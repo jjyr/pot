@@ -2,11 +2,11 @@ package control
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/internal/controlplane"
-	"github.com/jjyr/pot/internal/credentials"
 	"github.com/jjyr/pot/internal/gateway"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/schedule"
@@ -17,6 +17,7 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/executor"
+	"github.com/jjyr/pot/pkg/integrations"
 	"github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/sandbox"
@@ -46,34 +47,38 @@ type Options struct {
 	Embedded                                                                 bool
 	Node                                                                     string
 	ControlHTTPClient                                                        *http.Client
+	IntegrationAdapters                                                      []integrations.Adapter
 }
 type Service struct {
-	mu                sync.Mutex
-	resourceMutations sync.Mutex
-	options           Options
-	ctx               context.Context
-	cancel            context.CancelFunc
-	Registry          *assistant.Registry
-	Providers         *gateway.Registry
-	Credentials       *credentials.Store
-	Profiles          *ProfileStore
-	Usage             *usage.Ledger
-	Permissions       *PermissionStore
-	Operations        *Operations
-	Changes           core.Changes
-	conversations     map[string]*assistant.Conversation
-	hosts             map[string]*executor.Engine
-	hostGenerations   map[string]uint64
-	instructions      InstructionSources
-	closed            bool
-	Machines          *controlplane.Directory
-	RunnerJournal     *runner.Journal
-	Runner            *runner.Executor
-	Tasks             *tasks.Service
-	Schedules         *schedule.Service
-	Mailbox           *assistant.Mailbox
-	Terminals         *terminal.Hub
-	taskLife          *taskLifecycle
+	mu                  sync.Mutex
+	resourceMutations   sync.Mutex
+	options             Options
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	Registry            *assistant.Registry
+	Providers           *gateway.Registry
+	Integrations        *integrations.Service
+	integrationDB       *sql.DB
+	integrationSecrets  *secrets.Store
+	integrationAccounts *integrations.SQLAccounts
+	Profiles            *ProfileStore
+	Usage               *usage.Ledger
+	Permissions         *PermissionStore
+	Operations          *Operations
+	Changes             core.Changes
+	conversations       map[string]*assistant.Conversation
+	hosts               map[string]*executor.Engine
+	hostGenerations     map[string]uint64
+	instructions        InstructionSources
+	closed              bool
+	Machines            *controlplane.Directory
+	RunnerJournal       *runner.Journal
+	Runner              *runner.Executor
+	Tasks               *tasks.Service
+	Schedules           *schedule.Service
+	Mailbox             *assistant.Mailbox
+	Terminals           *terminal.Hub
+	taskLife            *taskLifecycle
 }
 
 func Open(options Options) (*Service, error) {
@@ -122,7 +127,7 @@ func Open(options Options) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.Credentials, err = credentials.Open(filepath.Join(options.Root, "control.sqlite"), options.Keys)
+	err = s.openIntegrations()
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +248,7 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 	if err != nil {
 		return assistant.RunOptions{}, err
 	}
-	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: thread.Owner, Turn: request.RequestID, Generation: thread.Generation, DefaultTarget: target, Spec: thread.Config, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, ApprovalOwner: principal, HostWorkspace: hostWorkspace, Usage: s.Usage, UsageScope: principal, Credentials: s.Credentials, Product: s.productDispatchBound(principal, thread.Owner, request.RequestID, thread.Generation, false)}
+	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: thread.Owner, Turn: request.RequestID, Generation: thread.Generation, DefaultTarget: target, Spec: thread.Config, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, ApprovalOwner: principal, HostWorkspace: hostWorkspace, Usage: s.Usage, UsageScope: principal, Credentials: s.Integrations, Product: s.productDispatchBound(principal, thread.Owner, request.RequestID, thread.Generation, false)}
 	waitScope := principal
 	if thread.Owner != principal {
 		waitScope = thread.Owner
@@ -290,7 +295,7 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 	}
 	definitions = append(definitions, s.productTools(false)...)
 	return assistant.RunOptions{Composer: s.options.Composer, Execution: executionContext, Services: ports, Dispatch: dispatch.Dispatch, Tools: definitions, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
-		s.Credentials.Forget(credentialScope(thread.Owner, request.RequestID, thread.Generation))
+		s.Integrations.Forget(credentialScope(thread.Owner, request.RequestID, thread.Generation))
 		s.Permissions.Expire(principal, request.RequestID, thread.Generation)
 		err := engine.Drain()
 		if s.options.CleanupTarget != nil {
@@ -384,8 +389,14 @@ func (s *Service) Close() error {
 	if s.Usage != nil {
 		result = errors.Join(result, s.Usage.Close())
 	}
-	if s.Credentials != nil {
-		result = errors.Join(result, s.Credentials.Close())
+	if s.Integrations != nil {
+		result = errors.Join(result, s.Integrations.Close())
+	}
+	if s.integrationSecrets != nil {
+		result = errors.Join(result, s.integrationSecrets.Close())
+	}
+	if s.integrationDB != nil {
+		result = errors.Join(result, s.integrationDB.Close())
 	}
 	if s.Providers != nil {
 		result = errors.Join(result, s.Providers.Close())

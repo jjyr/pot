@@ -43,5 +43,5 @@ func ExecutionTools(policy ShellSettings) []json.RawMessage {
 }
 
 func CredentialBindingsSchema() any {
-	return map[string]any{"type": "object", "maxProperties": 16, "description": "Inject configured Control service credentials into environment variables, e.g. GH_TOKEN: {service: github}. Values never enter tool arguments. An omitted account selects the default account.", "additionalProperties": map[string]any{"type": "object", "properties": map[string]any{"service": map[string]any{"type": "string"}, "account": map[string]any{"type": "string"}}, "required": []string{"service"}, "additionalProperties": false}}
+	return map[string]any{"type": "object", "maxProperties": 16, "description": "Inject configured Control service credentials into environment variables, e.g. GH_TOKEN: {service: github}. Values never enter tool arguments. Each service has one connected account.", "additionalProperties": map[string]any{"type": "object", "properties": map[string]any{"service": map[string]any{"type": "string"}}, "required": []string{"service"}, "additionalProperties": false}}
 }

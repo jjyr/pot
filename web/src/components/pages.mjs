@@ -9,6 +9,7 @@ import {renderMarkdown} from './markdown.mjs';
 import {renderSandboxResources} from './resources.mjs';
 import {renderAbout} from './about.mjs';
 import {renderMachineMembership} from './membership.mjs';
+import {renderIntegrations} from './integrations.mjs';
 
 export function createPages({client, host, approvalHost, locale, notify, changed, titleChanged, openChat, routeChanged=()=>{},withResourceConsent=({work})=>work()}) {
   const gate = createRequestGate(), approvalGate = createRequestGate();
@@ -171,7 +172,7 @@ export function createPages({client, host, approvalHost, locale, notify, changed
     }catch(reason){if(gate.current(token))errorView(reason);}
   }
   async function settings(root, token) {
-    root.classList.add('settings-content');root.append(segments([['general',tr('General','通用')],['providers',tr('AI Providers','AI 提供商')],['accounts',tr('Service accounts','服务账号')],['tasks',tr('Task Configuration','任务配置')]],filter.settingsTab,value=>{filter.settingsTab=value;show('settings');}));
+    root.classList.add('settings-content');root.append(segments([['general',tr('General','通用')],['providers',tr('AI Providers','AI 提供商')],['integrations',tr('Third-party accounts','第三方账号')],['tasks',tr('Task Configuration','任务配置')]],filter.settingsTab,value=>{filter.settingsTab=value;show('settings');}));
     if(filter.settingsTab==='general'){
     const preferences=card(tr('General','通用'));
     const preference=(key,value)=>{try{localStorage.setItem(key,value);}catch{}window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key,value}}));};
@@ -187,7 +188,7 @@ export function createPages({client, host, approvalHost, locale, notify, changed
     const locations=client.spaces||[];if(!configurationSpace)configurationSpace=scope().space;
     const settingsScope={space:configurationSpace,owner:''};
     if(client.desktop&&locations.length>1){const location=field(tr('Configuration location','配置位置'),configurationSpace,{choices:locations.map(space=>[space.id,space.name])});location.input.onchange=()=>{configurationSpace=location.input.value;show('settings');};root.append(location.row);}
-    if(filter.settingsTab==='accounts'){await serviceAccounts(root,token,settingsScope);return;}
+    if(filter.settingsTab==='integrations'){await renderIntegrations({root,request,scope:settingsScope,signal:token.signal,locale,openExternal:client.openExternal});return;}
     const providers=await request('/api/v1/providers',{...settingsScope,signal:token.signal});if(!gate.current(token))return;
     if(filter.settingsTab==='tasks'){const [policy,allowances]=await Promise.all([request('/api/v1/agent/routing',{...settingsScope,signal:token.signal}),request('/api/v1/usage/providers',{...settingsScope,signal:token.signal})]);if(!gate.current(token))return;const execution=card(tr('Task Configuration','任务配置'));for(const profile of providers.profiles||[]){const row=n('div','list-row');row.append(n('span','row-info',profile.name),n('span','hint',profile.model),action(tr('Configure','配置'),()=>routingEditor(profile,policy,settingsScope)));execution.append(row);}root.append(execution);const limits=card(tr('Provider allowances','提供商配额'));for(const quota of allowances.providers||[]){const profile=(providers.profiles||[]).find(value=>value.provider===quota.provider),row=n('div','list-row');row.append(n('span','row-info',profile?.name||quota.provider),n('span','hint',quota.active?`${Number(quota.remaining).toLocaleString(locale())} ${tr('remaining','剩余')}`:tr('Unlimited','无限制')),action(tr('Edit allowance','编辑配额'),()=>providerPolicyEditor(quota,settingsScope)));limits.append(row);}root.append(limits);return;}
     root.append(n('p','hint',tr('Manage connections and default models for assistants.','管理助手的连接和默认模型。')));
@@ -204,26 +205,6 @@ export function createPages({client, host, approvalHost, locale, notify, changed
     for(const space of spaces.items||[]) {const row=n('div','list-row');row.append(n('span','',space.name),n('span','hint',space.connected?tr('Connected','已连接'):tr('Offline','离线')));if(client.desktop&&space.kind==='remote') {for(const name of ['connect','disconnect','remove']) {const button=action(tr({connect:'Connect',disconnect:'Disconnect',remove:'Remove'}[name],{connect:'连接',disconnect:'断开',remove:'移除'}[name]),()=>operation(button,()=>request('/api/v1/spaces',{method:'POST',owner:'',space:'',body:{action:name,space_id:space.id}})));row.append(button);}}machines.append(row);}
     if(client.desktop)machines.append(action(tr('Connect Space','连接 Space'),()=>spaceEditor()));root.append(machines);
 
-  }
-  async function serviceAccounts(root,token,settingsScope){
-    const data=await request('/api/v1/credentials',{...settingsScope,signal:token.signal});if(!gate.current(token))return;
-    root.append(n('p','hint',tr('Configured accounts are available to all assistants and tasks in this Space. Access follows the permissions of the saved token.','此 Space 中的所有助手和任务均可使用已配置的账号，访问范围由 Token 的权限决定。')));
-    root.append(toolbar(n('h2','page-heading',tr('Service accounts','服务账号')),action(tr('Add account','添加账号'),()=>serviceAccountEditor(null,settingsScope))));
-    if(!data.items?.length)empty(root,tr('Add a GitHub token or another service credential.','添加 GitHub Token 或其他服务凭据。'));
-    for(const account of data.items||[]){const row=n('div','page-card provider-summary'),info=n('div','row-info');info.append(n('span','',account.name),n('span','hint',`${account.service} / ${account.account}${account.default?' · '+tr('Default','默认'):''}`));if(account.expires_at)info.append(n('span','hint',`${tr('Expires','到期时间')}: ${new Date(account.expires_at).toLocaleString(locale())}`));const remove=action(tr('Delete','删除'),()=>operation(remove,()=>request('/api/v1/credentials/remove',{...settingsScope,method:'POST',body:{service:account.service,account:account.account,expected_revision:account.revision}})),{danger:true});row.append(info,action(tr('Edit','编辑'),()=>serviceAccountEditor(account,settingsScope)),remove);root.append(row);}
-  }
-  async function serviceAccountEditor(account,capturedScope){
-    if(!await leave())return;
-    const initial={service:account?.service||'github',account:account?.account||'personal',name:account?.name||'GitHub',default:account?.default??true,token:'',expires_at:account?.expires_at?new Date(new Date(account.expires_at).getTime()-new Date(account.expires_at).getTimezoneOffset()*60000).toISOString().slice(0,16):''};
-    const form=renderEditor(account?tr('Edit service account','编辑服务账号'):tr('Add service account','添加服务账号'),initial,[
-      {name:'service',label:tr('Service','服务'),required:true,help:tr('Service identifier, for example github.','服务标识，例如 github。')},
-      {name:'account',label:tr('Account ID','账号标识'),required:true},
-      {name:'name',label:tr('Name','名称'),required:true},
-      {name:'token',label:'Token',kind:'password',required:!account,help:account?tr('Leave blank to keep the saved token.','留空保留现有 Token。'):''},
-      {name:'expires_at',label:tr('Expiration','到期时间'),kind:'datetime-local',help:tr('Leave blank when the token has no known expiration.','Token 没有已知到期时间时留空。')},
-      {name:'default',label:tr('Default account for this service','此服务的默认账号'),kind:'checkbox'},
-    ],(values,context)=>request('/api/v1/credentials',{...context,method:'POST',body:{...values,expected_revision:account?.revision||0,expires_at:values.expires_at?new Date(values.expires_at).toISOString():null}}),{capturedScope});
-    if(account){form.controls.get('service').readOnly=true;form.controls.get('account').readOnly=true;}
   }
   function providerPolicyEditor(quota,owner) {
     renderEditor(tr('Provider allowance','提供商配额'),quota.policy,[

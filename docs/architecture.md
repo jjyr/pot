@@ -57,8 +57,11 @@ publish a browser endpoint. See [Deployment](deployment.md).
 
 Control owns assistant identities, rules, conversations, Tasks, schedules, model
 configuration, provider keys, external-service accounts, accounting, approvals and
-global resources. [Credentials](credentials.md) defines run-bound service credential
-injection and direct GitHub CLI access. An
+global resources. The independent Integrations component manages third-party
+login and credentials through injected account and Secrets stores. Control
+provides authentication, routing and composition. [Integrations](credentials.md)
+defines browser authorization, run-bound credential injection and direct GitHub
+CLI access. An
 assistant remains on its owning Control. Task placement selects a machine; that
 machine's policy resolves Host or Sandbox when dispatch starts. The resulting
 execution target remains fixed for the run. An unavailable target fails visibly.

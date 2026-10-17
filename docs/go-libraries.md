@@ -20,6 +20,15 @@ complete-host facade and may compose `internal/` services behind private fields.
 Internal implementation types do not appear in its public signatures. See
 [component boundaries](backend-components.md) for package responsibilities.
 
+## Third-party integrations
+
+`pkg/integrations` provides account and OAuth session lifecycle behind injected
+`Adapter`, `AccountStore` and `SecretStore` ports. `SQLAccounts` accepts a
+caller-owned database. `CredentialResolver` provides scoped reads for execution
+callers. `pkg/integrations/github` implements GitHub browser device authorization.
+Neither package imports Control or internal product code. See
+[Integrations](credentials.md) for API and lifecycle contracts.
+
 ## Embed an Agent loop
 
 `agent.Agent` runs the model/tool loop. The caller supplies:

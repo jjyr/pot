@@ -8,24 +8,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jjyr/pot/internal/credentials"
-	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/pkg/integrations"
 	"github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/resource"
 )
 
 func TestCredentialCommandEnvironmentAndNonsecretReceipts(t *testing.T) {
 	d, execution, _ := localDispatcher(t)
-	key, _ := secrets.NewMemoryKey(bytes.Repeat([]byte{9}, 32))
-	store, err := credentials.Open(filepath.Join(t.TempDir(), "credentials.sqlite"), key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	d.Credentials = store
-	if _, err = store.Save(context.Background(), credentials.SaveRequest{Service: "github", Account: "test", Name: "Test", Token: "injected-fixture-token"}); err != nil {
-		t.Fatal(err)
-	}
+	d.Credentials = fixedCredentials("injected-fixture-token")
 	call := modelprotocol.ToolCall{ID: "credential-command", Name: "exec_command", Arguments: json.RawMessage(`{"cmd":"test -n \"$GH_TOKEN\" && printf injected","credentials":{"GH_TOKEN":{"service":"github"}}}`)}
 	value, err := d.Dispatch(context.Background(), execution, call, nil)
 	if err != nil || !bytes.Contains(value, []byte("injected")) {
@@ -57,5 +47,25 @@ func TestBundledGitHubPluginContract(t *testing.T) {
 	}
 	if bundle.Manifest.Contributes.Tools.Credentials["GH_TOKEN"].Service != "github" || bundle.Manifest.Contributes.Tools.SessionMode != "call" {
 		t.Fatal("incorrect credential/lifecycle declaration")
+	}
+}
+
+// fixedCredentials tests the dispatch port without coupling it to account storage.
+type fixedCredentials string
+
+func (f fixedCredentials) Credential(context.Context, string, string, bool) (string, error) {
+	return string(f), nil
+}
+func (f fixedCredentials) Forget(string) {}
+func configureIntegration(t *testing.T, s *Service, token string) {
+	t.Helper()
+	ctx := context.Background()
+	raw, _ := json.Marshal(integrations.Credential{AccessToken: token})
+	ref := "integration/test"
+	if err := s.integrationSecrets.Put(ctx, ref, raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.integrationAccounts.Save(ctx, integrations.Account{Service: "github", Identity: integrations.Identity{ID: "1", Username: "test"}, SecretRef: ref}, 0); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -13,7 +13,7 @@ implementation. Code defines actual behavior.
 | Visual language, responsive navigation and editing-page interactions | [Design language](design-language.md) |
 | Native Space ownership, combined views and offline behavior | [Multi-Space UI](multi-space-ui.md) |
 | Encrypted credentials and master keys | [Secrets](secrets.md) |
-| External-service accounts, credential caching and GitHub | [Credentials](credentials.md) |
+| Third-party login, integration components and credentials | [Credentials](credentials.md) |
 | Backend responsibilities and API contracts | [Backend components](backend-components.md) |
 | Reusable Go packages and embedding a host | [Go libraries](go-libraries.md) |
 | Plugins, tools, approvals and browser execution | [Plugin packages](plugins.md), [composition](tool-composition.md), [permissions](permissions.md), [computer use](computer-use.md) |

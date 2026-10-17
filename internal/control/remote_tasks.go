@@ -373,7 +373,7 @@ func (s *Service) controlRPC(ctx context.Context, p controlplane.Principal, requ
 		}
 		stopDispatch := context.AfterFunc(authority.ctx, cancel)
 		defer stopDispatch()
-		dispatcher := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: launch.TaskID, ApprovalOwner: launch.AssistantID, Task: launch.TaskID, Turn: launch.RunID, Generation: launch.Generation, DefaultTarget: launch.ExecutionTarget, Spec: authority.model.Spec, Credentials: s.Credentials, Usage: s.Usage, UsageScope: launch.TaskID, Permissions: s.Permissions, Operations: s.Operations, Target: func(ctx context.Context, operation Operation, execution executor.Request, emit func(core.Update) error) (json.RawMessage, error) {
+		dispatcher := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: launch.TaskID, ApprovalOwner: launch.AssistantID, Task: launch.TaskID, Turn: launch.RunID, Generation: launch.Generation, DefaultTarget: launch.ExecutionTarget, Spec: authority.model.Spec, Credentials: s.Integrations, Usage: s.Usage, UsageScope: launch.TaskID, Permissions: s.Permissions, Operations: s.Operations, Target: func(ctx context.Context, operation Operation, execution executor.Request, emit func(core.Update) error) (json.RawMessage, error) {
 			var response executeReply
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
@@ -424,7 +424,7 @@ func (s *Service) authority(ctx context.Context, peer *controlplane.Peer, l runn
 		return nil, err
 	}
 	runctx, cancel := context.WithCancel(s.ctx)
-	context.AfterFunc(runctx, func() { s.Credentials.Forget(credentialScope(l.TaskID, l.RunID, l.Generation)) })
+	context.AfterFunc(runctx, func() { s.Integrations.Forget(credentialScope(l.TaskID, l.RunID, l.Generation)) })
 	a := &remoteAuthority{streams: map[string]*modelStream{}, ctx: runctx, cancel: cancel}
 	go func() {
 		select {
