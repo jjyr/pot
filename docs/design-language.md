@@ -176,19 +176,36 @@ and titles share the image. A new completed live reply triggers one 650 ms whole
 image scale-and-tilt rebound. Initial history, duplicate updates and reconnect
 catch-up do not replay it; hidden pages do not queue reactions.
 
+First-use Chat offers Connect AI provider when no connection exists. Saving that
+connection returns to Chat and automatically creates Pot using the Space's default
+Provider/model. An empty Chat with an existing Provider follows the same bootstrap
+path. Offline or failed directory loads offer recovery rather than connection setup.
+The empty directory caption is No assistants yet.
+
+Every newly created assistant starts with a fixed welcome message in the creation
+UI's language, introducing its saved name and inviting the user to name it or
+describe how it can help. The welcome is committed to both the durable transcript
+and the model checkpoint, so the first model request includes it as an assistant
+message. It makes no inference call, generates no unread notification and is never
+reinserted or translated on reopening. Existing conversations are not backfilled.
+The assistant can save a user-requested name through `rename_assistant`; directory,
+title and settings use that same identity. Workers and peer conversations cannot
+rename the assistant.
+
 The + action opens creation with name, destination Space, Provider and model
 visible. The destination Space's default Provider is preselected, and the model
 field contains that Provider's concrete default model ID, never a synthetic
 "Default model" choice. Changing Provider selects its default model. Changing
-Space loads that Space's Providers and defaults. Saving a Provider creates or
-selects no assistant; assistant registration is explicit and retries reuse its
-request identity.
+Space loads that Space's Providers and defaults. Saving a Provider within this
+form resumes the draft without creating or selecting an assistant; registration
+occurs on Create and start chatting, and retries reuse its request identity.
 
 Creation and assistant editing share the same configuration controls. Existing
 assistant location is read-only. Provider/model changes are saved on the assistant
 without changing the shared Provider or other assistants. Model parameters and
 assistant instructions start collapsed; expanding instructions reveals AGENTS.md.
 Nested Provider setup preserves the assistant draft and returns to its caller.
+Create and start chatting saves the assistant and opens its conversation.
 Assistant settings contain no task routing controls: the assistant chooses task
 models autonomously, guided by its instructions.
 

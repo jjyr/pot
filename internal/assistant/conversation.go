@@ -38,6 +38,7 @@ type ConversationOptions struct {
 	Manager                                  *execution.Manager
 	InitialSpec                              *core.ResolvedSpec
 	InitialRules                             string
+	InitialWelcome                           string
 	InitialIntent                            json.RawMessage
 	RefreshConfiguration                     func(context.Context, core.Thread, json.RawMessage) (*core.ResolvedSpec, error)
 	MaxRequests, MaxTurnRequests             uint64 // zero is unlimited; independent of token allowances
@@ -119,6 +120,11 @@ CREATE TABLE IF NOT EXISTS assistant_observations(sequence INTEGER PRIMARY KEY A
 			return err
 		}
 		if !initialized {
+			if options.InitialWelcome != "" {
+				if err := initializeWelcome(tx, options); err != nil {
+					return err
+				}
+			}
 			if len(options.InitialRules) > 262144 {
 				return errors.New("initial rules exceed limit")
 			}

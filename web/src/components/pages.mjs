@@ -154,12 +154,12 @@ export function createPages({client, host, approvalHost, locale, notify, changed
         const options={owner:captured.owner,space:captured.space,method:'POST'},selection=selectValue(values);
         if(!selection)throw Error(tr('Connect and select a Provider first.','请先连接并选择提供商。'));
         preview.replaceWith(preview=avatar(56,definition?.request_id||definition?.id||context.request_id));
-        if(!definition){const saved=await request('/api/v1/assistants',{...options,space:values.space_id,owner:'',body:{request_id:context.request_id,name:values.name,text:values.text,...(selection?{selection}:{})}});return {assistant:{...saved,space_id:values.space_id}};}
+        if(!definition){const saved=await request('/api/v1/assistants',{...options,space:values.space_id,owner:'',body:{request_id:context.request_id,name:values.name,text:values.text,locale:locale(),...(selection?{selection}:{})}});return {assistant:{...saved,space_id:values.space_id}};}
         if(values.name!==initial.name){const saved=await request(`/api/v1/assistants/${encodeURIComponent(definition.id)}`,{...options,body:{name:values.name,revision}});revision=saved.revision;initial.name=values.name;session.acknowledge({name:values.name});}
         const signature=JSON.stringify(selection);
         if(selection&&signature!==initialSelection){const saved=await request('/api/v1/agent',{...options,body:{request_id:context.request_id,expected_generation:generation,expected_revision:configurationRevision,selection}});generation=saved.generation;configurationRevision=saved.revision;initialSelection=signature;session.acknowledge(Object.fromEntries(['profile_id','model','model_selection','context_window','max_output_tokens','reasoning_effort'].map(key=>[key,values[key]])));}
         if(values.text!==initial.text){const saved=await request('/api/v1/instructions',{...options,body:{text:values.text,revision:rulesRevision}});rulesRevision=saved.revision;initial.text=values.text;session.acknowledge({text:values.text});}
-      },{returnChat:true,submitLabel:definition?tr('Save','保存'):tr('Create assistant','创建助手')});
+      },{returnChat:true,submitLabel:definition?tr('Save','保存'):tr('Create and start chatting','创建并开始聊天')});
       const controls=form.controls,session=form.session;
       editor.kind='assistant';
       let preview=avatar(56,definition?.request_id||definition?.id||session.requestID);
@@ -234,6 +234,12 @@ export function createPages({client, host, approvalHost, locale, notify, changed
     const controller=await renderSandboxResources({client,root,scope:{space:local.id,owner:''},locale,notify});
     if(resourceView===view&&gate.current(token)){view.controller=controller;restoreView('resource-cache',token);}
   }
+  async function setupAI() {
+    const captured={...scope(),owner:''};
+    const snapshot=await request('/api/v1/providers',captured);
+    await providerPicker(snapshot,captured);
+    if(editor?.kind==='picker')editor.onboarding=true;
+  }
   async function providerPicker(snapshot,captured) {
     if(editor?.kind==='assistant')suspendEditor();else if(!await leave())return;
     const form=renderEditor(tr('Add Provider','添加提供商'),{search:''},[{name:'search',label:tr('Search providers','搜索提供商'),kind:'search'}],()=>{}, {capturedScope:captured});
@@ -245,6 +251,7 @@ export function createPages({client, host, approvalHost, locale, notify, changed
     const toggle=action(tr('More providers…','更多提供商…'),()=>{more=!more;toggle.textContent=more?tr('Fewer providers','收起提供商'):tr('More providers…','更多提供商…');render();});form.form.querySelector('.editor-fields').append(toggle);form.controls.get('search').addEventListener('input',render);render();
   }
   async function providerEditor(profile, snapshot, settingsScope, providerOverride) {
+    const onboarding=(editor?.kind==='picker'&&editor.onboarding)||(!(client.assistants||[]).length&&!editorParents.some(parent=>parent.kind==='assistant'));
     if(editor?.kind==='picker')suspendEditor();else if(!await leave())return;
     const connection=(snapshot.connections||[]).find(c=>c.profile_id===profile?.id);
     const providerID=providerOverride||profile?.model_settings?.catalog_provider||'custom';
@@ -267,7 +274,7 @@ export function createPages({client, host, approvalHost, locale, notify, changed
       return request('/api/v1/providers',{...context,method:'POST',body:{request_id:context.request_id,profile_id:profile?.id||'',expected_revision:profile?.revision||0,models:[...new Set([...configuredModels,values.model].filter(Boolean))],...connectionValues,reasoning_effort:values.reasoning_effort.trim()||null,max_output_tokens:values.max_output_tokens||modelDefaults(snapshot,providerID,values.model).output,model_settings:{catalog_provider:providerID==='custom'?null:providerID,context_window:context_window||null,max_output_tokens:values.max_output_tokens||null}}});
     },{capturedScope:settingsScope});
     const controls=form.controls,session=form.session;let endpointEdited=false;
-    form.lifecycle.cancel=()=>back({skipPicker:true});form.lifecycle.afterSave=async saved=>{await back({skipPicker:true});await editor?.lifecycle.providersChanged?.(saved);};
+    form.lifecycle.cancel=()=>back({skipPicker:true});form.lifecycle.afterSave=async saved=>{await back({skipPicker:true});await editor?.lifecycle.providersChanged?.(saved);if(onboarding){openChat();changed(saved);}};
     const set=(name,value)=>{controls.get(name).value=value??'';session.set(name,value);};
     const showModel=()=>{controls.get('model').closest('.form-row').hidden=!!controls.get('model_selection').value;};
     const inherit=()=>{const limits=modelDefaults(snapshot,providerID,session.values.model);controls.get('context_window').placeholder=String(limits.context);controls.get('max_output_tokens').placeholder=String(limits.output);};
@@ -496,7 +503,7 @@ export function createPages({client, host, approvalHost, locale, notify, changed
   const beforeUnload=event=>{if([...(editor?[editor]:[]),...editorParents].some(value=>value.session.dirty||value.session.pending)){event.preventDefault();event.returnValue='';}};
   const preference=()=>{if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner});};
   window.addEventListener('beforeunload',beforeUnload);window.addEventListener('pot:locale',preference);
-  return {get title(){return title;},get editing(){return !!editor;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner;},show,assistant,leave,back,permissions,handleHistory:popstate,openResources:resourceCache,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalGate.close();approvalOwner='';approvalHost.replaceChildren();},conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,record=true){route='tasks';return taskDetail(task,{recordHistory:record});},showProviders(){filter.settingsTab='providers';return show('settings');},
+  return {get title(){return title;},get editing(){return !!editor;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner;},show,assistant,setupAI,leave,back,permissions,handleHistory:popstate,openResources:resourceCache,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalGate.close();approvalOwner='';approvalHost.replaceChildren();},conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,record=true){route='tasks';return taskDetail(task,{recordHistory:record});},
     refresh(){if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(resourceView){resourceView.controller?.refresh();return;}if(taskView){refreshTaskEvents();return;}if(!editor&&route&&host.offsetParent)show(route,{keepUsageOwner:!!usageOwner});},
     dispose(){disposed=true;gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
   };

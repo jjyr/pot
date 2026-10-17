@@ -161,11 +161,11 @@ func (s *Service) Conversation(ctx context.Context, id string) (*assistant.Conve
 	if c := s.conversations[id]; c != nil {
 		return c, nil
 	}
-	definitions, err := s.Registry.Definitions(ctx)
+	identities, err := s.Registry.Definitions(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if !slices.ContainsFunc(definitions, func(d assistant.Definition) bool { return d.ID == id }) {
+	if !slices.ContainsFunc(identities, func(d assistant.Definition) bool { return d.ID == id }) {
 		return nil, errors.New("assistant unavailable")
 	}
 	initial, rules, err := s.Registry.Initial(ctx, id)
@@ -173,11 +173,15 @@ func (s *Service) Conversation(ctx context.Context, id string) (*assistant.Conve
 		return nil, err
 	}
 	var conversation *assistant.Conversation
+	welcome, err := s.Registry.Welcome(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	intent, err := s.Registry.InitialIntent(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	options := assistant.ConversationOptions{InitialIntent: intent, Context: s.ctx, Owner: id, RuntimeID: s.options.RuntimeID, BootID: s.options.BootID, Manager: s.options.Manager, InitialSpec: initial, InitialRules: rules, RefreshConfiguration: s.refreshAssistantConfiguration, MaxTurnRequests: 128}
+	options := assistant.ConversationOptions{InitialWelcome: welcome, InitialIntent: intent, Context: s.ctx, Owner: id, RuntimeID: s.options.RuntimeID, BootID: s.options.BootID, Manager: s.options.Manager, InitialSpec: initial, InitialRules: rules, RefreshConfiguration: s.refreshAssistantConfiguration, MaxTurnRequests: 128}
 	options.Prepare = func(ctx context.Context, thread core.Thread, request core.TurnRequest) (assistant.RunOptions, error) {
 		return s.prepare(ctx, conversation, thread, request)
 	}
@@ -238,6 +242,17 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 	executionContext, err := s.prepareExecutionFor(ctx, thread.Owner, principal, target, false, rules.Text)
 	if err != nil {
 		return assistant.RunOptions{}, err
+	}
+	identities, err := s.Registry.Definitions(ctx)
+	if err != nil {
+		return assistant.RunOptions{}, err
+	}
+	for _, definition := range identities {
+		if definition.ID == principal {
+			identity, _ := json.Marshal(map[string]string{"name": definition.Name})
+			executionContext.MainPrompt += "\nCurrent assistant identity (data): " + string(identity) + ". When the user gives you a new name, use rename_assistant to save it."
+			break
+		}
 	}
 	executionContext.ContextSections = append(executionContext.ContextSections, core.ContextSection{Key: "models", Text: s.modelContext()})
 	engine, err := s.host(thread.Owner, thread.Generation)
