@@ -683,3 +683,31 @@ func TestIncompleteMachineOwnershipCanRetryBeforeAnyVerifiedInitialization(t *te
 		t.Fatal("retry did not record verified initialization", plan, err)
 	}
 }
+
+func TestPodmanRebuildOwnsDevelopmentResetAndRetainsTaskFiles(t *testing.T) {
+	p, i, _ := stoppedPodmanContainer(t)
+	workspace := p.Workspace(i)
+	development := filepath.Join(filepath.Dir(workspace), "development")
+	if err := os.MkdirAll(workspace, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(development, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "task-result"), []byte("retain"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(development, "toolchain"), []byte("reset"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	state, err := p.Lifecycle(context.Background(), i, "rebuild")
+	if err != nil || state.Phase != "stopped" {
+		t.Fatal(state, err)
+	}
+	if _, err = os.Stat(development); !os.IsNotExist(err) {
+		t.Fatal("development reset unconfirmed", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(workspace, "task-result")); err != nil || string(data) != "retain" {
+		t.Fatal("task file lost", string(data), err)
+	}
+}

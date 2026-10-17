@@ -19,7 +19,6 @@ type Settings struct {
 	TLSKey    string `json:"tls_key"`
 	Workspace string `json:"workspace"`
 	Resources string `json:"resources"`
-	Helpers   string `json:"helpers"`
 }
 
 func (s Settings) Validate() error {
@@ -31,7 +30,7 @@ func (s Settings) Validate() error {
 			return errors.New("server listen requires host:port")
 		}
 	}
-	for _, path := range []string{s.TLSCert, s.TLSKey, s.Workspace, s.Resources, s.Helpers} {
+	for _, path := range []string{s.TLSCert, s.TLSKey, s.Workspace, s.Resources} {
 		if strings.ContainsAny(path, "\x00\r\n") || path != "" && !filepath.IsAbs(path) {
 			return errors.New("server file/directory settings require absolute paths")
 		}

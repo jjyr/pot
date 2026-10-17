@@ -36,7 +36,7 @@ func TestEnrolledMacOSManifestRequiresPrivateCompleteBundle(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	manifest := MacOSManifest{SchemaVersion: 1, Provider: sandbox.AppleVM, GuestBuild: "26A", XcodeVersion: "26", Bootstrap: "pot-macos-executor-v3", GuestIP: "192.168.65.3", MACAddress: "02:00:00:00:00:03"}
+	manifest := MacOSManifest{SchemaVersion: 1, Provider: AppleVMID, GuestBuild: "26A", XcodeVersion: "26", Bootstrap: "pot-macos-executor-v3", GuestIP: "192.168.65.3", MACAddress: "02:00:00:00:00:03"}
 	if err := privateJSON(filepath.Join(bundle, "manifest.json"), manifest); err != nil {
 		t.Fatal(err)
 	}

@@ -74,7 +74,7 @@ func TestRealLinuxSandboxQualification(t *testing.T) {
 	provider := NewPodman(PodmanConfig{RuntimeRoot: root, Binary: os.Getenv("POT_GO_SANDBOX_BINARY"), MachineName: os.Getenv("POT_GO_PODMAN_MACHINE_NAME"), UserSkills: user, BuiltinSkills: builtin})
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
-	manager, err := sandbox.Open(ctx, sandbox.Config{Root: root, RuntimeID: "go-qualification", Providers: []sandbox.Provider{provider}})
+	manager, err := sandbox.Open(ctx, sandbox.Config{Root: root, RuntimeID: "go-qualification", DefaultProvider: PodmanID, Providers: []sandbox.Provider{provider}})
 	if err != nil {
 		t.Fatal(err)
 	}

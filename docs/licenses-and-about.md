@@ -82,7 +82,7 @@ remain with the distributed assets. Brand artwork is generated from the retained
 `mise run icons` regenerates native, frontend and light/dark tray artwork.
 
 Linux Sandbox images are separate resources. Their pinned recipes and package
-versions live under `resources/sandbox/linux/default/`; the image's OS packages
+versions live under `providers/podman/image/`; the image's OS packages
 and corresponding source obligations are separate from the host Go inventory.
 A resource release must retain the upstream package notices and corresponding
 source required by its pinned packages. The host About list does not claim to

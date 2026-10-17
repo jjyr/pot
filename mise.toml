@@ -67,7 +67,7 @@ run = "python scripts/tests/release-packaging.py"
 
 [tasks."check:swift"]
 description = "Compile the native macOS VM Helper without starting a VM"
-run = "env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR swift build -c release --package-path helper --disable-sandbox --scratch-path .local/go/swift-build --product PotMacOSHelper -j 4"
+run = "env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR swift build -c release --package-path providers/apple-vm/helper --disable-sandbox --scratch-path .local/go/swift-build --product PotMacOSHelper -j 4"
 env = { SWIFTPM_MODULECACHE_OVERRIDE = "{{config_root}}/.local/go/swift-modules", CLANG_MODULE_CACHE_PATH = "{{config_root}}/.local/go/clang-modules" }
 
 [tasks."build:web"]
@@ -82,17 +82,21 @@ run = "go build -mod=readonly ./web"
 description = "Build a portable Go CLI archive with retained runtime assets"
 run = "python scripts/build-go-cli"
 
+[tasks."build:providers"]
+description = "Build independent provider packages without downloading guest images"
+run = "python scripts/build-go-providers"
+
 [tasks."build:sandbox-image"]
 description = "Build a Debian OCI guest image with an explicit Podman builder"
-run = "python scripts/build-go-container-image"
+run = "python providers/podman/build-image"
 
 [tasks."export:sandbox-resources"]
-description = "Verify exact reviewed OCI image exports against the embedded catalog"
-run = "python scripts/export-go-sandbox-resources"
+description = "Verify exact reviewed OCI image exports against the Podman plugin catalog"
+run = "python providers/podman/export-resources"
 
 [tasks.licenses]
 description = "Collect notices for actual linked Go dependencies and runtime"
-run = "python scripts/go-notices --output .local/licenses/go-dependencies.txt ./cmd/pot ./cmd/pot-tool-executor"
+run = "python scripts/go-notices --output .local/licenses/go-dependencies.txt ./cmd/pot ./cmd/pot-tool-executor ./providers/podman/cmd ./providers/apple-vm/cmd"
 
 [tasks."test:ui"]
 description = "Verify shared DOM composer and production owner-scoped state contracts"
@@ -163,6 +167,8 @@ description = "Cross-build Go headless entry points without CGO or GUI dependenc
 run = '''
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -mod=readonly -trimpath -o .local/go/linux-arm64/ ./cmd/pot ./cmd/pot-tool-executor
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -mod=readonly -trimpath -o .local/go/linux-amd64/ ./cmd/pot ./cmd/pot-tool-executor
+python scripts/build-go-providers --platform linux-arm64 --output .local/go/linux-arm64/Resources/providers
+python scripts/build-go-providers --platform linux-amd64 --output .local/go/linux-amd64/Resources/providers
 '''
 
 [tasks."test:packaging"]

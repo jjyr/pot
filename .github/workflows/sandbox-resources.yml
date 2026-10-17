@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Resource tag already committed in the embedded catalog
+        description: Resource tag already committed in the Podman plugin catalog
         required: true
         default: sandbox-go-resources-v0.3.0
         type: string
@@ -35,7 +35,7 @@ jobs:
           staged=$(mktemp -d "$RUNNER_TEMP/pot-sandbox-resources.XXXXXX")
           rmdir "$staged"
           manifest=$(mktemp "$RUNNER_TEMP/pot-sandbox-resources-manifest.XXXXXX")
-          mise exec -- python scripts/verify-go-sandbox-resources \
+          mise exec -- python providers/podman/verify-resources \
             --source "$PREPARED_ASSETS" --tag "$RESOURCE_TAG" --output "$staged" >"$manifest"
           echo "RESOURCE_MANIFEST=$manifest" >>"$GITHUB_ENV"
       - name: Publish immutable resources

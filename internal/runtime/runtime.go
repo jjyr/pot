@@ -14,6 +14,7 @@ import (
 	"github.com/jjyr/pot/pkg/resource"
 	"github.com/jjyr/pot/pkg/resourcecontrol"
 	"github.com/jjyr/pot/pkg/sandbox"
+	"github.com/jjyr/pot/pkg/sandboxresources"
 	"os"
 	"path/filepath"
 	"sync"
@@ -21,26 +22,30 @@ import (
 )
 
 type Options struct {
-	Root                               string
-	ResourceDirectory, HelperDirectory string
-	SandboxProviders                   []sandbox.Provider
-	Control                            control.Options
-	Limits                             *execution.Limits
-	DisableMetadataRefresh             bool
+	Root                     string
+	ResourceDirectory        string
+	SandboxProviders         []sandbox.Provider
+	SandboxProviderDirectory string
+	DefaultSandboxProvider   string
+	SandboxCatalog           *sandboxresources.Catalog
+	Control                  control.Options
+	Limits                   *execution.Limits
+	DisableMetadataRefresh   bool
 }
 type Runtime struct {
-	Root           *instance.Root
-	AssetDirectory string
-	BootID         string
-	Executions     *execution.Manager
-	Control        *control.Service
-	Sandboxes      *sandbox.Manager
-	Resources      *resource.Store
-	Provisioning   *resourcecontrol.Manager
-	cancel         context.CancelFunc
-	once           sync.Once
-	closeErr       error
-	background     sync.WaitGroup
+	Root            *instance.Root
+	AssetDirectory  string
+	BootID          string
+	Executions      *execution.Manager
+	Control         *control.Service
+	Sandboxes       *sandbox.Manager
+	Resources       *resource.Store
+	Provisioning    *resourcecontrol.Manager
+	providerCatalog sandboxresources.Catalog
+	cancel          context.CancelFunc
+	once            sync.Once
+	closeErr        error
+	background      sync.WaitGroup
 }
 
 func Open(ctx context.Context, options Options) (*Runtime, error) {

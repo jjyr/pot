@@ -11,7 +11,11 @@ import re
 import tarfile
 import tempfile
 
-from go_packaging import BUILD, ROOT, digest, oci_image_descriptor
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from podman_build import BUILD, ROOT, digest, oci_image_descriptor
 
 
 def validate_image_reference(layout, reference, manifest_digest):
@@ -56,10 +60,10 @@ def export(source, output, tag, catalog_path, update, architecture=None):
     old = (
         json.loads(catalog_path.read_text())
         if catalog_path.exists()
-        else {"schema_version": 2, "default_linux_bundles": {}, "resources": {}, "bundles": {}}
+        else {"schema_version": 3, "defaults": {"podman": {}}, "resources": {}, "bundles": {}}
     )
-    if old.get("schema_version") != 2:
-        raise ValueError("A schema 2 resource catalog is required")
+    if old.get("schema_version") != 3:
+        raise ValueError("A schema 3 provider resource catalog is required")
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".resource-export-", dir=output) as temporary:
         target = Path(temporary) / "image.tar.gz"
@@ -90,15 +94,23 @@ def export(source, output, tag, catalog_path, update, architecture=None):
             "format": "oci-tar-gzip",
         }
         bundle = {
-            "image": key,
-            "image_reference": metadata["reference"],
-            "manifest_digest": metadata["manifest_digest"],
-            "bootstrap_version": "pot-executor-v2",
-            "os": "linux",
+            "provider": "podman",
+            "repository": "https://github.com/jjyr/pot",
             "architecture": architecture,
+            "resources": {"image": key},
+            "metadata": {
+                "image_reference": metadata["reference"],
+                "manifest_digest": metadata["manifest_digest"],
+                "bootstrap_version": "pot-executor-v2",
+                "os": "linux",
+            },
         }
         identity = hashlib.sha256(
-            json.dumps(bundle, sort_keys=True, separators=(",", ":")).encode()
+            json.dumps(
+                {"image": key, **bundle["metadata"], "architecture": architecture},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
         ).hexdigest()[:16]
         name = f"linux-{architecture}-" + identity
         expected = old["resources"].get(key)
@@ -109,14 +121,14 @@ def export(source, output, tag, catalog_path, update, architecture=None):
             if name in old["bundles"] and old["bundles"][name] != bundle:
                 raise ValueError("Immutable bundle identity collision")
             old["bundles"].setdefault(name, bundle)
-            old["default_linux_bundles"][architecture] = name
+            old["defaults"]["podman"][architecture] = name
         elif (
             expected != entry
             or old["bundles"].get(name) != bundle
-            or old["default_linux_bundles"].get(architecture) != name
+            or old["defaults"]["podman"].get(architecture) != name
         ):
             raise ValueError(
-                "Resources differ from embedded Go catalog; explicitly export --update-catalog then rebuild clients"
+                "Resources differ from provider catalog; explicitly export --update-catalog then repackage the provider"
             )
         target.replace(output / filename)
         if update:
@@ -139,7 +151,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--output", type=Path, default=BUILD / "releases/resources")
     parser.add_argument("--tag", default="sandbox-go-resources-v0.3.0")
-    parser.add_argument("--catalog", type=Path, default=ROOT / "resources/sandbox/catalog.json")
+    parser.add_argument("--catalog", type=Path, default=ROOT / "providers/podman/catalog.json")
     parser.add_argument("--update-catalog", action="store_true")
     args = parser.parse_args()
     if not args.arch:

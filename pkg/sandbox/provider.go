@@ -15,8 +15,6 @@ import (
 )
 
 const (
-	AppleVM  = "macos.apple-virtualization"
-	Podman   = "podman"
 	SharedID = "shared"
 )
 
@@ -25,6 +23,7 @@ type Capabilities struct {
 	Files           bool `json:"files"`
 	Desktop         bool `json:"desktop"`
 	SharedExecution bool `json:"shared_execution"`
+	HostMappings    bool `json:"host_mappings"`
 }
 type Descriptor struct {
 	ID           string       `json:"id"`
@@ -39,19 +38,19 @@ type Resources struct {
 	DiskGiB   uint64 `json:"disk_gib"`
 }
 type PreparedResources struct {
-	BundleID       string `json:"bundle_id"`
-	Image          string `json:"image"`
-	ImageReference string `json:"image_reference"`
-	ManifestDigest string `json:"manifest_digest"`
-	Architecture   string `json:"architecture"`
+	BundleID     string            `json:"bundle_id"`
+	Provider     string            `json:"provider"`
+	Architecture string            `json:"architecture"`
+	Paths        map[string]string `json:"paths,omitempty"`
+	Metadata     json.RawMessage   `json:"metadata"`
 }
 
 // Instance is constructed from durable owner configuration, never model paths.
 type Instance struct {
-	Root      string
-	ID        string
-	Resources Resources
-	Mappings  []HostMapping
+	Root      string        `json:"root"`
+	ID        string        `json:"id"`
+	Resources Resources     `json:"resources"`
+	Mappings  []HostMapping `json:"mappings,omitempty"`
 }
 
 func (i Instance) Directory() string { return filepath.Join(i.Root, "sandboxes", i.ID) }

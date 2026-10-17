@@ -245,7 +245,7 @@ func privateFile(path string, limit int64) ([]byte, error) {
 	}
 	return data, nil
 }
-func validatePaths(resources sandbox.PreparedResources) error {
+func validatePaths(resources imageResources) error {
 	if resources.BundleID == "" || resources.ImageReference == "" || resources.ManifestDigest == "" || resources.Architecture == "" {
 		return errors.New("missing prepared image identity")
 	}
@@ -266,12 +266,12 @@ func validatePaths(resources sandbox.PreparedResources) error {
 	return nil
 }
 
-func immutableResources(instance sandbox.Instance, resources sandbox.PreparedResources) error {
+func immutableResources(instance sandbox.Instance, resources imageResources) error {
 	if err := validatePaths(resources); err != nil {
 		return err
 	}
 	path := filepath.Join(instance.Directory(), "prepared-resources.json")
-	var old sandbox.PreparedResources
+	var old imageResources
 	if err := loadJSON(path, &old); err == nil {
 		if old != resources {
 			return errors.New("Sandbox resource bundle is pinned")

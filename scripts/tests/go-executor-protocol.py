@@ -39,8 +39,8 @@ POLICY = dict(
 )
 
 for source in [
-    ROOT / "resources/sandbox/linux/default/executor.py",
-    ROOT / "resources/sandbox/macos/xcode/executor.py",
+    ROOT / "providers/podman/image/executor.py",
+    ROOT / "providers/apple-vm/bootstrap/executor.py",
 ]:
     parsed = ast.parse(source.read_text())
     selected = [

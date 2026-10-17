@@ -16,7 +16,6 @@ from go_packaging import (
     digest,
     go_build,
     prepare_resources,
-    swift_helpers,
 )
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -41,13 +40,6 @@ with tempfile.TemporaryDirectory(prefix=".go-cli-", dir=BUILD) as temporary:
     prepare_resources(resources, args.platform)
     for name in ("pot", "pot-tool-executor"):
         go_build("./cmd/" + name, staged / "bin" / name, args.platform)
-    if args.platform == "darwin-arm64":
-        helpers = swift_helpers()
-        for name in ("PotMacOSHelper",):
-            shutil.copy2(helpers / name, staged / "bin" / name)
-        shutil.copy2(
-            helpers / "SwiftDependencyLicenses.txt", resources / "SwiftDependencyLicenses.txt"
-        )
     call(
         [
             "python3",

@@ -5,7 +5,7 @@ import argparse
 from pathlib import Path
 import platform
 
-from go_packaging import BUILD, NODE_HASHES, prepare_resources, swift_helpers
+from go_packaging import BUILD, NODE_HASHES, prepare_resources
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument(
@@ -18,13 +18,6 @@ parser.add_argument(
     }.get(platform.system()),
 )
 parser.add_argument("--output", type=Path, default=BUILD / "runtime-resources")
-parser.add_argument(
-    "--helpers", action="store_true", help="Compile and sign retained macOS Helpers from source"
-)
 args = parser.parse_args()
 prepare_resources(args.output.resolve(), args.platform)
-if args.helpers:
-    if platform.system() != "Darwin":
-        parser.error("Swift virtualization Helpers require macOS")
-    swift_helpers()
 print(args.output.resolve())

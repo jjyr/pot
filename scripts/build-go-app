@@ -15,7 +15,6 @@ from go_packaging import (
     call,
     go_build,
     prepare_resources,
-    swift_helpers,
     linker_flags,
     prepare_wails_module,
 )
@@ -26,7 +25,6 @@ version = os.environ.get("POT_APP_VERSION", "0.1.0")
 if not re.fullmatch(r"\d+\.\d+\.\d+", version):
     raise SystemExit("POT_APP_VERSION must be major.minor.patch")
 BUILD.mkdir(parents=True, exist_ok=True)
-helpers = swift_helpers()
 release = os.environ.get("POT_APP_RELEASE") == "1"
 bundle = BUILD / ("Pot.app" if release else "PotGoPreview.app")
 with tempfile.TemporaryDirectory(prefix=".go-app-", dir=BUILD) as temporary:
@@ -56,9 +54,6 @@ with tempfile.TemporaryDirectory(prefix=".go-app-", dir=BUILD) as temporary:
         env=environment,
     )
     go_build("./cmd/pot", contents / "MacOS/pot", "darwin-arm64")
-    for name in ("PotMacOSHelper",):
-        shutil.copy2(helpers / name, contents / "MacOS" / name)
-    shutil.copy2(helpers / "SwiftDependencyLicenses.txt", resources / "SwiftDependencyLicenses.txt")
     shutil.copy2(ROOT / "resources/app/assets/Pot.icns", resources / "Pot.icns")
     call(
         [
@@ -69,6 +64,8 @@ with tempfile.TemporaryDirectory(prefix=".go-app-", dir=BUILD) as temporary:
             "./cmd/pot-app",
             "./cmd/pot",
             "./cmd/pot-tool-executor",
+            "./providers/podman/cmd",
+            "./providers/apple-vm/cmd",
         ],
         env=environment,
     )
@@ -99,7 +96,9 @@ with tempfile.TemporaryDirectory(prefix=".go-app-", dir=BUILD) as temporary:
     )
     for executable in (
         resources / "node/bin/node",
-        resources / "macos-bootstrap/pot-tool-executor",
+        resources / "providers/apple-vm/bootstrap/pot-tool-executor",
+        resources / "providers/apple-vm/bin/provider",
+        resources / "providers/podman/bin/provider",
         contents / "MacOS/pot",
         binary,
     ):

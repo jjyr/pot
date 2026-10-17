@@ -85,7 +85,7 @@ func findPodmanBinary(goos string, candidates []string) string {
 	return "podman"
 }
 func (p *Podman) Descriptor() sandbox.Descriptor {
-	return sandbox.Descriptor{ID: sandbox.Podman, OS: "linux", HostOS: p.hostOS, Engine: "podman", Capabilities: sandbox.Capabilities{Shell: true, Files: true, Desktop: true, SharedExecution: true}}
+	return sandbox.Descriptor{ID: PodmanID, OS: "linux", HostOS: p.hostOS, Engine: "podman", Capabilities: sandbox.Capabilities{Shell: true, Files: true, Desktop: true, SharedExecution: true, HostMappings: true}}
 }
 func (p *Podman) DefaultResources() sandbox.Resources {
 	return sandbox.Resources{CPUs: 4, MemoryGiB: 8, DiskGiB: 0}
@@ -101,7 +101,11 @@ func (p *Podman) Workspace(instance sandbox.Instance) string {
 }
 func (p *Podman) GuestWorkspace() string               { return "/data/workspace" }
 func (p *Podman) CleanupPolicy() sandbox.CleanupPolicy { return sandbox.ProcessContainment }
-func (p *Podman) BindResources(ctx context.Context, instance sandbox.Instance, resources sandbox.PreparedResources) error {
+func (p *Podman) BindResources(ctx context.Context, instance sandbox.Instance, prepared sandbox.PreparedResources) error {
+	resources, err := decodeImageResources(prepared)
+	if err != nil {
+		return err
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -470,6 +474,20 @@ func (p *Podman) Lifecycle(ctx context.Context, instance sandbox.Instance, metho
 	p.instances[instance.Directory()] = instance
 	p.mu.Unlock()
 	switch method {
+	case "rebuild":
+		state, err := p.Lifecycle(ctx, instance, "delete")
+		if err != nil {
+			return state, err
+		}
+		if state.Phase != "stopped" {
+			return state, core.ErrCleanupUnconfirmed
+		}
+		workspace, err := os.OpenRoot(filepath.Dir(p.Workspace(instance)))
+		if err != nil {
+			return state, err
+		}
+		err = workspace.RemoveAll("development")
+		return state, errors.Join(err, workspace.Close())
 	case "status":
 		return p.state(ctx, instance)
 	case "prepare":

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "podman",
+  "version": "1.0.0",
+  "host_os": [
+    "darwin",
+    "linux"
+  ],
+  "executable": "bin/provider",
+  "default_shared": true,
+  "catalog": "catalog.json"
+}

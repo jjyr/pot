@@ -79,7 +79,6 @@ services, resource provisioning and shared execution lifecycle:
 host, err := runtime.Open(ctx, runtime.Options{
     Root: "/absolute/private/pot-data",
     ResourceDirectory: "/absolute/path/resources",
-    HelperDirectory: "/absolute/path/helpers",
     Composer: composer,
     Embedded: true,
 })
@@ -92,9 +91,18 @@ handler := host.Handler(operatorToken)
 
 Use the import `github.com/jjyr/pot/pkg/runtime`. Root and resource directory are
 required; the facade does not discover assets in the caller's checkout. Supply
-the retained plugins, Skills, Node and Swift helpers needed by the selected
-features. A nil Sandbox provider list uses platform defaults; an explicit empty
-`[]sandbox.Provider{}` disables providers. Opening a host does not boot a guest.
+the retained tool plugins, Skills, Node and installed Provider packages needed
+by the selected features. A nil `SandboxProviders` discovers packages under
+`ResourceDirectory/providers`, or an explicit `SandboxProviderDirectory`.
+An empty `[]sandbox.Provider{}` disables providers. Discovery starts plugin host
+processes for a handshake without booting guests or downloading images.
+
+Embedding applications can instead inject `SandboxProviders`, an explicit
+`DefaultSandboxProvider` for the shared environment and `SandboxCatalog` for
+those providers' resource definitions. No built-in Podman selection or embedded
+image catalog is supplied for injected providers. Public `pkg/providerplugin`
+provides discovery and the executable-side `Serve` SDK; see
+[Provider plugins](provider-plugins.md).
 
 The host exclusively locks its root and owns its managers. Stop HTTP serving and
 all use of borrowed managers before closing it. `Info()` returns a copy of its

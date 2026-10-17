@@ -24,7 +24,7 @@ func TestChangedCatalogDefaultKeepsExistingSandboxPinAfterRestart(t *testing.T) 
 	if err := m.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
-	options.Catalog.DefaultLinuxBundles[runtime.GOARCH] = "other"
+	options.Catalog.Defaults["fixture"][runtime.GOARCH] = "other"
 	m, err = Open(options)
 	if err != nil {
 		t.Fatal(err)
@@ -42,5 +42,37 @@ func TestChangedCatalogDefaultKeepsExistingSandboxPinAfterRestart(t *testing.T) 
 	fresh, err := m.Request(ctx, "newSandbox", "")
 	if err != nil || fresh.BundleID != "other" {
 		t.Fatalf("new Sandbox did not use new default: %+v %v", fresh, err)
+	}
+}
+
+func TestDifferentProviderCannotUseAnotherProvidersBundle(t *testing.T) {
+	ctx := context.Background()
+	options, closeStore := fixture(t, nil)
+	defer closeStore()
+	b := options.Catalog.Bundles["bundle"]
+	b.Provider = "alternate"
+	options.Catalog.Bundles["alternate-bundle"] = b
+	options.Catalog.Defaults["alternate"] = map[string]string{runtime.GOARCH: "alternate-bundle"}
+	options.SandboxProvider = func(_ context.Context, id string) (string, error) {
+		if id == "alternate-sandbox" {
+			return "alternate", nil
+		}
+		return "fixture", nil
+	}
+	manager, err := Open(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(ctx)
+	if _, err = manager.Request(ctx, "alternate-sandbox", "bundle"); err == nil {
+		t.Fatal("cross-provider resource pin accepted")
+	}
+	request, err := manager.Request(ctx, "alternate-sandbox", "")
+	if err != nil || request.BundleID != "alternate-bundle" {
+		t.Fatal(request, err)
+	}
+	status, err := manager.Snapshot(ctx)
+	if err != nil || status.DefaultBundles["alternate"] != "alternate-bundle" || status.DefaultBundles["fixture"] != "bundle" {
+		t.Fatal(status, err)
 	}
 }

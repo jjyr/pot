@@ -32,7 +32,7 @@ def build(root, output, check=False):
     translations = catalogs(root)
     for page, directory in [
         ("desktop", "desktop"),
-        ("sandbox", "resources/sandbox/linux/default"),
+        ("sandbox", "providers/podman/image"),
     ]:
         template = root / directory / "index.template.html"
         source = template.read_text()
