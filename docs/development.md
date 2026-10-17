@@ -105,11 +105,19 @@ bypass failed hooks. CI separates portable product and macOS packaging checks.
 `resources/app/PotIcon.swift` remains the vector artwork master used by icon and
 tray generation; removing the VM Helper does not remove brand generation.
 
-The explicit paid permission qualification uses the configured DeepSeek Flash from
-`~/.pi/agent/models.json` (or `POT_PI_MODELS`) without modifying Pi configuration:
+Paid tests require an explicit `POT_LIVE=1` in the calling process. Copy
+`.env.example` to `.env` in the current repository root and set
+`DEEPSEEK_API_KEY`; `DEEPSEEK_BASE_URL` and `DEEPSEEK_MODEL` default to
+`https://api.deepseek.com` and `deepseek-v4-flash`. `.env` is Git-ignored.
+Configuration is loaded only after opt-in; putting `POT_LIVE=1` in `.env` cannot
+enable paid calls. Tests locate this checkout's root because `go test` changes
+the working directory to the package directory. They never read Pi configuration
+or export credentials to child commands. Values are literal `KEY=value`
+assignments with optional single/double quotes or an `export` prefix, without
+shell/variable expansion.
 
 ```sh
-POT_DEEPSEEK_LIVE=1 mise exec -- go test -v ./internal/control \
+POT_LIVE=1 mise exec -- go test -v ./internal/control \
   -run '^TestDeepSeekUnsandboxLive$' -count=1 -timeout=16m
 ```
 

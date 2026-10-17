@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,57 +20,21 @@ import (
 )
 
 // Opt-in paid qualification uses the actual Control/Gateway/Agent/permissions
-// stack and real SRT, never scripted model responses. Pi configuration is read
-// only; keys stay in memory/encrypted storage and are never logged.
+// stack and real SRT, never scripted model responses. Local .env configuration
+// is read only after explicit opt-in; credentials are never logged.
 func TestDeepSeekUnsandboxLive(t *testing.T) {
-	if os.Getenv("POT_DEEPSEEK_LIVE") != "1" {
-		t.Skip("explicit POT_DEEPSEEK_LIVE=1 required for paid model requests")
+	if os.Getenv("POT_LIVE") != "1" {
+		t.Skip("explicit POT_LIVE=1 required for paid model requests")
 	}
-	path := os.Getenv("POT_PI_MODELS")
-	if path == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			t.Fatal(err)
-		}
-		path = filepath.Join(home, ".pi/agent/models.json")
-	}
-	var pi struct {
-		Providers map[string]struct {
-			API     string `json:"api"`
-			BaseURL string `json:"baseUrl"`
-			APIKey  string `json:"apiKey"`
-			Models  []struct {
-				ID string `json:"id"`
-			} `json:"models"`
-		} `json:"providers"`
-	}
-	data, err := os.ReadFile(path)
+	path, err := liveEnvironmentPath()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(data) > 4*1024*1024 || json.Unmarshal(data, &pi) != nil {
-		t.Fatal("invalid Pi model configuration")
+	config, err := readLiveModelConfig(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	clear(data)
-	p, ok := pi.Providers["deepseek"]
-	u, parseErr := url.Parse(p.BaseURL)
-	if !ok || p.API != "openai-completions" || p.APIKey == "" || strings.HasPrefix(p.APIKey, "!") || parseErr != nil || u.Scheme != "https" || u.User != nil || u.RawQuery != "" {
-		t.Fatal("requires configured Pi DeepSeek HTTPS API with literal/env key")
-	}
-	key := p.APIKey
-	if value, ok := os.LookupEnv(key); ok {
-		key = value
-	}
-	model := ""
-	for _, m := range p.Models {
-		if m.ID == "deepseek-v4-flash" || m.ID == "deepseek-flash" {
-			model = m.ID
-			break
-		}
-	}
-	if model == "" {
-		t.Fatal("Pi DeepSeek Flash model missing")
-	}
+	model := config.Model
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +94,7 @@ func TestDeepSeekUnsandboxLive(t *testing.T) {
 				t.Fatal(err)
 			}
 			none := "none"
-			profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "live-provider", ProfileID: "live-profile", Name: "Pi DeepSeek qualification", Model: model, Endpoint: strings.TrimRight(p.BaseURL, "/") + "/chat/completions", Protocol: "openai_chat", APIKey: key, MaxOutputTokens: 768, ReasoningEffort: &none})
+			profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "live-provider", ProfileID: "live-profile", Name: "Local DeepSeek qualification", Model: model, Endpoint: strings.TrimRight(config.BaseURL, "/") + "/chat/completions", Protocol: "openai_chat", APIKey: config.APIKey, MaxOutputTokens: 768, ReasoningEffort: &none})
 			if err != nil {
 				t.Fatal(err)
 			}
