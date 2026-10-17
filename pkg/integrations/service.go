@@ -126,6 +126,15 @@ func (s *Service) List(ctx context.Context) ([]Integration, error) {
 			v.Status = "connected"
 			if a.ExpiresAt != nil && !a.ExpiresAt.After(s.now()) {
 				v.Status = "expired"
+				if _, can := adapter.(Refresher); can {
+					c, err := s.readCredential(ctx, a)
+					if err != nil {
+						return nil, err
+					}
+					if c.RefreshToken != "" && (c.RefreshExpiresAt == nil || c.RefreshExpiresAt.After(s.now())) {
+						v.Status = "connected"
+					}
+				}
 			}
 		}
 		if pending := s.sessions[id]; pending != nil {
@@ -363,6 +372,19 @@ func (s *Service) save(ctx context.Context, a Account, c Credential, revision ui
 	}
 	return next, err
 }
+func (s *Service) readCredential(ctx context.Context, a Account) (Credential, error) {
+	raw, err := s.opts.Secrets.Get(ctx, a.SecretRef)
+	if err != nil {
+		return Credential{}, err
+	}
+	defer clear(raw)
+	var c Credential
+	if err = json.Unmarshal(raw, &c); err != nil {
+		return Credential{}, errors.New("invalid stored credential")
+	}
+	return c, nil
+}
+
 func (s *Service) Credential(ctx context.Context, scope, service string, force bool) (string, error) {
 	if scope == "" {
 		return "", errors.New("credential scope is required")
@@ -393,22 +415,16 @@ func (s *Service) Credential(ctx context.Context, scope, service string, force b
 	if ok && !force && value.revision == a.Revision && (value.expires == nil || now.Add(30*time.Second).Before(*value.expires) || now.Sub(value.loaded) < time.Second) && (value.expires == nil || value.expires.After(now)) {
 		return value.token, nil
 	}
-	raw, err := s.opts.Secrets.Get(ctx, a.SecretRef)
+	c, err := s.readCredential(ctx, a)
 	if err != nil {
 		return "", err
-	}
-	var c Credential
-	err = json.Unmarshal(raw, &c)
-	clear(raw)
-	if err != nil {
-		return "", errors.New("invalid stored credential")
 	}
 	if c.RefreshToken != "" && (force || c.ExpiresAt != nil && !now.Add(30*time.Second).Before(*c.ExpiresAt)) {
 		refresher, can := adapter.(Refresher)
 		if can && (c.RefreshExpiresAt == nil || c.RefreshExpiresAt.After(now)) {
 			c, err = refresher.Refresh(ctx, c)
 			if err != nil {
-				return "", errors.New("credential refresh failed; sign out and log in again")
+				return "", errors.New("credential refresh failed")
 			}
 			if c.AccessToken == "" {
 				return "", errors.New("empty refreshed credential")

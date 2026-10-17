@@ -16,8 +16,8 @@ import (
 )
 
 type Options struct {
-	ClientID, ClientSecret string
-	HTTPClient             *http.Client
+	ClientID   string
+	HTTPClient *http.Client
 }
 type Adapter struct {
 	options Options
@@ -129,9 +129,6 @@ func (a *Adapter) Authorize(ctx context.Context, challenge integrations.Challeng
 }
 func (a *Adapter) Refresh(ctx context.Context, previous integrations.Credential) (integrations.Credential, error) {
 	values := url.Values{"client_id": {a.options.ClientID}, "grant_type": {"refresh_token"}, "refresh_token": {previous.RefreshToken}}
-	if a.options.ClientSecret != "" {
-		values.Set("client_secret", a.options.ClientSecret)
-	}
 	var token tokenResponse
 	if err := a.post(ctx, "https://github.com/login/oauth/access_token", values, &token); err != nil {
 		return integrations.Credential{}, err
