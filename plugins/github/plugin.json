@@ -1,0 +1,55 @@
+{
+  "schema_version": 2,
+  "id": "github",
+  "version": "0.1.0",
+  "contributes": {
+    "tools": {
+      "runtime": "node",
+      "execution": "host_or_sandbox",
+      "session_mode": "call",
+      "entrypoint": "index.mjs",
+      "files": [
+        "index.mjs",
+        "instructions.md"
+      ],
+      "requirements": [
+        "node",
+        "gh",
+        "git"
+      ],
+      "credentials": {
+        "GH_TOKEN": {
+          "service": "github"
+        }
+      },
+      "tools": [
+        {
+          "name": "github_cli",
+          "description": "Run GitHub CLI (gh) using the default GitHub account configured on Control. Supply argv without the gh executable. Requests run directly from the execution machine. Each invocation starts a fresh process. Nothing is retried automatically; inspect prior effects before repeating a write. Use exec_command with credentials for git push or other shell workflows.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "workdir": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "refresh_credentials": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "args"
+            ],
+            "additionalProperties": false
+          }
+        }
+      ]
+    }
+  }
+}

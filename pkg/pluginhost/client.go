@@ -46,6 +46,8 @@ var ErrSessionEnded = errors.New("plugin session ended; explicitly start a new s
 // Session ownership (Agent/epoch), the eight-session limit and input-schema
 // validation belong to the caller's execution manager.
 type Config struct {
+	Workspace       string
+	Environment     map[string]string
 	Node            string
 	Identity        string
 	Entrypoint      string
@@ -151,6 +153,17 @@ func New(config Config) (*Client, error) {
 	}
 	cmd := exec.Command(node, "--input-type=module", "-e", hostSource, filepath.Join(directory, config.Entrypoint))
 	cmd.Env = hostEnvironment(directory)
+	if config.Workspace != "" {
+		cmd.Env = append(cmd.Env, "POT_EXECUTION_WORKSPACE="+config.Workspace)
+	}
+	for name, value := range config.Environment {
+		for i := len(cmd.Env) - 1; i >= 0; i-- {
+			if strings.HasPrefix(cmd.Env[i], name+"=") {
+				cmd.Env = append(cmd.Env[:i], cmd.Env[i+1:]...)
+			}
+		}
+		cmd.Env = append(cmd.Env, name+"="+value)
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	input, err := cmd.StdinPipe()
 	if err != nil {

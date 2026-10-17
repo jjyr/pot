@@ -250,6 +250,12 @@ func (m *Manager) beginCall(ctx context.Context, owner string) (context.Context,
 	}, nil
 }
 func (m *Manager) Execute(ctx context.Context, grant AccessGrant, callID, name string, args json.RawMessage, emit func(core.Update) error) (json.RawMessage, error) {
+	return m.ExecuteWithEnvironment(ctx, grant, callID, name, args, nil, emit)
+}
+
+// ExecuteWithEnvironment transports credentials without adding them to prepared
+// inputs, receipt digests or stored requests.
+func (m *Manager) ExecuteWithEnvironment(ctx context.Context, grant AccessGrant, callID, name string, args json.RawMessage, environment map[string]string, emit func(core.Update) error) (json.RawMessage, error) {
 	if err := grant.validate(m.runtimeID); err != nil {
 		return nil, err
 	}
@@ -331,7 +337,7 @@ func (m *Manager) Execute(ctx context.Context, grant AccessGrant, callID, name s
 	if _, err := m.db.ExecContext(ctx, "INSERT INTO sandbox_receipts VALUES (?,?,?,?,?,'started',NULL)", key, definition.ID, grant.Owner, digest, operationID); err != nil {
 		return nil, err
 	}
-	body, err := json.Marshal(map[string]any{"id": operationID, "scope": scope.ID, "operation": name, "args": args, "cwd": scope.Workspace, "role": role(grant), "policy": grant.Policy})
+	body, err := json.Marshal(map[string]any{"id": operationID, "scope": scope.ID, "operation": name, "args": args, "cwd": scope.Workspace, "role": role(grant), "policy": grant.Policy, "environment": environment})
 	if err != nil {
 		return nil, err
 	}

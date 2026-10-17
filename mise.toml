@@ -113,7 +113,7 @@ run = "python scripts/tests/skill-mounts.py"
 
 [tasks."test:operation-prepare"]
 description = "Verify retained guest argument normalization without authorization state"
-run = "python scripts/tests/operation-prepare.py"
+run = ["python scripts/tests/operation-prepare.py", "python scripts/tests/credential-transport.py"]
 
 [tasks."test:hooks"]
 description = "Verify hook timing and failure propagation"

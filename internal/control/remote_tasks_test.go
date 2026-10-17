@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/jjyr/pot/internal/controlplane"
+	"github.com/jjyr/pot/internal/credentials"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
@@ -61,6 +62,9 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 			t.Error("provider key missing at Control")
 		}
 		raw, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(raw), "remote-fixture-service-token") {
+			t.Error("service credential leaked into model context")
+		}
 		var fields map[string]json.RawMessage
 		json.Unmarshal(raw, &fields)
 		var event any
@@ -68,7 +72,7 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 			summaries.Add(1)
 			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "Remote result summarized"}, "finish_reason": "stop"}}}
 		} else if workerCalls.Add(1) == 1 {
-			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "remote-command", "type": "function", "function": map[string]any{"name": "exec_command", "arguments": `{"cmd":"printf remote-proof > artifact.txt; printf remote-ok","login":false}`}}}}, "finish_reason": "tool_calls"}}}
+			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "remote-command", "type": "function", "function": map[string]any{"name": "exec_command", "arguments": `{"cmd":"test -n \"$GH_TOKEN\" && printf remote-proof > artifact.txt; printf remote-ok","login":false,"credentials":{"GH_TOKEN":{"service":"github"}}}`}}}}, "finish_reason": "tool_calls"}}}
 		} else {
 			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "Remote artifact complete"}, "finish_reason": "stop"}}}
 		}
@@ -80,6 +84,9 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 	defer model.Close()
 	control := taskControl(t, "control", model.URL)
 	worker := taskControl(t, "worker", "")
+	if _, err := control.Credentials.Save(context.Background(), credentials.SaveRequest{Service: "github", Account: "personal", Name: "Personal", Token: "remote-fixture-service-token"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := control.Machines.EnableControl(); err != nil {
 		t.Fatal(err)
 	}
@@ -169,6 +176,16 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 	}
 	if _, err = control.ReadTaskFile(ctx, "main", record.Info.ID, "../../control.sqlite", 1024); err == nil {
 		t.Fatal("remote result reader escaped task directory")
+	}
+	for _, name := range []string{"runner.sqlite", "runner.sqlite-wal"} {
+		raw, _ := os.ReadFile(filepath.Join(worker.options.Root, name))
+		if strings.Contains(string(raw), "remote-fixture-service-token") {
+			t.Fatal("credential persisted in Runner command/event journal")
+		}
+	}
+	accounts, err := worker.Credentials.List(ctx)
+	if err != nil || len(accounts) != 0 {
+		t.Fatal("Runner persisted Control service accounts", err)
 	}
 	if len(worker.Profiles.Snapshot().Profiles) != 0 {
 		t.Fatal("Runner received provider configuration")

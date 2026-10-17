@@ -26,6 +26,9 @@ not independently managed resources. Runtime owns automatic Sandbox lifecycle;
 
 Profile filters can narrow visibility. Target defaults and approval rules are in
 [Agent permissions](permissions.md).
+Commands request external-service credentials through the `credentials`
+environment-variable mapping and explicitly reread them with `refresh_credentials`.
+Plugins declare bindings in their manifest. See [Credentials](credentials.md).
 There are no separate file/list tools: inspect with commands and edit with patches
 or approved commands. Task semantics are in [Task coordination](task-coordination.md).
 

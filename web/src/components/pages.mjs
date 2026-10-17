@@ -171,7 +171,7 @@ export function createPages({client, host, approvalHost, locale, notify, changed
     }catch(reason){if(gate.current(token))errorView(reason);}
   }
   async function settings(root, token) {
-    root.classList.add('settings-content');root.append(segments([['general',tr('General','通用')],['providers',tr('AI Providers','AI 提供商')],['tasks',tr('Task Configuration','任务配置')]],filter.settingsTab,value=>{filter.settingsTab=value;show('settings');}));
+    root.classList.add('settings-content');root.append(segments([['general',tr('General','通用')],['providers',tr('AI Providers','AI 提供商')],['accounts',tr('Service accounts','服务账号')],['tasks',tr('Task Configuration','任务配置')]],filter.settingsTab,value=>{filter.settingsTab=value;show('settings');}));
     if(filter.settingsTab==='general'){
     const preferences=card(tr('General','通用'));
     const preference=(key,value)=>{try{localStorage.setItem(key,value);}catch{}window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key,value}}));};
@@ -187,6 +187,7 @@ export function createPages({client, host, approvalHost, locale, notify, changed
     const locations=client.spaces||[];if(!configurationSpace)configurationSpace=scope().space;
     const settingsScope={space:configurationSpace,owner:''};
     if(client.desktop&&locations.length>1){const location=field(tr('Configuration location','配置位置'),configurationSpace,{choices:locations.map(space=>[space.id,space.name])});location.input.onchange=()=>{configurationSpace=location.input.value;show('settings');};root.append(location.row);}
+    if(filter.settingsTab==='accounts'){await serviceAccounts(root,token,settingsScope);return;}
     const providers=await request('/api/v1/providers',{...settingsScope,signal:token.signal});if(!gate.current(token))return;
     if(filter.settingsTab==='tasks'){const [policy,allowances]=await Promise.all([request('/api/v1/agent/routing',{...settingsScope,signal:token.signal}),request('/api/v1/usage/providers',{...settingsScope,signal:token.signal})]);if(!gate.current(token))return;const execution=card(tr('Task Configuration','任务配置'));for(const profile of providers.profiles||[]){const row=n('div','list-row');row.append(n('span','row-info',profile.name),n('span','hint',profile.model),action(tr('Configure','配置'),()=>routingEditor(profile,policy,settingsScope)));execution.append(row);}root.append(execution);const limits=card(tr('Provider allowances','提供商配额'));for(const quota of allowances.providers||[]){const profile=(providers.profiles||[]).find(value=>value.provider===quota.provider),row=n('div','list-row');row.append(n('span','row-info',profile?.name||quota.provider),n('span','hint',quota.active?`${Number(quota.remaining).toLocaleString(locale())} ${tr('remaining','剩余')}`:tr('Unlimited','无限制')),action(tr('Edit allowance','编辑配额'),()=>providerPolicyEditor(quota,settingsScope)));limits.append(row);}root.append(limits);return;}
     root.append(n('p','hint',tr('Manage connections and default models for assistants.','管理助手的连接和默认模型。')));
@@ -203,6 +204,26 @@ export function createPages({client, host, approvalHost, locale, notify, changed
     for(const space of spaces.items||[]) {const row=n('div','list-row');row.append(n('span','',space.name),n('span','hint',space.connected?tr('Connected','已连接'):tr('Offline','离线')));if(client.desktop&&space.kind==='remote') {for(const name of ['connect','disconnect','remove']) {const button=action(tr({connect:'Connect',disconnect:'Disconnect',remove:'Remove'}[name],{connect:'连接',disconnect:'断开',remove:'移除'}[name]),()=>operation(button,()=>request('/api/v1/spaces',{method:'POST',owner:'',space:'',body:{action:name,space_id:space.id}})));row.append(button);}}machines.append(row);}
     if(client.desktop)machines.append(action(tr('Connect Space','连接 Space'),()=>spaceEditor()));root.append(machines);
 
+  }
+  async function serviceAccounts(root,token,settingsScope){
+    const data=await request('/api/v1/credentials',{...settingsScope,signal:token.signal});if(!gate.current(token))return;
+    root.append(n('p','hint',tr('Configured accounts are available to all assistants and tasks in this Space. Access follows the permissions of the saved token.','此 Space 中的所有助手和任务均可使用已配置的账号，访问范围由 Token 的权限决定。')));
+    root.append(toolbar(n('h2','page-heading',tr('Service accounts','服务账号')),action(tr('Add account','添加账号'),()=>serviceAccountEditor(null,settingsScope))));
+    if(!data.items?.length)empty(root,tr('Add a GitHub token or another service credential.','添加 GitHub Token 或其他服务凭据。'));
+    for(const account of data.items||[]){const row=n('div','page-card provider-summary'),info=n('div','row-info');info.append(n('span','',account.name),n('span','hint',`${account.service} / ${account.account}${account.default?' · '+tr('Default','默认'):''}`));if(account.expires_at)info.append(n('span','hint',`${tr('Expires','到期时间')}: ${new Date(account.expires_at).toLocaleString(locale())}`));const remove=action(tr('Delete','删除'),()=>operation(remove,()=>request('/api/v1/credentials/remove',{...settingsScope,method:'POST',body:{service:account.service,account:account.account,expected_revision:account.revision}})),{danger:true});row.append(info,action(tr('Edit','编辑'),()=>serviceAccountEditor(account,settingsScope)),remove);root.append(row);}
+  }
+  async function serviceAccountEditor(account,capturedScope){
+    if(!await leave())return;
+    const initial={service:account?.service||'github',account:account?.account||'personal',name:account?.name||'GitHub',default:account?.default??true,token:'',expires_at:account?.expires_at?new Date(new Date(account.expires_at).getTime()-new Date(account.expires_at).getTimezoneOffset()*60000).toISOString().slice(0,16):''};
+    const form=renderEditor(account?tr('Edit service account','编辑服务账号'):tr('Add service account','添加服务账号'),initial,[
+      {name:'service',label:tr('Service','服务'),required:true,help:tr('Service identifier, for example github.','服务标识，例如 github。')},
+      {name:'account',label:tr('Account ID','账号标识'),required:true},
+      {name:'name',label:tr('Name','名称'),required:true},
+      {name:'token',label:'Token',kind:'password',required:!account,help:account?tr('Leave blank to keep the saved token.','留空保留现有 Token。'):''},
+      {name:'expires_at',label:tr('Expiration','到期时间'),kind:'datetime-local',help:tr('Leave blank when the token has no known expiration.','Token 没有已知到期时间时留空。')},
+      {name:'default',label:tr('Default account for this service','此服务的默认账号'),kind:'checkbox'},
+    ],(values,context)=>request('/api/v1/credentials',{...context,method:'POST',body:{...values,expected_revision:account?.revision||0,expires_at:values.expires_at?new Date(values.expires_at).toISOString():null}}),{capturedScope});
+    if(account){form.controls.get('service').readOnly=true;form.controls.get('account').readOnly=true;}
   }
   function providerPolicyEditor(quota,owner) {
     renderEditor(tr('Provider allowance','提供商配额'),quota.policy,[
@@ -242,7 +263,7 @@ export function createPages({client, host, approvalHost, locale, notify, changed
     const selectedEntry=(snapshot.directory||[]).find(value=>value.id===selectedProvider);
     const inherited=modelDefaults(snapshot,selectedProvider,profile?.model||'');
     let configuredModels=[...(snapshot.configured_models?.[profile?.id]||[])];
-    const initial={provider_search:'',provider_kind:selectedProvider,model_selection:(selectedEntry?.models||[]).some(value=>value.id===profile?.model)?profile.model:'',context_window:profile?(profile.model_settings?profile.model_settings.context_window??null:agent.context_window||32768):null,max_input_tokens:inherited.input||'',compact_at:agent.compact_at||'',context_reserve:agent.context_reserve??4096,auto_compact:agent.auto_compact??true,use_provider_usage:agent.use_provider_usage??true,request_timeout_ms:agent.request_timeout_ms||180000,system_prompt:agent.system_prompt||'',builtin_tools:(agent.builtin_tools||['exec_command','write_stdin','apply_patch','exec','wait']).join(', '),allowed_tools:agent.allowed_tools?.join(', ')||'',...Object.fromEntries(Object.entries(agent.plugins||{'computer-use':{enabled:true}}).map(([name,value])=>['plugin:'+name,value.enabled])),name:profile?.name||selectedEntry?.name||'',model:profile?.model||'',endpoint:connection?.endpoint||selectedEntry?.endpoint||'',protocol:connection?.protocol||selectedEntry?.protocol||'openai_responses',api_key:'',max_output_tokens:profile?(profile.model_settings?profile.model_settings.max_output_tokens??null:profile.params?.max_output_tokens||4096):null,reasoning_effort:profile?.params?.reasoning_effort||''};
+    const initial={provider_search:'',provider_kind:selectedProvider,model_selection:(selectedEntry?.models||[]).some(value=>value.id===profile?.model)?profile.model:'',context_window:profile?(profile.model_settings?profile.model_settings.context_window??null:agent.context_window||32768):null,max_input_tokens:inherited.input||'',compact_at:agent.compact_at||'',context_reserve:agent.context_reserve??4096,auto_compact:agent.auto_compact??true,use_provider_usage:agent.use_provider_usage??true,request_timeout_ms:agent.request_timeout_ms||180000,system_prompt:agent.system_prompt||'',builtin_tools:(agent.builtin_tools||['exec_command','write_stdin','apply_patch','exec','wait']).join(', '),allowed_tools:agent.allowed_tools?.join(', ')||'',...Object.fromEntries(Object.entries({github:{enabled:false},...(agent.plugins||{'computer-use':{enabled:true}})}).map(([name,value])=>['plugin:'+name,value.enabled])),name:profile?.name||selectedEntry?.name||'',model:profile?.model||'',endpoint:connection?.endpoint||selectedEntry?.endpoint||'',protocol:connection?.protocol||selectedEntry?.protocol||'openai_responses',api_key:'',max_output_tokens:profile?(profile.model_settings?profile.model_settings.max_output_tokens??null:profile.params?.max_output_tokens||4096):null,reasoning_effort:profile?.params?.reasoning_effort||''};
     const form=renderEditor(profile?tr('Edit AI connection','编辑 AI 连接'):tr('Add AI connection','添加 AI 连接'),initial,[
       {name:'provider_search',label:tr('Find a Provider','搜索提供商'),kind:'search'},
       {name:'provider_kind',label:tr('Provider','提供商'),choices:providerChoices(snapshot,{selected:selectedProvider}).map(([value,label])=>[value,value==='__more'?tr('More providers…','更多提供商…'):value==='custom'?tr('Custom connection','自定义连接'):label])},
@@ -263,10 +284,10 @@ export function createPages({client, host, approvalHost, locale, notify, changed
       {name:'system_prompt',label:tr('System instructions','系统指令'),kind:'textarea'},
       {name:'builtin_tools',label:tr('Built-in tools','内置工具'),help:tr('Separate tool names with commas.','工具名称以逗号分隔。')},
       {name:'allowed_tools',label:tr('Allowed tools','允许的工具'),help:tr('Leave blank to use the configured defaults.','留空使用默认配置。')},
-      ...Object.keys(agent.plugins||{'computer-use':{enabled:true}}).map(name=>({name:'plugin:'+name,label:`${tr('Plugin','插件')} · ${name}`,kind:'checkbox'})),
+      ...Object.keys({github:{enabled:false},...(agent.plugins||{'computer-use':{enabled:true}})}).map(name=>({name:'plugin:'+name,label:`${tr('Plugin','插件')} · ${name}`,kind:'checkbox'})),
     ],(values,context)=>{
       const {provider_search,provider_kind,model_selection,context_window,max_input_tokens,compact_at,context_reserve,auto_compact,use_provider_usage,request_timeout_ms,system_prompt,builtin_tools,allowed_tools,...connectionValues}=values;
-      const plugins=structuredClone(agent.plugins||{'computer-use':{enabled:true}});
+      const plugins=structuredClone({github:{enabled:false},...(agent.plugins||{'computer-use':{enabled:true}})});
       for(const key of Object.keys(connectionValues))if(key.startsWith('plugin:')){plugins[key.slice(7)]={...plugins[key.slice(7)],enabled:connectionValues[key]};delete connectionValues[key];}
       return request('/api/v1/providers',{...context,method:'POST',body:{request_id:context.request_id,profile_id:profile?.id||'',expected_revision:profile?.revision||0,models:[...new Set([...configuredModels,values.model].filter(Boolean))],...connectionValues,reasoning_effort:values.reasoning_effort.trim()||null,max_output_tokens:values.max_output_tokens||modelDefaults(snapshot,provider_kind,values.model).output,model_settings:{catalog_provider:provider_kind==='custom'?null:provider_kind,context_window:context_window||null,max_output_tokens:values.max_output_tokens||null},
         agent:{...agent,plugins,context_window:context_window||modelDefaults(snapshot,provider_kind,values.model).context,max_input_tokens:max_input_tokens||null,compact_at:compact_at||null,context_reserve,auto_compact,use_provider_usage,request_timeout_ms,system_prompt:system_prompt||null,builtin_tools:builtin_tools.split(',').map(value=>value.trim()).filter(Boolean),allowed_tools:allowed_tools.trim()?allowed_tools.split(',').map(value=>value.trim()).filter(Boolean):null}}});

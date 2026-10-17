@@ -157,7 +157,7 @@ func (r *Runtime) openSandboxes(ctx context.Context, options Options, config *co
 			if err = r.Sandboxes.RememberPrepared(ctx, grant, request.ID, request.Operation, args, prepared); err != nil {
 				return nil, err
 			}
-			return r.Sandboxes.Execute(ctx, grant, request.ID, request.Operation, prepared, emit)
+			return r.Sandboxes.ExecuteWithEnvironment(ctx, grant, request.ID, request.Operation, prepared, request.Environment, emit)
 		}
 		if previous != nil {
 			return previous(ctx, op, request, emit)

@@ -1,5 +1,5 @@
 // Package executor runs already-authorized commands in one Agent/epoch scope.
-// It contains no routing, credentials or approval decisions. Create a separate
+// It contains no routing, credential ownership or approval decisions. Create a separate
 // Engine for each execution owner; process handles cannot survive restart.
 package executor
 
@@ -28,7 +28,9 @@ type Request struct {
 	Operation string             `json:"operation"`
 	CWD       string             `json:"cwd"`
 	Policy    core.ShellSettings `json:"policy"`
-	Args      map[string]any     `json:"args"`
+	// Environment is transient and must never be included in durable receipts.
+	Environment map[string]string `json:"environment,omitempty"`
+	Args        map[string]any    `json:"args"`
 }
 
 // Event preserves the serde externally-tagged ToolOutput update wire format.
@@ -134,6 +136,9 @@ func (e *Engine) Execute(ctx context.Context, request Request, emit func(Event) 
 	defer stop()
 	ctx = callCtx
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateEnvironment(request.Environment); err != nil {
 		return nil, err
 	}
 	if request.Operation == "inspect" {
@@ -276,4 +281,34 @@ func (e *Engine) fenceCleanup(err error) {
 	e.mu.Lock()
 	e.fence = errors.Join(e.fence, err)
 	e.mu.Unlock()
+}
+
+func validateEnvironment(env map[string]string) error {
+	if len(env) > 16 {
+		return errors.New("too many credential environment variables")
+	}
+	total := 0
+	for name, value := range env {
+		total += len(name) + len(value)
+		if !core.CredentialEnvironmentName(name) || strings.ContainsRune(value, 0) {
+			return errors.New("invalid credential environment")
+		}
+	}
+	if total > 256*1024 {
+		return errors.New("credential environment exceeds limit")
+	}
+	return nil
+}
+func mergeEnvironment(base []string, extra map[string]string) []string {
+	result := make([]string, 0, len(base)+len(extra))
+	for _, entry := range base {
+		name, _, _ := strings.Cut(entry, "=")
+		if _, ok := extra[name]; !ok {
+			result = append(result, entry)
+		}
+	}
+	for name, value := range extra {
+		result = append(result, name+"="+value)
+	}
+	return result
 }

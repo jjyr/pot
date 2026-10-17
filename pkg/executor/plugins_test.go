@@ -3,12 +3,51 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/resource"
 )
+
+func TestGitHubCLIReceivesCredentialAndArgumentVector(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node unavailable")
+	}
+	bin := t.TempDir()
+	// The fixture checks argv literally and reports only whether authentication
+	// was supplied. No external account or network is involved.
+	program := "#!/bin/sh\n[ -n \"$GH_TOKEN\" ] || exit 4\n[ \"$1\" = 'api' ] || exit 5\n[ \"$2\" = 'literal; no shell expansion' ] || exit 6\nprintf authenticated\n"
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(program), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	bundle, err := resource.LoadPlugin("../../plugins/github")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, r := fixture(t)
+	r.Operation = "plugin_call"
+	r.Environment = map[string]string{"GH_TOKEN": "fixture-private-token"}
+	r.Args = map[string]any{"plugin": bundle, "tool": "github_cli", "mode": "text", "input": map[string]any{"args": []any{"api", "literal; no shell expansion"}}}
+	for range 10 {
+		result, err := e.Execute(context.Background(), r, nil)
+		raw, _ := json.Marshal(result)
+		if err != nil || result["isError"] == true || !strings.Contains(string(raw), "authenticated") {
+			t.Fatal(string(raw), err)
+		}
+		if strings.Contains(string(raw), "fixture-private-token") {
+			t.Fatal("credential leaked in plugin result")
+		}
+	}
+	if ids, err := e.plugins.inventory(); err != nil || len(ids) != 0 {
+		t.Fatal("call-scoped plugins retained processes", ids, err)
+	}
+}
 
 func counterBundle(t *testing.T) core.PluginBundle {
 	t.Helper()

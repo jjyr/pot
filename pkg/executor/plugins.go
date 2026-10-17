@@ -15,6 +15,7 @@ import (
 type pluginInstance struct {
 	client       *pluginhost.Client
 	digest, mode string
+	environment  string
 	touched      time.Time
 	idle         time.Duration
 	busy         int
@@ -130,6 +131,7 @@ func (e *Engine) executePlugin(ctx context.Context, r Request) (map[string]any, 
 	if idle <= 0 {
 		return nil, errors.New("plugin idle timeout exceeds supported duration")
 	}
+	environment, _ := core.HashJSON(r.Environment)
 	p := &e.plugins
 	p.mu.Lock()
 	if p.closing || p.fence != nil {
@@ -151,21 +153,21 @@ func (e *Engine) executePlugin(ctx context.Context, r Request) (map[string]any, 
 			p.mu.Unlock()
 			return nil, errors.New("plugin session expired; explicitly start a new REPL")
 		}
-		if instance.digest != bundle.Digest || instance.mode != mode {
+		if instance.digest != bundle.Digest || instance.mode != mode || instance.environment != environment && input["reset"] != true {
 			p.mu.Unlock()
-			return nil, errors.New("plugin session binding changed")
+			return nil, errors.New("plugin session binding or credentials changed; reset the session and start a new one")
 		}
 	} else {
 		if len(p.instances) >= 8 {
 			p.mu.Unlock()
 			return nil, errors.New("plugin session limit reached")
 		}
-		client, err := pluginhost.New(pluginhost.Config{Node: e.options.Node, Identity: bundle.Digest, Entrypoint: bundle.Manifest.Contributes.Tools.Entrypoint, Files: bundle.Files, Mode: mode, ExecutionTarget: e.options.ExecutionTarget, IdleTimeout: idle})
+		client, err := pluginhost.New(pluginhost.Config{Workspace: r.CWD, Environment: r.Environment, Node: e.options.Node, Identity: bundle.Digest, Entrypoint: bundle.Manifest.Contributes.Tools.Entrypoint, Files: bundle.Files, Mode: mode, ExecutionTarget: e.options.ExecutionTarget, IdleTimeout: idle})
 		if err != nil {
 			p.mu.Unlock()
 			return nil, err
 		}
-		instance = &pluginInstance{client: client, digest: bundle.Digest, mode: mode, touched: time.Now(), idle: idle}
+		instance = &pluginInstance{environment: environment, client: client, digest: bundle.Digest, mode: mode, touched: time.Now(), idle: idle}
 		session = client.SessionID()
 		p.instances[session] = instance
 	}
@@ -201,6 +203,17 @@ func (e *Engine) executePlugin(ctx context.Context, r Request) (map[string]any, 
 			e.fenceCleanup(err)
 		}
 		return nil, err
+	}
+	if bundle.Manifest.Contributes.Tools.SessionMode == "call" {
+		cleanup := instance.client.Close()
+		p.mu.Lock()
+		delete(p.instances, session)
+		p.mu.Unlock()
+		if cleanup != nil {
+			e.fenceCleanup(errors.Join(ErrCleanupUnconfirmed, cleanup))
+			return nil, errors.Join(ErrCleanupUnconfirmed, cleanup)
+		}
+		result.SessionID = ""
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {

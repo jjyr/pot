@@ -216,7 +216,10 @@ def execute(request):
     op_id, scope = request["id"], request["scope"]
     if not valid_id(op_id) or not valid_id(scope):
         raise ValueError("Invalid operation/scope ID")
-    encoded = json.dumps(request, sort_keys=True)
+    encoded = json.dumps(
+        {key: value for key, value in request.items() if key != "environment"},
+        sort_keys=True,
+    )
     with LOCK:
         row = DB.execute("SELECT input,result FROM operations WHERE id=?", (op_id,)).fetchone()
         if row:
@@ -366,7 +369,8 @@ class Handler(BaseHTTPRequestHandler):
                 plugins["requirements"] = [
                     name
                     for name in plugins.get("requirements", [])
-                    if name in ("node", "chromium") and Path("/usr/bin/" + name).is_file()
+                    if name in ("node", "chromium", "git", "gh")
+                    and Path("/usr/bin/" + name).is_file()
                 ]
                 if not Path("/usr/bin/node").is_file():
                     plugins["runtime"] = None

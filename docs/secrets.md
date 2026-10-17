@@ -40,8 +40,9 @@ pot serve
 ```
 
 Do not regenerate this file on restart. Restoring the database requires the same
-master key. Key rotation/re-encryption and general Runner secret distribution
-are not implemented. Embedders can supply a `KeySource` before configuring
+master key. Key rotation/re-encryption is not implemented. External-service account
+delivery is described in [Credentials](credentials.md); model Provider keys remain
+Control-only. Embedders can supply a `KeySource` before configuring
 Providers; all assistants share the Control configuration handle.
 
 ## Execution boundary
@@ -52,9 +53,9 @@ never included in launch manifests, checkpoints, chat messages or Runner
 configuration. Gateway and Secrets are separate libraries in the Control process;
 there is no extra service to deploy.
 
-A future task-secret delivery protocol must bind references to the selected
-run/execution target and inject values into tools rather than model context. The
-current secret store does not imply an export API or Runner access to all secrets.
+External-service credentials use separate account records and run-bound tool
+environment injection. This does not expose Provider secrets or provide a bulk
+secret export API. See [Credentials](credentials.md).
 
 Provider credentials are configured through Control; there is no plaintext
 credential-file reader or import endpoint.

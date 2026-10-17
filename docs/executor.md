@@ -1,7 +1,9 @@
 # Sandbox command execution
 
 The Host Agent (`pkg/agent`) calls the same role-scoped tools. Runtime validates
-arguments and routes them to a credential-free guest runner. Remote Task Agents run on the selected execution Runtime and use Control for models and approvals. `pkg/agent` also routes these same tool names to
+arguments and routes them to a guest runner. External-service credentials use
+transient environment fields; see [Credentials](credentials.md).
+Remote Task Agents run on the selected execution Runtime and use Control for models and approvals. `pkg/agent` also routes these same tool names to
 Host after its [permission gate](permissions.md).
 `execution_target` selects Host or a Sandbox for `pkg/agent`. Main uses the machine execution policy and
 tasks resolve policy at dispatch and retain that context only for their current execution. File tools share the same runner implementation.

@@ -373,7 +373,7 @@ func (s *Service) controlRPC(ctx context.Context, p controlplane.Principal, requ
 		}
 		stopDispatch := context.AfterFunc(authority.ctx, cancel)
 		defer stopDispatch()
-		dispatcher := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: launch.TaskID, ApprovalOwner: launch.AssistantID, Task: launch.TaskID, Turn: launch.RunID, Generation: launch.Generation, DefaultTarget: launch.ExecutionTarget, Spec: authority.model.Spec, Usage: s.Usage, UsageScope: launch.TaskID, Permissions: s.Permissions, Operations: s.Operations, Target: func(ctx context.Context, operation Operation, execution executor.Request, emit func(core.Update) error) (json.RawMessage, error) {
+		dispatcher := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: launch.TaskID, ApprovalOwner: launch.AssistantID, Task: launch.TaskID, Turn: launch.RunID, Generation: launch.Generation, DefaultTarget: launch.ExecutionTarget, Spec: authority.model.Spec, Credentials: s.Credentials, Usage: s.Usage, UsageScope: launch.TaskID, Permissions: s.Permissions, Operations: s.Operations, Target: func(ctx context.Context, operation Operation, execution executor.Request, emit func(core.Update) error) (json.RawMessage, error) {
 			var response executeReply
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
@@ -424,6 +424,7 @@ func (s *Service) authority(ctx context.Context, peer *controlplane.Peer, l runn
 		return nil, err
 	}
 	runctx, cancel := context.WithCancel(s.ctx)
+	context.AfterFunc(runctx, func() { s.Credentials.Forget(credentialScope(l.TaskID, l.RunID, l.Generation)) })
 	a := &remoteAuthority{streams: map[string]*modelStream{}, ctx: runctx, cancel: cancel}
 	go func() {
 		select {
@@ -648,7 +649,14 @@ func (s *Service) runnerRPC(ctx context.Context, p controlplane.Principal, reque
 		if name != q.Request.Operation || actual != expected {
 			return nil, errors.New("execution differs from authorized operation")
 		}
-		receipt, claim, err := s.RunnerJournal.BeginCommand(ctx, record.Launch.ControlID, record.Launch.TaskID, record.Launch.RunID, operation.CallID, r.Data)
+		// Only nonsecret request fields participate in durable command receipts.
+		durable := q
+		durable.Request.Environment = nil
+		durableData, err := json.Marshal(durable)
+		if err != nil {
+			return nil, err
+		}
+		receipt, claim, err := s.RunnerJournal.BeginCommand(ctx, record.Launch.ControlID, record.Launch.TaskID, record.Launch.RunID, operation.CallID, durableData)
 		if err != nil {
 			return nil, err
 		}
