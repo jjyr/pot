@@ -353,10 +353,13 @@ func Allowed(method, path string) bool {
 	}
 	if method == "POST" {
 		switch path {
-		case "/api/v1/assistants", "/api/v1/providers", "/api/v1/providers/default", "/api/v1/providers/check", "/api/v1/agent", "/api/v1/agent/routing", "/api/v1/instructions", "/api/v1/messages", "/api/v1/turn/cancel", "/api/v1/turn/steer", "/api/v1/turn/control", "/api/v1/permissions", "/api/v1/usage/policy", "/api/v1/usage/providers", "/api/v1/usage/resume", "/api/v1/schedules", "/api/v1/machines", protocol.AssistantMailAPI:
+		case "/api/v1/assistants", "/api/v1/providers", "/api/v1/providers/default", "/api/v1/providers/check", "/api/v1/providers/resolve", "/api/v1/providers/test", "/api/v1/agent", "/api/v1/agent/routing", "/api/v1/instructions", "/api/v1/messages", "/api/v1/turn/cancel", "/api/v1/turn/steer", "/api/v1/turn/control", "/api/v1/permissions", "/api/v1/usage/policy", "/api/v1/usage/providers", "/api/v1/usage/resume", "/api/v1/schedules", "/api/v1/machines", protocol.AssistantMailAPI:
 			return true
 		}
 		if strings.HasPrefix(path, "/api/v1/assistants/") {
+			if path == "/api/v1/assistants/bootstrap" {
+				return true
+			}
 			id := strings.TrimPrefix(path, "/api/v1/assistants/")
 			return core.Identifier(id)
 		}
@@ -411,6 +414,8 @@ func (s *Server) proxy(w http.ResponseWriter, r *http.Request, generation uint64
 				if e := controller.Flush(); e != nil {
 					return
 				}
+				// Bound each write, not the idle wait for the next SSE frame.
+				_ = controller.SetWriteDeadline(time.Time{})
 			}
 			if err != nil {
 				return

@@ -80,13 +80,17 @@ func (manager *compositionManager) call(name string, raw json.RawMessage, parent
 				callID := fmt.Sprintf("%s:js:%d", parent, next)
 				ids.Unlock()
 				call := m.ToolCall{ID: callID, Name: toolName, Arguments: args}
-				if err := manager.emit(core.Update{Type: "tool_started", ID: callID, Name: toolName, Args: args}); err != nil {
+				if err := manager.emit(core.Update{Type: "tool_started", ParentID: parent, ID: callID, Name: toolName, Args: args}); err != nil {
 					return nil, err
 				}
 				value, err := manager.dispatch(ctx, manager.execution, call, manager.emit)
 				if err != nil {
 					if core.IsCleanupUnconfirmed(err) {
 						return nil, &composition.UnconfirmedCleanupError{Cause: err}
+					}
+					failure, _ := json.Marshal(map[string]any{"isError": true, "error": err.Error()})
+					if emitErr := manager.emit(core.Update{Type: "tool_finished", ID: callID, Name: toolName, Result: failure, Failed: true}); emitErr != nil {
+						return nil, emitErr
 					}
 					return nil, err
 				}

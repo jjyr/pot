@@ -19,16 +19,21 @@ var (
 )
 
 type Update struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	Outcome   *Outcome        `json:"outcome,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Args      json.RawMessage `json:"args,omitempty"`
-	Result    json.RawMessage `json:"result,omitempty"`
-	Failed    bool            `json:"failed,omitempty"`
-	Stream    string          `json:"stream,omitempty"`
-	Recovered bool            `json:"recovered,omitempty"`
+	ParentID  string           `json:"parent_id,omitempty"`
+	AtMS      int64            `json:"at_ms,omitempty"`
+	Phase     string           `json:"phase,omitempty"`
+	Target    *ExecutionTarget `json:"target,omitempty"`
+	Workdir   string           `json:"workdir,omitempty"`
+	Type      string           `json:"type"`
+	Text      string           `json:"text,omitempty"`
+	Outcome   *Outcome         `json:"outcome,omitempty"`
+	ID        string           `json:"id,omitempty"`
+	Name      string           `json:"name,omitempty"`
+	Args      json.RawMessage  `json:"args,omitempty"`
+	Result    json.RawMessage  `json:"result,omitempty"`
+	Failed    bool             `json:"failed,omitempty"`
+	Stream    string           `json:"stream,omitempty"`
+	Recovered bool             `json:"recovered,omitempty"`
 }
 type AgentEvent struct {
 	Generation uint64 `json:"generation"`

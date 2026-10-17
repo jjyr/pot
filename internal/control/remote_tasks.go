@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/jjyr/pot/internal/controlplane"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/agent"
@@ -46,6 +47,7 @@ type remotePrepared struct {
 	launch    runner.Launch
 	execution core.ExecutionContext
 	engine    ToolEngine
+	emits     map[string]func(core.Update) error
 }
 type remoteAuthority struct {
 	mu      sync.Mutex
@@ -395,7 +397,11 @@ func (s *Service) controlRPC(ctx context.Context, p controlplane.Principal, requ
 			}
 			return response.Value, nil
 		}}
-		raw, err := dispatcher.Dispatch(ctx, core.ExecutionContext{Owner: launch.TaskID, Role: core.Worker, Workspace: q.Workspace}, q.Call, nil)
+		sequence := 0
+		raw, err := dispatcher.Dispatch(ctx, core.ExecutionContext{Owner: launch.TaskID, Role: core.Worker, Workspace: q.Workspace}, q.Call, func(update core.Update) error {
+			sequence++
+			return s.remoteCall(ctx, peer, binding(launch), "task.tool_update", fmt.Sprintf("tool-update:%s:%s:%d", launch.RunID, q.Call.ID, sequence), update, nil)
+		})
 		return raw, err
 	case "task.settle":
 		s.Permissions.Expire(launch.AssistantID, launch.RunID, launch.Generation)
@@ -610,6 +616,31 @@ func (s *Service) runnerRPC(ctx context.Context, p controlplane.Principal, reque
 		return json.Marshal(struct {
 			Data string `json:"data"`
 		}{base64.RawStdEncoding.EncodeToString(data)})
+	case "task.tool_update":
+		var update core.Update
+		if err := core.DecodeJSON(r.Data, &update); err != nil {
+			return nil, err
+		}
+		if update.Type != "tool_state" || update.Target != nil && *update.Target != record.Launch.ExecutionTarget {
+			return nil, controlplane.ErrUnauthorized
+		}
+		switch update.Phase {
+		case "preparing", "waiting_approval", "running", "denied":
+		default:
+			return nil, controlplane.ErrUnauthorized
+		}
+		state := s.remote()
+		state.mu.Lock()
+		prepared := state.prepared[record.Launch.RunID]
+		emit := prepared.emits[update.ID]
+		state.mu.Unlock()
+		if emit == nil {
+			return nil, errors.New("tool update has no active original call")
+		}
+		if err := emit(update); err != nil {
+			return nil, err
+		}
+		return json.Marshal(map[string]bool{"accepted": true})
 	case "task.execute":
 		var q remoteExecute
 		if err = core.DecodeJSON(r.Data, &q); err != nil {
@@ -668,13 +699,31 @@ func (s *Service) runnerRPC(ctx context.Context, p controlplane.Principal, reque
 		}
 		var value json.RawMessage
 		if record.Launch.ExecutionTarget.Target.Kind == "host" {
-			result, runErr := prepared.engine.Execute(ctx, q.Request, nil)
+			emit := func(event executor.Event) error {
+				state.mu.Lock()
+				callback := prepared.emits[operation.CallID]
+				state.mu.Unlock()
+				if callback == nil {
+					return errors.New("tool output has no active original call")
+				}
+				return callback(core.Update{Type: "tool_output", ID: operation.CallID, Stream: event.ToolOutput.Stream, Text: event.ToolOutput.Text})
+			}
+			result, runErr := prepared.engine.Execute(ctx, q.Request, emit)
 			err = runErr
 			if result != nil {
 				value, _ = json.Marshal(result)
 			}
 		} else if s.options.Target != nil {
-			value, err = s.options.Target(ctx, operation, q.Request, nil)
+			value, err = s.options.Target(ctx, operation, q.Request, func(update core.Update) error {
+				state.mu.Lock()
+				callback := prepared.emits[operation.CallID]
+				state.mu.Unlock()
+				if callback == nil {
+					return errors.New("tool output has no active original call")
+				}
+				update.ID = operation.CallID
+				return callback(update)
+			})
 		} else {
 			err = errors.New("Sandbox executor unavailable; no Host fallback")
 		}
@@ -742,7 +791,7 @@ func (s *Service) prepareRemoteTask(ctx context.Context, r runner.Run) (runner.P
 	}
 	state := s.remote()
 	state.mu.Lock()
-	state.prepared[l.RunID] = remotePrepared{l, execution, engine}
+	state.prepared[l.RunID] = remotePrepared{launch: l, execution: execution, engine: engine, emits: map[string]func(core.Update) error{}}
 	state.mu.Unlock()
 	services := &remoteServices{s: s, peer: peer, launch: l}
 	feedback := &remoteFeedback{services: services}
@@ -755,6 +804,17 @@ func (s *Service) prepareRemoteTask(ctx context.Context, r runner.Run) (runner.P
 		tools = append(tools, d)
 	}
 	loop := &agent.Agent{Services: services, Feedback: feedback, Tools: tools, Composer: s.options.Composer, Dispatch: func(ctx context.Context, e core.ExecutionContext, call modelprotocol.ToolCall, emit func(core.Update) error) (json.RawMessage, error) {
+		state := s.remote()
+		state.mu.Lock()
+		prepared, ok := state.prepared[l.RunID]
+		if ok {
+			prepared.emits[call.ID] = emit
+		}
+		state.mu.Unlock()
+		if !ok {
+			return nil, errors.New("Task original prepared execution unavailable")
+		}
+		defer func() { state.mu.Lock(); delete(prepared.emits, call.ID); state.mu.Unlock() }()
 		var result json.RawMessage
 		if ctx.Err() != nil {
 			return nil, ctx.Err()

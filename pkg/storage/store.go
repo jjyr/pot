@@ -57,6 +57,10 @@ PRAGMA user_version=1;`)
 		for _, message := range messages {
 			if message.Status == "accepted" || message.Status == "streaming" {
 				message.Status = "failed"
+				if message.Tool != nil {
+					message.Tool.Phase = "unknown"
+					message.Tool.FinishedAtMS = Now()
+				}
 				if _, err = s.Save(context.Background(), message); err != nil {
 					break
 				}

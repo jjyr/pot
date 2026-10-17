@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jjyr/pot/internal/gateway"
+	"github.com/jjyr/pot/pkg/modelprotocol"
 	"io"
 	"net/http"
 	"net/url"
@@ -26,58 +27,24 @@ type ProviderCheck struct {
 
 func (p *ProfileStore) Check(ctx context.Context, r CheckProvider) (ProviderCheck, error) {
 	result := ProviderCheck{Models: []string{}}
-	u, err := url.Parse(r.Endpoint)
-	if err != nil || u.Hostname() == "" || u.User != nil || u.Fragment != "" || u.RawQuery != "" || u.Opaque != "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return result, errors.New("invalid model-list endpoint")
+	resolved, err := resolveProviderEndpoint(r.Endpoint, r.Protocol)
+	if err != nil {
+		return result, err
 	}
-	key := []byte(r.APIKey)
+	r.Endpoint = resolved.Endpoint
+	u, _ := url.Parse(r.Endpoint)
+	if u.RawQuery != "" {
+		return result, errors.New("model-list checks do not support query parameters")
+	}
+	key, err := p.checkCredential(ctx, r)
+	if err != nil {
+		return result, err
+	}
 	defer clear(key)
-	if len(key) == 0 && r.ProfileID != "" {
-		spec, err := p.Resolve(r.ProfileID)
-		if err != nil {
-			return result, err
-		}
-		provider, err := p.registry.Get(ctx, spec.Provider)
-		if err != nil {
-			return result, err
-		}
-		if provider.Endpoint != r.Endpoint || provider.Protocol != r.Protocol {
-			return result, errors.New("enter a credential when checking a changed endpoint")
-		}
-		key, err = p.registry.Credential(ctx, provider)
-		if err != nil {
-			return result, err
-		}
-		defer clear(key)
-	}
-	if len(key) == 0 || strings.ContainsAny(string(key), "\r\n") {
-		return result, errors.New("provider credential required")
-	}
-	path := u.Path
-	modelPath := ""
-	switch r.Protocol {
-	case "openai_chat":
-		if strings.HasSuffix(path, "/chat/completions") {
-			modelPath = strings.TrimSuffix(path, "/chat/completions") + "/models"
-		}
-	case "openai_responses":
-		if strings.HasSuffix(path, "/responses") {
-			modelPath = strings.TrimSuffix(path, "/responses") + "/models"
-		}
-	case "anthropic_messages":
-		if strings.HasSuffix(path, "/messages") {
-			modelPath = strings.TrimSuffix(path, "/messages") + "/models"
-		}
-	case "gemini":
-		if prefix, _, ok := strings.Cut(path, "/models/"); ok {
-			modelPath = prefix + "/models"
-		}
-	}
-	if modelPath == "" {
+	if resolved.ModelsEndpoint == "" {
 		return result, nil
 	}
-	u.Path = modelPath
-	u.RawPath = ""
+	u, _ = url.Parse(resolved.ModelsEndpoint)
 	request, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
 	if err != nil {
 		return result, err
@@ -98,7 +65,7 @@ func (p *ProfileStore) Check(ctx context.Context, r CheckProvider) (ProviderChec
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return result, gateway.ErrConnection
+		return result, gateway.StatusError(response.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, 262145))
 	if err != nil || len(data) > 262144 {
@@ -139,4 +106,37 @@ func (p *ProfileStore) Check(ctx context.Context, r CheckProvider) (ProviderChec
 	result.Models = slices.Compact(result.Models)
 	result.Supported = true
 	return result, nil
+}
+
+func (p *ProfileStore) checkCredential(ctx context.Context, r CheckProvider) ([]byte, error) {
+	key := []byte(r.APIKey)
+	if len(key) == 0 && r.ProfileID != "" {
+		spec, err := p.Resolve(r.ProfileID)
+		if err != nil {
+			return nil, err
+		}
+		provider, err := p.registry.Get(ctx, spec.Provider)
+		if err != nil {
+			return nil, err
+		}
+		if provider.Endpoint != r.Endpoint || provider.Protocol != r.Protocol {
+			return nil, errors.New("enter a credential when checking a changed endpoint")
+		}
+		key, err = p.registry.Credential(ctx, provider)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(key) == 0 || strings.ContainsAny(string(key), "\r\n") {
+		return nil, errors.New("provider credential required")
+	}
+	return key, nil
+}
+
+func resolveProviderEndpoint(address, protocol string) (modelprotocol.EndpointResolution, error) {
+	resolved, err := modelprotocol.ResolveEndpoint(address, modelprotocol.Protocol(protocol))
+	if err == nil && resolved.DetectedProtocol != "" && string(resolved.DetectedProtocol) != protocol {
+		err = errors.New("endpoint does not match the selected request format")
+	}
+	return resolved, err
 }

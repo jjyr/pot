@@ -38,6 +38,7 @@ type ConversationOptions struct {
 	Manager                                  *execution.Manager
 	InitialSpec                              *core.ResolvedSpec
 	InitialRules                             string
+	InitialWelcome                           string
 	InitialIntent                            json.RawMessage
 	RefreshConfiguration                     func(context.Context, core.Thread, json.RawMessage) (*core.ResolvedSpec, error)
 	MaxRequests, MaxTurnRequests             uint64 // zero is unlimited; independent of token allowances
@@ -119,6 +120,11 @@ CREATE TABLE IF NOT EXISTS assistant_observations(sequence INTEGER PRIMARY KEY A
 			return err
 		}
 		if !initialized {
+			if options.InitialWelcome != "" {
+				if err := initializeWelcome(tx, options); err != nil {
+					return err
+				}
+			}
 			if len(options.InitialRules) > 262144 {
 				return errors.New("initial rules exceed limit")
 			}
@@ -175,6 +181,14 @@ CREATE TABLE IF NOT EXISTS assistant_observations(sequence INTEGER PRIMARY KEY A
 	if c.messages, err = store.Messages(context.Background()); err != nil {
 		stop()
 		return nil, err
+	}
+	for i := len(c.messages) - 1; i >= 0; i-- {
+		if message := c.messages[i]; message.Role == protocol.Assistant {
+			if message.Status == protocol.Failed && message.Error != "" {
+				c.lastError = errors.New(message.Error)
+			}
+			break
+		}
 	}
 	if c.cursor, err = store.Cursor(context.Background()); err != nil {
 		stop()
@@ -240,7 +254,7 @@ func (c *Conversation) snapshotLocked() protocol.Snapshot {
 	if c.thread == nil {
 		phase = protocol.NeedsConfiguration
 	}
-	if c.blocked {
+	if c.blocked || c.lastError != nil && c.turn == nil {
 		phase = protocol.AgentFailed
 	}
 	if c.lastError != nil {
@@ -249,7 +263,7 @@ func (c *Conversation) snapshotLocked() protocol.Snapshot {
 	}
 	var turn *protocol.TurnState
 	if c.turn != nil {
-		turn = &protocol.TurnState{UserMessageID: c.turn.UserMessageID, Cancelling: c.turn.Cancelling, Paused: c.turn.Paused}
+		turn = &protocol.TurnState{UserMessageID: c.turn.UserMessageID, Cancelling: c.turn.Cancelling, Paused: c.turn.Paused, State: c.turn.State}
 		if c.turn.Paused {
 			message := "Paused before the next model request"
 			detail = &message
@@ -354,7 +368,7 @@ func (c *Conversation) appendTurnMetadataLocked(ctx context.Context, metadata ma
 	}
 	var turn *protocol.TurnState
 	if c.turn != nil {
-		turn = &protocol.TurnState{UserMessageID: c.turn.UserMessageID, Cancelling: c.turn.Cancelling, Paused: c.turn.Paused}
+		turn = &protocol.TurnState{UserMessageID: c.turn.UserMessageID, Cancelling: c.turn.Cancelling, Paused: c.turn.Paused, State: c.turn.State}
 	}
 	if metadata == nil {
 		metadata = map[string]string{}
@@ -465,6 +479,12 @@ func (c *Conversation) Cancel(ctx context.Context, request protocol.CancelTurn) 
 		for _, message := range slices.Clone(c.messages) {
 			if message.Status == protocol.Accepted || message.Status == protocol.Streaming {
 				message.Status = protocol.MessageCancelled
+				if message.Tool != nil {
+					tool := *message.Tool
+					tool.Phase = "stopped"
+					tool.FinishedAtMS = storage.Now()
+					message.Tool = &tool
+				}
 				if err := c.putMessageLocked(ctx, message, nil); err != nil {
 					return err
 				}
@@ -740,6 +760,15 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 	}
 	for _, m := range slices.Clone(c.messages) {
 		if m.Status == protocol.Accepted || m.Status == protocol.Streaming {
+			if m.Tool != nil {
+				tool := *m.Tool
+				diagnostic := ""
+				if result.Err != nil {
+					diagnostic = result.Err.Error()
+				}
+				tool.Apply(core.Update{Type: "turn_finished", AtMS: storage.Now(), Outcome: &core.Outcome{Kind: string(result.Phase), Error: diagnostic}})
+				m.Tool = &tool
+			}
 			m.Status = protocol.Complete
 			if result.Phase == execution.Cancelled {
 				m.Status = protocol.MessageCancelled
@@ -749,6 +778,30 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 			if err := c.putMessageLocked(ctx, m, nil); err != nil {
 				return err
 			}
+		}
+	}
+	if result.Phase != execution.Succeeded {
+		// Persist one terminal reply even when preparation failed before the Agent
+		// emitted message_started. The detail belongs to this turn across reloads.
+		var reply protocol.Message
+		for _, message := range c.messages {
+			if message.ID == c.turn.ReplyMessageID {
+				reply = message
+				break
+			}
+		}
+		if reply.ID == "" {
+			reply = protocol.Message{ID: storage.ID(), ConversationID: c.options.ConversationID, Role: protocol.Assistant, CreatedAtMS: storage.Now()}
+		}
+		reply.ReplyTo = c.turn.UserMessageID
+		reply.Status = protocol.Failed
+		if result.Phase == execution.Cancelled {
+			reply.Status = protocol.MessageCancelled
+		} else if result.Err != nil {
+			reply.Error = result.Err.Error()
+		}
+		if err := c.putMessageLocked(ctx, reply, nil); err != nil {
+			return err
 		}
 	}
 	if c.blocked {

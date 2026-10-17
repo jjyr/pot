@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -64,7 +65,16 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 			resultErr = errors.Join(resultErr, err)
 		}()
 	}
+	state := func(phase string, target *core.ExecutionTarget, workdir string) error {
+		if emit == nil {
+			return nil
+		}
+		return emit(core.Update{Type: "tool_state", ID: call.ID, Phase: phase, Target: target, Workdir: workdir})
+	}
 	if handler := d.Product[call.Name]; handler != nil {
+		if err := state("running", nil, ""); err != nil {
+			return nil, err
+		}
 		return handler(ctx, execution, call, emit)
 	}
 	args := map[string]any{}
@@ -76,6 +86,22 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 		return nil, err
 	}
 	delete(args, "execution_target")
+	cwd := execution.Workspace
+	if target.IsLocalTo(d.RuntimeID) && target.Target.Kind == "host" && d.HostWorkspace != "" {
+		cwd = d.HostWorkspace
+	}
+	displayCWD := cwd
+	if dir, ok := args["workdir"].(string); ok && dir != "" {
+		if filepath.IsAbs(dir) {
+			displayCWD = dir
+		} else {
+			displayCWD = filepath.Join(cwd, dir)
+		}
+	}
+	if err := state("preparing", &target, displayCWD); err != nil {
+		return nil, err
+	}
+
 	if _, _, err = d.Permissions.Policy(target.RuntimeID); err != nil {
 		return nil, err
 	}
@@ -117,7 +143,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 		if approvalOwner == "" {
 			approvalOwner = d.Owner
 		}
-		if _, err = d.Permissions.Authorize(ctx, HostRequest{Owner: approvalOwner, Task: d.Task, Turn: d.Turn, Generation: d.Generation, CallID: call.ID, MachineID: target.RuntimeID, EnrollmentEpoch: epoch, Tool: call.Name, Args: prepared}); err != nil {
+		if _, err = d.Permissions.authorize(ctx, HostRequest{Owner: approvalOwner, Task: d.Task, Turn: d.Turn, Generation: d.Generation, CallID: call.ID, MachineID: target.RuntimeID, EnrollmentEpoch: epoch, Tool: call.Name, Args: prepared}, func() error { return state("waiting_approval", &target, displayCWD) }); err != nil {
+			if errors.Is(err, ErrHostDenied) {
+				if emitErr := state("denied", &target, displayCWD); emitErr != nil {
+					return nil, emitErr
+				}
+			}
 			return nil, err
 		}
 	}
@@ -137,10 +168,6 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 			return receipt.Result, errors.New(receipt.Error)
 		}
 		return receipt.Result, nil
-	}
-	cwd := execution.Workspace
-	if target.IsLocalTo(d.RuntimeID) && target.Target.Kind == "host" && d.HostWorkspace != "" {
-		cwd = d.HostWorkspace
 	}
 	request := executor.Request{ID: call.ID, Operation: name, CWD: cwd, Policy: d.Spec.Params.Agent.Shell, Args: engineArgs}
 	if name == "exec_command" || name == "plugin_call" {
@@ -164,6 +191,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 		}
 	}
 	var value json.RawMessage
+	if err == nil {
+		err = state("running", &target, displayCWD)
+	}
 	if err != nil {
 		if persistErr := d.Operations.Complete(context.WithoutCancel(ctx), key, nil, err); persistErr != nil {
 			return nil, errors.Join(core.ErrCleanupUnconfirmed, persistErr)

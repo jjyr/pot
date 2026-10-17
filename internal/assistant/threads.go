@@ -95,7 +95,7 @@ func InitializeThread(ctx context.Context, store *storage.Store, owner string, c
 		if _, err = tx.ExecContext(ctx, "INSERT INTO metadata VALUES (?,?)", ThreadKey, string(body)); err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO metadata VALUES (?,?)", ContextKey, emptyContext); err != nil {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO metadata VALUES (?,?) ON CONFLICT(key) DO NOTHING", ContextKey, emptyContext); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, "INSERT INTO metadata VALUES ('agent.setup.pending','false') ON CONFLICT(key) DO UPDATE SET value='false'")

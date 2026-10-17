@@ -1,3 +1,6 @@
+import {createToolCall} from './tool-call.mjs';
+import {toolForest} from '../state/tool-calls.mjs';
+import {connectProviderEditor} from './provider-connection.mjs';
 import {avatar} from './avatar.mjs';
 import {translate} from '../locales/messages.mjs';
 import {icon} from './icons.mjs';
@@ -13,10 +16,12 @@ import {renderAbout} from './about.mjs';
 import {renderMachineMembership} from './membership.mjs';
 import {renderIntegrations} from './integrations.mjs';
 
-export function createPages({client, host, approvalHost, locale, notify, changed, titleChanged, openChat, routeChanged=()=>{},withResourceConsent=({work})=>work()}) {
+export function createPages({onApprovalsChanged=()=>{},client, host, approvalHost, locale, notify, changed, titleChanged, openChat, routeChanged=()=>{},withResourceConsent=({work})=>work()}) {
   const gate = createRequestGate(), approvalGate = createRequestGate();
   let route = '', title = '', editor = null, disposed = false, pageVersion = 0, configurationSpace = '',taskView=null,resourceView=null,scheduleView=null,detailParent=false,usageOwner=null;
   let filter = {taskScope:'active', taskQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageDays:7, usageScope:'all', usageOffset:0,usageSpace:'all',settingsTab:'general',taskTarget:null,taskSpace:'all'};
+  let pendingApprovals=[];
+  const toolMemory=new Map();
   const cached = new Map(),spaceCache = new Map(),expandedMachines=new Set(),editorParents=[],taskDrafts=new Map(),scheduleWrites=new Map();
   let currentViewKey='',viewReady=false,approvalOwner='',shortcutOpen=null;
   const tr = (en, zh) => locale() === 'zh-CN' ? zh : en;
@@ -84,6 +89,7 @@ export function createPages({client, host, approvalHost, locale, notify, changed
     const sessions=[...(editor?[editor]:[]),...(!toParent?editorParents:[])];
     if(sessions.some(value=>value.session.pending)) {notify(tr('Please wait for the save result.','请等待保存结果。'));return false;}
     if(sessions.some(value=>value.session.dirty)&&!await confirmDiscard())return false;
+    for(const value of sessions)value.lifecycle.dispose?.();
     editor=null;if(!toParent)editorParents.length=0;taskView=null;scheduleView=null;viewReady=false;gate.close();host.replaceChildren();return true;
   }
   function suspendEditor(){if(editor){editor.scroll=host.scrollTop;editor.focus=innerWidth>=720&&editor.root.contains(document.activeElement)?document.activeElement:null;editorParents.push(editor);editor=null;}}
@@ -154,12 +160,12 @@ export function createPages({client, host, approvalHost, locale, notify, changed
         const options={owner:captured.owner,space:captured.space,method:'POST'},selection=selectValue(values);
         if(!selection)throw Error(tr('Connect and select a Provider first.','请先连接并选择提供商。'));
         preview.replaceWith(preview=avatar(56,definition?.request_id||definition?.id||context.request_id));
-        if(!definition){const saved=await request('/api/v1/assistants',{...options,space:values.space_id,owner:'',body:{request_id:context.request_id,name:values.name,text:values.text,...(selection?{selection}:{})}});return {assistant:{...saved,space_id:values.space_id}};}
+        if(!definition){const saved=await request('/api/v1/assistants',{...options,space:values.space_id,owner:'',body:{request_id:context.request_id,name:values.name,text:values.text,locale:locale(),...(selection?{selection}:{})}});return {assistant:{...saved,space_id:values.space_id}};}
         if(values.name!==initial.name){const saved=await request(`/api/v1/assistants/${encodeURIComponent(definition.id)}`,{...options,body:{name:values.name,revision}});revision=saved.revision;initial.name=values.name;session.acknowledge({name:values.name});}
         const signature=JSON.stringify(selection);
         if(selection&&signature!==initialSelection){const saved=await request('/api/v1/agent',{...options,body:{request_id:context.request_id,expected_generation:generation,expected_revision:configurationRevision,selection}});generation=saved.generation;configurationRevision=saved.revision;initialSelection=signature;session.acknowledge(Object.fromEntries(['profile_id','model','model_selection','context_window','max_output_tokens','reasoning_effort'].map(key=>[key,values[key]])));}
         if(values.text!==initial.text){const saved=await request('/api/v1/instructions',{...options,body:{text:values.text,revision:rulesRevision}});rulesRevision=saved.revision;initial.text=values.text;session.acknowledge({text:values.text});}
-      },{returnChat:true,submitLabel:definition?tr('Save','保存'):tr('Create assistant','创建助手')});
+      },{returnChat:true,submitLabel:definition?tr('Save','保存'):tr('Create and start chatting','创建并开始聊天')});
       const controls=form.controls,session=form.session;
       editor.kind='assistant';
       let preview=avatar(56,definition?.request_id||definition?.id||session.requestID);
@@ -246,6 +252,12 @@ export function createPages({client, host, approvalHost, locale, notify, changed
     const controller=await renderSandboxResources({client,root,scope:{space:local.id,owner:''},locale,notify});
     if(resourceView===view&&gate.current(token)){view.controller=controller;restoreView('resource-cache',token);}
   }
+  async function setupAI() {
+    const captured={...scope(),owner:''};
+    const snapshot=await request('/api/v1/providers',captured);
+    await providerPicker(snapshot,captured);
+    if(editor?.kind==='picker')editor.onboarding=true;
+  }
   async function providerPicker(snapshot,captured) {
     if(editor?.kind==='assistant')suspendEditor();else if(!await leave())return;
     const form=renderEditor(tr('Add Provider','添加提供商'),{search:''},[{name:'search',label:tr('Search providers','搜索提供商'),kind:'search'}],()=>{}, {capturedScope:captured});
@@ -257,16 +269,18 @@ export function createPages({client, host, approvalHost, locale, notify, changed
     const toggle=action(tr('More providers…','更多提供商…'),()=>{more=!more;toggle.textContent=more?tr('Fewer providers','收起提供商'):tr('More providers…','更多提供商…');render();});form.form.querySelector('.editor-fields').append(toggle);form.controls.get('search').addEventListener('input',render);render();
   }
   async function providerEditor(profile, snapshot, settingsScope, providerOverride) {
+    const onboarding=(editor?.kind==='picker'&&editor.onboarding)||(!(client.assistants||[]).length&&!editorParents.some(parent=>parent.kind==='assistant'));
     if(editor?.kind==='picker')suspendEditor();else if(!await leave())return;
     const connection=(snapshot.connections||[]).find(c=>c.profile_id===profile?.id);
     const providerID=providerOverride||profile?.model_settings?.catalog_provider||'custom';
     const selectedEntry=(snapshot.directory||[]).find(value=>value.id===providerID);
     const inherited=modelDefaults(snapshot,providerID,profile?.model||'');
     let configuredModels=[...(snapshot.configured_models?.[profile?.id]||[])];
-    const initial={name:profile?.name||selectedEntry?.name||'',endpoint:connection?.endpoint||selectedEntry?.endpoint||'',api_key:'',model:profile?.model||'',model_selection:'',protocol:connection?.protocol||selectedEntry?.protocol||'openai_responses',context_window:profile?.model_settings?.context_window??null,max_output_tokens:profile?.model_settings?.max_output_tokens??null,reasoning_effort:profile?.params?.reasoning_effort||''};
+    const baseName=selectedEntry?.name||tr('Custom Provider','自定义供应商'),names=new Set((snapshot.profiles||[]).map(value=>value.name));let defaultName=baseName;for(let index=2;names.has(defaultName);index++)defaultName=`${baseName} ${index}`;
+    const initial={name:profile?.name||defaultName,endpoint:connection?.endpoint||selectedEntry?.endpoint||'',api_key:'',model:profile?.model||'',model_selection:'',protocol:connection?.protocol||selectedEntry?.protocol||'openai_responses',context_window:profile?.model_settings?.context_window??null,max_output_tokens:profile?.model_settings?.max_output_tokens??null,reasoning_effort:profile?.params?.reasoning_effort||''};
     const form=renderEditor(profile?tr('Edit Provider','编辑提供商'):tr('Add Provider','添加提供商'),initial,[
       {name:'name',label:tr('Name','名称'),required:true},
-      {name:'endpoint',label:tr('Endpoint','API 地址'),kind:'url',required:true},
+      {name:'endpoint',label:tr('Endpoint','API 地址'),kind:'url',required:true,help:tr('Base URL or complete request URL.','基础地址或完整请求地址。')},
       {name:'api_key',label:tr('API key','API 密钥'),kind:'password',required:!profile,help:profile?tr('Leave blank to keep the saved key.','留空保留现有密钥。'):''},
       {name:'model_selection',label:tr('Model','默认模型'),choices:[['',tr('Enter model ID','输入模型 ID')]]},
       {name:'model',label:tr('Model ID','模型 ID'),required:true},
@@ -279,7 +293,7 @@ export function createPages({client, host, approvalHost, locale, notify, changed
       return request('/api/v1/providers',{...context,method:'POST',body:{request_id:context.request_id,profile_id:profile?.id||'',expected_revision:profile?.revision||0,models:[...new Set([...configuredModels,values.model].filter(Boolean))],...connectionValues,reasoning_effort:values.reasoning_effort.trim()||null,max_output_tokens:values.max_output_tokens||modelDefaults(snapshot,providerID,values.model).output,model_settings:{catalog_provider:providerID==='custom'?null:providerID,context_window:context_window||null,max_output_tokens:values.max_output_tokens||null}}});
     },{capturedScope:settingsScope});
     const controls=form.controls,session=form.session;let endpointEdited=false;
-    form.lifecycle.cancel=()=>back({skipPicker:true});form.lifecycle.afterSave=async saved=>{await back({skipPicker:true});await editor?.lifecycle.providersChanged?.(saved);};
+    form.lifecycle.cancel=()=>back({skipPicker:true});form.lifecycle.afterSave=async saved=>{await back({skipPicker:true});await editor?.lifecycle.providersChanged?.(saved);if(onboarding){openChat();changed(saved);}};
     const set=(name,value)=>{controls.get(name).value=value??'';session.set(name,value);};
     const showModel=()=>{controls.get('model').closest('.form-row').hidden=!!controls.get('model_selection').value;};
     const inherit=()=>{const limits=modelDefaults(snapshot,providerID,session.values.model);controls.get('context_window').placeholder=String(limits.context);controls.get('max_output_tokens').placeholder=String(limits.output);};
@@ -291,8 +305,8 @@ export function createPages({client, host, approvalHost, locale, notify, changed
     controls.get('endpoint').addEventListener('input',()=>{endpointEdited=true;});
     controls.get('protocol').addEventListener('change',()=>{endpointEdited=true;});
     controls.get('model').addEventListener('input',inherit);inherit();
-    const check=action(tr('Check available models','检查可用模型'),async()=>{const captured=structuredClone(session.values);check.disabled=true;try{const value=await request('/api/v1/providers/check',{...settingsScope,method:'POST',body:{endpoint:captured.endpoint,protocol:captured.protocol,api_key:captured.api_key,profile_id:profile?.id||''}});if(editor?.session!==session||['endpoint','protocol','api_key'].some(name=>session.values[name]!==captured[name]))return;configuredModels=(value.models||[]).map(model=>typeof model==='string'?model:model.id);models(configuredModels,session.values.model);const status=n('p','success-text',tr('Model list received','已获取模型列表'));form.root.append(status);}catch(reason){if(editor?.session===session)errorView(reason,form.root);}finally{check.disabled=false;}});
-    form.form.querySelector('.editor-actions').prepend(check);
+    connectProviderEditor({form,request,scope:settingsScope,profile,connection,tr,current:()=>editor?.session===session&&!disposed&&client.runtime.boot_id===session.context.boot,models:entries=>{configuredModels=entries.map(model=>typeof model==='string'?model:model.id);models([...new Map([...(selectedEntry?.models||[]),...configuredModels].map(model=>[typeof model==='string'?model:model.id,model])).values()],controls.get('model_selection').value);}});
+
   }
   function spaceEditor() {
     renderEditor(tr('Connect Space','连接 Space'),{name:'',endpoint:'',token:'',ca_pem:''},[
@@ -344,10 +358,31 @@ export function createPages({client, host, approvalHost, locale, notify, changed
     try{
       let count=0,page;
       do{page=await request(`/api/v1/tasks/${encodeURIComponent(view.task.id)}/events?${new URLSearchParams({after:view.state.cursor,limit:100})}`,{...view.scope,signal:view.token.signal});if(!gate.current(view.token)||taskView!==view)return;const previous=view.state.cursor;appendTaskEvents(view.state,page.events);if(page.has_more&&view.state.cursor===previous)throw Error('Task event cursor did not advance');count+=(page.events||[]).length;}while(page.has_more&&count<5000);
-      for(const message of view.state.messages){let entry=view.nodes.get(message.id);if(!entry){const element=n(message.role==='tool'?'details':'div',`task-event role-${message.role}`);entry={element,text:null};view.nodes.set(message.id,entry);view.transcript.append(element);}if(entry.text!==message.text){entry.element.replaceChildren();if(message.role==='tool')entry.element.append(n('summary','',message.name),n('pre','',message.text));else entry.element.append(renderMarkdown(message.text,{downloadFile:view.downloadFile}));entry.text=message.text;}}
+      renderTaskTranscript(view);
       if(page.unavailable&&!view.unavailable){view.unavailable=n('p','hint',tr('Original machine is offline. Showing cached execution output.','原执行机器离线，显示缓存执行输出。'));view.transcript.prepend(view.unavailable);}else if(!page.unavailable&&view.unavailable){view.unavailable.remove();view.unavailable=null;}
       if(page.has_more)queueMicrotask(()=>refreshTaskEvents(view));
     }catch(reason){if(gate.current(view.token)&&reason.name!=='AbortError')notify(reason.message);}finally{view.busy=false;if(view.again){view.again=false;queueMicrotask(()=>refreshTaskEvents(view));}}
+  }
+  function renderTaskTranscript(view){
+    const forest=toolForest(view.state.messages);
+    for(const message of view.state.messages){
+      let entry=view.nodes.get(message.id);
+      if(!entry){const element=n('div',`task-event role-${message.role}`);entry={element,text:null};view.nodes.set(message.id,entry);view.transcript.append(element);}
+      if(message.tool){
+        if(!entry.tool){entry.tool=createToolCall({memory:toolMemory,key:JSON.stringify([view.scope,view.task.id,message.id]),locale,onDecision:decideApproval,downloadFile:view.downloadFile});entry.element.append(entry.tool.element);}
+        const children=forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children||[];
+        entry.tool.update(message,{approval:approvalFor(message.tool),offline:!!view.unavailable,children:children.map(entry=>entry.message)});
+        const parent=forest.byID.get(message.tool.turn_id+':'+message.tool.parent_id);
+        if(parent&&parent.children.some(entry=>entry.message.id===message.id)&&view.nodes.get(parent.message.id)?.tool)view.nodes.get(parent.message.id).tool.children.append(entry.element);
+      }else if(entry.text!==message.text){entry.element.replaceChildren(renderMarkdown(message.text,{downloadFile:view.downloadFile}));entry.text=message.text;}
+    }
+  }
+  function approvalFor(tool){const scope=approvalScope();return pendingApprovals.find(item=>item.request.owner===scope.owner&&(item.request.task||'')===(taskView?.task.id||'')&&item.request.call_id===tool.id&&item.request.turn===tool.turn_id);}
+  async function decideApproval(approval,action){
+    const captured={...approvalScope()};
+    if(approval.request.owner!==captured.owner||(approval.request.task||'')!==(taskView?.task.id||''))throw Error(tr('Approval context changed.','授权上下文已改变。'));
+    await request('/api/v1/permissions',{...captured,method:'POST',body:{id:approval.id,action}});
+    await permissions();
   }
   async function schedules(root, token) {
     root.classList.add('schedules-content');
@@ -477,15 +512,19 @@ export function createPages({client, host, approvalHost, locale, notify, changed
   }
   const approvalScope=()=>taskView?.scope||scope();
   async function permissions() {
-    if(!approvalScope().owner||disposed){approvalGate.close();approvalHost.replaceChildren();return;}
+    if(!approvalScope().owner||disposed){approvalGate.close();pendingApprovals=[];approvalHost.replaceChildren();onApprovalsChanged();return;}
     const token=approvalGate.next(),captured=approvalScope(),key=JSON.stringify(captured);if(approvalOwner!==key){approvalOwner=key;approvalHost.replaceChildren();}
     try {
       const value=await request('/api/v1/permissions',{...captured,signal:token.signal});if(!approvalGate.current(token)||disposed||JSON.stringify(approvalScope())!==JSON.stringify(captured))return;
       const pending=(value.pending||[]).filter(item=>(!item.request?.owner||item.request.owner===captured.owner)&&(!taskView||item.request?.task===taskView.task.id));
-      const fragment=document.createDocumentFragment();
-      for(const approval of pending) {const box=n('section','approval-card');box.append(n('strong','',tr('Request approval','请求授权')),n('p','approval-description',`${captured.owner} · ${approval.request.machine_id}\n${tr('Wants to operate this machine directly','想要直接操作这台机器')}\n\n${tr('Approve the exact operation shown below. It runs with the machine Runtime account permissions; this does not grant access to future commands.','仅批准下面展示的具体操作，以该机器 Runtime 账户的权限执行，不授权后续命令。')}`),n('pre','approval-arguments',`${approval.request.tool}\n${JSON.stringify(approval.request.args,null,2)}`));
+      pendingApprovals=pending;
+      const fragment=document.createDocumentFragment();let inlineLocator=false;
+      for(const approval of pending) {const toolRoot=[...(taskView?.transcript||document.querySelector('.message-column')).querySelectorAll('.tool-call')].find(node=>node.dataset.callId===approval.request.call_id&&(!node.dataset.turnId||node.dataset.turnId===approval.request.turn));
+        if(toolRoot){if(inlineLocator)continue;inlineLocator=true;const locate=action(`${pending.length} ${translate(locale(),'tool.approvalPending')} · ${translate(locale(),'tool.viewApprovals')}`,()=>{toolRoot.open=true;toolRoot.scrollIntoView({block:'center',behavior:'smooth'});toolRoot.querySelector('summary')?.focus();});fragment.append(locate);continue;}
+        const box=n('section','approval-card');box.append(n('strong','',tr('Request approval','请求授权')),n('p','approval-description',`${captured.owner} · ${approval.request.machine_id}\n${tr('Wants to operate this machine directly','想要直接操作这台机器')}\n\n${tr('Approve the exact operation shown below. It runs with the machine Runtime account permissions; this does not grant access to future commands.','仅批准下面展示的具体操作，以该机器 Runtime 账户的权限执行，不授权后续命令。')}`),n('pre','approval-arguments',`${approval.request.tool}\n${JSON.stringify(approval.request.args,null,2)}`));
         for(const name of ['allow_once','deny']){const button=action(tr(name==='allow_once'?'Allow this operation':'Deny',name==='allow_once'?'允许此次操作':'拒绝'),()=>operation(button,()=>request('/api/v1/permissions',{...captured,method:'POST',body:{id:approval.id,action:name}}),permissions));box.append(button);}fragment.append(box);}
       approvalHost.replaceChildren(fragment);
+      if(taskView)renderTaskTranscript(taskView);onApprovalsChanged();
     }catch(reason){if(approvalGate.current(token)&&reason.name!=='AbortError')notify(reason.message);}
   }
   async function show(next,{keepUsageOwner=false}={}) {
@@ -508,8 +547,9 @@ export function createPages({client, host, approvalHost, locale, notify, changed
   const beforeUnload=event=>{if([...(editor?[editor]:[]),...editorParents].some(value=>value.session.dirty||value.session.pending)){event.preventDefault();event.returnValue='';}};
   const preference=()=>{if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner});};
   window.addEventListener('beforeunload',beforeUnload);window.addEventListener('pot:locale',preference);
-  return {get title(){return title;},get editing(){return !!editor;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner;},show,assistant,leave,back,permissions,handleHistory:popstate,openResources:resourceCache,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalGate.close();approvalOwner='';approvalHost.replaceChildren();},conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,record=true){route='tasks';return taskDetail(task,{recordHistory:record});},showProviders(){filter.settingsTab='providers';return show('settings');},
+  return {get title(){return title;},get editing(){return !!editor;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner;},show,assistant,setupAI,leave,back,permissions,handleHistory:popstate,openResources:resourceCache,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalGate.close();approvalOwner='';pendingApprovals=[];approvalHost.replaceChildren();},approvalFor,decideApproval,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,record=true){route='tasks';return taskDetail(task,{recordHistory:record});},
+    showProviders(){filter.settingsTab='providers';return show('settings');},
     refresh(){if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(resourceView){resourceView.controller?.refresh();return;}if(taskView){refreshTaskEvents();return;}if(!editor&&route&&host.offsetParent)show(route,{keepUsageOwner:!!usageOwner});},
-    dispose(){disposed=true;gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
+    dispose(){for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle.dispose?.();disposed=true;gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
   };
 }

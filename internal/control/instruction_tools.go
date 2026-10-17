@@ -14,7 +14,7 @@ func instructionTools() []modelprotocol.ToolDefinition {
 		{Name: "update_agent_instructions", Description: "Propose a full replacement of this assistant's instructions. Requires exact owner review independently of Host machine policy. A concurrent edit invalidates the reviewed revision.", InputSchema: json.RawMessage(`{"type":"object","properties":{"text":{"type":"string","maxLength":262144}},"required":["text"],"additionalProperties":false}`)},
 	}
 }
-func (s *Service) instructionCall(ctx context.Context, owner, turn string, generation uint64, call modelprotocol.ToolCall) (json.RawMessage, error) {
+func (s *Service) instructionCall(ctx context.Context, owner, turn string, generation uint64, call modelprotocol.ToolCall, emit func(core.Update) error) (json.RawMessage, error) {
 	c, err := s.Conversation(ctx, owner)
 	if err != nil {
 		return nil, err
@@ -59,8 +59,23 @@ func (s *Service) instructionCall(ctx context.Context, owner, turn string, gener
 		return nil, err
 	}
 	review, _ := json.Marshal(map[string]string{"text": pending.Text, "before": pending.Before.Text, "revision": pending.Before.Revision})
-	if _, err = s.Permissions.Authorize(ctx, HostRequest{Owner: owner, Turn: turn, Generation: generation, CallID: call.ID, MachineID: s.options.RuntimeID, EnrollmentEpoch: epoch, Tool: call.Name, Args: review}); err != nil {
+	if _, err = s.Permissions.authorize(ctx, HostRequest{Owner: owner, Turn: turn, Generation: generation, CallID: call.ID, MachineID: s.options.RuntimeID, EnrollmentEpoch: epoch, Tool: call.Name, Args: review}, func() error {
+		if emit == nil {
+			return nil
+		}
+		return emit(core.Update{Type: "tool_state", ID: call.ID, Phase: "waiting_approval"})
+	}); err != nil {
+		if errors.Is(err, ErrHostDenied) && emit != nil {
+			if emitErr := emit(core.Update{Type: "tool_state", ID: call.ID, Phase: "denied"}); emitErr != nil {
+				return nil, emitErr
+			}
+		}
 		return nil, err
+	}
+	if emit != nil {
+		if err := emit(core.Update{Type: "tool_state", ID: call.ID, Phase: "running"}); err != nil {
+			return nil, err
+		}
 	}
 	if err = ctx.Err(); err != nil {
 		return nil, err

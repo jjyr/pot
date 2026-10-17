@@ -15,6 +15,7 @@ const paths = {
   clock:'M12 8v5h4M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
   copy: 'M9 9h11v11H9zM15 5V3H3v12h2',
   star: 'm12 3 2.78 5.63L21 9.54l-4.5 4.39 1.06 6.19L12 17.2l-5.56 2.92 1.06-6.19L3 9.54l6.22-.91L12 3z',
+  alert: 'M12 8v4M12 16h.01M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
 };
 export function icon(name) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');

@@ -34,10 +34,12 @@ func (m *memorySecrets) Get(_ context.Context, id string) ([]byte, error) {
 func (m *memorySecrets) Delete(_ context.Context, id string) error { delete(m.values, id); return nil }
 
 type testAdapter struct {
-	done         chan struct{}
-	ignoreCancel bool
-	refreshes    int
-	expiry       *time.Time
+	done          chan struct{}
+	ignoreCancel  bool
+	refreshes     int
+	expiry        *time.Time
+	refreshExpiry *time.Time
+	refreshErr    error
 }
 
 func (a *testAdapter) Descriptor() Descriptor {
@@ -56,12 +58,16 @@ func (a *testAdapter) Authorize(ctx context.Context, _ Challenge) (Grant, error)
 		case <-a.done:
 		}
 	}
-	return Grant{Identity: Identity{ID: "123", Username: "fixture"}, Credential: Credential{AccessToken: "private-access-token", RefreshToken: "private-refresh-token", ExpiresAt: a.expiry}}, nil
+	return Grant{Identity: Identity{ID: "123", Username: "fixture"}, Credential: Credential{AccessToken: "private-access-token", RefreshToken: "private-refresh-token", ExpiresAt: a.expiry, RefreshExpiresAt: a.refreshExpiry}}, nil
 }
 func (a *testAdapter) Refresh(_ context.Context, previous Credential) (Credential, error) {
 	a.refreshes++
+	if a.refreshErr != nil {
+		return Credential{}, a.refreshErr
+	}
 	next := previous
 	next.AccessToken = "refreshed-access-token"
+	next.RefreshToken = "rotated-refresh-token"
 	expiry := time.Now().Add(time.Hour)
 	next.ExpiresAt = &expiry
 	return next, nil
@@ -224,6 +230,12 @@ func TestExecutionCacheRefreshAndIsolation(t *testing.T) {
 	if len(secrets.values) != 1 {
 		t.Fatal("old refresh token secret retained")
 	}
+	for _, raw := range secrets.values {
+		var stored Credential
+		if err := json.Unmarshal(raw, &stored); err != nil || stored.RefreshToken != "rotated-refresh-token" {
+			t.Fatal("rotated refresh token was not persisted", err)
+		}
+	}
 	token, err = s.Credential(ctx, "other", "github", false)
 	if err != nil || token != "refreshed-access-token" {
 		t.Fatal("other scope kept stale credential")
@@ -234,6 +246,8 @@ func TestExpiredCredentialAndNearExpiryRefresh(t *testing.T) {
 	now := time.Now()
 	expiry := now.Add(time.Minute)
 	a.expiry = &expiry
+	refreshExpiry := now.Add(90 * time.Minute)
+	a.refreshExpiry = &refreshExpiry
 	connect(t, s, a)
 	s.now = func() time.Time { return now }
 	ctx := context.Background()
@@ -249,6 +263,63 @@ func TestExpiredCredentialAndNearExpiryRefresh(t *testing.T) {
 	}
 	if _, err := s.Credential(ctx, "run", "github", false); err == nil {
 		t.Fatal("expired credential injected")
+	}
+}
+
+func TestRefreshableAccountStaysConnectedAfterAccessExpiry(t *testing.T) {
+	for _, refreshExpired := range []bool{false, true} {
+		t.Run(map[bool]string{false: "refreshable", true: "refresh-expired"}[refreshExpired], func(t *testing.T) {
+			s, a, _, _ := fixture(t)
+			now := time.Now()
+			expiry := now.Add(-time.Minute)
+			refreshExpiry := now.Add(time.Hour)
+			if refreshExpired {
+				refreshExpiry = now.Add(-time.Second)
+			}
+			a.expiry, a.refreshExpiry = &expiry, &refreshExpiry
+			connect(t, s, a)
+			ctx := context.Background()
+			items, err := s.List(ctx)
+			want := Connected
+			if refreshExpired {
+				want = Expired
+			}
+			if err != nil || items[0].Status != want || a.refreshes != 0 {
+				t.Fatal("listing must report refreshability without contacting upstream", items, err)
+			}
+			raw, _ := json.Marshal(items)
+			if strings.Contains(string(raw), "private-") {
+				t.Fatal("listing exposed refresh credentials")
+			}
+			token, err := s.Credential(ctx, "new-run", "github", false)
+			if refreshExpired {
+				if err == nil || a.refreshes != 0 {
+					t.Fatal("expired refresh credential used", err)
+				}
+			} else if err != nil || token != "refreshed-access-token" || a.refreshes != 1 {
+				t.Fatal("expired access credential did not refresh automatically", err)
+			}
+		})
+	}
+}
+
+func TestTemporaryRefreshFailureDoesNotRequireLogin(t *testing.T) {
+	s, a, _, _ := fixture(t)
+	expiry := time.Now().Add(-time.Minute)
+	a.expiry = &expiry
+	connect(t, s, a)
+	a.refreshErr = errors.New("temporary network failure")
+	ctx := context.Background()
+	if _, err := s.Credential(ctx, "run", "github", false); err == nil || strings.Contains(err.Error(), "sign out") {
+		t.Fatal("temporary refresh failure requested login", err)
+	}
+	items, err := s.List(ctx)
+	if err != nil || items[0].Status != Connected {
+		t.Fatal("temporary refresh failure expired the account", items, err)
+	}
+	a.refreshErr = nil
+	if token, err := s.Credential(ctx, "next-run", "github", false); err != nil || token != "refreshed-access-token" {
+		t.Fatal("credential could not recover after network failure", err)
 	}
 }
 

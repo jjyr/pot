@@ -47,6 +47,9 @@ func (a *Agent) Execute(ctx context.Context, execution core.ExecutionContext, th
 		if terminal {
 			return context.Canceled
 		}
+		if update.AtMS == 0 {
+			update.AtMS = time.Now().UnixMilli()
+		}
 		sequence++
 		return sink(core.AgentEvent{Generation: thread.Generation, TurnID: request.RequestID, Seq: sequence, Update: update})
 	}
@@ -323,6 +326,9 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 				if !containsTool(available, call.Name) {
 					callErr = fmt.Errorf("tool unavailable for this role")
 				} else if call.Name == "exec" || call.Name == "wait" {
+					if err := emit(core.Update{Type: "tool_state", ID: call.ID, Phase: "running"}); err != nil {
+						return err
+					}
 					value, callErr = manager.call(call.Name, call.Arguments, call.ID)
 				} else {
 					value, callErr = a.Dispatch(ctx, execution, call, emit)
@@ -356,7 +362,7 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 			if err := a.save(ctx, &state); err != nil {
 				return err
 			}
-			display := json.RawMessage(message.Text)
+			display := value
 			if err := emit(core.Update{Type: "tool_finished", ID: call.ID, Name: call.Name, Result: display, Failed: failedResult(value)}); err != nil {
 				return err
 			}
@@ -431,7 +437,7 @@ func (a *Agent) available(role core.ExecutionRole, settings core.AgentSettings, 
 		if role == core.Summary && tool.Name != "list_tasks" && tool.Name != "get_task" {
 			continue
 		}
-		if role == core.Worker && slices.Contains([]string{"create_task", "list_tasks", "get_task", "guide_task", "interrupt", "cancel_task", "send_message", "wait_task", "list_assistants", "send_assistant_message", "list_schedules", "get_schedule", "manage_schedule", "read_agent_instructions", "update_agent_instructions"}, tool.Name) {
+		if role == core.Worker && slices.Contains([]string{"create_task", "list_tasks", "get_task", "guide_task", "interrupt", "cancel_task", "send_message", "wait_task", "list_assistants", "send_assistant_message", "list_schedules", "get_schedule", "manage_schedule", "read_agent_instructions", "update_agent_instructions", "rename_assistant"}, tool.Name) {
 			continue
 		}
 		if settings.AllowedTools != nil && !slices.Contains(*settings.AllowedTools, tool.Name) {

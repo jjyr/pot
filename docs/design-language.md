@@ -9,7 +9,7 @@ and build and regression commands in [Development](development.md#checks).
 
 Use quiet surfaces, system typography, fine dividers and restrained color. Blue
 identifies primary actions and focus; status colors accompany text or icons.
-Assistant replies are mostly unboxed; user messages use a soft blue fill. Reserve
+Assistant replies use quiet neutral bubbles; user messages use a soft blue fill. Reserve
 cards for related controls or details, rather than wrapping every row.
 
 ### Color and surfaces
@@ -176,19 +176,36 @@ and titles share the image. A new completed live reply triggers one 650 ms whole
 image scale-and-tilt rebound. Initial history, duplicate updates and reconnect
 catch-up do not replay it; hidden pages do not queue reactions.
 
+First-use Chat offers Connect AI provider when no connection exists. Saving that
+connection returns to Chat and automatically creates Pot using the Space's default
+Provider/model. An empty Chat with an existing Provider follows the same bootstrap
+path. Offline or failed directory loads offer recovery rather than connection setup.
+The empty directory caption is No assistants yet.
+
+Every newly created assistant starts with a fixed welcome message in the creation
+UI's language, introducing its saved name and inviting the user to name it or
+describe how it can help. The welcome is committed to both the durable transcript
+and the model checkpoint, so the first model request includes it as an assistant
+message. It makes no inference call, generates no unread notification and is never
+reinserted or translated on reopening. Existing conversations are not backfilled.
+The assistant can save a user-requested name through `rename_assistant`; directory,
+title and settings use that same identity. Workers and peer conversations cannot
+rename the assistant.
+
 The + action opens creation with name, destination Space, Provider and model
 visible. The destination Space's default Provider is preselected, and the model
 field contains that Provider's concrete default model ID, never a synthetic
 "Default model" choice. Changing Provider selects its default model. Changing
-Space loads that Space's Providers and defaults. Saving a Provider creates or
-selects no assistant; assistant registration is explicit and retries reuse its
-request identity.
+Space loads that Space's Providers and defaults. Saving a Provider within this
+form resumes the draft without creating or selecting an assistant; registration
+occurs on Create and start chatting, and retries reuse its request identity.
 
 Creation and assistant editing share the same configuration controls. Existing
 assistant location is read-only. Provider/model changes are saved on the assistant
 without changing the shared Provider or other assistants. Model parameters and
 assistant instructions start collapsed; expanding instructions reveals AGENTS.md.
 Nested Provider setup preserves the assistant draft and returns to its caller.
+Create and start chatting saves the assistant and opens its conversation.
 Assistant settings contain no task routing controls: the assistant chooses task
 models autonomously, guided by its instructions.
 
@@ -214,20 +231,56 @@ queued, waiting and finished tasks are excluded. The region is presentation stat
 not persisted assistant prose. Queued guidance has a clock with a Received tooltip;
 applied instructions do not retain a status caption.
 
-Current-turn activity appears at the end of the conversation as a lightweight
-assistant bubble: Sending, Thinking, Working or Stopping. Waiting dots use a smooth
-1.4-second staggered cycle; streamed replies replace the waiting bubble and retain
-a small activity dot while text arrives. Reduced Motion uses static indicators.
-Animations exist only while the turn is active. Repeated failure text in an
-unfinished reply and its generated system notice is presented once, preserving
-partial prose and exposing the original error behind a details control. Ordinary
-messages do not repeat turn failure, stopped or applied captions underneath them.
+Sending immediately creates one optimistic user message and assistant reply
+bubble. Its identity survives acceptance, Thinking, streamed output and completion;
+the composer and current reading position remain intact. Waiting dots use a smooth
+1.4-second staggered cycle, and streamed output retains a small activity dot.
+Completed, paused, stopped and allowance-waiting replies have no activity animation.
+Reduced Motion uses static indicators.
+
+All failed replies share one presentation in that same bubble: a soft error fill,
+error icon, concise reason and expandable original diagnostic. Partial prose stays
+above the error within the bubble. Configuration failures offer one Check AI
+settings action. A definitively rejected send retains its draft and offers Retry
+with the same request identity; editing the draft disables that retry. Failure is
+not repeated in a separate notice below the composer. Persisted failures remain
+readable after navigation or restart.
+
+Connection loss during a reply or uncertain send updates the bubble to
+Reconnecting, without declaring execution failed or automatically sending again.
+Recovery reads authoritative state. A connection notice below the composer is
+used only when no pending send or active reply already owns that status.
 
 Task file links download through the owning Control; App requests a save location
 and Web uses browser downloads. Delivery constraints belong in
 [Deployment](deployment.md). Native Chat can offer desktop recovery actions for
 recognized unsuccessful-task diagnostics; these reuse existing connection/resource
 forms without automatically retrying the task.
+
+### Tool calls
+
+Chat and Task details share compact inline tool disclosures. The closed row shows
+the operation, a deterministic argument preview, explicit status and elapsed time;
+active operations also show their resolved machine, Host/Sandbox and workdir.
+Failures keep a concise reason visible while collapsed. Expanded details show
+arguments, ordered output, final results and a secondary raw call/result disclosure.
+Commands, scripts and patches retain monospace formatting; supported image results
+render inline. No tool action implicitly repeats an operation.
+
+Ordinary calls default to collapsed. Composition children nest under their original
+`exec` call in start order. Exact approval requests open the affected call and its
+ancestors, show the full reviewed operation, and provide Allow this operation / Deny.
+A compact locator exposes pending approvals outside the current reading position;
+requests without a transcript row retain a standalone approval card. A failed
+approval submission keeps its diagnostic and controls available. Long-lived machine
+policy remains in Machines.
+
+Live output has bounded height and follows only while its reader stays near the
+bottom; Jump to latest resumes following. Expanding, copying, changing locale,
+completion and streamed updates preserve disclosure and reading position. Narrow
+rows wrap status and argument previews without making the page scroll horizontally.
+Tool clocks use animation frames only while the corresponding projection is active.
+See [UI events](ui-events.md#tool-call-projections) for the event and persistence contract.
 
 ### Tasks and schedules
 

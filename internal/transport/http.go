@@ -149,6 +149,7 @@ func streamSnapshots(w http.ResponseWriter, r *http.Request, app *Application) {
 }
 func writeHeartbeat(controller *http.ResponseController, w http.ResponseWriter) error {
 	_ = controller.SetWriteDeadline(time.Now().Add(15 * time.Second))
+	defer controller.SetWriteDeadline(time.Time{})
 	if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
 		return err
 	}
@@ -159,6 +160,7 @@ func writeSSE(controller *http.ResponseController, w http.ResponseWriter, event,
 		return errors.New("invalid SSE identity")
 	}
 	_ = controller.SetWriteDeadline(time.Now().Add(15 * time.Second))
+	defer controller.SetWriteDeadline(time.Time{})
 	if _, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", id, event, data); err != nil {
 		return err
 	}

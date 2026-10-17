@@ -182,6 +182,9 @@ func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (stream i
 		return nil, errors.New("model request already claimed or uncertain")
 	}
 	knownUnsent = false
+	if provider.Protocol == "gemini" {
+		provider.Endpoint = modelprotocol.BindEndpointModel(provider.Endpoint, s.Spec.Model)
+	}
 	response, err := gateway.Forward(ctx, provider, key, body, "", time.Duration(s.Spec.Params.Agent.RequestTimeoutMS)*time.Millisecond)
 	if err != nil {
 		return nil, err

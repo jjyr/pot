@@ -1,7 +1,7 @@
 import {createTopicVersions} from '../state/changes.mjs';
 // Shared product transport. Every operation captures its Space/owner before IO.
 export class APIError extends Error {
-  constructor(status, value) { super(value?.message || `HTTP ${status}`); this.status = status; this.code = value?.code || 'http_error'; }
+  constructor(status, value) { super(value?.message || (typeof value?.error === 'string' && value.error) || `HTTP ${status}`); this.status = status; this.code = value?.code || 'http_error'; }
 }
 export function decodeDesktopResponse(raw) {
   const value=typeof raw==='string'?JSON.parse(raw):raw;
@@ -87,7 +87,13 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
     subscribe(onSnapshot, onStatus = () => {}) {
       const scope = {...context};
       let active = true, token;
-      const deliver = value => { if (active) { try { onSnapshot(normalizeSnapshot(value, runtime, scope.owner, scope.space)); } catch { onStatus('offline'); } } };
+      const deliver = value => {
+        if (!active) return;
+        let snapshot;
+        try { snapshot = normalizeSnapshot(value, runtime, scope.owner, scope.space); }
+        catch (reason) { onStatus('offline', reason); return; }
+        onSnapshot(snapshot);
+      };
       if (desktop) {
         const stop = runtimeAPI.Events.On('pot:snapshot', event => {
           const value = event.data;
@@ -95,15 +101,20 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
         });
         const stopStatus=runtimeAPI.Events.On('pot:subscription',event=>{
           const value=event.data;
-          if(active&&value.space_id===scope.space&&value.owner===scope.owner)onStatus(value.status);
+          if(active&&value.space_id===scope.space&&value.owner===scope.owner)onStatus(value.status,value.error?new Error(value.error):undefined);
         });
         invoke('Subscribe', scope.space, scope.owner).then(value => {
           token = value; if (!active) invoke('Unsubscribe', value).catch(() => {}); else onStatus('connected');
-        }).catch(() => { if (active) onStatus('offline'); });
+        }).catch(reason => { if (active) onStatus('offline', reason); });
         return () => { active = false; stop(); stopStatus(); if (token) invoke('Unsubscribe', token).catch(() => {}); };
       }
       const source = new EventSource(`${base}${scopedPath('/api/v1/events', scope)}`);
-      source.addEventListener('snapshot', event => { try { deliver(JSON.parse(event.data)); } catch { onStatus('offline'); } });
+      source.addEventListener('snapshot', event => {
+        let value;
+        try { value = JSON.parse(event.data); }
+        catch (reason) { if (active) onStatus('offline', reason); return; }
+        deliver(value);
+      });
       source.onopen = () => { if (active) onStatus('connected'); };
       source.onerror = () => { if (active) onStatus('offline'); };
       return () => { active = false; source.close(); };

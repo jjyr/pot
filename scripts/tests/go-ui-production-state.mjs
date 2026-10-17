@@ -44,6 +44,26 @@ assert.equal(calls.at(-1).url,'/api/v1/messages?assistant_id=b&space_id=local');
 await client.cancel({boot_id:'boot',request_id:'cancel',turn_id:'u'});assert.deepEqual(JSON.parse(calls.at(-1).options.body),{request_id:'cancel',user_message_id:'u'});
 await assert.rejects(client.request('/denied'),error=>error instanceof APIError&&error.status===403&&error.message==='Remote denied');
 assert.equal(calls.filter(call=>call.url.includes('/denied')).length,1,'failed remote request never retries locally');
+assert.equal(new APIError(401,{error:'browser authentication required'}).message,'browser authentication required','Browser server diagnostics survive the HTTP adapter');
+const sources=[];
+globalThis.EventSource=class {
+  handlers=new Map();
+  constructor(url){this.url=url;sources.push(this);}
+  addEventListener(type,handler){this.handlers.set(type,handler);}
+  close(){this.closed=true;}
+};
+const statuses=[];
+const stopStream=client.subscribe(()=>{throw Error('Rendering failed');},(...value)=>statuses.push(value));
+const source=sources.at(-1),receive=source.handlers.get('snapshot');
+assert.throws(()=>receive({data:JSON.stringify(raw)}),/Rendering failed/,'Rendering exceptions reach the interface error handler');
+assert.equal(statuses.length,0,'Rendering failures must not mark the service offline');
+receive({data:'invalid JSON'});
+assert.equal(statuses.at(-1)[0],'offline');assert.ok(statuses.at(-1)[1] instanceof SyntaxError,'Malformed events retain the parsing diagnostic');
+receive({data:JSON.stringify({...raw,cursor:-1})});
+assert.equal(statuses.at(-1)[1].message,'Invalid conversation cursor','Invalid snapshots retain their diagnostic');
+stopStream();assert.equal(source.closed,true);
+const count=statuses.length;receive({data:'invalid JSON'});source.onerror();
+assert.equal(statuses.length,count,'Retired subscriptions cannot update connection diagnostics');
 console.log('Production UI owner fencing, partial-save reconciliation, and transport checks passed');
 const {combineTasks,combineUsage}=await import('../../web/src/state/aggregate.mjs');
 const combined=combineTasks([{space:{id:'local'},value:{items:[{id:'same',updated_at_ms:1}],counts:{active:1}}},{space:{id:'remote'},value:{items:[{id:'same',updated_at_ms:2}],counts:{active:2}}}],{limit:1});
@@ -60,7 +80,7 @@ const {createTaskTranscript,appendTaskEvents}=await import('../../web/src/state/
 const transcript=createTaskTranscript(),event=(sequence,type,value={})=>({sequence,event:{update:{type,...value}}});
 appendTaskEvents(transcript,[event(1,'message_started'),event(2,'text_delta',{text:'First'}),event(3,'tool_started',{id:'t',name:'read',args:{path:'a'}}),event(4,'tool_output',{id:'t',text:'result'})]);
 appendTaskEvents(transcript,[event(2,'text_delta',{text:'duplicate'}),event(5,'text_delta',{text:' reply'}),event(6,'message_finished')]);
-assert.equal(transcript.messages[0].text,'First reply');assert.ok(transcript.messages[1].text.includes('result'));assert.equal(transcript.cursor,6);
+assert.equal(transcript.messages[0].text,'First reply');assert.ok(transcript.messages[1].tool.output[0].text.includes('result'));assert.equal(transcript.cursor,6);
 appendTaskEvents(transcript,[event(7,'turn_finished',{outcome:{kind:'unknown',error:'Execution result is uncertain'}})]);assert.equal(transcript.messages.at(-1).role,'system');
 const {createReplies}=await import('../../web/src/state/replies.mjs');
 const replies=createReplies();assert.deepEqual(replies.observe('control','a','old',5,true),{unread:0,arrived:false});
@@ -83,3 +103,14 @@ await client.send({boot_id:'boot',request_id:'s',conversation_id:'c',user_messag
 await client.controlTurn({user_message_id:'original-turn',action:'pause'},{owner:'a',space:'remote'});assert.equal(calls.at(-1).url,'/api/v1/turn/control?assistant_id=a&space_id=remote');
 
 assert.equal(combineUsage([{space:{id:'a'},value:{agent_models:[{agent:'pot',model:'shared',input:3,output:2}]}},{space:{id:'b'},stale:true,value:{agent_models:[{agent:'pot',model:'shared',input:7,output:1}]}}]).agent_models[0].input,10,'Global Agent/model categories combine identical models across Spaces');
+
+const {toolForest,applyToolUpdate,toolFailure}=await import('../../web/src/state/tool-calls.mjs');
+const detail=applyToolUpdate({},{type:'tool_started',id:'child',parent_id:'parent',name:'exec_command',args:{cmd:'pwd'},at_ms:10});
+applyToolUpdate(detail,{type:'tool_output',stream:'stdout',text:'retained',at_ms:20});
+applyToolUpdate(detail,{type:'tool_finished',result:{exit_code:1,stderr:'failed command'},failed:true,at_ms:30});
+assert.equal(detail.args.cmd,'pwd');assert.equal(detail.output[0].text,'retained');assert.equal(detail.phase,'failed');assert.equal(toolFailure(detail),'failed command');
+const parentTool=turn=>({id:`${turn}-parent`,tool:{turn_id:turn,id:'parent',name:'exec'}}),childTool=turn=>({id:`${turn}-child`,tool:{...detail,turn_id:turn}});
+const forest=toolForest([parentTool('a'),childTool('a'),parentTool('b'),childTool('b')]);
+assert.equal(forest.roots.length,2);assert.equal(forest.roots[0].children[0].message.id,'a-child');assert.equal(forest.roots[1].children[0].message.id,'b-child','Repeated call IDs cannot reparent across turns');
+assert.equal(toolForest([{tool:{id:'a',parent_id:'b'}},{tool:{id:'b',parent_id:'a'}}]).roots.length,2,'Malformed cycles remain top-level');
+applyToolUpdate(detail,{type:'turn_finished',outcome:{kind:'unknown',error:'uncertain'}});assert.equal(detail.phase,'unknown');

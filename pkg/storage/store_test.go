@@ -190,3 +190,24 @@ func TestScopedMailboxRecoveryAndDedup(t *testing.T) {
 		t.Fatal("uncertain attempt replayed")
 	}
 }
+
+func TestRestartRetainsToolDetailsWithoutDeclaringSuccess(t *testing.T) {
+	ctx := context.Background()
+	s, path := testStore(t)
+	m := Message{ID: "tool-message", ConversationID: "main", Role: protocol.Tool, Status: protocol.Streaming, CreatedAtMS: Now(), Tool: &protocol.ToolCall{TurnID: "turn", ID: "call", Name: "exec_command", Args: json.RawMessage(`{"cmd":"pwd"}`), Phase: "running", StartedAtMS: 1, Output: []protocol.ToolOutput{{Stream: "stdout", Text: "partial output"}}}}
+	if _, err := s.Save(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	saved, err := reopened.Message(ctx, m.ID)
+	if err != nil || saved == nil || saved.Tool == nil || saved.Tool.Phase != "unknown" || saved.Tool.Output[0].Text != "partial output" || string(saved.Tool.Args) != `{"cmd":"pwd"}` || saved.Status != protocol.Failed {
+		t.Fatal(saved, err)
+	}
+}

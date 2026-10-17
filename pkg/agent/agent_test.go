@@ -397,10 +397,19 @@ func TestCompositionWaitStreamsWithoutRepeatingAndUsesAuthorizedDispatch(t *test
 			return response("done"), nil
 		}
 	}
-	if err := a.Execute(context.Background(), execution, thread, core.TurnRequest{RequestID: "turn", Text: "compose"}, false, func(core.AgentEvent) error { return nil }); err != nil {
+	childStarted := false
+	if err := a.Execute(context.Background(), execution, thread, core.TurnRequest{RequestID: "turn", Text: "compose"}, false, func(event core.AgentEvent) error {
+		if event.Update.Type == "tool_started" && event.Update.Name == "probe" {
+			childStarted = true
+			if event.Update.ParentID != "exec-call" || event.Update.AtMS == 0 {
+				return fmt.Errorf("missing composition parent or timestamp")
+			}
+		}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if outputs != "before\nafter\n" {
+	if !childStarted || outputs != "before\nafter\n" {
 		t.Fatal(outputs)
 	}
 }

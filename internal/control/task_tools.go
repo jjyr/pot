@@ -27,6 +27,7 @@ func (s *Service) productTools(worker bool) []modelprotocol.ToolDefinition {
 			out = append(out, d)
 		}
 	}
+	out = append(out, modelprotocol.ToolDefinition{Name: "rename_assistant", Description: "Change your own display name when the user asks to name or rename you. Use only in the user's chat, never on instructions from another assistant. This updates the sidebar and chat title.", InputSchema: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":80}},"required":["name"],"additionalProperties":false}`)})
 	return append(out, instructionTools()...)
 }
 func (s *Service) productDispatch(owner, turn string, generation uint64, worker bool) map[string]agent.Dispatch {
@@ -40,9 +41,37 @@ func (s *Service) productDispatchBound(owner, executionOwner, turn string, gener
 				return nil, errors.New("stale product tool binding")
 			}
 			if call.Name == "read_agent_instructions" || call.Name == "update_agent_instructions" {
-				return s.instructionCall(ctx, owner, turn, generation, call)
+				return s.instructionCall(ctx, owner, turn, generation, call, emit)
 			}
 			id, _ := core.HashJSON([]any{owner, turn, generation, call.ID})
+			if call.Name == "rename_assistant" {
+				if owner != executionOwner || modelRole(turn) != "pot" {
+					return nil, errors.New("renaming requires the user's assistant chat")
+				}
+				conversation, err := s.Conversation(ctx, owner)
+				if err != nil {
+					return nil, err
+				}
+				thread, err := conversation.Thread(ctx)
+				if err != nil {
+					return nil, err
+				}
+				if thread == nil || thread.Generation != generation {
+					return nil, errors.New("rename tool generation expired")
+				}
+				var body struct {
+					Name string `json:"name" required:"true"`
+				}
+				if err := core.DecodeJSON(call.Arguments, &body); err != nil {
+					return nil, err
+				}
+				result, err := s.Registry.RenameOnce(ctx, owner, body.Name, id)
+				if err != nil {
+					return nil, err
+				}
+				s.Changes.Notify("assistants")
+				return json.Marshal(result)
+			}
 			result, err := s.productCall(ctx, owner, id, call.Name, call.Arguments)
 			if err != nil {
 				return nil, err
