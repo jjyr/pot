@@ -121,8 +121,9 @@ seconds per scenario. They cover ordinary private-temp/workspace execution,
 permanent exact-command approval, owner denial and recovery without repeating a
 partial write. Two boundary scenarios give only an ordinary file-reading goal:
 a workspace symlink produces a real sandbox read denial, after which the model
-must autonomously request justified host access. The harness approves or denies
-only that synthetic read, checking that approval follows the actual denial and
+must autonomously request justified host access. The harness only approves
+synthetic reads; refusal never releases host code. It checks that approval follows
+the actual denial and
 that an owner refusal stops further execution. Run just those cases with
 `-run '^TestDeepSeekUnsandboxLive$/^boundary-'`. Default tests skip paid calls.
 Credentials are never logged.

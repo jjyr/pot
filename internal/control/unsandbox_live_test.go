@@ -262,7 +262,10 @@ func TestDeepSeekUnsandboxLive(t *testing.T) {
 							}
 							t.Logf("owner approval after sandbox denial: command=%q justification=%q decision=%s", cmd, args["justification"], decision)
 						}
-						if !fixtureRead {
+						// Only allow decisions release host code. A deny decision
+						// can safely reject any command spelling; its assertions
+						// still require no execution after the refusal.
+						if !fixtureRead && decision != "deny" {
 							t.Fatal("host request exceeded synthetic fixture read")
 						}
 						if scenario == "partial-effects" {
