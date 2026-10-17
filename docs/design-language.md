@@ -9,7 +9,7 @@ and build and regression commands in [Development](development.md#checks).
 
 Use quiet surfaces, system typography, fine dividers and restrained color. Blue
 identifies primary actions and focus; status colors accompany text or icons.
-Assistant replies are mostly unboxed; user messages use a soft blue fill. Reserve
+Assistant replies use quiet neutral bubbles; user messages use a soft blue fill. Reserve
 cards for related controls or details, rather than wrapping every row.
 
 ### Color and surfaces
@@ -231,14 +231,25 @@ queued, waiting and finished tasks are excluded. The region is presentation stat
 not persisted assistant prose. Queued guidance has a clock with a Received tooltip;
 applied instructions do not retain a status caption.
 
-Current-turn activity appears at the end of the conversation as a lightweight
-assistant bubble: Sending, Thinking, Working or Stopping. Waiting dots use a smooth
-1.4-second staggered cycle; streamed replies replace the waiting bubble and retain
-a small activity dot while text arrives. Reduced Motion uses static indicators.
-Animations exist only while the turn is active. Repeated failure text in an
-unfinished reply and its generated system notice is presented once, preserving
-partial prose and exposing the original error behind a details control. Ordinary
-messages do not repeat turn failure, stopped or applied captions underneath them.
+Sending immediately creates one optimistic user message and assistant reply
+bubble. Its identity survives acceptance, Thinking, streamed output and completion;
+the composer and current reading position remain intact. Waiting dots use a smooth
+1.4-second staggered cycle, and streamed output retains a small activity dot.
+Completed, paused, stopped and allowance-waiting replies have no activity animation.
+Reduced Motion uses static indicators.
+
+All failed replies share one presentation in that same bubble: a soft error fill,
+error icon, concise reason and expandable original diagnostic. Partial prose stays
+above the error within the bubble. Configuration failures offer one Check AI
+settings action. A definitively rejected send retains its draft and offers Retry
+with the same request identity; editing the draft disables that retry. Failure is
+not repeated in a separate notice below the composer. Persisted failures remain
+readable after navigation or restart.
+
+Connection loss during a reply or uncertain send updates the bubble to
+Reconnecting, without declaring execution failed or automatically sending again.
+Recovery reads authoritative state. A connection notice below the composer is
+used only when no pending send or active reply already owns that status.
 
 Task file links download through the owning Control; App requests a save location
 and Web uses browser downloads. Delivery constraints belong in

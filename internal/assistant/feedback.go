@@ -248,7 +248,7 @@ func (f *turnFeedback) event(event core.AgentEvent) error {
 		f.reply = storage.ID()
 		c.turn.ReplyMessageID = f.reply
 		metadata, _ := json.Marshal(c.turn)
-		return c.putMessageLocked(ctx, protocol.Message{ID: f.reply, ConversationID: c.options.ConversationID, Role: protocol.Assistant, Status: protocol.Streaming, CreatedAtMS: storage.Now()}, map[string]string{"conversation.turn": string(metadata)})
+		return c.putMessageLocked(ctx, protocol.Message{ID: f.reply, ConversationID: c.options.ConversationID, Role: protocol.Assistant, ReplyTo: c.turn.UserMessageID, Status: protocol.Streaming, CreatedAtMS: storage.Now()}, map[string]string{"conversation.turn": string(metadata)})
 	case "text_delta", "message_finished":
 		if f.reply == "" {
 			return errors.New("assistant output arrived before message start")

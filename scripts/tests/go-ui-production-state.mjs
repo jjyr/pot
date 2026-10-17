@@ -44,6 +44,26 @@ assert.equal(calls.at(-1).url,'/api/v1/messages?assistant_id=b&space_id=local');
 await client.cancel({boot_id:'boot',request_id:'cancel',turn_id:'u'});assert.deepEqual(JSON.parse(calls.at(-1).options.body),{request_id:'cancel',user_message_id:'u'});
 await assert.rejects(client.request('/denied'),error=>error instanceof APIError&&error.status===403&&error.message==='Remote denied');
 assert.equal(calls.filter(call=>call.url.includes('/denied')).length,1,'failed remote request never retries locally');
+assert.equal(new APIError(401,{error:'browser authentication required'}).message,'browser authentication required','Browser server diagnostics survive the HTTP adapter');
+const sources=[];
+globalThis.EventSource=class {
+  handlers=new Map();
+  constructor(url){this.url=url;sources.push(this);}
+  addEventListener(type,handler){this.handlers.set(type,handler);}
+  close(){this.closed=true;}
+};
+const statuses=[];
+const stopStream=client.subscribe(()=>{throw Error('Rendering failed');},(...value)=>statuses.push(value));
+const source=sources.at(-1),receive=source.handlers.get('snapshot');
+assert.throws(()=>receive({data:JSON.stringify(raw)}),/Rendering failed/,'Rendering exceptions reach the interface error handler');
+assert.equal(statuses.length,0,'Rendering failures must not mark the service offline');
+receive({data:'invalid JSON'});
+assert.equal(statuses.at(-1)[0],'offline');assert.ok(statuses.at(-1)[1] instanceof SyntaxError,'Malformed events retain the parsing diagnostic');
+receive({data:JSON.stringify({...raw,cursor:-1})});
+assert.equal(statuses.at(-1)[1].message,'Invalid conversation cursor','Invalid snapshots retain their diagnostic');
+stopStream();assert.equal(source.closed,true);
+const count=statuses.length;receive({data:'invalid JSON'});source.onerror();
+assert.equal(statuses.length,count,'Retired subscriptions cannot update connection diagnostics');
 console.log('Production UI owner fencing, partial-save reconciliation, and transport checks passed');
 const {combineTasks,combineUsage}=await import('../../web/src/state/aggregate.mjs');
 const combined=combineTasks([{space:{id:'local'},value:{items:[{id:'same',updated_at_ms:1}],counts:{active:1}}},{space:{id:'remote'},value:{items:[{id:'same',updated_at_ms:2}],counts:{active:2}}}],{limit:1});

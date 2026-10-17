@@ -22,6 +22,7 @@ async page => {
   let value;
   if(path==='/api/v1/runtime')value={runtime_id:'contract-test',boot_id:'boot'};
   else if(path==='/api/v1/spaces')value={active_space_id:'local',items:[{id:'local',control_id:'control-local',name:'Local',kind:'local',connected:true},...(remoteOffline?[{id:'remote-offline',control_id:'control-remote-offline',name:'Offline Space',kind:'remote',connected:false,assistants:[{id:'cached-remote',name:'Cached remote assistant',revision:1}]}]:[])]};
+  else if(path==='/api/v1/assistants/bootstrap')value={assistant:null};
   else if(path==='/api/v1/assistants')value=definitions;
   else if(path==='/api/v1/snapshot')value={cursor:1,api_version:3,boot_id:'boot',conversation_id:url.searchParams.get('assistant_id'),messages:[{id:'file-message',role:'assistant',status:'complete',text:`[Download report](pot-file://${fileTask}/reports/result.txt)`},{id:'internal-report',role:'system',status:'complete',request_id:'pot-result-task-proof',text:'Hidden internal report instructions'},{id:'normal-system',role:'system',status:'complete',text:'Ordinary system note'}],turn:null,agent:{phase:'ready',model:'test-model'}};
   else if(path===`/api/v1/tasks/${fileTask}/file`)value={size:7,offset:0,revision:'fixture',data:'cmVwb3J0Cg=='};
@@ -33,7 +34,8 @@ async page => {
   else if(path==='/api/v1/agent/routing')value={revision:1,profile_limits:{},provider_limits:{}};
   else if(path==='/api/v1/usage/providers')value=method==='GET'?{providers:[{provider:'route-p',revision:4,active:false,policy:{period:'none',limit:1000,timezone:'UTC',auto_resume:true}}]}:{provider:'route-p',revision:5};
   else if(path==='/api/v1/about')value={version:'fixture',revision:'fixture',go_version:'go1.27.2',licenses:[],notices_available:false};
-  else if(path==='/api/v1/providers/check')value={models:['model-from-api']};
+  else if(path==='/api/v1/providers/resolve'){const body=route.request().postDataJSON();value={endpoint:body.endpoint,detected_protocol:body.protocol};}
+  else if(path==='/api/v1/providers/check')value={supported:true,models:['model-from-api']};
   else if(path==='/api/v1/completions')value={items:[{token:'/skill:creator',label:'Creator',detail:'Skill'}]};
   else if(path==='/api/v1/agent'){if(method==='POST'){const body=route.request().postDataJSON();thread={...thread,selection:body.selection,generation:thread.generation+1,revision:thread.revision+1};}value=thread;}
   else if(path==='/api/v1/instructions'){if(method==='POST')rules={...route.request().postDataJSON(),revision:2};value=rules;}
@@ -63,7 +65,7 @@ async page => {
  try {
   await page.setViewportSize({width:1200,height:792});
   await page.goto('http://127.0.0.1:17702/?theme=light&locale=en&contract=ui-production');
-  await page.locator('.assistant-directory').getByText('Create your first assistant',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'Connect AI provider',exact:true}).waitFor();
   definitions=[{id:'alpha',name:'Alpha',revision:1},{id:'beta',name:'Beta',revision:1}];
   await page.evaluate(()=>window.__potContractChanges({assistants:1}));
   await page.waitForFunction(()=>document.querySelector('#pot-composer')&&!document.querySelector('#pot-composer').disabled);
@@ -131,7 +133,6 @@ async page => {
   assert(await page.getByLabel('Context window',{exact:true}).isEnabled(),'Inherited context can be overridden directly');
   await page.getByLabel('Reasoning effort',{exact:true}).fill('custom-effort');
   await page.getByLabel('API key',{exact:true}).fill('isolated-fixture-key');
-  await page.getByRole('button',{name:'Check available models',exact:true}).click();
   await page.getByRole('option',{name:'model-from-api',exact:true}).waitFor({state:'attached'});
   assert(posts.filter(value=>value.path==='/api/v1/providers').length===1,'Checking never saves a connection');
   assert(posts.filter(value=>value.path==='/api/v1/messages').length===0,'Checking never sends a model message');

@@ -14,6 +14,7 @@ const paths = {
   cloud:'M6 18h12a4 4 0 0 0 0-8h-1a6 6 0 0 0-11 1 3.5 3.5 0 0 0 0 7',
   clock:'M12 8v5h4M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
   copy: 'M9 9h11v11H9zM15 5V3H3v12h2',
+  alert: 'M12 8v4M12 16h.01M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
 };
 export function icon(name) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');

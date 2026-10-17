@@ -10,6 +10,7 @@ import (
 	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/resourcecontrol"
 	"github.com/jjyr/pot/pkg/storage"
@@ -250,6 +251,18 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 				return nil, err
 			}
 			return s.Notifications(ctx, body.After, body.Initialize)
+		case "/api/v1/providers/resolve":
+			var body control.CheckProvider
+			if err = decode(r.Body, &body); err != nil {
+				return nil, err
+			}
+			return modelprotocol.ResolveEndpoint(body.Endpoint, modelprotocol.Protocol(body.Protocol))
+		case "/api/v1/providers/test":
+			var body control.TestProvider
+			if err = decode(r.Body, &body); err != nil {
+				return nil, err
+			}
+			return s.Profiles.Test(ctx, body)
 		case "/api/v1/providers/check":
 			var body control.CheckProvider
 			if err = decode(r.Body, &body); err != nil {

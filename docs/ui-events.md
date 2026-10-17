@@ -48,6 +48,15 @@ Snapshot refresh retains composer nodes, drafts and reading position. It follows
 the bottom only when the reader was already near it; otherwise the latest-message
 action remains available. Only a matching request receipt clears a submitted
 draft. Connection failure keeps the draft and exposes recovery.
+Assistant messages bind to their input through `reply_to`; terminal failures retain
+their original diagnostic in the message's `error` field, including preparation
+failures before the first model event. Chat projects a single reply bubble from
+the local send through its receipt and first assistant output. Pending sends are
+scoped by owner, preserve drafts and retain request identity across reconciliation.
+Turn `state` distinguishes allowance waiting from active thinking.
+Subscription errors retain their available diagnostics; a
+frontend rendering exception is reported by the interface error handler rather
+than being classified as a service disconnection.
 
 ## Task execution transcripts
 
@@ -67,7 +76,8 @@ Task's explicit Control/assistant identity.
 
 ## Lifecycle and remaining clocks
 
-SSE keepalive comments run every 15 seconds; writes have bounded deadlines.
+SSE keepalive comments run every 15 seconds; writes have bounded deadlines that
+are cleared after flushing, so idle HTTP/2 streams remain open between frames.
 Backend shutdown or request cancellation closes subscriptions. Browser logout
 revokes access and reloads into authentication. Window/client disposal removes
 listeners and releases subscriptions.

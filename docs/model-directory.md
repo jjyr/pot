@@ -51,6 +51,19 @@ separate chooser and connection editor; search and provider selection appear onl
 in the chooser. The editor contains name, API URL, credential, default model,
 request format, context/output limits and reasoning effort in that order. It never
 edits assistant instructions, execution policy or tool/plugin selection.
+New connections have an editable default name: the selected provider name, or
+Custom Provider with a numeric suffix when needed. API URLs accept a complete
+inference endpoint or a base ending in a version segment such as `/v1`,
+`/proxy/v1` or `/v1beta`. Control appends `/responses`, `/chat/completions`,
+`/messages` or `/models/{model}:streamGenerateContent` for the selected protocol.
+An origin without a path defaults to `/v1` (Gemini: `/v1beta`). Complete custom
+paths are preserved without guessing additional prefixes. Recognized full
+endpoints with a different protocol are rejected; the editor offers an explicit
+format correction. The editor previews Control's resolved request URL without
+rewriting the input. Save, discovery and connection tests share this resolver;
+saved routes contain the resolved endpoint. Existing routes are not rewritten.
+Gemini substitutes the path's `{model}` placeholder at request time so assistant
+model overrides use their selected model.
 
 An assistant's Add Provider shortcut retains its draft while opening that same
 connection flow. Saving selects the new connection and its default model in the
@@ -94,10 +107,23 @@ retain their catalog identity independently of the generated credential-route ID
 Custom API placeholders, including models outside the ready-connection chooser.
 
 The assistant selector offers supported models with text input/output and tool
-calling, excluding known deprecated and specialized models. API Check supplements
-directory options with IDs reported by the configured endpoint; metadata does not
-prove account access. Users can still enter a model ID manually. Check does not
-save configuration or perform inference.
+calling, excluding known deprecated and specialized models. The connection editor
+loads model IDs asynchronously after a 400 ms pause when address, protocol and
+credential are available, including an unchanged saved credential. These IDs
+supplement directory options; discovery never changes the current model value or
+switches a manually entered value into a selection. Connection edits cancel stale
+requests, and leaving the editor disposes background work. Failed discovery offers
+inline retry and does not block manual model entry or saving. Directory metadata
+and model-list access do not prove inference access.
+
+Test connection explicitly sends one short streaming inference request using the
+unsaved address, protocol, credential, model and reasoning effort. It does not save
+a Provider or add conversation history. Success requires a complete decoded text
+reply, not merely HTTP 200. Requests have a 30-second deadline and 256 KiB response
+bound, do not follow redirects and never retry inference automatically. The editor
+shows compact success/failure feedback with expandable diagnostics. Neither model
+listing nor address preview performs inference. A saved key may be reused only
+when the resolved endpoint and protocol still match its saved route.
 
 User-configured endpoints accept HTTP and HTTPS, including local gateways reached
 through hostnames, LAN addresses or IPv6. Check, save and inference share this

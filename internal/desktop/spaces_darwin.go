@@ -85,7 +85,7 @@ func (s *Service) streamSpace(ctx context.Context, space, owner string) {
 			return
 		}
 		if err != nil {
-			s.app.Event.Emit("pot:subscription", map[string]any{"space_id": space, "owner": owner, "status": "offline"})
+			s.app.Event.Emit("pot:subscription", map[string]any{"space_id": space, "owner": owner, "status": "offline", "error": err.Error()})
 		}
 		timer := time.NewTimer(delay)
 		select {

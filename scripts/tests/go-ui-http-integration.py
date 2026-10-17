@@ -338,10 +338,39 @@ def run(binary, base, env, cli_command):
             }
             browser_open = True
             browser_cli("open", origin)
+            provider_state = {
+                "origin": origin,
+                "base": f"http://127.0.0.1:{model.server_port}",
+                "connectedScreenshot": str(
+                    ROOT / "output/pr-images/provider-connected-desktop-after.png"
+                ),
+                "mobileScreenshot": str(ROOT / "output/pr-images/provider-setup-mobile-after.png"),
+                "desktopScreenshot": str(
+                    ROOT / "output/pr-images/provider-setup-desktop-after.png"
+                ),
+            }
+            # Authenticate the isolated browser before editor API probes.
+            browser_cli(
+                "run-code",
+                "async page => { await page.request.post("
+                + json.dumps(origin + "/access/token")
+                + ", {headers:{Authorization:"
+                + json.dumps("Bearer " + state["token"])
+                + "}}); }",
+            )
+            code = (ROOT / "scripts/tests/go-ui-providers-browser.js").read_text()
+            providers = browser_cli("run-code", code.replace("STATE", json.dumps(provider_state)))
+            if '"passed":true' not in providers:
+                raise RuntimeError("Provider editor browser contracts did not pass")
             code = (ROOT / "scripts/tests/go-ui-http-browser.js").read_text()
             output = browser_cli("run-code", code.replace("STATE", json.dumps(state)))
             if '"errors":[]' not in output:
                 raise RuntimeError("Browser did not return successful integration evidence")
+            replies = browser_cli(
+                "run-code", (ROOT / "scripts/tests/go-ui-replies-browser.js").read_text()
+            )
+            if '"passed":true' not in replies:
+                raise RuntimeError("Reply bubble browser contracts did not pass")
             actual = (base / "download.bin").read_bytes()
             assert len(actual) == len(content)
             assert hashlib.sha256(actual).digest() == hashlib.sha256(content).digest()

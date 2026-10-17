@@ -77,6 +77,8 @@ type Message struct {
 	CreatedAtMS    int64         `json:"created_at_ms" required:"true"`
 	RequestID      *string       `json:"request_id"`
 	Steering       bool          `json:"steering,omitempty"`
+	ReplyTo        string        `json:"reply_to,omitempty"`
+	Error          string        `json:"error,omitempty"`
 }
 
 func (m Message) Validate() error {
@@ -96,6 +98,12 @@ func (m Message) Validate() error {
 	if m.CreatedAtMS < 0 || uint64(m.CreatedAtMS) > core.MaxSafeInteger {
 		return fmt.Errorf("invalid message timestamp")
 	}
+	if m.ReplyTo != "" && (m.Role != Assistant || !core.Identifier(m.ReplyTo)) {
+		return fmt.Errorf("invalid assistant reply binding")
+	}
+	if m.Error != "" && (m.Role != Assistant || m.Status != Failed) {
+		return fmt.Errorf("error detail requires a failed assistant reply")
+	}
 	return nil
 }
 
@@ -103,6 +111,7 @@ type TurnState struct {
 	UserMessageID string `json:"user_message_id" required:"true"`
 	Cancelling    bool   `json:"cancelling" required:"true"`
 	Paused        bool   `json:"paused"`
+	State         string `json:"state"`
 }
 type RequestBudget struct {
 	Used            uint64 `json:"used" required:"true"`

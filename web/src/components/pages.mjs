@@ -1,3 +1,4 @@
+import {connectProviderEditor} from './provider-connection.mjs';
 import {avatar} from './avatar.mjs';
 import {translate} from '../locales/messages.mjs';
 import {icon} from './icons.mjs';
@@ -84,6 +85,7 @@ export function createPages({client, host, approvalHost, locale, notify, changed
     const sessions=[...(editor?[editor]:[]),...(!toParent?editorParents:[])];
     if(sessions.some(value=>value.session.pending)) {notify(tr('Please wait for the save result.','请等待保存结果。'));return false;}
     if(sessions.some(value=>value.session.dirty)&&!await confirmDiscard())return false;
+    for(const value of sessions)value.lifecycle.dispose?.();
     editor=null;if(!toParent)editorParents.length=0;taskView=null;scheduleView=null;viewReady=false;gate.close();host.replaceChildren();return true;
   }
   function suspendEditor(){if(editor){editor.scroll=host.scrollTop;editor.focus=innerWidth>=720&&editor.root.contains(document.activeElement)?document.activeElement:null;editorParents.push(editor);editor=null;}}
@@ -258,10 +260,11 @@ export function createPages({client, host, approvalHost, locale, notify, changed
     const selectedEntry=(snapshot.directory||[]).find(value=>value.id===providerID);
     const inherited=modelDefaults(snapshot,providerID,profile?.model||'');
     let configuredModels=[...(snapshot.configured_models?.[profile?.id]||[])];
-    const initial={name:profile?.name||selectedEntry?.name||'',endpoint:connection?.endpoint||selectedEntry?.endpoint||'',api_key:'',model:profile?.model||'',model_selection:'',protocol:connection?.protocol||selectedEntry?.protocol||'openai_responses',context_window:profile?.model_settings?.context_window??null,max_output_tokens:profile?.model_settings?.max_output_tokens??null,reasoning_effort:profile?.params?.reasoning_effort||''};
+    const baseName=selectedEntry?.name||tr('Custom Provider','自定义供应商'),names=new Set((snapshot.profiles||[]).map(value=>value.name));let defaultName=baseName;for(let index=2;names.has(defaultName);index++)defaultName=`${baseName} ${index}`;
+    const initial={name:profile?.name||defaultName,endpoint:connection?.endpoint||selectedEntry?.endpoint||'',api_key:'',model:profile?.model||'',model_selection:'',protocol:connection?.protocol||selectedEntry?.protocol||'openai_responses',context_window:profile?.model_settings?.context_window??null,max_output_tokens:profile?.model_settings?.max_output_tokens??null,reasoning_effort:profile?.params?.reasoning_effort||''};
     const form=renderEditor(profile?tr('Edit Provider','编辑提供商'):tr('Add Provider','添加提供商'),initial,[
       {name:'name',label:tr('Name','名称'),required:true},
-      {name:'endpoint',label:tr('Endpoint','API 地址'),kind:'url',required:true},
+      {name:'endpoint',label:tr('Endpoint','API 地址'),kind:'url',required:true,help:tr('Base URL or complete request URL.','基础地址或完整请求地址。')},
       {name:'api_key',label:tr('API key','API 密钥'),kind:'password',required:!profile,help:profile?tr('Leave blank to keep the saved key.','留空保留现有密钥。'):''},
       {name:'model_selection',label:tr('Model','默认模型'),choices:[['',tr('Enter model ID','输入模型 ID')]]},
       {name:'model',label:tr('Model ID','模型 ID'),required:true},
@@ -286,8 +289,8 @@ export function createPages({client, host, approvalHost, locale, notify, changed
     controls.get('endpoint').addEventListener('input',()=>{endpointEdited=true;});
     controls.get('protocol').addEventListener('change',()=>{endpointEdited=true;});
     controls.get('model').addEventListener('input',inherit);inherit();
-    const check=action(tr('Check available models','检查可用模型'),async()=>{const captured=structuredClone(session.values);check.disabled=true;try{const value=await request('/api/v1/providers/check',{...settingsScope,method:'POST',body:{endpoint:captured.endpoint,protocol:captured.protocol,api_key:captured.api_key,profile_id:profile?.id||''}});if(editor?.session!==session||['endpoint','protocol','api_key'].some(name=>session.values[name]!==captured[name]))return;configuredModels=(value.models||[]).map(model=>typeof model==='string'?model:model.id);models(configuredModels,session.values.model);const status=n('p','success-text',tr('Model list received','已获取模型列表'));form.root.append(status);}catch(reason){if(editor?.session===session)errorView(reason,form.root);}finally{check.disabled=false;}});
-    form.form.querySelector('.editor-actions').prepend(check);
+    connectProviderEditor({form,request,scope:settingsScope,profile,connection,tr,current:()=>editor?.session===session&&!disposed&&client.runtime.boot_id===session.context.boot,models:entries=>{configuredModels=entries.map(model=>typeof model==='string'?model:model.id);models([...new Map([...(selectedEntry?.models||[]),...configuredModels].map(model=>[typeof model==='string'?model:model.id,model])).values()],controls.get('model_selection').value);}});
+
   }
   function spaceEditor() {
     renderEditor(tr('Connect Space','连接 Space'),{name:'',endpoint:'',token:'',ca_pem:''},[
@@ -504,7 +507,8 @@ export function createPages({client, host, approvalHost, locale, notify, changed
   const preference=()=>{if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner});};
   window.addEventListener('beforeunload',beforeUnload);window.addEventListener('pot:locale',preference);
   return {get title(){return title;},get editing(){return !!editor;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner;},show,assistant,setupAI,leave,back,permissions,handleHistory:popstate,openResources:resourceCache,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalGate.close();approvalOwner='';approvalHost.replaceChildren();},conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,record=true){route='tasks';return taskDetail(task,{recordHistory:record});},
+    showProviders(){filter.settingsTab='providers';return show('settings');},
     refresh(){if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(resourceView){resourceView.controller?.refresh();return;}if(taskView){refreshTaskEvents();return;}if(!editor&&route&&host.offsetParent)show(route,{keepUsageOwner:!!usageOwner});},
-    dispose(){disposed=true;gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
+    dispose(){for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle.dispose?.();disposed=true;gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
   };
 }

@@ -8,6 +8,8 @@ import {createPages} from './pages.mjs';
 import {createLiveResourceRequests} from './resources.mjs';
 import {createReplies,replyKey} from '../state/replies.mjs';
 import {bindCompletions} from './completions.mjs';
+import {projectChatReplies} from '../state/chat-replies.mjs';
+import {createReplyBubble} from './reply.mjs';
 
 function el(tag, className = '', text) {
   const element = document.createElement(tag);
@@ -45,6 +47,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let route = 'chat';
   let connection = 'connecting';
   let error = '';
+  let connectionError = '';
   let directoryOpen = !params.has('conversation');
   let cancelPending = false;
   let editorOwner = null;
@@ -146,7 +149,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if (typeof result.message_id !== 'string' || typeof result.duplicate !== 'boolean') throw Error('Invalid message receipt');
       settleSend(state, receipt, true);
     } catch (reason) {
-      if (settleSend(state, receipt, false)) error = reason.message || String(reason);
+      if (settleSend(state, receipt, false, reason)&&receipt.request.user_message_id) error = reason.message || String(reason);
     }
     if (!disposed) { syncEditor(); updateControls(); }
   }
@@ -175,15 +178,17 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     input.disabled = !snapshot && !editorOwner;
     const visibleConnection=selectedAssistant?.offline?'offline':connection;
     status.replaceChildren();
-    status.classList.toggle('has-error', Boolean(error) || visibleConnection === 'offline');
-    status.classList.toggle('is-connected',!error&&visibleConnection==='connected');
-    status.append(el('span', '', error || (visibleConnection === 'connected' ? t(client.production?'connected':'preview') : t(visibleConnection))));
-    if (visibleConnection === 'offline') {
+    status.classList.toggle('has-error', Boolean(error || connectionError) || visibleConnection === 'offline');
+    status.classList.toggle('is-connected',!error&&!connectionError&&visibleConnection==='connected');
+    const replyOwnsConnection=state.snapshot?.running||state.sends.has(editorOwner);
+    if(error||!replyOwnsConnection)status.append(el('span', '', error || connectionError || (visibleConnection === 'connected' ? t(client.production?'connected':'preview') : t(visibleConnection))));
+    if (visibleConnection === 'offline'&&!replyOwnsConnection) {
       const retry = el('button', 'text-button', t('retry'));
       retry.type = 'button';
       retry.onclick = () => loadSnapshot(true);
       status.append(retry);
     }
+    renderMessages();
   }
   function saveNavigation(next,replace=false){const value={potRoute:next,potScope:client.scope?.()||{},potDirectory:directoryOpen};window.history[replace?'replaceState':'pushState'](value,'',location.href);}
   async function navigate(next,{replace=false,record=true}={}) {
@@ -330,7 +335,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       row.append(assistantAvatar(item,32)); const labels = el('span', 'assistant-labels'); const name = el('span', 'assistant-name');name.append(el('span','assistant-title',item.name));
       const badge=el('span','owner-badge badge-icon');badge.title=item.space_name||t(item.space_kind==='remote'?'remote':'local');badge.append(icon(item.space_kind==='remote'?'cloud':'machines'));name.append(badge);
       const unread=replies.unread(controlOf(item),item.id,item.reply_count||0);if(unread){const badge=el('span','unread-badge',unread>9?'9+':String(unread));badge.title=String(unread);badge.setAttribute('aria-label',`${unread} ${locale==='zh-CN'?'条未读回复':'unread replies'}`);name.append(badge);row.classList.add('has-unread');}
-      labels.append(name, el('span', 'assistant-preview', item.offline ? t('offline') : item.preview || item.phase || ''));
+      labels.append(name, el('span', 'assistant-preview', item.offline ? t('offline') : item.preview || ({failed:t('replyFailed'),needs_configuration:t('setupAI'),ready:t('connected')}[item.phase] || item.phase || '')));
       row.append(labels); row.onclick = () => client.production ? selectAssistant(item) : (directoryOpen = false, renderShell());
       list.append(row); rows.push({row, name:item.name.toLowerCase()});
     }
@@ -364,28 +369,33 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const scope=client.scope(),key=JSON.stringify([scope.space,scope.owner]),ticket=++taskRefresh;
     try{const value=await client.request('/api/v1/tasks/query?scope=active&limit=50',{...scope});if(disposed||ticket!==taskRefresh||key!==JSON.stringify([client.scope().space,client.scope().owner]))return;taskCache.set(key,(value.items||[]).filter(task=>task.phase==='running').map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner})));if(route==='chat')renderMessages();}catch{/* Keep owner-scoped cached rows until an authoritative refresh succeeds. */}
   }
-  let activityNode;
   function renderMessages() {
     const follow = nearBottom();
     const previousTop = history.scrollTop;
-    activityNode?.remove();
-    activityNode = null;
-    const snapshot = state.snapshot;
-    const visibleMessages=(snapshot?.messages||[]).filter(message=>!(message.role==='system'&&message.request_id?.startsWith('pot-result-')));
-    const ids = new Set(visibleMessages.map(message => message.id));
+    const snapshot = state.snapshot||(client.production&&selectedAssistant?cachedSnapshots.get(JSON.stringify([selectedAssistant.space_id||'',selectedAssistant.id])):null);
+    const sending=state.sends.get(editorOwner||(snapshot&&ownerKey(snapshot)));
+    const visibleMessages=projectChatReplies(snapshot,sending,{offline:connection==='offline'||disconnected||selectedAssistant?.offline});
+    const ids = new Set(visibleMessages.map(message => message.viewKey));
     for (const [id, record] of messageNodes) if (!ids.has(id)) { record.row.remove(); messageNodes.delete(id); }
     let position = 0;
     for (const message of visibleMessages) {
-      let record = messageNodes.get(message.id);
+      let record = messageNodes.get(message.viewKey);
       if (!record) {
         const row = el('article', `message role-${message.role}`);
         const bubble = el('div', 'message-body');
         row.append(bubble);
         record = {row, bubble};
-        messageNodes.set(message.id, record);
+        messageNodes.set(message.viewKey, record);
       }
       const {row, bubble} = record;
-      if (record.text !== message.text || record.role !== message.role) {
+      if(message.role==='assistant'){
+        record.reply ||= createReplyBubble(bubble);
+        const scope=client.scope?.();
+        record.reply.update(message,{t,downloadFile:client.downloadFile?async({task,path})=>{try{await client.downloadFile(task,path,scope);}catch(reason){error=reason.message;updateControls();}}:undefined,
+          onSettings:async()=>{if(!await pages?.leave())return;route='settings';await pages.showProviders();renderShell();},
+          onReconnect:()=>loadSnapshot(true),onRetrySend:submit,canRetrySend:connection==='connected'&&!pendingSend()&&draft(state)===sending?.request.text});
+        record.text=message.text;record.role=message.role;
+      }else if (record.text !== message.text || record.role !== message.role) {
         bubble.replaceChildren();
         if (message.role === 'tool') {const detail=el('details','tool-details');detail.append(el('summary','',message.text.split('\n')[0].slice(0,100)),el('pre','',message.text));bubble.append(detail);}
         else if (message.role === 'system') bubble.textContent = message.text;
@@ -403,7 +413,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         row.append(copy); record.copy = copy;
       }
       if (record.copy) {record.copy.title=t('copy');record.copy.setAttribute('aria-label',t('copy'));}
-      if (message.status === 'streaming' && !record.dot) {
+      if (message.role==='tool'&&message.status === 'streaming' && !record.dot) {
         record.dot = el('span', 'activity-dot'); row.append(record.dot);
       } else if (message.status !== 'streaming' && record.dot) { record.dot.remove(); record.dot = null; }
       record.dot?.setAttribute('aria-label', t('working'));
@@ -414,22 +424,18 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if (messageColumn.children[position] !== row) messageColumn.insertBefore(row, messageColumn.children[position] || null);
       position++;
     }
-    const lastAssistant=(snapshot?.messages||[]).findLast(message=>message.role==='assistant');
-    for(const [id,record]of messageNodes){if(id!==lastAssistant?.id){record.tasks?.remove();record.tasks=null;}}
-    if(client.production&&lastAssistant){const record=messageNodes.get(lastAssistant.id),tasks=taskCache.get(JSON.stringify([client.scope().space,client.scope().owner]))||[];record.tasks?.remove();record.tasks=null;if(tasks.length){const strip=el('div','background-tasks');strip.setAttribute('aria-label',locale==='zh-CN'?'正在执行的后台任务':'Executing background tasks');for(const task of tasks.slice(0,3)){const open=el('button','background-task');open.type='button';open.title=task.title;open.append(el('span','task-activity-dot'),el('span','background-task-title',task.title));open.onclick=()=>{route='tasks';pages.openTask(task);renderShell();};strip.append(open);}if(tasks.length>3){const more=el('button','text-button',locale==='zh-CN'?`还有 ${tasks.length-3} 项任务`:`${tasks.length-3} more tasks`);more.onclick=()=>navigate('tasks');strip.append(more);}record.row.append(strip);record.tasks=strip;}}
+    const lastAssistant=visibleMessages.findLast(message=>message.role==='assistant');
+    for(const [id,record]of messageNodes){if(id!==lastAssistant?.viewKey){record.tasks?.remove();record.tasks=null;}}
+    if(client.production&&lastAssistant){const record=messageNodes.get(lastAssistant.viewKey),tasks=taskCache.get(JSON.stringify([client.scope().space,client.scope().owner]))||[];record.tasks?.remove();record.tasks=null;if(tasks.length){const strip=el('div','background-tasks');strip.setAttribute('aria-label',locale==='zh-CN'?'正在执行的后台任务':'Executing background tasks');for(const task of tasks.slice(0,3)){const open=el('button','background-task');open.type='button';open.title=task.title;open.append(el('span','task-activity-dot'),el('span','background-task-title',task.title));open.onclick=()=>{route='tasks';pages.openTask(task);renderShell();};strip.append(open);}if(tasks.length>3){const more=el('button','text-button',locale==='zh-CN'?`还有 ${tasks.length-3} 项任务`:`${tasks.length-3} more tasks`);more.onclick=()=>navigate('tasks');strip.append(more);}record.row.append(strip);record.tasks=strip;}}
     if (snapshot && !visibleMessages.length) {
-      activityNode = el('p', 'empty-chat', t('first')); messageColumn.append(activityNode);
-    }
-    if (snapshot?.running && !snapshot.messages.some(message => message.role === 'assistant' && message.status === 'streaming')) {
-      activityNode = el('div', 'activity', snapshot.turn?.paused?(locale==='zh-CN'?'已暂停':'Paused'):t('working'));
-      const dots = el('span', 'waiting-dots');
-      dots.setAttribute('aria-hidden', 'true');
-      dots.append(el('i'), el('i'), el('i'));
-      if(!snapshot.turn?.paused)activityNode.append(dots); messageColumn.append(activityNode);
+      if(!messageColumn.querySelector('.empty-chat'))messageColumn.append(el('p', 'empty-chat', t('first')));
+    }else if(visibleMessages.length){
+      messageColumn.querySelector('.empty-chat')?.remove();
     }
     if (follow) requestAnimationFrame(() => { if (!disposed) scrollBottom(); });
     else { history.scrollTop = previousTop; latest.hidden = false; }
   }
+  function pendingSend(){return state.snapshot&&state.pending.has(ownerKey(state.snapshot));}
   function onSnapshot(snapshot, receivedEpoch = epoch) {
     if (disposed || receivedEpoch !== state.epoch) return;
     if (state.snapshot && validSnapshot(snapshot)
@@ -439,6 +445,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const initialSnapshot = !state.snapshot;
     if (!acceptSnapshot(state, snapshot, receivedEpoch)){if(state.snapshot&&validSnapshot(snapshot)&&state.snapshot.cursor===snapshot.cursor){connection='connected';updateControls();}return;}
     connection = 'connected';
+    connectionError = '';
     if(client.production)cachedSnapshots.set(JSON.stringify([client.scope().space,client.scope().owner]),snapshot);
     const restorePosition = editorOwner !== ownerKey(snapshot) ? positions.get(ownerKey(snapshot)) : undefined;
     syncEditor();
@@ -449,9 +456,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const abort = new AbortController();
   async function loadSnapshot(reattach = false) {
     if (disposed) return;
-    if (reattach) {epoch = beginSubscription(state);attach();return;}
+    if (reattach) {epoch = beginSubscription(state);disconnected=false;attach();return;}
     const receivedEpoch = epoch;
-    connection = 'connecting'; error = ''; updateControls();
+    connection = 'connecting'; error = ''; connectionError = ''; updateControls();
     try {
       const value = await client.snapshot({signal: abort.signal});
       if (disposed || receivedEpoch !== state.epoch) return;
@@ -464,9 +471,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function attach() {
     unsubscribe();
     const receivedEpoch = epoch;
-    unsubscribe = client.subscribe(value => onSnapshot(value, receivedEpoch), value => {
+    unsubscribe = client.subscribe(value => onSnapshot(value, receivedEpoch), (value, reason) => {
       if (disposed || receivedEpoch !== state.epoch) return;
-      if (value === 'offline') disconnected = true;
+      if (value === 'offline') {disconnected = true;connectionError = reason?.message || t('streamDisconnected');}
+      if (value === 'connected') connectionError = '';
       if (value === 'connected' && disconnected) { disconnected = false; loadSnapshot(true); }
       else { connection = value; updateControls(); }
     });
@@ -479,7 +487,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if (state.snapshot) positions.set(ownerKey(state.snapshot), history.scrollTop);
     pages?.clearApprovals();selectedAssistant = item; client.setScope({owner:item.id, space:item.space_id || ''});
     epoch = beginSubscription(state); editorOwner = null; route = 'chat'; if(!initial)directoryOpen = false;
-    messageColumn.replaceChildren(); messageNodes.clear(); error = '';
+    messageColumn.replaceChildren(); messageNodes.clear(); error = ''; connectionError = ''; disconnected = false;
     const cached=cachedSnapshots.get(JSON.stringify([item.space_id||'',item.id]));
     if(cached){acceptSnapshot(state,cached,epoch);syncEditor();renderMessages();}
     if(client.production&&record)saveNavigation('chat',initial);
