@@ -38,7 +38,9 @@ func OpenRegistry(path, root string) (*Registry, error) {
 		if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS assistant_registry_identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1),root TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS assistant_definitions(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,name TEXT NOT NULL,revision INTEGER NOT NULL,request_id TEXT NOT NULL UNIQUE,created_name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS assistant_initial(id TEXT PRIMARY KEY, binding TEXT NOT NULL, spec TEXT NOT NULL,rules TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS assistant_initial_intent(id TEXT PRIMARY KEY,intent TEXT NOT NULL);`); err != nil {
+CREATE TABLE IF NOT EXISTS assistant_initial_intent(id TEXT PRIMARY KEY,intent TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS assistant_welcome(id TEXT PRIMARY KEY,text TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS assistant_rename_requests(id TEXT PRIMARY KEY,input_hash TEXT NOT NULL,response TEXT NOT NULL);`); err != nil {
 			return err
 		}
 		if _, err := tx.Exec("INSERT OR IGNORE INTO assistant_registry_identity VALUES (1,?)", root); err != nil {
@@ -103,12 +105,12 @@ func (r *Registry) Create(ctx context.Context, request, name string) (Definition
 // CreateConfigured binds the entire creation input before publishing identity.
 // Initial configuration is immutable and only applied to a new conversation.
 func (r *Registry) CreateConfigured(ctx context.Context, request, name, profile, rules string, resolve func() (*core.ResolvedSpec, error)) (Definition, error) {
-	return r.CreateWithIntent(ctx, request, name, profile, rules, nil, resolve)
+	return r.CreateWithIntent(ctx, request, name, profile, rules, nil, "", false, resolve)
 }
 
 // CreateWithIntent binds creation intent before publishing the assistant identity.
-func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingInput, rules string, intent json.RawMessage, resolve func() (*core.ResolvedSpec, error)) (Definition, error) {
-	binding, err := core.HashJSON([]any{name, bindingInput, rules, intent})
+func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingInput, rules string, intent json.RawMessage, welcome string, onlyFirst bool, resolve func() (*core.ResolvedSpec, error)) (Definition, error) {
+	binding, err := core.HashJSON([]any{name, bindingInput, rules, intent, welcome})
 	if err != nil {
 		return Definition{}, err
 	}
@@ -124,6 +126,15 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 	}
 	var definition Definition
 	err = storage.Transaction(ctx, r.db, func(tx *sql.Tx) error {
+		if onlyFirst {
+			err := tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id FROM assistant_definitions ORDER BY sequence LIMIT 1").Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID)
+			if err == nil {
+				return validateDefinition(definition)
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+		}
 		var createdName string
 		err := tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id,created_name FROM assistant_definitions WHERE request_id=?", request).Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID, &createdName)
 		if err == nil {
@@ -174,11 +185,23 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 		if _, err = tx.ExecContext(ctx, "INSERT INTO assistant_initial_intent VALUES (?,?)", id, intentBody); err != nil {
 			return err
 		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO assistant_welcome VALUES (?,?)", id, welcome); err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx, "INSERT INTO assistant_definitions(id,name,revision,request_id,created_name) VALUES (?,?,?,?,?)", id, name, 1, request, name)
 		return err
 	})
 	return definition, err
 }
+func (r *Registry) Welcome(ctx context.Context, id string) (string, error) {
+	var text string
+	err := r.db.QueryRowContext(ctx, "SELECT text FROM assistant_welcome WHERE id=?", id).Scan(&text)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return text, err
+}
+
 func (r *Registry) Rename(ctx context.Context, id, name string, revision uint64) (Definition, error) {
 	if err := ValidateName(name); err != nil {
 		return Definition{}, err

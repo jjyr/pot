@@ -58,6 +58,7 @@ def run(binary, base, env, cli_command):
     browser_open = False
     web = None
     task_id = ""
+    model_requests = []
     coordinator_key = secrets.token_urlsafe(24)
     opener = build_opener(ProxyHandler({}))
     with (base / "process.log").open("w") as log:
@@ -144,7 +145,39 @@ def run(binary, base, env, cli_command):
                 if self.headers.get("Authorization") != "Bearer isolated-key":
                     self.send_error(401)
                     return
-                self.rfile.read(int(self.headers["Content-Length"]))
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                model_requests.append(body)
+                if any(
+                    m.get("content") == "以后叫你小白" for m in body.get("messages", [])
+                ) and not any(m.get("role") == "tool" for m in body.get("messages", [])):
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.end_headers()
+                    event = {
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "id": "rename-onboarding",
+                                            "type": "function",
+                                            "function": {
+                                                "name": "rename_assistant",
+                                                "arguments": json.dumps({"name": "小白"}),
+                                            },
+                                        }
+                                    ]
+                                },
+                                "finish_reason": "tool_calls",
+                            }
+                        ]
+                    }
+                    self.wfile.write(
+                        ("data: " + json.dumps(event) + "\n\ndata: [DONE]\n\n").encode()
+                    )
+                    return
                 text = "Server stream integration completed. "
                 text += (
                     f"[Download binary proof](pot-file://{task_id}/proof.bin)"
@@ -213,6 +246,37 @@ def run(binary, base, env, cli_command):
                 )
             )
             wait_for(lambda: cli("status", "-root", str(base / "runtime")), "Runtime")
+            runtime = api("GET", "/api/v1/runtime")
+            api(
+                "POST",
+                "/api/v1/permissions",
+                {
+                    "action": "configure",
+                    "machine_id": runtime["runtime_id"],
+                    "machine_policy": {"execution_mode": "host", "host_access": "allow"},
+                },
+            )
+            start_web()
+            browser_open = True
+            browser_cli("open", origin)
+            browser_cli("snapshot")
+            onboarding = {
+                "origin": origin,
+                "token": cli("access", "-browser-root", str(base / "browser"), "token").strip(),
+                "endpoint": f"http://127.0.0.1:{model.server_port}",
+                "screenshot": str(ROOT / "output/pr-images/onboarding-after.png"),
+            }
+            (ROOT / "output/pr-images").mkdir(parents=True, exist_ok=True)
+            code = (ROOT / "scripts/tests/go-ui-onboarding-browser.js").read_text()
+            browser_cli("run-code", code.replace("STATE", json.dumps(onboarding)))
+            welcome = "你好，我是 Pot。\n\n你可以给我起个名字，或者告诉我你希望我如何帮你。"
+            assert any(
+                any(
+                    m.get("role") == "assistant" and m.get("content") == welcome
+                    for m in body.get("messages", [])
+                )
+                for body in model_requests
+            ), "Welcome missing from actual HTTP model request"
             api(
                 "POST",
                 "/api/v1/providers",
@@ -264,7 +328,6 @@ def run(binary, base, env, cli_command):
             artifact.parent.mkdir(parents=True, exist_ok=True)
             content = bytes(range(256)) * 4097 + b"\x00GO\xffEND"
             artifact.write_bytes(content)
-            start_web()
             state = {
                 "origin": origin,
                 "coord": f"http://127.0.0.1:{coordinator.server_port}",

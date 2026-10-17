@@ -113,6 +113,11 @@ assert.equal(thinking[1].viewKey,streaming[1].viewKey,'Streaming adopts the exis
 const settling=projectChatReplies({...waiting,messages:[chatInput,{...chatReply,text:'Done',status:'complete'}]});
 assert.equal(settling.length,2,'Finishing a message before turn cleanup must not create another bubble');
 assert.equal(settling[1].viewKey,thinking[1].viewKey,'Turn cleanup keeps activity in the original reply');
+const toolInput={...chatReply,text:'',status:'complete'},toolOutput={id:'tool',role:'tool',text:'result',status:'complete'},nextOutput={...chatReply,id:'next',text:'Done'};
+const toolRound=projectChatReplies({...waiting,messages:[chatInput,toolInput,toolOutput]});
+const afterTool=projectChatReplies({...waiting,messages:[chatInput,toolInput,toolOutput,nextOutput]});
+assert.equal(afterTool.filter(row=>row.role==='assistant').length,1,'Tool-only rounds do not leave empty reply bubbles');
+assert.equal(toolRound[1].viewKey,afterTool.at(-1).viewKey,'Output after a tool round adopts the waiting bubble');
 assert.equal(projectChatReplies(waiting,null,{offline:true})[1].phase,'reconnecting','Connection loss does not declare execution failed');
 const failed=projectChatReplies({...waiting,running:false,turn_id:null,messages:[chatInput,{...chatReply,text:'Partial',status:'failed',error:'HTTP 404'}]});
 assert.equal(failed.filter(row=>row.phase==='failed').length,1,'Only one failed reply is displayed');

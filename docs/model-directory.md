@@ -38,9 +38,15 @@ failure notification.
 ## Ownership and defaults
 
 Providers are Space-owned named connections with credentials, protocol, endpoint,
-available models and a concrete default model. Saving a Provider never configures
-or registers an assistant. The Space's default Provider initializes new assistant
-forms; its concrete default model ID is visibly selected. Provider setup is a
+available models and a concrete default model. Saving a Provider stores the
+connection independently of assistant registration. On first-use Chat, the UI
+explicitly calls `POST /api/v1/assistants/bootstrap` with its locale after connection setup
+or when opening an empty directory with an existing Provider. Control atomically
+creates one default assistant named Pot only if the Space still has no assistants
+and has a default Provider. Concurrent clients return the same identity; existing
+assistants and saved names are preserved. Nested Provider setup in an assistant
+draft resumes that draft without bootstrapping Pot. The Space's default Provider
+initializes new assistant forms; its concrete default model ID is visibly selected. Provider setup is a
 separate chooser and connection editor; search and provider selection appear only
 in the chooser. The editor contains name, API URL, credential, default model,
 request format, context/output limits and reasoning effort in that order. It never

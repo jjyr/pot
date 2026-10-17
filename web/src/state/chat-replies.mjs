@@ -1,19 +1,22 @@
 // Reply identities survive the optimistic send, its receipt, and the first
 // streamed assistant message. Transport loss never declares execution failed.
 export function projectChatReplies(snapshot, send, {offline=false}={}) {
-  const messages=snapshot?.messages||[],inputs=new Map(),firstReplies=new Set(),rows=[];
-  for(const message of messages){
-    if((message.role==='user'&&!message.steering)||message.role==='system'){
-      inputs.set(message.id,message);
-    }
-  }
+  const messages=snapshot?.messages||[],inputs=new Map(),replyInputs=new Map(),latestReplies=new Map(),firstReplies=new Set(),rows=[];
   let currentInput='';
   for(const message of messages){
-    if((message.role==='user'&&!message.steering)||message.role==='system')currentInput=message.id;
+    if((message.role==='user'&&!message.steering)||message.role==='system'){
+      inputs.set(message.id,message);currentInput=message.id;
+    }
+    if(message.role==='assistant'){const input=message.reply_to||currentInput;replyInputs.set(message.id,input);latestReplies.set(input,message.id);}
+  }
+  for(const message of messages){
     if(message.role==='system'&&message.request_id?.startsWith('pot-result-'))continue;
     const row={...message,viewKey:message.request_id?`input:${message.request_id}`:message.id};
     if(message.role==='assistant'){
-      const input=inputs.get(message.reply_to||currentInput);
+      const input=inputs.get(replyInputs.get(message.id));
+      // Tool-only model rounds have no prose to keep. The next output adopts
+      // their waiting bubble instead of leaving empty cards in the transcript.
+      if(!message.text&&message.status==='complete'&&(!snapshot.running||input?.id!==snapshot.turn_id||latestReplies.get(input?.id)!==message.id))continue;
       row.inputID=input?.id;
       if(input&&!firstReplies.has(input.id)){
         row.viewKey=`reply:${input.request_id||input.id}`;firstReplies.add(input.id);

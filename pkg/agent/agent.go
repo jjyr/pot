@@ -431,7 +431,7 @@ func (a *Agent) available(role core.ExecutionRole, settings core.AgentSettings, 
 		if role == core.Summary && tool.Name != "list_tasks" && tool.Name != "get_task" {
 			continue
 		}
-		if role == core.Worker && slices.Contains([]string{"create_task", "list_tasks", "get_task", "guide_task", "interrupt", "cancel_task", "send_message", "wait_task", "list_assistants", "send_assistant_message", "list_schedules", "get_schedule", "manage_schedule", "read_agent_instructions", "update_agent_instructions"}, tool.Name) {
+		if role == core.Worker && slices.Contains([]string{"create_task", "list_tasks", "get_task", "guide_task", "interrupt", "cancel_task", "send_message", "wait_task", "list_assistants", "send_assistant_message", "list_schedules", "get_schedule", "manage_schedule", "read_agent_instructions", "update_agent_instructions", "rename_assistant"}, tool.Name) {
 			continue
 		}
 		if settings.AllowedTools != nil && !slices.Contains(*settings.AllowedTools, tool.Name) {
