@@ -24,3 +24,5 @@ When implementing features or changing schemas, protocols, APIs, or configuratio
 - Keep PR titles and descriptions concise; explain the problem and resulting behavior.
 - Illustrate architecture changes with an ASCII diagram.
 - Include labeled before/after screenshots for UI changes.
+- Store PR screenshots in `docs/pr-images/<normalized-branch>/`, following the
+  [PR image conventions](docs/pr-images/README.md).
