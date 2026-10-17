@@ -63,7 +63,7 @@ func fixture() map[string]provider {
 	return map[string]provider{"proxy": {Name: "Proxy", NPM: "@ai-sdk/openai-compatible", API: ptr("https://fixture.invalid/v1"), Models: map[string]model{"claude-example": {Name: "Proxy chat", Limit: Limits{Context: 64000, Input: 50000, Output: 4000}, ToolCall: true, Modalities: modalities{Input: []string{"text", "image"}, Output: []string{"text"}}}, "embedding": {Kind: ptr("embedding")}}}, "anthropic": {Name: "Anthropic", NPM: "@ai-sdk/anthropic", Models: map[string]model{"claude-example": {Name: "Official", Limit: Limits{Context: 200000, Output: 32000}, ToolCall: true, Modalities: modalities{Input: []string{"text"}, Output: []string{"text"}}}}}}
 }
 func profile() core.Profile {
-	return core.Profile{ID: "p", Revision: 1, Name: "P", Provider: "route", AuthRef: "provider:route", Model: "claude-example", ModelSettings: &core.ModelSettings{}, Params: core.Parameters{Agent: core.DefaultAgentSettings(), MaxOutputTokens: 4000}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "guest_vm"}}
+	return core.Profile{ID: "p", Revision: 1, Name: "P", Provider: "route", AuthRef: "provider:route", Model: "claude-example", ModelSettings: &core.ModelSettings{}, Params: core.Parameters{Agent: core.DefaultAgentSettings(), MaxOutputTokens: 4000}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "runtime"}}
 }
 func TestOfflineDirectoryAndExactProviderDefaults(t *testing.T) {
 	d, err := Open(filepath.Join(t.TempDir(), "models"))

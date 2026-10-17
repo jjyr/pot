@@ -12,20 +12,17 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/protocol"
-	"github.com/jjyr/pot/pkg/resourcecontrol"
 	"github.com/jjyr/pot/pkg/storage"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 )
 
 type Application struct {
-	RuntimeResources  func(context.Context, string, json.RawMessage) (any, error)
-	About             func(context.Context) (any, error)
-	Control           *control.Service
-	Desktop           http.Handler
-	Resources         *resourcecontrol.Manager
+	RuntimeResources func(context.Context, string, json.RawMessage) (any, error)
+	About            func(context.Context) (any, error)
+	Control          *control.Service
+
 	RuntimeID, BootID string
 	Name              string
 }
@@ -66,9 +63,6 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 			return nil, errors.New("product information unavailable")
 		}
 		return a.About(ctx)
-	}
-	if result, err, handled := a.resourceCall(ctx, method, u, r); handled {
-		return result, err
 	}
 	if path == "/api/v1/runtime/resources" {
 		if a.RuntimeResources == nil {
@@ -147,7 +141,7 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 		case "/api/v1/completions":
 			return s.Completions(ctx, owner, u.Query().Get("q"))
 		case "/api/v1/runtime":
-			return map[string]any{"api_version": protocol.APIVersion, "runtime_id": a.RuntimeID, "boot_id": a.BootID, "implementation": "go", "control_id": a.RuntimeID, "name": a.Name, "capabilities": map[string]bool{"host": true, "sandbox": s.HasSandbox()}}, nil
+			return map[string]any{"api_version": protocol.APIVersion, "runtime_id": a.RuntimeID, "boot_id": a.BootID, "implementation": "go", "control_id": a.RuntimeID, "name": a.Name}, nil
 		case "/api/v1/control":
 			return map[string]any{"id": a.RuntimeID, "name": a.Name, "runtime_id": a.RuntimeID, "connected": true, "role": s.ControlRole()}, nil
 		case "/api/v1/assistants":

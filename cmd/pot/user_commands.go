@@ -220,7 +220,7 @@ func userCommand(ctx context.Context, args []string, out io.Writer) error {
 		} else {
 			report["runtime_error"] = healthErr.Error()
 		}
-		for key, path := range map[string]string{"runtime_socket": "runtime.sock", "sandbox_helper_socket": "helper.sock"} {
+		for key, path := range map[string]string{"runtime_socket": "runtime.sock"} {
 			info, err := os.Stat(filepath.Join(root, path))
 			report[key] = err == nil && info.Mode()&os.ModeSocket != 0
 		}

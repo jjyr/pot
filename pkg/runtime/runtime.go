@@ -20,10 +20,6 @@ import (
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/composition"
 	"github.com/jjyr/pot/pkg/execution"
-	"github.com/jjyr/pot/pkg/resource"
-	"github.com/jjyr/pot/pkg/resourcecontrol"
-	"github.com/jjyr/pot/pkg/sandbox"
-	"github.com/jjyr/pot/pkg/sandboxresources"
 )
 
 // KeySource supplies the encryption key for this host's provider credentials.
@@ -44,15 +40,6 @@ type Options struct {
 	// ResourceDirectory contains packaged skills, plugins and optional Node.
 	// It is required even when the embedding application supplies no assets.
 	ResourceDirectory string
-	// SandboxProviders nil loads local capabilities from PluginRoot. An empty,
-	// nonnil slice disables providers. Open handshakes with plugin processes
-	// without starting engines, guests or downloads.
-	SandboxProviders []sandbox.Provider
-	// DefaultSandboxProvider overrides the installed plugin default. Explicit
-	// in-process Providers must supply this to use the shared Sandbox.
-	DefaultSandboxProvider string
-	// SandboxCatalog supplies resources for explicitly injected Providers.
-	SandboxCatalog *sandboxresources.Catalog
 	// Limits nil uses persisted limits or execution.DefaultLimits.
 	Limits *execution.Limits
 	// Workspace and AgentHome default to directories beneath Root. BuiltinSkills
@@ -108,8 +95,7 @@ func Open(ctx context.Context, options Options) (*Runtime, error) {
 	}
 	inner, err := impl.Open(ctx, impl.Options{
 		Root: options.Root, ResourceDirectory: resources,
-		SandboxProviders: options.SandboxProviders, Limits: options.Limits,
-		DefaultSandboxProvider: options.DefaultSandboxProvider, SandboxCatalog: options.SandboxCatalog,
+		Limits:                 options.Limits,
 		DisableMetadataRefresh: options.DisableMetadataRefresh,
 		Control: control.Options{
 			Workspace: options.Workspace, AgentHome: options.AgentHome,
@@ -127,8 +113,8 @@ func Open(ctx context.Context, options Options) (*Runtime, error) {
 		name = "Pot"
 	}
 	app := &transport.Application{
-		RuntimeResources: inner.ResourceCall, Resources: inner.Provisioning,
-		Control: inner.Control, RuntimeID: inner.Root.Identity.RuntimeID,
+		RuntimeResources: inner.ResourceCall,
+		Control:          inner.Control, RuntimeID: inner.Root.Identity.RuntimeID,
 		BootID: inner.BootID, Name: name,
 		About: func(context.Context) (any, error) { return productinfo.Read(resources) },
 	}
@@ -143,15 +129,6 @@ func (r *Runtime) Info() Info {
 
 // Executions returns the shared execution capacity and lifecycle manager.
 func (r *Runtime) Executions() *execution.Manager { return r.inner.Executions }
-
-// Sandboxes returns the host's sandbox manager.
-func (r *Runtime) Sandboxes() *sandbox.Manager { return r.inner.Sandboxes }
-
-// Resources returns the host's verified resource cache.
-func (r *Runtime) Resources() *resource.Store { return r.inner.Resources }
-
-// Provisioning returns the sandbox resource preparation manager.
-func (r *Runtime) Provisioning() *resourcecontrol.Manager { return r.inner.Provisioning }
 
 // Handler returns the authenticated operator API, including event streams and
 // runtime resource commands. Every request requires Authorization: Bearer token.
@@ -170,13 +147,6 @@ func (r *Runtime) ResourceSnapshot(ctx context.Context) (json.RawMessage, error)
 	return json.Marshal(value)
 }
 
-// ImportSandboxResources imports an offline bundle for an explicit Sandbox and
-// waits for verification/binding. An empty bundle ID retains the existing pin or
-// selects that Provider's architecture default for an unpinned Sandbox.
-func (r *Runtime) ImportSandboxResources(ctx context.Context, sandboxID, bundleID, directory string) error {
-	return r.inner.ImportSandboxResources(ctx, sandboxID, bundleID, directory)
-}
-
-// Close cancels background work and closes the host's services, providers and
+// Close cancels background work and closes the host's services and
 // exclusive data-root lock. It is safe to call more than once.
 func (r *Runtime) Close() error { return r.inner.Close() }

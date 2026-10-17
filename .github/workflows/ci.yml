@@ -45,8 +45,6 @@ jobs:
       - run: mise run check:go
       - run: mise run test
       - run: mise run test:executor
-      - run: mise run test:skills
-      - run: mise run test:operation-prepare
       - run: mise run test:i18n
       - run: mise run test:hooks
       - run: mise run licenses

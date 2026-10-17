@@ -9,7 +9,7 @@ user agreement; see the repository `AGENTS.md`.
 | Capability | Tools | Roles |
 |---|---|---|
 | Execution | `exec_command`, `write_stdin`, `apply_patch` | Main, Worker |
-| Computer use | `cua_repl` | Main, Worker; Host or Linux Sandbox |
+| Computer use | `cua_repl` | Main, Worker; fixed Runtime |
 | Composition | `exec`, `wait` | Main, Worker |
 | Tasks | `create_task`, `list_tasks`, `get_task`, `guide_task`, `interrupt`, `cancel_task`, `send_message`, `wait_task` | Main; Summary only list/get |
 | Assistant messages | `list_assistants`, `send_assistant_message` | Main |
@@ -17,15 +17,11 @@ user agreement; see the repository `AGENTS.md`.
 | Assistant rules | `read_agent_instructions`, `update_agent_instructions` (always reviewed) | Main |
 | Execution targets | `list_execution_targets` | Main |
 
-`list_execution_targets` discovers authorized Host/Sandbox destinations without
-starting them. Execution tools use `execution_target` with `"host"`, `"sandbox:ID"`
-or a typed Runtime + Host/Sandbox reference. `create_task` and
-`manage_schedule.spec` use `machine_id`; machine policy resolves the execution mode at dispatch. These are addresses,
-not independently managed resources. Runtime owns automatic Sandbox lifecycle;
-`manage_sandbox` is absent from the model tool catalog.
+`list_execution_targets` lists enrolled Runtime destinations. `create_task` and
+`manage_schedule.spec` accept explicit `machine_id`; omission uses the owning
+Control. Execution tools remain fixed to their run and accept no destination
+selector. Target authorization is defined in [Permissions](permissions.md).
 
-Profile filters can narrow visibility. Target defaults and approval rules are in
-[Agent permissions](permissions.md).
 Commands request external-service credentials through the `credentials`
 environment-variable mapping and explicitly reread them with `refresh_credentials`.
 Plugins declare bindings in their manifest. See [Credentials](credentials.md).
@@ -40,8 +36,8 @@ enters model history; child operations remain visible in events and approval car
 
 ```javascript
 const results = await Promise.all([
-  tools.exec_command({cmd: "git status --short", execution_target: "sandbox:project"}),
-  tools.exec_command({cmd: "git diff --stat", execution_target: "sandbox:project"})
+  tools.exec_command({cmd: "git status --short"}),
+  tools.exec_command({cmd: "git diff --stat"})
 ]);
 text(results.map(r => ({stdout: r.stdout, exit_code: r.exit_code})));
 ```

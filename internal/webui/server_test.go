@@ -68,6 +68,16 @@ func TestAuthenticationAllowlistCredentialSeparationAndRotation(t *testing.T) {
 			t.Fatalf("browser resource provisioning allowed: %s %d", method, w.Code)
 		}
 	}
+	for _, endpoint := range []struct{ method, path string }{
+		{"POST", "/api/v1/desktop/sessions"},
+		{"GET", "/desktop/retired/rfb"},
+		{"GET", "/desktop-assets/rfb.js"},
+		{"POST", "/api/v1/machines"},
+	} {
+		if denied := invoke(endpoint.method, endpoint.path, "", cookie.String(), "http://localhost"); denied.Code != 404 {
+			t.Fatal("retired management route published", endpoint, denied.Code)
+		}
+	}
 	if w = invoke("POST", "/api/v1/messages", "", cookie.String(), "https://attacker.example"); w.Code != 403 {
 		t.Fatal(w.Code)
 	}

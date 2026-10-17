@@ -9,7 +9,7 @@ import (
 )
 
 func TestInstructionToolsAlwaysRequireExactOwnerReview(t *testing.T) {
-	for _, policy := range []string{"allow", "deny"} {
+	for _, policy := range []string{"allow", "ask"} {
 		t.Run(policy, func(t *testing.T) {
 			s, _ := configurationService(t)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -23,7 +23,7 @@ func TestInstructionToolsAlwaysRequireExactOwnerReview(t *testing.T) {
 				t.Fatal(err)
 			}
 			thread, _ := c.Thread(ctx)
-			if err = s.Permissions.Configure("runtime", MachinePolicy{"sandbox", policy}); err != nil {
+			if err = s.Permissions.Configure("runtime", MachinePolicy{ExecutionAccess: policy}); err != nil {
 				t.Fatal(err)
 			}
 			if len(s.productTools(true)) != 0 {

@@ -2,7 +2,7 @@
 
 Pot is a personal assistant with persistent conversations and background Tasks.
 Multiple chat assistants own their conversations, rules, Tasks and schedules.
-Task Agents execute a concrete brief on one fixed Host or Sandbox; they have no
+Task Agents execute a concrete brief on one fixed Runtime; they have no
 independent assistant persona or assistant AGENTS.md.
 
 The App starts/exits with its own Runtime and supports local use alongside

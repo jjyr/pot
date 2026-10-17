@@ -33,7 +33,7 @@ func SmallScenario(id string, turns []string, tools bool) Scenario {
 	}
 	settings.Shell.DefaultOutputBytes = 512
 	settings.Shell.MaxOutputBytes = 512
-	return Scenario{ID: id, Profile: core.Profile{ID: "eval", Revision: 1, Name: "Evaluation", Provider: "mock", Model: "deepseek-v4-flash", AuthRef: "provider:mock", Params: core.Parameters{MaxOutputTokens: 128, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "guest_vm"}}, Protocol: "openai_chat", Turns: turns, Responses: []ScriptedResponse{}, Fixtures: map[string]string{}, ExpectedFiles: map[string]string{}, DeadlineMS: 60000}
+	return Scenario{ID: id, Profile: core.Profile{ID: "eval", Revision: 1, Name: "Evaluation", Provider: "mock", Model: "deepseek-v4-flash", AuthRef: "provider:mock", Params: core.Parameters{MaxOutputTokens: 128, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "runtime"}}, Protocol: "openai_chat", Turns: turns, Responses: []ScriptedResponse{}, Fixtures: map[string]string{}, ExpectedFiles: map[string]string{}, DeadlineMS: 60000}
 }
 func assertion(text string, isJSON bool) OutputAssertion {
 	if isJSON {

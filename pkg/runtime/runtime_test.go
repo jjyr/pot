@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/jjyr/pot/pkg/runtime"
-	"github.com/jjyr/pot/pkg/sandbox"
 )
 
 type unusedKeys struct{ t *testing.T }
@@ -25,8 +24,8 @@ func hostOptions(t *testing.T) runtime.Options {
 	t.Helper()
 	return runtime.Options{
 		Root: filepath.Join(t.TempDir(), "host"), ResourceDirectory: t.TempDir(),
-		SandboxProviders: []sandbox.Provider{}, DisableMetadataRefresh: true,
-		Keys: unusedKeys{t}, Embedded: true, Name: "Embedded fixture",
+		DisableMetadataRefresh: true,
+		Keys:                   unusedKeys{t}, Embedded: true, Name: "Embedded fixture",
 	}
 }
 
@@ -41,12 +40,10 @@ func TestLifecycleRetainsIdentityAndReleasesRoot(t *testing.T) {
 	if info.RuntimeID == "" || info.BootID == "" || !filepath.IsAbs(info.Root) || info.AssetDirectory != options.ResourceDirectory {
 		t.Fatalf("unexpected host identity: %+v", info)
 	}
-	if host.Executions() == nil || host.Sandboxes() == nil || host.Resources() == nil || host.Provisioning() == nil {
+	if host.Executions() == nil {
 		t.Fatal("complete host must expose its reusable managers")
 	}
-	if got := host.Sandboxes().Descriptors(); len(got) != 0 {
-		t.Fatalf("explicit empty providers must disable platform defaults: %+v", got)
-	}
+
 	if duplicate, err := runtime.Open(context.Background(), options); err == nil {
 		_ = duplicate.Close()
 		t.Fatal("second host acquired an owned root")
@@ -115,13 +112,12 @@ func TestAuthenticatedHostAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	var resources struct {
-		RuntimeID string               `json:"runtime_id"`
-		Providers []sandbox.Descriptor `json:"sandbox_providers"`
+		RuntimeID string `json:"runtime_id"`
 	}
 	if err := json.Unmarshal(snapshot, &resources); err != nil {
 		t.Fatal(err)
 	}
-	if resources.RuntimeID != host.Info().RuntimeID || len(resources.Providers) != 0 {
+	if resources.RuntimeID != host.Info().RuntimeID {
 		t.Fatalf("unexpected resource snapshot: %s", snapshot)
 	}
 }

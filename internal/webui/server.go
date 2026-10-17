@@ -176,7 +176,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			failure(w, 405, "method not allowed")
 			return
 		}
-		reply(w, 200, map[string]any{"authenticated": auth, "scope": "control", "push_available": s.push != nil && s.push.Available(), "push_key": s.pushKey(), "desktop_available": !strings.Contains(s.upstream.URL, "/control/v1/owner")})
+		reply(w, 200, map[string]any{"authenticated": auth, "scope": "control", "push_available": s.push != nil && s.push.Available(), "push_key": s.pushKey()})
 		return
 	case "/access/token":
 		if c.Disabled {
@@ -259,26 +259,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		failure(w, 404, "access route unavailable")
 		return
 	}
-	if desktopAllowed(r.Method, r.URL.Path) {
-		if strings.Contains(s.upstream.URL, "/control/v1/owner") {
-			failure(w, 503, "remote desktop transport unavailable")
-			return
-		}
-		if !auth {
-			failure(w, 401, "browser authentication required")
-			return
-		}
-		query := r.URL.Query()
-		query.Del("assistant_id")
-		query.Del("space_id")
-		r.URL.RawQuery = query.Encode()
-		if strings.HasSuffix(r.URL.Path, "/rfb") && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-			s.proxyDesktopSocket(w, r, c.Generation)
-		} else {
-			s.proxy(w, r, c.Generation)
-		}
-		return
-	}
+
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		if !auth {
 			failure(w, 401, "browser authentication required")
@@ -353,7 +334,7 @@ func Allowed(method, path string) bool {
 	}
 	if method == "POST" {
 		switch path {
-		case "/api/v1/assistants", "/api/v1/providers", "/api/v1/providers/default", "/api/v1/providers/check", "/api/v1/providers/resolve", "/api/v1/providers/test", "/api/v1/agent", "/api/v1/agent/routing", "/api/v1/instructions", "/api/v1/messages", "/api/v1/turn/cancel", "/api/v1/turn/steer", "/api/v1/turn/control", "/api/v1/permissions", "/api/v1/usage/policy", "/api/v1/usage/providers", "/api/v1/usage/resume", "/api/v1/schedules", "/api/v1/machines", protocol.AssistantMailAPI:
+		case "/api/v1/assistants", "/api/v1/providers", "/api/v1/providers/default", "/api/v1/providers/check", "/api/v1/providers/resolve", "/api/v1/providers/test", "/api/v1/agent", "/api/v1/agent/routing", "/api/v1/instructions", "/api/v1/messages", "/api/v1/turn/cancel", "/api/v1/turn/steer", "/api/v1/turn/control", "/api/v1/permissions", "/api/v1/usage/policy", "/api/v1/usage/providers", "/api/v1/usage/resume", "/api/v1/schedules", protocol.AssistantMailAPI:
 			return true
 		}
 		if strings.HasPrefix(path, "/api/v1/assistants/") {

@@ -20,7 +20,7 @@ func localDispatcher(t *testing.T) (*Dispatcher, core.ExecutionContext, *executo
 		t.Fatal(err)
 	}
 	p.Enroll("local", "epoch")
-	p.Configure("local", MachinePolicy{"host", "allow"})
+	p.Configure("local", MachinePolicy{ExecutionAccess: "allow"})
 	operations, err := OpenOperations(filepath.Join(root, "operations.sqlite"))
 	if err != nil {
 		t.Fatal(err)
@@ -29,7 +29,7 @@ func localDispatcher(t *testing.T) (*Dispatcher, core.ExecutionContext, *executo
 	s := modelSession(t, "https://example.com/v1/chat/completions")
 	engine := executor.New(executor.Options{Home: root})
 	t.Cleanup(func() { engine.Close() })
-	d := &Dispatcher{RuntimeID: "local", Owner: "assistant", Turn: "turn", Generation: 1, DefaultTarget: core.HostTarget("local"), Spec: s.Spec, Permissions: p, Operations: operations, Host: engine}
+	d := &Dispatcher{RuntimeID: "local", Owner: "assistant", Turn: "turn", Generation: 1, DefaultTarget: core.RuntimeTarget("local"), Spec: s.Spec, Permissions: p, Operations: operations, Host: engine}
 	return d, core.ExecutionContext{Owner: "assistant", Workspace: root, Role: core.Main}, engine
 }
 func TestAuthorizedHostCommandReceiptNoDuplicateEffect(t *testing.T) {
@@ -80,18 +80,11 @@ func TestUncertainHostCleanupFencesNewCall(t *testing.T) {
 	}
 }
 
-func TestMainExplicitHostUsesAssistantDirectoryFromSandboxDefault(t *testing.T) {
+func TestToolsCannotRetargetAnotherRuntime(t *testing.T) {
 	d, e, _ := localDispatcher(t)
-	d.DefaultTarget = core.SandboxTarget("local", "shared")
-	d.HostWorkspace = e.Workspace
-	e.Workspace = "/data/workspace"
-	call := modelprotocol.ToolCall{ID: "explicit-host", Name: "exec_command", Arguments: json.RawMessage(`{"cmd":"printf explicit-host > destination","login":false,"execution_target":"host"}`)}
-	if _, err := d.Dispatch(context.Background(), e, call, nil); err != nil {
-		t.Fatal(err)
-	}
-	body, err := os.ReadFile(filepath.Join(d.HostWorkspace, "destination"))
-	if err != nil || string(body) != "explicit-host" {
-		t.Fatal(string(body), err)
+	call := modelprotocol.ToolCall{ID: "retarget", Name: "exec_command", Arguments: json.RawMessage(`{"cmd":"true","execution_target":{"runtime_id":"other"}}`)}
+	if _, err := d.Dispatch(context.Background(), e, call, nil); err == nil {
+		t.Fatal("tool changed fixed destination")
 	}
 }
 
@@ -99,7 +92,7 @@ func TestDispatchReportsApprovalAndActualTargetBeforeExecution(t *testing.T) {
 	for _, decision := range []string{"allow_once", "deny"} {
 		t.Run(decision, func(t *testing.T) {
 			d, e, _ := localDispatcher(t)
-			if err := d.Permissions.Configure("local", MachinePolicy{"host", "ask"}); err != nil {
+			if err := d.Permissions.Configure("local", MachinePolicy{ExecutionAccess: "ask"}); err != nil {
 				t.Fatal(err)
 			}
 			phases := []string{}

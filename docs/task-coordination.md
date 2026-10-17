@@ -70,9 +70,8 @@ Owner recovery uses `POST /api/v1/tasks/{id}/recovery` with the original
 same original destination journal through `POST /api/v1/runtime/recovery` with
 `control_id`, `task_id`, `run_id` and the action. These private/native ports are
 excluded from browser publication. Inspection returns receipt states and unresolved
-reasons without starting a model, guest or tool. Reconciliation consults the
-original Control operations, signed destination command receipts and durable
-Sandbox request/result bindings. It accepts no client-supplied result or cleanup
+reasons without starting a model or tool. Reconciliation consults the
+original Control operations, signed destination command receipts. It accepts no client-supplied result or cleanup
 acknowledgment. Known results update the original checkpoint once; only proven
 cleanup releases held capacity and ends the run as interrupted. A previous-boot
 Host run with issued operations and no recorded cleanup proof remains fenced.
@@ -103,15 +102,15 @@ Checks and live qualification limits: [permission contract](permissions.md).
 
 ## Execution policy and reruns
 
-New tasks use the selected machine's current execution policy when dispatched.
-The actual Host/Sandbox context is retained as execution information for the active
+New tasks use the selected machine's current execution authorization for subsequent tool operations.
+The actual Runtime destination is retained as execution information for the active
 run, receipts and file retrieval. It is not reused as a default for future tasks.
 Guidance is accepted only while a task remains active. Complete, failed, cancelled
 and interrupted tasks require a new task to run again; retained files are not
-implicitly imported into that new task. Sandbox executions reuse the machine-owned shared development environment.
-Execution cleanup closes only that Task's processes and sessions; the environment,
-installed tools and files remain. A new Task receives a new workspace directory
-but observes existing shared software and cache state.
+implicitly imported into that new task. Task workspaces are separate local
+directories on the fixed Runtime. Cleanup closes only that Task's processes and
+sessions; files remain. No shared guest environment or automatic project copy is
+provided.
 
 Task persistence uses schema version 4. Development builds use an independent
 data root; unsupported storage formats are rejected without rewriting files.

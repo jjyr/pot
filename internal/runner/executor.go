@@ -10,7 +10,6 @@ import (
 	"github.com/jjyr/pot/pkg/execution"
 	m "github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/protocol"
-	"strings"
 	"sync"
 )
 
@@ -381,40 +380,15 @@ func isExecutionTool(name string, config core.ResolvedSpec) bool {
 // BindTarget independently prevents a worker from changing destination, even if
 // the owner approval service would otherwise grant the requested operation.
 func BindTarget(raw json.RawMessage, fixed core.ExecutionTarget) (json.RawMessage, error) {
+	if err := fixed.Validate(); err != nil {
+		return nil, err
+	}
 	var args map[string]json.RawMessage
 	if err := core.DecodeJSON(raw, &args); err != nil {
 		return nil, err
 	}
-	if _, old := args["sandbox_id"]; old {
-		return nil, fmt.Errorf("worker cannot select sandbox_id")
+	if _, exists := args["execution_target"]; exists {
+		return nil, fmt.Errorf("worker cannot select an execution target")
 	}
-	if selector, exists := args["execution_target"]; exists {
-		var requested core.ExecutionTarget
-		if len(selector) > 0 && selector[0] == '{' {
-			if err := core.DecodeJSON(selector, &requested); err != nil {
-				return nil, err
-			}
-		} else {
-			var shorthand string
-			if err := json.Unmarshal(selector, &shorthand); err != nil {
-				return nil, err
-			}
-			if shorthand == "host" {
-				requested = core.HostTarget(fixed.RuntimeID)
-			} else if id, ok := strings.CutPrefix(shorthand, "sandbox:"); ok {
-				requested = core.SandboxTarget(fixed.RuntimeID, id)
-			} else {
-				return nil, fmt.Errorf("invalid execution target selector")
-			}
-		}
-		if requested != fixed {
-			return nil, fmt.Errorf("worker cannot change its fixed execution target")
-		}
-	}
-	target, err := json.Marshal(fixed)
-	if err != nil {
-		return nil, err
-	}
-	args["execution_target"] = target
-	return json.Marshal(args)
+	return raw, nil
 }

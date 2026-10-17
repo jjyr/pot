@@ -261,7 +261,7 @@ forms without automatically retrying the task.
 
 Chat and Task details share compact inline tool disclosures. The closed row shows
 the operation, a deterministic argument preview, explicit status and elapsed time;
-active operations also show their resolved machine, Host/Sandbox and workdir.
+active operations also show their resolved machine and workdir.
 Failures keep a concise reason visible while collapsed. Expanded details show
 arguments, ordered output, final results and a secondary raw call/result disclosure.
 Commands, scripts and patches retain monospace formatting; supported image results
@@ -327,16 +327,16 @@ Loading preserves navigation and the chart region; failures retain inline recove
 Unknown or incomplete data is distinct from zero. Accounting and aggregation
 belong in [Token usage](token-usage.md).
 
-Machines groups inventory by Space with expandable Host/Sandbox rows. Cached
-offline data remains visible; unavailable operations are disabled. Viewing a machine
-does not start it or change routing. Desktop viewing is exposed where transport
-exists, currently local App. Resource/permission controls follow owner capabilities;
-see [Multi-Space UI](multi-space-ui.md) and [Sandbox resources](sandbox-resources.md).
+Machines groups inventory by Space. Cached offline data remains visible. Machine
+settings expose Ask each time / Always allow execution on this machine; owner
+policy changes are valid without starting a process on that machine. Viewing a
+machine changes neither routing nor authorization. See [Multi-Space UI](multi-space-ui.md).
 
 ### Approvals and About
 
-Approval cards identify assistant, machine and Host/Sandbox capability, with
-Allow this operation / Deny actions. See [Permissions](permissions.md).
+Approval cards identify assistant, machine and exact tool arguments, with
+Always allow execution on this machine / Allow once / Deny actions. Instruction
+changes offer only Allow once / Deny. See [Permissions](permissions.md).
 About Pot is available from General settings; its content follows
 [About and licenses](licenses-and-about.md).
 

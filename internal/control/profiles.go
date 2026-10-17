@@ -93,8 +93,7 @@ func OpenProfiles(path, pluginRoot string, registry *gateway.Registry) (*Profile
 	return p, nil
 }
 
-// defaultAgentSettings discovers tool capabilities only. Installed Sandbox Providers
-// and resource catalogs never enter model execution snapshots or tool selection.
+// defaultAgentSettings discovers installed tool packages and pins execution snapshots.
 func (p *ProfileStore) defaultAgentSettings() (core.AgentSettings, error) {
 	settings := core.DefaultAgentSettings()
 	if p.pluginRoot == "" {
@@ -264,7 +263,7 @@ func (p *ProfileStore) save(ctx context.Context, r SaveProfile) (core.Profile, e
 		revision = previous.Revision + 1
 	}
 	routeID := storage.ID()
-	profile := core.Profile{ID: r.ProfileID, Revision: revision, Name: r.Name, Provider: routeID, Model: r.Model, AuthRef: "provider:" + routeID, ModelSettings: r.ModelSettings, Params: core.Parameters{MaxOutputTokens: output, ReasoningEffort: r.ReasoningEffort, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "guest_vm"}}
+	profile := core.Profile{ID: r.ProfileID, Revision: revision, Name: r.Name, Provider: routeID, Model: r.Model, AuthRef: "provider:" + routeID, ModelSettings: r.ModelSettings, Params: core.Parameters{MaxOutputTokens: output, ReasoningEffort: r.ReasoningEffort, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "runtime"}}
 	if _, err := p.directory.Apply(profile); err != nil {
 		return core.Profile{}, err
 	}

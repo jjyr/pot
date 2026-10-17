@@ -68,8 +68,6 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
     cancel: ({boot_id, turn_id, request_id}) => request('/api/v1/turn/cancel', {method: 'POST', body: {request_id, user_message_id: turn_id}}),
     openMain: desktop ? () => invoke('OpenMain') : undefined,
     openExternal: desktop ? url => runtimeAPI.Browser.OpenURL(url) : undefined,
-    openDesktop: desktop ? sandboxID => invoke('OpenDesktop',sandboxID) : undefined,
-    confirmSandboxResources:desktop?(requestID,locale)=>invoke('ConfirmSandboxResources',requestID,locale):undefined,
     markRead:desktop?value=>invoke('ReadAssistant',value.space_id,value.owner,value.reply_id,value.reply_count):undefined,
     onRead:desktop?handler=>runtimeAPI.Events.On('pot:read',event=>handler(event.data)):undefined,
     setReducedMotion:desktop?value=>invoke('SetReducedMotion',value):undefined,

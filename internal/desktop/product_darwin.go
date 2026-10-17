@@ -7,10 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
-	"net/http"
-	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -31,11 +28,11 @@ import (
 // Service is the desktop adapter to the same application contract used by CLI
 // and browser. Exported bindings contain no lifecycle or credential access.
 type Service struct {
-	ctx                       context.Context
-	app                       *application.App
-	api                       *transport.Application
-	spaces                    *spaces.Manager
-	native                    *nativeDesktop
+	ctx    context.Context
+	app    *application.App
+	api    *transport.Application
+	spaces *spaces.Manager
+
 	main, tray                *application.WebviewWindow
 	mu                        sync.Mutex
 	subscriptions             map[string]context.CancelFunc
@@ -97,7 +94,7 @@ func Run(root string) error {
 		return err
 	}
 	defer runtime.Close()
-	api := &transport.Application{RuntimeResources: runtime.ResourceCall, Resources: runtime.Provisioning, Control: runtime.Control, RuntimeID: runtime.Root.Identity.RuntimeID, BootID: runtime.BootID, Name: "Pot"}
+	api := &transport.Application{RuntimeResources: runtime.ResourceCall, Control: runtime.Control, RuntimeID: runtime.Root.Identity.RuntimeID, BootID: runtime.BootID, Name: "Pot"}
 	api.About = func(context.Context) (any, error) { return productinfo.Read(runtime.AssetDirectory) }
 	socket, err := transport.StartSocket(ctx, runtime.Root.Path, api)
 	if err != nil {
@@ -129,22 +126,9 @@ func Run(root string) error {
 	}
 	defer manager.Close()
 	service.spaces = manager
-	native, err := startNativeDesktop(ctx, runtime.Sandboxes, os.DirFS(runtime.AssetDirectory))
-	if err != nil {
-		return err
-	}
-	defer native.close()
-	service.native = native
 	files := application.AssetFileServerFS(assets.FS())
-	assetHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/desktop/") {
-			http.Error(w, "Use native desktop viewer", 404)
-			return
-		}
-		files.ServeHTTP(w, r)
-	})
 
-	app := application.New(application.Options{Name: "Pot", Description: "Pot " + buildinfo.Version, Icon: appIcon, Services: []application.Service{application.NewService(service)}, Assets: application.AssetOptions{Handler: assetHandler}, Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false}, OnShutdown: func() {
+	app := application.New(application.Options{Name: "Pot", Description: "Pot " + buildinfo.Version, Icon: appIcon, Services: []application.Service{application.NewService(service)}, Assets: application.AssetOptions{Handler: files}, Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false}, OnShutdown: func() {
 		stop()
 		service.mu.Lock()
 		for _, cancel := range service.subscriptions {

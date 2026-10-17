@@ -50,7 +50,7 @@ func TestCompletedTaskDownloadStreamsBeyondOldProxyLimit(t *testing.T) {
 	if err = c.Configure(ctx, spec, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.Permissions.Configure(runtime.Root.Identity.RuntimeID, control.MachinePolicy{ExecutionMode: "host", HostAccess: "allow"}); err != nil {
+	if err = s.Permissions.Configure(runtime.Root.Identity.RuntimeID, control.MachinePolicy{ExecutionAccess: "allow"}); err != nil {
 		t.Fatal(err)
 	}
 	sub := s.Tasks.Subscribe()

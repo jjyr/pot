@@ -10,7 +10,7 @@ import (
 )
 
 func operation(call string) Operation {
-	return Operation{Owner: "assistant", Turn: "turn", Generation: 1, CallID: call, Target: core.HostTarget("machine"), Tool: "exec_command", Args: json.RawMessage(`{"cmd":"printf hello"}`)}
+	return Operation{Owner: "assistant", Turn: "turn", Generation: 1, CallID: call, Target: core.RuntimeTarget("machine"), Tool: "exec_command", Args: json.RawMessage(`{"cmd":"printf hello"}`)}
 }
 func TestReceiptDuplicateBindingRestartFence(t *testing.T) {
 	ctx := context.Background()
@@ -35,7 +35,7 @@ func TestReceiptDuplicateBindingRestartFence(t *testing.T) {
 		t.Fatal(duplicate, claimed, err)
 	}
 	changed := operation("1")
-	changed.Target = core.SandboxTarget("machine", "shared")
+	changed.Target = core.RuntimeTarget("other-runtime")
 	if _, _, err = o.Begin(ctx, changed); err == nil {
 		t.Fatal("rebound operation")
 	}

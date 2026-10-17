@@ -58,16 +58,7 @@ func (s *Service) localTaskFileChunk(ctx context.Context, target core.ExecutionT
 		return result, errors.New("invalid Task file query")
 	}
 	base := s.options.Workspace
-	if target.Target.Kind == "sandbox" {
-		if s.options.Sandboxes == nil {
-			return result, errors.New("Sandbox manager unavailable")
-		}
-		w, err := s.options.Sandboxes.WorkspacePaths(ctx, target, task, true)
-		if err != nil {
-			return result, err
-		}
-		base = w.HostRoot
-	}
+
 	anchor, err := os.OpenRoot(base)
 	if err != nil {
 		return result, err

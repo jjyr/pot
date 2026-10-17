@@ -24,7 +24,7 @@ for await (const line of createInterface({ input: process.stdin })) {
     };
     // Each execute receives a fresh sink, while plugin state survives calls.
     currentEmit = emit;
-    if (!plugin) plugin = (await import(pathToFileURL(entry))).createPlugin({ mode: request.mode, execution_target: request.execution_target, emit: item => currentEmit(item) });
+    if (!plugin) plugin = (await import(pathToFileURL(entry))).createPlugin({ mode: request.mode, emit: item => currentEmit(item) });
     await plugin.execute({ tool: request.tool, input: request.input });
     process.stdout.write(JSON.stringify({ content }) + '\n');
   } catch (error) {

@@ -73,7 +73,7 @@ func TestLocalTaskUsesRunnerSharedCapacityControlModelAndSummary(t *testing.T) {
 	if err = c.Configure(ctx, spec, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.Permissions.Configure("local", MachinePolicy{"host", "allow"}); err != nil {
+	if err = s.Permissions.Configure("local", MachinePolicy{ExecutionAccess: "allow"}); err != nil {
 		t.Fatal(err)
 	}
 	accepted, err := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: "task-create", Text: "Write one artifact", MachineID: "local"})

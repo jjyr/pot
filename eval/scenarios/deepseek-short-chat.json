@@ -19,7 +19,7 @@
     "tool_policy": {
       "worker_orchestration": false,
       "summary_read_only": true,
-      "unattended": "guest_vm"
+      "unattended": "runtime"
     }
   },
   "protocol": "openai_chat",

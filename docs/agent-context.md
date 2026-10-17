@@ -13,16 +13,17 @@ AGENTS.md and project skills at the execution workspace; see
 [Architecture](architecture.md) for the execution contract.
 Permission storage is separate from instruction discovery; see
 [Agent permissions](permissions.md). Project discovery uses the actual tool execution cwd. Main resolves the machine's
-current Host/shared-Sandbox policy at the start of each run. Workers use their
-recorded Host/Sandbox task workspace throughout an active execution.
+local workspace at the start of each run. Workers use their recorded destination
+Runtime workspace throughout an active execution.
 
-Discovery starts at the execution cwd and finds the nearest ancestor with a `.git` file or directory. Sandbox discovery stops at its workspace mount boundary. Host discovery uses the nearest project root as its boundary, or cwd when there is no repository marker. It loads AGENTS.md files from that root through cwd in root-to-leaf order. Without a root marker it reads only cwd. Nested repositories stop inheritance from outer repositories. Descendants below cwd are not eagerly scanned; the injected guidance tells the agent to inspect applicable descendant AGENTS.md files before editing there.
+Discovery starts at the execution cwd and finds the nearest ancestor with a `.git` file or directory. Discovery uses the nearest project root as its boundary, or cwd when there is no repository marker. It loads AGENTS.md files from that root through cwd in root-to-leaf order. Without a root marker it reads only cwd. Nested repositories stop inheritance from outer repositories. Descendants below cwd are not eagerly scanned; the injected guidance tells the agent to inspect applicable descendant AGENTS.md files before editing there.
 
 Only `AGENTS.md` is read. `AGENTS.override.md` and fallback filenames are ignored. Each chat assistant owns a versioned AGENTS.md text record in its own database. This record is independent of execution targets and travels with the assistant's state. Project AGENTS.md discovery remains filesystem-based. UI edits and assistant tools operate on the same DB record. Every successful save creates a new revision, including reverting to identical text.
 
 Main contexts load global instructions, assistant rules and applicable project directory instructions. Worker contexts load only applicable project directory instructions: workers have no assistant AGENTS.md and inherit neither assistant rules nor global Agent-home rules. The delegating assistant must include relevant constraints in the task brief. Project AGENTS.md files remain ordinary directory policies, separate from the assistant's own rule record. Assistant rules are snapshotted for each execution and never grant permissions. Deeper directory guidance takes precedence on conflicts, and explicit user instructions take precedence over file instructions. There is no instruction-file size cap or truncation; normal model context limits still apply. Empty/whitespace-only contents are omitted; invalid UTF-8 is decoded lossily.
 
-The Runtime instruction filesystem interface uses execution-visible paths. Its current implementation reads the Host-shared Sandbox workspace mount without starting the execution environment and resolves relative and absolute symlinks in guest path space. Links outside that mount are omitted with a diagnostic, so Host files cannot be pulled in through a project symlink. Other guest mounts and image files are not instruction sources.
+Instruction discovery reads the destination Runtime's local filesystem. It does
+not start an execution process or translate paths through a guest namespace.
 
 ## Refresh and injection
 
@@ -134,12 +135,10 @@ not exposed as unaudited MCP writes.
 
 ## Conversational control
 
-Each Host assistant prepares its workspace under `agent-workspace/assistants/ID`.
-Task workspaces remain under `agent-workspace/tasks/ID`. A Main tool explicitly
-selecting Host uses the assistant’s Host directory even when its default context
-was prepared in Sandbox. Correspondence execution retains the recipient’s Host
-directory and separate conversation history. These directories organize files;
-they do not add a security boundary inside authorized Host execution.
+Each assistant prepares `agent-workspace/assistants/ID` on its owning Control.
+Tasks prepare `agent-workspace/tasks/ID` on their fixed Runtime. Correspondence
+uses the recipient's directory and independent history. Directories organize
+files and do not add an OS security boundary.
 
 `POST /api/v1/turn/steer` binds `request_id`, `user_message_id` and `text` to the
 original active turn. The pending input and visible user message commit together.
@@ -162,7 +161,7 @@ with `go:embed`; Control supplies it when preparing Main execution context.
 Editing the text requires rebuilding the binary; there is no runtime file read. It is not global `AGENTS.md` or a routine scheduler. A custom
 `system_prompt` replaces the default `pkg/agent` prompt.
 
-Tests cover repository/worktree markers, nested repositories, absent roots, ignored overrides, file changes/removal, empty and invalid UTF-8 files, files larger than 32 KiB, guest symlink resolution and Host escape rejection, global failure/recovery/cache clearing, Main Host project context and fixed task assignment. Runtime context tests cover Main/Worker roles plus Summary exclusion; `pkg/agent` request tests cover all four supported model protocols, custom prompts, append-only history, cold-cache prefix replay and compaction reconstruction. Run `mise run test` and `mise run check:go`.
+Tests cover repository/worktree markers, nested repositories, absent roots, ignored overrides, file changes/removal, empty and invalid UTF-8 files, files larger than 32 KiB, global failure/recovery/cache clearing, Main Host project context and fixed task assignment. Runtime context tests cover Main/Worker roles plus Summary exclusion; `pkg/agent` request tests cover all four supported model protocols, custom prompts, append-only history, cold-cache prefix replay and compaction reconstruction. Run `mise run test` and `mise run check:go`.
 
 
 ## Global ownership
@@ -216,13 +215,12 @@ The built-in dispatch instructions and fresh configured Provider/model catalog r
 injected independently. A custom system prompt still receives file instructions.
 
 Explicit task choices take precedence over saved rules. Without an explicit target,
-Control selects a machine labelled `task-runner`, preferring its own Runtime and
-then stable Runtime ID order. Task and schedule requests select `machine_id`.
-At dispatch, the selected machine's current policy determines direct Host or
-shared Sandbox execution. The actual context is recorded for this execution;
-reruns create new Tasks. Same-machine Host exceptions require machine policy
-approval and do not change the Task's normal context. Labels describe routing intent, not a capability guarantee;
-execution fails normally if the selected target cannot do the work. Rules guide autonomous model selection from configured Providers; they cannot
+Control defaults to its own Runtime; an explicit selection chooses a registered
+remote Runtime. Task and schedule requests select `machine_id`.
+The fixed Runtime and workspace are recorded for the run; reruns create new
+Tasks. Each tool uses current machine execution authorization. Labels never grant
+capabilities or implicitly move work; unsupported execution fails visibly.
+Rules guide autonomous model selection from configured Providers; they cannot
 enable an unconfigured service or grant execution authority. `create_task` retains
 `selection_reason`; dedicated preference tools and `preference_revision` have
 been removed with user agreement. Existing tasks retain configuration snapshots.
@@ -288,29 +286,26 @@ versions supplied by Control. Every bundle contains UTF-8 SKILL.md
 with YAML frontmatter and optional scripts, references and assets. Only metadata
 is advertised during discovery; full instructions are read on demand.
 
-Runtime supplies ordered roots. Project directories are discovered from the assigned workspace upwards, stopping at a repository root or the Sandbox workspace boundary. The nearest project wins, then global user skills, then builtins. Names in the included builtin catalog are reserved: user/project attempts to shadow them are diagnosed and ignored. Bundle names match their directory names in authored and packaged skills.
+Runtime supplies ordered roots. Project directories are discovered from the assigned workspace upwards, stopping at the nearest repository root, or cwd when no repository exists. The nearest project wins, then global user skills, then builtins. Names in the included builtin catalog are reserved: user/project attempts to shadow them are diagnosed and ignored. Bundle names match their directory names in authored and packaged skills.
 
 Malformed bundles produce diagnostics and are omitted. Symlink directories and SKILL.md symlinks are skipped. Supporting assets inside a bundle are not recursively discovered as additional skills. Catalog ordering and conflict resolution are deterministic.
 
 ## Unified execution view and permissions
 
-Main Host execution advertises the real user/builtin source paths. Tasks materialize their selected global bundles under the execution workspace’s `.pot/control-resources/<digest>/` before starting; both local and connected execution advertise these read-only files through injected absolute paths. The digest identifies cache content, not a requested version. Local Sandbox global source mounts remain at `~/.pot/agent/skills/<name>`. Runtime injects resolved absolute paths, so models do not have to expand `~`. In the Linux provider, the executor sets HOME to its assigned execution workspace; the scope mount view is installed beneath that home. A main scope uses `/data/workspace`, and a task scope uses `/data/workspace/tasks/<task-id>`. Different providers must implement the same home-relative convention.
+Main execution advertises actual user/builtin source paths. Tasks materialize
+selected Control bundles beneath `.pot/control-resources/<digest>/` in their
+fixed workspace. The digest identifies prepared content, not a user-requested
+version. Injected paths are absolute destination-local paths; no mount or HOME
+translation is performed. Project Skills remain independently discovered.
 
-| Resource | Main scope | Task scope |
-|---|---|---|
-| Global user bundles | Writable | Read-only |
-| Builtin bundles | Read-only | Read-only |
-| Project bundles | Existing workspace permissions | Existing workspace permissions |
-
-Helper shares the Host user directory and packaged builtin root into root-only guest source directories. The root broker creates a private mount namespace, binds the global user root at the home-relative skill path, and binds each builtin bundle read-only over its corresponding entry. Task scopes also remount the user root read-only. Empty reserved mountpoint directories can exist in the user backing directory; builtin files are never copied there. Symlink sources/mountpoints and failed mount preparation fail the operation without an unrestricted fallback.
-
-Main and task runners use the same unprivileged guest account so installed toolchains remain reusable. Execution scopes have independent processes and sessions, but are not mutual security boundaries. Tool children drop effective capabilities and set no_new_privs. Shared workspace group permissions retain desktop access to task files, but do not provide mutual isolation between tasks in one Sandbox. Skills grant no extra tools or Sandbox lifecycle authority.
-
-Configuration overrides are POT_AGENT_SKILLS_DIR for the Host user directory and POT_BUILTIN_SKILLS_DIR for packaged builtin files. Helper supplies the latter to Server. Standalone development defaults to this repo's flat skills directory. Changing the configured source root requires restarting the Sandbox; directory contents remain live through the share.
+Skills grant no execution authority. Instructions and Skills use the same local
+filesystem rules for local and explicitly remote Task execution. Runtime asset
+paths are set by host composition and remain independent of guest management.
+See [Permissions](permissions.md) and [Executor](executor.md).
 
 ## Injection and task selection
 
-`core.ExecutionContext.SkillResources` carries ordered SkillRoot entries, reserved names and optional selections. `pkg/agent` discovers supplied filesystem roots without interpreting roles, Sandbox identity or mounts. Callers provide `core.SkillResources` for Main and Task contexts.
+`core.ExecutionContext.SkillResources` carries ordered SkillRoot entries, reserved names and optional selections. `pkg/agent` discovers supplied filesystem roots without interpreting product roles or machine discovery. Callers provide `core.SkillResources` for Main and Task contexts.
 
 Task creation accepts optional `skills: ["name", ...]` selecting global user or builtin bundles only. Omitted or empty lists load no global skills. Project skills are always discovered independently and are not filtered by this list. Selections persist, but each new execution synchronizes current contents before starting the Agent. Contents remain stable for that run; Control does not retain per-task bundle versions. Unavailable selected global skills fail visibly when preparing a turn, even if a project skill has that name.
 
@@ -344,14 +339,9 @@ previous messages, system task reports, existing tasks and scheduled occurrences
 never inherit new selections. Selected Skills are persisted with the new task.
 Global/project Skill discovery and project AGENTS.md still use the existing rules.
 
-Local Controls, including the embedded App, initialize with `task-runner`, `local`
-and their OS. Newly joined machines receive `runner` and their declared OS label.
-Each Space must retain at least one enabled machine labelled `task-runner`;
-label edits and member removal cannot remove the last one. Offline members count
-toward this configuration constraint, without guaranteeing execution availability.
-Control owns all label edits; heartbeats, repeated enrollment and restarts do not
-restore removed labels while another enabled machine retains `task-runner`.
-Opening a Space with no configured task runner adds the local `task-runner` default.
+Runtime labels describe machines and never implicitly place Tasks. New roots
+and joined machines carry their OS label. Control owns all label edits;
+heartbeats, repeated enrollment and restarts do not restore removed labels.
 Labels use lowercase ASCII letters, digits, hyphens and underscores.
 
 ## Recovering a stopped Main turn
@@ -364,7 +354,7 @@ requires `action: "reconcile"` and that exact `user_message_id`. Browser
 publication excludes this route, and clients cannot supply results or cleanup
 acknowledgments.
 
-Control reads original operation receipts and durable Sandbox request bindings.
+Control reads original operation receipts and original execution receipts.
 Actual original cleanup is recorded before terminal acknowledgment; otherwise
 cleanup must be independently proven. A safe stopped boundary with no uncertain
 effects can be closed, and proven tool results enter the original checkpoint

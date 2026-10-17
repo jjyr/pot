@@ -43,7 +43,7 @@ func TestWorkerResourcesKeepDestinationInstructionsAndSkills(t *testing.T) {
 	s.options.PluginRoot = pluginRoot
 	s.Profiles.pluginRoot = pluginRoot
 	pluginDir := filepath.Join(pluginRoot, "qualifier")
-	writeTaskFixture(t, filepath.Join(pluginDir, "plugin.json"), `{"schema_version":2,"id":"qualifier","version":"1","contributes":{"tools":{"runtime":"node","execution":"host_or_sandbox","entrypoint":"plugin.mjs","files":["plugin.mjs"],"requirements":[],"tools":[{"name":"fixture_echo","description":"fixture","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}]},"sandbox_providers":[{"id":"fixture.provider","host_os":["darwin","linux"],"executable":"bin/provider","default_shared":false}],"resources":[{"provider":"fixture.provider","catalog":"catalog.json"}]}}`)
+	writeTaskFixture(t, filepath.Join(pluginDir, "plugin.json"), `{"schema_version":2,"id":"qualifier","version":"1","contributes":{"tools":{"runtime":"node","execution":"runtime","entrypoint":"plugin.mjs","files":["plugin.mjs"],"requirements":[],"tools":[{"name":"fixture_echo","description":"fixture","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}]}}}`)
 	writeTaskFixture(t, filepath.Join(pluginDir, "plugin.mjs"), "OLD_PLUGIN")
 	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "test", Name: "Test", Model: "model", Endpoint: "https://example.test", Protocol: "openai_chat", APIKey: "fixture-only", MaxOutputTokens: 100})
 	if err != nil {
@@ -97,7 +97,7 @@ func TestWorkerResourcesKeepDestinationInstructionsAndSkills(t *testing.T) {
 	writeTaskFixture(t, filepath.Join(cwd, ".git"), "")
 	writeTaskFixture(t, filepath.Join(cwd, "AGENTS.md"), "DESTINATION_PROJECT")
 	writeTaskFixture(t, filepath.Join(cwd, ".agents", "skills", "destination", "SKILL.md"), "---\nname: destination\ndescription: Destination skill\n---\nDestination")
-	launch := runner.Launch{ControlID: "local", RuntimeID: "local", AssistantID: "main", TaskID: "worker", RunID: "run", Generation: 1, ExecutionTarget: core.HostTarget("local"), Config: selected.Config, Plugins: selected.Plugins, Skills: &[]string{"global"}, Text: "work"}
+	launch := runner.Launch{ControlID: "local", RuntimeID: "local", AssistantID: "main", TaskID: "worker", RunID: "run", Generation: 1, ExecutionTarget: core.RuntimeTarget("local"), Config: selected.Config, Plugins: selected.Plugins, Skills: &[]string{"global"}, Text: "work"}
 	run, err := s.RunnerJournal.Accept(ctx, launch)
 	if err != nil {
 		t.Fatal(err)
@@ -132,7 +132,7 @@ func TestWorkerResourcesKeepDestinationInstructionsAndSkills(t *testing.T) {
 		t.Fatal("plugin current source not pinned as destination bundle")
 	}
 	b := pinned.Config.Params.Agent.Plugins["qualifier"].Bundle
-	if len(b.Files) != 1 || len(b.Manifest.Contributes.SandboxProviders) != 0 || len(b.Manifest.Contributes.Resources) != 0 {
+	if len(b.Files) != 1 {
 		t.Fatal("Task synchronized local plugin capabilities", b)
 	}
 	if !contains(pinned, "QUEUED_UPDATE") {

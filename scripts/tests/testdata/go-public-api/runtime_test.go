@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/jjyr/pot/pkg/runtime"
-	"github.com/jjyr/pot/pkg/sandbox"
 )
 
 type noCredentials struct{ t *testing.T }
@@ -22,8 +21,8 @@ func (k noCredentials) Key(context.Context, bool) ([]byte, error) {
 func TestPublicRuntimeFromExternalModule(t *testing.T) {
 	options := runtime.Options{
 		Root: filepath.Join(t.TempDir(), "host"), ResourceDirectory: t.TempDir(),
-		SandboxProviders: []sandbox.Provider{}, DisableMetadataRefresh: true,
-		Keys: noCredentials{t}, Embedded: true, Name: "External fixture",
+		DisableMetadataRefresh: true,
+		Keys:                   noCredentials{t}, Embedded: true, Name: "External fixture",
 	}
 	host, err := runtime.Open(context.Background(), options)
 	if err != nil {
@@ -38,12 +37,10 @@ func TestPublicRuntimeFromExternalModule(t *testing.T) {
 	if info.RuntimeID == "" || info.BootID == "" || info.AssetDirectory != options.ResourceDirectory {
 		t.Fatalf("host info: %+v", info)
 	}
-	if host.Executions() == nil || host.Resources() == nil || host.Provisioning() == nil {
+	if host.Executions() == nil {
 		t.Fatal("host managers are inaccessible")
 	}
-	if len(host.Sandboxes().Descriptors()) != 0 {
-		t.Fatal("empty providers unexpectedly selected a platform provider")
-	}
+
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/control", nil)
 	recorder := httptest.NewRecorder()
 	host.Handler("external-token").ServeHTTP(recorder, request)

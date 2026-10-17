@@ -1,123 +1,50 @@
-# Plugin packages
+# Tool plugin packages
 
-A Plugin is one locally installed package with a `plugin.json` manifest. A package
-can contribute tools, Sandbox Providers, resource catalogs, or any combination.
-Package identity, version, discovery and confined file access are shared. Each
-capability retains its own execution contract and authorization boundary.
+A plugin is a trusted locally installed directory with a schema-2 `plugin.json`
+manifest. `pkg/plugin` validates identity and confined file access without
+starting processes. Only `contributes.tools` is supported; removed execution
+Provider/resource capabilities and unknown fields fail explicitly.
 
 ```text
-Resources/plugins/<package>/plugin.json + capability files
-                         |
-              pkg/plugin: load and validate
-                         |
-          +--------------+----------------+
-          |              |                |
-        tools     sandbox_providers    resources
-          |              |                |
-   tool-only snapshot  Runtime host    verified delivery
-          |              |                |
-   Node tool session  Provider RPC <--- prepared paths
-          |              |
-    Host / Sandbox   Podman / Apple VM
+Resources/plugins/<package>/plugin.json + declared files
+                        |
+                pkg/plugin loader
+                        |
+              digest-pinned tool bundle
+                        |
+          Control execution authorization
+                        |
+        destination Go executor -> Node tool process
 ```
 
-## Manifest
+## Manifest and execution
 
-Schema 2 replaces the old tool-only manifest. There is no separate Provider
-manifest or installation root. For example, the Podman package declares:
+`contributes.tools` declares `runtime: "node"`, `execution: "runtime"`,
+`entrypoint`, `files`, `requirements` and `tools`. Optional `credentials` name
+connected services injected into the tool process; `session_mode: "call"` closes
+the process after each invocation. See [Credentials](credentials.md) and the
+[bundled manifest](../plugins/computer-use/plugin.json).
 
-```json
-{
-  "schema_version": 2,
-  "id": "podman",
-  "version": "1.0.0",
-  "contributes": {
-    "sandbox_providers": [{
-      "id": "podman",
-      "host_os": ["darwin", "linux"],
-      "executable": "bin/provider",
-      "default_shared": true
-    }],
-    "resources": [{"provider": "podman", "catalog": "catalog.json"}]
-  }
-}
-```
+Input schemas support flat scalar values and bounded string arrays. Paths are
+confined relative package paths without symlinks. Tool snapshots contain only
+the declared UTF-8 files, limited to 32 files / 512 KiB, and are digest-pinned.
+Executors reject extra payloads and unknown capabilities. Tool installation does
+not grant execution authority; each call uses [machine authorization](permissions.md).
 
-A tool capability is declared under `contributes.tools` with `runtime`,
-`execution`, `entrypoint`, `files`, `requirements` and `tools`. Optional
-`credentials` bindings name connected services to inject into the tool
-process; `session_mode: "call"` closes the process after each invocation. See
-[Credentials](credentials.md) for login, single-account ownership and caching. The current driver
-requires Node, supports `sandbox` or `host_or_sandbox`, and validates flat scalar
-and bounded string-array input schemas. See the [computer-use manifest](../plugins/computer-use/plugin.json)
-and [tool execution contract](computer-use.md#plugin-contract-and-lifecycle).
+## Discovery, synchronization and packaging
 
-A package may declare multiple `sandbox_providers`. Each entry has a distinct
-Provider ID, supported host OS list, executable, optional `args` and
-`default_shared`. Package IDs identify installation units; Provider IDs identify
-execution backends; tool names identify operations. These identities are not
-interchangeable. For example, package `apple-vm` contributes Provider
-`macos.apple-virtualization`. Unsupported host capabilities are skipped, without
-disabling other capabilities in the package.
+Runtime loads packages from `PluginRoot`, defaulting to
+`ResourceDirectory/plugins`. Installed tools are enabled by default; Provider
+connection forms only configure models and credentials. Main turns and prepared
+Tasks retain their resource snapshots. Before a Task first prepares, the original
+Runner synchronizes selected current tool files and Skills through Control's
+run-bound authenticated interface. Project instructions are read on the destination.
 
-Each `resources` entry associates a catalog path with a Provider ID. A catalog-only
-image package can supply additional bundles for an installed Provider, without
-shipping an executable. Missing referenced Providers, duplicate Provider IDs,
-conflicting catalog identities and ambiguous shared defaults fail explicitly.
-Catalog contents and verified preparation are described in
-[Sandbox resources](sandbox-resources.md).
+`pkg/pluginhost` owns bounded Node process sessions. Tool processes follow their
+execution scope and bundle digest. Cancellation, ownership checks, operation
+receipts and uncertainty fences apply to plugin calls as to built-in tools.
 
-Unknown capabilities and old manifest schemas fail validation. MCP could be a
-separate capability in a future design; it is not implemented or required by
-this package format or its current capability drivers.
-
-## Loading and authority
-
-`pkg/plugin` owns the common loader and directory discovery. Manifests are bounded
-to 64 KiB. File references must be confined relative paths without symlinks;
-executables must be regular executable files. Loading a manifest neither starts
-a process nor prepares a guest or download. Installation is trusted local owner
-configuration; plugins execute with the owner's OS privileges.
-
-Runtime uses `PluginRoot`, defaulting to `ResourceDirectory/plugins`, for locally
-installed packages. `pkg/sandboxprovider.Load` consumes only the discovered Sandbox
-and resource capabilities and performs bounded Provider handshakes. The Provider
-process protocol belongs to the [Sandbox capability](sandbox-provider-protocol.md),
-not to the common package framework. `pkg/pluginhost` remains the Node tool-session
-host. There is no common wire protocol imposed on these capability drivers.
-
-Control enables all installed tool capabilities and all built-in tools by default.
-Connection and assistant editors expose no tool allowlist or plugin switches, and
-`POST /api/v1/providers` accepts only connection/model settings. On startup,
-connection records discard former execution settings, tool filters and plugin
-opt-outs; fresh turns use product defaults, including assistants retaining an
-older Provider revision. Running turns and prepared Tasks keep their snapshots.
-Account login remains in third-party account settings; tool availability does not
-bypass machine authorization, role restrictions or operation approvals.
-
-Only tool capabilities enter the generated Profile `agent.plugins` snapshot.
-Discovery never starts a Sandbox Provider or prepares its resource catalog.
-`ToolBundle` projects the tool declaration and its explicitly listed UTF-8 files
-into a digest-pinned snapshot. Provider declarations, catalogs, native binaries
-and Helpers are excluded. Receiving executors reject bundles containing local
-capabilities even if their digest is valid. Tool snapshots retain the 32-file /
-512-KiB limit. Task synchronization carries only these snapshots; the destination
-Runtime retains ownership of its own installed Providers and resources.
-
-Provider processes live with Runtime. Tool processes live with their authorized
-execution target and session. Enabling a tool does not enable a Provider; closing
-a tool session does not stop the Sandbox. Approval, leases, receipts and recovery
-remain in their existing managers.
-
-## Packaging and upgrades
-
-Bundled source packages live under `plugins/`. Podman owns image recipes, build
-and export tooling; Apple VM owns bootstrap and signed Helper sources. Runtime
-packages include only required capability payloads, not source build trees or
-image bytes. `mise run build:plugins` packages tools and host-supported Providers
-through the same build entry point. Commands belong to [Development](development.md).
-
-Stop Runtime before replacing or removing packages. Retain catalog records for
-existing Sandbox pins when publishing new defaults. Package replacement does not
-rewrite existing Sandbox resource identities. Live reload, automatic installation,
-remote MCP connections and a plugin marketplace are not implemented.
+`mise run build:plugins` packages only the manifests and declared tool files.
+Packages contain no VM engines, images or guest bootstrap. Stop Runtime before
+replacing a complete package. Live reload, automatic installation, remote MCP
+connections and a plugin marketplace remain outside this contract.

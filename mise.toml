@@ -34,11 +34,11 @@ description = "Test product contracts without model calls or VMs"
 depends = ["test:go", "test:ui", "test:packaging", "test:eval", "test:public-api"]
 
 [tasks.prepare]
-description = "Prepare retained Node, JS plugins, skills and viewer resources"
+description = "Prepare retained Node, JS plugins, and skills"
 run = "python scripts/prepare-go-resources"
 
 [tasks.build]
-description = "Build the isolated Go/Wails macOS app with its signed native VM helper"
+description = "Build the isolated Go/Wails macOS app with local execution"
 run = "python scripts/build-go-app"
 
 [tasks.bundle]
@@ -65,15 +65,6 @@ run = 'python scripts/release "$usage_version" --output "$usage_output"'
 description = "Verify macOS release packaging without a build or VM"
 run = "python scripts/tests/release-packaging.py"
 
-[tasks."check:swift"]
-description = "Compile the native macOS VM Helper without starting a VM"
-run = "env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR swift build -c release --package-path plugins/apple-vm/helper --disable-sandbox --scratch-path .local/go/swift-build --product PotMacOSHelper -j 4"
-env = { SWIFTPM_MODULECACHE_OVERRIDE = "{{config_root}}/.local/go/swift-modules", CLANG_MODULE_CACHE_PATH = "{{config_root}}/.local/go/clang-modules" }
-
-[tasks."build:web"]
-description = "Build localized retained desktop viewer and Sandbox pages"
-run = "python scripts/localize-web"
-
 [tasks."build:web-ui"]
 description = "Verify and embed the shared HTML/CSS/JS product frontend"
 run = "go build -mod=readonly ./web"
@@ -83,45 +74,28 @@ description = "Build a portable Go CLI archive with retained runtime assets"
 run = "python scripts/build-go-cli"
 
 [tasks."build:plugins"]
-description = "Package tool and Provider capabilities without downloading guest images"
+description = "Package tool plugins"
 run = "python scripts/build-go-plugins"
-
-[tasks."build:sandbox-image"]
-description = "Build a Debian OCI guest image with an explicit Podman builder"
-run = "python plugins/podman/build-image"
-
-[tasks."export:sandbox-resources"]
-description = "Verify exact reviewed OCI image exports against the Podman plugin catalog"
-run = "python plugins/podman/export-resources"
 
 [tasks.licenses]
 description = "Collect notices for actual linked Go dependencies and runtime"
-run = "python scripts/go-notices --output .local/licenses/go-dependencies.txt ./cmd/pot ./cmd/pot-tool-executor ./plugins/podman/cmd ./plugins/apple-vm/cmd"
+run = "python scripts/go-notices --output .local/licenses/go-dependencies.txt ./cmd/pot"
 
 [tasks."test:ui"]
 description = "Verify shared DOM composer and production owner-scoped state contracts"
 run = ["node scripts/tests/go-ui-state.mjs", "node scripts/tests/go-ui-production-state.mjs", "node scripts/tests/web-errors.js"]
 
 [tasks."test:executor"]
-description = "Verify Go executor through retained Linux/macOS Python callers"
-depends = ["build:go"]
-run = ["python scripts/tests/go-executor-protocol.py .local/go/bin/pot-tool-executor", "python scripts/tests/executor-lifecycle.py", "python scripts/tests/macos-provider.py"]
-
-[tasks."test:skills"]
-description = "Verify retained guest per-scope skills mount policy without a VM"
-run = "python scripts/tests/skill-mounts.py"
-
-[tasks."test:operation-prepare"]
-description = "Verify retained guest argument normalization without authorization state"
-run = ["python scripts/tests/operation-prepare.py", "python scripts/tests/credential-transport.py"]
+description = "Verify local executor process ownership, sessions and cleanup"
+run = "go test -race ./pkg/executor ./pkg/pluginhost"
 
 [tasks."test:hooks"]
 description = "Verify hook timing and failure propagation"
 run = "python scripts/tests/hook-timing.py"
 
 [tasks."test:browser"]
-description = "Qualify retained CUA plugin observations against a Chromium fixture"
-run = ["node scripts/tests/browser-close.mjs", "python scripts/tests/browser.py"]
+description = "Verify browser process closure and observation bounds"
+run = "node scripts/tests/browser-close.mjs"
 
 [tasks."test:skill-authoring"]
 description = "Verify builtin skill validation and installation helpers"
@@ -132,7 +106,7 @@ python -m venv .local/skill-tests
 """
 
 [tasks."test:i18n"]
-description = "Verify retained localized pages and catalog completeness"
+description = "Verify shared product translation completeness"
 run = "python scripts/tests/localization.py"
 
 [tasks."test:eval"]
@@ -159,21 +133,21 @@ description = "Test Go product components with the race detector"
 run = "go test -race ./..."
 
 [tasks."build:go"]
-description = "Build Go CLI and executor independently of the desktop"
-run = "go build -mod=readonly -trimpath -o .local/go/bin/ ./cmd/pot ./cmd/pot-tool-executor"
+description = "Build Go CLI independently of the desktop"
+run = "go build -mod=readonly -trimpath -o .local/go/bin/ ./cmd/pot"
 
 [tasks."build:linux"]
 description = "Cross-build Go headless entry points without CGO or GUI dependencies"
 run = '''
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -mod=readonly -trimpath -o .local/go/linux-arm64/ ./cmd/pot ./cmd/pot-tool-executor
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -mod=readonly -trimpath -o .local/go/linux-amd64/ ./cmd/pot ./cmd/pot-tool-executor
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -mod=readonly -trimpath -o .local/go/linux-arm64/ ./cmd/pot
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -mod=readonly -trimpath -o .local/go/linux-amd64/ ./cmd/pot
 python scripts/build-go-plugins --platform linux-arm64 --output .local/go/linux-arm64/Resources/plugins
 python scripts/build-go-plugins --platform linux-amd64 --output .local/go/linux-amd64/Resources/plugins
 '''
 
 [tasks."test:packaging"]
 description = "Verify package layout, immutable export and service artifact generation"
-run = ["python scripts/tests/go-packaging.py", "python scripts/tests/verify-go-sandbox-resources.py"]
+run = "python scripts/tests/go-packaging.py"
 
 [tasks.preview]
 description = "Run the disposable loopback shared UI preview (no model or product data)"

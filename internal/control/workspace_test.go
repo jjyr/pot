@@ -21,22 +21,22 @@ func TestHostAssistantWorkspaceAndInstructionDiscoveryAreOwnerScoped(t *testing.
 	}
 	writeTaskFixture(t, filepath.Join(a, "AGENTS.md"), "FIRST_PRIVATE")
 	writeTaskFixture(t, filepath.Join(b, "AGENTS.md"), "SECOND_PRIVATE")
-	first, err := s.prepareExecution(ctx, "first", core.HostTarget("local"), false, "")
+	first, err := s.prepareExecution(ctx, "first", core.RuntimeTarget("local"), false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := s.prepareExecution(ctx, "second", core.HostTarget("local"), false, "")
+	second, err := s.prepareExecution(ctx, "second", core.RuntimeTarget("local"), false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if a == b || first.Workspace != a || second.Workspace != b || strings.Contains(first.Instructions, "SECOND_PRIVATE") || !strings.Contains(first.Instructions, "FIRST_PRIVATE") || strings.Contains(second.Instructions, "FIRST_PRIVATE") {
 		t.Fatal(first, second)
 	}
-	mail, err := s.prepareExecutionFor(ctx, "mail-execution", "first", core.HostTarget("local"), false, "")
+	mail, err := s.prepareExecutionFor(ctx, "mail-execution", "first", core.RuntimeTarget("local"), false, "")
 	if err != nil || mail.Owner != "mail-execution" || mail.Workspace != a {
 		t.Fatal(mail, err)
 	}
-	worker, err := s.prepareExecution(ctx, "worker", core.HostTarget("local"), true, "")
+	worker, err := s.prepareExecution(ctx, "worker", core.RuntimeTarget("local"), true, "")
 	if err != nil || worker.Workspace != filepath.Join(s.options.Workspace, "tasks", "worker") {
 		t.Fatal(worker, err)
 	}

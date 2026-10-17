@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {createEditorSession,createRequestGate} from '../../web/src/state/editor.mjs';
 import {scopedPath,normalizeSnapshot,createProductionClient,decodeDesktopResponse,APIError} from '../../web/src/adapters/production.mjs';
 import {createTopicVersions} from '../../web/src/state/changes.mjs';
-const cancelledPreparation={id:'request-proof',sandbox_id:'shared',bundle_id:'linux-fixture',state:'cancelled',error:'Cancelled by owner'};
+const cancelledPreparation={id:'request-proof',state:'cancelled',error:'Cancelled by owner'};
 assert.deepEqual(decodeDesktopResponse(JSON.stringify(cancelledPreparation)),cancelledPreparation,'Successful native cancellation retains its domain error text without a false HTTP failure');
 assert.equal(decodeDesktopResponse(cancelledPreparation),cancelledPreparation,'Object DTO identity is preserved');
 assert.deepEqual(decodeDesktopResponse({status:200,error:'Optional domain diagnostic'}),{status:200,error:'Optional domain diagnostic'});

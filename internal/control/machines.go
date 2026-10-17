@@ -2,12 +2,9 @@ package control
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"github.com/jjyr/pot/internal/controlplane"
 	"github.com/jjyr/pot/pkg/core"
-	"github.com/jjyr/pot/pkg/sandbox"
-	"github.com/jjyr/pot/pkg/storage"
 	"runtime"
 	"time"
 )
@@ -150,46 +147,12 @@ func (s *Service) ManageMembership(ctx context.Context, r MembershipCommand) (an
 	return nil, errors.New("unknown membership action")
 }
 
-type MachineCommand struct {
-	Action    string             `json:"action" required:"true"`
-	MachineID string             `json:"machine_id"`
-	SandboxID string             `json:"sandbox_id"`
-	Resources *sandbox.Resources `json:"resources"`
-}
-
-func (s *Service) localMachine(ctx context.Context) (map[string]any, error) {
+func (s *Service) localMachine(_ context.Context) (map[string]any, error) {
 	policy, _, err := s.Permissions.Policy(s.options.RuntimeID)
 	if err != nil {
 		return nil, err
 	}
-	desktop := false
-	if s.options.Sandboxes != nil {
-		for _, d := range s.options.Sandboxes.Descriptors() {
-			desktop = desktop || d.Capabilities.Desktop
-		}
-	}
-	item := map[string]any{"id": s.options.RuntimeID, "runtime_id": s.options.RuntimeID, "name": s.options.RuntimeID, "os": runtime.GOOS, "connected": true, "role": s.Machines.Role(), "tags": s.Machines.LocalLabels(), "policy": policy, "capabilities": map[string]bool{"host": true, "sandbox": s.HasSandbox(), "desktop": desktop}}
-	if s.options.Sandboxes != nil {
-		definitions, err := s.options.Sandboxes.Inventory(ctx)
-		if err != nil {
-			return nil, err
-		}
-		for _, d := range definitions {
-			if d.Retired {
-				continue
-			}
-			raw, _ := json.Marshal(d)
-			var view map[string]any
-			json.Unmarshal(raw, &view)
-			status, err := s.options.Sandboxes.Lifecycle(ctx, d.ID, "status")
-			if err == nil {
-				view["state"] = status
-			}
-			item["sandbox"] = view
-			break
-		}
-	}
-	return item, nil
+	return map[string]any{"id": s.options.RuntimeID, "runtime_id": s.options.RuntimeID, "name": s.options.RuntimeID, "os": runtime.GOOS, "connected": true, "role": s.Machines.Role(), "tags": s.Machines.LocalLabels(), "policy": policy}, nil
 }
 func (s *Service) MachineList(ctx context.Context) ([]map[string]any, error) {
 	local, err := s.localMachine(ctx)
@@ -202,88 +165,11 @@ func (s *Service) MachineList(ctx context.Context) ([]map[string]any, error) {
 		return nil, err
 	}
 	for _, m := range members {
-		item := map[string]any{"id": m.Identity.RuntimeID, "runtime_id": m.Identity.RuntimeID, "name": m.Identity.RuntimeID, "os": m.OS, "tags": m.Labels, "connected": m.Online, "role": "runner", "capabilities": map[string]bool{"host": true, "sandbox": false, "desktop": false}}
-		if m.Online {
-			if peer, err := s.Machines.Peer(m.Identity.RuntimeID); err == nil {
-				reply, err := peer.Call(ctx, controlplane.Request{ID: "inventory:" + storage.ID(), Method: "machine.inventory", Params: json.RawMessage(`{}`)})
-				if err == nil {
-					var remote map[string]any
-					if err = core.DecodeJSON(reply, &remote); err == nil {
-						for _, key := range []string{"capabilities", "sandbox"} {
-							if value, ok := remote[key]; ok {
-								item[key] = value
-							}
-						}
-					}
-				}
-			}
-		}
 		policy, _, err := s.Permissions.Policy(m.Identity.RuntimeID)
-		if err == nil {
-			item["policy"] = policy
+		if err != nil {
+			return nil, err
 		}
-		items = append(items, item)
+		items = append(items, map[string]any{"id": m.Identity.RuntimeID, "runtime_id": m.Identity.RuntimeID, "name": m.Identity.RuntimeID, "os": m.OS, "tags": m.Labels, "connected": m.Online, "role": "runner", "policy": policy})
 	}
 	return items, nil
-}
-func (s *Service) ManageMachine(ctx context.Context, r MachineCommand) (any, error) {
-	if r.MachineID != "" && r.MachineID != s.options.RuntimeID {
-		peer, err := s.Machines.Peer(r.MachineID)
-		if err != nil {
-			return nil, err
-		}
-		raw, _ := json.Marshal(r)
-		reply, err := peer.Call(ctx, controlplane.Request{ID: "machine-manage:" + storage.ID(), Method: "machine.manage", Params: raw})
-		if err != nil {
-			return nil, err
-		}
-		var value any
-		if err = core.DecodeJSON(reply, &value); err != nil {
-			return nil, err
-		}
-		s.Changes.Notify("machines")
-		return value, nil
-	}
-	return s.manageLocalMachine(ctx, r)
-}
-func (s *Service) manageLocalMachine(ctx context.Context, r MachineCommand) (any, error) {
-	m := s.options.Sandboxes
-	if m == nil {
-		return nil, errors.New("machine has no available Sandbox provider")
-	}
-	id := r.SandboxID
-	if id == "" {
-		d, err := m.EnsureShared(ctx)
-		if err != nil {
-			return nil, err
-		}
-		id = d.ID
-	}
-	defer s.Changes.Notify("machines")
-	switch r.Action {
-	case "start", "stop", "rebuild":
-		if r.Action == "start" {
-			if err := s.PrepareSandboxResources(ctx, id); err != nil {
-				return nil, err
-			}
-		}
-		return m.Lifecycle(ctx, id, r.Action)
-	case "recover":
-		err := m.Recover(ctx, id)
-		return map[string]bool{"recovered": err == nil}, err
-	case "configure_resources":
-		if r.Resources == nil {
-			return nil, errors.New("Sandbox resources required")
-		}
-		err := m.Configure(ctx, id, *r.Resources)
-		return map[string]bool{"configured": err == nil}, err
-	}
-	return nil, errors.New("unknown Sandbox management action")
-}
-
-func (s *Service) PrepareSandboxResources(ctx context.Context, id string) error {
-	if s.options.PrepareSandboxResources != nil {
-		return s.options.PrepareSandboxResources(ctx, id)
-	}
-	return nil
 }

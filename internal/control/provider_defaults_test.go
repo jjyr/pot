@@ -14,7 +14,7 @@ import (
 
 func installDefaultToolFixture(t *testing.T, root, id string) {
 	t.Helper()
-	manifest := `{"schema_version":2,"id":"` + id + `","version":"1","contributes":{"tools":{"runtime":"node","execution":"host_or_sandbox","entrypoint":"tool.mjs","files":["tool.mjs"],"requirements":[],"tools":[{"name":"` + strings.ReplaceAll(id, "-", "_") + `","description":"fixture","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}]},"sandbox_providers":[{"id":"fixture.` + id + `","host_os":["darwin","linux"],"executable":"bin/provider"}]}}`
+	manifest := `{"schema_version":2,"id":"` + id + `","version":"1","contributes":{"tools":{"runtime":"node","execution":"runtime","entrypoint":"tool.mjs","files":["tool.mjs"],"requirements":[],"tools":[{"name":"` + strings.ReplaceAll(id, "-", "_") + `","description":"fixture","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}]}}}`
 	writeTaskFixture(t, filepath.Join(root, id, "plugin.json"), manifest)
 	writeTaskFixture(t, filepath.Join(root, id, "tool.mjs"), "ORIGINAL_TOOL")
 }
@@ -26,7 +26,6 @@ func TestProviderDefaultsEnableInstalledToolsAndClearLegacyFilters(t *testing.T)
 	installDefaultToolFixture(t, root, "github")
 	installDefaultToolFixture(t, root, "computer-use")
 	// Neither tool discovery nor resolution may read or launch Provider binaries.
-	writeTaskFixture(t, filepath.Join(root, "provider-only", "plugin.json"), `{"schema_version":2,"id":"provider-only","version":"1","contributes":{"sandbox_providers":[{"id":"fixture.only","host_os":["darwin","linux"],"executable":"bin/not-installed"}]}}`)
 	before, _ := s.Registry.Definitions(context.Background())
 	profile, err := s.Profiles.Save(context.Background(), SaveProfile{RequestID: "connection-only", Name: "Connection", Model: "first", Endpoint: "https://fixture.invalid/v1/chat/completions", Protocol: "openai_chat", APIKey: "fixture-key"})
 	if err != nil {
@@ -44,7 +43,7 @@ func TestProviderDefaultsEnableInstalledToolsAndClearLegacyFilters(t *testing.T)
 		t.Fatal("tools are not enabled by default", spec.Params.Agent)
 	}
 	for _, installed := range spec.Params.Agent.Plugins {
-		if !installed.Enabled || installed.Bundle == nil || installed.Source != nil || len(installed.Bundle.Manifest.Contributes.SandboxProviders) != 0 {
+		if !installed.Enabled || installed.Bundle == nil || installed.Source != nil {
 			t.Fatal("execution snapshot is not pinned and tool-only", installed)
 		}
 	}

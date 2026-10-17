@@ -30,15 +30,13 @@ parser.add_argument(
 )
 parser.add_argument("--output", type=Path, default=BUILD / "releases")
 args = parser.parse_args()
-if args.platform == "darwin-arm64" and platform.system() != "Darwin":
-    parser.error("macOS archives include signed Swift Helpers and must be built on macOS")
 BUILD.mkdir(parents=True, exist_ok=True)
 args.output.mkdir(parents=True, exist_ok=True)
 with tempfile.TemporaryDirectory(prefix=".go-cli-", dir=BUILD) as temporary:
     staged = Path(temporary) / ("pot-go-" + args.platform)
     resources = staged / "Resources"
     prepare_resources(resources, args.platform)
-    for name in ("pot", "pot-tool-executor"):
+    for name in ("pot",):
         go_build("./cmd/" + name, staged / "bin" / name, args.platform)
     call(
         [

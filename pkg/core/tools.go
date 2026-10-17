@@ -18,15 +18,10 @@ func ProductTools() []json.RawMessage {
 }
 
 func ExecutionReferenceSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"runtime_id":{"type":"string"},"target":{"oneOf":[{"type":"object","properties":{"kind":{"const":"host"}},"required":["kind"],"additionalProperties":false},{"type":"object","properties":{"kind":{"const":"sandbox"},"sandbox_id":{"type":"string"}},"required":["kind","sandbox_id"],"additionalProperties":false}]}},"required":["runtime_id","target"],"additionalProperties":false}`)
-}
-func ExecutionSelectorSchema() json.RawMessage {
-	data, _ := json.Marshal(map[string]any{"oneOf": []any{map[string]any{"type": "string", "description": "Local host or sandbox:ID."}, ExecutionReferenceSchema()}, "description": "Execution destination. Omitted uses the current execution context. Use host for the same machine; policy determines approval. Task placement does not change."})
-	return data
+	return json.RawMessage(`{"type":"object","properties":{"runtime_id":{"type":"string"}},"required":["runtime_id"],"additionalProperties":false}`)
 }
 
-// ExecutionTools is the sole built-in execution schema source. The owner adds
-// execution_target using ExecutionSelectorSchema only when routing is available.
+// ExecutionTools is the sole built-in execution schema source. Tools remain bound to their run destination.
 func ExecutionTools(policy ShellSettings) []json.RawMessage {
 	stringField := func() any { return map[string]any{"type": "string"} }
 	boolean := func() any { return map[string]any{"type": "boolean"} }

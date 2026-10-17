@@ -4,7 +4,7 @@ cask "pot" do
 
   url "https://github.com/jjyr/pot/releases/download/v#{version}/Pot-#{version}-arm64.zip"
   name "Pot"
-  desc "Personal AI assistant with managed Linux sandboxes"
+  desc "Personal AI assistant with local and explicit remote task execution"
   homepage "https://github.com/jjyr/pot"
 
   depends_on arch: :arm64

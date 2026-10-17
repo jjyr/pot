@@ -20,11 +20,11 @@ func TestEmbeddedControlCannotChangeMembershipRole(t *testing.T) {
 	if s.ControlRole() != "embedded" || s.Machines.Membership() != nil {
 		t.Fatal("embedded role changed")
 	}
-	if _, err := s.ManageMembership(context.Background(), MembershipCommand{Action: "set_tags", RuntimeID: "local", Tags: []string{"desktop", "task-runner"}}); err != nil {
+	if _, err := s.ManageMembership(context.Background(), MembershipCommand{Action: "set_tags", RuntimeID: "local", Tags: []string{"desktop"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ManageMembership(context.Background(), MembershipCommand{Action: "set_tags", RuntimeID: "local", Tags: []string{"desktop"}}); err == nil {
-		t.Fatal("embedded Space lost its last task-runner")
+	if _, err := s.ManageMembership(context.Background(), MembershipCommand{Action: "set_tags", RuntimeID: "local", Tags: nil}); err != nil {
+		t.Fatal("labels unexpectedly control local execution", err)
 	}
 }
 
@@ -87,7 +87,7 @@ func TestConfiguredProviderOrAssistantCannotBecomeRunnerAndRunnerCannotSaveProvi
 	}
 }
 
-func TestRemovingLastTaskRunnerPreservesMemberPermissions(t *testing.T) {
+func TestRemovingRemoteRunnerClearsPermissionsAndRetainsLocalDefault(t *testing.T) {
 	ctx := context.Background()
 	control := taskControl(t, "control", "")
 	worker := taskControl(t, "worker", "")
@@ -115,19 +115,18 @@ func TestRemovingLastTaskRunnerPreservesMemberPermissions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	policy, epoch, err := control.Permissions.Policy("worker")
+	_, _, err = control.Permissions.Policy("worker")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = control.ManageMembership(ctx, MembershipCommand{Action: "remove_member", RuntimeID: "worker"}); err == nil {
-		t.Fatal("removed last task-runner through owner API")
+	if _, err = control.ManageMembership(ctx, MembershipCommand{Action: "remove_member", RuntimeID: "worker"}); err != nil {
+		t.Fatal("remote removal depends on obsolete labels", err)
 	}
-	after, afterEpoch, err := control.Permissions.Policy("worker")
-	if err != nil || after != policy || afterEpoch != epoch {
-		t.Fatal("rejected removal changed permissions", after, afterEpoch, err)
+	if _, _, err = control.Permissions.Policy("worker"); err == nil {
+		t.Fatal("removed member retained execution authority")
 	}
 	machine, err := control.selectTaskMachine(ctx, "")
-	if err != nil || machine != "worker" {
-		t.Fatal("rejected removal changed default task routing", machine, err)
+	if err != nil || machine != "control" {
+		t.Fatal("removing remote member changed local default", machine, err)
 	}
 }

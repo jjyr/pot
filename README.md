@@ -6,10 +6,9 @@
 
 Pot is an open-source implementation of the Dot experience.
 
-Pot runs its Agent locally with managed Linux sandboxes. macOS and Linux use the
-same independently packaged Podman container provider; macOS runs its Linux containers in one dedicated
-Pot-managed Podman machine. Pot manages machines, sandboxes and background tasks—you
-simply tell it what to do and provide guidance along the way.
+Pot runs assistants and background tasks through a Go Control with local execution.
+Explicitly enrolled Runners support remote Tasks. Commands and tool plugins run
+on the selected machine with owner authorization; Runtime manages no VMs or containers.
 
 ## Install
 
@@ -36,22 +35,20 @@ Both modes use the same CLI:
 - **[Control](docs/deployment.md#standalone-control)** manages assistants, conversations,
   model credentials, tasks and joined machines. Connect with the macOS App or Web UI.
 - **[Execution-only (Runner)](docs/deployment.md#runner-membership)** joins
-  a Control and provides explicitly configured Host or Sandbox execution resources.
+  a Control and provides explicitly selected local execution.
   It connects outward and needs no model-provider credentials.
 
 Go hosts the product logic. The macOS App uses Wails v3 and the system WebView;
 main window, tray and the independent browser service share HTML/CSS/JavaScript.
-Tools, Sandbox backends and image catalogs use [Plugin packages](docs/plugins.md), with separate capability contracts.
-Swift provides native macOS VM support; Node plugins and Python guest services
-run in their own runtimes. See [Deployment](docs/deployment.md) for resource
-setup, private data roots and browser publication.
+Tools use trusted [Plugin packages](docs/plugins.md). The Runtime supplies Node;
+browser tools use Chrome/Chromium installed on the execution machine.
 
 ## Features
 
 - **A personal AI assistant** — give instructions, ask questions, and follow up through chat.
-- **Managed sandboxes** — independent Linux sandboxes start on demand, run tools and preserve work across shutdown.
-- **Background tasks** — Pot binds each task to a fixed Host or Sandbox, tracks progress, and reports results.
+- **Local execution** — tools run on the Control by default, with explicit remote Task destinations.
+- **Background tasks** — Pot binds each task to a fixed Runtime, tracks progress, and reports results.
 - **Scheduled work** — ask Pot to run recurring tasks and notify you when something changes.
-- **A visible workspace** — inspect the sandbox desktop and take over when needed.
+- **Persistent workspaces** — retain files in assistant and Task directories.
 
 See the [documentation](docs/README.md) for details.

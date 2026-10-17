@@ -160,9 +160,7 @@ type PluginManifest struct {
 	Contributes   PluginContributions `json:"contributes"`
 }
 type PluginContributions struct {
-	Tools            *PluginTools            `json:"tools,omitempty"`
-	SandboxProviders []PluginSandboxProvider `json:"sandbox_providers,omitempty"`
-	Resources        []PluginResourceCatalog `json:"resources,omitempty"`
+	Tools *PluginTools `json:"tools,omitempty"`
 }
 type PluginTools struct {
 	SessionMode  string             `json:"session_mode,omitempty"`
@@ -174,17 +172,7 @@ type PluginTools struct {
 	Requirements []string           `json:"requirements"`
 	Tools        []json.RawMessage  `json:"tools"`
 }
-type PluginSandboxProvider struct {
-	ID            string   `json:"id"`
-	HostOS        []string `json:"host_os"`
-	Executable    string   `json:"executable"`
-	Args          []string `json:"args,omitempty"`
-	DefaultShared bool     `json:"default_shared"`
-}
-type PluginResourceCatalog struct {
-	Provider string `json:"provider"`
-	Catalog  string `json:"catalog"`
-}
+
 type PluginBundle struct {
 	Manifest PluginManifest    `json:"manifest"`
 	Files    map[string]string `json:"files"`
@@ -248,27 +236,8 @@ func (m PluginManifest) Validate() error {
 		}
 	}
 	c := m.Contributes
-	if c.Tools == nil && len(c.SandboxProviders) == 0 && len(c.Resources) == 0 {
+	if c.Tools == nil {
 		return fmt.Errorf("plugin declares no capabilities")
-	}
-	seen := map[string]bool{}
-	for _, p := range c.SandboxProviders {
-		if !Identifier(p.ID) || seen[p.ID] || len(p.HostOS) == 0 || len(p.Args) > 16 || !SafeRelativePath(p.Executable) {
-			return fmt.Errorf("invalid Sandbox Provider capability")
-		}
-		seen[p.ID] = true
-		hosts := map[string]bool{}
-		for _, host := range p.HostOS {
-			if (host != "darwin" && host != "linux") || hosts[host] {
-				return fmt.Errorf("invalid provider host OS")
-			}
-			hosts[host] = true
-		}
-	}
-	for _, resource := range c.Resources {
-		if !Identifier(resource.Provider) || !SafeRelativePath(resource.Catalog) {
-			return fmt.Errorf("invalid plugin resource catalog")
-		}
 	}
 	if c.Tools != nil {
 		return validatePluginTools(*c.Tools)
@@ -283,7 +252,7 @@ func (b PluginBundle) Validate() error {
 	if err := m.Validate(); err != nil {
 		return err
 	}
-	if m.Contributes.Tools == nil || len(m.Contributes.SandboxProviders) != 0 || len(m.Contributes.Resources) != 0 {
+	if m.Contributes.Tools == nil {
 		return fmt.Errorf("execution bundle must contain only tool capability")
 	}
 	tools := m.Contributes.Tools
@@ -317,7 +286,7 @@ func validatePluginTools(tools PluginTools) error {
 	if tools.SessionMode != "" && tools.SessionMode != "call" {
 		return fmt.Errorf("unsupported plugin session mode")
 	}
-	if tools.Runtime != "node" || !slices.Contains([]string{"sandbox", "host_or_sandbox"}, tools.Execution) {
+	if tools.Runtime != "node" || tools.Execution != "runtime" {
 		return fmt.Errorf("invalid tool runtime or execution target")
 	}
 	if len(tools.Files) == 0 || len(tools.Files) > 32 || !slices.Contains(tools.Files, tools.Entrypoint) {

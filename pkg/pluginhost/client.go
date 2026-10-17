@@ -46,15 +46,14 @@ var ErrSessionEnded = errors.New("plugin session ended; explicitly start a new s
 // Session ownership (Agent/epoch), the eight-session limit and input-schema
 // validation belong to the caller's execution manager.
 type Config struct {
-	Workspace       string
-	Environment     map[string]string
-	Node            string
-	Identity        string
-	Entrypoint      string
-	Files           map[string]string
-	Mode            string        // text or mixed, derived from model capabilities by Control
-	ExecutionTarget string        // host (default) or sandbox under a trusted Python broker
-	IdleTimeout     time.Duration // zero uses the 30-minute default
+	Workspace   string
+	Environment map[string]string
+	Node        string
+	Identity    string
+	Entrypoint  string
+	Files       map[string]string
+	Mode        string        // text or mixed, derived from model capabilities by Control
+	IdleTimeout time.Duration // zero uses the 30-minute default
 }
 
 type Content struct {
@@ -85,7 +84,6 @@ type Client struct {
 	wait       chan error
 	directory  string
 	id, mode   string
-	target     string
 	idle       time.Duration
 	touched    time.Time
 	ended      bool
@@ -93,12 +91,7 @@ type Client struct {
 }
 
 func New(config Config) (*Client, error) {
-	if config.ExecutionTarget == "" {
-		config.ExecutionTarget = "host"
-	}
-	if config.ExecutionTarget != "host" && config.ExecutionTarget != "sandbox" {
-		return nil, errors.New("invalid trusted plugin execution target")
-	}
+
 	if config.IdleTimeout < 0 {
 		return nil, errors.New("invalid plugin idle timeout")
 	}
@@ -179,7 +172,7 @@ func New(config Config) (*Client, error) {
 		_ = output.Close()
 		return nil, err
 	}
-	c := &Client{cmd: cmd, stdin: input, stdout: output, reader: bufio.NewReader(output), wait: make(chan error, 1), directory: directory, id: hex.EncodeToString(id), mode: config.Mode, target: config.ExecutionTarget, idle: config.IdleTimeout, touched: time.Now()}
+	c := &Client{cmd: cmd, stdin: input, stdout: output, reader: bufio.NewReader(output), wait: make(chan error, 1), directory: directory, id: hex.EncodeToString(id), mode: config.Mode, idle: config.IdleTimeout, touched: time.Now()}
 	go func() { c.wait <- cmd.Wait() }()
 	ok = true
 	return c, nil
@@ -236,7 +229,7 @@ func (c *Client) Execute(ctx context.Context, tool string, input map[string]any)
 	if code, ok := input["code"].(string); ok && len(code) > 32768 {
 		return Result{}, errors.New("plugin code exceeds 32 KiB")
 	}
-	request, err := json.Marshal(map[string]any{"tool": tool, "input": input, "mode": c.mode, "execution_target": c.target})
+	request, err := json.Marshal(map[string]any{"tool": tool, "input": input, "mode": c.mode})
 	if err != nil {
 		return Result{}, err
 	}

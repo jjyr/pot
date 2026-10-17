@@ -12,20 +12,13 @@ import (
 )
 
 type MachinePolicy struct {
-	ExecutionMode string `json:"execution_mode"`
-	HostAccess    string `json:"host_access"`
+	ExecutionAccess string `json:"execution_access"`
 }
 
-func DefaultMachinePolicy() MachinePolicy { return MachinePolicy{"sandbox", "ask"} }
+func DefaultMachinePolicy() MachinePolicy { return MachinePolicy{ExecutionAccess: "ask"} }
 func (p MachinePolicy) Validate() error {
-	if p.ExecutionMode != "host" && p.ExecutionMode != "sandbox" {
-		return errors.New("invalid machine execution mode")
-	}
-	if p.HostAccess != "ask" && p.HostAccess != "allow" && p.HostAccess != "deny" {
-		return errors.New("invalid Host access policy")
-	}
-	if p.ExecutionMode == "host" && p.HostAccess == "deny" {
-		return errors.New("Host mode cannot deny Host access")
+	if p.ExecutionAccess != "ask" && p.ExecutionAccess != "allow" && p.ExecutionAccess != "deny" {
+		return errors.New("invalid execution access policy")
 	}
 	return nil
 }
@@ -54,6 +47,7 @@ type hostDecision struct {
 	approval Approval
 	done     chan struct{}
 	resolved bool
+	action   string
 	allow    bool
 	invalid  bool
 }
@@ -66,7 +60,7 @@ type PermissionStore struct {
 }
 
 func OpenPermissions(path string) (*PermissionStore, error) {
-	p := &PermissionStore{path: path, state: permissionFile{4, map[string]MachinePolicy{}, map[string]string{}}, pending: map[string]*hostDecision{}}
+	p := &PermissionStore{path: path, state: permissionFile{5, map[string]MachinePolicy{}, map[string]string{}}, pending: map[string]*hostDecision{}}
 	body, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return p, nil
@@ -77,7 +71,7 @@ func OpenPermissions(path string) (*PermissionStore, error) {
 	if err = core.DecodeJSON(body, &p.state); err != nil {
 		return nil, err
 	}
-	if p.state.Version != 4 || p.state.Machines == nil || p.state.Epochs == nil {
+	if p.state.Version != 5 || p.state.Machines == nil || p.state.Epochs == nil {
 		return nil, errors.New("unsupported machine policy format")
 	}
 	for id, policy := range p.state.Machines {
@@ -99,7 +93,7 @@ func (p *PermissionStore) saveLocked(next permissionFile) error {
 	return nil
 }
 func (p *PermissionStore) copyLocked() permissionFile {
-	next := permissionFile{4, map[string]MachinePolicy{}, map[string]string{}}
+	next := permissionFile{5, map[string]MachinePolicy{}, map[string]string{}}
 	for k, v := range p.state.Machines {
 		next.Machines[k] = v
 	}
@@ -178,15 +172,15 @@ func (p *PermissionStore) Policy(machine string) (MachinePolicy, string, error) 
 }
 func (r HostRequest) validate() error {
 	if r.Owner == "" || r.Turn == "" || r.CallID == "" || !core.Identifier(r.MachineID) || r.EnrollmentEpoch == "" || r.Generation == 0 || r.Generation > core.MaxSafeInteger || r.Tool == "" || !json.Valid(r.Args) || len(r.Args) > 4*1024*1024 {
-		return errors.New("invalid exact Host request")
+		return errors.New("invalid exact execution request")
 	}
 	return nil
 }
 
-// Authorize returns persistent=true only for current configured Host access.
+// Authorize returns persistent=true only for current configured execution access.
 // A temporary allow_once covers this exact operation; the dispatcher must still
 // inspect its receipt and executor-owned session before doing any work.
-var ErrHostDenied = errors.New("Host operation denied")
+var ErrHostDenied = errors.New("Execution operation denied")
 
 func (p *PermissionStore) Authorize(ctx context.Context, r HostRequest) (bool, error) {
 	return p.authorize(ctx, r, nil)
@@ -207,9 +201,14 @@ func (p *PermissionStore) authorize(ctx context.Context, r HostRequest, pending 
 		p.mu.Unlock()
 		return false, errors.New("machine enrollment changed")
 	}
+	// A later broad grant must not reverse an explicit denial of this exact call.
+	if previous := p.pending[hash]; previous != nil && previous.resolved && !previous.allow {
+		p.mu.Unlock()
+		return false, ErrHostDenied
+	}
 	review := r.Tool == "update_agent_instructions"
 	if !review {
-		switch policy.HostAccess {
+		switch policy.ExecutionAccess {
 		case "allow":
 			p.mu.Unlock()
 			return true, nil
@@ -234,7 +233,7 @@ func (p *PermissionStore) authorize(ctx context.Context, r HostRequest, pending 
 			return false, nil
 		}
 		p.mu.Unlock()
-		return false, errors.New("interactive Host input requires persistent Host access")
+		return false, errors.New("interactive Host input requires persistent execution access")
 	}
 	if r.Tool == "exec_command" {
 		var args struct {
@@ -246,7 +245,7 @@ func (p *PermissionStore) authorize(ctx context.Context, r HostRequest, pending 
 		}
 		if args.TTY {
 			p.mu.Unlock()
-			return false, errors.New("interactive Host terminal requires persistent Host access")
+			return false, errors.New("interactive Host terminal requires persistent execution access")
 		}
 	}
 	d := p.pending[hash]
@@ -269,14 +268,14 @@ func (p *PermissionStore) authorize(ctx context.Context, r HostRequest, pending 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	current, exists := p.state.Machines[r.MachineID]
-	if d.invalid || !exists || p.state.Epochs[r.MachineID] != r.EnrollmentEpoch || !review && current.HostAccess == "deny" {
-		return false, errors.New("Host authorization expired")
-	}
-	if !review && current.HostAccess == "allow" {
-		return true, nil
+	if d.invalid || !exists || p.state.Epochs[r.MachineID] != r.EnrollmentEpoch || !review && current.ExecutionAccess == "deny" {
+		return false, errors.New("execution authorization expired")
 	}
 	if !d.allow {
 		return false, ErrHostDenied
+	}
+	if !review && current.ExecutionAccess == "allow" {
+		return true, nil
 	}
 	return false, nil
 }
@@ -294,8 +293,8 @@ func (p *PermissionStore) Pending(owner string) []Approval {
 	return result
 }
 func (p *PermissionStore) Decide(owner, id, action string) error {
-	if action != "allow_once" && action != "deny" {
-		return errors.New("invalid Host approval action")
+	if action != "allow_once" && action != "allow_always" && action != "deny" {
+		return errors.New("invalid execution approval action")
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -303,13 +302,40 @@ func (p *PermissionStore) Decide(owner, id, action string) error {
 	if d == nil || d.approval.Request.Owner != owner || d.invalid {
 		return errors.New("approval is unavailable for this owner")
 	}
-	allow := action == "allow_once"
 	if d.resolved {
-		if d.allow != allow {
-			return errors.New("approval already decided differently")
+		if d.action == action {
+			return nil
+		}
+		return errors.New("approval already decided differently")
+	}
+	if action == "allow_always" {
+		if d.approval.Request.Tool == "update_agent_instructions" {
+			return errors.New("instruction changes require exact review")
+		}
+		r := d.approval.Request
+		if p.state.Epochs[r.MachineID] != r.EnrollmentEpoch {
+			return errors.New("machine enrollment changed")
+		}
+		next := p.copyLocked()
+		next.Machines[r.MachineID] = MachinePolicy{ExecutionAccess: "allow"}
+		if err := p.saveLocked(next); err != nil {
+			return err
+		}
+		// Wake all exact requests on this machine to recheck the saved policy. Keep
+		// independent instruction reviews pending; policy never approves rule edits.
+		for _, pending := range p.pending {
+			if pending.approval.Request.MachineID == r.MachineID && pending.approval.Request.Tool != "update_agent_instructions" && !pending.resolved {
+				pending.action = "allow_always"
+				pending.allow = true
+				pending.resolved = true
+				close(pending.done)
+			}
 		}
 		return nil
 	}
+	allow := action == "allow_once"
+
+	d.action = action
 	d.allow = allow
 	d.resolved = true
 	close(d.done)

@@ -151,38 +151,15 @@ func (s *Service) taskTarget(ctx context.Context, machine string) (core.Executio
 	if s.Machines.Role() == "runner" {
 		return core.ExecutionTarget{}, errors.New("Runner cannot own Task coordination")
 	}
-	policy, _, err := s.Permissions.Policy(machine)
-	if err != nil {
+	if _, _, err := s.Permissions.Policy(machine); err != nil {
 		return core.ExecutionTarget{}, err
 	}
 	if machine != s.options.RuntimeID {
-		peer, err := s.Machines.Peer(machine)
-		if err != nil {
+		if _, err := s.Machines.Peer(machine); err != nil {
 			return core.ExecutionTarget{}, err
 		}
-		raw, _ := json.Marshal(struct {
-			Mode string `json:"mode"`
-		}{policy.ExecutionMode})
-		reply, err := peer.Call(ctx, controlplane.Request{ID: "target:" + storage.ID(), Method: "machine.target", Params: raw})
-		if err != nil {
-			return core.ExecutionTarget{}, err
-		}
-		var target core.ExecutionTarget
-		if err = core.DecodeJSON(reply, &target); err != nil {
-			return target, err
-		}
-		if target.RuntimeID != machine || target.Target.Kind != policy.ExecutionMode {
-			return target, errors.New("remote policy target differs from selected machine/mode")
-		}
-		return target, target.Validate()
 	}
-	if policy.ExecutionMode == "host" {
-		return core.HostTarget(machine), nil
-	}
-	if s.options.ResolveSandbox == nil {
-		return core.ExecutionTarget{}, errors.New("Sandbox unavailable; no Host fallback")
-	}
-	return s.options.ResolveSandbox(ctx)
+	return core.RuntimeTarget(machine), nil
 }
 func (s *Service) taskLoop() {
 	defer s.taskLife.wg.Done()
@@ -583,16 +560,7 @@ func (f taskFiles) ReadResult(ctx context.Context, target core.ExecutionTarget, 
 		return nil, errors.New("invalid result path")
 	}
 	base := f.s.options.Workspace
-	if target.Target.Kind == "sandbox" {
-		if f.s.options.Sandboxes == nil {
-			return nil, errors.New("Sandbox manager unavailable")
-		}
-		w, err := f.s.options.Sandboxes.WorkspacePaths(ctx, target, task, true)
-		if err != nil {
-			return nil, err
-		}
-		base = w.HostRoot
-	}
+
 	anchor, err := os.OpenRoot(base)
 	if err != nil {
 		return nil, err

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare retained JS/Node/Swift assets for the independent Go product."""
+"""Prepare retained JS/Node assets for the independent Go product."""
 
 import argparse
 from pathlib import Path

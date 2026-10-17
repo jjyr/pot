@@ -11,14 +11,13 @@ import {createEditorSession, createRequestGate} from '../state/editor.mjs';
 import {createTaskTranscript,appendTaskEvents} from '../state/task-transcript.mjs';
 import {configurePush,forgetBrowserAccess,configureBrowserAccess,requestPWAInstall} from '../adapters/access.mjs';
 import {renderMarkdown} from './markdown.mjs';
-import {renderSandboxResources} from './resources.mjs';
 import {renderAbout} from './about.mjs';
 import {renderMachineMembership} from './membership.mjs';
 import {renderIntegrations} from './integrations.mjs';
 
-export function createPages({onApprovalsChanged=()=>{},client, host, approvalHost, locale, notify, changed, titleChanged, openChat, routeChanged=()=>{},withResourceConsent=({work})=>work()}) {
+export function createPages({onApprovalsChanged=()=>{},client, host, approvalHost, locale, notify, changed, titleChanged, openChat, routeChanged=()=>{}}) {
   const gate = createRequestGate(), approvalGate = createRequestGate();
-  let route = '', title = '', editor = null, disposed = false, pageVersion = 0, configurationSpace = '',taskView=null,resourceView=null,scheduleView=null,detailParent=false,usageOwner=null;
+  let route = '', title = '', editor = null, disposed = false, pageVersion = 0, configurationSpace = '',taskView=null,scheduleView=null,detailParent=false,usageOwner=null;
   let filter = {taskScope:'active', taskQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageDays:7, usageScope:'all', usageOffset:0,usageSpace:'all',settingsTab:'general',taskTarget:null,taskSpace:'all'};
   let pendingApprovals=[];
   const toolMemory=new Map();
@@ -194,7 +193,6 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const appearance=n('div','preference-setting appearance-setting');appearance.append(n('span','',tr('Appearance','外观')),segments([['system',tr('System','跟随系统')],['light',tr('Light','浅色')],['dark',tr('Dark','深色')]],document.documentElement.dataset.theme||'system',value=>preference('pot-go-preview-theme',value)));preferences.append(appearance);root.append(preferences);
 
     const shortcuts=n('details','page-card shortcut-card');shortcuts.dataset.cacheKey='keyboard-shortcuts';shortcuts.open=shortcutOpen??innerWidth>=720;const shortcutSummary=n('summary','',tr('Keyboard shortcuts','快捷键'));shortcutSummary.onclick=()=>{shortcutOpen=!shortcuts.open;};shortcuts.append(shortcutSummary);for(const [label,key]of [[tr('Parent page','父页面'),'⌘ ['],[tr('Machines','机器'),'⌘ D'],[tr('Settings','设置'),'⌘ ,'],[tr('New line','换行'),'⇧ ↵']]){const row=n('div','preference-row');row.append(n('span','hint',label),n('kbd','',key));shortcuts.append(row);}root.append(shortcuts);
-    if(client.desktop){const resources=n('section','page-card');resources.append(action(tr('Resource cache','资源缓存'),resourceCache));root.append(resources);}
     if(!client.desktop&&client.access){const access=n('section','page-card browser-actions');access.append(action(tr('Add to Home Screen','添加到主屏幕'),async()=>{if(!await requestPWAInstall())access.append(n('p','hint',tr('Use your browser menu to install Pot or add it to the Home Screen.','通过浏览器菜单安装 Pot 或添加到主屏幕。')));}));if(client.access.push_available){for(const enabled of [true,false]){const button=action(enabled?tr('Enable message notifications','启用消息通知'):tr('Disable message notifications','停用消息通知'),()=>operation(button,()=>configurePush(client.access,{enabled,locale:locale()}),()=>{}));access.append(button);}}access.append(action(tr('Change access token','更改访问令牌'),()=>renderEditor(tr('Browser access','浏览器访问'),{token:''},[{name:'token',label:tr('Access token','访问令牌'),kind:'password',required:true}],values=>configureBrowserAccess(values.token))),action(tr('Disconnect this browser','断开此浏览器'),()=>forgetBrowserAccess()));root.append(access);}
 
     await renderAbout({client,root,scope:{owner:'',space:client.desktop?(client.spaces||[]).find(space=>space.kind==='local')?.id||'':scope().space},locale});return;
@@ -244,13 +242,6 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       {name:'profile_limit',label:tr('Model concurrency','模型并发数'),kind:'number',parse:value=>value?Number(value):null,min:1,max:1000,help:tr('Leave blank for no additional limit.','留空表示不另设上限。')},
       {name:'provider_limit',label:tr('Provider concurrency','提供商并发数'),kind:'number',parse:value=>value?Number(value):null,min:1,max:1000},
     ],(values,context)=>{const next=structuredClone(policy);next.profile_limits||={};next.provider_limits||={};for(const [key,id,value]of [['profile_limits',profile.id,values.profile_limit],['provider_limits',profile.provider,values.provider_limit]]){if(value)next[key][id]=value;else delete next[key][id];}return request('/api/v1/agent/routing',{...context,method:'POST',body:next});},{capturedScope:owner});
-  }
-  async function resourceCache(record=true){
-    if(!await leave())return;
-    const local=(client.spaces||[]).find(space=>space.kind==='local');if(!local)return;
-    if(record)history.pushState({potRoute:'settings',potResource:true,potScope:{space:local.id,owner:''}},'',location.href);const token=gate.next(),root=body(),view={token,controller:null};resourceView=view;detailParent=true;heading(tr('Resource cache','资源缓存'));
-    const controller=await renderSandboxResources({client,root,scope:{space:local.id,owner:''},locale,notify});
-    if(resourceView===view&&gate.current(token)){view.controller=controller;restoreView('resource-cache',token);}
   }
   async function setupAI() {
     const captured={...scope(),owner:''};
@@ -318,7 +309,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     root.append(segments([['tasks',tr('Tasks','任务')],['schedules',tr('Schedules','定时计划')]],filter.taskTab,value=>{filter.taskTab=value;show('tasks');}));
     if(filter.taskTab==='schedules')return schedules(root,token);
     const pages=await across(`/api/v1/tasks/query?${new URLSearchParams({scope:filter.taskScope,q:filter.taskQuery,offset:0,limit:50,...(filter.taskTarget?{execution_target:JSON.stringify(filter.taskTarget)}:{})})}`,token,{paginate:true,perAssistant:true,spaceID:filter.taskSpace});if(!gate.current(token))return;const result=combineTasks(pages,{offset:filter.taskOffset,limit:20});
-    if(filter.taskTarget)root.append(toolbar(n('span','hint',`${filter.taskTarget.runtime_id} · ${filter.taskTarget.target.kind==='host'?'Host':'Sandbox'}`),action(tr('Show all tasks','显示所有任务'),()=>{filter.taskTarget=null;filter.taskSpace='all';filter.taskOffset=0;show('tasks');})));
+    if(filter.taskTarget)root.append(toolbar(n('span','hint',`${filter.taskTarget.runtime_id}`),action(tr('Show all tasks','显示所有任务'),()=>{filter.taskTarget=null;filter.taskSpace='all';filter.taskOffset=0;show('tasks');})));
     const controls=toolbar();controls.classList.add('task-filters');controls.append(segments(['active','attention','archived'].map(value=>[value,`${tr({active:'Ongoing',attention:'Needs attention',archived:'Archived'}[value],{active:'进行中',attention:'需关注',archived:'已归档'}[value])} ${result.counts[value]}`]),filter.taskScope,value=>{filter.taskScope=value;filter.taskOffset=0;show('tasks');}));
     const search=field(tr('Search task title or ID…','搜索任务标题或 ID…'),filter.taskQuery,{kind:'search'});search.row.classList.add('task-search');search.input.placeholder=tr('Search task title or ID…','搜索任务标题或 ID…');search.input.onchange=()=>{filter.taskQuery=search.input.value;filter.taskOffset=0;show('tasks');};controls.append(search.row);root.append(controls);
     const tasks=n('div','task-list');tasks.dataset.scrollKey='task-list';if(!result.items?.length)empty(tasks,tr('No ongoing tasks. Describe a goal in Chat to get started.','暂无进行中的任务，在聊天中描述目标即可开始。'));
@@ -484,36 +475,13 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     root.append(n('p','hint',tr('Machines','机器')));if(!list(result).length)empty(root,tr('No machines','暂无机器'));
     let machineSpace='';for(const machine of list(result)) {if(machineSpace!==machine._space_id){machineSpace=machine._space_id;root.append(n('p','hint machine-location',machine._space_name));}
       const machineKey=JSON.stringify([machine._space_id,machine.id]),group=n('section','page-card machine-card'),header=n('div','machine-header');const machineIcon=n('span','machine-icon');machineIcon.append(icon('machines'));header.append(machineIcon,n('span','machine-name',machine.name||machine.runtime_id||machine.id),n('span',machine.connected?'success-text':'hint',machine._stale?tr('Stale','已过期'):machine.connected?tr('Connected','已连接'):tr('Offline','离线')),action('',()=>{if(expandedMachines.has(machineKey))expandedMachines.delete(machineKey);else expandedMachines.add(machineKey);show('machines');}));header.lastChild.setAttribute('aria-label',tr('Machine settings','机器设置'));header.lastChild.append(icon('settings'));group.dataset.machineId=machine.runtime_id||machine.id;group.dataset.spaceId=machine._space_id;group.append(header,n('p','hint',(machine.tags||[]).join(' · ')));const settings=n('div','machine-settings');settings.hidden=!expandedMachines.has(machineKey);group.append(settings);
-      const capabilities=machine.capabilities||{};settings.append(n('p','hint',Object.entries(capabilities).filter(([,value])=>value===true).map(([key])=>key).join(' · ')));
-      const policy=machine.policy||{execution_mode:'sandbox',host_access:'ask'};
-      const mode=field(tr('Execution mode','执行模式'),policy.execution_mode,{choices:[['sandbox','Sandbox'],['host','Host']]}),hostAccess=field(tr('Host access','Host 访问'),policy.host_access,{choices:[['ask',tr('Ask each time','每次询问')],['allow',tr('Allow','允许')],['deny',tr('Deny','拒绝')]]});settings.append(mode.row,hostAccess.row);
-      const save=action(tr('Save permissions','保存权限'),()=>operation(save,()=>request('/api/v1/permissions',{method:'POST',space:machine._space_id,owner:'',body:{action:'configure',machine_id:machine.runtime_id||machine.id,machine_policy:{execution_mode:mode.input.value,host_access:hostAccess.input.value}}})),{disabled:!machine.connected||machine._stale});settings.append(save);const hostTarget=n('details','machine-target');hostTarget.dataset.cacheKey=machineKey+':host';hostTarget.append(targetSummary(`Host · ${machine.connected?tr('Connected','已连接'):tr('Offline','离线')}`),action(tr('View Host tasks','查看 Host 任务'),()=>machineTasks(machine,'host')));group.append(hostTarget);
-      if(machine.sandbox) {const sandbox=machine.sandbox,target=n('details','machine-target');target.dataset.cacheKey=machineKey+':sandbox';target.append(targetSummary('Sandbox'),n('p','hint',`${sandbox.state?.phase||sandbox.state||''}${sandbox.quarantined?' · '+tr('Quarantined','已隔离'):''}`));
-        const actions=toolbar(action(tr('View Sandbox tasks','查看 Sandbox 任务'),()=>machineTasks(machine,'sandbox')));for(const name of ['start','stop','rebuild','recover']){const button=action(tr({start:'Start',stop:'Stop',rebuild:'Rebuild',recover:'Recover'}[name],{start:'启动',stop:'停止',rebuild:'重建',recover:'恢复'}[name]),()=>operation(button,()=>{const work=()=>request('/api/v1/machines',{method:'POST',space:machine._space_id,owner:'',body:{action:name,machine_id:machine.id,sandbox_id:sandbox.id}});return ['start','rebuild'].includes(name)&&client.desktop&&(machine.runtime_id||machine.id)===(client.runtime.runtime_id||client.runtime.id)?withResourceConsent({space:machine._space_id,sandboxID:sandbox.id,work}):work();}),{disabled:!machine.connected||machine._stale,danger:name==='rebuild'});actions.append(button);}target.append(actions);
-        if(sandbox.resources) {target.append(n('p','hint',`${sandbox.resources.cpus} CPU · ${sandbox.resources.memory_gib} GiB · ${sandbox.resources.disk_gib?`${sandbox.resources.disk_gib} GiB`:tr('Shared storage','共享存储')}`));target.append(action(tr('Configure resources','配置资源'),()=>resourceEditor(machine),{disabled:!machine.connected||machine._stale}));}
-        group.append(target);
-      }
-      if(capabilities.desktop)group.append(action(tr('Open desktop','打开桌面'),()=>desktop(machine),{disabled:!machine.connected||machine._stale||!client.openDesktop||machine._space_id!==(client.spaces||[]).find(space=>space.kind==='local')?.id||(machine.runtime_id||machine.id)!==(client.runtime.runtime_id||client.runtime.id)}));root.append(group);
+      const policy=machine.policy||{execution_access:'ask'};
+      const access=field(tr('Execution authorization','执行授权'),policy.execution_access,{choices:[['ask',tr('Ask each time','每次询问')],['allow',tr('Always allow execution on this machine','始终允许在此机器执行')],['deny',tr('Disable execution','禁用执行')]]});settings.append(access.row);
+      settings.append(n('p','hint',tr('Applies to all assistants and tasks in this Space on this machine. You can revoke persistent access here.','适用于此 Space 中在该机器执行的所有助手和任务。可在此撤销持续授权。')));
+      const save=action(tr('Save permissions','保存权限'),()=>operation(save,()=>request('/api/v1/permissions',{method:'POST',space:machine._space_id,owner:'',body:{action:'configure',machine_id:machine.runtime_id||machine.id,machine_policy:{execution_access:access.input.value}}})),{disabled:machine._stale});settings.append(save);
+      group.append(action(tr('View tasks','查看任务'),()=>machineTasks(machine)));root.append(group);
     }
     await renderMachineMembership({client,root,machines:list(result),locale,notify,refresh:()=>show('machines'),edit:({title,initial,fields,save,scope})=>renderEditor(title,initial,fields,save,{capturedScope:scope}),signal:token.signal});
-  }
-  function resourceEditor(machine) {
-    renderEditor(tr('Sandbox resources','Sandbox 资源'),machine.sandbox.resources,[
-      {name:'cpus',label:'CPU',kind:'number',parse:Number,required:true},{name:'memory_gib',label:tr('Memory (GiB)','内存（GiB）'),kind:'number',parse:Number,required:true},...(machine.sandbox.resources.disk_gib?[{name:'disk_gib',label:tr('Disk (GiB)','磁盘（GiB）'),kind:'number',parse:Number,required:true}]:[]),
-    ],(values,context)=>request('/api/v1/machines',{...context,method:'POST',body:{action:'configure_resources',machine_id:machine.id,sandbox_id:machine.sandbox.id,resources:{...machine.sandbox.resources,...values}}}),{capturedScope:{space:machine._space_id,owner:''}});
-  }
-  async function desktop(machine) {
-    if(client.desktop&&(machine._space_id!==client.spaces?.find(space=>space.kind==='local')?.id||(machine.runtime_id||machine.id)!==(client.runtime.runtime_id||client.runtime.id))){errorView(Error(tr('Remote desktop viewing is unavailable.','远端桌面查看暂不可用。')));return;}
-    if(client.openDesktop){try{await client.openDesktop(machine.sandbox?.id||machine.id);}catch(reason){errorView(reason);}return;}
-    const captured={space:machine._space_id,owner:''};let sessionPath;
-    try {
-      const result=await request('/api/v1/desktop/sessions',{...captured,method:'POST',body:{sandbox_id:machine.sandbox?.id||machine.id}});
-      if(typeof result.path!=='string'||!/^\/desktop\/[A-Za-z0-9]+\/$/.test(result.path))throw Error(tr('Desktop transport returned an invalid display path.','桌面传输返回的显示路径无效。'));
-      sessionPath=result.path;
-      const root=body(),frame=n('iframe','desktop-frame');frame.src=sessionPath;frame.title=machine.name||machine.id;
-      const close=action(tr('Close desktop','关闭桌面'),()=>operation(close,()=>request(`${sessionPath}api/close`,{...captured,method:'POST',body:{}}),()=>show('machines')));
-      root.append(toolbar(close),frame);
-    }catch(reason){if(sessionPath)request(`${sessionPath}api/close`,{...captured,method:'POST',body:{}}).catch(()=>{});errorView(reason);}
   }
   const approvalScope=()=>taskView?.scope||scope();
   async function permissions() {
@@ -526,8 +494,8 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       const fragment=document.createDocumentFragment();let inlineLocator=false;
       for(const approval of pending) {const toolRoot=[...(taskView?.transcript||document.querySelector('.message-column')).querySelectorAll('.tool-call')].find(node=>node.dataset.callId===approval.request.call_id&&(!node.dataset.turnId||node.dataset.turnId===approval.request.turn));
         if(toolRoot){if(inlineLocator)continue;inlineLocator=true;const locate=action(`${pending.length} ${translate(locale(),'tool.approvalPending')} · ${translate(locale(),'tool.viewApprovals')}`,()=>{toolRoot.open=true;toolRoot.scrollIntoView({block:'center',behavior:'smooth'});toolRoot.querySelector('summary')?.focus();});fragment.append(locate);continue;}
-        const box=n('section','approval-card');box.append(n('strong','',tr('Request approval','请求授权')),n('p','approval-description',`${captured.owner} · ${approval.request.machine_id}\n${tr('Wants to operate this machine directly','想要直接操作这台机器')}\n\n${tr('Approve the exact operation shown below. It runs with the machine Runtime account permissions; this does not grant access to future commands.','仅批准下面展示的具体操作，以该机器 Runtime 账户的权限执行，不授权后续命令。')}`),n('pre','approval-arguments',`${approval.request.tool}\n${JSON.stringify(approval.request.args,null,2)}`));
-        for(const name of ['allow_once','deny']){const button=action(tr(name==='allow_once'?'Allow this operation':'Deny',name==='allow_once'?'允许此次操作':'拒绝'),()=>operation(button,()=>request('/api/v1/permissions',{...captured,method:'POST',body:{id:approval.id,action:name}}),permissions));box.append(button);}fragment.append(box);}
+        const box=n('section','approval-card');box.append(n('strong','',tr('Request approval','请求授权')),n('p','approval-description',`${captured.owner} · ${approval.request.machine_id}\n${tr('Wants to operate this machine directly','想要直接操作这台机器')}\n\n${translate(locale(),approval.request.tool==='update_agent_instructions'?'tool.instructionConsent':'tool.hostConsent')}`),n('pre','approval-arguments',`${approval.request.tool}\n${JSON.stringify(approval.request.args,null,2)}`));
+        for(const name of (approval.request.tool==='update_agent_instructions'?['allow_once','deny']:['allow_always','allow_once','deny'])){const button=action(translate(locale(),'tool.'+name),()=>operation(button,()=>request('/api/v1/permissions',{...captured,method:'POST',body:{id:approval.id,action:name}}),permissions));box.append(button);}fragment.append(box);}
       approvalHost.replaceChildren(fragment);
       if(taskView)renderTaskTranscript(taskView);onApprovalsChanged();
     }catch(reason){if(approvalGate.current(token)&&reason.name!=='AbortError')notify(reason.message);}
@@ -535,7 +503,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   async function show(next,{keepUsageOwner=false}={}) {
     if(editor)return;
     captureView();viewReady=false;
-    taskView=null;resourceView=null;scheduleView=null;detailParent=false;if(!keepUsageOwner)usageOwner=null;
+    taskView=null;scheduleView=null;detailParent=false;if(!keepUsageOwner)usageOwner=null;
     route=next;heading(tr({tasks:filter.taskTab==='schedules'?'Schedules':'Tasks',machines:'Machines',usage:'Usage',settings:'Settings'}[next]||next,{tasks:filter.taskTab==='schedules'?'定时计划':'任务',machines:'机器',usage:'用量',settings:'设置'}[next]||next));
     const version=++pageVersion,token=gate.next(),root=body();
     root.append(n('p','hint',tr('Loading…','正在加载…')));
@@ -544,7 +512,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     catch(reason){if(gate.current(token)&&version===pageVersion&&!disposed)errorView(reason,root);}
   }
   function openUsageView(context,record=true){usageOwner={...context};route='usage';filter.usageOffset=0;if(record)history.pushState({potRoute:'usage',potScope:{space:context.space,owner:context.owner},potUsage:{...usageOwner}},'',location.href);routeChanged('usage');return show('usage',{keepUsageOwner:true});}
-  function machineTasks(machine,kind){filter.taskTarget={runtime_id:machine.runtime_id||machine.id,target:kind==='host'?{kind:'host'}:{kind:'sandbox',sandbox_id:machine.sandbox.id}};filter.taskSpace=machine._space_id;filter.taskOffset=0;filter.taskTab='tasks';route='tasks';routeChanged('tasks');history.pushState({potRoute:'tasks',potScope:scope()},'',location.href);return show('tasks');}
+  function machineTasks(machine){filter.taskTarget={runtime_id:machine.runtime_id||machine.id};filter.taskSpace=machine._space_id;filter.taskOffset=0;filter.taskTab='tasks';route='tasks';routeChanged('tasks');history.pushState({potRoute:'tasks',potScope:scope()},'',location.href);return show('tasks');}
   const popstate=async event=>{
     if(!editor)return false;if(event.state?.potEditor===editor.id)return true;
     const current=editor;if(!await back())history.pushState({...history.state,potEditor:current.id},'',location.href);return true;
@@ -552,9 +520,9 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   const beforeUnload=event=>{if([...(editor?[editor]:[]),...editorParents].some(value=>value.session.dirty||value.session.pending)){event.preventDefault();event.returnValue='';}};
   const preference=()=>{if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner});};
   window.addEventListener('beforeunload',beforeUnload);window.addEventListener('pot:locale',preference);
-  return {get title(){return title;},get editing(){return !!editor;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner;},show,assistant,setupAI,leave,back,permissions,handleHistory:popstate,openResources:resourceCache,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalGate.close();approvalOwner='';pendingApprovals=[];approvalHost.replaceChildren();},approvalFor,decideApproval,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,record=true){route='tasks';return taskDetail(task,{recordHistory:record});},
+  return {get title(){return title;},get editing(){return !!editor;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner;},show,assistant,setupAI,leave,back,permissions,handleHistory:popstate,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalGate.close();approvalOwner='';pendingApprovals=[];approvalHost.replaceChildren();},approvalFor,decideApproval,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,record=true){route='tasks';return taskDetail(task,{recordHistory:record});},
     showProviders(){filter.settingsTab='providers';return show('settings');},
-    refresh(){if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(resourceView){resourceView.controller?.refresh();return;}if(taskView){refreshTaskEvents();return;}if(!editor&&route&&host.offsetParent)show(route,{keepUsageOwner:!!usageOwner});},
+    refresh(){if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(taskView){refreshTaskEvents();return;}if(!editor&&route&&host.offsetParent)show(route,{keepUsageOwner:!!usageOwner});},
     dispose(){for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle.dispose?.();disposed=true;gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
   };
 }

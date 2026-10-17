@@ -1,11 +1,10 @@
 # Development guide
 
-## Toolchains and normal workflow
+## Toolchains and workflow
 
-`mise.toml` pins the stable Go toolchain (1.27.2), Node (24.21.0), Python and source
-check tools. macOS App/Helper development requires Apple Silicon, macOS 26+ and
-selected Xcode/Swift 6.2+. Headless Go packages build independently on Linux and
-must not import Wails or platform desktop libraries.
+`mise.toml` pins Go, Node, Python and source checks. macOS App development requires
+Apple Silicon, macOS 26+ and selected Xcode. Headless Go packages build on Linux
+without Wails or platform desktop libraries.
 
 ```sh
 mise install
@@ -17,206 +16,87 @@ mise run build
 mise run open
 ```
 
-`prepare` supplies retained Node, tool plugins, Provider packages, Skills, viewer
-and license assets. Provider packaging builds host executables and the signed
-Swift Helper on macOS; it downloads no guest images.
-`build`/`bundle` create `.local/go/PotGoPreview.app`, an independent development
-bundle with ID `dev.pot.go-preview`. Release packaging uses the production bundle
-identity. Product App starts real Go services; disposable fixtures are separate:
-
-```sh
-mise run preview
-# macOS fixture UI without product data or model/tool calls:
-mise exec -- go run ./cmd/pot-app -preview
-```
-
-The browser fixture binds loopback on port 17702 by default. It does not test
-production browser authentication, provider transport or Sandbox isolation.
+`prepare` supplies pinned Node, tool plugins, Skills and license assets. It starts
+no execution environment. `build`/`bundle` create `.local/go/PotGoPreview.app`, an
+independent development bundle with ID `dev.pot.go-preview`. Release packaging
+uses the production identity. Do not replace a running product's files implicitly.
 
 ## Builds and packaging
 
-| Command | Output / purpose |
+| Command | Output |
 |---|---|
-| `mise run build:go` | Portable CLI and executor under `.local/go/bin` |
-| `mise run build:linux` | CGO-free Linux amd64/arm64 entry points |
-| `mise run build:cli` | Target CLI/runtime archive with retained resources |
-| `mise run build` | Complete Wails macOS bundle and signed native macOS VM Swift Helper |
+| `mise run build:go` | CLI under `.local/go/bin` |
+| `mise run build:linux` | CGO-free Linux amd64/arm64 CLI and tool packages |
+| `mise run build:cli` | Target CLI archive with Node, tools and Skills |
+| `mise run build` | Complete Wails macOS bundle |
 | `mise run build:web-ui` | Embedded shared HTML/CSS/JS frontend |
-| `mise run build:web` | Localized retained viewer/Sandbox pages |
-| `mise run build:plugins` | Unified tool and Provider packages under `.local/go/runtime-resources/plugins` |
-| `mise run build:sandbox-image` | Podman Linux OCI image, independent of App packaging |
-| `mise run export:sandbox-resources` | Deterministic export validation against the Podman plugin catalog |
-| `mise run release -- VERSION` | Local release archive/checksum/cask; publishing is separate |
+| `mise run build:plugins` | Tool manifests and declared sources |
+| `mise run release -- VERSION` | Local archive/checksum/cask; publishing is separate |
 
 `scripts/build-go-app`, `scripts/build-go-cli` and `scripts/go_packaging.py` own
-asset layout and pinned Node checksums. Packaging includes plugin/Skill sources,
-viewer resources, component notices and the correct target executor. It neither
-builds a Sandbox image implicitly nor replaces an existing running service.
-Image build architectures, explicit macOS connections and reviewed resource export
-commands are documented below in [Sandbox image resources](#sandbox-image-resources).
+layout and checksums. Packages include no VM engines, images, guest bootstrap,
+remote desktop viewer or guest execution subprocess. Standalone and embedded
+Runtime locate trusted tool assets independently of workspace preparation.
 
-The native macOS VM Helper builds through `plugins/apple-vm/helper/Package.swift` and retains
-Virtualization.framework ownership. Linux containers use the Go Podman provider
-on both hosts. JavaScript plugins and Node remain their own runtime; Python guest broker,
-browser and desktop support remain Python. Go hosts product logic; tool
-compositions run through a process-isolated goja worker. Heap/process and
-turn-lifecycle limits belong at that worker boundary; goja itself supplies no
-per-runtime hard heap limit.
-
-Reusable libraries live in `pkg/`; product entry points and private implementation
-live in `cmd/` and `internal/`. `mise run test:public-api` copies a consumer into an
-independent Go module outside the checkout, builds the standalone composition
-worker, and exercises only public imports. It is included in `mise run test`.
-See [Go libraries](go-libraries.md) for the supported embedding boundaries.
-
-Standalone startup and browser serving use [Deployment](deployment.md). CLI and
-App default to the new Go root, not previous product data. Use explicit private
-temporary roots for integration checks; never run two hosts against one root.
-
-## Plugin packages
-
-`mise run build:plugins` builds complete installed packages independently of
-the App and guest images. `mise run prepare`, App and CLI packaging include the
-same packages automatically. For a Linux package or cross-build:
+For cross-platform tool packages:
 
 ```sh
 mise exec -- python scripts/build-go-plugins --platform linux-amd64 \
   --output /absolute/plugin-packages
 ```
 
-Install each complete package directory under the selected Runtime resource
-root's `plugins/` directory while Runtime is stopped. Native macOS packages
-require macOS/Xcode because their plugin owns a signed Swift Helper. See
-[Plugin packages](plugins.md) for the package format and
-[Sandbox capability protocol](sandbox-provider-protocol.md) for Provider RPC.
+Stop Runtime before replacing complete installed packages. Node plugins use the
+bundled Node; browser tools also need Chrome/Chromium on the execution machine.
+Goja compositions run in a bounded process worker. Goja supplies no independent
+per-runtime hard heap limit. See [Go libraries](go-libraries.md).
 
-## Sandbox image resources
-
-Install pinned tools and a working Podman builder. `build:sandbox-image` invokes
-`plugins/podman/build-image`. macOS requires an explicitly prepared
-build connection; the script never starts/selects a default machine:
-
-```sh
-mise exec -- python plugins/podman/build-image --arch arm64 --connection BUILD_CONNECTION
-```
-
-On native Linux, omit `--connection` and select `--arch amd64` or `arm64`.
-Output is `.local/go/images/linux-ARCH/{sandbox-image,sandbox-image.json}`.
-Transferable contexts use `--prepare-only --context FRESH_DIRECTORY`, followed
-by `--prepared-context DIRECTORY --arch ARCH --output DIRECTORY` on the builder.
-
-Export the reviewed OCI layout and update that architecture's catalog explicitly:
-
-```sh
-mise exec -- python plugins/podman/export-resources \
-  --source .local/go/images/linux-arm64 --arch arm64 \
-  --tag sandbox-go-resources-v0.3.0 --update-catalog
-```
-
-Retain exact exports under `.local/go/releases/resources`, review/commit the
-catalog, then repackage the Podman plugin. Keep image-only bundles needed by
-pinned instances; unchanged digests retain their release tag. Plugin catalogs
-retain earlier pinned bundles. Omit `--update-catalog` to verify.
-Archive export is deterministic for identical OCI inputs; a clean image rebuild
-can change installation metadata/timestamps. Do not reuse filenames for new bytes.
-
-Publication workflow `.github/workflows/sandbox-resources.yml` requires the
-absolute reviewed export directory as `prepared_assets` and its committed tag.
-It never rebuilds or changes the catalog. Local staging uses the same verifier:
-
-```sh
-mise exec -- python plugins/podman/verify-resources \
-  --source ABSOLUTE_EXPORT_DIRECTORY --output ABSOLUTE_FRESH_DIRECTORY \
-  --tag sandbox-go-resources-v0.3.0
-```
-
-The verifier copies/hashes only catalog files belonging to that tag, rejects
-unsafe names/symlinks/existing output and fails on missing/changed files. The
-workflow uploads that explicit list and never overwrites a release.
-Provider/App packages embed no OCI layers. Release accessibility must match the download audience;
-catalog publication does not make a private repository anonymously accessible.
-
-For offline provisioning, stop the Runtime and run
-`pot resources import -root ROOT -resources RESOURCES -sandbox SANDBOX_ID
--bundle BUNDLE_ID -directory RELEASE_ASSETS_DIRECTORY`. Omit `-sandbox` to target
-`shared`, and omit `-bundle` to retain the existing pin or use that Provider's
-architecture default. The resource directory defaults to saved server settings
-or packaged assets. Plugin-declared size/hash/extraction checks still apply.
-This is an explicit owner operation.
-
-## Checks
+## Checks and isolated previews
 
 ```sh
 mise run lint
 mise run check:go
-mise run test:go
-mise run test:ui
-mise run test:eval
-mise run test:packaging
-mise run check:swift
+mise run test
+mise run test:executor
+mise run test:release
+mise run test:i18n
 mise run licenses
+mise run build:linux
 ```
 
-`check:go` runs formatting, vet and architectural import checks. `test:go` uses
-the race detector. Browser/DOM tests cover shared state, real production adapters,
-owner boundaries, drafts, IME, navigation and streamed Task output. Deterministic
-Eval runs the production Agent with native fixtures and real local tool effects;
-see [Eval CLI](../eval/README.md). Paid DeepSeek calls occur only through explicit
-`live`/live-suite commands, never ordinary checks.
+`check:go` verifies formatting, vet and architectural imports. `test:go` uses the
+race detector. UI tests cover owner-scoped state, drafts, IME, navigation and
+streamed output. Eval uses the production Agent with deterministic local fixtures;
+paid model calls run only through explicit live commands. Public API tests build
+an independent external consumer and a standalone composition worker.
 
-Run `mise run test:ui-http-integration` explicitly for real browser HTTP/SSE,
-reconnect, session boundaries and binary download checks. It requires cached
-`@playwright/cli` and its installed browser. It uses isolated temporary roots and
-a deterministic loopback provider, installs nothing, makes no external model
-calls and cleans up its own processes. It is separate from ordinary tests.
+Use `mise run preview` for a disposable browser fixture on loopback port 17702,
+or `mise exec -- go run ./cmd/pot-app -preview` for a native fixture. Neither uses
+product data or model calls. Browser fixtures do not establish real authentication
+or remote transport behavior. `mise run test:ui-http-integration` exercises real
+local HTTP/SSE and downloads with a deterministic loopback model fixture; it needs
+cached Playwright CLI and an installed browser.
 
-Sandbox Provider unit tests use lifecycle doubles and explicit local executors;
-these do not establish VM/container isolation. Actual Provider qualification needs
-the intended machine, installed image/resources and dedicated private workspace.
-Report execution evidence and limitations in the owning issue/task response,
-without repository validation reports or development checklists.
+Use private temporary data roots for service integration tests. Never open the
+same root in App and standalone Runtime concurrently. Report checks and limitations
+in the task/PR, not repository validation reports. Store only reviewed UI comparison
+screenshots under [PR image conventions](pr-images/README.md).
 
-`hk.pkl` defines repository hooks. Pre-commit checks changed sources and staged
-whitespace. Pre-push groups Go/product tests, macOS Helper checks, scripts and
-licenses. Use pinned tools through `mise run` or `mise exec -- …`; do not bypass a
-failed gate by skipping hooks. CI workflows live in `.github/workflows/` and use
-separate portable, macOS and resource/release responsibilities.
+`hk.pkl` owns pre-commit and pre-push checks. Run commands through `mise`; do not
+bypass failed hooks. CI separates portable product and macOS packaging checks.
 
 ## Source layout
 
-| Directory | Ownership |
+| Directory | Responsibility |
 |---|---|
-| `cmd/pot`, `cmd/pot-app`, `cmd/pot-tool-executor`, `cmd/pot-eval` | Product entry points |
-| `internal/` | Independently testable Go components; see [boundaries](backend-components.md) |
-| `web/` | Shared product HTML/CSS/JS and embedded assets |
-| `plugins/` | Common manifests, Node tool implementations, Provider entry points, image recipes and native VM Helper |
-| `resources/app/` | Native brand assets, vector master and locales |
-| `resources/models-dev/`, `resources/model-directory.json` | Public model metadata/notices |
-| `skills/` | Skill bundles |
-| `desktop/` | Retained desktop viewer resources |
-| `eval/` | Scenarios, experiment scripts and Eval CLI documentation |
-| `scripts/` | Build, release, checks and operational tooling |
+| `cmd/` | CLI, App, Eval and isolated composition-worker entry points |
+| `pkg/` | Public execution, Agent and embedding libraries |
+| `internal/` | Product services and adapters |
+| `web/` | Shared product frontend |
+| `plugins/` | Tool manifests and Node implementations |
+| `skills/` | Built-in Skill bundles |
+| `resources/` | Brand assets, model metadata and notices |
+| `scripts/` | Build, release, source checks and fixtures |
+| `eval/` | Deterministic and explicit live evaluation |
 
-Keep documentation focused on lasting contracts and operating instructions.
-Record implementation progress and qualification results in the owning issue.
-The documentation describes the current implementation and operating contracts.
-
-## UI and retained assets
-
-Main, tray and browser share DOM components, fonts/tokens, themes and localization;
-platform adapters supply native dialogs, window operations and browser sessions.
-See [shared UI](shared-ui.md) and [design language](design-language.md).
-
-`scripts/tests/go-ui-tools-browser.js` is a Playwright CLI `run-code` contract
-scenario against the disposable preview on port 17702. It mocks product endpoints
-to exercise inline tool details, stream following, composition nesting, exact
-approval decisions, scoped navigation and Task transcripts. It writes the reviewed
-screenshots to the branch's PR image directory. Go tests separately cover durable
-projection, real local execution and signed remote state/output delivery.
-
-`scripts/localize-web` builds retained desktop/Sandbox HTML. Update source
-templates under `desktop/` and `plugins/podman/image/`, and translations under
-`resources/app/locales/`; generated viewer output is not the product UI source.
-`scripts/make-icons.swift` uses `resources/app/PotIcon.swift` as the vector master.
-Dependency notices are generated by `scripts/go-notices` and retained runtime
-notice preparation; see [licenses](licenses-and-about.md).
+`resources/app/PotIcon.swift` remains the vector artwork master used by icon and
+tray generation; removing the VM Helper does not remove brand generation.

@@ -47,15 +47,15 @@ func TestPersistentStateErrorAndDisposal(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "disposed")
 	markerJSON, _ := json.Marshal(marker)
 	c := newFixture(t, `import {writeFile} from 'node:fs/promises';
-export function createPlugin({emit,mode,execution_target}) {
+export function createPlugin({emit,mode}) {
  let n=0;
  return {async execute({input}) {
-  emit({type:'text',text:JSON.stringify({n:++n,mode,execution_target})});
+  emit({type:'text',text:JSON.stringify({n:++n,mode})});
   if(input.fail) throw new Error('fixture failure');
  },async dispose(){await writeFile(`+string(markerJSON)+`, 'done');}};
 }`, "text")
 	first := execute(t, c, map[string]any{})
-	if first.SessionID == "" || len(first.Content) != 1 || first.Content[0].Text != `{"n":1,"mode":"text","execution_target":"host"}` {
+	if first.SessionID == "" || len(first.Content) != 1 || first.Content[0].Text != `{"n":1,"mode":"text"}` {
 		t.Fatalf("unexpected result: %+v", first)
 	}
 	failed := execute(t, c, map[string]any{"fail": true, "session_id": first.SessionID})
@@ -218,7 +218,7 @@ func TestRetainedComputerUseREPLWithoutBrowser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.IsError || len(first.Content) != 2 || !strings.Contains(first.Content[0].Text, "headless Chromium in Host") || first.Content[1].Text != "41" {
+	if first.IsError || len(first.Content) != 2 || !strings.Contains(first.Content[0].Text, "headless Chromium in this execution machine") || first.Content[1].Text != "41" {
 		t.Fatalf("retained Node REPL failed: %+v", first)
 	}
 	next, err := c.Execute(context.Background(), "cua_repl", map[string]any{"session_id": first.SessionID, "code": "counter++; nodeRepl.write(counter);"})

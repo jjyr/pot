@@ -85,23 +85,6 @@ func color(_ value: UInt32, alpha: CGFloat = 1) -> NSColor {
             try renderMark(size: size).write(to: assets.appendingPathComponent("PotMenuBar-\(size).png"))
         }
         // The wallpaper is generated from the same native master, with no duplicate character geometry.
-        let watermark = renderMark(size: 256, color: .white).base64EncodedString()
-        let wallpaper = """
-        <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
-         <defs>
-          <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#faf9f6"/><stop offset="1" stop-color="#e9e9e5"/></linearGradient>
-          <mask id="companion" mask-type="alpha"><image x="600" y="360" width="80" height="80" href="data:image/png;base64,\(watermark)"/></mask>
-         </defs>
-         <path fill="url(#bg)" d="M0 0h1280v800H0z"/>
-         <path fill="#CF962E" opacity="0.24" mask="url(#companion)" d="M600 360h80v80h-80z"/>
-        </svg>
-        """
-        try wallpaper.write(
-            to: root.appendingPathComponent("plugins/podman/image/pot-wallpaper.svg"),
-            atomically: true,
-            encoding: .utf8
-        )
-
         let iconset = root.appendingPathComponent(".local/go/Pot.iconset")
         try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
         for size in [16, 32, 128, 256, 512] {

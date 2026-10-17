@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/jjyr/pot/internal/usage"
@@ -87,7 +86,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 	}
 	delete(args, "execution_target")
 	cwd := execution.Workspace
-	if target.IsLocalTo(d.RuntimeID) && target.Target.Kind == "host" && d.HostWorkspace != "" {
+	if target.IsLocalTo(d.RuntimeID) && d.HostWorkspace != "" {
 		cwd = d.HostWorkspace
 	}
 	displayCWD := cwd
@@ -134,24 +133,24 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	if target.Target.Kind == "host" {
-		_, epoch, err := d.Permissions.Policy(target.RuntimeID)
-		if err != nil {
-			return nil, err
-		}
-		approvalOwner := d.ApprovalOwner
-		if approvalOwner == "" {
-			approvalOwner = d.Owner
-		}
-		if _, err = d.Permissions.authorize(ctx, HostRequest{Owner: approvalOwner, Task: d.Task, Turn: d.Turn, Generation: d.Generation, CallID: call.ID, MachineID: target.RuntimeID, EnrollmentEpoch: epoch, Tool: call.Name, Args: prepared}, func() error { return state("waiting_approval", &target, displayCWD) }); err != nil {
-			if errors.Is(err, ErrHostDenied) {
-				if emitErr := state("denied", &target, displayCWD); emitErr != nil {
-					return nil, emitErr
-				}
-			}
-			return nil, err
-		}
+
+	_, epoch, err := d.Permissions.Policy(target.RuntimeID)
+	if err != nil {
+		return nil, err
 	}
+	approvalOwner := d.ApprovalOwner
+	if approvalOwner == "" {
+		approvalOwner = d.Owner
+	}
+	if _, err = d.Permissions.authorize(ctx, HostRequest{Owner: approvalOwner, Task: d.Task, Turn: d.Turn, Generation: d.Generation, CallID: call.ID, MachineID: target.RuntimeID, EnrollmentEpoch: epoch, Tool: call.Name, Args: prepared}, func() error { return state("waiting_approval", &target, displayCWD) }); err != nil {
+		if errors.Is(err, ErrHostDenied) {
+			if emitErr := state("denied", &target, displayCWD); emitErr != nil {
+				return nil, emitErr
+			}
+		}
+		return nil, err
+	}
+
 	name, engineArgs, err := d.prepare(call.Name, args, target)
 	if err != nil {
 		return nil, err
@@ -200,7 +199,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 		}
 		return nil, err
 	}
-	if target.RuntimeID == d.RuntimeID && target.Target.Kind == "host" {
+	if target.RuntimeID == d.RuntimeID {
 		if d.Host == nil {
 			err = errors.New("Host executor is unavailable")
 		} else {
@@ -233,28 +232,10 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 	return value, err
 }
 func (d *Dispatcher) target(selector any) (core.ExecutionTarget, error) {
-	target := d.DefaultTarget
-	switch v := selector.(type) {
-	case nil:
-	case string:
-		switch {
-		case v == "host":
-			target = core.HostTarget(d.DefaultTarget.RuntimeID)
-		case strings.HasPrefix(v, "sandbox:"):
-			target = core.SandboxTarget(d.DefaultTarget.RuntimeID, strings.TrimPrefix(v, "sandbox:"))
-		default:
-			return target, errors.New("invalid execution target selector")
-		}
-	default:
-		data, err := json.Marshal(selector)
-		if err != nil {
-			return target, err
-		}
-		if err = core.DecodeJSON(data, &target); err != nil {
-			return target, err
-		}
+	if selector != nil {
+		return core.ExecutionTarget{}, errors.New("tool execution is fixed to its Runtime")
 	}
-	return target, target.Validate()
+	return d.DefaultTarget, d.DefaultTarget.Validate()
 }
 func (d *Dispatcher) prepare(name string, args map[string]any, target core.ExecutionTarget) (string, map[string]any, error) {
 	switch name {
@@ -285,9 +266,7 @@ func (d *Dispatcher) prepare(name string, args map[string]any, target core.Execu
 			if err := bundle.ValidateInput(name, args); err != nil {
 				return "", nil, err
 			}
-			if target.Target.Kind == "host" && bundle.Manifest.Contributes.Tools.Execution != "host_or_sandbox" {
-				return "", nil, errors.New("plugin supports Sandbox execution only")
-			}
+
 			mode := "text"
 			if d.Spec.Params.Agent.ModelCatalog != nil {
 				descriptor, err := d.Spec.Params.Agent.ModelCatalog.Resolve(d.Spec.Provider, d.Spec.Model)

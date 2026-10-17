@@ -128,8 +128,7 @@ A non-expiring token revoked at GitHub is discovered by the actual command;
 logged-in UI state does not perform continuous upstream validation. When refresh
 cannot restore access, log out and log in again.
 
-Transient environment fields are excluded from Runner command records, Sandbox
-prepared inputs, guest request journals and shell initialization snapshots. Plugin
+Transient environment fields are excluded from Runner command records and shell initialization snapshots. Plugin
 packages, tool arguments and launch manifests contain references only. Persistent
 plugin sessions must be reset if credentials change; `session_mode: call` starts a
 fresh process for each invocation.

@@ -100,19 +100,10 @@ handler := host.Handler(operatorToken)
 
 Use the import `github.com/jjyr/pot/pkg/runtime`. Root and resource directory are
 required; the facade does not discover assets in the caller's checkout. Supply
-the retained tool plugins, Skills, Node and installed Provider packages needed
-by the selected features. A nil `SandboxProviders` loads Sandbox capabilities
-from common Plugin packages under `PluginRoot` (default `ResourceDirectory/plugins`).
-An empty `[]sandbox.Provider{}` disables providers. Discovery starts plugin host
-processes for a handshake without booting guests or downloading images.
-
-Embedding applications can instead inject `SandboxProviders`, an explicit
-`DefaultSandboxProvider` for the shared environment and `SandboxCatalog` for
-those providers' resource definitions. No built-in Podman selection or embedded
-image catalog is supplied for injected providers. Public `pkg/sandboxprovider`
-consumes packages discovered by `pkg/plugin` and supplies the executable-side
-`Serve` SDK. See [Plugin packages](plugins.md) and the
-[Sandbox capability protocol](sandbox-provider-protocol.md).
+the retained tool plugins, Skills and Node needed by the selected features.
+Assets load without starting execution processes or downloading images. See
+[Plugin packages](plugins.md). The facade exposes execution capacity and owner
+resource APIs; child environment Providers and image managers are absent.
 
 The host exclusively locks its root and owns its managers. Stop HTTP serving and
 all use of borrowed managers before closing it. `Info()` returns a copy of its

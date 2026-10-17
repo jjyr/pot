@@ -483,65 +483,17 @@ type executeReply struct {
 }
 
 func (s *Service) runnerRPC(ctx context.Context, p controlplane.Principal, request controlplane.Request) (json.RawMessage, error) {
-	if request.Method == "machine.target" || request.Method == "machine.inventory" || request.Method == "machine.manage" || request.Method == "machine.requirements" {
+	if request.Method == "machine.inventory" {
 		m := s.Machines.Membership()
 		if m == nil || p.RuntimeID != m.Enrollment.Control.RuntimeID || p.Epoch != m.Enrollment.Epoch {
 			return nil, controlplane.ErrUnauthorized
 		}
-		if request.Method == "machine.requirements" {
-			var q struct {
-				Target       core.ExecutionTarget      `json:"target"`
-				Requirements protocol.TaskRequirements `json:"requirements"`
-			}
-			if err := core.DecodeJSON(request.Params, &q); err != nil {
-				return nil, err
-			}
-			if q.Target.RuntimeID != s.options.RuntimeID {
-				return nil, controlplane.ErrUnauthorized
-			}
-			if err := s.validateTaskTarget(ctx, q.Target, q.Requirements); err != nil {
-				return nil, err
-			}
-			return json.RawMessage(`{}`), nil
-		}
-		if request.Method == "machine.inventory" {
-			value, err := s.localMachine(ctx)
-			if err != nil {
-				return nil, err
-			}
-			return json.Marshal(value)
-		}
-		if request.Method == "machine.manage" {
-			var command MachineCommand
-			if err := core.DecodeJSON(request.Params, &command); err != nil {
-				return nil, err
-			}
-			if command.MachineID != "" && command.MachineID != s.options.RuntimeID {
-				return nil, controlplane.ErrUnauthorized
-			}
-			value, err := s.manageLocalMachine(ctx, command)
-			if err != nil {
-				return nil, err
-			}
-			return json.Marshal(value)
-		}
-		var q struct {
-			Mode string `json:"mode"`
-		}
-		if err := core.DecodeJSON(request.Params, &q); err != nil {
-			return nil, err
-		}
-		if q.Mode == "host" {
-			return json.Marshal(core.HostTarget(s.options.RuntimeID))
-		}
-		if q.Mode != "sandbox" || s.options.ResolveSandbox == nil {
-			return nil, errors.New("selected machine Sandbox unavailable; no Host fallback")
-		}
-		target, err := s.options.ResolveSandbox(ctx)
+
+		value, err := s.localMachine(ctx)
 		if err != nil {
 			return nil, err
 		}
-		return json.Marshal(target)
+		return json.Marshal(value)
 	}
 	r, err := decodeRemote(request.Params)
 	if err != nil {
@@ -698,35 +650,22 @@ func (s *Service) runnerRPC(ctx context.Context, p controlplane.Principal, reque
 			return receipt.Reply, nil
 		}
 		var value json.RawMessage
-		if record.Launch.ExecutionTarget.Target.Kind == "host" {
-			emit := func(event executor.Event) error {
-				state.mu.Lock()
-				callback := prepared.emits[operation.CallID]
-				state.mu.Unlock()
-				if callback == nil {
-					return errors.New("tool output has no active original call")
-				}
-				return callback(core.Update{Type: "tool_output", ID: operation.CallID, Stream: event.ToolOutput.Stream, Text: event.ToolOutput.Text})
+
+		emit := func(event executor.Event) error {
+			state.mu.Lock()
+			callback := prepared.emits[operation.CallID]
+			state.mu.Unlock()
+			if callback == nil {
+				return errors.New("tool output has no active original call")
 			}
-			result, runErr := prepared.engine.Execute(ctx, q.Request, emit)
-			err = runErr
-			if result != nil {
-				value, _ = json.Marshal(result)
-			}
-		} else if s.options.Target != nil {
-			value, err = s.options.Target(ctx, operation, q.Request, func(update core.Update) error {
-				state.mu.Lock()
-				callback := prepared.emits[operation.CallID]
-				state.mu.Unlock()
-				if callback == nil {
-					return errors.New("tool output has no active original call")
-				}
-				update.ID = operation.CallID
-				return callback(update)
-			})
-		} else {
-			err = errors.New("Sandbox executor unavailable; no Host fallback")
+			return callback(core.Update{Type: "tool_output", ID: operation.CallID, Stream: event.ToolOutput.Stream, Text: event.ToolOutput.Text})
 		}
+		result, runErr := prepared.engine.Execute(ctx, q.Request, emit)
+		err = runErr
+		if result != nil {
+			value, _ = json.Marshal(result)
+		}
+
 		if len(value) == 0 {
 			value = json.RawMessage("null")
 		}

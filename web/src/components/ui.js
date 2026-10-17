@@ -7,7 +7,6 @@ import {acceptSnapshot, beginSend, beginSubscription, createConversationState, d
 import {bindComposer} from './composer.mjs';
 import {renderMarkdown} from './markdown.mjs';
 import {createPages} from './pages.mjs';
-import {createLiveResourceRequests} from './resources.mjs';
 import {createReplies,replyKey} from '../state/replies.mjs';
 import {bindCompletions} from './completions.mjs';
 import {projectChatReplies} from '../state/chat-replies.mjs';
@@ -68,7 +67,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const workspace = el('main', 'workspace');
   const notice = el('p', 'preview-notice');
   const approvals = el('div', 'approval-host');
-  const resourceNotices=el('div','resource-notices');resourceNotices.hidden=true;resourceNotices.dataset.empty='true';let liveResources=null;
+  const resourceNotices=el('div','resource-notices');resourceNotices.hidden=true;resourceNotices.dataset.empty='true';
   const history = el('div', 'history');
   history.setAttribute('role', 'log');
   history.setAttribute('aria-label', t('chat'));
@@ -93,8 +92,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   menu.hidden = true;
   const preferences = el('dialog', 'preferences');
   root.append(rail, titlebar, directory, workspace, menu, preferences);
-  const pages = client.production ? createPages({onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: value => {if(value?.assistant)pendingSelection=value.assistant;loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();},withResourceConsent:options=>liveResources?liveResources.run(options):options.work(), openChat:()=>{route='chat';directoryOpen=false;renderShell();if(!selectedAssistant)loadDirectory();}}) : null;
-  if(client.production&&client.desktop)liveResources=createLiveResourceRequests({client,host:resourceNotices,locale:()=>locale,notify:value=>{error=value;updateControls();},scope:()=>{const space=(client.spaces||[]).find(value=>value.kind==='local');return {space:space?.id,name:space?.name};},onChanged:()=>renderShell()});
+  const pages = client.production ? createPages({onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: value => {if(value?.assistant)pendingSelection=value.assistant;loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();}, openChat:()=>{route='chat';directoryOpen=false;renderShell();if(!selectedAssistant)loadDirectory();}}) : null;
   const media = matchMedia('(max-width: 719px)');
   const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
   const saveReads=()=>{if(!client.desktop)persist('pot-ui-read-v1',JSON.stringify(replies.records()));};
@@ -507,7 +505,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     try {
       const catalog = await client.request('/api/v1/spaces', {owner:'', space:''});
       if (ticket !== directoryEpoch || disposed) return;
-      spaces = catalog.items || [];client.spaces=spaces;liveResources?.refresh();
+      spaces = catalog.items || [];client.spaces=spaces;
       if (!spaces.length) throw Error('No serving Space');
       if(!selectedAssistant)client.setScope({space:catalog.active_space_id||spaces[0].id,owner:''});
       const projectAssistants=(value,space,offline)=>{let items=value;if(typeof items==='string'){try{items=JSON.parse(items);}catch{items=[];}}return (items?.items||items||[]).map(item=>({...item,control_id:space.control_id||space.id,space_id:space.id,space_name:space.name,space_kind:space.kind,offline}));};
@@ -548,7 +546,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const preferencesChanged = event => {
     if(event.detail.key==='pot-go-preview-locale') locale=event.detail.value;
     if(event.detail.key==='pot-go-preview-theme') theme=event.detail.value;
-    renderShell();renderMessages();liveResources?.repaint();window.dispatchEvent(new Event('pot:locale'));
+    renderShell();renderMessages();window.dispatchEvent(new Event('pot:locale'));
   };
   window.addEventListener('pot:preference',preferencesChanged);
   const popNavigation=async event=>{
@@ -602,10 +600,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   viewport?.addEventListener('resize', viewportChanged);
   window.addEventListener('resize', viewportChanged);
   renderShell();viewportChanged();
-  if(client.production){stopChanges=client.changes(topics=>{const keys=Array.isArray(topics)?topics:Object.keys(topics||{});if(!keys.length||keys.some(key=>/^(spaces|assistant|conversation|runtime)/.test(key)))loadDirectory(false);if(keys.some(key=>/^(tasks|runner)/.test(key)))refreshBackgroundTasks();if(keys.some(key=>/^(sandbox_resources|resources|machines)/.test(key)))liveResources?.refresh();pages.refresh();pages.permissions();},{space:''});loadDirectory();}else attach();
+  if(client.production){stopChanges=client.changes(topics=>{const keys=Array.isArray(topics)?topics:Object.keys(topics||{});if(!keys.length||keys.some(key=>/^(spaces|assistant|conversation|runtime)/.test(key)))loadDirectory(false);if(keys.some(key=>/^(tasks|runner)/.test(key)))refreshBackgroundTasks();pages.refresh();pages.permissions();},{space:''});loadDirectory();}else attach();
   return () => {
     disposed = true; directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
-    completions?.dispose();liveResources?.dispose();
+    completions?.dispose();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);
     window.removeEventListener('pot:preference',preferencesChanged);

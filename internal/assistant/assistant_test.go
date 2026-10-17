@@ -78,7 +78,7 @@ func resolved(t *testing.T, model string) core.ResolvedSpec {
 	t.Helper()
 	settings := core.DefaultAgentSettings()
 	settings.Plugins = map[string]core.PluginConfig{}
-	profile := core.Profile{ID: "profile", Revision: 1, Name: "Fixture", Provider: "provider", Model: model, AuthRef: "provider:provider", Params: core.Parameters{MaxOutputTokens: 1000, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "guest_vm"}}
+	profile := core.Profile{ID: "profile", Revision: 1, Name: "Fixture", Provider: "provider", Model: model, AuthRef: "provider:provider", Params: core.Parameters{MaxOutputTokens: 1000, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "runtime"}}
 	spec, err := profile.Resolve()
 	if err != nil {
 		t.Fatal(err)

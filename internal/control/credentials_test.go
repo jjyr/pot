@@ -10,7 +10,7 @@ import (
 
 	"github.com/jjyr/pot/pkg/integrations"
 	"github.com/jjyr/pot/pkg/modelprotocol"
-	"github.com/jjyr/pot/pkg/resource"
+	"github.com/jjyr/pot/pkg/plugin"
 )
 
 func TestGitHubLoginAvailableWithoutDeploymentConfiguration(t *testing.T) {
@@ -45,7 +45,7 @@ func TestCredentialCommandEnvironmentAndNonsecretReceipts(t *testing.T) {
 	}
 }
 func TestBundledGitHubPluginContract(t *testing.T) {
-	bundle, err := resource.LoadPlugin("../../plugins/github")
+	bundle, err := plugin.LoadPlugin("../../plugins/github")
 	if err != nil {
 		t.Fatal(err)
 	}
