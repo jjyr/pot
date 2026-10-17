@@ -82,7 +82,7 @@ GitHub App token issuance require separate service adapters.
 ## GitHub
 
 Configure a `github` account authorized for the intended repositories. Enable the
-`github` plugin in the AI provider's plugin settings to expose `github_cli`. It
+`github` plugin in the AI provider's plugin settings to expose `github`. It
 executes `gh` directly using `GH_TOKEN`; Control does not proxy GitHub requests.
 Arguments are an argv array without the executable:
 

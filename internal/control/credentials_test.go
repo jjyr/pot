@@ -49,10 +49,10 @@ func TestBundledGitHubPluginContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = bundle.ValidateInput("github_cli", map[string]any{"args": []any{"pr", "list", "--repo", "owner/repo"}}); err != nil {
+	if err = bundle.ValidateInput("github", map[string]any{"args": []any{"pr", "list", "--repo", "owner/repo"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err = bundle.ValidateInput("github_cli", map[string]any{"args": []any{17}}); err == nil {
+	if err = bundle.ValidateInput("github", map[string]any{"args": []any{17}}); err == nil {
 		t.Fatal("nonstring argv accepted")
 	}
 	if bundle.Manifest.Contributes.Tools.Credentials["GH_TOKEN"].Service != "github" || bundle.Manifest.Contributes.Tools.SessionMode != "call" {

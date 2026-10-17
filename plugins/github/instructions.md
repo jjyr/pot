@@ -1,6 +1,6 @@
 # GitHub
 
-Use `github_cli` for GitHub CLI operations. `args` is an argv array without `gh`;
+Use `github` for GitHub CLI operations. `args` is an argv array without `gh`;
 for example `["pr", "list", "--repo", "owner/repo", "--json", "number,title"]`.
 The default GitHub account is configured in Settings → Service accounts on the
 owning Control. All assistants and tasks of that Control may use configured accounts.

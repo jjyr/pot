@@ -24,7 +24,7 @@
       },
       "tools": [
         {
-          "name": "github_cli",
+          "name": "github",
           "description": "Run GitHub CLI (gh) using the default GitHub account configured on Control. Supply argv without the gh executable. Requests run directly from the execution machine. Each invocation starts a fresh process. Nothing is retried automatically; inspect prior effects before repeating a write. Use exec_command with credentials for git push or other shell workflows.",
           "inputSchema": {
             "type": "object",
