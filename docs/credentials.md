@@ -15,6 +15,8 @@ the first remaining account in account-ID order. Edits and deletes check the
 account's revision to reject stale client writes. A blank token on edit keeps the
 saved value; expiration is supplied explicitly and may be omitted.
 
+![Service accounts settings with an example GitHub account](images/service-accounts.png)
+
 The authenticated owner API exposes:
 
 - `GET /api/v1/credentials`: `{items: [...]}` containing account metadata only.
