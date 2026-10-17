@@ -1,3 +1,4 @@
+import {activeTool} from './tool-calls.mjs';
 // Reply identities survive the optimistic send, its receipt, and the first
 // streamed assistant message. Transport loss never declares execution failed.
 export function projectChatReplies(snapshot, send, {offline=false}={}) {
@@ -39,6 +40,12 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
     const request=send.request;
     rows.push({id:`pending:${request.request_id}`,viewKey:`input:${request.request_id}`,role:'user',text:request.text,status:'accepted'});
     rows.push({id:`pending-reply:${request.request_id}`,viewKey:`reply:${request.request_id}`,role:'assistant',text:'',status:'accepted',phase:send.phase==='failed'?'failed':send.phase==='uncertain'||offline?'reconnecting':send.phase,error:send.detail||'',local:true});
+  }
+  if(snapshot?.running&&!offline&&!snapshot.turn?.paused&&snapshot.turn?.state!=='waiting'){
+    const start=messages.findIndex(message=>message.id===snapshot.turn_id);
+    const tools=start<0?[]:messages.slice(start+1).filter(message=>activeTool(message.tool));
+    const reply=rows.findLast(row=>row.role==='assistant'&&row.inputID===snapshot.turn_id);
+    if(reply&&tools.length)reply.phase=tools.every(message=>message.tool.phase==='waiting_approval')?'approval':'tools';
   }
   return rows;
 }

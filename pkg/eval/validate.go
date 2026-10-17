@@ -134,7 +134,7 @@ func Validate(directory string) (Report, error) {
 				}
 				activeTools[key] = e.Update.Name
 				report.ToolCount++
-			case "tool_output":
+			case "tool_state", "tool_output":
 				if _, ok := activeTools[key]; !ok {
 					return report, fmt.Errorf("output without active tool")
 				}

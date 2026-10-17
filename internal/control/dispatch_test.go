@@ -94,3 +94,45 @@ func TestMainExplicitHostUsesAssistantDirectoryFromSandboxDefault(t *testing.T) 
 		t.Fatal(string(body), err)
 	}
 }
+
+func TestDispatchReportsApprovalAndActualTargetBeforeExecution(t *testing.T) {
+	for _, decision := range []string{"allow_once", "deny"} {
+		t.Run(decision, func(t *testing.T) {
+			d, e, _ := localDispatcher(t)
+			if err := d.Permissions.Configure("local", MachinePolicy{"host", "ask"}); err != nil {
+				t.Fatal(err)
+			}
+			phases := []string{}
+			call := modelprotocol.ToolCall{ID: "review", Name: "exec_command", Arguments: json.RawMessage(`{"cmd":"printf approved","login":false}`)}
+			_, err := d.Dispatch(context.Background(), e, call, func(update core.Update) error {
+				if update.Type != "tool_state" {
+					return nil
+				}
+				phases = append(phases, update.Phase)
+				if update.Target == nil || *update.Target != d.DefaultTarget || update.Workdir != e.Workspace {
+					t.Fatal(update)
+				}
+				if update.Phase == "waiting_approval" {
+					pending := d.Permissions.Pending(d.Owner)
+					if len(pending) != 1 {
+						t.Fatal(pending)
+					}
+					return d.Permissions.Decide(d.Owner, pending[0].ID, decision)
+				}
+				return nil
+			})
+			expected := "running"
+			if decision == "deny" {
+				expected = "denied"
+				if !errors.Is(err, ErrHostDenied) {
+					t.Fatal(err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if len(phases) != 3 || phases[0] != "preparing" || phases[1] != "waiting_approval" || phases[2] != expected {
+				t.Fatal(phases)
+			}
+		})
+	}
+}

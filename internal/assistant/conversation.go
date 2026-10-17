@@ -479,6 +479,12 @@ func (c *Conversation) Cancel(ctx context.Context, request protocol.CancelTurn) 
 		for _, message := range slices.Clone(c.messages) {
 			if message.Status == protocol.Accepted || message.Status == protocol.Streaming {
 				message.Status = protocol.MessageCancelled
+				if message.Tool != nil {
+					tool := *message.Tool
+					tool.Phase = "stopped"
+					tool.FinishedAtMS = storage.Now()
+					message.Tool = &tool
+				}
 				if err := c.putMessageLocked(ctx, message, nil); err != nil {
 					return err
 				}
@@ -754,6 +760,15 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 	}
 	for _, m := range slices.Clone(c.messages) {
 		if m.Status == protocol.Accepted || m.Status == protocol.Streaming {
+			if m.Tool != nil {
+				tool := *m.Tool
+				diagnostic := ""
+				if result.Err != nil {
+					diagnostic = result.Err.Error()
+				}
+				tool.Apply(core.Update{Type: "turn_finished", AtMS: storage.Now(), Outcome: &core.Outcome{Kind: string(result.Phase), Error: diagnostic}})
+				m.Tool = &tool
+			}
 			m.Status = protocol.Complete
 			if result.Phase == execution.Cancelled {
 				m.Status = protocol.MessageCancelled

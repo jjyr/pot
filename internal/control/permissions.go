@@ -186,7 +186,13 @@ func (r HostRequest) validate() error {
 // Authorize returns persistent=true only for current configured Host access.
 // A temporary allow_once covers this exact operation; the dispatcher must still
 // inspect its receipt and executor-owned session before doing any work.
-func (p *PermissionStore) Authorize(ctx context.Context, r HostRequest) (persistent bool, err error) {
+var ErrHostDenied = errors.New("Host operation denied")
+
+func (p *PermissionStore) Authorize(ctx context.Context, r HostRequest) (bool, error) {
+	return p.authorize(ctx, r, nil)
+}
+
+func (p *PermissionStore) authorize(ctx context.Context, r HostRequest, pending func() error) (persistent bool, err error) {
 	r.Args = append(json.RawMessage(nil), r.Args...)
 	if err = r.validate(); err != nil {
 		return false, err
@@ -209,7 +215,7 @@ func (p *PermissionStore) Authorize(ctx context.Context, r HostRequest) (persist
 			return true, nil
 		case "deny":
 			p.mu.Unlock()
-			return false, errors.New("Host access denied by machine policy")
+			return false, ErrHostDenied
 		}
 	}
 	// Output polling/cancellation does not create a new command, but the executor
@@ -250,6 +256,11 @@ func (p *PermissionStore) Authorize(ctx context.Context, r HostRequest) (persist
 		p.Changes.Notify("permissions")
 	}
 	p.mu.Unlock()
+	if pending != nil {
+		if err := pending(); err != nil {
+			return false, err
+		}
+	}
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()
@@ -265,7 +276,7 @@ func (p *PermissionStore) Authorize(ctx context.Context, r HostRequest) (persist
 		return true, nil
 	}
 	if !d.allow {
-		return false, errors.New("Host operation denied")
+		return false, ErrHostDenied
 	}
 	return false, nil
 }

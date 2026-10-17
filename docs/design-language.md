@@ -257,6 +257,31 @@ and Web uses browser downloads. Delivery constraints belong in
 recognized unsuccessful-task diagnostics; these reuse existing connection/resource
 forms without automatically retrying the task.
 
+### Tool calls
+
+Chat and Task details share compact inline tool disclosures. The closed row shows
+the operation, a deterministic argument preview, explicit status and elapsed time;
+active operations also show their resolved machine, Host/Sandbox and workdir.
+Failures keep a concise reason visible while collapsed. Expanded details show
+arguments, ordered output, final results and a secondary raw call/result disclosure.
+Commands, scripts and patches retain monospace formatting; supported image results
+render inline. No tool action implicitly repeats an operation.
+
+Ordinary calls default to collapsed. Composition children nest under their original
+`exec` call in start order. Exact approval requests open the affected call and its
+ancestors, show the full reviewed operation, and provide Allow this operation / Deny.
+A compact locator exposes pending approvals outside the current reading position;
+requests without a transcript row retain a standalone approval card. A failed
+approval submission keeps its diagnostic and controls available. Long-lived machine
+policy remains in Machines.
+
+Live output has bounded height and follows only while its reader stays near the
+bottom; Jump to latest resumes following. Expanding, copying, changing locale,
+completion and streamed updates preserve disclosure and reading position. Narrow
+rows wrap status and argument previews without making the page scroll horizontally.
+Tool clocks use animation frames only while the corresponding projection is active.
+See [UI events](ui-events.md#tool-call-projections) for the event and persistence contract.
+
 ### Tasks and schedules
 
 Tasks keeps Ongoing / Needs attention / Archived groups, search and 20-item

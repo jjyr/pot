@@ -33,7 +33,7 @@ func TestInstructionToolsAlwaysRequireExactOwnerReview(t *testing.T) {
 			defer sub.Close()
 			done := make(chan error, 1)
 			go func() {
-				_, e := s.instructionCall(ctx, a.ID, "turn", thread.Generation, modelprotocol.ToolCall{ID: "change", Name: "update_agent_instructions", Arguments: json.RawMessage(`{"text":"owner reviewed"}`)})
+				_, e := s.instructionCall(ctx, a.ID, "turn", thread.Generation, modelprotocol.ToolCall{ID: "change", Name: "update_agent_instructions", Arguments: json.RawMessage(`{"text":"owner reviewed"}`)}, nil)
 				done <- e
 			}()
 			var approval Approval

@@ -207,6 +207,13 @@ Main, tray and browser share DOM components, fonts/tokens, themes and localizati
 platform adapters supply native dialogs, window operations and browser sessions.
 See [shared UI](shared-ui.md) and [design language](design-language.md).
 
+`scripts/tests/go-ui-tools-browser.js` is a Playwright CLI `run-code` contract
+scenario against the disposable preview on port 17702. It mocks product endpoints
+to exercise inline tool details, stream following, composition nesting, exact
+approval decisions, scoped navigation and Task transcripts. It writes the reviewed
+screenshots to the branch's PR image directory. Go tests separately cover durable
+projection, real local execution and signed remote state/output delivery.
+
 `scripts/localize-web` builds retained desktop/Sandbox HTML. Update source
 templates under `desktop/` and `plugins/podman/image/`, and translations under
 `resources/app/locales/`; generated viewer output is not the product UI source.

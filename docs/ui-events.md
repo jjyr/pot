@@ -74,6 +74,31 @@ updates preserve the guidance draft instead of rebuilding the form. Pagination
 rejects a non-advancing cursor. Tools remain expandable and file links retain the
 Task's explicit Control/assistant identity.
 
+## Tool-call projections
+
+Main Chat persists a structured `message.tool` projection separately from prose:
+call/turn identity, composition parent, original arguments, resolved execution
+target/workdir, lifecycle timestamps, ordered stream chunks and the raw result.
+Completion never overwrites arguments or streamed output. Agent events carry
+`at_ms`; `tool_state` records preparing, exact approval waiting, running and denied
+transitions. Unsettled calls become stopped after cancellation or result-unconfirmed
+when the original run cannot establish a terminal receipt. Restart preserves these
+details and marks unfinished projections unconfirmed rather than replaying them.
+
+Task transcripts reduce the same start/state/output/finish events. Control forwards
+run-bound state updates to the original Runner, whose Agent sequences them into
+its durable log; destination executors stream output through that same Agent.
+Composition children have explicit `parent_id` values scoped by the original turn.
+A returned process session or yielded script is distinct from completed execution.
+
+Chat and Tasks use the shared `components/tool-call.mjs` disclosure. Ordinary calls
+start collapsed; exact approval requests open their call and composition ancestors.
+Owner-scoped disclosure state and stable output nodes survive snapshots and
+navigation. Output following pauses when the reader scrolls upward. Large displays
+are bounded and clearly labeled; copy retains the complete available text, while
+source truncation remains explicitly identified. Displayed outputs cannot recover
+bytes the executor did not retain.
+
 ## Lifecycle and remaining clocks
 
 SSE keepalive comments run every 15 seconds; writes have bounded deadlines that

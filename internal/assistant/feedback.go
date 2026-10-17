@@ -268,36 +268,50 @@ func (f *turnFeedback) event(event core.AgentEvent) error {
 	case "tool_started":
 		id := storage.ID()
 		f.toolMessages[update.ID] = id
-		return c.putMessageLocked(ctx, protocol.Message{ID: id, ConversationID: c.options.ConversationID, Role: protocol.Tool, Text: update.Name, Status: protocol.Streaming, CreatedAtMS: storage.Now()}, nil)
-	case "tool_finished":
+		tool := &protocol.ToolCall{}
+		tool.Apply(update)
+		tool.TurnID = f.request.RequestID
+		return c.putMessageLocked(ctx, protocol.Message{ID: id, ConversationID: c.options.ConversationID, Role: protocol.Tool, Tool: tool, Status: protocol.Streaming, CreatedAtMS: update.AtMS}, nil)
+	case "tool_state", "tool_finished", "tool_output":
 		id := f.toolMessages[update.ID]
 		if id == "" {
-			return errors.New("tool output arrived before tool start")
+			return errors.New("tool update arrived before tool start")
 		}
 		for _, m := range c.messages {
 			if m.ID == id {
-				m.Text = string(update.Result)
-				m.Status = protocol.Complete
-				if update.Failed {
-					m.Status = protocol.Failed
+				if m.Tool == nil {
+					return errors.New("tool details missing")
+				}
+				// Copy before mutation: a previously delivered snapshot owns its value.
+				tool := *m.Tool
+				tool.Output = slices.Clone(tool.Output)
+				tool.Apply(update)
+				m.Tool = &tool
+				if update.Type == "tool_finished" {
+					m.Status = protocol.Complete
+					if update.Failed {
+						m.Status = protocol.Failed
+					}
 				}
 				return c.putMessageLocked(ctx, m, nil)
 			}
 		}
 		return errors.New("tool projection missing")
-	case "tool_output":
-		id := f.toolMessages[update.ID]
-		if id == "" {
-			return errors.New("tool stream arrived before tool start")
-		}
-		for _, message := range c.messages {
-			if message.ID == id {
-				message.Text += update.Text
-				return c.putMessageLocked(ctx, message, nil)
+	case "turn_finished":
+		for _, message := range slices.Clone(c.messages) {
+			if message.Tool != nil && message.Status == protocol.Streaming {
+				tool := *message.Tool
+				tool.Apply(update)
+				message.Tool = &tool
+				message.Status = protocol.Failed
+				if tool.Phase == "stopped" {
+					message.Status = protocol.MessageCancelled
+				}
+				if err := c.putMessageLocked(ctx, message, nil); err != nil {
+					return err
+				}
 			}
 		}
-		return errors.New("tool stream projection missing")
-	case "turn_finished":
 		if update.Outcome != nil && update.Outcome.Error != "" {
 			c.lastError = errors.New(update.Outcome.Error)
 		} else if update.Outcome != nil && update.Outcome.Kind == "success" {

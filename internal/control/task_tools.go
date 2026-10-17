@@ -41,7 +41,7 @@ func (s *Service) productDispatchBound(owner, executionOwner, turn string, gener
 				return nil, errors.New("stale product tool binding")
 			}
 			if call.Name == "read_agent_instructions" || call.Name == "update_agent_instructions" {
-				return s.instructionCall(ctx, owner, turn, generation, call)
+				return s.instructionCall(ctx, owner, turn, generation, call, emit)
 			}
 			id, _ := core.HashJSON([]any{owner, turn, generation, call.ID})
 			if call.Name == "rename_assistant" {
