@@ -1,5 +1,18 @@
 export const messages = {
   en: {
+    "integrations.title": "Third-party accounts",
+    "integrations.description": "Connect services for your assistants and tasks.",
+    "integrations.status.connected": "Logged in",
+    "integrations.status.expired": "Login expired",
+    "integrations.status.pending": "Waiting for authorization",
+    "integrations.status.disconnected": "Not logged in",
+    "integrations.login": "Log in",
+    "integrations.logout": "Log out",
+    "integrations.cancel": "Cancel",
+    "integrations.authorization.instructions": "Enter this code in your browser to authorize the connection.",
+    "integrations.authorization.openBrowser": "Open browser",
+    "integrations.loginUnavailable": "Login is not available on this Control. Contact its administrator.",
+    "integrations.authorization.failed": "Authorization did not complete. Please try logging in again.",
     "web.error.title":"The interface encountered an error","web.error.message":"Some controls may stop responding. Refresh the page to recover.","web.error.reload":"Refresh page","web.error.details":"View details","web.error.close":"Close","web.error.log":"Error log","web.error.copy":"Copy log","web.error.copied":"Log copied","web.error.copy-failed":"Could not copy. Select and copy the log below.",
     assistants: 'Assistants', chat: 'Chat', tasks: 'Tasks', machines: 'Machines', usage: 'Usage', settings: 'Settings',
     search: 'Search assistants', assistant: 'Pot', local: 'Local', preview: 'Go developer preview',
@@ -14,6 +27,19 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    "integrations.title": "第三方账号",
+    "integrations.description": "连接第三方服务，供助手和任务使用。",
+    "integrations.status.connected": "已登录",
+    "integrations.status.expired": "登录已失效",
+    "integrations.status.pending": "等待授权",
+    "integrations.status.disconnected": "未登录",
+    "integrations.login": "登录",
+    "integrations.logout": "退出登录",
+    "integrations.cancel": "取消",
+    "integrations.authorization.instructions": "在浏览器中输入此验证码，完成授权。",
+    "integrations.authorization.openBrowser": "打开浏览器",
+    "integrations.loginUnavailable": "此 Control 尚未启用登录，请联系管理员。",
+    "integrations.authorization.failed": "授权未完成，请重新登录。",
     "web.error.title":"界面发生异常","web.error.message":"部分操作可能无法响应，请刷新页面恢复。","web.error.reload":"刷新页面","web.error.details":"查看详情","web.error.close":"关闭","web.error.log":"错误日志","web.error.copy":"复制日志","web.error.copied":"日志已复制","web.error.copy-failed":"无法自动复制，请选择下方日志并复制。",
     assistants: '助手', chat: '聊天', tasks: '任务', machines: '机器', usage: '用量', settings: '设置',
     search: '搜索助手', assistant: 'Pot', local: '本地', preview: 'Go 开发预览',
@@ -28,3 +54,8 @@ export const messages = {
     searchEmpty: '没有匹配的助手', cancelError: '无法停止当前回合，请重试。',
   },
 };
+
+// All product components share the same English fallback for missing locales/keys.
+export function translate(locale,key) {
+  return messages[locale]?.[key] ?? messages.en[key] ?? key;
+}
