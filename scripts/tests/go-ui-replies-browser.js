@@ -40,6 +40,8 @@ async page=>{
  await page.locator('.reply-content').getByText('你好！',{exact:true}).waitFor();
  assert(await page.evaluate(()=>document.querySelector('.reply-bubble')===replyFixture.bubble),'Streaming updates the same bubble');
  assert(await page.locator('.role-assistant').count()===1,'Streaming does not leave a second Thinking placeholder');
+ await page.evaluate(()=>replyFixture.publish({messages:[replyFixture.input,{id:'reply',reply_to:'input',role:'assistant',status:'complete',text:'你好！'}]}));
+ assert(await page.locator('.role-assistant').count()===1,'Turn cleanup keeps feedback in the same completed message');
  await page.locator('#pot-composer').fill('保留新草稿');
  await page.evaluate(()=>replyFixture.publish({messages:[replyFixture.input,{id:'reply',reply_to:'input',role:'assistant',status:'failed',text:'你好！',error:'model provider returned HTTP 404'}],running:false,turn_id:null}));
  await page.getByText('回复失败',{exact:true}).waitFor();

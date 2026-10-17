@@ -110,6 +110,9 @@ const streaming=projectChatReplies({...waiting,messages:[chatInput,{...chatReply
 assert.equal(optimistic[0].viewKey,thinking[0].viewKey,'Optimistic user input becomes the accepted message');
 assert.equal(optimistic[1].viewKey,thinking[1].viewKey,'Sending becomes Thinking in the same reply');
 assert.equal(thinking[1].viewKey,streaming[1].viewKey,'Streaming adopts the existing waiting bubble');
+const settling=projectChatReplies({...waiting,messages:[chatInput,{...chatReply,text:'Done',status:'complete'}]});
+assert.equal(settling.length,2,'Finishing a message before turn cleanup must not create another bubble');
+assert.equal(settling[1].viewKey,thinking[1].viewKey,'Turn cleanup keeps activity in the original reply');
 assert.equal(projectChatReplies(waiting,null,{offline:true})[1].phase,'reconnecting','Connection loss does not declare execution failed');
 const failed=projectChatReplies({...waiting,running:false,turn_id:null,messages:[chatInput,{...chatReply,text:'Partial',status:'failed',error:'HTTP 404'}]});
 assert.equal(failed.filter(row=>row.phase==='failed').length,1,'Only one failed reply is displayed');

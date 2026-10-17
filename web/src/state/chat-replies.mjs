@@ -28,7 +28,9 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
   const input=inputs.get(snapshot?.turn_id);
   const active=rows.filter(row=>row.role==='assistant'&&row.inputID===input?.id);
   if(snapshot?.running&&input&&!active.some(row=>['thinking','streaming','reconnecting','paused','waiting','failed'].includes(row.phase))){
-    rows.push({id:`waiting:${input.id}`,viewKey:active.length?`waiting:${input.id}`:`reply:${input.request_id||input.id}`,role:'assistant',text:'',status:'streaming',phase:offline?'reconnecting':snapshot.turn?.paused?'paused':snapshot.turn?.state==='waiting'?'waiting':'thinking',inputID:input.id});
+    const phase=offline?'reconnecting':snapshot.turn?.paused?'paused':snapshot.turn?.state==='waiting'?'waiting':'thinking';
+    if(active.length)active.at(-1).phase=phase;
+    else rows.push({id:`waiting:${input.id}`,viewKey:`reply:${input.request_id||input.id}`,role:'assistant',text:'',status:'streaming',phase,inputID:input.id});
   }
   if(send&&!send.request.user_message_id&&!messages.some(message=>message.request_id===send.request.request_id)){
     const request=send.request;
