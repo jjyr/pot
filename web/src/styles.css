@@ -335,3 +335,10 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 @media(max-width:719px){.integration-authorization{padding-left:0}.integration-row{gap:14px}.integration-status,.integration-identity{font-size:14px}}
 
 .editor-fields>.avatar{display:block;margin-bottom:24px}.provider-key-link{align-self:flex-start;color:var(--primary);font-size:13px;text-decoration:none}
+
+.provider-endpoint-preview { display:block; overflow-wrap:anywhere; }
+.provider-model-status { display:block; font-size:12px; }
+.provider-model-status:empty, .provider-test-status:empty { display:none; }
+.provider-test-row { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-top:16px; }
+.provider-test-status { min-width:0; overflow-wrap:anywhere; }
+.provider-model-status .control, .provider-endpoint-preview .control { margin-left:6px; }

@@ -191,6 +191,11 @@ func (p *ProfileStore) save(ctx context.Context, r SaveProfile) (core.Profile, e
 			return core.Profile{}, errors.New("invalid saved model ID")
 		}
 	}
+	resolved, err := resolveProviderEndpoint(r.Endpoint, r.Protocol)
+	if err != nil {
+		return core.Profile{}, err
+	}
+	r.Endpoint = resolved.Endpoint
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	sanitized := r
