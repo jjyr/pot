@@ -9,6 +9,14 @@ async page => {
  let failDefault=false,holdDefault=false,releaseDefault,defaultArrived;const defaultReady=new Promise(resolve=>defaultArrived=resolve);
  const scheduleExecutions=new Set();let allowanceFixture=false,mainWaitTurn='main-original',mailWaitTurn='mail-original',mainWaitSince=11,mailWaitSince=21;
  const schedulePlan=index=>({id:index?'plan-'+index:'plan-proof',next_at_ms:index+1,spec:{title:index?'Extra schedule '+index:'Schedule proof',goal:'Full goal retained only in selected schedule',enabled:true,timezone:'UTC',kind:'daily',time:'09:00',weekdays:[],misfire:'coalesce',notify:'changes'},next_label:'Tomorrow'});
+ const usageBuckets=days=>{
+  const step=days===365?7:1,buckets=[];
+  for(let offset=0;offset<days;offset+=step){
+   const start=new Date(Date.UTC(2026,9,18-days+offset)).toISOString().slice(0,10),end=new Date(Date.UTC(2026,9,17-days+Math.min(days,offset+step))).toISOString().slice(0,10),active=offset+step>=days;
+   buckets.push({label:start.slice(5),range:`${start} — ${end}`,input:active?4:0,output:active?2:0,cache:0,unknown:0});
+  }
+  return buckets;
+ };
  const fileTask='de305d54-75b4-431b-adb2-eb6b9e546014';
  const onError=error=>errors.push(error.message);page.on('pageerror',onError);const onDialog=dialog=>dialog.type()==='beforeunload'?dialog.accept():dialog.dismiss();page.on('dialog',onDialog);
  let definitions=[],sharedStorage=false;
@@ -57,7 +65,7 @@ async page => {
   }
   else if(path==='/api/v1/machines')value={items:[{id:'machine-one',runtime_id:'machine-one',name:'Machine One',connected:true,capabilities:{host:true,sandbox:true},sandbox:{id:'sandbox-exact',state:{phase:'stopped'},resources:{cpus:2,memory_gib:4,disk_gib:sharedStorage?0:20}}},{id:'machine-offline',runtime_id:'machine-offline',name:'Offline machine',connected:false,capabilities:{host:true,sandbox:true},sandbox:{id:'sandbox-offline',state:{phase:'stopped'},resources:{cpus:2,memory_gib:4,disk_gib:20}}}]};
   else if(path==='/api/v1/usage/resume')value={accepted:true};
-  else if(path==='/api/v1/usage/summary')value={...(allowanceFixture?{waiting:{turn:url.searchParams.get('scope')==='task-proof'?'task-fixed-run':mainWaitTurn,since:url.searchParams.get('scope')==='task-proof'?31:mainWaitSince,provider:'route-p'},mail_waits:[{scope:'mail:stable',turn:mailWaitTurn,since:mailWaitSince,provider:'route-p'}]}:{}),total:{input:4,output:2,requests:1},lifetime:{input:900,output:100,requests:2},buckets:[],requests:[],tools:[],compactions:[],quota:{active:false,policy:{period:'none',limit:100,timezone:'UTC',auto_resume:true}}};
+  else if(path==='/api/v1/usage/summary')value={...(allowanceFixture?{waiting:{turn:url.searchParams.get('scope')==='task-proof'?'task-fixed-run':mainWaitTurn,since:url.searchParams.get('scope')==='task-proof'?31:mainWaitSince,provider:'route-p'},mail_waits:[{scope:'mail:stable',turn:mailWaitTurn,since:mailWaitSince,provider:'route-p'}]}:{}),days:Number(url.searchParams.get('days')||7),timezone:url.searchParams.get('timezone')||'UTC',bucket_days:url.searchParams.get('days')==='365'?7:1,total:{input:4,output:2,requests:1},lifetime:{input:900,output:100,requests:2},buckets:usageBuckets(Number(url.searchParams.get('days')||7)),requests:[],tools:[],compactions:[],quota:{active:false,policy:{period:'none',limit:100,timezone:'UTC',auto_resume:true}}};
   else if(path.startsWith('/api/v1/assistants/')){const body=route.request().postDataJSON();const definition=definitions.find(value=>value.id===path.split('/').pop());Object.assign(definition,{name:body.name,revision:definition.revision+1});value=definition;}
   else {await route.fulfill({status:404,contentType:'application/json',body:JSON.stringify({message:'Unmocked endpoint: '+path})});return;}
   await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(value)});
