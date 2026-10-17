@@ -35,7 +35,7 @@ App resources and portable CLI archives include these original plain-text files:
 | `SwiftDependencyLicenses.txt` | Native macOS VM Swift Helper dependency notices; macOS packages only |
 | `FrontendFontLicense.txt` | IBM Plex Sans under the SIL Open Font License |
 | `FrontendIconLicense.txt` | Retained Lucide/Feather and GitHub Octicons under ISC/MIT terms |
-| `ModelDirectoryLicense.txt` | The models.dev catalog seed and provider artwork |
+| `ModelDirectoryLicense.txt` | The models.dev catalog seed and Lobe Icons provider artwork |
 | `node/LICENSE` | The pinned Node.js distribution and its bundled dependencies |
 | `novnc/LICENSE.txt` | The pinned noVNC distribution |
 

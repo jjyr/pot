@@ -6,10 +6,57 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/jjyr/pot/resources"
 )
+
+func TestBundledProviderArtworkOverridesCachedLogos(t *testing.T) {
+	root := t.TempDir()
+	providers := fixture()
+	providers["deepseek"] = providers["anthropic"]
+	fallback := `<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h24v24H0z"/></svg>`
+	cached, err := json.Marshal(snapshot{Providers: providers, Logos: map[string]string{"deepseek": fallback, "proxy": fallback}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "catalog.json"), cached, 0600); err != nil {
+		t.Fatal(err)
+	}
+	d, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := resources.ProviderLogos.ReadFile("provider-logos/deepseek.svg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, option := range d.Options() {
+		switch option.ID {
+		case "deepseek":
+			if option.Logo != string(want) {
+				t.Fatal("cached monochrome mark replaced bundled color artwork")
+			}
+		case "proxy":
+			if option.Logo != fallback {
+				t.Fatal("provider without bundled artwork lost its directory mark")
+			}
+		}
+	}
+	entries, err := resources.ProviderLogos.ReadDir("provider-logos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		body, err := resources.ProviderLogos.ReadFile("provider-logos/" + entry.Name())
+		if err != nil || !validLogo(string(body)) {
+			t.Errorf("invalid bundled provider artwork %s: %v", entry.Name(), err)
+		}
+	}
+}
 
 func ptr[T any](v T) *T { return &v }
 func fixture() map[string]provider {
