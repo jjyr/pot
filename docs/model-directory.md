@@ -45,6 +45,10 @@ separate chooser and connection editor; search and provider selection appear onl
 in the chooser. The editor contains name, API URL, credential, default model,
 request format, context/output limits and reasoning effort in that order. It never
 edits assistant instructions, execution policy or tool/plugin selection.
+The API URL is the complete inference request endpoint, such as
+`https://gateway.example/v1/responses` for Responses or
+`https://gateway.example/v1/chat/completions` for Chat Completions. Pot sends
+requests to that exact URL; a base URL ending only in `/v1` is insufficient.
 
 An assistant's Add Provider shortcut retains its draft while opening that same
 connection flow. Saving selects the new connection and its default model in the

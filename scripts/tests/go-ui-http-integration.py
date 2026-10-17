@@ -279,6 +279,11 @@ def run(binary, base, env, cli_command):
             output = browser_cli("run-code", code.replace("STATE", json.dumps(state)))
             if '"errors":[]' not in output:
                 raise RuntimeError("Browser did not return successful integration evidence")
+            replies = browser_cli(
+                "run-code", (ROOT / "scripts/tests/go-ui-replies-browser.js").read_text()
+            )
+            if '"passed":true' not in replies:
+                raise RuntimeError("Reply bubble browser contracts did not pass")
             actual = (base / "download.bin").read_bytes()
             assert len(actual) == len(content)
             assert hashlib.sha256(actual).digest() == hashlib.sha256(content).digest()

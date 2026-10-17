@@ -3,6 +3,7 @@ import {acceptSnapshot, beginSend, beginSubscription, createConversationState, d
 import {allowedLink,parseFileLink} from '../../web/src/components/markdown.mjs';
 import {createEnterGuard, bindComposer} from '../../web/src/components/composer.mjs';
 import {messages,translate} from '../../web/src/locales/messages.mjs';
+import {projectChatReplies,replyFailureKind} from '../../web/src/state/chat-replies.mjs';
 
 for(const [locale,catalog] of Object.entries(messages)){
   assert.deepEqual(Object.keys(catalog).sort(),Object.keys(messages.en).sort(),`Shared translation keys: ${locale}`);
@@ -99,6 +100,27 @@ assert.equal(draft(state), 'uncertain');
 settleSend(state, afterReconnect, true);
 assert(!acceptSnapshot(state, snapshot({boot_id: 'third-boot', owner_id: 'new-owner', running: true, turn_id: null, cursor: '2'}), fourthEpoch), 'active turns must carry a cancellation target');
 console.log('Go UI state and DOM composer checks passed');
+
+const chatInput={id:'input',request_id:'request',role:'user',text:'Hello',status:'streaming'};
+const chatReply={id:'output',reply_to:'input',role:'assistant',text:'',status:'streaming'};
+const waiting={...snapshot(),running:true,turn_id:'input',messages:[chatInput]};
+const optimistic=projectChatReplies(snapshot(),{request:{request_id:'request',text:'Hello'},phase:'sending'});
+const thinking=projectChatReplies(waiting);
+const streaming=projectChatReplies({...waiting,messages:[chatInput,{...chatReply,text:'Partial'}]});
+assert.equal(optimistic[0].viewKey,thinking[0].viewKey,'Optimistic user input becomes the accepted message');
+assert.equal(optimistic[1].viewKey,thinking[1].viewKey,'Sending becomes Thinking in the same reply');
+assert.equal(thinking[1].viewKey,streaming[1].viewKey,'Streaming adopts the existing waiting bubble');
+assert.equal(projectChatReplies(waiting,null,{offline:true})[1].phase,'reconnecting','Connection loss does not declare execution failed');
+const failed=projectChatReplies({...waiting,running:false,turn_id:null,messages:[chatInput,{...chatReply,text:'Partial',status:'failed',error:'HTTP 404'}]});
+assert.equal(failed.filter(row=>row.phase==='failed').length,1,'Only one failed reply is displayed');
+assert.equal(failed[1].text,'Partial','Partial prose stays in the original reply');
+assert.equal(failed[1].error,'HTTP 404');
+assert.equal(failed[1].viewKey,thinking[1].viewKey,'Failure updates the original reply');
+assert.equal(projectChatReplies(waiting,{request:{request_id:'request',text:'Hello'},phase:'uncertain'}).length,2,'An uncertain receipt cannot duplicate an already accepted input');
+assert.equal(projectChatReplies({...waiting,turn:{paused:true}})[1].phase,'paused','Paused turns do not keep thinking');
+assert.equal(replyFailureKind('model provider returned HTTP 404'),'configuration');
+assert.equal(replyFailureKind('model provider returned HTTP 503'),'service');
+assert.equal(replyFailureKind('model provider returned HTTP 429'),'limit');
 
 assert(allowedLink('https://example.com'));
 for (const value of ['javascript:alert(1)', 'data:text/html,hello', 'file:///etc/passwd', '/api/private']) assert(!allowedLink(value));

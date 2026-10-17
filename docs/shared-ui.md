@@ -21,6 +21,9 @@ web/src: shell, pages, composer, drafts, configuration, navigation
 [`components/ui.js`](../web/src/components/ui.js) owns the shell, assistant
 directory, Chat and input lifecycle. [`components/pages.mjs`](../web/src/components/pages.mjs)
 owns Tasks, schedules, Machines, Usage, configuration forms and return contexts.
+[`components/reply.mjs`](../web/src/components/reply.mjs) owns reply content,
+activity and the single failure presentation; [`state/chat-replies.mjs`](../web/src/state/chat-replies.mjs)
+binds optimistic and durable reply identities without changing execution state.
 Reusable controls, Markdown, completion, resource and About components live beside
 those files. Portable conversation/editor/ownership state lives in `web/src/state`.
 The shared components use a client interface; they do not call Wails directly.

@@ -92,6 +92,58 @@ func waitSnapshot(t *testing.T, c *Conversation, predicate func(protocol.Snapsho
 		}
 	}
 }
+func TestConversationProviderFailureDiagnosticAndRetry(t *testing.T) {
+	ctx := context.Background()
+	var calls, cleanup atomic.Int64
+	c := conversationFixture(t, filepath.Join(t.TempDir(), "conversation.sqlite"), "boot", func(context.Context, core.ModelRequest) (io.ReadCloser, error) {
+		if calls.Add(1) == 1 {
+			return nil, &core.ModelRequestError{Cause: errors.New("model provider returned HTTP 404"), Disposition: "rejected"}
+		}
+		return replySSE("Connected"), nil
+	}, &cleanup)
+	if _, err := c.Send(ctx, protocol.SendMessage{RequestID: "first", ConversationID: "main", Text: "Hello"}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil && len(s.Messages) > 0 })
+	if snapshot.Agent.Phase != protocol.AgentFailed || snapshot.Agent.Detail == nil || *snapshot.Agent.Detail != "model provider returned HTTP 404" {
+		t.Fatal("provider failure must remain visible in the snapshot", snapshot.Agent)
+	}
+	if len(snapshot.Messages) != 2 || snapshot.Messages[1].ReplyTo != snapshot.Messages[0].ID || snapshot.Messages[1].Error != *snapshot.Agent.Detail {
+		t.Fatal("failure must belong to exactly one durable assistant reply", snapshot.Messages)
+	}
+	if _, err := c.Send(ctx, protocol.SendMessage{RequestID: "retry", ConversationID: "main", Text: "Hello again"}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot = waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil && len(s.Messages) == 4 })
+	if snapshot.Agent.Phase != protocol.Ready || snapshot.Agent.Detail != nil || snapshot.Messages[3].Text != "Connected" {
+		t.Fatal("successful retry must clear the failure", snapshot)
+	}
+}
+
+func TestPreparationFailureCreatesOneDurableReply(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "conversation.sqlite")
+	var cleanup atomic.Int64
+	model := func(context.Context, core.ModelRequest) (io.ReadCloser, error) { return replySSE("unexpected"), nil }
+	c := conversationFixture(t, path, "first-boot", model, &cleanup)
+	c.options.Prepare = func(context.Context, core.Thread, core.TurnRequest) (RunOptions, error) {
+		return RunOptions{}, errors.New("model provider connection failed")
+	}
+	if _, err := c.Send(ctx, protocol.SendMessage{RequestID: "first", ConversationID: "main", Text: "Hello"}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil && len(s.Messages) > 0 })
+	if len(snapshot.Messages) != 2 || snapshot.Messages[1].Status != protocol.Failed || snapshot.Messages[1].ReplyTo != snapshot.Messages[0].ID || snapshot.Messages[1].Error != "model provider connection failed" {
+		t.Fatal("preparation failures must not leave an empty conversation", snapshot)
+	}
+	c.Close()
+	c = conversationFixture(t, path, "second-boot", model, &cleanup)
+	restored, err := c.Snapshot(ctx)
+	if err != nil || len(restored.Messages) != 2 || restored.Messages[1].Error != snapshot.Messages[1].Error || restored.Agent.Phase != protocol.AgentFailed {
+		t.Fatal("restart must preserve the original failure without creating another reply", restored, err)
+	}
+}
+
 func TestConversationRealAgentStreamDedupRestartAndCounts(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "conversation.sqlite")

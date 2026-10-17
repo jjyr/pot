@@ -176,6 +176,14 @@ CREATE TABLE IF NOT EXISTS assistant_observations(sequence INTEGER PRIMARY KEY A
 		stop()
 		return nil, err
 	}
+	for i := len(c.messages) - 1; i >= 0; i-- {
+		if message := c.messages[i]; message.Role == protocol.Assistant {
+			if message.Status == protocol.Failed && message.Error != "" {
+				c.lastError = errors.New(message.Error)
+			}
+			break
+		}
+	}
 	if c.cursor, err = store.Cursor(context.Background()); err != nil {
 		stop()
 		return nil, err
@@ -240,7 +248,7 @@ func (c *Conversation) snapshotLocked() protocol.Snapshot {
 	if c.thread == nil {
 		phase = protocol.NeedsConfiguration
 	}
-	if c.blocked {
+	if c.blocked || c.lastError != nil && c.turn == nil {
 		phase = protocol.AgentFailed
 	}
 	if c.lastError != nil {
@@ -249,7 +257,7 @@ func (c *Conversation) snapshotLocked() protocol.Snapshot {
 	}
 	var turn *protocol.TurnState
 	if c.turn != nil {
-		turn = &protocol.TurnState{UserMessageID: c.turn.UserMessageID, Cancelling: c.turn.Cancelling, Paused: c.turn.Paused}
+		turn = &protocol.TurnState{UserMessageID: c.turn.UserMessageID, Cancelling: c.turn.Cancelling, Paused: c.turn.Paused, State: c.turn.State}
 		if c.turn.Paused {
 			message := "Paused before the next model request"
 			detail = &message
@@ -354,7 +362,7 @@ func (c *Conversation) appendTurnMetadataLocked(ctx context.Context, metadata ma
 	}
 	var turn *protocol.TurnState
 	if c.turn != nil {
-		turn = &protocol.TurnState{UserMessageID: c.turn.UserMessageID, Cancelling: c.turn.Cancelling, Paused: c.turn.Paused}
+		turn = &protocol.TurnState{UserMessageID: c.turn.UserMessageID, Cancelling: c.turn.Cancelling, Paused: c.turn.Paused, State: c.turn.State}
 	}
 	if metadata == nil {
 		metadata = map[string]string{}
@@ -749,6 +757,30 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 			if err := c.putMessageLocked(ctx, m, nil); err != nil {
 				return err
 			}
+		}
+	}
+	if result.Phase != execution.Succeeded {
+		// Persist one terminal reply even when preparation failed before the Agent
+		// emitted message_started. The detail belongs to this turn across reloads.
+		var reply protocol.Message
+		for _, message := range c.messages {
+			if message.ID == c.turn.ReplyMessageID {
+				reply = message
+				break
+			}
+		}
+		if reply.ID == "" {
+			reply = protocol.Message{ID: storage.ID(), ConversationID: c.options.ConversationID, Role: protocol.Assistant, CreatedAtMS: storage.Now()}
+		}
+		reply.ReplyTo = c.turn.UserMessageID
+		reply.Status = protocol.Failed
+		if result.Phase == execution.Cancelled {
+			reply.Status = protocol.MessageCancelled
+		} else if result.Err != nil {
+			reply.Error = result.Err.Error()
+		}
+		if err := c.putMessageLocked(ctx, reply, nil); err != nil {
+			return err
 		}
 	}
 	if c.blocked {

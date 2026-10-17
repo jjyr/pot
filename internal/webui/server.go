@@ -411,6 +411,8 @@ func (s *Server) proxy(w http.ResponseWriter, r *http.Request, generation uint64
 				if e := controller.Flush(); e != nil {
 					return
 				}
+				// Bound each write, not the idle wait for the next SSE frame.
+				_ = controller.SetWriteDeadline(time.Time{})
 			}
 			if err != nil {
 				return

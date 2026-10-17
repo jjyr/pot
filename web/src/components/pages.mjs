@@ -254,7 +254,7 @@ export function createPages({client, host, approvalHost, locale, notify, changed
     const initial={name:profile?.name||selectedEntry?.name||'',endpoint:connection?.endpoint||selectedEntry?.endpoint||'',api_key:'',model:profile?.model||'',model_selection:'',protocol:connection?.protocol||selectedEntry?.protocol||'openai_responses',context_window:profile?.model_settings?.context_window??null,max_output_tokens:profile?.model_settings?.max_output_tokens??null,reasoning_effort:profile?.params?.reasoning_effort||''};
     const form=renderEditor(profile?tr('Edit Provider','编辑提供商'):tr('Add Provider','添加提供商'),initial,[
       {name:'name',label:tr('Name','名称'),required:true},
-      {name:'endpoint',label:tr('Endpoint','API 地址'),kind:'url',required:true},
+      {name:'endpoint',label:tr('Endpoint','API 地址'),kind:'url',required:true,help:tr('Enter the full request URL, including /responses for Responses or /chat/completions for Chat Completions.','填写完整请求地址：Responses 需包含 /responses，Chat Completions 需包含 /chat/completions。')},
       {name:'api_key',label:tr('API key','API 密钥'),kind:'password',required:!profile,help:profile?tr('Leave blank to keep the saved key.','留空保留现有密钥。'):''},
       {name:'model_selection',label:tr('Model','默认模型'),choices:[['',tr('Enter model ID','输入模型 ID')]]},
       {name:'model',label:tr('Model ID','模型 ID'),required:true},

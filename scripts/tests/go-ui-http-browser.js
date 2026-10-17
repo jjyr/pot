@@ -1,6 +1,7 @@
 // Real local Go Runtime/Web integration; no UI route replies are mocked.
 async page=>{
  const state=STATE,assert=(value,message)=>{if(!value)throw Error(message)},errors=[],requests=[];
+ let step='initial load';
  const onError=error=>errors.push(error.message);page.on('pageerror',onError);page.on('request',request=>{if(new URL(request.url()).pathname.startsWith('/api/v1/'))requests.push({path:new URL(request.url()).pathname,authorization:!!request.headers().authorization})});
  const onlyLoopback=route=>['127.0.0.1','localhost'].includes(new URL(route.request().url()).hostname)?route.continue():route.abort();await page.context().route('**/*',onlyLoopback);
  const browser=page.context().browser(),secondContext=await browser.newContext({viewport:{width:1200,height:820}}),anonymous=await browser.newContext(),second=await secondContext.newPage();second.on('pageerror',onError);await secondContext.route('**/*',onlyLoopback);
@@ -11,9 +12,11 @@ async page=>{
   for(const path of ['/api/v1/runtime/control','/api/v1/runtime/resources','/api/v1/terminals'])assert((await page.request.get(state.origin+path)).status()===404,'Published browser private boundary: '+path);
   assert((await page.request.post(state.origin+'/api/v1/messages?assistant_id='+state.assistant_id,{headers:{Origin:'https://untrusted.invalid'},data:{request_id:'cross-origin-denied',text:'not accepted'}})).status()===403,'Cross-origin browser write rejected');
   const cookies=await page.context().cookies(state.origin),session=cookies.find(value=>value.name==='pot_session');assert(session?.httpOnly&&session.sameSite==='Strict','Session is HttpOnly and SameSite Strict');assert(!await page.evaluate(()=>document.cookie.includes('pot_session=')),'Session inaccessible to JavaScript');
+  step='settings';
   await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Third-party accounts',exact:true}).click();
   await page.getByRole('heading',{name:'GitHub',exact:true}).waitFor();assert(await page.getByRole('button',{name:'Log in',exact:true}).isDisabled(),'Unconfigured GitHub application gives explicit unavailable login');assert(await page.getByRole('button',{name:'Add account',exact:true}).count()===0,'No manual or multiple account binding');
   const integrations=await(await page.request.get(state.origin+'/api/v1/integrations')).json();assert(integrations.items.length===1&&integrations.items[0].id==='github'&&integrations.items[0].status==='disconnected','Supported integration is listed before login');assert((await page.request.get(state.origin+'/api/v1/credentials')).status()===404,'Manual credential API removed');await page.getByRole('button',{name:'Chat',exact:true}).click();
+  step='provider setup';
   const providerBefore=await(await page.request.get(state.origin+'/api/v1/providers')).json(),assistantsBefore=await(await page.request.get(state.origin+'/api/v1/assistants')).json();
   const existingConnection=providerBefore.connections[0];
   await page.getByRole('button',{name:'New assistant',exact:true}).click();
@@ -28,10 +31,12 @@ async page=>{
   assert(await page.getByLabel('Name',{exact:true}).inputValue()==='Setup flow proof'&&await page.getByLabel('Provider',{exact:true}).inputValue()===originalProvider&&await page.getByLabel('Model',{exact:true}).inputValue()===originalModel,'Cancelling nested setup preserves assistant draft and selection');
   await page.getByRole('button',{name:'+ Add Provider',exact:true}).click();await page.getByRole('button',{name:'Custom API',exact:true}).click();
   await page.getByLabel('Name',{exact:true}).fill('New local connection');await page.getByLabel('Endpoint',{exact:true}).fill(existingConnection.endpoint);await page.getByLabel('Protocol',{exact:true}).selectOption(existingConnection.protocol);await page.getByLabel('API key',{exact:true}).fill('isolated-key');await page.getByLabel('Model ID',{exact:true}).fill('new-default-model');await page.getByRole('button',{name:'Save',exact:true}).click();
+  step='assistant creation';
   await page.getByRole('button',{name:'Create assistant',exact:true}).waitFor();
   const providerAfter=await(await page.request.get(state.origin+'/api/v1/providers')).json(),newConnection=providerAfter.profiles.find(value=>value.name==='New local connection'),assistantsAfterProvider=await(await page.request.get(state.origin+'/api/v1/assistants')).json();
   assert(providerAfter.profiles.length===providerBefore.profiles.length+1&&JSON.stringify(assistantsAfterProvider)===JSON.stringify(assistantsBefore),'Saving Provider creates only the connection');
   assert(await page.getByLabel('Provider',{exact:true}).inputValue()===newConnection.id&&await page.getByLabel('Model',{exact:true}).inputValue()==='new-default-model'&&await page.getByLabel('Name',{exact:true}).inputValue()==='Setup flow proof'&&await page.getByLabel('Instructions',{exact:true}).inputValue()==='Keep my assistant draft','Nested Provider selects its default model and restores all assistant fields');
+  step='assistant creation';
   await page.getByRole('button',{name:'Create assistant',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#pot-composer')&&!document.querySelector('#pot-composer').disabled);
   const assistantsAfter=await(await page.request.get(state.origin+'/api/v1/assistants')).json(),created=assistantsAfter.find(value=>value.name==='Setup flow proof');
   assert(assistantsAfter.length===assistantsBefore.length+1&&!!created,'Only explicit Create assistant registers the assistant');
@@ -39,14 +44,18 @@ async page=>{
   assert(config.selection.profile_id===newConnection.id&&config.selection.model==='new-default-model'&&rules.text==='Keep my assistant draft','Created assistant persists its own model and instructions');
   assert(JSON.stringify((await(await page.request.get(state.origin+'/api/v1/providers')).json()).profiles)===JSON.stringify(providerAfter.profiles),'Creating assistant does not modify Providers');
   await page.locator('.assistant-row').filter({hasText:'Live browser integration'}).click();await page.waitForFunction(()=>document.querySelector('#pot-composer')&&!document.querySelector('#pot-composer').disabled);
+  step='first stream';
   const before=await second.locator('.role-assistant').count();await page.locator('#pot-composer').fill('First real browser stream');await page.locator('#pot-composer').press('Enter');await second.waitForFunction(count=>document.querySelectorAll('.role-assistant').length>count,before);await second.getByRole('link',{name:'Download binary proof',exact:true}).last().waitFor();await page.getByRole('link',{name:'Download binary proof',exact:true}).last().waitFor();
   const receipt=await page.request.get(state.origin+'/api/v1/snapshot?assistant_id='+state.assistant_id);const snapshot=await receipt.json();assert(snapshot.messages.some(value=>value.role==='user'&&value.text==='First real browser stream'),'Browser send persisted under original assistant');
   const downloadPromise=page.waitForEvent('download');await page.getByRole('link',{name:'Download binary proof',exact:true}).last().click();const download=await downloadPromise;assert(download.suggestedFilename()==='proof.bin','Actual download filename');await download.saveAs(state.download_path);
+  step='reconnect';
   const reconnect=second.waitForResponse(response=>new URL(response.url()).pathname==='/api/v1/events'&&response.status()===200,{timeout:20000});assert((await page.request.post(state.coord+'/restart-web',{headers:{Authorization:'Bearer '+state.control_key}})).status()===200,'Independent browser service restarted');await reconnect;await page.waitForFunction(()=>!document.querySelector('#pot-composer')?.disabled);
+  step='stream after reconnect';
   const nextBefore=await second.locator('.role-assistant').count();await page.locator('#pot-composer').fill('After real SSE reconnect');await page.locator('#pot-composer').press('Enter');await second.waitForFunction(count=>document.querySelectorAll('.role-assistant').length>count,nextBefore);await second.waitForFunction(()=>document.querySelectorAll('.role-assistant').length&&[...document.querySelectorAll('.role-assistant')].at(-1).textContent.includes('Download binary proof'));
   const a=await(await page.request.get(state.origin+'/api/v1/snapshot?assistant_id='+state.assistant_id)).json(),b=await(await second.request.get(state.origin+'/api/v1/snapshot?assistant_id='+state.assistant_id)).json();assert(a.cursor===b.cursor&&JSON.stringify(a.messages)===JSON.stringify(b.messages),'Both real clients converge after service restart');assert(a.messages.filter(value=>value.role==='user'&&value.text==='After real SSE reconnect').length===1,'Reconnect never replays send');
+  step='logout';
   await page.request.post(state.origin+'/access/logout');assert((await page.request.get(state.origin+'/api/v1/runtime')).status()===401,'Logout revokes original client');assert((await second.request.get(state.origin+'/api/v1/runtime')).status()===200,'Logout preserves other independently authenticated session');
   assert((await second.request.post(state.coord+'/rotate',{headers:{Authorization:'Bearer '+state.control_key}})).status()===200,'Operator rotates only isolated token');assert((await second.request.get(state.origin+'/api/v1/runtime')).status()===401,'Token rotation revokes second session');assert((await anonymous.request.post(state.origin+'/access/token',{headers:{Authorization:'Bearer '+state.token}})).status()===401,'Old access token rejected');
   assert(requests.every(value=>!value.authorization),'Browser API never receives upstream owner credential');assert(errors.length===0,errors.join('\n'));return {real_service:true,separate_provider_and_assistant_setup:true,nested_draft_and_cancel:true,integration_catalog:true,mocked_ui_routes:false,deterministic_local_provider:true,cross_client_sse:true,reconnect_convergence:true,private_api_boundary:true,cross_origin_write_denied:true,independent_sessions:true,token_revocation:true,browser_download_saved:true,errors};
- }finally{await secondContext.close();await anonymous.close();page.off('pageerror',onError);}
+ }catch(error){throw Error(step+': '+error.message+'; '+errors.join('; ')+'; '+(await page.locator('body').innerText()).slice(0,500));}finally{await secondContext.close();await anonymous.close();page.off('pageerror',onError);}
 }
