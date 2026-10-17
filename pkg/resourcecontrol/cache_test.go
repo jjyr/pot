@@ -66,11 +66,11 @@ func TestActivePreparationAndUnknownDefinitionCannotReleaseResources(t *testing.
 	ctx := context.Background()
 	options, closeStore := fixture(t, roundTrip(func(r *http.Request) (*http.Response, error) { <-r.Context().Done(); return nil, r.Context().Err() }))
 	defer closeStore()
-	options.ValidateSandbox = func(_ context.Context, id string) error {
+	options.SandboxProvider = func(_ context.Context, id string) (string, error) {
 		if id != "saved" {
-			return errors.New("missing definition")
+			return "", errors.New("missing definition")
 		}
-		return nil
+		return "fixture", nil
 	}
 	m, err := Open(options)
 	if err != nil {

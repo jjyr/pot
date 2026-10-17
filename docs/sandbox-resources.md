@@ -14,14 +14,19 @@ publish atomically and are revalidated against the archive, not an editable
 marker. Transfers share by digest: waiters cancel independently, and the last
 cancellation stops the transfer.
 
-`pkg/sandboxresources` consumes embedded `resources/sandbox/catalog.json`.
-It pins immutable filenames, sizes, hashes, architecture, OCI identity and
-executor bootstrap. Asset URLs derive from the release tag/filename under
-`https://github.com/jjyr/pot`. No mutable remote catalog/latest image is consulted.
-Hashes protect bytes only while the client/catalog itself remains trusted.
+`pkg/sandboxresources` consumes catalogs declared by installed Provider plugins.
+Core embeds no Sandbox image catalog. Each bundle identifies its provider,
+architecture, HTTPS release repository, logical resource roles and opaque
+metadata. The Podman plugin's `providers/podman/catalog.json` pins its OCI
+identity and executor bootstrap; other providers can declare their own image
+formats and bootstrap contracts. Release URLs derive from each bundle's
+repository, resource release tag and filename. No mutable remote catalog or
+latest image is consulted. Hashes protect bytes while the installed plugin and
+catalog remain trusted. See [Provider plugins](provider-plugins.md).
 
 Control owns consent, requests, bundle pins and cache references. Manager passes
-verified image paths to Podman, which imports and pins their immutable identity.
+verified paths and provider-owned metadata to the matching plugin. Podman imports
+and pins its immutable OCI identity; core does not interpret that identity.
 Resource binding alone starts no engine, machine or container. Resource readiness
 is distinct from Provider lifecycle/readiness.
 
@@ -53,12 +58,13 @@ Sandbox deletion releases it. Failed deletion retains references.
 
 ## Pins and versions
 
-The image-only catalog has `schema_version: 2`, per-architecture defaults and
-independent resource tags `sandbox-go-resources-vMAJOR.MINOR.PATCH` (currently
-`v0.3.0`). Published descriptors/files are immutable. New images get new
-identities; client defaults affect newly pinned instances. Existing instances
-keep their bundle, including on rebuild. Resource updates do not implicitly
-rewrite existing definitions or workspaces.
+Catalog schema 3 has defaults per provider and guest architecture. The Podman
+plugin uses independent resource tags `sandbox-go-resources-vMAJOR.MINOR.PATCH`
+(currently `v0.3.0`). Published descriptors/files remain immutable. New images get
+new identities; plugin defaults affect newly pinned instances. Existing
+instances keep their bundle, including on rebuild. Resource updates do not
+rewrite existing definitions or workspaces. Plugin upgrades must retain catalog
+entries for existing pins. Status uses `default_bundles` keyed by provider.
 
 ## Building and releasing
 

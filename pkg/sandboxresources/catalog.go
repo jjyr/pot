@@ -1,85 +1,149 @@
-// Package sandboxresources selects embedded immutable resource bundles and binds
-// only verified paths to Sandbox providers. Catalog updates require a rebuild.
+// Package sandboxresources prepares provider-declared immutable resource bundles.
+// Image formats, bootstrap contracts and defaults belong to provider packages.
 package sandboxresources
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net/url"
+	"path/filepath"
+	"runtime"
+	"sort"
+
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/resource"
 	"github.com/jjyr/pot/pkg/sandbox"
-	"github.com/jjyr/pot/resources"
-	"path/filepath"
-	"regexp"
-	"runtime"
 )
 
 type Bundle struct {
-	Image            string `json:"image"`
-	ImageReference   string `json:"image_reference"`
-	ManifestDigest   string `json:"manifest_digest"`
-	BootstrapVersion string `json:"bootstrap_version"`
-	OS               string `json:"os"`
-	Architecture     string `json:"architecture"`
+	Provider     string            `json:"provider"`
+	Architecture string            `json:"architecture"`
+	Repository   string            `json:"repository"`
+	Resources    map[string]string `json:"resources"`
+	Metadata     json.RawMessage   `json:"metadata"`
 }
 type Catalog struct {
-	SchemaVersion       uint32                       `json:"schema_version"`
-	DefaultLinuxBundles map[string]string            `json:"default_linux_bundles"`
-	Resources           map[string]resource.Resource `json:"resources"`
-	Bundles             map[string]Bundle            `json:"bundles"`
+	SchemaVersion uint32                       `json:"schema_version"`
+	Defaults      map[string]map[string]string `json:"defaults"`
+	Resources     map[string]resource.Resource `json:"resources"`
+	Bundles       map[string]Bundle            `json:"bundles"`
 }
 
-var manifestDigest = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+func Empty() Catalog {
+	return Catalog{SchemaVersion: 3, Defaults: map[string]map[string]string{}, Resources: map[string]resource.Resource{}, Bundles: map[string]Bundle{}}
+}
+func (c Catalog) DefaultBundle(provider string) string { return c.Defaults[provider][runtime.GOARCH] }
 
-// DefaultBundle selects the immutable image for this Runtime's native CPU.
-func (c Catalog) DefaultBundle() string { return c.DefaultLinuxBundles[runtime.GOARCH] }
-
-func Embedded() (Catalog, error) {
-	var c Catalog
-	err := core.DecodeJSON(resources.SandboxCatalog, &c)
-	if err != nil {
-		return c, err
+// RequiresResources also covers providers whose bundles must be selected
+// explicitly. Lack of a default must never bypass preparation or consent.
+func (c Catalog) RequiresResources(provider string) bool {
+	for _, bundle := range c.Bundles {
+		if bundle.Provider == provider {
+			return true
+		}
 	}
-	return c, c.Validate()
+	return false
 }
 func (c Catalog) Validate() error {
-	if c.SchemaVersion != 2 || len(c.DefaultLinuxBundles) == 0 {
-		return errors.New("invalid image resource catalog")
+	if c.SchemaVersion != 3 {
+		return errors.New("unsupported provider resource catalog schema")
 	}
-	for _, r := range c.Resources {
+	for id, r := range c.Resources {
+		if !core.Identifier(id) {
+			return errors.New("invalid resource ID")
+		}
 		if err := r.Validate(); err != nil {
 			return err
 		}
 	}
-	for _, b := range c.Bundles {
-		if b.OS != "linux" || (b.Architecture != "arm64" && b.Architecture != "amd64") || b.BootstrapVersion != "pot-executor-v2" || b.ImageReference == "" || !manifestDigest.MatchString(b.ManifestDigest) {
-			return errors.New("unsupported sandbox image bundle")
+	for id, b := range c.Bundles {
+		u, err := url.Parse(b.Repository)
+		if !core.Identifier(id) || !core.Identifier(b.Provider) || !core.Identifier(b.Architecture) || len(b.Resources) == 0 || len(b.Resources) > 32 || !json.Valid(b.Metadata) || len(b.Metadata) > 65536 || err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("invalid provider resource bundle %q", id)
 		}
-		image, ok := c.Resources[b.Image]
-		if !ok || image.Format != resource.OCITarGzip {
-			return errors.New("bundle requires an OCI image resource")
+		for name, rid := range b.Resources {
+			if !core.Identifier(name) {
+				return errors.New("invalid resource role")
+			}
+			if _, ok := c.Resources[rid]; !ok {
+				return errors.New("bundle resource is missing")
+			}
 		}
 	}
-	for arch, id := range c.DefaultLinuxBundles {
-		b, ok := c.Bundles[id]
-		if !ok || b.Architecture != arch {
-			return errors.New("invalid architecture default")
+	for provider, arches := range c.Defaults {
+		if !core.Identifier(provider) {
+			return errors.New("invalid default provider")
+		}
+		for arch, id := range arches {
+			b, ok := c.Bundles[id]
+			if !ok || b.Provider != provider || b.Architecture != arch {
+				return errors.New("invalid provider architecture default")
+			}
 		}
 	}
 	return nil
 }
 
-// Import accepts an explicit owner-provided offline export, with catalog hash
-// verification of every byte. Existing user images and stores are never adopted.
+// Merge rejects collisions rather than letting discovery order replace resources.
+func (c *Catalog) Merge(other Catalog, provider string) error {
+	if err := other.Validate(); err != nil {
+		return err
+	}
+	for id := range other.Defaults {
+		if id != provider {
+			return errors.New("plugin declares another provider's default")
+		}
+	}
+	for id, b := range other.Bundles {
+		if b.Provider != provider {
+			return errors.New("plugin declares another provider's bundle")
+		}
+		if _, ok := c.Bundles[id]; ok {
+			return errors.New("duplicate bundle ID: " + id)
+		}
+	}
+	for id := range other.Resources {
+		if _, ok := c.Resources[id]; ok {
+			return errors.New("duplicate resource ID: " + id)
+		}
+	}
+	if _, ok := c.Defaults[provider]; ok {
+		return errors.New("duplicate provider resource defaults")
+	}
+	for id, b := range other.Bundles {
+		c.Bundles[id] = b
+	}
+	for id, r := range other.Resources {
+		c.Resources[id] = r
+	}
+	if defaults, ok := other.Defaults[provider]; ok {
+		c.Defaults[provider] = defaults
+	}
+	return c.Validate()
+}
+func (b Bundle) ResourceIDs() []string {
+	set := map[string]bool{}
+	for _, id := range b.Resources {
+		set[id] = true
+	}
+	ids := make([]string, 0, len(set))
+	for id := range set {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
 func (c Catalog) Import(ctx context.Context, store *resource.Store, bundle, directory string) (sandbox.PreparedResources, error) {
-	return c.prepare(ctx, store, bundle, func(id string) (resource.Verified, error) {
+	return c.prepare(ctx, bundle, func(id string) (resource.Verified, error) {
 		r := c.Resources[id]
 		return store.Import(ctx, r, filepath.Join(directory, r.Filename))
 	})
 }
-func (c Catalog) Prepare(ctx context.Context, store *resource.Store, bundle, repository string, emit func(string, resource.Progress)) (sandbox.PreparedResources, error) {
-	return c.prepare(ctx, store, bundle, func(id string) (resource.Verified, error) {
-		return store.Prepare(ctx, c.Resources[id], repository, func(p resource.Progress) {
+func (c Catalog) Prepare(ctx context.Context, store *resource.Store, bundle string, emit func(string, resource.Progress)) (sandbox.PreparedResources, error) {
+	return c.prepare(ctx, bundle, func(id string) (resource.Verified, error) {
+		return store.Prepare(ctx, c.Resources[id], c.Bundles[bundle].Repository, func(p resource.Progress) {
 			if emit != nil {
 				emit(id, p)
 			}
@@ -87,7 +151,7 @@ func (c Catalog) Prepare(ctx context.Context, store *resource.Store, bundle, rep
 	})
 }
 func (c Catalog) Cached(ctx context.Context, store *resource.Store, bundle string) (sandbox.PreparedResources, error) {
-	return c.prepare(ctx, store, bundle, func(id string) (resource.Verified, error) {
+	return c.prepare(ctx, bundle, func(id string) (resource.Verified, error) {
 		v, ok, err := store.Cached(ctx, c.Resources[id])
 		if err == nil && !ok {
 			err = errors.New("Sandbox resources unavailable; explicitly prepare or import resources")
@@ -95,33 +159,31 @@ func (c Catalog) Cached(ctx context.Context, store *resource.Store, bundle strin
 		return v, err
 	})
 }
-func (c Catalog) prepare(ctx context.Context, store *resource.Store, id string, load func(string) (resource.Verified, error)) (sandbox.PreparedResources, error) {
+func (c Catalog) prepare(ctx context.Context, id string, load func(string) (resource.Verified, error)) (sandbox.PreparedResources, error) {
 	if err := c.Validate(); err != nil {
 		return sandbox.PreparedResources{}, err
 	}
-	if id == "" {
-		id = c.DefaultBundle()
-	}
-	bundle, ok := c.Bundles[id]
+	b, ok := c.Bundles[id]
 	if !ok {
 		return sandbox.PreparedResources{}, errors.New("unknown resource bundle")
 	}
-	if bundle.Architecture != runtime.GOARCH {
-		return sandbox.PreparedResources{}, errors.New("Sandbox image does not match this Runtime architecture")
+	if b.Architecture != runtime.GOARCH {
+		return sandbox.PreparedResources{}, errors.New("bundle does not match Runtime architecture")
 	}
-	result := sandbox.PreparedResources{BundleID: id, ImageReference: bundle.ImageReference, ManifestDigest: bundle.ManifestDigest, Architecture: bundle.Architecture}
-	for _, item := range []struct {
-		id   string
-		dest *string
-	}{{bundle.Image, &result.Image}} {
+	out := sandbox.PreparedResources{BundleID: id, Provider: b.Provider, Architecture: b.Architecture, Metadata: append(json.RawMessage(nil), b.Metadata...), Paths: map[string]string{}}
+	paths := map[string]string{}
+	for _, rid := range b.ResourceIDs() {
 		if err := ctx.Err(); err != nil {
-			return result, err
+			return out, err
 		}
-		v, err := load(item.id)
+		v, err := load(rid)
 		if err != nil {
-			return result, err
+			return out, err
 		}
-		*item.dest = v.Path()
+		paths[rid] = v.Path()
 	}
-	return result, nil
+	for role, rid := range b.Resources {
+		out.Paths[role] = paths[rid]
+	}
+	return out, nil
 }

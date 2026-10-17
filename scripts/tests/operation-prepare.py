@@ -6,9 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-SOURCE = (
-    Path(__file__).resolve().parents[2] / "resources/sandbox/linux/default/operation_prepare.py"
-)
+SOURCE = Path(__file__).resolve().parents[2] / "providers/podman/image/operation_prepare.py"
 spec = importlib.util.spec_from_file_location("operation_prepare", SOURCE)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
@@ -38,7 +36,7 @@ class Preparation(unittest.TestCase):
                 module.prepare({"tool": "exec_command", "args": {"workdir": "../escape"}}, home)
 
     def test_no_guest_authorization_endpoint(self):
-        for relative in ["linux/default", "macos/xcode"]:
+        for relative in ["podman/image", "apple-vm/bootstrap"]:
             source = SOURCE.parents[2] / relative / "executor.py"
             text = source.read_text()
             self.assertNotIn('"/permissions"', text)

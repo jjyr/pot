@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "id": "macos.apple-virtualization",
+  "version": "1.0.0",
+  "host_os": [
+    "darwin"
+  ],
+  "executable": "bin/provider",
+  "default_shared": false
+}

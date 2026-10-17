@@ -16,10 +16,11 @@ import (
 )
 
 type Config struct {
-	Root      string
-	RuntimeID string
-	DB        *sql.DB
-	Providers []Provider
+	Root            string
+	RuntimeID       string
+	DB              *sql.DB
+	Providers       []Provider
+	DefaultProvider string
 }
 type Manager struct {
 	root, runtimeID string
@@ -27,6 +28,7 @@ type Manager struct {
 	ownsDB          bool
 	mu              sync.Mutex
 	providers       map[string]Provider
+	defaultProvider string
 	gates           map[string]chan struct{}
 	closed          bool
 	calls           map[string]map[string]context.CancelFunc
@@ -48,7 +50,7 @@ func Open(ctx context.Context, config Config) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	manager := &Manager{root: root, runtimeID: config.RuntimeID, db: config.DB, providers: map[string]Provider{}, gates: map[string]chan struct{}{}, calls: map[string]map[string]context.CancelFunc{}, liveLeases: map[string]string{}}
+	manager := &Manager{defaultProvider: config.DefaultProvider, root: root, runtimeID: config.RuntimeID, db: config.DB, providers: map[string]Provider{}, gates: map[string]chan struct{}{}, calls: map[string]map[string]context.CancelFunc{}, liveLeases: map[string]string{}}
 	lock, err := os.OpenFile(filepath.Join(root, "sandbox-manager.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
@@ -249,7 +251,10 @@ func (m *Manager) EnsureShared(ctx context.Context) (Definition, error) {
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return Definition{}, err
 	}
-	provider := Podman
+	provider := m.defaultProvider
+	if provider == "" {
+		return Definition{}, errors.New("no default Sandbox Provider configured")
+	}
 	definition, err := m.Create(ctx, SharedID, "Shared development environment", provider, Resources{})
 	if err != nil {
 		if existing, lookup := m.definition(ctx, SharedID); lookup == nil {

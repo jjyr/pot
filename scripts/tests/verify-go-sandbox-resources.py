@@ -13,7 +13,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 loader = importlib.machinery.SourceFileLoader(
-    "verify_resources", str(ROOT / "scripts/verify-go-sandbox-resources")
+    "verify_resources", str(ROOT / "providers/podman/verify-resources")
 )
 spec = importlib.util.spec_from_loader(loader.name, loader)
 verifier = importlib.util.module_from_spec(spec)
@@ -47,7 +47,7 @@ class ReviewedResources(unittest.TestCase):
         }
 
     def stage(self, tag=NEW, source=None):
-        self.catalog.write_text(json.dumps({"schema_version": 2, "resources": self.resources}))
+        self.catalog.write_text(json.dumps({"schema_version": 3, "resources": self.resources}))
         return verifier.stage_assets(source or self.source, self.output, tag, self.catalog)
 
     def assert_no_partial_output(self):

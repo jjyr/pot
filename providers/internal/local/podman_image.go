@@ -28,7 +28,7 @@ type verifiedPodmanImage struct {
 	ConfigDigest string
 	Architecture string
 	Files        []string
-	Resources    sandbox.PreparedResources
+	Resources    imageResources
 }
 
 func validDigest(digest string) bool {
@@ -50,7 +50,7 @@ func readOCIFile(root, name string, limit int64) ([]byte, error) {
 	}
 	return os.ReadFile(file)
 }
-func verifyPodmanImage(resources sandbox.PreparedResources) (verifiedPodmanImage, error) {
+func verifyPodmanImage(resources imageResources) (verifiedPodmanImage, error) {
 	out := verifiedPodmanImage{Resources: resources}
 	if err := validatePaths(resources); err != nil {
 		return out, err
@@ -209,7 +209,7 @@ func verifyPodmanImage(resources sandbox.PreparedResources) (verifiedPodmanImage
 	return out, nil
 }
 func (p *Podman) preparedImage(ctx context.Context, instance sandbox.Instance) (string, error) {
-	var resources sandbox.PreparedResources
+	var resources imageResources
 	if err := loadJSON(filepath.Join(instance.Directory(), "prepared-resources.json"), &resources); err != nil {
 		return "", errors.New("prepare and bind the verified Sandbox OCI resource before starting")
 	}

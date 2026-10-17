@@ -24,8 +24,8 @@ Unknown effects require reconciliation rather than replacement execution.
 See [Task coordination](task-coordination.md) and [Permissions](permissions.md).
 
 Native macOS VM support remains Swift. Linux Sandbox execution uses Go and the
-same Podman provider on macOS and Linux; macOS hosts share a dedicated Pot-managed
-Podman machine. JavaScript plugins and Node execution,
+same independently packaged Podman provider on macOS and Linux; macOS hosts share
+a dedicated Pot-managed Podman machine. JavaScript plugins and Node execution,
 Python guest services and the desktop viewer keep their existing responsibilities.
 Go tool composition uses goja. Linux Sandbox resources are separately distributed,
 versioned and verified; client packages do not silently download them. Local

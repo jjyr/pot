@@ -26,8 +26,9 @@ points; `internal/` contains product implementation. All packages share one root
 | `pkg/execution` | Shared destination Agent queue, concurrency, cancellation and uncertainty fences |
 | `pkg/terminal` | Ephemeral user-operated PTYs, bounded replay and explicit process cleanup |
 | `pkg/sandbox` | Definitions, selection, lifecycle, scopes, leases, receipts, mappings and recovery |
-| `pkg/sandboxprovider`, `pkg/platformhelper` | Shared macOS/Linux Podman provider and retained Swift native macOS VM adapter |
-| `pkg/resource`, `pkg/resourcecontrol`, `pkg/sandboxresources` | Verified resource delivery, owner consent and embedded image catalog |
+| `pkg/providerplugin` | Installed Provider manifests, versioned private RPC, process supervision and desktop stream transport |
+| `providers/`, `pkg/platformhelper` | Independent Podman/Apple VM packages, image/bootstrap definitions and shared private platform implementation |
+| `pkg/resource`, `pkg/resourcecontrol`, `pkg/sandboxresources` | Verified resource delivery, owner consent and provider-declared resource catalogs |
 | `pkg/runtime` | Public complete-host facade, lifecycle and authenticated operator handler |
 | `internal/runtime` | Product composition, root ownership and component lifecycle behind the facade |
 | `internal/transport`, `internal/spaces` | Private/native API adapters and owner-scoped local/remote client aggregation |
@@ -49,7 +50,7 @@ through the destination's shared execution manager. Control owns provider keys,
 approvals, accounting and global resources. Connected Workers run beside their
 fixed Host/Sandbox target and call Control through run-bound signed ports.
 
-Native macOS VM support stays in `helper/` using Swift. JavaScript
+Native macOS VM support belongs to `providers/apple-vm/helper/` using Swift. JavaScript
 plugins, Node execution and Python guest services retain their existing roles.
 Go components compose these runtime assets through explicit interfaces.
 

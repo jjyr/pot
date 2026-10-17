@@ -20,10 +20,13 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 import go_packaging  # noqa: E402
 
+sys.path.insert(0, str(ROOT / "providers/podman"))
+import podman_build  # noqa: E402
+
 
 def exporter():
     loader = __import__("importlib.machinery").machinery.SourceFileLoader(
-        "export_go_resources", str(ROOT / "scripts/export-go-sandbox-resources")
+        "export_go_resources", str(ROOT / "providers/podman/export-resources")
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
@@ -32,10 +35,61 @@ def exporter():
 
 
 class GoPackaging(unittest.TestCase):
+    def test_provider_packages_own_executables_catalog_and_native_bootstrap(self):
+        for platform_name in ("linux-amd64", "darwin-arm64"):
+            with self.subTest(platform=platform_name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                for name in ("podman", "apple-vm"):
+                    package = root / "providers" / name
+                    package.mkdir(parents=True)
+                    shutil.copy2(
+                        ROOT / "providers" / name / "provider.json", package / "provider.json"
+                    )
+                shutil.copy2(
+                    ROOT / "providers/podman/catalog.json", root / "providers/podman/catalog.json"
+                )
+                bootstrap = root / "providers/apple-vm/bootstrap"
+                bootstrap.mkdir()
+                (bootstrap / "provision.sh").write_text("fixture")
+                helpers = root / "signed-helpers"
+                helpers.mkdir()
+                for name in ("PotMacOSHelper", "SwiftDependencyLicenses.txt"):
+                    (helpers / name).write_text("signed fixture")
+
+                def compile_provider(package, destination, platform, **_):
+                    destination.write_text(package + " " + platform)
+                    destination.chmod(0o755)
+
+                with (
+                    mock.patch.object(go_packaging, "ROOT", root),
+                    mock.patch.object(go_packaging, "go_build", side_effect=compile_provider),
+                    mock.patch.object(go_packaging, "swift_helpers", return_value=helpers) as swift,
+                ):
+                    installed = root / "installed"
+                    go_packaging.prepare_providers(installed, platform_name)
+                podman = installed / "podman"
+                self.assertEqual(
+                    sorted(p.name for p in podman.iterdir()),
+                    ["bin", "catalog.json", "provider.json"],
+                )
+                self.assertIn("./providers/podman/cmd", (podman / "bin/provider").read_text())
+                self.assertEqual(
+                    (podman / "catalog.json").read_bytes(),
+                    (root / "providers/podman/catalog.json").read_bytes(),
+                )
+                apple = installed / "apple-vm"
+                if platform_name.startswith("darwin"):
+                    self.assertTrue((apple / "bin/PotMacOSHelper").is_file())
+                    self.assertTrue((apple / "bootstrap/pot-tool-executor").is_file())
+                    swift.assert_called_once()
+                else:
+                    self.assertFalse(apple.exists())
+                    swift.assert_not_called()
+
     def guest_fixture(self, root):
         """Use real source/localization inputs with tiny verified vendor archives."""
         for relative in (
-            "resources/sandbox/linux/default",
+            "providers/podman/image",
             "resources/app/locales",
             "desktop",
         ):
@@ -66,7 +120,7 @@ class GoPackaging(unittest.TestCase):
             item = tarfile.TarInfo("noVNC-1.7.0/LICENSE.txt")
             item.size = len(data)
             target.addfile(item, io.BytesIO(data))
-        recipe = root / "resources/sandbox/linux/default"
+        recipe = root / "providers/podman/image"
         metadata = json.loads((recipe / "desktop-assets.json").read_text())
         for entry in metadata["assets"]:
             data = ("desktop fixture for " + entry["filename"]).encode()
@@ -89,7 +143,11 @@ class GoPackaging(unittest.TestCase):
             mock.patch.object(go_packaging, "BUILD", build),
             mock.patch.object(go_packaging, "NODE_HASHES", hashes),
             mock.patch.object(go_packaging, "NOVNC_HASH", novnc_hash),
-            mock.patch.object(go_packaging, "go_build", side_effect=compile_executor),
+            mock.patch.object(podman_build, "go_build", side_effect=compile_executor),
+            mock.patch.object(podman_build, "ROOT", root),
+            mock.patch.object(podman_build, "BUILD", build),
+            mock.patch.object(podman_build, "NODE_HASHES", hashes),
+            mock.patch.object(podman_build, "NOVNC_HASH", novnc_hash),
             mock.patch.object(
                 go_packaging.urllib.request,
                 "urlopen",
@@ -105,11 +163,11 @@ class GoPackaging(unittest.TestCase):
                 for arch in ("arm64", "amd64"):
                     with self.subTest(architecture=arch):
                         assets = root / "contexts" / arch / "assets"
-                        manifest = go_packaging.prepare_guest_assets(assets, arch)
+                        manifest = podman_build.prepare_guest_assets(assets, arch)
                         self.assertEqual(manifest["architecture"], arch)
                         self.assertEqual(manifest["base"]["distribution"], "debian")
                         self.assertEqual(manifest["base"]["suite"], "trixie")
-                        self.assertEqual(manifest["base"], go_packaging.guest_image_config())
+                        self.assertEqual(manifest["base"], podman_build.guest_image_config())
                         self.assertEqual(
                             sorted(manifest["assets"]),
                             sorted(item.name for item in assets.iterdir()),
@@ -139,7 +197,7 @@ class GoPackaging(unittest.TestCase):
                 arm.write_bytes(x64.read_bytes())
                 destination = root / "context/assets"
                 with self.assertRaisesRegex(ValueError, "[Cc]hecksum"):
-                    go_packaging.prepare_guest_assets(destination, "arm64")
+                    podman_build.prepare_guest_assets(destination, "arm64")
                 self.assertFalse(destination.exists())
                 self.assertEqual(list(destination.parent.iterdir()), [])
 
@@ -152,21 +210,21 @@ class GoPackaging(unittest.TestCase):
                 marker = destination / "stale-executor"
                 marker.write_text("old architecture")
                 with self.assertRaisesRegex(ValueError, "fresh|empty"):
-                    go_packaging.prepare_guest_assets(destination, "amd64")
+                    podman_build.prepare_guest_assets(destination, "amd64")
                 self.assertEqual(marker.read_text(), "old architecture")
-                (root / "resources/sandbox/linux/default/executor.py").unlink()
+                (root / "providers/podman/image/executor.py").unlink()
                 fresh = root / "fresh/assets"
                 with self.assertRaisesRegex(ValueError, "Missing guest asset"):
-                    go_packaging.prepare_guest_assets(fresh, "arm64")
+                    podman_build.prepare_guest_assets(fresh, "arm64")
                 self.assertFalse(fresh.exists())
                 with self.assertRaisesRegex(ValueError, "architecture"):
-                    go_packaging.prepare_guest_assets(fresh, "riscv64")
+                    podman_build.prepare_guest_assets(fresh, "riscv64")
 
     def test_guest_base_rejects_floating_or_other_distribution_inputs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with self.guest_environment(root):
-                path = root / "resources/sandbox/linux/default/base-image.json"
+                path = root / "providers/podman/image/base-image.json"
                 original = json.loads(path.read_text())
                 for field, value in (
                     ("base_image", "docker.io/library/debian:trixie-slim"),
@@ -176,7 +234,7 @@ class GoPackaging(unittest.TestCase):
                     with self.subTest(field=field):
                         path.write_text(json.dumps({**original, field: value}))
                         with self.assertRaisesRegex(ValueError, "pinned Debian"):
-                            go_packaging.guest_image_config()
+                            podman_build.guest_image_config()
 
     def minimal_oci(
         self, layout, label, *, nested=False, architecture="arm64", source_hash="fixture"
@@ -243,7 +301,7 @@ class GoPackaging(unittest.TestCase):
         }
 
     def metadata(self, layout, architecture="arm64"):
-        descriptor, _ = go_packaging.oci_image_descriptor(layout, architecture)
+        descriptor, _ = podman_build.oci_image_descriptor(layout, architecture)
         return {
             "schema_version": 1,
             "os": "linux",
@@ -259,7 +317,7 @@ class GoPackaging(unittest.TestCase):
             index, _ = self.minimal_oci(layout, "nested-image", nested=True)
             metadata = self.metadata(layout)
             self.assertNotEqual(metadata["manifest_digest"], index["manifests"][0]["digest"])
-            go_packaging.publish_guest_image(layout, output, metadata)
+            podman_build.publish_guest_image(layout, output, metadata)
             self.assertEqual(self.tree_bytes(output / "sandbox-image"), self.tree_bytes(layout))
             self.assertEqual(json.loads((output / "sandbox-image.json").read_text()), metadata)
             self.assertEqual(
@@ -281,12 +339,12 @@ class GoPackaging(unittest.TestCase):
                 {**metadata, "manifest_digest": "sha256:" + "0" * 64},
             ):
                 with self.assertRaises(ValueError):
-                    go_packaging.publish_guest_image(layout, output, invalid)
+                    podman_build.publish_guest_image(layout, output, invalid)
                 self.assertEqual(self.tree_bytes(output), previous)
             original = layer.read_bytes()
             layer.write_bytes(b"x" * len(original))
             with self.assertRaisesRegex(ValueError, "missing or corrupt"):
-                go_packaging.publish_guest_image(layout, output, metadata)
+                podman_build.publish_guest_image(layout, output, metadata)
             self.assertEqual(self.tree_bytes(output), previous)
             layer.write_bytes(original)
             rename = Path.rename
@@ -298,7 +356,7 @@ class GoPackaging(unittest.TestCase):
 
             with mock.patch.object(Path, "rename", new=fail_publish):
                 with self.assertRaisesRegex(OSError, "injected publish"):
-                    go_packaging.publish_guest_image(layout, output, metadata)
+                    podman_build.publish_guest_image(layout, output, metadata)
             self.assertEqual(self.tree_bytes(output), previous)
             self.assertEqual(sorted(path.name for path in root.iterdir()), ["image", "published"])
 
@@ -311,7 +369,7 @@ class GoPackaging(unittest.TestCase):
             layer.rename(real)
             layer.symlink_to(real)
             with self.assertRaisesRegex(ValueError, "Unsafe"):
-                go_packaging.verify_oci_layout(layout)
+                podman_build.verify_oci_layout(layout)
             for name in ("../escaped", "/absolute", "same", "link"):
                 with self.subTest(name=name):
                     archive, destination = root / "archive.tar", root / "unpacked"
@@ -326,27 +384,27 @@ class GoPackaging(unittest.TestCase):
                             if name == "same":
                                 target.addfile(item, io.BytesIO(b"x"))
                     with self.assertRaises(ValueError):
-                        go_packaging.unpack_oci_archive(archive, destination)
+                        podman_build.unpack_oci_archive(archive, destination)
                     self.assertFalse(destination.exists())
 
     def test_podman_builder_requires_explicit_mac_connection_and_never_provisions(self):
-        self.assertEqual(go_packaging.podman_command(system="Linux"), ["podman", "--remote=false"])
+        self.assertEqual(podman_build.podman_command(system="Linux"), ["podman", "--remote=false"])
         self.assertEqual(
-            go_packaging.podman_command("pot-builder", system="Darwin"),
+            podman_build.podman_command("pot-builder", system="Darwin"),
             ["podman", "--connection", "pot-builder"],
         )
         with self.assertRaisesRegex(ValueError, "--connection"):
-            go_packaging.podman_command(system="Darwin")
+            podman_build.podman_command(system="Darwin")
         for name in ("--default", "a b", "../builder"):
             with self.assertRaises(ValueError):
-                go_packaging.podman_command(name)
+                podman_build.podman_command(name)
 
     def test_prepared_context_build_binds_target_inputs_and_saved_leaf_manifest(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with self.guest_environment(root):
                 context, output, layout = root / "context", root / "output", root / "image"
-                manifest = go_packaging.prepare_guest_context(context, "amd64")
+                manifest = podman_build.prepare_guest_context(context, "amd64")
                 self.minimal_oci(
                     layout, "built", architecture="amd64", source_hash=manifest["source_hash"]
                 )
@@ -360,8 +418,8 @@ class GoPackaging(unittest.TestCase):
                             for path in sorted(layout.rglob("*")):
                                 target.add(path, arcname=path.relative_to(layout), recursive=False)
 
-                with mock.patch.object(go_packaging, "call", side_effect=call):
-                    result = go_packaging.build_guest_image(context, output, "amd64", "pot-builder")
+                with mock.patch.object(podman_build, "call", side_effect=call):
+                    result = podman_build.build_guest_image(context, output, "amd64", "pot-builder")
                 self.assertEqual(len(calls), 2)
                 self.assertEqual(calls[0][:4], ["podman", "--connection", "pot-builder", "build"])
                 self.assertIn("--platform=linux/amd64", calls[0])
@@ -373,7 +431,7 @@ class GoPackaging(unittest.TestCase):
                 self.assertEqual(result["source_hash"], manifest["source_hash"])
                 (context / "assets/build-inputs.json").write_text("unreviewed nested input")
                 with self.assertRaisesRegex(ValueError, "checksum changed"):
-                    go_packaging.validate_guest_context(context, "amd64")
+                    podman_build.validate_guest_context(context, "amd64")
 
     def test_tray_patch_refuses_source_or_patch_drift(self):
         patch = (ROOT / "patches/wails-v3.0.0-beta.30-tray-aspect.patch").read_bytes()
@@ -409,15 +467,15 @@ class GoPackaging(unittest.TestCase):
                     export(source, output, "sandbox-go-resources-v0.3.0", catalog, False, arch)
                     self.assertEqual(first, self.tree_bytes(output))
             trust = json.loads(catalog.read_text())
-            self.assertEqual(trust["schema_version"], 2)
-            self.assertEqual(set(trust["default_linux_bundles"]), {"arm64", "amd64"})
+            self.assertEqual(trust["schema_version"], 3)
+            self.assertEqual(set(trust["defaults"]["podman"]), {"arm64", "amd64"})
             self.assertEqual(len(trust["resources"]), 2)
             self.assertTrue(
                 all(entry["format"] == "oci-tar-gzip" for entry in trust["resources"].values())
             )
             source = root / "amd64"
             (source / "sandbox-image/unreviewed-extra").write_bytes(b"changed reviewed bytes")
-            with self.assertRaisesRegex(ValueError, "differ from embedded"):
+            with self.assertRaisesRegex(ValueError, "differ from provider"):
                 export(source, output, "sandbox-go-resources-v0.3.0", catalog, False, "amd64")
             (source / "sandbox-image/unreviewed-extra").unlink()
             (source / "sandbox-image/extra").symlink_to(catalog)

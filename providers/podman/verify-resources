@@ -11,13 +11,13 @@ import stat
 import tempfile
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def selected_assets(catalog, tag):
     if not re.fullmatch(r"sandbox-go-resources-v\d+\.\d+\.\d+", tag):
         raise ValueError("Invalid Sandbox resource release tag")
-    if catalog.get("schema_version") != 2 or not isinstance(catalog.get("resources"), dict):
+    if catalog.get("schema_version") != 3 or not isinstance(catalog.get("resources"), dict):
         raise ValueError("Unsupported Sandbox resource catalog")
     assets = []
     names = set()
@@ -99,7 +99,7 @@ if __name__ == "__main__":
         "--output", type=Path, required=True, help="Fresh absolute staging directory"
     )
     parser.add_argument("--tag", required=True)
-    parser.add_argument("--catalog", type=Path, default=ROOT / "resources/sandbox/catalog.json")
+    parser.add_argument("--catalog", type=Path, default=ROOT / "providers/podman/catalog.json")
     arguments = parser.parse_args()
     print(
         json.dumps(

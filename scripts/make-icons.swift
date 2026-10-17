@@ -97,7 +97,7 @@ func color(_ value: UInt32, alpha: CGFloat = 1) -> NSColor {
         </svg>
         """
         try wallpaper.write(
-            to: root.appendingPathComponent("resources/sandbox/linux/default/pot-wallpaper.svg"),
+            to: root.appendingPathComponent("providers/podman/image/pot-wallpaper.svg"),
             atomically: true,
             encoding: .utf8
         )

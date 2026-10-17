@@ -31,7 +31,7 @@ type lifecycleDouble struct {
 	engines    map[string]*executor.Engine
 }
 
-func platformID() string { return Podman }
+func platformID() string { return "fixture" }
 func (p *lifecycleDouble) Descriptor() Descriptor {
 	return Descriptor{ID: platformID(), OS: "linux", HostOS: runtime.GOOS, Engine: "test-lifecycle", Capabilities: Capabilities{Shell: true, Files: true, SharedExecution: p.shared}}
 }
@@ -176,7 +176,7 @@ func setupManager(t *testing.T, shared bool) (*Manager, *lifecycleDouble, Access
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	guest, _ := filepath.EvalSymlinks(t.TempDir())
 	provider := &lifecycleDouble{root: guest, shared: shared, confirm: true, engines: map[string]*executor.Engine{}}
-	manager, err := Open(context.Background(), Config{Root: root, RuntimeID: "runtime", Providers: []Provider{provider}})
+	manager, err := Open(context.Background(), Config{Root: root, RuntimeID: "runtime", DefaultProvider: platformID(), Providers: []Provider{provider}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,11 +332,11 @@ func TestRestartUnknownScopesLeaseGuardsAndExclusiveOwner(t *testing.T) {
 		t.Fatal("stopped VM with active scope lease")
 	}
 	root := manager.root
-	if _, err := Open(context.Background(), Config{Root: root, RuntimeID: "runtime", Providers: []Provider{provider}}); err == nil {
+	if _, err := Open(context.Background(), Config{Root: root, RuntimeID: "runtime", DefaultProvider: platformID(), Providers: []Provider{provider}}); err == nil {
 		t.Fatal("adopted an already-owned Manager root")
 	}
 	manager.Close()
-	reopened, err := Open(context.Background(), Config{Root: root, RuntimeID: "runtime", Providers: []Provider{provider}})
+	reopened, err := Open(context.Background(), Config{Root: root, RuntimeID: "runtime", DefaultProvider: platformID(), Providers: []Provider{provider}})
 	if err != nil {
 		t.Fatal(err)
 	}

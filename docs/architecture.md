@@ -3,8 +3,8 @@
 Pot uses Go for product logic, Wails v3 with the system WebView for the macOS
 App, and a shared HTML/CSS/JS frontend. The main window, tray panel and browser
 use the same components, styles and state contracts. Swift provides the macOS
-VM implementation; Linux Sandboxes use the same Go Podman provider on macOS and
-Linux. Node/JavaScript plugins and Python guest services retain
+VM implementation inside the Apple VM provider plugin; Linux Sandboxes use the
+same independently packaged Go Podman plugin on macOS and Linux. Node/JavaScript plugins and Python guest services retain
 their existing responsibilities. See [component boundaries](backend-components.md).
 Reusable Go libraries live in `pkg/`, command entry points in `cmd/`, and product
 implementation in `internal/`. [Go libraries](go-libraries.md) describes the
@@ -139,6 +139,14 @@ user input. Compaction durably installs current sections, continuation summary
 and the last real user message before continuing. Provider cache lifetime does
 not reset section comparison. Raw HTTP/token observations, estimates and budget
 reservations remain distinct.
+
+Sandbox Providers are trusted, independently installed host processes. Runtime
+loads their manifests and resource catalogs, then uses versioned private RPC.
+Image recipes, defaults, guest bootstrap and native VM Helpers belong to provider
+packages. Core owns policy, consent, verified delivery and durable execution
+state; it does not link platform provider implementations. Node tool plugins
+remain inside the selected execution environment. See
+[Provider plugins](provider-plugins.md) for the extension contract.
 
 Sandbox definitions, selected Sandbox, VM/container lifecycle and execution scopes
 are separate. Creating/selecting a definition does not boot a guest. Main and

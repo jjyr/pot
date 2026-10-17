@@ -3,7 +3,8 @@ package runtime
 import (
 	"context"
 	"os"
-	"runtime"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,18 +12,15 @@ import (
 	"github.com/jjyr/pot/internal/secrets"
 )
 
-func TestManualAppleSandboxStartWaitsForConsentBeforeAnyHelperStart(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("Apple container resource consent")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func TestPluginSandboxStartWaitsForConsentBeforeAnyEngineStart(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	keys, _ := secrets.NewMemoryKey(make([]byte, 32))
 	root := t.TempDir()
 	if err := os.Chmod(root, 0700); err != nil {
 		t.Fatal(err)
 	}
-	r, err := Open(ctx, Options{Root: root, ResourceDirectory: t.TempDir(), HelperDirectory: t.TempDir(), DisableMetadataRefresh: true, Control: control.Options{Keys: keys}})
+	r, err := Open(ctx, Options{Root: root, ResourceDirectory: providerResources(t), DisableMetadataRefresh: true, Control: control.Options{Keys: keys}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,4 +72,27 @@ func TestManualAppleSandboxStartWaitsForConsentBeforeAnyHelperStart(t *testing.T
 	}
 	// There are deliberately no Helper binaries: reaching lifecycle start would
 	// fail before this durable awaiting-consent flow could be observed.
+}
+
+func providerResources(t *testing.T) string {
+	t.Helper()
+	resources := t.TempDir()
+	directory := filepath.Join(resources, "providers", "podman")
+	if err := os.MkdirAll(filepath.Join(directory, "bin"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"provider.json", "catalog.json"} {
+		data, err := os.ReadFile(filepath.Join("../../providers/podman", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(filepath.Join(directory, name), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	build := exec.Command("go", "build", "-o", filepath.Join(directory, "bin/provider"), "../../providers/podman/cmd")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("provider build: %s %v", output, err)
+	}
+	return resources
 }

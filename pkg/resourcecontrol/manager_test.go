@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -45,8 +46,9 @@ func fixture(t *testing.T, transfer http.RoundTripper) (Options, func()) {
 	data := fixtureData()
 	sum := sha256.Sum256([]byte(data))
 	res := resource.Resource{ReleaseTag: "sandbox-go-resources-v0.1.0", Filename: "fixture.tar.gz", SHA256: hex.EncodeToString(sum[:]), SizeBytes: uint64(len(data)), UnpackedBytes: uint64(len(`{"schemaVersion":2}`) + len(`{"imageLayoutVersion":"1.0.0"}`)), Format: resource.OCITarGzip}
-	b := sandboxresources.Bundle{Image: "asset", ImageReference: "fixture:immutable", ManifestDigest: "sha256:" + strings.Repeat("a", 64), BootstrapVersion: "pot-executor-v2", OS: "linux", Architecture: runtime.GOARCH}
-	c := sandboxresources.Catalog{SchemaVersion: 2, DefaultLinuxBundles: map[string]string{runtime.GOARCH: "bundle"}, Resources: map[string]resource.Resource{"asset": res}, Bundles: map[string]sandboxresources.Bundle{"bundle": b, "other": b}}
+	b := sandboxresources.Bundle{Provider: "fixture", Repository: "https://example.test", Resources: map[string]string{"image": "asset"}, Metadata: json.RawMessage(`{"bootstrap":"fixture"}`), Architecture: runtime.GOARCH}
+	c := sandboxresources.Catalog{SchemaVersion: 3, Defaults: map[string]map[string]string{"fixture": {runtime.GOARCH: "bundle"}}, Resources: map[string]resource.Resource{"asset": res}, Bundles: map[string]sandboxresources.Bundle{"bundle": b, "other": b}}
+
 	if transfer == nil {
 		transfer = roundTrip(func(r *http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(data)), ContentLength: int64(len(data))}, nil
@@ -56,7 +58,7 @@ func fixture(t *testing.T, transfer http.RoundTripper) (Options, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	options := Options{Root: filepath.Join(root, "control"), Catalog: c, Store: s, Bind: func(context.Context, string, sandbox.PreparedResources) error { return nil }}
+	options := Options{Root: filepath.Join(root, "control"), Catalog: c, Store: s, SandboxProvider: func(context.Context, string) (string, error) { return "fixture", nil }, Bind: func(context.Context, string, sandbox.PreparedResources) error { return nil }}
 	return options, func() {
 		if err := s.Close(context.Background()); err != nil {
 			t.Error(err)
@@ -95,7 +97,7 @@ func TestConsentPinsSharedPreparationAndCachedReuse(t *testing.T) {
 	var mu sync.Mutex
 	bound := map[string]int{}
 	options.Bind = func(_ context.Context, id string, p sandbox.PreparedResources) error {
-		if p.BundleID != "bundle" || p.Image == "" {
+		if p.BundleID != "bundle" || p.Paths["image"] == "" {
 			t.Error("unverified binding")
 		}
 		mu.Lock()

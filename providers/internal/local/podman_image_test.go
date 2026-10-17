@@ -16,7 +16,7 @@ import (
 	"github.com/jjyr/pot/pkg/sandbox"
 )
 
-func testOCI(t *testing.T) (sandbox.PreparedResources, string, string) {
+func testOCI(t *testing.T) (imageResources, string, string) {
 	t.Helper()
 	root := podmanTestRoot(t)
 	if err := os.MkdirAll(filepath.Join(root, "blobs/sha256"), 0700); err != nil {
@@ -44,7 +44,7 @@ func testOCI(t *testing.T) (sandbox.PreparedResources, string, string) {
 	if err := os.WriteFile(filepath.Join(root, "oci-layout"), []byte(`{"imageLayoutVersion":"1.0.0"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	return sandbox.PreparedResources{BundleID: "qualification", Image: root, ImageReference: reference, ManifestDigest: descriptor.Digest, Architecture: runtime.GOARCH}, configuration.Digest, filepath.Join(root, "blobs/sha256", layer.Digest[7:])
+	return imageResources{BundleID: "qualification", Image: root, ImageReference: reference, ManifestDigest: descriptor.Digest, Architecture: runtime.GOARCH}, configuration.Digest, filepath.Join(root, "blobs/sha256", layer.Digest[7:])
 }
 func TestPodmanBindVerifiesGraphWithoutMachineOrEngineSideEffects(t *testing.T) {
 	resources, _, layer := testOCI(t)
@@ -52,7 +52,7 @@ func TestPodmanBindVerifiesGraphWithoutMachineOrEngineSideEffects(t *testing.T) 
 	p := NewPodman(PodmanConfig{RuntimeRoot: root, Binary: filepath.Join(root, "must-not-run")})
 	p.hostOS = "darwin"
 	i := sandbox.Instance{Root: root, ID: "shared"}
-	if err := p.BindResources(context.Background(), i, resources); err != nil {
+	if err := p.BindResources(context.Background(), i, resources.prepared()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "podman-machine")); !os.IsNotExist(err) {
@@ -64,7 +64,7 @@ func TestPodmanBindVerifiesGraphWithoutMachineOrEngineSideEffects(t *testing.T) 
 	if err := os.WriteFile(layer, []byte("different contents"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.BindResources(context.Background(), i, resources); err == nil {
+	if err := p.BindResources(context.Background(), i, resources.prepared()); err == nil {
 		t.Fatal("corrupt OCI layer accepted")
 	}
 }
@@ -93,7 +93,7 @@ func TestPodmanBindingRejectsWrongReferenceManifestArchitectureAndSymlinks(t *te
 				}
 			}
 			p := NewPodman(PodmanConfig{})
-			if err := p.BindResources(context.Background(), sandbox.Instance{Root: podmanTestRoot(t), ID: "shared"}, resource); err == nil {
+			if err := p.BindResources(context.Background(), sandbox.Instance{Root: podmanTestRoot(t), ID: "shared"}, resource.prepared()); err == nil {
 				t.Fatal("invalid prepared OCI binding accepted")
 			}
 		})
@@ -160,7 +160,7 @@ func TestPodmanImportsOnlyVerifiedOCIGraphOverStdinAndPinsConfiguration(t *testi
 	t.Setenv("POT_PODMAN_IMAGE_STATE", state)
 	t.Setenv("POT_PODMAN_IMAGE_CONFIG", config)
 	i := sandbox.Instance{Root: root, ID: "shared"}
-	if err = p.BindResources(context.Background(), i, resource); err != nil {
+	if err = p.BindResources(context.Background(), i, resource.prepared()); err != nil {
 		t.Fatal(err)
 	}
 	// A file outside the verified graph must never be sent to the engine.
@@ -205,7 +205,7 @@ func TestPodmanBindingCannotReplaceAnAcceptedContainerImage(t *testing.T) {
 	if err := privateJSON(filepath.Join(i.Directory(), "podman.json"), podmanInstance{Name: "pot-original", Image: strings.Repeat("0", 64)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.BindResources(context.Background(), i, resource); err == nil {
+	if err := p.BindResources(context.Background(), i, resource.prepared()); err == nil {
 		t.Fatal("accepted image replaced by new resource binding")
 	}
 	if _, err := os.Stat(filepath.Join(i.Directory(), "prepared-resources.json")); !os.IsNotExist(err) {

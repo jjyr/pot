@@ -16,8 +16,8 @@ mise install
 mise run build:cli
 ```
 
-CLI archives include the Go executables and retained runtime assets. macOS
-archives include the signed native macOS VM Swift Helper. Linux Sandbox execution
+CLI archives include the Go executables, installed Provider packages and retained
+runtime assets. The macOS Apple VM package includes its signed Swift Helper. Linux Sandbox execution
 uses Podman on both hosts and separately prepared, verified OCI image resources. See
 [Development](development.md) for artifact layout and build options. Upgrade
 Control, Runners and App from the same revision.
@@ -37,6 +37,12 @@ concurrently.
 Keep each root private and preserve its identity and secret master key across
 restarts. See [Secrets](secrets.md).
 
+Provider packages live under `Resources/providers/`. Stop Runtime before
+replacing a complete package and retain catalog records referenced by existing
+Sandbox pins. Providers and image catalogs can be updated independently of Pot
+core. Missing provider packages leave those Sandbox targets unavailable, with no
+Host fallback. See [Provider plugins](provider-plugins.md).
+
 ## Linux Sandbox runtime
 
 Install Podman for the account running Pot. On macOS, use `brew install podman`;
@@ -44,7 +50,7 @@ on Linux, install the distribution's rootless Podman packages with cgroup v2 and
 systemd support. Host-only Runtime operation does not require a running Sandbox.
 
 Both hosts use the `podman` provider and the architecture-specific OCI bundle in
-the embedded catalog. Start/Rebuild prepares missing resources through the
+the installed Podman plugin catalog. Start/Rebuild prepares missing resources through the
 [owner download confirmation](sandbox-resources.md#consent-progress-and-cache); an arbitrary
 locally tagged image cannot replace that verified bundle. Offline provisioning
 uses `pot resources import` as documented in [resource delivery](sandbox-resources.md).
@@ -112,8 +118,7 @@ Listener and resource paths can be persisted without changing the running proces
   "tls_cert": "",
   "tls_key": "",
   "workspace": "/absolute/agent-workspace",
-  "resources": "/absolute/Resources",
-  "helpers": "/absolute/Helpers"
+  "resources": "/absolute/Resources"
 }
 ```
 

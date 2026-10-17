@@ -23,6 +23,7 @@ import (
 	"github.com/jjyr/pot/pkg/resource"
 	"github.com/jjyr/pot/pkg/resourcecontrol"
 	"github.com/jjyr/pot/pkg/sandbox"
+	"github.com/jjyr/pot/pkg/sandboxresources"
 )
 
 // KeySource supplies the encryption key for this host's provider credentials.
@@ -43,12 +44,18 @@ type Options struct {
 	// ResourceDirectory contains packaged skills, plugins and optional Node.
 	// It is required even when the embedding application supplies no assets.
 	ResourceDirectory string
-	// HelperDirectory contains platform helpers. An empty value uses
-	// ResourceDirectory; no checkout-relative default is used.
-	HelperDirectory string
-	// SandboxProviders nil selects platform defaults. An empty, nonnil slice
-	// disables providers. Providers are not started by Open.
+	// SandboxProviders nil discovers installed provider packages. An empty,
+	// nonnil slice disables providers. Open handshakes with plugin processes
+	// without starting engines, guests or downloads.
 	SandboxProviders []sandbox.Provider
+	// SandboxProviderDirectory defaults to ResourceDirectory/providers. Packages
+	// contain provider.json, a host executable and an optional resource catalog.
+	SandboxProviderDirectory string
+	// DefaultSandboxProvider overrides the installed plugin default. Explicit
+	// in-process Providers must supply this to use the shared Sandbox.
+	DefaultSandboxProvider string
+	// SandboxCatalog supplies resources for explicitly injected Providers.
+	SandboxCatalog *sandboxresources.Catalog
 	// Limits nil uses persisted limits or execution.DefaultLimits.
 	Limits *execution.Limits
 	// Workspace and AgentHome default to directories beneath Root. BuiltinSkills
@@ -98,21 +105,14 @@ func Open(ctx context.Context, options Options) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	helpers := options.HelperDirectory
-	if helpers == "" {
-		helpers = resources
-	}
-	helpers, err = filepath.Abs(helpers)
-	if err != nil {
-		return nil, err
-	}
 	composer := options.Composer
 	if composer == nil {
 		composer = composition.ProcessRunner{}
 	}
 	inner, err := impl.Open(ctx, impl.Options{
-		Root: options.Root, ResourceDirectory: resources, HelperDirectory: helpers,
+		Root: options.Root, ResourceDirectory: resources,
 		SandboxProviders: options.SandboxProviders, Limits: options.Limits,
+		SandboxProviderDirectory: options.SandboxProviderDirectory, DefaultSandboxProvider: options.DefaultSandboxProvider, SandboxCatalog: options.SandboxCatalog,
 		DisableMetadataRefresh: options.DisableMetadataRefresh,
 		Control: control.Options{
 			Workspace: options.Workspace, AgentHome: options.AgentHome,
@@ -173,11 +173,11 @@ func (r *Runtime) ResourceSnapshot(ctx context.Context) (json.RawMessage, error)
 	return json.Marshal(value)
 }
 
-// ImportSandboxResources imports an offline resource bundle for the shared
-// Podman sandbox and waits until preparation completes. This is an explicit
-// operation and may start the provider; Open does not call it automatically.
-func (r *Runtime) ImportSandboxResources(ctx context.Context, directory string) error {
-	return r.inner.ImportSandboxResources(ctx, directory)
+// ImportSandboxResources imports an offline bundle for an explicit Sandbox and
+// waits for verification/binding. An empty bundle ID retains the existing pin or
+// selects that Provider's architecture default for an unpinned Sandbox.
+func (r *Runtime) ImportSandboxResources(ctx context.Context, sandboxID, bundleID, directory string) error {
+	return r.inner.ImportSandboxResources(ctx, sandboxID, bundleID, directory)
 }
 
 // Close cancels background work and closes the host's services, providers and

@@ -57,7 +57,7 @@ func LoadMacOSManifest(bundle string) (MacOSManifest, error) {
 	if err := loadJSON(filepath.Join(bundle, "manifest.json"), &manifest); err != nil {
 		return manifest, err
 	}
-	if manifest.SchemaVersion != 1 || manifest.Provider != sandbox.AppleVM || manifest.GuestBuild == "" || manifest.XcodeVersion == "" || manifest.Bootstrap != "pot-macos-executor-v3" {
+	if manifest.SchemaVersion != 1 || manifest.Provider != AppleVMID || manifest.GuestBuild == "" || manifest.XcodeVersion == "" || manifest.Bootstrap != "pot-macos-executor-v3" {
 		return manifest, errors.New("incompatible macOS bundle; install pot-macos-executor-v3 and enroll complete stopped instance")
 	}
 	ip := net.ParseIP(manifest.GuestIP)
@@ -83,7 +83,7 @@ type AppleVM struct {
 
 func NewAppleVM(config AppleVMConfig) *AppleVM { return &AppleVM{config: config} }
 func (p *AppleVM) Descriptor() sandbox.Descriptor {
-	return sandbox.Descriptor{ID: sandbox.AppleVM, OS: "macos", HostOS: "macos", Engine: "apple-virtualization", Capabilities: sandbox.Capabilities{Shell: true, Files: true, Desktop: true, SharedExecution: false}}
+	return sandbox.Descriptor{ID: AppleVMID, OS: "macos", HostOS: runtime.GOOS, Engine: "apple-virtualization", Capabilities: sandbox.Capabilities{Shell: true, Files: true, Desktop: true, SharedExecution: false}}
 }
 func (p *AppleVM) DefaultResources() sandbox.Resources {
 	return sandbox.Resources{CPUs: 4, MemoryGiB: 8, DiskGiB: 64}

@@ -54,7 +54,14 @@ No installer/first-run automation is delivered. Prepare the complete platform wi
 
 ## Bootstrap and enroll
 
-Build the Host components with `mise run check:swift` and the native runner with `mise run build:go`. Packaging signs the separate Helper with `helper/virtualization.entitlements`, places it beside the Host executable and includes native runner/bootstrap assets in `Resources/macos-bootstrap/`. Custom installations select the Helper directory through `serve -helpers` and runtime assets through `-resources`. These paths are owner configuration, never Agent arguments.
+Build the Host components with `mise run check:swift` and the native runner with
+`mise run build:go`. `mise run build:providers` packages the provider executable,
+signs the separate Helper with `providers/apple-vm/helper/virtualization.entitlements`,
+and places it at `Resources/providers/apple-vm/bin/PotMacOSHelper`. The native
+runner/bootstrap assets live in that package's `bootstrap/` directory. Custom
+installations select the complete resource directory through `serve -resources`;
+there is no separate Helper-directory setting. These paths are owner
+configuration, never Agent arguments.
 
 1. Generate per-instance assets on Host:
 
@@ -64,7 +71,7 @@ Build the Host components with `mise run check:swift` and the native runner with
 
    This generates a dedicated CA, guest certificate/key and token; it deletes the temporary CA signing key. It neither starts a VM nor accepts OS/Xcode terms.
 
-2. Privately transfer the guest certificate/key/token and native `pot-tool-executor` into that guest's enrollment staging directory. Transfer the files under `resources/sandbox/macos/xcode/` as trusted bootstrap inputs, dereferencing the shared `operation_prepare.py` symlink (`cp -L` or an equivalent staging step) so the module is transferred as a regular file. Inside the prepared guest, run:
+2. Privately transfer the guest certificate/key/token and native `pot-tool-executor` into that guest's enrollment staging directory. Transfer the files under `providers/apple-vm/bootstrap/` as trusted bootstrap inputs, dereferencing the shared `operation_prepare.py` symlink (`cp -L` or an equivalent staging step) so the module is transferred as a regular file. Inside the prepared guest, run:
 
    ```sh
    sudo ./provision.sh STANDARD_ACCOUNT /PRIVATE/GUEST_ENROLLMENT

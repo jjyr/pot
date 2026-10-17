@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -89,6 +88,9 @@ func (m *Manager) BindResources(ctx context.Context, id string, resources Prepar
 	if err != nil {
 		return err
 	}
+	if resources.Provider != definition.Provider {
+		return errors.New("resource bundle belongs to another Sandbox Provider")
+	}
 	if definition.Quarantined {
 		return core.ErrCleanupUnconfirmed
 	}
@@ -133,21 +135,12 @@ func (m *Manager) Lifecycle(ctx context.Context, id, action string) (out Status,
 		}
 	}
 	if action == "rebuild" {
-		state, err := provider.Lifecycle(ctx, instance, "delete")
+		state, err := provider.Lifecycle(ctx, instance, "rebuild")
 		if err != nil {
 			return state, err
 		}
 		if state.Phase != "stopped" {
 			return state, core.ErrCleanupUnconfirmed
-		}
-		workspace, err := os.OpenRoot(filepath.Dir(provider.Workspace(instance)))
-		if err != nil {
-			return state, err
-		}
-		err = workspace.RemoveAll("development")
-		closeErr := workspace.Close()
-		if err != nil || closeErr != nil {
-			return state, errors.Join(err, closeErr)
 		}
 		definition.ManagerEpoch++
 		definition.GuestGeneration = nil
@@ -410,8 +403,8 @@ func (m *Manager) ConfigureMappings(ctx context.Context, id string, mappings []H
 	if err != nil {
 		return err
 	}
-	if definition.Provider == AppleVM {
-		return errors.New("enrolled macOS VM does not support arbitrary Host mappings")
+	if !provider.Descriptor().Capabilities.HostMappings {
+		return errors.New("Sandbox Provider does not support Host mappings")
 	}
 	if definition.Quarantined {
 		return core.ErrCleanupUnconfirmed

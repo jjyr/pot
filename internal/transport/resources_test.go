@@ -2,7 +2,9 @@ package transport
 
 import (
 	"context"
+	"github.com/jjyr/pot/pkg/core"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,7 +17,12 @@ import (
 )
 
 func TestResourceOwnerAPIRequiresAuthenticationAndExplicitAction(t *testing.T) {
-	catalog, err := sandboxresources.Embedded()
+	data, err := os.ReadFile("../../providers/podman/catalog.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var catalog sandboxresources.Catalog
+	err = core.DecodeJSON(data, &catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +31,7 @@ func TestResourceOwnerAPIRequiresAuthenticationAndExplicitAction(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close(context.Background())
-	manager, err := resourcecontrol.Open(resourcecontrol.Options{Root: t.TempDir(), Catalog: catalog, Store: store, Bind: func(context.Context, string, sandbox.PreparedResources) error {
+	manager, err := resourcecontrol.Open(resourcecontrol.Options{Root: t.TempDir(), Catalog: catalog, Store: store, SandboxProvider: func(context.Context, string) (string, error) { return "podman", nil }, Bind: func(context.Context, string, sandbox.PreparedResources) error {
 		t.Fatal("unprepared resources bound")
 		return nil
 	}})

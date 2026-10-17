@@ -5,9 +5,14 @@ macOS and Linux use the same architecture-specific Debian 13 stable
 It contains the execution service, development dependencies and optional desktop.
 Product Runtime, model credentials and provider configuration stay on Host.
 
+The image catalog, recipe and build/export definitions belong to the installed
+Podman Provider plugin; core embeds no Debian image selection. Other Provider
+plugins can own different images and bootstrap contracts. See
+[Provider plugins](provider-plugins.md).
+
 ## Recipe and contents
 
-`resources/sandbox/linux/default/` owns the Dockerfile and installation recipe.
+`providers/podman/image/` owns the Dockerfile and installation recipe.
 `base-image.json` pins the Debian digest and signed package snapshot;
 `packages.lock` selects direct packages. The snapshot fixes dependency versions,
 and `/opt/pot/installed-packages.txt` records the installed inventory. Debian

@@ -25,9 +25,8 @@ type Options struct {
 	Root            string
 	Catalog         sandboxresources.Catalog
 	Store           *resource.Store
-	Repository      string
 	Bind            func(context.Context, string, sandbox.PreparedResources) error
-	ValidateSandbox func(context.Context, string) error
+	SandboxProvider func(context.Context, string) (string, error)
 	Notify          func()
 }
 type Request struct {
@@ -48,16 +47,18 @@ type ResourceStatus struct {
 	Error  string `json:"error,omitempty"`
 }
 type BundleStatus struct {
+	Provider     string           `json:"provider"`
+	Architecture string           `json:"architecture"`
 	ID           string           `json:"id"`
 	Resources    []ResourceStatus `json:"resources"`
 	MissingBytes uint64           `json:"missing_bytes"`
 	Ready        bool             `json:"ready"`
 }
 type Status struct {
-	DefaultBundle string         `json:"default_bundle"`
-	Bundles       []BundleStatus `json:"bundles"`
-	Requests      []Request      `json:"requests"`
-	Cache         CacheStatus    `json:"cache"`
+	DefaultBundles map[string]string `json:"default_bundles"`
+	Bundles        []BundleStatus    `json:"bundles"`
+	Requests       []Request         `json:"requests"`
+	Cache          CacheStatus       `json:"cache"`
 }
 type entry struct {
 	request Request
@@ -76,14 +77,11 @@ type Manager struct {
 }
 
 func Open(options Options) (*Manager, error) {
-	if options.Store == nil || options.Bind == nil {
-		return nil, errors.New("resource Store and binding port required")
+	if options.Store == nil || options.Bind == nil || options.SandboxProvider == nil {
+		return nil, errors.New("resource Store, binding and Sandbox provider ports required")
 	}
 	if err := options.Catalog.Validate(); err != nil {
 		return nil, err
-	}
-	if options.Repository == "" {
-		options.Repository = "https://github.com/jjyr/pot"
 	}
 	if err := os.MkdirAll(options.Root, 0700); err != nil {
 		return nil, err
@@ -125,7 +123,7 @@ func Open(options Options) (*Manager, error) {
 				if err = core.DecodeJSON([]byte(body), &r); err != nil {
 					break
 				}
-				if !core.Identifier(r.ID) || !core.Identifier(r.SandboxID) || (r.Owner != "" && !core.Identifier(r.Owner)) || (r.Turn != "" && !core.Identifier(r.Turn)) || options.Catalog.Bundles[r.BundleID].Image == "" {
+				if !core.Identifier(r.ID) || !core.Identifier(r.SandboxID) || (r.Owner != "" && !core.Identifier(r.Owner)) || (r.Turn != "" && !core.Identifier(r.Turn)) || options.Catalog.Bundles[r.BundleID].Provider == "" {
 					err = errors.New("invalid persisted resource request")
 					break
 				}
@@ -175,13 +173,16 @@ func (m *Manager) notify() {
 
 // Snapshot only verifies cache bytes; it never starts a transfer or a VM.
 func (m *Manager) Snapshot(ctx context.Context) (Status, error) {
-	out := Status{DefaultBundle: m.options.Catalog.DefaultBundle(), Bundles: []BundleStatus{}, Requests: []Request{}}
+	out := Status{DefaultBundles: map[string]string{}, Bundles: []BundleStatus{}, Requests: []Request{}}
+	for provider := range m.options.Catalog.Defaults {
+		out.DefaultBundles[provider] = m.options.Catalog.DefaultBundle(provider)
+	}
 	for id, b := range m.options.Catalog.Bundles {
 		if b.Architecture != runtime.GOARCH {
 			continue
 		}
-		item := BundleStatus{ID: id, Ready: true, Resources: []ResourceStatus{}}
-		for _, rid := range []string{b.Image} {
+		item := BundleStatus{ID: id, Provider: b.Provider, Architecture: b.Architecture, Ready: true, Resources: []ResourceStatus{}}
+		for _, rid := range b.ResourceIDs() {
 			r := m.options.Catalog.Resources[rid]
 			_, cached, err := m.options.Store.Cached(ctx, r)
 			diagnostic := ""
@@ -229,6 +230,11 @@ func (m *Manager) requestFor(ctx context.Context, sandboxID, bundleID, owner, tu
 		m.mu.Unlock()
 		return Request{}, errors.New("resource manager closed")
 	}
+	provider, err := m.options.SandboxProvider(ctx, sandboxID)
+	if err != nil {
+		m.mu.Unlock()
+		return Request{}, err
+	}
 	if bundleID == "" {
 		// An omitted bundle means the instance's original pin. A changed
 		// client default applies only when this Sandbox has never been pinned.
@@ -239,19 +245,14 @@ func (m *Manager) requestFor(ctx context.Context, sandboxID, bundleID, owner, tu
 			}
 		}
 		if bundleID == "" {
-			bundleID = m.options.Catalog.DefaultBundle()
+			bundleID = m.options.Catalog.DefaultBundle(provider)
 		}
 	}
-	if b, ok := m.options.Catalog.Bundles[bundleID]; !ok || b.Architecture != runtime.GOARCH {
+	if b, ok := m.options.Catalog.Bundles[bundleID]; !ok || b.Architecture != runtime.GOARCH || b.Provider != provider {
 		m.mu.Unlock()
 		return Request{}, errors.New("unknown resource bundle or incompatible Runtime architecture")
 	}
-	if m.options.ValidateSandbox != nil {
-		if err := m.options.ValidateSandbox(ctx, sandboxID); err != nil {
-			m.mu.Unlock()
-			return Request{}, err
-		}
-	}
+
 	bound := false
 	var ready *Request
 	for _, e := range m.entries {
@@ -402,7 +403,7 @@ func (m *Manager) run(ctx context.Context, e *entry, request Request, directory 
 	if directory != "" {
 		prepared, err = m.options.Catalog.Import(ctx, m.options.Store, request.BundleID, directory)
 	} else {
-		prepared, err = m.options.Catalog.Prepare(ctx, m.options.Store, request.BundleID, m.options.Repository, func(id string, p resource.Progress) {
+		prepared, err = m.options.Catalog.Prepare(ctx, m.options.Store, request.BundleID, func(id string, p resource.Progress) {
 			m.mu.Lock()
 			if e.request.State == "preparing" {
 				e.request.ResourceID = id

@@ -18,7 +18,7 @@ type instructionProvider struct {
 }
 
 func (p instructionProvider) Descriptor() sandbox.Descriptor {
-	return sandbox.Descriptor{ID: sandbox.Podman, OS: "linux", HostOS: "macos", Engine: "podman"}
+	return sandbox.Descriptor{ID: "podman", OS: "linux", HostOS: "macos", Engine: "podman"}
 }
 func (p instructionProvider) DefaultResources() sandbox.Resources {
 	return sandbox.Resources{CPUs: 1, MemoryGiB: 1, DiskGiB: 4}
@@ -55,7 +55,7 @@ func TestSandboxInstructionsResolveGuestSymlinksAndKeepSkillsLocations(t *testin
 	os.MkdirAll(filepath.Join(workspace, "rules"), 0700)
 	os.WriteFile(filepath.Join(workspace, "rules/instructions"), []byte("Guest rule"), 0600)
 	os.Symlink("/data/workspace/rules/instructions", filepath.Join(workspace, "AGENTS.md"))
-	manager, err := sandbox.Open(ctx, sandbox.Config{Root: filepath.Join(root, "execution"), RuntimeID: "local", Providers: []sandbox.Provider{instructionProvider{workspace, t}}})
+	manager, err := sandbox.Open(ctx, sandbox.Config{Root: filepath.Join(root, "execution"), RuntimeID: "local", DefaultProvider: "podman", Providers: []sandbox.Provider{instructionProvider{workspace, t}}})
 	if err != nil {
 		t.Fatal(err)
 	}
