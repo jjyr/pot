@@ -1,4 +1,5 @@
 import {node as n,action} from './primitives.mjs';
+import {icon} from './icons.mjs';
 
 // The view only sees the integration catalog and login sessions. OAuth tokens
 // and provider-specific polling remain behind the Integrations API.
@@ -18,6 +19,7 @@ export async function renderIntegrations({root,request,scope,signal,locale,openE
     clearTimeout(timer);rows.replaceChildren();
     for(const item of items){
       const row=n('article','integration-row'),summary=n('div','integration-summary'),mark=n('span','integration-mark',item.name.slice(0,1)),info=n('div','row-info'),title=n('h3','integration-name',item.name),status=n('span','integration-status');
+      if(item.id==='github')mark.replaceChildren(icon('github'));
       const connected=!!item.account,pending=item.login?.status==='pending';
       status.textContent=item.status==='connected'?tr('Logged in','已登录'):item.status==='expired'?tr('Login expired','登录已失效'):pending?tr('Waiting for authorization','等待授权'):tr('Not logged in','未登录');status.dataset.status=item.status;status.setAttribute('role','status');info.append(title);if(connected)info.append(n('span','integration-identity','@'+item.account.identity.username));info.append(status);mark.setAttribute('aria-hidden','true');summary.append(mark,info);row.append(summary);
       const controls=n('div','integration-actions');row.append(controls);

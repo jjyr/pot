@@ -307,6 +307,7 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 .integration-row{display:flex;align-items:center;flex-wrap:wrap;gap:18px;padding:20px 0;border-bottom:1px solid var(--divider)}
 .integration-summary{display:flex;align-items:center;gap:14px;flex:1;min-width:180px}
 .integration-mark{display:grid;place-items:center;width:42px;height:42px;border-radius:10px;background:var(--secondary);font-size:22px;font-weight:600}
+.integration-mark svg{width:26px;height:26px}
 .integration-name{margin:0;font-size:16px;font-weight:600}
 .integration-identity{font-size:13px;color:var(--muted)}
 .integration-status{font-size:13px;color:var(--muted)}
