@@ -1,49 +1,106 @@
 # Command execution
 
-Control authorizes an exact operation, then the fixed destination Runtime runs
-it through `pkg/executor`. Main uses its owning Control's local executor; explicit
-remote Tasks use the authenticated Runner. Tools cannot change their destination.
-See [authorization](permissions.md) and [Task coordination](task-coordination.md).
+Control authorizes an operation and its execution mode; the fixed destination
+Runtime executes it through `pkg/executor`. Main uses its owning Control; explicit
+remote Tasks use the authenticated Runner. Tools cannot change destinations.
+See [permissions](permissions.md).
 
-## Workspaces and context
+```text
+Dispatcher -> machine/default + exact command authorization
+           -> destination Go Executor
+                +-- sandbox -> Node SRT SDK -> Seatbelt / bwrap -> workload
+                +-- host --------------------------------------> workload
+                                      |
+                          separate process supervisor
+                          receipts / output / PTY / cleanup
+```
+
+## Workspaces, files and environment
 
 Main uses `WORKSPACE/assistants/ASSISTANT_ID`; Workers use
-`WORKSPACE/tasks/TASK_ID`. Project instructions and Skills are discovered in that
-machine's filesystem. Control global resources synchronize for Tasks before first
-preparation. No host/guest mapping, implicit project copying or shared Task working
-directory is provided. Installed tools and OS files remain machine-local.
+`WORKSPACE/tasks/TASK_ID`. Instructions and Skills come from the destination.
+Control resources synchronize before first Task preparation. Project replication,
+VM images and host/guest path translation are absent.
 
-Relative command `workdir` resolves beneath the initial working directory; absolute
-command paths use the Runtime service account's ordinary privileges. A working
-directory is not filesystem isolation. `apply_patch` paths remain workspace-scoped.
-External-service credentials use [run-bound injection](credentials.md).
+Protected launches require packaged Node/SRT assets and a confined workspace.
+Workspace/project files are writable. System libraries, selected installation
+roots and the immutable plugin bundle are readable; unrelated user directories
+and Runtime state are excluded. The launcher itself must not be inside a workload
+write root. It generates a private home, temp and cache directory for each launch.
+Do not interpret a writable workspace as data-loss protection.
 
-## Commands and shells
+IP networking is unrestricted; no SRT proxy variables are injected. Unix IPC is
+restricted independently; necessary macOS DNS support is narrowly allowed.
+Runtime/model authority is not inherited through ambient environment variables.
+Service credentials are explicitly injected after authorization. Reserved startup,
+loader and Runtime environment names cannot be used as credential destinations.
 
-`exec_command` creates an independent command with its own cwd and environment.
-`cd` or `export` does not modify later commands. Shell paths must name an installed
-supported shell; `login` defaults to the configured shell policy. Login environment
-snapshots remain bounded and scoped to the executor. Timeout, output, session and
-idle limits apply to every invocation.
+Host mode deliberately bypasses SRT and has the service account's privileges.
+The product still starts it with a reviewed environment and supervises its process
+lifetime. Host permissions include access to local services and other effects
+outside the original process tree; cleanup does not reverse such effects.
 
-Omit `yield_time_ms` to wait for completion; set it to return a live session after
-a bounded wait. `write_stdin` polls output or interacts with that original session.
-Sessions cannot cross assistant/generation/Runtime ownership. TTY allocation and
-additional input under `ask` require persistent machine authorization. Empty input
-polling and cancellation still check executor session ownership.
+## Commands, sessions and initialization
+
+`exec_command` creates an independent command/cwd/environment. `cd` and `export`
+do not mutate later calls. Shells must be installed absolute sh/bash/zsh paths.
+Canonical context is resolved on the destination before approval and checked
+again against the actual request. Mode and policy revision are authenticated.
+
+Product login initialization runs inside the selected execution mode on each
+launch. It does not capture/replay an unsandboxed login snapshot before entering
+a protected shell. The configured snapshot flag remains part of command identity;
+standalone trusted executor hosts can use the bounded snapshot cache explicitly.
+
+Omit `yield_time_ms` to wait; specify it to return a live session. `write_stdin`
+retains the original process/mode. It cannot start a new command using session
+identity or cross owner/generation/Runtime boundaries. Sandbox TTY/input is
+available. Host TTY and nonempty input require explicit interactive authorization
+on the original command; output polling, interrupt and termination remain usable.
+
+`apply_patch` retains workspace/path checks. Protected patches run in a dedicated
+Go worker under the same OS policy, so direct Go file writes do not bypass it.
+Persistent plugin sessions pin bundle, observation mode, execution mode, revision
+and environment. Policy changes invalidate them rather than upgrading JS memory.
+
+## SDK adapter and packaging
+
+`sandbox/package-lock.json` pins SRT 0.0.80 and its dependencies. Packaging uses
+npm integrity verification with lifecycle scripts disabled and applies exact
+SHA-256-checked SDK changes from `sandbox/patch-sdk.mjs`. Source drift fails the
+build. The extension exposes explicit unrestricted-network configuration, skips
+proxy infrastructure, and keeps macOS Unix socket restrictions independent of IP
+network access. It does not enable weaker namespace or network settings.
+
+The trusted Node helper receives JSON over private pipes, generates argv and
+retains SDK mount bookkeeping until workload cleanup. It is not the workload's
+Node REPL. One helper belongs to one command or plugin session; global SDK state
+is never shared by unrelated work. Files/paths are literal entries, not patterns.
+
+Linux hides unreadable directories with private mounts. Writes may succeed in
+those overlays, but do not modify the original host tree. A successful syscall
+there is not evidence that a host file was changed.
+
+Linux needs working user/PID namespaces, bubblewrap, ripgrep, SDK seccomp assets
+and the SDK's declared dependencies. Missing support fails explicitly. macOS
+requires the native packaged build for process inspection. No unavailable sandbox
+silently becomes host execution.
 
 ## Lifetime and recovery
 
-Each invocation drains only its own executor processes and plugin sessions. Local
-cleanup uses process groups and bounded cleanup confirmation; it does not provide
-the former guest cgroup containment or VM isolation. Completion does not erase
-workspace files. Cancellation cannot undo external effects.
+An independent trusted supervisor closes private control descriptors before
+workload execution and emits a separate cleanup receipt. Linux uses a child
+subreaper to reap detached descendants. macOS uses stable original process
+identities and per-sandbox policy membership probes, including detached members;
+these native interfaces are qualified by the real sandbox suite. Host authority
+is broader than this protection and is not an OS isolation guarantee.
 
-An uncertain cleanup/result retains execution capacity and durable receipt fences.
-Restart or disconnect does not launch a replacement command or move work to another
-Runtime. Previous-boot operations without original cleanup proof remain fenced
-until explicit owner recovery can establish the outcome. See
-[Tasks](task-coordination.md) for inspection and reconciliation.
+Cancellation/timeout stops the original execution and drains descendants, terminal
+handles, plugin/browser sessions and SDK helpers. Missing/failed cleanup receipts
+are errors. Only confirmed cleanup permits temporary directories to be removed;
+project files persist. This is not VM/cgroup isolation or CPU/memory/disk quotas.
 
-CPU/memory/disk quotas for VMs and containers are absent. Execution concurrency,
-model admission and token allowances remain independently configured.
+Uncertain outcomes retain capacity and durable receipt fences. Restart/disconnect
+never launches a replacement or moves work. Inspect the original identity and
+explicitly reconcile recovery; stopping computation does not prove external
+side effects were rolled back.

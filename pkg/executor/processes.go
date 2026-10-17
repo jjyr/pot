@@ -15,10 +15,17 @@ import (
 	"unicode/utf8"
 
 	"github.com/creack/pty"
+	"github.com/jjyr/pot/pkg/processscope"
+	"github.com/jjyr/pot/pkg/sandbox"
 	"golang.org/x/sys/unix"
 )
 
 type process struct {
+	markers        processscope.Markers
+	supervisor     *processscope.Scope
+	mode           string
+	interactive    bool
+	finishSandbox  func() error
 	opMu           sync.Mutex
 	terminalMu     sync.Mutex
 	mu             sync.Mutex
@@ -152,7 +159,12 @@ waiting:
 			}
 		}
 	}
-	cleanupErr := killGroup(p.cmd.Process.Pid)
+	var cleanupErr error
+	if p.supervisor != nil && !exited {
+		cleanupErr = p.supervisor.Stop(p.cmd.Process.Pid)
+	} else {
+		cleanupErr = killGroup(p.cmd.Process.Pid)
+	}
 	if !exited {
 		select {
 		case waitErr = <-waited:
@@ -161,6 +173,9 @@ waiting:
 		}
 	}
 	deadline := time.Now().Add(5 * time.Second)
+	if p.supervisor != nil {
+		cleanupErr = errors.Join(cleanupErr, p.supervisor.Finish())
+	}
 	cleanupErr = errors.Join(cleanupErr, confirmGroupGone(p.cmd.Process.Pid, deadline))
 	for range p.readers {
 		remaining := time.Until(deadline)
@@ -201,6 +216,11 @@ waiting:
 	if cleanupErr != nil {
 		p.err = errors.Join(ErrCleanupUnconfirmed, cleanupErr)
 	}
+	if p.finishSandbox != nil && p.err == nil {
+		if err := p.finishSandbox(); err != nil {
+			p.err = errors.Join(p.err, ErrCleanupUnconfirmed, err)
+		}
+	}
 	close(p.done)
 	p.notify()
 }
@@ -225,7 +245,7 @@ func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process,
 	}
 	parts := strings.Split(shell, "/")
 	switch parts[len(parts)-1] {
-	case "sh", "bash", "zsh":
+	case "sh", "bash", "zsh", "dash":
 	default:
 		return "", nil, errors.New("unsupported shell; use sh/bash/zsh")
 	}
@@ -251,12 +271,59 @@ func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process,
 	if home == "" {
 		home = r.CWD
 	}
-	command, err := e.snapshots.command(ctx, shell, workdir, home, r.Args["cmd"].(string), login, policy.ShellSnapshot)
+	var command *exec.Cmd
+	if r.Mode == "sandbox" || e.options.Admit != nil {
+		flag := "-c"
+		if login {
+			flag = "-lc"
+		}
+		command = exec.Command(shell, flag, r.Args["cmd"].(string))
+		command.Dir = workdir
+		command.Env = sandbox.Environment()
+		if r.Mode == "host" {
+			command.Env = append(command.Env, "HOME="+home)
+		}
+	} else {
+		command, err = e.snapshots.command(ctx, shell, workdir, home, r.Args["cmd"].(string), login, policy.ShellSnapshot)
+	}
 	if err != nil {
 		return "", nil, err
 	}
 	command.Env = mergeEnvironment(command.Env, r.Environment)
-	p := &process{cmd: command, changed: make(chan struct{}, 1), done: make(chan struct{}), stop: make(chan struct{}), touched: time.Now(), maxOutput: int(policy.MaxOutputBytes)}
+	p := &process{mode: r.Mode, interactive: r.Args["interactive"] == true, cmd: command, changed: make(chan struct{}, 1), done: make(chan struct{}), stop: make(chan struct{}), touched: time.Now(), maxOutput: int(policy.MaxOutputBytes)}
+
+	if r.Mode == "session" {
+		return "", nil, errors.New("session authority cannot launch a new command")
+	}
+	if r.Args["tty"] == true && r.Mode == "host" && !p.interactive {
+		return "", nil, errors.New("host TTY requires explicit interactive authorization")
+	}
+	if r.Mode == "sandbox" {
+		launcher := e.sandboxLauncher()
+		launcher.Markers = &p.markers
+		p.finishSandbox, err = launcher.Prepare(ctx, command, r.CWD, nil, nil, r.Args["tty"] == true)
+		if err != nil {
+			return "", nil, err
+		}
+	}
+	if len(e.options.ProcessWorker) > 0 {
+		p.supervisor, err = processscope.Prepare(command, e.options.ProcessWorker, p.markers)
+		if err != nil {
+			if p.finishSandbox != nil {
+				_ = p.finishSandbox()
+			}
+			return "", nil, err
+		}
+	}
+	started := false
+	defer func() {
+		if !started && p.supervisor != nil {
+			p.supervisor.Abort()
+		}
+		if !started && p.finishSandbox != nil {
+			_ = p.finishSandbox()
+		}
+	}()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed || e.draining || e.fence != nil {
@@ -275,6 +342,19 @@ func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process,
 	}
 	if uint64(len(e.sessions)) >= policy.MaxSessions {
 		return "", nil, errors.New("process session limit reached")
+	}
+
+	var release func()
+	if e.options.Admit != nil {
+		release, err = e.options.Admit(r.Revision)
+		if err != nil {
+			return "", nil, err
+		}
+		defer func() {
+			if release != nil {
+				release()
+			}
+		}()
 	}
 	tty, _ := r.Args["tty"].(bool)
 	if tty {
@@ -339,7 +419,19 @@ func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process,
 		p.input = stdinWrite
 		p.readers = []*os.File{stdoutRead, stderrRead}
 	}
+	if p.supervisor != nil {
+		if err = p.supervisor.Started(); err != nil {
+			_ = killGroup(command.Process.Pid)
+			_ = command.Wait()
+			return "", nil, err
+		}
+	}
+	if release != nil {
+		release()
+		release = nil
+	}
 	id := identity()
+	started = true
 	e.sessions[id] = p
 	go p.run(time.Duration(timeout)*time.Millisecond, time.Duration(policy.SessionIdleTimeoutMS)*time.Millisecond)
 	return id, p, nil
@@ -420,11 +512,25 @@ func (e *Engine) executeProcess(ctx context.Context, r Request, emit func(Event)
 			}
 		}
 		if chars, ok := r.Args["chars"].(string); ok && chars != "" && chars != "\x03" {
+			if p.mode == "host" && !p.interactive {
+				return nil, errors.New("host stdin requires an explicitly authorized interactive session")
+			}
 			if p.input == nil || p.stdinClosed {
 				return nil, errors.New("process stdin is closed")
 			}
 			written := make(chan error, 1)
-			go func() { _, err := io.WriteString(p.input, chars); written <- err }()
+			go func() {
+				if e.options.Admit != nil {
+					release, err := e.options.Admit(r.Revision)
+					if err != nil {
+						written <- err
+						return
+					}
+					defer release()
+				}
+				_, err := io.WriteString(p.input, chars)
+				written <- err
+			}()
 			select {
 			case err := <-written:
 				if err != nil {

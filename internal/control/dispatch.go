@@ -38,6 +38,7 @@ type Dispatcher struct {
 	Permissions            *PermissionStore
 	Operations             *Operations
 	Host                   ToolEngine
+	ResolveCommand         func(context.Context, map[string]any) (*CommandContext, error)
 	Target                 TargetDispatch
 	Credentials            integrations.CredentialResolver
 	Product                map[string]agent.Dispatch
@@ -64,11 +65,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 			resultErr = errors.Join(resultErr, err)
 		}()
 	}
+	executionMode := ""
 	state := func(phase string, target *core.ExecutionTarget, workdir string) error {
 		if emit == nil {
 			return nil
 		}
-		return emit(core.Update{Type: "tool_state", ID: call.ID, Phase: phase, Target: target, Workdir: workdir})
+		return emit(core.Update{Type: "tool_state", ID: call.ID, Phase: phase, ExecutionMode: executionMode, Target: target, Workdir: workdir})
 	}
 	if handler := d.Product[call.Name]; handler != nil {
 		if err := state("running", nil, ""); err != nil {
@@ -134,7 +136,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 		return nil, err
 	}
 
-	_, epoch, err := d.Permissions.Policy(target.RuntimeID)
+	permissionPolicy, epoch, err := d.Permissions.Policy(target.RuntimeID)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +144,25 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 	if approvalOwner == "" {
 		approvalOwner = d.Owner
 	}
-	if _, err = d.Permissions.authorize(ctx, HostRequest{Owner: approvalOwner, Task: d.Task, Turn: d.Turn, Generation: d.Generation, CallID: call.ID, MachineID: target.RuntimeID, EnrollmentEpoch: epoch, Tool: call.Name, Args: prepared}, func() error { return state("waiting_approval", &target, displayCWD) }); err != nil {
+	var commandContext *CommandContext
+	if call.Name == "exec_command" {
+		if d.ResolveCommand != nil {
+			commandContext, err = d.ResolveCommand(ctx, args)
+		} else if target.IsLocalTo(d.RuntimeID) {
+			commandContext, err = ResolveCommandContext(cwd, args, d.Spec.Params.Agent.Shell)
+		} else {
+			err = errors.New("destination command resolver is unavailable")
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	hostRequested := args["execution_mode"] == "host"
+	if value, ok := args["execution_mode"]; ok && value != "host" && value != "default" {
+		return nil, errors.New("invalid requested execution mode")
+	}
+	mode, err := d.Permissions.authorize(ctx, HostRequest{Owner: approvalOwner, Task: d.Task, Turn: d.Turn, Generation: d.Generation, CallID: call.ID, MachineID: target.RuntimeID, EnrollmentEpoch: epoch, Tool: call.Name, Args: prepared, Command: commandContext, Host: hostRequested}, func() error { return state("waiting_approval", &target, displayCWD) })
+	if err != nil {
 		if errors.Is(err, ErrHostDenied) {
 			if emitErr := state("denied", &target, displayCWD); emitErr != nil {
 				return nil, emitErr
@@ -168,7 +188,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 		}
 		return receipt.Result, nil
 	}
-	request := executor.Request{ID: call.ID, Operation: name, CWD: cwd, Policy: d.Spec.Params.Agent.Shell, Args: engineArgs}
+	request := executor.Request{Command: commandContext, Mode: mode, Revision: permissionPolicy.Revision, ID: call.ID, Operation: name, CWD: cwd, Policy: d.Spec.Params.Agent.Shell, Args: engineArgs}
 	if name == "exec_command" || name == "plugin_call" {
 		bindings, refresh, credentialErr := d.credentialBindings(call.Name, args)
 		if credentialErr != nil {
@@ -191,6 +211,10 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 	}
 	var value json.RawMessage
 	if err == nil {
+		err = d.Permissions.CheckRevision(target.RuntimeID, epoch, permissionPolicy.Revision)
+	}
+	if err == nil {
+		executionMode = mode
 		err = state("running", &target, displayCWD)
 	}
 	if err != nil {
@@ -243,7 +267,7 @@ func (d *Dispatcher) prepare(name string, args map[string]any, target core.Execu
 		if name == "exec_command" {
 			copyArgs := make(map[string]any, len(args))
 			for key, value := range args {
-				if key != "credentials" && key != "refresh_credentials" {
+				if key != "credentials" && key != "refresh_credentials" && key != "execution_mode" && key != "justification" {
 					copyArgs[key] = value
 				}
 			}

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-let chrome, profile, target, session, ownerSession, closing, cleanupError, gracefulExit = false, sequence = 0, nextId = 0;
+let chrome, profile, target, session, ownerSession, closing, cleanupError, gracefulExit = false, sequence = 0, nextId = 0, startupDiagnostics = '';
 let pending = new Map(), nodes = new Map(), buffer = Buffer.alloc(0);
 const MAX_IMAGE = 1024 * 1024;
 function rejectPending(error) {
@@ -89,13 +89,15 @@ async function open() {
     '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
   ].find(path => existsSync(path));
   if (!executable) throw new Error('Chromium/Chrome unavailable in this execution target; install it or configure POT_BROWSER_EXECUTABLE');
+  startupDiagnostics = '';
   chrome = spawn(executable, [
     '--headless=new', '--disable-dev-shm-usage', '--no-first-run',
     '--disable-background-networking', '--disable-sync', '--remote-debugging-pipe',
     `--user-data-dir=${profile}`, 'about:blank',
-  ], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
+  ], { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
   const child = chrome;
-  const ended = error => { if (chrome === child) rejectPending(error); };
+  child.stderr.on('data', chunk => { if (chrome === child) startupDiagnostics = (startupDiagnostics + chunk.toString()).slice(-4096); });
+  const ended = error => { if (chrome === child) rejectPending(new Error(`Browser unavailable in this execution environment: ${error.message}${startupDiagnostics ? '\n'+startupDiagnostics : ''}`)); };
   child.on('error', ended);
   child.once('exit', () => ended(new Error('Browser session ended; outcome unknown')));
   child.stdio[3].on('error', ended);

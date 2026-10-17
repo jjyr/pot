@@ -77,6 +77,20 @@ export function createPlugin({emit,mode}) {
 	}
 }
 
+func TestPersistentInvocationRechecksAdmissionBeforeSendingCode(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "executed")
+	path, _ := json.Marshal(marker)
+	c := newFixture(t, `import {writeFileSync} from 'node:fs'; export function createPlugin(){return {async execute(){writeFileSync(`+string(path)+`,'executed')},async dispose(){}}}`, "text")
+	rejected := errors.New("permission revision changed")
+	c.admit = func() (func(), error) { return nil, rejected }
+	if _, err := c.Execute(context.Background(), "fixture", map[string]any{}); !errors.Is(err, rejected) {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("revoked session received code", err)
+	}
+}
+
 func TestTypedImagesModesAndNewestImage(t *testing.T) {
 	source := `export function createPlugin({emit}) {return {async execute(){
  emit({type:'image',mimeType:'image/png',data:'YQ==',width:1,height:1});

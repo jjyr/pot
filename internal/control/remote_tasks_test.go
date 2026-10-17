@@ -66,7 +66,7 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 			summaries.Add(1)
 			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "Remote result summarized"}, "finish_reason": "stop"}}}
 		} else if workerCalls.Add(1) == 1 {
-			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "remote-command", "type": "function", "function": map[string]any{"name": "exec_command", "arguments": `{"cmd":"test -n \"$GH_TOKEN\" && printf remote-proof > artifact.txt; printf remote-ok","login":false,"credentials":{"GH_TOKEN":{"service":"github"}}}`}}}}, "finish_reason": "tool_calls"}}}
+			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "remote-command", "type": "function", "function": map[string]any{"name": "exec_command", "arguments": `{"cmd":"test -n \"$GH_TOKEN\" && printf remote-proof > artifact.txt; printf remote-ok","login":false,"execution_mode":"host","credentials":{"GH_TOKEN":{"service":"github"}}}`}}}}, "finish_reason": "tool_calls"}}}
 		} else {
 			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "Remote artifact complete"}, "finish_reason": "stop"}}}
 		}
@@ -114,7 +114,7 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 			if pending[0].Request.Task != record.Info.ID || pending[0].Request.MachineID != "worker" {
 				t.Fatalf("approval scope: %+v", pending)
 			}
-			if err = control.Permissions.Decide("main", pending[0].ID, "allow_once"); err != nil {
+			if err = control.Permissions.Decide("main", pending[0].ID, "allow_task"); err != nil {
 				t.Fatal(err)
 			}
 			break

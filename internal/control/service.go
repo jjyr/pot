@@ -42,6 +42,7 @@ type Options struct {
 	CleanupTarget                                                            func(context.Context, string, bool) error
 
 	Embedded            bool
+	SandboxDirectory    string
 	Node                string
 	ControlHTTPClient   *http.Client
 	IntegrationAdapters []integrations.Adapter
@@ -116,6 +117,7 @@ func Open(options Options) (*Service, error) {
 			return nil, err
 		}
 	}
+	s.Permissions.Apply = s.applyPermissionRevision
 	s.Registry, err = assistant.OpenRegistry(filepath.Join(options.Root, "control.sqlite"), "main")
 	if err != nil {
 		return nil, err
@@ -205,7 +207,11 @@ func (s *Service) host(owner string, generation uint64) (*executor.Engine, error
 		e = nil
 	}
 	if e == nil {
-		e = executor.New(executor.Options{Node: s.options.Node, Home: s.options.AgentHome})
+		worker, err := os.Executable()
+		if err != nil {
+			return nil, err
+		}
+		e = executor.New(executor.Options{ProcessWorker: []string{worker}, Admit: s.executionAdmission, Node: s.options.Node, Home: s.options.AgentHome, SandboxDirectory: s.options.SandboxDirectory, ProtectedPaths: []string{s.options.Root}})
 		s.hosts[owner] = e
 		if s.hostGenerations == nil {
 			s.hostGenerations = map[string]uint64{}

@@ -1,70 +1,132 @@
-# Machine execution authorization
+# Machine and command execution authorization
 
-Control owns execution authorization for each enrolled Runtime in its Space.
-Main tools execute on the owning Control; Tasks execute on their fixed Runtime.
-Execution uses the Runtime service account and its OS privileges. A workspace
-is a working directory, not a security boundary. OS privacy and administrative
-permissions remain independent.
+Control owns policy for each Runtime membership in its Space. A trusted server
+and a protected personal Mac may coexist. Space membership does not grant host
+execution on every machine. Main uses its owning Control; Tasks retain their
+fixed Runtime. No denial or disconnect moves work to another destination.
 
-## Decisions and scope
+## Machine defaults and command rules
 
-New machines default to `execution_access: "ask"`. Every new command, patch or
-plugin invocation requires an exact owner decision. Approval identifies the
-assistant, Task/turn, generation, call ID, Runtime, enrollment epoch, tool and
-complete arguments. Composed tools pass through the same authorization boundary.
+| Machine setting | Behavior |
+| --- | --- |
+| Protected (`ask`, default) | Ordinary operations run in the SRT sandbox; host exceptions require authorization |
+| Trusted (`allow`) | Host execution without SRT, except matching explicit host-deny rules |
+| Blocked (`deny`) | No new execution; owned output polling and cleanup remain available |
 
-| Decision | Effect |
-|---|---|
-| `allow_once` | Approves only the displayed call and arguments |
-| `allow_always` | Persists `execution_access: "allow"` for this machine in this Space |
-| `deny` | Rejects this call; future calls retain the current machine policy |
+New machines are Protected, including Controls. Trust is an explicit owner choice.
+Machine settings belong to one enrollment; re-enrollment clears old rules/grants.
 
-Persistent authorization covers all assistants, Tasks and scheduled executions
-on that machine in this Space, survives restart and never authorizes another
-machine or Space. The approval card names this scope. It also releases ordinary
-pending calls on the same machine. Owner settings can restore `ask`; pending
-approvals are invalidated and later operations must request authorization again.
-Revocation does not undo effects or stop running commands; use cancellation.
-Removing/re-enrolling a machine clears its saved grant and temporary decisions.
+A permanent command rule matches the full command source, canonical effective
+working directory, canonical shell, login/snapshot settings, terminal and
+interactive mode, and explicit credential references. It also binds the machine
+and enrollment. Output/yield limits are not authority. There are no prefix,
+command-family or wildcard rules. `npm test`, `npm install`, `npm test -- --watch`
+and `npm test && curl ...` are different commands. A changed directory, shell or
+credential binding needs another matching rule.
 
-Instruction edits always require independent exact review, including when the
-machine has persistent execution authorization. They offer allow-once or deny;
-`allow_always` is rejected for instruction edits.
+Matching is authorization to execute code, not proof of its effects: scripts,
+executables, Git configuration and dependencies can change under the same text.
+An interactive host grant permits subsequent input to that process and must be
+explicitly identified as such; a noninteractive rule cannot create a host REPL.
 
-An allow-once shell decision approves the command, not a promise about the files
-it can affect. Arbitrary programs cannot be confined by parsing command text.
-Under `ask`, model TTY allocation and additional session input require persistent
-authorization. Output polling and cancellation remain available with executor
-session ownership checks. The user-operated native terminal is a separate owner
-interface. Unattended Tasks can wait for approval; scheduling grants no authority.
+Rule policies are `allow_host`, `default` and `deny_host`. Explicit host denial
+wins over machine trust and task grants. It still permits a separately requested
+sandboxed operation. `default` and rule deletion restore the machine default;
+they do not remove broader machine trust. Machine Blocked overrides all grants.
 
-## Remote execution and recovery
+## Approval decisions
 
-Remote requests return to authenticated Control services. Runner validates the
-signed approved operation against the original run, fixed Runtime, tool, arguments
-and shell settings before executing. Model-provider credentials remain in Control.
-Operation receipts prevent duplicate effects; unknown results retain their fences
-and are inspected by original identity, never replayed on another machine.
-Temporary decisions expire with the work context or process restart.
+`exec_command.execution_mode: "host"` requests a host exception and
+`justification` explains why. Omission/`default` uses the machine policy and saved
+rules. Matching allow rules select host execution directly; the event/UI reports
+the actual mode. The model cannot supply sandbox profiles or change destinations.
 
-## Persistence and owner API
+| Decision | Scope |
+| --- | --- |
+| `allow_always` | Persist this exact command/context on this machine, then execute |
+| `allow_task` | Repeated matching commands in the current work/run only |
+| `deny` | Reject the original host request, without creating a permanent deny |
 
-`permissions.json` version 5 stores `machines` and enrollment `epochs`. Each machine
-policy has exactly `execution_access` (`ask`, `allow` or owner-configured `deny`).
-Machine-level `deny` blocks execution; it is distinct from denying one approval.
-Unsupported formats fail
-without rewriting files; previous Host/Sandbox policies are not implicitly adopted.
+Current work means one accepted foreground user request, one Task run, or one
+scheduled occurrence. Grants do not extend to other commands, subsequent user
+requests, child/sibling Tasks, scheduled occurrences, machines or generations.
+Completion/cancellation, restart, enrollment changes and policy invalidation clear
+temporary grants. Background scheduling grants no authority.
 
-`GET /api/v1/permissions` returns machine policy and pending requests for the
-selected conversation owner. `POST` accepts `{id, action}` for the decisions above.
-Owner settings use:
+Instruction edits always require independent exact `allow_once`/`deny` review,
+even on Trusted or Blocked machines; command/task grants never approve them.
 
-```json
-{
-  "action": "configure",
-  "machine_id": "runtime-id",
-  "machine_policy": {"execution_access": "ask"}
-}
-```
+Every pending decision binds owner, Task/run/turn, generation, call ID, Runtime,
+enrollment, tool and full arguments/context. A later grant cannot reverse a denial
+already given to that exact request. Persistent grants are saved before permitting
+execution; write failure leaves approval pending.
 
-Sources: `internal/control/permissions.go` and `internal/control/dispatch.go`.
+## Sandbox and host boundaries
+
+Protected execution uses the pinned SRT SDK adapter: macOS Seatbelt or Linux
+bubblewrap/seccomp. Workspaces are writable; necessary system/toolchain assets are
+read-only; unrelated user files and Runtime authority are excluded. Private homes,
+temporary files and caches are scoped to the execution. Unix sockets are blocked
+apart from necessary narrowly defined system support. Apple Events remain disabled.
+
+Network access is open, including ordinary localhost TCP. No SRT domain-filtering
+proxy is injected. Accessible local services must enforce their own authentication.
+Sandboxing cannot prevent transmission of files a workload is allowed to read.
+
+Host mode bypasses SRT and uses the Runtime account's OS privileges, including
+its socket access. It is not described as file/socket isolated. OS administrative
+and privacy permissions remain independent.
+
+Shell initialization, patches and Node plugins must follow the selected mode.
+Protected plugin sessions remain sandboxed; command rules do not grant plugin
+host execution. Protected plugin host exceptions are not currently exposed.
+Trusted machines can run ordinary host plugin sessions. See [executor](executor.md).
+
+Sandbox errors do not trigger automatic host execution or command replay. Native
+filesystem denials cannot generally pause for approval. The Agent receives the
+failure, accounts for partial effects, and may request a new explicit host call.
+
+## Owner management and applying changes
+
+Settings -> Execution permissions groups machine defaults, permanent command
+rules and active task grants by machine. Machines links to this same editor.
+Owners can manually create/edit/delete rules, change machine policy, inspect and
+remove task grants, and retry a pending policy application. These edit current
+authority; deleting a rule is not deleting a history record.
+
+Owner edits persist a new revision, invalidate pending/task grants and close the
+machine's old execution Engines. This conservatively stops existing work on that
+machine. Processes and persistent plugin sessions do not silently inherit new
+permissions or retain old host authority. Work is not automatically restarted.
+
+Control and Runner serialize revision checks with actual process start. Runner
+receives authenticated revisions, rejects stale requests and does not admit host
+work from a disconnected cache. Offline/failed application is visible as pending
+and fences new admission. A stopped process does not undo prior file/network
+side effects; uncertain cleanup retains existing receipt/capacity fences.
+
+## Storage and API
+
+Permission format 6 stores machines, enrollment epochs, exact command rules and
+durable policy-application fences. Restart retains pending/uncertain application.
+Temporary grants and pending decisions are not restored after restart. Unsupported
+old formats fail without rewriting the file or inferring new grants. Runner
+journal schema 5 separates execution mode/context-bearing requests from old runs.
+
+`GET /api/v1/permissions` returns `policy` (machines, rules, task_grants,
+application states) and conversation-owner-scoped pending approvals.
+`POST /api/v1/permissions` accepts:
+
+- `{id, action: "allow_always" | "allow_task" | "deny"}` for command approval.
+- `{action:"configure", machine_id, machine_policy:{execution_access, revision}}`.
+- `{action:"save_rule", rule, old_id, expected_revision}`; identity/enrollment and
+  canonical destination context are resolved by the owner service.
+- `{action:"delete_rule", machine_id, id, expected_revision}`.
+- `{action:"remove_task_grant", id}`.
+- `{action:"retry", machine_id, expected_revision}`.
+
+Edits carry the observed policy revision and reject stale drafts. Command rules
+record updater/time; credential values never enter rules or durable receipts.
+
+Sources: `internal/control/permissions.go`, `permission_application.go` and
+`dispatch.go`. Protocol/lifetime rules remain in [Task coordination](task-coordination.md).

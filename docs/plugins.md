@@ -12,9 +12,9 @@ Resources/plugins/<package>/plugin.json + declared files
                         |
               digest-pinned tool bundle
                         |
-          Control execution authorization
+          Control machine / command authorization
                         |
-        destination Go executor -> Node tool process
+        destination Go executor -> Node tool process (sandboxed on protected machines)
 ```
 
 ## Manifest and execution
@@ -29,7 +29,7 @@ Input schemas support flat scalar values and bounded string arrays. Paths are
 confined relative package paths without symlinks. Tool snapshots contain only
 the declared UTF-8 files, limited to 32 files / 512 KiB, and are digest-pinned.
 Executors reject extra payloads and unknown capabilities. Tool installation does
-not grant execution authority; each call uses [machine authorization](permissions.md).
+not grant execution authority; each call uses [execution authorization](permissions.md). A shell command grant never authorizes a plugin. Protected plugin sessions are sandboxed; Trusted machines use host sessions.
 
 ## Discovery, synchronization and packaging
 
@@ -40,7 +40,7 @@ Tasks retain their resource snapshots. Before a Task first prepares, the origina
 Runner synchronizes selected current tool files and Skills through Control's
 run-bound authenticated interface. Project instructions are read on the destination.
 
-`pkg/pluginhost` owns bounded Node process sessions. Tool processes follow their
+`pkg/pluginhost` owns bounded Node process sessions. Execution mode and policy revision are pinned alongside the bundle; policy changes close the old session. Tool processes follow their
 execution scope and bundle digest. Cancellation, ownership checks, operation
 receipts and uncertainty fences apply to plugin calls as to built-in tools.
 

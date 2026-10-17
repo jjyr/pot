@@ -89,14 +89,14 @@ func TestToolsCannotRetargetAnotherRuntime(t *testing.T) {
 }
 
 func TestDispatchReportsApprovalAndActualTargetBeforeExecution(t *testing.T) {
-	for _, decision := range []string{"allow_once", "deny"} {
+	for _, decision := range []string{"allow_task", "deny"} {
 		t.Run(decision, func(t *testing.T) {
 			d, e, _ := localDispatcher(t)
 			if err := d.Permissions.Configure("local", MachinePolicy{ExecutionAccess: "ask"}); err != nil {
 				t.Fatal(err)
 			}
 			phases := []string{}
-			call := modelprotocol.ToolCall{ID: "review", Name: "exec_command", Arguments: json.RawMessage(`{"cmd":"printf approved","login":false}`)}
+			call := modelprotocol.ToolCall{ID: "review", Name: "exec_command", Arguments: json.RawMessage(`{"cmd":"printf approved","login":false,"execution_mode":"host"}`)}
 			_, err := d.Dispatch(context.Background(), e, call, func(update core.Update) error {
 				if update.Type != "tool_state" {
 					return nil

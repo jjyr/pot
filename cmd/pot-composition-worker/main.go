@@ -8,9 +8,13 @@ import (
 	"os"
 
 	"github.com/jjyr/pot/pkg/composition"
+	"github.com/jjyr/pot/pkg/processscope"
 )
 
 func main() {
+	if processscope.HandleWorker() {
+		return
+	}
 	if err := composition.ServeWorker(context.Background(), os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

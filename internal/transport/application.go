@@ -194,11 +194,7 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 			}
 			return c.Snapshot(ctx)
 		case "/api/v1/permissions":
-			policy, _, err := s.Permissions.Policy(a.RuntimeID)
-			if err != nil {
-				return nil, err
-			}
-			return map[string]any{"policy": map[string]any{"machines": map[string]any{a.RuntimeID: policy}}, "pending": s.Permissions.Pending(owner)}, nil
+			return map[string]any{"policy": s.Permissions.Snapshot(), "pending": s.Permissions.Pending(owner)}, nil
 		case "/api/v1/usage/summary":
 			days := 7
 			if text := u.Query().Get("days"); text != "" {
@@ -348,20 +344,35 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 			return map[string]bool{"accepted": err == nil}, err
 		case "/api/v1/permissions":
 			var body struct {
-				ID            string                 `json:"id,omitempty"`
-				Action        string                 `json:"action" required:"true"`
-				MachineID     string                 `json:"machine_id,omitempty"`
-				MachinePolicy *control.MachinePolicy `json:"machine_policy,omitempty"`
+				ID               string                 `json:"id,omitempty"`
+				Action           string                 `json:"action" required:"true"`
+				MachineID        string                 `json:"machine_id,omitempty"`
+				MachinePolicy    *control.MachinePolicy `json:"machine_policy,omitempty"`
+				Rule             *control.CommandRule   `json:"rule,omitempty"`
+				OldID            string                 `json:"old_id,omitempty"`
+				ExpectedRevision uint64                 `json:"expected_revision,omitempty"`
 			}
 			if err = decode(r.Body, &body); err != nil {
 				return nil, err
 			}
-			if body.Action == "configure" {
-				if body.MachinePolicy == nil {
+			switch body.Action {
+			case "save_rule":
+				if body.Rule == nil {
+					return nil, errors.New("command rule required")
+				}
+				err = s.SaveCommandRule(ctx, "owner", *body.Rule, body.OldID, body.ExpectedRevision)
+			case "delete_rule":
+				err = s.Permissions.DeleteRule(body.MachineID, body.ID, body.ExpectedRevision)
+			case "remove_task_grant":
+				err = s.Permissions.RemoveGrant(body.ID)
+			case "retry":
+				err = s.Permissions.Retry(body.MachineID, body.ExpectedRevision)
+			case "configure":
+				if body.MachinePolicy == nil || body.MachinePolicy.Revision == 0 {
 					return nil, errors.New("machine policy required")
 				}
 				err = s.Permissions.Configure(body.MachineID, *body.MachinePolicy)
-			} else {
+			default:
 				err = s.Permissions.Decide(owner, body.ID, body.Action)
 			}
 			return map[string]bool{"accepted": err == nil}, err

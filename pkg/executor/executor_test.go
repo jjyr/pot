@@ -32,17 +32,71 @@ func fixture(t *testing.T) (*Engine, Request) {
 			t.Errorf("cleanup: %v", err)
 		}
 	})
-	return e, Request{ID: "call", CWD: dir, Policy: policy}
+	return e, Request{Mode: "host", ID: "call", CWD: dir, Policy: policy}
 }
 func call(t *testing.T, e *Engine, r Request, name string, args map[string]any) map[string]any {
 	t.Helper()
 	r.Operation = name
+	if name == "exec_command" {
+		args["interactive"] = true
+	}
 	r.Args = args
 	result, err := e.Execute(context.Background(), r, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return result
+}
+
+func TestProductHostAdmissionPrecedesStartupAndSanitizesEnvironment(t *testing.T) {
+	e, r := fixture(t)
+	r.Policy.AllowLoginShell = true
+	r.Policy.ShellSnapshot = true
+	r.Operation = "exec_command"
+	r.Args = map[string]any{"cmd": "printf should-not-run"}
+	rejected := errors.New("policy changed")
+	e.options.Admit = func(uint64) (func(), error) { return nil, rejected }
+	if _, err := e.Execute(context.Background(), r, nil); !errors.Is(err, rejected) {
+		t.Fatal(err)
+	}
+	if len(e.snapshots.entries) != 0 {
+		t.Fatal("product ran login snapshot before final admission")
+	}
+	e.options.Admit = func(uint64) (func(), error) { return func() {}, nil }
+	t.Setenv("POT_TEST_AUTH_SECRET", "private")
+	r.Policy.AllowLoginShell = false
+	// A fresh execution owns immutable shell settings.
+	e2 := New(e.options)
+	defer e2.Close()
+	r.Args = map[string]any{"cmd": "printf '%s' \"${POT_TEST_AUTH_SECRET-unset}\""}
+	result, err := e2.Execute(context.Background(), r, nil)
+	if err != nil || result["stdout"] != "unset" {
+		t.Fatal("ambient authority inherited", result, err)
+	}
+}
+
+func TestHostInteractiveAuthorityDoesNotComeFromOrdinaryCommand(t *testing.T) {
+	e, r := fixture(t)
+	r.Operation = "exec_command"
+	r.Args = map[string]any{"cmd": "read -r value; echo received:$value", "yield_time_ms": 10}
+	result, err := e.Execute(context.Background(), r, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := result["session_id"]
+	if id == nil {
+		t.Fatal(result)
+	}
+	r.Mode = "session"
+	r.Operation = "write_stdin"
+	r.Args = map[string]any{"session_id": id, "chars": "unexpected\\n", "yield_time_ms": 10}
+	if _, err = e.Execute(context.Background(), r, nil); err == nil {
+		t.Fatal("ordinary host command accepted interactive input")
+	}
+	r.Args = map[string]any{"session_id": id, "terminate": true, "yield_time_ms": 1000}
+	if _, err = e.Execute(context.Background(), r, nil); err != nil {
+		t.Fatal("owned cancellation denied", err)
+	}
 }
 func TestSeparateCommandsAndBoundedUTF8Output(t *testing.T) {
 	e, r := fixture(t)

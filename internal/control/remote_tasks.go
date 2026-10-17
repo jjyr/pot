@@ -38,10 +38,13 @@ type remoteRequest struct {
 	Data    json.RawMessage `json:"data" required:"true"`
 }
 type remoteState struct {
-	mu            sync.Mutex
-	runs          map[string]*remoteAuthority
-	runnerStarted bool
-	prepared      map[string]remotePrepared
+	permissionRevision uint64
+	permissionApplied  uint64
+	permissionUpdate   sync.Mutex
+	mu                 sync.Mutex
+	runs               map[string]*remoteAuthority
+	runnerStarted      bool
+	prepared           map[string]remotePrepared
 }
 type remotePrepared struct {
 	launch    runner.Launch
@@ -375,7 +378,14 @@ func (s *Service) controlRPC(ctx context.Context, p controlplane.Principal, requ
 		}
 		stopDispatch := context.AfterFunc(authority.ctx, cancel)
 		defer stopDispatch()
-		dispatcher := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: launch.TaskID, ApprovalOwner: launch.AssistantID, Task: launch.TaskID, Turn: launch.RunID, Generation: launch.Generation, DefaultTarget: launch.ExecutionTarget, Spec: authority.model.Spec, Credentials: s.Integrations, Usage: s.Usage, UsageScope: launch.TaskID, Permissions: s.Permissions, Operations: s.Operations, Target: func(ctx context.Context, operation Operation, execution executor.Request, emit func(core.Update) error) (json.RawMessage, error) {
+		dispatcher := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: launch.TaskID, ApprovalOwner: launch.AssistantID, Task: launch.TaskID, Turn: launch.RunID, Generation: launch.Generation, DefaultTarget: launch.ExecutionTarget, Spec: authority.model.Spec, Credentials: s.Integrations, Usage: s.Usage, UsageScope: launch.TaskID, Permissions: s.Permissions, Operations: s.Operations, ResolveCommand: func(ctx context.Context, args map[string]any) (*CommandContext, error) {
+			var value CommandContext
+			err := s.remoteCall(ctx, peer, binding(launch), "task.command_context", "context:"+q.Call.ID, args, &value)
+			return &value, err
+		}, Target: func(ctx context.Context, operation Operation, execution executor.Request, emit func(core.Update) error) (json.RawMessage, error) {
+			if err := s.syncRemotePermission(ctx, peer, execution.Revision); err != nil {
+				return nil, err
+			}
 			var response executeReply
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
@@ -483,6 +493,48 @@ type executeReply struct {
 }
 
 func (s *Service) runnerRPC(ctx context.Context, p controlplane.Principal, request controlplane.Request) (json.RawMessage, error) {
+	if request.Method == "machine.command_context" {
+		m := s.Machines.Membership()
+		if m == nil || p.RuntimeID != m.Enrollment.Control.RuntimeID || p.Epoch != m.Enrollment.Epoch {
+			return nil, controlplane.ErrUnauthorized
+		}
+		var c CommandContext
+		if err := core.DecodeJSON(request.Params, &c); err != nil {
+			return nil, err
+		}
+		args := map[string]any{"cmd": c.Command, "shell": c.Shell, "login": c.Login, "interactive": c.Interactive, "tty": c.TTY}
+		if len(c.Credentials) > 0 {
+			var refs any
+			if err := json.Unmarshal(c.Credentials, &refs); err != nil {
+				return nil, err
+			}
+			args["credentials"] = refs
+		}
+		value, err := ResolveCommandContext(c.Directory, args, core.ShellSettings{Executable: c.Shell, AllowLoginShell: true, ShellSnapshot: c.Snapshot})
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	}
+	if request.Method == "machine.permissions" {
+		m := s.Machines.Membership()
+		if m == nil || p.RuntimeID != m.Enrollment.Control.RuntimeID || p.Epoch != m.Enrollment.Epoch {
+			return nil, controlplane.ErrUnauthorized
+		}
+		var q struct {
+			Revision uint64 `json:"revision"`
+		}
+		if err := core.DecodeJSON(request.Params, &q); err != nil {
+			return nil, err
+		}
+		if q.Revision == 0 {
+			return nil, errors.New("invalid permission revision")
+		}
+		if err := s.remote().applyPermissions(q.Revision, s.drainPermissionEngines); err != nil {
+			return nil, err
+		}
+		return json.RawMessage(`{}`), nil
+	}
 	if request.Method == "machine.inventory" {
 		m := s.Machines.Membership()
 		if m == nil || p.RuntimeID != m.Enrollment.Control.RuntimeID || p.Epoch != m.Enrollment.Epoch {
@@ -519,6 +571,27 @@ func (s *Service) runnerRPC(ctx context.Context, p controlplane.Principal, reque
 			return nil, recoveryErr
 		}
 		return json.Marshal(snapshot)
+	case "task.command_context":
+		var args map[string]any
+		if err = core.DecodeJSON(r.Data, &args); err != nil {
+			return nil, err
+		}
+		state := s.remote()
+		state.mu.Lock()
+		prepared, ok := state.prepared[record.Launch.RunID]
+		state.mu.Unlock()
+		if !ok {
+			return nil, errors.New("Task is not prepared")
+		}
+		resources, _, err := s.readPreparedTaskResources(ctx, record.Launch)
+		if err != nil {
+			return nil, err
+		}
+		value, err := ResolveCommandContext(prepared.execution.Workspace, args, resources.Config.Params.Agent.Shell)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
 	case "task.prepared.resources":
 		resources, _, err := s.readPreparedTaskResources(ctx, record.Launch)
 		if err != nil {
@@ -631,6 +704,26 @@ func (s *Service) runnerRPC(ctx context.Context, p controlplane.Principal, reque
 		expected, _ := core.HashJSON(args)
 		if name != q.Request.Operation || actual != expected {
 			return nil, errors.New("execution differs from authorized operation")
+		}
+		if name == "exec_command" {
+			expectedContext, err := ResolveCommandContext(q.Request.CWD, arguments, resources.Config.Params.Agent.Shell)
+			if err != nil {
+				return nil, err
+			}
+			a, _ := core.HashJSON(expectedContext)
+			b, _ := core.HashJSON(q.Request.Command)
+			if a != b {
+				return nil, errors.New("approved command context differs on Runner")
+			}
+		}
+		if q.Request.Mode != "host" && q.Request.Mode != "sandbox" && q.Request.Mode != "session" {
+			return nil, errors.New("execution mode missing")
+		}
+		state.mu.Lock()
+		currentRevision := state.permissionRevision
+		state.mu.Unlock()
+		if q.Request.Revision != currentRevision {
+			return nil, errors.New("Runner permission revision differs")
 		}
 		// Only nonsecret request fields participate in durable command receipts.
 		durable := q

@@ -57,11 +57,15 @@ mise run lint
 mise run check:go
 mise run test
 mise run test:executor
+mise run test:sandbox
+mise run test:sandbox-linux
 mise run test:release
 mise run test:i18n
 mise run licenses
 mise run build:linux
 ```
+
+`test:sandbox` runs real file, socket, network, terminal, plugin and cleanup tests with the pinned SDK. `test:sandbox-linux` uses a disposable non-root Docker host with namespace restrictions relaxed only on the outer test container; only test assets are mounted read-only.
 
 `check:go` verifies formatting, vet and architectural imports. `test:go` uses the
 race detector. UI tests cover owner-scoped state, drafts, IME, navigation and

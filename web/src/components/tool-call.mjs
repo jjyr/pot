@@ -38,6 +38,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',onDecis
   function update(message,next={}){
     current=message;options=next;const tool=message.tool;if(!tool)return;
     const result=toolResult(tool),pending=next.approval;
+
     const phase=pending?'waiting_approval':tool.phase;
     const names={exec_command:'command',write_stdin:'session',apply_patch:'patch',exec:'script',wait:'wait',cua_repl:'computer'};
     title.textContent=names[tool.name]?t(names[tool.name]):tool.name;
@@ -53,12 +54,12 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',onDecis
     // Live clocks run only while a visible operation needs one, and honor backend time.
     const elapsed=start?Math.max(0,((tool.finished_at_ms||Date.now())-start)/1000):null;
     duration.textContent=elapsed===null?'':`${phase==='waiting_approval'?t('waited')+' ':''}${elapsed<1?elapsed.toFixed(1):Math.floor(elapsed)}s`;
-    context.textContent=[tool.target?.runtime_id,tool.workdir].filter(Boolean).join(' · ');context.hidden=!activeTool(tool)||!context.textContent;
+    context.textContent=[tool.target?.runtime_id,tool.workdir,tool.execution_mode==='host'?t('hostExecution'):tool.execution_mode==='sandbox'?t('sandboxExecution'):''].filter(Boolean).join(' · ');context.hidden=!activeTool(tool)||!context.textContent;
     const error=['failed','denied','unknown'].includes(phase)?String(toolFailure(tool)||t(phase)).split('\n')[0]:'';failure.textContent=error;failure.hidden=!error;
-    const nextSignature=JSON.stringify([tool.name,tool.target,tool.workdir,locale()]);
-    if(signature!==nextSignature){signature=nextSignature;metadata.replaceChildren();for(const [label,value]of [[t('name'),tool.name],[t('target'),tool.target?.runtime_id],[t('workdir'),tool.workdir]])if(value)metadata.append(n('dt','',label),n('dd','',value));}
+    const nextSignature=JSON.stringify([tool.name,tool.target,tool.workdir,tool.execution_mode,locale()]);
+    if(signature!==nextSignature){signature=nextSignature;metadata.replaceChildren();for(const [label,value]of [[t('executionMode'),tool.execution_mode==='host'?t('hostExecution'):tool.execution_mode==='sandbox'?t('sandboxExecution'):null],[t('name'),tool.name],[t('target'),tool.target?.runtime_id],[t('workdir'),tool.workdir]])if(value)metadata.append(n('dt','',label),n('dd','',value));}
     const approvalKey=JSON.stringify([pending?.id,locale()]);
-    if(approvalSignature!==approvalKey){approvalSignature=approvalKey;approval.replaceChildren();if(pending){approval.append(n('strong','',t('approvalTitle')),n('p','',t(pending.request.tool==='update_agent_instructions'?'instructionConsent':'hostConsent')),n('pre','tool-code',`${pending.request.machine_id} · ${pending.request.tool}\n${pretty(pending.request.args)}`));const actions=n('div','tool-approval-actions'),error=n('p','inline-error');for(const action of (pending.request.tool==='update_agent_instructions'?['allow_once','deny']:['allow_always','allow_once','deny'])){const button=n('button',`control ${action==='allow_once'?'primary':''}`,t(action));button.type='button';button.onclick=async()=>{const buttons=actions.querySelectorAll('button');buttons.forEach(button=>button.disabled=true);error.textContent='';try{await onDecision(pending,action);}catch(reason){error.textContent=reason.message;buttons.forEach(button=>button.disabled=false);}};actions.append(button);}approval.append(actions,error);}}
+    if(approvalSignature!==approvalKey){approvalSignature=approvalKey;approval.replaceChildren();if(pending){approval.append(n('strong','',t('approvalTitle')),n('p','',t(pending.request.tool==='update_agent_instructions'?'instructionConsent':'hostConsent')),n('pre','tool-code',`${pending.request.machine_id} · ${pending.request.tool}\n${pretty(pending.request.command_context||pending.request.args)}`));const actions=n('div','tool-approval-actions'),error=n('p','inline-error');for(const action of (pending.request.tool==='update_agent_instructions'?['allow_once','deny']:['allow_always','allow_task','deny'])){const button=n('button',`control ${['allow_once','allow_task'].includes(action)?'primary':''}`,t(action));button.type='button';button.onclick=async()=>{const buttons=actions.querySelectorAll('button');buttons.forEach(button=>button.disabled=true);error.textContent='';try{await onDecision(pending,action);}catch(reason){error.textContent=reason.message;buttons.forEach(button=>button.disabled=false);}};actions.append(button);}approval.append(actions,error);}}
     approval.hidden=!pending;
     if(pending&&!autoOpened){building=true;root.open=true;autoOpened=true;building=false;remember();queueMicrotask(()=>{for(let parent=root.parentElement?.closest('details.tool-call');parent;parent=parent.parentElement?.closest('details.tool-call'))parent.open=true;});}
     if(!pending)autoOpened=false;

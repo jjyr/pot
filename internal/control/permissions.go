@@ -4,18 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"sort"
 	"sync"
+	"time"
 
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/executor"
 	"github.com/jjyr/pot/pkg/instance"
 )
 
+// ask means protected execution, allow explicitly trusts the machine, and deny
+// blocks new execution. The owner setting is separate from command grants.
 type MachinePolicy struct {
 	ExecutionAccess string `json:"execution_access"`
+	Revision        uint64 `json:"revision"`
 }
 
-func DefaultMachinePolicy() MachinePolicy { return MachinePolicy{ExecutionAccess: "ask"} }
+func DefaultMachinePolicy() MachinePolicy { return MachinePolicy{ExecutionAccess: "ask", Revision: 1} }
 func (p MachinePolicy) Validate() error {
 	if p.ExecutionAccess != "ask" && p.ExecutionAccess != "allow" && p.ExecutionAccess != "deny" {
 		return errors.New("invalid execution access policy")
@@ -23,10 +30,32 @@ func (p MachinePolicy) Validate() error {
 	return nil
 }
 
+type CommandContext = executor.CommandContext
+type CommandRule struct {
+	ID              string         `json:"id"`
+	MachineID       string         `json:"machine_id"`
+	EnrollmentEpoch string         `json:"enrollment_epoch"`
+	Context         CommandContext `json:"context"`
+	Policy          string         `json:"policy"`
+	UpdatedBy       string         `json:"updated_by"`
+	UpdatedAt       string         `json:"updated_at"`
+}
+type TaskGrant struct {
+	ID              string         `json:"id"`
+	MachineID       string         `json:"machine_id"`
+	EnrollmentEpoch string         `json:"enrollment_epoch"`
+	Owner           string         `json:"owner"`
+	Task            string         `json:"task,omitempty"`
+	Turn            string         `json:"turn"`
+	Generation      uint64         `json:"generation"`
+	Context         CommandContext `json:"context"`
+}
 type permissionFile struct {
-	Version  int                      `json:"version"`
-	Machines map[string]MachinePolicy `json:"machines"`
-	Epochs   map[string]string        `json:"epochs"`
+	Version      int                      `json:"version"`
+	Machines     map[string]MachinePolicy `json:"machines"`
+	Epochs       map[string]string        `json:"epochs"`
+	Rules        map[string]CommandRule   `json:"rules"`
+	Applications map[string]ApplyState    `json:"applications"`
 }
 type HostRequest struct {
 	Owner           string          `json:"owner"`
@@ -38,6 +67,8 @@ type HostRequest struct {
 	EnrollmentEpoch string          `json:"enrollment_epoch"`
 	Tool            string          `json:"tool"`
 	Args            json.RawMessage `json:"args"`
+	Command         *CommandContext `json:"command_context,omitempty"`
+	Host            bool            `json:"host_execution"`
 }
 type Approval struct {
 	ID      string      `json:"id"`
@@ -51,16 +82,28 @@ type hostDecision struct {
 	allow    bool
 	invalid  bool
 }
+type ApplyState struct {
+	Revision uint64 `json:"revision"`
+	State    string `json:"state"`
+	Error    string `json:"error,omitempty"`
+}
 type PermissionStore struct {
+	denied  map[string]HostRequest
 	mu      sync.Mutex
 	path    string
 	state   permissionFile
 	pending map[string]*hostDecision
+	grants  map[string]TaskGrant
+	applied map[string]ApplyState
+	// Apply drains affected execution and synchronizes Runner admission. Failed
+	// application leaves admission fenced and is visible to owner settings.
+	Apply   func(string, uint64) error
 	Changes core.Changes
 }
 
 func OpenPermissions(path string) (*PermissionStore, error) {
-	p := &PermissionStore{path: path, state: permissionFile{5, map[string]MachinePolicy{}, map[string]string{}}, pending: map[string]*hostDecision{}}
+	p := &PermissionStore{path: path, state: permissionFile{6, map[string]MachinePolicy{}, map[string]string{}, map[string]CommandRule{}, map[string]ApplyState{}}, denied: map[string]HostRequest{}, pending: map[string]*hostDecision{}, grants: map[string]TaskGrant{}}
+	p.applied = p.state.Applications
 	body, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return p, nil
@@ -68,18 +111,31 @@ func OpenPermissions(path string) (*PermissionStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = core.DecodeJSON(body, &p.state); err != nil {
+	var stored permissionFile
+	if err = core.DecodeJSON(body, &stored); err != nil {
 		return nil, err
 	}
-	if p.state.Version != 5 || p.state.Machines == nil || p.state.Epochs == nil {
-		return nil, errors.New("unsupported machine policy format")
+	p.state = stored
+	if p.state.Version != 6 || p.state.Machines == nil || p.state.Epochs == nil || p.state.Rules == nil || p.state.Applications == nil {
+		return nil, errors.New("unsupported permission format; preserve the file and explicitly reconfigure machine policies")
+	}
+	p.applied = p.state.Applications
+	for machine, application := range p.applied {
+		if policy, ok := p.state.Machines[machine]; !ok || application.Revision != policy.Revision || (application.State != "applied" && application.State != "pending" && application.State != "applying") {
+			return nil, errors.New("invalid permission application state")
+		}
 	}
 	for id, policy := range p.state.Machines {
-		if !core.Identifier(id) || p.state.Epochs[id] == "" {
-			return nil, errors.New("machine policy enrollment missing")
+		if !core.Identifier(id) || p.state.Epochs[id] == "" || policy.Revision == 0 {
+			return nil, errors.New("invalid machine policy enrollment")
 		}
 		if err = policy.Validate(); err != nil {
 			return nil, err
+		}
+	}
+	for id, rule := range p.state.Rules {
+		if err = p.validateRule(rule); err != nil || id != rule.ID {
+			return nil, errors.New("invalid stored command rule")
 		}
 	}
 	return p, nil
@@ -89,18 +145,25 @@ func (p *PermissionStore) saveLocked(next permissionFile) error {
 		return err
 	}
 	p.state = next
+	p.applied = next.Applications
 	p.Changes.Notify("permissions")
 	return nil
 }
 func (p *PermissionStore) copyLocked() permissionFile {
-	next := permissionFile{5, map[string]MachinePolicy{}, map[string]string{}}
+	n := permissionFile{6, map[string]MachinePolicy{}, map[string]string{}, map[string]CommandRule{}, map[string]ApplyState{}}
 	for k, v := range p.state.Machines {
-		next.Machines[k] = v
+		n.Machines[k] = v
 	}
 	for k, v := range p.state.Epochs {
-		next.Epochs[k] = v
+		n.Epochs[k] = v
 	}
-	return next
+	for k, v := range p.state.Rules {
+		n.Rules[k] = v
+	}
+	for k, v := range p.applied {
+		n.Applications[k] = v
+	}
+	return n
 }
 func (p *PermissionStore) invalidateLocked(machine string) {
 	for id, d := range p.pending {
@@ -113,10 +176,34 @@ func (p *PermissionStore) invalidateLocked(machine string) {
 			delete(p.pending, id)
 		}
 	}
+	for id, g := range p.grants {
+		if g.MachineID == machine {
+			delete(p.grants, id)
+		}
+	}
 }
-
-// Enroll creates a fresh epoch and resets policy/temporary decisions. A heartbeat
-// must never call it; repeated presence cannot restore revoked Host authority.
+func (p *PermissionStore) apply(machine string, revision uint64) error {
+	var err error
+	if p.Apply != nil {
+		err = p.Apply(machine, revision)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if current := p.applied[machine]; current.Revision == revision {
+		state := ApplyState{Revision: revision, State: "applied"}
+		if err != nil {
+			state.State = "pending"
+			state.Error = err.Error()
+		}
+		next := p.copyLocked()
+		next.Applications[machine] = state
+		if saveErr := p.saveLocked(next); saveErr != nil {
+			return errors.Join(err, saveErr)
+		}
+	}
+	p.Changes.Notify("permissions")
+	return err
+}
 func (p *PermissionStore) Enroll(machine, epoch string) error {
 	if !core.Identifier(machine) || epoch == "" {
 		return errors.New("invalid enrollment identity")
@@ -126,10 +213,17 @@ func (p *PermissionStore) Enroll(machine, epoch string) error {
 	next := p.copyLocked()
 	next.Machines[machine] = DefaultMachinePolicy()
 	next.Epochs[machine] = epoch
+	delete(next.Applications, machine)
+	for id, r := range next.Rules {
+		if r.MachineID == machine {
+			delete(next.Rules, id)
+		}
+	}
 	if err := p.saveLocked(next); err != nil {
 		return err
 	}
 	p.invalidateLocked(machine)
+	delete(p.applied, machine)
 	return nil
 }
 func (p *PermissionStore) Remove(machine string) error {
@@ -138,10 +232,17 @@ func (p *PermissionStore) Remove(machine string) error {
 	next := p.copyLocked()
 	delete(next.Machines, machine)
 	delete(next.Epochs, machine)
+	delete(next.Applications, machine)
+	for id, r := range next.Rules {
+		if r.MachineID == machine {
+			delete(next.Rules, id)
+		}
+	}
 	if err := p.saveLocked(next); err != nil {
 		return err
 	}
 	p.invalidateLocked(machine)
+	delete(p.applied, machine)
 	return nil
 }
 func (p *PermissionStore) Configure(machine string, policy MachinePolicy) error {
@@ -149,103 +250,253 @@ func (p *PermissionStore) Configure(machine string, policy MachinePolicy) error 
 		return err
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if _, ok := p.state.Machines[machine]; !ok {
+	current, ok := p.state.Machines[machine]
+	if !ok {
+		p.mu.Unlock()
 		return errors.New("machine is not enrolled")
 	}
+	if policy.Revision != 0 && policy.Revision != current.Revision {
+		p.mu.Unlock()
+		return errors.New("permission policy changed; reload settings")
+	}
 	next := p.copyLocked()
+	policy.Revision = current.Revision + 1
 	next.Machines[machine] = policy
+	next.Applications[machine] = ApplyState{Revision: policy.Revision, State: "applying"}
 	if err := p.saveLocked(next); err != nil {
+		p.mu.Unlock()
 		return err
 	}
 	p.invalidateLocked(machine)
-	return nil
+	p.mu.Unlock()
+	return p.apply(machine, policy.Revision)
 }
 func (p *PermissionStore) Policy(machine string) (MachinePolicy, string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	v, ok := p.state.Machines[machine]
 	if !ok {
-		return MachinePolicy{}, "", errors.New("machine is not enrolled")
+		return v, "", errors.New("machine is not enrolled")
 	}
 	return v, p.state.Epochs[machine], nil
 }
+func ruleID(machine, epoch string, c CommandContext) string {
+	key, _ := core.HashJSON(struct {
+		Machine, Epoch string
+		Context        CommandContext
+	}{machine, epoch, c})
+	return key
+}
+func grantID(r HostRequest) string {
+	key, _ := core.HashJSON(struct {
+		Machine, Epoch, Owner, Task, Turn string
+		Generation                        uint64
+		Context                           *CommandContext
+	}{r.MachineID, r.EnrollmentEpoch, r.Owner, r.Task, r.Turn, r.Generation, r.Command})
+	return key
+}
+func denialID(r HostRequest) string {
+	key, _ := core.HashJSON(struct {
+		Machine, Epoch, Owner, Task, Turn, Call string
+		Generation                              uint64
+	}{r.MachineID, r.EnrollmentEpoch, r.Owner, r.Task, r.Turn, r.CallID, r.Generation})
+	return key
+}
+func (p *PermissionStore) validateRule(r CommandRule) error {
+	if p.state.Epochs[r.MachineID] != r.EnrollmentEpoch || r.EnrollmentEpoch == "" {
+		return errors.New("rule enrollment changed")
+	}
+	if err := r.Context.Validate(); err != nil {
+		return err
+	}
+	if r.Policy != "allow_host" && r.Policy != "default" && r.Policy != "deny_host" {
+		return errors.New("invalid command rule policy")
+	}
+	if r.ID != ruleID(r.MachineID, r.EnrollmentEpoch, r.Context) {
+		return errors.New("command rule identity differs")
+	}
+	return nil
+}
+func (p *PermissionStore) SaveRule(owner string, r CommandRule, oldID string, revision uint64) error {
+	p.mu.Lock()
+	r.EnrollmentEpoch = p.state.Epochs[r.MachineID]
+	r.ID = ruleID(r.MachineID, r.EnrollmentEpoch, r.Context)
+	if err := p.validateRule(r); err != nil {
+		p.mu.Unlock()
+		return err
+	}
+	policy := p.state.Machines[r.MachineID]
+	if revision != policy.Revision {
+		p.mu.Unlock()
+		return errors.New("permission policy changed; reload settings")
+	}
+	next := p.copyLocked()
+	if oldID != "" {
+		old, ok := next.Rules[oldID]
+		if !ok || old.MachineID != r.MachineID {
+			p.mu.Unlock()
+			return errors.New("command rule no longer exists")
+		}
+		delete(next.Rules, oldID)
+	}
+	r.UpdatedBy = owner
+	r.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	next.Rules[r.ID] = r
+	policy.Revision++
+	next.Machines[r.MachineID] = policy
+	next.Applications[r.MachineID] = ApplyState{Revision: policy.Revision, State: "applying"}
+	if err := p.saveLocked(next); err != nil {
+		p.mu.Unlock()
+		return err
+	}
+	p.invalidateLocked(r.MachineID)
+	p.mu.Unlock()
+	return p.apply(r.MachineID, policy.Revision)
+}
+func (p *PermissionStore) DeleteRule(machine, id string, revision uint64) error {
+	p.mu.Lock()
+	r, ok := p.state.Rules[id]
+	policy := p.state.Machines[machine]
+	if !ok || r.MachineID != machine || policy.Revision != revision {
+		p.mu.Unlock()
+		return errors.New("command rule changed; reload settings")
+	}
+	next := p.copyLocked()
+	delete(next.Rules, id)
+	policy.Revision++
+	next.Machines[machine] = policy
+	next.Applications[machine] = ApplyState{Revision: policy.Revision, State: "applying"}
+	if err := p.saveLocked(next); err != nil {
+		p.mu.Unlock()
+		return err
+	}
+	p.invalidateLocked(machine)
+	p.mu.Unlock()
+	return p.apply(machine, policy.Revision)
+}
+func (p *PermissionStore) RemoveGrant(id string) error {
+	p.mu.Lock()
+	g, ok := p.grants[id]
+	p.mu.Unlock()
+	if !ok {
+		return errors.New("task grant no longer exists")
+	}
+	policy, _, err := p.Policy(g.MachineID)
+	if err != nil {
+		return err
+	}
+	return p.Configure(g.MachineID, policy)
+}
+func (p *PermissionStore) Snapshot() map[string]any {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	rules := []CommandRule{}
+	for _, r := range p.state.Rules {
+		rules = append(rules, r)
+	}
+	sort.Slice(rules, func(i, j int) bool { return rules[i].ID < rules[j].ID })
+	grants := []TaskGrant{}
+	for _, g := range p.grants {
+		grants = append(grants, g)
+	}
+	machines := map[string]MachinePolicy{}
+	for k, v := range p.state.Machines {
+		machines[k] = v
+	}
+	applied := map[string]ApplyState{}
+	for k, v := range p.applied {
+		applied[k] = v
+	}
+	return map[string]any{"machines": machines, "rules": rules, "task_grants": grants, "application": applied}
+}
 func (r HostRequest) validate() error {
-	if r.Owner == "" || r.Turn == "" || r.CallID == "" || !core.Identifier(r.MachineID) || r.EnrollmentEpoch == "" || r.Generation == 0 || r.Generation > core.MaxSafeInteger || r.Tool == "" || !json.Valid(r.Args) || len(r.Args) > 4*1024*1024 {
+	if r.Owner == "" || r.Turn == "" || r.CallID == "" || !core.Identifier(r.MachineID) || r.EnrollmentEpoch == "" || r.Generation == 0 || r.Tool == "" || !json.Valid(r.Args) {
 		return errors.New("invalid exact execution request")
+	}
+	if r.Command != nil {
+		return r.Command.Validate()
 	}
 	return nil
 }
 
-// Authorize returns persistent=true only for current configured execution access.
-// A temporary allow_once covers this exact operation; the dispatcher must still
-// inspect its receipt and executor-owned session before doing any work.
 var ErrHostDenied = errors.New("Execution operation denied")
 
-func (p *PermissionStore) Authorize(ctx context.Context, r HostRequest) (bool, error) {
+func (p *PermissionStore) Authorize(ctx context.Context, r HostRequest) (string, error) {
 	return p.authorize(ctx, r, nil)
 }
-
-func (p *PermissionStore) authorize(ctx context.Context, r HostRequest, pending func() error) (persistent bool, err error) {
+func (p *PermissionStore) authorize(ctx context.Context, r HostRequest, pending func() error) (string, error) {
 	r.Args = append(json.RawMessage(nil), r.Args...)
-	if err = r.validate(); err != nil {
-		return false, err
+	if err := r.validate(); err != nil {
+		return "", err
 	}
 	hash, err := core.HashJSON(r)
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	p.mu.Lock()
 	policy, ok := p.state.Machines[r.MachineID]
 	if !ok || p.state.Epochs[r.MachineID] != r.EnrollmentEpoch {
 		p.mu.Unlock()
-		return false, errors.New("machine enrollment changed")
-	}
-	// A later broad grant must not reverse an explicit denial of this exact call.
-	if previous := p.pending[hash]; previous != nil && previous.resolved && !previous.allow {
-		p.mu.Unlock()
-		return false, ErrHostDenied
+		return "", errors.New("machine enrollment changed")
 	}
 	review := r.Tool == "update_agent_instructions"
-	if !review {
-		switch policy.ExecutionAccess {
-		case "allow":
-			p.mu.Unlock()
-			return true, nil
-		case "deny":
-			p.mu.Unlock()
-			return false, ErrHostDenied
-		}
+	var stdin struct {
+		Chars string `json:"chars"`
 	}
-	// Output polling/cancellation does not create a new command, but the executor
-	// must bind the session to this owner/turn. Sending input requires persistence.
-	if r.Tool == "write_stdin" {
-		var args struct {
-			SessionID string `json:"session_id"`
-			Chars     string `json:"chars"`
-		}
-		if err = json.Unmarshal(r.Args, &args); err != nil {
-			p.mu.Unlock()
-			return false, err
-		}
-		if args.Chars == "" {
-			p.mu.Unlock()
-			return false, nil
-		}
+	_ = json.Unmarshal(r.Args, &stdin)
+	if r.Tool == "write_stdin" && stdin.Chars == "" {
 		p.mu.Unlock()
-		return false, errors.New("interactive Host input requires persistent execution access")
+		return "session", nil
 	}
-	if r.Tool == "exec_command" {
-		var args struct {
-			TTY bool `json:"tty"`
-		}
-		if err = json.Unmarshal(r.Args, &args); err != nil {
+	if _, denied := p.denied[denialID(r)]; denied {
+		p.mu.Unlock()
+		return "", ErrHostDenied
+	}
+	if previous := p.pending[hash]; previous != nil && previous.resolved && !previous.allow {
+		p.mu.Unlock()
+		return "", ErrHostDenied
+	}
+	if !review {
+		if policy.ExecutionAccess == "deny" {
 			p.mu.Unlock()
-			return false, err
+			return "", ErrHostDenied
 		}
-		if args.TTY {
+		if state, ok := p.applied[r.MachineID]; ok && state.State != "applied" {
 			p.mu.Unlock()
-			return false, errors.New("interactive Host terminal requires persistent execution access")
+			return "", fmt.Errorf("permission update %s: %s", state.State, state.Error)
+		}
+		if r.Tool == "write_stdin" {
+			p.mu.Unlock()
+			return "session", nil
+		}
+		rule := CommandRule{}
+		if r.Command != nil {
+			rule = p.state.Rules[ruleID(r.MachineID, r.EnrollmentEpoch, *r.Command)]
+		}
+		if rule.Policy == "deny_host" {
+			p.mu.Unlock()
+			if r.Host {
+				return "", ErrHostDenied
+			}
+			return "sandbox", nil
+		}
+		if policy.ExecutionAccess == "allow" || rule.Policy == "allow_host" {
+			p.mu.Unlock()
+			return "host", nil
+		}
+		if r.Command != nil {
+			if _, ok := p.grants[grantID(r)]; ok {
+				p.mu.Unlock()
+				return "host", nil
+			}
+		}
+		if !r.Host {
+			p.mu.Unlock()
+			return "sandbox", nil
+		}
+		if r.Command == nil {
+			p.mu.Unlock()
+			return "", errors.New("host exception requires an exact shell command; plugin host exceptions are not supported")
 		}
 	}
 	d := p.pending[hash]
@@ -257,49 +508,44 @@ func (p *PermissionStore) authorize(ctx context.Context, r HostRequest, pending 
 	p.mu.Unlock()
 	if pending != nil {
 		if err := pending(); err != nil {
-			return false, err
+			return "", err
 		}
 	}
 	select {
 	case <-ctx.Done():
-		return false, ctx.Err()
+		return "", ctx.Err()
 	case <-d.done:
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	current, exists := p.state.Machines[r.MachineID]
 	if d.invalid || !exists || p.state.Epochs[r.MachineID] != r.EnrollmentEpoch || !review && current.ExecutionAccess == "deny" {
-		return false, errors.New("execution authorization expired")
+		return "", errors.New("execution authorization expired")
 	}
 	if !d.allow {
-		return false, ErrHostDenied
+		return "", ErrHostDenied
 	}
-	if !review && current.ExecutionAccess == "allow" {
-		return true, nil
-	}
-	return false, nil
+	return "host", nil
 }
 func (p *PermissionStore) Pending(owner string) []Approval {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	result := []Approval{}
+	out := []Approval{}
 	for _, d := range p.pending {
 		if !d.resolved && !d.invalid && d.approval.Request.Owner == owner {
-			a := d.approval
-			a.Request.Args = append(json.RawMessage(nil), a.Request.Args...)
-			result = append(result, a)
+			out = append(out, d.approval)
 		}
 	}
-	return result
+	return out
 }
 func (p *PermissionStore) Decide(owner, id, action string) error {
-	if action != "allow_once" && action != "allow_always" && action != "deny" {
-		return errors.New("invalid execution approval action")
+	if action != "allow_once" && action != "allow_task" && action != "allow_always" && action != "deny" {
+		return errors.New("invalid approval action")
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	d := p.pending[id]
-	if d == nil || d.approval.Request.Owner != owner || d.invalid {
+	if d == nil || d.invalid || d.approval.Request.Owner != owner {
 		return errors.New("approval is unavailable for this owner")
 	}
 	if d.resolved {
@@ -308,37 +554,58 @@ func (p *PermissionStore) Decide(owner, id, action string) error {
 		}
 		return errors.New("approval already decided differently")
 	}
+	r := d.approval.Request
+	review := r.Tool == "update_agent_instructions"
+	if review && (action == "allow_task" || action == "allow_always") {
+		return errors.New("instruction changes require exact review")
+	}
+	if !review && action == "allow_once" {
+		return errors.New("command authorization requires task or permanent scope")
+	}
 	if action == "allow_always" {
-		if d.approval.Request.Tool == "update_agent_instructions" {
-			return errors.New("instruction changes require exact review")
-		}
-		r := d.approval.Request
-		if p.state.Epochs[r.MachineID] != r.EnrollmentEpoch {
-			return errors.New("machine enrollment changed")
+		if r.Command == nil {
+			return errors.New("command context required")
 		}
 		next := p.copyLocked()
-		next.Machines[r.MachineID] = MachinePolicy{ExecutionAccess: "allow"}
+		rule := CommandRule{ID: ruleID(r.MachineID, r.EnrollmentEpoch, *r.Command), MachineID: r.MachineID, EnrollmentEpoch: r.EnrollmentEpoch, Context: *r.Command, Policy: "allow_host", UpdatedBy: owner, UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
+		next.Rules[rule.ID] = rule
 		if err := p.saveLocked(next); err != nil {
 			return err
 		}
-		// Wake all exact requests on this machine to recheck the saved policy. Keep
-		// independent instruction reviews pending; policy never approves rule edits.
-		for _, pending := range p.pending {
-			if pending.approval.Request.MachineID == r.MachineID && pending.approval.Request.Tool != "update_agent_instructions" && !pending.resolved {
-				pending.action = "allow_always"
-				pending.allow = true
-				pending.resolved = true
-				close(pending.done)
-			}
-		}
-		return nil
 	}
-	allow := action == "allow_once"
-
+	if action == "allow_task" {
+		if r.Command == nil {
+			return errors.New("command context required")
+		}
+		key := grantID(r)
+		p.grants[key] = TaskGrant{ID: key, MachineID: r.MachineID, EnrollmentEpoch: r.EnrollmentEpoch, Owner: r.Owner, Task: r.Task, Turn: r.Turn, Generation: r.Generation, Context: *r.Command}
+	}
+	if action == "deny" {
+		p.denied[denialID(r)] = r
+	}
 	d.action = action
-	d.allow = allow
+	d.allow = action != "deny"
 	d.resolved = true
 	close(d.done)
+	if action == "allow_always" || action == "allow_task" {
+		for key, waiting := range p.pending {
+			q := waiting.approval.Request
+			if waiting.resolved || q.Command == nil || q.Tool != "exec_command" {
+				continue
+			}
+			same := ruleID(q.MachineID, q.EnrollmentEpoch, *q.Command) == ruleID(r.MachineID, r.EnrollmentEpoch, *r.Command)
+			if action == "allow_task" {
+				same = same && grantID(q) == grantID(r)
+			}
+			if same {
+				waiting.action = action
+				waiting.allow = true
+				waiting.resolved = true
+				close(waiting.done)
+				_ = key
+			}
+		}
+	}
 	p.Changes.Notify("permissions")
 	return nil
 }
@@ -356,5 +623,59 @@ func (p *PermissionStore) Expire(owner, turn string, generation uint64) {
 			delete(p.pending, id)
 		}
 	}
+	for id, r := range p.denied {
+		if r.Owner == owner && r.Turn == turn && r.Generation == generation {
+			delete(p.denied, id)
+		}
+	}
+	for id, g := range p.grants {
+		if g.Owner == owner && g.Turn == turn && g.Generation == generation {
+			delete(p.grants, id)
+		}
+	}
 	p.Changes.Notify("permissions")
+}
+
+// CheckRevision is the final local admission check after preparation. Policy
+// edits close existing Engines, so an already-preparing launch cannot slip in.
+func (p *PermissionStore) CheckRevision(machine, epoch string, revision uint64) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	v, ok := p.state.Machines[machine]
+	if !ok || p.state.Epochs[machine] != epoch || v.Revision != revision {
+		return errors.New("execution permission revision changed")
+	}
+	if state, ok := p.applied[machine]; ok && state.State != "applied" {
+		return errors.New("permission update is not yet applied")
+	}
+	return nil
+}
+
+// Admit holds policy serialization only across the actual process start.
+func (p *PermissionStore) Admit(machine string, revision uint64) (func(), error) {
+	p.mu.Lock()
+	v, ok := p.state.Machines[machine]
+	state := p.applied[machine]
+	if !ok || v.Revision != revision || v.ExecutionAccess == "deny" || state.State != "" && state.State != "applied" {
+		p.mu.Unlock()
+		return nil, errors.New("execution authority changed before process start")
+	}
+	return p.mu.Unlock, nil
+}
+
+func (p *PermissionStore) Retry(machine string, revision uint64) error {
+	p.mu.Lock()
+	policy, ok := p.state.Machines[machine]
+	if !ok || policy.Revision != revision {
+		p.mu.Unlock()
+		return errors.New("permission policy changed")
+	}
+	next := p.copyLocked()
+	next.Applications[machine] = ApplyState{Revision: revision, State: "applying"}
+	if err := p.saveLocked(next); err != nil {
+		p.mu.Unlock()
+		return err
+	}
+	p.mu.Unlock()
+	return p.apply(machine, revision)
 }
