@@ -20,8 +20,11 @@ func TestEmbeddedControlCannotChangeMembershipRole(t *testing.T) {
 	if s.ControlRole() != "embedded" || s.Machines.Membership() != nil {
 		t.Fatal("embedded role changed")
 	}
-	if _, err := s.ManageMembership(context.Background(), MembershipCommand{Action: "set_tags", RuntimeID: "local", Tags: []string{"desktop"}}); err != nil {
+	if _, err := s.ManageMembership(context.Background(), MembershipCommand{Action: "set_tags", RuntimeID: "local", Tags: []string{"desktop", "task-runner"}}); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := s.ManageMembership(context.Background(), MembershipCommand{Action: "set_tags", RuntimeID: "local", Tags: []string{"desktop"}}); err == nil {
+		t.Fatal("embedded Space lost its last task-runner")
 	}
 }
 
@@ -81,5 +84,50 @@ func TestConfiguredProviderOrAssistantCannotBecomeRunnerAndRunnerCannotSaveProvi
 	}
 	if _, err = runner.CreateAssistant(ctx, CreateAssistant{RequestID: "create", Name: "Assistant"}); err == nil {
 		t.Fatal("Runner acquired assistant")
+	}
+}
+
+func TestRemovingLastTaskRunnerPreservesMemberPermissions(t *testing.T) {
+	ctx := context.Background()
+	control := taskControl(t, "control", "")
+	worker := taskControl(t, "worker", "")
+	if err := control.Machines.EnableControl(); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(control.ControlServer(nil))
+	defer server.Close()
+	invitation, err := control.Machines.Invitation(ctx, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector := controlplane.Connector{Directory: worker.Machines}
+	if _, err = connector.Enroll(ctx, server.URL, control.Machines.Identity(), invitation.Code); err != nil {
+		t.Fatal(err)
+	}
+	if err = control.Permissions.Enroll("worker", "fixture-epoch"); err != nil {
+		t.Fatal(err)
+	}
+	for _, cmd := range []MembershipCommand{
+		{Action: "set_tags", RuntimeID: "worker", Tags: []string{"task-runner"}},
+		{Action: "set_tags", RuntimeID: "control", Tags: []string{"linux"}},
+	} {
+		if _, err = control.ManageMembership(ctx, cmd); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy, epoch, err := control.Permissions.Policy("worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = control.ManageMembership(ctx, MembershipCommand{Action: "remove_member", RuntimeID: "worker"}); err == nil {
+		t.Fatal("removed last task-runner through owner API")
+	}
+	after, afterEpoch, err := control.Permissions.Policy("worker")
+	if err != nil || after != policy || afterEpoch != epoch {
+		t.Fatal("rejected removal changed permissions", after, afterEpoch, err)
+	}
+	machine, err := control.selectTaskMachine(ctx, "")
+	if err != nil || machine != "worker" {
+		t.Fatal("rejected removal changed default task routing", machine, err)
 	}
 }

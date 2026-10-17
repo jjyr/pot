@@ -84,10 +84,10 @@ func (s *Service) ManageMembership(ctx context.Context, r MembershipCommand) (an
 		if r.RuntimeID == s.options.RuntimeID {
 			return nil, errors.New("cannot remove local Runtime")
 		}
-		if err := s.Permissions.Remove(r.RuntimeID); err != nil {
+		if err := s.Machines.Remove(ctx, r.RuntimeID); err != nil {
 			return nil, err
 		}
-		if err := s.Machines.Remove(ctx, r.RuntimeID); err != nil {
+		if err := s.Permissions.Remove(r.RuntimeID); err != nil {
 			return nil, err
 		}
 		s.Changes.Notify("machines")

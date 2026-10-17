@@ -344,9 +344,14 @@ previous messages, system task reports, existing tasks and scheduled occurrences
 never inherit new selections. Selected Skills are persisted with the new task.
 Global/project Skill discovery and project AGENTS.md still use the existing rules.
 
-Control initializes its labels to `task-runner`, `desktop` and its OS. Newly joined
-machines receive only their declared OS label. Control owns all label edits;
-heartbeats, repeated enrollment and restarts do not restore removed labels.
+Local Controls, including the embedded App, initialize with `task-runner`, `local`
+and their OS. Newly joined machines receive `runner` and their declared OS label.
+Each Space must retain at least one enabled machine labelled `task-runner`;
+label edits and member removal cannot remove the last one. Offline members count
+toward this configuration constraint, without guaranteeing execution availability.
+Control owns all label edits; heartbeats, repeated enrollment and restarts do not
+restore removed labels while another enabled machine retains `task-runner`.
+Opening a Space with no configured task runner adds the local `task-runner` default.
 Labels use lowercase ASCII letters, digits, hyphens and underscores.
 
 ## Recovering a stopped Main turn
