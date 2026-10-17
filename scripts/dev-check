@@ -72,7 +72,7 @@ def sources(args):
         if not path.is_file() or path.is_symlink():
             continue
         kind = {".go": "go", ".swift": "swift", ".py": "python", ".sh": "shell"}.get(path.suffix)
-        if not kind and path.parts[0] in {"scripts", "providers"}:
+        if not kind and path.parts[0] in {"scripts", "plugins"}:
             first = path.read_bytes().split(b"\n", 1)[0]
             if first.startswith(b"#!") and b"python" in first:
                 kind = "python"

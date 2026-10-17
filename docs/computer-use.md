@@ -25,7 +25,7 @@ Use owner-only `pot config get/set agent` (`GET/POST /api/v1/agent`). The defaul
 {"computer-use": {"enabled": true}}
 ```
 
-Set `enabled:false` to disable it, or `plugins:{}` to disable all plugins. If `allowed_tools` is configured, include `cua_repl`. `builtin_tools` controls core execution and composition tools. Saving older settings removes the `browser` builtin and migrates its allowed-tool entry to `cua_repl`; re-save/rebind old profiles to pin the plugin.
+Set `enabled:false` to disable it, or `plugins:{}` to disable all tool capabilities. If `allowed_tools` is configured, include `cua_repl`. `builtin_tools` controls core execution and composition tools. Saving older settings removes the `browser` builtin and migrates its allowed-tool entry to `cua_repl`; re-save/rebind old profiles to pin the plugin.
 
 Import or replace a trusted package from an absolute Host directory:
 
@@ -89,7 +89,7 @@ private files. Browser actions are never retried as part of shutdown.
 
 ## Plugin contract and lifecycle
 
-Packages own their instructions, tool schemas and implementation. See the [bundled manifest](../plugins/computer-use/plugin.json). Version 1 requires `runtime:"node"`, `execution:"host_or_sandbox"` (Host and Sandbox) or `"sandbox"` (Sandbox only), confined package paths, unique tool names, and flat scalar input schemas. Bundles are limited to 32 files / 512 KiB. Plugins export `createPlugin({mode,execution_target,emit})` with `execute({tool,input})` and `dispose()`.
+Packages own their instructions, tool schemas and implementation. See the [bundled manifest](../plugins/computer-use/plugin.json). The common schema-2 manifest declares `contributes.tools`, which requires `runtime:"node"`, `execution:"host_or_sandbox"` (Host and Sandbox) or `"sandbox"` (Sandbox only), confined package paths, unique tool names, and flat scalar input schemas. Only the tool declaration and files enter transferable snapshots; Provider and resource capabilities stay local. Tool bundles are limited to 32 files / 512 KiB. Tool implementations export `createPlugin({mode,execution_target,emit})` with `execute({tool,input})` and `dispose()`.
 
 Control execution target adapters resolve the target, check permission, and send the pinned bundle and model-derived mode to the execution backend. Sessions are bound to Agent and epoch; Sandbox sessions also bind to boot generation. Bundle digest, execution target and observation mode stay fixed. Existing pinned Sandbox-only bundles must be re-imported/rebound to enable Host execution.
 

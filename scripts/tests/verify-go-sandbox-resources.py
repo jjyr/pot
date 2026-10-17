@@ -13,7 +13,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 loader = importlib.machinery.SourceFileLoader(
-    "verify_resources", str(ROOT / "providers/podman/verify-resources")
+    "verify_resources", str(ROOT / "plugins/podman/verify-resources")
 )
 spec = importlib.util.spec_from_loader(loader.name, loader)
 verifier = importlib.util.module_from_spec(spec)

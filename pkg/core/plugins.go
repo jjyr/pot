@@ -14,11 +14,14 @@ import (
 // ValidateInput applies the deliberately small scalar-schema plugin contract.
 // It rejects undeclared fields before the retained Node host is invoked.
 func (b PluginBundle) ValidateInput(name string, input map[string]any) error {
+	if b.Manifest.Contributes.Tools == nil {
+		return fmt.Errorf("plugin provides no tool capability")
+	}
 	if input == nil {
 		return fmt.Errorf("plugin input must be an object")
 	}
 	var schema map[string]any
-	for _, raw := range b.Manifest.Tools {
+	for _, raw := range b.Manifest.Contributes.Tools.Tools {
 		var tool map[string]any
 		if err := DecodeJSON(raw, &tool); err != nil {
 			return err
@@ -128,16 +131,37 @@ func pluginNumber(value any) (float64, bool) {
 	return n, !math.IsNaN(n) && !math.IsInf(n, 0)
 }
 
+// PluginManifest describes an installed package. Capabilities have independent
+// execution contracts; package discovery never grants permission to run them.
 type PluginManifest struct {
-	SchemaVersion uint32            `json:"schema_version"`
-	ID            string            `json:"id"`
-	Version       string            `json:"version"`
-	Runtime       string            `json:"runtime"`
-	Execution     string            `json:"execution"`
-	Entrypoint    string            `json:"entrypoint"`
-	Files         []string          `json:"files"`
-	Requirements  []string          `json:"requirements"`
-	Tools         []json.RawMessage `json:"tools"`
+	SchemaVersion uint32              `json:"schema_version"`
+	ID            string              `json:"id"`
+	Version       string              `json:"version"`
+	Contributes   PluginContributions `json:"contributes"`
+}
+type PluginContributions struct {
+	Tools            *PluginTools            `json:"tools,omitempty"`
+	SandboxProviders []PluginSandboxProvider `json:"sandbox_providers,omitempty"`
+	Resources        []PluginResourceCatalog `json:"resources,omitempty"`
+}
+type PluginTools struct {
+	Runtime      string            `json:"runtime"`
+	Execution    string            `json:"execution"`
+	Entrypoint   string            `json:"entrypoint"`
+	Files        []string          `json:"files"`
+	Requirements []string          `json:"requirements"`
+	Tools        []json.RawMessage `json:"tools"`
+}
+type PluginSandboxProvider struct {
+	ID            string   `json:"id"`
+	HostOS        []string `json:"host_os"`
+	Executable    string   `json:"executable"`
+	Args          []string `json:"args,omitempty"`
+	DefaultShared bool     `json:"default_shared"`
+}
+type PluginResourceCatalog struct {
+	Provider string `json:"provider"`
+	Catalog  string `json:"catalog"`
 }
 type PluginBundle struct {
 	Manifest PluginManifest    `json:"manifest"`
@@ -190,9 +214,10 @@ func PluginToolName(name string) bool {
 	}
 	return !slices.Contains([]string{"exec_command", "write_stdin", "apply_patch", "plugin_call", "browser", "exec", "wait", "read_agent_instructions", "update_agent_instructions", "create_task", "list_tasks", "get_task", "guide_task", "interrupt", "cancel_task", "send_message", "wait_task", "list_assistants", "send_assistant_message", "list_schedules", "get_schedule", "manage_schedule", "list_execution_targets"}, name)
 }
-func (b PluginBundle) Validate() error {
-	m := b.Manifest
-	if m.SchemaVersion != 1 || m.Runtime != "node" || !slices.Contains([]string{"sandbox", "host_or_sandbox"}, m.Execution) || m.ID == "" || len(m.ID) > 64 || m.Version == "" || len(m.Version) > 64 {
+
+// Validate checks the common package format and each declared capability.
+func (m PluginManifest) Validate() error {
+	if m.SchemaVersion != 2 || m.ID == "" || len(m.ID) > 64 || m.Version == "" || len(m.Version) > 64 {
 		return fmt.Errorf("invalid plugin contract")
 	}
 	for _, c := range m.ID {
@@ -200,21 +225,59 @@ func (b PluginBundle) Validate() error {
 			return fmt.Errorf("invalid plugin ID")
 		}
 	}
-	if len(m.Files) > 32 || len(m.Files) != len(b.Files) || !slices.Contains(m.Files, m.Entrypoint) {
-		return fmt.Errorf("plugin file set mismatch")
+	c := m.Contributes
+	if c.Tools == nil && len(c.SandboxProviders) == 0 && len(c.Resources) == 0 {
+		return fmt.Errorf("plugin declares no capabilities")
 	}
 	seen := map[string]bool{}
-	size := 0
-	for _, p := range m.Files {
-		data, exists := b.Files[p]
-		if !exists || seen[p] || !SafeRelativePath(p) {
-			return fmt.Errorf("invalid plugin file")
+	for _, p := range c.SandboxProviders {
+		if !Identifier(p.ID) || seen[p.ID] || len(p.HostOS) == 0 || len(p.Args) > 16 || !SafeRelativePath(p.Executable) {
+			return fmt.Errorf("invalid Sandbox Provider capability")
 		}
-		seen[p] = true
+		seen[p.ID] = true
+		hosts := map[string]bool{}
+		for _, host := range p.HostOS {
+			if (host != "darwin" && host != "linux") || hosts[host] {
+				return fmt.Errorf("invalid provider host OS")
+			}
+			hosts[host] = true
+		}
+	}
+	for _, resource := range c.Resources {
+		if !Identifier(resource.Provider) || !SafeRelativePath(resource.Catalog) {
+			return fmt.Errorf("invalid plugin resource catalog")
+		}
+	}
+	if c.Tools != nil {
+		return validatePluginTools(*c.Tools)
+	}
+	return nil
+}
+
+// Validate accepts only a tool capability snapshot. Native providers and resource
+// catalogs are local installation capabilities and must never cross Task sync.
+func (b PluginBundle) Validate() error {
+	m := b.Manifest
+	if err := m.Validate(); err != nil {
+		return err
+	}
+	if m.Contributes.Tools == nil || len(m.Contributes.SandboxProviders) != 0 || len(m.Contributes.Resources) != 0 {
+		return fmt.Errorf("execution bundle must contain only tool capability")
+	}
+	tools := m.Contributes.Tools
+	if len(tools.Files) != len(b.Files) {
+		return fmt.Errorf("plugin file set mismatch")
+	}
+	size := 0
+	for _, name := range tools.Files {
+		data, ok := b.Files[name]
+		if !ok {
+			return fmt.Errorf("plugin file set mismatch")
+		}
 		size += len(data)
 	}
 	if size > 512*1024 {
-		return fmt.Errorf("plugin package too large")
+		return fmt.Errorf("plugin tool bundle too large")
 	}
 	hash, err := b.Hash()
 	if err != nil {
@@ -223,11 +286,27 @@ func (b PluginBundle) Validate() error {
 	if hash != b.Digest {
 		return fmt.Errorf("plugin digest mismatch")
 	}
-	if len(m.Tools) == 0 || len(m.Tools) > 16 {
+	return nil
+}
+func validatePluginTools(tools PluginTools) error {
+	if tools.Runtime != "node" || !slices.Contains([]string{"sandbox", "host_or_sandbox"}, tools.Execution) {
+		return fmt.Errorf("invalid tool runtime or execution target")
+	}
+	if len(tools.Files) == 0 || len(tools.Files) > 32 || !slices.Contains(tools.Files, tools.Entrypoint) {
+		return fmt.Errorf("invalid plugin tool files")
+	}
+	seen := map[string]bool{}
+	for _, name := range tools.Files {
+		if !SafeRelativePath(name) || seen[name] {
+			return fmt.Errorf("invalid plugin tool path")
+		}
+		seen[name] = true
+	}
+	if len(tools.Tools) == 0 || len(tools.Tools) > 16 {
 		return fmt.Errorf("invalid plugin tool count")
 	}
 	names := map[string]bool{}
-	for _, data := range m.Tools {
+	for _, data := range tools.Tools {
 		var tool struct {
 			Name        string `json:"name" required:"true"`
 			Description string `json:"description" required:"true"`

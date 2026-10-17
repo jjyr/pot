@@ -41,7 +41,7 @@ Both modes use the same CLI:
 
 Go hosts the product logic. The macOS App uses Wails v3 and the system WebView;
 main window, tray and the independent browser service share HTML/CSS/JavaScript.
-Sandbox backends and their image catalogs belong to [Provider plugins](docs/provider-plugins.md).
+Tools, Sandbox backends and image catalogs use [Plugin packages](docs/plugins.md), with separate capability contracts.
 Swift provides native macOS VM support; Node plugins and Python guest services
 run in their own runtimes. See [Deployment](docs/deployment.md) for resource
 setup, private data roots and browser publication.

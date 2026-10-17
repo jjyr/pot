@@ -43,7 +43,7 @@ production browser authentication, provider transport or Sandbox isolation.
 | `mise run build` | Complete Wails macOS bundle and signed native macOS VM Swift Helper |
 | `mise run build:web-ui` | Embedded shared HTML/CSS/JS frontend |
 | `mise run build:web` | Localized retained viewer/Sandbox pages |
-| `mise run build:providers` | Independent installed Provider packages under `.local/go/runtime-resources/providers` |
+| `mise run build:plugins` | Unified tool and Provider packages under `.local/go/runtime-resources/plugins` |
 | `mise run build:sandbox-image` | Podman Linux OCI image, independent of App packaging |
 | `mise run export:sandbox-resources` | Deterministic export validation against the Podman plugin catalog |
 | `mise run release -- VERSION` | Local release archive/checksum/cask; publishing is separate |
@@ -55,7 +55,7 @@ builds a Sandbox image implicitly nor replaces an existing running service.
 Image build architectures, explicit macOS connections and reviewed resource export
 commands are documented below in [Sandbox image resources](#sandbox-image-resources).
 
-The native macOS VM Helper builds through `providers/apple-vm/helper/Package.swift` and retains
+The native macOS VM Helper builds through `plugins/apple-vm/helper/Package.swift` and retains
 Virtualization.framework ownership. Linux containers use the Go Podman provider
 on both hosts. JavaScript plugins and Node remain their own runtime; Python guest broker,
 browser and desktop support remain Python. Go hosts product logic; tool
@@ -73,30 +73,31 @@ Standalone startup and browser serving use [Deployment](deployment.md). CLI and
 App default to the new Go root, not previous product data. Use explicit private
 temporary roots for integration checks; never run two hosts against one root.
 
-## Provider packages
+## Plugin packages
 
-`mise run build:providers` builds complete installed packages independently of
+`mise run build:plugins` builds complete installed packages independently of
 the App and guest images. `mise run prepare`, App and CLI packaging include the
 same packages automatically. For a Linux package or cross-build:
 
 ```sh
-mise exec -- python scripts/build-go-providers --platform linux-amd64 \
-  --output /absolute/provider-packages
+mise exec -- python scripts/build-go-plugins --platform linux-amd64 \
+  --output /absolute/plugin-packages
 ```
 
 Install each complete package directory under the selected Runtime resource
-root's `providers/` directory while Runtime is stopped. Native macOS packages
+root's `plugins/` directory while Runtime is stopped. Native macOS packages
 require macOS/Xcode because their plugin owns a signed Swift Helper. See
-[Provider plugins](provider-plugins.md) for the package and RPC contracts.
+[Plugin packages](plugins.md) for the package format and
+[Sandbox capability protocol](sandbox-provider-protocol.md) for Provider RPC.
 
 ## Sandbox image resources
 
 Install pinned tools and a working Podman builder. `build:sandbox-image` invokes
-`providers/podman/build-image`. macOS requires an explicitly prepared
+`plugins/podman/build-image`. macOS requires an explicitly prepared
 build connection; the script never starts/selects a default machine:
 
 ```sh
-mise exec -- python providers/podman/build-image --arch arm64 --connection BUILD_CONNECTION
+mise exec -- python plugins/podman/build-image --arch arm64 --connection BUILD_CONNECTION
 ```
 
 On native Linux, omit `--connection` and select `--arch amd64` or `arm64`.
@@ -107,7 +108,7 @@ by `--prepared-context DIRECTORY --arch ARCH --output DIRECTORY` on the builder.
 Export the reviewed OCI layout and update that architecture's catalog explicitly:
 
 ```sh
-mise exec -- python providers/podman/export-resources \
+mise exec -- python plugins/podman/export-resources \
   --source .local/go/images/linux-arm64 --arch arm64 \
   --tag sandbox-go-resources-v0.3.0 --update-catalog
 ```
@@ -124,7 +125,7 @@ absolute reviewed export directory as `prepared_assets` and its committed tag.
 It never rebuilds or changes the catalog. Local staging uses the same verifier:
 
 ```sh
-mise exec -- python providers/podman/verify-resources \
+mise exec -- python plugins/podman/verify-resources \
   --source ABSOLUTE_EXPORT_DIRECTORY --output ABSOLUTE_FRESH_DIRECTORY \
   --tag sandbox-go-resources-v0.3.0
 ```
@@ -188,10 +189,10 @@ separate portable, macOS and resource/release responsibilities.
 | `cmd/pot`, `cmd/pot-app`, `cmd/pot-tool-executor`, `cmd/pot-eval` | Product entry points |
 | `internal/` | Independently testable Go components; see [boundaries](backend-components.md) |
 | `web/` | Shared product HTML/CSS/JS and embedded assets |
-| `providers/` | Provider entry points, manifests, image recipes, guest services and native VM Helper |
+| `plugins/` | Common manifests, Node tool implementations, Provider entry points, image recipes and native VM Helper |
 | `resources/app/` | Native brand assets, vector master and locales |
 | `resources/models-dev/`, `resources/model-directory.json` | Public model metadata/notices |
-| `plugins/`, `skills/` | Existing JavaScript plugin and Skill bundles |
+| `skills/` | Skill bundles |
 | `desktop/` | Retained desktop viewer resources |
 | `eval/` | Scenarios, experiment scripts and Eval CLI documentation |
 | `scripts/` | Build, release, checks and operational tooling |
@@ -207,7 +208,7 @@ platform adapters supply native dialogs, window operations and browser sessions.
 See [shared UI](shared-ui.md) and [design language](design-language.md).
 
 `scripts/localize-web` builds retained desktop/Sandbox HTML. Update source
-templates under `desktop/` and `providers/podman/image/`, and translations under
+templates under `desktop/` and `plugins/podman/image/`, and translations under
 `resources/app/locales/`; generated viewer output is not the product UI source.
 `scripts/make-icons.swift` uses `resources/app/PotIcon.swift` as the vector master.
 Dependency notices are generated by `scripts/go-notices` and retained runtime

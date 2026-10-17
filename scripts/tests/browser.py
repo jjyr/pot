@@ -31,7 +31,7 @@ class Page(BaseHTTPRequestHandler):
 
 def package(root):
     manifest = json.loads((root / "plugin.json").read_text())
-    files = {name: (root / name).read_text() for name in manifest["files"]}
+    files = {name: (root / name).read_text() for name in manifest["contributes"]["tools"]["files"]}
     encoded = json.dumps(
         [manifest, files], sort_keys=True, separators=(",", ":"), ensure_ascii=False
     )

@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
 
-SOURCE = Path(__file__).resolve().parents[2] / "providers/podman/image/executor.py"
+SOURCE = Path(__file__).resolve().parents[2] / "plugins/podman/image/executor.py"
 
 
 class DevelopmentEnvironmentTests(unittest.TestCase):

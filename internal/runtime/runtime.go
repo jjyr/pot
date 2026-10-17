@@ -22,15 +22,14 @@ import (
 )
 
 type Options struct {
-	Root                     string
-	ResourceDirectory        string
-	SandboxProviders         []sandbox.Provider
-	SandboxProviderDirectory string
-	DefaultSandboxProvider   string
-	SandboxCatalog           *sandboxresources.Catalog
-	Control                  control.Options
-	Limits                   *execution.Limits
-	DisableMetadataRefresh   bool
+	Root                   string
+	ResourceDirectory      string
+	SandboxProviders       []sandbox.Provider
+	DefaultSandboxProvider string
+	SandboxCatalog         *sandboxresources.Catalog
+	Control                control.Options
+	Limits                 *execution.Limits
+	DisableMetadataRefresh bool
 }
 type Runtime struct {
 	Root            *instance.Root

@@ -17,7 +17,7 @@ import (
 )
 
 func TestResourceOwnerAPIRequiresAuthenticationAndExplicitAction(t *testing.T) {
-	data, err := os.ReadFile("../../providers/podman/catalog.json")
+	data, err := os.ReadFile("../../plugins/podman/catalog.json")
 	if err != nil {
 		t.Fatal(err)
 	}

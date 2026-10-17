@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-SOURCE = Path(__file__).resolve().parents[2] / "providers/podman/image/operation_prepare.py"
+SOURCE = Path(__file__).resolve().parents[2] / "plugins/podman/image/operation_prepare.py"
 spec = importlib.util.spec_from_file_location("operation_prepare", SOURCE)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)

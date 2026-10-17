@@ -36,7 +36,7 @@ must match English keys and placeholders.
 
 `scripts/localize-web` validates these catalogs and builds
 `desktop/index.template.html` and
-`providers/podman/image/index.template.html` into generated `index.html`,
+`plugins/podman/image/index.template.html` into generated `index.html`,
 `i18n.js` and page-specific `locales.json`. Generated files live under
 `.local/web/{desktop,sandbox}`. `--check` validates without writing. App and guest
 image preparation copy the generated assets; rebuild the image to distribute

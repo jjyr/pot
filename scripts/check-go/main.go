@@ -19,7 +19,7 @@ func main() {
 }
 
 func check() error {
-	format := exec.Command("gofmt", "-l", "cmd", "pkg", "internal", "providers", "web", "scripts/check-go", "scripts/tests/testdata/go-public-api")
+	format := exec.Command("gofmt", "-l", "cmd", "pkg", "internal", "plugins", "web", "scripts/check-go", "scripts/tests/testdata/go-public-api")
 	output, err := format.Output()
 	if err != nil {
 		return err
@@ -27,7 +27,7 @@ func check() error {
 	if len(output) != 0 {
 		return fmt.Errorf("run gofmt on:\n%s", output)
 	}
-	list := exec.Command("go", "list", "-mod=readonly", "-json", "./cmd/...", "./pkg/...", "./internal/...", "./resources/...", "./providers/...", "./web")
+	list := exec.Command("go", "list", "-mod=readonly", "-json", "./cmd/...", "./pkg/...", "./internal/...", "./resources/...", "./plugins/...", "./web")
 	output, err = list.Output()
 	if err != nil {
 		return fmt.Errorf("list packages: %w", err)
@@ -61,9 +61,9 @@ func check() error {
 				}
 			}
 		}
-		if !strings.HasPrefix(pkg.ImportPath, "github.com/jjyr/pot/providers/") {
+		if !strings.HasPrefix(pkg.ImportPath, "github.com/jjyr/pot/plugins/") {
 			for _, dep := range pkg.Deps {
-				if strings.HasPrefix(dep, "github.com/jjyr/pot/providers/") {
+				if strings.HasPrefix(dep, "github.com/jjyr/pot/plugins/") {
 					return fmt.Errorf("core package %s links provider implementation %s", pkg.ImportPath, dep)
 				}
 			}

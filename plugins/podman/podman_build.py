@@ -45,7 +45,7 @@ GUEST_WEB_ASSETS = ("index.html", "i18n.js", "locales.json")
 
 
 def guest_image_config():
-    path = ROOT / "providers/podman/image/base-image.json"
+    path = ROOT / "plugins/podman/image/base-image.json"
     config = json.loads(path.read_text())
     expected = {"schema_version", "distribution", "suite", "base_image", "snapshot"}
     if (
@@ -61,7 +61,7 @@ def guest_image_config():
 
 
 def guest_desktop_assets():
-    manifest = json.loads((ROOT / "providers/podman/image/desktop-assets.json").read_text())
+    manifest = json.loads((ROOT / "plugins/podman/image/desktop-assets.json").read_text())
     if set(manifest) != {"schema_version", "assets"} or manifest["schema_version"] != 1:
         raise ValueError("Pinned desktop asset manifest required")
     names = set()
@@ -104,7 +104,7 @@ def prepare_guest_assets(assets, arch):
     if assets.exists() and (not assets.is_dir() or any(assets.iterdir())):
         raise ValueError("Guest assets directory must be fresh or empty")
     config = guest_image_config()
-    recipe = ROOT / "providers/podman/image"
+    recipe = ROOT / "plugins/podman/image"
     for name in GUEST_RECIPE_ASSETS:
         if not (recipe / name).is_file():
             raise ValueError(f"Missing guest asset: {name}")
@@ -266,7 +266,7 @@ def prepare_guest_context(context, architecture):
         staged = Path(temporary) / "context"
         staged.mkdir()
         manifest = prepare_guest_assets(staged / "assets", architecture)
-        shutil.copy2(ROOT / "providers/podman/image/Dockerfile", staged / "Dockerfile")
+        shutil.copy2(ROOT / "plugins/podman/image/Dockerfile", staged / "Dockerfile")
         manifest["source_hash"] = context_fingerprint(staged)
         (staged / "build-inputs.json").write_text(json.dumps(manifest, indent=2) + "\n")
         if context.exists():

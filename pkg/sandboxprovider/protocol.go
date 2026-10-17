@@ -1,6 +1,6 @@
-// Package providerplugin hosts trusted, independently packaged Sandbox Providers.
-// Plugins run on the host; tool plugins remain a separate execution mechanism.
-package providerplugin
+// Package sandboxprovider implements the Sandbox capability process contract.
+// Common Plugin packages own installation; this package owns only Provider RPC.
+package sandboxprovider
 
 import (
 	"encoding/json"

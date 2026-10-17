@@ -151,7 +151,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--output", type=Path, default=BUILD / "releases/resources")
     parser.add_argument("--tag", default="sandbox-go-resources-v0.3.0")
-    parser.add_argument("--catalog", type=Path, default=ROOT / "providers/podman/catalog.json")
+    parser.add_argument("--catalog", type=Path, default=ROOT / "plugins/podman/catalog.json")
     parser.add_argument("--update-catalog", action="store_true")
     args = parser.parse_args()
     if not args.arch:

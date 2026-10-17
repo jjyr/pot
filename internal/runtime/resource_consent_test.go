@@ -77,12 +77,12 @@ func TestPluginSandboxStartWaitsForConsentBeforeAnyEngineStart(t *testing.T) {
 func providerResources(t *testing.T) string {
 	t.Helper()
 	resources := t.TempDir()
-	directory := filepath.Join(resources, "providers", "podman")
+	directory := filepath.Join(resources, "plugins", "podman")
 	if err := os.MkdirAll(filepath.Join(directory, "bin"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"provider.json", "catalog.json"} {
-		data, err := os.ReadFile(filepath.Join("../../providers/podman", name))
+	for _, name := range []string{"plugin.json", "catalog.json"} {
+		data, err := os.ReadFile(filepath.Join("../../plugins/podman", name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -90,7 +90,7 @@ func providerResources(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	build := exec.Command("go", "build", "-o", filepath.Join(directory, "bin/provider"), "../../providers/podman/cmd")
+	build := exec.Command("go", "build", "-o", filepath.Join(directory, "bin/provider"), "../../plugins/podman/cmd")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("provider build: %s %v", output, err)
 	}

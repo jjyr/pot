@@ -11,10 +11,11 @@ import (
 	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/executor"
-	"github.com/jjyr/pot/pkg/providerplugin"
+	"github.com/jjyr/pot/pkg/plugin"
 	"github.com/jjyr/pot/pkg/resource"
 	"github.com/jjyr/pot/pkg/resourcecontrol"
 	"github.com/jjyr/pot/pkg/sandbox"
+	"github.com/jjyr/pot/pkg/sandboxprovider"
 	"github.com/jjyr/pot/pkg/sandboxresources"
 )
 
@@ -57,11 +58,11 @@ func (r *Runtime) openSandboxes(ctx context.Context, options Options, config *co
 	catalog := sandboxresources.Empty()
 	defaultProvider := options.DefaultSandboxProvider
 	if providers == nil {
-		directory := options.SandboxProviderDirectory
-		if directory == "" {
-			directory = filepath.Join(resources, "providers")
+		packages, err := plugin.Discover(config.PluginRoot)
+		if err != nil {
+			return err
 		}
-		registry, err := providerplugin.Discover(ctx, directory, providerplugin.Config{Root: executionRoot, UserSkills: filepath.Join(config.AgentHome, "skills"), BuiltinSkills: config.BuiltinSkills})
+		registry, err := sandboxprovider.Load(ctx, packages, sandboxprovider.Config{Root: executionRoot, UserSkills: filepath.Join(config.AgentHome, "skills"), BuiltinSkills: config.BuiltinSkills})
 		if err != nil {
 			return err
 		}

@@ -99,7 +99,7 @@ if __name__ == "__main__":
         "--output", type=Path, required=True, help="Fresh absolute staging directory"
     )
     parser.add_argument("--tag", required=True)
-    parser.add_argument("--catalog", type=Path, default=ROOT / "providers/podman/catalog.json")
+    parser.add_argument("--catalog", type=Path, default=ROOT / "plugins/podman/catalog.json")
     arguments = parser.parse_args()
     print(
         json.dumps(

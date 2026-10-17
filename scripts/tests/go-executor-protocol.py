@@ -39,8 +39,8 @@ POLICY = dict(
 )
 
 for source in [
-    ROOT / "providers/podman/image/executor.py",
-    ROOT / "providers/apple-vm/bootstrap/executor.py",
+    ROOT / "plugins/podman/image/executor.py",
+    ROOT / "plugins/apple-vm/bootstrap/executor.py",
 ]:
     parsed = ast.parse(source.read_text())
     selected = [

@@ -140,13 +140,18 @@ and the last real user message before continuing. Provider cache lifetime does
 not reset section comparison. Raw HTTP/token observations, estimates and budget
 reservations remain distinct.
 
-Sandbox Providers are trusted, independently installed host processes. Runtime
-loads their manifests and resource catalogs, then uses versioned private RPC.
-Image recipes, defaults, guest bootstrap and native VM Helpers belong to provider
-packages. Core owns policy, consent, verified delivery and durable execution
-state; it does not link platform provider implementations. Node tool plugins
-remain inside the selected execution environment. See
-[Provider plugins](provider-plugins.md) for the extension contract.
+Plugins use one package format and capability registry. Packages declare tools,
+Sandbox Providers and resource catalogs independently. `pkg/plugin` loads manifests
+and confines package paths without starting processes. Profile/Task selection
+projects only tool declarations and files; Runtime separately activates locally
+installed Provider capabilities. See [Plugin packages](plugins.md).
+
+Sandbox Providers are trusted host processes using the Sandbox-specific private
+RPC in `pkg/sandboxprovider`. Node tool sessions retain their existing protocol in
+`pkg/pluginhost`; no common communication protocol is imposed. Image recipes,
+defaults, guest bootstrap and native VM Helpers belong to the packages. Core owns
+policy, consent, verified delivery and durable execution state, without linking
+platform implementations. See [Provider protocol](sandbox-provider-protocol.md).
 
 Sandbox definitions, selected Sandbox, VM/container lifecycle and execution scopes
 are separate. Creating/selecting a definition does not boot a guest. Main and
