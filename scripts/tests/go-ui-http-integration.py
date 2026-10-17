@@ -224,7 +224,6 @@ def run(binary, base, env, cli_command):
                     "endpoint": f"http://127.0.0.1:{model.server_port}",
                     "protocol": "openai_chat",
                     "api_key": "isolated-key",
-                    "agent": {"plugins": {}, "builtin_tools": [], "auto_compact": False},
                     "max_output_tokens": 1024,
                 },
             )

@@ -47,10 +47,8 @@ func TestConfiguredProviderOrAssistantCannotBecomeRunnerAndRunnerCannotSaveProvi
 		_, err = connector.Enroll(ctx, server.URL, preview, invitation.Code, "join-"+s.options.RuntimeID)
 		return err
 	}
-	settings := core.DefaultAgentSettings()
-	settings.Plugins = map[string]core.PluginConfig{}
 	save := func(s *Service) (core.Profile, error) {
-		return s.Profiles.Save(ctx, SaveProfile{RequestID: "provider", ProfileID: "fixture", Name: "Fixture", Model: "model", Endpoint: "https://example.test", Protocol: "openai_chat", APIKey: "fixture", Agent: &settings, MaxOutputTokens: 100})
+		return s.Profiles.Save(ctx, SaveProfile{RequestID: "provider", ProfileID: "fixture", Name: "Fixture", Model: "model", Endpoint: "https://example.test", Protocol: "openai_chat", APIKey: "fixture", MaxOutputTokens: 100})
 	}
 	configured := taskControl(t, "configured", "")
 	profile, err := save(configured)

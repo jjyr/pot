@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"github.com/jjyr/pot/internal/controlplane"
 	"github.com/jjyr/pot/internal/secrets"
-	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/protocol"
 	"io"
@@ -34,11 +33,7 @@ func taskControl(t *testing.T, id, url string) *Service {
 		}
 		ctx := context.Background()
 		s.Registry.Create(ctx, "create", "Pot")
-		settings := core.DefaultAgentSettings()
-		settings.Plugins = map[string]core.PluginConfig{}
-		settings.BuiltinTools = []string{"exec_command"}
-		settings.AutoCompact = false
-		profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "test", Name: "Test", Model: "model", Endpoint: url, Protocol: "openai_chat", APIKey: "owner-key", Agent: &settings, MaxOutputTokens: 100})
+		profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "test", Name: "Test", Model: "model", Endpoint: url, Protocol: "openai_chat", APIKey: "owner-key", MaxOutputTokens: 100})
 		if err != nil {
 			t.Fatal(err)
 		}

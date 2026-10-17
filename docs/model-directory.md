@@ -36,9 +36,18 @@ failure notification.
 Providers are Space-owned named connections with credentials, protocol, endpoint,
 available models and a concrete default model. Saving a Provider never configures
 or registers an assistant. The Space's default Provider initializes new assistant
-forms; its concrete default model ID is visibly selected. Changing Provider
-selects its default model. There is no synthetic "Default model" option and no
-separate Space-level default model overriding the Provider default.
+forms; its concrete default model ID is visibly selected. Provider setup is a
+separate chooser and connection editor; search and provider selection appear only
+in the chooser. The editor contains name, API URL, credential, default model,
+request format, context/output limits and reasoning effort in that order. It never
+edits assistant instructions, execution policy or tool/plugin selection.
+
+An assistant's Add Provider shortcut retains its draft while opening that same
+connection flow. Saving selects the new connection and its default model in the
+resumed assistant form; it does not create the assistant. Cancelling restores the
+original selection. The creation form requires a configured Provider. Changing
+Provider selects its default model. There is no synthetic "Default model" option
+and no separate Space-level default model overriding the Provider default.
 
 Assistants save their own Provider/model/parameter selection. Empty assistant
 parameter fields inherit the selected Provider default model parameters; a

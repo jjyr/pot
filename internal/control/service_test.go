@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/internal/secrets"
-	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/protocol"
 	"io"
@@ -80,11 +79,7 @@ func TestLocalControlAgentApprovalCommandPersistenceAndRestart(t *testing.T) {
 	if _, err = service.Registry.Create(ctx, "create-assistant", "Pot"); err != nil {
 		t.Fatal(err)
 	}
-	settings := core.DefaultAgentSettings()
-	settings.Plugins = map[string]core.PluginConfig{}
-	settings.BuiltinTools = []string{"exec_command"}
-	settings.AutoCompact = false
-	profile, err := service.Profiles.Save(ctx, SaveProfile{RequestID: "configure", ProfileID: "test", Name: "Test", Model: "test", Endpoint: server.URL, Protocol: "openai_chat", APIKey: "test-key", Agent: &settings, MaxOutputTokens: 100})
+	profile, err := service.Profiles.Save(ctx, SaveProfile{RequestID: "configure", ProfileID: "test", Name: "Test", Model: "test", Endpoint: server.URL, Protocol: "openai_chat", APIKey: "test-key", MaxOutputTokens: 100})
 	if err != nil {
 		t.Fatal(err)
 	}

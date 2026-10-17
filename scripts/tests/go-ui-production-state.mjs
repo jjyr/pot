@@ -16,7 +16,7 @@ assert.deepEqual(changed({assistants:1},'a','boot2'),['assistants'],'server rest
 const initial={name:'A',profile_id:'first',text:'rules'};
 const editor=createEditorSession({space:'remote',owner:'a'},initial);
 editor.set('name','B');editor.set('profile_id','second');
-const first=editor.begin();assert.ok(first.request_id);assert.equal(editor.pending,true);
+const previewID=editor.requestID;const first=editor.begin();assert.equal(first.request_id,previewID,'Avatar preview uses the first creation request identity');assert.ok(first.request_id);assert.equal(editor.pending,true);
 editor.set('name','Ignored while saving');assert.equal(editor.values.name,'B');
 editor.acknowledge({name:'B'});editor.settle(false);
 assert.equal(editor.dirty,true,'partial acknowledgement retains remaining dirty sections');
@@ -51,12 +51,11 @@ assert.equal(combined.items[0]._space_id,'remote');assert.equal(combined.next_of
 const combinedUsage=combineUsage([{space:{id:'local'},value:{total:{input:5,output:3},buckets:[{label:'today',input:5,output:3}],tools:[{name:'shell',calls:1}]}},{space:{id:'remote'},value:{total:{input:7,output:2},buckets:[{label:'today',input:7,output:2}],tools:[{name:'shell',calls:2}]}}]);
 assert.equal(combinedUsage.total.input,12);assert.equal(combinedUsage.buckets[0].output,5);assert.equal(combinedUsage.tools[0].calls,3);
 assert.equal(combineUsage([{space:{id:'remote'},owner:'a',value:{requests:[{id:'r'}]}}]).requests[0]._assistant_id,'a');
-const {modelDefaults,providerChoices}=await import('../../web/src/state/models.mjs');
+const {modelDefaults}=await import('../../web/src/state/models.mjs');
 const directory={directory:[{id:'a',name:'A',common:true,models:[{id:'same',context:1000,input:900,output:200}]},{id:'b',name:'B',common:false,models:[{id:'same',context:2000,output:400}]}],model_defaults:{unknown:{context:5000,output:600}}};
 assert.equal(modelDefaults(directory,'b','same').context,2000,'provider-specific model facts win');
 assert.equal(modelDefaults(directory,'custom','unknown').output,600,'manual IDs inherit offline known facts');
 assert.equal(modelDefaults(directory,'custom','missing').context,32768);
-assert.ok(providerChoices(directory).some(([id])=>id==='__more'));assert.ok(!providerChoices(directory,{all:true}).some(([id])=>id==='__more'));
 const {createTaskTranscript,appendTaskEvents}=await import('../../web/src/state/task-transcript.mjs');
 const transcript=createTaskTranscript(),event=(sequence,type,value={})=>({sequence,event:{update:{type,...value}}});
 appendTaskEvents(transcript,[event(1,'message_started'),event(2,'text_delta',{text:'First'}),event(3,'tool_started',{id:'t',name:'read',args:{path:'a'}}),event(4,'tool_output',{id:'t',text:'result'})]);

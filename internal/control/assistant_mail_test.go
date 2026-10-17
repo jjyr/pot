@@ -13,7 +13,6 @@ import (
 
 	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/pkg/agent"
-	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
@@ -66,11 +65,7 @@ func TestAssistantMailRunsIndependentContextAndOnlyExplicitReplies(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	settings := core.DefaultAgentSettings()
-	settings.Plugins = map[string]core.PluginConfig{}
-	settings.BuiltinTools = []string{}
-	settings.AutoCompact = false
-	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "mail-profile", ProfileID: "mail", Name: "Mail", Model: "fixture", Endpoint: server.URL, Protocol: "openai_chat", APIKey: "mail-key", Agent: &settings, MaxOutputTokens: 128})
+	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "mail-profile", ProfileID: "mail", Name: "Mail", Model: "fixture", Endpoint: server.URL, Protocol: "openai_chat", APIKey: "mail-key", MaxOutputTokens: 128})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,11 +148,7 @@ func TestAssistantMailAllowanceWaitResumesSameEnvelopeWithoutMainWaitOrReplay(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	settings := core.DefaultAgentSettings()
-	settings.Plugins = map[string]core.PluginConfig{}
-	settings.BuiltinTools = []string{}
-	settings.AutoCompact = false
-	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "fixture", Name: "Fixture", Model: "fixture", Endpoint: server.URL, Protocol: "openai_chat", APIKey: "fixture", Agent: &settings, MaxOutputTokens: 100})
+	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "fixture", Name: "Fixture", Model: "fixture", Endpoint: server.URL, Protocol: "openai_chat", APIKey: "fixture", MaxOutputTokens: 100})
 	if err != nil {
 		t.Fatal(err)
 	}

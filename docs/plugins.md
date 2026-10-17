@@ -86,8 +86,17 @@ process protocol belongs to the [Sandbox capability](sandbox-provider-protocol.m
 not to the common package framework. `pkg/pluginhost` remains the Node tool-session
 host. There is no common wire protocol imposed on these capability drivers.
 
-Profile `agent.plugins` settings select only tools. A Profile source override can
-load a tool capability but never registers a local Provider or resource catalog.
+Control enables all installed tool capabilities and all built-in tools by default.
+Connection and assistant editors expose no tool allowlist or plugin switches, and
+`POST /api/v1/providers` accepts only connection/model settings. On startup,
+connection records discard former execution settings, tool filters and plugin
+opt-outs; fresh turns use product defaults, including assistants retaining an
+older Provider revision. Running turns and prepared Tasks keep their snapshots.
+Account login remains in third-party account settings; tool availability does not
+bypass machine authorization, role restrictions or operation approvals.
+
+Only tool capabilities enter the generated Profile `agent.plugins` snapshot.
+Discovery never starts a Sandbox Provider or prepares its resource catalog.
 `ToolBundle` projects the tool declaration and its explicitly listed UTF-8 files
 into a digest-pinned snapshot. Provider declarations, catalogs, native binaries
 and Helpers are excluded. Receiving executors reject bundles containing local

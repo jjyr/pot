@@ -39,12 +39,13 @@ func TestWorkerResourcesKeepDestinationInstructionsAndSkills(t *testing.T) {
 	s := taskResourceService(t)
 	ctx := context.Background()
 	s.Registry.Create(ctx, "create", "Pot")
-	settings := core.DefaultAgentSettings()
-	pluginDir := filepath.Join(t.TempDir(), "qualifier")
+	pluginRoot := t.TempDir()
+	s.options.PluginRoot = pluginRoot
+	s.Profiles.pluginRoot = pluginRoot
+	pluginDir := filepath.Join(pluginRoot, "qualifier")
 	writeTaskFixture(t, filepath.Join(pluginDir, "plugin.json"), `{"schema_version":2,"id":"qualifier","version":"1","contributes":{"tools":{"runtime":"node","execution":"host_or_sandbox","entrypoint":"plugin.mjs","files":["plugin.mjs"],"requirements":[],"tools":[{"name":"fixture_echo","description":"fixture","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}]},"sandbox_providers":[{"id":"fixture.provider","host_os":["darwin","linux"],"executable":"bin/provider","default_shared":false}],"resources":[{"provider":"fixture.provider","catalog":"catalog.json"}]}}`)
 	writeTaskFixture(t, filepath.Join(pluginDir, "plugin.mjs"), "OLD_PLUGIN")
-	settings.Plugins = map[string]core.PluginConfig{"qualifier": {Enabled: true, Source: &pluginDir}}
-	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "test", Name: "Test", Model: "model", Endpoint: "https://example.test", Protocol: "openai_chat", APIKey: "fixture-only", Agent: &settings, MaxOutputTokens: 100})
+	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "test", Name: "Test", Model: "model", Endpoint: "https://example.test", Protocol: "openai_chat", APIKey: "fixture-only", MaxOutputTokens: 100})
 	if err != nil {
 		t.Fatal(err)
 	}

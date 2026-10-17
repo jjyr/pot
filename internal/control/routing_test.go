@@ -17,13 +17,11 @@ import (
 func TestRoutingCASQuotaFencesAndCompleteCatalog(t *testing.T) {
 	s := taskResourceService(t)
 	ctx := context.Background()
-	settings := core.DefaultAgentSettings()
-	settings.Plugins = map[string]core.PluginConfig{}
 	models := []string{}
 	for i := 0; i < 80; i++ {
 		models = append(models, fmt.Sprintf("model-%03d", i))
 	}
-	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "fixture", Name: "Fixture", Model: models[0], Models: models, Endpoint: "https://example.test", Protocol: "openai_chat", APIKey: "fixture", Agent: &settings, MaxOutputTokens: 100})
+	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "fixture", Name: "Fixture", Model: models[0], Models: models, Endpoint: "https://example.test", Protocol: "openai_chat", APIKey: "fixture", MaxOutputTokens: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
