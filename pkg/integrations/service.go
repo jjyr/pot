@@ -167,6 +167,8 @@ func (s *Service) login(v *session) Login {
 func (s *Service) BeginLogin(ctx context.Context, service string) (Login, error) {
 	var v *session
 	var adapter Adapter
+	var beginContext context.Context
+	var cancelBegin context.CancelFunc
 	err := s.mutate(func() error {
 		adapter = s.adapters[service]
 		if adapter == nil {
@@ -189,15 +191,18 @@ func (s *Service) BeginLogin(ctx context.Context, service string) (Login, error)
 		if err != nil {
 			return err
 		}
-		cancel := func() {}
-		v = &session{Login: Login{ID: identifier(), Service: service, Status: "pending", ExpiresAt: s.now().Add(15 * time.Minute)}, cancel: cancel, revision: revision}
+		beginContext, cancelBegin = context.WithCancel(s.ctx)
+		v = &session{Login: Login{ID: identifier(), Service: service, Status: "pending", ExpiresAt: s.now().Add(15 * time.Minute)}, cancel: cancelBegin, revision: revision}
 		s.sessions[service] = v
 		return nil
 	})
 	if err != nil {
 		return Login{}, err
 	}
-	challenge, beginErr := adapter.Begin(ctx)
+	stopRequest := context.AfterFunc(ctx, cancelBegin)
+	defer stopRequest()
+	challenge, beginErr := adapter.Begin(beginContext)
+	cancelBegin()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed || s.sessions[service] != v || v.Status != "pending" {
