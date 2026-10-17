@@ -92,7 +92,20 @@ func Open(path, runtimeID, bootID string) (*Journal, error) {
 	}
 	return j, nil
 }
-func (j *Journal) Close() error                  { return j.db.Close() }
+func (j *Journal) Close() error { return j.db.Close() }
+
+// CheckPolicyCleanup prevents a fresh Runner boot from acknowledging revocation
+// while prior execution still requires authoritative cleanup reconciliation.
+func (j *Journal) CheckPolicyCleanup(ctx context.Context) error {
+	var unknown bool
+	if err := j.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM task_runs WHERE phase=?) OR EXISTS(SELECT 1 FROM run_commands WHERE phase='unknown')", RecoveryRequired).Scan(&unknown); err != nil {
+		return err
+	}
+	if unknown {
+		return core.ErrCleanupUnconfirmed
+	}
+	return nil
+}
 func (j *Journal) Subscribe() *core.Subscription { return j.changes.Subscribe() }
 func (j *Journal) validateRun(run Run) error {
 	if run.SchemaVersion != SchemaVersion || !core.Identifier(run.BootID) {

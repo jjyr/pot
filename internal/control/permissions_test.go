@@ -333,6 +333,13 @@ func TestApplicationReceiptSaveFailureRetainsDurableFence(t *testing.T) {
 	if _, err = reopened.Authorize(context.Background(), hostRequest("after-restart")); err == nil {
 		t.Fatal("unpersisted application result admitted work")
 	}
+	policy, _, _ := reopened.Policy("machine")
+	if err = reopened.Retry("machine", policy.Revision); err == nil {
+		t.Fatal("restart fabricated missing cleanup proof")
+	}
+	if err = reopened.Configure("machine", policy); err == nil {
+		t.Fatal("settings save bypassed recovery fence")
+	}
 }
 
 func TestRunnerSameRevisionRetriesUnconfirmedDrain(t *testing.T) {

@@ -83,9 +83,10 @@ type hostDecision struct {
 	invalid  bool
 }
 type ApplyState struct {
-	Revision uint64 `json:"revision"`
-	State    string `json:"state"`
-	Error    string `json:"error,omitempty"`
+	Revision         uint64 `json:"revision"`
+	State            string `json:"state"`
+	Error            string `json:"error,omitempty"`
+	RecoveryRequired bool   `json:"recovery_required,omitempty"`
 }
 type PermissionStore struct {
 	denied  map[string]HostRequest
@@ -123,6 +124,11 @@ func OpenPermissions(path string) (*PermissionStore, error) {
 	for machine, application := range p.applied {
 		if policy, ok := p.state.Machines[machine]; !ok || application.Revision != policy.Revision || (application.State != "applied" && application.State != "pending" && application.State != "applying") {
 			return nil, errors.New("invalid permission application state")
+		}
+		if application.State == "applying" {
+			application.RecoveryRequired = true
+			application.Error = "Runtime restarted during policy application; reconcile old execution scopes and replace the enrollment before granting new authority"
+			p.applied[machine] = application
 		}
 	}
 	for id, policy := range p.state.Machines {
@@ -194,6 +200,7 @@ func (p *PermissionStore) apply(machine string, revision uint64) error {
 		if err != nil {
 			state.State = "pending"
 			state.Error = err.Error()
+			state.RecoveryRequired = core.IsCleanupUnconfirmed(err)
 		}
 		next := p.copyLocked()
 		next.Applications[machine] = state
@@ -254,6 +261,10 @@ func (p *PermissionStore) Configure(machine string, policy MachinePolicy) error 
 	if !ok {
 		p.mu.Unlock()
 		return errors.New("machine is not enrolled")
+	}
+	if p.applied[machine].RecoveryRequired {
+		p.mu.Unlock()
+		return errors.New("previous execution cleanup requires owner recovery and a new enrollment")
 	}
 	if policy.Revision != 0 && policy.Revision != current.Revision {
 		p.mu.Unlock()
@@ -319,6 +330,10 @@ func (p *PermissionStore) validateRule(r CommandRule) error {
 }
 func (p *PermissionStore) SaveRule(owner string, r CommandRule, oldID string, revision uint64) error {
 	p.mu.Lock()
+	if p.applied[r.MachineID].RecoveryRequired {
+		p.mu.Unlock()
+		return errors.New("previous execution cleanup requires owner recovery and a new enrollment")
+	}
 	r.EnrollmentEpoch = p.state.Epochs[r.MachineID]
 	r.ID = ruleID(r.MachineID, r.EnrollmentEpoch, r.Context)
 	if err := p.validateRule(r); err != nil {
@@ -355,6 +370,10 @@ func (p *PermissionStore) SaveRule(owner string, r CommandRule, oldID string, re
 }
 func (p *PermissionStore) DeleteRule(machine, id string, revision uint64) error {
 	p.mu.Lock()
+	if p.applied[machine].RecoveryRequired {
+		p.mu.Unlock()
+		return errors.New("previous execution cleanup requires owner recovery and a new enrollment")
+	}
 	r, ok := p.state.Rules[id]
 	policy := p.state.Machines[machine]
 	if !ok || r.MachineID != machine || policy.Revision != revision {
@@ -665,6 +684,10 @@ func (p *PermissionStore) Admit(machine string, revision uint64) (func(), error)
 
 func (p *PermissionStore) Retry(machine string, revision uint64) error {
 	p.mu.Lock()
+	if p.applied[machine].RecoveryRequired {
+		p.mu.Unlock()
+		return errors.New("previous execution cleanup requires owner recovery and a new enrollment")
+	}
 	policy, ok := p.state.Machines[machine]
 	if !ok || policy.Revision != revision {
 		p.mu.Unlock()

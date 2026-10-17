@@ -530,6 +530,11 @@ func (s *Service) runnerRPC(ctx context.Context, p controlplane.Principal, reque
 		if q.Revision == 0 {
 			return nil, errors.New("invalid permission revision")
 		}
+		if s.RunnerJournal != nil {
+			if err := s.RunnerJournal.CheckPolicyCleanup(ctx); err != nil {
+				return nil, err
+			}
+		}
 		if err := s.remote().applyPermissions(q.Revision, s.drainPermissionEngines); err != nil {
 			return nil, err
 		}

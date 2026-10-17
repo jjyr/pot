@@ -105,6 +105,12 @@ work from a disconnected cache. Offline/failed application is visible as pending
 and fences new admission. A stopped process does not undo prior file/network
 side effects; uncertain cleanup retains existing receipt/capacity fences.
 
+An application interrupted by Runtime restart, or a missing cleanup receipt,
+requires owner recovery. Retry cannot manufacture proof after old Engines have
+disappeared. Reconcile the original execution scopes and deliberately replace the
+affected enrollment/root; preserve its old state for inspection. A Runner with
+unreconciled prior runs also refuses policy acknowledgment after restart.
+
 ## Storage and API
 
 Permission format 6 stores machines, enrollment epochs, exact command rules and
