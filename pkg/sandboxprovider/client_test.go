@@ -1,4 +1,4 @@
-package providerplugin
+package sandboxprovider
 
 import (
 	"context"
@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/plugin"
 	"github.com/jjyr/pot/pkg/sandbox"
 )
 
@@ -125,16 +126,16 @@ func fixturePackage(t *testing.T, directory, id string) string {
 	if err = os.WriteFile(filepath.Join(packageRoot, "provider"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	writeManifest(t, packageRoot, Manifest{SchemaVersion: Version, ID: id, Version: "1.0.0", HostOS: []string{runtime.GOOS}, Executable: "provider", DefaultShared: true})
+	writeManifest(t, packageRoot, core.PluginManifest{SchemaVersion: 2, ID: id, Version: "1.0.0", Contributes: core.PluginContributions{SandboxProviders: []core.PluginSandboxProvider{{ID: id, HostOS: []string{runtime.GOOS}, Executable: "provider", DefaultShared: true}}}})
 	return packageRoot
 }
-func writeManifest(t *testing.T, directory string, m Manifest) {
+func writeManifest(t *testing.T, directory string, m core.PluginManifest) {
 	t.Helper()
 	body, err := json.Marshal(m)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = os.WriteFile(filepath.Join(directory, "provider.json"), body, 0600); err != nil {
+	if err = os.WriteFile(filepath.Join(directory, "plugin.json"), body, 0600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -147,7 +148,7 @@ func registryFixture(t *testing.T) (Registry, Config) {
 		t.Fatal(err)
 	}
 	config := Config{Root: root}
-	registry, err := Discover(context.Background(), directory, config)
+	registry, err := loadFixture(context.Background(), directory, config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +247,7 @@ func TestLostAcknowledgementIsNeverReplayedOrRestarted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := Discover(context.Background(), directory, Config{Root: root})
+	registry, err := loadFixture(context.Background(), directory, Config{Root: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,11 +287,11 @@ func TestDiscoveryRejectsAmbiguousDefaultsTraversalAndProtocolMismatch(t *testin
 		t.Run(kind, func(t *testing.T) {
 			directory := t.TempDir()
 			packageRoot := fixturePackage(t, directory, "fixture")
-			body, err := os.ReadFile(filepath.Join(packageRoot, "provider.json"))
+			body, err := os.ReadFile(filepath.Join(packageRoot, "plugin.json"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			var m Manifest
+			var m core.PluginManifest
 			if err = json.Unmarshal(body, &m); err != nil {
 				t.Fatal(err)
 			}
@@ -298,20 +299,20 @@ func TestDiscoveryRejectsAmbiguousDefaultsTraversalAndProtocolMismatch(t *testin
 			case "ambiguous":
 				fixturePackage(t, directory, "second")
 			case "traversal":
-				m.Executable = "../provider"
+				m.Contributes.SandboxProviders[0].Executable = "../provider"
 			case "version":
 				m.SchemaVersion = 99
 			case "identity":
-				m.ID = "different"
+				m.Contributes.SandboxProviders[0].ID = "different"
 			case "symlink":
 				if err = os.Symlink(filepath.Join(packageRoot, "provider"), filepath.Join(packageRoot, "link")); err != nil {
 					t.Fatal(err)
 				}
-				m.Executable = "link"
+				m.Contributes.SandboxProviders[0].Executable = "link"
 			}
 			writeManifest(t, packageRoot, m)
 			root, _ := filepath.EvalSymlinks(t.TempDir())
-			if _, err = Discover(context.Background(), directory, Config{Root: root}); err == nil {
+			if _, err = loadFixture(context.Background(), directory, Config{Root: root}); err == nil {
 				t.Fatal("invalid plugin accepted")
 			}
 		})
@@ -325,7 +326,7 @@ func TestParentChannelLossExitsWithoutFabricatingShutdownAcknowledgement(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := Discover(context.Background(), directory, Config{Root: root})
+	registry, err := loadFixture(context.Background(), directory, Config{Root: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,5 +342,71 @@ func TestParentChannelLossExitsWithoutFabricatingShutdownAcknowledgement(t *test
 	}
 	if err = p.Shutdown(context.Background()); !errors.Is(err, core.ErrCleanupUnconfirmed) {
 		t.Fatal("missing shutdown acknowledgement accepted", err)
+	}
+}
+
+func loadFixture(ctx context.Context, directory string, config Config) (Registry, error) {
+	packages, err := plugin.Discover(directory)
+	if err != nil {
+		return Registry{}, err
+	}
+	return Load(ctx, packages, config)
+}
+
+func TestCatalogOnlyPluginContributesToInstalledProvider(t *testing.T) {
+	directory := t.TempDir()
+	fixturePackage(t, directory, "podman")
+	imageRoot := filepath.Join(directory, "image")
+	if err := os.MkdirAll(imageRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile("../../plugins/podman/catalog.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(imageRoot, "catalog.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	writeManifest(t, imageRoot, core.PluginManifest{SchemaVersion: 2, ID: "image", Version: "1", Contributes: core.PluginContributions{Resources: []core.PluginResourceCatalog{{Provider: "podman", Catalog: "catalog.json"}}}})
+	packages, err := plugin.Discover(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packages) != 2 {
+		t.Fatal(packages)
+	}
+	for _, p := range packages {
+		if p.Manifest.ID == "image" {
+			if _, err = p.ToolBundle(); err == nil {
+				t.Fatal("catalog-only plugin became executable tool")
+			}
+		}
+	}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := Load(context.Background(), packages, Config{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := registry.Providers[0].Shutdown(context.Background()); err != nil {
+			t.Error(err)
+		}
+	}()
+	if len(registry.Providers) != 1 || len(registry.Catalog.Bundles) == 0 {
+		t.Fatal(registry)
+	}
+	// A catalog does not supply or implicitly install the referenced provider.
+	if err = os.RemoveAll(filepath.Join(directory, "podman")); err != nil {
+		t.Fatal(err)
+	}
+	packages, err = plugin.Discover(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = Load(context.Background(), packages, Config{Root: root}); err == nil {
+		t.Fatal("catalog silently installed missing Provider")
 	}
 }

@@ -8,11 +8,11 @@ Product Runtime, model credentials and provider configuration stay on Host.
 The image catalog, recipe and build/export definitions belong to the installed
 Podman Provider plugin; core embeds no Debian image selection. Other Provider
 plugins can own different images and bootstrap contracts. See
-[Provider plugins](provider-plugins.md).
+[Plugin packages](plugins.md).
 
 ## Recipe and contents
 
-`providers/podman/image/` owns the Dockerfile and installation recipe.
+`plugins/podman/image/` owns the Dockerfile and installation recipe.
 `base-image.json` pins the Debian digest and signed package snapshot;
 `packages.lock` selects direct packages. The snapshot fixes dependency versions,
 and `/opt/pot/installed-packages.txt` records the installed inventory. Debian

@@ -20,13 +20,13 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 import go_packaging  # noqa: E402
 
-sys.path.insert(0, str(ROOT / "providers/podman"))
+sys.path.insert(0, str(ROOT / "plugins/podman"))
 import podman_build  # noqa: E402
 
 
 def exporter():
     loader = __import__("importlib.machinery").machinery.SourceFileLoader(
-        "export_go_resources", str(ROOT / "providers/podman/export-resources")
+        "export_go_resources", str(ROOT / "plugins/podman/export-resources")
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
@@ -39,16 +39,20 @@ class GoPackaging(unittest.TestCase):
         for platform_name in ("linux-amd64", "darwin-arm64"):
             with self.subTest(platform=platform_name), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
-                for name in ("podman", "apple-vm"):
-                    package = root / "providers" / name
+                for name in ("podman", "apple-vm", "computer-use"):
+                    package = root / "plugins" / name
                     package.mkdir(parents=True)
-                    shutil.copy2(
-                        ROOT / "providers" / name / "provider.json", package / "provider.json"
-                    )
+                    shutil.copy2(ROOT / "plugins" / name / "plugin.json", package / "plugin.json")
                 shutil.copy2(
-                    ROOT / "providers/podman/catalog.json", root / "providers/podman/catalog.json"
+                    ROOT / "plugins/podman/catalog.json", root / "plugins/podman/catalog.json"
                 )
-                bootstrap = root / "providers/apple-vm/bootstrap"
+                tools = json.loads((root / "plugins/computer-use/plugin.json").read_text())[
+                    "contributes"
+                ]["tools"]
+                for name in tools["files"]:
+                    (root / "plugins/computer-use" / name).write_text("tool fixture")
+                (root / "plugins/podman/build-image").write_text("build recipe")
+                bootstrap = root / "plugins/apple-vm/bootstrap"
                 bootstrap.mkdir()
                 (bootstrap / "provision.sh").write_text("fixture")
                 helpers = root / "signed-helpers"
@@ -66,16 +70,21 @@ class GoPackaging(unittest.TestCase):
                     mock.patch.object(go_packaging, "swift_helpers", return_value=helpers) as swift,
                 ):
                     installed = root / "installed"
-                    go_packaging.prepare_providers(installed, platform_name)
+                    go_packaging.prepare_plugins(installed, platform_name)
                 podman = installed / "podman"
                 self.assertEqual(
                     sorted(p.name for p in podman.iterdir()),
-                    ["bin", "catalog.json", "provider.json"],
+                    ["bin", "catalog.json", "plugin.json"],
                 )
-                self.assertIn("./providers/podman/cmd", (podman / "bin/provider").read_text())
+                self.assertIn("./plugins/podman/cmd", (podman / "bin/provider").read_text())
                 self.assertEqual(
                     (podman / "catalog.json").read_bytes(),
-                    (root / "providers/podman/catalog.json").read_bytes(),
+                    (root / "plugins/podman/catalog.json").read_bytes(),
+                )
+                self.assertFalse((podman / "build-image").exists())
+                self.assertEqual(
+                    sorted(p.name for p in (installed / "computer-use").iterdir()),
+                    sorted(["plugin.json", *tools["files"]]),
                 )
                 apple = installed / "apple-vm"
                 if platform_name.startswith("darwin"):
@@ -89,7 +98,7 @@ class GoPackaging(unittest.TestCase):
     def guest_fixture(self, root):
         """Use real source/localization inputs with tiny verified vendor archives."""
         for relative in (
-            "providers/podman/image",
+            "plugins/podman/image",
             "resources/app/locales",
             "desktop",
         ):
@@ -120,7 +129,7 @@ class GoPackaging(unittest.TestCase):
             item = tarfile.TarInfo("noVNC-1.7.0/LICENSE.txt")
             item.size = len(data)
             target.addfile(item, io.BytesIO(data))
-        recipe = root / "providers/podman/image"
+        recipe = root / "plugins/podman/image"
         metadata = json.loads((recipe / "desktop-assets.json").read_text())
         for entry in metadata["assets"]:
             data = ("desktop fixture for " + entry["filename"]).encode()
@@ -212,7 +221,7 @@ class GoPackaging(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "fresh|empty"):
                     podman_build.prepare_guest_assets(destination, "amd64")
                 self.assertEqual(marker.read_text(), "old architecture")
-                (root / "providers/podman/image/executor.py").unlink()
+                (root / "plugins/podman/image/executor.py").unlink()
                 fresh = root / "fresh/assets"
                 with self.assertRaisesRegex(ValueError, "Missing guest asset"):
                     podman_build.prepare_guest_assets(fresh, "arm64")
@@ -224,7 +233,7 @@ class GoPackaging(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with self.guest_environment(root):
-                path = root / "providers/podman/image/base-image.json"
+                path = root / "plugins/podman/image/base-image.json"
                 original = json.loads(path.read_text())
                 for field, value in (
                     ("base_image", "docker.io/library/debian:trixie-slim"),

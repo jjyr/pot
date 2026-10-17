@@ -1,0 +1,24 @@
+{
+  "schema_version": 2,
+  "id": "podman",
+  "version": "1.0.0",
+  "contributes": {
+    "sandbox_providers": [
+      {
+        "host_os": [
+          "darwin",
+          "linux"
+        ],
+        "executable": "bin/provider",
+        "default_shared": true,
+        "id": "podman"
+      }
+    ],
+    "resources": [
+      {
+        "provider": "podman",
+        "catalog": "catalog.json"
+      }
+    ]
+  }
+}

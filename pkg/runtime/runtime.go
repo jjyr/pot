@@ -44,13 +44,10 @@ type Options struct {
 	// ResourceDirectory contains packaged skills, plugins and optional Node.
 	// It is required even when the embedding application supplies no assets.
 	ResourceDirectory string
-	// SandboxProviders nil discovers installed provider packages. An empty,
+	// SandboxProviders nil loads local capabilities from PluginRoot. An empty,
 	// nonnil slice disables providers. Open handshakes with plugin processes
 	// without starting engines, guests or downloads.
 	SandboxProviders []sandbox.Provider
-	// SandboxProviderDirectory defaults to ResourceDirectory/providers. Packages
-	// contain provider.json, a host executable and an optional resource catalog.
-	SandboxProviderDirectory string
 	// DefaultSandboxProvider overrides the installed plugin default. Explicit
 	// in-process Providers must supply this to use the shared Sandbox.
 	DefaultSandboxProvider string
@@ -112,7 +109,7 @@ func Open(ctx context.Context, options Options) (*Runtime, error) {
 	inner, err := impl.Open(ctx, impl.Options{
 		Root: options.Root, ResourceDirectory: resources,
 		SandboxProviders: options.SandboxProviders, Limits: options.Limits,
-		SandboxProviderDirectory: options.SandboxProviderDirectory, DefaultSandboxProvider: options.DefaultSandboxProvider, SandboxCatalog: options.SandboxCatalog,
+		DefaultSandboxProvider: options.DefaultSandboxProvider, SandboxCatalog: options.SandboxCatalog,
 		DisableMetadataRefresh: options.DisableMetadataRefresh,
 		Control: control.Options{
 			Workspace: options.Workspace, AgentHome: options.AgentHome,

@@ -235,7 +235,7 @@ def swift_helpers():
             "-c",
             "release",
             "--package-path",
-            ROOT / "providers/apple-vm/helper",
+            ROOT / "plugins/apple-vm/helper",
             "--disable-sandbox",
             "--scratch-path",
             scratch,
@@ -259,7 +259,7 @@ def swift_helpers():
                 "--sign",
                 "-",
                 "--entitlements",
-                ROOT / "providers/apple-vm/helper/virtualization.entitlements",
+                ROOT / "plugins/apple-vm/helper/virtualization.entitlements",
                 destination / name,
             ]
         )
@@ -276,7 +276,6 @@ def prepare_resources(destination, platform):
     call(["python3", ROOT / "scripts/localize-web"])
     for source, name in (
         (ROOT / "skills", "skills"),
-        (ROOT / "plugins", "plugins"),
         (ROOT / "web/src", "web"),
         (ROOT / ".local/web/desktop", "desktop"),
         (novnc(), "novnc"),
@@ -292,10 +291,10 @@ def prepare_resources(destination, platform):
     shutil.copy2(
         ROOT / "web/src/assets/Lucide-LICENSE.txt", destination / "FrontendIconLicense.txt"
     )
-    prepare_providers(destination / "providers", platform)
+    prepare_plugins(destination / "plugins", platform)
     if goos == "darwin":
         shutil.copy2(
-            destination / "providers/apple-vm/SwiftDependencyLicenses.txt",
+            destination / "plugins/apple-vm/SwiftDependencyLicenses.txt",
             destination / "SwiftDependencyLicenses.txt",
         )
     call(
@@ -306,33 +305,48 @@ def prepare_resources(destination, platform):
             destination / "GoDependencyLicenses.txt",
             "./cmd/pot",
             "./cmd/pot-tool-executor",
-            "./providers/podman/cmd",
-            *(["./providers/apple-vm/cmd"] if goos == "darwin" else []),
+            "./plugins/podman/cmd",
+            *(["./plugins/apple-vm/cmd"] if goos == "darwin" else []),
         ],
         env={**os.environ, "GOOS": goos, "GOARCH": goarch, "CGO_ENABLED": "0"},
     )
 
 
-def prepare_providers(destination, platform):
-    """Build owner-installed provider packages; never prepare a guest image."""
+def prepare_plugins(destination, platform):
+    """Package declared capabilities; never prepare an engine or guest image."""
     goos, _ = platform.split("-")
     destination.mkdir(parents=True, exist_ok=True)
-    for source in sorted((ROOT / "providers").iterdir()):
-        manifest_path = source / "provider.json"
+    for source in sorted((ROOT / "plugins").iterdir()):
+        manifest_path = source / "plugin.json"
         if not manifest_path.is_file():
             continue
         manifest = json.loads(manifest_path.read_text())
-        if goos not in manifest["host_os"]:
+        contributions = manifest["contributes"]
+        providers = contributions.get("sandbox_providers", [])
+        supported = [p for p in providers if goos in p["host_os"]]
+        if providers and not supported and not contributions.get("tools"):
             continue
         package = destination / source.name
         if package.exists():
             shutil.rmtree(package)
-        (package / "bin").mkdir(parents=True)
-        shutil.copy2(manifest_path, package / "provider.json")
-        if manifest.get("catalog"):
-            shutil.copy2(source / manifest["catalog"], package / manifest["catalog"])
-        go_build("./providers/" + source.name + "/cmd", package / manifest["executable"], platform)
-        if source.name == "apple-vm":
+        package.mkdir(parents=True)
+        shutil.copy2(manifest_path, package / "plugin.json")
+        tools = contributions.get("tools")
+        if tools:
+            for name in tools["files"]:
+                target = package / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source / name, target)
+        for resource in contributions.get("resources", []):
+            name = resource["catalog"]
+            target = package / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source / name, target)
+        for provider in supported:
+            target = package / provider["executable"]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            go_build("./plugins/" + source.name + "/cmd", target, platform)
+        if source.name == "apple-vm" and supported:
             copy_tree(source / "bootstrap", package / "bootstrap")
             go_build("./cmd/pot-tool-executor", package / "bootstrap/pot-tool-executor", platform)
             helpers = swift_helpers()

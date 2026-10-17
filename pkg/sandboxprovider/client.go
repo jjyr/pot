@@ -1,4 +1,4 @@
-package providerplugin
+package sandboxprovider
 
 import (
 	"bufio"

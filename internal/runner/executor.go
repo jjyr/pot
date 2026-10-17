@@ -368,7 +368,7 @@ func isExecutionTool(name string, config core.ResolvedSpec) bool {
 		if !plugin.Enabled || plugin.Bundle == nil {
 			continue
 		}
-		for _, raw := range plugin.Bundle.Manifest.Tools {
+		for _, raw := range plugin.Bundle.Manifest.Contributes.Tools.Tools {
 			var definition m.ToolDefinition
 			if json.Unmarshal(raw, &definition) == nil && definition.Name == name {
 				return true

@@ -14,11 +14,11 @@ implementation. Code defines actual behavior.
 | Encrypted credentials and master keys | [Secrets](secrets.md) |
 | Backend responsibilities and API contracts | [Backend components](backend-components.md) |
 | Reusable Go packages and embedding a host | [Go libraries](go-libraries.md) |
-| Tools, approvals and browser execution | [Composition](tool-composition.md), [permissions](permissions.md), [computer use](computer-use.md) |
+| Plugins, tools, approvals and browser execution | [Plugin packages](plugins.md), [composition](tool-composition.md), [permissions](permissions.md), [computer use](computer-use.md) |
 | Assistant messaging and App relay | [Assistant messages](assistant-messages.md) |
 | Tasks, schedules and usage | [Tasks](task-coordination.md), [schedules](scheduled-tasks.md), [token usage](token-usage.md) |
 | AI providers, model defaults and offline metadata | [Model directory](model-directory.md) |
-| Sandbox execution and resources | [Provider plugins](provider-plugins.md), [providers](sandbox-providers.md), [executor](executor.md), [resources](sandbox-resources.md), [images](sandbox-image.md), [macOS](macos-sandbox.md) |
+| Sandbox execution and resources | [Provider protocol](sandbox-provider-protocol.md), [providers](sandbox-providers.md), [executor](executor.md), [resources](sandbox-resources.md), [images](sandbox-image.md), [macOS](macos-sandbox.md) |
 | Event-driven updates and stream lifecycle | [UI events](ui-events.md) |
 | Shared UI, language and licenses | [Shared UI](shared-ui.md), [internationalization](internationalization.md), [licenses](licenses-and-about.md) |
 | Agent evaluation | [CLI](../eval/README.md), [measurement design](token-evaluation.md), [small-budget suite](token-evaluation-next-suite.md) |

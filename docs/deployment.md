@@ -37,11 +37,12 @@ concurrently.
 Keep each root private and preserve its identity and secret master key across
 restarts. See [Secrets](secrets.md).
 
-Provider packages live under `Resources/providers/`. Stop Runtime before
+Tool, Provider and resource capabilities share Plugin packages under
+`Resources/plugins/`, using one `plugin.json` manifest. Stop Runtime before
 replacing a complete package and retain catalog records referenced by existing
 Sandbox pins. Providers and image catalogs can be updated independently of Pot
 core. Missing provider packages leave those Sandbox targets unavailable, with no
-Host fallback. See [Provider plugins](provider-plugins.md).
+Host fallback. See [Plugin packages](plugins.md).
 
 ## Linux Sandbox runtime
 

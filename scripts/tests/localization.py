@@ -31,7 +31,7 @@ for key in en:
     assert not re.search(r"[\u4e00-\u9fff]", en[key]), f"Chinese in English translation: {key}"
 subprocess.run(["python3", ROOT / "scripts/localize-web", "--check"], check=True)
 for name in [
-    "providers/podman/image/index.template.html",
+    "plugins/podman/image/index.template.html",
     "desktop/index.template.html",
 ]:
     text = (ROOT / name).read_text()
@@ -40,7 +40,7 @@ for name in [
 with tempfile.TemporaryDirectory(prefix="pot-web-build-") as directory:
     temp = Path(directory)
     fixture = temp / "source"
-    for name in ["resources/app/locales", "desktop", "providers/podman/image"]:
+    for name in ["resources/app/locales", "desktop", "plugins/podman/image"]:
         shutil.copytree(ROOT / name, fixture / name)
     third = dict(en, **{"language.name": "Français", "web.take-over": "Prendre le contrôle"})
     (fixture / "resources/app/locales/fr.json").write_text(json.dumps(third))

@@ -17,12 +17,12 @@ cancellation stops the transfer.
 `pkg/sandboxresources` consumes catalogs declared by installed Provider plugins.
 Core embeds no Sandbox image catalog. Each bundle identifies its provider,
 architecture, HTTPS release repository, logical resource roles and opaque
-metadata. The Podman plugin's `providers/podman/catalog.json` pins its OCI
+metadata. The Podman plugin's `plugins/podman/catalog.json` pins its OCI
 identity and executor bootstrap; other providers can declare their own image
 formats and bootstrap contracts. Release URLs derive from each bundle's
 repository, resource release tag and filename. No mutable remote catalog or
 latest image is consulted. Hashes protect bytes while the installed plugin and
-catalog remain trusted. See [Provider plugins](provider-plugins.md).
+catalog remain trusted. See [Plugin packages](plugins.md).
 
 Control owns consent, requests, bundle pins and cache references. Manager passes
 verified paths and provider-owned metadata to the matching plugin. Podman imports

@@ -2,15 +2,15 @@ package main
 
 import (
 	"fmt"
-	"github.com/jjyr/pot/pkg/providerplugin"
 	"github.com/jjyr/pot/pkg/sandbox"
-	local "github.com/jjyr/pot/providers/internal/local"
+	"github.com/jjyr/pot/pkg/sandboxprovider"
+	local "github.com/jjyr/pot/plugins/internal/local"
 	"os"
 	"path/filepath"
 )
 
 func main() {
-	err := providerplugin.Serve(func(c providerplugin.Config) (sandbox.Provider, error) {
+	err := sandboxprovider.Serve(func(c sandboxprovider.Config) (sandbox.Provider, error) {
 		executable, err := os.Executable()
 		if err != nil {
 			return nil, err

@@ -12,7 +12,7 @@ import (
 
 func counterBundle(t *testing.T) core.PluginBundle {
 	t.Helper()
-	b := core.PluginBundle{Manifest: core.PluginManifest{SchemaVersion: 1, ID: "counter", Version: "1", Runtime: "node", Execution: "host_or_sandbox", Entrypoint: "index.mjs", Files: []string{"index.mjs"}, Requirements: []string{"node"}, Tools: []json.RawMessage{json.RawMessage(`{"name":"count","description":"count","inputSchema":{"type":"object","properties":{"session_id":{"type":"string"},"reset":{"type":"boolean"}},"additionalProperties":false}}`)}}, Files: map[string]string{"index.mjs": "export function createPlugin({emit}) { let n=0; return {async execute(){emit({type:'text',text:String(++n)});},async dispose(){}}; }"}}
+	b := core.PluginBundle{Manifest: core.PluginManifest{SchemaVersion: 2, ID: "counter", Version: "1", Contributes: core.PluginContributions{Tools: &core.PluginTools{Runtime: "node", Execution: "host_or_sandbox", Entrypoint: "index.mjs", Files: []string{"index.mjs"}, Requirements: []string{"node"}, Tools: []json.RawMessage{json.RawMessage(`{"name":"count","description":"count","inputSchema":{"type":"object","properties":{"session_id":{"type":"string"},"reset":{"type":"boolean"}},"additionalProperties":false}}`)}}}}, Files: map[string]string{"index.mjs": "export function createPlugin({emit}) { let n=0; return {async execute(){emit({type:'text',text:String(++n)});},async dispose(){}}; }"}}
 	var err error
 	b.Digest, err = b.Hash()
 	if err != nil {
@@ -89,7 +89,7 @@ func TestPluginTargetIdleAndUnknownSession(t *testing.T) {
 	if _, err := e.Execute(context.Background(), request, nil); err == nil {
 		t.Fatal("resumed idle plugin")
 	}
-	bundle.Manifest.Execution = "sandbox"
+	bundle.Manifest.Contributes.Tools.Execution = "sandbox"
 	bundle.Digest, _ = bundle.Hash()
 	request.Args = pluginArgs(t, bundle, map[string]any{})
 	if _, err := e.Execute(context.Background(), request, nil); err == nil {

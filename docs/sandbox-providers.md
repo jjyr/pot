@@ -2,7 +2,7 @@
 
 Sandbox Manager owns definitions, selection, lifecycle serialization, scopes,
 leases, receipts and recovery. Control supplies policy/approval; Providers own
-workspace paths, lifecycle, image catalogs, guest bootstrap and authenticated transport. Installed packages are discovered through the [Provider plugin host](provider-plugins.md).
+workspace paths, lifecycle, image catalogs, guest bootstrap and authenticated transport. Installed packages are discovered through the [Plugin packages](plugins.md).
 Discovery handshakes with host processes but starts no guest or download. [Architecture](architecture.md) defines execution ownership.
 
 | Provider | Host | Execution |

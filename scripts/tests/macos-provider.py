@@ -16,9 +16,9 @@ from types import SimpleNamespace
 import urllib.error
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "providers/podman/image"))
+sys.path.insert(0, str(ROOT / "plugins/podman/image"))
 spec = importlib.util.spec_from_file_location(
-    "macos_executor", ROOT / "providers/apple-vm/bootstrap/executor.py"
+    "macos_executor", ROOT / "plugins/apple-vm/bootstrap/executor.py"
 )
 broker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(broker)

@@ -103,7 +103,7 @@ func (e *Engine) executePlugin(ctx context.Context, r Request) (map[string]any, 
 	if mode != "text" && mode != "mixed" {
 		return nil, errors.New("invalid plugin mode")
 	}
-	if e.options.ExecutionTarget == "host" && bundle.Manifest.Execution != "host_or_sandbox" {
+	if e.options.ExecutionTarget == "host" && bundle.Manifest.Contributes.Tools.Execution != "host_or_sandbox" {
 		return nil, errors.New("this plugin supports Sandbox execution only")
 	}
 	input, ok := r.Args["input"].(map[string]any)
@@ -160,7 +160,7 @@ func (e *Engine) executePlugin(ctx context.Context, r Request) (map[string]any, 
 			p.mu.Unlock()
 			return nil, errors.New("plugin session limit reached")
 		}
-		client, err := pluginhost.New(pluginhost.Config{Node: e.options.Node, Identity: bundle.Digest, Entrypoint: bundle.Manifest.Entrypoint, Files: bundle.Files, Mode: mode, ExecutionTarget: e.options.ExecutionTarget, IdleTimeout: idle})
+		client, err := pluginhost.New(pluginhost.Config{Node: e.options.Node, Identity: bundle.Digest, Entrypoint: bundle.Manifest.Contributes.Tools.Entrypoint, Files: bundle.Files, Mode: mode, ExecutionTarget: e.options.ExecutionTarget, IdleTimeout: idle})
 		if err != nil {
 			p.mu.Unlock()
 			return nil, err

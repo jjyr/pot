@@ -411,7 +411,7 @@ func (a *Agent) available(role core.ExecutionRole, settings core.AgentSettings, 
 		if !plugin.Enabled || plugin.Bundle == nil {
 			continue
 		}
-		for _, raw := range plugin.Bundle.Manifest.Tools {
+		for _, raw := range plugin.Bundle.Manifest.Contributes.Tools.Tools {
 			var definition m.ToolDefinition
 			if err := core.DecodeJSON(raw, &definition); err != nil {
 				return nil, err

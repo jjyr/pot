@@ -35,7 +35,7 @@ jobs:
           staged=$(mktemp -d "$RUNNER_TEMP/pot-sandbox-resources.XXXXXX")
           rmdir "$staged"
           manifest=$(mktemp "$RUNNER_TEMP/pot-sandbox-resources-manifest.XXXXXX")
-          mise exec -- python providers/podman/verify-resources \
+          mise exec -- python plugins/podman/verify-resources \
             --source "$PREPARED_ASSETS" --tag "$RESOURCE_TAG" --output "$staged" >"$manifest"
           echo "RESOURCE_MANIFEST=$manifest" >>"$GITHUB_ENV"
       - name: Publish immutable resources

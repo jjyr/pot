@@ -208,7 +208,7 @@ func (d *Dispatcher) prepare(name string, args map[string]any, target core.Execu
 			continue
 		}
 		bundle := config.Bundle
-		for _, definition := range bundle.Manifest.Tools {
+		for _, definition := range bundle.Manifest.Contributes.Tools.Tools {
 			var tool struct {
 				Name string `json:"name"`
 			}
@@ -218,7 +218,7 @@ func (d *Dispatcher) prepare(name string, args map[string]any, target core.Execu
 			if err := bundle.ValidateInput(name, args); err != nil {
 				return "", nil, err
 			}
-			if target.Target.Kind == "host" && bundle.Manifest.Execution != "host_or_sandbox" {
+			if target.Target.Kind == "host" && bundle.Manifest.Contributes.Tools.Execution != "host_or_sandbox" {
 				return "", nil, errors.New("plugin supports Sandbox execution only")
 			}
 			mode := "text"
