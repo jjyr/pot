@@ -13,6 +13,16 @@ import (
 	"github.com/jjyr/pot/pkg/resource"
 )
 
+func TestGitHubLoginAvailableWithoutDeploymentConfiguration(t *testing.T) {
+	t.Setenv("POT_GITHUB_CLIENT_ID", "")
+	t.Setenv("POT_GITHUB_CLIENT_SECRET", "")
+	s := taskResourceService(t)
+	items, err := s.Integrations.List(context.Background())
+	if err != nil || len(items) != 1 || items[0].ID != "github" || !items[0].LoginAvailable || items[0].Status != "disconnected" {
+		t.Fatal("built-in GitHub login unavailable", items, err)
+	}
+}
+
 func TestCredentialCommandEnvironmentAndNonsecretReceipts(t *testing.T) {
 	d, execution, _ := localDispatcher(t)
 	d.Credentials = fixedCredentials("injected-fixture-token")

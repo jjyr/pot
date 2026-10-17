@@ -35,11 +35,14 @@ func TestDeviceAuthorizationIdentityAndRefresh(t *testing.T) {
 			}
 			json.NewEncoder(w).Encode(map[string]any{"device_code": "never-public-device", "user_code": "TEST-CODE", "verification_uri": "https://github.com/login/device", "expires_in": 900, "interval": 5})
 		case "/login/oauth/access_token":
+			if r.Form.Get("client_id") != "fixture-client" || r.Form.Has("client_secret") {
+				t.Error("device authorization and refresh must use only the public client ID")
+			}
 			if r.Form.Get("grant_type") == "refresh_token" {
 				if r.Form.Get("refresh_token") != "private-refresh" {
 					t.Error("refresh token missing")
 				}
-				io.WriteString(w, `{"access_token":"next-access","refresh_token":"next-refresh","expires_in":3600}`)
+				io.WriteString(w, `{"access_token":"next-access","refresh_token":"next-refresh","expires_in":28800,"refresh_token_expires_in":15897600}`)
 				return
 			}
 			if r.Form.Get("device_code") != "never-public-device" {
@@ -82,6 +85,9 @@ func TestDeviceAuthorizationIdentityAndRefresh(t *testing.T) {
 	next, err := adapter.Refresh(ctx, grant.Credential)
 	if err != nil || next.AccessToken != "next-access" {
 		t.Fatal("refresh", err)
+	}
+	if next.RefreshToken != "next-refresh" || next.ExpiresAt == nil || next.RefreshExpiresAt == nil {
+		t.Fatal("rotated credentials or expiry deadlines missing")
 	}
 }
 func TestAuthorizationErrorsNeverExposeResponseBodies(t *testing.T) {

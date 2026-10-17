@@ -37,11 +37,16 @@ Command / plugin -> CredentialResolver -> transient process environment
 
 ## Browser authorization
 
-Register a GitHub OAuth App and enable **Device Flow** in its settings. Configure
-`POT_GITHUB_CLIENT_ID` on the owning Control before starting it. This is the
-application ID, not a user's token. No shared third-party application's identity
-is bundled. Without configuration, GitHub remains visible and login is disabled
-with an administrator setup message.
+Control embeds the public Client ID of the **Pot** GitHub OAuth App owned by
+`jjyr`: `Ov23lijqmW8fsHmUPXl9`. GitHub login is available without deployment
+configuration. There is no environment variable, configuration field or UI option
+to replace this identity. The GitHub tool plugin consumes execution credentials;
+it does not own the OAuth application or login flow.
+
+The official OAuth App enables **Device Flow** and expiring tokens. Each user's
+Control contacts GitHub directly; Pot operates no intermediary authorization
+server. No Client Secret is generated, embedded or required for device login or
+refresh. The Client ID identifies the application and is not a user's credential.
 
 The GitHub adapter requests `repo read:user`, obtains a device challenge, and
 opens `https://github.com/login/device` in the user's browser. Pot displays the
@@ -50,10 +55,17 @@ responses, then fetches the authenticated user's stable ID and username before
 saving the account. This works with local or remote Controls without a public
 callback endpoint. Device codes and OAuth tokens never reach the management API.
 
-GitHub OAuth App access tokens normally have no expiration. If using an application
-configuration that issues expiring and refresh tokens, the adapter supports
-refresh exchanges; configure `POT_GITHUB_CLIENT_SECRET` when that application
-requires it. Secret configuration stays on the owning host.
+The official app issues access tokens that expire after eight hours and refresh
+tokens that expire after six months without use. On credential use, Control
+refreshes an expired or near-expiry access token without browser interaction and
+persists the new token pair encrypted in its own Secrets store. It does not run a
+background renewal timer. A refreshable account remains connected even when its
+current access token has expired. Listing accounts checks local refreshability,
+not GitHub's current authorization state. Temporary refresh failures fail the
+command without requesting logout or automatically retrying the command. Once
+both credentials are unusable, or GitHub rejects authorization permanently, the
+user must log out and authorize again. See GitHub's
+[device authorization and refresh contract](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#refreshing-an-access-token-with-a-refresh-token).
 
 Login sessions are memory-only, bounded by the provider's deadline, and do not
 survive restart. One pending session is allowed per service. Cancellation, logout
@@ -124,7 +136,7 @@ fresh process for each invocation.
 
 ## GitHub commands
 
-Enable the `github` plugin in the AI provider's plugin settings. It runs `gh`
+The bundled `github` tool plugin is enabled by default. It runs `gh`
 directly with `GH_TOKEN`; Integrations does not proxy business requests or execute
 commands. Arguments are an argv array without the executable:
 
