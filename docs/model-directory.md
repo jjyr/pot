@@ -65,6 +65,15 @@ saved routes contain the resolved endpoint. Existing routes are not rewritten.
 Gemini substitutes the path's `{model}` placeholder at request time so assistant
 model overrides use their selected model.
 
+The first saved Provider automatically becomes the Space default. Settings shows
+that default with a filled star and a Default badge in the configured Provider
+list; other rows offer an outlined star to select a new default. These controls
+retain the directory's existing brand artwork and colors. Default changes save
+immediately without reordering the list. While a save is pending, star controls
+are disabled and the previous default remains visible until acknowledgement.
+A failed save retains that default and offers an inline retry. Selecting a
+default affects new assistant forms, not existing assistants or Task snapshots.
+
 An assistant's Add Provider shortcut retains its draft while opening that same
 connection flow. Saving selects the new connection and its default model in the
 resumed assistant form; it does not create the assistant. Cancelling restores the
