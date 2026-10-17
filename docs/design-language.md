@@ -258,6 +258,9 @@ Expired accounts remain visible until logout. See [Integrations](credentials.md)
 
 AI Providers manages named connections, credentials, endpoints, protocols and
 concrete default models. One Provider is the Space's new-assistant default.
+The first saved Provider becomes the default automatically. Each configured row
+retains its brand icon and offers a star to choose the default; the selected row
+has a filled blue star and a Default badge. There is no separate default picker.
 Changing these defaults affects new form selections, not existing assistants or
 Task snapshots. There is no global Main Agent selection. Task Configuration
 contains execution capacity and Provider allowances, not model-routing defaults,

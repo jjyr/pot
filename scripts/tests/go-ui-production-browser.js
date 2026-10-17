@@ -6,6 +6,7 @@ async page => {
  let taskPage=0,longTaskList=false,remoteOffline=false,approvalFor='',approvalTask='',taskBeta=false,scheduleFixture=false,scheduleDeleted=false,loseScheduleReply=true;
  let releaseGuidance,guidanceArrived;const guidanceReady=new Promise(resolve=>guidanceArrived=resolve);
  let releaseTaskResume,taskResumeArrived;const taskResumeReady=new Promise(resolve=>taskResumeArrived=resolve);
+ let failDefault=false,holdDefault=false,releaseDefault,defaultArrived;const defaultReady=new Promise(resolve=>defaultArrived=resolve);
  const scheduleExecutions=new Set();let allowanceFixture=false,mainWaitTurn='main-original',mailWaitTurn='mail-original',mainWaitSince=11,mailWaitSince=21;
  const schedulePlan=index=>({id:index?'plan-'+index:'plan-proof',next_at_ms:index+1,spec:{title:index?'Extra schedule '+index:'Schedule proof',goal:'Full goal retained only in selected schedule',enabled:true,timezone:'UTC',kind:'daily',time:'09:00',weekdays:[],misfire:'coalesce',notify:'changes'},next_label:'Tomorrow'});
  const fileTask='de305d54-75b4-431b-adb2-eb6b9e546014';
@@ -28,6 +29,7 @@ async page => {
   else if(path===`/api/v1/tasks/${fileTask}/file-download`){await route.fulfill({status:200,contentType:'application/octet-stream',headers:{'Content-Disposition':'attachment; filename="result.txt"'},body:'report\n'});return;}
   else if(path==='/api/v1/events'||path==='/api/v1/changes'){await route.fulfill({status:200,contentType:'text/event-stream',body:': isolated contract test\n\n'});return;}
   else if(path==='/api/v1/providers'){if(method==='POST'){const body=route.request().postDataJSON(),profile={id:'nested-profile',name:body.name,model:body.model,revision:1,provider:'nested-route',params:{max_output_tokens:body.max_output_tokens,reasoning_effort:body.reasoning_effort},model_settings:body.model_settings};providers.profiles.push(profile);providers.connections.push({profile_id:profile.id,endpoint:body.endpoint,protocol:body.protocol,has_key:true});value=profile;}else value=providers;}
+  else if(path==='/api/v1/providers/default'){if(holdDefault)await new Promise(resolve=>{releaseDefault=resolve;defaultArrived();});if(failDefault){await route.fulfill({status:503,json:{message:'Default Provider save failed'}});return;}providers.default_provider_id=route.request().postDataJSON().provider_id;value={};}
   else if(path==='/api/v1/turn/steer')value={message_id:'guidance-message',duplicate:false};
   else if(path==='/api/v1/turn/control')value={accepted:true};
   else if(path==='/api/v1/agent/routing')value={revision:1,profile_limits:{},provider_limits:{}};
@@ -121,6 +123,22 @@ async page => {
   const offlineMachine=page.locator('.machine-card').filter({hasText:'Offline machine'});await offlineMachine.locator('.machine-target').filter({hasText:'View Sandbox tasks'}).locator('summary').click();assert(await offlineMachine.getByRole('button',{name:'Configure resources',exact:true}).isDisabled(),'Offline machine resource mutation is disabled');await machine.getByRole('button',{name:'View Sandbox tasks',exact:true}).click();await page.getByRole('button',{name:'Show all tasks',exact:true}).waitFor();assert(reads.some(value=>value.path==='/api/v1/tasks/query'&&value.target&&JSON.parse(value.target).target.sandbox_id==='sandbox-exact'&&value.space==='local'),'View Sandbox tasks captures full execution target');await page.getByRole('button',{name:'Show all tasks',exact:true}).click();
   for(const name of ['Tasks','Machines','Usage','Settings']) {await page.getByRole('button',{name,exact:true}).first().click();await page.locator('.page-content').waitFor();}
   await page.getByRole('button',{name:'AI Providers',exact:true}).click();
+  await page.locator('.provider-default').first().waitFor();
+  assert(await page.getByLabel('Default Provider for new assistants',{exact:true}).count()===0,'Default selection lives in Provider rows');
+  assert(await page.locator('.provider-default-badge:visible').count()===1&&await page.locator('.provider-default[data-provider-id="p"]').isDisabled(),'Current default has one badge and cannot be cleared');
+  const beforeDefault=JSON.stringify(thread),providerOrder=await page.locator('.provider-default').evaluateAll(buttons=>buttons.map(button=>button.dataset.providerId));
+  holdDefault=true;await page.locator('.provider-default[data-provider-id="nested-profile"]').click();await defaultReady;
+  assert(await page.locator('.provider-default').evaluateAll(buttons=>buttons.every(button=>button.disabled)),'Only one default save can be submitted at a time');
+  assert(await page.locator('.provider-default[aria-pressed="true"]').getAttribute('data-provider-id')==='p','Pending save retains the acknowledged default');
+  holdDefault=false;releaseDefault();await page.locator('.provider-default[data-provider-id="nested-profile"][aria-pressed="true"]').waitFor();
+  const defaultSave=posts.find(value=>value.path==='/api/v1/providers/default');assert(defaultSave.space==='local'&&defaultSave.owner===null&&defaultSave.body.provider_id==='nested-profile','Default saves capture the configuration Space without an assistant owner');
+  assert(JSON.stringify(await page.locator('.provider-default').evaluateAll(buttons=>buttons.map(button=>button.dataset.providerId)))===JSON.stringify(providerOrder),'Switching default never reorders Providers');
+  failDefault=true;await page.locator('.provider-default[data-provider-id="p"]').click();await page.getByRole('alert').filter({hasText:'Default Provider save failed'}).waitFor();
+  assert(await page.locator('.provider-default[aria-pressed="true"]').getAttribute('data-provider-id')==='nested-profile','Failed save preserves the previous default');
+  failDefault=false;await page.getByRole('button',{name:'Retry',exact:true}).click();await page.locator('.provider-default[data-provider-id="p"][aria-pressed="true"]').waitFor();
+  assert(JSON.stringify(thread)===beforeDefault,'Default changes never rewrite an existing assistant selection');
+  await page.setViewportSize({width:390,height:852});assert((await page.locator('.provider-default').first().boundingBox()).height===44,'Default stars retain a44px touch target on phones');assert(!await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),'Provider rows fit narrow screens');await page.setViewportSize({width:1200,height:792});
+  await page.getByRole('button',{name:'General',exact:true}).click();await page.getByRole('button',{name:'AI Providers',exact:true}).click();await page.locator('.provider-default[data-provider-id="p"][aria-pressed="true"]').waitFor();
   await page.getByRole('button',{name:'Add connection',exact:true}).click();
   await page.getByRole('button',{name:'OpenAI',exact:true}).click();
   assert(await page.getByLabel('Find a Provider',{exact:true}).count()===0&&await page.getByLabel('Provider',{exact:true}).count()===0,'Connection editor does not repeat Provider search or selection');

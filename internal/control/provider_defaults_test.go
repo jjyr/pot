@@ -105,3 +105,51 @@ func TestOlderProviderRevisionAdoptsToolsOnlyAtFreshTurnBoundary(t *testing.T) {
 		t.Fatal("refresh mutated the existing execution snapshot")
 	}
 }
+
+func TestDefaultProviderInitializesNewAssistantsAndPersists(t *testing.T) {
+	ctx := context.Background()
+	s, first := configurationService(t)
+	if s.Profiles.Snapshot().DefaultProviderID != first.ID {
+		t.Fatal("first Provider was not selected automatically")
+	}
+	existing, err := s.CreateAssistant(ctx, CreateAssistant{RequestID: "existing-default", Name: "Existing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.AssistantConfiguration(ctx, existing.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "second-provider", Name: "Second", Model: "second", Endpoint: "https://fixture.invalid/v1/chat/completions", Protocol: "openai_chat", APIKey: "fixture-key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Profiles.Snapshot().DefaultProviderID != first.ID {
+		t.Fatal("adding a Provider replaced the selected default")
+	}
+	if err = s.Profiles.SetDefault(second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Profiles.SetDefault("missing"); err == nil {
+		t.Fatal("unknown default Provider was accepted")
+	}
+	reopened, err := OpenProfiles(s.Profiles.path, "", s.Providers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Snapshot().DefaultProviderID != second.ID {
+		t.Fatal("selected default was not persisted")
+	}
+	next, err := s.CreateAssistant(ctx, CreateAssistant{RequestID: "next-default", Name: "Next"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextConfig, err := s.AssistantConfiguration(ctx, next.ID)
+	if err != nil || nextConfig.Config.SourceProfileID != second.ID || nextConfig.Config.Model != second.Model {
+		t.Fatal("new assistant did not inherit the selected Provider and model", nextConfig, err)
+	}
+	after, err := s.AssistantConfiguration(ctx, existing.ID)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("default selection changed an existing assistant", after, err)
+	}
+}
