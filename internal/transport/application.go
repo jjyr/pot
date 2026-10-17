@@ -284,6 +284,14 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 				return nil, err
 			}
 			return s.CreateAssistant(ctx, body)
+		case "/api/v1/assistants/bootstrap":
+			var body struct {
+				Locale string `json:"locale" required:"true"`
+			}
+			if err = decode(r.Body, &body); err != nil {
+				return nil, err
+			}
+			return s.BootstrapAssistant(ctx, body.Locale)
 		case "/api/v1/agent":
 			var body control.SaveAssistantConfiguration
 			if err = decode(r.Body, &body); err != nil {

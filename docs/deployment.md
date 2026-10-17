@@ -91,10 +91,13 @@ encrypt credentials or content. Deployment network protection and TLS are
 operator choices.
 
 A listener enables standalone Control but creates no assistant. Configure a
-Provider through App, then explicitly create an assistant. API callers may use
+Provider through App; first-use Chat then bootstraps Pot automatically. API callers may use
 `POST /api/v1/assistants`; it requires a stable `request_id` and a `name`, and
-optionally an explicit assistant model selection. Saving Providers alone never
-creates conversational identities.
+optionally an explicit assistant model selection and `locale` (`en` or `zh-CN`,
+default English) for its persisted welcome. `POST /api/v1/assistants/bootstrap`
+accepts `locale` and returns `assistant: null` without a default Provider, otherwise
+the first existing assistant or a newly created Pot. Saving Providers alone never
+creates conversational identities; Chat initiates the separate bootstrap request.
 
 The private CLI socket authenticates operator requests without exposing its
 internal token:

@@ -247,9 +247,37 @@ type CreateAssistant struct {
 	Name      string              `json:"name" required:"true"`
 	Selection *AssistantSelection `json:"selection,omitempty"`
 	Text      string              `json:"text,omitempty"`
+	Locale    string              `json:"locale,omitempty"`
 }
 
 func (s *Service) CreateAssistant(ctx context.Context, request CreateAssistant) (assistant.Definition, error) {
+	return s.createAssistant(ctx, request, false)
+}
+
+// BootstrapAssistant creates Pot only when this Space has a Provider and no
+// assistants. The registry transaction arbitrates simultaneous windows/retries.
+func (s *Service) BootstrapAssistant(ctx context.Context, locale string) (map[string]any, error) {
+	definitions, err := s.Registry.Definitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(definitions) > 0 {
+		return map[string]any{"assistant": definitions[0]}, nil
+	}
+	if s.Profiles.Snapshot().DefaultProviderID == "" {
+		return map[string]any{"assistant": nil}, nil
+	}
+	definition, err := s.createAssistant(ctx, CreateAssistant{RequestID: "pot-onboarding", Name: "Pot", Locale: locale}, true)
+	return map[string]any{"assistant": definition}, err
+}
+
+func (s *Service) createAssistant(ctx context.Context, request CreateAssistant, onlyFirst bool) (assistant.Definition, error) {
+	welcome := "Hi, I'm " + request.Name + ".\n\nYou can give me a name, or tell me how you'd like me to help."
+	if request.Locale == "zh-CN" {
+		welcome = "你好，我是 " + request.Name + "。\n\n你可以给我起个名字，或者告诉我你希望我如何帮你。"
+	} else if request.Locale != "" && request.Locale != "en" {
+		return assistant.Definition{}, errors.New("unsupported assistant locale")
+	}
 	var intent json.RawMessage
 	var err error
 	if request.Selection != nil {
@@ -270,7 +298,7 @@ func (s *Service) CreateAssistant(ctx context.Context, request CreateAssistant) 
 	var definition assistant.Definition
 	err = s.Machines.OwnerAction(func() error {
 		var err error
-		definition, err = s.Registry.CreateWithIntent(ctx, request.RequestID, request.Name, binding, request.Text, intent, func() (*core.ResolvedSpec, error) {
+		definition, err = s.Registry.CreateWithIntent(ctx, request.RequestID, request.Name, binding, request.Text, intent, welcome, onlyFirst, func() (*core.ResolvedSpec, error) {
 			if request.Selection != nil {
 				spec, err := s.Profiles.ResolveAssistant(*request.Selection)
 				return &spec, err

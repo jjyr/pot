@@ -357,6 +357,9 @@ func Allowed(method, path string) bool {
 			return true
 		}
 		if strings.HasPrefix(path, "/api/v1/assistants/") {
+			if path == "/api/v1/assistants/bootstrap" {
+				return true
+			}
 			id := strings.TrimPrefix(path, "/api/v1/assistants/")
 			return core.Identifier(id)
 		}
