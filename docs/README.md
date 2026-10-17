@@ -7,6 +7,7 @@ implementation. Code defines actual behavior.
 |---|---|
 | Deployment, resource APIs, Control membership and web-ui-server | [Deployment](deployment.md) |
 | Build, test and release | [Development](development.md) |
+| PR screenshot storage and naming | [PR images](pr-images/README.md) |
 | Current product scope and deferred platform work | [Development plan](development-plan.md) |
 | Assistant rules, project AGENTS.md, routing and Skills | [Agent context](agent-context.md) |
 | Visual language, responsive navigation and editing-page interactions | [Design language](design-language.md) |
