@@ -6,14 +6,14 @@ export function taskElapsed(start,now,locale='en'){
   return zh?`已用 ${value}`:`Elapsed ${value}`;
 }
 
-// One presentation timer per mounted Chat; no projection reads or DOM rebuilds.
-export function bindBackgroundTaskClock(root,{locale,active}){
+// One presentation timer per mounted view; no projection reads or DOM rebuilds.
+export function bindTaskClock(root,{locale,active}){
   let timer=0,disposed=false;
   function refresh(){
     clearTimeout(timer);timer=0;
     if(disposed||document.hidden||!active())return;
     const now=Date.now();let delay=Infinity;
-    for(const node of root.querySelectorAll('.background-task-elapsed')){
+    for(const node of root.querySelectorAll('[data-started-at]')){
       const start=Number(node.dataset.startedAt),text=taskElapsed(start,now,locale());
       if(node.textContent!==text)node.textContent=text;
       if(!text)continue;

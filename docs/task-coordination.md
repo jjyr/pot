@@ -57,8 +57,9 @@ run. Subsequent claims after allowance resume retain that timestamp. Control
 copies it into Task info from the original run receipt, including when the first
 observed receipt is waiting or terminal. Zero means execution has not started or
 its original start time is unavailable; creation and update timestamps are never
-substituted. Chat uses this timestamp for total elapsed wall time, including later
-waits, while Task details show the local start date and time.
+substituted. Chat and ongoing Task-list rows use this timestamp for total elapsed
+wall time, including later waits, while Task details show the local start date
+and time. Ended Task-list rows do not retain a live clock.
 
 ## Pause at a model boundary
 

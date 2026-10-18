@@ -323,8 +323,14 @@ See [UI events](ui-events.md#tool-call-projections) for the event and persistenc
 ### Tasks and schedules
 
 Tasks keeps Ongoing / Needs attention / Archived groups, search and 20-item
-pagination. Rows group by assistant and show title, state and change time. Filters
-and search remain outside the scrolling list; search/group changes reset paging.
+pagination. Rows group by assistant and show title, state and execution context.
+Ongoing rows with a known first execution start also show muted elapsed time,
+using the same wall-time rules and formatter as Chat. Desktop aligns time to the
+right of the title, before the chevron; below 720 px it sits beside the status
+information. Never-started and ended tasks omit the live clock. Only visible
+lists advance their clocks; navigation and disposal release the presentation
+timer without requesting backend data. Filters and search remain outside the
+scrolling list; search/group changes reset paging.
 
 Schedules share the Tasks destination and provide next run, time zone, policies
 and history linking to tasks. Editing uses the editing-page contract; deletion

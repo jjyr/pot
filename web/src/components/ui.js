@@ -13,7 +13,7 @@ import {projectChatReplies} from '../state/chat-replies.mjs';
 import {createReplyBubble} from './reply.mjs';
 import {reconcile} from './reconcile.mjs';
 import {createRefreshQueue,relevantChange} from '../state/refresh.mjs';
-import {taskElapsed,bindBackgroundTaskClock} from './task-time.mjs';
+import {taskElapsed,bindTaskClock} from './task-time.mjs';
 
 function el(tag, className = '', text) {
   const element = document.createElement(tag);
@@ -77,7 +77,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   history.setAttribute('role', 'log');
   history.setAttribute('aria-label', t('chat'));
   const messageColumn = el('div', 'message-column');
-  const taskClock=bindBackgroundTaskClock(messageColumn,{locale:()=>locale,active:()=>!disposed&&route==='chat'&&!root.classList.contains('show-directory')});
+  const taskClock=bindTaskClock(messageColumn,{locale:()=>locale,active:()=>!disposed&&route==='chat'&&!root.classList.contains('show-directory')});
   history.append(messageColumn);
   const status = el('div', 'connection-status');
   status.setAttribute('role', 'status');
