@@ -64,9 +64,9 @@ func (l *Ledger) Page(ctx context.Context, kind string, q Query, atMS int64) (Pa
 }
 func modelPage(ctx context.Context, db queryDB, q Query, atMS int64, zone *time.Location) (Page, error) {
 	if q.Days == 0 {
-		q.Days = 7
+		q.Days = 14
 	}
-	if q.Days != 7 && q.Days != 30 && q.Days != 90 && q.Days != 365 {
+	if q.Days != 14 && q.Days != 30 && q.Days != 90 && q.Days != 365 {
 		return Page{}, fmt.Errorf("invalid usage range")
 	}
 	groupStart, groupEnd := int64(0), int64(math.MaxInt64)

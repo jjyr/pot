@@ -197,7 +197,7 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 		case "/api/v1/permissions":
 			return map[string]any{"policy": s.Permissions.Snapshot(), "pending": s.Permissions.Pending(owner)}, nil
 		case "/api/v1/usage/summary", "/api/v1/usage/models", "/api/v1/usage/requests", "/api/v1/usage/tools", "/api/v1/usage/compactions":
-			days := 7
+			days := 14
 			if text := u.Query().Get("days"); text != "" {
 				days, err = strconv.Atoi(text)
 				if err != nil {
