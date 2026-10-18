@@ -75,9 +75,21 @@ rejects a non-advancing cursor. Tools remain expandable and file links retain th
 Task's explicit Control/assistant identity.
 
 Task invalidations also refresh status, pause controls, guidance/reference delivery
-states and the terminal result in place. The original input appears once as the
-Goal; guidance and references appear before execution output with explicit labels.
-The latest execution output and terminal result remain above the message composer.
+states and terminal output in place. The original input appears once in a collapsed
+Goal disclosure. The Agent emits an `input_applied` event with the input's request ID
+after checkpoint persistence and before acknowledgment. These durable bookmarks
+place delivered guidance and references before their continuation, independently
+of response arrival order or machine clocks. Repeated bookmarks do not reorder
+history. Pending inputs remain at the tail; retained historical inputs without a
+bookmark remain identifiable without inventing a delivery position.
+
+The task conversation uses the shared reply bubbles, tool disclosures, composer
+binding and reference completions. Only its history scrolls; status and the composer
+remain visible. Following stops when the reader scrolls upward, and Latest resumes
+it. Navigation restores the goal/tool disclosures and reading position. Terminal
+text already present in the final reply is not repeated. Ended tasks retain an
+unsent draft read-only and expose no send action. Only a matching successful send
+clears an unedited draft; failed sends retain their request identity for retry.
 
 ## Tool-call projections
 

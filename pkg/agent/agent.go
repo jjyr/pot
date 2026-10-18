@@ -244,7 +244,7 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 		if err := a.Feedback.Ready(ctx); err != nil {
 			return err
 		}
-		if _, err := a.acceptSteering(ctx, &state, false); err != nil {
+		if _, err := a.acceptSteering(ctx, &state, false, emit); err != nil {
 			return err
 		}
 		input := m.Request{Protocol: m.Protocol(thread.Config.GatewayProtocol), Model: thread.Config.Model, System: system, Messages: portable(thread.Config, state.Messages, descriptor.Vision()), Tools: available, MaxOutputTokens: thread.Config.Params.MaxOutputTokens, ReasoningEffort: thread.Config.Params.ReasoningEffort}
@@ -290,7 +290,7 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 			return err
 		}
 		if len(state.Pending) == 0 {
-			added, err := a.acceptSteering(ctx, &state, true)
+			added, err := a.acceptSteering(ctx, &state, true, emit)
 			if err != nil {
 				return err
 			}
@@ -380,7 +380,7 @@ func (a *Agent) save(ctx context.Context, state *Checkpoint) error {
 	}
 	return a.Feedback.SaveContext(ctx, raw)
 }
-func (a *Agent) acceptSteering(ctx context.Context, state *Checkpoint, finalizing bool) (bool, error) {
+func (a *Agent) acceptSteering(ctx context.Context, state *Checkpoint, finalizing bool, emit func(core.Update) error) (bool, error) {
 	pending, err := a.Feedback.Steering(ctx, finalizing)
 	if err != nil {
 		return false, err
@@ -401,6 +401,11 @@ func (a *Agent) acceptSteering(ctx context.Context, state *Checkpoint, finalizin
 	if len(ids) > 0 {
 		if err := a.save(ctx, state); err != nil {
 			return false, err
+		}
+		for _, id := range ids {
+			if err := emit(core.Update{Type: "input_applied", ID: id}); err != nil {
+				return false, err
+			}
 		}
 		if err := a.Feedback.AcknowledgeSteering(ctx, ids); err != nil {
 			return false, err
