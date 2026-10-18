@@ -131,7 +131,7 @@ through its explicit GET allowlist. Usage limits are read from the summary's
 
 Gateway accepts only the current Thread's provider/model. `request_routes` links request IDs to
 Agent type, profile ID, provider, generation, and spec hash. Existing request tables retain executed configuration models/turns.
-OpenAI Chat codec retains DeepSeek reservation/output-cap/settlement behavior. Requests after a configuration change use the new snapshot; previous request attribution remains unchanged. Global/session summaries group input/output/cache/records/unknown usage by Agent type + model. Same models across Agents stay separate; same Agent/model across profiles/providers combines, retaining provider/profile/generation in request details.
+OpenAI Chat codec retains DeepSeek reservation/output-cap/settlement behavior. Requests after a configuration change use the new snapshot; previous request attribution remains unchanged. Global/session summaries group input/output/cache/request counts by Agent type + model. Same models across Agents stay separate; same Agent/model across profiles/providers combines, retaining provider/profile/generation in request details.
 
 `unknown` protocol neither parses response usage nor changes output caps or pretends usage is zero. Requests retain
 unknown usage and conservative reservations. Exact request budgets, usage reporting and safe checkpoint resume require a known protocol. Subscription quotas remain unintegrated and cannot be inferred from the API ledger.
@@ -163,4 +163,4 @@ share one ledger; compaction retains its actual Agent/model attribution.
 Global categories use the page's selected range/zone, matching global totals; session/task details use their scope's
 lifetime range, matching the total card. Pages hold 20 categories, sorted by input+output descending, then stable Agent/model order.
 Pagination does not change totals/trends/allowances; scope/zone changes reset pages, and the global model range resets its pages. Stale responses are discarded. In the combined locations view, model categories remain grouped and paginated per Space; partial model pages are never summed into misleading global category totals. Global totals and trends still combine complete aggregates across Spaces.
-Categories show input/output/input-cache hits/incomplete records without presenting unknown consumption as zero.
+Categories show input/output/input-cache hits. Incomplete-record counts are not calculated or exposed in usage aggregates or the UI. Individual request details keep missing token values as unknown rather than zero; reservations still retain conservative accounting until complete usage arrives or the allowance window ends.

@@ -13,7 +13,7 @@ async page => {
   const step=days===365?7:1,buckets=[];
   for(let offset=0;offset<days;offset+=step){
    const start=new Date(Date.UTC(2026,9,18-days+offset)).toISOString().slice(0,10),end=new Date(Date.UTC(2026,9,17-days+Math.min(days,offset+step))).toISOString().slice(0,10),active=offset+step>=days;
-   buckets.push({label:start.slice(5),range:`${start} — ${end}`,input:active?4:0,output:active?2:0,cache:0,unknown:0});
+   buckets.push({label:start.slice(5),range:`${start} — ${end}`,input:active?4:0,output:active?2:0,cache:0});
   }
   return buckets;
  };

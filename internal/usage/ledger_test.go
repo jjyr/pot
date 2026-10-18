@@ -89,7 +89,7 @@ func TestReservationBothAllowancesAtomicClaimAndRestart(t *testing.T) {
 		t.Fatal(q)
 	}
 	s, err := l.Summary(ctx, Query{Scope: "main"}, at)
-	if err != nil || s.Lifetime.Input != 120 || s.Lifetime.Output != 20 || s.Lifetime.Cache != 120 || s.Lifetime.Unknown != 0 {
+	if err != nil || s.Lifetime.Input != 120 || s.Lifetime.Output != 20 || s.Lifetime.Cache != 120 {
 		t.Fatal(s, err)
 	}
 }

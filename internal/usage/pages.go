@@ -82,13 +82,13 @@ func modelPage(ctx context.Context, db queryDB, q Query, atMS int64, zone *time.
 	}
 	items := []AgentModel{}
 
-	rows, err := db.QueryContext(ctx, `SELECT COALESCE(t.agent,'unknown'),r.model,COUNT(*),COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0),SUM(CASE WHEN r.input IS NULL OR r.output IS NULL THEN 1 ELSE 0 END) FROM requests r LEFT JOIN request_routes t ON t.request_id=r.id WHERE (?='' OR r.scope=?) AND r.at>=? AND r.at<? GROUP BY COALESCE(t.agent,'unknown'),r.model ORDER BY COALESCE(SUM(r.input),0)+COALESCE(SUM(r.output),0) DESC,1,2 LIMIT 21 OFFSET ?`, q.Scope, q.Scope, groupStart, groupEnd, q.Offset)
+	rows, err := db.QueryContext(ctx, `SELECT COALESCE(t.agent,'unknown'),r.model,COUNT(*),COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0) FROM requests r LEFT JOIN request_routes t ON t.request_id=r.id WHERE (?='' OR r.scope=?) AND r.at>=? AND r.at<? GROUP BY COALESCE(t.agent,'unknown'),r.model ORDER BY COALESCE(SUM(r.input),0)+COALESCE(SUM(r.output),0) DESC,1,2 LIMIT 21 OFFSET ?`, q.Scope, q.Scope, groupStart, groupEnd, q.Offset)
 	if err != nil {
 		return Page{}, err
 	}
 	for rows.Next() {
 		var a AgentModel
-		if err := rows.Scan(&a.Agent, &a.Model, &a.Requests, &a.Input, &a.Output, &a.Cache, &a.Unknown); err != nil {
+		if err := rows.Scan(&a.Agent, &a.Model, &a.Requests, &a.Input, &a.Output, &a.Cache); err != nil {
 			rows.Close()
 			return Page{}, err
 		}
@@ -161,7 +161,7 @@ func toolPage(ctx context.Context, db queryDB, q Query) (Page, error) {
 func compactionPage(ctx context.Context, db queryDB, q Query, zone *time.Location) (Page, error) {
 	items := []CompactionRecord{}
 
-	rows, err := db.QueryContext(ctx, `SELECT c.id,c.at,c.reason,c.state,c.tokens_before,c.tokens_after,COUNT(r.id),COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0),COALESCE(SUM(CASE WHEN r.id IS NOT NULL AND (r.input IS NULL OR r.output IS NULL) THEN 1 ELSE 0 END),0) FROM compactions c LEFT JOIN requests r ON r.compaction_id=c.id WHERE c.scope=? GROUP BY c.id ORDER BY c.at,c.id LIMIT 21 OFFSET ?`, q.Scope, q.Offset)
+	rows, err := db.QueryContext(ctx, `SELECT c.id,c.at,c.reason,c.state,c.tokens_before,c.tokens_after,COUNT(r.id),COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0) FROM compactions c LEFT JOIN requests r ON r.compaction_id=c.id WHERE c.scope=? GROUP BY c.id ORDER BY c.at,c.id LIMIT 21 OFFSET ?`, q.Scope, q.Offset)
 	if err != nil {
 		return Page{}, err
 	}
@@ -170,7 +170,7 @@ func compactionPage(ctx context.Context, db queryDB, q Query, zone *time.Locatio
 		var c CompactionRecord
 		var at int64
 		var before, after sql.NullInt64
-		if err := rows.Scan(&c.ID, &at, &c.Reason, &c.State, &before, &after, &c.Requests, &c.Input, &c.Output, &c.Cache, &c.Unknown); err != nil {
+		if err := rows.Scan(&c.ID, &at, &c.Reason, &c.State, &before, &after, &c.Requests, &c.Input, &c.Output, &c.Cache); err != nil {
 			return Page{}, err
 		}
 		c.Label = time.UnixMilli(at).In(zone).Format("2006-01-02 15:04")
