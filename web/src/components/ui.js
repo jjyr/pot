@@ -246,7 +246,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     restoredAttachmentFailures.add(key);
     if(!draft(state)&&!attachmentUI.items().length&&!draftReferences(state).length){setDraft(state,failed.input.text);setDraftReferences(state,failed.input.references||[]);attachmentUI.restore(editorOwner,failed.input.attachments||[],{...client.scope()});syncEditor();}
   }
-  const completions=client.production?bindCompletions(input,{client,host:composerArea,locale:()=>locale}):null;
+  const completions=client.production?bindCompletions(input,{client,host:composerArea,locale:()=>locale,mobile:editor.mobile}):null;
   function syncEditor() {
     if (!state.snapshot) return;
     const nextOwner = ownerKey(state.snapshot);
@@ -286,7 +286,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     catch { if (cancelEpoch === state.epoch) error = t('cancelError'); }
     finally { cancelPending = false; if (!disposed) updateControls(); }
   }
-  form.addEventListener('submit', event => { event.preventDefault(); submit(); });
+  form.addEventListener('submit', event => { event.preventDefault(); if(!editor.mobile)submit(); });
   send.addEventListener('click', () => state.snapshot?.running&&!draft(state).trim()&&!attachmentUI?.items().length ? cancel() : submit());
   function updateControls() {
     const snapshot = state.snapshot;
