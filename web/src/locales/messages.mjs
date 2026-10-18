@@ -1,5 +1,8 @@
 export const messages = {
   en: {
+    'tasks.backgroundCount':'Background tasks · {count}',
+    'tasks.expandOne':'Expand {count} more task', 'tasks.expandMore':'Expand {count} more tasks', 'tasks.collapse':'Collapse',
+    'tasks.elapsedDescription':'Total time since execution first started, including waits',
     'attachments.add':'Add attachment', 'attachments.images':'Images', 'attachments.pdf':'PDF',
     'attachments.modelUnsupported':'Current model does not support image or PDF uploads',
     'attachments.imagesUnsupported':'Current model does not support images', 'attachments.pdfUnsupported':'Current model does not support PDF uploads',
@@ -134,6 +137,9 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'tasks.backgroundCount':'后台任务 · {count}',
+    'tasks.expandOne':'展开其余 {count} 项任务', 'tasks.expandMore':'展开其余 {count} 项任务', 'tasks.collapse':'收起',
+    'tasks.elapsedDescription':'自首次开始执行起的总耗时，包含中间等待',
     'attachments.add':'添加附件', 'attachments.images':'图片', 'attachments.pdf':'PDF',
     'attachments.modelUnsupported':'当前模型不支持图片或 PDF 上传',
     'attachments.imagesUnsupported':'当前模型不支持图片', 'attachments.pdfUnsupported':'当前模型不支持 PDF 上传',

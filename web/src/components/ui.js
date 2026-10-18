@@ -17,7 +17,9 @@ import {projectChatReplies} from '../state/chat-replies.mjs';
 import {createReplyBubble} from './reply.mjs';
 import {reconcile} from './reconcile.mjs';
 import {createRefreshQueue,relevantChange} from '../state/refresh.mjs';
-import {taskElapsed,bindTaskClock} from './task-time.mjs';
+import {bindTaskClock} from './task-time.mjs';
+import {createBackgroundTasks} from './background-tasks.mjs';
+import {captureReadingPosition,restoreReadingPosition} from './reading-position.mjs';
 import {bindResumeRecovery} from '../state/resume.mjs';
 import {bindViewport} from './viewport.mjs';
 
@@ -66,7 +68,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let assistants = [], spaces = [], selectedAssistant = null, pendingSelection = null;
   let unsubscribe = () => {}, stopChanges = () => {};
   let directoryEpoch = 0, directorySignature = '';
-  const positions = new Map(), cachedSnapshots = new Map();
+  const positions = new Map(), cachedSnapshots = new Map(), readingPositions = new Map();
+  let chatShown=false,historyFrame=0,pendingReadingPosition=null,lastMessageSnapshot=null,lastMessagePresentation='',pendingFollow=false,hasRenderedMessages=false;
   let restoredSnapshot=false,awaitingSnapshot=false;
   const snapshotKey=(space=client.scope?.().space||'',owner=client.scope?.().owner||'')=>JSON.stringify([(client.spaces||[]).find(item=>item.id===space)?.control_id||client.runtime?.runtime_id||'',space,owner]);
   const t = key => translate(locale,key);
@@ -338,6 +341,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   preferences.addEventListener('close', () => { preferencesOpen = false;notifications?.report(); });
   const shellRoots={rail,titlebar,menu};
   function renderShell() {
+    const showingChat=route==='chat'&&!(media.matches&&directoryOpen);
+    if(chatShown&&!showingChat)readingPositions.set(snapshotKey(),captureReadingPosition(history));
+    if(!chatShown&&showingChat)pendingReadingPosition=readingPositions.get(snapshotKey())||pendingReadingPosition;
+    chatShown=showingChat;
     queueMicrotask(()=>{if(!disposed)notifications?.report();});
     const rail=shellRoots.rail.cloneNode(false),titlebar=shellRoots.titlebar.cloneNode(false),menu=shellRoots.menu.cloneNode(false);
     markVisibleRead();
@@ -447,22 +454,43 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   latest.onclick = scrollBottom;
   const messageNodes = new Map(),toolMemory=new Map();
   const taskCache=new Map();
+  const backgroundTaskView=createBackgroundTasks({locale:()=>locale,
+    onOpen:task=>{const returnTo={route:'chat',scope:{...client.scope()}};route='tasks';pages.openTask(task,{returnTo});renderShell();},
+    onToggle:change=>renderMessages({taskToggle:change}),
+  });
   let backgroundTasks=null,backgroundTaskKey='';
   function refreshBackgroundTasks(){
     if(!client.production||!selectedAssistant)return Promise.resolve();
     const scope={...client.scope()},key=JSON.stringify([scope.space,scope.owner]);
     if(!backgroundTasks||key!==backgroundTaskKey){
       backgroundTasks?.close();backgroundTaskKey=key;
-      backgroundTasks=createRefreshQueue(async()=>{const value=await client.request('/api/v1/tasks/query?scope=active&limit=50',{...scope,signal:abort.signal});if(disposed||key!==JSON.stringify([client.scope().space,client.scope().owner]))return;taskCache.set(key,(value.items||[]).filter(task=>['running','waiting_approval'].includes(task.phase)).map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner})));pages.rememberTasks(taskCache.get(key));if(route==='chat')renderMessages();},{active:()=>!disposed&&key===JSON.stringify([client.scope().space,client.scope().owner])});
+      backgroundTasks=createRefreshQueue(async()=>{
+        const items=[],seen=new Set();let offset=0;
+        do{
+          if(seen.has(offset))throw Error('Invalid task pagination cursor');seen.add(offset);
+          const value=await client.request(`/api/v1/tasks/query?scope=active&limit=50&offset=${offset}`,{...scope,signal:abort.signal});
+          if(disposed||key!==JSON.stringify([client.scope().space,client.scope().owner]))return;
+          items.push(...(value.items||[]));offset=value.next_offset;
+        }while(offset!=null);
+        taskCache.set(key,items.filter(task=>['running','waiting_approval'].includes(task.phase)).map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner})));
+        pages.rememberTasks(taskCache.get(key));if(route==='chat')renderMessages();
+      },{active:()=>!disposed&&key===JSON.stringify([client.scope().space,client.scope().owner])});
     }return backgroundTasks.run();
   }
-  function renderMessages() {
+  function renderMessages({taskToggle}={}) {
+    cancelAnimationFrame(historyFrame);
     const follow = nearBottom();
-    const previousTop = history.scrollTop;
+    const readingPosition=pendingReadingPosition||captureReadingPosition(history,{ignoreToggle:!!taskToggle?.expanded});
     const snapshot = state.snapshot||(client.production&&selectedAssistant?cachedSnapshots.get(snapshotKey(selectedAssistant.space_id||'',selectedAssistant.id)):null);
     const sending=state.sends.get(editorOwner||(snapshot&&ownerKey(snapshot)));
     const activeTurn=snapshot?.running?(snapshot.messages.find(message=>message.id===snapshot.turn_id)?.request_id||snapshot.turn_id):null;
     const visibleMessages=projectScriptRuns(projectChatReplies(snapshot,sending,{offline:connection==='offline'||disconnected||selectedAssistant?.offline}),{activeTurn});
+    // Snapshot identity covers transcript changes. Keep only the small local
+    // presentation state here; do not serialize long histories on task refresh.
+    const presentation=JSON.stringify([locale,connection,disconnected,selectedAssistant?.offline,sending?.request.request_id,sending?.phase,sending?.detail]);
+    const messagesChanged=snapshot!==lastMessageSnapshot||presentation!==lastMessagePresentation;
+    lastMessageSnapshot=snapshot;lastMessagePresentation=presentation;
+    if(chatShown&&messagesChanged&&follow)pendingFollow=true;
     const ids = new Set(visibleMessages.map(message => message.viewKey));
     const forest=toolForest(visibleMessages);
     for (const [id, record] of messageNodes) if (!ids.has(id)) { record.row.remove(); messageNodes.delete(id); }
@@ -478,6 +506,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       }
       const {row, bubble} = record;
       row.dataset.messageId=message.id;
+      bubble.dataset.scrollAnchor=`message:${message.viewKey}`;
       if(message.role==='tool'&&message.tool){
         const scope=client.scope?.()||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
         if(!record.tool){record.tool=createToolCall({memory:toolMemory,key,locale:()=>locale,onDecision:(approval,action)=>pages.decideApproval(approval,action)});bubble.append(record.tool.element);}
@@ -532,29 +561,21 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       else {if(messageColumn.children[position]===chatApprovals)position++;if (messageColumn.children[position] !== row) messageColumn.insertBefore(row, messageColumn.children[position] || null);position++;}
     }
     const lastAssistant=visibleMessages.findLast(message=>message.role==='assistant');
-    for(const [id,record]of messageNodes){if(id!==lastAssistant?.viewKey){record.tasks?.remove();record.tasks=null;}}
-    if(client.production&&lastAssistant){
-      const record=messageNodes.get(lastAssistant.viewKey),tasks=[...(taskCache.get(JSON.stringify([client.scope().space,client.scope().owner]))||[])].sort((a,b)=>Number(pages.taskNeedsApproval(b.id,b.phase))-Number(pages.taskNeedsApproval(a.id,a.phase)));
-      if(tasks.length){
-        const strip=el('div','background-tasks');strip.setAttribute('aria-label',locale==='zh-CN'?'正在执行的后台任务':'Executing background tasks');
-        for(const task of tasks.slice(0,3)){
-          const open=el('button','background-task');open.type='button';open.dataset.viewKey=JSON.stringify([task._space_id,task.assistant_id,task.id]);open.title=task.title;
-          const waiting=pages.taskNeedsApproval(task.id,task.phase),meta=el('span','background-task-meta');open.classList.toggle('needs-approval',waiting);
-          open.append(el('span','task-activity-dot'),el('span','background-task-title',task.title));
-          if(waiting)meta.append(el('span','background-task-status',t('tool.waiting_approval')));
-          const time=taskElapsed(task.started_at_ms,Date.now(),locale);
-          if(time){
-            if(waiting){const separator=el('span','','·');separator.setAttribute('aria-hidden','true');meta.append(separator);}
-            const elapsed=el('span','background-task-elapsed',time);elapsed.dataset.startedAt=task.started_at_ms;elapsed.setAttribute('role','timer');elapsed.setAttribute('aria-live','off');
-            elapsed.title=locale==='zh-CN'?'自首次开始执行起的总耗时，包含中间等待':'Total time since execution first started, including waits';meta.append(elapsed);
-          }
-          if(meta.childNodes.length)open.append(meta);
-          open.onclick=()=>{const returnTo={route:'chat',scope:client.scope()};route='tasks';pages.openTask(task,{returnTo});renderShell();};strip.append(open);
-        }
-        if(tasks.length>3){const more=el('button','text-button',locale==='zh-CN'?`还有 ${tasks.length-3} 项任务`:`${tasks.length-3} more tasks`);more.onclick=()=>navigate('tasks');strip.append(more);}
-        if(record.tasks)reconcile(record.tasks,strip);else{record.row.append(strip);record.tasks=strip;}
-      }else{record.tasks?.remove();record.tasks=null;}
+    const tasks=client.production?(taskCache.get(JSON.stringify([client.scope().space,client.scope().owner]))||[]):[];
+    let tasksChanged=client.production?backgroundTaskView.update(snapshotKey(),tasks,(id,phase)=>pages.taskNeedsApproval(id,phase)):false;
+    if(client.production&&lastAssistant&&tasks.length){
+      const row=messageNodes.get(lastAssistant.viewKey).row;
+      if(backgroundTaskView.element.parentElement!==row){
+        const focused=backgroundTaskView.element.contains(document.activeElement)?document.activeElement:null;
+        tasksChanged ||= !!backgroundTaskView.element.parentElement;
+        row.append(backgroundTaskView.element);focused?.focus({preventScroll:true});
+      }
+    }else backgroundTaskView.element.remove();
+    if(taskToggle&&!taskToggle.expanded&&readingPosition.anchors[0]?.key.startsWith('task:')){
+      const retained=new Set([...backgroundTaskView.element.querySelectorAll('[data-scroll-anchor]')].map(node=>node.dataset.scrollAnchor));
+      if(!retained.has(readingPosition.anchors[0].key))readingPosition.anchors=[{key:'background-tasks-heading',offset:0}];
     }
+    if(chatShown&&(taskToggle||(tasksChanged&&hasRenderedMessages)))pendingReadingPosition=readingPosition;
     taskClock.refresh();
     if (snapshot && !visibleMessages.length) {
       if(!messageColumn.querySelector('.empty-chat'))messageColumn.append(el('p', 'empty-chat', t('first')));
@@ -565,8 +586,14 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(approvalAnchor?approvalAnchor.nextElementSibling!==chatApprovals:messageColumn.lastElementChild!==chatApprovals){const focused=chatApprovals.contains(document.activeElement)?document.activeElement:null;if(approvalAnchor)approvalAnchor.after(chatApprovals);else messageColumn.append(chatApprovals);focused?.focus({preventScroll:true});}
     pages?.renderApprovals();
     if(!chatApprovals.hidden&&locateApprovals===JSON.stringify(client.scope?.())){locateApprovals='';requestAnimationFrame(()=>{if(!disposed&&route==='chat')chatApprovals.scrollIntoView({block:'nearest',behavior:reducedMotion.matches?'instant':'smooth'});});}
-    if (follow) requestAnimationFrame(() => { if (!disposed) scrollBottom(); });
-    else { history.scrollTop = previousTop; latest.hidden = false; }
+    if(chatShown){
+      historyFrame=requestAnimationFrame(()=>{
+        if(disposed||!chatShown)return;
+        if(pendingReadingPosition){restoreReadingPosition(history,pendingReadingPosition);pendingReadingPosition=null;}
+        else if(pendingFollow)scrollBottom();else restoreReadingPosition(history,readingPosition);
+        pendingFollow=false;if(visibleMessages.length)hasRenderedMessages=true;latest.hidden=nearBottom();
+      });
+    }
   }
   function pendingSend(){return state.snapshot&&state.pending.has(ownerKey(state.snapshot));}
   function onSnapshot(snapshot, receivedEpoch = epoch) {
@@ -626,9 +653,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     completions?.reset();
     if (editor.composing) { input.blur(); if (editor.composing) return; }
     if (pages && !await pages.leave()) return;
-    if (state.snapshot) positions.set(ownerKey(state.snapshot), history.scrollTop);
+    if (state.snapshot) {positions.set(ownerKey(state.snapshot), history.scrollTop);if(chatShown)readingPositions.set(snapshotKey(),captureReadingPosition(history));}
     pages?.clearApprovals();locateApprovals=item.pending_approvals?JSON.stringify({owner:item.id,space:item.space_id||''}):'';selectedAssistant = item; client.setScope({owner:item.id, space:item.space_id || ''});
     epoch = beginSubscription(state); editorOwner = null; route = 'chat'; if(!initial)directoryOpen = false;
+    pendingReadingPosition=readingPositions.get(snapshotKey())||null;pendingFollow=false;hasRenderedMessages=false;
     messageColumn.replaceChildren(); messageNodes.clear(); error = ''; connectionError = ''; disconnected = false;
     const cached=cachedSnapshots.get(snapshotKey(item.space_id||'',item.id));
     restoredSnapshot=!!cached;connection='connecting';
@@ -761,7 +789,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     await Promise.all([snapshot,loadDirectory()]);
   });
   return () => {
-    disposed = true; stopResources?.();client.resources?.clear();stopResume();taskClock.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
+    disposed = true; cancelAnimationFrame(historyFrame);stopResources?.();client.resources?.clear();stopResume();taskClock.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     stopMessageSelection();completions?.dispose();attachmentUI?.destroy();client.releaseAttachments?.();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);
