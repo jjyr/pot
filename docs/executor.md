@@ -28,6 +28,9 @@ roots and the immutable plugin bundle are readable; unrelated user directories
 and Runtime state are excluded. The launcher itself must not be inside a workload
 write root. It generates a private home, temp and cache directory for each launch.
 Do not interpret a writable workspace as data-loss protection.
+System read roots are selected by the execution OS before checking path existence.
+macOS installation roots and Linux-specific CA, font and browser configuration
+paths are not granted on the other platform. Unsupported platforms fail closed.
 
 IP networking is unrestricted; no SRT proxy variables are injected. Unix IPC is
 restricted independently; necessary macOS DNS support is narrowly allowed.
