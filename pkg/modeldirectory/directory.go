@@ -267,6 +267,26 @@ func find(providers map[string]provider, catalog *string, id string) (model, boo
 	}
 	return model{}, false
 }
+
+// Custom gateways may namespace an official model ID. Use only known namespace
+// mappings and an exact official entry, and only for input capabilities. Limits
+// and the actual request model continue to use the original identity.
+func findInputAlias(providers map[string]provider, id string) (model, bool) {
+	namespace, name, qualified := strings.Cut(id, "/")
+	if !qualified || strings.Contains(name, "/") {
+		return model{}, false
+	}
+	for _, owner := range official(name) {
+		if namespace != owner && !(namespace == "codex" && owner == "openai") {
+			continue
+		}
+		if m, ok := providers[owner].Models[name]; ok {
+			return m, true
+		}
+	}
+	return model{}, false
+}
+
 func (d *Directory) Defaults() map[string]Limits {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -291,6 +311,10 @@ func (d *Directory) Apply(profile core.Profile) (core.Profile, error) {
 	}
 	d.mu.RLock()
 	m, known := find(d.state.Providers, settings.CatalogProvider, result.Model)
+	inputModel := m
+	if !known && settings.CatalogProvider == nil {
+		inputModel, known = findInputAlias(d.state.Providers, result.Model)
+	}
 	d.mu.RUnlock()
 	limits := m.Limit
 	window := limits.Context
@@ -323,17 +347,21 @@ func (d *Directory) Apply(profile core.Profile) (core.Profile, error) {
 	} else {
 		result.Params.Agent.MaxInputTokens = nil
 	}
-	if known {
+	inputs, discovered := settings.InputModalities[result.Model]
+	if known || discovered {
 		catalog := result.Params.Agent.ModelCatalog
 		if catalog == nil {
 			catalog = &core.ModelCatalog{SchemaVersion: 1, Default: json.RawMessage(`{}`), Models: map[string]map[string]json.RawMessage{}}
 		}
 		modalities := []string{"text"}
-		if slices.Contains(m.Modalities.Input, "image") {
+		if slices.Contains(inputModel.Modalities.Input, "image") {
 			modalities = append(modalities, "image")
 		}
-		if slices.Contains(m.Modalities.Input, "pdf") {
+		if slices.Contains(inputModel.Modalities.Input, "pdf") {
 			modalities = append(modalities, "pdf")
+		}
+		if discovered {
+			modalities = inputs
 		}
 		defaults := map[string]any{"input_modalities": modalities}
 		var overrides any

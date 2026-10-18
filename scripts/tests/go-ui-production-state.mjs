@@ -87,7 +87,22 @@ assert.equal(combined.items[0]._space_id,'remote');assert.equal(combined.next_of
 const combinedUsage=combineUsage([{space:{id:'local'},value:{total:{input:5,output:3},buckets:[{label:'today',input:5,output:3}],tools:[{name:'shell',calls:1}]}},{space:{id:'remote'},value:{total:{input:7,output:2},buckets:[{label:'today',input:7,output:2}],tools:[{name:'shell',calls:2}]}}]);
 assert.equal(combinedUsage.total.input,12);assert.equal(combinedUsage.buckets[0].output,5);
 
-const {modelDefaults}=await import('../../web/src/state/models.mjs');
+const {modelDefaults,createModelInputDiscovery}=await import('../../web/src/state/models.mjs');
+const routeA={endpoint:'https://a.invalid/v1',protocol:'openai_responses'},routeB={...routeA,endpoint:'https://b.invalid/v1'},routeC={...routeA,protocol:'openai_chat'};
+const discoveredInputs={vision:['text','image']},inputDiscovery=createModelInputDiscovery(routeA,discoveredInputs);
+assert.deepEqual(inputDiscovery.snapshot(routeA),discoveredInputs);
+inputDiscovery.connectionChanged(routeB);
+assert.deepEqual(inputDiscovery.snapshot(routeB),{},'Address changes discard old capabilities before discovery returns');
+inputDiscovery.adopt(routeA,discoveredInputs);
+assert.deepEqual(inputDiscovery.snapshot(routeB),{},'A late response from another connection cannot restore old capabilities');
+inputDiscovery.connectionChanged(routeA);
+assert.deepEqual(inputDiscovery.snapshot(routeA),{},'Editing away and back requires a new capability fetch');
+inputDiscovery.adopt(routeA,{vision:['text','pdf']});
+assert.deepEqual(inputDiscovery.snapshot(routeA),{vision:['text','pdf']});
+inputDiscovery.connectionChanged(routeC);
+assert.deepEqual(inputDiscovery.snapshot(routeC),{},'Protocol changes require fresh capability discovery');
+inputDiscovery.adopt(routeC,{});
+assert.deepEqual(inputDiscovery.snapshot(routeC),{},'A standard model list without optional modalities retains no route-specific override');
 const directory={directory:[{id:'a',name:'A',common:true,models:[{id:'same',context:1000,input:900,output:200}]},{id:'b',name:'B',common:false,models:[{id:'same',context:2000,output:400}]}],model_defaults:{unknown:{context:5000,output:600}}};
 assert.equal(modelDefaults(directory,'b','same').context,2000,'provider-specific model facts win');
 assert.equal(modelDefaults(directory,'custom','unknown').output,600,'manual IDs inherit offline known facts');

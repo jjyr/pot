@@ -1,5 +1,9 @@
 export const messages = {
   en: {
+    'attachments.add':'Add attachment', 'attachments.images':'Images', 'attachments.pdf':'PDF',
+    'attachments.modelUnsupported':'Current model does not support image or PDF uploads',
+    'attachments.imagesUnsupported':'Current model does not support images', 'attachments.pdfUnsupported':'Current model does not support PDF uploads',
+    'attachments.unavailable':'Attachments are temporarily unavailable',
     'markdown.diagramSource':'Mermaid source', 'markdown.diagramUnavailable':'Could not render this diagram. The source is available below.',
     'markdown.zoomIn':'Zoom in', 'markdown.zoomOut':'Zoom out', 'markdown.resetZoom':'Reset zoom',
     'tool.files':'Affected files','tool.changes':'Changes','tool.added':'Added','tool.modified':'Modified','tool.deleted':'Deleted','tool.moved':'Move destination',
@@ -96,6 +100,10 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'attachments.add':'添加附件', 'attachments.images':'图片', 'attachments.pdf':'PDF',
+    'attachments.modelUnsupported':'当前模型不支持图片或 PDF 上传',
+    'attachments.imagesUnsupported':'当前模型不支持图片', 'attachments.pdfUnsupported':'当前模型不支持 PDF 上传',
+    'attachments.unavailable':'附件暂时不可用',
     'markdown.diagramSource':'Mermaid 源码', 'markdown.diagramUnavailable':'无法渲染此图表，可在下方查看源码。',
     'markdown.zoomIn':'放大', 'markdown.zoomOut':'缩小', 'markdown.resetZoom':'重置缩放',
     'tool.files':'涉及文件','tool.changes':'变更内容','tool.added':'新增','tool.modified':'修改','tool.deleted':'删除','tool.moved':'移动目标',

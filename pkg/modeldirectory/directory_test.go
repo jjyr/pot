@@ -106,6 +106,109 @@ func TestOfflineDirectoryAndExactProviderDefaults(t *testing.T) {
 		}
 	}
 }
+
+func TestConnectionModalitiesOverrideDirectoryWithoutChangingIntent(t *testing.T) {
+	d := &Directory{state: snapshot{Providers: fixture()}}
+	p := profile()
+	p.ModelSettings.CatalogProvider = ptr("proxy")
+	p.ModelSettings.InputModalities = map[string][]string{p.Model: {"text", "pdf"}}
+	resolved, err := d.Apply(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := resolved.Resolve()
+	if err != nil || spec.AttachmentCapabilities() != (core.AttachmentCapabilities{PDF: true}) {
+		t.Fatal(spec.AttachmentCapabilities(), err)
+	}
+	if p.Params.Agent.ModelCatalog != nil {
+		t.Fatal("discovery mutated saved intent")
+	}
+	p.Params.Agent.ModelCatalog = &core.ModelCatalog{SchemaVersion: 1, Default: json.RawMessage(`{"input_modalities":["text","image"]}`), Models: map[string]map[string]json.RawMessage{}}
+	resolved, err = d.Apply(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err = resolved.Resolve()
+	if err != nil || spec.AttachmentCapabilities() != (core.AttachmentCapabilities{Image: true}) {
+		t.Fatal("explicit model catalog override lost", err)
+	}
+	p.ModelSettings.InputModalities[p.Model] = []string{"image"}
+	if _, err = d.Apply(p); err == nil {
+		t.Fatal("invalid input facts accepted")
+	}
+}
+
+func TestCachedNamespacedInputCapabilities(t *testing.T) {
+	root := t.TempDir()
+	providers := fixture()
+	providers["openai"] = provider{Name: "OpenAI", Models: map[string]model{
+		"gpt-example": {Name: "Example", Limit: Limits{Context: 500000, Output: 128000}, Modalities: modalities{Input: []string{"text", "image", "pdf"}}},
+	}}
+	data, err := json.Marshal(snapshot{Providers: providers})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(root, "catalog.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	d, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		id      string
+		catalog *string
+		want    core.AttachmentCapabilities
+	}{
+		{"codex/gpt-example", nil, core.AttachmentCapabilities{Image: true, PDF: true}},
+		{"openai/gpt-example", nil, core.AttachmentCapabilities{Image: true, PDF: true}},
+		{"other/gpt-example", nil, core.AttachmentCapabilities{}},
+		{"codex/openai/gpt-example", nil, core.AttachmentCapabilities{}},
+		{"codex/gpt-example-pro", nil, core.AttachmentCapabilities{}},
+		{"codex/claude-example", nil, core.AttachmentCapabilities{}},
+		{"codex/gpt-example", ptr("proxy"), core.AttachmentCapabilities{}},
+	} {
+		t.Run(tt.id, func(t *testing.T) {
+			p := profile()
+			p.Model = tt.id
+			p.ModelSettings.CatalogProvider = tt.catalog
+			resolved, err := d.Apply(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			spec, err := resolved.Resolve()
+			if err != nil || spec.AttachmentCapabilities() != tt.want {
+				t.Fatal(spec.AttachmentCapabilities(), err)
+			}
+			if spec.Model != tt.id || spec.ContextWindow != 32768 || spec.Params.MaxOutputTokens != 8192 {
+				t.Fatal("capability alias changed request identity or limits", spec.Model, spec.ContextWindow, spec.Params.MaxOutputTokens)
+			}
+		})
+	}
+	// An endpoint's exact declaration can limit an alias to image input only.
+	p := profile()
+	p.Model = "codex/gpt-example"
+	p.ModelSettings.InputModalities = map[string][]string{p.Model: {"text", "image"}}
+	resolved, err := d.Apply(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := resolved.Resolve()
+	if err != nil || spec.AttachmentCapabilities() != (core.AttachmentCapabilities{Image: true}) {
+		t.Fatal("cached PDF capability replaced connection facts", spec.AttachmentCapabilities(), err)
+	}
+	// Full identities from the directory win over normalized name fallback.
+	p.ModelSettings.InputModalities = nil
+	d.state.Providers["proxy"].Models[p.Model] = model{Name: "Exact", Modalities: modalities{Input: []string{"text"}}}
+	resolved, err = d.Apply(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err = resolved.Resolve()
+	if err != nil || spec.AttachmentCapabilities() != (core.AttachmentCapabilities{}) {
+		t.Fatal("alias overrode exact model ID", spec.AttachmentCapabilities(), err)
+	}
+}
 func TestRefreshAttemptDurableAndConditionalAtomic(t *testing.T) {
 	root := t.TempDir()
 	d, err := Open(root)
