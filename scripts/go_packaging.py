@@ -239,6 +239,9 @@ def prepare_resources(destination, platform):
     shutil.copy2(
         ROOT / "web/src/assets/IBMPlexSans-OFL.txt", destination / "FrontendFontLicense.txt"
     )
+    shutil.copy2(
+        ROOT / "web/src/vendor/pele-LICENSE.txt", destination / "FrontendDiagramLicense.txt"
+    )
     (destination / "FrontendIconLicense.txt").write_text(
         "\n\n".join(
             (ROOT / "web/src/assets" / name).read_text().rstrip()

@@ -19,6 +19,28 @@ import go_packaging  # noqa: E402
 
 
 class GoPackaging(unittest.TestCase):
+    def test_frontend_diagrams_ship_with_their_complete_notice(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            node = root / "node"
+            node.mkdir()
+            destination = root / "Resources"
+            with (
+                mock.patch.object(go_packaging, "node", return_value=node),
+                mock.patch.object(go_packaging, "prepare_sandbox"),
+                mock.patch.object(go_packaging, "prepare_plugins"),
+                mock.patch.object(go_packaging, "call"),
+            ):
+                go_packaging.prepare_resources(destination, "linux-amd64")
+            self.assertEqual(
+                (destination / "web/vendor/pele.mjs").read_bytes(),
+                (ROOT / "web/src/vendor/pele.mjs").read_bytes(),
+            )
+            notice = (destination / "FrontendDiagramLicense.txt").read_text()
+            self.assertEqual(notice, (ROOT / "web/src/vendor/pele-LICENSE.txt").read_text())
+            self.assertIn("MIT License", notice)
+            self.assertIn("ISC License", notice)
+
     def test_tool_packages_contain_only_declared_files(self):
         for platform in ("linux-amd64", "darwin-arm64"):
             with tempfile.TemporaryDirectory() as temporary:

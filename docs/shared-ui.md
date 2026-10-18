@@ -38,6 +38,27 @@ Width controls navigation. Touch density applies below 720 px or with a coarse
 pointer; the tray keeps its explicit compact layout.
 The canonical Companion assets and deterministic avatar colors are shared.
 
+## Markdown diagrams
+
+[`components/markdown.mjs`](../web/src/components/markdown.mjs) renders closed
+`mermaid` fences through [`components/mermaid.mjs`](../web/src/components/mermaid.mjs)
+in Chat, Task details and Markdown tool results. Other fences and incomplete
+streamed fences remain code. The component loads the pinned, bundled Pele ESM
+module only when a diagram enters the document; no CDN is needed.
+
+Each `pot-mermaid` element owns its Pele mount and destroys it on disconnection,
+including when a streaming message replaces its content. A late module load
+cannot mount a detached or superseded element. Container resizing and pending
+font loading trigger Pele's layout refresh. Semantic CSS variables keep diagrams
+in the current light/dark theme, and shrinking diagrams support zoom and pan.
+Source is available in a disclosure and opens automatically on failure; errors
+stay within that diagram. Only closed fences are drawn, and rendering is bounded
+to 20,000 source characters, 1,000,000 SVG characters and 500 flowchart edges.
+Diagram links and images are disabled, and raw Markdown HTML remains literal.
+Pele uses its own layouts rather than Mermaid's exact appearance.
+
+## Native editing and ownership
+
 All hosts use DOM textareas and inputs. The WebView/browser owns shaping, caret,
 selection, undo and IME; the shell owns the composer frame, send/stop actions,
 drafts and reference completion. Stream updates retain the live editor node and

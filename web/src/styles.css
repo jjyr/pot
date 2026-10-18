@@ -106,6 +106,16 @@ h1, h2, p { margin: 0; }
 .reply-bubble.is-failed { background: color-mix(in srgb,var(--danger) 8%,var(--canvas)); }
 .reply-status { color: var(--muted); }
 .reply-content:not([hidden]) + .reply-status:not([hidden]) { margin-top: 12px; }
+.message-body:has(pot-mermaid) { width: 100%; min-width: 0; }
+pot-mermaid { display: block; width: 100%; min-width: 0; max-width: 100%; margin: 12px 0; white-space: normal; }
+.mermaid-canvas { width: 100%; min-width: 0; overflow: hidden; }
+.mermaid-canvas:empty { display: none; }
+.mermaid-canvas .pele { --pele-bg: var(--navigation); --pele-fg: var(--text); --pele-muted: var(--muted); --pele-line: var(--text); --pele-surface: var(--surface); --pele-surface-alt: var(--secondary); --pele-border: var(--input-border); --pele-accent: var(--primary); --pele-error: var(--danger); --pele-critical: var(--danger); }
+.mermaid-source { margin-top: 8px; }
+.mermaid-source > summary { color: var(--muted); cursor: pointer; font-size: var(--description-size); }
+.mermaid-source pre { position: relative; margin-top: 8px; padding: 30px 14px 14px; max-width: 100%; overflow: auto; background: var(--secondary); white-space: pre; }
+.mermaid-source code { font: 12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
+pot-mermaid[data-state='error'] .mermaid-canvas { color: var(--danger); }
 .reply-status-title { display: flex; align-items: center; gap: 8px; }
 .reply-status-title svg { width: 17px; height: 17px; flex: none; }
 .is-failed .reply-status-title { color: var(--danger); font-weight: 500; }

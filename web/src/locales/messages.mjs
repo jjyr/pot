@@ -1,5 +1,7 @@
 export const messages = {
   en: {
+    'markdown.diagramSource':'Mermaid source', 'markdown.diagramUnavailable':'Could not render this diagram. The source is available below.',
+    'markdown.zoomIn':'Zoom in', 'markdown.zoomOut':'Zoom out', 'markdown.resetZoom':'Reset zoom',
     'tool.files':'Affected files','tool.changes':'Changes','tool.added':'Added','tool.modified':'Modified','tool.deleted':'Deleted','tool.moved':'Move destination',
     'tool.scriptYielded':'Script yielded', 'tool.scriptRunning':'Script still running', 'tool.scriptOutput':'Script output',
     'tool.command': 'Run command',
@@ -91,6 +93,8 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'markdown.diagramSource':'Mermaid 源码', 'markdown.diagramUnavailable':'无法渲染此图表，可在下方查看源码。',
+    'markdown.zoomIn':'放大', 'markdown.zoomOut':'缩小', 'markdown.resetZoom':'重置缩放',
     'tool.files':'涉及文件','tool.changes':'变更内容','tool.added':'新增','tool.modified':'修改','tool.deleted':'删除','tool.moved':'移动目标',
     'tool.scriptYielded':'脚本已让出', 'tool.scriptRunning':'脚本仍在运行', 'tool.scriptOutput':'脚本输出',
     'tool.command': '执行命令',
