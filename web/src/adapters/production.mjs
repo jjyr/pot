@@ -45,7 +45,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
       try {
         const raw = await pending;
         if (signal?.aborted) throw signal.reason;
-        const value=decodeDesktopResponse(raw);if(method!=='GET')client.resources?.invalidate([],capturedScope);return value;
+        const value=decodeDesktopResponse(raw);if(method!=='GET'&&(path!=='/api/v1/assistants/bootstrap'||value?.assistant))client.resources?.invalidate([],capturedScope);return value;
       } finally { signal?.removeEventListener('abort', abort); }
     }
     const response = await fetch(`${base}${fullPath}`, {method, signal, credentials: 'same-origin',
@@ -53,7 +53,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
       body: body === undefined ? undefined : JSON.stringify(body)});
     const value = response.status === 204 ? null : await response.json().catch(() => null);
     if (!response.ok) throw new APIError(response.status, value);
-    if(method!=='GET')client.resources?.invalidate([],capturedScope);
+    if(method!=='GET'&&(path!=='/api/v1/assistants/bootstrap'||value?.assistant))client.resources?.invalidate([],capturedScope);
     return value;
   }
   const runtime = await request('/api/v1/runtime', {owner: '', space: ''});

@@ -43,7 +43,7 @@ console.log('Resource cache: sharing, isolation, stale reads, invalidation races
 // newly selected Space, and never place request credentials into a read cache.
 const {createProductionClient}=await import('../../web/src/adapters/production.mjs');
 const originalFetch=globalThis.fetch,transportCalls=[];let save=deferred(),version=1;
-globalThis.fetch=async(path,options={})=>{transportCalls.push({path,method:options.method});const url=new URL(path,'http://fixture');if(options.method==='POST'){await save.promise;version++;return new Response(JSON.stringify({saved:true}));}return new Response(JSON.stringify(url.pathname==='/api/v1/runtime'?{runtime_id:'transport',boot_id:'boot'}:{version}));};
+globalThis.fetch=async(path,options={})=>{transportCalls.push({path,method:options.method});const url=new URL(path,'http://fixture');if(options.method==='POST'&&url.pathname==='/api/v1/assistants/bootstrap')return new Response(JSON.stringify({assistant:null}));if(options.method==='POST'){await save.promise;version++;return new Response(JSON.stringify({saved:true}));}return new Response(JSON.stringify(url.pathname==='/api/v1/runtime'?{runtime_id:'transport',boot_id:'boot'}:{version}));};
 try{
   const transport=await createProductionClient();transport.spaces=[{id:'a',control_id:'a'},{id:'b',control_id:'b'}];
   transport.setScope({space:'a',owner:'alpha'});await transport.read('/api/v1/providers');await transport.read('/api/v1/agent/routing');
@@ -52,6 +52,13 @@ try{
   const beforeReads=transportCalls.length;await transport.read('/api/v1/providers');assert.equal(transportCalls.length,beforeReads,'A save finishing after navigation cannot invalidate the new Space');
   transport.setScope({space:'a',owner:'alpha'});assert.equal((await transport.read('/api/v1/providers')).version,1,'Save invalidation preserves visible content while refreshing');await tick();assert.equal((await transport.read('/api/v1/providers')).version,2);
   await transport.read('/api/v1/agent/routing');await tick();assert.equal(transportCalls.filter(call=>call.path.includes('/agent/routing')).length,2,'Saving providers invalidates associated routing data');
+  // With no Provider, first-use bootstrap is a read-only no-op. Invalidating
+  // directory reads here would make their background refresh bootstrap again.
+  await transport.read('/api/v1/assistants');await transport.read('/api/v1/spaces');
+  await transport.request('/api/v1/assistants/bootstrap',{method:'POST',body:{locale:'en'}});
+  const afterBootstrap=transportCalls.length;
+  await transport.read('/api/v1/assistants');await transport.read('/api/v1/spaces');await transport.read('/api/v1/providers');await tick();
+  assert.equal(transportCalls.length,afterBootstrap,'A bootstrap without a Provider cannot trigger a directory refresh loop');
   transport.resources.clear();
 }finally{globalThis.fetch=originalFetch;}
 console.log('Shared transport save invalidation and captured-scope fencing passed');
