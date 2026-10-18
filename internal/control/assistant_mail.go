@@ -124,7 +124,7 @@ func (s *Service) runAssistantMail(main *assistant.Conversation, message protoco
 			return s.taskCompaction(ctx, message.To.AgentID, message.ID, raw)
 		}
 		feedback.ready = options.Ready
-		loop := agent.Agent{Services: options.Services, Feedback: feedback, Dispatch: options.Dispatch, Cleanup: options.Cleanup, Composer: s.options.Composer, Tools: options.Tools, PrepareContext: options.PrepareContext, MaxRounds: options.MaxRounds}
+		loop := agent.Agent{Services: options.Services, Feedback: feedback, Dispatch: options.Dispatch, Cleanup: options.Cleanup, Composer: s.options.Composer, Tools: options.Tools, PrepareContext: options.PrepareContext}
 		var checkpoint agent.Checkpoint
 		resuming := len(state) > 0 && json.Unmarshal(state, &checkpoint) == nil && checkpoint.LastRequest == message.ID
 		err = loop.Execute(runCtx, options.Execution, thread, request, resuming, func(event core.AgentEvent) error {

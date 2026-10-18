@@ -52,7 +52,7 @@ type Feedback interface {
 // Agent never directly executes tools or bypasses it for composition children.
 type Dispatch func(context.Context, core.ExecutionContext, modelprotocol.ToolCall, func(core.Update) error) (json.RawMessage, error)
 type Composer interface {
-	Run(context.Context, string, map[string]composition.Tool, func(string) error) error
+	Run(context.Context, string, map[string]composition.Tool, func(composition.Event) error) error
 }
 type Cleanup func(context.Context, core.ExecutionContext, bool) error
 type TokenEstimator func(modelprotocol.Request) (uint64, error)
@@ -82,7 +82,6 @@ type Agent struct {
 	ResolveAttachments func(context.Context, core.ResolvedSpec, []modelprotocol.Message) ([]modelprotocol.Message, error)
 	PrepareContext     PrepareContext
 	Skills             SkillProvider
-	MaxRounds          int
 }
 
 // Checkpoint is owner-held persisted model history, distinct from public/UI

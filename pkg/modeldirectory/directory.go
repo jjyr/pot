@@ -246,6 +246,17 @@ func official(model string) []string {
 	return nil
 }
 func find(providers map[string]provider, catalog *string, id string) (model, bool) {
+	if m, ok := findExact(providers, catalog, id); ok {
+		return m, true
+	}
+	// Proxy route prefixes do not change the underlying model's public facts.
+	// Preserve full-ID precedence, then search the final name exactly.
+	if slash := strings.LastIndexByte(id, '/'); slash >= 0 && slash+1 < len(id) {
+		return findExact(providers, catalog, id[slash+1:])
+	}
+	return model{}, false
+}
+func findExact(providers map[string]provider, catalog *string, id string) (model, bool) {
 	if catalog != nil {
 		m, ok := providers[*catalog].Models[id]
 		return m, ok
@@ -262,25 +273,6 @@ func find(providers map[string]provider, catalog *string, id string) (model, boo
 	sort.Strings(ids)
 	for _, p := range ids {
 		if m, ok := providers[p].Models[id]; ok {
-			return m, true
-		}
-	}
-	return model{}, false
-}
-
-// Custom gateways may namespace an official model ID. Use only known namespace
-// mappings and an exact official entry, and only for input capabilities. Limits
-// and the actual request model continue to use the original identity.
-func findInputAlias(providers map[string]provider, id string) (model, bool) {
-	namespace, name, qualified := strings.Cut(id, "/")
-	if !qualified || strings.Contains(name, "/") {
-		return model{}, false
-	}
-	for _, owner := range official(name) {
-		if namespace != owner && !(namespace == "codex" && owner == "openai") {
-			continue
-		}
-		if m, ok := providers[owner].Models[name]; ok {
 			return m, true
 		}
 	}
@@ -311,10 +303,6 @@ func (d *Directory) Apply(profile core.Profile) (core.Profile, error) {
 	}
 	d.mu.RLock()
 	m, known := find(d.state.Providers, settings.CatalogProvider, result.Model)
-	inputModel := m
-	if !known && settings.CatalogProvider == nil {
-		inputModel, known = findInputAlias(d.state.Providers, result.Model)
-	}
 	d.mu.RUnlock()
 	limits := m.Limit
 	window := limits.Context
@@ -354,10 +342,10 @@ func (d *Directory) Apply(profile core.Profile) (core.Profile, error) {
 			catalog = &core.ModelCatalog{SchemaVersion: 1, Default: json.RawMessage(`{}`), Models: map[string]map[string]json.RawMessage{}}
 		}
 		modalities := []string{"text"}
-		if slices.Contains(inputModel.Modalities.Input, "image") {
+		if slices.Contains(m.Modalities.Input, "image") {
 			modalities = append(modalities, "image")
 		}
-		if slices.Contains(inputModel.Modalities.Input, "pdf") {
+		if slices.Contains(m.Modalities.Input, "pdf") {
 			modalities = append(modalities, "pdf")
 		}
 		if discovered {

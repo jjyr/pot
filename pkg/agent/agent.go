@@ -245,14 +245,7 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 	if err := a.save(ctx, &state); err != nil {
 		return err
 	}
-	rounds := a.MaxRounds
-	if rounds == 0 {
-		rounds = 128
-	}
-	if rounds < 1 {
-		return fmt.Errorf("invalid model round limit")
-	}
-	for range rounds {
+	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -400,7 +393,6 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 			}
 		}
 	}
-	return fmt.Errorf("agent model round limit reached")
 }
 func (a *Agent) save(ctx context.Context, state *Checkpoint) error {
 	raw, err := json.Marshal(state)

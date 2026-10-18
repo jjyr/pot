@@ -107,6 +107,68 @@ func TestOfflineDirectoryAndExactProviderDefaults(t *testing.T) {
 	}
 }
 
+func TestProxyModelSuffixUsesExactFactsWithoutChangingRoute(t *testing.T) {
+	d, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	providers := fixture()
+	providers["openai"] = provider{Name: "OpenAI", Models: map[string]model{
+		"gpt-example": {Name: "Official", Limit: Limits{Context: 200000, Input: 160000, Output: 32000}, Modalities: modalities{Input: []string{"text", "image", "pdf"}}},
+	}}
+	providers["proxy"].Models["gpt-example"] = model{Name: "Proxy", Limit: Limits{Context: 64000, Output: 4000}, Modalities: modalities{Input: []string{"text"}}}
+	providers["proxy"].Models["exact/gpt-example"] = model{Name: "Full ID", Limit: Limits{Context: 80000, Output: 8000}, Modalities: modalities{Input: []string{"text"}}}
+	d.state = snapshot{Providers: providers}
+	for _, test := range []struct {
+		name, model string
+		catalog     *string
+		window      uint64
+		image, pdf  bool
+	}{
+		{"official suffix", "codex/gpt-example", nil, 200000, true, true},
+		{"nested route", "gateway/codex/gpt-example", nil, 200000, true, true},
+		{"full ID wins globally", "exact/gpt-example", nil, 80000, false, false},
+		{"selected provider suffix", "codex/gpt-example", ptr("proxy"), 64000, false, false},
+		{"selected provider is retained", "codex/gpt-example", ptr("anthropic"), 32768, false, false},
+		{"unknown variant", "codex/gpt-example-new", nil, 32768, false, false},
+		{"empty suffix", "codex/", nil, 32768, false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			p := profile()
+			p.Model = test.model
+			p.ModelSettings.CatalogProvider = test.catalog
+			resolved, err := d.Apply(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolved.Model != p.Model || resolved.Provider != p.Provider || resolved.AuthRef != p.AuthRef || resolved.Params.Agent.ContextWindow != test.window {
+				t.Fatal("route or inherited limits changed unexpectedly", resolved)
+			}
+			descriptor := core.DefaultModelDescriptor()
+			if catalog := resolved.Params.Agent.ModelCatalog; catalog != nil {
+				descriptor, err = catalog.Resolve(resolved.Provider, resolved.Model)
+			}
+			if err != nil || descriptor.Vision() != test.image || descriptor.PDF() != test.pdf {
+				t.Fatal(descriptor, err)
+			}
+		})
+	}
+	// Explicit capability overrides remain attached to the actual wire model ID.
+	p := profile()
+	p.Model = "codex/gpt-example"
+	p.Params.Agent.ModelCatalog = &core.ModelCatalog{SchemaVersion: 1, Default: json.RawMessage(`{}`), Models: map[string]map[string]json.RawMessage{
+		p.Provider: {p.Model: json.RawMessage(`{"input_modalities":["text"]}`)},
+	}}
+	resolved, err := d.Apply(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := resolved.Params.Agent.ModelCatalog.Resolve(p.Provider, p.Model)
+	if err != nil || descriptor.Vision() || descriptor.PDF() {
+		t.Fatal("suffix lookup replaced an explicit capability override", descriptor, err)
+	}
+}
+
 func TestConnectionModalitiesOverrideDirectoryWithoutChangingIntent(t *testing.T) {
 	d := &Directory{state: snapshot{Providers: fixture()}}
 	p := profile()
@@ -162,8 +224,8 @@ func TestCachedNamespacedInputCapabilities(t *testing.T) {
 	}{
 		{"codex/gpt-example", nil, core.AttachmentCapabilities{Image: true, PDF: true}},
 		{"openai/gpt-example", nil, core.AttachmentCapabilities{Image: true, PDF: true}},
-		{"other/gpt-example", nil, core.AttachmentCapabilities{}},
-		{"codex/openai/gpt-example", nil, core.AttachmentCapabilities{}},
+		{"other/gpt-example", nil, core.AttachmentCapabilities{Image: true, PDF: true}},
+		{"codex/openai/gpt-example", nil, core.AttachmentCapabilities{Image: true, PDF: true}},
 		{"codex/gpt-example-pro", nil, core.AttachmentCapabilities{}},
 		{"codex/claude-example", nil, core.AttachmentCapabilities{}},
 		{"codex/gpt-example", ptr("proxy"), core.AttachmentCapabilities{}},
@@ -180,8 +242,14 @@ func TestCachedNamespacedInputCapabilities(t *testing.T) {
 			if err != nil || spec.AttachmentCapabilities() != tt.want {
 				t.Fatal(spec.AttachmentCapabilities(), err)
 			}
-			if spec.Model != tt.id || spec.ContextWindow != 32768 || spec.Params.MaxOutputTokens != 8192 {
-				t.Fatal("capability alias changed request identity or limits", spec.Model, spec.ContextWindow, spec.Params.MaxOutputTokens)
+			window, output := uint64(32768), uint64(8192)
+			if tt.want.Image {
+				window, output = 500000, 128000
+			} else if tt.id == "codex/claude-example" {
+				window, output = 200000, 32000
+			}
+			if spec.Model != tt.id || spec.ContextWindow != window || spec.Params.MaxOutputTokens != output {
+				t.Fatal("suffix facts changed request identity or inherited unexpected limits", spec.Model, spec.ContextWindow, spec.Params.MaxOutputTokens)
 			}
 		})
 	}
@@ -209,6 +277,7 @@ func TestCachedNamespacedInputCapabilities(t *testing.T) {
 		t.Fatal("alias overrode exact model ID", spec.AttachmentCapabilities(), err)
 	}
 }
+
 func TestRefreshAttemptDurableAndConditionalAtomic(t *testing.T) {
 	root := t.TempDir()
 	d, err := Open(root)
