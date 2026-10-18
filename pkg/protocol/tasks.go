@@ -47,7 +47,6 @@ type TaskInfo struct {
 	CreatedAtMS  int64        `json:"created_at_ms"`
 	StartedAtMS  int64        `json:"started_at_ms"`
 	UpdatedAtMS  int64        `json:"updated_at_ms"`
-	Resource     string       `json:"resource"`
 	Routing      *TaskRouting `json:"routing"`
 	ExecutorIcon string       `json:"executor_icon"`
 }
@@ -69,7 +68,6 @@ type CreateTask struct {
 	Skills          *[]string        `json:"skills"`
 	RequestID       string           `json:"request_id" required:"true"`
 	Text            string           `json:"text" required:"true"`
-	Resource        string           `json:"resource"`
 	Profile         *string          `json:"profile"`
 	Model           *string          `json:"model"`
 	Requirements    TaskRequirements `json:"requirements"`
@@ -77,9 +75,6 @@ type CreateTask struct {
 }
 
 func (t CreateTask) Validate() error {
-	if t.Resource != "" && t.Resource != "shared" {
-		return fmt.Errorf("invalid cooperative task resource")
-	}
 	if t.RequestID == "" || len(t.RequestID) > 128 || strings.ContainsRune(t.RequestID, 0) || strings.TrimSpace(t.Text) == "" || len(t.Text) > 65536 || t.MachineID != "" && !core.Identifier(t.MachineID) {
 		return fmt.Errorf("invalid task request")
 	}
