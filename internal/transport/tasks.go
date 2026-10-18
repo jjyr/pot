@@ -35,6 +35,16 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 	var result any
 	var err error
 	switch {
+	case method == "GET" && path == "/api/v1/tasks/outcomes":
+		var after *uint64
+		if u.Query().Has("after") {
+			var cursor uint64
+			cursor, err = strconv.ParseUint(u.Query().Get("after"), 10, 64)
+			after = &cursor
+		}
+		if err == nil {
+			result, err = s.Tasks.Outcomes(ctx, owner, after)
+		}
 	case method == "GET" && path == "/api/v1/tasks/query":
 		var q protocol.TaskQuery
 		q.Scope = u.Query().Get("scope")

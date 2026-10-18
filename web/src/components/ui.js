@@ -680,7 +680,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   if(client.production){stopChanges=client.changes((topics,source={})=>{
     const keys=Array.isArray(topics)?topics:Object.keys(topics||{});
     if(source.reset){notifications?.refresh({reset:true,space:source.space});loadDirectory();}
-    else if(relevantChange(keys,['tasks','runner','permissions']))notifications?.refresh();
+    else if(relevantChange(keys,['task-outcomes','permissions']))notifications?.refresh({topics:keys,space:source.space});
     if(relevantChange(keys,['spaces','assistants','assistant-mail','conversation','runtime','permissions']))loadDirectory();
     if(relevantChange(keys,['tasks','runner'],client.scope().space,source))refreshBackgroundTasks();
     pages.refresh(keys,source);if(relevantChange(keys,['permissions','spaces','runtime'],pages.approvalSpace,source))pages.permissions();

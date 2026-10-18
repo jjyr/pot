@@ -166,16 +166,24 @@ The PWA Service Worker retains asset caching only; its updated cache version
 activates immediately and takes over existing pages, with no push or notification
 click handlers.
 
-Notifications observe existing projections on domain invalidations:
+Notifications observe owner-scoped projections on domain invalidations:
 
 - A changed assistant catalogue `reply_id` with an increased `reply_count`
   identifies a completed assistant reply. Token updates do not notify.
 - Task `complete` notifies success; `failed` and `interrupted` notify failure.
   Other phases, including explicit cancellation, do not notify. Task identity
-  and `updated_at_ms` distinguish subsequent terminal transitions.
+  and a durable outcome sequence distinguish subsequent terminal transitions.
+  The compact [Task outcome API](task-coordination.md#client-notification-outcomes)
+  reads only changes after a client cursor. `task-outcomes` invalidations wake
+  this reader; token/output updates do not query notification state.
 - New pending permission request IDs notify approval. Tool arguments and full
   assistant responses are never included; text contains a bounded name and a
   short event description.
+
+Each assistant has separate Task-outcome and approval refresh queues. A failed
+read retains that reader's last successful cursor or baseline; it cannot reset
+another assistant, erase a reply baseline, or block approvals behind Task reads.
+Approval responses include an optional `task_title` for the notification name.
 
 Initial reads, the first read after disconnection, and Runtime boot replacements
 establish baselines. An in-flight read from a previous connection cannot establish

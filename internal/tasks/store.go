@@ -59,6 +59,10 @@ func Open(path string, options Options) (*Service, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := s.initializeOutcomes(); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := s.validateStored(context.Background()); err != nil {
 		db.Close()
 		return nil, err
@@ -109,6 +113,17 @@ func write(ctx context.Context, tx *sql.Tx, r *Record) error {
 	raw, err := json.Marshal(r)
 	if err != nil {
 		return err
+	}
+	// A compact terminal transition is committed with the authoritative Task.
+	// Same-phase metadata writes cannot repeat an outcome or advance its cursor.
+	switch r.Info.Phase {
+	case protocol.TaskComplete, protocol.TaskFailed, protocol.TaskInterrupted, protocol.TaskCancelled:
+		_, err = tx.ExecContext(ctx, `INSERT INTO task_outcomes(assistant_id,task_id,title,phase,updated_at_ms)
+		 SELECT ?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM tasks WHERE assistant_id=? AND id=? AND phase=?)`,
+			r.AssistantID, r.Info.ID, r.Info.Title, r.Info.Phase, r.Info.UpdatedAtMS, r.AssistantID, r.Info.ID, r.Info.Phase)
+		if err != nil {
+			return err
+		}
 	}
 	_, err = tx.ExecContext(ctx, "INSERT INTO tasks(assistant_id,id,phase,created,body) VALUES(?,?,?,?,?) ON CONFLICT(assistant_id,id) DO UPDATE SET phase=excluded.phase,body=excluded.body", r.AssistantID, r.Info.ID, r.Info.Phase, r.Info.CreatedAtMS, string(raw))
 	return err
@@ -366,7 +381,22 @@ func (s *Service) change(ctx context.Context, assistant, id string, fn func(*sql
 	return err
 }
 
-func (s *Service) Notify()                       { s.changes.Notify("tasks") }
+func (s *Service) Notify() {
+	s.changes.Notify("tasks")
+	// Callers also include schedule transactions that can change complete to
+	// failed. Read only the indexed head after commit, never the Task archive.
+	s.outcomeMu.Lock()
+	var cursor uint64
+	err := s.db.QueryRow("SELECT COALESCE(MAX(sequence),0) FROM task_outcomes").Scan(&cursor)
+	changed := err == nil && cursor > s.outcomeCursor
+	if changed {
+		s.outcomeCursor = cursor
+	}
+	s.outcomeMu.Unlock()
+	if changed && s.options.OutcomesChanged != nil {
+		s.options.OutcomesChanged()
+	}
+}
 func (s *Service) Subscribe() *core.Subscription { return s.changes.Subscribe() }
 func validateInput(requestID, text string) error {
 	if requestID == "" || len(requestID) > 128 || strings.TrimSpace(text) == "" || len(text) > 65536 || !utf8.ValidString(text) {

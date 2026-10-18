@@ -195,7 +195,23 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 			}
 			return c.Snapshot(ctx)
 		case "/api/v1/permissions":
-			return map[string]any{"policy": s.Permissions.Snapshot(), "pending": s.Permissions.Pending(owner)}, nil
+			type pendingApproval struct {
+				control.Approval
+				TaskTitle string `json:"task_title,omitempty"`
+			}
+			pending := []pendingApproval{}
+			for _, approval := range s.Permissions.Pending(owner) {
+				item := pendingApproval{Approval: approval}
+				if approval.Request.Task != "" {
+					// The name is optional presentation context. A missing Task
+					// must never hide the authoritative pending decision.
+					if task, err := s.Tasks.Get(ctx, owner, approval.Request.Task); err == nil && task != nil {
+						item.TaskTitle = task.Info.Title
+					}
+				}
+				pending = append(pending, item)
+			}
+			return map[string]any{"policy": s.Permissions.Snapshot(), "pending": pending}, nil
 		case "/api/v1/usage/summary", "/api/v1/usage/models", "/api/v1/usage/requests", "/api/v1/usage/tools", "/api/v1/usage/compactions":
 			days := 14
 			if text := u.Query().Get("days"); text != "" {

@@ -60,6 +60,7 @@ async page => {
     else if(b.action==='retry')executionPolicy.application[m]={revision:current.revision,state:'applied'};
     value={accepted:true};
    }else value={policy:executionPolicy,pending:approvalFor?[{id:'approval-alpha',request:{owner:approvalFor,task:approvalTask,machine_id:'machine-one',tool:'exec_command',args:{cmd:'cat /Projects/shared/release.txt',request_unsandboxed:true,justification:'Read the requested release file outside the workspace.'},command_context:{command:'cat /Projects/shared/release.txt',directory:'/Projects/shop',shell:'/bin/bash',snapshot:true}}}]:[]};}
+  else if(path==='/api/v1/tasks/outcomes')value={items:[],cursor:0,has_more:false};
   else if(path==='/api/v1/tasks/query'){const tasks=[{id:'task-proof',title:'Task transcript proof',assistant_id:'alpha',phase:'running',updated_at_ms:1},...(longTaskList?Array.from({length:19},(_,index)=>({id:'task-extra-'+index,title:'Extra task '+index,assistant_id:'alpha',phase:'running',updated_at_ms:1})):[])];value={items:url.searchParams.get('assistant_id')==='alpha'?tasks:taskBeta?[{id:'task-beta',title:'Other-owner task',assistant_id:'beta',phase:'running',updated_at_ms:1}]:[],total:tasks.length,next_offset:null};}
   else if(path==='/api/v1/tasks/task-beta')value={run_id:'beta-run',info:{phase:'running'},request:{text:'Other-owner goal'}};
   else if(path==='/api/v1/tasks/task-beta/messages')value=[];

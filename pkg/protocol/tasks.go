@@ -123,6 +123,18 @@ type TaskPage struct {
 	Counts     TaskCounts `json:"counts"`
 	Selected   *TaskInfo  `json:"selected"`
 }
+type TaskOutcome struct {
+	Sequence    uint64    `json:"sequence"`
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	Phase       TaskPhase `json:"phase"`
+	UpdatedAtMS int64     `json:"updated_at_ms"`
+}
+type TaskOutcomePage struct {
+	Items   []TaskOutcome `json:"items"`
+	Cursor  uint64        `json:"cursor"`
+	HasMore bool          `json:"has_more"`
+}
 type ScheduleSpec struct {
 	MachineID    string           `json:"machine_id"`
 	Title        string           `json:"title" required:"true"`

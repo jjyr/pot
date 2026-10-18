@@ -1,25 +1,24 @@
 import assert from 'node:assert/strict';
-import {createNotificationProjection,viewingNotification,notificationText} from '../../web/src/state/notifications.mjs';
+import {createNotificationProjection,taskOutcomeNotifications,viewingNotification,notificationText} from '../../web/src/state/notifications.mjs';
 import {createSystemNotifications,browserNotificationPermission} from '../../web/src/adapters/notifications.mjs';
 
 const owner={id:'alpha',space_id:'space-a',control_id:'control-a',name:'Alpha',reply_id:'old',reply_count:4};
 const task=(phase,id='task')=>({id,title:'Build',phase});
 const approval=(id='approval',task='task')=>({id,request:{owner:'alpha',task,args:{secret:'never put this in notification'}}});
 const projection=createNotificationProjection();
-assert.deepEqual(projection.observe(owner,[task('complete')],[approval()],'boot'),[],'history is a baseline');
-assert.deepEqual(projection.observe(owner,[task('complete')],[approval()],'boot'),[],'duplicate snapshot');
-assert.deepEqual(projection.observe({...owner,responding:true},[task('running')],[],'boot'),[],'tokens/running states do not notify');
-const events=projection.observe({...owner,reply_id:'new',reply_count:5},[task('failed')],[approval('new')],'boot');
-assert.deepEqual(events.map(event=>event.kind),['reply','task-failed','approval']);
-assert.equal(events[2].name,'Build','Task approval uses its Task name');
+assert.deepEqual(projection.observe(owner,[approval()],'boot'),[],'history is a baseline');
+assert.deepEqual(projection.observe(owner,[approval()],'boot'),[],'duplicate snapshot');
+assert.deepEqual(projection.observe({...owner,responding:true},[],'boot'),[],'token states do not notify');
+const events=projection.observe({...owner,reply_id:'new',reply_count:5},[{...approval('new'),task_title:'Build'}],'boot');
+assert.deepEqual(events.map(event=>event.kind),['reply','approval']);
+assert.equal(events[1].name,'Build','Task approval uses its Task name');
 assert(!JSON.stringify(events.map(event=>notificationText(event))).includes('secret'));
-assert.equal(projection.observe({...owner,reply_id:'new',reply_count:5},[task('interrupted')],[],'boot')[0].kind,'task-failed');
 projection.reset('space-a');
-assert.deepEqual(projection.observe({...owner,reply_id:'catch-up',reply_count:10},[task('complete')],[approval()],'boot'),[],'reconnect catch-up suppressed');
-assert.deepEqual(projection.observe({...owner,reply_id:'restart',reply_count:11},[task('failed')],[approval('restart')],'new-boot'),[],'boot replacement suppressed');
-const splitBoot=createNotificationProjection();splitBoot.observe(owner,[task('running')],[],'boot-one');
-splitBoot.observe({...owner,reply_id:'restart-reply',reply_count:20},undefined,undefined,'boot-two');
-assert.deepEqual(splitBoot.observe({...owner,reply_id:'restart-reply',reply_count:20},[task('complete')],[approval('restart')],'boot-two'),[],'new-boot directory and asynchronous Task/approval reads share a fresh baseline');
+assert.deepEqual(projection.observe({...owner,reply_id:'catch-up',reply_count:10},[approval()],'boot'),[],'reconnect catch-up suppressed');
+assert.deepEqual(projection.observe({...owner,reply_id:'restart',reply_count:11},[approval('restart')],'new-boot'),[],'boot replacement suppressed');
+const splitBoot=createNotificationProjection();splitBoot.observe(owner,[],'boot-one');
+splitBoot.observe({...owner,reply_id:'restart-reply',reply_count:20},undefined,'boot-two');
+assert.deepEqual(splitBoot.observe({...owner,reply_id:'restart-reply',reply_count:20},[approval('restart')],'boot-two'),[],'new-boot directory and asynchronous approval reads share a fresh baseline');
 const event={space:'space-a',control:'control-a',owner:'alpha',task:'task'};
 assert(viewingNotification({focused:true,route:'chat',space:'space-a',owner:'alpha'},event));
 assert(viewingNotification({focused:true,route:'tasks',space:'space-a',owner:'alpha',task:'task'},event));
@@ -44,7 +43,7 @@ function host(){const host=new EventTarget(),document=new EventTarget();document
  return Object.assign(host,{document,Notification:TestNotification,isSecureContext:true,crypto:globalThis.crypto,BroadcastChannel,
  localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value)},setTimeout,focus(){focused=true;}});}
 const client=()=>({desktop:false,assistants:[{...owner}],spaces:[{id:'space-a',boot_id:'boot',connected:true}],
- request:async(path,scope)=>{assert.equal(scope.owner,'alpha');assert.equal(scope.space,'space-a');return path.startsWith('/api/v1/tasks/query')?{items:tasks,next_offset:null}:{pending:approvals};}});
+ request:async(path,scope)=>{assert.equal(scope.owner,'alpha');assert.equal(scope.space,'space-a');if(path.startsWith('/api/v1/tasks/outcomes')){const after=new URL(path,'http://fixture').searchParams.get('after');return {items:after===null?[]:tasks.filter(item=>item.sequence>Number(after)),cursor:tasks.at(-1)?.sequence||0,has_more:false};}assert.equal(path,'/api/v1/permissions');return {pending:approvals};}});
 const claims=async id=>{if(seen.has(id))return false;seen.add(id);return true;};
 const clientA=client(),hostA=host();
 const manager=createSystemNotifications({client:clientA,surface:'main',view:()=>route,open:event=>opened.push(event),locale:()=> 'en',host:hostA,claim:claims});
@@ -56,7 +55,7 @@ focused=false;clientA.assistants[0]={...owner,reply_id:'reply-background',reply_
 shown[0].onclick();assert.equal(opened[0].space,'space-a');assert.equal(opened[0].owner,'alpha');assert(shown[0].closed);
 focused=true;route={route:'chat',space:'space-a',owner:'beta'};
 clientA.assistants[0]={...owner,reply_id:'reply-other-chat',reply_count:7};await manager.directory();assert.equal(shown.length,2,'foreground other chat delivers');
-tasks=[task('running')];await manager.refresh();tasks=[task('complete')];await manager.refresh();assert.equal(shown.at(-1).options.body,'Background task complete');
+tasks=[{...task('complete'),sequence:1}];await manager.refresh();assert.equal(shown.at(-1).options.body,'Background task complete');
 approvals=[approval()];await manager.refresh();assert.equal(shown.at(-1).options.body,'Approval required. Review in Pot.');
 const beforeReplay=shown.length;await manager.refresh();await manager.directory();assert.equal(shown.length,beforeReplay);
 await manager.setEnabled(false);assert.equal(manager.state.enabled,false);
@@ -96,12 +95,99 @@ nativeClick({...event,kind:'approval'});assert.equal(nativeOpened.length,0);
 nativeClient.assistants=[{...owner}];await native.directory();assert.equal(nativeOpened[0].task,'task');assert.equal(nativePrompts,0);
 await native.setEnabled(false);await native.setEnabled(true);assert.equal(storage.get('pot-system-notifications-browser-v1'),'false');native.dispose();
 
-// A resumed Task may finish again; its durable update timestamp identifies the
-// new terminal transition while repeated metadata still yields no event.
-const resumed=createNotificationProjection();resumed.observe(owner,[{...task('running'),updated_at_ms:1}],[]);
-const firstFinish=resumed.observe(owner,[{...task('complete'),updated_at_ms:2}],[])[0];
-resumed.observe(owner,[{...task('running'),updated_at_ms:3}],[]);
-const nextFinish=resumed.observe(owner,[{...task('complete'),updated_at_ms:4}],[])[0];assert.notEqual(firstFinish.id,nextFinish.id);
+// Distinct committed terminal transitions keep distinct event IDs even when
+// their timestamps coincide. Explicit cancellations remain silent.
+const firstFinish=taskOutcomeNotifications(owner,[{...task('complete'),sequence:1,updated_at_ms:2}])[0];
+const nextFinish=taskOutcomeNotifications(owner,[{...task('failed'),sequence:2,updated_at_ms:2}])[0];
+assert.notEqual(firstFinish.id,nextFinish.id);
+assert.equal(taskOutcomeNotifications(owner,[task('cancelled')]).length,0);
+
+// A task query failure or stall cannot clear another owner's baseline, delay
+// approvals, or consume the failing owner's last successful outcome cursor.
+function isolatedClient(){
+ const alerts=[],calls=[],heads=new Map([['alpha',1000],['beta',2000]]),changes=new Map(),pending=new Map();
+ let rejectAlpha=false,stallAlpha=null;
+ class Alert {static permission='granted';constructor(title,options){alerts.push({title,...options});}}
+ const testHost=new EventTarget(),document=new EventTarget();document.visibilityState='hidden';document.hasFocus=()=>false;
+ Object.assign(testHost,{document,Notification:Alert,isSecureContext:true,localStorage:{getItem:()=>null},setTimeout});
+ const testClient={desktop:false,spaces:[{id:'space-a',boot_id:'boot',connected:true}],assistants:[{...owner},{...owner,id:'beta',name:'Beta'}],
+  async request(path,scope){
+   calls.push({path,owner:scope.owner});
+   if(path==='/api/v1/permissions')return {pending:pending.get(scope.owner)||[]};
+   assert(path.startsWith('/api/v1/tasks/outcomes'),'Notification reads must never load Task lists');
+   if(scope.owner==='alpha'&&stallAlpha)await stallAlpha;
+   if(scope.owner==='alpha'&&rejectAlpha)throw Error('Alpha task read failed');
+   const after=new URL(path,'http://fixture').searchParams.get('after');
+   return {items:after===null?[]:(changes.get(scope.owner)||[]).filter(item=>item.sequence>Number(after)),cursor:heads.get(scope.owner),has_more:false};
+  }};
+ const coordinator=createSystemNotifications({client:testClient,surface:'main',view:()=>({}),open:()=>{},locale:()=> 'en',host:testHost,claim:async()=>true});
+ return {alerts,calls,heads,changes,pending,client:testClient,coordinator,set reject(value){rejectAlpha=value;},set stall(value){stallAlpha=value;}};
+}
+const isolated=isolatedClient();await isolated.coordinator.directory();assert.equal(isolated.alerts.length,0);
+isolated.reject=true;
+isolated.heads.set('alpha',1001);isolated.changes.set('alpha',[{...task('failed','alpha-task'),sequence:1001}]);
+isolated.heads.set('beta',2001);isolated.changes.set('beta',[{...task('complete','beta-task'),sequence:2001}]);
+isolated.pending.set('alpha',[{...approval('alpha-approval'),task_title:'Alpha needs approval'}]);
+isolated.pending.set('beta',[{...approval('beta-approval'),request:{owner:'beta'},task_title:'Beta needs approval'}]);
+await isolated.coordinator.refresh();
+assert.equal(isolated.alerts.filter(item=>item.body==='Background task complete').length,1,'Alpha error must not baseline Beta completion');
+assert.equal(isolated.alerts.filter(item=>item.body==='Approval required. Review in Pot.').length,2,'Task error must not block either approval reader');
+isolated.client.assistants[1]={...isolated.client.assistants[1],reply_id:'beta-new',reply_count:5};
+await isolated.coordinator.directory();assert.equal(isolated.alerts.at(-1).body,'Assistant reply complete','Query error must preserve reply baseline');
+isolated.reject=false;await isolated.coordinator.refresh({topics:['task-outcomes']});
+assert.equal(isolated.alerts.at(-1).body,'Background task failed or interrupted','Failed read must retain its last successful cursor');
+const beforeToken=isolated.calls.length;
+await isolated.coordinator.refresh({topics:['tasks','runner','usage']});
+assert.equal(isolated.calls.length,beforeToken,'Token/output invalidations must not query notifications');
+assert(isolated.calls.some(item=>item.path==='/api/v1/tasks/outcomes?after=1000'),'Only read changes after the 1000-row archive baseline');
+let releaseAlpha;isolated.stall=new Promise(resolve=>{releaseAlpha=resolve;});
+isolated.heads.set('beta',2002);isolated.changes.get('beta').push({...task('failed','beta-fast'),sequence:2002});
+isolated.pending.get('alpha').push({...approval('alpha-second'),task_title:'Second approval'});
+const stalledRead=isolated.coordinator.refresh();
+await new Promise(resolve=>setImmediate(resolve));
+assert(isolated.alerts.some(item=>item.title.includes('Second approval')),'A stalled Task read must not block the same owner approval');
+assert.equal(isolated.alerts.filter(item=>item.body==='Background task failed or interrupted').length,2,'A stalled owner must not block another owner');
+releaseAlpha();await stalledRead;isolated.stall=null;
+// Reconnect establishes the current head rather than replaying catch-up.
+await isolated.coordinator.refresh({reset:true,space:'space-a'});
+const beforeCatchup=isolated.alerts.length;
+isolated.heads.set('alpha',1002);isolated.changes.get('alpha').push({...task('complete','offline-task'),sequence:1002});
+await isolated.coordinator.directory();assert.equal(isolated.alerts.length,beforeCatchup);
+isolated.heads.set('alpha',1003);isolated.changes.get('alpha').push({...task('complete','online-task'),sequence:1003});
+await isolated.coordinator.refresh({topics:['task-outcomes']});assert.equal(isolated.alerts.length,beforeCatchup+1);
+isolated.coordinator.dispose();
+
+// A new Task can be created and finish between reads. A bounded cursor page
+// retains it without any prior active-list observation, including page two.
+const paged=isolatedClient();await paged.coordinator.directory();
+const oldRequest=paged.client.request;
+let pageReads=0;
+paged.client.request=async(path,scope)=>{
+ if(scope.owner!=='alpha'||!path.startsWith('/api/v1/tasks/outcomes'))return oldRequest(path,scope);
+ pageReads++;const after=Number(new URL(path,'http://fixture').searchParams.get('after'));
+ return after===1000?{items:[{...task('complete','fast-one'),sequence:1001}],cursor:1001,has_more:true}:
+  {items:[{...task('failed','fast-two'),sequence:1002}],cursor:1002,has_more:false};
+};
+await paged.coordinator.refresh({topics:['task-outcomes']});
+assert.equal(pageReads,2);assert.equal(paged.alerts.length,2);paged.coordinator.dispose();
+
+// Retire an in-flight old connection before it can install a new baseline or
+// deliver an old outcome into the replacement watcher.
+const stale=isolatedClient();await stale.coordinator.directory();
+let releaseStale,arrivedStale;
+const staleStarted=new Promise(resolve=>{arrivedStale=resolve;}),staleResponse=new Promise(resolve=>{releaseStale=resolve;});
+const realRequest=stale.client.request;
+stale.client.request=(path,scope)=>{
+ if(scope.owner==='alpha'&&path.includes('after=1000')){arrivedStale();return staleResponse;}
+ return realRequest(path,scope);
+};
+const oldRead=stale.coordinator.refresh({topics:['task-outcomes']});await staleStarted;
+await stale.coordinator.refresh({reset:true,space:'space-a'});
+stale.heads.set('alpha',1002);await stale.coordinator.directory();
+releaseStale({items:[{...task('complete','stale-task'),sequence:1001}],cursor:1001,has_more:false});await oldRead;
+assert.equal(stale.alerts.length,0,'Old connection outcomes cannot cross reset');
+stale.heads.set('alpha',1003);stale.changes.set('alpha',[{...task('complete','fresh-task'),sequence:1003}]);
+await stale.coordinator.refresh({topics:['task-outcomes']});assert.equal(stale.alerts.length,1);stale.coordinator.dispose();
 
 // Retirement is local and best-effort. Removed server endpoints (404), browser
 // restrictions and a stalled push provider cannot block the new coordinator.

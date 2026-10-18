@@ -1,31 +1,28 @@
-// Catalogue projections are observations, not an event log. The first successful
-// read after startup, disconnection or a boot change is always a baseline.
+// Reply and approval observations have independent baselines per owner. Task
+// outcomes use their own durable cursor rather than a full Task-list snapshot.
+const identity=assistant=>({space:assistant.space_id,control:assistant.control_id||assistant.space_id,owner:assistant.id,name:String(assistant.name||'Pot').slice(0,60)});
+const event=(base,kind,id,task='')=>({...base,kind,task,id:JSON.stringify([base.control,base.owner,kind,id])});
+export function taskOutcomeNotifications(assistant,items) {
+  const base=identity(assistant);
+  return items.filter(item=>['complete','failed','interrupted'].includes(item.phase)).map(item=>
+    event({...base,name:String(item.title||base.name).slice(0,60)},item.phase==='complete'?'task-complete':'task-failed',JSON.stringify([item.id,item.sequence]),item.id));
+}
 export function createNotificationProjection() {
-  const owners = new Map();
+  const owners=new Map();
   return {
-    reset(space) { for (const [key, value] of owners) if (!space || value.space === space) owners.delete(key); },
-    observe(assistant, tasks, approvals, boot = '') {
-      const space=assistant.space_id, control=assistant.control_id||space;
-      const key=JSON.stringify([control,assistant.id]),stored=owners.get(key),previous=stored?.boot===boot?stored:undefined;
-      const current={space,boot,reply:assistant.reply_id,count:assistant.reply_count||0,
-        tasks:tasks?new Map(tasks.map(task=>[task.id,task.phase])):previous?.tasks||null,approvals:approvals?new Set(approvals.map(item=>item.id)):previous?.approvals||null};
+    reset(space,owner='',control='') {
+      for(const [key,value] of owners)if((!space||value.space===space)&&(!owner||value.owner===owner)&&(!control||value.control===control))owners.delete(key);
+    },
+    observe(assistant,approvals,boot='') {
+      const base=identity(assistant),key=JSON.stringify([base.control,base.space,base.owner]),stored=owners.get(key),previous=stored?.boot===boot?stored:undefined;
+      const current={...base,boot,reply:assistant.reply_id,count:assistant.reply_count||0,
+        approvals:approvals?new Set(approvals.map(item=>item.id)):previous?.approvals||null};
       owners.set(key,current);
-      if(!previous||previous.boot!==boot)return [];
-      const events=[],base={space,control,owner:assistant.id,name:String(assistant.name||'Pot').slice(0,60)};
-      const add=(kind,id,task='')=>events.push({...base,kind,task,id:JSON.stringify([control,assistant.id,kind,id])});
-      if(current.reply&&current.reply!==previous.reply&&current.count>previous.count)add('reply',current.reply);
-      for(const task of previous.tasks?tasks||[]:[]) {
-        if(previous.tasks.get(task.id)===task.phase)continue;
-        if(['complete','failed','interrupted'].includes(task.phase)) {
-          add(task.phase==='complete'?'task-complete':'task-failed',JSON.stringify([task.id,task.updated_at_ms||0]),task.id);
-          events.at(-1).name=String(task.title||base.name).slice(0,60);
-        }
-      }
-      for(const approval of previous.approvals?approvals||[]:[])if(!previous.approvals.has(approval.id)){
-        const taskID=approval.request?.task||'';add('approval',approval.id,taskID);
-        const title=tasks?.find(task=>task.id===taskID)?.title;
-        if(title)events.at(-1).name=String(title).slice(0,60);
-      }
+      if(!previous)return [];
+      const events=[];
+      if(current.reply&&current.reply!==previous.reply&&current.count>previous.count)events.push(event(base,'reply',current.reply));
+      for(const approval of previous.approvals?approvals||[]:[])if(!previous.approvals.has(approval.id))
+        events.push(event({...base,name:String(approval.task_title||base.name).slice(0,60)},'approval',approval.id,approval.request?.task||''));
       return events;
     },
   };

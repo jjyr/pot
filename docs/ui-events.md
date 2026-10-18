@@ -9,7 +9,7 @@ and subscriptions wake the shared DOM components.
 
 `GET /api/v1/changes` requires operator authorization. The standalone browser
 server exposes it through its authenticated proxy. SSE `changed` frames contain
-a map of domain versions, such as `assistants`, `tasks`, `schedules`, `usage`,
+a map of domain versions, such as `assistants`, `tasks`, `task-outcomes`, `schedules`, `usage`,
 `machines`, `resources` and `permissions`. Frame IDs contain the Runtime boot ID
 and a stream sequence. Version markers are invalidation state, not durable
 conversation replay cursors.

@@ -1,4 +1,4 @@
-import {createNotificationProjection,viewingNotification,notificationText} from '../state/notifications.mjs';
+import {createNotificationProjection,taskOutcomeNotifications,viewingNotification,notificationText} from '../state/notifications.mjs';
 import {createRefreshQueue} from '../state/refresh.mjs';
 
 const preferenceKey='pot-system-notifications-browser-v1';
@@ -26,8 +26,8 @@ export function browserNotificationPermission(host=globalThis) {
 }
 
 export function createSystemNotifications({client,surface,view,open,locale,host=window,claim=claimBrowserNotification}) {
-  const projection=createNotificationProjection(),listeners=new Set(),abort=new AbortController();
-  let disposed=false,enabled=true,permission='loading',error='',generation=0,directorySignature='',awaitingDirectory=true,pendingClick=null,statusEpoch=0;
+  const projection=createNotificationProjection(),listeners=new Set(),owners=new Map();
+  let disposed=false,enabled=true,permission='loading',error='',generation=0,awaitingDirectory=true,pendingClick=null,statusEpoch=0;
   const channel=!client.desktop&&host.BroadcastChannel?new host.BroadcastChannel('pot-system-notifications-v1'):null;
   const pending=new Map();
   const emit=()=>listeners.forEach(listener=>listener());
@@ -61,40 +61,49 @@ export function createSystemNotifications({client,surface,view,open,locale,host=
       host.setTimeout(()=>{pending.delete(id);resolve(visible||viewingNotification(context(),event));},120);
     });
   }
-  async function deliver(event) {
-    if(disposed)return;
+  async function deliver(event,current=()=>!disposed) {
+    if(!current())return;
     const text=notificationText(event,locale());
     if(client.desktop){await client.notifySystem({...event,...text});return;}
-    const ticket=generation,visible=await browserViewing(event);
-    if(disposed||ticket!==generation||!await claim(event.id,host.indexedDB))return;
+    const visible=await browserViewing(event);
+    if(!current()||!await claim(event.id,host.indexedDB)||!current())return;
     if(visible||!enabled||browserNotificationPermission(host)!=='granted')return;
     const notification=new host.Notification(text.title,{body:text.body,tag:event.id,icon:'/assets/PotCompanion.png'});
     notification.onclick=()=>{notification.close();host.focus();Promise.resolve(open(event)).catch(fail);};
   }
   const fail=reason=>{error=reason.message||String(reason);emit();};
-  async function read() {
-    if(awaitingDirectory)return;
-    const ticket=generation;
-    for(const assistant of client.assistants||[]) {
-      if(disposed||ticket!==generation)return;
-      const space=(client.spaces||[]).find(item=>item.id===assistant.space_id);
-      if(assistant.offline||space?.connected===false){projection.reset(assistant.space_id);continue;}
-      const scope={owner:assistant.id,space:assistant.space_id,signal:abort.signal};
-      try{
-        const tasks=[];let offset=0;
-        do{
-          const page=await client.request(`/api/v1/tasks/query?scope=all&limit=50&offset=${offset}`,scope);
-          tasks.push(...(page.items||[]));
-          const next=page.next_offset;if(next!=null&&next<=offset)throw Error('Invalid notification task cursor');offset=next;
-        }while(offset!=null);
-        const approvals=await client.request('/api/v1/permissions',scope);
-        if(disposed||ticket!==generation)return;
-        const latest=(client.assistants||[]).find(item=>item.id===assistant.id&&item.space_id===assistant.space_id);if(!latest)continue;
-        for(const event of projection.observe(latest,tasks,(approvals.pending||[]).filter(item=>item.request?.owner===assistant.id),space?.boot_id||''))await deliver(event);
-      }catch(reason){projection.reset(assistant.space_id);if(!disposed&&reason.name!=='AbortError')fail(reason);}
-    }
+  const ownerKey=item=>JSON.stringify([item.control_id||item.space_id,item.space_id,item.id]);
+  const bootOf=item=>(client.spaces||[]).find(space=>space.id===item.space_id)?.boot_id||'';
+  function stopOwner(entry){entry.abort.abort();entry.tasks.close();entry.approvals.close();owners.delete(entry.key);}
+  function watch(assistant) {
+    const key=ownerKey(assistant),boot=bootOf(assistant);let entry=owners.get(key);
+    if(entry&&entry.boot!==boot){stopOwner(entry);projection.reset(assistant.space_id,assistant.id,assistant.control_id);entry=null;}
+    if(entry)return entry;
+    entry={key,boot,space:assistant.space_id,abort:new AbortController(),cursor:null};
+    const latest=()=>(client.assistants||[]).find(item=>ownerKey(item)===key);
+    const current=()=>{
+      const item=latest(),space=(client.spaces||[]).find(space=>space.id===entry.space);
+      return !disposed&&owners.get(key)===entry&&item&&!item.offline&&space?.connected!==false&&bootOf(item)===boot;
+    };
+    const scope={owner:assistant.id,space:entry.space,signal:entry.abort.signal};
+    const send=async events=>{for(const event of events){if(!current())return;await deliver(event,current).catch(fail);}};
+    entry.tasks=createRefreshQueue(async()=>{
+      let more;
+      do{
+        const after=entry.cursor,page=await client.request(`/api/v1/tasks/outcomes${after===null?'':`?after=${after}`}`,scope);
+        if(!current())return;
+        if(!Number.isSafeInteger(page.cursor)||page.cursor<0||(after!==null&&page.cursor<after)||page.has_more&&(after===null||page.cursor<=after))throw Error('Invalid notification task cursor');
+        entry.cursor=page.cursor;more=page.has_more;
+        if(after!==null)await send(taskOutcomeNotifications(latest(),page.items||[]));
+      }while(more&&current());
+    },{active:current,onError:fail});
+    entry.approvals=createRefreshQueue(async()=>{
+      const approvals=await client.request('/api/v1/permissions',scope);
+      if(current())await send(projection.observe(latest(),(approvals.pending||[]).filter(item=>item.request?.owner===assistant.id),boot));
+    },{active:current,onError:fail});
+    entry.current=current;
+    owners.set(key,entry);return entry;
   }
-  const queue=createRefreshQueue(read,{active:()=>!disposed,onError:fail});
   function openPending(){
     if(!pendingClick||awaitingDirectory||disposed)return;
     const event=pendingClick;pendingClick=null;Promise.resolve(open(event)).catch(fail);
@@ -118,20 +127,37 @@ export function createSystemNotifications({client,surface,view,open,locale,host=
       else if(browserNotificationPermission(host)==='default')await host.Notification.requestPermission();
       await status();
     },
-    refresh({reset=false,space=''}={}){if(reset){generation++;projection.reset(space);directorySignature='';awaitingDirectory=true;return Promise.resolve();}return queue.run();},
+    refresh({reset=false,space='',topics=[]}={}){
+      if(reset){
+        generation++;projection.reset(space);awaitingDirectory=true;
+        for(const entry of owners.values())if(!space||entry.space===space)stopOwner(entry);
+        return Promise.resolve();
+      }
+      const reads=[];
+      for(const entry of owners.values())if(!space||entry.space===space){
+        if(!topics.length||topics.includes('task-outcomes'))reads.push(entry.tasks.run());
+        if(!topics.length||topics.includes('permissions'))reads.push(entry.approvals.run());
+      }
+      return Promise.all(reads);
+    },
     directory({epoch=generation}={}){
       if(epoch!==generation||disposed)return Promise.resolve();
       awaitingDirectory=false;openPending();
-      const deliveries=[],rows=client.assistants||[],signature=JSON.stringify(rows.map(item=>[item.control_id,item.space_id,item.id,item.offline,(client.spaces||[]).find(space=>space.id===item.space_id)?.boot_id]));
+      const deliveries=[],rows=client.assistants||[],keys=new Set(rows.map(ownerKey));
+      for(const entry of owners.values())if(!keys.has(entry.key))stopOwner(entry);
       for(const item of rows){
-        if(item.offline){projection.reset(item.space_id);continue;}
-        const boot=(client.spaces||[]).find(space=>space.id===item.space_id)?.boot_id||'';
-        for(const event of projection.observe(item,undefined,undefined,boot))deliveries.push(deliver(event).catch(fail));
+        const key=ownerKey(item),space=(client.spaces||[]).find(space=>space.id===item.space_id);
+        if(item.offline||space?.connected===false){
+          const entry=owners.get(key);if(entry)stopOwner(entry);
+          projection.reset(item.space_id,item.id,item.control_id);continue;
+        }
+        const existing=owners.get(key),entry=watch(item);
+        for(const event of projection.observe(item,undefined,entry.boot))deliveries.push(deliver(event,entry.current).catch(fail));
+        if(existing!==entry)deliveries.push(entry.tasks.run(),entry.approvals.run());
       }
-      if(signature!==directorySignature){directorySignature=signature;deliveries.push(queue.run());}
       return Promise.all(deliveries);
     },
     report,
-    dispose(){disposed=true;abort.abort();queue.close();channel?.close();stopClick();stopPreference();listeners.clear();host.removeEventListener('focus',focus);host.removeEventListener('blur',report);host.document.removeEventListener('visibilitychange',focus);host.removeEventListener('storage',storage);},
+    dispose(){disposed=true;for(const entry of owners.values())stopOwner(entry);channel?.close();stopClick();stopPreference();listeners.clear();host.removeEventListener('focus',focus);host.removeEventListener('blur',report);host.document.removeEventListener('visibilitychange',focus);host.removeEventListener('storage',storage);},
   };
 }
