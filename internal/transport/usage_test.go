@@ -3,12 +3,16 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/internal/usage"
+	"github.com/jjyr/pot/internal/webui"
 	"github.com/jjyr/pot/pkg/execution"
 )
 
@@ -47,6 +51,87 @@ func TestUsageSummaryAndIndependentListRoutes(t *testing.T) {
 	for _, path := range []string{"/api/v1/usage/requests", "/api/v1/usage/tools?scope=main&offset=-1", "/api/v1/usage/models?days=2", "/api/v1/usage/compactions?scope=main&timezone=Invalid"} {
 		if _, err := app.Call(ctx, Request{Method: "GET", Path: path}); err == nil {
 			t.Fatal("invalid list query accepted", path)
+		}
+	}
+}
+
+func TestBrowserReadRoutesReachApplication(t *testing.T) {
+	manager, _ := execution.New("local", "boot", execution.DefaultLimits())
+	keys, _ := secrets.NewMemoryKey(make([]byte, 32))
+	service, err := control.Open(control.Options{Root: t.TempDir(), RuntimeID: "local", BootID: "boot", Manager: manager, Keys: keys})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	ctx := context.Background()
+	if _, err = service.Registry.Create(ctx, "create", "Pot"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.Usage.Reserve(ctx, usage.ReserveRequest{ID: "request", Scope: "main", Turn: "turn", AtMS: time.Now().UnixMilli(), Model: "fixture", InputEstimate: 10, MaxOutput: 20}); err != nil {
+		t.Fatal(err)
+	}
+	app := &Application{Control: service, RuntimeID: "local", BootID: "boot", About: func(context.Context) (any, error) {
+		return map[string]string{"version": "fixture"}, nil
+	}}
+	upstream := httptest.NewServer(Handler(app, "control-secret"))
+	defer upstream.Close()
+	config := webui.NewConfig()
+	browser, err := webui.New(webui.Options{Origin: "http://localhost", Config: config, Upstream: webui.Upstream{URL: upstream.URL, Credential: "control-secret", Client: upstream.Client()}, Assets: fstest.MapFS{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer browser.Close()
+	login := httptest.NewRequest("POST", "http://localhost/access/token", nil)
+	login.Header.Set("Authorization", "Bearer "+config.Token)
+	response := httptest.NewRecorder()
+	browser.ServeHTTP(response, login)
+	if response.Code != http.StatusOK {
+		t.Fatal("browser login failed", response.Code)
+	}
+	cookie := response.Result().Cookies()[0]
+	for _, path := range []string{
+		"/api/v1/runtime", "/api/v1/control", "/api/v1/spaces", "/api/v1/assistants",
+		"/api/v1/providers", "/api/v1/agent", "/api/v1/agent/routing", "/api/v1/instructions", "/api/v1/about",
+		"/api/v1/integrations", "/api/v1/agent/diagnostics",
+		"/api/v1/snapshot", "/api/v1/permissions", "/api/v1/machines", "/api/v1/schedules",
+		"/api/v1/tasks/query", "/api/v1/usage/providers",
+		"/api/v1/usage/summary?scope=main&timezone=UTC",
+		"/api/v1/usage/models?scope=main&timezone=UTC&offset=0",
+		"/api/v1/usage/requests?scope=main&timezone=UTC&offset=0",
+		"/api/v1/usage/tools?scope=main&timezone=UTC&offset=0",
+		"/api/v1/usage/compactions?scope=main&timezone=UTC&offset=0",
+		"/api/v1/usage/models?days=365&timezone=Asia%2FShanghai&offset=20",
+	} {
+		t.Run(path, func(t *testing.T) {
+			r := httptest.NewRequest("GET", "http://localhost"+path, nil)
+			r.AddCookie(cookie)
+			w := httptest.NewRecorder()
+			browser.ServeHTTP(w, r)
+			if w.Code != http.StatusOK || !json.Valid(w.Body.Bytes()) {
+				t.Fatalf("browser/application route mismatch: %d %s", w.Code, w.Body.String())
+			}
+			// Check persisted data and the policy consumed by the frontend editor.
+			if path == "/api/v1/usage/requests?scope=main&timezone=UTC&offset=0" {
+				var page struct{ Items []usage.RequestRecord }
+				if err = json.Unmarshal(w.Body.Bytes(), &page); err != nil || len(page.Items) != 1 || page.Items[0].ID != "request" {
+					t.Fatal("request page lost original scope", w.Body.String(), err)
+				}
+			}
+			if path == "/api/v1/usage/summary?scope=main&timezone=UTC" {
+				var summary usage.Summary
+				if err = json.Unmarshal(w.Body.Bytes(), &summary); err != nil || summary.Quota.Policy != usage.DefaultPolicy() {
+					t.Fatal("summary must include the policy used by the editor", w.Body.String(), err)
+				}
+			}
+		})
+	}
+	for _, path := range []string{"/api/v1/runtime/control", "/api/v1/runtime/resources", "/api/v1/terminals", "/api/v1/usage/policy"} {
+		r := httptest.NewRequest("GET", "http://localhost"+path, nil)
+		r.AddCookie(cookie)
+		w := httptest.NewRecorder()
+		browser.ServeHTTP(w, r)
+		if w.Code != http.StatusNotFound {
+			t.Fatal("private or unsupported route published", path, w.Code, w.Body.String())
 		}
 	}
 }

@@ -138,3 +138,59 @@ func TestBrowserRateLimitAndOrigin(t *testing.T) {
 		t.Fatal(w.Code, string(data))
 	}
 }
+
+func TestBrowserUsagePagesReachControl(t *testing.T) {
+	requests := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer control-secret" || r.Header.Get("Cookie") != "" {
+			t.Error("incorrect upstream credentials")
+		}
+		requests <- r.URL.RequestURI()
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"items":[],"offset":20,"next_offset":null}`))
+	}))
+	defer upstream.Close()
+	config := NewConfig()
+	server, err := New(Options{Origin: "http://localhost", Config: config, Upstream: Upstream{URL: upstream.URL, Credential: "control-secret", Client: upstream.Client()}, Assets: fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("UI")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	login := httptest.NewRequest("POST", "http://localhost/access/token", nil)
+	login.Header.Set("Authorization", "Bearer "+config.Token)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, login)
+	if response.Code != http.StatusOK {
+		t.Fatal("login failed", response.Code)
+	}
+	cookie := response.Result().Cookies()[0]
+	for _, kind := range []string{"models", "requests", "tools", "compactions"} {
+		t.Run(kind, func(t *testing.T) {
+			path := "/api/v1/usage/" + kind + "?scope=main&timezone=Asia%2FShanghai&days=30&offset=20"
+			r := httptest.NewRequest("GET", "http://localhost"+path, nil)
+			r.AddCookie(cookie)
+			w := httptest.NewRecorder()
+			server.ServeHTTP(w, r)
+			if w.Code != http.StatusOK || w.Body.String() != `{"items":[],"offset":20,"next_offset":null}` {
+				t.Fatalf("usage page not proxied: status=%d body=%s", w.Code, w.Body.String())
+			}
+			if received := <-requests; received != path {
+				t.Fatal("usage query changed", received)
+			}
+			for _, method := range []string{"POST", "PUT", "DELETE"} {
+				r = httptest.NewRequest(method, "http://localhost"+path, nil)
+				r.AddCookie(cookie)
+				w = httptest.NewRecorder()
+				server.ServeHTTP(w, r)
+				if w.Code != http.StatusNotFound {
+					t.Fatal("usage page allowed mutation", method, w.Code)
+				}
+			}
+		})
+	}
+	for _, path := range []string{"/api/v1/usage/private", "/api/v1/usage/models/private", "/api/v1/usage/models/"} {
+		if Allowed("GET", path) {
+			t.Fatal("unknown usage route published", path)
+		}
+	}
+}

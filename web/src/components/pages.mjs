@@ -506,7 +506,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     return connectView(root,token,async()=>{
       const summary=across(`/api/v1/usage/summary?${new URLSearchParams(params)}`,token,{spaceID,ownerID:usageOwner?.owner||'',errorTarget:root});
       const [pages]=await Promise.all([summary,...jobs.map(job=>initial?job:job.refresh())]);initial=false;
-      await Promise.all(pages.map(async page=>{if(!page.value.quota?.policy){const policy=await request('/api/v1/usage/policy',{space:page.space.id,owner:usageOwner?.owner||'',signal:token.signal});page.value={...page.value,quota:{...page.value.quota,policy}};}}));return pages;
+      return pages;
     },pages=>{const projection=n('div'),limitProjection=n('div','usage-limit-actions');
     const data=pages.length===1?{...pages[0].value,spaces:pages}:combineUsage(pages);
     const {exact,compact}=usageNumbers(locale()),total=(usageOwner?data.lifetime||data.total:data.total)||{},metrics=n('div','usage-metrics'),totalCard=n('section','page-card usage-total');

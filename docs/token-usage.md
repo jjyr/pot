@@ -122,6 +122,10 @@ Usage query/policy/recovery APIs require the main Runtime token; workers cannot 
 
 `GET /api/v1/agent/diagnostics` provides bounded execution metadata; diagnostic responses omit prompt text, tool arguments, output and error payloads.
 
+The browser service publishes the summary and all four paginated detail routes
+through its explicit GET allowlist. Usage limits are read from the summary's
+`quota.policy`; `/api/v1/usage/policy` is a write-only endpoint.
+
 
 ## Thread configuration attribution
 
