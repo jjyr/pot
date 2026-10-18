@@ -123,6 +123,25 @@ assert.deepEqual(completionQuery('Review /skill:cre',17),{start:7,end:17,query:'
 assert.equal(completionQuery('https://example.com/path',24),null);assert.equal(completionQuery('/skill:a',2,4),null);assert.equal(completionQuery('/skill:a ',9),null);
 
 const {createConversationState,beginSubscription,acceptSnapshot,setDraft,beginSend,settleSend}=await import('../../web/src/state/conversation.mjs');
+const resumeState=createConversationState(),resumeEpoch=beginSubscription(resumeState);
+const resumeSnapshot={runtime_id:'runtime',boot_id:'boot',owner_id:'owner',conversation_id:'chat',cursor:'1',running:false,turn_id:null,messages:[]};
+acceptSnapshot(resumeState,resumeSnapshot,resumeEpoch);setDraft(resumeState,'sent before switching windows');
+const resumeReceipt=beginSend(resumeState,'resume-send');
+const renewedEpoch=beginSubscription(resumeState,{retainPending:true});
+assert.equal(resumeState.pending.get(resumeReceipt.key),resumeReceipt,'Recovery retains an in-flight receipt');
+assert.equal(resumeState.sends.get(resumeReceipt.key).phase,'sending');
+assert.equal(acceptSnapshot(resumeState,{...resumeSnapshot,cursor:'9'},resumeEpoch),false,'Retired stream callbacks are fenced');
+acceptSnapshot(resumeState,{...resumeSnapshot,cursor:'2'},renewedEpoch);
+assert.equal(beginSend(resumeState,'duplicate'),null,'Returning to a window cannot submit a duplicate');
+assert.equal(settleSend(resumeState,resumeReceipt,true),true,'The original acknowledgement settles after recovery');
+assert.equal(resumeState.drafts.size,0,'Its exact submitted draft clears normally');
+setDraft(resumeState,'acknowledged during recovery');const earlyResumeReceipt=beginSend(resumeState,'early-resume-send');
+beginSubscription(resumeState,{retainPending:true});
+assert.equal(settleSend(resumeState,earlyResumeReceipt,true),true);
+assert.equal(resumeState.drafts.size,0,'An acknowledgement arriving before the recovery snapshot still clears its own draft');
+acceptSnapshot(resumeState,resumeSnapshot,resumeState.epoch);setDraft(resumeState,'original draft');
+const editedResumeReceipt=beginSend(resumeState,'edited-resume-send');beginSubscription(resumeState,{retainPending:true});setDraft(resumeState,'new typing',editedResumeReceipt.key);
+settleSend(resumeState,editedResumeReceipt,true);assert.equal(resumeState.drafts.get(editedResumeReceipt.key),'new typing','Recovery never clears text typed after sending');
 const steeringState=createConversationState(),steeringEpoch=beginSubscription(steeringState);
 acceptSnapshot(steeringState,{runtime_id:'runtime',boot_id:'boot',owner_id:'owner',conversation_id:'chat',cursor:'1',running:true,turn_id:'original-turn',messages:[]},steeringEpoch);setDraft(steeringState,'live guidance');
 assert.equal(beginSend(steeringState,'ignored'),null,'Preview cannot steer a running turn');

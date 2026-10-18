@@ -9,11 +9,11 @@ async page=>{
   const {mountApp}=await import('/components/ui.js');
   const root=document.createElement('div');document.body.replaceChildren(root);
   const context={owner:'',space:''},empty={runtime_id:'reply-runtime',boot_id:'boot',owner_id:JSON.stringify(['local','main']),conversation_id:'main',cursor:'1',running:false,turn_id:null,messages:[]};
-  const fixture=window.replyFixture={snapshot:empty,requests:[],subscriptions:0};
+  const fixture=window.replyFixture={snapshot:empty,requests:[],subscriptions:0,changeSubscriptions:0};
   const client={production:true,runtime:{runtime_id:'reply-runtime',boot_id:'boot'},scope:()=>({...context}),setScope:value=>Object.assign(context,value),
    snapshot:async()=>structuredClone(context.owner==='other'?{...empty,owner_id:JSON.stringify(['local','other']),conversation_id:'other'}:fixture.snapshot),
    send:request=>{fixture.requests.push(request);return new Promise((resolve,reject)=>{fixture.resolveSend=resolve;fixture.rejectSend=reject;});},
-   cancel:async()=>{},changes:()=>()=>{},
+   cancel:async()=>{},changes:()=>{fixture.changeSubscriptions++;return ()=>{};},
    subscribe:(deliver,status)=>{fixture.deliver=deliver;fixture.status=status;fixture.subscriptions++;status('connected');return ()=>{};},
    request:async path=>{
     if(path==='/api/v1/spaces')return {active_space_id:'local',items:[{id:'local',control_id:'reply-runtime',name:'Local',kind:'local',connected:true}]};
@@ -72,11 +72,31 @@ async page=>{
  await page.evaluate(()=>replyFixture.publish({messages:[replyFixture.input,{id:'reply',reply_to:'input',role:'assistant',status:'complete',text:'连接正常'}],running:false,turn_id:null}));
  await page.getByText('连接正常',{exact:true}).waitFor();
  assert(await page.locator('.waiting-dots,.role-assistant .activity-dot').count()===0,'Completed replies stop all activity animation');
+ await page.evaluate(()=>{
+  replyFixture.publish({messages:[replyFixture.input,{id:'reply',reply_to:'input',role:'assistant',status:'streaming',text:'等待后台完成'}],running:true,turn_id:'input'});
+  replyFixture.status('offline');
+  replyFixture.retiredDeliver=replyFixture.deliver;replyFixture.retiredStatus=replyFixture.status;
+  replyFixture.beforeResume={subscriptions:replyFixture.subscriptions,changes:replyFixture.changeSubscriptions,requests:replyFixture.requests.length};
+  // The server finishes while the old stream cannot deliver. Returning to the
+  // window must replace both subscriptions and fetch the terminal snapshot.
+  replyFixture.snapshot={...replyFixture.snapshot,cursor:String(Number(replyFixture.snapshot.cursor)+1),messages:[replyFixture.input,{id:'reply',reply_to:'input',role:'assistant',status:'complete',text:'切回后同步完成'}],running:false,turn_id:null};
+ });
+ await page.getByText('连接中断，正在重新连接…',{exact:true}).waitFor();
+ await page.evaluate(()=>{window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));});
+ await page.getByText('切回后同步完成',{exact:true}).waitFor();
+ assert(await page.evaluate(()=>replyFixture.subscriptions===replyFixture.beforeResume.subscriptions+1&&replyFixture.changeSubscriptions===replyFixture.beforeResume.changes+1),'Returning renews both streams once for paired lifecycle events');
+ assert(await page.evaluate(()=>replyFixture.requests.length===replyFixture.beforeResume.requests),'Recovery does not resend input');
+ assert(await page.locator('#pot-composer').inputValue()==='保留新草稿','Recovery preserves the draft');
+ await page.evaluate(()=>{replyFixture.retiredStatus('offline');replyFixture.retiredDeliver({...replyFixture.snapshot,cursor:'999',messages:[],running:false,turn_id:null});});
+ await page.getByText('切回后同步完成',{exact:true}).waitFor();
+ await page.evaluate(()=>{replyFixture.beforeOnline=replyFixture.subscriptions;window.dispatchEvent(new Event('online'));});
+ await page.waitForFunction(()=>replyFixture.subscriptions===replyFixture.beforeOnline+1);
+ await page.getByText('切回后同步完成',{exact:true}).waitFor();
  await page.locator('.assistant-row').filter({hasText:'Other assistant'}).click();
  await page.waitForFunction(()=>document.querySelector('.window-title').textContent.includes('Other assistant'));
  assert(await page.locator('.reply-bubble').count()===0,'Another assistant cannot inherit the reply');
  await page.locator('.assistant-row').filter({hasText:'Pot'}).click();
- await page.getByText('连接正常',{exact:true}).waitFor();
+ await page.getByText('切回后同步完成',{exact:true}).waitFor();
  assert(await page.locator('#pot-composer').inputValue()==='保留新草稿','Owner navigation restores its own draft');
  await page.locator('#pot-composer').fill('测试发送错误');await page.locator('#pot-composer').press('Enter');
  await page.getByText('发送中…',{exact:true}).waitFor();

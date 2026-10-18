@@ -15,6 +15,7 @@ import {createReplyBubble} from './reply.mjs';
 import {reconcile} from './reconcile.mjs';
 import {createRefreshQueue,relevantChange} from '../state/refresh.mjs';
 import {taskElapsed,bindTaskClock} from './task-time.mjs';
+import {bindResumeRecovery} from '../state/resume.mjs';
 
 function el(tag, className = '', text) {
   const element = document.createElement(tag);
@@ -510,7 +511,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const abort = new AbortController();
   async function loadSnapshot(reattach = false) {
     if (disposed) return;
-    if (reattach) {epoch = beginSubscription(state);disconnected=false;attach();return;}
+    if (reattach) {epoch = beginSubscription(state,{retainPending:true});disconnected=false;return attach();}
     const receivedEpoch = epoch;
     connection = 'connecting'; error = ''; connectionError = ''; updateControls();
     try {
@@ -532,7 +533,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if (value === 'connected' && disconnected) { disconnected = false; loadSnapshot(true); }
       else { connection = value; updateControls(); }
     });
-    loadSnapshot();
+    return loadSnapshot();
   }
   async function selectAssistant(item, initial = false,record=true) {
     completions?.reset();
@@ -651,14 +652,23 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   viewport?.addEventListener('resize', viewportChanged);
   window.addEventListener('resize', viewportChanged);
   renderShell();viewportChanged();
-  if(client.production){stopChanges=client.changes((topics,source={})=>{
-    const keys=Array.isArray(topics)?topics:Object.keys(topics||{});
-    if(relevantChange(keys,['spaces','assistants','assistant-mail','conversation','runtime','permissions']))loadDirectory();
-    if(relevantChange(keys,['tasks','runner'],client.scope().space,source))refreshBackgroundTasks();
-    pages.refresh(keys,source);if(relevantChange(keys,['permissions','spaces','runtime'],pages.approvalSpace,source))pages.permissions();
-  },{space:''});loadDirectory();}else attach();
+  function attachChanges(){
+    stopChanges();stopChanges=client.changes((topics,source={})=>{
+      const keys=Array.isArray(topics)?topics:Object.keys(topics||{});
+      if(relevantChange(keys,['spaces','assistants','assistant-mail','conversation','runtime','permissions']))loadDirectory();
+      if(relevantChange(keys,['tasks','runner'],client.scope().space,source))refreshBackgroundTasks();
+      pages.refresh(keys,source);if(relevantChange(keys,['permissions','spaces','runtime'],pages.approvalSpace,source))pages.permissions();
+    },{space:''});
+  }
+  if(client.production){attachChanges();loadDirectory();}else attach();
+  const stopResume=bindResumeRecovery(async()=>{
+    if(disposed)return;
+    const snapshot=selectedAssistant||!client.production?loadSnapshot(true):Promise.resolve();
+    if(client.production){attachChanges();pages.refresh();pages.permissions();refreshBackgroundTasks();}
+    await Promise.all([snapshot,loadDirectory()]);
+  });
   return () => {
-    disposed = true; taskClock.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
+    disposed = true; stopResume();taskClock.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     completions?.dispose();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);
