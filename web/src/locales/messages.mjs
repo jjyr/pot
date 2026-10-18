@@ -1,5 +1,9 @@
 export const messages = {
   en: {
+    'attachments.add':'Add attachment', 'attachments.images':'Images', 'attachments.pdf':'PDF',
+    'attachments.modelUnsupported':'Current model does not support image or PDF uploads',
+    'attachments.imagesUnsupported':'Current model does not support images', 'attachments.pdfUnsupported':'Current model does not support PDF uploads',
+    'attachments.unavailable':'Attachments are temporarily unavailable',
     'references.list':'Message references', 'references.assistant':'Replying to assistant', 'references.you':'Replying to you',
     'references.open':'View original: {source}', 'references.remove':'Remove reference', 'references.unavailable':'Original message unavailable',
     'references.limit':'Select up to 8 excerpts, each at most 4 KiB and totaling at most 16 KiB.', 'references.added':'Reference added', 'references.removed':'Reference removed',
@@ -7,6 +11,7 @@ export const messages = {
 
     'loading.pending':'Loading…',
     'loading.stale':'Refresh failed. Previously loaded data is still shown.',
+
 
     'markdown.diagramSource':'Mermaid source', 'markdown.diagramUnavailable':'Could not render this diagram. The source is available below.',
     'markdown.zoomIn':'Zoom in', 'markdown.zoomOut':'Zoom out', 'markdown.resetZoom':'Reset zoom',
@@ -129,6 +134,10 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'attachments.add':'添加附件', 'attachments.images':'图片', 'attachments.pdf':'PDF',
+    'attachments.modelUnsupported':'当前模型不支持图片或 PDF 上传',
+    'attachments.imagesUnsupported':'当前模型不支持图片', 'attachments.pdfUnsupported':'当前模型不支持 PDF 上传',
+    'attachments.unavailable':'附件暂时不可用',
     'references.list':'消息引用', 'references.assistant':'引用助手的消息', 'references.you':'引用你的消息',
     'references.open':'查看原消息：{source}', 'references.remove':'移除引用', 'references.unavailable':'原消息不可用',
     'references.limit':'最多引用 8 处，每处不超过 4 KiB，总计不超过 16 KiB。', 'references.added':'已加入引用', 'references.removed':'已移除引用',
@@ -136,6 +145,7 @@ export const messages = {
 
     'loading.pending':'正在加载…',
     'loading.stale':'刷新失败，继续显示之前加载的数据。',
+
 
     'markdown.diagramSource':'Mermaid 源码', 'markdown.diagramUnavailable':'无法渲染此图表，可在下方查看源码。',
     'markdown.zoomIn':'放大', 'markdown.zoomOut':'缩小', 'markdown.resetZoom':'重置缩放',

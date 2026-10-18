@@ -99,7 +99,11 @@ func (p *ProfileStore) ResolveAssistant(selection AssistantSelection) (core.Reso
 		if profile.ModelSettings != nil {
 			catalog = profile.ModelSettings.CatalogProvider
 		}
-		profile.ModelSettings = &core.ModelSettings{CatalogProvider: catalog}
+		var inputs map[string][]string
+		if profile.ModelSettings != nil {
+			inputs = profile.ModelSettings.InputModalities
+		}
+		profile.ModelSettings = &core.ModelSettings{CatalogProvider: catalog, InputModalities: inputs}
 	} else if profile.ModelSettings == nil {
 		window, output := profile.Params.Agent.ContextWindow, profile.Params.MaxOutputTokens
 		profile.ModelSettings = &core.ModelSettings{ContextWindow: &window, MaxOutputTokens: &output}

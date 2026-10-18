@@ -6,7 +6,7 @@ import {avatar} from './avatar.mjs';
 import {translate} from '../locales/messages.mjs';
 import {icon} from './icons.mjs';
 import {node as n, action, field, section, table, details} from './primitives.mjs';
-import {modelDefaults} from '../state/models.mjs';
+import {modelDefaults,createModelInputDiscovery} from '../state/models.mjs';
 import {ownedItems,combineTasks,combineUsage} from '../state/aggregate.mjs';
 import {createEditorSession, createRequestGate} from '../state/editor.mjs';
 import {createTaskTranscript,appendTaskEvents} from '../state/task-transcript.mjs';
@@ -290,6 +290,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const selectedEntry=(snapshot.directory||[]).find(value=>value.id===providerID);
     const inherited=modelDefaults(snapshot,providerID,profile?.model||'');
     let configuredModels=[...(snapshot.configured_models?.[profile?.id]||[])];
+    const inputDiscovery=createModelInputDiscovery(connection,profile?.model_settings?.input_modalities);
     const baseName=selectedEntry?.name||tr('Custom Provider','自定义供应商'),names=new Set((snapshot.profiles||[]).map(value=>value.name));let defaultName=baseName;for(let index=2;names.has(defaultName);index++)defaultName=`${baseName} ${index}`;
     const initial={name:profile?.name||defaultName,endpoint:connection?.endpoint||selectedEntry?.endpoint||'',api_key:'',model:profile?.model||'',model_selection:'',protocol:connection?.protocol||selectedEntry?.protocol||'openai_responses',context_window:profile?.model_settings?.context_window??null,max_output_tokens:profile?.model_settings?.max_output_tokens??null,reasoning_effort:profile?.params?.reasoning_effort||''};
     const form=renderEditor(profile?tr('Edit Provider','编辑提供商'):tr('Add Provider','添加提供商'),initial,[
@@ -304,7 +305,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       {name:'reasoning_effort',label:tr('Reasoning effort','推理强度'),placeholder:tr('Provider default','提供商默认值')},
     ],(values,context)=>{
       const {model_selection,context_window,...connectionValues}=values;
-      return request('/api/v1/providers',{...context,method:'POST',body:{request_id:context.request_id,profile_id:profile?.id||'',expected_revision:profile?.revision||0,models:[...new Set([...configuredModels,values.model].filter(Boolean))],...connectionValues,reasoning_effort:values.reasoning_effort.trim()||null,max_output_tokens:values.max_output_tokens||modelDefaults(snapshot,providerID,values.model).output,model_settings:{catalog_provider:providerID==='custom'?null:providerID,context_window:context_window||null,max_output_tokens:values.max_output_tokens||null}}});
+      return request('/api/v1/providers',{...context,method:'POST',body:{request_id:context.request_id,profile_id:profile?.id||'',expected_revision:profile?.revision||0,models:[...new Set([...configuredModels,values.model].filter(Boolean))],...connectionValues,reasoning_effort:values.reasoning_effort.trim()||null,max_output_tokens:values.max_output_tokens||modelDefaults(snapshot,providerID,values.model).output,model_settings:{catalog_provider:providerID==='custom'?null:providerID,context_window:context_window||null,max_output_tokens:values.max_output_tokens||null,input_modalities:inputDiscovery.snapshot(values)}}});
     },{capturedScope:settingsScope});
     const controls=form.controls,session=form.session;let endpointEdited=false;
     form.lifecycle.cancel=()=>back({skipPicker:true});form.lifecycle.afterSave=async saved=>{await back({skipPicker:true});await editor?.lifecycle.providersChanged?.(saved);if(onboarding){openChat();changed(saved);}};
@@ -319,7 +320,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     controls.get('endpoint').addEventListener('input',()=>{endpointEdited=true;});
     controls.get('protocol').addEventListener('change',()=>{endpointEdited=true;});
     controls.get('model').addEventListener('input',inherit);inherit();
-    connectProviderEditor({form,request,scope:settingsScope,profile,connection,tr,current:()=>editor?.session===session&&!disposed&&client.runtime.boot_id===session.context.boot,models:entries=>{configuredModels=entries.map(model=>typeof model==='string'?model:model.id);models([...new Map([...(selectedEntry?.models||[]),...configuredModels].map(model=>[typeof model==='string'?model:model.id,model])).values()],controls.get('model_selection').value);}});
+    connectProviderEditor({form,request,scope:settingsScope,profile,connection,tr,current:()=>editor?.session===session&&!disposed&&client.runtime.boot_id===session.context.boot,connectionChanged:value=>inputDiscovery.connectionChanged(value),models:(entries,inputs)=>{inputDiscovery.adopt(session.values,inputs);configuredModels=entries.map(model=>typeof model==='string'?model:model.id);models([...new Map([...(selectedEntry?.models||[]),...configuredModels].map(model=>[typeof model==='string'?model:model.id,model])).values()],controls.get('model_selection').value);}});
 
   }
   function spaceEditor() {

@@ -492,6 +492,10 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 .composer-toolbar { display: flex; align-items: center; justify-content: space-between; position: relative; }
 .composer-toolbar .send-button { margin: 0; }
 .attachment-plus { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border-radius: 50%; border: 1px solid var(--divider); background: transparent; }
+.attachment-trigger { position: relative; display: inline-flex; border-radius: 50%; }
+.attachment-trigger .attachment-plus:disabled { pointer-events: none; }
+.attachment-tooltip { display: none; position: absolute; bottom: calc(100% + 8px); left: 0; width: max-content; max-width: min(300px, 70vw); padding: 8px 10px; border: 1px solid var(--divider); border-radius: 8px; background: var(--surface); color: var(--text); box-shadow: 0 4px 20px #0002; font-size: 12px; line-height: 1.5; z-index: 25; }
+.attachment-trigger:hover .attachment-tooltip:not([hidden]), .attachment-trigger:focus .attachment-tooltip:not([hidden]) { display: block; }
 .attachment-menu { position: absolute; left: 0; bottom: calc(100% + 8px); display: grid; min-width: 150px; padding: 5px; gap: 4px; border: 1px solid var(--divider); border-radius: 10px; background: var(--surface); box-shadow: 0 4px 20px #0002; z-index: 25; }
 .attachment-menu[hidden], .composer-attachments[hidden], .attachment-hint[hidden] { display: none; }
 .attachment-menu button { text-align: left; padding: 8px 12px; border: 0; background: transparent; border-radius: 6px; }
