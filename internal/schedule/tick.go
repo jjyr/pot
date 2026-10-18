@@ -3,9 +3,7 @@ package schedule
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
-	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
@@ -35,71 +33,13 @@ func ParseResult(data []byte) (ResultFile, error) {
 	}
 	return result, nil
 }
-func (s *Service) unfinished(ctx context.Context) ([]queued, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT assistant_id,schedule_id,body FROM schedule_runs WHERE finished IS NULL ORDER BY scheduled,rowid")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	result := []queued{}
-	for rows.Next() {
-		var q queued
-		var raw string
-		if err := rows.Scan(&q.Owner, &q.PlanID, &raw); err != nil {
-			return nil, err
-		}
-		if err := core.DecodeJSON([]byte(raw), &q.Run); err != nil {
-			return nil, err
-		}
-		result = append(result, q)
-	}
-	return result, rows.Err()
-}
 
 // Tick takes an explicit clock. Occurrence identity, queue entry and next due
-// time commit atomically. Readiness gates future launches, not result recovery.
+// time commit atomically. Task coordination finalizes results independently of
+// the readiness gate for future launches.
 func (s *Service) Tick(ctx context.Context, at int64) error {
 	if at < 0 || uint64(at) > core.MaxSafeInteger {
 		return fmt.Errorf("invalid scheduler clock")
-	}
-	pending, err := s.unfinished(ctx)
-	if err != nil {
-		return err
-	}
-	for _, q := range pending {
-		if q.Run.TaskID == nil {
-			return fmt.Errorf("unfinished schedule occurrence has no Task")
-		}
-		task, err := s.options.Tasks.Get(ctx, q.Owner, *q.Run.TaskID)
-		if err != nil {
-			return err
-		}
-		if task == nil {
-			return fmt.Errorf("scheduled Task disappeared")
-		}
-		if task.Info.Phase.Scope() == "active" {
-			continue
-		}
-		var result ResultFile
-		var resultErr error
-		if task.Info.Phase == protocol.TaskComplete {
-			if s.options.Results == nil || task.Info.ExecutionTarget == nil {
-				resultErr = fmt.Errorf("fixed destination result transport unavailable")
-			} else {
-				data, err := s.options.Results.ReadResult(ctx, *task.Info.ExecutionTarget, task.Info.ID, ".pot-schedule-result.json", 16384)
-				if err != nil {
-					resultErr = err
-				} else {
-					result, resultErr = ParseResult(data)
-				}
-			}
-		}
-		if errors.Is(resultErr, tasks.ErrResultPending) {
-			continue
-		}
-		if err := s.complete(ctx, q, task.Info.Phase, result, resultErr, at); err != nil {
-			return err
-		}
 	}
 	rows, err := s.db.QueryContext(ctx, "SELECT assistant_id,id FROM schedules ORDER BY rowid")
 	if err != nil {
@@ -232,100 +172,4 @@ func (s *Service) lastError(ctx context.Context, owner, id, detail string) error
 		plan.Info.LastError = detail
 		return writePlan(ctx, tx, owner, *plan)
 	})
-}
-func (s *Service) complete(ctx context.Context, q queued, phase protocol.TaskPhase, result ResultFile, resultErr error, at int64) error {
-	err := storage.Transaction(ctx, s.db, func(tx *sql.Tx) error {
-		plan, err := readPlan(ctx, tx, q.Owner, q.PlanID)
-		if err != nil {
-			return err
-		}
-		if plan == nil {
-			return fmt.Errorf("schedule missing")
-		}
-		run, err := readRun(ctx, tx, q.Owner, q.PlanID, q.Run.ID)
-		if err != nil {
-			return err
-		}
-		if run == nil {
-			return fmt.Errorf("schedule occurrence missing")
-		}
-		if run.FinishedAtMS != nil {
-			return nil
-		}
-		task, err := s.options.Tasks.GetTx(ctx, tx, q.Owner, *run.TaskID)
-		if err != nil {
-			return err
-		}
-		if task == nil || task.Info.Phase.Scope() == "active" {
-			return fmt.Errorf("late scheduled result no longer matches ended Task")
-		}
-		phase = task.Info.Phase
-		run.FinishedAtMS = &at
-		if phase == protocol.TaskComplete {
-			if resultErr != nil {
-				phase = protocol.TaskFailed
-				run.Summary = "Structured result missing or invalid: " + resultErr.Error()
-				if err := s.options.Tasks.FailResultTx(ctx, tx, q.Owner, task.Info.ID, run.Summary); err != nil {
-					return err
-				}
-			} else {
-				changed := plan.Info.Baseline == nil || *plan.Info.Baseline != result.Fingerprint
-				run.Changed = &changed
-				run.Summary = result.Summary + "\nEvidence: " + strings.Join(result.Evidence, "; ")
-				if len(result.Artifacts) > 0 {
-					run.Summary += "\nArtifacts: " + strings.Join(result.Artifacts, ", ")
-				}
-				if run.Generation == plan.Generation {
-					fingerprint := result.Fingerprint
-					plan.Info.Baseline = &fingerprint
-				}
-			}
-		} else if task.Result != nil {
-			run.Summary = task.Result.Text
-			if len([]rune(run.Summary)) > 1200 {
-				run.Summary = string([]rune(run.Summary)[:1200])
-			}
-		}
-		run.State = string(phase)
-		failed := phase == protocol.TaskFailed || phase == protocol.TaskInterrupted
-		notify := run.Notify == "all" || run.Notify == "changes" && (run.Changed != nil && *run.Changed || failed) || run.Notify == "failures" && failed
-		if notify {
-			id, _ := core.HashJSON([]string{q.Owner, q.PlanID, q.Run.ID})
-			text := fmt.Sprintf("Schedule %q: %s\n%s", plan.Info.Spec.Title, run.State, run.Summary)
-			if _, err := tx.ExecContext(ctx, "INSERT INTO schedule_notifications(id,assistant_id,schedule_id,run_id,text) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING", id, q.Owner, q.PlanID, q.Run.ID, text); err != nil {
-				return err
-			}
-		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM task_notifications WHERE assistant_id=? AND task_id=?", q.Owner, task.Info.ID); err != nil {
-			return err
-		}
-		if err := writeRun(ctx, tx, q.Owner, q.PlanID, *run); err != nil {
-			return err
-		}
-		return writePlan(ctx, tx, q.Owner, *plan)
-	})
-	if err == nil {
-		s.options.Tasks.Notify()
-	}
-	return err
-}
-func (s *Service) Notifications(ctx context.Context, owner string) ([]Notification, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id,assistant_id,schedule_id,run_id,text FROM schedule_notifications WHERE assistant_id=? ORDER BY rowid", owner)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	result := []Notification{}
-	for rows.Next() {
-		var n Notification
-		if err := rows.Scan(&n.ID, &n.AssistantID, &n.ScheduleID, &n.RunID, &n.Text); err != nil {
-			return nil, err
-		}
-		result = append(result, n)
-	}
-	return result, rows.Err()
-}
-func (s *Service) AcknowledgeNotification(ctx context.Context, owner, id string) error {
-	_, err := s.db.ExecContext(ctx, "DELETE FROM schedule_notifications WHERE assistant_id=? AND id=?", owner, id)
-	return err
 }

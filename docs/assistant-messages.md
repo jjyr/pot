@@ -33,8 +33,9 @@ while handling agent correspondence remain references, never owner guidance.
 checks. `agent_messages` in the Control's `tasks.sqlite` stores Task inputs,
 assistant correspondence and task-result events. Task input and notification
 views are transcript/receiver projections over this table, not separate queues.
-Task completion and its event commit in the same transaction. Schema 5 does not
-import legacy Task queues or the former standalone assistant mailbox.
+Task completion and its event commit in the same transaction. Task schema 6 and
+schedule schema 2 require the unified outcome format; older schemas are rejected
+without importing legacy queues or schedule notifications.
 
 The assistant's user inbox is separate and has priority at turn boundaries.
 Accepted requests arriving during an automatic read-only summary start their
@@ -94,7 +95,11 @@ A [terminal hook](hooks.md) creates one event identified by Task and run for
 completion, failure, interruption or cancellation, including stopping before
 dispatch. Approval hooks only update UI and user reminders. When user chat is
 available, its receiver claims a batch of currently pending outcomes and produces
-one concise report using each Task title and actual outcome. Summaries have no
+one concise report using each Task title and actual outcome. Ordinary and
+scheduled outcomes share this batch, delivery journal and acknowledgment path.
+The receiver reads immutable event data rather than reinterpreting current Task
+state. Schedule policy can suppress an outcome before delivery; no separate
+schedule notification queue or reporting turn exists. Summaries have no
 tools, do not infer undelivered Tasks' states and omit identifiers from prose. Real Task identifiers remain
 available for artifact download URLs.
 
@@ -130,8 +135,8 @@ Its tagged operations are `directory`, `register`, `pending`, `deliver`,
 `acknowledge` and `history`. Addresses and envelopes follow the Agent contract in
 `pkg/protocol/mail.go`; history projects assistant correspondence only.
 
-Inbox states include queued, processing, waiting, processed, failed and
-interrupted. A processing attempt is persisted before model invocation. Restart
-marks incomplete attempts interrupted. Allowance continuation reuses only a
+Inbox states include queued, processing, waiting, processed, failed, interrupted
+and policy-suppressed (`suppressed`) outcomes. A processing attempt is persisted
+before model invocation. Restart marks incomplete attempts interrupted. Allowance continuation reuses only a
 stopped checkpoint with no started model/tool effects. A fenced sender group
 does not replay its input; other peer contexts remain independent.

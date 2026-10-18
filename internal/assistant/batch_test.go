@@ -151,7 +151,7 @@ func TestUserBatchBoundLeavesOverflowForNextTurn(t *testing.T) {
 func enqueueResult(t *testing.T, m *Mailbox, id string, owner string) protocol.Envelope {
 	t.Helper()
 	run := newConversation()
-	e := protocol.Envelope{ID: id, Kind: "task_result", From: protocol.AgentRef{ControlID: m.controlID, Kind: "runtime", AgentID: "runtime"}, To: address(m.controlID, owner), ConversationID: run, Text: "outcome " + id, Result: &protocol.TaskResultEvent{TaskID: "task-" + id, RunID: run, Title: id, Phase: protocol.TaskFailed, Text: "failure " + id}}
+	e := protocol.Envelope{ID: id, Kind: "task_result", From: protocol.AgentRef{ControlID: m.controlID, Kind: "runtime", AgentID: "runtime"}, To: address(m.controlID, owner), ConversationID: run, Text: "outcome " + id, Result: &protocol.TaskResultEvent{Origin: protocol.TaskOrigin{Kind: "manual"}, TaskID: "task-" + id, RunID: run, Title: id, Phase: protocol.TaskFailed, Text: "failure " + id}}
 	if err := storage.Transaction(context.Background(), m.db, func(tx *sql.Tx) error { return inbox.EnqueueTx(context.Background(), tx, e, "in", "queued") }); err != nil {
 		t.Fatal(err)
 	}

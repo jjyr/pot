@@ -63,6 +63,9 @@ func (e Envelope) Validate() error {
 		return fmt.Errorf("invalid Runtime task event")
 	}
 	if e.Result != nil {
+		if err := e.Result.Origin.Validate(); err != nil {
+			return err
+		}
 		switch e.Result.Phase {
 		case TaskComplete, TaskFailed, TaskCancelled, TaskInterrupted:
 		default:
@@ -79,11 +82,33 @@ func (e Envelope) Validate() error {
 }
 
 type TaskResultEvent struct {
-	TaskID string    `json:"task_id"`
-	RunID  string    `json:"run_id"`
-	Title  string    `json:"title"`
-	Phase  TaskPhase `json:"phase"`
-	Text   string    `json:"text"`
+	TaskID            string     `json:"task_id"`
+	RunID             string     `json:"run_id"`
+	Title             string     `json:"title"`
+	Phase             TaskPhase  `json:"phase"`
+	Text              string     `json:"text"`
+	Error             string     `json:"error,omitempty"`
+	Origin            TaskOrigin `json:"origin"`
+	Evidence          []string   `json:"evidence,omitempty"`
+	Artifacts         []string   `json:"artifacts,omitempty"`
+	SuppressionReason string     `json:"suppression_reason,omitempty"`
+}
+
+// TaskOrigin is assigned by Control, never by model-supplied task arguments.
+type TaskOrigin struct {
+	Kind         string `json:"kind"`
+	ScheduleID   string `json:"schedule_id,omitempty"`
+	OccurrenceID string `json:"occurrence_id,omitempty"`
+}
+
+func (o TaskOrigin) Validate() error {
+	if o.Kind == "manual" && o.ScheduleID == "" && o.OccurrenceID == "" {
+		return nil
+	}
+	if o.Kind == "schedule" && core.Identifier(o.ScheduleID) && o.OccurrenceID != "" && len(o.OccurrenceID) <= 256 && !strings.ContainsRune(o.OccurrenceID, 0) {
+		return nil
+	}
+	return fmt.Errorf("invalid Task origin")
 }
 
 type SendMail struct {

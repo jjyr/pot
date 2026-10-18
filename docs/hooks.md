@@ -7,9 +7,11 @@ not exposed as model tools. `send_message` remains the Agent messaging primitive
 ```text
 PermissionStore --> approval hook --> UI invalidation --> cards + user reminder
 
-Task transaction --> terminal hook --> shared Agent inbox --> assistant report
-                              |
-                              +-----> UI invalidation --> current Task status
+Ordinary / scheduled result --> prepare --> terminal transaction
+                                               |  final Task + outcome hook
+                                               |  schedule history + baseline + policy
+                                               +--> shared Agent inbox --> assistant report
+                                               +--> UI invalidation --> current Task status
 ```
 
 | Event | UI topics | Agent inbox |
@@ -17,6 +19,7 @@ Task transaction --> terminal hook --> shared Agent inbox --> assistant report
 | `approval_requested` | `permissions`, `tasks` | No |
 | `approval_resolved` | `permissions`, `tasks` | No |
 | `approval_expired` | `permissions`, `tasks` | No |
+| `task_started` | `tasks` | No |
 | `task_completed` | `tasks`, `assistant-mail` | Owning assistant |
 | `task_failed` | `tasks`, `assistant-mail` | Owning assistant |
 | `task_interrupted` | `tasks`, `assistant-mail` | Owning assistant |
@@ -41,14 +44,39 @@ Owner decisions continue through the permission API, which checks exact request
 identity and saves permanent grants before permitting the original operation.
 See [Permissions](permissions.md) and [UI events](ui-events.md).
 
+## Task execution start
+
+`task_started` is published once when Control first observes the original Runner's
+nonzero execution start time. Enqueueing or accepting a queued launch does not
+emit it. The start time commits before publication and prevents repeats across
+reconciliation and restart. This hook only invalidates Task UI; it never creates
+an assistant summary or inbox entry.
+
 ## Task outcomes
+
+Task coordination prepares the outcome before its first active-to-terminal
+transition. Control supplies a domain result processor: ordinary results need no
+additional preparation; scheduled results validate their structured report and
+apply schedule policy. File transport runs outside the transaction. The original
+Task/run, generation and record revision fence the prepared result at commit.
+An unavailable remote report leaves the Task active for reconciliation without
+restarting its Worker or publishing a premature outcome.
 
 The Task state-change transaction detects the first active-to-terminal transition
 and atomically enqueues its hook as a Runtime result envelope in `agent_messages`.
 The ID binds the Task and original run. This covers all terminal outcomes,
 including cancellation or interruption before dispatch. Failure reports preserve
 the actual execution error alongside available text; an empty result still has
-a concrete terminal status. Hook insertion failure rolls back the state change.
+a concrete terminal status. Hook insertion failure rolls back the state change,
+schedule history and baseline.
+Missing or invalid mandatory reports therefore produce only a failed outcome,
+never an earlier successful hook followed by a status correction.
+
+Task records carry Control-assigned `manual` or `schedule` origins. Scheduled
+origins bind the schedule and occurrence explicitly; request ID prefixes have no
+routing meaning. Result envelopes preserve the final error, evidence, artifact
+paths and notification suppression reason. Silent schedule outcomes enter the
+same inbox as `suppressed`, retain their history and do not wake a model.
 
 After commit, UI invalidations wake the current projections. The existing assistant
 receiver claims the durable result when user chat is available and reports its

@@ -140,7 +140,7 @@ func (s *Service) productCall(ctx context.Context, owner, id, name string, args 
 		if err != nil || r == nil {
 			return nil, errors.New("Task missing")
 		}
-		return map[string]any{"task": r.Info, "error": r.Error, "result": r.Result}, nil
+		return map[string]any{"task": r.Info, "error": r.Error, "result": r.Outcome}, nil
 	case "interrupt", "cancel_task":
 		mode := "cancel"
 		if name == "interrupt" {

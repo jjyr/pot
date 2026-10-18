@@ -125,18 +125,10 @@ func (s *Service) deliverTaskResults(ctx context.Context, owner string) {
 	size := 0
 	encodedSize := 0
 	for _, notice := range notices {
-		record, err := s.Tasks.Get(ctx, owner, notice.TaskID)
-		if err != nil || record == nil {
-			continue
-		}
-		if strings.HasPrefix(record.Request.RequestID, "schedule:") {
-			_ = s.Tasks.AcknowledgeNotification(ctx, owner, notice.ID)
-			continue
-		}
 		if len(ids) >= inbox.MaxBatchMessages || size+len(notice.Text) > inbox.MaxBatchBytes {
 			break
 		}
-		outcome := map[string]any{"title": record.Info.Title, "phase": notice.Phase, "result": notice.Text, "artifact_task_id": notice.TaskID}
+		outcome := map[string]any{"title": notice.Title, "phase": notice.Phase, "result": notice.Text, "error": notice.Error, "evidence": notice.Evidence, "artifacts": notice.Artifacts, "artifact_task_id": notice.TaskID}
 		encoded, _ := json.Marshal(outcome)
 		if len(ids) > 0 && encodedSize+len(encoded) > inbox.MaxBatchBytes {
 			break

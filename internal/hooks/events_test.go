@@ -41,7 +41,7 @@ func TestApprovalRoutesNeverEnterAgentInbox(t *testing.T) {
 }
 
 func TestOutcomeHookRejectsMismatchedTypeAndRun(t *testing.T) {
-	event := Task("assistant", 1, protocol.TaskResultEvent{TaskID: "task", RunID: "run", Title: "Work", Phase: protocol.TaskFailed, Text: "failed"})
+	event := Task("assistant", 1, protocol.TaskResultEvent{Origin: protocol.TaskOrigin{Kind: "manual"}, TaskID: "task", RunID: "run", Title: "Work", Phase: protocol.TaskFailed, Text: "failed"})
 	if err := event.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -53,5 +53,22 @@ func TestOutcomeHookRejectsMismatchedTypeAndRun(t *testing.T) {
 	event.RunID = "replacement-run"
 	if err := event.Validate(); err == nil {
 		t.Fatal("outcome rebound to another run")
+	}
+}
+
+func TestStartedHookCannotEnterAgentInbox(t *testing.T) {
+	event := Started("assistant", "task", "run", 1)
+	if err := event.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(event.Topics(), []string{"tasks"}) {
+		t.Fatal(event.Topics())
+	}
+	if err := EnqueueTx(context.Background(), nil, "control", "runtime", event); err == nil {
+		t.Fatal("start hook entered summary inbox")
+	}
+	event.Result = &protocol.TaskResultEvent{}
+	if err := event.Validate(); err == nil {
+		t.Fatal("start hook accepted a terminal result")
 	}
 }

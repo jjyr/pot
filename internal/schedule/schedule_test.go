@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jjyr/pot/internal/hooks"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/core"
@@ -60,7 +61,7 @@ type destination struct {
 
 func (d *destination) Launch(_ context.Context, l runner.Launch) (runner.Run, error) {
 	hash, _ := l.Digest()
-	r := runner.Run{Launch: l, LaunchDigest: hash, Phase: runner.Running, BootID: "boot"}
+	r := runner.Run{Launch: l, LaunchDigest: hash, Phase: runner.Running, BootID: "boot", StartedAtMS: time.Now().UnixMilli()}
 	d.runs[l.RunID] = r
 	d.launches++
 	return r, nil
@@ -103,6 +104,7 @@ type fixture struct {
 	reader      *resultReader
 	ready       *bool
 	modelReads  *int
+	events      *[]hooks.Event
 }
 
 func setup(t *testing.T) fixture {
@@ -117,7 +119,11 @@ func setup(t *testing.T) fixture {
 	}
 	port := &destination{runs: map[string]runner.Run{}}
 	reads := 0
-	queue, err := tasks.Open(filepath.Join(t.TempDir(), "tasks.sqlite"), tasks.Options{ControlID: "control", RuntimeID: "machine", Port: port, ResolveModel: func(context.Context, string, protocol.CreateTask) (tasks.Selection, error) {
+	var service *Service
+	var events []hooks.Event
+	queue, err := tasks.Open(filepath.Join(t.TempDir(), "tasks.sqlite"), tasks.Options{ControlID: "control", RuntimeID: "machine", Port: port, PublishHook: func(event hooks.Event) { events = append(events, event) }, PrepareOutcome: func(ctx context.Context, record tasks.Record, event protocol.TaskResultEvent) (tasks.OutcomeCommit, error) {
+		return service.PrepareOutcome(ctx, record, event)
+	}, ResolveModel: func(context.Context, string, protocol.CreateTask) (tasks.Selection, error) {
 		reads++
 		return tasks.Selection{Config: spec, Plugins: []string{}}, nil
 	}, ResolveTarget: func(context.Context, string) (core.ExecutionTarget, error) { return core.RuntimeTarget("machine"), nil }})
@@ -127,11 +133,11 @@ func setup(t *testing.T) fixture {
 	t.Cleanup(func() { queue.Close() })
 	ready := true
 	reader := &resultReader{body: json.RawMessage(`{"summary":"Observed facts","fingerprint":"facts-v1","evidence":["https://example.com/source"]}`)}
-	service, err := New(Options{Tasks: queue, Ready: func(context.Context, string) (bool, error) { return ready, nil }, Results: reader})
+	service, err = New(Options{Tasks: queue, Ready: func(context.Context, string) (bool, error) { return ready, nil }, Results: reader})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return fixture{service, queue, port, reader, &ready, &reads}
+	return fixture{service, queue, port, reader, &ready, &reads, &events}
 }
 func create(t *testing.T, f fixture, spec protocol.ScheduleSpec, at int64) protocol.ScheduleInfo {
 	t.Helper()
@@ -212,11 +218,11 @@ func TestStructuredResultsBaselineQuietRepeatAndGenerationFence(t *testing.T) {
 	if err := f.schedule.Tick(ctx, at+61000); err != nil {
 		t.Fatal(err)
 	}
-	notices, _ := f.schedule.Notifications(ctx, "assistant")
+	notices, _ := f.tasks.Notifications(ctx, "assistant")
 	if len(notices) != 1 {
 		t.Fatal(notices)
 	}
-	if err := f.schedule.AcknowledgeNotification(ctx, "assistant", notices[0].ID); err != nil {
+	if err := f.tasks.AcknowledgeNotification(ctx, "assistant", notices[0].ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.schedule.Tick(ctx, at+120000); err != nil {
@@ -234,7 +240,7 @@ func TestStructuredResultsBaselineQuietRepeatAndGenerationFence(t *testing.T) {
 	if err := f.schedule.Tick(ctx, at+121000); err != nil {
 		t.Fatal(err)
 	}
-	notices, _ = f.schedule.Notifications(ctx, "assistant")
+	notices, _ = f.tasks.Notifications(ctx, "assistant")
 	if len(notices) != 0 {
 		t.Fatal("unchanged result notified", notices)
 	}
@@ -325,10 +331,10 @@ func TestInvalidResultFailsTaskAndHistoryRetentionKeepsUnfinished(t *testing.T) 
 	history, _ := f.schedule.Page(ctx, "assistant", Query{Selected: info.ID})
 	taskID := *history.Runs[0].TaskID
 	f.destination.complete(taskID)
+	f.reader.err = errors.New("missing report")
 	if err := f.tasks.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}
-	f.reader.err = errors.New("missing report")
 	if err := f.schedule.Tick(ctx, at+61000); err != nil {
 		t.Fatal(err)
 	}
