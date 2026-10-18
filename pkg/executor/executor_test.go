@@ -22,9 +22,7 @@ func fixture(t *testing.T) (*Engine, Request) {
 	policy := DefaultShellSettings()
 	policy.ShellSnapshot = false
 	policy.AllowLoginShell = false
-	policy.DefaultTimeoutMS = 2000
-	policy.MaxTimeoutMS = 5000
-	policy.DefaultYieldMS = 30
+	policy.DefaultYieldMS = 1000
 	policy.MaxYieldMS = 1000
 	e := New(Options{Home: dir})
 	t.Cleanup(func() {
@@ -175,15 +173,19 @@ func TestPipePTYResizeInterruptAndFinishedRead(t *testing.T) {
 }
 func TestTimeoutIdleCancellationAndNoDescendants(t *testing.T) {
 	e, r := fixture(t)
-	result := call(t, e, r, "exec_command", map[string]any{"cmd": "sleep 60", "timeout_ms": 30})
-	if result["reason"] != "timeout" || result["session_id"] != nil {
-		t.Fatal(result)
+	r.Operation = "exec_command"
+	r.Args = map[string]any{"cmd": "touch should-not-start", "timeout_ms": 30}
+	if _, err := e.Execute(context.Background(), r, nil); err == nil {
+		t.Fatal("accepted removed hard timeout parameter")
+	}
+	if _, err := os.Stat(filepath.Join(r.CWD, "should-not-start")); !os.IsNotExist(err) {
+		t.Fatal("invalid command started", err)
 	}
 	r.Policy.SessionIdleTimeoutMS = 100
 	// A changed scope policy is intentionally rejected; expiry gets a fresh scope.
 	e2 := New(Options{Home: r.CWD})
 	defer e2.Close()
-	result = call(t, e2, r, "exec_command", map[string]any{"cmd": "sleep 60", "yield_time_ms": 10})
+	result := call(t, e2, r, "exec_command", map[string]any{"cmd": "sleep 60", "yield_time_ms": 10})
 	id := result["session_id"].(string)
 	time.Sleep(180 * time.Millisecond)
 	result = call(t, e2, r, "write_stdin", map[string]any{"session_id": id, "yield_time_ms": 30})
@@ -323,6 +325,7 @@ func TestFailedSnapshotFallbackAndZshAliases(t *testing.T) {
 func TestBlockedPTYInputIsBoundedAndCancelled(t *testing.T) {
 	e, r := fixture(t)
 	r.Policy.MaxYieldMS = 100
+	r.Policy.DefaultYieldMS = 100
 	result := call(t, e, r, "exec_command", map[string]any{"cmd": "stty -icanon -echo; printf ready; sleep 60", "tty": true, "yield_time_ms": 30})
 	id := result["session_id"].(string)
 	r.Operation = "write_stdin"
@@ -336,5 +339,59 @@ func TestBlockedPTYInputIsBoundedAndCancelled(t *testing.T) {
 	}
 	if err := e.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDefaultYieldKeepsCommandAliveUntilPolled(t *testing.T) {
+	e, r := fixture(t)
+	r.Policy.DefaultYieldMS = 10
+	result := call(t, e, r, "exec_command", map[string]any{"cmd": "sleep .1; printf completed"})
+	id, ok := result["session_id"].(string)
+	if !ok || result["execution_status"] != "running" || result["reason"] != nil {
+		t.Fatal("default wait did not yield a live command", result)
+	}
+	result = call(t, e, r, "write_stdin", map[string]any{"session_id": id, "yield_time_ms": 1000})
+	if result["stdout"] != "completed" || result["exit_code"] != 0 || result["session_id"] != nil {
+		t.Fatal("default wait killed or lost the original process", result)
+	}
+}
+
+func TestCommandShellPreservesToolchainPATH(t *testing.T) {
+	for _, mode := range []string{"product", "standalone", "snapshot"} {
+		for _, login := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/login=%v", mode, login), func(t *testing.T) {
+				e, r := fixture(t)
+				bin := filepath.Join(r.CWD, "runtime 'quoted'", "bin")
+				project := filepath.Join(r.CWD, "project-bin")
+				for dir, value := range map[string]string{bin: "packaged", project: "project"} {
+					if err := os.MkdirAll(dir, 0700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(dir, "node"), []byte("#!/bin/sh\nprintf "+value), 0700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				e.options.Node = filepath.Join(bin, "node")
+				if mode == "product" {
+					e.options.Admit = func(uint64) (func(), error) { return func() {}, nil }
+				}
+				r.Policy.ShellSnapshot = mode == "snapshot"
+				r.Policy.AllowLoginShell = login
+				if login {
+					if err := os.WriteFile(filepath.Join(r.CWD, ".bash_profile"), []byte("export PATH="+project+":/usr/bin:/bin\n"), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				t.Setenv("PATH", project+":/usr/bin:/bin")
+				result := call(t, e, r, "exec_command", map[string]any{"cmd": "node"})
+				if result["stdout"] != "project" || result["exit_code"] != 0 {
+					t.Fatal(result)
+				}
+				result = call(t, e, r, "exec_command", map[string]any{"cmd": filepath.Join(project, "node")})
+				if result["stdout"] != "project" || result["exit_code"] != 0 {
+					t.Fatal(result)
+				}
+			})
+		}
 	}
 }

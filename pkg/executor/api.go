@@ -232,7 +232,7 @@ func ValidateArguments(name string, args map[string]any) error {
 	var required string
 	switch name {
 	case "exec_command":
-		fields = "cmd shell login tty interactive workdir timeout_ms max_output_chars yield_time_ms"
+		fields = "cmd shell login tty interactive workdir max_output_chars yield_time_ms"
 		required = "cmd"
 	case "write_stdin":
 		fields = "session_id chars close_stdin interrupt terminate rows cols yield_time_ms max_output_chars"

@@ -46,7 +46,13 @@ mise exec -- python scripts/build-go-plugins --platform linux-amd64 \
 ```
 
 Stop Runtime before replacing complete installed packages. Node plugins use the
-bundled Node; browser tools also need Chrome/Chromium on the execution machine.
+bundled Node and put its `bin` directory first on PATH for plugin child processes.
+Ordinary command shells keep their own PATH and project toolchain; Pot does not
+inject its bundled Node directory. Packaging preserves the distribution's npm/npx
+symlinks so their relative modules remain usable after
+relocation. Project commands select installed versions through their own toolchain
+manager, such as `mise exec`. Browser tools also need Chrome/Chromium on the
+execution machine.
 Goja compositions run in a bounded process worker. Goja supplies no independent
 per-runtime hard heap limit. See [Go libraries](go-libraries.md).
 

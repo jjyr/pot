@@ -116,19 +116,12 @@ func confirmGroupGone(pid int, deadline time.Time) error {
 	}
 	return fmt.Errorf("%w: process group %d remains", ErrCleanupUnconfirmed, pid)
 }
-func (p *process) run(timeout, idle time.Duration) {
+func (p *process) run(idle time.Duration) {
 	waited := make(chan error, 1)
 	go func() { waited <- p.cmd.Wait() }()
 	readerDone := make(chan error, len(p.readers))
 	for index, reader := range p.readers {
 		go p.drain(reader, index == 1, readerDone)
-	}
-	var overall <-chan time.Time
-	var overallTimer *time.Timer
-	if timeout > 0 {
-		overallTimer = time.NewTimer(timeout)
-		overall = overallTimer.C
-		defer overallTimer.Stop()
 	}
 	idleTimer := time.NewTimer(idle)
 	defer idleTimer.Stop()
@@ -140,9 +133,6 @@ waiting:
 		select {
 		case waitErr = <-waited:
 			exited = true
-			break waiting
-		case <-overall:
-			reason = "timeout"
 			break waiting
 		case <-p.stop:
 			reason = "cancelled"
@@ -227,15 +217,7 @@ waiting:
 
 func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process, error) {
 	policy := r.Policy
-	yielding := r.Args["yield_time_ms"] != nil
-	var timeout uint64
 	var err error
-	if !yielding || r.Args["timeout_ms"] != nil {
-		timeout, err = number(r.Args, "timeout_ms", policy.DefaultTimeoutMS, policy.MaxTimeoutMS)
-		if err != nil {
-			return "", nil, err
-		}
-	}
 	shell := policy.Executable
 	if value, ok := r.Args["shell"].(string); ok {
 		shell = value
@@ -433,7 +415,7 @@ func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process,
 	id := identity()
 	started = true
 	e.sessions[id] = p
-	go p.run(time.Duration(timeout)*time.Millisecond, time.Duration(policy.SessionIdleTimeoutMS)*time.Millisecond)
+	go p.run(time.Duration(policy.SessionIdleTimeoutMS) * time.Millisecond)
 	return id, p, nil
 }
 func (e *Engine) executeProcess(ctx context.Context, r Request, emit func(Event) error) (map[string]any, error) {
@@ -441,13 +423,9 @@ func (e *Engine) executeProcess(ctx context.Context, r Request, emit func(Event)
 	if err != nil {
 		return nil, err
 	}
-	yielding := r.Operation == "write_stdin" || r.Args["yield_time_ms"] != nil
-	wait := r.Policy.MaxTimeoutMS
-	if yielding {
-		wait, err = number(r.Args, "yield_time_ms", r.Policy.DefaultYieldMS, r.Policy.MaxYieldMS)
-		if err != nil {
-			return nil, err
-		}
+	wait, err := number(r.Args, "yield_time_ms", r.Policy.DefaultYieldMS, r.Policy.MaxYieldMS)
+	if err != nil {
+		return nil, err
 	}
 	var id string
 	var p *process
@@ -544,7 +522,7 @@ func (e *Engine) executeProcess(ctx context.Context, r Request, emit func(Event)
 				return nil, e.waitCancelled(p, errors.New("process stdin write timed out"))
 			}
 		}
-		if r.Args["close_stdin"] == true || !yielding {
+		if r.Args["close_stdin"] == true {
 			if p.terminal != nil {
 				if _, err := p.input.Write([]byte{4}); err != nil {
 					return nil, err

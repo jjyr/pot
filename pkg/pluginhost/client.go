@@ -170,6 +170,20 @@ func New(config Config) (*Client, error) {
 		}
 		cmd.Env = append(cmd.Env, name+"="+value)
 	}
+	// Child tools use the same configured distribution as the plugin host,
+	// even when the inherited or execution environment selects another Node.
+	if filepath.IsAbs(node) {
+		path := filepath.Dir(node)
+		for i := len(cmd.Env) - 1; i >= 0; i-- {
+			if value, ok := strings.CutPrefix(cmd.Env[i], "PATH="); ok {
+				if value != "" {
+					path += string(os.PathListSeparator) + value
+				}
+				cmd.Env = append(cmd.Env[:i], cmd.Env[i+1:]...)
+			}
+		}
+		cmd.Env = append(cmd.Env, "PATH="+path)
+	}
 
 	var finish func() error
 	if config.Prepare != nil {
