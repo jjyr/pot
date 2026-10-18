@@ -1,5 +1,6 @@
 import {mergeHistoryPage} from '../state/chat-history.mjs';
 import {createMessageWindow,readingAnchor,restoreReadingAnchor} from './message-window.mjs';
+import {notificationOnboarding} from './notification-onboarding.mjs';
 import {bindMessageSelection,renderMessageReferences,referenceProblem} from './message-references.mjs';
 import {createSystemNotifications} from '../adapters/notifications.mjs';
 import {createToolCall} from './tool-call.mjs';
@@ -116,6 +117,15 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     view:()=>({...((route==='tasks'&&pages?.notificationContext)||{space:selectedAssistant?.space_id||'',owner:selectedAssistant?.id||''}),route:menuOpen||preferencesOpen||root.classList.contains('show-directory')?'navigation':route}),
     open:openNotification}):null;
   if(notifications)client.notifications=notifications;
+  const onboarding=notifications&&!client.desktop?notificationOnboarding({notifications,locale:()=>locale}):null;
+  if(onboarding)root.append(onboarding.element);
+  let notificationReady=false;
+  function mainReady(){
+    if(notificationReady)return;notificationReady=true;
+    // The successful initial directory read has mounted the main interface.
+    // Wait for a paint; rendering, reconnects and tray setup do not authorize.
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{if(!disposed)notifications?.ready();}));
+  }
   async function openNotification(event){
     notificationError.hidden=true;
     try{
@@ -749,6 +759,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         }
         if(!assistants.length){directoryOpen=false;renderShell();const empty=el('div','empty-chat');empty.append(el('h2','',t('welcomeTitle')),el('p','hint',available?t('welcomeSetup'):t('partialOffline')));const setup=el('button','control primary',t(available?'setupAI':'retry'));setup.onclick=async()=>{if(!available){loadDirectory();return;}setup.disabled=true;try{await navigate('settings');await pages.setupAI();}catch(reason){error=reason.message;updateControls();}finally{setup.disabled=false;}};empty.append(setup);messageColumn.replaceChildren(empty);}
       }
+      mainReady();
       if(pendingSelection){const chosen=assistants.find(item=>item.id===pendingSelection.id&&item.space_id===pendingSelection.space_id);pendingSelection=null;if(chosen){await selectAssistant(chosen);notifications?.directory({epoch:notificationEpoch});return;}}
       if (!selectedAssistant && assistants.length && !pages.editing) {
         const requested=params.get('assistant_id');const requestedSpace=params.get('space_id');
@@ -834,7 +845,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     await Promise.all([snapshot,loadDirectory()]);
   });
   return () => {
-    disposed = true;cancelAnimationFrame(renderFrame);viewportObserver.disconnect();messageWindow.close();stopResources?.();client.resources?.clear();stopResume();taskClock.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
+    disposed = true;cancelAnimationFrame(renderFrame);viewportObserver.disconnect();messageWindow.close();stopResources?.();client.resources?.clear();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     stopMessageSelection();completions?.dispose();attachmentUI?.destroy();client.releaseAttachments?.();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);

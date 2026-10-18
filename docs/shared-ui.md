@@ -218,12 +218,31 @@ General settings has one **System notifications** preference, enabled by default
 This expresses delivery intent; it does not grant browser or macOS permission.
 The setting shows the current permission, an explicit authorization action while
 permission is undetermined, and instructions for browser/system settings after a
-denial. Mounting, reconnecting and background events never request permission.
+denial. After the authenticated Web main interface is ready, an eligible desktop
+browser with undetermined permission sees a non-modal introduction. Only its
+**Allow notifications** click requests browser permission, within that click's
+user activation. **Not now**, closing the browser prompt, errors, and page reloads
+do not repeat the introduction. A permanent origin/profile IndexedDB transaction
+claims the introduction before display across tabs and Controls; if durable atomic
+storage is unavailable, discovery is skipped and settings remains available.
+This record is independent of delivery intent and OS permission.
+
+In the macOS App, the main interface's first successful directory load and paint
+signals readiness to the shared Go service. If Pot notifications are enabled and
+native authorization is undetermined, it requests permission automatically. Tray
+initialization cannot trigger it. Automatic and manual requests share one in-flight
+coordinator; a durable attempted marker prevents automatic retries after errors
+or unknown native status. Settings still supports explicit retry. Already granted,
+denied, or disabled clients never automatically request permission.
 An insecure or unsupported browser reports its actual limitation. Pot does not
 play audio: sound, banners and Do Not Disturb follow browser/macOS settings.
 
 Browsers use the Notification API in a secure context (HTTPS or localhost).
-Windows and Linux are supported through the Web UI. The macOS App uses Wails'
+Windows and Linux are supported through the Web UI. Mobile browsers do not get
+this introduction or a misleading authorization button: the current constructor
+send path does not implement Android Service Worker delivery or verified iOS Home
+Screen delivery. Settings explains the specific environment limitation.
+The macOS App uses Wails'
 UserNotifications service from a bundled, signed App, with the official
 `UNNotificationSettings.authorizationStatus` for permission presentation. Web and
 App preferences are independent: the browser stores its preference in local

@@ -76,3 +76,34 @@ test('emission pacing is checkpointed across threads and restart without losing 
  r=await h.run(480,JSON.parse(JSON.stringify(r.state)));assert.equal(r.events.length,1);assert.match(r.events[0].url,/issues\/2$/);assert.deepEqual(r.state.pending,{});
  r=await h.run(540,r.state);assert.equal(r.events.length,0);
 });
+test('consumed and legacy history requests cannot replay after an account switch',async()=>{
+ const h=harness();let r=await h.run(0);
+ const config={existing:'consumed',existing_account:'123'};
+ h.set({rows:[thread(80)],comments:[comment(-1)]});r=await h.run(90,r.state,config);
+ assert.equal(r.state.manual,'consumed');
+ // Same consumed request, then a pending legacy request from another identity.
+ for(const [state,nextConfig]of [[{...r.state,account:'old'},config],[{...r.state,account:'old',manual:'previous'},{existing:'old-unconsumed'}]]){
+  const before=h.calls.length,next=await h.run(180,state,nextConfig);
+  assert.equal(next.status,'baseline');assert.deepEqual(next.events,[]);assert.deepEqual(next.state.pending,{});
+  assert.match(h.calls[before].url,/since=/,'Account switch only scans recent baseline');
+  h.set({code:403});const failed=await h.run(180,state,nextConfig);assert.equal(failed.status,'permission');
+  h.set({code:200});const retried=await h.run(4000,failed.state,nextConfig);assert.equal(retried.status,'baseline');assert.deepEqual(retried.state.pending,{},'Failed account transition cannot resurrect history intent');
+ }
+ // A new owner request explicitly scoped to the connected account still works.
+ const before=h.calls.length;
+ r=await h.run(270,{...r.state,account:'old'},{existing:'fresh-request',existing_account:'123'});
+ assert.equal(r.status,'ready');assert.ok(Object.keys(r.state.pending).length);
+ assert.doesNotMatch(h.calls[before].url,/since=/);
+ // A request for another account must establish a baseline instead.
+ r=await h.run(360,{...r.state,account:'old'},{existing:'wrong-account',existing_account:'other'});
+ assert.equal(r.status,'baseline');assert.deepEqual(r.state.pending,{});
+});
+test('reason filters match supported API and custom values without changing defaults',async()=>{
+ for(const reason of ['assign','ci_activity','security_alert','custom_reason']){
+  const h=harness();let r=await h.run(0);h.set({rows:[thread(80,reason)],comments:[comment(80)]});
+  r=await h.run(90,r.state,{reasons:[reason]});assert.equal(r.status,'ready');assert.ok(Object.keys(r.state.pending).length,reason);
+ }
+ const h=harness();let r=await h.run(0);h.set({rows:[thread(80,'assign')],comments:[comment(80)]});
+ r=await h.run(90,r.state);assert.deepEqual(r.state.pending,{},'Defaults stay unchanged');
+ r=await h.run(180,r.state,{reasons:['invalid reason']});assert.equal(r.status,'overflow');
+});

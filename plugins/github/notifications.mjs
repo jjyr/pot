@@ -7,10 +7,11 @@ const clean=(value,max)=>String(value??'').slice(0,max);
 const titleBytes=value=>{let text='';for(const ch of String(value??'')){if(Buffer.byteLength(text+ch)>512)break;text+=ch;}return text;};
 class Failure extends Error {constructor(status,delay){super(status);this.status=status;this.delay=delay;}}
 function validate(config){
- if(!config||typeof config!=='object'||Array.isArray(config)||Object.keys(config).some(k=>!['repositories','reasons','existing'].includes(k)))throw new Failure('overflow',3600);
+ if(!config||typeof config!=='object'||Array.isArray(config)||Object.keys(config).some(k=>!['repositories','reasons','existing','existing_account'].includes(k)))throw new Failure('overflow',3600);
  for(const key of ['repositories','reasons'])if(config[key]!==undefined&&(!Array.isArray(config[key])||config[key].length>100||config[key].some(v=>typeof v!=='string'||v.length>200)))throw new Failure('overflow',3600);
  if(config.repositories?.some(v=>!/^[-\w.]+\/[-\w.]+$/.test(v)))throw new Failure('overflow',3600);
- if(config.reasons?.some(v=>!reasons.includes(v)))throw new Failure('overflow',3600);
+ if(config.reasons?.some(v=>!/^[-a-zA-Z0-9_]+$/.test(v)))throw new Failure('overflow',3600);
+ if(config.existing_account!==undefined&&(typeof config.existing_account!=='string'||config.existing_account.length>200))throw new Failure('overflow',3600);
  if(config.existing!==undefined&&(typeof config.existing!=='string'||config.existing.length>128))throw new Failure('overflow',3600);
 }
 
@@ -21,8 +22,13 @@ export async function poll(input,options={}) {
  const base=options.base||'https://api.github.com',fetcher=options.fetch||fetch;
  const account=input.accounts.github;
  if(!account||!process.env.GH_TOKEN)return {state:input.state,events:[],delay_seconds:300,status:'authorization'};
+ // Consume legacy account-unscoped history intent on an identity change,
+ // including failed exchanges, so a retry cannot turn it into a new request.
+ const accountChanged=!!input.state?.account&&input.state.account!==account;
+ const previousManual=input.state?.manual||false;
+ const manualReceipt=accountChanged&&!config.existing_account?(typeof config.existing==='string'?config.existing:previousManual):previousManual;
  let state=structuredClone(input.state);
- if(!state||state.account!==account)state={account,threads:{},pending:{},baseline:false,since:null,modified:null,failures:0,manual:false};
+ if(!state||state.account!==account)state={account,threads:{},pending:{},baseline:false,since:null,modified:null,failures:0,manual:manualReceipt};
  let interval=Math.max(60,state.interval||60);
  const request=async(path,headers={})=>{
  const url=new URL(path,base);
@@ -65,7 +71,10 @@ export async function poll(input,options={}) {
  if(state.nextPollAt>now)return {state,events:flush(),delay_seconds:Math.min(86400,Math.max(60,Math.ceil((state.nextPollAt-now)/1000))),status:state.retryStatus||'ready'};
  try {
  validate(config);
- const manual=!!config.existing&&config.existing!==state.manual;
+ // Legacy unscoped requests cannot cross accounts. New requests carry the
+ // account the owner selected, and consumed nonces survive identity resets.
+ const manualAccount=config.existing_account?config.existing_account===account:!accountChanged;
+ const manual=!!config.existing&&config.existing!==state.manual&&manualAccount;
  const initial=!state.baseline&&!manual;
  const feeds=[];
  for(const repository of (config.repositories?.length?[...new Set(config.repositories)]:[null])){
@@ -144,7 +153,7 @@ export async function poll(input,options={}) {
  return {state,events,delay_seconds:Math.min(86400,Math.max(60,Math.ceil(delay))),status:initial?'baseline':'ready'};
  }catch(error){
  // Discard all partial page/context mutations. No cursor advances on failure.
- const original=input.state?.account===account?structuredClone(input.state):{account,threads:{},pending:{},baseline:false,since:null,modified:null,manual:false};
+ const original=input.state?.account===account?structuredClone(input.state):{account,threads:{},pending:{},baseline:false,since:null,modified:null,manual:manualReceipt};
  original.failures=Math.min(8,(original.failures||0)+1);original.interval=interval;
  const delay=Math.max(interval,error.delay||Math.min(3600,60*2**original.failures));
  original.nextPollAt=now+delay*1000;original.retryStatus=error.status||'backoff';
