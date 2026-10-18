@@ -22,6 +22,12 @@ Mutations publish after persistence; no-op reads do not produce invalidations.
 The global subscription remains active even when no assistant exists, so an
 assistant created by another client appears without reloading the page.
 
+Task pages ignore unrelated domain changes. The task list refreshes in the
+background, coalesces changes received during a request, and reconciles rows by
+Space, assistant and task identity. Existing rows remain visible while loading
+or after a failed refresh; search input, focus and list scroll position survive
+updates. Navigation and filter changes retire the previous request generation.
+
 Desktop Space adapters consume the same backend subscriptions and emit
 `pot:changed` through Wails. Responses and changes carry their Space identity;
 a failed remote request never falls back to another Control.

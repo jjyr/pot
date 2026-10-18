@@ -18,7 +18,7 @@ import {renderExecutionPermissions} from './execution-permissions.mjs';
 
 export function createPages({onApprovalsChanged=()=>{},client, host, approvalHost, locale, notify, changed, titleChanged, openChat, routeChanged=()=>{}}) {
   const gate = createRequestGate(), approvalGate = createRequestGate();
-  let route = '', title = '', editor = null, disposed = false, pageVersion = 0, configurationSpace = '',taskView=null,scheduleView=null,detailParent=false,usageOwner=null;
+  let route = '', title = '', editor = null, disposed = false, pageVersion = 0, configurationSpace = '',taskView=null,taskListView=null,scheduleView=null,detailParent=false,usageOwner=null;
   let filter = {taskScope:'active', taskQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageDays:7, usageScope:'all', usageOffset:0,usageSpace:'all',settingsTab:'general',taskTarget:null,taskSpace:'all'};
   let pendingApprovals=[];
   const toolMemory=new Map();
@@ -51,7 +51,8 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     if(!gate.current(token))return [];
     const failed=results.filter(value=>value.status==='rejected');
     const pages=results.filter(value=>value.status==='fulfilled').map(value=>value.value);
-    if(failed.length||pages.some(page=>page.stale)) {const message=n('p','inline-error',tr('Some Spaces are unavailable; totals may be incomplete and cached rows are marked stale.','部分 Space 不可用，用量可能不完整，缓存项目标记为过期。'));host.querySelector('.page-content')?.prepend(message);}
+    host.querySelector('.space-availability')?.remove();
+    if(failed.length||pages.some(page=>page.stale)) {const message=n('p','inline-error space-availability',tr('Some Spaces are unavailable; totals may be incomplete and cached rows are marked stale.','部分 Space 不可用，用量可能不完整，缓存项目标记为过期。'));host.querySelector('.page-content')?.prepend(message);}
     if(!pages.length&&targets.length)throw failed[0]?.reason||Error('No Space data');return pages;
   }
   function heading(value) {title=value; titleChanged();}
@@ -90,7 +91,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     if(sessions.some(value=>value.session.pending)) {notify(tr('Please wait for the save result.','请等待保存结果。'));return false;}
     if(sessions.some(value=>value.session.dirty)&&!await confirmDiscard())return false;
     for(const value of sessions)value.lifecycle.dispose?.();
-    editor=null;if(!toParent)editorParents.length=0;taskView=null;scheduleView=null;viewReady=false;gate.close();host.replaceChildren();return true;
+    editor=null;if(!toParent)editorParents.length=0;taskView=null;taskListView=null;scheduleView=null;viewReady=false;gate.close();host.replaceChildren();return true;
   }
   function suspendEditor(){if(editor){editor.scroll=host.scrollTop;editor.focus=innerWidth>=720&&editor.root.contains(document.activeElement)?document.activeElement:null;editorParents.push(editor);editor=null;}}
   function renderEditor(label, initial, definitions, save, {returnChat=false,capturedScope,submitLabel=tr('Save','保存')}={}) {
@@ -310,21 +311,52 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     root.classList.add('tasks-content');
     root.append(segments([['tasks',tr('Tasks','任务')],['schedules',tr('Schedules','定时计划')]],filter.taskTab,value=>{filter.taskTab=value;show('tasks');}));
     if(filter.taskTab==='schedules')return schedules(root,token);
-    const pages=await across(`/api/v1/tasks/query?${new URLSearchParams({scope:filter.taskScope,q:filter.taskQuery,offset:0,limit:50,...(filter.taskTarget?{execution_target:JSON.stringify(filter.taskTarget)}:{})})}`,token,{paginate:true,perAssistant:true,spaceID:filter.taskSpace});if(!gate.current(token))return;const result=combineTasks(pages,{offset:filter.taskOffset,limit:20});
     if(filter.taskTarget)root.append(toolbar(n('span','hint',`${filter.taskTarget.runtime_id}`),action(tr('Show all tasks','显示所有任务'),()=>{filter.taskTarget=null;filter.taskSpace='all';filter.taskOffset=0;show('tasks');})));
-    const controls=toolbar();controls.classList.add('task-filters');controls.append(segments(['active','attention','archived'].map(value=>[value,`${tr({active:'Ongoing',attention:'Needs attention',archived:'Archived'}[value],{active:'进行中',attention:'需关注',archived:'已归档'}[value])} ${result.counts[value]}`]),filter.taskScope,value=>{filter.taskScope=value;filter.taskOffset=0;show('tasks');}));
+    const controls=toolbar();controls.classList.add('task-filters');
+    const scopes=segments(['active','attention','archived'].map(value=>[value,tr({active:'Ongoing',attention:'Needs attention',archived:'Archived'}[value],{active:'进行中',attention:'需关注',archived:'已归档'}[value])]),filter.taskScope,value=>{filter.taskScope=value;filter.taskOffset=0;show('tasks');});controls.append(scopes);
     const search=field(tr('Search task title or ID…','搜索任务标题或 ID…'),filter.taskQuery,{kind:'search'});search.row.classList.add('task-search');search.input.placeholder=tr('Search task title or ID…','搜索任务标题或 ID…');search.input.onchange=()=>{filter.taskQuery=search.input.value;filter.taskOffset=0;show('tasks');};controls.append(search.row);root.append(controls);
-    const tasks=n('div','task-list');tasks.dataset.scrollKey='task-list';if(!result.items?.length)empty(tasks,tr('No ongoing tasks. Describe a goal in Chat to get started.','暂无进行中的任务，在聊天中描述目标即可开始。'));
-    let groupKey='';
-    for(const task of result.items||[]){const key=JSON.stringify([task._space_id,task._assistant_id]);if(key!==groupKey){groupKey=key;const assistant=(client.assistants||[]).find(item=>item.id===task._assistant_id&&item.space_id===task._space_id);tasks.append(n('div','task-owner',assistant?.name||task._assistant_id));}
-      const row=n('button','task-row');row.type='button';row.setAttribute('aria-label',task.title);row.disabled=task._stale;row.onclick=()=>taskDetail(task);row.title=task.title;
-      const line=n('span','task-title-line'),logo=n('span','task-brand',task.executor_icon==='anthropic'?'A':'◉');line.append(logo,n('span','task-title',task.title),n('span','hint','›'));
-      const detail=n('span','task-meta'),phase=n('span',`task-phase phase-${task.phase}`,tr({running:'Running',queued:'Queued',waiting:'Waiting',failed:'Failed',complete:'Complete',interrupted:'Interrupted',cancelled:'Cancelled'}[task.phase]||task.phase,{running:'运行中',queued:'排队中',waiting:'等待中',failed:'失败',complete:'已完成',interrupted:'已中断',cancelled:'已取消'}[task.phase]||task.phase));detail.append(phase,n('span','hint',`${task._space_name||''}${task.machine_id?' · '+task.machine_id:''}${task.pending?' · '+task.pending+' '+tr('pending instructions','条待处理指令'):''}${task._stale?' · '+tr('Stale','已过期'):''}`));row.append(line,detail);tasks.append(row);
-    }root.append(tasks);
-    const footer=toolbar(n('span','hint',`${result.total} ${tr('items','项')} · ${tr('Page','第')} ${Math.floor(filter.taskOffset/20)+1}`));footer.classList.add('pagination');footer.append(action(tr('Previous','上一页'),()=>{filter.taskOffset=Math.max(0,filter.taskOffset-20);show('tasks');},{disabled:!filter.taskOffset}),action(tr('Next','下一页'),()=>{filter.taskOffset=result.next_offset;show('tasks');},{disabled:result.next_offset==null}));root.append(footer);
+    const rows=n('div','task-list');rows.dataset.scrollKey='task-list';rows.append(n('p','hint',tr('Loading…','正在加载…')));root.append(rows);
+    const summary=n('span','hint'),previous=action(tr('Previous','上一页'),()=>{filter.taskOffset=Math.max(0,filter.taskOffset-20);show('tasks');},{disabled:!filter.taskOffset});
+    const next=action(tr('Next','下一页'),()=>{filter.taskOffset=taskListView.result.next_offset;show('tasks');},{disabled:true});
+    const footer=toolbar(summary,previous,next);footer.classList.add('pagination');root.append(footer);
+    const view={token,rows,scopes,summary,previous,next,nodes:new Map(),busy:false,again:false,result:null};taskListView=view;
+    await refreshTaskList(view);
+  }
+  async function refreshTaskList(view=taskListView) {
+    if(!view||!gate.current(view.token))return;if(view.busy){view.again=true;return;}view.busy=true;
+    try {
+      const pages=await across(`/api/v1/tasks/query?${new URLSearchParams({scope:filter.taskScope,q:filter.taskQuery,offset:0,limit:50,...(filter.taskTarget?{execution_target:JSON.stringify(filter.taskTarget)}:{})})}`,view.token,{paginate:true,perAssistant:true,spaceID:filter.taskSpace});
+      if(!gate.current(view.token)||taskListView!==view)return;
+      const result=combineTasks(pages,{offset:filter.taskOffset,limit:20});
+      if(!view.result)view.rows.replaceChildren();view.result=result;
+      const text=(node,value)=>{if(node.textContent!==value)node.textContent=value;};
+      for(const [index,value]of ['active','attention','archived'].entries())text(view.scopes.children[index],`${tr({active:'Ongoing',attention:'Needs attention',archived:'Archived'}[value],{active:'进行中',attention:'需关注',archived:'已归档'}[value])} ${result.counts[value]}`);
+      const ordered=[],keys=new Set();let groupKey='';
+      const retain=(key,create)=>{keys.add(key);let entry=view.nodes.get(key);if(!entry){entry=create();view.nodes.set(key,entry);}ordered.push(entry.row);return entry;};
+      for(const task of result.items){
+        const ownerKey=JSON.stringify([task._space_id,task._assistant_id]),taskKey=JSON.stringify([task._space_id,task._assistant_id,task.id]);
+        if(ownerKey!==groupKey){groupKey=ownerKey;const assistant=(client.assistants||[]).find(item=>item.id===task._assistant_id&&item.space_id===task._space_id);text(retain('owner:'+taskKey,()=>({row:n('div','task-owner')})).row,assistant?.name||task._assistant_id);}
+        const entry=retain(taskKey,()=>{
+          const row=n('button','task-row');row.type='button';const line=n('span','task-title-line'),logo=n('span','task-brand'),title=n('span','task-title'),detail=n('span','task-meta'),phase=n('span'),meta=n('span','hint');
+          line.append(logo,title,n('span','hint','›'));detail.append(phase,meta);row.append(line,detail);return {row,logo,title,phase,meta};
+        });
+        entry.row.setAttribute('aria-label',task.title);entry.row.disabled=task._stale;entry.row.title=task.title;entry.row.onclick=()=>taskDetail(task);
+        text(entry.logo,task.executor_icon==='anthropic'?'A':'◉');text(entry.title,task.title);entry.phase.className=`task-phase phase-${task.phase}`;
+        text(entry.phase,tr({running:'Running',queued:'Queued',waiting:'Waiting',failed:'Failed',complete:'Complete',interrupted:'Interrupted',cancelled:'Cancelled'}[task.phase]||task.phase,{running:'运行中',queued:'排队中',waiting:'等待中',failed:'失败',complete:'已完成',interrupted:'已中断',cancelled:'已取消'}[task.phase]||task.phase));
+        text(entry.meta,`${task._space_name||''}${task.machine_id?' · '+task.machine_id:''}${task.pending?' · '+task.pending+' '+tr('pending instructions','条待处理指令'):''}${task._stale?' · '+tr('Stale','已过期'):''}`);
+      }
+      if(!result.items.length)text(retain('empty',()=>({row:n('p','page-empty')})).row,tr('No ongoing tasks. Describe a goal in Chat to get started.','暂无进行中的任务，在聊天中描述目标即可开始。'));
+      const scroll=view.rows.scrollTop,focused=view.rows.contains(document.activeElement)?document.activeElement:null;
+      for(const [key,entry]of view.nodes)if(!keys.has(key)){entry.row.remove();view.nodes.delete(key);}
+      for(const [index,row]of ordered.entries())if(view.rows.children[index]!==row)view.rows.insertBefore(row,view.rows.children[index]||null);
+      if(focused?.isConnected&&document.activeElement!==focused)focused.focus({preventScroll:true});
+      view.rows.scrollTop=scroll;
+      text(view.summary,`${result.total} ${tr('items','项')} · ${tr('Page','第')} ${Math.floor(filter.taskOffset/20)+1}`);view.previous.disabled=!filter.taskOffset;view.next.disabled=result.next_offset==null;
+    }catch(reason){if(gate.current(view.token)&&reason.name!=='AbortError'){if(!view.result){view.rows.replaceChildren();errorView(reason,view.rows);}else notify(reason.message);}}
+    finally{view.busy=false;if(view.again){view.again=false;queueMicrotask(()=>refreshTaskList(view));}}
   }
   async function taskDetail(task,{recordHistory=true}={}) {
-    taskView=null;scheduleView=null;detailParent=true;if(recordHistory){const replace=history.state?.potTask?.id===task.id&&history.state?.potScope?.space===task._space_id;history[replace?'replaceState':'pushState']({potRoute:'tasks',potScope:{space:task._space_id,owner:task.assistant_id},potTask:{...task}},'',location.href);}
+    taskView=null;taskListView=null;scheduleView=null;detailParent=true;if(recordHistory){const replace=history.state?.potTask?.id===task.id&&history.state?.potScope?.space===task._space_id;history[replace?'replaceState':'pushState']({potRoute:'tasks',potScope:{space:task._space_id,owner:task.assistant_id},potTask:{...task}},'',location.href);}
     const result=await load(async token=>request(`/api/v1/tasks/${encodeURIComponent(task.id)}`,{signal:token.signal,owner:task.assistant_id,space:task._space_id}));if(!result)return;
     const {root}=result, record=result.value;heading(task.title);
     const fileScope={owner:task.assistant_id,space:task._space_id};
@@ -502,7 +534,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   async function show(next,{keepUsageOwner=false}={}) {
     if(editor)return;
     captureView();viewReady=false;
-    taskView=null;scheduleView=null;detailParent=false;if(!keepUsageOwner)usageOwner=null;
+    taskView=null;taskListView=null;scheduleView=null;detailParent=false;if(!keepUsageOwner)usageOwner=null;
     route=next;heading(tr({tasks:filter.taskTab==='schedules'?'Schedules':'Tasks',machines:'Machines',usage:'Usage',settings:'Settings'}[next]||next,{tasks:filter.taskTab==='schedules'?'定时计划':'任务',machines:'机器',usage:'用量',settings:'设置'}[next]||next));
     const version=++pageVersion,token=gate.next(),root=body();
     root.append(n('p','hint',tr('Loading…','正在加载…')));
@@ -521,7 +553,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   window.addEventListener('beforeunload',beforeUnload);window.addEventListener('pot:locale',preference);
   return {get title(){return title;},get editing(){return !!editor;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner;},show,assistant,setupAI,leave,back,permissions,handleHistory:popstate,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalGate.close();approvalOwner='';pendingApprovals=[];approvalHost.replaceChildren();},approvalFor,decideApproval,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,record=true){route='tasks';return taskDetail(task,{recordHistory:record});},
     showProviders(){filter.settingsTab='providers';return show('settings');},
-    refresh(){if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(taskView){refreshTaskEvents();return;}if(!editor&&route&&host.offsetParent)show(route,{keepUsageOwner:!!usageOwner});},
+    refresh(topics=[]){if(route==='tasks'&&topics.length&&!topics.some(key=>/^(tasks|runner|spaces|assistants|machines|runtime)$/.test(key)||(filter.taskTab==='schedules'&&key==='schedules')))return;if(taskListView)return refreshTaskList();if(detailParent&&!taskView&&!scheduleView)return;if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(taskView){return refreshTaskEvents();}if(!editor&&route&&host.offsetParent)show(route,{keepUsageOwner:!!usageOwner});},
     dispose(){for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle.dispose?.();disposed=true;gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
   };
 }

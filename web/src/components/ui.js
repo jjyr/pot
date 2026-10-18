@@ -600,7 +600,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   viewport?.addEventListener('resize', viewportChanged);
   window.addEventListener('resize', viewportChanged);
   renderShell();viewportChanged();
-  if(client.production){stopChanges=client.changes(topics=>{const keys=Array.isArray(topics)?topics:Object.keys(topics||{});if(!keys.length||keys.some(key=>/^(spaces|assistant|conversation|runtime)/.test(key)))loadDirectory(false);if(keys.some(key=>/^(tasks|runner)/.test(key)))refreshBackgroundTasks();pages.refresh();pages.permissions();},{space:''});loadDirectory();}else attach();
+  if(client.production){stopChanges=client.changes(topics=>{const keys=Array.isArray(topics)?topics:Object.keys(topics||{});if(!keys.length||keys.some(key=>/^(spaces|assistant|conversation|runtime)/.test(key)))loadDirectory(false);if(keys.some(key=>/^(tasks|runner)/.test(key)))refreshBackgroundTasks();pages.refresh(keys);pages.permissions();},{space:''});loadDirectory();}else attach();
   return () => {
     disposed = true; directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     completions?.dispose();

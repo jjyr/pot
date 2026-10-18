@@ -372,6 +372,10 @@ def run(binary, base, env, cli_command):
             providers = browser_cli("run-code", code.replace("STATE", json.dumps(provider_state)))
             if '"passed":true' not in providers:
                 raise RuntimeError("Provider editor browser contracts did not pass")
+            code = (ROOT / "scripts/tests/go-ui-tasks-browser.js").read_text()
+            tasks = browser_cli("run-code", code.replace("STATE", json.dumps({"origin": origin})))
+            if '"passed":true' not in tasks:
+                raise RuntimeError("Task page browser contracts did not pass")
             code = (ROOT / "scripts/tests/go-ui-http-browser.js").read_text()
             output = browser_cli("run-code", code.replace("STATE", json.dumps(state)))
             if '"errors":[]' not in output:
