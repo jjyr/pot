@@ -71,22 +71,29 @@ const (
 )
 
 type Message struct {
-	Attachments    []core.Attachment `json:"attachments,omitempty"`
-	Queued         bool              `json:"queued,omitempty"`
-	Tool           *ToolCall         `json:"tool,omitempty"`
-	ID             string            `json:"id" required:"true"`
-	ConversationID string            `json:"conversation_id" required:"true"`
-	Role           Role              `json:"role" required:"true"`
-	Text           string            `json:"text" required:"true"`
-	Status         MessageStatus     `json:"status" required:"true"`
-	CreatedAtMS    int64             `json:"created_at_ms" required:"true"`
-	RequestID      *string           `json:"request_id"`
-	Steering       bool              `json:"steering,omitempty"`
-	ReplyTo        string            `json:"reply_to,omitempty"`
-	Error          string            `json:"error,omitempty"`
+	References     []core.MessageReference `json:"references,omitempty"`
+	Attachments    []core.Attachment       `json:"attachments,omitempty"`
+	Queued         bool                    `json:"queued,omitempty"`
+	Tool           *ToolCall               `json:"tool,omitempty"`
+	ID             string                  `json:"id" required:"true"`
+	ConversationID string                  `json:"conversation_id" required:"true"`
+	Role           Role                    `json:"role" required:"true"`
+	Text           string                  `json:"text" required:"true"`
+	Status         MessageStatus           `json:"status" required:"true"`
+	CreatedAtMS    int64                   `json:"created_at_ms" required:"true"`
+	RequestID      *string                 `json:"request_id"`
+	Steering       bool                    `json:"steering,omitempty"`
+	ReplyTo        string                  `json:"reply_to,omitempty"`
+	Error          string                  `json:"error,omitempty"`
 }
 
 func (m Message) Validate() error {
+	if err := core.ValidateMessageReferences(m.References); err != nil {
+		return err
+	}
+	if len(m.References) > 0 && m.Role != User {
+		return fmt.Errorf("references require user role")
+	}
 	if err := core.ValidateAttachments(m.Attachments); err != nil {
 		return err
 	}
@@ -225,16 +232,20 @@ func (e Event) Validate() error {
 }
 
 type SendMessage struct {
-	Attachments    []core.Attachment `json:"attachments,omitempty"`
-	RequestID      string            `json:"request_id" required:"true"`
-	ConversationID string            `json:"conversation_id" required:"true"`
-	Text           string            `json:"text" required:"true"`
+	References     []core.MessageReference `json:"references,omitempty"`
+	Attachments    []core.Attachment       `json:"attachments,omitempty"`
+	RequestID      string                  `json:"request_id" required:"true"`
+	ConversationID string                  `json:"conversation_id" required:"true"`
+	Text           string                  `json:"text" required:"true"`
 }
 
 func (m SendMessage) Equal(other SendMessage) bool {
-	return m.RequestID == other.RequestID && m.ConversationID == other.ConversationID && m.Text == other.Text && slices.Equal(m.Attachments, other.Attachments)
+	return m.RequestID == other.RequestID && m.ConversationID == other.ConversationID && m.Text == other.Text && slices.Equal(m.Attachments, other.Attachments) && slices.Equal(m.References, other.References)
 }
 func (m SendMessage) Validate() error {
+	if err := core.ValidateMessageReferences(m.References); err != nil {
+		return err
+	}
 	if err := core.ValidateAttachments(m.Attachments); err != nil {
 		return err
 	}

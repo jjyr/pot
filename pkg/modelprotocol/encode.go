@@ -44,6 +44,9 @@ func Encode(r Request) (json.RawMessage, error) {
 		functions = append(functions, map[string]any{"name": t.Name, "description": t.Description, "parameters": schema})
 	}
 	for _, m := range r.Messages {
+		if err := core.ValidateMessageReferences(m.References); err != nil {
+			return nil, err
+		}
 		if len(m.Attachments) > 0 {
 			return nil, fmt.Errorf("attachment references require owning Control resolution")
 		}
@@ -92,6 +95,8 @@ func Encode(r Request) (json.RawMessage, error) {
 	case OpenAIChat:
 		input = append(input, map[string]any{"role": "system", "content": r.System})
 		for _, m := range r.Messages {
+			metadata := messageMetadata(m)
+			m.Text = metadata + m.Text
 			if m.Role != "tool" {
 				flushImages()
 			}
@@ -100,7 +105,14 @@ func Encode(r Request) (json.RawMessage, error) {
 				_ = json.Unmarshal(m.Replay, &replay)
 			}
 			if replay != nil {
-				input = append(input, json.RawMessage(m.Replay))
+				if metadata != "" {
+					if parts, ok := replay["content"].([]any); ok {
+						replay["content"] = append([]any{map[string]any{"type": "text", "text": metadata}}, parts...)
+					} else {
+						replay["content"] = metadata + str(replay["content"])
+					}
+				}
+				input = append(input, replay)
 			} else if m.Role == "tool" {
 				input = append(input, map[string]any{"role": "tool", "tool_call_id": m.CallID, "content": m.Text})
 			} else {
@@ -153,6 +165,8 @@ func Encode(r Request) (json.RawMessage, error) {
 		}
 	case OpenAIResponses:
 		for _, m := range r.Messages {
+			metadata := messageMetadata(m)
+			m.Text = metadata + m.Text
 			if m.Role != "tool" {
 				flushImages()
 			}
@@ -161,6 +175,9 @@ func Encode(r Request) (json.RawMessage, error) {
 				_ = json.Unmarshal(m.Replay, &replay)
 			}
 			if replay != nil {
+				if metadata != "" {
+					input = append(input, map[string]any{"role": "assistant", "content": metadata})
+				}
 				input = append(input, replay...)
 			} else if m.Role == "tool" {
 				input = append(input, map[string]any{"type": "function_call_output", "call_id": m.CallID, "output": m.Text})
@@ -208,6 +225,8 @@ func Encode(r Request) (json.RawMessage, error) {
 		}
 	case AnthropicMessages:
 		for _, m := range r.Messages {
+			metadata := messageMetadata(m)
+			m.Text = metadata + m.Text
 			role := m.Role
 			if role == "tool" {
 				role = "user"
@@ -215,6 +234,16 @@ func Encode(r Request) (json.RawMessage, error) {
 			parts := []any{}
 			if m.Role == "assistant" && len(m.Replay) > 0 {
 				_ = json.Unmarshal(m.Replay, &parts)
+			}
+			if len(parts) > 0 && metadata != "" {
+				// Signed thinking remains first and byte-for-byte intact.
+				at := 0
+				for at < len(parts) && (str(obj(parts[at])["type"]) == "thinking" || str(obj(parts[at])["type"]) == "redacted_thinking") {
+					at++
+				}
+				annotated := append([]any{}, parts[:at]...)
+				annotated = append(annotated, map[string]any{"type": "text", "text": metadata})
+				parts = append(annotated, parts[at:]...)
 			}
 			if len(parts) == 0 {
 				if m.Role == "tool" {
@@ -260,6 +289,8 @@ func Encode(r Request) (json.RawMessage, error) {
 			}
 		}
 		for _, m := range r.Messages {
+			metadata := messageMetadata(m)
+			m.Text = metadata + m.Text
 			role := "user"
 			if m.Role == "assistant" {
 				role = "model"
@@ -267,6 +298,9 @@ func Encode(r Request) (json.RawMessage, error) {
 			parts := []any{}
 			if m.Role == "assistant" && len(m.Replay) > 0 {
 				_ = json.Unmarshal(m.Replay, &parts)
+			}
+			if len(parts) > 0 && metadata != "" {
+				parts = append(parts, map[string]any{"text": metadata})
 			}
 			if len(parts) == 0 {
 				if m.Role == "tool" {

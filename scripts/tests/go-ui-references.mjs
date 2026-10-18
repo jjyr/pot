@@ -1,0 +1,33 @@
+import assert from 'node:assert/strict';
+import {createConversationState,beginSubscription,acceptSnapshot,setDraft,ownerKey,draftReferences,setDraftReferences,beginSend,settleSend} from '../../web/src/state/conversation.mjs';
+import {projectChatReplies} from '../../web/src/state/chat-replies.mjs';
+import {referenceProblem} from '../../web/src/components/message-references.mjs';
+import {createProductionClient} from '../../web/src/adapters/production.mjs';
+const state=createConversationState(),epoch=beginSubscription(state);
+const snapshot={runtime_id:'control',boot_id:'boot',owner_id:'alice',conversation_id:'main',cursor:'1',messages:[],running:false,turn_id:null};
+acceptSnapshot(state,snapshot,epoch);setDraft(state,'为什么？');
+const refs=[{message_id:'source',quote:'只有选中的字🙂'}];setDraftReferences(state,refs);
+const receipt=beginSend(state,'first');assert.deepEqual(receipt.request.references,refs);
+assert.deepEqual(projectChatReplies(snapshot,{request:receipt.request,phase:'sending'})[0].references,refs);
+settleSend(state,receipt,false,new Error('lost receipt'));
+assert.equal(beginSend(state,'replacement').request.request_id,'first','Lost receipt reconciles original input including refs');
+settleSend(state,receipt,false);
+setDraftReferences(state,[{message_id:'other',quote:'另一条'}]);
+const changed=beginSend(state,'changed');assert.equal(changed.request.request_id,'changed','Changed reference has a fresh receipt');
+setDraftReferences(state,refs);settleSend(state,changed,true);
+assert.deepEqual(draftReferences(state),refs,'Late acknowledgement preserves newer references');
+const key=ownerKey(snapshot);state.snapshot={...snapshot,owner_id:'bob'};
+assert.deepEqual(draftReferences(state),[],'Different assistant does not inherit references');
+assert.deepEqual(draftReferences(state,key),refs);
+assert(referenceProblem([{message_id:'source',quote:'中'.repeat(1366)}]),'Quote limit counts UTF-8 bytes');
+assert(referenceProblem(Array.from({length:9},(_,i)=>({message_id:String(i),quote:'x'}))));
+assert(!referenceProblem(refs));
+const oldFetch=globalThis.fetch,requests=[];
+globalThis.fetch=async(url,options)=>{requests.push({url:String(url),options});return{ok:true,status:200,json:async()=>String(url).includes('/runtime')?{runtime_id:'control'}:{message_id:'accepted',duplicate:false}};};
+try{
+ const client=await createProductionClient();client.setScope({owner:'alice',space:'remote'});
+ await client.send({...receipt.request,user_message_id:'active'});
+ assert.deepEqual(JSON.parse(requests.at(-1).options.body).references,refs,'Guidance carries references through the production adapter');
+ assert.match(requests.at(-1).url,/turn\/steer/);
+}finally{globalThis.fetch=oldFetch;}
+console.log('Message reference ownership, receipt reconciliation, UTF-8 limits and guidance transport passed');

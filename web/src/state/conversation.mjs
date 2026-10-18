@@ -14,11 +14,12 @@ export function validSnapshot(value) {
       && ['user', 'assistant', 'system', 'tool'].includes(message.role)
       && typeof message.text === 'string' && typeof message.status === 'string'
       && (message.error===undefined||typeof message.error==='string')
-      && (message.reply_to===undefined||typeof message.reply_to==='string'));
+      && (message.reply_to===undefined||typeof message.reply_to==='string')
+      && (message.references===undefined||Array.isArray(message.references)&&message.references.every(ref=>ref&&typeof ref.message_id==='string'&&(ref.quote===undefined||typeof ref.quote==='string'))));
 }
 
 export function createConversationState() {
-  return {epoch: 0, snapshot: null, drafts: new Map(), pending: new Map(), retries: new Map(), sends: new Map()};
+  return {epoch: 0, snapshot: null, drafts: new Map(), referenceDrafts: new Map(), pending: new Map(), retries: new Map(), sends: new Map()};
 }
 
 export function beginSubscription(state,{retainPending=false}={}) {
@@ -54,14 +55,18 @@ export function setDraft(state, text, key = state.snapshot && ownerKey(state.sna
   if (key) state.drafts.set(key, text);
 }
 
+export function draftReferences(state, key = state.snapshot && ownerKey(state.snapshot)) { return state.referenceDrafts.get(key) || []; }
+export function setDraftReferences(state, refs, key = state.snapshot && ownerKey(state.snapshot)) { if(key)state.referenceDrafts.set(key,refs.map(ref=>({...ref}))); }
+
 export function beginSend(state, requestID, {allowRunning=false,attachments=[],retryUserMessageID}={}) {
   if (!state.snapshot || (state.snapshot.running&&!allowRunning)) return null;
   const key = ownerKey(state.snapshot);
   const text = draft(state, key);
+  const references = draftReferences(state,key);
   if ((!text.trim() && !attachments.length) || state.pending.has(key)) return null;
   const retry = state.retries.get(key);
-  const request = retry?.text === text && JSON.stringify(retry.attachments||[])===JSON.stringify(attachments) && retry.boot_id === state.snapshot.boot_id ? retry
-    : {request_id: requestID, boot_id: state.snapshot.boot_id, conversation_id: state.snapshot.conversation_id, text,...(attachments.length?{attachments}:{}),...(retryUserMessageID?{retry_user_message_id:retryUserMessageID}:{}),...(state.snapshot.running?{user_message_id:state.snapshot.turn_id}:{})};
+  const request = retry?.text === text && JSON.stringify(retry.references||[])===JSON.stringify(references) && JSON.stringify(retry.attachments||[])===JSON.stringify(attachments) && retry.boot_id === state.snapshot.boot_id ? retry
+    : {request_id: requestID, boot_id: state.snapshot.boot_id, conversation_id: state.snapshot.conversation_id, text,...(references.length?{references:references.map(ref=>({...ref}))}:{}),...(attachments.length?{attachments}:{}),...(retryUserMessageID?{retry_user_message_id:retryUserMessageID}:{}),...(state.snapshot.running?{user_message_id:state.snapshot.turn_id}:{})};
   const receipt = {request, key, epoch: state.epoch};
   state.pending.set(key, receipt);
   if(!request.user_message_id)state.sends.set(key,{request,phase:'sending'});
@@ -75,6 +80,7 @@ export function settleSend(state, receipt, accepted, reason) {
   if (accepted) state.retries.delete(receipt.key);
   else state.retries.set(receipt.key, receipt.request);
   if(!receipt.request.user_message_id&&!state.snapshot?.messages.some(message=>message.request_id===receipt.request.request_id))state.sends.set(receipt.key,{request:receipt.request,phase:accepted?'thinking':reason?.status?'failed':'uncertain',detail:reason?.message||''});
+  if(accepted && JSON.stringify(draftReferences(state,receipt.key))===JSON.stringify(receipt.request.references||[]))state.referenceDrafts.delete(receipt.key);
   // An acknowledgement clears only the exact submitted draft. New typing and
   // drafts belonging to a different assistant survive late acknowledgements.
   if (accepted && (!state.snapshot || state.snapshot.boot_id === receipt.request.boot_id) && draft(state, receipt.key) === receipt.request.text) state.drafts.delete(receipt.key);

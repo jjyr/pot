@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {attachmentAllowed,attachmentProblem,failedAttachmentInput} from '../../web/src/components/attachments.mjs';
+import {attachmentAllowed,attachmentProblem,failedMessageInput} from '../../web/src/components/attachments.mjs';
 import {createConversationState,beginSubscription,acceptSnapshot,setDraft,draft,beginSend,settleSend} from '../../web/src/state/conversation.mjs';
 import {projectChatReplies} from '../../web/src/state/chat-replies.mjs';
 import {createProductionClient} from '../../web/src/adapters/production.mjs';
@@ -30,8 +30,8 @@ const changed=beginSend(state,'changed',{attachments:[pdf]});assert.equal(change
 setDraft(state,'new typing');settleSend(state,changed,true);assert.equal(draft(state),'new typing');
 const rows=projectChatReplies(snapshot,{request:first.request,phase:'sending'});assert.deepEqual(rows[0].attachments,[image,pdf],'Optimistic message retains inline image refs');
 const steeringFailure={running:false,messages:[{id:'original',role:'user',text:'start',status:'failed'},{id:'guide',role:'user',steering:true,text:'',status:'complete',attachments:[pdf]},{id:'reply',role:'assistant',status:'failed'}]};
-assert.deepEqual(failedAttachmentInput(steeringFailure),{input:steeringFailure.messages[1],target:'original'},'Guidance API failure restores its attachment draft and retries the original turn');
-assert.equal(failedAttachmentInput({...steeringFailure,running:true}),null,'A live retry never restores the stale failed draft');
+assert.deepEqual(failedMessageInput(steeringFailure),{input:steeringFailure.messages[1],target:'original'},'Guidance API failure restores its attachment draft and retries the original turn');
+assert.equal(failedMessageInput({...steeringFailure,running:true}),null,'A live retry never restores the stale failed draft');
 const requests=[],oldFetch=globalThis.fetch;
 globalThis.fetch=async(url,options)=>{
   requests.push({url:String(url),options});

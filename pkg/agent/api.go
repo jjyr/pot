@@ -16,6 +16,8 @@ import (
 var ErrUncertainEffects = errors.New("agent checkpoint has an operation with unconfirmed effects")
 
 type SteeringInput struct {
+	MessageID   string
+	References  []core.MessageReference
 	Attachments []core.Attachment
 	ID          string
 	Text        string
@@ -69,6 +71,7 @@ type Services interface {
 // Composer is optional for model-only and ordinary tool use. To enable composed
 // tools, set it to a composition.ProcessRunner with an explicit worker command.
 type Agent struct {
+	MessageID          func(context.Context) (string, error)
 	Services           Services
 	Feedback           Feedback
 	Dispatch           Dispatch
