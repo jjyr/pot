@@ -5,8 +5,7 @@ import {icon} from './icons.mjs';
 export function renderMachinePermissions({root:target,machine,policy,request,scope,locale,refresh,edit,draft,isCurrent,stale=false}) {
   const root=n('div','machine-permissions');
   const tr=(en,zh)=>locale()==='zh-CN'?zh:en;
-  const labels={ask:tr('Protected · sandbox by default','受保护 · 默认沙箱'),allow:tr('Trusted · host execution','可信 · 宿主执行'),deny:tr('Blocked','禁止执行')};
-  const descriptions={ask:tr('Sandbox by default; host execution requires authorization.','默认在沙箱内执行，宿主执行需授权。'),allow:tr('Host execution bypasses file and socket protection.','默认在宿主执行，不受文件和 socket 隔离保护。'),deny:tr('No new execution can start.','不允许启动新的执行。')};
+  const labels={ask:tr('Sandbox execution','沙箱执行'),allow:tr('Direct execution','直接执行'),deny:tr('Blocked','禁止执行')};
   const ruleLabels={allow_host:tr('Allow host','允许宿主执行'),default:tr('Follow machine default','遵循机器默认策略'),deny_host:tr('Deny host','禁止宿主执行')};
   const id=machine.runtime_id||machine.id,current=policy.machines[id],application=policy.application?.[id];
   const warning=tr('Saving stops existing execution on this machine and clears temporary authorizations. Work is not restarted automatically.','保存会停止这台机器上的现有执行，并清除临时授权。任务不会自动重启。');
@@ -38,7 +37,7 @@ export function renderMachinePermissions({root:target,machine,policy,request,sco
     form.form.querySelector('.editor-actions').before(n('p','hint permission-warning',warning));
   };
   const mode=field(tr('Default execution','默认执行方式'),draft.values.execution_access,{choices:Object.entries(labels)});
-  mode.row.classList.add('permission-default');mode.row.querySelector('.form-label').append(n('small','hint',descriptions[current.execution_access]));
+  mode.row.classList.add('permission-default');
   const changes=n('div','permission-changes'),conflict=n('p','inline-error'),save=action(tr('Save permissions','保存权限'),()=>mutate({action:'configure',machine_id:id,machine_policy:{execution_access:draft.values.execution_access,revision:draft.values.revision}},{configure:true}),{primary:true});
   const cancel=action(tr('Cancel','取消'),()=>{draft.settle(true,current);draft.error='';target.querySelector('.permission-default select').value=current.execution_access;update();});
   const controls=n('div','editor-actions');controls.append(cancel,save);changes.append(n('p','hint permission-warning',warning),conflict,controls);
