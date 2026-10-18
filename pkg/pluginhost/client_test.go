@@ -184,6 +184,42 @@ export function createPlugin({emit}) {return {async execute(){
 	}
 }
 
+func TestConfiguredNodePrecedesOtherToolsForPluginChildren(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node unavailable")
+	}
+	other := t.TempDir()
+	if err := os.WriteFile(filepath.Join(other, "node"), []byte("#!/bin/sh\nexit 99\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", other+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for _, override := range []bool{false, true} {
+		t.Run(strconv.FormatBool(override), func(t *testing.T) {
+			config := Config{Node: node, Identity: "trusted-fixture-digest", Entrypoint: "index.mjs", Mode: "text", Files: map[string]string{"index.mjs": `import {execFileSync} from 'node:child_process';
+export function createPlugin({emit}) {return {async execute(){
+ emit({type:'text',text:execFileSync('node',['-p','process.execPath'],{encoding:'utf8'}).trim()});
+},async dispose(){}};}`}}
+			if override {
+				config.Environment = map[string]string{"PATH": other}
+			}
+			c, err := New(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = c.Close() })
+			result := execute(t, c, map[string]any{})
+			want, err := filepath.EvalSymlinks(node)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.IsError || len(result.Content) != 1 || result.Content[0].Text != want {
+				t.Fatalf("plugin child did not use configured Node: %+v, want %s", result, want)
+			}
+		})
+	}
+}
+
 func TestCancellationInvalidatesAndCleansDescendants(t *testing.T) {
 	c := newFixture(t, `import {spawn} from 'node:child_process';
 export function createPlugin({emit}) {return {async execute({input}){

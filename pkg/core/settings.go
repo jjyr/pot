@@ -10,8 +10,6 @@ type ShellSettings struct {
 	AllowLoginShell      bool   `json:"allow_login_shell"`
 	ShellSnapshot        bool   `json:"shell_snapshot"`
 	SessionIdleTimeoutMS uint64 `json:"session_idle_timeout_ms"`
-	DefaultTimeoutMS     uint64 `json:"default_timeout_ms"`
-	MaxTimeoutMS         uint64 `json:"max_timeout_ms"`
 	DefaultOutputBytes   uint64 `json:"default_output_bytes"`
 	MaxOutputBytes       uint64 `json:"max_output_bytes"`
 	MaxSessions          uint64 `json:"max_sessions"`
@@ -20,7 +18,7 @@ type ShellSettings struct {
 }
 
 func DefaultShellSettings() ShellSettings {
-	return ShellSettings{"/bin/bash", true, true, 1800000, 120000, 300000, 16384, 65536, 8, 1000, 10000}
+	return ShellSettings{"/bin/bash", true, true, 1800000, 16384, 65536, 8, 10000, 30000}
 }
 func (s *ShellSettings) UnmarshalJSON(data []byte) error {
 	type plain ShellSettings
@@ -32,7 +30,7 @@ func (s *ShellSettings) UnmarshalJSON(data []byte) error {
 	return nil
 }
 func (s ShellSettings) Validate() error {
-	if s.Executable == "" || s.DefaultTimeoutMS == 0 || s.DefaultTimeoutMS > s.MaxTimeoutMS || s.DefaultOutputBytes == 0 || s.DefaultOutputBytes > s.MaxOutputBytes || s.MaxOutputBytes > MaxSafeInteger || s.MaxSessions == 0 || s.SessionIdleTimeoutMS == 0 || s.DefaultYieldMS == 0 || s.DefaultYieldMS > s.MaxYieldMS {
+	if s.Executable == "" || s.DefaultOutputBytes == 0 || s.DefaultOutputBytes > s.MaxOutputBytes || s.MaxOutputBytes > MaxSafeInteger || s.MaxSessions == 0 || s.SessionIdleTimeoutMS == 0 || s.DefaultYieldMS == 0 || s.DefaultYieldMS > s.MaxYieldMS {
 		return fmt.Errorf("invalid shell limits")
 	}
 	return nil

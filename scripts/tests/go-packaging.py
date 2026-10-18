@@ -43,6 +43,30 @@ class GoPackaging(unittest.TestCase):
                         sorted(["plugin.json", *tools["files"]]),
                     )
 
+    def test_node_distribution_preserves_relocatable_npm_links(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "node"
+            (source / "bin").mkdir(parents=True)
+            (source / "lib/node_modules/npm/bin").mkdir(parents=True)
+            (source / "lib/node_modules/npm/lib").mkdir()
+            (source / "lib/node_modules/npm/bin/npm-cli.js").write_text(
+                "console.log(require('../lib/cli.js'));"
+            )
+            (source / "lib/node_modules/npm/lib/cli.js").write_text(
+                "module.exports = 'relocated-npm';"
+            )
+            (source / "bin/npm").symlink_to("../lib/node_modules/npm/bin/npm-cli.js")
+            installed = root / "relocated/Resources/node"
+            go_packaging.copy_tree(source, installed, symlinks=True)
+            shutil.rmtree(source)
+            self.assertTrue((installed / "bin/npm").is_symlink())
+            result = subprocess.check_output(
+                ["node", installed / "bin/npm"],
+                text=True,
+            )
+            self.assertEqual(result.strip(), "relocated-npm")
+
     def test_tray_patch_refuses_source_or_patch_drift(self):
         patch = (ROOT / "patches/wails-v3.0.0-beta.30-tray-aspect.patch").read_bytes()
         lines = patch.decode().splitlines(keepends=True)
