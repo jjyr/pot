@@ -376,6 +376,23 @@ def run(binary, base, env, cli_command):
             tasks = browser_cli("run-code", code.replace("STATE", json.dumps({"origin": origin})))
             if '"passed":true' not in tasks:
                 raise RuntimeError("Task page browser contracts did not pass")
+            code = (ROOT / "scripts/tests/go-ui-refresh-browser.js").read_text()
+            refresh = browser_cli("run-code", code.replace("STATE", json.dumps({"origin": origin})))
+            if '"passed":true' not in refresh:
+                raise RuntimeError("Background refresh browser contracts did not pass")
+            code = (ROOT / "scripts/tests/go-ui-production-browser.js").read_text()
+            code = code.replace("http://127.0.0.1:17702", origin).replace(
+                "docs/pr-images/", str(ROOT / "output/pr-images/regression") + "/"
+            )
+            production = browser_cli(
+                "run-code",
+                "async page => { const context = await page.context().browser().newContext({serviceWorkers:'block'}); "
+                "try { return await ("
+                + code
+                + ")(await context.newPage()); } finally { await context.close(); } }",
+            )
+            if '"errors":[]' not in production:
+                raise RuntimeError("Production UI browser contracts did not pass")
             code = (ROOT / "scripts/tests/go-ui-http-browser.js").read_text()
             output = browser_cli("run-code", code.replace("STATE", json.dumps(state)))
             if '"errors":[]' not in output:

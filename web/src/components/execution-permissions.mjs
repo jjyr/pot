@@ -1,11 +1,13 @@
 import {node as n,action,field,table} from './primitives.mjs';
+import {reconcile,setPending} from './reconcile.mjs';
 
-export function renderExecutionPermissions({root,machines,policy,request,scope,locale,refresh,edit,stale=false}) {
+export function createExecutionPermissions({root,request,scope,locale,refresh,edit,current}) {
+  let policy={};const drafts=new Map(),content=n('div');root.append(content);
   const tr=(en,zh)=>locale()==='zh-CN'?zh:en;
   const labels={ask:tr('Protected · sandbox by default','受保护 · 默认沙箱'),allow:tr('Trusted · host execution','可信 · 宿主执行'),deny:tr('Blocked','禁止执行')};
   const ruleLabels={allow_host:tr('Allow host','允许宿主执行'),default:tr('Follow machine default','遵循机器默认策略'),deny_host:tr('Deny host','禁止宿主执行')};
   const status=n('p','inline-error');status.setAttribute('role','alert');root.append(status);
-  const mutate=async(button,body)=>{button.disabled=true;status.textContent='';try{await request('/api/v1/permissions',{...scope,method:'POST',body});await refresh();}catch(error){status.textContent=error.message;button.disabled=false;}};
+  const mutate=async(button,body,onSaved=()=>{})=>{setPending(button,true);status.textContent='';try{await request('/api/v1/permissions',{...scope,method:'POST',body});if(!current())return;onSaved();await refresh();}catch(error){if(current())status.textContent=error.message;}finally{setPending(button,false);}};
   const editor=(machine,existing)=>{
     const id=machine.runtime_id||machine.id,current=policy.machines?.[id]||machine.policy,context=existing?.context||{};
     const initial={command:'',directory:'',shell:'/bin/bash',login:false,snapshot:true,interactive:false,tty:false,credentials:'',policy:'allow_host',...context,...(existing?{policy:existing.policy}:{}),credentials:context.credentials?JSON.stringify(context.credentials,null,2):''};
@@ -21,19 +23,27 @@ export function renderExecutionPermissions({root,machines,policy,request,scope,l
       {name:'policy',label:tr('Host permission','宿主执行策略'),choices:Object.entries(ruleLabels)},
     ],save:values=>{const {policy:effect,credentials,...command}=values;return request('/api/v1/permissions',{...scope,method:'POST',body:{action:'save_rule',old_id:existing?.id||'',expected_revision:current.revision,rule:{machine_id:id,context:{...command,...(credentials.trim()?{credentials:JSON.parse(credentials)}:{})},policy:effect}}});}});
   };
-  for(const machine of machines){
-    const id=machine.runtime_id||machine.id,current=policy.machines?.[id]||machine.policy||{execution_access:'ask'},card=n('section','page-card permission-machine');card.dataset.machineId=id;
-    card.append(n('h2','',machine.name||id));
-    const mode=field(tr('Default execution','默认执行方式'),current.execution_access,{choices:Object.entries(labels)});card.append(mode.row);
-    card.append(n('p','hint',tr('Trust applies to this machine only. Host execution bypasses file and socket protection. Saving settings stops existing execution on this machine.','信任仅适用于这台机器。宿主执行不受文件和 socket 隔离保护。保存设置会停止该机器上的现有执行。')));
-    const save=action(tr('Save permissions','保存权限'),()=>mutate(save,{action:'configure',machine_id:id,machine_policy:{execution_access:mode.input.value,revision:current.revision}}),{disabled:stale||policy.application?.[id]?.recovery_required});card.append(save);
-    const application=policy.application?.[id];if(application&&application.state!=='applied'){const box=n('div','permission-application');box.append(n('p','inline-error',tr('Permission update is not confirmed: ','权限变更尚未确认生效：')+(application.error||application.state)));const retry=action(tr(application.recovery_required?'Owner recovery required':'Retry application',application.recovery_required?'需要所有者恢复':'重试应用'),()=>mutate(retry,{action:'retry',machine_id:id,expected_revision:current.revision}),{disabled:stale||application.recovery_required});box.append(retry);card.append(box);}
-    const header=n('div','list-row');header.append(n('h3','row-info',tr('Permanent command permissions','永久命令授权')),action(tr('Add permission','新增授权'),()=>editor(machine),{disabled:stale}));card.append(header);
-    const rules=(policy.rules||[]).filter(rule=>rule.machine_id===id);
-    if(!rules.length)card.append(n('p','hint',tr('No permanent command permissions.','暂无永久命令授权。')));
-    else card.append(table([tr('Command and directory','命令与目录'),tr('Policy','策略'),tr('Updated','更新时间'),tr('Actions','操作')],rules.map(rule=>{const command=n('div');command.append(n('pre','tool-code',rule.context.command),n('p','hint',rule.context.directory),n('small','hint',`${rule.context.shell}${rule.context.interactive?' · interactive':''}`));const controls=n('div','editor-actions'),remove=action(tr('Remove','移除'),()=>mutate(remove,{action:'delete_rule',machine_id:id,id:rule.id,expected_revision:current.revision}),{disabled:stale});controls.append(action(tr('Edit','编辑'),()=>editor(machine,rule),{disabled:stale}),remove);return[command,ruleLabels[rule.policy],`${rule.updated_at||''} · ${rule.updated_by||''}`,controls];})));
-    card.append(n('p','hint',tr('Removing a command rule restores the machine default; it does not remove machine trust.','移除命令规则后恢复机器默认策略，不会取消整台机器的信任。')));
-    const grants=(policy.task_grants||[]).filter(grant=>grant.machine_id===id);if(grants.length){card.append(n('h3','',tr('Active task authorizations','当前任务授权')));for(const grant of grants){const row=n('div','list-row'),info=n('div','row-info');info.append(n('pre','tool-code',grant.context.command),n('p','hint',`${grant.context.directory} · ${grant.task||grant.turn}`));const remove=action(tr('Remove task authorization','移除任务授权'),()=>mutate(remove,{action:'remove_task_grant',id:grant.id}),{disabled:stale});row.append(info,remove);card.append(row);}}
-    root.append(card);
-  }
+  return ({machines,permissions,stale})=>{
+    policy=permissions.policy||{};const projection=n('div'),seen=new Set();
+    for(const machine of machines){
+      const id=machine.runtime_id||machine.id;seen.add(id);const latest=policy.machines?.[id]||machine.policy||{execution_access:'ask'};
+      let draft=drafts.get(id);if(!draft){draft={value:latest.execution_access,baseline:latest,dirty:false};drafts.set(id,draft);}if(!draft.dirty){draft.value=latest.execution_access;draft.baseline=latest;}
+      const card=n('section','page-card permission-machine');card.dataset.machineId=id;card.dataset.viewKey=id;card.append(n('h2','',machine.name||id));
+      const mode=field(tr('Default execution','默认执行方式'),draft.value,{choices:Object.entries(labels)});mode.input.onchange=event=>{draft.value=event.currentTarget.value;draft.dirty=draft.value!==draft.baseline.execution_access;};card.append(mode.row);
+      const conflict=draft.dirty&&draft.baseline.revision!==latest.revision;
+      const notice=n('p','hint',tr('Permissions changed while editing. Keep your selection or reload the current policy.','编辑期间权限已变化。可保留选择，或重新加载当前策略。'));notice.hidden=!conflict;card.append(notice);
+      const reset=action(tr('Reload current permissions','重新加载当前权限'),()=>{draft.dirty=false;refresh();});reset.hidden=!conflict;card.append(reset);
+      card.append(n('p','hint',tr('Trust applies to this machine only. Host execution bypasses file and socket protection. Saving settings stops existing execution on this machine.','信任仅适用于这台机器。宿主执行不受文件和 socket 隔离保护。保存设置会停止该机器上的现有执行。')));
+      const save=action(tr('Save permissions','保存权限'),event=>{const value=draft.value;return mutate(event.currentTarget,{action:'configure',machine_id:id,machine_policy:{execution_access:value,revision:draft.baseline.revision}},()=>{if(draft.value===value)draft.dirty=false;});},{disabled:stale||policy.application?.[id]?.recovery_required});card.append(save);
+      const application=policy.application?.[id];if(application&&application.state!=='applied'){const box=n('div','permission-application');box.dataset.viewKey='application';box.append(n('p','inline-error',tr('Permission update is not confirmed: ','权限变更尚未确认生效：')+(application.error||application.state)),action(tr(application.recovery_required?'Owner recovery required':'Retry application',application.recovery_required?'需要所有者恢复':'重试应用'),event=>mutate(event.currentTarget,{action:'retry',machine_id:id,expected_revision:latest.revision}),{disabled:stale||application.recovery_required}));card.append(box);}
+      const header=n('div','list-row');header.dataset.viewKey='rules-header';header.append(n('h3','row-info',tr('Permanent command permissions','永久命令授权')),action(tr('Add permission','新增授权'),()=>editor(machine),{disabled:stale}));card.append(header);
+      const rules=(policy.rules||[]).filter(rule=>rule.machine_id===id);
+      if(!rules.length)card.append(n('p','hint',tr('No permanent command permissions.','暂无永久命令授权。')));
+      else card.append(table([tr('Command and directory','命令与目录'),tr('Policy','策略'),tr('Updated','更新时间'),tr('Actions','操作')],rules.map(rule=>{const command=n('div');command.append(n('pre','tool-code',rule.context.command),n('p','hint',rule.context.directory),n('small','hint',`${rule.context.shell}${rule.context.interactive?' · interactive':''}`));const controls=n('div','editor-actions');controls.append(action(tr('Edit','编辑'),()=>editor(machine,rule),{disabled:stale}),action(tr('Remove','移除'),event=>mutate(event.currentTarget,{action:'delete_rule',machine_id:id,id:rule.id,expected_revision:latest.revision}),{disabled:stale}));return[command,ruleLabels[rule.policy],`${rule.updated_at||''} · ${rule.updated_by||''}`,controls];}),rules.map(rule=>rule.id)));
+      card.append(n('p','hint',tr('Removing a command rule restores the machine default; it does not remove machine trust.','移除命令规则后恢复机器默认策略，不会取消整台机器的信任。')));
+      for(const grant of (policy.task_grants||[]).filter(grant=>grant.machine_id===id)){const row=n('div','list-row');row.dataset.viewKey='grant:'+grant.id;const info=n('div','row-info');info.append(n('pre','tool-code',grant.context.command),n('p','hint',`${grant.context.directory} · ${grant.task||grant.turn}`));row.append(info,action(tr('Remove task authorization','移除任务授权'),event=>mutate(event.currentTarget,{action:'remove_task_grant',id:grant.id}),{disabled:stale}));card.append(row);}
+      projection.append(card);
+    }
+    for(const id of drafts.keys())if(!seen.has(id))drafts.delete(id);reconcile(content,projection);
+  };
 }

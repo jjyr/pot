@@ -12,9 +12,12 @@ import {createTaskTranscript,appendTaskEvents} from '../state/task-transcript.mj
 import {configurePush,forgetBrowserAccess,configureBrowserAccess,requestPWAInstall} from '../adapters/access.mjs';
 import {renderMarkdown} from './markdown.mjs';
 import {renderAbout} from './about.mjs';
+import {createRefreshQueue,relevantChange} from '../state/refresh.mjs';
+import {reconcile,keyedRows,setDisabled,setPending} from './reconcile.mjs';
+import {createProviderList,createTaskSettings} from './settings-lists.mjs';
 import {renderMachineMembership} from './membership.mjs';
-import {renderIntegrations} from './integrations.mjs';
-import {renderExecutionPermissions} from './execution-permissions.mjs';
+import {createIntegrations} from './integrations.mjs';
+import {createExecutionPermissions} from './execution-permissions.mjs';
 
 export function createPages({onApprovalsChanged=()=>{},client, host, approvalHost, locale, notify, changed, titleChanged, openChat, routeChanged=()=>{}}) {
   const gate = createRequestGate(), approvalGate = createRequestGate();
@@ -23,7 +26,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   let pendingApprovals=[];
   const toolMemory=new Map();
   const cached = new Map(),spaceCache = new Map(),expandedMachines=new Set(),editorParents=[],taskDrafts=new Map(),scheduleWrites=new Map();
-  let currentViewKey='',viewReady=false,approvalOwner='',shortcutOpen=null;
+  let pageView=null,currentViewKey='',viewReady=false,shortcutOpen=null;
   const tr = (en, zh) => locale() === 'zh-CN' ? zh : en;
   const scope = () => client.scope();
   const request = (path, options = {}) => client.request(path, options);
@@ -65,16 +68,21 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   function segments(entries,current,select) {const value=n('div','segments');for(const [key,label]of entries){const button=action(label,()=>select(key));button.classList.toggle('selected',key===current);button.setAttribute('aria-pressed',String(key===current));value.append(button);}return value;}
   function toolbar(...children) {const result=n('div','page-toolbar');result.append(...children);return result;}
   async function operation(button, work, after = () => show(route)) {
-    const version=pageVersion;button.disabled=true;
+    const version=pageVersion;setPending(button,true);
     try {await work(); if(!disposed&&version===pageVersion&&button.isConnected) await after();}
     catch(reason) {if(!disposed&&version===pageVersion&&button.isConnected) errorView(reason);}
-    finally {button.disabled=false;}
+    finally {setPending(button,false);}
   }
-  async function load(work) {
-    captureView();viewReady=false;
-    const token=gate.next(), root=body();root.append(n('p','hint',tr('Loading…','正在加载…')));
-    try {const value=await work(token);if(gate.current(token)&&!disposed) {root.replaceChildren();return {root,value,token};}}
-    catch(reason) {if(gate.current(token)&&!disposed) {root.replaceChildren();errorView(reason,root);}}
+  function connectView(root,token,read,update,{topics=[],space=''}={}) {
+    const status=n('div','hint page-refresh-status',tr('Loading…','正在加载…'));status.setAttribute('role','status');root.prepend(status);
+    const view={root,token,topics,space};pageView=view;
+    const active=()=>!disposed&&pageView===view&&gate.current(token);
+    view.queue=createRefreshQueue(async()=>{
+      root.setAttribute('aria-busy','true');
+      try{const value=await read();if(!active())return;await update(value);if(active()){status.hidden=true;status.replaceChildren();}}
+      finally{if(active())root.setAttribute('aria-busy','false');}
+    },{active,onError:reason=>{status.hidden=false;status.replaceChildren(n('span','',reason.message||String(reason)),action(tr('Retry','重试'),()=>view.queue.run()));status.className='inline-error page-refresh-status';}});
+    return view.queue.run();
   }
   function empty(root, text) {root.append(n('p','page-empty',text));}
   async function confirmDiscard() {
@@ -91,12 +99,12 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     if(sessions.some(value=>value.session.pending)) {notify(tr('Please wait for the save result.','请等待保存结果。'));return false;}
     if(sessions.some(value=>value.session.dirty)&&!await confirmDiscard())return false;
     for(const value of sessions)value.lifecycle.dispose?.();
-    editor=null;if(!toParent)editorParents.length=0;taskView=null;taskListView=null;scheduleView=null;viewReady=false;gate.close();host.replaceChildren();return true;
+    pageView?.queue.close();pageView=null;editor=null;if(!toParent)editorParents.length=0;taskView=null;taskListView=null;scheduleView=null;viewReady=false;gate.close();host.replaceChildren();return true;
   }
   function suspendEditor(){if(editor){editor.scroll=host.scrollTop;editor.focus=innerWidth>=720&&editor.root.contains(document.activeElement)?document.activeElement:null;editorParents.push(editor);editor=null;}}
   function renderEditor(label, initial, definitions, save, {returnChat=false,capturedScope,submitLabel=tr('Save','保存')}={}) {
     captureView();viewReady=false;
-    gate.close();
+    pageView?.queue.close();pageView=null;gate.close();
     const captured=capturedScope||scope(), caller=route || 'settings';
     const session=createEditorSession({...captured,route:caller,boot:client.runtime.boot_id},initial);
     const root=body(), form=n('form','editor-form'), fields=n('div','editor-fields'), footer=n('div','editor-actions'), status=n('p','inline-error');status.setAttribute('role','alert');
@@ -202,36 +210,21 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const locations=client.spaces||[];if(!configurationSpace)configurationSpace=scope().space;
     const settingsScope={space:configurationSpace,owner:''};
     if(client.desktop&&locations.length>1){const location=field(tr('Configuration location','配置位置'),configurationSpace,{choices:locations.map(space=>[space.id,space.name])});location.input.onchange=()=>{configurationSpace=location.input.value;show('settings');};root.append(location.row);}
-    if(filter.settingsTab==='integrations'){await renderIntegrations({root,request,scope:settingsScope,signal:token.signal,locale,openExternal:client.openExternal});return;}
-    if(filter.settingsTab==='permissions'){const [permissions,machines]=await Promise.all([request('/api/v1/permissions',{...settingsScope,signal:token.signal}),request('/api/v1/machines',{...settingsScope,signal:token.signal})]);if(!gate.current(token))return;renderExecutionPermissions({root,machines:list(machines),policy:permissions.policy||{},request,scope:settingsScope,locale,refresh:()=>show('settings'),edit:({title,initial,fields,save,scope})=>renderEditor(title,initial,fields,save,{capturedScope:scope}),stale:locations.find(space=>space.id===configurationSpace)?.connected===false});return;}
-    const providers=await request('/api/v1/providers',{...settingsScope,signal:token.signal});if(!gate.current(token))return;
-    if(filter.settingsTab==='tasks'){const [policy,allowances]=await Promise.all([request('/api/v1/agent/routing',{...settingsScope,signal:token.signal}),request('/api/v1/usage/providers',{...settingsScope,signal:token.signal})]);if(!gate.current(token))return;const execution=card(tr('Task Configuration','任务配置'));for(const profile of providers.profiles||[]){const row=n('div','list-row');row.append(n('span','row-info',profile.name),n('span','hint',profile.model),action(tr('Configure','配置'),()=>routingEditor(profile,policy,settingsScope)));execution.append(row);}root.append(execution);const limits=card(tr('Provider allowances','提供商配额'));for(const quota of allowances.providers||[]){const profile=(providers.profiles||[]).find(value=>value.provider===quota.provider),row=n('div','list-row');row.append(n('span','row-info',profile?.name||quota.provider),n('span','hint',quota.active?`${Number(quota.remaining).toLocaleString(locale())} ${tr('remaining','剩余')}`:tr('Unlimited','无限制')),action(tr('Edit allowance','编辑配额'),()=>providerPolicyEditor(quota,settingsScope)));limits.append(row);}root.append(limits);return;}
-    root.append(n('p','hint',tr('Manage connections and default models for assistants.','管理助手的连接和默认模型。')));
-    const add=action(tr('+ Add Provider','＋ 添加提供商'),()=>providerPicker(providers,settingsScope));add.setAttribute('aria-label',tr('Add connection','添加连接'));const header=toolbar(n('h2','page-heading',tr('Configured Providers','已配置的提供商')),add);header.classList.add('provider-heading');root.append(header);
-    const defaultControls=[],status=n('div','hint provider-defaults-status');status.setAttribute('role','status');status.setAttribute('aria-live','polite');let savingDefault=false;
-    const updateDefaults=()=>{for(const {profile,button,badge}of defaultControls){const selected=profile.id===providers.default_provider_id;badge.hidden=!selected;button.disabled=savingDefault||selected;button.setAttribute('aria-pressed',String(selected));button.setAttribute('aria-label',`${profile.name}: ${selected?tr('Current default Provider','当前默认提供商'):tr('Set as default Provider','设为默认提供商')}`);button.title=selected?tr('Current default Provider','当前默认提供商'):tr('Set as default Provider','设为默认提供商');}};
-    const setDefault=async profile=>{
-      if(savingDefault||profile.id===providers.default_provider_id)return;
-      savingDefault=true;updateDefaults();status.setAttribute('role','status');status.classList.remove('inline-error');status.textContent=tr('Setting default Provider…','正在设置默认提供商…');
-      try{await request('/api/v1/providers/default',{...settingsScope,method:'POST',body:{provider_id:profile.id}});if(!gate.current(token)||disposed||!root.isConnected)return;providers.default_provider_id=profile.id;status.textContent=tr(`${profile.name} is now the default Provider.`,`已将 ${profile.name} 设为默认提供商。`);}
-      catch(reason){if(!gate.current(token)||disposed||!root.isConnected)return;status.setAttribute('role','alert');status.classList.add('inline-error');status.replaceChildren(n('span','',reason.message||String(reason)),action(tr('Retry','重试'),()=>setDefault(profile)));}
-      finally{savingDefault=false;updateDefaults();}
-    };
-    if(!(providers.profiles||[]).length)empty(root,tr('Add an AI Provider to get started. The first Provider becomes the default automatically.','添加 AI 提供商以开始使用，第一个提供商将自动设为默认。'));
-    else root.append(n('p','hint provider-default-help',tr('New assistants preselect the default Provider and its default model.','新助手将预选默认提供商及其默认模型。')));
-    for(const profile of providers.profiles||[]){const row=n('div','page-card provider-summary'),info=n('div','row-info'),name=n('span','provider-name'),badge=n('span','provider-default-badge',tr('Default','默认'));name.append(n('span','',profile.name),badge);info.append(name,n('span','hint',profile.model));
-      const logo=(providers.directory||[]).find(value=>value.id===profile.model_settings?.catalog_provider)?.logo;if(logo?.startsWith('<svg')){const image=n('img','provider-logo');image.alt='';image.src=`data:image/svg+xml;charset=utf-8,${encodeURIComponent(logo)}`;row.append(image);}
-      else{const fallback=icon('settings');fallback.classList.add('provider-logo');row.append(fallback);}
-      const button=action('',()=>setDefault(profile));button.classList.add('icon-button','provider-default');button.dataset.providerId=profile.id;button.append(icon('star'));defaultControls.push({profile,button,badge});
-      const edit=action(tr('Configure','配置'),()=>providerEditor(profile,providers,settingsScope));edit.setAttribute('aria-label',tr('Edit','编辑'));row.append(info,button,edit);root.append(row);
+    const current=()=>gate.current(token)&&!disposed,refresh=()=>pageView?.queue.run(),options={root,tr,request,scope:settingsScope,current,refresh};
+    if(filter.settingsTab==='integrations'){
+      const update=createIntegrations({root,request,scope:settingsScope,signal:token.signal,locale,openExternal:client.openExternal,refresh});
+      return connectView(root,token,()=>request('/api/v1/integrations',{...settingsScope,signal:token.signal}),update,{topics:['integrations','spaces'],space:settingsScope.space});
     }
-    updateDefaults();root.append(status);
-    if(!client.desktop)return;
-    const machines=card(tr('Spaces and connections','Space 与连接'));
-    const spaces=await request('/api/v1/spaces',{signal:token.signal,owner:'',space:''});if(!gate.current(token))return;
-    for(const space of spaces.items||[]) {const row=n('div','list-row');row.append(n('span','',space.name),n('span','hint',space.connected?tr('Connected','已连接'):tr('Offline','离线')));if(client.desktop&&space.kind==='remote') {for(const name of ['connect','disconnect','remove']) {const button=action(tr({connect:'Connect',disconnect:'Disconnect',remove:'Remove'}[name],{connect:'连接',disconnect:'断开',remove:'移除'}[name]),()=>operation(button,()=>request('/api/v1/spaces',{method:'POST',owner:'',space:'',body:{action:name,space_id:space.id}})));row.append(button);}}machines.append(row);}
-    if(client.desktop)machines.append(action(tr('Connect Space','连接 Space'),()=>spaceEditor()));root.append(machines);
-
+    if(filter.settingsTab==='permissions'){
+      const update=createExecutionPermissions({...options,locale,edit:({title,initial,fields,save,scope})=>renderEditor(title,initial,fields,save,{capturedScope:scope})});
+      return connectView(root,token,async()=>{const [permissions,machines]=await Promise.all([request('/api/v1/permissions',{...settingsScope,signal:token.signal}),request('/api/v1/machines',{...settingsScope,signal:token.signal})]);return {permissions,machines:list(machines),stale:client.spaces?.find(space=>space.id===configurationSpace)?.connected===false};},update,{topics:['permissions','machines','spaces'],space:settingsScope.space});
+    }
+    if(filter.settingsTab==='tasks'){
+      const update=createTaskSettings({root,tr,configure:(profile,policy)=>routingEditor(profile,policy,settingsScope),allowance:quota=>providerPolicyEditor(quota,settingsScope)});
+      return connectView(root,token,async()=>{const [providers,policy,allowances]=await Promise.all([request('/api/v1/providers',{...settingsScope,signal:token.signal}),request('/api/v1/agent/routing',{...settingsScope,signal:token.signal}),request('/api/v1/usage/providers',{...settingsScope,signal:token.signal})]);return {providers,policy,allowances};},update,{topics:['providers','settings','usage','spaces'],space:settingsScope.space});
+    }
+    const update=createProviderList({...options,pick:providers=>providerPicker(providers,settingsScope),edit:(profile,providers)=>providerEditor(profile,providers,settingsScope),spaceEditor});
+    return connectView(root,token,async()=>{const [providers,spaces]=await Promise.all([request('/api/v1/providers',{...settingsScope,signal:token.signal}),client.desktop?request('/api/v1/spaces',{signal:token.signal,owner:'',space:''}):null]);return {providers,spaces};},update,{topics:['providers','spaces'],space:settingsScope.space});
   }
   function providerPolicyEditor(quota,owner) {
     renderEditor(tr('Provider allowance','提供商配额'),quota.policy,[
@@ -319,11 +312,11 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const summary=n('span','hint'),previous=action(tr('Previous','上一页'),()=>{filter.taskOffset=Math.max(0,filter.taskOffset-20);show('tasks');},{disabled:!filter.taskOffset});
     const next=action(tr('Next','下一页'),()=>{filter.taskOffset=taskListView.result.next_offset;show('tasks');},{disabled:true});
     const footer=toolbar(summary,previous,next);footer.classList.add('pagination');root.append(footer);
-    const view={token,rows,scopes,summary,previous,next,nodes:new Map(),busy:false,again:false,result:null};taskListView=view;
+    const view={token,rows,scopes,summary,previous,next,nodes:new Map(),result:null};view.queue=createRefreshQueue(()=>readTaskList(view),{active:()=>!disposed&&gate.current(token)&&taskListView===view});taskListView=view;
     await refreshTaskList(view);
   }
-  async function refreshTaskList(view=taskListView) {
-    if(!view||!gate.current(view.token))return;if(view.busy){view.again=true;return;}view.busy=true;
+  function refreshTaskList(view=taskListView){return view?.queue.run();}
+  async function readTaskList(view) {
     try {
       const pages=await across(`/api/v1/tasks/query?${new URLSearchParams({scope:filter.taskScope,q:filter.taskQuery,offset:0,limit:50,...(filter.taskTarget?{execution_target:JSON.stringify(filter.taskTarget)}:{})})}`,view.token,{paginate:true,perAssistant:true,spaceID:filter.taskSpace});
       if(!gate.current(view.token)||taskListView!==view)return;
@@ -353,40 +346,43 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       view.rows.scrollTop=scroll;
       text(view.summary,`${result.total} ${tr('items','项')} · ${tr('Page','第')} ${Math.floor(filter.taskOffset/20)+1}`);view.previous.disabled=!filter.taskOffset;view.next.disabled=result.next_offset==null;
     }catch(reason){if(gate.current(view.token)&&reason.name!=='AbortError'){if(!view.result){view.rows.replaceChildren();errorView(reason,view.rows);}else notify(reason.message);}}
-    finally{view.busy=false;if(view.again){view.again=false;queueMicrotask(()=>refreshTaskList(view));}}
+
   }
   async function taskDetail(task,{recordHistory=true}={}) {
-    taskView=null;taskListView=null;scheduleView=null;detailParent=true;if(recordHistory){const replace=history.state?.potTask?.id===task.id&&history.state?.potScope?.space===task._space_id;history[replace?'replaceState':'pushState']({potRoute:'tasks',potScope:{space:task._space_id,owner:task.assistant_id},potTask:{...task}},'',location.href);}
-    const result=await load(async token=>request(`/api/v1/tasks/${encodeURIComponent(task.id)}`,{signal:token.signal,owner:task.assistant_id,space:task._space_id}));if(!result)return;
-    const {root}=result, record=result.value;heading(task.title);
-    const fileScope={owner:task.assistant_id,space:task._space_id};
-    const downloadFile=async({task:id,path})=>{try{await client.downloadFile(id,path,fileScope);}catch(reason){if(gate.current(result.token))errorView(reason,root);}};
-    root.append(n('p','hint',`${record.info?.phase||task.phase} · ${task.machine_id||''}`));
-    if(record.error)root.append(n('p','inline-error',record.error));
-    if(record.request?.text)root.append(section(tr('Goal','目标')),renderMarkdown(record.request.text,{downloadFile}));
-    if(record.result)root.append(section(tr('Result','结果')),renderMarkdown(typeof record.result==='string'?record.result:JSON.stringify(record.result),{downloadFile}));
-    const transcript=n('div','task-transcript message-body');root.append(transcript);
-    const view={task,token:result.token,scope:fileScope,transcript,state:createTaskTranscript(),nodes:new Map(),busy:false,again:false,downloadFile};taskView=view;titleChanged();permissions();
-    await refreshTaskEvents(view);
-    const inputs=await request(`/api/v1/tasks/${encodeURIComponent(task.id)}/messages`,{owner:task.assistant_id,space:task._space_id});
-    if(!gate.current(result.token))return;
-    for(const input of list(inputs))root.append(n('p','task-input',input.text));
-    const draftKey=JSON.stringify([task._space_id,task.assistant_id,task.id]),input=field(tr('Message','消息'),taskDrafts.get(draftKey)||'',{kind:'textarea'});input.input.oninput=()=>taskDrafts.set(draftKey,input.input.value);root.append(input.row);
+    if(taskView&&taskView.task.id===task.id&&taskView.scope.space===task._space_id&&taskView.scope.owner===task.assistant_id&&pageView)return pageView.queue.run();
+    captureView();pageView?.queue.close();pageView=null;taskListView=null;scheduleView=null;detailParent=true;
+    if(recordHistory){const replace=history.state?.potTask?.id===task.id&&history.state?.potScope?.space===task._space_id;history[replace?'replaceState':'pushState']({potRoute:'tasks',potScope:{space:task._space_id,owner:task.assistant_id},potTask:{...task}},'',location.href);}
+    const token=gate.next(),root=body(),fileScope={owner:task.assistant_id,space:task._space_id},metadata=n('div'),transcript=n('div','task-transcript message-body'),messages=n('div'),files=n('div');
+    const downloadFile=async({task:id,path})=>{try{await client.downloadFile(id,path,fileScope);}catch(reason){if(gate.current(token))errorView(reason,root);}};
+    const draftKey=JSON.stringify([task._space_id,task.assistant_id,task.id]),input=field(tr('Message','消息'),taskDrafts.get(draftKey)||'',{kind:'textarea'});input.input.oninput=()=>taskDrafts.set(draftKey,input.input.value);
+    const view={task,token,scope:fileScope,transcript,state:createTaskTranscript(),nodes:new Map(),downloadFile,record:null};taskView=view;
     let guidance;
-    const send=action(tr('Send guidance','发送指导'),()=>{if(!guidance||guidance.text!==input.input.value)guidance={request_id:uid(),text:input.input.value};const attempt={...guidance};return operation(send,async()=>{await request(`/api/v1/tasks/${encodeURIComponent(task.id)}/messages`,{owner:task.assistant_id,space:task._space_id,method:'POST',body:attempt});if(taskDrafts.get(draftKey)===attempt.text)taskDrafts.delete(draftKey);},()=>taskDetail(task));},{primary:true});
-    const actions=toolbar(send,action(tr('Usage','用量'),()=>openUsageView({...fileScope,name:task.title,scope:task.id,returnTask:{...task}})));if((record.info?.phase||task.phase)==='running'&&record.run_id){const paused=!!record.info?.paused,control=action(paused?tr('Resume task','恢复任务'):tr('Pause task','暂停任务'),()=>operation(control,()=>request(`/api/v1/tasks/${encodeURIComponent(task.id)}/control`,{...fileScope,method:'POST',body:{run_id:record.run_id,action:paused?'resume':'pause'}}),()=>taskDetail(task)));actions.append(control);}for(const name of ['interrupt','cancel']) {const requestID=uid(),button=action(tr(name==='cancel'?'Cancel task':'Interrupt',name==='cancel'?'取消任务':'中断'),()=>operation(button,()=>request(`/api/v1/tasks/${encodeURIComponent(task.id)}/${name}`,{method:'POST',owner:task.assistant_id,space:task._space_id,body:{request_id:requestID}}),()=>taskDetail(task)),{danger:true});actions.append(button);}root.append(actions);
-    if(record.files?.length)for(const file of record.files){const link=n('a','',file.name||file.path);link.href='#';link.onclick=event=>{event.preventDefault();downloadFile({task:task.id,path:file.path});};root.append(link);}
-    restoreView(`task:${draftKey}`,result.token);
+    const send=action(tr('Send guidance','发送指导'),()=>{if(!guidance||guidance.text!==input.input.value)guidance={request_id:uid(),text:input.input.value};const attempt={...guidance};return operation(send,async()=>{await request(`/api/v1/tasks/${encodeURIComponent(task.id)}/messages`,{...fileScope,method:'POST',body:attempt});if(taskDrafts.get(draftKey)===attempt.text){taskDrafts.delete(draftKey);input.input.value='';}},()=>pageView?.queue.run());},{primary:true,disabled:true});
+    const actions=toolbar(send,action(tr('Usage','用量'),()=>openUsageView({...fileScope,name:task.title,scope:task.id,returnTask:{...task}})));
+    const control=action(tr('Pause task','暂停任务'),()=>{const record=view.record;return operation(control,()=>request(`/api/v1/tasks/${encodeURIComponent(task.id)}/control`,{...fileScope,method:'POST',body:{run_id:record.run_id,action:record.info?.paused?'resume':'pause'}}),()=>pageView?.queue.run());});control.hidden=true;actions.append(control);
+    const buttons=[];for(const name of ['interrupt','cancel']){const requestID=uid(),button=action(tr(name==='cancel'?'Cancel task':'Interrupt',name==='cancel'?'取消任务':'中断'),()=>operation(button,()=>request(`/api/v1/tasks/${encodeURIComponent(task.id)}/${name}`,{...fileScope,method:'POST',body:{request_id:requestID}}),()=>pageView?.queue.run()),{danger:true,disabled:true});buttons.push(button);actions.append(button);}
+    root.append(metadata,transcript,messages,input.row,actions,files);heading(task.title);permissions();
+    await connectView(root,token,async()=>{const [record,inputs]=await Promise.all([request(`/api/v1/tasks/${encodeURIComponent(task.id)}`,{...fileScope,signal:token.signal}),request(`/api/v1/tasks/${encodeURIComponent(task.id)}/messages`,{...fileScope,signal:token.signal})]);return {record,inputs};},async({record,inputs})=>{
+      view.record=record;const phase=record.info?.phase||task.phase,projection=n('div');projection.append(n('p','hint',`${phase} · ${record.info?.machine_id||task.machine_id||''}`));
+      if(record.error){const error=n('p','inline-error',record.error);error.dataset.viewKey='error';projection.append(error);}
+      if(record.request?.text){const goal=n('section');goal.dataset.viewKey='goal';goal.append(section(tr('Goal','目标')),renderMarkdown(record.request.text,{downloadFile}));projection.append(goal);}
+      if(record.result){const result=n('section');result.dataset.viewKey='result';result.append(section(tr('Result','结果')),renderMarkdown(typeof record.result==='string'?record.result:JSON.stringify(record.result),{downloadFile}));projection.append(result);}reconcile(metadata,projection);
+      const guidanceProjection=n('div');for(const [index,message]of list(inputs).entries()){const row=n('p','task-input',message.text);row.dataset.viewKey=message.id||message.request_id||String(index);guidanceProjection.append(row);}reconcile(messages,guidanceProjection);
+      const fileProjection=n('div');for(const file of record.files||[]){const link=n('a','',file.name||file.path);link.dataset.viewKey=file.path;link.href='#';link.onclick=event=>{event.preventDefault();downloadFile({task:task.id,path:file.path});};fileProjection.append(link);}reconcile(files,fileProjection);
+      const active=['running','waiting','queued'].includes(phase);setDisabled(send,!active);for(const button of buttons)setDisabled(button,!active);
+      control.hidden=phase!=='running'||!record.run_id;control.textContent=record.info?.paused?tr('Resume task','恢复任务'):tr('Pause task','暂停任务');await refreshTaskEvents(view);
+    },{topics:['tasks','runner','machines','spaces'],space:fileScope.space});
+    if(gate.current(token))restoreView(`task:${draftKey}`,token);
   }
-  async function refreshTaskEvents(view=taskView) {
-    if(!view||!gate.current(view.token))return;if(view.busy){view.again=true;return;}view.busy=true;
+  function refreshTaskEvents(view=taskView){if(!view)return Promise.resolve();view.eventsQueue||=createRefreshQueue(()=>readTaskEvents(view),{active:()=>!disposed&&gate.current(view.token)&&taskView===view});return view.eventsQueue.run();}
+  async function readTaskEvents(view) {
     try{
       let count=0,page;
       do{page=await request(`/api/v1/tasks/${encodeURIComponent(view.task.id)}/events?${new URLSearchParams({after:view.state.cursor,limit:100})}`,{...view.scope,signal:view.token.signal});if(!gate.current(view.token)||taskView!==view)return;const previous=view.state.cursor;appendTaskEvents(view.state,page.events);if(page.has_more&&view.state.cursor===previous)throw Error('Task event cursor did not advance');count+=(page.events||[]).length;}while(page.has_more&&count<5000);
       renderTaskTranscript(view);
       if(page.unavailable&&!view.unavailable){view.unavailable=n('p','hint',tr('Original machine is offline. Showing cached execution output.','原执行机器离线，显示缓存执行输出。'));view.transcript.prepend(view.unavailable);}else if(!page.unavailable&&view.unavailable){view.unavailable.remove();view.unavailable=null;}
       if(page.has_more)queueMicrotask(()=>refreshTaskEvents(view));
-    }catch(reason){if(gate.current(view.token)&&reason.name!=='AbortError')notify(reason.message);}finally{view.busy=false;if(view.again){view.again=false;queueMicrotask(()=>refreshTaskEvents(view));}}
+    }catch(reason){if(gate.current(view.token)&&reason.name!=='AbortError')notify(reason.message);}
   }
   function renderTaskTranscript(view){
     const forest=toolForest(view.state.messages);
@@ -409,9 +405,14 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     await request('/api/v1/permissions',{...captured,method:'POST',body:{id:approval.id,action}});
     await permissions();
   }
-  async function schedules(root, token) {
-    root.classList.add('schedules-content');
-    const pages=await across('/api/v1/schedules?limit=50',token,{paginate:true,perAssistant:true});if(!gate.current(token))return;
+  async function schedules(root,token) {
+    root.classList.add('schedules-content');const content=n('div','schedule-projection');root.append(content);
+    return connectView(root,token,()=>across('/api/v1/schedules?limit=50',token,{paginate:true,perAssistant:true}),pages=>{
+      const projection=n('div','schedule-projection');renderSchedules(projection,pages);reconcile(content,projection);
+    },{topics:['schedules','tasks','assistants','spaces','machines']});
+  }
+  function renderSchedules(root,pages) {
+
     const items=pages.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner)).sort((a,b)=>(a.next_at_ms||0)-(b.next_at_ms||0)||a._assistant_id.localeCompare(b._assistant_id)||a.id.localeCompare(b.id));
     filter.scheduleOffset=Math.min(filter.scheduleOffset,Math.max(0,Math.floor((items.length-1)/20)*20));
     const rows=n('div','schedule-list');rows.dataset.scrollKey='schedule-list';if(!items.length)empty(rows,tr('No schedules','暂无定时计划'));
@@ -420,38 +421,46 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       const owner=n('span','schedule-owner'),assistant=(client.assistants||[]).find(owner=>owner.id===item._assistant_id&&owner.space_id===item._space_id),space=(client.spaces||[]).find(space=>space.id===item._space_id);
       owner.append(n('span','',assistant?.name||item._assistant_id));owner.title=item._space_name||'';
       owner.append(icon(space?.kind==='local'&&!space?.remote?'machines':'cloud'));
-      row.append(button,owner,n('span','hint',item._stale?tr('Stale','已过期'):item.spec.enabled?item.next_label||tr('Not scheduled','未安排'):tr('Paused','已暂停')));rows.append(row);
+      row.append(button,owner,n('span','hint',item._stale?tr('Stale','已过期'):item.spec.enabled?item.next_label||tr('Not scheduled','未安排'):tr('Paused','已暂停')));row.dataset.viewKey=JSON.stringify([item._space_id,item._assistant_id,item.id]);rows.append(row);
     }
     root.append(rows);
     const footer=n('div','schedule-pagination'),buttons=toolbar(action(tr('Previous','上一页'),()=>{filter.scheduleOffset=Math.max(0,filter.scheduleOffset-20);show('tasks');},{disabled:!filter.scheduleOffset}),action(tr('Next','下一页'),()=>{filter.scheduleOffset+=20;show('tasks');},{disabled:filter.scheduleOffset+20>=items.length}));
     footer.append(n('span','hint',`${items.length} · ${Math.floor(filter.scheduleOffset/20)+1}`),buttons);root.append(footer);
   }
   async function scheduleHistory(item,record=true,runsOffset=0) {
-    detailParent=true;filter.taskTab='schedules';if(record)history.pushState({potRoute:'tasks',potSchedule:{...item},potScope:{space:item._space_id,owner:item._assistant_id}},'',location.href);
-    const result=await load(token=>request(`/api/v1/schedules?${new URLSearchParams({selected:item.id,runs_offset:runsOffset,limit:20})}`,{signal:token.signal,space:item._space_id,owner:item._assistant_id}));if(!result)return;
-    if(!result.value.selected||result.value.selected.deleted){scheduleView=null;return show('tasks');}
-    const selected={...item,...result.value.selected},view={item:selected,runsOffset};scheduleView=view;
-    const {root}=result;heading(selected.spec.title);const info=card(tr('Schedule details','定时计划详情'));
+    if(scheduleView&&scheduleView.item.id===item.id&&scheduleView.item._space_id===item._space_id&&scheduleView.item._assistant_id===item._assistant_id&&scheduleView.runsOffset===runsOffset&&pageView)return pageView.queue.run();
+    captureView();pageView?.queue.close();pageView=null;taskListView=null;taskView=null;detailParent=true;filter.taskTab='schedules';
+    if(record)history.pushState({potRoute:'tasks',potSchedule:{...item},potScope:{space:item._space_id,owner:item._assistant_id}},'',location.href);
+    const token=gate.next(),root=body(),content=n('div');root.append(content);
+    const view={item,runsOffset,token,busy:false,confirmed:false,content};scheduleView=view;
+    await connectView(root,token,()=>request(`/api/v1/schedules?${new URLSearchParams({selected:item.id,runs_offset:runsOffset,limit:20})}`,{signal:token.signal,space:item._space_id,owner:item._assistant_id}),value=>{
+      if(!value.selected||value.selected.deleted){scheduleView=null;return show('tasks',{force:true});}
+      view.item={...item,...value.selected};const projection=n('div');renderScheduleHistory(projection,view,value,runsOffset);reconcile(content,projection);
+    },{topics:['schedules','tasks','machines','spaces'],space:item._space_id});
+    if(gate.current(token))restoreView(JSON.stringify(['schedule-history',item._space_id,item._assistant_id,item.id,runsOffset]),token);
+  }
+  function renderScheduleHistory(root,view,value,runsOffset) {
+    const selected=view.item;heading(selected.spec.title);const info=card(tr('Schedule details','定时计划详情'));
     info.append(n('p','hint',selected.spec.goal),n('p','hint',`${selected.spec.timezone||''} · ${selected.next_label||tr('Not scheduled','未安排')}`));if(selected.last_error)info.append(n('p','inline-error',selected.last_error));
-    const actions=toolbar();let busy=false,confirmed=false;
+    const actions=toolbar();
     for(const name of ['run',selected.spec.enabled?'pause':'resume','edit','delete']) {
       const writeKey=JSON.stringify([selected._space_id,selected._assistant_id,selected.id,name]);
-      const button=action(tr({run:'Run now',pause:'Pause',resume:'Resume',edit:'Edit',delete:'Remove'}[name],{run:'立即运行',pause:'暂停',resume:'恢复',edit:'编辑',delete:'移除'}[name]),async()=>{
-        if(busy||scheduleView!==view||!gate.current(result.token))return;
+      const button=action(tr({run:'Run now',pause:'Pause',resume:'Resume',edit:'Edit',delete:'Remove'}[name],{run:'立即运行',pause:'暂停',resume:'恢复',edit:'编辑',delete:'移除'}[name]),async event=>{
+        const button=event.currentTarget,actions=button.parentElement;
+        if(view.busy||scheduleView!==view||!gate.current(view.token))return;
         if(name==='edit'){scheduleEditor(selected);return;}
-        if(name==='delete'&&!confirmed){confirmed=true;button.textContent=tr('Confirm removal','确认移除');return;}
-        busy=true;for(const control of actions.querySelectorAll('button'))control.disabled=true;
+        if(name==='delete'&&!view.confirmed){view.confirmed=true;button.textContent=tr('Confirm removal','确认移除');return;}
+        view.busy=true;for(const control of actions.querySelectorAll('button'))control.disabled=true;
         const body=scheduleWrites.get(writeKey)||{request_id:uid(),action:name,schedule_id:selected.id};scheduleWrites.set(writeKey,body);
-        try{await request('/api/v1/schedules',{method:'POST',space:selected._space_id,owner:selected._assistant_id,body});scheduleWrites.delete(writeKey);if(scheduleView===view&&gate.current(result.token)){if(name==='delete'){scheduleView=null;await show('tasks');}else await scheduleHistory(selected,false,runsOffset);}}
-        catch(reason){if(scheduleView===view&&gate.current(result.token))errorView(reason,root);}
-        finally{busy=false;for(const control of actions.querySelectorAll('button'))control.disabled=false;}
-      },{primary:name==='run',danger:name==='delete',disabled:selected._stale});actions.append(button);
+        try{await request('/api/v1/schedules',{method:'POST',space:selected._space_id,owner:selected._assistant_id,body});scheduleWrites.delete(writeKey);if(scheduleView===view&&gate.current(view.token)){if(name==='delete'){scheduleView=null;await show('tasks',{force:true});}else await pageView.queue.run();}}
+        catch(reason){if(scheduleView===view&&gate.current(view.token))errorView(reason,view.content);}
+        finally{view.busy=false;for(const control of actions.querySelectorAll('button'))control.disabled=false;}
+      },{primary:name==='run',danger:name==='delete',disabled:selected._stale||view.busy});actions.append(button);
     }
-    info.append(actions,n('p','hint',tr('Pausing or removing only affects future runs.','暂停或移除只影响未来的执行。')));root.append(info,n('p','hint',tr('Run history','运行历史')));
-    const rows=(result.value.runs||[]).map(run=>{const summary=n('span','',run.summary);if(run.task_id)summary.append(action(tr('View task','查看任务'),()=>taskDetail({id:run.task_id,title:run.summary||selected.spec.title,assistant_id:selected._assistant_id,_assistant_id:selected._assistant_id,_space_id:selected._space_id})));return [run.scheduled_label,run.state,summary];});
-    root.append(table([tr('Scheduled','计划时间'),tr('State','状态'),tr('Summary','摘要')],rows));
-    root.append(toolbar(action(tr('Newer entries','较新记录'),()=>scheduleHistory(selected,false,Math.max(0,runsOffset-20)),{disabled:!runsOffset}),action(tr('Older entries','较早记录'),()=>scheduleHistory(selected,false,result.value.runs_next_offset),{disabled:result.value.runs_next_offset==null})));
-    restoreView(JSON.stringify(['schedule-history',item._space_id,item._assistant_id,item.id,runsOffset]),result.token);
+    if(view.confirmed){const remove=actions.lastChild;remove.textContent=tr('Confirm removal','确认移除');}info.append(actions,n('p','hint',tr('Pausing or removing only affects future runs.','暂停或移除只影响未来的执行。')));root.append(info,n('p','hint',tr('Run history','运行历史')));
+    const rows=(value.runs||[]).map(run=>{const summary=n('span','',run.summary);if(run.task_id)summary.append(action(tr('View task','查看任务'),()=>taskDetail({id:run.task_id,title:run.summary||selected.spec.title,assistant_id:selected._assistant_id,_assistant_id:selected._assistant_id,_space_id:selected._space_id})));return [run.scheduled_label,run.state,summary];});
+    root.append(table([tr('Scheduled','计划时间'),tr('State','状态'),tr('Summary','摘要')],rows,(value.runs||[]).map(run=>run.id||JSON.stringify([run.scheduled_label,run.task_id]))));
+    root.append(toolbar(action(tr('Newer entries','较新记录'),()=>scheduleHistory(selected,false,Math.max(0,runsOffset-20)),{disabled:!runsOffset}),action(tr('Older entries','较早记录'),()=>scheduleHistory(selected,false,value.runs_next_offset),{disabled:value.runs_next_offset==null})));
   }
   function scheduleEditor(item) {
     const spec=item?.spec||{title:'',goal:'',machine_id:'',timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,kind:'daily',at:'',every_minutes:60,time:'09:00',weekdays:[1,2,3,4,5],misfire:'coalesce',notify:'changes',enabled:true,profile:null,model:null,requirements:{tools:false,desktop:false,exact_budget:false,live_steering:false}};
@@ -466,11 +475,20 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     ],(values,context)=>{const {owner_ref,...specValues}=values;const [space,owner]=JSON.parse(owner_ref);return request('/api/v1/schedules',{...context,space,owner,method:'POST',body:{request_id:context.request_id,action:item?'update':'create',schedule_id:item?.id||'',spec:{...specValues,weekdays:values.weekdays.split(',').filter(Boolean).map(Number)}}});},{capturedScope:item?{space:item._space_id,owner:item._assistant_id}:scope()});
     if(item)editor.returnSchedule={...item};
   }
-  async function usage(root, token) {
+  async function usage(root,token) {
+    const captured=usageOwner?{...usageOwner}:null,space=captured?.space||filter.usageSpace,days=filter.usageDays,offset=filter.usageOffset;
+    const content=n('div');root.append(content);
+    return connectView(root,token,async()=>{
+      const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const pages=await across(`/api/v1/usage/summary?${new URLSearchParams({days,timezone,scope:captured?.scope||captured?.owner||'',offset})}`,token,{spaceID:space,ownerID:captured?.owner||'',allModels:!captured});
+      await Promise.all(pages.map(async page=>{if(!page.value.quota?.policy){const policy=await request('/api/v1/usage/policy',{space:page.space.id,owner:captured?.owner||'',signal:token.signal});page.value={...page.value,quota:{...page.value.quota,policy}};}}));return pages;
+    },pages=>{const projection=n('div');renderUsage(projection,token,pages);for(const [index,node]of [...projection.children].entries())if(!node.dataset.viewKey)node.dataset.viewKey=node.querySelector('h2')?.textContent||node.className+':'+index;reconcile(content,projection);},{topics:['usage','spaces','providers'],space:space==='all'?'':space});
+  }
+  function renderUsage(root, token, pages) {
     const locations=n('div','usage-location');locations.append(n('span','hint',tr('Location','位置')),segments([['all',tr('All locations','所有位置')],...(client.spaces||[]).map(space=>[space.id,space.name])],filter.usageSpace,value=>{filter.usageSpace=value;show('usage',{keepUsageOwner:true});}));if(!usageOwner)root.append(locations);
     const titleRow=toolbar(n('h2','page-heading',usageOwner?tr('Total usage','总用量'):tr('Overall statistics','总体统计')));titleRow.classList.add('usage-heading');root.append(titleRow);root.append(segments([7,30,90,365].map(days=>[days,days===365?tr('Last year','最近一年'):tr(`Last ${days} days`,`最近 ${days} 天`)]),filter.usageDays,days=>{filter.usageDays=days;filter.usageOffset=0;show('usage',{keepUsageOwner:true});}));
     const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const pages=await across(`/api/v1/usage/summary?${new URLSearchParams({days:filter.usageDays,timezone,scope:usageOwner?.scope||usageOwner?.owner||'',offset:filter.usageOffset})}`,token,{spaceID:usageOwner?.space||filter.usageSpace,ownerID:usageOwner?.owner||'',allModels:!usageOwner});if(!gate.current(token))return;const data=pages.length===1?{...pages[0].value,spaces:pages}:combineUsage(pages);
+    const data=pages.length===1?{...pages[0].value,spaces:pages}:combineUsage(pages);
     if(usageOwner)root.insertBefore(n('p','hint',usageOwner.name),root.firstChild.nextSibling);
     const compact=value=>Number(value||0)>=1000000?(Number(value)/1000000).toFixed(1)+'M':Number(value||0)>=1000?(Number(value)/1000).toFixed(1)+'K':String(Number(value||0));
     const exact=value=>value==null?'—':Number(value).toLocaleString(locale());
@@ -480,23 +498,23 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const total=(usageOwner?data.lifetime||data.total:data.total)||{},metrics=n('div','usage-metrics'),totalCard=n('section','page-card usage-total');
     for(const [label,value]of [[tr('Total tokens','总 token'),total.input+total.output],[tr('Input (includes cache)','输入（含缓存）'),total.input],[tr('Output','输出'),total.output]]){const item=n('div','metric');item.title=exact(value);item.append(n('span','hint',label),n('strong','',compact(value)));metrics.append(item);}totalCard.append(metrics,n('p','usage-cache-breakdown',breakdown(total)),n('p','hint',tr('Cached tokens are included in input and total tokens. These counts are not the billed cost.','缓存 token 已包含在输入和总 token 中；token 数量不代表实际费用。')),n('p','hint',`${tr('Usage records','用量记录')}: ${total.requests||0}${total.unknown?' · '+total.unknown+' '+tr('incomplete record; totals may be incomplete','条不完整记录，总量可能不完整'):''}`));root.append(totalCard);
     const routing=data.routing_total||{},routingCard=card(tr('Main chat usage including task routing','主聊天用量（含任务路由）'));routingCard.append(n('p','usage-number',`${compact((routing.input||0)+(routing.output||0))} tokens`),n('p','hint',`${tr('Input','输入')} ${compact(routing.input)} · ${tr('Output','输出')} ${compact(routing.output)} · ${tr('Cached input','缓存输入')} ${compact(routing.cache)}`),n('p','hint',tr('Includes the entire main chat turn that delegated a task, including understanding and responding. Already included in totals; this is not a separate routing fee.','包含委派任务的整个主聊天回合（包括理解和回复），已计入总量，不单独收取路由费用。')));root.append(routingCard);
-    const models=card(tr('Agent / model usage','Agent / 模型用量'));for(const model of data.agent_models||[]){const row=n('div','usage-model-row'),line=n('div','usage-model-title');line.append(n('span','',`${model.agent==='pot'?'Pot':model.agent} · ${model.model}`),n('span','',`${compact(model.input+model.output)} tokens`));row.append(line,n('p','hint',`${tr('Input','输入')} ${compact(model.input)} · ${tr('Output','输出')} ${compact(model.output)}`),n('p','hint',`${breakdown(model)}${model.unknown?' · '+model.unknown+' '+tr('incomplete usage record','条不完整用量记录'):''}`));models.append(row);}if(!data.agent_models?.length)models.append(n('p','hint',tr('No usage records yet','暂无用量记录')));root.append(models);
+    const models=card(tr('Agent / model usage','Agent / 模型用量'));for(const model of data.agent_models||[]){const row=n('div','usage-model-row'),line=n('div','usage-model-title');line.append(n('span','',`${model.agent==='pot'?'Pot':model.agent} · ${model.model}`),n('span','',`${compact(model.input+model.output)} tokens`));row.append(line,n('p','hint',`${tr('Input','输入')} ${compact(model.input)} · ${tr('Output','输出')} ${compact(model.output)}`),n('p','hint',`${breakdown(model)}${model.unknown?' · '+model.unknown+' '+tr('incomplete usage record','条不完整用量记录'):''}`));row.dataset.viewKey=JSON.stringify([model.agent,model.model]);models.append(row);}if(!data.agent_models?.length)models.append(n('p','hint',tr('No usage records yet','暂无用量记录')));root.append(models);
     const chart=n('div','usage-chart');chart.setAttribute('role','group');chart.setAttribute('aria-label',tr('Token usage trend','Token 用量趋势'));
     const maximum=Math.max(1,...(data.buckets||[]).map(b=>b.input+b.output));
     const series=[['usage-uncached',tr('Uncached input','未缓存输入'),uncached],['usage-cached',tr('Cached input','缓存输入'),value=>value.cache||0],['usage-output',tr('Output','输出'),value=>value.output||0]];
-    for(const bucket of data.buckets||[]){const column=n('div','chart-column'),bar=n('div','chart-bar');bar.style.height=`${Math.max(0,(bucket.input+bucket.output)/maximum*140)}px`;bar.title=`${bucket.range||bucket.label} · ${tr('Input','输入')} ${exact(bucket.input)} · ${tr('Output','输出')} ${exact(bucket.output)} · ${breakdown(bucket)}${bucket.unknown?' · '+bucket.unknown+' '+tr('incomplete usage record','条不完整用量记录'):''}`;bar.setAttribute('aria-label',bar.title);bar.tabIndex=0;for(const [className,,value]of series){const segment=n('span',className);segment.style.flexGrow=String(value(bucket)||0);bar.append(segment);}column.append(bar,n('small','',bucket.label));chart.append(column);}const chartCard=n('section','page-card'),legend=n('div','usage-legend');for(const [className,label]of series){const entry=n('span');entry.append(n('i',className),n('span','',label));legend.append(entry);}chartCard.append(n('p','hint',`${data.bucket_days===7?tr('Up to 7 days per bar','每条最多代表 7 天'):tr('One day per bar','每条代表一天')} · ${data.timezone||timezone} · ${tr('Today is still in progress','今天尚未结束')}`),legend,chart);root.append(chartCard);
+    for(const bucket of data.buckets||[]){const column=n('div','chart-column'),bar=n('div','chart-bar');bar.style.height=`${Math.max(0,(bucket.input+bucket.output)/maximum*140)}px`;bar.title=`${bucket.range||bucket.label} · ${tr('Input','输入')} ${exact(bucket.input)} · ${tr('Output','输出')} ${exact(bucket.output)} · ${breakdown(bucket)}${bucket.unknown?' · '+bucket.unknown+' '+tr('incomplete usage record','条不完整用量记录'):''}`;bar.setAttribute('aria-label',bar.title);bar.tabIndex=0;for(const [className,,value]of series){const segment=n('span',className);segment.style.flexGrow=String(value(bucket)||0);bar.append(segment);}column.append(bar,n('small','',bucket.label));column.dataset.viewKey=bucket.range||bucket.label;chart.append(column);}const chartCard=n('section','page-card'),legend=n('div','usage-legend');for(const [className,label]of series){const entry=n('span');entry.append(n('i',className),n('span','',label));legend.append(entry);}chartCard.append(n('p','hint',`${data.bucket_days===7?tr('Up to 7 days per bar','每条最多代表 7 天'):tr('One day per bar','每条代表一天')} · ${data.timezone||timezone} · ${tr('Today is still in progress','今天尚未结束')}`),legend,chart);root.append(chartCard);
     for(const page of pages) {
       const value=page.value,owner={space:page.space.id,owner:usageOwner?.owner||''};
-      const policy=value.quota?.policy||await request('/api/v1/usage/policy',{...owner,signal:token.signal});if(!gate.current(token))return;
+      const policy=value.quota.policy;
       if(pages.length===1)titleRow.append(action(tr('Usage limits','用量限制'),()=>policyEditor(policy,owner),{disabled:page.stale}));
-      const allowance=card(`${tr('Token allowance','Token 配额')} · ${page.space.name}`);allowance.append(n('p','hint',value.quota?.active?`${Number(value.quota.remaining).toLocaleString(locale())} ${tr('remaining','剩余')} · ${value.quota.reset_label||''}`:tr('No active token limit','未启用 token 限额')),action(tr('Edit allowance','编辑配额'),()=>policyEditor(policy,owner),{disabled:page.stale}));root.append(allowance);
-      if(usageOwner&&!usageOwner.returnTask)for(const mail of value.mail_waits||[]){const waiting=section(tr('Correspondence waiting for allowance','助手通信正在等待配额'));waiting.append(n('p','hint',mail.provider||''));const requestID=uid(),resume=action(tr('Resume correspondence','恢复助手通信'),()=>operation(resume,()=>request('/api/v1/usage/resume',{...owner,method:'POST',body:{request_id:requestID,scope:mail.scope,turn:mail.turn,since:mail.since}}),()=>show('usage',{keepUsageOwner:true})),{disabled:page.stale});waiting.append(resume);root.append(waiting);}
-      if(value.waiting){const waiting=section(tr('Waiting for allowance','等待配额'));waiting.append(n('p','hint',value.waiting.provider||''));for(const name of ['resume','cancel']){const requestID=uid(),task=usageOwner?.returnTask;const button=action(tr(name==='resume'?'Resume':'Cancel waiting',name==='resume'?'恢复':'取消等待'),()=>operation(button,async()=>{if(task)return request(`/api/v1/tasks/${encodeURIComponent(task.id)}/${name}`,{...owner,method:'POST',body:{request_id:requestID,...(name==='resume'?{turn:value.waiting.turn,since:value.waiting.since}:{})}});if(name==='resume')return request('/api/v1/usage/resume',{...owner,method:'POST',body:{request_id:requestID,turn:value.waiting.turn,since:value.waiting.since}});const snapshot=await request('/api/v1/snapshot',owner),message=snapshot.messages?.find(message=>message.id===snapshot.turn?.user_message_id);if(!message||message.request_id!==value.waiting.turn)throw Error(tr('Allowance wait changed. Refresh Usage.','配额等待已变化，请刷新用量页面。'));return request('/api/v1/turn/cancel',{...owner,method:'POST',body:{request_id:requestID,user_message_id:message.id}});},()=>show('usage',{keepUsageOwner:true})),{disabled:page.stale||!usageOwner});waiting.append(button);}root.append(waiting);}
+      const allowance=card(`${tr('Token allowance','Token 配额')} · ${page.space.name}`);allowance.append(n('p','hint',value.quota?.active?`${Number(value.quota.remaining).toLocaleString(locale())} ${tr('remaining','剩余')} · ${value.quota.reset_label||''}`:tr('No active token limit','未启用 token 限额')),action(tr('Edit allowance','编辑配额'),()=>policyEditor(policy,owner),{disabled:page.stale}));allowance.dataset.viewKey='allowance:'+page.space.id;root.append(allowance);
+      if(usageOwner&&!usageOwner.returnTask)for(const mail of value.mail_waits||[]){const waiting=section(tr('Correspondence waiting for allowance','助手通信正在等待配额'));waiting.append(n('p','hint',mail.provider||''));const requestID=uid(),resume=action(tr('Resume correspondence','恢复助手通信'),event=>operation(event.currentTarget,()=>request('/api/v1/usage/resume',{...owner,method:'POST',body:{request_id:requestID,scope:mail.scope,turn:mail.turn,since:mail.since}}),()=>show('usage',{keepUsageOwner:true})),{disabled:page.stale});waiting.dataset.viewKey=JSON.stringify(['mail',page.space.id,mail.scope]);waiting.append(resume);root.append(waiting);}
+      if(value.waiting){const waiting=section(tr('Waiting for allowance','等待配额'));waiting.append(n('p','hint',value.waiting.provider||''));for(const name of ['resume','cancel']){const requestID=uid(),task=usageOwner?.returnTask;const button=action(tr(name==='resume'?'Resume':'Cancel waiting',name==='resume'?'恢复':'取消等待'),event=>operation(event.currentTarget,async()=>{if(task)return request(`/api/v1/tasks/${encodeURIComponent(task.id)}/${name}`,{...owner,method:'POST',body:{request_id:requestID,...(name==='resume'?{turn:value.waiting.turn,since:value.waiting.since}:{})}});if(name==='resume')return request('/api/v1/usage/resume',{...owner,method:'POST',body:{request_id:requestID,turn:value.waiting.turn,since:value.waiting.since}});const snapshot=await request('/api/v1/snapshot',owner),message=snapshot.messages?.find(message=>message.id===snapshot.turn?.user_message_id);if(!message||message.request_id!==value.waiting.turn)throw Error(tr('Allowance wait changed. Refresh Usage.','配额等待已变化，请刷新用量页面。'));return request('/api/v1/turn/cancel',{...owner,method:'POST',body:{request_id:requestID,user_message_id:message.id}});},()=>show('usage',{keepUsageOwner:true})),{disabled:page.stale||!usageOwner});waiting.append(button);}waiting.dataset.viewKey='wait:'+page.space.id;root.append(waiting);}
     }
-    if(usageOwner){root.append(section(tr('Model requests','模型请求')),n('p','hint',tr('Each row is one model request. A turn can make several requests. Cached input is part of total input.','每行代表一次模型请求；一个提问可能触发多次请求。缓存输入是输入总量的一部分。')),table([tr('Time','时间'),tr('Model','模型'),tr('Input','输入'),tr('Cached input','缓存输入'),tr('Uncached input','未缓存输入'),tr('Cache hit rate','缓存命中率'),tr('Output','输出'),tr('State','状态')],(data.requests||[]).map(record=>[record.label,record.model,exact(record.input),record.input==null?'—':exact(record.cache),exact(uncached(record)),hitRate(record),exact(record.output),record.state])));
+    if(usageOwner){root.append(section(tr('Model requests','模型请求')),n('p','hint',tr('Each row is one model request. A turn can make several requests. Cached input is part of total input.','每行代表一次模型请求；一个提问可能触发多次请求。缓存输入是输入总量的一部分。')),table([tr('Time','时间'),tr('Model','模型'),tr('Input','输入'),tr('Cached input','缓存输入'),tr('Uncached input','未缓存输入'),tr('Cache hit rate','缓存命中率'),tr('Output','输出'),tr('State','状态')],(data.requests||[]).map(record=>[record.label,record.model,exact(record.input),record.input==null?'—':exact(record.cache),exact(uncached(record)),hitRate(record),exact(record.output),record.state]),(data.requests||[]).map(record=>record.id||JSON.stringify([record.at,record.model,record.label]))));
     const next=data.next_offset??data.agent_model_next_offset??data.compaction_next_offset;if(filter.usageOffset||next!=null)root.append(toolbar(action(tr('Previous page','上一页'),()=>{filter.usageOffset=Math.max(0,filter.usageOffset-20);show('usage',{keepUsageOwner:true});},{disabled:!filter.usageOffset}),action(tr('Next page','下一页'),()=>{filter.usageOffset=next;show('usage',{keepUsageOwner:true});},{disabled:next==null})));
-    root.append(section(tr('Tools','工具')),table([tr('Tool','工具'),tr('Calls','调用'),tr('Failed','失败'),tr('Duration (ms)','耗时（毫秒）')],(data.tools||[]).map(tool=>[tool.name,tool.calls,tool.failed,tool.duration_ms])));
-    root.append(section(tr('Context compaction','上下文压缩')),table([tr('Time','时间'),tr('State','状态'),tr('Before','之前'),tr('After','之后')],(data.compactions||[]).map(record=>[record.label,record.state,record.tokens_before,record.tokens_after])));}
+    root.append(section(tr('Tools','工具')),table([tr('Tool','工具'),tr('Calls','调用'),tr('Failed','失败'),tr('Duration (ms)','耗时（毫秒）')],(data.tools||[]).map(tool=>[tool.name,tool.calls,tool.failed,tool.duration_ms]),(data.tools||[]).map(tool=>tool.name)));
+    root.append(section(tr('Context compaction','上下文压缩')),table([tr('Time','时间'),tr('State','状态'),tr('Before','之前'),tr('After','之后')],(data.compactions||[]).map(record=>[record.label,record.state,record.tokens_before,record.tokens_after]),(data.compactions||[]).map(record=>record.id||record.at||record.label)));}
   }
   function policyEditor(policy,owner) {
     renderEditor(tr('Token allowance','Token 配额'),policy,[
@@ -504,41 +522,60 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       {name:'limit',label:tr('Token limit','Token 上限'),kind:'number',parse:Number,required:true},{name:'timezone',label:tr('Time zone','时区'),required:true},{name:'auto_resume',label:tr('Automatically resume','自动恢复'),kind:'checkbox'},
     ],(values,context)=>request('/api/v1/usage/policy',{...context,method:'POST',body:values}),{capturedScope:owner});
   }
-  async function machines(root, token) {
-    const pages=await across('/api/v1/machines',token);if(!gate.current(token))return;const result={items:pages.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner))};
-    root.append(n('p','hint',tr('Machines','机器')));if(!list(result).length)empty(root,tr('No machines','暂无机器'));
-    let machineSpace='';for(const machine of list(result)) {if(machineSpace!==machine._space_id){machineSpace=machine._space_id;root.append(n('p','hint machine-location',machine._space_name));}
-      const machineKey=JSON.stringify([machine._space_id,machine.id]),group=n('section','page-card machine-card'),header=n('div','machine-header');const machineIcon=n('span','machine-icon');machineIcon.append(icon('machines'));header.append(machineIcon,n('span','machine-name',machine.name||machine.runtime_id||machine.id),n('span',machine.connected?'success-text':'hint',machine._stale?tr('Stale','已过期'):machine.connected?tr('Connected','已连接'):tr('Offline','离线')),action('',()=>{if(expandedMachines.has(machineKey))expandedMachines.delete(machineKey);else expandedMachines.add(machineKey);show('machines');}));header.lastChild.setAttribute('aria-label',tr('Machine settings','机器设置'));header.lastChild.append(icon('settings'));group.dataset.machineId=machine.runtime_id||machine.id;group.dataset.spaceId=machine._space_id;group.append(header,n('p','hint',(machine.tags||[]).join(' · ')));const settings=n('div','machine-settings');settings.hidden=!expandedMachines.has(machineKey);group.append(settings);
-      settings.append(action(tr('Manage execution permissions','管理执行权限'),()=>{configurationSpace=machine._space_id;filter.settingsTab='permissions';show('settings');},{disabled:machine._stale}));
-      group.append(action(tr('View tasks','查看任务'),()=>machineTasks(machine)));root.append(group);
-    }
-    await renderMachineMembership({client,root,machines:list(result),locale,notify,refresh:()=>show('machines'),edit:({title,initial,fields,save,scope})=>renderEditor(title,initial,fields,save,{capturedScope:scope}),signal:token.signal});
+  async function machines(root,token) {
+    const rows=n('div'),entries=new Map(),membership=n('div');root.append(n('p','hint',tr('Machines','机器')),rows,membership);
+    const emptyRow=n('p','page-empty',tr('No machines','暂无机器'));root.append(emptyRow);
+    return connectView(root,token,()=>across('/api/v1/machines',token),async pages=>{
+      const items=pages.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner));emptyRow.hidden=!!items.length;
+      keyedRows(rows,entries,items,{key:machine=>JSON.stringify([machine._space_id,machine.runtime_id||machine.id]),create:machine=>{
+        const element=n('section','page-card machine-card'),header=n('div','machine-header'),mark=n('span','machine-icon'),name=n('span','machine-name'),status=n('span'),tags=n('p','hint'),settings=n('div','machine-settings'),location=n('p','hint machine-location');mark.append(icon('machines'));
+        const entry={element,name,status,tags,settings,location};const key=JSON.stringify([machine._space_id,machine.id]);settings.hidden=!expandedMachines.has(key);
+        const toggle=action('',()=>{settings.hidden=!settings.hidden;if(settings.hidden)expandedMachines.delete(key);else expandedMachines.add(key);});toggle.setAttribute('aria-label',tr('Machine settings','机器设置'));toggle.append(icon('settings'));header.append(mark,name,status,toggle);element.append(location,header,tags,settings);
+        entry.permissions=action(tr('Manage execution permissions','管理执行权限'),()=>{configurationSpace=entry.item._space_id;filter.settingsTab='permissions';show('settings');});settings.append(entry.permissions);
+        element.append(action(tr('View tasks','查看任务'),()=>machineTasks(entry.item)));return entry;
+      },update:(entry,machine)=>{entry.element.dataset.machineId=machine.runtime_id||machine.id;entry.element.dataset.spaceId=machine._space_id;entry.name.textContent=machine.name||machine.runtime_id||machine.id;entry.location.textContent=machine._space_name;entry.status.textContent=machine._stale?tr('Stale','已过期'):machine.connected?tr('Connected','已连接'):tr('Offline','离线');entry.status.className=machine.connected?'success-text':'hint';entry.tags.textContent=(machine.tags||[]).join(' · ');entry.permissions.disabled=machine._stale;}});
+      await renderMachineMembership({client,root,membershipRoot:membership,machines:items,locale,notify,refresh:()=>pageView?.queue.run(),edit:({title,initial,fields,save,scope})=>renderEditor(title,initial,fields,save,{capturedScope:scope}),signal:token.signal});
+    },{topics:['machines','spaces','permissions']});
   }
   const approvalScope=()=>taskView?.scope||scope();
-  async function permissions() {
-    if(!approvalScope().owner||disposed){approvalGate.close();pendingApprovals=[];approvalHost.replaceChildren();onApprovalsChanged();return;}
-    const token=approvalGate.next(),captured=approvalScope(),key=JSON.stringify(captured);if(approvalOwner!==key){approvalOwner=key;approvalHost.replaceChildren();}
-    try {
-      const value=await request('/api/v1/permissions',{...captured,signal:token.signal});if(!approvalGate.current(token)||disposed||JSON.stringify(approvalScope())!==JSON.stringify(captured))return;
+  let approvalQueue=null,approvalContext='';
+  function permissions() {
+    const captured={...approvalScope()},key=JSON.stringify([captured,taskView?.task.id||'']);
+    if(!captured.owner||disposed){approvalQueue?.close();approvalQueue=null;approvalContext='';approvalGate.close();pendingApprovals=[];approvalHost.replaceChildren();onApprovalsChanged();return Promise.resolve();}
+    if(approvalContext!==key||!approvalQueue){
+      approvalQueue?.close();approvalContext=key;const token=approvalGate.next(),current=()=>!disposed&&approvalGate.current(token)&&approvalContext===key&&key===JSON.stringify([approvalScope(),taskView?.task.id||'']);pendingApprovals=[];approvalHost.replaceChildren();
+      approvalQueue=createRefreshQueue(async()=>{
+      const value=await request('/api/v1/permissions',{...captured,signal:token.signal});if(!current())return;
       const pending=(value.pending||[]).filter(item=>(!item.request?.owner||item.request.owner===captured.owner)&&(!taskView||item.request?.task===taskView.task.id));
       pendingApprovals=pending;
-      const fragment=document.createDocumentFragment();let inlineLocator=false;
-      for(const approval of pending) {const toolRoot=[...(taskView?.transcript||document.querySelector('.message-column')).querySelectorAll('.tool-call')].find(node=>node.dataset.callId===approval.request.call_id&&(!node.dataset.turnId||node.dataset.turnId===approval.request.turn));
-        if(toolRoot){if(inlineLocator)continue;inlineLocator=true;const locate=action(`${pending.length} ${translate(locale(),'tool.approvalPending')} · ${translate(locale(),'tool.viewApprovals')}`,()=>{toolRoot.open=true;toolRoot.scrollIntoView({block:'center',behavior:'smooth'});toolRoot.querySelector('summary')?.focus();});fragment.append(locate);continue;}
-        const box=n('section','approval-card'),preview=n('div','approval-preview'),actions=n('div','approval-actions');preview.append(n('strong','',tr('Request approval','请求授权')),...(approval.request.args?.cmd?[n('pre','approval-arguments',approval.request.args.cmd)]:[]),...(approval.request.args?.justification?[n('p','approval-justification',`${tr('Reason','申请理由')}: ${approval.request.args.justification}`)]:[]),n('p','approval-description',`${captured.owner} · ${approval.request.machine_id}\n${tr('Wants to operate this machine directly','想要直接操作这台机器')}\n\n${translate(locale(),approval.request.tool==='update_agent_instructions'?'tool.instructionConsent':'tool.hostConsent')}`),n('pre','approval-arguments',`${approval.request.tool}\n${JSON.stringify(approval.request.command_context||approval.request.args,null,2)}`));
-        for(const name of (approval.request.tool==='update_agent_instructions'?['allow_once','deny']:['allow_always','allow_task','deny'])){const button=action(translate(locale(),'tool.'+name),()=>operation(button,()=>request('/api/v1/permissions',{...captured,method:'POST',body:{id:approval.id,action:name}}),permissions));actions.append(button);}box.append(preview,actions);fragment.append(box);}
-      approvalHost.replaceChildren(fragment);
-      if(taskView)renderTaskTranscript(taskView);onApprovalsChanged();
-    }catch(reason){if(approvalGate.current(token)&&reason.name!=='AbortError')notify(reason.message);}
+      onApprovalsChanged();syncApprovals();
+
+      },{active:current,onError:reason=>notify(reason.message)});
+    }
+    return approvalQueue.run();
   }
-  async function show(next,{keepUsageOwner=false}={}) {
+  function syncApprovals() {
+    const captured=approvalScope();if(approvalContext!==JSON.stringify([captured,taskView?.task.id||''])){approvalHost.replaceChildren();return;}
+    const pending=pendingApprovals;
+      const fragment=approvalHost.cloneNode(false);let inlineLocator=false;
+      for(const approval of pending) {const toolRoot=[...(taskView?.transcript||document.querySelector('.message-column')).querySelectorAll('.tool-call')].find(node=>node.dataset.callId===approval.request.call_id&&(!node.dataset.turnId||node.dataset.turnId===approval.request.turn));
+        if(toolRoot){if(inlineLocator)continue;inlineLocator=true;const locate=action(`${pending.length} ${translate(locale(),'tool.approvalPending')} · ${translate(locale(),'tool.viewApprovals')}`,()=>{toolRoot.open=true;toolRoot.scrollIntoView({block:'center',behavior:'smooth'});toolRoot.querySelector('summary')?.focus();});locate.dataset.viewKey='locator';fragment.append(locate);continue;}
+        const box=n('section','approval-card'),preview=n('div','approval-preview'),actions=n('div','approval-actions');preview.append(n('strong','',tr('Request approval','请求授权')),...(approval.request.args?.cmd?[n('pre','approval-arguments',approval.request.args.cmd)]:[]),...(approval.request.args?.justification?[n('p','approval-justification',`${tr('Reason','申请理由')}: ${approval.request.args.justification}`)]:[]),n('p','approval-description',`${captured.owner} · ${approval.request.machine_id}\n${tr('Wants to operate this machine directly','想要直接操作这台机器')}\n\n${translate(locale(),approval.request.tool==='update_agent_instructions'?'tool.instructionConsent':'tool.hostConsent')}`),n('pre','approval-arguments',`${approval.request.tool}\n${JSON.stringify(approval.request.command_context||approval.request.args,null,2)}`));
+        box.dataset.viewKey=approval.id;for(const name of (approval.request.tool==='update_agent_instructions'?['allow_once','deny']:['allow_always','allow_task','deny'])){const button=action(translate(locale(),'tool.'+name),event=>operation(event.currentTarget,()=>request('/api/v1/permissions',{...captured,method:'POST',body:{id:approval.id,action:name}}),permissions));button.dataset.viewKey=name;actions.append(button);}box.append(preview,actions);fragment.append(box);}
+      reconcile(approvalHost,fragment);
+      if(taskView)renderTaskTranscript(taskView);  }
+  async function show(next,{keepUsageOwner=false,force=false}={}) {
     if(editor)return;
-    captureView();viewReady=false;
+    if(!keepUsageOwner)usageOwner=null;
+    if(next==='settings'&&filter.settingsTab!=='general'&&!configurationSpace)configurationSpace=scope().space;
+    const viewKey=JSON.stringify([next,next==='tasks'?[filter.taskTab,filter.taskScope,filter.taskQuery,filter.taskOffset,filter.scheduleOffset,filter.taskTarget,filter.taskSpace]:next==='usage'?[filter.usageDays,filter.usageSpace,filter.usageOffset,usageOwner]:next==='settings'?[filter.settingsTab,configurationSpace]:[]]);
+    if(!force&&route===next&&currentViewKey===viewKey){if(taskListView)return refreshTaskList();if(pageView)return pageView.queue.run();}
+    captureView();viewReady=false;pageView?.queue.close();pageView=null;
+
     taskView=null;taskListView=null;scheduleView=null;detailParent=false;if(!keepUsageOwner)usageOwner=null;
     route=next;heading(tr({tasks:filter.taskTab==='schedules'?'Schedules':'Tasks',machines:'Machines',usage:'Usage',settings:'Settings'}[next]||next,{tasks:filter.taskTab==='schedules'?'定时计划':'任务',machines:'机器',usage:'用量',settings:'设置'}[next]||next));
-    const version=++pageVersion,token=gate.next(),root=body();
+    const version=++pageVersion,token=gate.next(),root=body();currentViewKey=viewKey;
     root.append(n('p','hint',tr('Loading…','正在加载…')));
-    const viewKey=JSON.stringify([next,next==='tasks'?[filter.taskTab,filter.taskScope,filter.taskQuery,filter.taskOffset,filter.scheduleOffset,filter.taskTarget,filter.taskSpace]:next==='usage'?[filter.usageDays,filter.usageSpace,filter.usageOffset,usageOwner]:next==='settings'?[filter.settingsTab,configurationSpace]:[]]);
     try {root.replaceChildren();await ({settings,tasks,machines,usage}[next]||settings)(root,token);if(gate.current(token))restoreView(viewKey,token);}
     catch(reason){if(gate.current(token)&&version===pageVersion&&!disposed)errorView(reason,root);}
   }
@@ -549,11 +586,18 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const current=editor;if(!await back())history.pushState({...history.state,potEditor:current.id},'',location.href);return true;
   };
   const beforeUnload=event=>{if([...(editor?[editor]:[]),...editorParents].some(value=>value.session.dirty||value.session.pending)){event.preventDefault();event.returnValue='';}};
-  const preference=()=>{if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner});};
+  const preference=()=>{if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner,force:true});};
   window.addEventListener('beforeunload',beforeUnload);window.addEventListener('pot:locale',preference);
-  return {get title(){return title;},get editing(){return !!editor;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner;},show,assistant,setupAI,leave,back,permissions,handleHistory:popstate,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalGate.close();approvalOwner='';pendingApprovals=[];approvalHost.replaceChildren();},approvalFor,decideApproval,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,record=true){route='tasks';return taskDetail(task,{recordHistory:record});},
+  return {get title(){return title;},get editing(){return !!editor;},get approvalSpace(){return approvalScope().space;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner;},show,assistant,setupAI,leave,back,permissions,syncApprovals,handleHistory:popstate,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalQueue?.close();approvalQueue=null;approvalContext='';approvalGate.close();pendingApprovals=[];approvalHost.replaceChildren();},approvalFor,decideApproval,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,record=true){route='tasks';return taskDetail(task,{recordHistory:record});},
     showProviders(){filter.settingsTab='providers';return show('settings');},
-    refresh(topics=[]){if(route==='tasks'&&topics.length&&!topics.some(key=>/^(tasks|runner|spaces|assistants|machines|runtime)$/.test(key)||(filter.taskTab==='schedules'&&key==='schedules')))return;if(taskListView)return refreshTaskList();if(detailParent&&!taskView&&!scheduleView)return;if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(taskView){return refreshTaskEvents();}if(!editor&&route&&host.offsetParent)show(route,{keepUsageOwner:!!usageOwner});},
-    dispose(){for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle.dispose?.();disposed=true;gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
+    refresh(topics=[],source={}){
+      if(editor||disposed||!route||!host.offsetParent)return;
+      if(pageView){if(relevantChange(topics,pageView.topics,pageView.space,source))return pageView.queue.run();return;}
+      if(route==='settings')return;
+      if(route==='tasks'&&!relevantChange(topics,['tasks','runner','spaces','assistants','machines',...(filter.taskTab==='schedules'?['schedules']:[])],taskView?.scope.space||'',source))return;
+      if(taskListView)return refreshTaskList();if(detailParent&&!taskView&&!scheduleView)return;
+      if(taskView)return refreshTaskEvents();
+    },
+    dispose(){for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle.dispose?.();disposed=true;approvalQueue?.close();pageView?.queue.close();gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
   };
 }

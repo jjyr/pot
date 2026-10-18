@@ -12,6 +12,7 @@ async page=>{
    f.items=Array.from({length:12},(_,index)=>({id:String(index),title:'分析任务 '+(index+1),phase:'running',assistant_id:'a',updated_at_ms:100-index}));
    f.client={spaces:[{id:'local',name:'本机'}],assistants:[{id:'a',space_id:'local',name:'项目助手'}],runtime:{boot_id:'fixture'},scope:()=>({space:'local',owner:'a'}),request:(path,options={})=>{
     if(path.includes('/permissions'))return Promise.resolve({items:[]});
+    if(/^\/api\/v1\/tasks\/[^/]+$/.test(path)&&f.detailRecord)return Promise.resolve(structuredClone(f.detailRecord));
     if(path.endsWith('/messages'))return Promise.resolve({items:[]});
     if(path.includes('/events?'))return Promise.resolve({events:[],cursor:0});
     return new Promise((resolve,reject)=>{const call={path,options,resolve,reject};f.calls.push(call);f.pending.push(call);});
@@ -65,12 +66,14 @@ async page=>{
   await page.evaluate(async()=>{const f=taskFixture;f.client.assistants.push({id:'b',space_id:'local',name:'第二助手'});f.refresh=f.pages.refresh(['assistants']);for(const call of f.pending.splice(0))call.resolve({items:[{...f.items[0],assistant_id:call.options.owner,title:'助手 '+call.options.owner}],counts:{active:1}});await f.refresh;});
   assert(await page.locator('.task-row').count()===2,'Row identity includes assistant identity');
   await page.getByRole('button',{name:'助手 b',exact:true}).click();
-  await page.evaluate(()=>taskFixture.pages.refresh(['tasks']));
+  await page.evaluate(()=>{taskFixture.pages.refresh(['tasks']);});
   assert(await page.evaluate(()=>taskFixture.pending.length===1&&taskFixture.pending[0].options.owner==='b'&&!taskFixture.pending[0].options.signal.aborted),'Changes during detail loading do not navigate back to the list');
-  await page.evaluate(()=>taskFixture.pending.shift().resolve({info:{phase:'running'},request:{text:'目标'}}));
+  await page.evaluate(()=>{taskFixture.detailRecord={info:{phase:'running'},request:{text:'目标'}};taskFixture.pending.shift().resolve(taskFixture.detailRecord);});
   await page.getByLabel('消息',{exact:true}).waitFor();
   await page.getByLabel('消息',{exact:true}).fill('保留任务指导');
-  await page.evaluate(async()=>{taskFixture.guidance=document.querySelector('textarea');await taskFixture.pages.refresh(['tasks']);});
+  await page.evaluate(async()=>{taskFixture.guidance=document.querySelector('textarea');taskFixture.detailRecord.info.phase='complete';taskFixture.detailRecord.result='完成结果';await taskFixture.pages.refresh(['tasks']);});
+  assert(await page.getByText('完成结果',{exact:true}).count()===1,'Task metadata and results refresh with the transcript');
+  assert(await page.getByRole('button',{name:'发送指导',exact:true}).isDisabled(),'Completed Tasks reject further guidance');
   assert(await page.evaluate(()=>taskFixture.guidance===document.querySelector('textarea')&&taskFixture.guidance.value==='保留任务指导'),'Transcript updates retain the guidance draft');
   assert(errors.length===0,errors.join('\n'));
   return {passed:true,coalesced_refresh:true,stable_dom:true,retained_search:true,offline_recovery:true,stale_responses_ignored:true,owner_identity:true,detail_navigation:true,errors};

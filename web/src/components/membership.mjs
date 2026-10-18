@@ -1,14 +1,15 @@
 import {node as n,action,field,section} from './primitives.mjs';
+import {setDisabled,setPending} from './reconcile.mjs';
 
 // Membership is an owner operation, separate from connecting the App to a Space.
 // Browser sessions deliberately cannot access the private runtime/control API.
-export async function renderMachineMembership({client,root,machines,locale,notify,refresh,edit,signal}) {
+export async function renderMachineMembership({client,root,machines,locale,notify,refresh,edit,signal,membershipRoot=root}) {
   if(!client.desktop)return;
   const tr=(en,zh)=>locale()==='zh-CN'?zh:en;
   const current=()=>root.isConnected&&!signal?.aborted;
   const command=(scope,body)=>client.request('/api/v1/runtime/control',{...scope,method:'POST',body});
   const error=(target,reason)=>{if(!current()||!target.isConnected)return;let box=target.querySelector('.membership-error');if(!box){box=n('p','inline-error membership-error');box.setAttribute('role','alert');target.append(box);}box.textContent=reason.message||String(reason);};
-  async function run(button,target,work){if(button.disabled)return;button.disabled=true;try{await work();}catch(reason){error(target,reason);}finally{if(button.isConnected)button.disabled=false;}}
+  async function run(button,target,work){if(button.disabled)return;setPending(button,true);try{await work();}catch(reason){error(target,reason);}finally{setPending(button,false);}}
   function confirmRemove(machine,scope) {
     const dialog=n('dialog','preferences'),buttons=n('div','page-toolbar'),status=n('p','inline-error');status.setAttribute('role','alert');
     const close=()=>{dialog.close();dialog.remove();};
@@ -48,23 +49,26 @@ export async function renderMachineMembership({client,root,machines,locale,notif
     verified.input.addEventListener('change',update);form.lifecycle.settled=update;submit.textContent=tr('Join Control','加入 Control');panel.append(previewButton,identity,verified.row,status);form.form.insertBefore(panel,form.form.querySelector('.editor-actions'));update();
   }
   const spaces=[...new Set(machines.map(machine=>machine._space_id))];
+  for(const card of membershipRoot.querySelectorAll('[data-membership-space]'))if(!spaces.includes(card.dataset.membershipSpace))card.remove();
   await Promise.all(spaces.map(async space=>{
     const scope={space,owner:''},owned=machines.filter(machine=>machine._space_id===space);
-    if(owned.every(machine=>machine._stale))return;
+    const previous=[...membershipRoot.querySelectorAll('[data-membership-space]')].find(card=>card.dataset.membershipSpace===space);
+    if(owned.every(machine=>machine._stale)){for(const button of previous?.querySelectorAll('button')||[])setDisabled(button,true);for(const card of root.querySelectorAll('.machine-card'))if(card.dataset.spaceId===space)for(const button of card.querySelectorAll('[data-membership-action]'))setDisabled(button,true);return;}
     let state;
-    try{state=await client.request('/api/v1/runtime/control',{...scope,signal});}catch(reason){if(reason.name!=='AbortError'&&current())notify(reason.message);return;}
+    try{state=await client.request('/api/v1/runtime/control',{...scope,signal});}catch(reason){if(reason.name!=='AbortError'&&current()){for(const button of previous?.querySelectorAll('button')||[])setDisabled(button,true);notify(reason.message);}return;}
     if(!current())return;
     for(const machine of owned){const card=[...root.querySelectorAll('.machine-card')].find(card=>card.dataset.machineId===(machine.runtime_id||machine.id)&&card.dataset.spaceId===space),settings=card?.querySelector('.machine-settings');if(!settings)continue;
-      settings.append(action(tr('Edit labels','编辑标签'),()=>labelsEditor(machine,scope),{disabled:machine._stale}));
-      if(state.role==='control'&&(machine.runtime_id||machine.id)!==state.identity.runtime_id)settings.append(action(tr('Remove machine','移除机器'),()=>confirmRemove(machine,scope),{danger:true,disabled:machine._stale}));
+      let labels=settings.querySelector('[data-membership-action=labels]');if(!labels){labels=action(tr('Edit labels','编辑标签'),()=>{});labels.dataset.membershipAction='labels';settings.append(labels);}labels.onclick=()=>labelsEditor(machine,scope);labels.disabled=machine._stale;
+      let remove=settings.querySelector('[data-membership-action=remove]');if(state.role==='control'&&(machine.runtime_id||machine.id)!==state.identity.runtime_id){if(!remove){remove=action(tr('Remove machine','移除机器'),()=>{},{danger:true});remove.dataset.membershipAction='remove';settings.append(remove);}remove.onclick=()=>confirmRemove(machine,scope);remove.disabled=machine._stale;}else remove?.remove();
     }
+    if(previous?.dataset.membershipRole===state.role){for(const button of previous.querySelectorAll('button'))setDisabled(button,false);const address=previous.querySelector('.membership-address');if(address)address.textContent=state.membership?.url||state.membership?.control?.runtime_id||'';return;}previous?.remove();
     if(state.role==='embedded')return;
-    const card=section(tr('Execution machine membership','执行机器成员资格'),owned[0]?._space_name||'');card.classList.add('page-card');root.append(card);
+    const card=section(tr('Execution machine membership','执行机器成员资格'),owned[0]?._space_name||'');card.classList.add('page-card');card.dataset.membershipSpace=space;card.dataset.membershipRole=state.role;membershipRoot.append(card);
     if(state.role==='control'){
       card.append(n('p','hint',tr('Create an invitation on this Control, then use it on the execution machine to join. The machine connects to Control and appears here after joining.','在此 Control 创建邀请，然后在执行机器上使用它加入。机器连接 Control 后会显示在这里。')));
       const output=n('div'),create=action(tr('Create machine invitation','创建机器加入邀请'),()=>run(create,card,async()=>{const invitation=await command(scope,{action:'create_invitation'});if(!current()||!card.isConnected)return;const code=field(tr('Machine invitation','机器加入邀请'),invitation.invitation,{readOnly:true}),copy=action(tr('Copy invitation','复制加入邀请'),async()=>{try{await navigator.clipboard.writeText(invitation.invitation);notify(tr('Copied','已复制'));}catch(reason){error(card,reason);}});output.replaceChildren(code.row,n('p','hint',`${tr('Expires','过期时间')}: ${new Date(invitation.expires_at_ms).toLocaleString(locale())}`),copy);}));card.append(create,output);
     }else if(state.role==='runner'){
-      card.append(n('p','hint',state.membership?.url||state.membership?.control?.runtime_id||''));
+      card.append(n('p','hint membership-address',state.membership?.url||state.membership?.control?.runtime_id||''));
       const leave=action(tr('Leave Control','离开 Control'),()=>{const editor=edit({title:tr('Leave Control','离开 Control'),initial:{confirmed:false},fields:[{name:'confirmed',label:tr('Disconnect this execution machine after its active operations have been cleaned up','清理活跃操作后断开此执行机器'),kind:'checkbox'}],scope,save:async(values,context)=>{if(!values.confirmed)throw Error(tr('Confirm leaving this Control.','请确认离开此 Control。'));return command(context,{action:'leave'});}});editor.form.querySelector('.editor-actions .primary').textContent=tr('Leave Control','离开 Control');},{danger:true});card.append(leave);
     }else if(state.role==='neutral')card.append(action(tr('Join a Control','加入 Control'),()=>joinEditor(scope)));
   }));
