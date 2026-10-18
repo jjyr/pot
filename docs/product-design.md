@@ -10,9 +10,12 @@ one configured remote Control. Control coordinates the user's machines, model co
 global resources and approvals. [Architecture](architecture.md) defines ownership;
 [Design language and interactions](design-language.md) defines the Chat/Tasks/Machines flows.
 
-Short questions can be answered directly. Longer work can be delegated with an
-explicit model, execution target and goal. Guidance is marked received, then applied;
-completion reports describe the result and include file links only when needed.
+Simple searches, focused research and design discussions are completed directly
+in chat, including tool-assisted current-data lookups and diagrams. Work requiring
+independent execution, such as feature implementation or extensive investigation,
+is delegated with a model, execution target and goal. Guidance is marked received,
+then applied; completion reports describe the result and include file links only
+when needed.
 Files, history and task bindings survive restart. Unknown external effects are
 reconciled rather than repeated. Model changes preserve context at safe boundaries.
 
