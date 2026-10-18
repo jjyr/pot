@@ -48,12 +48,53 @@ Control contacts GitHub directly; Pot operates no intermediary authorization
 server. No Client Secret is generated, embedded or required for device login or
 refresh. The Client ID identifies the application and is not a user's credential.
 
-The GitHub adapter requests `repo read:user`, obtains a device challenge, and
-opens `https://github.com/login/device` in the user's browser. Pot displays the
-one-time user code. The adapter respects GitHub's polling interval and slowdown
-responses, then fetches the authenticated user's stable ID and username before
-saving the account. This works with local or remote Controls without a public
-callback endpoint. Device codes and OAuth tokens never reach the management API.
+The GitHub adapter requests a fixed set of development scopes, obtains a device
+challenge, and opens `https://github.com/login/device` in the user's browser. Pot
+displays the one-time user code. The adapter respects GitHub's polling interval
+and slowdown responses, then fetches the authenticated user's stable ID and
+username before saving the account. This works with local or remote Controls
+without a public callback endpoint. Device codes and OAuth tokens never reach
+the management API.
+
+### GitHub development scopes
+
+| Requested scope | Development use |
+| --- | --- |
+| `repo` | Public/private repositories, Git push, PRs, issues, releases, Actions operations, deployments and repository webhooks |
+| `workflow` | Add and update `.github/workflows` files |
+| `read:org` | Read organization and team membership for collaboration |
+| `read:user`, `user:email` | Read account identity and email addresses for commit attribution |
+| `gist` | Manage code snippets |
+| `notifications` | Read notifications and manage thread/repository subscriptions |
+| `project` | Read and update user and organization Projects |
+| `read:packages`, `write:packages` | Package reads and writes on endpoints that accept OAuth tokens |
+
+See GitHub's [OAuth scope definitions](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps)
+and [Actions workflow API](https://docs.github.com/en/rest/actions/workflows).
+`repo` already includes repository hook, status, deployment and security-event
+access; Pot does not request their narrower scopes separately. Scopes remain
+limited by the user's role, organization OAuth/SSO policies and repository rules;
+they do not bypass branch protections.
+
+Pot does not request repository/package deletion, organization administration,
+account profile changes, SSH/GPG key management, audit logs or Codespaces scopes.
+Those operations need separate authorization. GitHub Packages registry
+authentication is also distinct: GitHub documents classic PAT authentication for
+package clients and `GITHUB_TOKEN` for Actions. The package OAuth scopes do not
+promise registry login or publishing from `npm`/`docker`; use the supported
+credential for that environment. See [Packages permissions](https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages)
+and the [Packages REST API](https://docs.github.com/en/rest/packages/packages).
+
+After updating the owning Control to a version with these scopes, existing
+accounts must sign out and sign in again under Settings → Third-party accounts,
+then approve the new GitHub authorization. Refreshing an existing token does not
+request additional scopes. A connected state describes credential availability,
+not proof that all requested scopes were granted. For permission failures,
+inspect only GitHub's `X-OAuth-Scopes` and `X-Accepted-OAuth-Scopes` response
+headers (never the credential), and check organization restrictions and repository
+rules before retrying a write.
+
+### Token lifetime
 
 The official app issues access tokens that expire after eight hours and refresh
 tokens that expire after six months without use. On credential use, Control

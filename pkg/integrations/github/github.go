@@ -24,6 +24,10 @@ type Adapter struct {
 	client  *http.Client
 }
 
+// developmentScopes covers repository development and collaboration. Account and
+// organization administration, repository/package deletion and Codespaces are separate.
+const developmentScopes = "repo workflow read:org read:user user:email gist notifications project read:packages write:packages"
+
 func New(o Options) *Adapter {
 	o.ClientID = strings.TrimSpace(o.ClientID)
 	client := http.Client{Timeout: 20 * time.Second}
@@ -56,7 +60,7 @@ func (a *Adapter) Begin(ctx context.Context) (integrations.Challenge, error) {
 		ExpiresIn       int    `json:"expires_in"`
 		Interval        int    `json:"interval"`
 	}
-	err := a.post(ctx, "https://github.com/login/device/code", url.Values{"client_id": {a.options.ClientID}, "scope": {"repo read:user"}}, &response)
+	err := a.post(ctx, "https://github.com/login/device/code", url.Values{"client_id": {a.options.ClientID}, "scope": {developmentScopes}}, &response)
 	if err != nil {
 		return integrations.Challenge{}, err
 	}
