@@ -242,7 +242,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     if(filter.settingsTab==='integrations'){
       const refreshIntegrations=()=>{if(!current())return Promise.resolve();client.resources?.invalidate(['integrations'],{space:settingsScope.space});return refresh();};
       const update=createIntegrations({root,request,scope:settingsScope,signal:token.signal,locale,openExternal:client.openExternal,refresh:refreshIntegrations});
-      return connectView(root,token,async()=>{const [accounts,notifications]=await Promise.all([read('/api/v1/integrations',{...settingsScope,signal:token.signal}),request('/api/v1/plugin-notifications',{...settingsScope,signal:token.signal})]);return {...accounts,notifications};},update,{topics:['integrations','plugin-notifications','spaces'],space:settingsScope.space});
+      return connectView(root,token,async()=>{const [accounts,notifications]=await Promise.all([read('/api/v1/integrations',{...settingsScope,signal:token.signal}),request('/api/v1/plugin-notifications',{...settingsScope,signal:token.signal})]);return {...accounts,notifications};},update,{topics:['integrations','plugin-notifications','assistants','spaces'],space:settingsScope.space});
     }
     if(filter.settingsTab==='tasks'){
       const update=createTaskSettings({root,tr,locale,configure:(profile,policy)=>routingEditor(profile,policy,settingsScope),allowance:quota=>providerPolicyEditor(quota,settingsScope)});
