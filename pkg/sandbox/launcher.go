@@ -263,7 +263,7 @@ func (l Launcher) Prepare(ctx context.Context, command *exec.Cmd, workspace stri
 
 // Environment excludes ambient application secrets and startup-code variables.
 func Environment() []string {
-	values := map[string]string{"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "C.UTF-8"}
+	values := map[string]string{"PATH": defaultExecutablePath(runtime.GOOS), "LANG": "C.UTF-8"}
 	for _, key := range []string{"PATH", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR"} {
 		if value := os.Getenv(key); value != "" {
 			values[key] = value
@@ -271,6 +271,15 @@ func Environment() []string {
 	}
 	return ReplaceEnvironment(nil, values)
 }
+
+func defaultExecutablePath(goos string) string {
+	path := "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+	if goos == "darwin" {
+		return "/opt/homebrew/bin:" + path
+	}
+	return path
+}
+
 func ReplaceEnvironment(base []string, values map[string]string) []string {
 	result := make([]string, 0, len(base)+len(values))
 	for _, item := range base {

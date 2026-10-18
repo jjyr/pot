@@ -31,6 +31,9 @@ Do not interpret a writable workspace as data-loss protection.
 System read roots are selected by the execution OS before checking path existence.
 macOS installation roots and Linux-specific CA, font and browser configuration
 paths are not granted on the other platform. Unsupported platforms fail closed.
+The execution environment preserves a nonempty host `PATH`. Otherwise it uses
+standard executable directories for the execution OS; `/opt/homebrew/bin` is
+included only on macOS.
 
 IP networking is unrestricted; no SRT proxy variables are injected. Unix IPC is
 restricted independently; necessary macOS DNS support is narrowly allowed.
