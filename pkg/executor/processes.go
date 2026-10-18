@@ -226,6 +226,10 @@ waiting:
 }
 
 func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process, error) {
+	// Check before shell snapshots, which can themselves run login code.
+	if r.Args["tty"] == true && r.Mode == "host" && r.Args["interactive"] != true {
+		return "", nil, &NotStartedError{Cause: errors.New("host TTY requires interactive:true on the original exec_command; command was not started. Set tty:true and interactive:true together, or omit tty for noninteractive commands")}
+	}
 	policy := r.Policy
 	yielding := r.Args["yield_time_ms"] != nil
 	var timeout uint64
@@ -263,7 +267,7 @@ func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process,
 		}
 		workdir = value
 	}
-	workdir, err = resolve(workdir, r.CWD)
+	workdir, err = resolveWorkingDirectory(workdir, r.CWD)
 	if err != nil {
 		return "", nil, err
 	}
@@ -294,9 +298,6 @@ func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process,
 
 	if r.Mode == "session" {
 		return "", nil, errors.New("session authority cannot launch a new command")
-	}
-	if r.Args["tty"] == true && r.Mode == "host" && !p.interactive {
-		return "", nil, errors.New("host TTY requires explicit interactive authorization")
 	}
 	if r.Mode == "sandbox" {
 		launcher := e.sandboxLauncher()

@@ -233,6 +233,8 @@ func TestMalformedWireEndsSession(t *testing.T) {
 	for _, response := range []string{
 		`{"content":[{"type":"text"}]}`,
 		`{"content":[{"type":"text","text":null}]}`,
+		`{"content":[],"isError":false,"code":"browser_unavailable","execution_status":"not_started"}`,
+		`{"content":[],"isError":true,"error":"invalid","execution_status":"cleanup_unconfirmed"}`,
 		`{"content":[{"type":"image","mimeType":"image/png","data":"invalid","width":1,"height":1}]}`,
 	} {
 		t.Run(response, func(t *testing.T) {
@@ -256,11 +258,21 @@ func TestPackageConfinement(t *testing.T) {
 	}
 }
 
-func TestRetainedComputerUseREPLWithoutBrowser(t *testing.T) {
+func TestPluginDiagnosticsCannotComeFromEvaluatedException(t *testing.T) {
+	c := newFixture(t, `export function createPlugin(){return {async execute(){throw Object.assign(new Error('failed after execution'),{code:'browser_unavailable',execution_status:'not_started'})},async dispose(){}}}`, "text")
+	result := execute(t, c, map[string]any{})
+	if !result.IsError || result.Code != "" || result.ExecutionStatus != "" || !strings.Contains(result.Error, "prior effects may have occurred") {
+		t.Fatal("exception claimed a pre-execution rejection", result)
+	}
+}
+
+func TestRetainedComputerUseREPLWithoutStartingBrowser(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("Node unavailable: retained computer-use REPL probe requires Node")
 	}
+	// Availability checks an executable; this probe never launches a browser.
+	t.Setenv("POT_BROWSER_EXECUTABLE", node)
 	files := map[string]string{}
 	for _, name := range []string{"index.mjs", "browser.mjs", "instructions.md"} {
 		source, err := os.ReadFile(filepath.Join("../../plugins/computer-use", name))

@@ -3,6 +3,8 @@ package executor
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -56,7 +58,7 @@ func ResolveCommandContext(cwd string, args map[string]any, policy core.ShellSet
 		}
 	}
 	var err error
-	dir, err = filepath.EvalSymlinks(dir)
+	dir, err = resolveWorkingDirectory(dir, cwd)
 	if err != nil {
 		return nil, err
 	}
@@ -92,4 +94,23 @@ func ResolveCommandContext(cwd string, args map[string]any, policy core.ShellSet
 		}
 	}
 	return result, result.Validate()
+}
+
+func resolveWorkingDirectory(path, workspace string) (string, error) {
+	dir, err := resolve(path, workspace)
+	if err == nil {
+		var info os.FileInfo
+		info, err = os.Stat(dir)
+		if err == nil && !info.IsDir() {
+			err = errors.New("path is not a directory")
+		}
+	}
+	if err != nil {
+		instruction := ""
+		if errors.Is(err, os.ErrNotExist) {
+			instruction = ". Create the directory from an existing workdir first"
+		}
+		return "", &NotStartedError{Cause: fmt.Errorf("cannot use workdir %q; command was not started%s: %w", path, instruction, err)}
+	}
+	return dir, nil
 }

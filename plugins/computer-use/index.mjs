@@ -1,7 +1,7 @@
 import repl from 'node:repl';
 import { PassThrough } from 'node:stream';
 import { inspect } from 'node:util';
-import { operation, close } from './browser.mjs';
+import { operation, close, browserAvailability } from './browser.mjs';
 
 export function createPlugin({ mode, emit }) {
   const vision = mode === 'mixed';
@@ -85,6 +85,11 @@ The REPL controls a separate headless Chromium in this execution machine. Native
   return {
     async execute({ tool, input }) {
       if (tool !== 'cua_repl') throw new Error('Unknown computer-use tool');
+      const availability = browserAvailability();
+      if (!availability.available) return {
+        isError: true, code: 'browser_unavailable', execution_status: 'not_started',
+        error: `${availability.error} No browser operation or supplied JavaScript was started.`,
+      };
       if (!initialized) { write(docs); initialized = true; }
       calls = [];
       let failure;

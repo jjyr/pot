@@ -158,6 +158,9 @@ func Encode(r Request) (json.RawMessage, error) {
 		if len(functions) > 0 {
 			for _, f := range functions {
 				obj(f)["type"] = "function"
+				// Tool contracts use omission for optional arguments. Responses
+				// may normalize an unspecified strict mode into required fields.
+				obj(f)["strict"] = false
 			}
 			body["tools"] = functions
 		}

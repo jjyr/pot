@@ -57,7 +57,7 @@ Model code cannot change the mode. Canvas or inaccessible content may require vi
 
 ## CUA REPL
 
-`cua_repl` is exposed to `pkg/agent` and scoped Pot MCP. It accepts `code`, optional `session_id`, and optional `reset`. An initial call without code returns API documentation and a session ID. Reuse the ID to preserve variables, top-level `await` and tab handles across calls during the active execution. The session remains on its original Runtime; select another machine when creating
+`cua_repl` is exposed to `pkg/agent` and scoped Pot MCP. It accepts `code`, optional `session_id`, and optional `reset`. When the browser executable is available, an initial call without code returns API documentation and a session ID. Reuse the ID to preserve variables, top-level `await` and tab handles across calls during the active execution. The session remains on its original Runtime; select another machine when creating
 a Task. Each invocation passes the same permission checks, including calls composed through `exec`. Use direct `cua_repl` calls for typed screenshot input.
 
 ```javascript
@@ -101,6 +101,15 @@ paths are detected, or set `POT_BROWSER_EXECUTABLE`. Chromium keeps its native
 sandbox enabled, uses inherited CDP pipes and a temporary profile. Plugin children
 receive a restricted environment without inherited model credentials. The JS REPL is not isolation; the destination execution policy supplies the OS boundary. Unsupported Chromium/native-sandbox combinations fail rather than disabling Chromium protection or silently switching to host execution.
 Browser sessions do not adopt existing user profiles or persistent logins.
+
+Each invocation checks for an executable browser before evaluating supplied
+JavaScript. A missing, non-executable or non-file browser path returns
+`isError:true`, `code:"browser_unavailable"`, `execution_status:"not_started"`
+and an actionable explanation to the Agent. No supplied JavaScript, browser
+process or browser profile is started. This file check does not prove that the
+browser can start under the selected execution policy; later startup or page
+errors retain the usual possible-effects diagnostics. An explicit
+`POT_BROWSER_EXECUTABLE` is authoritative and does not fall back to another path.
 
 The current protected backend does not support Google Chrome on macOS when its
 profile singleton IPC is blocked, or Linux Chromium when its native user-namespace

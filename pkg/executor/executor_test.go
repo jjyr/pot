@@ -113,6 +113,50 @@ func TestHostInteractiveAuthorityDoesNotComeFromOrdinaryCommand(t *testing.T) {
 		t.Fatal("owned cancellation denied", err)
 	}
 }
+
+func TestRejectedCommandStartupNeverRunsLoginOrCommand(t *testing.T) {
+	for _, kind := range []string{"tty", "missing-workdir", "file-workdir"} {
+		t.Run(kind, func(t *testing.T) {
+			e, r := fixture(t)
+			// Even standalone snapshot-enabled hosts must reject before invoking
+			// the shell, including a login snapshot's initialization code.
+			r.Policy.AllowLoginShell = true
+			r.Policy.ShellSnapshot = true
+			bin := filepath.Join(r.CWD, "bash")
+			marker := filepath.Join(r.CWD, "started")
+			if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf started > '"+marker+"'\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			r.Operation = "exec_command"
+			r.Args = map[string]any{"cmd": "mkdir -p missing; printf command", "shell": bin, "login": true}
+			if kind == "tty" {
+				r.Args["tty"] = true
+			} else if kind == "missing-workdir" {
+				r.Args["workdir"] = filepath.Join(r.CWD, "missing")
+			} else {
+				path := filepath.Join(r.CWD, "file")
+				if err := os.WriteFile(path, nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+				r.Args["workdir"] = path
+			}
+			result, err := e.Execute(context.Background(), r, nil)
+			var rejected *NotStartedError
+			if !errors.As(err, &rejected) || result["execution_status"] != "not_started" || !strings.Contains(err.Error(), "command was not started") {
+				t.Fatal(result, err)
+			}
+			if kind == "missing-workdir" && !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("missing-directory cause lost", err)
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatal("rejected command invoked login shell", err)
+			}
+			if _, err := os.Stat(filepath.Join(r.CWD, "missing")); !os.IsNotExist(err) {
+				t.Fatal("rejected command created its own working directory", err)
+			}
+		})
+	}
+}
 func TestSeparateCommandsAndBoundedUTF8Output(t *testing.T) {
 	e, r := fixture(t)
 	os.Mkdir(filepath.Join(r.CWD, "dir"), 0700)

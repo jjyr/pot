@@ -307,6 +307,34 @@ func TestToolFailureKeepsExecutionDiagnosticsInNextModelRequest(t *testing.T) {
 		t.Fatal("failure was replayed", s.calls)
 	}
 }
+
+func TestBrowserUnavailableResultReachesNextModelRequest(t *testing.T) {
+	a, _, s, thread, execution := setup(t)
+	a.Tools = []m.ToolDefinition{{Name: "probe", InputSchema: json.RawMessage(`{"type":"object"}`)}}
+	a.Dispatch = func(context.Context, core.ExecutionContext, m.ToolCall, func(core.Update) error) (json.RawMessage, error) {
+		return json.RawMessage(`{"isError":true,"code":"browser_unavailable","execution_status":"not_started","error":"Chromium/Chrome unavailable. No browser operation or supplied JavaScript was started.","content":[]}`), nil
+	}
+	s.model = func(request core.ModelRequest, index int) (string, error) {
+		if index == 0 {
+			return response("", m.ToolCall{ID: "browser-probe", Name: "probe", Arguments: json.RawMessage(`{}`)}), nil
+		}
+		for _, field := range []string{"browser_unavailable", "not_started", "Chromium/Chrome unavailable", "No browser operation or supplied JavaScript was started"} {
+			if !strings.Contains(string(request.Body), field) {
+				return "", fmt.Errorf("browser diagnostic lost before model: %s", field)
+			}
+		}
+		return response("browser unavailable"), nil
+	}
+	failed := false
+	if err := a.Execute(context.Background(), execution, thread, core.TurnRequest{RequestID: "browser-failure", Text: "inspect a web page"}, false, func(event core.AgentEvent) error {
+		if event.Update.Type == "tool_finished" {
+			failed = event.Update.Failed
+		}
+		return nil
+	}); err != nil || !failed || s.calls != 2 {
+		t.Fatal("browser failure not delivered to Agent", err, failed, s.calls)
+	}
+}
 func TestCancellationDrainsBeforeTerminalAndRetainsUncertainCheckpoint(t *testing.T) {
 	a, f, s, thread, execution := setup(t)
 	a.Tools = []m.ToolDefinition{{Name: "probe", InputSchema: json.RawMessage(`{"type":"object"}`)}}

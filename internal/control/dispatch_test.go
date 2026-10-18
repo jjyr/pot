@@ -7,8 +7,11 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/executor"
 	"github.com/jjyr/pot/pkg/modelprotocol"
+	"github.com/jjyr/pot/pkg/plugin"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -63,6 +66,50 @@ func TestAuthorizedHostCommandReceiptNoDuplicateEffect(t *testing.T) {
 }
 
 type uncertainEngine struct{}
+
+func TestBrowserUnavailableDiagnosticSurvivesDispatchAndReceiptReplay(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("Node unavailable")
+	}
+	t.Setenv("POT_BROWSER_EXECUTABLE", filepath.Join(t.TempDir(), "missing-chrome"))
+	d, execution, _ := localDispatcher(t)
+	bundle, err := plugin.LoadPlugin("../../plugins/computer-use")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Spec.Params.Agent.Plugins = map[string]core.PluginConfig{"computer-use": {Enabled: true, Bundle: &bundle}}
+	if err = d.Spec.Rehash(); err != nil {
+		t.Fatal(err)
+	}
+	call := modelprotocol.ToolCall{ID: "browser-unavailable", Name: "cua_repl", Arguments: json.RawMessage(`{"code":"nodeRepl.write('UNEXPECTED_USER_CODE')"}`)}
+	for range 2 {
+		raw, err := d.Dispatch(context.Background(), execution, call, nil)
+		var result map[string]any
+		if err != nil || json.Unmarshal(raw, &result) != nil || result["isError"] != true || result["code"] != "browser_unavailable" || result["execution_status"] != "not_started" || strings.Contains(string(raw), "UNEXPECTED_USER_CODE") {
+			t.Fatal("browser preflight diagnostic lost at Agent boundary", string(raw), err)
+		}
+	}
+}
+
+func TestStartupRejectionsReachAgentAsNotStarted(t *testing.T) {
+	for _, args := range []string{
+		`{"cmd":"printf changed > marker","tty":true,"login":false}`,
+		`{"cmd":"mkdir -p missing; printf changed > marker","workdir":"missing","login":false}`,
+	} {
+		d, execution, _ := localDispatcher(t)
+		call := modelprotocol.ToolCall{ID: "rejected", Name: "exec_command", Arguments: json.RawMessage(args)}
+		for range 2 {
+			raw, err := d.Dispatch(context.Background(), execution, call, nil)
+			var result map[string]any
+			if err == nil || json.Unmarshal(raw, &result) != nil || result["execution_status"] != "not_started" || result["isError"] != true {
+				t.Fatal("startup error lost through dispatch or receipt replay", string(raw), err)
+			}
+		}
+		if _, err := os.Stat(filepath.Join(execution.Workspace, "marker")); !os.IsNotExist(err) {
+			t.Fatal("rejected command had effects", err)
+		}
+	}
+}
 
 func (uncertainEngine) Execute(context.Context, executor.Request, func(executor.Event) error) (map[string]any, error) {
 	return nil, core.ErrCleanupUnconfirmed

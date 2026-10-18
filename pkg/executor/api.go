@@ -31,6 +31,13 @@ type PreparationError struct{ Cause error }
 func (e *PreparationError) Error() string { return e.Cause.Error() }
 func (e *PreparationError) Unwrap() error { return e.Cause }
 
+// NotStartedError identifies a known rejection before command execution.
+// It must never describe a failure after shell initialization or workload start.
+type NotStartedError struct{ Cause error }
+
+func (e *NotStartedError) Error() string { return e.Cause.Error() }
+func (e *NotStartedError) Unwrap() error { return e.Cause }
+
 type Request struct {
 	Command   *CommandContext    `json:"command_context,omitempty"`
 	Mode      string             `json:"mode"`
@@ -104,7 +111,19 @@ func identity() string {
 	return hex.EncodeToString(b)
 }
 
-func (e *Engine) Execute(ctx context.Context, request Request, emit func(Event) error) (map[string]any, error) {
+func (e *Engine) Execute(ctx context.Context, request Request, emit func(Event) error) (result map[string]any, resultErr error) {
+	defer func() {
+		var rejected *NotStartedError
+		if errors.As(resultErr, &rejected) && !errors.Is(resultErr, ErrCleanupUnconfirmed) {
+			if result == nil {
+				result = map[string]any{}
+			}
+			result["execution_status"] = "not_started"
+			if request.Mode == "host" || request.Mode == "sandbox" {
+				result["execution_mode"] = request.Mode
+			}
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -121,14 +140,11 @@ func (e *Engine) Execute(ctx context.Context, request Request, emit func(Event) 
 	if !filepath.IsAbs(request.CWD) {
 		return nil, errors.New("execution cwd must be absolute")
 	}
-	cwd, err := filepath.EvalSymlinks(request.CWD)
+	cwd, err := resolveWorkingDirectory(request.CWD, request.CWD)
 	if err != nil {
 		return nil, err
 	}
 	request.CWD = cwd
-	if info, err := os.Stat(cwd); err != nil || !info.IsDir() {
-		return nil, errors.New("execution cwd must be a directory")
-	}
 	e.mu.Lock()
 	if e.closed || e.draining || e.fence != nil {
 		err := errors.Join(errors.New("execution scope ended"), e.fence)
@@ -186,7 +202,6 @@ func (e *Engine) Execute(ctx context.Context, request Request, emit func(Event) 
 	if err := ValidateArguments(request.Operation, request.Args); err != nil {
 		return nil, err
 	}
-	var result map[string]any
 	switch request.Operation {
 	case "apply_patch":
 		var report string

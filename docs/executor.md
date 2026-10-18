@@ -81,6 +81,13 @@ retains the original process/mode. It cannot start a new command using session
 identity or cross owner/generation/Runtime boundaries. Sandbox TTY/input is
 available. Host TTY and nonempty input require explicit interactive authorization
 on the original command; output polling, interrupt and termination remain usable.
+For a Host PTY, set both `tty:true` and `interactive:true` on `exec_command`.
+The dependency is checked before shell initialization. Noninteractive servers and
+test commands can use pipes and a live session without allocating a PTY.
+
+`workdir` must name an existing directory before the shell starts. Create a new
+directory from an existing working directory in a separate call first. A missing
+or non-directory workdir rejects the command without creating files.
 
 `apply_patch` retains workspace/path checks. Protected patches run in a dedicated
 Go worker under the same OS policy, so direct Go file writes do not bypass it.
@@ -146,3 +153,7 @@ execution report `not_started`. Missing cleanup proof reports
 continuing the Agent. A selected boundary on a preparation failure is not evidence
 that workload code ran. Structured diagnostics and partial results survive Agent
 error conversion. Failed operations are not automatically replayed.
+
+Known TTY-argument and working-directory startup rejections report `not_started`
+with an explanation that the command did not run; ordinary shell failures retain
+their exit codes and partial output.
