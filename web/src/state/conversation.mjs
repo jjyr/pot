@@ -21,11 +21,14 @@ export function createConversationState() {
   return {epoch: 0, snapshot: null, drafts: new Map(), pending: new Map(), retries: new Map(), sends: new Map()};
 }
 
-export function beginSubscription(state) {
+export function beginSubscription(state,{retainPending=false}={}) {
   state.epoch++;
-  for (const [key, pending] of state.pending) state.retries.set(key, pending.request);
-  for (const send of state.sends.values())if(send.phase==='sending')send.phase='uncertain';
-  state.pending.clear();
+  if(retainPending){for(const pending of state.pending.values())pending.epoch=state.epoch;}
+  else{
+    for (const [key, pending] of state.pending) state.retries.set(key, pending.request);
+    for (const send of state.sends.values())if(send.phase==='sending')send.phase='uncertain';
+    state.pending.clear();
+  }
   state.snapshot = null;
   return state.epoch;
 }
@@ -74,6 +77,6 @@ export function settleSend(state, receipt, accepted, reason) {
   if(!receipt.request.user_message_id&&!state.snapshot?.messages.some(message=>message.request_id===receipt.request.request_id))state.sends.set(receipt.key,{request:receipt.request,phase:accepted?'thinking':reason?.status?'failed':'uncertain',detail:reason?.message||''});
   // An acknowledgement clears only the exact submitted draft. New typing and
   // drafts belonging to a different assistant survive late acknowledgements.
-  if (accepted && state.snapshot?.boot_id === receipt.request.boot_id && draft(state, receipt.key) === receipt.request.text) state.drafts.delete(receipt.key);
+  if (accepted && (!state.snapshot || state.snapshot.boot_id === receipt.request.boot_id) && draft(state, receipt.key) === receipt.request.text) state.drafts.delete(receipt.key);
   return true;
 }

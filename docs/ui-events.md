@@ -71,6 +71,12 @@ backend context. The native Space adapter reconnects with bounded backoff;
 browser reconnect is managed by EventSource. Reconnection starts from an
 authoritative snapshot.
 
+Returning to a visible window, restoring a page or regaining network connectivity
+also renews the conversation and change subscriptions and refreshes current
+projections. Paired focus/visibility events coalesce, and recovery reads do not
+overlap. Recovery retains drafts and in-flight send receipts without resending
+input; retired stream callbacks cannot overwrite the renewed subscription.
+
 The shared conversation state validates owner/Runtime/boot identity and rejects
 older cursors. Navigation generations fence late responses, including A → B → A.
 Snapshot refresh retains composer nodes, drafts and reading position. It follows

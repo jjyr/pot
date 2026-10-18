@@ -5,6 +5,26 @@ import {createEnterGuard, bindComposer} from '../../web/src/components/composer.
 import {messages,translate} from '../../web/src/locales/messages.mjs';
 import {projectChatReplies,replyFailureKind} from '../../web/src/state/chat-replies.mjs';
 import {taskElapsed} from '../../web/src/components/task-time.mjs';
+import {bindResumeRecovery} from '../../web/src/state/resume.mjs';
+
+const resumeHost=new EventTarget(),resumePage=new EventTarget(),resumeTimers=new Map();
+let resumeTimerID=0,recoveries=0,finishRecovery;
+resumeHost.setTimeout=callback=>{const id=++resumeTimerID;resumeTimers.set(id,callback);return id;};
+resumeHost.clearTimeout=id=>resumeTimers.delete(id);
+resumePage.visibilityState='hidden';
+const stopResume=bindResumeRecovery(()=>{recoveries++;return new Promise(resolve=>{finishRecovery=resolve;});},{window:resumeHost,document:resumePage});
+const flushResume=()=>{const callbacks=[...resumeTimers.values()];resumeTimers.clear();return Promise.all(callbacks.map(callback=>callback()));};
+resumeHost.dispatchEvent(new Event('online'));resumePage.dispatchEvent(new Event('visibilitychange'));
+assert.equal(resumeTimers.size,0,'Hidden pages wait until they return');
+resumePage.visibilityState='visible';resumePage.dispatchEvent(new Event('visibilitychange'));resumeHost.dispatchEvent(new Event('focus'));resumeHost.dispatchEvent(new Event('pageshow'));
+assert.equal(resumeTimers.size,1,'Visibility, focus and page restoration coalesce');
+const recovering=flushResume();assert.equal(recoveries,1);
+resumeHost.dispatchEvent(new Event('online'));assert.equal(resumeTimers.size,0,'Network recovery never overlaps an active recovery');
+finishRecovery();await recovering;
+resumeHost.dispatchEvent(new Event('online'));const onlineRecovery=flushResume();assert.equal(recoveries,2,'Network restoration renews subscriptions');finishRecovery();await onlineRecovery;
+resumeHost.dispatchEvent(new Event('focus'));stopResume();await flushResume();
+resumeHost.dispatchEvent(new Event('online'));resumePage.dispatchEvent(new Event('visibilitychange'));
+assert.equal(recoveries,2,'Disposal cancels queued recovery and removes listeners');
 
 const taskStart=1000000;
 for(const [seconds,zh,en]of [[0,'0秒','0s'],[59,'59秒','59s'],[60,'1分0秒','1m 0s'],[754,'12分34秒','12m 34s'],[3599,'59分59秒','59m 59s'],[3600,'1小时0分','1h 0m'],[86399,'23小时59分','23h 59m'],[86400,'1天0小时','1d 0h'],[183600,'2天3小时','2d 3h']]){
