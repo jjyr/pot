@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"github.com/jjyr/pot/internal/inbox"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -368,6 +369,77 @@ func TestPluginNotificationBatchCountsCanonicalPayloadBytes(t *testing.T) {
 		var state string
 		if err = m.db.QueryRow("SELECT state FROM agent_messages WHERE id=?", id).Scan(&state); err != nil || state != "processing" {
 			t.Fatal(state, err)
+		}
+	}
+}
+
+// Default initialization must lose to every persisted owner choice and must not
+// touch checkpoint/recipient history, even when several callers initialize.
+func TestPluginDefaultInitializationConcurrent(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "mail.sqlite")
+	m, err := OpenMailbox(path, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	other, err := OpenMailbox(path, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	var wg sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		store := m
+		if i%2 == 1 {
+			store = other
+		}
+		go func() {
+			defer wg.Done()
+			if err := store.EnsureBackground(ctx, "github", "first"); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	bindings, err := m.Backgrounds(ctx)
+	if err != nil || len(bindings) != 1 || bindings[0].Revision != 1 || !bindings[0].Enabled || bindings[0].Assistant != "first" {
+		t.Fatal(bindings, err)
+	}
+	b := bindings[0]
+	if err = m.CommitBackground(ctx, b, core.PluginIdentity{ID: "github", Version: "1", Digest: "installed"}, core.BackgroundResponse{State: json.RawMessage(`{"account":"old","baseline":true}`), Status: "baseline", DelaySeconds: 90}, 100); err != nil {
+		t.Fatal(err)
+	}
+	b.Enabled = false
+	b.Assistant = "chosen"
+	if err = m.ConfigureBackground(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.EnsureBackground(ctx, "github", "different"); err != nil {
+		t.Fatal(err)
+	}
+	bindings, err = m.Backgrounds(ctx)
+	if err != nil || bindings[0].Enabled || bindings[0].Assistant != "chosen" || bindings[0].Revision != 2 || string(bindings[0].State) != `{"account":"old","baseline":true}` {
+		t.Fatal(bindings, err)
+	}
+	if err = m.ConfigureBackground(ctx, b); err == nil {
+		t.Fatal("stale draft accepted")
+	}
+	// An explicit off choice before any assistant exists is initialized intent.
+	if err = m.ConfigureBackground(ctx, BackgroundBinding{ID: "waiting", Enabled: false, Config: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.EnsureBackground(ctx, "waiting", "late-assistant"); err != nil {
+		t.Fatal(err)
+	}
+	bindings, err = m.Backgrounds(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, next := range bindings {
+		if next.ID == "waiting" && (next.Enabled || next.Assistant != "" || next.Revision != 1) {
+			t.Fatal(next)
 		}
 	}
 }

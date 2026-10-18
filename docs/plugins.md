@@ -157,7 +157,11 @@ no plugin-specific delivery timer, rate table or model role. `queued` and
 
 Statuses are stable identifiers: `ready`, `baseline`, `backoff`, `rate_limited`,
 `authorization`, `permission`, `overflow`; the host also reports `disabled` and
-`unavailable`. Protocol/process/acceptance failures leave the old checkpoint and
+`unavailable`. The settings projection also distinguishes `pending`,
+`waiting_assistant`, `assistant_missing` and `plugin_missing` from known host
+configuration state. Plugin discovery failures retain their raw diagnostic in
+settings details; runtime status identifiers and queue counts are also available
+there. Protocol/process/acceptance failures leave the old checkpoint and
 schedule a five-minute retry. The plugin receives that old checkpoint again;
 there is no false success receipt. Owner management uses authenticated
 `GET /api/v1/plugin-notifications` and
@@ -181,12 +185,35 @@ independent Controls/devices. The owner must inspect interrupted conversations.
 
 ### GitHub notifications
 
-In **Settings → Third-party accounts**, connect GitHub, then enable GitHub
-notifications, select an assistant and save. The assistant needs an AI profile.
-Optional filters are comma-separated `owner/repo` names and notification reasons.
+In **Settings → Third-party accounts**, the connected GitHub row starts collapsed.
+Open it once to see all notification settings and the separate sign-out action.
+Notifications are enabled automatically for an unconfigured connected account,
+with the first assistant in this Control's persistent creation order as recipient.
+No assistant means waiting: the existing background loop binds the first one when
+available. An existing binding (including disabled or a missing recipient) is never
+auto-replaced. Defaults are inserted atomically into the existing configuration
+store; concurrent initialization cannot overwrite an explicit save. Account changes
+retain configuration, while the plugin's account identity resets its own baseline.
+The assistant needs an AI profile. A missing plugin, missing recipient or unavailable
+credentials is shown as a failure/waiting state rather than active polling.
+
+The account row summarizes the saved configuration and runtime status. Drafts keep
+the revision they started with, survive background updates and language changes,
+and require an explicit save; an outdated revision is rejected without discarding
+the draft. Expansion lasts for this settings visit and resets on account changes.
+All fields are directly visible in the expanded account, without advanced sections.
+Optional filters are comma-separated `owner/repo` names and labeled notification
+reasons, with a free-form field preserving other API/configured values.
 Blank reason filters select `mention`, `team_mention`, `review_requested`,
 `author`, `comment`, `subscribed`, `participating`. `subscribed` can include watched
-threads; restrict reasons/repositories to reduce noise.
+threads; restrict reasons/repositories to reduce noise. API reason values are
+matched locally;
+labels cover known GitHub reasons and a comma-separated field retains custom
+values. Filters do not add API reason parameters or change the default set.
+The one-time history request carries `existing` (a nonce) and `existing_account`
+(the connected GitHub identity). Consumed nonces remain consumed across account
+resets. Legacy unscoped requests cannot cross account identities, including on
+failed exchanges, so reconnecting does not silently replay history.
 
 The plugin uses only GET requests to the GitHub REST API. It requests all
 notification thread states (including read threads), follows pagination, respects

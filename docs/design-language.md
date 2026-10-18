@@ -260,8 +260,9 @@ Pause/Resume, Usage, task details and cancellation. Machine/model identifiers li
 in task details rather than the status row. Ended tasks replace the active composer
 with a compact outcome caption; any unsent draft remains visible read-only.
 
-Main Chat shows a neutral Background tasks · N region below only the latest
-assistant message. It previews three running or approval-waiting tasks, with a
+Main Chat shows a neutral Background tasks · N region after the current message
+window. The region remains outside recycled message rows, preserving task focus
+and expansion while long-chat history is virtualized. It previews three running or approval-waiting tasks, with a
 full-width Expand remaining tasks row when more are available. Expand and Collapse
 operate in place, using Chat's scroll container. They preserve the reading anchor
 rather than jumping to the bottom. Expansion is scoped to Control, Space and

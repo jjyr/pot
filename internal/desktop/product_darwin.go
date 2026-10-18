@@ -41,6 +41,7 @@ type Service struct {
 	reads                     *attention.Store
 	notificationStore         *systemnotifications.Store
 	notifier                  *notifications.NotificationService
+	notificationAuthorization *systemnotifications.Authorization
 	notificationViews         map[string]NotificationView
 	pendingNotification       map[string]interface{}
 	attentionWake             chan struct{}
@@ -121,6 +122,10 @@ func Run(root string) error {
 	}
 	notifier := notifications.New()
 	service := &Service{notificationStore: notificationStore, notifier: notifier, notificationViews: map[string]NotificationView{}, ctx: ctx, api: api, subscriptions: map[string]context.CancelFunc{}, reads: reads, attentionWake: make(chan struct{}, 1)}
+	service.notificationAuthorization = &systemnotifications.Authorization{
+		Store: notificationStore, Status: notificationAuthorization,
+		Request: func() error { _, err := notifier.RequestNotificationAuthorization(); return err },
+	}
 	localClient := socket.Endpoint.Client()
 	localClient.Timeout = 0
 	manager, err := spaces.Open(ctx, spaces.Options{Path: filepath.Join(runtime.Root.Path, "app-spaces.json"), Local: spaces.NewLocalHTTPClient(localClient, socket.Endpoint.Token, api.RuntimeID), LocalID: api.RuntimeID, LocalName: "This Mac", OnStreamReset: func(space string) {

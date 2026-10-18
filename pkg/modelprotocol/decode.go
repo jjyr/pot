@@ -122,11 +122,22 @@ func (d *Decoder) Push(raw json.RawMessage) (result StreamEvent, err error) {
 		case "response.completed":
 			if output := array(get(e, "response", "output")); output != nil {
 				d.blocks = map[int]map[string]any{}
+				var text strings.Builder
 				for i, v := range output {
 					if obj(v) == nil {
 						return result, fmt.Errorf("invalid Responses output item")
 					}
 					d.blocks[i] = obj(v)
+					if obj(v)["type"] == "message" {
+						for _, part := range array(obj(v)["content"]) {
+							text.WriteString(str(obj(part)["text"]))
+						}
+					}
+				}
+				// A final snapshot may supply text that was not streamed. Use the
+				// same concatenation as Finish and emit only its missing suffix.
+				if strings.HasPrefix(text.String(), d.text.String()) {
+					delta = strings.TrimPrefix(text.String(), d.text.String())
 				}
 			}
 			d.terminal = true

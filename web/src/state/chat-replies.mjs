@@ -11,14 +11,14 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
     if(message.role==='assistant'){const input=message.reply_to||currentInput;replyInputs.set(message.id,input);latestReplies.set(input,message.id);}
   }
   for(const message of messages){
-    if(message.role==='system'&&message.request_id?.startsWith('pot-result-'))continue;
+    if(message.context_only&&message.role!=='tool' || message.role==='system'&&message.request_id?.startsWith('pot-result-'))continue;
     const row={...message,viewKey:message.request_id?`input:${message.request_id}`:message.id};
     if(message.role==='assistant'){
       const input=inputs.get(replyInputs.get(message.id));
       // Tool-only model rounds have no prose to keep. The next output adopts
       // their waiting bubble instead of leaving empty cards in the transcript.
       if(!message.text&&message.status==='complete'&&(!snapshot.running||input?.id!==snapshot.turn_id||latestReplies.get(input?.id)!==message.id))continue;
-      row.inputID=input?.id;
+      row.inputID=input?.id||message.reply_to;
       if(input&&!firstReplies.has(input.id)){
         row.viewKey=`reply:${input.request_id||input.id}`;firstReplies.add(input.id);
       }

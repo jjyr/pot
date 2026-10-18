@@ -31,11 +31,26 @@ func (s *Service) SystemNotificationStatus() map[string]any {
 	return map[string]any{"enabled": s.notificationStore.Enabled(), "permission": notificationAuthorization()}
 }
 func (s *Service) RequestSystemNotificationPermission() (map[string]any, error) {
-	// Called only from the explicit settings action, never from startup or events.
-	if _, err := s.notifier.RequestNotificationAuthorization(); err != nil {
+	if err := s.notificationAuthorization.Authorize(); err != nil {
 		return nil, err
 	}
 	return s.SystemNotificationStatus(), nil
+}
+
+// NotificationMainReady is called after the main UI has loaded its directory
+// and painted. Tray initialization cannot consume or start the automatic attempt.
+func (s *Service) NotificationMainReady(surface string) (map[string]any, error) {
+	if surface != "main" {
+		return s.SystemNotificationStatus(), nil
+	}
+	if !s.main.IsVisible() {
+		status := s.SystemNotificationStatus()
+		status["deferred"] = true
+		return status, nil
+	}
+	err := s.notificationAuthorization.MainReady(surface)
+	s.app.Event.Emit("pot:notification-preference")
+	return s.SystemNotificationStatus(), err
 }
 func (s *Service) SetSystemNotificationsEnabled(enabled bool) error {
 	if err := s.notificationStore.SetEnabled(enabled); err != nil {
