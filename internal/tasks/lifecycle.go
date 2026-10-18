@@ -155,6 +155,9 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 		}
 		current.Info.RemoteWaiting = false
 		current.Error = ""
+		if current.Info.StartedAtMS == 0 {
+			current.Info.StartedAtMS = run.StartedAtMS
+		}
 		switch run.Phase {
 		case runner.Accepted:
 			current.Info.Phase = protocol.TaskQueued
