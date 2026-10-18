@@ -323,7 +323,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     unavailable.hidden = route === 'chat';
     if (!client.production) unavailable.textContent = t('unavailable');
     // Search is window state and survives narrow conversation navigation/resizes.
-    const nextDirectorySignature = JSON.stringify([locale,selectedAssistant?.space_id,selectedAssistant?.id,assistants,state.snapshot?.assistants,replies.records()]);
+    const nextDirectorySignature = JSON.stringify([locale,selectedAssistant?.space_id,selectedAssistant?.id,spaces,assistants,state.snapshot?.assistants,replies.records()]);
     if (nextDirectorySignature !== directorySignature || !directory.childElementCount) {
     directorySignature=nextDirectorySignature;
     const searchValue = directory.querySelector('input')?.value || '';
@@ -342,8 +342,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     for (const item of items) {
       const selected = (!client.production&&item.id==='main') || selectedAssistant?.id === item.id && selectedAssistant?.space_id === item.space_id;
       const row = el('button', `assistant-row${selected ? ' is-selected' : ''}`); row.type = 'button';row.dataset.viewKey=JSON.stringify([item.space_id,item.id]);row.dataset.searchName=item.name.toLowerCase();
-      row.append(assistantAvatar(item,32)); const labels = el('span', 'assistant-labels'); const name = el('span', 'assistant-name');name.append(el('span','assistant-title',item.name));
-      const badge=el('span','owner-badge badge-icon');badge.title=item.space_name||t(item.space_kind==='remote'?'remote':'local');badge.append(icon(item.space_kind==='remote'?'cloud':'machines'));name.append(badge);
+      row.append(assistantAvatar(item,32)); const labels = el('span', 'assistant-labels'); const name = el('span', 'assistant-name');const title=el('span','assistant-title',item.name);title.title=item.name;name.append(title);
+      if(spaces.length>1){const location=el('span','assistant-location',item.space_name||t(item.space_kind==='remote'?'remote':'local'));location.title=location.textContent;name.append(location);}
       const unread=replies.unread(controlOf(item),item.id,item.reply_count||0);if(unread){const badge=el('span','unread-badge',unread>9?'9+':String(unread));badge.title=String(unread);badge.setAttribute('aria-label',`${unread} ${locale==='zh-CN'?'条未读回复':'unread replies'}`);name.append(badge);row.classList.add('has-unread');}
       const pending=Number(item.pending_approvals)||0;
       if(pending){row.classList.add('needs-approval');labels.append(name,el('span','assistant-approval-status',`${t('tool.awaitingApproval')} · ${pending}`));}

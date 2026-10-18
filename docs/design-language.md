@@ -162,8 +162,12 @@ Configuration request reconciliation is described in
 
 ### Assistants
 
-The directory and wide pane share rows containing avatar, name, ownership badge,
-one-line preview and unread count. Search filters names without changing the
+The directory and wide pane share rows containing avatar, name, one-line preview
+and unread count. With more than one configured Space, a muted Space name follows
+the assistant name; a single Space needs no ownership label. These labels remain
+visible when a configured Space is offline, and execution machines within a Space
+do not affect their visibility. Long names truncate with full-text tooltips, while
+unread counts stay at the trailing edge. Search filters names without changing the
 selected conversation. Registry order remains stable; duplicate names include
 the Space name. Initial history does not count as unread. Opening the conversation
 clears its indicator. Offline, approval, configuration and activity previews
