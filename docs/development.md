@@ -71,6 +71,11 @@ mise run licenses
 mise run build:linux
 ```
 
+`test:i18n` checks shared catalog key parity, nonempty translations and matching
+ordered `{parameter}` markers. It does not scan for hardcoded UI text or verify
+runtime language changes; follow the [i18n rules](internationalization.md) for
+those checks.
+
 `test:sandbox` runs real file, socket, network, terminal, plugin and cleanup tests with the pinned SDK. `test:sandbox-linux` uses a disposable non-root Docker host with namespace restrictions relaxed only on the outer test container; only test assets are mounted read-only.
 
 `check:go` verifies formatting, vet and architectural imports. `test:go` uses the
