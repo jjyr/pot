@@ -1,3 +1,5 @@
+import {createMermaidBlock} from './mermaid.mjs';
+
 // Native DOM Markdown. Raw HTML is literal; link protocols are allowlisted.
 export function allowedLink(value) {
   try { return ['http:', 'https:'].includes(new URL(value).protocol); }
@@ -45,7 +47,16 @@ export function renderMarkdown(source,options={}) {
   for(let index=0;index<lines.length;) {
     const line=lines[index];if(!line.trim()){index++;continue;}
     const fence=line.match(/^\s*(`{3,}|~{3,})(.*)$/);
-    if(fence){const pre=element('pre'),language=element('span',fence[2].trim());language.className='code-language';const code=element('code'),body=[];for(index++;index<lines.length&&!lines[index].trimStart().startsWith(fence[1]);index++)body.push(lines[index]);index++;code.textContent=body.join('\n');pre.append(language,code);result.append(pre);continue;}
+    if(fence){
+      const pre=element('pre'),language=element('span',fence[2].trim()),code=element('code'),body=[];
+      const closing=new RegExp('^\\s*'+fence[1][0]+'{'+fence[1].length+',}\\s*$');
+      for(index++;index<lines.length&&!closing.test(lines[index]);index++)body.push(lines[index]);
+      const closed=index<lines.length;index++;
+      language.className='code-language';code.textContent=body.join('\n');pre.append(language,code);
+      // Incomplete streamed fences remain ordinary code until their closing line.
+      result.append(closed&&fence[2].trim().split(/\s+/)[0].toLowerCase()==='mermaid'?createMermaidBlock(code.textContent,pre):pre);
+      continue;
+    }
     const heading=line.match(/^ {0,3}(#{1,6})\s+(.+?)(?:\s+#+)?$/);
     if(heading){const node=element(`h${heading[1].length}`);inline(node,heading[2],0,options);result.append(node);index++;continue;}
     if(/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)){result.append(element('hr'));index++;continue;}
