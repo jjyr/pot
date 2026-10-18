@@ -1,5 +1,12 @@
 export const messages = {
   en: {
+    'continuation.title':'Continue the interrupted task',
+    'continuation.hint':'Continue from saved progress. Completed actions are kept; the incomplete reply is regenerated.',
+    'continuation.recoveryHint':'Pot will check saved execution results before continuing from the last confirmed progress.',
+    'continuation.continue':'Continue task', 'continuation.pending':'Restoring progress…',
+    'continuation.unresolved':'Some tool results or process shutdowns are still unconfirmed. Pot kept your progress. Review the details before trying again.',
+    'continuation.stale':'This task has changed. Refresh the conversation to see its current state.',
+    'continuation.failed':'Could not continue the task. Your saved progress and draft are kept. Try again.',
     'attachments.add':'Add attachment', 'attachments.images':'Images', 'attachments.pdf':'PDF',
     'attachments.modelUnsupported':'Current model does not support image or PDF uploads',
     'attachments.imagesUnsupported':'Current model does not support images', 'attachments.pdfUnsupported':'Current model does not support PDF uploads',
@@ -134,6 +141,13 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'continuation.title':'继续中断的任务',
+    'continuation.hint':'从保存的进度继续，保留已完成的操作，重新生成未完成的回复。',
+    'continuation.recoveryHint':'Pot 会先核对已保存的执行结果，再从最后确认的进度继续。',
+    'continuation.continue':'继续任务', 'continuation.pending':'正在恢复进度…',
+    'continuation.unresolved':'部分工具结果或进程停止状态尚未确认。Pot 已保留进度，请查看详情后重试。',
+    'continuation.stale':'任务状态已变化，请刷新会话查看最新状态。',
+    'continuation.failed':'暂时无法继续任务，已保存的进度和草稿均保留，请重试。',
     'attachments.add':'添加附件', 'attachments.images':'图片', 'attachments.pdf':'PDF',
     'attachments.modelUnsupported':'当前模型不支持图片或 PDF 上传',
     'attachments.imagesUnsupported':'当前模型不支持图片', 'attachments.pdfUnsupported':'当前模型不支持 PDF 上传',

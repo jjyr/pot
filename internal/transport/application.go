@@ -344,6 +344,12 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 				return nil, err
 			}
 			return c.RetryFailed(ctx, body.RequestID, body.UserMessageID)
+		case "/api/v1/turn/continue":
+			var body control.ContinueMainCommand
+			if err = decode(r.Body, &body); err != nil {
+				return nil, err
+			}
+			return s.ContinueMain(ctx, owner, body)
 		case "/api/v1/messages":
 			var body protocol.SendMessage
 			if err = decode(r.Body, &body); err != nil {

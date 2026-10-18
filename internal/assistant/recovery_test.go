@@ -113,22 +113,29 @@ func TestMainRecoveryUsesExactCheckpointAndOriginalResult(t *testing.T) {
 		t.Fatal(result, calls.Load())
 	}
 }
-func TestMainRecoveryUnknownModelNeverClearsFence(t *testing.T) {
+func TestMainRecoveryAbandonsInterruptedModelAfterCleanup(t *testing.T) {
 	checkpoint := recoveryCheckpoint()
 	id := "model-original"
 	checkpoint.ModelRequestID = &id
-	c, _ := stoppedMainFixture(t, checkpoint, true)
+	c, calls := stoppedMainFixture(t, checkpoint, true)
 	ctx := context.Background()
 	state, err := c.Recovery(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = c.ReconcileRecovery(ctx, *state, nil, true); !errors.Is(err, agent.ErrUncertainEffects) {
+	if err = c.ReconcileRecovery(ctx, *state, nil, false); !errors.Is(err, core.ErrCleanupUnconfirmed) {
 		t.Fatal(err)
 	}
-	if _, err = c.Send(ctx, protocol.SendMessage{RequestID: "new", ConversationID: "main", Text: "blocked"}); !errors.Is(err, agent.ErrUncertainEffects) {
+	if err = c.ReconcileRecovery(ctx, *state, nil, true); err != nil {
 		t.Fatal(err)
 	}
+	if calls.Load() != 0 {
+		t.Fatal("recovery resampled the old request")
+	}
+	if _, err = c.Send(ctx, protocol.SendMessage{RequestID: "new", ConversationID: "main", Text: "continue"}); err != nil {
+		t.Fatal(err)
+	}
+	waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil })
 }
 
 func TestMainCleanupProofComesFromOriginalCleanupService(t *testing.T) {
@@ -141,8 +148,56 @@ func TestMainCleanupProofComesFromOriginalCleanupService(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil })
-	state, err := c.Recovery(ctx)
-	if err != nil || !state.CleanupConfirmed || cleanup.Load() != 1 {
-		t.Fatal(state, cleanup.Load(), err)
+	proof, exists, err := c.store.Get(ctx, "conversation.cleanup.original")
+	if err != nil || !exists || proof == "" || cleanup.Load() != 1 {
+		t.Fatal(exists, cleanup.Load(), err)
+	}
+}
+
+func TestCancelledModelCanContinueAfterRestartWithExactAttempt(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "conversation.sqlite")
+	var cleanup, calls atomic.Int64
+	started := make(chan struct{})
+	c := conversationFixture(t, path, "first-boot", func(ctx context.Context, _ core.ModelRequest) (io.ReadCloser, error) {
+		calls.Add(1)
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}, &cleanup)
+	accepted, err := c.Send(ctx, protocol.SendMessage{RequestID: "original", ConversationID: "main", Text: "keep working"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if err := c.Cancel(ctx, protocol.CancelTurn{RequestID: "stop", UserMessageID: accepted.MessageID}); err != nil {
+		t.Fatal(err)
+	}
+	waitSnapshot(t, c, func(snapshot protocol.Snapshot) bool { return snapshot.Turn == nil })
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	c = conversationFixture(t, path, "second-boot", func(context.Context, core.ModelRequest) (io.ReadCloser, error) {
+		calls.Add(1)
+		return replySSE("continued"), nil
+	}, &cleanup)
+	snapshot, err := c.Snapshot(ctx)
+	if err != nil || snapshot.Continuation == nil || snapshot.Continuation.RecoveryRequired || snapshot.Continuation.AttemptID != "original" {
+		t.Fatal(snapshot, err)
+	}
+	if _, err := c.RetryContinuation(ctx, "stale", accepted.MessageID, "another-attempt"); err == nil {
+		t.Fatal("stale attempt accepted")
+	}
+	if calls.Load() != 1 {
+		t.Fatal("stale action started a model", calls.Load())
+	}
+	if _, err := c.RetryContinuation(ctx, "continue", accepted.MessageID, "original"); err != nil {
+		t.Fatal(err)
+	}
+	waitSnapshot(t, c, func(snapshot protocol.Snapshot) bool {
+		return snapshot.Turn == nil && snapshot.Agent.Phase == protocol.Ready
+	})
+	if calls.Load() != 2 {
+		t.Fatal("cancelled input did not continue", calls.Load())
 	}
 }

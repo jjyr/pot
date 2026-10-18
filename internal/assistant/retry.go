@@ -4,16 +4,26 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
-// RetryFailed only resumes a confirmed, failed model boundary. It keeps the
-// original user message, checkpoint, uploads and tool receipts. Unknown network
-// outcomes retain the existing recovery fence.
+// RetryFailed resumes a failed model boundary after execution cleanup. It keeps
+// the original user message, checkpoint, uploads and tool receipts, discarding
+// incomplete model output. Uncertain tool effects retain the recovery fence.
 func (c *Conversation) RetryFailed(ctx context.Context, id, target string) (protocol.SendMessageAccepted, error) {
+	return c.retryFailed(ctx, id, target, "")
+}
+
+// RetryContinuation also binds a UI action to the exact displayed interruption.
+func (c *Conversation) RetryContinuation(ctx context.Context, id, target, attempt string) (protocol.SendMessageAccepted, error) {
+	return c.retryFailed(ctx, id, target, attempt)
+}
+
+func (c *Conversation) retryFailed(ctx context.Context, id, target, attempt string) (protocol.SendMessageAccepted, error) {
 	if !core.Identifier(id) || !core.Identifier(target) {
 		return protocol.SendMessageAccepted{}, errors.New("invalid retry identity")
 	}
@@ -28,8 +38,14 @@ func (c *Conversation) RetryFailed(ctx context.Context, id, target string) (prot
 		}
 		return protocol.SendMessageAccepted{MessageID: target, Duplicate: true}, nil
 	}
-	if c.closed || c.blocked || c.turn != nil {
+	if c.closed || c.turn != nil {
 		return protocol.SendMessageAccepted{}, errors.New("conversation cannot retry this turn")
+	}
+	if c.blocked {
+		if attempt != "" && (c.recovery == nil || c.recovery.UserMessageID != target || c.recovery.attemptID() != attempt) {
+			return protocol.SendMessageAccepted{}, errors.New("continuation attempt changed")
+		}
+		return protocol.SendMessageAccepted{}, agent.ErrUncertainEffects
 	}
 	raw, found, err := c.store.Get(ctx, "conversation.retry")
 	if err != nil {
@@ -45,6 +61,9 @@ func (c *Conversation) RetryFailed(ctx context.Context, id, target string) (prot
 	if turn.UserMessageID != target {
 		return protocol.SendMessageAccepted{}, errors.New("retry target changed")
 	}
+	if attempt != "" && turn.attemptID() != attempt {
+		return protocol.SendMessageAccepted{}, errors.New("continuation attempt changed")
+	}
 	body, err := c.store.LoadContext(ctx)
 	if err != nil {
 		return protocol.SendMessageAccepted{}, err
@@ -55,7 +74,7 @@ func (c *Conversation) RetryFailed(ctx context.Context, id, target string) (prot
 			return protocol.SendMessageAccepted{}, err
 		}
 	}
-	if checkpoint.Started != nil || checkpoint.ModelRequestID != nil || len(checkpoint.Pending) > 0 {
+	if checkpoint.Started != nil || checkpoint.ModelRequestID != nil {
 		return protocol.SendMessageAccepted{}, agent.ErrUncertainEffects
 	}
 	for i := len(c.messages) - 1; i >= 0; i-- {
@@ -84,6 +103,7 @@ func (c *Conversation) RetryFailed(ctx context.Context, id, target string) (prot
 		return protocol.SendMessageAccepted{}, errors.New("assistant configuration unavailable")
 	}
 	turn.Resuming = checkpoint.LastRequest == turn.Request.RequestID
+	turn.AttemptID = id
 	turn.BootID = c.options.BootID
 	turn.Generation = c.thread.Generation
 	turn.State = "queued"
@@ -111,4 +131,36 @@ func (c *Conversation) RetryFailed(ctx context.Context, id, target string) (prot
 	}
 	c.input <- turn.Request
 	return protocol.SendMessageAccepted{MessageID: target}, nil
+}
+
+func (c *Conversation) continuationLocked() *protocol.Continuation {
+	if c.turn != nil {
+		return nil
+	}
+	turn := c.recovery
+	if !c.blocked {
+		raw, exists, err := c.store.Get(context.WithoutCancel(c.ctx), "conversation.retry")
+		if err != nil || !exists || raw == "" {
+			return nil
+		}
+		var retry savedTurn
+		if json.Unmarshal([]byte(raw), &retry) != nil {
+			return nil
+		}
+		turn = &retry
+	}
+	if turn == nil || strings.HasPrefix(turn.Request.RequestID, "pot-result-") {
+		return nil
+	}
+	// Old failed inputs must not become retryable again after newer input.
+	for i := len(c.messages) - 1; i >= 0; i-- {
+		message := c.messages[i]
+		if message.Role == protocol.User && !message.Steering && !message.Queued {
+			if !turn.includes(message.ID) {
+				return nil
+			}
+			return &protocol.Continuation{UserMessageID: turn.UserMessageID, AttemptID: turn.attemptID(), RecoveryRequired: c.blocked}
+		}
+	}
+	return nil
 }

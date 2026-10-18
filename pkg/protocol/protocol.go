@@ -164,6 +164,15 @@ type Snapshot struct {
 	ConversationID string         `json:"conversation_id" required:"true"`
 	Messages       []Message      `json:"messages" required:"true"`
 	Turn           *TurnState     `json:"turn"`
+	Continuation   *Continuation  `json:"continuation"`
+}
+
+// Continuation binds an explicit user action to the saved original input.
+// RecoveryRequired means Control must reconcile receipts and cleanup first.
+type Continuation struct {
+	UserMessageID    string `json:"user_message_id" required:"true"`
+	AttemptID        string `json:"attempt_id" required:"true"`
+	RecoveryRequired bool   `json:"recovery_required" required:"true"`
 }
 type Event struct {
 	EventID string         `json:"event_id" required:"true"`

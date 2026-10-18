@@ -102,11 +102,8 @@ func (s *Service) RecoverMain(ctx context.Context, owner string, q MainRecoveryC
 		if err = core.DecodeJSON(state.Context, &checkpoint); err != nil {
 			return out, err
 		}
-		if (checkpoint.Started != nil || len(operations) > 0) && checkpoint.LastRequest != state.RequestID {
+		if (checkpoint.Started != nil || checkpoint.ModelRequestID != nil || len(operations) > 0) && checkpoint.LastRequest != state.RequestID {
 			out.Unresolved = append(out.Unresolved, "checkpoint differs from original recovery turn")
-		}
-		if checkpoint.ModelRequestID != nil {
-			out.Unresolved = append(out.Unresolved, "original model outcome is uncertain; request remains fenced")
 		}
 		if checkpoint.Started != nil {
 			if _, known := values[*checkpoint.Started]; !known {

@@ -104,21 +104,46 @@ func TestAttachmentOnlySteeringDeduplicatesAndReachesNextModel(t *testing.T) {
 	}
 }
 
-func TestRetryFailedCannotReplayUnknownModelOutcome(t *testing.T) {
+func TestRetryFailedModelTransportRetainsOriginalInput(t *testing.T) {
 	var calls, cleanup atomic.Int64
 	c := conversationFixture(t, filepath.Join(t.TempDir(), "conversation.sqlite"), "boot", func(context.Context, core.ModelRequest) (io.ReadCloser, error) {
-		calls.Add(1)
-		return nil, errors.New("connection lost after sending")
+		if calls.Add(1) == 1 {
+			return nil, errors.New("connection lost after sending")
+		}
+		return replySSE("recovered"), nil
 	}, &cleanup)
 	receipt, err := c.Send(context.Background(), protocol.SendMessage{RequestID: "original", ConversationID: "main", Text: "hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil && len(s.Messages) == 2 })
-	if _, err = c.RetryFailed(context.Background(), "retry", receipt.MessageID); err == nil {
-		t.Fatal("uncertain model outcome replayed")
+	if _, err = c.RetryFailed(context.Background(), "retry", receipt.MessageID); err != nil {
+		t.Fatal(err)
 	}
-	if calls.Load() != 1 {
-		t.Fatal("unexpected duplicate model request", calls.Load())
+	waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil && s.Agent.Phase == protocol.Ready })
+	if calls.Load() != 2 {
+		t.Fatal("model boundary was not retried", calls.Load())
+	}
+	if duplicate, err := c.RetryFailed(context.Background(), "retry", receipt.MessageID); err != nil || !duplicate.Duplicate || calls.Load() != 2 {
+		t.Fatal("retry receipt lost", duplicate, err, calls.Load())
+	}
+	raw, err := c.store.LoadContext(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var checkpoint struct {
+		Messages []modelprotocol.Message `json:"messages"`
+	}
+	if err := json.Unmarshal(raw, &checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	inputs := 0
+	for _, message := range checkpoint.Messages {
+		if message.Role == "user" && message.Text == "hello" {
+			inputs++
+		}
+	}
+	if inputs != 1 {
+		t.Fatal("retry duplicated original input", inputs)
 	}
 }

@@ -109,6 +109,13 @@ When allowance is sufficient and automatic continuation enabled, the scheduler r
 
 Resume reuses the saved Agent context, without replaying original prompts/tools. The model still chooses subsequent tools; this is not an exactly-once guarantee for external actions. Missing sessions, unconfirmed tool cleanup, or unknown crash side effects cannot retry automatically.
 
+Model connection failures and incomplete streams preserve the last committed
+context for an explicit failed-turn retry. An interrupted sample's uncommitted
+output is discarded; already completed tool receipts remain in history. A new
+sample uses a new request ID and reservation. The old sample's unknown usage
+retains its conservative reservation until the allowance window ends; making a
+turn retryable does not mark that request rejected or refund its allowance.
+
 ## API
 
 Usage query/policy/recovery APIs require the main Runtime token; workers cannot read the global ledger or change policies. Internal compaction endpoints validate session authority.

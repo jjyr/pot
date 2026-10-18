@@ -218,6 +218,7 @@ func TestAttachmentPublicationAllowlist(t *testing.T) {
 		{"POST", "/api/v1/attachments", true},
 		{"GET", "/api/v1/attachments/file-id", true},
 		{"POST", "/api/v1/turn/retry", true},
+		{"POST", "/api/v1/turn/continue", true},
 		{"GET", "/api/v1/attachments", false},
 		{"DELETE", "/api/v1/attachments/file-id", false},
 		{"GET", "/api/v1/attachments/../../private", false},

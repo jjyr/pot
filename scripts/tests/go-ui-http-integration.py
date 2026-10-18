@@ -431,6 +431,11 @@ def run(binary, base, env, cli_command):
             )
             if '"passed":true' not in replies:
                 raise RuntimeError("Reply bubble browser contracts did not pass")
+            continuation = browser_cli(
+                "run-code", (ROOT / "scripts/tests/go-ui-continuation-browser.js").read_text()
+            )
+            if '"passed":true' not in continuation:
+                raise RuntimeError("Interrupted turn continuation contracts did not pass")
             mermaid = browser_cli(
                 "run-code", (ROOT / "scripts/tests/go-ui-mermaid-browser.js").read_text()
             )
