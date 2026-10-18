@@ -104,7 +104,7 @@ func modelPage(ctx context.Context, db queryDB, q Query, atMS int64, zone *time.
 func requestPage(ctx context.Context, db queryDB, q Query, zone *time.Location) (Page, error) {
 	items := []RequestRecord{}
 
-	rows, err := db.QueryContext(ctx, `SELECT r.id,r.turn_id,r.at,r.model,r.input,r.output,r.cache,r.state,r.compaction_id,COALESCE(t.agent,'unknown'),COALESCE(t.provider,'unknown'),COALESCE(t.profile_id,''),t.generation FROM requests r LEFT JOIN request_routes t ON t.request_id=r.id WHERE r.scope=? ORDER BY r.at,r.id LIMIT 21 OFFSET ?`, q.Scope, q.Offset)
+	rows, err := db.QueryContext(ctx, `SELECT r.id,r.turn_id,r.at,r.model,r.input,r.output,r.cache,r.state,r.compaction_id,COALESCE(t.agent,'unknown'),COALESCE(t.provider,'unknown'),COALESCE(t.profile_id,''),t.generation FROM requests r LEFT JOIN request_routes t ON t.request_id=r.id WHERE r.scope=? ORDER BY r.at DESC,r.id DESC LIMIT 21 OFFSET ?`, q.Scope, q.Offset)
 	if err != nil {
 		return Page{}, err
 	}

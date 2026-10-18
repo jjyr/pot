@@ -348,6 +348,10 @@ apply_patch remains workspace-scoped. Global installation/update is performed on
 
 ## Message references and machine labels
 
+Selected Chat excerpts use structured message IDs and quote data, independently
+of the slash selectors below. Main can read referenced original messages by ID
+after compaction. See [Chat references](chat-references.md).
+
 App and Web autocomplete standalone `/` words at the caret using authenticated,
 assistant-scoped `/api/v1/completions` metadata. Candidates include registered
 machines, Control-managed labels, and the assistant's current global Skill catalog. Project Skills are discovered by the

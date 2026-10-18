@@ -12,11 +12,11 @@ export function attachmentProblem(items,caps,zh=false) {
   }
   return '';
 }
-export function failedAttachmentInput(snapshot) {
+export function failedMessageInput(snapshot) {
   if(!snapshot||snapshot.running)return null;
   const messages=snapshot.messages||[],anchor=messages.findLast(m=>m.role==='user'&&!m.steering);
   if(anchor?.status!=='failed')return null;
-  const input=messages.slice(messages.indexOf(anchor)).findLast(m=>m.role==='user'&&m.attachments?.length);
+  const input=messages.slice(messages.indexOf(anchor)).findLast(m=>m.role==='user'&&(m.attachments?.length||m.references?.length));
   return input?{input,target:anchor.id}:null;
 }
 export function formatAttachmentSize(size) {return size<1024?`${size} B`:size<1024*1024?`${(size/1024).toFixed(1)} KB`:`${(size/1024/1024).toFixed(1)} MB`;}

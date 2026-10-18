@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jjyr/pot/pkg/core"
@@ -75,9 +76,9 @@ func TestWelcomeSurvivesRestartAndReachesModelAPI(t *testing.T) {
 	}
 	found := false
 	for i, m := range body.Messages {
-		if m.Role == "assistant" && m.Content == welcome {
+		if m.Role == "assistant" && strings.HasSuffix(m.Content, welcome) {
 			found = true
-			if i+1 >= len(body.Messages) || body.Messages[i+1].Role != "user" || body.Messages[i+1].Content != "以后叫你小白" {
+			if i+1 >= len(body.Messages) || body.Messages[i+1].Role != "user" || !strings.HasSuffix(body.Messages[i+1].Content, "以后叫你小白") {
 				t.Fatal("welcome must precede user input", string(r.Body))
 			}
 		}

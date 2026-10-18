@@ -55,7 +55,7 @@ export async function renderMachineMembership({client,root,machines,locale,notif
     const previous=[...membershipRoot.querySelectorAll('[data-membership-space]')].find(card=>card.dataset.membershipSpace===space);
     if(owned.every(machine=>machine._stale)){for(const button of previous?.querySelectorAll('button')||[])setDisabled(button,true);for(const card of root.querySelectorAll('.machine-card'))if(card.dataset.spaceId===space)for(const button of card.querySelectorAll('[data-membership-action]'))setDisabled(button,true);return;}
     let state;
-    try{state=await client.request('/api/v1/runtime/control',{...scope,signal});}catch(reason){if(reason.name!=='AbortError'&&current()){for(const button of previous?.querySelectorAll('button')||[])setDisabled(button,true);notify(reason.message);}return;}
+    try{state=await (client.read||client.request)('/api/v1/runtime/control',{...scope,signal});}catch(reason){if(reason.name!=='AbortError'&&current()){for(const button of previous?.querySelectorAll('button')||[])setDisabled(button,true);notify(reason.message);}return;}
     if(!current())return;
     for(const machine of owned){const card=[...root.querySelectorAll('.machine-card')].find(card=>card.dataset.machineId===(machine.runtime_id||machine.id)&&card.dataset.spaceId===space),header=card?.querySelector('.machine-header');if(!header)continue;
       let menu=header.querySelector('.machine-actions');

@@ -71,6 +71,7 @@ func (g *EventGate) Finish() Outcome {
 }
 
 type TurnRequest struct {
+	Inputs      []ConversationInput
 	Attachments []Attachment
 	RequestID   string
 	Text        string

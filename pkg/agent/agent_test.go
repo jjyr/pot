@@ -505,7 +505,10 @@ func TestCompactionPersistsReducedClassifiedHistory(t *testing.T) {
 		}
 		return response("continued"), nil
 	}
-	if err := a.Execute(context.Background(), execution, thread, core.TurnRequest{RequestID: "turn", Text: "latest goal"}, false, func(core.AgentEvent) error { return nil }); err != nil {
+	if err := a.Execute(context.Background(), execution, thread, core.TurnRequest{RequestID: "turn", Text: "latest goal", Inputs: []core.ConversationInput{
+		{ID: "batch-first", Text: "latest goal", References: []core.MessageReference{{MessageID: "older", Quote: "selected words"}}},
+		{ID: "batch-second", Text: "later constraint"},
+	}}, false, func(core.AgentEvent) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if len(s.compactions) != 2 || s.calls != 2 {
@@ -514,13 +517,20 @@ func TestCompactionPersistsReducedClassifiedHistory(t *testing.T) {
 	var result Checkpoint
 	_ = json.Unmarshal(f.body, &result)
 	found := false
+	retained := map[string]m.Message{}
 	for _, message := range result.Messages {
+		if message.Role == "user" && message.Kind.Type == "conversation" {
+			retained[message.ID] = message
+		}
 		if message.Kind.Type == "summary" {
 			found = true
 		}
 		if strings.Contains(message.Text, strings.Repeat("answer", 100)) {
 			t.Fatal("history not compacted")
 		}
+	}
+	if len(retained) != 2 || retained["batch-first"].Text != "latest goal" || len(retained["batch-first"].References) != 1 || retained["batch-second"].Text != "later constraint" {
+		t.Fatal("compaction lost a batch member or reference", retained)
 	}
 	if !found || result.ModelRequestID != nil {
 		t.Fatal(result)
