@@ -104,12 +104,12 @@ func (l *Ledger) Summary(ctx context.Context, q Query, atMS int64) (Summary, err
 }
 func summary(ctx context.Context, db queryDB, q Query, atMS int64) (Summary, error) {
 	if q.Days == 0 {
-		q.Days = 7
+		q.Days = 14
 	}
 	if q.Timezone == "" {
 		q.Timezone = "Asia/Shanghai"
 	}
-	if q.Days != 7 && q.Days != 30 && q.Days != 90 && q.Days != 365 || q.Offset < 0 || q.Offset > 1000000 || len(q.Scope) > 128 {
+	if q.Days != 14 && q.Days != 30 && q.Days != 90 && q.Days != 365 || q.Offset < 0 || q.Offset > 1000000 || len(q.Scope) > 128 {
 		return Summary{}, fmt.Errorf("invalid usage query")
 	}
 	zone, err := time.LoadLocation(q.Timezone)

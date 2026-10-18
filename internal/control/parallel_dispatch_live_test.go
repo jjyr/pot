@@ -155,7 +155,7 @@ func TestDeepSeekParallelDispatchObservationLive(t *testing.T) {
 		defer done()
 		snapshot, _ = c.Snapshot(finalCtx)
 		page, _ := s.Tasks.Page(finalCtx, "main", protocol.TaskQuery{Scope: "all", Limit: 50})
-		modelUsage, _ := s.Usage.Summary(finalCtx, usage.Query{Days: 7, Timezone: "UTC"}, time.Now().UnixMilli())
+		modelUsage, _ := s.Usage.Summary(finalCtx, usage.Query{Days: 14, Timezone: "UTC"}, time.Now().UnixMilli())
 		report := map[string]any{"model": config.Model, "model_requests_attempted": requests.Load(), "timeline": records, "snapshot": snapshot, "tasks": page, "usage": modelUsage, "runtime_max_active": execution.DefaultLimits().MaxActive, "workload_seconds": map[string]int{"A": 70, "B": 5}}
 		data, _ := json.MarshalIndent(report, "", "  ")
 		if err := os.WriteFile(filepath.Join(out, "observation.json"), data, 0600); err != nil {

@@ -25,7 +25,7 @@ import {taskElapsed,bindTaskClock} from './task-time.mjs';
 export function createPages({onApprovalsChanged=()=>{},client, host, approvalHost, chatApprovalHost, chatVisible, locale, notify, changed, titleChanged, openChat, routeChanged=()=>{}}) {
   const gate = createRequestGate(), approvalGate = createRequestGate();
   let route = '', title = '', editor = null, disposed = false, pageVersion = 0, configurationSpace = '',taskView=null,taskOrigin=null,taskListView=null,scheduleView=null,detailParent=false,usageOwner=null;
-  let filter = {taskScope:'active', taskQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageDays:7, usageScope:'all', usageSpace:'all',settingsTab:'general'};
+  let filter = {taskScope:'active', taskQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageDays:14, usageScope:'all', usageSpace:'all',settingsTab:'general'};
   let pendingApprovals=[];
   const toolMemory=new Map(),usageOffsets=new Map(),usageCache=new Map(),approvalCards=new Map(),taskNames=new Map();
   const chatApprovals=createChatApprovals({host:chatApprovalHost,locale,visible:chatVisible});

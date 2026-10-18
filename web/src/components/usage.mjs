@@ -39,7 +39,7 @@ export function usageRows(value,locale,tr) {
 export function usageTrend(data,{locale,tr,timezone,days,onDays,segments}) {
   const card=n('section','page-section page-card usage-trend'),header=n('div','usage-chart-heading'),chart=n('div','usage-chart'),legend=n('div','usage-legend');
   header.append(n('h2','',tr('Usage trend','用量趋势')),usageTooltip(n('span','hint usage-chart-period',data.bucket_days===7?tr('Weekly','按周'):tr('Daily','按日')),{title:timezone,note:tr('The current period is still in progress.','当前周期统计截至现在。')}));
-  card.append(header,segments([7,30,90,365].map(value=>[value,value===365?tr('Last year','最近一年'):tr(`Last ${value} days`,`最近 ${value} 天`)]),days,onDays));
+  card.append(header,segments([14,30,90,365].map(value=>[value,value===365?tr('Last year','最近一年'):tr(`Last ${value} days`,`最近 ${value} 天`)]),days,onDays));
   const {uncached}=usageNumbers(locale),series=[['usage-uncached',tr('Uncached input','未缓存输入'),uncached],['usage-cached',tr('Cached input','缓存输入'),value=>value.cache||0],['usage-output',tr('Output','输出'),value=>value.output||0]];
   chart.setAttribute('role','group');chart.setAttribute('aria-label',tr('Token usage trend','Token 用量趋势'));
   const maximum=Math.max(1,...(data.buckets||[]).map(value=>value.input+value.output));
