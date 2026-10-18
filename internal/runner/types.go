@@ -132,6 +132,7 @@ type Run struct {
 	LaunchDigest     string          `json:"launch_digest"`
 	BootID           string          `json:"boot_id"`
 	Phase            Phase           `json:"phase"`
+	StartedAtMS      int64           `json:"started_at_ms"`
 	Result           *Terminal       `json:"result"`
 	Context          json.RawMessage `json:"context,omitempty"`
 	EventSequence    uint64          `json:"event_sequence"`

@@ -246,7 +246,15 @@ with a compact outcome caption; any unsent draft remains visible read-only.
 Main Chat shows up to three running or approval-waiting background tasks below
 only the latest assistant message, with a dot, title and overflow entry.
 Approval-waiting rows come first, use an attention color and show Waiting for
-approval. Pending operations appear as collapsed permission cards immediately
+approval. Each row shows muted, right-aligned elapsed wall time from the original
+Runner's first execution claim, excluding the initial queue and including later
+approval, pause and allowance waits. Below 720 px, the title wraps and the status
+and time move below it. Durations show seconds below a minute, minutes/seconds
+below an hour, hours/minutes below a day and days/hours thereafter. The clock
+continues across refresh and reconnect, updates only its text while Chat is visible,
+and never requests backend projections. Unknown start times omit the clock.
+Task details expose the start timestamp in the viewer's local timezone.
+Pending operations appear as collapsed permission cards immediately
 after the last assistant message, with a transient notice and an independent
 Waiting for your approval count in the assistant directory. Clicking a card
 expands the same review component used in Task details. New requests announce

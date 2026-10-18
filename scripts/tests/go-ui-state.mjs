@@ -4,6 +4,15 @@ import {allowedLink,parseFileLink} from '../../web/src/components/markdown.mjs';
 import {createEnterGuard, bindComposer} from '../../web/src/components/composer.mjs';
 import {messages,translate} from '../../web/src/locales/messages.mjs';
 import {projectChatReplies,replyFailureKind} from '../../web/src/state/chat-replies.mjs';
+import {taskElapsed} from '../../web/src/components/task-time.mjs';
+
+const taskStart=1000000;
+for(const [seconds,zh,en]of [[0,'0秒','0s'],[59,'59秒','59s'],[60,'1分0秒','1m 0s'],[754,'12分34秒','12m 34s'],[3599,'59分59秒','59m 59s'],[3600,'1小时0分','1h 0m'],[86399,'23小时59分','23h 59m'],[86400,'1天0小时','1d 0h'],[183600,'2天3小时','2d 3h']]){
+  assert.equal(taskElapsed(taskStart,taskStart+seconds*1000,'zh-CN'),`已用 ${zh}`);
+  assert.equal(taskElapsed(taskStart,taskStart+seconds*1000,'en'),`Elapsed ${en}`);
+}
+for(const start of [undefined,null,0,-1,NaN,'1000000'])assert.equal(taskElapsed(start,taskStart),'','Unavailable starts never fall back to creation time');
+assert.equal(taskElapsed(taskStart,taskStart-1000,'zh-CN'),'已用 0秒','Clock skew cannot show a negative duration');
 
 for(const [locale,catalog] of Object.entries(messages)){
   assert.deepEqual(Object.keys(catalog).sort(),Object.keys(messages.en).sort(),`Shared translation keys: ${locale}`);

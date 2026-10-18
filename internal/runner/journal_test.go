@@ -9,7 +9,61 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
+
+func TestFirstExecutionTimeSurvivesResumeAndRestart(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "runner.sqlite")
+	j, err := Open(path, "runtime", "boot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	launch := launchFixture(t)
+	accepted, err := j.Accept(ctx, launch)
+	if err != nil || accepted.StartedAtMS != 0 {
+		t.Fatal("acceptance must not start the clock", accepted, err)
+	}
+	before := time.Now().UnixMilli()
+	if claimed, err := j.Claim(ctx, "control", "task", "run"); err != nil || !claimed {
+		t.Fatal(claimed, err)
+	}
+	first, err := j.Inspect(ctx, "control", "task", "run")
+	if err != nil || first.StartedAtMS < before || first.StartedAtMS > time.Now().UnixMilli() {
+		t.Fatal("claim must persist its actual start", first, err)
+	}
+	// Use a distinct historical value so this detects resets without sleeps.
+	started := first.StartedAtMS - 60000
+	if err := j.change(ctx, "control", "task", "run", func(run *Run) error { run.StartedAtMS = started; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Wait(ctx, "control", "task", "run", "allowance"); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Resume(ctx, "control", "task", "run"); err != nil {
+		t.Fatal(err)
+	}
+	if claimed, err := j.Claim(ctx, "control", "task", "run"); err != nil || !claimed {
+		t.Fatal(claimed, err)
+	}
+	duplicate, err := j.Accept(ctx, launch)
+	if err != nil || duplicate.StartedAtMS != started {
+		t.Fatal("resume/duplicate acceptance reset start", duplicate, err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	j, err = Open(path, "runtime", "nextboot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	restored, err := j.Inspect(ctx, "control", "task", "run")
+	if err != nil || restored.StartedAtMS != started || restored.Phase != RecoveryRequired {
+		t.Fatal("restart lost the original start", restored, err)
+	}
+}
 
 func launchFixture(t *testing.T) Launch {
 	t.Helper()
