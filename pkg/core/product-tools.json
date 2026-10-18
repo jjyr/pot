@@ -180,7 +180,7 @@
   },
   {
     "name": "wait_task",
-    "description": "Wait for any of up to eight tasks to complete, fail, become interrupted, cancelled, allowance-waiting or waiting_approval. Bounded wait; no busy polling. Returns metadata, per-task cursors and timed_out. A waiting_approval task needs the user's decision in the assistant Chat approval dialog. Pass returned cursors as after to suppress unchanged settled states. Does not retrieve transcripts, resume tasks or wait for exec; use wait for JavaScript runs.",
+    "description": "Wait for any of up to eight tasks to complete, fail, become interrupted, cancelled, allowance-waiting or waiting_approval. Bounded wait; no busy polling. Returns metadata, per-task cursors and timed_out. A waiting_approval task needs the user's decision in the assistant Chat approval cards. Pass returned cursors as after to suppress unchanged settled states. Does not retrieve transcripts, resume tasks or wait for exec; use wait for JavaScript runs.",
     "inputSchema": {
       "type": "object",
       "properties": {

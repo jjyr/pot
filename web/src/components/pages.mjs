@@ -15,15 +15,16 @@ import {renderAbout} from './about.mjs';
 import {renderMachineMembership} from './membership.mjs';
 import {renderIntegrations} from './integrations.mjs';
 import {renderExecutionPermissions} from './execution-permissions.mjs';
-import {createTaskApprovalDialog} from './task-approval-dialog.mjs';
+import {createApprovalCard} from './approval-card.mjs';
+import {createChatApprovals} from './chat-approvals.mjs';
 
-export function createPages({onApprovalsChanged=()=>{},client, host, approvalHost, locale, notify, changed, titleChanged, openChat, chatVisible=()=>false, routeChanged=()=>{}}) {
+export function createPages({onApprovalsChanged=()=>{},client, host, approvalHost, chatApprovalHost, chatVisible, locale, notify, changed, titleChanged, openChat, routeChanged=()=>{}}) {
   const gate = createRequestGate(), approvalGate = createRequestGate();
   let route = '', title = '', editor = null, disposed = false, pageVersion = 0, configurationSpace = '',taskView=null,taskOrigin=null,scheduleView=null,detailParent=false,usageOwner=null;
   let filter = {taskScope:'active', taskQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageDays:7, usageScope:'all', usageOffset:0,usageSpace:'all',settingsTab:'general',taskTarget:null,taskSpace:'all'};
   let pendingApprovals=[];
   const toolMemory=new Map(),approvalCards=new Map(),taskNames=new Map();
-  const taskApprovalDialog=createTaskApprovalDialog({locale});
+  const chatApprovals=createChatApprovals({host:chatApprovalHost,locale,visible:chatVisible});
   const cached = new Map(),spaceCache = new Map(),expandedMachines=new Set(),editorParents=[],taskDrafts=new Map(),scheduleWrites=new Map();
   let currentViewKey='',viewReady=false,approvalOwner='',shortcutOpen=null;
   const tr = (en, zh) => locale() === 'zh-CN' ? zh : en;
@@ -374,14 +375,14 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     }
     renderApprovals();
   }
-  function approvalFor(tool,task=''){if(approvalOwner!==approvalContext())return;const scope=approvalScope();return pendingApprovals.find(item=>item.request.owner===scope.owner&&(item.request.task||'')===task&&item.request.call_id===tool.id&&item.request.turn===tool.turn_id);}
+  function approvalFor(tool,task=''){if(approvalOwner!==approvalContext())return;const scope=approvalScope();const approval=pendingApprovals.find(item=>item.request.owner===scope.owner&&(item.request.task||'')===task&&item.request.call_id===tool.id&&item.request.turn===tool.turn_id);return approval?{...approval,task_title:taskNames.get(taskNameKey(scope,task))}:undefined;}
   function taskNeedsApproval(id,phase){return approvalOwner===approvalContext()?pendingApprovals.some(item=>item.request.owner===scope().owner&&item.request.task===id):phase==='waiting_approval';}
   const taskNameKey=(captured,id)=>JSON.stringify([captured.space,captured.owner,id]);
   function rememberTasks(items){for(const task of items)taskNames.set(taskNameKey({space:task._space_id,owner:task.assistant_id||task._assistant_id},task.id),task.title);}
   function taskPhaseLabel(phase){return phase==='waiting_approval'?translate(locale(),'tool.waiting_approval'):tr({running:'Running',queued:'Queued',waiting:'Waiting',failed:'Failed',complete:'Complete',interrupted:'Interrupted',cancelled:'Cancelled'}[phase]||phase,{running:'运行中',queued:'排队中',waiting:'等待中',failed:'失败',complete:'已完成',interrupted:'已中断',cancelled:'已取消'}[phase]||phase);}
   async function decideApproval(approval,action){
     const captured={...approvalScope()};
-    if(approvalOwner!==approvalContext()||approval.request.owner!==captured.owner||(taskView&&approval.request.task!==taskView.task.id)||!pendingApprovals.some(item=>item.id===approval.id))throw Error(tr('Approval context changed.','授权上下文已改变。'));
+    if(disposed||approvalOwner!==approvalContext()||approval.request.owner!==captured.owner||(taskView&&approval.request.task!==taskView.task.id)||!pendingApprovals.some(item=>item.id===approval.id))throw Error(tr('Approval context changed.','授权上下文已改变。'));
     await request('/api/v1/permissions',{...captured,method:'POST',body:{id:approval.id,action}});
     await permissions();
   }
@@ -492,52 +493,35 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   }
   const approvalScope=()=>taskView?.scope||scope();
   const approvalContext=()=>JSON.stringify([approvalScope(),taskView?.task.id||'']);
-  function standaloneApproval(approval,capturedKey) {
-    const box=n('section','approval-card'),preview=n('div','approval-preview'),actions=n('div','approval-actions'),error=n('p','inline-error');
-    error.setAttribute('role','alert');if(approval.request.task)box.dataset.taskId=approval.request.task;
-    preview.append(n('strong','',approval.request.task?tr('Task awaiting approval','任务需要授权'):tr('Request approval','请求授权')));
-    if(approval.request.task)preview.append(n('p','approval-task',`${tr('Task','任务')}: ${taskNames.get(taskNameKey(approvalScope(),approval.request.task))||approval.request.task}`));
-    if(approval.request.args?.cmd)preview.append(n('pre','approval-arguments',approval.request.args.cmd));
-    if(approval.request.args?.justification)preview.append(n('p','approval-justification',`${tr('Reason','申请理由')}: ${approval.request.args.justification}`));
-    preview.append(n('p','approval-description',`${approval.request.owner} · ${approval.request.machine_id}\n${tr('Wants to operate this machine directly','想要直接操作这台机器')}\n\n${translate(locale(),approval.request.tool==='update_agent_instructions'?'tool.instructionConsent':'tool.hostConsent')}`),n('pre','approval-arguments',`${approval.request.tool}\n${JSON.stringify(approval.request.command_context||approval.request.args,null,2)}`));
-    for(const name of (approval.request.tool==='update_agent_instructions'?['allow_once','deny']:['allow_always','allow_task','deny'])) {
-      const button=action(translate(locale(),'tool.'+name),async()=>{
-        const buttons=actions.querySelectorAll('button');buttons.forEach(button=>button.disabled=true);error.textContent='';
-        try {
-          if(approvalContext()!==capturedKey)throw Error(tr('Approval context changed.','授权上下文已改变。'));
-          await decideApproval(approval,name);
-        }catch(reason){error.textContent=reason.message;buttons.forEach(button=>button.disabled=false);}
-      });actions.append(button);
-    }
-    box.append(preview,error,actions);return box;
-  }
   function renderApprovals() {
-    if(disposed||approvalOwner!==approvalContext()){approvalHost.replaceChildren();taskApprovalDialog.update(approvalContext(),[],false);return;}
-    const nodes=[],retained=new Set(),taskEntries=[];let inlineLocator=false;
+    const chatContext=JSON.stringify(scope());
+    if(disposed||approvalOwner!==approvalContext()){approvalHost.replaceChildren();chatApprovals.update(chatContext,[]);return;}
+    const nodes=[],entries=[],retained=new Set();let inlineLocator=false;
     for(const approval of pendingApprovals) {
-      const sameTask=(approval.request.task||'')===(taskView?.task.id||'');
-      const toolRoot=sameTask?[...(taskView?.transcript||document.querySelector('.message-column')).querySelectorAll('.tool-call')].find(node=>node.dataset.callId===approval.request.call_id&&node.dataset.turnId===approval.request.turn):null;
-      if(toolRoot) {
+      const toolRoot=taskView?[...taskView.transcript.querySelectorAll('.tool-call')].find(node=>node.dataset.callId===approval.request.call_id&&node.dataset.turnId===approval.request.turn):null;
+      if(toolRoot){
         if(inlineLocator)continue;inlineLocator=true;
-        const key=JSON.stringify([approvalOwner,locale(),'locator']);retained.add(key);
-        if(!approvalCards.has(key))approvalCards.set(key,action('',()=>{}));
-        const locate=approvalCards.get(key);locate.textContent=`${pendingApprovals.length} ${translate(locale(),'tool.approvalPending')} · ${translate(locale(),'tool.viewApprovals')}`;
-        locate.onclick=()=>{toolRoot.open=true;toolRoot.scrollIntoView({block:'center',behavior:'smooth'});toolRoot.querySelector('summary')?.focus();};nodes.push(locate);continue;
+        const locate=action(`${pendingApprovals.length} ${translate(locale(),'tool.approvalPending')} · ${translate(locale(),'tool.viewApprovals')}`,()=>{toolRoot.open=true;toolRoot.scrollIntoView({block:'center',behavior:'smooth'});toolRoot.querySelector('summary')?.focus();});nodes.push(locate);continue;
       }
-      const key=JSON.stringify([approvalOwner,approval.id,locale()]);retained.add(key);
-      if(!approvalCards.has(key))approvalCards.set(key,standaloneApproval(approval,approvalOwner));
-      const label=approvalCards.get(key).querySelector('.approval-task');if(label)label.textContent=`${tr('Task','任务')}: ${taskNames.get(taskNameKey(approvalScope(),approval.request.task))||approval.request.task}`;
-      if(approval.request.task&&!taskView)taskEntries.push({id:approval.id,task:approval.request.task,element:approvalCards.get(key)});else nodes.push(approvalCards.get(key));
+      const key=JSON.stringify([approvalOwner,approval.id]);retained.add(key);
+      if(!approvalCards.has(key)) {
+        const capturedKey=approvalOwner;
+        approvalCards.set(key,createApprovalCard({locale,onDecision:async(original,decision)=>{
+          if(approvalContext()!==capturedKey)throw Error(tr('Approval context changed.','授权上下文已改变。'));
+          await decideApproval(original,decision);
+        }}));
+      }
+      const card=approvalCards.get(key);card.update(approval,{taskTitle:taskNames.get(taskNameKey(approvalScope(),approval.request.task))});
+      if(taskView)nodes.push(card.element);else entries.push({id:approval.id,element:card.element});
     }
-    if(taskEntries.length){const key=JSON.stringify([approvalOwner,locale(),'task-launcher']);retained.add(key);if(!approvalCards.has(key))approvalCards.set(key,action('',()=>taskApprovalDialog.show()));const launcher=approvalCards.get(key);launcher.classList.add('task-approval-launcher');const count=new Set(taskEntries.map(entry=>entry.task)).size;launcher.textContent=tr(`${count} task(s) need approval · Review`,`${count} 项任务需要授权 · 查看并授权`);nodes.unshift(launcher);}
-    taskApprovalDialog.update(approvalContext(),taskEntries,chatVisible());
+    chatApprovals.update(chatContext,entries);
     if(taskView?.status){const waiting=pendingApprovals.some(item=>item.request.task===taskView.task.id);const phase=waiting?'waiting_approval':taskView.phase==='waiting_approval'?'running':taskView.phase;taskView.status.textContent=[taskPhaseLabel(phase),taskView.task.machine_id].filter(Boolean).join(' · ');taskView.status.classList.toggle('phase-waiting_approval',waiting);}
     for(const key of approvalCards.keys())if(!retained.has(key))approvalCards.delete(key);
     for(const node of [...approvalHost.childNodes])if(!nodes.includes(node))node.remove();
     nodes.forEach((node,index)=>{if(approvalHost.childNodes[index]!==node)approvalHost.insertBefore(node,approvalHost.childNodes[index]||null);});
   }
   async function permissions() {
-    if(!approvalScope().owner||disposed){approvalGate.close();pendingApprovals=[];approvalOwner='';approvalCards.clear();approvalHost.replaceChildren();taskApprovalDialog.update('',[],false);onApprovalsChanged();return;}
+    if(!approvalScope().owner||disposed){approvalGate.close();pendingApprovals=[];approvalOwner='';approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);onApprovalsChanged();return;}
     const token=approvalGate.next(),captured=approvalScope(),key=approvalContext();
     if(approvalOwner!==key){pendingApprovals=[];approvalCards.clear();approvalHost.replaceChildren();}
     try {
@@ -573,9 +557,9 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   const beforeUnload=event=>{if([...(editor?[editor]:[]),...editorParents].some(value=>value.session.dirty||value.session.pending)){event.preventDefault();event.returnValue='';}};
   const preference=()=>{if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner});};
   window.addEventListener('beforeunload',beforeUnload);window.addEventListener('pot:locale',preference);
-  return {get title(){return title;},get editing(){return !!editor;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner;},show,assistant,setupAI,leave,back,permissions,handleHistory:popstate,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalGate.close();approvalOwner='';pendingApprovals=[];approvalCards.clear();approvalHost.replaceChildren();taskApprovalDialog.update('',[],false);},approvalFor,decideApproval,taskNeedsApproval,rememberTasks,renderApprovals,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,options={}){route='tasks';return taskDetail(task,options);},
+  return {get title(){return title;},get editing(){return !!editor;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner;},show,assistant,setupAI,leave,back,permissions,handleHistory:popstate,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalGate.close();approvalOwner='';pendingApprovals=[];approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);},approvalFor,decideApproval,taskNeedsApproval,rememberTasks,renderApprovals,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,options={}){route='tasks';return taskDetail(task,options);},
     showProviders(){filter.settingsTab='providers';return show('settings');},
     refresh(){if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(taskView){refreshTaskEvents();return;}if(!editor&&route&&host.offsetParent)show(route,{keepUsageOwner:!!usageOwner});},
-    dispose(){for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle.dispose?.();disposed=true;gate.close();approvalGate.close();taskApprovalDialog.dispose();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
+    dispose(){for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle.dispose?.();disposed=true;gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
   };
 }

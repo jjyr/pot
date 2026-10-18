@@ -67,6 +67,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const workspace = el('main', 'workspace');
   const notice = el('p', 'preview-notice');
   const approvals = el('div', 'approval-host');
+  const chatApprovals=el('section','chat-approvals');chatApprovals.hidden=true;
+  let locateApprovals='';
   const resourceNotices=el('div','resource-notices');resourceNotices.hidden=true;resourceNotices.dataset.empty='true';
   const history = el('div', 'history');
   history.setAttribute('role', 'log');
@@ -92,7 +94,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   menu.hidden = true;
   const preferences = el('dialog', 'preferences');
   root.append(rail, titlebar, directory, workspace, menu, preferences);
-  const pages = client.production ? createPages({chatVisible:()=>route==='chat'&&!root.classList.contains('show-directory'),onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: value => {if(value?.assistant)pendingSelection=value.assistant;loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();}, openChat:async target=>{if(target&&(!selectedAssistant||selectedAssistant.id!==target.owner||selectedAssistant.space_id!==target.space)){const assistant=assistants.find(item=>item.id===target.owner&&item.space_id===target.space);if(assistant)await selectAssistant(assistant,false,false);}route='chat';directoryOpen=false;renderShell();renderMessages();pages.permissions();if(!selectedAssistant)loadDirectory();}}) : null;
+  const pages = client.production ? createPages({chatVisible:()=>route==='chat'&&!root.classList.contains('show-directory'),onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, chatApprovalHost:chatApprovals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: value => {if(value?.assistant)pendingSelection=value.assistant;loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();}, openChat:async target=>{if(target&&(!selectedAssistant||selectedAssistant.id!==target.owner||selectedAssistant.space_id!==target.space)){const assistant=assistants.find(item=>item.id===target.owner&&item.space_id===target.space);if(assistant)await selectAssistant(assistant,false,false);}route='chat';directoryOpen=false;renderShell();renderMessages();pages.permissions();if(!selectedAssistant)loadDirectory();}}) : null;
   const media = matchMedia('(max-width: 719px)');
   const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
   const saveReads=()=>{if(!client.desktop)persist('pot-ui-read-v1',JSON.stringify(replies.records()));};
@@ -336,7 +338,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       row.append(assistantAvatar(item,32)); const labels = el('span', 'assistant-labels'); const name = el('span', 'assistant-name');name.append(el('span','assistant-title',item.name));
       const badge=el('span','owner-badge badge-icon');badge.title=item.space_name||t(item.space_kind==='remote'?'remote':'local');badge.append(icon(item.space_kind==='remote'?'cloud':'machines'));name.append(badge);
       const unread=replies.unread(controlOf(item),item.id,item.reply_count||0);if(unread){const badge=el('span','unread-badge',unread>9?'9+':String(unread));badge.title=String(unread);badge.setAttribute('aria-label',`${unread} ${locale==='zh-CN'?'条未读回复':'unread replies'}`);name.append(badge);row.classList.add('has-unread');}
-      labels.append(name, el('span', 'assistant-preview', item.offline ? t('offline') : item.preview || ({failed:t('replyFailed'),needs_configuration:t('setupAI'),ready:t('connected')}[item.phase] || item.phase || '')));
+      const pending=Number(item.pending_approvals)||0;
+      if(pending){row.classList.add('needs-approval');labels.append(name,el('span','assistant-approval-status',`${t('tool.awaitingApproval')} · ${pending}`));}
+      else labels.append(name, el('span', 'assistant-preview', item.offline ? t('offline') : item.preview || ({failed:t('replyFailed'),needs_configuration:t('setupAI'),ready:t('connected')}[item.phase] || item.phase || '')));
       row.append(labels); row.onclick = () => client.production ? selectAssistant(item) : (directoryOpen = false, renderShell());
       list.append(row); rows.push({row, name:item.name.toLowerCase()});
     }
@@ -393,7 +397,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if(message.role==='tool'&&message.tool){
         const scope=client.scope?.()||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
         if(!record.tool){record.tool=createToolCall({memory:toolMemory,key,locale:()=>locale,onDecision:(approval,action)=>pages.decideApproval(approval,action)});bubble.append(record.tool.element);}
-        record.tool.update(message,{approval:pages?.approvalFor(message.tool),offline:connection==='offline'||disconnected,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
+        record.tool.update(message,{offline:connection==='offline'||disconnected,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
       }else if(message.role==='assistant'){
         record.reply ||= createReplyBubble(bubble);
         const scope=client.scope?.();
@@ -429,7 +433,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
 
       const parent=message.tool&&forest.byID.get(message.tool.turn_id+':'+message.tool.parent_id);
       if(parent&&parent.children.some(entry=>entry.message.id===message.id)&&messageNodes.get(parent.message.viewKey)?.tool){messageNodes.get(parent.message.viewKey).tool.children.append(row);}
-      else {if (messageColumn.children[position] !== row) messageColumn.insertBefore(row, messageColumn.children[position] || null);position++;}
+      else {if(messageColumn.children[position]===chatApprovals)position++;if (messageColumn.children[position] !== row) messageColumn.insertBefore(row, messageColumn.children[position] || null);position++;}
     }
     const lastAssistant=visibleMessages.findLast(message=>message.role==='assistant');
     for(const [id,record]of messageNodes){if(id!==lastAssistant?.viewKey){record.tasks?.remove();record.tasks=null;}}
@@ -439,7 +443,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }else if(visibleMessages.length){
       messageColumn.querySelector('.empty-chat')?.remove();
     }
+    const approvalAnchor=lastAssistant&&messageNodes.get(lastAssistant.viewKey).row;
+    if(approvalAnchor?approvalAnchor.nextElementSibling!==chatApprovals:messageColumn.lastElementChild!==chatApprovals){const focused=chatApprovals.contains(document.activeElement)?document.activeElement:null;if(approvalAnchor)approvalAnchor.after(chatApprovals);else messageColumn.append(chatApprovals);focused?.focus({preventScroll:true});}
     pages?.renderApprovals();
+    if(!chatApprovals.hidden&&locateApprovals===JSON.stringify(client.scope?.())){locateApprovals='';requestAnimationFrame(()=>{if(!disposed&&route==='chat')chatApprovals.scrollIntoView({block:'nearest',behavior:reducedMotion.matches?'instant':'smooth'});});}
     if (follow) requestAnimationFrame(() => { if (!disposed) scrollBottom(); });
     else { history.scrollTop = previousTop; latest.hidden = false; }
   }
@@ -493,7 +500,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if (editor.composing) { input.blur(); if (editor.composing) return; }
     if (pages && !await pages.leave()) return;
     if (state.snapshot) positions.set(ownerKey(state.snapshot), history.scrollTop);
-    pages?.clearApprovals();selectedAssistant = item; client.setScope({owner:item.id, space:item.space_id || ''});
+    pages?.clearApprovals();locateApprovals=item.pending_approvals?JSON.stringify({owner:item.id,space:item.space_id||''}):'';selectedAssistant = item; client.setScope({owner:item.id, space:item.space_id || ''});
     epoch = beginSubscription(state); editorOwner = null; route = 'chat'; if(!initial)directoryOpen = false;
     messageColumn.replaceChildren(); messageNodes.clear(); error = ''; connectionError = ''; disconnected = false;
     const cached=cachedSnapshots.get(JSON.stringify([item.space_id||'',item.id]));
@@ -602,7 +609,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   viewport?.addEventListener('resize', viewportChanged);
   window.addEventListener('resize', viewportChanged);
   renderShell();viewportChanged();
-  if(client.production){stopChanges=client.changes(topics=>{const keys=Array.isArray(topics)?topics:Object.keys(topics||{});if(!keys.length||keys.some(key=>/^(spaces|assistant|conversation|runtime)/.test(key)))loadDirectory(false);if(keys.some(key=>/^(tasks|runner)/.test(key)))refreshBackgroundTasks();pages.refresh();pages.permissions();},{space:''});loadDirectory();}else attach();
+  if(client.production){stopChanges=client.changes(topics=>{const keys=Array.isArray(topics)?topics:Object.keys(topics||{});if(!keys.length||keys.some(key=>/^(spaces|assistant|conversation|runtime|permissions)/.test(key)))loadDirectory(false);if(keys.some(key=>/^(tasks|runner)/.test(key)))refreshBackgroundTasks();pages.refresh();pages.permissions();},{space:''});loadDirectory();}else attach();
   return () => {
     disposed = true; directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     completions?.dispose();

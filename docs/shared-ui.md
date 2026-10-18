@@ -49,16 +49,30 @@ requests retain the owning assistant; its Back/history path preserves the
 independently selected Chat. Task approvals follow the Task owner and exact Task,
 including when a different assistant remains selected in Chat. See [Multi-Space UI](multi-space-ui.md).
 
-Chat automatically opens a review dialog when its assistant's background Tasks
-need approval. It names every affected Task and shows each exact operation with
-direct Allow/Deny controls. Review later and Escape close the dialog without
-deciding; a persistent Chat action reopens it. Unchanged events preserve dismissal,
-focus and decision errors. New requests open it again. Switching assistants or
-leaving Chat closes the dialog and fences its decisions to their original owner.
-Task lists, details and the background strip show Waiting for approval, and the
-strip puts these Tasks first. Only approvals for the displayed Chat or exact Task
-may attach to inline calls; matching call and turn IDs alone cannot attach a
-background Task's request to a Chat call.
+Pending approvals appear in one transient region immediately after the latest
+assistant message. New messages move this region to the new anchor, preserving
+expanded cards, focus and decision errors. Without an assistant message it sits
+at the end of the conversation. It scrolls with Chat and never opens a modal.
+New request IDs trigger one accessible notice; unchanged invalidations do not
+repeat it. This projection comes from pending permissions, creates no conversation
+message or model request, and does not change reply/unread counts. Reload restores
+unresolved cards from the authoritative pending requests.
+
+Chat and Task details use the same expandable
+[`approval-card.mjs`](../web/src/components/approval-card.mjs) component, including
+Task name, machine, exact operation, explanation, decision controls and errors.
+Cards start collapsed and expand in place. A successful Allow/Deny removes the
+resolved card in both views; the last decision removes the notice and assistant
+badge. Failed submissions keep the operation and retry controls. Decisions retain
+the original Space, assistant, Task/run and exact request identity.
+
+The assistant catalogue exposes `pending_approvals` independently of replies.
+Permission invalidations refresh the directory even when another Chat is selected;
+waiting assistants show the count in their row. Selecting one locates its approval
+region. Task lists, details and the background strip show Waiting for approval,
+and the strip puts these Tasks first. Chat tool rows retain their execution state
+while the dedicated region owns approval controls; Task controls attach only to
+the exact Task call/turn, with a shared standalone card if no row is available.
 
 Task details retain their entry route in navigation history. Opening a Task from
 Chat makes Back return to that assistant's Chat with its draft and reading position;

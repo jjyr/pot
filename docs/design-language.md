@@ -228,9 +228,14 @@ full-title tooltips.
 Main Chat shows up to three running or approval-waiting background tasks below
 only the latest assistant message, with a dot, title and overflow entry.
 Approval-waiting rows come first, use an attention color and show Waiting for
-approval. New requests automatically open a dialog naming every affected Task
-and offering direct approval decisions. Review later leaves a persistent reopen
-action in Chat. Rows open task details, whose Back action returns to the entry
+approval. Pending operations appear as collapsed permission cards immediately
+after the last assistant message, with a transient notice and an independent
+Waiting for your approval count in the assistant directory. Clicking a card
+expands the same review component used in Task details. New requests announce
+once; unchanged updates retain review state. Resolved cards disappear, and the
+last resolution clears the region and directory marker. The region scrolls with
+Chat and never becomes a persisted message or ordinary unread reply.
+Rows open task details, whose Back action returns to the entry
 Chat; queued, allowance-waiting and finished tasks are excluded. The region is presentation state,
 not persisted assistant prose. Queued guidance has a clock with a Received tooltip;
 applied instructions do not retain a status caption.
