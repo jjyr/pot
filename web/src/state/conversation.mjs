@@ -1,3 +1,4 @@
+import {mergeUIFrame} from './chat-history.mjs';
 // State is scoped by runtime, Control/assistant owner and conversation. Boot IDs
 // fence subscriptions; cursors are decimal strings, never JavaScript numbers.
 export function ownerKey(snapshot) {
@@ -19,7 +20,7 @@ export function validSnapshot(value) {
 }
 
 export function createConversationState() {
-  return {epoch: 0, snapshot: null, drafts: new Map(), referenceDrafts: new Map(), pending: new Map(), retries: new Map(), sends: new Map()};
+  return {epoch: 0, snapshot: null, drafts: new Map(), referenceDrafts: new Map(), pending: new Map(), retries: new Map(), sends: new Map(), seenRequests: new Set()};
 }
 
 export function beginSubscription(state,{retainPending=false}={}) {
@@ -40,10 +41,15 @@ export function acceptSnapshot(state, snapshot, epoch) {
   // A different identity/boot is established only by a fresh subscription. Late
   // events may not silently navigate the user into another owner's conversation.
   if (previous && (ownerKey(previous) !== ownerKey(snapshot) || previous.boot_id !== snapshot.boot_id)) return false;
-  if (previous && BigInt(snapshot.cursor) <= BigInt(previous.cursor)) return false;
+  if (previous && BigInt(snapshot.cursor) < BigInt(previous.cursor)) return false;
+  if (previous && snapshot.cursor === previous.cursor && snapshot.kind !== 'reset') return false;
+  const receivedMessages=snapshot.messages;
+  snapshot = mergeUIFrame(previous, snapshot, state.uiAnchor);
   state.snapshot = snapshot;
   const key=ownerKey(snapshot),send=state.sends.get(key);
-  if(send&&snapshot.messages.some(message=>message.request_id===send.request.request_id))state.sends.delete(key);
+  for(const message of receivedMessages)if(message.request_id){const receipt=JSON.stringify([key,message.request_id]);state.seenRequests.delete(receipt);state.seenRequests.add(receipt);}
+  while(state.seenRequests.size>256)state.seenRequests.delete(state.seenRequests.values().next().value);
+  if(send&&(state.seenRequests.has(JSON.stringify([key,send.request.request_id]))||snapshot.messages.some(message=>message.request_id===send.request.request_id)))state.sends.delete(key);
   return true;
 }
 
@@ -79,7 +85,7 @@ export function settleSend(state, receipt, accepted, reason) {
   state.pending.delete(receipt.key);
   if (accepted) state.retries.delete(receipt.key);
   else state.retries.set(receipt.key, receipt.request);
-  if(!receipt.request.user_message_id&&!state.snapshot?.messages.some(message=>message.request_id===receipt.request.request_id))state.sends.set(receipt.key,{request:receipt.request,phase:accepted?'thinking':reason?.status?'failed':'uncertain',detail:reason?.message||''});
+  if(!receipt.request.user_message_id&&!state.seenRequests.has(JSON.stringify([receipt.key,receipt.request.request_id]))&&!state.snapshot?.messages.some(message=>message.request_id===receipt.request.request_id))state.sends.set(receipt.key,{request:receipt.request,phase:accepted?'thinking':reason?.status?'failed':'uncertain',detail:reason?.message||''});
   if(accepted && JSON.stringify(draftReferences(state,receipt.key))===JSON.stringify(receipt.request.references||[]))state.referenceDrafts.delete(receipt.key);
   // An acknowledgement clears only the exact submitted draft. New typing and
   // drafts belonging to a different assistant survive late acknowledgements.

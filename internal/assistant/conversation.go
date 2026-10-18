@@ -114,6 +114,7 @@ type Conversation struct {
 	blocked, closed, finalizing bool
 	lastError                   error
 	subscribers                 map[chan protocol.Snapshot]struct{}
+	uiSubscribers               map[chan struct{}]struct{}
 	closeOnce                   sync.Once
 	closeErr                    error
 	controlChanged              chan struct{}
@@ -289,7 +290,7 @@ CREATE TABLE IF NOT EXISTS assistant_observations(sequence INTEGER PRIMARY KEY A
 	ok = true
 	return c, nil
 }
-func (c *Conversation) snapshotLocked() protocol.Snapshot {
+func (c *Conversation) stateLocked() protocol.Snapshot {
 	phase := protocol.Ready
 	var detail *string
 	if c.thread == nil {
@@ -333,15 +334,19 @@ func (c *Conversation) snapshotLocked() protocol.Snapshot {
 	if c.options.MaxRequests > 0 {
 		budget = &protocol.RequestBudget{Used: c.modelCount, Limit: c.options.MaxRequests, MaxOutputTokens: output}
 	}
-	messages := slices.Clone(c.messages)
-	for i := range messages {
-		messages[i].Attachments = slices.Clone(messages[i].Attachments)
-		if messages[i].RequestID != nil {
-			request := *messages[i].RequestID
-			messages[i].RequestID = &request
+	return protocol.Snapshot{Budget: budget, APIVersion: protocol.APIVersion, BootID: c.options.BootID, Cursor: c.cursor, Agent: protocol.AgentStatus{Attachments: caps, Model: model, Phase: phase, Detail: detail}, ConversationID: c.options.ConversationID, Turn: turn, Continuation: c.continuationLocked()}
+}
+func (c *Conversation) snapshotLocked() protocol.Snapshot {
+	state := c.stateLocked()
+	state.Messages = slices.Clone(c.messages)
+	for i := range state.Messages {
+		state.Messages[i].Attachments = slices.Clone(state.Messages[i].Attachments)
+		if state.Messages[i].RequestID != nil {
+			request := *state.Messages[i].RequestID
+			state.Messages[i].RequestID = &request
 		}
 	}
-	return protocol.Snapshot{Budget: budget, APIVersion: protocol.APIVersion, BootID: c.options.BootID, Cursor: c.cursor, Agent: protocol.AgentStatus{Attachments: caps, Model: model, Phase: phase, Detail: detail}, ConversationID: c.options.ConversationID, Messages: messages, Turn: turn, Continuation: c.continuationLocked()}
+	return state
 }
 func (c *Conversation) Snapshot(ctx context.Context) (protocol.Snapshot, error) {
 	if err := ctx.Err(); err != nil {
@@ -352,6 +357,12 @@ func (c *Conversation) Snapshot(ctx context.Context) (protocol.Snapshot, error) 
 	return c.snapshotLocked(), nil
 }
 func (c *Conversation) changedLocked() {
+	for ch := range c.uiSubscribers {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
 	for ch := range c.subscribers {
 		select {
 		case <-ch:

@@ -57,19 +57,65 @@ a failed remote request never falls back to another Control.
 
 ## Main conversation streams
 
-`GET /api/v1/events?assistant_id=...` sends authoritative `snapshot` frames.
-Subscription captures initial state and then sends current state as execution
-updates arrive. The snapshot contains a durable conversation cursor, Runtime
-boot identity, messages, active turn and assistant configuration. SSE IDs combine
-the boot ID, owner and cursor. Slow subscribers receive the latest projection
-without requiring an unbounded token queue.
+`GET /api/v1/events?assistant_id=...` sends UI-only `conversation` frames.
+The first frame has `kind: reset`; subsequent frames have `kind: delta` and a
+`base_cursor` matching the preceding frame's cursor. `view.state` carries Runtime
+boot identity, conversation cursor, turn, budget, assistant capabilities and the
+original continuation boundary. Continuation survives bounded reset/delta reads
+even when its original input is outside the loaded message window.
+`view.messages` contains message envelopes (`message`, decimal-string `sequence`,
+`version`, optional `context_only`); `view.history` describes the loaded interval.
+`GET /api/v1/snapshot` returns the same bounded reset frame. Protocol version 4
+uses this contract for browser, Wails and remote Space streams.
 
-The browser uses EventSource, closing the old source before switching owners.
-Desktop subscribes through Wails `Subscribe(space, owner)` and receives
-`pot:snapshot` plus `pot:subscription` connection status. Unsubscribe cancels its
-backend context. The native Space adapter reconnects with bounded backoff;
-browser reconnect is managed by EventSource. Reconnection starts from an
-authoritative snapshot.
+Reset frames read the latest 80 messages. `GET /api/v1/history` accepts one of
+`before`, `after` (exclusive sequence), or `around` (message ID), and an optional
+`limit` of 1–120 (default 80). The response includes boot/conversation identity,
+read cursor, messages, and `history: {before, after, has_more, has_newer}`. Sequence
+is the SQLite insertion row ID: message edits preserve it and timestamps do not
+affect ordering. Missing `around` targets return `not_found`; the normal scoped
+assistant lookup and authenticated browser proxy govern every read.
+
+A window adds up to 32 presentation dependencies (reply input and composition
+ancestors), plus the active input if needed. Context-only input rows inform reply
+identity without appearing as extra user messages. Context tool ancestors appear
+as enclosing disclosures and do not advance pagination boundaries. This cap keeps
+a very long active turn from forcing an unbounded initial read.
+
+Subscriptions register a capacity-one wakeup channel before reading state. On a
+wake, the server reads the durable cursor interval and coalesces changed message
+IDs in SQL, returning their current bodies plus current state. A gap exceeding
+256 journal entries produces a bounded reset. Message text updates replace that
+message's projection; they do not resend unrelated history. HTTP writes retain
+the stream write deadline. No token queue grows behind a slow consumer.
+
+The browser uses EventSource and closes the old source when switching owners.
+Desktop forwards the same frames through `pot:snapshot`; its Space adapter
+reconnects with bounded backoff. Every new connection begins with a reset. The
+client rejects old cursors and duplicate deltas and renews the subscription on a
+base-cursor gap or boot change. Read versions prevent a concurrent older page
+from overwriting newer token text. A bounded recent-update map also covers
+updates received while a page is in flight.
+
+The UI retains at most 640 messages and a 16 MiB estimated body budget per cached
+owner, with at most eight owner snapshots. Reading farther back evicts distant
+messages; scrolling down pages the newer interval, and Latest reads a recent
+window directly. References resolve by ID, without traversing intervening pages.
+Returning to cached Chat shows its projection immediately and refreshes it from
+the stream. A reset while reading an older message reloads that message's window.
+
+Main Chat mounts measured windows around the viewport with pixel overscan.
+Expanded tool children have their own windows sharing the chat scroller. Resize
+observers update placeholders; message-ID anchors compensate for prepend,
+attachment decoding, disclosure, viewport and font changes. Focus and selected
+text pin mounted rows. Recycling disconnects observers and releases attachment
+leases, while shared viewers/downloads retain their own leases. Rendering merges
+wakeups into animation frames; unchanged replies retain their Markdown nodes.
+
+These APIs only project UI messages. Internal `Conversation.Snapshot`, the full
+`c.messages` collection, model checkpoints, input queues, persistence, recovery,
+retry and model requests are unchanged. Sidebar reply IDs and counts still come
+from the complete conversation catalogue/outbox, independently of UI windows.
 
 Returning to a visible window, restoring a page or regaining network connectivity
 also renews the conversation and change subscriptions and refreshes current

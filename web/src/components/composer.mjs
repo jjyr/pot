@@ -1,3 +1,5 @@
+import {isMobileBrowser} from './input-platform.mjs';
+
 // Native DOM owns text, selection, paste, undo and IME. Never replace the textarea
 // or rewrite its value while composing, including when stream events arrive.
 export function createEnterGuard(now = () => performance.now()) {
@@ -16,8 +18,9 @@ export function createEnterGuard(now = () => performance.now()) {
   };
 }
 
-export function bindComposer(input, {onInput, onSend, onCompositionEnd}) {
+export function bindComposer(input, {onInput, onSend, onCompositionEnd, mobile = isMobileBrowser()}) {
   const guard = createEnterGuard();
+  if (mobile) input.setAttribute('enterkeyhint', 'enter');
   let measuredValue, measuredWidth, measuredScrollHeight;
   const resize = () => {
     const width = input.clientWidth;
@@ -30,13 +33,14 @@ export function bindComposer(input, {onInput, onSend, onCompositionEnd}) {
   const end = () => { guard.end(); onInput(input.value); resize(); onCompositionEnd?.(); };
   const change = () => { onInput(input.value); resize(); };
   const key = event => {
-    if (guard.shouldSend(event)) { event.preventDefault(); onSend(); }
+    if (!mobile && guard.shouldSend(event)) { event.preventDefault(); onSend(); }
   };
   input.addEventListener('compositionstart', start);
   input.addEventListener('compositionend', end);
   input.addEventListener('input', change);
   input.addEventListener('keydown', key);
   return {
+    mobile,
     get composing() { return guard.composing; },
     setValue(value) { if (!guard.composing && input.value !== value) { input.value = value; resize(); } },
     resize,

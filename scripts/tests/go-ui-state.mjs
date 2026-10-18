@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {acceptSnapshot, beginSend, beginSubscription, createConversationState, draft, ownerKey, setDraft, settleSend} from '../../web/src/state/conversation.mjs';
 import {allowedLink,parseFileLink} from '../../web/src/components/markdown.mjs';
 import {createEnterGuard, bindComposer} from '../../web/src/components/composer.mjs';
+import {isMobileBrowser} from '../../web/src/components/input-platform.mjs';
 import {messages,translate} from '../../web/src/locales/messages.mjs';
 import {projectChatReplies,replyFailureKind} from '../../web/src/state/chat-replies.mjs';
 import {taskElapsed} from '../../web/src/components/task-time.mjs';
@@ -101,6 +102,23 @@ assert.equal(success.request.request_id, 'failure', 'retrying an uncertain respo
 settleSend(state, success, true);
 assert.equal(draft(state), '', 'only the unchanged submitted draft is cleared');
 
+// Device policy is independent of window width, hover and generic touch support.
+for (const [name, navigator, mobile] of [
+  ['iPhone', {userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)'}, true],
+  ['Android phone', {userAgent:'Mozilla/5.0 (Linux; Android 15; Pixel 9) Mobile'}, true],
+  ['Android tablet', {userAgent:'Mozilla/5.0 (Linux; Android 15; Tablet)',userAgentData:{mobile:false}}, true],
+  ['iPad', {userAgent:'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X)'}, true],
+  ['iPad desktop UA', {userAgent:'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)',platform:'MacIntel',maxTouchPoints:5}, true],
+  ['Client Hints phone', {userAgent:'reduced',userAgentData:{mobile:true}}, true],
+  ['touch laptop', {userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',platform:'Win32',maxTouchPoints:10,userAgentData:{mobile:false}}, false],
+  ['Mac browser', {userAgent:'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)',platform:'MacIntel',maxTouchPoints:0}, false],
+  ['Linux desktop', {userAgent:'Mozilla/5.0 (X11; Linux x86_64)'}, false],
+  ['concealed identity', {}, false],
+]) {
+  assert.equal(isMobileBrowser({platform:'browser',navigator}),mobile,name);
+  assert.equal(isMobileBrowser({platform:'desktop',navigator}),false,`Native host: ${name}`);
+}
+
 let now = 0;
 const guard = createEnterGuard(() => now);
 const enter = {key: 'Enter'};
@@ -111,10 +129,10 @@ guard.end();
 assert(!guard.shouldSend(enter), 'compositionend-before-Enter must not send the selected candidate');
 now += 100;
 assert(guard.shouldSend(enter));
-for (const extra of [{isComposing: true}, {keyCode: 229}, {shiftKey: true}, {repeat: true}]) assert(!guard.shouldSend({...enter, ...extra}));
+for (const extra of [{isComposing: true}, {keyCode: 229}, {shiftKey: true}, {altKey: true}, {ctrlKey: true}, {metaKey: true}, {repeat: true}]) assert(!guard.shouldSend({...enter, ...extra}));
 
 // A small native EventTarget verifies event ordering through the actual binding.
-class Input extends EventTarget { value = ''; style = {}; clientWidth = 320; scrollHeight = 48; }
+class Input extends EventTarget { value = ''; style = {}; clientWidth = 320; scrollHeight = 48; attributes = new Map(); setAttribute(key,value) { this.attributes.set(key,value); } }
 const input = new Input();
 let sent = 0;
 let text = '';
@@ -141,6 +159,28 @@ binding.destroy();
 input.value = 'after disposal';
 input.dispatchEvent(new Event('input'));
 assert.equal(text, '你', 'disposed composers do not retain active listeners');
+const mobileInput = new Input();
+const mobileBinding = bindComposer(mobileInput, {mobile:true,onInput:value=>{text=value;},onSend:()=>{sent++;}});
+assert.equal(mobileInput.attributes.get('enterkeyhint'),'enter');
+mobileInput.value='第一行\n第二行';
+mobileInput.dispatchEvent(new Event('input'));
+for (const extra of [{}, {shiftKey:true}, {altKey:true}, {ctrlKey:true}, {metaKey:true}, {repeat:true}, {isComposing:true}, {keyCode:229}]) {
+  const event = new Event('keydown',{cancelable:true});
+  Object.assign(event,{key:'Enter',...extra});
+  mobileInput.dispatchEvent(event);
+  assert(!event.defaultPrevented,'Mobile Enter leaves native newline/IME behavior intact');
+}
+mobileInput.dispatchEvent(new Event('compositionstart'));
+mobileBinding.setValue('stale');
+assert.equal(mobileInput.value,'第一行\n第二行');
+mobileInput.dispatchEvent(new Event('compositionend'));
+const afterComposition = new Event('keydown',{cancelable:true});
+Object.assign(afterComposition,{key:'Enter'});mobileInput.dispatchEvent(afterComposition);
+assert(!afterComposition.defaultPrevented,'Candidate confirmation remains native');
+assert.equal(sent,0,'No mobile Enter path sends');
+assert.equal(text,'第一行\n第二行');
+mobileBinding.destroy();
+
 const secondEpoch = beginSubscription(state);
 assert.equal(state.snapshot, null, 'reattachment must release the old boot identity');
 assert(acceptSnapshot(state, snapshot({boot_id: 'new-boot', owner_id: 'new-owner', cursor: '1'}), secondEpoch));

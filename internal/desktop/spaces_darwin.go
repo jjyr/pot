@@ -69,10 +69,10 @@ func (s *Service) streamSpace(ctx context.Context, space, owner string) {
 	for {
 		s.app.Event.Emit("pot:subscription", map[string]any{"space_id": space, "owner": owner, "status": "connecting"})
 		err := s.spaces.Stream(ctx, space, path, func(event spaces.Event) error {
-			if event.Type != "snapshot" {
+			if event.Type != "conversation" {
 				return nil
 			}
-			var value protocol.Snapshot
+			var value protocol.UIFrame
 			if err := protocol.DecodeStrict(event.Data, &value); err != nil {
 				return err
 			}

@@ -378,6 +378,9 @@ Labels use lowercase ASCII letters, digits, hyphens and underscores.
 After a crash or uncertain termination, Main retains the original stopped turn
 until its execution records are reconciled. Chat exposes **Continue task** for
 the latest failed, cancelled or recovery-required turn, including after restart.
+Interrupted task-result summaries expose **Restore conversation**, using their
+original read-only Summary execution instead of rerunning completed background
+tasks. The `summary` flag distinguishes this presentation.
 The snapshot's `continuation` carries the original `user_message_id`, exact
 `attempt_id`, and `recovery_required`. `POST /api/v1/turn/continue` accepts these
 two identities plus a fresh `request_id`; browser and native clients use the

@@ -103,7 +103,7 @@ func TestSocketProductCreateEventsAuthAndRestart(t *testing.T) {
 	buf := make([]byte, 1024)
 	n, err := response.Body.Read(buf)
 	response.Body.Close()
-	if err != nil || !strings.Contains(string(buf[:n]), "event: snapshot") {
+	if err != nil || !strings.Contains(string(buf[:n]), "event: conversation") {
 		t.Fatal(string(buf[:n]), err)
 	}
 	if err = s.Close(ctx); err != nil {

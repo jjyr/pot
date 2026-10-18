@@ -87,7 +87,17 @@ an independent external consumer and a standalone composition worker.
 Use `mise run preview` for a disposable browser fixture on loopback port 17702,
 or `mise exec -- go run ./cmd/pot-app -preview` for a native fixture. Neither uses
 product data or model calls. Browser fixtures do not establish real authentication
-or remote transport behavior. `mise run test:ui-http-integration` exercises real
+or remote transport behavior.
+
+For an isolated long-chat browser fixture with real local history/SSE endpoints,
+run `POT_HISTORY_FIXTURE_URL_FILE=/tmp/pot-history-url mise exec -- go test
+./internal/transport -run '^TestHistoryBrowserFixture$' -v -count=1 -timeout=35m`.
+Open the origin from that URL file at
+`/scripts/tests/fixtures/chat-history.html`. Its desktop/mobile controls exercise
+the shared DOM against synthetic messages and a deterministic loopback provider;
+attachment bytes are synthetic local blobs. Stop it with `POST /fixture/stop` at
+that private origin. This opt-in fixture adds no product data or native notifications.
+ `mise run test:ui-http-integration` exercises real
 local HTTP/SSE and downloads with a deterministic loopback model fixture; it needs
 cached Playwright CLI and an installed browser.
 
@@ -98,6 +108,36 @@ screenshots under [PR image conventions](pr-images/README.md).
 
 `hk.pkl` owns pre-commit and pre-push checks. Run commands through `mise`; do not
 bypass failed hooks. CI separates portable product and macOS packaging checks.
+
+## CI and manual PR checks
+
+CI runs automatically on every tag push, including tags outside the release
+version pattern. Branch pushes (including `main`), PR events and GitHub Release
+events do not start CI. The separate Release workflow still publishes only for
+`v*.*.*` tag pushes or its explicit manual release input; it does not wait for CI.
+
+To run CI manually, open **Actions → CI → Run workflow** and choose a trusted
+branch or tag containing the workflow. Leave `pr` blank to check that selected
+ref, or enter a PR number from this repository to check its latest head commit,
+including a fork PR. For example:
+
+```sh
+gh workflow run ci.yml --ref main -f pr=123
+```
+
+The workflow resolves the PR head once at the start and pins both Linux and macOS
+jobs to that SHA in the base repository, rather than the PR merge commit. Invalid
+or inaccessible PR numbers fail before product jobs start. A later push to the PR
+requires another manual run. Runs for different PR numbers do not cancel each
+other; a new run for the same workflow ref and PR cancels the previous run.
+
+Manual PR checks execute the PR's build scripts and tool configuration on GitHub
+hosted runners. Review that code before starting the run and select a trusted
+workflow ref. Only the source-resolution job is granted pull-request read
+permission. Product jobs have read-only repository access, do not persist checkout
+credentials, skip shared mise and Go caches, and receive no release secrets. They
+use the selected workflow's check steps with the PR's source tree; changes to the
+PR's workflow are not run.
 
 ## Source layout
 

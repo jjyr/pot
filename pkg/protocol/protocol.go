@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	APIVersion          = 3
+	APIVersion          = 4
 	RuntimePort         = 17700
 	RuntimeEndpointFile = "runtime.json"
 	PathSnapshot        = "/api/v1/snapshot"
@@ -173,6 +173,7 @@ type Continuation struct {
 	UserMessageID    string `json:"user_message_id" required:"true"`
 	AttemptID        string `json:"attempt_id" required:"true"`
 	RecoveryRequired bool   `json:"recovery_required" required:"true"`
+	Summary          bool   `json:"summary" required:"true"`
 }
 type Event struct {
 	EventID string         `json:"event_id" required:"true"`

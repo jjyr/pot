@@ -405,6 +405,13 @@ def run(binary, base, env, cli_command):
                 )
                 if '"passed":true' not in output:
                     raise RuntimeError(script + " did not pass")
+            github_code = (ROOT / "scripts/tests/go-ui-github-account-browser.js").read_text()
+            github_result = browser_cli(
+                "run-code", github_code.replace("STATE", json.dumps({"origin": origin}))
+            )
+            if '"passed":true' not in github_result:
+                raise RuntimeError("GitHub account DOM checks did not pass")
+
             code = (ROOT / "scripts/tests/go-ui-refresh-browser.js").read_text()
             refresh = browser_cli("run-code", code.replace("STATE", json.dumps({"origin": origin})))
             if '"passed":true' not in refresh:

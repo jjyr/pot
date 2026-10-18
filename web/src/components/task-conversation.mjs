@@ -29,7 +29,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   let record=initial,state,inputs=[],approvals=[],unavailable=false,connectionError='',busy=false,disposed=false,following=true,restored=false,frame=0,menuMode='actions',menuSignature='',fileSignature='',draftVersion=0;
   const nodes=new Map();
   const editor=bindComposer(input,{onInput:text=>{draftVersion++;onDraft(text);updateComposer();},onSend:submit,onCompositionEnd:updateComposer});
-  const completion=bindCompletions(input,{client:{scope:()=>scope,request:(path,options)=>client.request(path,options)},host:composerArea,locale,id:`pot-task-${task.id}-completions`});
+  const completion=bindCompletions(input,{client:{scope:()=>scope,request:(path,options)=>client.request(path,options)},host:composerArea,locale,mobile:editor.mobile,id:`pot-task-${task.id}-completions`});
   const active=()=>['queued','running','waiting','waiting_approval'].includes(record.info?.phase||task.phase);
   const nearBottom=()=>history.scrollHeight-history.clientHeight-history.scrollTop<64;
   function scrollBottom(){history.scrollTop=history.scrollHeight;following=true;latest.hidden=true;}
@@ -48,7 +48,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     const text=input.value,version=draftVersion;
     await run(async()=>{await onSend(text);if(disposed)return;if(input.value===text&&version===draftVersion){editor.setValue('');onDraft('');}completion.reset();});
   }
-  form.onsubmit=event=>{event.preventDefault();submit();};send.onclick=()=>input.value.trim()?submit():run(onStop);
+  form.onsubmit=event=>{event.preventDefault();if(!editor.mobile)submit();};send.onclick=()=>input.value.trim()?submit():run(onStop);
   function updateComposer(){
     const running=active(),hasText=!!input.value.trim(),stop=!hasText;
     form.hidden=!running&&!input.value&&!editor.composing;input.readOnly=!running&&!editor.composing;if(!running)completion.reset();input.placeholder=tr('Add task guidance…','补充任务指导……');

@@ -72,6 +72,10 @@ func TestModelDisconnectRetryPreservesUnknownUsageReservation(t *testing.T) {
 	if failed.Continuation == nil || failed.Continuation.UserMessageID != accepted.MessageID || failed.Continuation.RecoveryRequired {
 		t.Fatal("interrupted model has no direct continuation", failed.Continuation)
 	}
+	frame, err := c.UIFrame(ctx, 0, true)
+	if err != nil || frame.Continuation == nil || frame.Continuation.AttemptID != failed.Continuation.AttemptID {
+		t.Fatal("paged UI lost the continuation boundary", frame.Continuation, err)
+	}
 	before, err := s.Usage.Quota(ctx, time.Now().UnixMilli())
 	if err != nil || before.Reserved == 0 {
 		t.Fatal(before, err)

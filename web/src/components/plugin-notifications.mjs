@@ -1,38 +1,76 @@
 import {node as n,action,field} from './primitives.mjs';
-import {reconcile} from './reconcile.mjs';
 import {translate} from '../locales/messages.mjs';
 
-export function createPluginNotifications({root,request,scope,signal,locale,refresh}) {
- const section=n('section','page-card');root.append(section);
+const defaults=['mention','team_mention','review_requested','author','comment','subscribed','participating'];
+const known=['mention','team_mention','review_requested','author','comment','subscribed','assign','ci_activity','invitation','manual','security_alert','state_change'];
+const split=value=>value.split(',').map(v=>v.trim()).filter(Boolean);
+const healthy=new Set(['ready','baseline']);
+
+// The account view owns the single disclosure. This form shares its reconciliation
+// so language/status changes preserve live controls, drafts and focus.
+export function createPluginNotifications({request,scope,signal,locale,refresh,render}) {
  const t=key=>translate(locale(),key);
- let current=null,draft=null,busy=false,error=false;
- signal.addEventListener('abort',()=>window.removeEventListener('pot:locale',render),{once:true});
- window.addEventListener('pot:locale',render);
- function render(){
- if(signal.aborted)return;
- const projection=n('section','page-card');if(!current){reconcile(section,projection);return;}
- const item=current.items?.find(i=>i.id==='github');if(!item){reconcile(section,projection);return;}
- if(!draft)draft={enabled:item.enabled,assistant:item.assistant,repositories:(item.config.repositories||[]).join(', '),reasons:(item.config.reasons||[]).join(', '),existing:false};
- projection.append(n('h3','',t('pluginNotifications.title')),n('p','hint',t('pluginNotifications.description')));
- const noAssistants=!current.assistants?.length;if(noAssistants)projection.append(n('p','hint',t('pluginNotifications.noAssistants')));
- const status=n('p','hint',t('pluginNotifications.status.'+(!item.enabled?'disabled':item.status)));status.setAttribute('role','status');projection.append(status);
- if(item.queued)projection.append(n('p','hint',t('pluginNotifications.queued').replace('{count}',String(item.queued))));
- if(item.attention)projection.append(n('p','inline-error',t('pluginNotifications.attention')));
- const enabled=field(t('pluginNotifications.enabled'),draft.enabled,{kind:'checkbox'});
- enabled.input.type='checkbox';enabled.input.checked=draft.enabled;enabled.input.onchange=event=>{draft.enabled=event.currentTarget.checked;};
- const target=field(t('pluginNotifications.assistant'),draft.assistant,{choices:(current.assistants||[]).map(a=>[a.id,a.name])});target.input.onchange=event=>{draft.assistant=event.currentTarget.value;};
- const repositories=field(t('pluginNotifications.repositories'),draft.repositories);repositories.input.oninput=event=>{draft.repositories=event.currentTarget.value;};
- const reasons=field(t('pluginNotifications.reasons'),draft.reasons);reasons.input.oninput=event=>{draft.reasons=event.currentTarget.value;};
- const existing=field(t('pluginNotifications.existing'),false,{kind:'checkbox'});existing.input.type='checkbox';existing.input.checked=draft.existing;existing.input.onchange=event=>{draft.existing=event.currentTarget.checked;};
- projection.append(enabled.row,target.row,repositories.row,reasons.row,n('p','hint',t('pluginNotifications.reasonHelp')),existing.row);
- const save=action(t('pluginNotifications.save'),async event=>{
- if(busy)return;busy=true;error=false;event.currentTarget.disabled=true;render();
- const split=value=>value.split(',').map(v=>v.trim()).filter(Boolean);
- try{await request('/api/v1/plugin-notifications/github',{...scope,signal,method:'POST',body:{enabled:draft.enabled,assistant:draft.assistant,revision:item.revision,config:{repositories:split(draft.repositories),reasons:split(draft.reasons),existing:draft.existing?crypto.randomUUID():(item.config.existing||'')}}});if(!signal.aborted){draft=null;await refresh();}}catch{error=true;}finally{busy=false;if(!signal.aborted)render();}
- });save.disabled=busy||noAssistants;projection.append(save);
- if(error){const message=n('p','inline-error',t('pluginNotifications.error'));message.setAttribute('role','alert');projection.append(message);}
- for(const control of projection.querySelectorAll('input,select,button'))control.disabled=busy||(control===save&&noAssistants);
- reconcile(section,projection);
- }
- return value=>{current=value;render();};
+ let current=null,draft=null,busy=false,error=false,identity=null,showDetails=false,diagnosticError='';
+ const item=()=>current?.items?.find(i=>i.id==='github');
+ const from=value=>({enabled:value.enabled,assistant:value.assistant,repositories:(value.config.repositories||[]).join(', '),reasons:[...(value.config.reasons||[])],existing:false,revision:value.revision,existingToken:value.config.existing||'',existingAccount:value.config.existing_account||''});
+ let dirty=false;
+ const edit=change=>{if(busy)return;change();dirty=true;};
+ return {
+  update(value,account){
+   const next=account?.identity.id||null;
+   if(identity!==next){identity=next;draft=null;dirty=false;error=false;showDetails=false;}
+   current=value;
+   if(item()&&(!draft||(!dirty&&!busy)))draft=from(item());
+  },
+  summary(){
+   const value=item();
+   if(!value)return {text:t('pluginNotifications.summary.error'),error:true};
+   if(value.attention)return {text:t('pluginNotifications.summary.error'),error:true};
+   if(!value.enabled)return {text:t('pluginNotifications.summary.disabled')};
+   if(value.status==='pending')return {text:t('pluginNotifications.summary.pending')};
+   if(value.status==='waiting_assistant')return {text:t('pluginNotifications.summary.waiting')};
+   if(!healthy.has(value.status)||value.attention)return {text:t('pluginNotifications.summary.error'),error:true};
+   const assistant=current.assistants?.find(a=>a.id===value.assistant);
+   return {text:t('pluginNotifications.summary.target').replace('{name}',assistant?.name||value.assistant)};
+  },
+  form(){
+   const projection=n('section','github-notifications');projection.dataset.viewKey='notification-form';
+   const value=item();if(!value||!draft){projection.append(n('p','inline-error',t('pluginNotifications.status.plugin_missing')));return projection;}
+   projection.append(n('h3','',t('pluginNotifications.title')),n('p','hint',t('pluginNotifications.description')));
+   const status=n('p',healthy.has(value.status)||!value.enabled||['pending','waiting_assistant'].includes(value.status)?'hint':'inline-error',t('pluginNotifications.status.'+value.status));status.dataset.viewKey='notification-status';status.setAttribute('role','status');projection.append(status);
+   if(value.queued)projection.append(n('p','hint',t('pluginNotifications.queued').replace('{count}',String(value.queued))));
+   if(value.attention)projection.append(n('p','inline-error',t('pluginNotifications.attention')));
+   if(!healthy.has(value.status)&&value.enabled||value.attention){
+    const details=action(t('pluginNotifications.details'),()=>{showDetails=!showDetails;render();});details.setAttribute('aria-expanded',String(showDetails));details.setAttribute('aria-controls','github-notification-diagnostics');projection.append(details);
+    const diagnostic=n('pre','notification-diagnostics',JSON.stringify({status:value.status,diagnostic:value.diagnostic,assistant:value.assistant,revision:value.revision,next:value.next,queued:value.queued,attention:value.attention},null,2));diagnostic.id='github-notification-diagnostics';diagnostic.hidden=!showDetails;projection.append(diagnostic);
+   }
+   const enabled=field(t('pluginNotifications.enabled'),draft.enabled,{kind:'checkbox'});enabled.input.onchange=event=>{edit(()=>{draft.enabled=event.currentTarget.checked;});render();};
+   const choices=(current.assistants||[]).map(a=>[a.id,a.name]);
+   if(!choices.some(([id])=>id===draft.assistant))choices.unshift([draft.assistant,t(draft.assistant?'pluginNotifications.status.assistant_missing':choices.length?'pluginNotifications.chooseAssistant':'pluginNotifications.noAssistants')]);
+   const target=field(t('pluginNotifications.assistant'),draft.assistant,{choices});target.input.onchange=event=>{edit(()=>{draft.assistant=event.currentTarget.value;});render();};
+   const repositories=field(t('pluginNotifications.repositories'),draft.repositories);repositories.input.oninput=event=>edit(()=>{draft.repositories=event.currentTarget.value;});
+   const reasons=n('fieldset','notification-reasons');reasons.append(n('legend','form-label',t('pluginNotifications.reasons')),n('p','hint',t('pluginNotifications.reasonHelp')));
+   const selected=draft.reasons.length?draft.reasons:defaults;
+   const options=n('div','notification-reason-options');
+   for(const reason of known){
+    const option=field(t('pluginNotifications.reason.'+reason),selected.includes(reason),{kind:'checkbox'});option.row.dataset.viewKey=reason;
+    option.input.onchange=event=>{edit(()=>{const values=new Set(draft.reasons.length?draft.reasons:defaults);if(event.currentTarget.checked)values.add(reason);else values.delete(reason);draft.reasons=[...values];});render();};options.append(option.row);
+   }
+   const custom=field(t('pluginNotifications.customReasons'),draft.reasons.filter(r=>!known.includes(r)).join(', '));custom.input.oninput=event=>edit(()=>{draft.reasons=[...draft.reasons.filter(r=>known.includes(r)),...split(event.currentTarget.value)];});
+   reasons.append(options,custom.row);
+   const existing=field(t('pluginNotifications.existing'),draft.existing,{kind:'checkbox'});existing.input.onchange=event=>edit(()=>{draft.existing=event.currentTarget.checked;});
+   projection.append(enabled.row,target.row,repositories.row,reasons,existing.row);
+   const save=action(t('pluginNotifications.save'),async()=>{
+    if(busy)return;const savingIdentity=identity,submitted=draft;busy=true;error=false;render();
+    const config={repositories:split(draft.repositories),reasons:draft.reasons,existing:draft.existing?crypto.randomUUID():draft.existingToken,existing_account:draft.existing?identity:draft.existingAccount};
+    try{
+     await request('/api/v1/plugin-notifications/github',{...scope,signal,method:'POST',body:{enabled:draft.enabled,assistant:draft.assistant,revision:draft.revision,config}});
+     if(!signal.aborted&&identity===savingIdentity&&draft===submitted){draft={...submitted,revision:submitted.revision+1,existing:false,existingToken:config.existing,existingAccount:config.existing_account};dirty=false;await refresh();}
+    }catch(cause){if(identity===savingIdentity){error=true;diagnosticError=cause.message||String(cause);}}finally{busy=false;if(!signal.aborted)render();}
+   });save.disabled=busy||(draft.enabled&&!draft.assistant);projection.append(save);
+   if(error){const message=n('p','inline-error',t('pluginNotifications.error'));message.dataset.viewKey='save-error';message.setAttribute('role','alert');projection.append(message);if(diagnosticError){const raw=n('pre','notification-diagnostics',diagnosticError);projection.append(raw);}}
+   for(const control of projection.querySelectorAll('input,select,button'))control.disabled=busy||control.disabled;
+   return projection;
+  }
+ };
 }

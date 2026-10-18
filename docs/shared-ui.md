@@ -109,6 +109,16 @@ do not rewrite its value. Only explicit restoration, matching send receipts and
 completion replace text. Composition events, `isComposing` and key code 229 keep
 candidate confirmation from choosing a completion or sending a message.
 
+Phone and tablet browsers leave Enter, including modified Enter and Enter with
+reference completions open, to native textarea editing and IME. Ordinary Enter
+inserts a line break; sending requires activation of the send button. Their
+composers advertise `enterkeyhint="enter"` and ignore form submission events.
+Desktop Enter/Shift+Enter behavior is unchanged. Input policy uses the existing desktop/browser host identity, UA Client Hints' mobile flag,
+mobile/Android/iOS user agents, and iPadOS's MacIntel plus multiple touch points
+identity. It does not use viewport width or pointer/hover media queries, so
+resizing a desktop window or using a touch laptop does not change Enter behavior.
+Browsers that conceal all mobile identity fall back to desktop behavior.
+
 The shared Chat composer accepts image/PDF files through DOM selection, drop and
 screenshot paste. It uses the same bounded byte upload API in browsers and the
 macOS WebView; native attachment downloads use the host save dialog. See
@@ -218,12 +228,31 @@ General settings has one **System notifications** preference, enabled by default
 This expresses delivery intent; it does not grant browser or macOS permission.
 The setting shows the current permission, an explicit authorization action while
 permission is undetermined, and instructions for browser/system settings after a
-denial. Mounting, reconnecting and background events never request permission.
+denial. After the authenticated Web main interface is ready, an eligible desktop
+browser with undetermined permission sees a non-modal introduction. Only its
+**Allow notifications** click requests browser permission, within that click's
+user activation. **Not now**, closing the browser prompt, errors, and page reloads
+do not repeat the introduction. A permanent origin/profile IndexedDB transaction
+claims the introduction before display across tabs and Controls; if durable atomic
+storage is unavailable, discovery is skipped and settings remains available.
+This record is independent of delivery intent and OS permission.
+
+In the macOS App, the main interface's first successful directory load and paint
+signals readiness to the shared Go service. If Pot notifications are enabled and
+native authorization is undetermined, it requests permission automatically. Tray
+initialization cannot trigger it. Automatic and manual requests share one in-flight
+coordinator; a durable attempted marker prevents automatic retries after errors
+or unknown native status. Settings still supports explicit retry. Already granted,
+denied, or disabled clients never automatically request permission.
 An insecure or unsupported browser reports its actual limitation. Pot does not
 play audio: sound, banners and Do Not Disturb follow browser/macOS settings.
 
 Browsers use the Notification API in a secure context (HTTPS or localhost).
-Windows and Linux are supported through the Web UI. The macOS App uses Wails'
+Windows and Linux are supported through the Web UI. Mobile browsers do not get
+this introduction or a misleading authorization button: the current constructor
+send path does not implement Android Service Worker delivery or verified iOS Home
+Screen delivery. Settings explains the specific environment limitation.
+The macOS App uses Wails'
 UserNotifications service from a bundled, signed App, with the official
 `UNNotificationSettings.authorizationStatus` for permission presentation. Web and
 App preferences are independent: the browser stores its preference in local

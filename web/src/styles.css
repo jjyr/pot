@@ -349,8 +349,8 @@ input[type='checkbox'].field-input { width: 18px; height: 18px; min-height: 18px
 .task-stage[data-phase='approval'] .task-status,.task-stage[data-phase='paused'] .task-status,.task-stage[data-phase='offline'] .task-status,.task-stage[data-phase='waiting'] .task-status{color:var(--attention);}
 .task-stage[data-phase='failed'] .task-status{color:var(--danger);}
 .task-stage .control{border:0;background:transparent;color:var(--primary);padding:4px 0;font-size:inherit;flex:none;}
-.task-history{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:28px var(--page-inset) 20px;overflow-anchor:none;}
-.task-column{max-width:var(--conversation-width);margin:0 auto;min-width:0;}
+.task-history{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:0 var(--page-inset);overflow-anchor:none;}
+.task-column{max-width:var(--conversation-width);margin:0 auto;min-width:0;padding:28px 0 20px;}
 .task-goal{margin-bottom:28px;color:var(--muted);font-size:var(--description-size);}
 .task-goal>summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;min-height:28px;}
 .task-goal>summary::-webkit-details-marker{display:none;}
@@ -389,8 +389,17 @@ input[type='checkbox'].field-input { width: 18px; height: 18px; min-height: 18px
 html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-color:#ac5965;border-left-color:#ff8b98}html[data-theme=dark] #pot-error-toast button,html[data-theme=dark] #pot-error-toast pre,html[data-theme=dark] #pot-error-log{background:#302025;color:#ffdddd;border-color:#ac5965}html[data-theme=dark] #pot-error-toast button:hover{background:#593039}
 .product-actions{position:fixed;inset:auto;right:calc(12px + var(--safe-area-right));top:calc(var(--viewport-top) + var(--safe-area-top) + 52px);margin:0;width:260px;max-height:calc(var(--viewport-height) - var(--safe-area-top) - var(--safe-area-bottom) - 64px);padding:8px;}.product-actions>.icon-button{display:flex;margin-left:auto;}.product-actions>.menu-destination{width:100%;min-height:36px;padding:8px 12px;font-size:14px;border:0;border-radius:6px;background:transparent;text-align:left;}.product-actions>.menu-destination:hover{background:var(--navigation);}
 .unread-badge{background:var(--primary);color:white;border-radius:10px;min-width:16px;padding:0 4px;text-align:center;font-size:10px;line-height:16px;flex:none;}.has-unread .assistant-title{font-weight:600;}.avatar.is-arriving{animation:avatar-rebound 650ms ease-out;transform-origin:50% 90%;}@keyframes avatar-rebound{0%,100%{transform:translateY(0) scale(1)}22%{transform:translateY(-5px) scale(1.06,.94)}48%{transform:translateY(0) scale(.96,1.04)}70%{transform:translateY(-2px) scale(1.02,.98)}}
-.background-tasks{margin-top:12px;display:flex;flex-direction:column;gap:4px;}.background-task{border:0;background:transparent;padding:4px 0;display:grid;grid-template-columns:5px minmax(0,1fr) auto;column-gap:8px;row-gap:4px;align-items:baseline;color:var(--muted);text-align:left;font-size:12px;width:100%;max-width:100%;}.background-task-title{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.background-task-meta{display:flex;align-items:baseline;gap:4px;white-space:nowrap;color:var(--muted);font-variant-numeric:tabular-nums;}.task-activity-dot{width:5px;height:5px;align-self:start;margin-top:.55em;flex:none;border-radius:50%;background:var(--primary);animation:task-activity 2.7s ease-in-out infinite;}@keyframes task-activity{0%,100%{opacity:.3}50%{opacity:1}}
-@media(max-width:719px){.background-task{grid-template-columns:5px minmax(0,1fr);}.background-task-title{white-space:normal;overflow-wrap:anywhere;}.background-task-meta{grid-column:2;flex-wrap:wrap;white-space:normal;}.background-task-elapsed{white-space:nowrap;}}
+.background-tasks{margin-top:12px;padding-top:12px;border-top:1px solid var(--divider);width:100%;max-width:720px;}
+.background-tasks-heading{margin:0 0 4px;padding:0 8px;font-size:12px;font-weight:400;color:var(--muted);}
+.background-task-list{display:flex;flex-direction:column;gap:2px;}
+.background-task{border:0;border-radius:var(--radius);background:transparent;padding:8px;display:grid;grid-template-columns:5px minmax(0,1fr);column-gap:8px;row-gap:4px;align-items:start;color:var(--muted);text-align:left;font-size:13px;line-height:20px;width:100%;max-width:100%;min-height:44px;}
+.background-task-title{min-width:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere;}
+.background-task-meta{grid-column:2;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px;color:var(--muted);font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;}
+.background-task-status{color:inherit;}.background-task.needs-approval .background-task-status{color:var(--attention);}.background-task-elapsed{white-space:nowrap;}
+.background-tasks-toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:44px;margin-top:4px;padding:8px;border:0;border-radius:var(--radius);background:transparent;color:var(--muted);font-size:13px;text-align:left;text-decoration:none;}
+.background-tasks-toggle svg{width:16px;height:16px;flex:none;}.background-tasks-toggle[aria-expanded='true'] svg{transform:rotate(180deg);}
+.background-task:hover,.background-tasks-toggle:hover{background:var(--button-hover);}.background-task:active,.background-tasks-toggle:active{background:var(--button-active);}
+.task-activity-dot{width:5px;height:5px;margin-top:.55em;border-radius:50%;background:var(--primary);animation:task-activity 2.7s ease-in-out infinite;}@keyframes task-activity{0%,100%{opacity:.3}50%{opacity:1}}
 .editor-disclosure{margin:20px 0;}.editor-disclosure>summary{cursor:pointer;font-weight:500;font-size:14px;}.editor-disclosure[open]>summary{margin-bottom:14px;}.field-body>.control{align-self:flex-start;}
 .composer-area{position:relative;}.completion-list{position:absolute;bottom:100%;left:0;right:0;z-index:20;max-height:240px;overflow:auto;background:var(--surface);border:1px solid var(--divider);border-radius:8px;box-shadow:0 4px 20px #0002;padding:4px;}.completion-option{display:flex;justify-content:space-between;gap:12px;width:100%;border:0;background:transparent;border-radius:4px;text-align:left;padding:8px 12px;}.completion-option[aria-selected=true]{background:var(--assistant-selection);}.completion-option small{color:var(--muted);}.completion-list[hidden]{display:none;}
 
@@ -548,3 +557,47 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 .attachment-viewer-toolbar .attachment-name { flex: 1; }
 .attachment-viewer>img,.attachment-viewer>iframe { width: 100%; height: calc(100% - 48px); object-fit: contain; border: 0; }
 @media (pointer: coarse) { .attachment-plus,.attachment-remove { min-width: 36px; min-height: 36px; } }
+
+/* Browser anchoring and the measured windows must not both compensate a resize. */
+.history { overflow-anchor: none; }
+.message-window-spacer { flex: none; width: 100%; pointer-events: none; }
+.history-page-status { display: block; margin: 8px auto 20px; font-size: 12px; }
+.history-page-status:disabled { opacity: .65; cursor: default; }
+.message-window { display: flex; flex-direction: column; gap: 0; }
+.message-window > .message { margin-bottom: 20px; }
+.tool-children { display: flex; flex-direction: column; }
+
+/* One account disclosure contains the complete notification form and sign-out. */
+.github-account{display:block;padding:0}
+.integration-toggle{width:100%;border:0;background:none;color:inherit;text-align:left;padding:20px 0;cursor:pointer;font:inherit}
+.integration-toggle:focus-visible{outline:2px solid var(--focus-ring, currentColor);outline-offset:2px;border-radius:var(--radius)}
+.integration-toggle .row-info{min-width:0;flex:1}
+.integration-toggle .integration-identity{margin-right:8px}
+.integration-notification{display:block;font-size:13px;color:var(--muted);overflow-wrap:anywhere;margin-top:4px}
+.integration-notification[data-error=true]{color:var(--attention)}
+.integration-chevron{margin-left:auto;font-size:22px;padding:8px}
+.github-account-settings{padding:0 0 20px 56px;min-width:0}
+.github-account-settings[hidden],.notification-diagnostics[hidden]{display:none}
+.github-notifications{display:flex;flex-direction:column;gap:12px;min-width:0}
+.github-notifications h3,.github-notifications p{margin:0}
+.github-notifications .form-row{margin:0;padding:8px 0;min-height:44px}
+.github-notifications>.control{align-self:flex-start;max-width:100%;white-space:normal}
+.github-account-settings>.integration-actions{border-top:1px solid var(--divider);padding-top:20px;margin-top:20px}
+.notification-reasons{border:0;padding:0;margin:0;min-width:0}
+.notification-reason-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px;margin:8px 0}
+.notification-reason-options .form-row{display:flex;flex-direction:row-reverse;justify-content:flex-end;align-items:center;gap:10px;border:0;cursor:pointer}
+.notification-reason-options .field-body{flex:none}
+.notification-diagnostics{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;font-size:12px}
+@media(max-width:719px){.github-account-settings{padding-left:0}.notification-reason-options{grid-template-columns:minmax(0,1fr)}.github-notifications .form-row{gap:8px}.github-account-settings .control{min-height:44px}.integration-toggle{min-width:0;gap:10px}}
+
+.integration-connection{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.integration-connection:has(.integration-identity) .integration-status::before{content:"· ";color:var(--muted)}
+
+/* Reserve space above either the directory or conversation; never cover input. */
+.notification-onboarding { grid-column: 2 / -1; grid-row: 2; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--divider); max-height: 35vh; overflow: auto; }
+.notification-onboarding p { margin: 4px 0 0; }
+.notification-onboarding-actions { display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
+.pot-app:has(> .notification-onboarding:not([hidden])) { grid-template-rows: var(--titlebar-height) auto minmax(0, 1fr); }
+.pot-app:has(> .notification-onboarding:not([hidden])) > :is(.workspace,.assistant-directory) { grid-row: 3; }
+@media(max-width:719px) {
+  .notification-onboarding { grid-column: 1; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px; }
+}

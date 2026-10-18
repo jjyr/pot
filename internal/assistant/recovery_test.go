@@ -201,3 +201,42 @@ func TestCancelledModelCanContinueAfterRestartWithExactAttempt(t *testing.T) {
 		t.Fatal("cancelled input did not continue", calls.Load())
 	}
 }
+
+func TestFailedSummaryOffersItsOwnReadOnlyContinuation(t *testing.T) {
+	ctx := context.Background()
+	var cleanup, calls atomic.Int64
+	c := conversationFixture(t, filepath.Join(t.TempDir(), "conversation.sqlite"), "boot", func(_ context.Context, request core.ModelRequest) (io.ReadCloser, error) {
+		switch calls.Add(1) {
+		case 1:
+			return replySSE("original work completed"), nil
+		case 2:
+			return nil, io.ErrUnexpectedEOF
+		default:
+			var body struct {
+				Tools []json.RawMessage `json:"tools"`
+			}
+			if err := json.Unmarshal(request.Body, &body); err != nil || len(body.Tools) != 0 {
+				t.Error("summary continuation gained tools", err)
+			}
+			return replySSE("saved results summarized"), nil
+		}
+	}, &cleanup)
+	if _, err := c.Send(ctx, protocol.SendMessage{RequestID: "user", ConversationID: "main", Text: "original goal"}); err != nil {
+		t.Fatal(err)
+	}
+	waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil && len(s.Messages) == 2 })
+	if _, err := c.Report(ctx, "pot-result-summary", "saved background-task result"); err != nil {
+		t.Fatal(err)
+	}
+	failed := waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil && s.Continuation != nil })
+	if !failed.Continuation.Summary || failed.Continuation.UserMessageID == failed.Messages[0].ID {
+		t.Fatal("failed summary was hidden or bound to old user input", failed.Continuation)
+	}
+	if _, err := c.RetryContinuation(ctx, "restore", failed.Continuation.UserMessageID, failed.Continuation.AttemptID); err != nil {
+		t.Fatal(err)
+	}
+	finished := waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil && s.Agent.Phase == protocol.Ready })
+	if calls.Load() != 3 || finished.Messages[len(finished.Messages)-1].Text != "saved results summarized" {
+		t.Fatal("summary restoration repeated the original work", calls.Load(), finished)
+	}
+}

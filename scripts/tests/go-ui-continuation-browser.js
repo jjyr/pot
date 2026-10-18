@@ -35,5 +35,8 @@ async page=>{
  await page.evaluate(()=>{continuationTest.locale='en';continuationTest.offline=true;continuationTest.update();});
  assert(await page.getByRole('button',{name:'Continue task',exact:true}).isDisabled(),'Offline conversations cannot submit continuation');
  await page.getByText('Could not continue the task. Your saved progress and draft are kept. Try again.',{exact:true}).waitFor();
+ await page.evaluate(()=>{continuationTest.snapshot.continuation.summary=true;continuationTest.offline=false;continuationTest.update();});
+ await page.getByText('Restore the interrupted summary',{exact:true}).waitFor();
+ assert(await page.getByRole('button',{name:'Restore conversation',exact:true}).isEnabled(),'Failed task-result summaries expose their own recovery action');
  return {passed:true,owner_fencing:true,draft_preserved:true,retry_identity:true,live_locale:true};
 }

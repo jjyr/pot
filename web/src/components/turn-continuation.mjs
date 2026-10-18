@@ -13,13 +13,13 @@ export function createTurnContinuation({client,locale,onContinued}) {
   const t=key=>translate(locale(),key);
   function render(){
     const attempt=current&&attempts.get(current.key);
-    const next=JSON.stringify([current?.key,current?.recovery,current?.connected,attempt?.pending,attempt?.accepted,attempt?.error?.code,attempt?.error?.message,locale()]);
+    const next=JSON.stringify([current?.key,current?.summary,current?.recovery,current?.connected,attempt?.pending,attempt?.accepted,attempt?.error?.code,attempt?.error?.message,locale()]);
     if(next===signature)return;signature=next;
     root.hidden=!current||!!attempt?.accepted;
     if(!current)return;
-    title.textContent=t('continuation.title');
-    hint.textContent=t(current.recovery?'continuation.recoveryHint':'continuation.hint');
-    action.textContent=t(attempt?.pending?'continuation.pending':'continuation.continue');
+    title.textContent=t(current.summary?'continuation.summaryTitle':'continuation.title');
+    hint.textContent=t(current.summary?'continuation.summaryHint':current.recovery?'continuation.recoveryHint':'continuation.hint');
+    action.textContent=t(attempt?.pending?'continuation.pending':current.summary?'continuation.summaryContinue':'continuation.continue');
     action.disabled=!current.connected||!!attempt?.pending;
     error.replaceChildren();error.hidden=!attempt?.error;
     if(attempt?.error){
@@ -41,7 +41,7 @@ export function createTurnContinuation({client,locale,onContinued}) {
   };
   return {root,update(snapshot,{connected=false}={}){
     const continuation=snapshot?.continuation;
-    current=continuation&&!snapshot.running?{key:JSON.stringify([snapshot.runtime_id,snapshot.owner_id,snapshot.conversation_id,continuation.user_message_id,continuation.attempt_id]),target:continuation.user_message_id,attemptID:continuation.attempt_id,recovery:continuation.recovery_required,connected,scope:{...client.scope()}}:null;
+    current=continuation&&!snapshot.running?{key:JSON.stringify([snapshot.runtime_id,snapshot.owner_id,snapshot.conversation_id,continuation.user_message_id,continuation.attempt_id]),target:continuation.user_message_id,attemptID:continuation.attempt_id,summary:continuation.summary,recovery:continuation.recovery_required,connected,scope:{...client.scope()}}:null;
     render();
   }};
 }

@@ -79,7 +79,7 @@ func (c *Conversation) retryFailed(ctx context.Context, id, target, attempt stri
 	}
 	for i := len(c.messages) - 1; i >= 0; i-- {
 		message := c.messages[i]
-		if message.Role == protocol.User && !message.Steering {
+		if message.Role == protocol.User && !message.Steering || strings.HasPrefix(turn.Request.RequestID, "pot-result-") && message.Role == protocol.System {
 			if !turn.includes(message.ID) {
 				return protocol.SendMessageAccepted{}, errors.New("conversation advanced after failed turn")
 			}
@@ -149,17 +149,18 @@ func (c *Conversation) continuationLocked() *protocol.Continuation {
 		}
 		turn = &retry
 	}
-	if turn == nil || strings.HasPrefix(turn.Request.RequestID, "pot-result-") {
+	if turn == nil {
 		return nil
 	}
+	summary := strings.HasPrefix(turn.Request.RequestID, "pot-result-")
 	// Old failed inputs must not become retryable again after newer input.
 	for i := len(c.messages) - 1; i >= 0; i-- {
 		message := c.messages[i]
-		if message.Role == protocol.User && !message.Steering && !message.Queued {
+		if message.Role == protocol.User && !message.Steering && !message.Queued || summary && message.Role == protocol.System {
 			if !turn.includes(message.ID) {
 				return nil
 			}
-			return &protocol.Continuation{UserMessageID: turn.UserMessageID, AttemptID: turn.attemptID(), RecoveryRequired: c.blocked}
+			return &protocol.Continuation{UserMessageID: turn.UserMessageID, AttemptID: turn.attemptID(), RecoveryRequired: c.blocked, Summary: summary}
 		}
 	}
 	return nil

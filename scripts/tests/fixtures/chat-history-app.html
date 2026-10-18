@@ -1,0 +1,13 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/web/src/styles.css"><title>Chat fixture</title><div id="app"></div>
+<script type="module">
+import {mountApp} from '/web/src/components/ui.js';
+import {createProductionClient,APIError} from '/web/src/adapters/production.mjs';
+const metrics={frames:[],pages:[],errors:[]};window.addEventListener('error',event=>metrics.errors.push(event.message));window.addEventListener('unhandledrejection',event=>metrics.errors.push(event.reason?.stack||String(event.reason)));
+const NativeSource=EventSource,sources=new Set();window.EventSource=class extends NativeSource{constructor(url){super(url);sources.add(this);this.addEventListener('conversation',event=>{const frame=JSON.parse(event.data);metrics.frames.push({kind:frame.kind,bytes:new TextEncoder().encode(event.data).length,count:frame.view.messages.length,cursor:frame.view.state.cursor});});}close(){sources.delete(this);super.close();}};
+const client=await createProductionClient();const history=client.history;let failPage=false;
+client.history=async(query,options)=>{if(failPage){failPage=false;throw new APIError(503,{code:'fixture_offline'});}const page=await history(query,options);metrics.pages.push({query,count:page.messages.length});return page;};
+// Synthetic attachment bytes are delayed locally; all chat/history/SSE requests
+// use the real Application above. These refs never touch product attachments.
+const urls=new Map();client.attachmentURL=async attachment=>{await new Promise(resolve=>setTimeout(resolve,350));if(!urls.has(attachment.id)){const svg='<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260"><rect width="400" height="260" fill="#e9b96e"/><text x="80" y="140" font-size="26">Synthetic image</text></svg>';urls.set(attachment.id,URL.createObjectURL(new Blob([attachment.id==='fixture-image'?svg:'%PDF-1.4 fixture'],{type:attachment.id==='fixture-image'?'image/svg+xml':'application/pdf'})));}return urls.get(attachment.id);};client.downloadAttachment=async()=>{};
+const dispose=mountApp(document.querySelector('#app'),client);window.fixture={client,metrics,failPage:()=>failPage=true,disconnect(){for(const source of sources)if(source.url.includes('/events')){source.close();source.onerror?.(new Event('error'));}},dispose};window.addEventListener('pagehide',()=>{dispose();for(const url of urls.values())URL.revokeObjectURL(url);});
+</script></html>

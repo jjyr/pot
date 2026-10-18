@@ -1,3 +1,4 @@
+import {claimNotificationOnboarding} from './notification-onboarding.mjs';
 import {createNotificationProjection,taskOutcomeNotifications,viewingNotification,notificationText} from '../state/notifications.mjs';
 import {createRefreshQueue} from '../state/refresh.mjs';
 
@@ -21,14 +22,21 @@ export async function claimBrowserNotification(id,indexedDB=globalThis.indexedDB
 
 export function browserNotificationPermission(host=globalThis) {
   if(!host.isSecureContext)return 'insecure';
-  if(!host.Notification)return 'unsupported';
-  return host.Notification.permission;
+  // Delivery currently uses the desktop Notification constructor. Mobile
+  // browsers require a Service Worker delivery path; iOS also requires an
+  // installed Home Screen app. Neither is implemented by this coordinator.
+  const nav=host.navigator||{},ua=nav.userAgent||'';
+  if(/iPhone|iPad|iPod/.test(ua)||(nav.platform==='MacIntel'&&nav.maxTouchPoints>1))return 'ios';
+  if(nav.userAgentData?.mobile||/Android|Mobile/.test(ua))return 'mobile';
+  if(typeof host.Notification!=='function'||typeof host.Notification.requestPermission!=='function')return 'unsupported';
+  return ['default','granted','denied'].includes(host.Notification.permission)?host.Notification.permission:'unavailable';
 }
 
-export function createSystemNotifications({client,surface,view,open,locale,host=window,claim=claimBrowserNotification}) {
+export function createSystemNotifications({client,surface,view,open,locale,host=window,claim=claimBrowserNotification,onboardingClaim=claimNotificationOnboarding}) {
   const projection=createNotificationProjection(),listeners=new Set(),owners=new Map();
   let disposed=false,enabled=true,permission='loading',error='',generation=0,awaitingDirectory=true,pendingClick=null,statusEpoch=0;
   const channel=!client.desktop&&host.BroadcastChannel?new host.BroadcastChannel('pot-system-notifications-v1'):null;
+  let ready=false,onboardingAttempted=false,onboarding=false,authorization=null,authorizing=false;
   const pending=new Map();
   const emit=()=>listeners.forEach(listener=>listener());
   const context=()=>({...view(),focused:host.document.visibilityState==='visible'&&host.document.hasFocus()});
@@ -43,8 +51,30 @@ export function createSystemNotifications({client,surface,view,open,locale,host=
       }
     }catch(reason){nextPermission='unavailable';nextError=reason.message;}
     if(disposed||ticket!==statusEpoch)return;
-    enabled=nextEnabled;permission=nextPermission;error=nextError;emit();
+    enabled=nextEnabled;permission=nextPermission;error=nextError;
+    if(!enabled||permission!=='default')onboarding=false;
+    emit();maybeOnboard();
   };
+  async function maybeOnboard(){
+    if(!ready||disposed||onboardingAttempted||surface!=='main'||host.document.visibilityState!=='visible')return;
+    if(client.desktop){
+      onboardingAttempted=true;
+      try{
+        const result=await client.notificationReady(surface);
+        // A main WebView can finish loading while its native window is hidden.
+        // Revisit only on the next focus/visibility signal, never in a loop.
+        if(result?.deferred){onboardingAttempted=false;return;}
+        await status();
+      }catch(reason){fail(reason);}
+      return;
+    }
+    if(!enabled||authorizing||permission!=='default')return;
+    onboardingAttempted=true;
+    const claimed=await onboardingClaim(host).catch(()=>false);
+    if(claimed&&!disposed&&enabled&&!authorizing&&browserNotificationPermission(host)==='default'){
+      onboarding=true;emit();
+    }
+  }
   const focus=()=>{report();status();};
   const storage=event=>{if(event.key===preferenceKey)status();};
   host.addEventListener('focus',focus);host.addEventListener('blur',report);host.document.addEventListener('visibilitychange',focus);host.addEventListener('storage',storage);
@@ -113,19 +143,29 @@ export function createSystemNotifications({client,surface,view,open,locale,host=
   status();
   return {
     get epoch(){return generation;},
-    get state(){return {enabled,permission,error};},
+    get state(){return {enabled,permission,error,onboarding,authorizing};},
     subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);},
     async setEnabled(value){
       if(client.desktop)await client.setNotificationsEnabled(value);
       else host.localStorage.setItem(preferenceKey,String(value));
-      statusEpoch++;enabled=value;emit();
+      statusEpoch++;enabled=value;if(!enabled)onboarding=false;emit();maybeOnboard();
       if(permission==='loading')await status();
     },
-    async authorize(){
-      // This method is called directly by the settings button's click handler.
-      if(client.desktop)await client.requestNotificationPermission();
-      else if(browserNotificationPermission(host)==='default')await host.Notification.requestPermission();
-      await status();
+    ready(){if(ready)return;ready=true;maybeOnboard();},
+    dismissOnboarding(){onboarding=false;emit();},
+    authorize(){
+      if(authorization)return authorization;
+      if(!enabled)return Promise.resolve();
+      // Invoke synchronously in the click's user activation, before ANY await.
+      onboarding=false;error='';authorizing=true;
+      let request;
+      try{
+        if(client.desktop)request=client.requestNotificationPermission();
+        else if(browserNotificationPermission(host)==='default')request=host.Notification.requestPermission();
+      }catch(reason){request=Promise.reject(reason);}
+      emit();
+      authorization=Promise.resolve(request).then(()=>status(),async reason=>{await status();fail(reason);throw reason;}).finally(()=>{authorization=null;authorizing=false;emit();});
+      return authorization;
     },
     refresh({reset=false,space='',topics=[]}={}){
       if(reset){

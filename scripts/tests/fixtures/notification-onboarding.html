@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Notification onboarding fixture</title>
+<link rel="stylesheet" href="/web/src/styles.css">
+<body><div id="app"></div>
+<script type="module">
+// Serve the repository on an isolated loopback origin. All permission and
+// delivery APIs are fakes; this page never calls the real Notification API.
+import {claimNotificationOnboarding} from '/web/src/adapters/notification-onboarding.mjs';
+const params=new URLSearchParams(location.search);
+const source=params.has('before')?'/output/notification-before/web/src':'/web/src';
+const {mountApp}=await import(`${source}/components/ui.js`);
+document.querySelector('link').href=`${source}/styles.css`;
+if(params.has('phone')){
+  document.body.style.cssText='background:#ddd;display:flex;justify-content:center';
+  const frame=document.createElement('iframe');frame.title='393px mobile viewport';frame.style.cssText='width:393px;height:760px;border:0';
+  params.delete('phone');params.set('narrow','1');frame.src=`${location.pathname}?${params}`;document.body.replaceChildren(frame);
+}else{
+  if(params.has('fresh'))await new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase('pot-notification-onboarding-v1');request.onsuccess=resolve;request.onerror=reject;});
+  let permission=params.get('permission')||'default',prompts=0,locale=params.get('locale')||'en';
+  class FakeNotification {
+    static get permission(){return permission;}
+    static requestPermission(){prompts++;record.textContent=`Permission requests: ${prompts}; user activation: ${navigator.userActivation.isActive}`;return new Promise(resolve=>{finish=()=>resolve(permission='default');reject=()=>resolve(permission='denied');});}
+    constructor(){throw Error('Fixture must not deliver notifications');}
+  }
+  let finish=()=>{},reject=()=>{};
+  const fakeHost=Object.create(window);
+  // Window methods require the real receiver; own properties avoid native setters.
+  for(const [key,value] of Object.entries({document,Notification:FakeNotification,isSecureContext:!params.has('insecure'),navigator:params.has('mobile')?{userAgent:'iPhone'}:navigator,localStorage, indexedDB,setTimeout,crypto,
+    addEventListener:window.addEventListener.bind(window),removeEventListener:window.removeEventListener.bind(window)}))Object.defineProperty(fakeHost,key,{value});
+  const scope={owner:'alpha',space:'fixture'};
+  const assistant={id:'alpha',name:'Pot',space_id:'fixture',control_id:'fixture',reply_count:1,reply_id:'reply'};
+  const snapshot={runtime_id:'fixture',owner_id:'alpha',boot_id:'fixture',conversation_id:'fixture',cursor:'1',running:false,turn_id:null,messages:[
+    {id:'user',role:'user',text:'Please review the release checklist.',status:'complete'},
+    {id:'reply',role:'assistant',text:'The checklist is ready. You can keep chatting while notification preferences are available.',status:'complete'}]};
+  const client={production:true,desktop:false,runtime:{runtime_id:'fixture'},assistants:[assistant],spaces:[],scope:()=>({...scope}),setScope:value=>Object.assign(scope,value),
+    snapshot:async()=>snapshot,subscribe(handler,status){queueMicrotask(()=>{status('connected');handler(snapshot);});return ()=>{};},changes:()=>()=>{},
+    request:async path=>{
+      if(path==='/api/v1/spaces')return {items:[{id:'fixture',control_id:'fixture',name:'Preview',connected:true}],active_space_id:'fixture'};
+      if(path==='/api/v1/assistants')return [assistant];
+      if(path==='/api/v1/permissions')return {pending:[]};
+      if(path.startsWith('/api/v1/tasks/outcomes'))return {items:[],cursor:0,has_more:false};
+      if(path.startsWith('/api/v1/tasks'))return {items:[]};
+      if(path.includes('models')||path.includes('providers'))return {items:[]};
+      return {};
+    }};
+  // Use the real shell and its readiness signal, replacing only the host APIs.
+  // The adapter is injected via the window's fake Notification descriptor for
+  // the shell mount, then restored. Its retained host is this fixture window.
+  Object.defineProperty(window,'Notification',{configurable:true,value:FakeNotification});
+  if(params.has('mobile'))Object.defineProperty(window,'navigator',{configurable:true,value:{language:'en',userAgent:'iPhone'}});
+  if(params.has('insecure'))Object.defineProperty(window,'isSecureContext',{configurable:true,value:false});
+  mountApp(document.querySelector('#app'),client);
+  const record=document.createElement('output');record.id='fixture-result';record.textContent='Permission requests: 0';
+  const panel=document.createElement('details');panel.style.cssText='position:fixed;bottom:0;right:0;z-index:20;background:white;color:black;font:12px sans-serif;max-width:100%';
+  const summary=document.createElement('summary');summary.textContent='Fixture controls';panel.append(summary,record);
+  const button=(text,run)=>{const b=document.createElement('button');b.textContent=text;b.onclick=run;panel.append(b);};
+  button('Dismiss fake system prompt',()=>finish());button('Deny fake system prompt',()=>reject());
+  button('Switch language',()=>{locale=locale==='en'?'zh-CN':'en';window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-go-preview-locale',value:locale}}));});
+  button('Reset first-run record',()=>{const request=indexedDB.deleteDatabase('pot-notification-onboarding-v1');request.onsuccess=()=>location.reload();});
+  button('Run storage checks',async()=>{
+    try{
+      const drop=()=>new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase('pot-notification-onboarding-v1');request.onsuccess=resolve;request.onerror=reject;});
+      await drop();
+      const claims=await Promise.all(Array.from({length:20},()=>claimNotificationOnboarding(window)));
+      if(claims.filter(Boolean).length!==1)throw Error('concurrent IDB claims failed');
+      if(await claimNotificationOnboarding(window))throw Error('durable record repeated');
+      const restricted=Object.create(fakeHost);Object.defineProperty(restricted,'localStorage',{get(){throw Error('blocked');}});
+      await drop();if(!await claimNotificationOnboarding(restricted))throw Error('IDB should work without localStorage');
+      record.textContent='PASS: 20 concurrent IDB claims, permanent record, localStorage blocked';
+    }catch(error){record.textContent=`FAIL: ${error.message}`;}
+  });
+  document.body.append(panel);
+}
+</script></body></html>
