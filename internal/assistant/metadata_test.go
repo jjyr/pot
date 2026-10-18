@@ -15,8 +15,8 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
-func TestResponsesMetadataNeverEntersTranscriptOrCheckpoint(t *testing.T) {
-	for _, scenario := range []struct{ snapshotOnly, generatedID bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
+func TestResponsesReturnedMetadataPersistsUnchanged(t *testing.T) {
+	for _, scenario := range []struct{ snapshotOnly, generatedID, discussion bool }{{false, false, false}, {true, false, false}, {false, true, false}, {true, true, false}, {false, true, true}, {true, true, true}} {
 		t.Run(fmt.Sprint(scenario), func(t *testing.T) {
 			snapshotOnly := scenario.snapshotOnly
 			ctx := context.Background()
@@ -32,6 +32,8 @@ func TestResponsesMetadataNeverEntersTranscriptOrCheckpoint(t *testing.T) {
 			if err = spec.Rehash(); err != nil {
 				t.Fatal(err)
 			}
+			var want string
+			var wantReplay []byte
 			var c *Conversation
 			c, err = OpenConversation(filepath.Join(t.TempDir(), "conversation.sqlite"), ConversationOptions{Owner: "main", RuntimeID: "runtime", BootID: "boot", Manager: manager, InitialSpec: &spec, InitialWelcome: "A task can use a separate worktree.", Prepare: func(_ context.Context, thread core.Thread, request core.TurnRequest) (RunOptions, error) {
 				return RunOptions{Execution: core.ExecutionContext{Owner: thread.Owner, Role: core.Main}, Services: modelPort{model: func(ctx context.Context, r core.ModelRequest) (io.ReadCloser, error) {
@@ -67,6 +69,8 @@ func TestResponsesMetadataNeverEntersTranscriptOrCheckpoint(t *testing.T) {
 						return map[string]any{"id": id, "type": "message", "role": "assistant", "phase": phase, "content": []any{map[string]any{"type": "output_text", "text": text}}}
 					}
 					items := []map[string]any{item("meta", "commentary", tag), item("progress", "commentary", "Queued."), item("final", "final_answer", "Separate worktree.")}
+					want = tag + "Queued.Separate worktree."
+					wantReplay, _ = json.Marshal(items)
 					var wire strings.Builder
 					write := func(event map[string]any) { data, _ := json.Marshal(event); fmt.Fprintf(&wire, "data: %s\n\n", data) }
 					if !snapshotOnly {
@@ -89,21 +93,29 @@ func TestResponsesMetadataNeverEntersTranscriptOrCheckpoint(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer c.Close()
-			if _, err = c.Send(ctx, protocol.SendMessage{RequestID: "confirm", ConversationID: "main", Text: "Confirm the accepted task."}); err != nil {
+			input := protocol.SendMessage{RequestID: "confirm", ConversationID: "main", Text: "Confirm the accepted task."}
+			if scenario.discussion {
+				history, err := c.store.Messages(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				tag := `<pot_message_metadata>{"message_id":"ABCDEFGHIJKLMNOPQRSTUVWXYZ"}</pot_message_metadata>`
+				input.Text = "Discuss " + tag
+				input.References = []core.MessageReference{{MessageID: history[0].ID, Quote: tag}}
+			}
+			if _, err = c.Send(ctx, input); err != nil {
 				t.Fatal(err)
 			}
 			snap := waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil && len(s.Messages) == 3 })
-			if snap.Messages[2].Text != "Queued.\n\nSeparate worktree." || snap.Messages[2].Status != protocol.Complete {
+			if snap.Messages[2].Text != want || snap.Messages[2].Status != protocol.Complete {
 				t.Fatal(snap.Messages)
 			}
 			messages, err := c.store.Messages(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, m := range messages {
-				if strings.Contains(m.Text, "pot_message_metadata") {
-					t.Fatal("metadata persisted in transcript")
-				}
+			if len(messages) != 3 || messages[2].Text != want {
+				t.Fatalf("returned content changed in transcript: %+v", messages)
 			}
 			raw, err := c.store.LoadContext(ctx)
 			if err != nil {
@@ -114,19 +126,26 @@ func TestResponsesMetadataNeverEntersTranscriptOrCheckpoint(t *testing.T) {
 				t.Fatal(err)
 			}
 			last := checkpoint.Messages[len(checkpoint.Messages)-1]
-			if last.Text != snap.Messages[2].Text || strings.Contains(string(last.Replay), "pot_message_metadata") || !strings.Contains(string(last.Replay), `"phase":"commentary"`) || !strings.Contains(string(last.Replay), `"phase":"final_answer"`) {
+			if last.Text != want || string(last.Replay) != string(wantReplay) {
 				t.Fatalf("invalid checkpoint: %+v", last)
 			}
-			// Every durable event, including intermediate streamed snapshots, must be clean.
+			// Durable streamed snapshots must preserve every prefix, including the tag.
 			events, err := c.store.Events(ctx, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
+			var streamed string
 			for _, event := range events {
-				raw, _ := json.Marshal(event)
-				if strings.Contains(string(raw), "pot_message_metadata") {
-					t.Fatal("metadata entered streamed event log")
+				if event.Message != nil && event.Message.ID == messages[2].ID {
+					text := event.Message.Text
+					if !strings.HasPrefix(want, text) || !strings.HasPrefix(text, streamed) {
+						t.Fatalf("stream changed content: %q -> %q", streamed, text)
+					}
+					streamed = text
 				}
+			}
+			if streamed != want {
+				t.Fatalf("stream=%q transcript=%q", streamed, want)
 			}
 		})
 	}

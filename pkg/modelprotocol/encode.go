@@ -166,10 +166,6 @@ func Encode(r Request) (json.RawMessage, error) {
 	case OpenAIResponses:
 		for _, m := range r.Messages {
 			metadata := messageMetadata(m)
-			if m.Role == "assistant" && m.Text == "" && len(m.Replay) == 0 {
-				metadata = ""
-			}
-			m.Text = metadata + m.Text
 			if m.Role != "tool" {
 				flushImages()
 			}
@@ -177,6 +173,10 @@ func Encode(r Request) (json.RawMessage, error) {
 			if len(m.Replay) > 0 && m.Role == "assistant" {
 				_ = json.Unmarshal(m.Replay, &replay)
 			}
+			if m.Role == "assistant" && m.Text == "" && replay == nil {
+				metadata = ""
+			}
+			m.Text = metadata + m.Text
 			if replay != nil {
 				if metadata != "" {
 					// Annotate the existing message instead of inventing an
@@ -368,4 +368,20 @@ func ContextPayload(r Request) (json.RawMessage, error) {
 		}
 	}
 	return json.Marshal(result)
+}
+
+// Only a native message with visible text can carry a transcript annotation.
+// Empty placeholders and reasoning/tool calls retain their original content.
+func responseMessage(replay []any) map[string]any {
+	for _, item := range replay {
+		b := obj(item)
+		if b["type"] == "message" {
+			for _, part := range array(b["content"]) {
+				if obj(part)["type"] == "output_text" && str(obj(part)["text"]) != "" {
+					return b
+				}
+			}
+		}
+	}
+	return nil
 }

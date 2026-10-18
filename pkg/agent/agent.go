@@ -579,7 +579,7 @@ func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoin
 	stopClose := context.AfterFunc(requestCtx, func() { _ = stream.Close() })
 	defer stopClose()
 	parser := m.SSE{}
-	decoder := m.NewRequestDecoder(input)
+	decoder := m.NewDecoder(input.Protocol)
 	buffer := make([]byte, 16384)
 	received := 0
 	for {

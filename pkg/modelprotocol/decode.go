@@ -8,21 +8,18 @@ import (
 )
 
 type Decoder struct {
-	responses        map[int]*responseText
-	responseSequence *uint64
-	annotations      map[string]bool
-	protocol         Protocol
-	text             strings.Builder
-	blocks           map[int]map[string]any
-	arguments        map[int]string
-	terminal         bool
-	finished         bool
-	failed           error
-	reason           string
-	reasoning        strings.Builder
-	observer         UsageObserver
-	usage            *TokenUsage
-	streamBytes      int
+	protocol    Protocol
+	text        strings.Builder
+	blocks      map[int]map[string]any
+	arguments   map[int]string
+	terminal    bool
+	finished    bool
+	failed      error
+	reason      string
+	reasoning   strings.Builder
+	observer    UsageObserver
+	usage       *TokenUsage
+	streamBytes int
 }
 
 func NewDecoder(protocol Protocol) *Decoder {
@@ -110,9 +107,44 @@ func (d *Decoder) Push(raw json.RawMessage) (result StreamEvent, err error) {
 			}
 		}
 	case OpenAIResponses:
-		delta, err = d.responseDelta(e)
-		if err != nil {
-			return result, err
+		switch e["type"] {
+		case "response.output_text.delta":
+			delta = str(e["delta"])
+		case "response.output_item.done":
+			i, e2 := index(e["output_index"])
+			if e2 != nil {
+				return result, e2
+			}
+			if obj(e["item"]) == nil {
+				return result, fmt.Errorf("invalid Responses output item")
+			}
+			d.blocks[i] = obj(e["item"])
+		case "response.completed":
+			if output := array(get(e, "response", "output")); output != nil {
+				d.blocks = map[int]map[string]any{}
+				var text strings.Builder
+				for i, v := range output {
+					if obj(v) == nil {
+						return result, fmt.Errorf("invalid Responses output item")
+					}
+					d.blocks[i] = obj(v)
+					if obj(v)["type"] == "message" {
+						for _, part := range array(obj(v)["content"]) {
+							text.WriteString(str(obj(part)["text"]))
+						}
+					}
+				}
+				// A final snapshot may supply text that was not streamed. Use the
+				// same concatenation as Finish and emit only its missing suffix.
+				if strings.HasPrefix(text.String(), d.text.String()) {
+					delta = strings.TrimPrefix(text.String(), d.text.String())
+				}
+			}
+			d.terminal = true
+			d.reason = "stop"
+		case "response.incomplete", "response.failed":
+			d.terminal = true
+			d.failed = fmt.Errorf("model response incomplete or failed")
 		}
 	case AnthropicMessages:
 		switch e["type"] {
@@ -282,11 +314,6 @@ func (d *Decoder) Finish() (Message, error) {
 			}
 			calls = append(calls, ToolCall{id, name, arguments})
 		}
-		if d.protocol == OpenAIResponses {
-			if state := d.responses[i]; state != nil && d.annotationItem(state, state.text()) {
-				continue
-			}
-		}
 		blocks = append(blocks, b)
 	}
 	if len(calls) > 128 {
@@ -312,14 +339,9 @@ func (d *Decoder) Finish() (Message, error) {
 	if d.protocol == OpenAIResponses {
 		var text strings.Builder
 		for _, item := range blocks {
-			b := obj(item)
-			if b["type"] == "message" {
-				state := &responseText{item: b, done: true}
-				if value := state.text(); value != "" {
-					if text.Len() > 0 {
-						text.WriteString("\n\n")
-					}
-					text.WriteString(value)
+			if obj(item)["type"] == "message" {
+				for _, part := range array(obj(item)["content"]) {
+					text.WriteString(str(obj(part)["text"]))
 				}
 			}
 		}

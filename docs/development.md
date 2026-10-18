@@ -131,21 +131,6 @@ Credentials stay on the configured machine and are never logged. Run it with
 `POT_LIVE=1 mise exec -- go test -v ./internal/control -run '^TestConfiguredModelMessageReferencesLive$' -count=1 -timeout=4m`
 and the two explicit path variables above.
 
-For an isolated Responses metadata diagnostic, run
-`TestConfiguredModelMetadataLive` with the same explicit opt-in and path variables.
-It uses the first configured profile, its exact model/protocol/reasoning effort,
-and synthetic history containing a side-effect-free accepted-tool result and a
-selected-excerpt reference to the preceding assistant message. Each
-of its native-replay and text-history cases permits one real request, capped at
-1536 output tokens, with no retries. A transparent loopback recorder forwards the
-serialized request to the configured endpoint and records bounded raw response
-SSE, item phases, decoded deltas and the durable reply/checkpoint by request ID.
-It records no headers, redacts the configured credential if present in a body,
-and keeps captures only in an owner-only temporary test directory, automatically
-removed when the test ends. There is no production logging switch or retained
-trace output. The test checks decode/persistence consistency; a passing sample
-does not establish that the upstream can never emit metadata.
-
 For DeepSeek tests, copy `.env.example` to `.env` in the current repository root and set
 `DEEPSEEK_API_KEY`; `DEEPSEEK_BASE_URL` and `DEEPSEEK_MODEL` default to
 `https://api.deepseek.com` and `deepseek-v4-flash`. `.env` is Git-ignored.
