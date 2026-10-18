@@ -21,17 +21,18 @@ import (
 )
 
 type RunOptions struct {
-	Execution      core.ExecutionContext
-	Services       core.ExecutionServices
-	Dispatch       agent.Dispatch
-	Cleanup        agent.Cleanup
-	Composer       agent.Composer
-	Tools          []modelprotocol.ToolDefinition
-	PrepareContext agent.PrepareContext
-	Ready          func(context.Context) error
-	Observe        func(context.Context, agent.Observation) error
-	Settle         func(context.Context) error
-	MaxRounds      int
+	Execution          core.ExecutionContext
+	Services           core.ExecutionServices
+	Dispatch           agent.Dispatch
+	Cleanup            agent.Cleanup
+	Composer           agent.Composer
+	Tools              []modelprotocol.ToolDefinition
+	ResolveAttachments func(context.Context, core.ResolvedSpec, []modelprotocol.Message) ([]modelprotocol.Message, error)
+	PrepareContext     agent.PrepareContext
+	Ready              func(context.Context) error
+	Observe            func(context.Context, agent.Observation) error
+	Settle             func(context.Context) error
+	MaxRounds          int
 }
 type ConversationOptions struct {
 	Context                                  context.Context
@@ -44,6 +45,7 @@ type ConversationOptions struct {
 	RefreshConfiguration                     func(context.Context, core.Thread, json.RawMessage) (*core.ResolvedSpec, error)
 	OnFinished                               func(context.Context, protocol.SendMessage, execution.Result) error
 	MaxRequests, MaxTurnRequests             uint64 // zero is unlimited; independent of token allowances
+	ValidateAttachments                      func(context.Context, core.ResolvedSpec, []core.Attachment) error
 	Prepare                                  func(context.Context, core.Thread, core.TurnRequest) (RunOptions, error)
 }
 type savedTurn struct {
@@ -305,6 +307,15 @@ func (c *Conversation) snapshotLocked() protocol.Snapshot {
 			detail = &message
 		}
 	}
+	caps := core.AttachmentCapabilities{}
+	if c.thread != nil {
+		caps = c.thread.Config.AttachmentCapabilities()
+		if c.turn == nil {
+			if pending, err := c.configurationLocked(context.WithoutCancel(c.ctx)); err == nil && pending.PendingSpec != nil {
+				caps = pending.PendingSpec.AttachmentCapabilities()
+			}
+		}
+	}
 	model := ""
 	output := uint64(0)
 	if c.thread != nil {
@@ -317,12 +328,13 @@ func (c *Conversation) snapshotLocked() protocol.Snapshot {
 	}
 	messages := slices.Clone(c.messages)
 	for i := range messages {
+		messages[i].Attachments = slices.Clone(messages[i].Attachments)
 		if messages[i].RequestID != nil {
 			request := *messages[i].RequestID
 			messages[i].RequestID = &request
 		}
 	}
-	return protocol.Snapshot{Budget: budget, APIVersion: protocol.APIVersion, BootID: c.options.BootID, Cursor: c.cursor, Agent: protocol.AgentStatus{Model: model, Phase: phase, Detail: detail}, ConversationID: c.options.ConversationID, Messages: messages, Turn: turn}
+	return protocol.Snapshot{Budget: budget, APIVersion: protocol.APIVersion, BootID: c.options.BootID, Cursor: c.cursor, Agent: protocol.AgentStatus{Attachments: caps, Model: model, Phase: phase, Detail: detail}, ConversationID: c.options.ConversationID, Messages: messages, Turn: turn}
 }
 func (c *Conversation) Snapshot(ctx context.Context) (protocol.Snapshot, error) {
 	if err := ctx.Err(); err != nil {
@@ -435,7 +447,23 @@ func (c *Conversation) Report(ctx context.Context, id, text string) (protocol.Se
 	}
 	return c.accept(ctx, protocol.SendMessage{RequestID: id, ConversationID: c.options.ConversationID, Text: text}, protocol.System)
 }
+func (c *Conversation) validateAttachmentsLocked(ctx context.Context, items []core.Attachment) error {
+	if len(items) == 0 {
+		return nil
+	}
+	if c.thread == nil || c.options.ValidateAttachments == nil {
+		return errors.New("attachments unavailable")
+	}
+	caps := c.thread.Config.AttachmentCapabilities()
+	for _, a := range items {
+		if !caps.Allows(a.MIMEType) {
+			return errors.New("current model does not support this attachment type")
+		}
+	}
+	return c.options.ValidateAttachments(ctx, c.thread.Config, items)
+}
 func (c *Conversation) accept(ctx context.Context, request protocol.SendMessage, role protocol.Role) (protocol.SendMessageAccepted, error) {
+	request.Attachments = slices.Clone(request.Attachments)
 	if err := validateConversationRequest(request); err != nil {
 		return protocol.SendMessageAccepted{}, err
 	}
@@ -452,10 +480,27 @@ func (c *Conversation) accept(ctx context.Context, request protocol.SendMessage,
 		return protocol.SendMessageAccepted{}, err
 	}
 	if old != nil {
-		if old.Role != role || old.ConversationID != request.ConversationID || old.Text != request.Text {
+		if old.Role != role || old.ConversationID != request.ConversationID || old.Text != request.Text || !slices.Equal(old.Attachments, request.Attachments) {
 			return protocol.SendMessageAccepted{}, errors.New("request identity already has different content")
 		}
 		return protocol.SendMessageAccepted{MessageID: old.ID, Duplicate: true}, nil
+	}
+	if c.turn == nil {
+		generation := uint64(0)
+		if c.thread != nil {
+			generation = c.thread.Generation
+		}
+		if err := c.applyConfigurationBoundaryLocked(ctx); err != nil {
+			return protocol.SendMessageAccepted{}, err
+		}
+		if c.thread != nil && c.thread.Generation != generation {
+			if err := c.appendTurnLocked(ctx); err != nil {
+				return protocol.SendMessageAccepted{}, err
+			}
+		}
+	}
+	if err := c.validateAttachmentsLocked(ctx, request.Attachments); err != nil {
+		return protocol.SendMessageAccepted{}, err
 	}
 	if c.blocked {
 		return protocol.SendMessageAccepted{}, agent.ErrUncertainEffects
@@ -475,16 +520,13 @@ func (c *Conversation) accept(ctx context.Context, request protocol.SendMessage,
 			return protocol.SendMessageAccepted{}, errors.New("user input has priority")
 		}
 	}
-	if err := c.applyConfigurationBoundaryLocked(ctx); err != nil {
-		return protocol.SendMessageAccepted{}, err
-	}
 	if c.thread == nil {
 		return protocol.SendMessageAccepted{}, errors.New("configure an assistant before sending messages")
 	}
-	message := protocol.Message{ID: storage.ID(), ConversationID: request.ConversationID, Role: role, Text: request.Text, Status: protocol.Accepted, CreatedAtMS: storage.Now(), RequestID: &request.RequestID}
+	message := protocol.Message{ID: storage.ID(), ConversationID: request.ConversationID, Role: role, Text: request.Text, Attachments: request.Attachments, Status: protocol.Accepted, CreatedAtMS: storage.Now(), RequestID: &request.RequestID}
 	c.turn = &savedTurn{Owner: c.options.Owner, BootID: c.options.BootID, Generation: c.thread.Generation, Request: request, UserMessageID: message.ID, State: "queued"}
 	raw, _ := json.Marshal(c.turn)
-	if err := c.putMessageLocked(ctx, message, map[string]string{"conversation.turn": string(raw)}); err != nil {
+	if err := c.putMessageLocked(ctx, message, map[string]string{"conversation.turn": string(raw), "conversation.retry": ""}); err != nil {
 		c.turn = nil
 		return protocol.SendMessageAccepted{}, err
 	}
@@ -720,7 +762,7 @@ func (c *Conversation) Identity(request protocol.SendMessage) execution.Identity
 func (c *Conversation) Failed(err error) { c.mu.Lock(); c.lastError = err; c.mu.Unlock() }
 func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage) execution.Result {
 	c.mu.Lock()
-	if c.turn == nil || c.turn.Request != request || c.turn.Cancelling || c.blocked {
+	if c.turn == nil || !c.turn.Request.Equal(request) || c.turn.Cancelling || c.blocked {
 		c.mu.Unlock()
 		return execution.Result{Phase: execution.Cancelled, Err: context.Canceled}
 	}
@@ -728,6 +770,13 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 		if err := c.aggregateUsersLocked(ctx); err != nil {
 			c.mu.Unlock()
 			return execution.Result{Phase: execution.Failed, Err: err}
+		}
+	}
+	inputAttachments := append([]core.Attachment(nil), c.turn.Request.Attachments...)
+	if len(c.turn.Inputs) > 0 {
+		inputAttachments = nil
+		for _, r := range c.turn.Inputs {
+			inputAttachments = append(inputAttachments, r.Attachments...)
 		}
 	}
 	inputText := c.turn.inputText()
@@ -746,7 +795,7 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 	c.finalizing = false
 	c.mu.Unlock()
 	defer cancel()
-	options, err := c.options.Prepare(runCtx, thread, core.TurnRequest{RequestID: request.RequestID, Text: inputText})
+	options, err := c.options.Prepare(runCtx, thread, core.TurnRequest{RequestID: request.RequestID, Text: inputText, Attachments: inputAttachments})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return execution.Result{Phase: execution.Cancelled, Err: err}
@@ -766,8 +815,8 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 		}
 		return c.recordCleanup(ctx, request.RequestID, thread.Generation)
 	}
-	loop := agent.Agent{Services: options.Services, Feedback: binding, Dispatch: options.Dispatch, Cleanup: cleanup, Composer: options.Composer, Tools: options.Tools, PrepareContext: options.PrepareContext, MaxRounds: options.MaxRounds}
-	err = loop.Execute(runCtx, options.Execution, thread, core.TurnRequest{RequestID: request.RequestID, Text: inputText}, resuming, binding.event)
+	loop := agent.Agent{Services: options.Services, Feedback: binding, Dispatch: options.Dispatch, Cleanup: cleanup, Composer: options.Composer, Tools: options.Tools, PrepareContext: options.PrepareContext, ResolveAttachments: options.ResolveAttachments, MaxRounds: options.MaxRounds}
+	err = loop.Execute(runCtx, options.Execution, thread, core.TurnRequest{RequestID: request.RequestID, Text: inputText, Attachments: inputAttachments}, resuming, binding.event)
 	phase := execution.Succeeded
 	if err != nil {
 		phase = execution.Failed
@@ -863,6 +912,12 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 			reply.Error = result.Err.Error()
 		}
 		if err := c.putMessageLocked(ctx, reply, nil); err != nil {
+			return err
+		}
+	}
+	if result.Phase == execution.Failed && !c.blocked {
+		raw, _ := json.Marshal(c.turn)
+		if err := c.store.Set(ctx, "conversation.retry", string(raw)); err != nil {
 			return err
 		}
 	}

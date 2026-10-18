@@ -174,8 +174,10 @@ Resolved specs contain concrete limits. A separate positive `limit.input` bounds
 input and compaction independently of total context and output reservation. Token
 estimation itself continues to follow [Codex's rules](token-usage.md#context-estimation).
 Public metadata does not change prompts, tool descriptions or execution authority.
-Known image-input support supplies a descriptor default supported by Pot's
-existing adapters; explicit model-catalog capability overrides take precedence.
+Known image and PDF input support supply independent descriptor defaults.
+Attachment capabilities are booleans intersected with implemented protocol
+encodings; image input never implies PDF input. Explicit model-catalog capability
+overrides take precedence. See [Chat attachments](chat-attachments.md).
 
 Main assistants may adopt updated local model defaults at a fresh turn boundary,
 only while still following the same saved profile revision. Running and paused

@@ -284,7 +284,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		failure(w, 404, "asset unavailable")
 		return
 	}
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-src 'self' blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 	s.assets.ServeHTTP(w, r)
 }
 func Allowed(method, path string) bool {
@@ -302,6 +302,9 @@ func Allowed(method, path string) bool {
 		return len(parts) == 2 && (parts[1] == "login" && method == "POST" || parts[1] == "connection" && method == "DELETE") || len(parts) == 3 && parts[1] == "login" && core.Identifier(parts[2]) && (method == "GET" || method == "DELETE")
 	}
 	if method == "GET" {
+		if strings.HasPrefix(path, "/api/v1/attachments/") {
+			return core.Identifier(strings.TrimPrefix(path, "/api/v1/attachments/"))
+		}
 		switch path {
 		case "/api/v1/usage/models", "/api/v1/usage/requests", "/api/v1/usage/tools", "/api/v1/usage/compactions":
 			return true
@@ -329,7 +332,7 @@ func Allowed(method, path string) bool {
 	}
 	if method == "POST" {
 		switch path {
-		case "/api/v1/assistants", "/api/v1/providers", "/api/v1/providers/default", "/api/v1/providers/check", "/api/v1/providers/resolve", "/api/v1/providers/test", "/api/v1/agent", "/api/v1/agent/routing", "/api/v1/instructions", "/api/v1/messages", "/api/v1/turn/cancel", "/api/v1/turn/steer", "/api/v1/turn/control", "/api/v1/permissions", "/api/v1/usage/policy", "/api/v1/usage/providers", "/api/v1/usage/resume", "/api/v1/schedules", protocol.AssistantMailAPI:
+		case "/api/v1/attachments", "/api/v1/assistants", "/api/v1/providers", "/api/v1/providers/default", "/api/v1/providers/check", "/api/v1/providers/resolve", "/api/v1/providers/test", "/api/v1/agent", "/api/v1/agent/routing", "/api/v1/instructions", "/api/v1/messages", "/api/v1/turn/cancel", "/api/v1/turn/retry", "/api/v1/turn/steer", "/api/v1/turn/control", "/api/v1/permissions", "/api/v1/usage/policy", "/api/v1/usage/providers", "/api/v1/usage/resume", "/api/v1/schedules", protocol.AssistantMailAPI:
 			return true
 		}
 		if strings.HasPrefix(path, "/api/v1/assistants/") {

@@ -77,6 +77,7 @@ type ModelOption struct {
 	Input    uint64 `json:"input"`
 	Output   uint64 `json:"output"`
 	Image    bool   `json:"image"`
+	PDF      bool   `json:"pdf"`
 }
 type ProviderOption struct {
 	ID       string        `json:"id"`
@@ -199,7 +200,7 @@ func (d *Directory) Options() []ProviderOption {
 			if !ok || !usable(m) {
 				continue
 			}
-			models = append(models, ModelOption{mid, m.Name, ep, protocol, m.Limit.Context, m.Limit.Input, m.Limit.Output, slices.Contains(m.Modalities.Input, "image")})
+			models = append(models, ModelOption{mid, m.Name, ep, protocol, m.Limit.Context, m.Limit.Input, m.Limit.Output, slices.Contains(m.Modalities.Input, "image"), slices.Contains(m.Modalities.Input, "pdf")})
 		}
 		if len(models) == 0 {
 			continue
@@ -330,6 +331,9 @@ func (d *Directory) Apply(profile core.Profile) (core.Profile, error) {
 		modalities := []string{"text"}
 		if slices.Contains(m.Modalities.Input, "image") {
 			modalities = append(modalities, "image")
+		}
+		if slices.Contains(m.Modalities.Input, "pdf") {
+			modalities = append(modalities, "pdf")
 		}
 		defaults := map[string]any{"input_modalities": modalities}
 		var overrides any

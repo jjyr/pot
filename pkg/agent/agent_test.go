@@ -387,7 +387,7 @@ func TestCancellationDrainsBeforeTerminalAndRetainsUncertainCheckpoint(t *testin
 }
 func TestSteeringIsSavedBeforeAcknowledgmentAndFinalResponse(t *testing.T) {
 	a, f, s, thread, execution := setup(t)
-	f.guidance = []SteeringInput{{"guidance", "new direction"}}
+	f.guidance = []SteeringInput{{ID: "guidance", Text: "new direction"}}
 	s.model = func(request core.ModelRequest, index int) (string, error) {
 		if index == 1 && !strings.Contains(string(request.Body), "new direction") {
 			return "", fmt.Errorf("guidance not in next request")

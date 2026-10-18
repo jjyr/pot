@@ -139,6 +139,12 @@ func (f *turnFeedback) Steering(ctx context.Context, finalizing bool) ([]agent.S
 		if err := rows.Scan(&input.ID, &input.Text); err != nil {
 			return nil, err
 		}
+		for _, message := range c.messages {
+			if message.ID == steeringMessageID(input.ID, c.turn.UserMessageID) {
+				input.Attachments = message.Attachments
+				break
+			}
+		}
 		out = append(out, input)
 	}
 	c.finalizing = finalizing && len(out) == 0
@@ -246,9 +252,10 @@ func (f *turnFeedback) event(event core.AgentEvent) error {
 	switch update.Type {
 	case "message_started":
 		for _, message := range c.messages {
-			if message.ID == c.turn.ReplyMessageID && (message.Status == protocol.Streaming || c.turn.Resuming && message.Text == "") {
+			if message.ID == c.turn.ReplyMessageID && (message.Status == protocol.Streaming || (c.turn.Resuming || message.Status == protocol.Failed) && message.Text == "") {
 				f.reply = message.ID
 				message.Status = protocol.Streaming
+				message.Error = ""
 				return c.putMessageLocked(ctx, message, nil)
 			}
 		}

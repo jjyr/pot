@@ -29,7 +29,7 @@ func (c *Conversation) queueUserFromLocked(ctx context.Context, request protocol
 	if count >= 100 {
 		return protocol.SendMessageAccepted{}, errors.New("user inbox is full")
 	}
-	message := protocol.Message{Queued: true, ID: storage.ID(), ConversationID: request.ConversationID, Role: protocol.User, Text: request.Text, Status: protocol.Accepted, CreatedAtMS: storage.Now(), RequestID: &request.RequestID}
+	message := protocol.Message{Queued: true, ID: storage.ID(), ConversationID: request.ConversationID, Role: protocol.User, Text: request.Text, Attachments: request.Attachments, Status: protocol.Accepted, CreatedAtMS: storage.Now(), RequestID: &request.RequestID}
 	raw, _ := json.Marshal(request)
 	var metadata map[string]string
 	if source != "" {
@@ -120,6 +120,9 @@ func (c *Conversation) aggregateUsersLocked(ctx context.Context) error {
 			return errors.New("queued user identity changed")
 		}
 		if item.message != next.UserMessageID {
+			if len(item.request.Attachments) > 0 || len(next.Request.Attachments) > 0 {
+				break
+			}
 			if len(next.Inputs) >= inbox.MaxBatchMessages || size+len(item.request.Text) > inbox.MaxBatchBytes {
 				break
 			}

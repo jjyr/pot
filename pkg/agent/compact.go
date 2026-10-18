@@ -15,6 +15,13 @@ func (a *Agent) compact(ctx context.Context, execution core.ExecutionContext, th
 		return nil
 	}
 	prepared := *input
+	if a.ResolveAttachments != nil {
+		var err error
+		prepared.Messages, err = a.ResolveAttachments(ctx, thread.Config, prepared.Messages)
+		if err != nil {
+			return err
+		}
+	}
 	if a.PrepareContext != nil {
 		var err error
 		prepared.Messages, err = a.PrepareContext(ctx, execution, prepared.Messages)
@@ -99,6 +106,12 @@ func (a *Agent) compact(ctx context.Context, execution core.ExecutionContext, th
 	if estimate == nil {
 		estimate = EstimateTokens
 	}
+	if a.ResolveAttachments != nil {
+		summaryInput.Messages, err = a.ResolveAttachments(ctx, thread.Config, summaryInput.Messages)
+		if err != nil {
+			return err
+		}
+	}
 	summaryTokens, err := estimate(summaryInput)
 	if err != nil {
 		return err
@@ -132,6 +145,12 @@ func (a *Agent) compact(ctx context.Context, execution core.ExecutionContext, th
 	replacement = append(replacement, summaryMessage(summary.Text), *last)
 	afterInput := *input
 	afterInput.Messages = portable(thread.Config, replacement, vision)
+	if a.ResolveAttachments != nil {
+		afterInput.Messages, err = a.ResolveAttachments(ctx, thread.Config, afterInput.Messages)
+		if err != nil {
+			return err
+		}
+	}
 	if a.PrepareContext != nil {
 		afterInput.Messages, err = a.PrepareContext(ctx, execution, afterInput.Messages)
 		if err != nil {

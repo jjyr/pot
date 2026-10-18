@@ -56,6 +56,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
   const runtime = await request('/api/v1/runtime', {owner: '', space: ''});
   if (!runtime || !(runtime.runtime_id || runtime.id)) throw Error('Runtime identity is unavailable');
   const readBaselines=desktop?await invoke('AssistantReads'):[];
+  const attachmentURLs=new Map();
   const client = {production: true, desktop, runtime, request,readBaselines,
     scope: () => ({...context}), setScope: value => Object.assign(context, value),
     snapshot: async options => {
@@ -63,7 +64,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
       const value = await request('/api/v1/snapshot', {...scope, ...options});
       return normalizeSnapshot(value, runtime, scope.owner, scope.space);
     },
-    send: ({boot_id,user_message_id,...body}) => request(user_message_id?'/api/v1/turn/steer':'/api/v1/messages', {method: 'POST', body:user_message_id?{request_id:body.request_id,user_message_id,text:body.text}:body}),
+    send: ({boot_id,user_message_id,retry_user_message_id,...body}) => retry_user_message_id ? request('/api/v1/turn/retry',{method:'POST',body:{request_id:body.request_id,user_message_id:retry_user_message_id}}) : request(user_message_id?'/api/v1/turn/steer':'/api/v1/messages', {method: 'POST', body:user_message_id?{request_id:body.request_id,user_message_id,text:body.text,attachments:body.attachments}:body}),
     controlTurn:(body,scope)=>request('/api/v1/turn/control',{...scope,method:'POST',body}),
     cancel: ({boot_id, turn_id, request_id}) => request('/api/v1/turn/cancel', {method: 'POST', body: {request_id, user_message_id: turn_id}}),
     notificationStatus:desktop?()=>invoke('SystemNotificationStatus'):undefined,
@@ -83,6 +84,30 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
     markRead:desktop?value=>invoke('ReadAssistant',value.space_id,value.owner,value.reply_id,value.reply_count):undefined,
     onRead:desktop?handler=>runtimeAPI.Events.On('pot:read',event=>handler(event.data)):undefined,
     setReducedMotion:desktop?value=>invoke('SetReducedMotion',value):undefined,
+    async attachmentURL(attachment,options={}) {
+      const scope={...context,...options},key=JSON.stringify([scope.space,scope.owner,attachment.id]);
+      if(attachmentURLs.has(key))return attachmentURLs.get(key);
+      const pending=(async()=>{
+        const parts=[];let offset=0;
+        while(offset<attachment.size){
+          const chunk=await request(`/api/v1/attachments/${encodeURIComponent(attachment.id)}?offset=${offset}`,scope);
+          if(chunk.offset!==offset||chunk.size!==attachment.size||chunk.revision!==attachment.id)throw Error('Attachment read changed');
+          const binary=atob(chunk.data),bytes=Uint8Array.from(binary,c=>c.charCodeAt(0));
+          if(!bytes.length||bytes.length>192*1024||offset+bytes.length>attachment.size)throw Error('Invalid attachment chunk');
+          parts.push(bytes);offset+=bytes.length;
+        }
+        return URL.createObjectURL(new Blob(parts,{type:attachment.mime_type}));
+      })();
+      attachmentURLs.set(key,pending);
+      pending.catch(()=>attachmentURLs.delete(key));
+      return pending;
+    },
+    async downloadAttachment(attachment,options={}){
+      const scope={...context,...options};
+      if(desktop)return invoke('DownloadAttachment',attachment.id,attachment.name,scope.owner,scope.space);
+      const url=await client.attachmentURL(attachment,scope),link=document.createElement('a');link.href=url;link.download=attachment.name;document.body.append(link);try{link.click();}finally{link.remove();}
+    },
+    releaseAttachments(){for(const pending of attachmentURLs.values())pending.then(url=>URL.revokeObjectURL(url)).catch(()=>{});attachmentURLs.clear();},
     async downloadFile(task,path,options={}) {
       const scope={...context,...options};
       if(desktop)return invoke('DownloadFile',task,path,scope.owner,scope.space);

@@ -71,8 +71,9 @@ func (g *EventGate) Finish() Outcome {
 }
 
 type TurnRequest struct {
-	RequestID string
-	Text      string
+	Attachments []Attachment
+	RequestID   string
+	Text        string
 }
 type ExecutionRole string
 
