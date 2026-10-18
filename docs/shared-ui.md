@@ -109,6 +109,16 @@ do not rewrite its value. Only explicit restoration, matching send receipts and
 completion replace text. Composition events, `isComposing` and key code 229 keep
 candidate confirmation from choosing a completion or sending a message.
 
+Phone and tablet browsers leave Enter, including modified Enter and Enter with
+reference completions open, to native textarea editing and IME. Ordinary Enter
+inserts a line break; sending requires activation of the send button. Their
+composers advertise `enterkeyhint="enter"` and ignore form submission events.
+Desktop Enter/Shift+Enter behavior is unchanged. Input policy uses the existing desktop/browser host identity, UA Client Hints' mobile flag,
+mobile/Android/iOS user agents, and iPadOS's MacIntel plus multiple touch points
+identity. It does not use viewport width or pointer/hover media queries, so
+resizing a desktop window or using a touch laptop does not change Enter behavior.
+Browsers that conceal all mobile identity fall back to desktop behavior.
+
 The shared Chat composer accepts image/PDF files through DOM selection, drop and
 screenshot paste. It uses the same bounded byte upload API in browsers and the
 macOS WebView; native attachment downloads use the host save dialog. See
