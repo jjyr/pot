@@ -30,8 +30,11 @@ func TestDeviceAuthorizationIdentityAndRefresh(t *testing.T) {
 		r.ParseForm()
 		switch r.URL.Path {
 		case "/login/device/code":
-			if r.Form.Get("client_id") != "fixture-client" || r.Form.Get("scope") != "repo read:user" {
-				t.Error("incorrect app or scopes")
+			if r.Form.Get("client_id") != "fixture-client" {
+				t.Error("incorrect app")
+			}
+			if got, want := r.Form.Get("scope"), "repo workflow read:org read:user user:email gist notifications project read:packages write:packages"; got != want {
+				t.Errorf("development scopes = %q, want %q", got, want)
 			}
 			json.NewEncoder(w).Encode(map[string]any{"device_code": "never-public-device", "user_code": "TEST-CODE", "verification_uri": "https://github.com/login/device", "expires_in": 900, "interval": 5})
 		case "/login/oauth/access_token":

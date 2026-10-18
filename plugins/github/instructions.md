@@ -19,3 +19,11 @@ for the requested command. Permission failures do not imply an expired token.
 Check the original result before repeating writes. Never run `gh auth login` to
 persist the injected token, print credentials, or include them in arguments/files.
 When login expires and cannot be refreshed, log out and log in again in Settings.
+After a Pot update adds GitHub scopes, update the owning Control and sign out/in
+there to approve the new scopes; refreshing an old token does not expand access.
+For scope failures, inspect only `X-OAuth-Scopes`/`X-Accepted-OAuth-Scopes` response
+headers, plus organization restrictions and repository rules. Pot's development
+scopes cover repositories, workflows, organization reads, identity/email reads,
+gists, notifications, Projects and supported package APIs. Package registry
+clients require a supported registry credential (classic PAT, or `GITHUB_TOKEN`
+in Actions); OAuth scope expansion alone does not establish registry access.
