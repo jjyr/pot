@@ -17,8 +17,9 @@ type Store struct {
 	state state
 }
 type state struct {
-	Enabled bool             `json:"enabled"`
-	Seen    map[string]int64 `json:"seen"`
+	AuthorizationAttempted bool             `json:"authorization_attempted,omitempty"`
+	Enabled                bool             `json:"enabled"`
+	Seen                   map[string]int64 `json:"seen"`
 }
 
 func Open(path string) (*Store, error) {
@@ -94,4 +95,19 @@ func (s *Store) save() error {
 		return err
 	}
 	return os.Rename(file.Name(), s.path)
+}
+
+// ClaimAuthorization is independent of delivery intent and event claims.
+func (s *Store) ClaimAuthorization() (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state.AuthorizationAttempted {
+		return false, nil
+	}
+	s.state.AuthorizationAttempted = true
+	if err := s.save(); err != nil {
+		s.state.AuthorizationAttempted = false
+		return false, err
+	}
+	return true, nil
 }

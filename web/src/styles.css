@@ -541,3 +541,13 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 .attachment-viewer-toolbar .attachment-name { flex: 1; }
 .attachment-viewer>img,.attachment-viewer>iframe { width: 100%; height: calc(100% - 48px); object-fit: contain; border: 0; }
 @media (pointer: coarse) { .attachment-plus,.attachment-remove { min-width: 36px; min-height: 36px; } }
+
+/* Reserve space above either the directory or conversation; never cover input. */
+.notification-onboarding { grid-column: 2 / -1; grid-row: 2; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--divider); max-height: 35vh; overflow: auto; }
+.notification-onboarding p { margin: 4px 0 0; }
+.notification-onboarding-actions { display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
+.pot-app:has(> .notification-onboarding:not([hidden])) { grid-template-rows: var(--titlebar-height) auto minmax(0, 1fr); }
+.pot-app:has(> .notification-onboarding:not([hidden])) > :is(.workspace,.assistant-directory) { grid-row: 3; }
+@media(max-width:719px) {
+  .notification-onboarding { grid-column: 1; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px; }
+}
