@@ -22,8 +22,12 @@ never fall back to local execution.
 
 ## Assistants
 
-The directory combines assistants without Space groups. Ownership badges identify
-the Space, not execution placement; duplicate names include the Space name.
+The directory combines assistants without Space groups. When more than one Space
+is configured, muted text beside each assistant name identifies its Space, not
+execution placement. A single configured Space shows no ownership label. Count
+configured Spaces even when offline or without assistants, so connection loss
+does not remove identity cues; adding execution machines within one Space does not
+enable the labels. Adding or removing a Space updates all rows immediately.
 Cached offline assistants remain visible. Conversation selection restores that
 owner's draft/history/reading position. Directory search/scroll belongs to the
 window because the list spans owners.

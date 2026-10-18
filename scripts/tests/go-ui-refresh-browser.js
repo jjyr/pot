@@ -106,7 +106,7 @@ async page=>{
   await page.clock.resume();
   await page.evaluate(async()=>{
    const f=refreshFixture;f.pages.dispose();f.approvals=[];document.body.replaceChildren();const root=document.createElement('div');document.body.append(root);
-   const response=f.response;f.response=(path,options)=>{if(path==='/api/v1/spaces')return {active_space_id:'local',items:f.client.spaces};if(path==='/api/v1/assistants')return f.client.assistants;if(path.startsWith('/api/v1/tasks/query'))return {items:[{id:'background',assistant_id:'a',title:'Background review',phase:'running'}]};return response(path,options);};
+   const response=f.response;f.response=(path,options)=>{if(path==='/api/v1/spaces')return {active_space_id:'local',items:f.client.spaces};if(path==='/api/v1/assistants')return f.client.assistants.filter(item=>item.space_id===options.space);if(path.startsWith('/api/v1/tasks/query'))return {items:[{id:'background',assistant_id:'a',title:'Background review',phase:'running'}]};return response(path,options);};
    f.selection={space:'local',owner:'a'};f.client.scope=()=>({...f.selection});f.client.setScope=value=>f.selection={...value};f.client.production=true;
    f.snapshot={runtime_id:'fixture',boot_id:'fixture',owner_id:'local/a',conversation_id:'chat',cursor:'1',running:false,turn_id:null,messages:[{id:'reply',role:'assistant',text:'Ready',status:'complete'}]};
    f.client.snapshot=()=>Promise.resolve(structuredClone(f.snapshot));f.client.subscribe=(receive,status)=>{f.receive=receive;status('connected');return ()=>{};};f.client.changes=receive=>{f.changes=receive;return ()=>{};};
@@ -116,6 +116,18 @@ async page=>{
   await page.evaluate(()=>{const f=refreshFixture;f.search=document.querySelector('.assistant-search');f.search.setSelectionRange(1,3);f.assistantRow=document.querySelector('.assistant-row');f.chatTask=document.querySelector('.background-task');f.nav=document.querySelector('.feature-rail button');f.client.assistants[0].name='Assistant renamed';f.changes(['assistants'],{space:'local'});});
   await page.getByText('Assistant renamed',{exact:true}).first().waitFor();
   assert(await page.evaluate(()=>refreshFixture.search===document.querySelector('.assistant-search')&&refreshFixture.search.value==='Assist'&&refreshFixture.search.selectionStart===1&&document.activeElement===refreshFixture.search&&refreshFixture.assistantRow===document.querySelector('.assistant-row')&&refreshFixture.nav===document.querySelector('.feature-rail button')),'Directory updates retain search, selection, focus, assistant rows and navigation');
+  assert(await page.locator('.assistant-location').count()===0,'A single Space has no ownership label');
+  await page.evaluate(()=>{const f=refreshFixture;f.client.spaces.push({id:'remote',name:'Work Space',kind:'remote',connected:true});f.changes(['spaces']);});
+  await page.locator('.assistant-location').filter({hasText:/^Local$/}).waitFor();
+  assert(await page.locator('.assistant-row').count()===1,'An empty second Space still enables ownership labels');
+  assert(await page.locator('.assistant-location').getAttribute('title')==='Local','Ownership text retains its full tooltip');
+  assert(await page.evaluate(()=>refreshFixture.assistantRow===document.querySelector('.assistant-row')&&refreshFixture.search===document.activeElement),'Space changes preserve assistant rows and search focus');
+  await page.evaluate(()=>{const f=refreshFixture;f.client.spaces[1].connected=false;f.client.spaces[0].name='Development Mac';f.changes(['spaces']);});
+  await page.locator('.assistant-location').filter({hasText:'Development Mac'}).waitFor();
+  assert(await page.locator('.assistant-location').count()===1,'An offline configured Space retains ownership labels');
+  await page.evaluate(()=>{const f=refreshFixture;f.client.spaces.pop();f.client.spaces[0].name='Local';f.changes(['spaces']);});
+  await page.waitForFunction(()=>!document.querySelector('.assistant-location'));
+  assert(await page.evaluate(()=>refreshFixture.assistantRow===document.querySelector('.assistant-row')&&refreshFixture.search.value==='Assist'),'Removing a Space hides labels without replacing the assistant row or search');
   await page.evaluate(()=>{const f=refreshFixture;f.snapshot.cursor='2';f.receive(structuredClone(f.snapshot));f.changes(['tasks'],{space:'local'});});
   assert(await page.evaluate(()=>refreshFixture.chatTask===document.querySelector('.background-task')),'Chat updates retain the executing task action');
   await page.getByRole('button',{name:'Preferences',exact:true}).click();
