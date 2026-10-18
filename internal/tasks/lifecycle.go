@@ -35,7 +35,7 @@ func (s *Service) Tick(ctx context.Context) error {
 	}
 	rows.Close()
 	for _, pair := range pairs {
-		if err := s.reconcile(ctx, pair[0], pair[1]); err != nil {
+		if err := s.reconcile(ctx, pair[0], pair[1]); err != nil && !errors.Is(err, ErrResultPending) && !errors.Is(err, errOutcomeChanged) {
 			return err
 		}
 	}
@@ -146,6 +146,26 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 	if err != nil || actual != expected || run.LaunchDigest != expected {
 		return fmt.Errorf("destination receipt changed immutable Task launch")
 	}
+	var terminal protocol.TaskPhase
+	switch run.Phase {
+	case runner.Complete:
+		terminal = protocol.TaskComplete
+	case runner.Failed:
+		terminal = protocol.TaskFailed
+	case runner.Interrupted:
+		terminal = protocol.TaskInterrupted
+	case runner.Cancelled:
+		terminal = protocol.TaskCancelled
+		if record.StopMode == "interrupt" {
+			terminal = protocol.TaskInterrupted
+		}
+	}
+	if terminal != "" {
+		if run.Result == nil || !run.CleanupConfirmed {
+			return core.ErrCleanupUnconfirmed
+		}
+		return s.finish(ctx, *record, terminal, run.Result, run.StartedAtMS, "")
+	}
 	return s.change(ctx, assistant, id, func(tx *sql.Tx, current *Record) error {
 		if current.RunID != run.Launch.RunID {
 			return fmt.Errorf("late run receipt rejected")
@@ -173,41 +193,6 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 			current.Info.Phase = protocol.TaskWaiting
 			current.Info.RemoteWaiting = true
 			current.Error = "original run requires receipt and cleanup reconciliation"
-		case runner.Complete, runner.Failed, runner.Cancelled, runner.Interrupted:
-			if run.Result == nil || !run.CleanupConfirmed {
-				return core.ErrCleanupUnconfirmed
-			}
-			current.Info.Paused = false
-			current.Result = run.Result
-			current.Error = run.Result.Outcome.Error
-			switch run.Phase {
-			case runner.Complete:
-				current.Info.Phase = protocol.TaskComplete
-			case runner.Failed:
-				current.Info.Phase = protocol.TaskFailed
-			case runner.Interrupted:
-				current.Info.Phase = protocol.TaskInterrupted
-			case runner.Cancelled:
-				if current.StopMode == "interrupt" {
-					current.Info.Phase = protocol.TaskInterrupted
-				} else {
-					current.Info.Phase = protocol.TaskCancelled
-				}
-			}
-			current.Finalizing = true
-			current.Info.Pending = 0
-			if current.StopMode == "cancel" {
-				if _, err := tx.ExecContext(ctx, "UPDATE task_inputs SET state='cancelled' WHERE assistant_id=? AND task_id=? AND state='pending'", assistant, id); err != nil {
-					return err
-				}
-			} else {
-				if _, err := tx.ExecContext(ctx, "UPDATE task_inputs SET state='retained' WHERE assistant_id=? AND task_id=? AND state='pending'", assistant, id); err != nil {
-					return err
-				}
-			}
-			if _, err := tx.ExecContext(ctx, "UPDATE task_inputs SET state='consumed' WHERE assistant_id=? AND task_id=? AND kind='input' AND state='active'", assistant, id); err != nil {
-				return err
-			}
 		default:
 			return fmt.Errorf("unknown Runner receipt phase")
 		}
@@ -230,6 +215,27 @@ func (s *Service) markWaiting(ctx context.Context, assistant, id string, cause e
 func (s *Service) Stop(ctx context.Context, assistant, id, mode string) error {
 	if mode != "interrupt" && mode != "cancel" {
 		return fmt.Errorf("invalid stop mode")
+	}
+	for {
+		record, err := s.Get(ctx, assistant, id)
+		if err != nil {
+			return err
+		}
+		if record == nil {
+			return fmt.Errorf("task missing")
+		}
+		if record.Info.Phase.Scope() != "active" || record.Launch != nil {
+			break
+		}
+		phase := protocol.TaskCancelled
+		if mode == "interrupt" {
+			phase = protocol.TaskInterrupted
+		}
+		err = s.finish(ctx, *record, phase, &runner.Terminal{Outcome: core.Cancelled, Text: "Task stopped before dispatch."}, 0, mode)
+		if errors.Is(err, errOutcomeChanged) {
+			continue
+		}
+		return err
 	}
 	send := false
 	var launch *runner.Launch
@@ -254,19 +260,7 @@ func (s *Service) Stop(ctx context.Context, assistant, id, mode string) error {
 		r.Finalizing = true
 		launch = r.Launch
 		if launch == nil {
-			r.Info.Pending = 0
-			if mode == "interrupt" {
-				r.Info.Phase = protocol.TaskInterrupted
-			} else {
-				r.Info.Phase = protocol.TaskCancelled
-			}
-			r.Result = &runner.Terminal{Outcome: core.Cancelled, Text: "Task stopped before dispatch."}
-			state := "retained"
-			if mode == "cancel" {
-				state = "cancelled"
-			}
-			_, err := tx.ExecContext(ctx, "UPDATE task_inputs SET state=? WHERE assistant_id=? AND task_id=? AND state IN ('pending','active')", state, assistant, id)
-			return err
+			return errOutcomeChanged
 		}
 		send = true
 		return nil
@@ -303,7 +297,7 @@ func (s *Service) ResumeWaiting(ctx context.Context, assistant, id string) error
 	return s.change(ctx, assistant, id, func(tx *sql.Tx, r *Record) error { r.Info.Phase = protocol.TaskQueued; r.Error = ""; return nil })
 }
 func (s *Service) Notifications(ctx context.Context, assistant string) ([]Notification, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id,assistant_id,task_id,phase,text FROM task_notifications WHERE assistant_id=? ORDER BY sequence", assistant)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,recipient,envelope FROM agent_messages WHERE recipient=? AND direction='in' AND state='queued' AND json_extract(envelope,'$.kind')='task_result' ORDER BY sequence`, assistant)
 	if err != nil {
 		return nil, err
 	}
@@ -311,9 +305,18 @@ func (s *Service) Notifications(ctx context.Context, assistant string) ([]Notifi
 	result := []Notification{}
 	for rows.Next() {
 		var n Notification
-		if err := rows.Scan(&n.ID, &n.AssistantID, &n.TaskID, &n.Phase, &n.Text); err != nil {
+		var body []byte
+		var message protocol.Envelope
+		if err := rows.Scan(&n.ID, &n.AssistantID, &body); err != nil {
 			return nil, err
 		}
+		if err := core.DecodeJSON(body, &message); err != nil {
+			return nil, err
+		}
+		if message.Result == nil {
+			return nil, fmt.Errorf("Task result missing")
+		}
+		n.TaskResultEvent = *message.Result
 		result = append(result, n)
 	}
 	return result, rows.Err()

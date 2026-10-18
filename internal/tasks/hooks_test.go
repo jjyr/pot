@@ -2,6 +2,9 @@ package tasks
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -71,6 +74,171 @@ func TestTerminalHooksCoverAllOutcomesAndPreserveFailure(t *testing.T) {
 			notices, err = s.Notifications(ctx, "assistant")
 			if err != nil || len(notices) != 0 || len(delivered) != 1 {
 				t.Fatal("terminal hook replayed", notices, delivered, err)
+			}
+		})
+	}
+}
+
+func TestStartedHookRequiresRunnerStartAndIsUIOnlyAcrossRestart(t *testing.T) {
+	ctx := context.Background()
+	s, port, target, path := fixture(t)
+	var events []hooks.Event
+	s.options.PublishHook = func(event hooks.Event) { events = append(events, event) }
+	port.lose = true
+	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "start", Text: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatal("launch intent emitted start", events)
+	}
+	port.mu.Lock()
+	run := port.runs[record.RunID]
+	run.Phase, run.StartedAtMS = runner.Accepted, 0
+	port.runs[record.RunID] = run
+	port.mu.Unlock()
+	if err := s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatal("queued receipt emitted start", events)
+	}
+	port.mu.Lock()
+	run.Phase, run.StartedAtMS = runner.Running, 1000
+	port.runs[record.RunID] = run
+	port.mu.Unlock()
+	if err := s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Kind != hooks.TaskStarted || events[0].Result != nil || len(events[0].Topics()) != 1 || events[0].Topics()[0] != "tasks" {
+		t.Fatal(events)
+	}
+	if notices, err := s.Notifications(ctx, "assistant"); err != nil || len(notices) != 0 {
+		t.Fatal(notices, err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := Open(path, Options{ControlID: "control", RuntimeID: "machine", Port: port, ResolveTarget: func(context.Context, string) (core.ExecutionTarget, error) { return *target, nil }, PublishHook: func(event hooks.Event) { events = append(events, event) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	if err := restored.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 {
+		t.Fatal("start replayed after restart", events)
+	}
+}
+
+func TestPreparedOutcomeCannotCommitAfterConcurrentTaskChange(t *testing.T) {
+	ctx := context.Background()
+	s, port, _, _ := fixture(t)
+	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "stale", Text: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	port.mu.Lock()
+	run := port.runs[record.RunID]
+	run.Phase, run.CleanupConfirmed = runner.Complete, true
+	run.Result = &runner.Terminal{Outcome: core.Success, Text: "done"}
+	port.runs[record.RunID] = run
+	port.mu.Unlock()
+	commits := 0
+	s.options.PrepareOutcome = func(ctx context.Context, snapshot Record, event protocol.TaskResultEvent) (OutcomeCommit, error) {
+		if err := s.SendMessage(ctx, "assistant", record.Info.ID, "reference", protocol.AgentRef{ControlID: "control", Kind: "task", AgentID: "peer"}, "late reference"); err != nil {
+			return nil, err
+		}
+		return func(context.Context, *sql.Tx, *protocol.TaskResultEvent) error { commits++; return nil }, nil
+	}
+	if err := s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := s.Get(ctx, "assistant", record.Info.ID)
+	if stored.Info.Phase.Scope() != "active" || commits != 0 {
+		t.Fatal(stored, commits)
+	}
+	s.options.PrepareOutcome = nil
+	if err := s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ = s.Get(ctx, "assistant", record.Info.ID)
+	if stored.Info.Phase != protocol.TaskComplete {
+		t.Fatal(stored)
+	}
+}
+
+func TestTaskStoreRejectsPreviousOutcomeSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.sqlite")
+	s, err := Open(path, Options{ControlID: "control", RuntimeID: "machine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB().Exec("UPDATE task_schema SET version=5"); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	_, err = Open(path, Options{ControlID: "control", RuntimeID: "machine"})
+	if err == nil || !strings.Contains(err.Error(), "unsupported task schema") {
+		t.Fatal(err)
+	}
+}
+
+func TestOutcomePreparationFailureLeavesTaskActive(t *testing.T) {
+	ctx := context.Background()
+	s, _, _, _ := fixture(t)
+	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "blocked", Text: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := errors.New("outcome preparation failed")
+	s.options.PrepareOutcome = func(context.Context, Record, protocol.TaskResultEvent) (OutcomeCommit, error) { return nil, want }
+	if err := s.Stop(ctx, "assistant", record.Info.ID, "cancel"); !errors.Is(err, want) {
+		t.Fatal(err)
+	}
+	stored, _ := s.Get(ctx, "assistant", record.Info.ID)
+	if stored.Info.Phase != protocol.TaskQueued || stored.Outcome != nil {
+		t.Fatal(stored)
+	}
+}
+
+func TestOutcomeProcessorCannotRebindTaskOrReopenExecution(t *testing.T) {
+	for _, field := range []string{"task", "run", "origin", "phase"} {
+		t.Run(field, func(t *testing.T) {
+			ctx := context.Background()
+			s, _, _, _ := fixture(t)
+			record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "binding", Text: "work"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.options.PrepareOutcome = func(context.Context, Record, protocol.TaskResultEvent) (OutcomeCommit, error) {
+				return func(_ context.Context, _ *sql.Tx, event *protocol.TaskResultEvent) error {
+					switch field {
+					case "task":
+						event.TaskID = "another-task"
+					case "run":
+						event.RunID = ID()
+					case "origin":
+						event.Origin = protocol.TaskOrigin{Kind: "schedule", ScheduleID: "schedule", OccurrenceID: "run"}
+					case "phase":
+						event.Phase = protocol.TaskRunning
+					}
+					return nil
+				}, nil
+			}
+			if err := s.Stop(ctx, "assistant", record.Info.ID, "cancel"); err == nil {
+				t.Fatal("invalid prepared outcome committed")
+			}
+			stored, _ := s.Get(ctx, "assistant", record.Info.ID)
+			if stored.Info.Phase != protocol.TaskQueued || stored.Outcome != nil {
+				t.Fatal(stored)
 			}
 		})
 	}

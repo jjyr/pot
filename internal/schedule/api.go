@@ -33,23 +33,11 @@ type Service struct {
 	db      *sql.DB
 	options Options
 }
-type Notification struct {
-	ID          string
-	AssistantID string
-	ScheduleID  string
-	RunID       string
-	Text        string
-}
 type ResultFile struct {
 	Summary     string   `json:"summary" required:"true"`
 	Fingerprint string   `json:"fingerprint" required:"true"`
 	Evidence    []string `json:"evidence" required:"true"`
 	Artifacts   []string `json:"artifacts,omitempty"`
-}
-type queued struct {
-	Owner  string
-	PlanID string
-	Run    protocol.ScheduleRun
 }
 type resolved struct {
 	Request   protocol.CreateTask

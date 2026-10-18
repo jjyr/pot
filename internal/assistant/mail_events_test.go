@@ -12,13 +12,19 @@ import (
 )
 
 func TestCompletionInboxClaimsAndReportsTheSameResultOnce(t *testing.T) {
+	for _, origin := range []protocol.TaskOrigin{{Kind: "manual"}, {Kind: "schedule", ScheduleID: "schedule", OccurrenceID: "schedule:1"}} {
+		t.Run(origin.Kind, func(t *testing.T) { testCompletionInboxClaimsAndReportsTheSameResultOnce(t, origin) })
+	}
+}
+
+func testCompletionInboxClaimsAndReportsTheSameResultOnce(t *testing.T, origin protocol.TaskOrigin) {
 	ctx := context.Background()
 	m, err := OpenMailbox(filepath.Join(t.TempDir(), "messages.sqlite"), "control")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer m.Close()
-	event := protocol.Envelope{ID: "completion", Kind: "task_result", From: protocol.AgentRef{ControlID: "control", Kind: "runtime", AgentID: "runtime"}, To: address("control", "main"), ConversationID: newConversation(), Text: "done", Result: &protocol.TaskResultEvent{TaskID: "task-a", RunID: newConversation(), Title: "A", Phase: protocol.TaskComplete, Text: "done"}}
+	event := protocol.Envelope{ID: "completion", Kind: "task_result", From: protocol.AgentRef{ControlID: "control", Kind: "runtime", AgentID: "runtime"}, To: address("control", "main"), ConversationID: newConversation(), Text: "done", Result: &protocol.TaskResultEvent{Origin: origin, TaskID: "task-a", RunID: newConversation(), Title: "A", Phase: protocol.TaskComplete, Text: "done"}}
 	enqueue := func() error {
 		return storage.Transaction(ctx, m.db, func(tx *sql.Tx) error { return inbox.EnqueueTx(ctx, tx, event, "in", "queued") })
 	}

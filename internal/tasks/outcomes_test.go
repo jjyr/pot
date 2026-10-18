@@ -18,7 +18,7 @@ func TestOutcomeCursorSkipsArchiveAndReadsBoundedOwnerTransitions(t *testing.T) 
 	config := selection(t).Config
 	if err := storage.Transaction(ctx, s.db, func(tx *sql.Tx) error {
 		for i := range 1000 {
-			r := Record{SchemaVersion: 5, AssistantID: "assistant", Config: config, Plugins: []string{}, RunID: fmt.Sprint("run", i), Generation: 1,
+			r := Record{SchemaVersion: 6, Origin: protocol.TaskOrigin{Kind: "manual"}, AssistantID: "assistant", Config: config, Plugins: []string{}, RunID: fmt.Sprint("run", i), Generation: 1,
 				Info:    protocol.TaskInfo{ID: fmt.Sprint("task", i), AssistantID: "assistant", Title: "History", Phase: protocol.TaskComplete},
 				Request: protocol.CreateTask{Text: "private task goal"}}
 			if err := write(ctx, tx, &r); err != nil {
@@ -125,37 +125,43 @@ func TestOutcomeInsertRollsBackTaskAndDoesNotRepeatSamePhase(t *testing.T) {
 	}
 }
 
-func TestScheduleValidationOutcomePublishesOnlyAfterCommit(t *testing.T) {
-	ctx := context.Background()
-	s, _, _, _ := fixture(t)
-	r, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "scheduled", Text: "Scheduled work"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	count := 0
-	s.options.OutcomesChanged = func() { count++ }
-	if err := s.change(ctx, "assistant", r.Info.ID, func(_ *sql.Tx, r *Record) error {
-		r.Info.Phase = protocol.TaskComplete
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	baseline, err := s.Outcomes(ctx, "assistant", nil)
-	if err != nil || count != 1 {
-		t.Fatal(baseline, count, err)
-	}
-	if err := storage.Transaction(ctx, s.db, func(tx *sql.Tx) error {
-		return s.FailResultTx(ctx, tx, "assistant", r.Info.ID, "Invalid structured result")
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if count != 1 {
-		t.Fatal("transaction published before caller's post-commit invalidation")
-	}
-	s.Notify()
-	s.Notify()
-	page, err := s.Outcomes(ctx, "assistant", &baseline.Cursor)
-	if err != nil || count != 2 || len(page.Items) != 1 || page.Items[0].Phase != protocol.TaskFailed {
-		t.Fatal("scheduled failure was lost or repeated", page, count, err)
+func TestPreparedOutcomePublishesOnlyFinalUnsuppressedPhase(t *testing.T) {
+	for _, suppressed := range []bool{false, true} {
+		t.Run(fmt.Sprint(suppressed), func(t *testing.T) {
+			ctx := context.Background()
+			s, _, _, _ := fixture(t)
+			r, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "prepared", Text: "Prepared work"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			count := 0
+			s.options.OutcomesChanged = func() { count++ }
+			s.options.PrepareOutcome = func(context.Context, Record, protocol.TaskResultEvent) (OutcomeCommit, error) {
+				return func(_ context.Context, _ *sql.Tx, event *protocol.TaskResultEvent) error {
+					event.Phase = protocol.TaskFailed
+					event.Error = "Invalid structured report"
+					if suppressed {
+						event.SuppressionReason = "notification_policy:failures"
+					}
+					return nil
+				}, nil
+			}
+			if err := s.finish(ctx, r, protocol.TaskComplete, nil, 0, ""); err != nil {
+				t.Fatal(err)
+			}
+			s.Notify()
+			zero := uint64(0)
+			page, err := s.Outcomes(ctx, "assistant", &zero)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if suppressed {
+				if len(page.Items) != 0 || count != 0 {
+					t.Fatal("suppressed outcome notified", page, count)
+				}
+			} else if len(page.Items) != 1 || page.Items[0].Phase != protocol.TaskFailed || count != 1 {
+				t.Fatal("intermediate success escaped or final outcome repeated", page, count)
+			}
+		})
 	}
 }
