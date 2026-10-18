@@ -87,9 +87,8 @@ type TaskResultEvent struct {
 }
 
 type SendMail struct {
-	To      AgentRef `json:"to"`
-	Text    string   `json:"text"`
-	ReplyTo *string  `json:"reply_to"`
+	To   AgentRef `json:"to"`
+	Text string   `json:"text"`
 }
 type Receipt struct {
 	Message Envelope `json:"message"`

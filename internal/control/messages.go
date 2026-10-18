@@ -45,11 +45,6 @@ func (s *Service) sendAgentMessage(ctx context.Context, id, owner string, sender
 				return nil, errors.New("message parent sender differs")
 			}
 			parent = &value
-			if send.ReplyTo != nil && *send.ReplyTo != value.ID {
-				return nil, errors.New("Task reply parent differs")
-			}
-		} else if send.ReplyTo != nil {
-			return nil, errors.New("Task reply has no bound parent")
 		}
 		if err := s.Tasks.SendMessageWithParent(ctx, owner, send.To.AgentID, id, sender, send.Text, parent); err != nil {
 			return nil, err
@@ -79,10 +74,6 @@ func (s *Service) sendAgentMessage(ctx context.Context, id, owner string, sender
 				return nil, errors.New("message sender binding differs")
 			}
 			parent = &value
-			if send.ReplyTo == nil && send.To == value.From {
-				reply := value.ID
-				send.ReplyTo = &reply
-			}
 		}
 		result, err := s.Mailbox.Send(ctx, id, sender, send, parent)
 		if err == nil {

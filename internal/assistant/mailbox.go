@@ -145,39 +145,32 @@ func newConversation() string {
 }
 
 // Send receives sender identity only from the owning adapter. parent is the
-// currently processed inbound message, including for a new conversation, so a
-// model cannot escape the automatic hop bound by omitting reply_to.
+// currently processed inbound message. Replies to its sender are linked
+// automatically; forwarding to another agent retains the causal hop bound.
 func (m *Mailbox) Send(ctx context.Context, id string, from protocol.AgentRef, send protocol.SendMail, parent *protocol.Envelope) (protocol.Envelope, error) {
 	if from.ControlID != m.controlID || from == send.To {
 		return protocol.Envelope{}, errors.New("invalid sender or self-message")
 	}
 	var message protocol.Envelope
 	err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
+		var replyTo *string
+		if parent != nil && send.To == parent.From {
+			reply := parent.ID
+			replyTo = &reply
+		}
 		old, err := findMail(ctx, tx, id)
 		if err != nil {
 			return err
 		}
 		if old != nil {
-			if old.From != from || old.To != send.To || old.Text != send.Text || !sameOptional(old.ReplyTo, send.ReplyTo) {
+			if old.From != from || old.To != send.To || old.Text != send.Text || !sameOptional(old.ReplyTo, replyTo) {
 				return errors.New("message ID reused with different content")
 			}
 			message = *old
 			return nil
 		}
-		var reply *protocol.Envelope
-		if send.ReplyTo != nil {
-			reply, err = findMail(ctx, tx, *send.ReplyTo)
-			if err != nil {
-				return err
-			}
-			if reply == nil {
-				return errors.New("reply message missing")
-			}
-			if reply.To != from || reply.From != send.To {
-				return errors.New("reply participants do not match")
-			}
-		}
 		hops := uint32(0)
+		conversation := newConversation()
 		if parent != nil {
 			stored, err := findMail(ctx, tx, parent.ID)
 			if err != nil {
@@ -187,13 +180,11 @@ func (m *Mailbox) Send(ctx context.Context, id string, from protocol.AgentRef, s
 				return errors.New("invalid processing parent binding")
 			}
 			hops = parent.Hops + 1
+			if replyTo != nil {
+				conversation = parent.ConversationID
+			}
 		}
-		conversation := newConversation()
-		if reply != nil {
-			hops = max(hops, reply.Hops+1)
-			conversation = reply.ConversationID
-		}
-		message = protocol.Envelope{Kind: "message", ID: id, From: from, To: send.To, ConversationID: conversation, ReplyTo: send.ReplyTo, Text: send.Text, Hops: hops}
+		message = protocol.Envelope{Kind: "message", ID: id, From: from, To: send.To, ConversationID: conversation, ReplyTo: replyTo, Text: send.Text, Hops: hops}
 		if err := message.Validate(); err != nil {
 			return err
 		}

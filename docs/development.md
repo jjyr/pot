@@ -136,6 +136,20 @@ that an owner refusal stops further execution. Run just those cases with
 `-run '^TestDeepSeekUnsandboxLive$/^boundary-'`. Default tests skip paid calls.
 Credentials are never logged.
 
+Task guidance can be qualified against real DeepSeek with:
+
+```sh
+POT_LIVE=1 mise exec -- go test -v ./internal/control \
+  -run '^TestDeepSeekTaskGuidanceLive$' -count=1 -timeout=3m
+```
+
+This uses production prompts and tools in a private Runtime. Worker startup is
+held until the real assistant forwards additional CI trigger rules to the existing
+Task using `send_message({to, text})`. The test checks durable acceptance and
+consumption by the original Worker, then verifies its real model response includes
+the rules. It performs no repository or CI changes and is capped at 12 paid
+requests, 768 output tokens per response and 150 seconds. Default tests skip it.
+
 Category-specific message batching can be qualified against real DeepSeek with:
 
 ```sh
