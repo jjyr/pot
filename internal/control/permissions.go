@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jjyr/pot/internal/hooks"
 	"os"
 	"sort"
 	"sync"
@@ -100,6 +101,30 @@ type PermissionStore struct {
 	// application leaves admission fenced and is visible to owner settings.
 	Apply   func(string, uint64) error
 	Changes core.Changes
+	// PublishHook must only invalidate projections; it is called under mu and
+	// must not reenter permission state or perform model/network operations.
+	PublishHook hooks.Publish
+}
+
+func (p *PermissionStore) approvalHookLocked(kind hooks.Kind, d *hostDecision) {
+	r := d.approval.Request
+	if p.PublishHook != nil {
+		p.PublishHook(hooks.Approval(kind, d.approval.ID, r.Owner, r.Task, r.Turn, r.Generation, d.action))
+	}
+	p.Changes.Notify("permissions")
+}
+
+func (p *PermissionStore) expireApproval(id string, d *hostDecision) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.pending[id] != d || d.resolved {
+		return
+	}
+	d.invalid = true
+	d.resolved = true
+	delete(p.pending, id)
+	close(d.done)
+	p.approvalHookLocked(hooks.ApprovalExpired, d)
 }
 
 func OpenPermissions(path string) (*PermissionStore, error) {
@@ -174,12 +199,16 @@ func (p *PermissionStore) copyLocked() permissionFile {
 func (p *PermissionStore) invalidateLocked(machine string) {
 	for id, d := range p.pending {
 		if d.approval.Request.MachineID == machine {
+			pending := !d.resolved
 			d.invalid = true
 			if !d.resolved {
 				d.resolved = true
 				close(d.done)
 			}
 			delete(p.pending, id)
+			if pending {
+				p.approvalHookLocked(hooks.ApprovalExpired, d)
+			}
 		}
 	}
 	for id, g := range p.grants {
@@ -522,16 +551,18 @@ func (p *PermissionStore) authorize(ctx context.Context, r HostRequest, pending 
 	if d == nil {
 		d = &hostDecision{approval: Approval{hash, r}, done: make(chan struct{})}
 		p.pending[hash] = d
-		p.Changes.Notify("permissions")
+		p.approvalHookLocked(hooks.ApprovalRequested, d)
 	}
 	p.mu.Unlock()
 	if pending != nil {
 		if err := pending(); err != nil {
+			p.expireApproval(hash, d)
 			return "", err
 		}
 	}
 	select {
 	case <-ctx.Done():
+		p.expireApproval(hash, d)
 		return "", ctx.Err()
 	case <-d.done:
 	}
@@ -606,6 +637,7 @@ func (p *PermissionStore) Decide(owner, id, action string) error {
 	d.allow = action != "deny"
 	d.resolved = true
 	close(d.done)
+	p.approvalHookLocked(hooks.ApprovalResolved, d)
 	if action == "allow_always" || action == "allow_task" {
 		for key, waiting := range p.pending {
 			q := waiting.approval.Request
@@ -621,6 +653,7 @@ func (p *PermissionStore) Decide(owner, id, action string) error {
 				waiting.allow = true
 				waiting.resolved = true
 				close(waiting.done)
+				p.approvalHookLocked(hooks.ApprovalResolved, waiting)
 				_ = key
 			}
 		}
@@ -634,12 +667,16 @@ func (p *PermissionStore) Expire(owner, turn string, generation uint64) {
 	for id, d := range p.pending {
 		r := d.approval.Request
 		if r.Owner == owner && r.Turn == turn && r.Generation == generation {
+			pending := !d.resolved
 			d.invalid = true
 			if !d.resolved {
 				d.resolved = true
 				close(d.done)
 			}
 			delete(p.pending, id)
+			if pending {
+				p.approvalHookLocked(hooks.ApprovalExpired, d)
+			}
 		}
 	}
 	for id, r := range p.denied {

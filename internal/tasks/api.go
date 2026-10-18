@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/jjyr/pot/internal/hooks"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -32,6 +33,7 @@ type Options struct {
 	AwaitingApproval func(assistant, task, run string, generation uint64) bool
 	ValidateTarget   func(context.Context, core.ExecutionTarget, protocol.TaskRequirements) error
 	MaxTasks         int
+	PublishHook      hooks.Publish
 }
 type Service struct {
 	db      *sql.DB

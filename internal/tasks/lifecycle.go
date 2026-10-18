@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/jjyr/pot/internal/inbox"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -177,6 +176,7 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 			}
 			current.Info.Paused = false
 			current.Result = run.Result
+			current.Error = run.Result.Outcome.Error
 			switch run.Phase {
 			case runner.Complete:
 				current.Info.Phase = protocol.TaskComplete
@@ -205,16 +205,6 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 			if _, err := tx.ExecContext(ctx, "UPDATE task_inputs SET state='consumed' WHERE assistant_id=? AND task_id=? AND kind='input' AND state='active'", assistant, id); err != nil {
 				return err
 			}
-			noticeID, _ := core.HashJSON([]string{id, current.RunID, "terminal"})
-			event := &protocol.TaskResultEvent{TaskID: id, RunID: current.RunID, Title: current.Info.Title, Phase: current.Info.Phase, Text: run.Result.Text}
-			message := protocol.Envelope{ID: noticeID, Kind: "task_result", From: protocol.AgentRef{ControlID: s.options.ControlID, Kind: "runtime", AgentID: s.options.RuntimeID}, To: protocol.AgentRef{ControlID: s.options.ControlID, Kind: "assistant", AgentID: assistant}, ConversationID: current.RunID, Text: run.Result.Text, Result: event}
-			if message.Text == "" {
-				message.Text = "Task ended without a text result."
-			}
-			if err := inbox.EnqueueTx(ctx, tx, message, "in", "queued"); err != nil {
-				return err
-			}
-
 		default:
 			return fmt.Errorf("unknown Runner receipt phase")
 		}

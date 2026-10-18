@@ -118,6 +118,7 @@ func Open(options Options) (*Service, error) {
 		}
 	}
 	s.Permissions.Apply = s.applyPermissionRevision
+	s.Permissions.PublishHook = s.publishHook
 	s.Registry, err = assistant.OpenRegistry(filepath.Join(options.Root, "control.sqlite"), "main")
 	if err != nil {
 		return nil, err

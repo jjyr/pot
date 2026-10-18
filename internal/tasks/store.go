@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jjyr/pot/internal/hooks"
 	"github.com/jjyr/pot/internal/inbox"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/core"
@@ -314,6 +315,7 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 }
 func (s *Service) change(ctx context.Context, assistant, id string, fn func(*sql.Tx, *Record) error) error {
 	changed := false
+	var terminal *hooks.Event
 	err := storage.Transaction(ctx, s.db, func(tx *sql.Tx) error {
 		record, err := read(ctx, tx, assistant, id)
 		if err != nil {
@@ -323,6 +325,7 @@ func (s *Service) change(ctx context.Context, assistant, id string, fn func(*sql
 			return fmt.Errorf("task missing")
 		}
 		before, _ := json.Marshal(record)
+		wasActive := record.Info.Phase.Scope() == "active"
 		if err := fn(tx, record); err != nil {
 			return err
 		}
@@ -332,10 +335,33 @@ func (s *Service) change(ctx context.Context, assistant, id string, fn func(*sql
 		}
 		changed = true
 		record.Info.UpdatedAtMS = time.Now().UnixMilli()
+		if wasActive && record.Info.Phase.Scope() != "active" {
+			text := record.Error
+			if record.Result != nil && record.Result.Text != "" {
+				text = record.Result.Text
+			}
+			if record.Result != nil && record.Result.Outcome.Error != "" && record.Result.Outcome.Error != text {
+				if text != "" {
+					text += "\n\n"
+				}
+				text += "Execution error: " + record.Result.Outcome.Error
+			}
+			if strings.TrimSpace(text) == "" {
+				text = "Task ended with status " + string(record.Info.Phase) + "."
+			}
+			event := hooks.Task(assistant, record.Generation, protocol.TaskResultEvent{TaskID: id, RunID: record.RunID, Title: record.Info.Title, Phase: record.Info.Phase, Text: text})
+			if err := hooks.EnqueueTx(ctx, tx, s.options.ControlID, s.options.RuntimeID, event); err != nil {
+				return err
+			}
+			terminal = &event
+		}
 		return write(ctx, tx, record)
 	})
 	if err == nil && changed {
 		s.Notify()
+		if terminal != nil && s.options.PublishHook != nil {
+			s.options.PublishHook(*terminal)
+		}
 	}
 	return err
 }

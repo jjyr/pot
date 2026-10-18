@@ -52,7 +52,9 @@ Runtime capacity and shared-resource policy.
 Main dispatches background work, acknowledges its accepted state and ends its
 turn. It exposes no Task waiting tool and does not poll for completion.
 
-A terminal hook creates one event identified by Task and run. When user chat is
+A [terminal hook](hooks.md) creates one event identified by Task and run for
+completion, failure, interruption or cancellation, including stopping before
+dispatch. Approval hooks only update UI and user reminders. When user chat is
 available, its receiver claims that event and produces one concise report using
 the Task title and actual outcome. Summaries have no tools, do not infer other
 Tasks' states and omit identifiers from prose. Real Task identifiers remain

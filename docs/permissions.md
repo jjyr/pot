@@ -73,6 +73,12 @@ enrollment, tool and full arguments/context. A later grant cannot reverse a deni
 already given to that exact request. Persistent grants are saved before permitting
 execution; write failure leaves approval pending.
 
+Approval creation, resolution and expiration publish [Runtime hooks](hooks.md).
+They refresh current UI cards and user reminders without messaging the assistant
+or making model calls. The UI reads authoritative pending decisions, so delayed
+updates cannot restore an expired approval. Waiting-call cancellation also expires
+its pending decision. Hooks never perform or authorize approval decisions.
+
 ## Sandbox and host boundaries
 
 Protected execution uses the pinned SRT SDK adapter: macOS Seatbelt or Linux

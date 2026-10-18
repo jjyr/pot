@@ -77,7 +77,8 @@ Agent messages use one sender-bound `send_message` primitive and a shared
 `agent_messages` inbox for Task inputs, assistant correspondence and Runtime
 completion events. User chat has a separate priority queue. Main releases its
 turn after dispatch; terminal hooks report outcomes independently, with durable
-report deduplication. See [Agent messages](assistant-messages.md).
+report deduplication. Approval hooks update UI and user reminders without waking
+an assistant model. See [Hooks](hooks.md) and [Agent messages](assistant-messages.md).
 
 Main and Worker invocations share the destination Runtime execution manager.
 Workers cannot coordinate other Tasks. Summary sessions have no tools and
