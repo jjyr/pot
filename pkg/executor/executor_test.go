@@ -427,11 +427,23 @@ func TestCommandShellPreservesToolchainPATH(t *testing.T) {
 					}
 				}
 				t.Setenv("PATH", project+":/usr/bin:/bin")
-				result := call(t, e, r, "exec_command", map[string]any{"cmd": "node"})
+				// Shell startup can outlive the default async yield, especially
+				// under race-enabled hooks. Inspect the original session's result.
+				run := func(cmd string) map[string]any {
+					result := call(t, e, r, "exec_command", map[string]any{"cmd": cmd})
+					stdout := result["stdout"].(string)
+					for poll := 0; result["session_id"] != nil && poll < 5; poll++ {
+						result = call(t, e, r, "write_stdin", map[string]any{"session_id": result["session_id"], "yield_time_ms": 1000})
+						stdout += result["stdout"].(string)
+					}
+					result["stdout"] = stdout
+					return result
+				}
+				result := run("node")
 				if result["stdout"] != "project" || result["exit_code"] != 0 {
 					t.Fatal(result)
 				}
-				result = call(t, e, r, "exec_command", map[string]any{"cmd": filepath.Join(project, "node")})
+				result = run(filepath.Join(project, "node"))
 				if result["stdout"] != "project" || result["exit_code"] != 0 {
 					t.Fatal(result)
 				}

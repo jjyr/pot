@@ -35,7 +35,12 @@ func TestUserBatchRunsOnceAndRetainsReceiptsAfterRestart(t *testing.T) {
 		if strings.Contains(body.Messages[0].Content, "Summarize background") {
 			t.Error("user batch inherited Summary role")
 		}
-		last := body.Messages[len(body.Messages)-1].Content
+		last := ""
+		for _, message := range body.Messages {
+			if message.Role == "user" {
+				last += message.Content + "\n"
+			}
+		}
 		if strings.Index(last, "first user request") < 0 || strings.Index(last, "second user constraint") < strings.Index(last, "first user request") {
 			t.Error("user batch lost original order", last)
 		}

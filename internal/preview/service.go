@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"github.com/jjyr/pot/pkg/core"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,10 +18,12 @@ import (
 const ConversationID = "preview-conversation"
 
 type Message struct {
-	ID     string `json:"id"`
-	Role   string `json:"role"`
-	Text   string `json:"text"`
-	Status string `json:"status"`
+	RequestID  string                  `json:"request_id,omitempty"`
+	References []core.MessageReference `json:"references,omitempty"`
+	ID         string                  `json:"id"`
+	Role       string                  `json:"role"`
+	Text       string                  `json:"text"`
+	Status     string                  `json:"status"`
 }
 
 // Cursor is a decimal string so no frontend loses precision as event counts grow.
@@ -46,10 +49,11 @@ type Snapshot struct {
 }
 
 type SendRequest struct {
-	RequestID      string `json:"request_id"`
-	BootID         string `json:"boot_id"`
-	ConversationID string `json:"conversation_id"`
-	Text           string `json:"text"`
+	References     []core.MessageReference `json:"references,omitempty"`
+	RequestID      string                  `json:"request_id"`
+	BootID         string                  `json:"boot_id"`
+	ConversationID string                  `json:"conversation_id"`
+	Text           string                  `json:"text"`
 }
 
 type Receipt struct {
@@ -171,6 +175,10 @@ func (s *Service) Send(request SendRequest) (Receipt, error) {
 		request.ConversationID != ConversationID || strings.TrimSpace(request.Text) == "" || len(request.Text) > 32768 {
 		return Receipt{}, &Error{"invalid_request", "Invalid preview message or conversation"}
 	}
+	if err := core.ValidateMessageReferences(request.References); err != nil {
+		return Receipt{}, &Error{"invalid_request", err.Error()}
+	}
+	request.References = slices.Clone(request.References)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed || s.ctx.Err() != nil {
@@ -180,7 +188,7 @@ func (s *Service) Send(request SendRequest) (Receipt, error) {
 		return Receipt{}, &Error{"stale_runtime", "Reconnect to the current preview before sending"}
 	}
 	if old, ok := s.receipts[request.RequestID]; ok {
-		if old.request != request {
+		if old.request.RequestID != request.RequestID || old.request.BootID != request.BootID || old.request.ConversationID != request.ConversationID || old.request.Text != request.Text || !slices.Equal(old.request.References, request.References) {
 			return Receipt{}, &Error{"request_conflict", "Request identity already has different content"}
 		}
 		receipt := old.receipt
@@ -197,7 +205,7 @@ func (s *Service) Send(request SendRequest) (Receipt, error) {
 	receipt := Receipt{MessageID: id}
 	s.receipts[request.RequestID] = accepted{request, receipt}
 	s.messages = append(s.messages,
-		Message{ID: id, Role: "user", Text: request.Text, Status: "complete"},
+		Message{ID: id, RequestID: request.RequestID, Role: "user", Text: request.Text, References: request.References, Status: "complete"},
 		Message{ID: id + "-reply", Role: "assistant", Status: "streaming"},
 	)
 	ctx, cancel := context.WithCancel(s.ctx)

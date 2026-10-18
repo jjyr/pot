@@ -1,7 +1,13 @@
 export const messages = {
   en: {
+    'references.list':'Message references', 'references.assistant':'Replying to assistant', 'references.you':'Replying to you',
+    'references.open':'View original: {source}', 'references.remove':'Remove reference', 'references.unavailable':'Original message unavailable',
+    'references.limit':'Select up to 8 excerpts, each at most 4 KiB and totaling at most 16 KiB.', 'references.added':'Reference added', 'references.removed':'Reference removed',
+    'references.read':'Read chat messages',
+
     'loading.pending':'Loading…',
     'loading.stale':'Refresh failed. Previously loaded data is still shown.',
+
     'markdown.diagramSource':'Mermaid source', 'markdown.diagramUnavailable':'Could not render this diagram. The source is available below.',
     'markdown.zoomIn':'Zoom in', 'markdown.zoomOut':'Zoom out', 'markdown.resetZoom':'Reset zoom',
     'tool.files':'Affected files','tool.changes':'Changes','tool.added':'Added','tool.modified':'Modified','tool.deleted':'Deleted','tool.moved':'Move destination',
@@ -123,8 +129,14 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'references.list':'消息引用', 'references.assistant':'引用助手的消息', 'references.you':'引用你的消息',
+    'references.open':'查看原消息：{source}', 'references.remove':'移除引用', 'references.unavailable':'原消息不可用',
+    'references.limit':'最多引用 8 处，每处不超过 4 KiB，总计不超过 16 KiB。', 'references.added':'已加入引用', 'references.removed':'已移除引用',
+    'references.read':'读取聊天消息',
+
     'loading.pending':'正在加载…',
     'loading.stale':'刷新失败，继续显示之前加载的数据。',
+
     'markdown.diagramSource':'Mermaid 源码', 'markdown.diagramUnavailable':'无法渲染此图表，可在下方查看源码。',
     'markdown.zoomIn':'放大', 'markdown.zoomOut':'缩小', 'markdown.resetZoom':'重置缩放',
     'tool.files':'涉及文件','tool.changes':'变更内容','tool.added':'新增','tool.modified':'修改','tool.deleted':'删除','tool.moved':'移动目标',

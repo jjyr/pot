@@ -102,7 +102,7 @@ func TestQueuedUserAndTaskOutcomesUseSeparateAggregatedModelTurns(t *testing.T) 
 				} `json:"messages"`
 			}
 			json.Unmarshal(raw, &parsed)
-			last := parsed.Messages[len(parsed.Messages)-1].Content
+			last := parsed.Messages[len(parsed.Messages)-2].Content + "\n" + parsed.Messages[len(parsed.Messages)-1].Content
 			if !strings.Contains(last, "user-one") || !strings.Contains(last, "user-two") || strings.Contains(last, "artifact_task_id") {
 				t.Error("user batch mixed with outcomes or lost input", last)
 			}
@@ -243,6 +243,23 @@ func TestAgentCommunicationBatchesBySenderNotWireConversation(t *testing.T) {
 		}
 		if _, err := sub.Next(ctx); err != nil {
 			t.Fatal(err, calls.Load())
+		}
+	}
+}
+
+func TestBatchRequestCategoryPreservesOriginalInputs(t *testing.T) {
+	marker := func(id, text string) string {
+		return "<pot_message_metadata>{\"message_id\":\"" + id + "\"}</pot_message_metadata>\n" + text
+	}
+	for _, texts := range [][]string{{"foreground gate"}, {"USER_ONE", "USER_TWO"}} {
+		messages := []map[string]string{{"role": "system", "content": "Main"}, {"role": "user", "content": "<pot_context key=\"environment\">data</pot_context>"}}
+		for i, text := range texts {
+			messages = append(messages, map[string]string{"role": "user", "content": marker(fmt.Sprint(i), text)})
+		}
+		raw, _ := json.Marshal(map[string]any{"messages": messages})
+		category, text := batchRequestCategory(raw)
+		if category != "user" || text != strings.Join(texts, "\n") {
+			t.Fatal(category, text)
 		}
 	}
 }

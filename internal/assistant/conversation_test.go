@@ -452,7 +452,7 @@ func TestTurnControlPausesAtBoundaryAndSteeringBindsOriginalReceipt(t *testing.T
 			return replySSE("first"), nil
 		case 2:
 			close(second)
-			if !strings.Contains(string(r.Body), "visible guidance") {
+			if !strings.Contains(string(r.Body), "visible guidance") || !strings.Contains(string(r.Body), `\"quote\":\"original\"`) {
 				t.Error("guidance absent from continued model request")
 			}
 			return replySSE("after guidance"), nil
@@ -467,7 +467,7 @@ func TestTurnControlPausesAtBoundaryAndSteeringBindsOriginalReceipt(t *testing.T
 	if err = c.Control(ctx, TurnControl{receipt.MessageID, "pause"}); err != nil {
 		t.Fatal(err)
 	}
-	guidance, err := c.Steer(ctx, SteerRequest{RequestID: "guide", UserMessageID: receipt.MessageID, Text: "visible guidance"})
+	guidance, err := c.Steer(ctx, SteerRequest{RequestID: "guide", UserMessageID: receipt.MessageID, Text: "visible guidance", References: []core.MessageReference{{MessageID: receipt.MessageID, Quote: "original"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -477,7 +477,7 @@ func TestTurnControlPausesAtBoundaryAndSteeringBindsOriginalReceipt(t *testing.T
 	}
 	found := false
 	for _, m := range snapshot.Messages {
-		if m.ID == guidance.MessageID && m.Text == "visible guidance" && m.Role == protocol.User && m.Status == protocol.Accepted {
+		if m.ID == guidance.MessageID && m.Text == "visible guidance" && m.Role == protocol.User && m.Status == protocol.Accepted && len(m.References) == 1 && m.References[0].Quote == "original" {
 			found = true
 		}
 	}
@@ -494,11 +494,11 @@ func TestTurnControlPausesAtBoundaryAndSteeringBindsOriginalReceipt(t *testing.T
 		t.Fatal(err)
 	}
 	waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil })
-	again, err := c.Steer(ctx, SteerRequest{RequestID: "guide", UserMessageID: receipt.MessageID, Text: "visible guidance"})
+	again, err := c.Steer(ctx, SteerRequest{RequestID: "guide", UserMessageID: receipt.MessageID, Text: "visible guidance", References: []core.MessageReference{{MessageID: receipt.MessageID, Quote: "original"}}})
 	if err != nil || !again.Duplicate || again.MessageID != guidance.MessageID {
 		t.Fatal(again, err)
 	}
-	if _, err = c.Steer(ctx, SteerRequest{RequestID: "guide", UserMessageID: "another-user", Text: "visible guidance"}); err == nil {
+	if _, err = c.Steer(ctx, SteerRequest{RequestID: "guide", UserMessageID: "another-user", Text: "visible guidance", References: []core.MessageReference{{MessageID: receipt.MessageID, Quote: "original"}}}); err == nil {
 		t.Fatal("steering receipt retargeted")
 	}
 	if err = c.Control(ctx, TurnControl{receipt.MessageID, "pause"}); err == nil {
