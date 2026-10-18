@@ -89,6 +89,9 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	if result, err, handled := a.integrationCall(ctx, method, path, r); handled {
 		return result, err
 	}
+	if result, err, handled := a.attachmentCall(ctx, method, u, owner, r); handled {
+		return result, err
+	}
 	if result, err, handled := a.taskCall(ctx, method, u, owner, r); handled {
 		return result, err
 	}
@@ -318,6 +321,19 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 				return nil, err
 			}
 			return c.SaveInstructions(ctx, body.Text, body.Revision)
+		case "/api/v1/turn/retry":
+			var body struct {
+				RequestID     string `json:"request_id"`
+				UserMessageID string `json:"user_message_id"`
+			}
+			if err = decode(r.Body, &body); err != nil {
+				return nil, err
+			}
+			c, err := conversation()
+			if err != nil {
+				return nil, err
+			}
+			return c.RetryFailed(ctx, body.RequestID, body.UserMessageID)
 		case "/api/v1/messages":
 			var body protocol.SendMessage
 			if err = decode(r.Body, &body); err != nil {

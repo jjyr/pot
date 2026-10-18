@@ -191,7 +191,7 @@ func TestDriverAlwaysUsesSharedManagerAndPreservesText(t *testing.T) {
 	if err := (Driver{manager, fixture}).Serve(context.Background(), input); err != nil {
 		t.Fatal(err)
 	}
-	if len(fixture.inputs) != 1 || fixture.inputs[0] != request || len(fixture.errors) != 0 || fixture.results[0].Phase != execution.Succeeded {
+	if len(fixture.inputs) != 1 || !fixture.inputs[0].Equal(request) || len(fixture.errors) != 0 || fixture.results[0].Phase != execution.Succeeded {
 		t.Fatal(fixture)
 	}
 	fixture.invalidIdentity = true

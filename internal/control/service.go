@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jjyr/pot/internal/assistant"
+	"github.com/jjyr/pot/internal/attachments"
 	"github.com/jjyr/pot/internal/controlplane"
 	"github.com/jjyr/pot/internal/gateway"
 	"github.com/jjyr/pot/internal/runner"
@@ -48,6 +49,7 @@ type Options struct {
 	IntegrationAdapters []integrations.Adapter
 }
 type Service struct {
+	Attachments         *attachments.Store
 	mu                  sync.Mutex
 	resourceMutations   sync.Mutex
 	options             Options
@@ -108,6 +110,14 @@ func Open(options Options) (*Service, error) {
 		}
 	}()
 	var err error
+	s.Attachments, err = attachments.Open(filepath.Join(options.Root, "attachments"))
+	if err != nil {
+		return nil, err
+	}
+	s.Attachments.Referenced = s.attachmentReferenced
+	if err = s.Attachments.Sweep(); err != nil {
+		return nil, err
+	}
 	s.Permissions, err = OpenPermissions(filepath.Join(options.Root, "permissions.json"))
 	if err != nil {
 		return nil, err
@@ -184,6 +194,9 @@ func (s *Service) Conversation(ctx context.Context, id string) (*assistant.Conve
 	options := assistant.ConversationOptions{InitialWelcome: welcome, InitialIntent: intent, Context: s.ctx, Owner: id, RuntimeID: s.options.RuntimeID, BootID: s.options.BootID, Manager: s.options.Manager, InitialSpec: initial, InitialRules: rules, RefreshConfiguration: s.refreshAssistantConfiguration, MaxTurnRequests: 128, OnFinished: func(ctx context.Context, r protocol.SendMessage, result execution.Result) error {
 		return s.finishAgentDelivery(ctx, id, r, result)
 	}}
+	options.ValidateAttachments = func(ctx context.Context, spec core.ResolvedSpec, items []core.Attachment) error {
+		return s.Attachments.Validate(id, items, spec.AttachmentCapabilities())
+	}
 	options.Prepare = func(ctx context.Context, thread core.Thread, request core.TurnRequest) (assistant.RunOptions, error) {
 		return s.prepare(ctx, conversation, thread, request)
 	}
@@ -313,7 +326,7 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 		definitions = append(definitions, definition)
 	}
 	definitions = append(definitions, s.productTools(false)...)
-	return assistant.RunOptions{Composer: s.options.Composer, Execution: executionContext, Services: ports, Dispatch: dispatch.Dispatch, Tools: definitions, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
+	return assistant.RunOptions{ResolveAttachments: s.resolveAttachments(principal, request.RequestID), Composer: s.options.Composer, Execution: executionContext, Services: ports, Dispatch: dispatch.Dispatch, Tools: definitions, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
 		s.Integrations.Forget(credentialScope(thread.Owner, request.RequestID, thread.Generation))
 		s.Permissions.Expire(principal, request.RequestID, thread.Generation)
 		err := engine.Drain()

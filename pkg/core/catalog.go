@@ -25,6 +25,7 @@ type ModelDescriptor struct {
 func DefaultModelDescriptor() ModelDescriptor {
 	return ModelDescriptor{InputModalities: []string{"text"}, SupportedInAPI: true, Visibility: "list", Priority: 100, ModelMessages: ModelMessages{Tools: map[string]ToolOverride{}}}
 }
+func (d ModelDescriptor) PDF() bool    { return slices.Contains(d.InputModalities, "pdf") }
 func (d ModelDescriptor) Vision() bool { return slices.Contains(d.InputModalities, "image") }
 func (d ModelDescriptor) Validate() error {
 	if !slices.Contains(d.InputModalities, "text") || d.SupportsImageDetailOriginal && !d.Vision() || !slices.Contains([]string{"list", "hide", "none"}, d.Visibility) {
@@ -32,7 +33,7 @@ func (d ModelDescriptor) Validate() error {
 	}
 	seen := map[string]bool{}
 	for _, m := range d.InputModalities {
-		if !slices.Contains([]string{"text", "image", "audio"}, m) || seen[m] {
+		if !slices.Contains([]string{"text", "image", "audio", "pdf"}, m) || seen[m] {
 			return fmt.Errorf("invalid/duplicate modality")
 		}
 		seen[m] = true

@@ -45,6 +45,11 @@ do not rewrite its value. Only explicit restoration, matching send receipts and
 completion replace text. Composition events, `isComposing` and key code 229 keep
 candidate confirmation from choosing a completion or sending a message.
 
+The shared Chat composer accepts image/PDF files through DOM selection, drop and
+screenshot paste. It uses the same bounded byte upload API in browsers and the
+macOS WebView; native attachment downloads use the host save dialog. See
+[Chat attachments](chat-attachments.md) for formats, capability checks and retention.
+
 Drafts, cached conversations, positions and late-response fences include the
 Control/Space and assistant identity. A matching authoritative receipt clears
 only its submitted draft. Selecting another assistant does not change ownership

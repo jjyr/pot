@@ -467,7 +467,7 @@ func TestTurnControlPausesAtBoundaryAndSteeringBindsOriginalReceipt(t *testing.T
 	if err = c.Control(ctx, TurnControl{receipt.MessageID, "pause"}); err != nil {
 		t.Fatal(err)
 	}
-	guidance, err := c.Steer(ctx, SteerRequest{"guide", receipt.MessageID, "visible guidance"})
+	guidance, err := c.Steer(ctx, SteerRequest{RequestID: "guide", UserMessageID: receipt.MessageID, Text: "visible guidance"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,11 +494,11 @@ func TestTurnControlPausesAtBoundaryAndSteeringBindsOriginalReceipt(t *testing.T
 		t.Fatal(err)
 	}
 	waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil })
-	again, err := c.Steer(ctx, SteerRequest{"guide", receipt.MessageID, "visible guidance"})
+	again, err := c.Steer(ctx, SteerRequest{RequestID: "guide", UserMessageID: receipt.MessageID, Text: "visible guidance"})
 	if err != nil || !again.Duplicate || again.MessageID != guidance.MessageID {
 		t.Fatal(again, err)
 	}
-	if _, err = c.Steer(ctx, SteerRequest{"guide", "another-user", "visible guidance"}); err == nil {
+	if _, err = c.Steer(ctx, SteerRequest{RequestID: "guide", UserMessageID: "another-user", Text: "visible guidance"}); err == nil {
 		t.Fatal("steering receipt retargeted")
 	}
 	if err = c.Control(ctx, TurnControl{receipt.MessageID, "pause"}); err == nil {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/jjyr/pot/pkg/core"
+	"slices"
 )
 
 const (
@@ -45,9 +46,10 @@ const (
 )
 
 type AgentStatus struct {
-	Model  string     `json:"model" required:"true"`
-	Phase  AgentPhase `json:"phase" required:"true"`
-	Detail *string    `json:"detail"`
+	Attachments core.AttachmentCapabilities `json:"attachments"`
+	Model       string                      `json:"model" required:"true"`
+	Phase       AgentPhase                  `json:"phase" required:"true"`
+	Detail      *string                     `json:"detail"`
 }
 type Role string
 
@@ -69,21 +71,28 @@ const (
 )
 
 type Message struct {
-	Queued         bool          `json:"queued,omitempty"`
-	Tool           *ToolCall     `json:"tool,omitempty"`
-	ID             string        `json:"id" required:"true"`
-	ConversationID string        `json:"conversation_id" required:"true"`
-	Role           Role          `json:"role" required:"true"`
-	Text           string        `json:"text" required:"true"`
-	Status         MessageStatus `json:"status" required:"true"`
-	CreatedAtMS    int64         `json:"created_at_ms" required:"true"`
-	RequestID      *string       `json:"request_id"`
-	Steering       bool          `json:"steering,omitempty"`
-	ReplyTo        string        `json:"reply_to,omitempty"`
-	Error          string        `json:"error,omitempty"`
+	Attachments    []core.Attachment `json:"attachments,omitempty"`
+	Queued         bool              `json:"queued,omitempty"`
+	Tool           *ToolCall         `json:"tool,omitempty"`
+	ID             string            `json:"id" required:"true"`
+	ConversationID string            `json:"conversation_id" required:"true"`
+	Role           Role              `json:"role" required:"true"`
+	Text           string            `json:"text" required:"true"`
+	Status         MessageStatus     `json:"status" required:"true"`
+	CreatedAtMS    int64             `json:"created_at_ms" required:"true"`
+	RequestID      *string           `json:"request_id"`
+	Steering       bool              `json:"steering,omitempty"`
+	ReplyTo        string            `json:"reply_to,omitempty"`
+	Error          string            `json:"error,omitempty"`
 }
 
 func (m Message) Validate() error {
+	if err := core.ValidateAttachments(m.Attachments); err != nil {
+		return err
+	}
+	if len(m.Attachments) > 0 && m.Role != User {
+		return fmt.Errorf("attachments require user role")
+	}
 	if m.Queued && (m.Role != User || m.Status != Accepted) {
 		return fmt.Errorf("only accepted user requests may be queued")
 	}
@@ -216,13 +225,20 @@ func (e Event) Validate() error {
 }
 
 type SendMessage struct {
-	RequestID      string `json:"request_id" required:"true"`
-	ConversationID string `json:"conversation_id" required:"true"`
-	Text           string `json:"text" required:"true"`
+	Attachments    []core.Attachment `json:"attachments,omitempty"`
+	RequestID      string            `json:"request_id" required:"true"`
+	ConversationID string            `json:"conversation_id" required:"true"`
+	Text           string            `json:"text" required:"true"`
 }
 
+func (m SendMessage) Equal(other SendMessage) bool {
+	return m.RequestID == other.RequestID && m.ConversationID == other.ConversationID && m.Text == other.Text && slices.Equal(m.Attachments, other.Attachments)
+}
 func (m SendMessage) Validate() error {
-	if !core.Identifier(m.RequestID) || !core.Identifier(m.ConversationID) || m.Text == "" || len(m.Text) > 65536 {
+	if err := core.ValidateAttachments(m.Attachments); err != nil {
+		return err
+	}
+	if !core.Identifier(m.RequestID) || !core.Identifier(m.ConversationID) || (m.Text == "" && len(m.Attachments) == 0) || len(m.Text) > 65536 {
 		return fmt.Errorf("invalid accepted input")
 	}
 	return nil

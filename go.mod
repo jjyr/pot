@@ -10,6 +10,7 @@ require (
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/wailsapp/wails/v3 v3.0.0-beta.30
 	go.yaml.in/yaml/v3 v3.0.5
+	golang.org/x/image v0.41.0
 	golang.org/x/sys v0.48.0
 	modernc.org/sqlite v1.60.1
 	tailscale.com v1.94.1

@@ -216,6 +216,10 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 	}
 	if !resuming && state.LastRequest != request.RequestID {
 		message := m.TextMessage("user", request.Text)
+		message.Attachments = append([]core.Attachment(nil), request.Attachments...)
+		if len(message.Attachments) > 0 {
+			message.Kind.Key = request.RequestID
+		}
 		if execution.Role == core.Summary {
 			message.Kind.Type = "notification"
 		}
@@ -250,6 +254,12 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 		input := m.Request{Protocol: m.Protocol(thread.Config.GatewayProtocol), Model: thread.Config.Model, System: system, Messages: portable(thread.Config, state.Messages, descriptor.Vision()), Tools: available, MaxOutputTokens: thread.Config.Params.MaxOutputTokens, ReasoningEffort: thread.Config.Params.ReasoningEffort}
 		if err := a.compact(ctx, execution, thread, &state, &input, sections, descriptor.Vision(), emit); err != nil {
 			return err
+		}
+		if a.ResolveAttachments != nil {
+			input.Messages, err = a.ResolveAttachments(ctx, thread.Config, input.Messages)
+			if err != nil {
+				return err
+			}
 		}
 		if a.PrepareContext != nil {
 			input.Messages, err = a.PrepareContext(ctx, execution, input.Messages)
@@ -393,7 +403,12 @@ func (a *Agent) acceptSteering(ctx context.Context, state *Checkpoint, finalizin
 		}
 		ids = append(ids, item.ID)
 		if !slices.Contains(state.SteeringIDs, item.ID) {
-			state.Messages = append(state.Messages, m.TextMessage("user", item.Text))
+			message := m.TextMessage("user", item.Text)
+			message.Attachments = append([]core.Attachment(nil), item.Attachments...)
+			if len(message.Attachments) > 0 {
+				message.Kind.Key = state.LastRequest
+			}
+			state.Messages = append(state.Messages, message)
 			state.SteeringIDs = append(state.SteeringIDs, item.ID)
 			added = true
 		}
@@ -498,6 +513,13 @@ func failedResult(raw json.RawMessage) bool {
 	return reason
 }
 func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoint, input m.Request, compactionID *string, emit func(core.Update) error) (response m.Message, result error) {
+	if a.ResolveAttachments != nil {
+		var err error
+		input.Messages, err = a.ResolveAttachments(ctx, thread.Config, input.Messages)
+		if err != nil {
+			return response, err
+		}
+	}
 	body, err := m.Encode(input)
 	if err != nil {
 		return response, err

@@ -44,11 +44,19 @@ func Encode(r Request) (json.RawMessage, error) {
 		functions = append(functions, map[string]any{"name": t.Name, "description": t.Description, "parameters": schema})
 	}
 	for _, m := range r.Messages {
+		if len(m.Attachments) > 0 {
+			return nil, fmt.Errorf("attachment references require owning Control resolution")
+		}
 		if m.Role != "user" && m.Role != "assistant" && m.Role != "tool" && m.Role != "system" {
 			return nil, fmt.Errorf("invalid model message role")
 		}
 		for _, image := range m.Images {
 			if err := image.Validate(); err != nil {
+				return nil, err
+			}
+		}
+		for _, doc := range m.Documents {
+			if err := doc.Validate(); err != nil {
 				return nil, err
 			}
 		}
@@ -97,6 +105,19 @@ func Encode(r Request) (json.RawMessage, error) {
 				input = append(input, map[string]any{"role": "tool", "tool_call_id": m.CallID, "content": m.Text})
 			} else {
 				message := map[string]any{"role": m.Role, "content": m.Text}
+				if len(m.Images) > 0 || len(m.Documents) > 0 {
+					parts := []any{}
+					if m.Text != "" {
+						parts = append(parts, map[string]any{"type": "text", "text": m.Text})
+					}
+					for _, image := range m.Images {
+						parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": image.DataURL(), "detail": "high"}})
+					}
+					for _, doc := range m.Documents {
+						parts = append(parts, map[string]any{"type": "file", "file": map[string]any{"filename": doc.Name, "file_data": "data:application/pdf;base64," + doc.Data}})
+					}
+					message["content"] = parts
+				}
 				if len(m.Calls) > 0 {
 					calls := []any{}
 					for _, call := range m.Calls {
@@ -106,8 +127,10 @@ func Encode(r Request) (json.RawMessage, error) {
 				}
 				input = append(input, message)
 			}
-			for _, image := range m.Images {
-				images = append(images, map[string]any{"type": "image_url", "image_url": map[string]any{"url": image.DataURL(), "detail": "high"}})
+			if m.Role == "tool" {
+				for _, image := range m.Images {
+					images = append(images, map[string]any{"type": "image_url", "image_url": map[string]any{"url": image.DataURL(), "detail": "high"}})
+				}
 			}
 		}
 		flushImages()
@@ -143,14 +166,30 @@ func Encode(r Request) (json.RawMessage, error) {
 				input = append(input, map[string]any{"type": "function_call_output", "call_id": m.CallID, "output": m.Text})
 			} else {
 				if m.Text != "" || len(m.Calls) == 0 {
-					input = append(input, map[string]any{"role": m.Role, "content": m.Text})
+					var content any = m.Text
+					if len(m.Images) > 0 || len(m.Documents) > 0 {
+						parts := []any{}
+						if m.Text != "" {
+							parts = append(parts, map[string]any{"type": "input_text", "text": m.Text})
+						}
+						for _, image := range m.Images {
+							parts = append(parts, map[string]any{"type": "input_image", "image_url": image.DataURL(), "detail": "high"})
+						}
+						for _, doc := range m.Documents {
+							parts = append(parts, map[string]any{"type": "input_file", "filename": doc.Name, "file_data": "data:application/pdf;base64," + doc.Data})
+						}
+						content = parts
+					}
+					input = append(input, map[string]any{"role": m.Role, "content": content})
 				}
 				for _, call := range m.Calls {
 					input = append(input, map[string]any{"type": "function_call", "call_id": call.ID, "name": call.Name, "arguments": string(call.Arguments)})
 				}
 			}
-			for _, image := range m.Images {
-				images = append(images, map[string]any{"type": "input_image", "image_url": image.DataURL(), "detail": "high"})
+			if m.Role == "tool" {
+				for _, image := range m.Images {
+					images = append(images, map[string]any{"type": "input_image", "image_url": image.DataURL(), "detail": "high"})
+				}
 			}
 		}
 		flushImages()
@@ -185,7 +224,7 @@ func Encode(r Request) (json.RawMessage, error) {
 					}
 					parts = append(parts, map[string]any{"type": "tool_result", "tool_use_id": m.CallID, "content": content})
 				} else {
-					if m.Text != "" || len(m.Calls) == 0 {
+					if m.Text != "" || (len(m.Calls) == 0 && len(m.Images) == 0 && len(m.Documents) == 0) {
 						parts = append(parts, map[string]any{"type": "text", "text": m.Text})
 					}
 					for _, call := range m.Calls {
@@ -193,6 +232,9 @@ func Encode(r Request) (json.RawMessage, error) {
 					}
 					for _, image := range m.Images {
 						parts = append(parts, anthropicImage(image))
+					}
+					for _, doc := range m.Documents {
+						parts = append(parts, map[string]any{"type": "document", "title": doc.Name, "source": map[string]any{"type": "base64", "media_type": "application/pdf", "data": doc.Data}})
 					}
 				}
 			}
@@ -234,7 +276,7 @@ func Encode(r Request) (json.RawMessage, error) {
 					}
 					parts = append(parts, map[string]any{"functionResponse": map[string]any{"id": m.CallID, "name": name, "response": map[string]any{"output": m.Text}}})
 				} else {
-					if m.Text != "" || len(m.Calls) == 0 {
+					if m.Text != "" || (len(m.Calls) == 0 && len(m.Images) == 0 && len(m.Documents) == 0) {
 						parts = append(parts, map[string]any{"text": m.Text})
 					}
 					for _, call := range m.Calls {
@@ -244,6 +286,9 @@ func Encode(r Request) (json.RawMessage, error) {
 			}
 			for _, image := range m.Images {
 				parts = append(parts, map[string]any{"inlineData": map[string]any{"mimeType": image.MIMEType, "data": image.Data}})
+			}
+			for _, doc := range m.Documents {
+				parts = append(parts, map[string]any{"inlineData": map[string]any{"mimeType": "application/pdf", "data": doc.Data}})
 			}
 			merge(role, "parts", parts)
 		}

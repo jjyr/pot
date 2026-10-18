@@ -146,6 +146,11 @@ func EstimateTokens(request m.Request) (uint64, error) {
 			continue
 		}
 		size := len(message.Text) + len(message.Images)*7373
+		// PDFs contain text plus page images. Conservatively charge decoded
+		// bytes with a per-document image floor; provider usage remains final.
+		for _, doc := range message.Documents {
+			size += max(7373, len(doc.Data)*3/4)
+		}
 		if message.Role == "tool" {
 			size += len(message.CallID)
 		}

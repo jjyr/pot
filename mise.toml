@@ -83,7 +83,7 @@ run = "python scripts/go-notices --output .local/licenses/go-dependencies.txt ./
 
 [tasks."test:ui"]
 description = "Verify shared DOM composer and production owner-scoped state contracts"
-run = ["node scripts/tests/go-ui-state.mjs", "node scripts/tests/go-ui-production-state.mjs", "node scripts/tests/web-errors.js"]
+run = ["node scripts/tests/go-ui-state.mjs", "node scripts/tests/go-ui-production-state.mjs", "node scripts/tests/go-ui-attachments.mjs", "node scripts/tests/web-errors.js"]
 
 [tasks."test:executor"]
 description = "Verify local executor process ownership, sessions and cleanup"
