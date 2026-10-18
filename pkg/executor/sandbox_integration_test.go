@@ -243,3 +243,58 @@ func TestRealSandboxChromiumQualification(t *testing.T) {
 		t.Fatal("browser descendant cleanup unconfirmed", err)
 	}
 }
+
+func TestRealSandboxCommandPreservesToolchainPATH(t *testing.T) {
+	e, r := sandboxFixture(t)
+	// The sandbox helper uses configured Node; ordinary commands retain PATH.
+	conflictingBin := filepath.Join(r.CWD, "other-bin")
+	if err := os.Mkdir(conflictingBin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"node", "npm", "npx"} {
+		if err := os.WriteFile(filepath.Join(conflictingBin, name), []byte("#!/bin/sh\necho project-"+name+"\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	paths := []string{conflictingBin}
+	for _, path := range filepath.SplitList(os.Getenv("PATH")) {
+		if path != filepath.Dir(e.options.Node) {
+			paths = append(paths, path)
+		}
+	}
+	// Keep Linux SRT dependencies (rg, socat, bwrap) available to the helper.
+	t.Setenv("PATH", strings.Join(paths, string(os.PathListSeparator)))
+	result := call(t, e, r, "exec_command", map[string]any{"cmd": "node --version && npm --version && npx --version", "yield_time_ms": 1000})
+	stdout := result["stdout"].(string)
+	for result["session_id"] != nil {
+		result = call(t, e, r, "write_stdin", map[string]any{"session_id": result["session_id"], "yield_time_ms": 1000})
+		stdout += result["stdout"].(string)
+	}
+	if result["exit_code"] != 0 || stdout != "project-node\nproject-npm\nproject-npx\n" {
+		t.Fatal(result, stdout)
+	}
+}
+
+func TestRealSandboxSharedToolBinDoesNotCoverWorkspace(t *testing.T) {
+	e, r := sandboxFixture(t)
+	shared := filepath.Dir(r.CWD)
+	bin := filepath.Join(shared, "bin")
+	if err := os.Mkdir(bin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nprintf tool"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(shared, "tool-neighbor-secret")
+	if err := os.WriteFile(secret, []byte("private-neighbor"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	result := call(t, e, r, "exec_command", map[string]any{"cmd": "if cat " + shellQuote(secret) + "; then exit 77; fi; printf written > tool-proof; gh"})
+	if result["exit_code"] != 0 || result["stdout"] != "tool" {
+		t.Fatal("shared tool root exposed siblings or covered workspace writes", result)
+	}
+	if data, err := os.ReadFile(filepath.Join(r.CWD, "tool-proof")); err != nil || string(data) != "written" {
+		t.Fatal(string(data), err)
+	}
+}

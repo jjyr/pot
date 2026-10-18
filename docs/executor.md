@@ -33,7 +33,17 @@ macOS installation roots and Linux-specific CA, font and browser configuration
 paths are not granted on the other platform. Unsupported platforms fail closed.
 The execution environment preserves a nonempty host `PATH`. Otherwise it uses
 standard executable directories for the execution OS; `/opt/homebrew/bin` is
-included only on macOS.
+included only on macOS. Ordinary command shells retain their inherited or
+shell-initialized PATH and project toolchain; Pot does not inject its bundled
+Node directory. Plugin hosts use the configured bundled Node and prepend its
+`bin` directory for child tools after applying execution environment settings.
+Within plugins, bundled node/npm/npx take precedence over tools already on PATH.
+The Node distribution, including npm/npx and their relative modules, is read-only
+in protected launches. Project commands must install versions requested by their
+own toolchain manager; Pot does not silently substitute versions.
+An inferred tool installation root must not contain the writable workspace. For
+a shared `bin` directory beside the workspace, only that executable directory is
+granted read access, keeping sibling state private and workspace writes intact.
 
 IP networking is unrestricted; no SRT proxy variables are injected. Unix IPC is
 restricted independently; necessary macOS DNS support is narrowly allowed.
@@ -76,7 +86,18 @@ launch. It does not capture/replay an unsandboxed login snapshot before entering
 a protected shell. The configured snapshot flag remains part of command identity;
 standalone trusted executor hosts can use the bounded snapshot cache explicitly.
 
-Omit `yield_time_ms` to wait; specify it to return a live session. `write_stdin`
+Commands wait up to `yield_time_ms` (10 seconds by default; the default maximum
+is 30 seconds), then return a live session when still running. This bounds the
+response wait, not the command lifetime. `timeout_ms` is not accepted. Use
+`write_stdin` to collect later output or explicitly interrupt/terminate a command.
+Cancellation, execution-scope shutdown and the configured session idle timeout
+still stop the original process and require cleanup proof. Shell configuration uses
+`default_yield_ms`, `max_yield_ms` and `session_idle_timeout_ms`; the retired
+`default_timeout_ms`/`max_timeout_ms` fields are rejected. An offline upgrade of
+persisted configurations must remove those fields and regenerate affected typed
+specifications and their hashes before starting the new Runtime.
+
+`write_stdin`
 retains the original process/mode. It cannot start a new command using session
 identity or cross owner/generation/Runtime boundaries. Sandbox TTY/input is
 available. Host TTY and nonempty input require explicit interactive authorization

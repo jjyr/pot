@@ -11,7 +11,7 @@ function sumRows(rows,keys) {const result={};for(const key of keys)result[key]=r
 // Only whole-summary values are combined across Spaces. Paginated categories
 // stay per Space so a partial page cannot masquerade as a complete global total.
 export function combineUsage(pages) {
-  const numeric=['input','output','cache','requests','unknown'],buckets=new Map();
+  const numeric=['input','output','cache','requests'],buckets=new Map();
   for(const {value}of pages)for(const bucket of value.buckets||[]){const old=buckets.get(bucket.label);buckets.set(bucket.label,{...bucket,...sumRows([old,bucket],numeric)});}
   return {total:sumRows(pages.map(page=>page.value.total),numeric),routing_total:sumRows(pages.map(page=>page.value.routing_total),numeric),buckets:[...buckets.values()],bucket_days:pages[0]?.value.bucket_days,timezone:pages[0]?.value.timezone,spaces:pages};
 }

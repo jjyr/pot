@@ -420,6 +420,14 @@ def run(binary, base, env, cli_command):
             )
             if '"passed":true' not in approvals:
                 raise RuntimeError("Task approval browser contracts did not pass")
+            task_time = browser_cli(
+                "run-code",
+                (ROOT / "scripts/tests/go-ui-task-time-browser.js")
+                .read_text()
+                .replace("STATE", json.dumps({"origin": origin})),
+            )
+            if '"passed":true' not in task_time:
+                raise RuntimeError("Task elapsed-time browser contracts did not pass")
             actual = (base / "download.bin").read_bytes()
             assert len(actual) == len(content)
             assert hashlib.sha256(actual).digest() == hashlib.sha256(content).digest()

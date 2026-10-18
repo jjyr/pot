@@ -107,7 +107,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     const choice=(text,work,{danger=false}={})=>{const button=action(text,work,{danger});button.classList.add('menu-destination');button.disabled=busy;dialog.append(button);return button;};
     if(menuMode==='details'){
       heading.firstChild.textContent=tr('Task details','任务详情');const data=n('dl','task-info');
-      for(const [key,value]of [[tr('Assistant','助手'),assistantName],[tr('Machine','执行机器'),record.info?.machine_id||task.machine_id],[tr('Model','模型'),record.config?.model],[tr('Task ID','任务 ID'),task.id]])if(value)data.append(n('dt','',key),n('dd','',value));
+      for(const [key,value]of [[tr('Assistant','助手'),assistantName],[tr('Machine','执行机器'),record.info?.machine_id||task.machine_id],[tr('Model','模型'),record.config?.model],[tr('Started','开始时间'),record.info?.started_at_ms?new Date(record.info.started_at_ms).toLocaleString(locale()):null],[tr('Task ID','任务 ID'),task.id]])if(value)data.append(n('dt','',key),n('dd','',value));
       dialog.append(data);choice(tr('Back','返回'),()=>{menuMode='actions';renderMenu(true);});return;
     }
     if(menuMode==='cancel'){

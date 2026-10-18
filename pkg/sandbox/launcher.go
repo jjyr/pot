@@ -117,6 +117,14 @@ func (l Launcher) Prepare(ctx context.Context, command *exec.Cmd, workspace stri
 		}
 	}
 	request := launch{CWD: cwd, Argv: command.Args, Read: append([]string{workspace, private}, read...), Write: append([]string{workspace, private}, write...), TTY: tty}
+	// The packaged Node distribution supplies node plus npm's relative modules.
+	// Plugin child tools can use it on PATH without exposing sibling
+	// Runtime state or granting writes to trusted tool assets.
+	nodePaths := []string{l.Node}
+	if bin := filepath.Dir(l.Node); filepath.Base(bin) == "bin" {
+		nodePaths = append(nodePaths, bin, filepath.Join(filepath.Dir(bin), "lib/node_modules"))
+	}
+	request.Read = append(request.Read, nodePaths...)
 	// System installation roots are read-only. Never expose the user's home,
 	// sibling temporary directories, Control database, or ambient credentials.
 	for _, root := range readRoots {
@@ -133,7 +141,9 @@ func (l Launcher) Prepare(ctx context.Context, command *exec.Cmd, workspace stri
 		if path, e := exec.LookPath(tool); e == nil {
 			if actual, e := filepath.EvalSymlinks(path); e == nil {
 				root := filepath.Dir(actual)
-				if filepath.Base(root) == "bin" {
+				// A shared bin directory can sit beside the workspace. Restoring
+				// its parent read-only would expose siblings and cover write mounts.
+				if filepath.Base(root) == "bin" && !within(workspace, filepath.Dir(root)) {
 					root = filepath.Dir(root)
 				}
 				if root != "/" && root != "/Users" && root != "/home" {
@@ -153,7 +163,7 @@ func (l Launcher) Prepare(ctx context.Context, command *exec.Cmd, workspace stri
 		request.Read = append(request.Read, filepath.Join(l.Directory, "node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp"))
 	}
 	request.DenyRead = append([]string{"/"}, l.ProtectedPaths...)
-	request.DenyWrite = []string{l.Directory, l.Node, markerDir}
+	request.DenyWrite = append([]string{l.Directory, markerDir}, nodePaths...)
 	for _, protected := range l.ProtectedPaths {
 		if !within(workspace, protected) {
 			request.DenyWrite = append(request.DenyWrite, protected)

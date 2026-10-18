@@ -59,8 +59,19 @@ func (manager *compositionManager) call(name string, raw json.RawMessage, parent
 		if args.Code == "" || len(args.Code) > 65536 {
 			return nil, composition.ErrCodeLimit
 		}
-		if len(manager.jobs) >= 4 {
-			return nil, fmt.Errorf("composition turn run limit reached")
+		active := 0
+		for _, job := range manager.jobs {
+			select {
+			case <-job.done:
+			default:
+				active++
+			}
+		}
+		if active >= 4 {
+			return nil, fmt.Errorf("composition active run limit reached; wait for an existing exec_id")
+		}
+		if len(manager.jobs) >= 64 {
+			return nil, fmt.Errorf("composition retained result limit reached; collect existing exec_id results")
 		}
 		id = newID()
 		ctx, cancel := context.WithCancel(manager.ctx)
@@ -153,6 +164,10 @@ func (manager *compositionManager) call(name string, raw json.RawMessage, parent
 				value["error"] = job.err.Error()
 			}
 			job.mu.Unlock()
+			if done {
+				job.cancel()
+				delete(manager.jobs, id)
+			}
 			return json.Marshal(value)
 		}
 		job.mu.Unlock()
@@ -193,5 +208,5 @@ func (manager *compositionManager) close() error {
 	return nil
 }
 func compositionSchemas() []m.ToolDefinition {
-	return []m.ToolDefinition{{Name: "exec", Description: "Compose authorized tools using JavaScript with top-level await, tools.NAME(args), and text(value). Await independent calls with Promise.all. Only text output is published. No filesystem/network/process/module/timer/Node globals or recursive exec/wait. Up to 4 runs/turn, 128 calls/run, 8 concurrent calls, 64 KiB code/output, 2s uninterrupted JS and 10min wall time. Disposable Go worker uses a 64 MiB soft memory target and sampled 96 MiB live-heap cancellation; neither is a hard heap/RSS cap. Unawaited effects may have occurred; runs cancel at turn end. Returns exec_id for wait while running.", InputSchema: json.RawMessage(`{"type":"object","properties":{"code":{"type":"string","maxLength":65536},"yield_time_ms":{"type":"integer","minimum":1,"maximum":60000}},"required":["code"],"additionalProperties":false}`)}, {Name: "wait", Description: "Collect only new explicit output or completion from an exec_id in this turn. Unknown/expired IDs fail. This does not poll shell sessions or Tasks.", InputSchema: json.RawMessage(`{"type":"object","properties":{"exec_id":{"type":"string"},"yield_time_ms":{"type":"integer","minimum":1,"maximum":60000}},"required":["exec_id"],"additionalProperties":false}`)}}
+	return []m.ToolDefinition{{Name: "exec", Description: "Compose authorized tools using JavaScript with top-level await, tools.NAME(args), and text(value). Await independent calls with Promise.all. Only text output is published. No filesystem/network/process/module/timer/Node globals or recursive exec/wait. Up to 4 active runs at once (completed runs release capacity; no cumulative turn quota), up to 64 uncollected runs/results, 128 calls/run, 8 concurrent calls, 64 KiB code/output, 2s uninterrupted JS and 10min wall time. Disposable Go worker uses a 64 MiB soft memory target and sampled 96 MiB live-heap cancellation; neither is a hard heap/RSS cap. Unawaited effects may have occurred; runs cancel at turn end. Returns exec_id for wait while running.", InputSchema: json.RawMessage(`{"type":"object","properties":{"code":{"type":"string","maxLength":65536},"yield_time_ms":{"type":"integer","minimum":1,"maximum":60000}},"required":["code"],"additionalProperties":false}`)}, {Name: "wait", Description: "Collect only new explicit output or completion from an exec_id in this turn. Unknown/expired IDs fail. This does not poll shell sessions or Tasks.", InputSchema: json.RawMessage(`{"type":"object","properties":{"exec_id":{"type":"string"},"yield_time_ms":{"type":"integer","minimum":1,"maximum":60000}},"required":["exec_id"],"additionalProperties":false}`)}}
 }

@@ -107,11 +107,43 @@ func TestUsagePagesOrderingBoundariesAndScope(t *testing.T) {
 	}
 }
 
+func TestSummaryFortnightRange(t *testing.T) {
+	ctx := context.Background()
+	l, _ := ledger(t)
+	at := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	for i, day := range []time.Time{
+		time.Date(2026, 10, 4, 23, 59, 59, 0, time.UTC),
+		time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC),
+		at.AddDate(0, 0, -8),
+		at,
+	} {
+		r := reservation(fmt.Sprintf("request-%d", i), day.UnixMilli())
+		if _, err := l.Reserve(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.Settle(ctx, r.ID, Frame{Input: number(100), Output: number(10)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, days := range []int{0, 14} {
+		s, err := l.Summary(ctx, Query{Days: days, Timezone: "UTC"}, at.UnixMilli())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.Days != 14 || s.BucketDays != 1 || len(s.Buckets) != 14 || s.Total.Requests != 3 || s.Lifetime.Requests != 4 {
+			t.Fatal("expected fourteen daily slots and range-limited totals", s)
+		}
+		if s.Buckets[0].Range != "2026-10-05 — 2026-10-05" || s.Buckets[0].Input != 100 || s.Buckets[1].Input != 0 || s.Buckets[13].Range != "2026-10-18 — 2026-10-18" || s.Buckets[13].Input != 100 {
+			t.Fatal("range must include the first midnight, empty dates and today", s.Buckets)
+		}
+	}
+}
+
 func TestModelPagesGlobalRangeAndSessionLifetime(t *testing.T) {
 	ctx := context.Background()
 	l, _ := ledger(t)
 	at := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
-	for i, days := range []int{-20, -1} {
+	for i, days := range []int{-14, -13, -8, -1} {
 		r := reservation(fmt.Sprintf("request-%d", i), at.AddDate(0, 0, days).UnixMilli())
 		if _, err := l.Reserve(ctx, r); err != nil {
 			t.Fatal(err)
@@ -124,7 +156,7 @@ func TestModelPagesGlobalRangeAndSessionLifetime(t *testing.T) {
 		scope string
 		days  int
 		count int64
-	}{{"", 7, 1}, {"", 30, 2}, {"main", 7, 2}} {
+	}{{"", 0, 3}, {"", 14, 3}, {"", 30, 4}, {"main", 14, 4}} {
 		p, err := l.Page(ctx, "models", Query{Scope: test.scope, Days: test.days, Timezone: "UTC"}, at.UnixMilli())
 		if err != nil {
 			t.Fatal(err)

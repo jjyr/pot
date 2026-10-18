@@ -245,3 +245,23 @@ func TestSSEUnicodeMultilineAndTruncation(t *testing.T) {
 		t.Fatal("partial frame accepted")
 	}
 }
+
+func TestResponsesExplicitlyDisablesStrictForOptionalToolFields(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","properties":{"code":{"type":"string"},"session_id":{"type":"string"},"reset":{"type":"boolean"}},"required":["code"],"additionalProperties":false}`)
+	raw, err := Encode(Request{Protocol: OpenAIResponses, Model: "model", MaxOutputTokens: 100, Tools: []ToolDefinition{{Name: "cua_repl", InputSchema: schema}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := object(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := obj(array(body["tools"])[0])
+	if strict, ok := tool["strict"].(bool); !ok || strict {
+		t.Fatal("optional arguments can become required by Responses", string(raw))
+	}
+	required := array(obj(tool["parameters"])["required"])
+	if len(required) != 1 || required[0] != "code" {
+		t.Fatal("optional session fields became required", string(raw))
+	}
+}

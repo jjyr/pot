@@ -39,14 +39,14 @@ export function usageRows(value,locale,tr) {
 export function usageTrend(data,{locale,tr,timezone,days,onDays,segments}) {
   const card=n('section','page-section page-card usage-trend'),header=n('div','usage-chart-heading'),chart=n('div','usage-chart'),legend=n('div','usage-legend');
   header.append(n('h2','',tr('Usage trend','用量趋势')),usageTooltip(n('span','hint usage-chart-period',data.bucket_days===7?tr('Weekly','按周'):tr('Daily','按日')),{title:timezone,note:tr('The current period is still in progress.','当前周期统计截至现在。')}));
-  card.append(header,segments([7,30,90,365].map(value=>[value,value===365?tr('Last year','最近一年'):tr(`Last ${value} days`,`最近 ${value} 天`)]),days,onDays));
+  card.append(header,segments([14,30,90,365].map(value=>[value,value===365?tr('Last year','最近一年'):tr(`Last ${value} days`,`最近 ${value} 天`)]),days,onDays));
   const {uncached}=usageNumbers(locale),series=[['usage-uncached',tr('Uncached input','未缓存输入'),uncached],['usage-cached',tr('Cached input','缓存输入'),value=>value.cache||0],['usage-output',tr('Output','输出'),value=>value.output||0]];
   chart.setAttribute('role','group');chart.setAttribute('aria-label',tr('Token usage trend','Token 用量趋势'));
   const maximum=Math.max(1,...(data.buckets||[]).map(value=>value.input+value.output));
   for(const [index,bucket]of (data.buckets||[]).entries()){
     const column=n('div','chart-column'),bar=n('div','chart-bar'),last=index===data.buckets.length-1;
     const title=data.bucket_days===7?bucket.range:(bucket.range||bucket.label).split(' — ')[0];
-    const rows=usageRows(bucket,locale,tr),note=[last?tr('Statistics through now','统计截至当前'):'',bucket.unknown?tr(`${bucket.unknown} incomplete usage records`,`${bucket.unknown} 条不完整用量记录`):'',timezone].filter(Boolean).join(' · ');
+    const rows=usageRows(bucket,locale,tr),note=[last?tr('Statistics through now','统计截至当前'):'',timezone].filter(Boolean).join(' · ');
     column.setAttribute('aria-label',`${title} · ${rows.map(row=>row.join(' ')).join(' · ')} · ${note}`);
     bar.style.height=`${Math.max(0,(bucket.input+bucket.output)/maximum*140)}px`;
     for(const [className,,value]of series){const segment=n('span',className);segment.style.flexGrow=String(value(bucket)||0);bar.append(segment);}
@@ -66,7 +66,7 @@ export function createUsageList({root,kind,title,params,owner,request,token,curr
   function render(value,stale=false){
     const rows=value.items||[],fragment=n('div');
     if(!rows.length)fragment.append(n('p','hint',tr('No records yet','暂无记录')));
-    else if(kind==='models')for(const model of rows){const row=n('div','usage-model-row'),line=n('div','usage-model-title');line.append(n('span','',`${model.agent==='pot'?'Pot':model.agent} · ${model.model}`),usageTooltip(n('span','usage-value',`${compact(model.input+model.output)} tokens`),{title:model.model,rows:usageRows(model,locale,tr)}));row.append(line,n('p','hint',`${tr('Input','输入')} ${compact(model.input)} · ${tr('Cached input','缓存输入')} ${compact(model.cache)} · ${tr('Output','输出')} ${compact(model.output)}`));if(model.unknown)row.append(n('p','hint',tr(`${model.unknown} incomplete records`,`${model.unknown} 条不完整记录`)));fragment.append(row);}
+    else if(kind==='models')for(const model of rows){const row=n('div','usage-model-row'),line=n('div','usage-model-title');line.append(n('span','',`${model.agent==='pot'?'Pot':model.agent} · ${model.model}`),usageTooltip(n('span','usage-value',`${compact(model.input+model.output)} tokens`),{title:model.model,rows:usageRows(model,locale,tr)}));row.append(line,n('p','hint',`${tr('Input','输入')} ${compact(model.input)} · ${tr('Cached input','缓存输入')} ${compact(model.cache)} · ${tr('Output','输出')} ${compact(model.output)}`));fragment.append(row);}
     else if(kind==='requests')fragment.append(table([tr('Time','时间'),tr('Model','模型'),tr('Input','输入'),tr('Cached input','缓存输入'),tr('Output','输出'),tr('State','状态')],rows.map(record=>[record.label,record.model,usageTooltip(n('span','usage-value',exact(record.input)),{title:record.label,rows:usageRows(record,locale,tr)}),record.input==null?'—':exact(record.cache),exact(record.output),record.state])));
     else if(kind==='tools')fragment.append(table([tr('Tool','工具'),tr('Calls','调用次数'),tr('Failed','失败'),tr('Duration (ms)','耗时（毫秒）')],rows.map(tool=>[tool.name,exact(tool.calls),exact(tool.failed),exact(tool.duration_ms)])));
     else fragment.append(table([tr('Time','时间'),tr('State','状态'),tr('Before','之前'),tr('After','之后')],rows.map(record=>[record.label,record.state,exact(record.tokens_before),exact(record.tokens_after)])));

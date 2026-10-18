@@ -46,6 +46,11 @@ Await dependent calls sequentially. Inspect tool results for failures; transport
 and approval errors reject their Promises. Product tools retain their MCP wrappers.
 Unawaited calls may have effects, but do not survive script completion.
 
+Up to four runs may be active at once; there is no cumulative per-turn run quota.
+At most 64 uncollected runs/results are retained. Collect finished results with
+`wait` to release retained state. Returning a completed result consumes its ID;
+later waits for that ID fail rather than replaying the result.
+
 Results contain `output` and `completed`, plus `exec_id` while running.
 `wait({exec_id, yield_time_ms?})` returns new output or completion without repeating
 previous output. `write_stdin` manages shell sessions. Task completion is delivered
@@ -78,3 +83,11 @@ composed calls retain the same argument contract.
 Operator management endpoints remain separate from model tools. They require
 Control membership and an existing resource. Lost operations are inspected by
 original identity and never resent; unresolved receipts block new effects.
+
+## Optional tool parameters
+
+The Responses encoder explicitly sends `strict: false` for function tools so
+optional properties remain optional. Omission is meaningful for execution tools
+(for example, creating a REPL without a session ID); the provider must not force
+placeholder values into every property. Local schema and authorization checks
+still validate all supplied arguments.

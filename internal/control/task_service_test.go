@@ -118,7 +118,7 @@ func TestLocalTaskUsesRunnerSharedCapacityControlModelAndSummary(t *testing.T) {
 			t.Fatal("result became user authority")
 		}
 	}
-	workerUsage, err := s.Usage.Summary(ctx, usage.Query{Scope: accepted.Info.ID, Days: 7, Timezone: "UTC"}, time.Now().UnixMilli())
+	workerUsage, err := s.Usage.Summary(ctx, usage.Query{Scope: accepted.Info.ID, Days: 14, Timezone: "UTC"}, time.Now().UnixMilli())
 	if err != nil || workerUsage.Total.Requests != 2 || workerUsage.Total.Input != 40 || workerUsage.Total.Output != 10 {
 		t.Fatal("Task usage attribution", workerUsage, err)
 	}
@@ -130,7 +130,7 @@ func TestLocalTaskUsesRunnerSharedCapacityControlModelAndSummary(t *testing.T) {
 	if len(tools) != 1 || tools[0].Name != "exec_command" || tools[0].Calls != 1 {
 		t.Fatal("Task tool attribution", workerTools)
 	}
-	mainUsage, err := s.Usage.Summary(ctx, usage.Query{Scope: "main", Days: 7, Timezone: "UTC"}, time.Now().UnixMilli())
+	mainUsage, err := s.Usage.Summary(ctx, usage.Query{Scope: "main", Days: 14, Timezone: "UTC"}, time.Now().UnixMilli())
 	if err != nil || mainUsage.Total.Requests != 1 {
 		t.Fatal("Task usage contaminated Main", mainUsage, err)
 	}

@@ -41,6 +41,10 @@ func TestUsageSummaryAndIndependentListRoutes(t *testing.T) {
 			t.Fatal(err)
 		}
 		if kind == "summary" {
+			var summary usage.Summary
+			if err := json.Unmarshal(data, &summary); err != nil || summary.Days != 14 || len(summary.Buckets) != 14 {
+				t.Fatal("summary must default to fourteen days", string(data), err)
+			}
 			if value["total"] == nil || value["buckets"] == nil || value["requests"] != nil || value["agent_models"] != nil || value["tools"] != nil || value["compactions"] != nil {
 				t.Fatal("summary must not load detail lists", string(data))
 			}

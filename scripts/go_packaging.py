@@ -138,10 +138,15 @@ def prepare_wails_module(work):
     return modfile
 
 
-def copy_tree(source, destination):
+def copy_tree(source, destination, *, symlinks=False):
     if destination.exists():
         shutil.rmtree(destination)
-    shutil.copytree(source, destination, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    shutil.copytree(
+        source,
+        destination,
+        symlinks=symlinks,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
 
 
 def node_archive(platform):
@@ -160,10 +165,14 @@ def node(platform):
     archive = node_archive(platform)
     target = BUILD / "node" / platform
     stamp = target / ".pot-archive-sha256"
-    if not stamp.exists() or stamp.read_text() != NODE_HASHES[platform]:
+    if (
+        not stamp.exists()
+        or stamp.read_text() != NODE_HASHES[platform]
+        or not (target / "bin/npm").is_symlink()
+    ):
         with tempfile.TemporaryDirectory(dir=BUILD) as temporary:
             extract(archive, Path(temporary))
-            copy_tree(Path(temporary) / name, target)
+            copy_tree(Path(temporary) / name, target, symlinks=True)
         stamp.write_text(NODE_HASHES[platform])
     return target
 
@@ -218,7 +227,7 @@ def prepare_resources(destination, platform):
         (ROOT / "web/src", "web"),
         (node(platform), "node"),
     ):
-        copy_tree(source, destination / name)
+        copy_tree(source, destination / name, symlinks=name == "node")
     shutil.copy2(ROOT / "LICENSE", destination / "LICENSE.txt")
     (destination / "ModelDirectoryLicense.txt").write_text(
         "\n\n".join(

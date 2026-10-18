@@ -21,15 +21,13 @@ type Totals struct {
 	Output   int64 `json:"output"`
 	Cache    int64 `json:"cache"`
 	Requests int64 `json:"requests"`
-	Unknown  int64 `json:"unknown"`
 }
 type Bucket struct {
-	Label   string `json:"label"`
-	Range   string `json:"range"`
-	Input   int64  `json:"input"`
-	Output  int64  `json:"output"`
-	Cache   int64  `json:"cache"`
-	Unknown int64  `json:"unknown"`
+	Label  string `json:"label"`
+	Range  string `json:"range"`
+	Input  int64  `json:"input"`
+	Output int64  `json:"output"`
+	Cache  int64  `json:"cache"`
 }
 type AgentModel struct {
 	Agent string `json:"agent"`
@@ -88,7 +86,7 @@ func aggregate(ctx context.Context, db queryer, scope string, start, end int64, 
 	var t Totals
 	parameters := []any{scope, scope, start, end}
 	parameters = append(parameters, args...)
-	err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0),COUNT(*),COALESCE(SUM(CASE WHEN r.input IS NULL OR r.output IS NULL THEN 1 ELSE 0 END),0) FROM requests r WHERE (?='' OR r.scope=?) AND r.at>=? AND r.at<? `+extra, parameters...).Scan(&t.Input, &t.Output, &t.Cache, &t.Requests, &t.Unknown)
+	err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(r.input),0),COALESCE(SUM(r.output),0),COALESCE(SUM(r.cache),0),COUNT(*) FROM requests r WHERE (?='' OR r.scope=?) AND r.at>=? AND r.at<? `+extra, parameters...).Scan(&t.Input, &t.Output, &t.Cache, &t.Requests)
 	return t, err
 }
 
@@ -104,12 +102,12 @@ func (l *Ledger) Summary(ctx context.Context, q Query, atMS int64) (Summary, err
 }
 func summary(ctx context.Context, db queryDB, q Query, atMS int64) (Summary, error) {
 	if q.Days == 0 {
-		q.Days = 7
+		q.Days = 14
 	}
 	if q.Timezone == "" {
 		q.Timezone = "Asia/Shanghai"
 	}
-	if q.Days != 7 && q.Days != 30 && q.Days != 90 && q.Days != 365 || q.Offset < 0 || q.Offset > 1000000 || len(q.Scope) > 128 {
+	if q.Days != 14 && q.Days != 30 && q.Days != 90 && q.Days != 365 || q.Offset < 0 || q.Offset > 1000000 || len(q.Scope) > 128 {
 		return Summary{}, fmt.Errorf("invalid usage query")
 	}
 	zone, err := time.LoadLocation(q.Timezone)
@@ -157,7 +155,7 @@ func summary(ctx context.Context, db queryDB, q Query, atMS int64) (Summary, err
 		if err != nil {
 			return s, err
 		}
-		s.Buckets = append(s.Buckets, Bucket{a.Format("01-02"), a.Format("2006-01-02") + " — " + b.AddDate(0, 0, -1).Format("2006-01-02"), t.Input, t.Output, t.Cache, t.Unknown})
+		s.Buckets = append(s.Buckets, Bucket{a.Format("01-02"), a.Format("2006-01-02") + " — " + b.AddDate(0, 0, -1).Format("2006-01-02"), t.Input, t.Output, t.Cache})
 	}
 	groupStart, groupEnd := begin.UnixMilli(), stop
 	if q.Scope != "" {

@@ -13,6 +13,7 @@ import {projectChatReplies} from '../state/chat-replies.mjs';
 import {createReplyBubble} from './reply.mjs';
 import {reconcile} from './reconcile.mjs';
 import {createRefreshQueue,relevantChange} from '../state/refresh.mjs';
+import {taskElapsed,bindTaskClock} from './task-time.mjs';
 
 function el(tag, className = '', text) {
   const element = document.createElement(tag);
@@ -76,6 +77,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   history.setAttribute('role', 'log');
   history.setAttribute('aria-label', t('chat'));
   const messageColumn = el('div', 'message-column');
+  const taskClock=bindTaskClock(messageColumn,{locale:()=>locale,active:()=>!disposed&&route==='chat'&&!root.classList.contains('show-directory')});
   history.append(messageColumn);
   const status = el('div', 'connection-status');
   status.setAttribute('role', 'status');
@@ -368,6 +370,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(!menu.hidden&&!shellRoots.menu.contains(document.activeElement))shellRoots.menu.querySelector('.icon-button')?.focus({preventScroll:true});
     if (preferencesOpen) renderPreferences();
     updateControls();
+    taskClock.refresh();
     requestAnimationFrame(() => { if (!disposed) editor.resize(); });
   }
   function nearBottom() { return history.scrollHeight - history.clientHeight - history.scrollTop < 80; }
@@ -448,7 +451,29 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     const lastAssistant=visibleMessages.findLast(message=>message.role==='assistant');
     for(const [id,record]of messageNodes){if(id!==lastAssistant?.viewKey){record.tasks?.remove();record.tasks=null;}}
-    if(client.production&&lastAssistant){const record=messageNodes.get(lastAssistant.viewKey),tasks=[...(taskCache.get(JSON.stringify([client.scope().space,client.scope().owner]))||[])].sort((a,b)=>Number(pages.taskNeedsApproval(b.id,b.phase))-Number(pages.taskNeedsApproval(a.id,a.phase)));if(tasks.length){const strip=el('div','background-tasks');strip.setAttribute('aria-label',locale==='zh-CN'?'正在执行的后台任务':'Executing background tasks');for(const task of tasks.slice(0,3)){const open=el('button','background-task');open.type='button';open.dataset.viewKey=JSON.stringify([task._space_id,task.assistant_id,task.id]);open.title=task.title;const waiting=pages.taskNeedsApproval(task.id,task.phase);open.classList.toggle('needs-approval',waiting);open.append(el('span','task-activity-dot'),el('span','background-task-title',task.title));if(waiting)open.append(el('span','background-task-status',t('tool.waiting_approval')));open.onclick=()=>{const returnTo={route:'chat',scope:client.scope()};route='tasks';pages.openTask(task,{returnTo});renderShell();};strip.append(open);}if(tasks.length>3){const more=el('button','text-button',locale==='zh-CN'?`还有 ${tasks.length-3} 项任务`:`${tasks.length-3} more tasks`);more.onclick=()=>navigate('tasks');strip.append(more);}if(record.tasks)reconcile(record.tasks,strip);else{record.row.append(strip);record.tasks=strip;}}else{record.tasks?.remove();record.tasks=null;}}
+    if(client.production&&lastAssistant){
+      const record=messageNodes.get(lastAssistant.viewKey),tasks=[...(taskCache.get(JSON.stringify([client.scope().space,client.scope().owner]))||[])].sort((a,b)=>Number(pages.taskNeedsApproval(b.id,b.phase))-Number(pages.taskNeedsApproval(a.id,a.phase)));
+      if(tasks.length){
+        const strip=el('div','background-tasks');strip.setAttribute('aria-label',locale==='zh-CN'?'正在执行的后台任务':'Executing background tasks');
+        for(const task of tasks.slice(0,3)){
+          const open=el('button','background-task');open.type='button';open.dataset.viewKey=JSON.stringify([task._space_id,task.assistant_id,task.id]);open.title=task.title;
+          const waiting=pages.taskNeedsApproval(task.id,task.phase),meta=el('span','background-task-meta');open.classList.toggle('needs-approval',waiting);
+          open.append(el('span','task-activity-dot'),el('span','background-task-title',task.title));
+          if(waiting)meta.append(el('span','background-task-status',t('tool.waiting_approval')));
+          const time=taskElapsed(task.started_at_ms,Date.now(),locale);
+          if(time){
+            if(waiting){const separator=el('span','','·');separator.setAttribute('aria-hidden','true');meta.append(separator);}
+            const elapsed=el('span','background-task-elapsed',time);elapsed.dataset.startedAt=task.started_at_ms;elapsed.setAttribute('role','timer');elapsed.setAttribute('aria-live','off');
+            elapsed.title=locale==='zh-CN'?'自首次开始执行起的总耗时，包含中间等待':'Total time since execution first started, including waits';meta.append(elapsed);
+          }
+          if(meta.childNodes.length)open.append(meta);
+          open.onclick=()=>{const returnTo={route:'chat',scope:client.scope()};route='tasks';pages.openTask(task,{returnTo});renderShell();};strip.append(open);
+        }
+        if(tasks.length>3){const more=el('button','text-button',locale==='zh-CN'?`还有 ${tasks.length-3} 项任务`:`${tasks.length-3} more tasks`);more.onclick=()=>navigate('tasks');strip.append(more);}
+        if(record.tasks)reconcile(record.tasks,strip);else{record.row.append(strip);record.tasks=strip;}
+      }else{record.tasks?.remove();record.tasks=null;}
+    }
+    taskClock.refresh();
     if (snapshot && !visibleMessages.length) {
       if(!messageColumn.querySelector('.empty-chat'))messageColumn.append(el('p', 'empty-chat', t('first')));
     }else if(visibleMessages.length){
@@ -631,7 +656,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     pages.refresh(keys,source);if(relevantChange(keys,['permissions','spaces','runtime'],pages.approvalSpace,source))pages.permissions();
   },{space:''});loadDirectory();}else attach();
   return () => {
-    disposed = true; directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
+    disposed = true; taskClock.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     completions?.dispose();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);

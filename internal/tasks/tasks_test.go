@@ -26,7 +26,7 @@ func (p *fakePort) Launch(_ context.Context, l runner.Launch) (runner.Run, error
 	defer p.mu.Unlock()
 	p.launches++
 	hash, _ := l.Digest()
-	run := runner.Run{SchemaVersion: runner.SchemaVersion, Launch: l, LaunchDigest: hash, BootID: "boot", Phase: runner.Running}
+	run := runner.Run{SchemaVersion: runner.SchemaVersion, Launch: l, LaunchDigest: hash, BootID: "boot", Phase: runner.Running, StartedAtMS: time.Now().UnixMilli()}
 	p.runs[l.RunID] = run
 	if p.lose {
 		return runner.Run{}, errors.New("ack lost")
@@ -81,6 +81,53 @@ func fixture(t *testing.T) (*Service, *fakePort, *core.ExecutionTarget, string) 
 	t.Cleanup(func() { s.Close() })
 	return s, p, &target, path
 }
+func TestOriginalStartTimeFromDelayedReceiptsSurvivesRestart(t *testing.T) {
+	for _, phase := range []runner.Phase{runner.Running, runner.Waiting, runner.Complete} {
+		t.Run(string(phase), func(t *testing.T) {
+			ctx := context.Background()
+			s, p, _, path := fixture(t)
+			record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "clock", Text: "work"})
+			if err != nil || record.Info.StartedAtMS != 0 {
+				t.Fatal("queued Task must not start the clock", record, err)
+			}
+			p.lose = true
+			if err := s.Tick(ctx); err != nil {
+				t.Fatal(err)
+			}
+			current, err := s.Get(ctx, "assistant", record.Info.ID)
+			if err != nil || current.Info.StartedAtMS != 0 {
+				t.Fatal("unknown launch receipt invented a start", current, err)
+			}
+			run := p.runs[record.RunID]
+			run.StartedAtMS = record.Info.CreatedAtMS + 60000
+			run.Phase = phase
+			if phase == runner.Complete {
+				run.Result = &runner.Terminal{Outcome: core.Success, Text: "done"}
+				run.CleanupConfirmed = true
+			}
+			p.runs[record.RunID] = run
+			if err := s.Tick(ctx); err != nil {
+				t.Fatal(err)
+			}
+			current, err = s.Get(ctx, "assistant", record.Info.ID)
+			if err != nil || current.Info.StartedAtMS != run.StartedAtMS {
+				t.Fatal("delayed receipt lost execution start", current, err)
+			}
+			options := s.options
+			s.Close()
+			restored, err := Open(path, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restored.Close()
+			current, err = restored.Get(ctx, "assistant", record.Info.ID)
+			if err != nil || current.Info.StartedAtMS != run.StartedAtMS {
+				t.Fatal("Control restart lost execution start", current, err)
+			}
+		})
+	}
+}
+
 func TestCooperativeSharedResourcesHoldOriginalMachineLease(t *testing.T) {
 	ctx := context.Background()
 	s, p, _, _ := fixture(t)

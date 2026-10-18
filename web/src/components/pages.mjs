@@ -20,11 +20,12 @@ import {createIntegrations} from './integrations.mjs';
 import {renderMachinePermissions} from './execution-permissions.mjs';
 import {createApprovalCard} from './approval-card.mjs';
 import {createChatApprovals} from './chat-approvals.mjs';
+import {taskElapsed,bindTaskClock} from './task-time.mjs';
 
 export function createPages({onApprovalsChanged=()=>{},client, host, approvalHost, chatApprovalHost, chatVisible, locale, notify, changed, titleChanged, openChat, routeChanged=()=>{}}) {
   const gate = createRequestGate(), approvalGate = createRequestGate();
   let route = '', title = '', editor = null, disposed = false, pageVersion = 0, configurationSpace = '',taskView=null,taskOrigin=null,taskListView=null,scheduleView=null,detailParent=false,usageOwner=null;
-  let filter = {taskScope:'active', taskQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageDays:7, usageScope:'all', usageSpace:'all',settingsTab:'general'};
+  let filter = {taskScope:'active', taskQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageDays:14, usageScope:'all', usageSpace:'all',settingsTab:'general'};
   let pendingApprovals=[];
   const toolMemory=new Map(),usageOffsets=new Map(),usageCache=new Map(),approvalCards=new Map(),taskNames=new Map();
   const chatApprovals=createChatApprovals({host:chatApprovalHost,locale,visible:chatVisible});
@@ -107,12 +108,12 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     if(sessions.some(value=>value.session.pending)) {notify(tr('Please wait for the save result.','请等待保存结果。'));return false;}
     if(sessions.some(value=>value.session.dirty)&&!await confirmDiscard())return false;
     for(const value of sessions)value.lifecycle?.dispose?.();
-    pageView?.queue.close();pageView=null;editor=null;if(!toParent){editorParents.length=0;machineDrafts.clear();}closeTaskView();taskOrigin=null;detailParent=false;taskListView=null;scheduleView=null;viewReady=false;gate.close();host.replaceChildren();return true;
+    pageView?.queue.close();pageView=null;editor=null;if(!toParent){editorParents.length=0;machineDrafts.clear();}closeTaskView();taskOrigin=null;detailParent=false;closeTaskList();scheduleView=null;viewReady=false;gate.close();host.replaceChildren();return true;
   }
   function suspendEditor(){if(editor){editor.scroll=host.scrollTop;editor.focus=innerWidth>=720&&editor.root.contains(document.activeElement)?document.activeElement:null;editorParents.push(editor);editor=null;}}
   function renderEditor(label, initial, definitions, save, {returnChat=false,capturedScope,submitLabel=tr('Save','保存')}={}) {
     captureView();viewReady=false;
-    pageView?.queue.close();pageView=null;gate.close();
+    pageView?.queue.close();pageView=null;closeTaskList();gate.close();
     const captured=capturedScope||scope(), caller=route || 'settings';
     const session=createEditorSession({...captured,route:caller,boot:client.runtime.boot_id},initial);
     const root=body(), form=n('form','editor-form'), fields=n('div','editor-fields'), footer=n('div','editor-actions'), status=n('p','inline-error');status.setAttribute('role','alert');
@@ -317,6 +318,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const next=action(tr('Next','下一页'),()=>{filter.taskOffset=taskListView.result.next_offset;show('tasks');},{disabled:true});
     const footer=toolbar(summary,previous,next);footer.classList.add('pagination');root.append(footer);
     const view={token,rows,scopes,summary,previous,next,nodes:new Map(),result:null};view.queue=createRefreshQueue(()=>readTaskList(view),{active:()=>!disposed&&gate.current(token)&&taskListView===view});taskListView=view;
+    view.clock=bindTaskClock(rows,{locale,active:()=>!disposed&&gate.current(token)&&taskListView===view&&!!rows.offsetParent});
     await refreshTaskList(view);
   }
   function refreshTaskList(view=taskListView){return view?.queue.run();}
@@ -334,12 +336,19 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
         const ownerKey=JSON.stringify([task._space_id,task._assistant_id]),taskKey=JSON.stringify([task._space_id,task._assistant_id,task.id]);
         if(ownerKey!==groupKey){groupKey=ownerKey;const assistant=(client.assistants||[]).find(item=>item.id===task._assistant_id&&item.space_id===task._space_id);text(retain('owner:'+taskKey,()=>({row:n('div','task-owner')})).row,assistant?.name||task._assistant_id);}
         const entry=retain(taskKey,()=>{
-          const row=n('button','task-row');row.type='button';const line=n('span','task-title-line'),logo=n('span','task-brand'),title=n('span','task-title'),detail=n('span','task-meta'),phase=n('span'),meta=n('span','hint');
-          line.append(logo,title,n('span','hint','›'));detail.append(phase,meta);row.append(line,detail);return {row,logo,title,phase,meta};
+          const row=n('button','task-row');row.type='button';const line=n('span','task-title-line'),logo=n('span','task-brand'),title=n('span','task-title'),elapsed=n('span','task-list-elapsed'),chevron=n('span','hint task-chevron','›'),detail=n('span','task-meta'),phase=n('span'),meta=n('span','hint');
+          elapsed.setAttribute('role','timer');elapsed.setAttribute('aria-live','off');
+          line.append(logo,title);detail.append(phase,meta);row.append(line,elapsed,chevron,detail);return {row,logo,title,phase,meta,elapsed};
         });
         entry.row.setAttribute('aria-label',task.title);entry.row.disabled=task._stale;entry.row.title=task.title;entry.row.onclick=()=>taskDetail(task);
         text(entry.logo,task.executor_icon==='anthropic'?'A':'◉');text(entry.title,task.title);entry.phase.className=`task-phase phase-${task.phase}`;
         text(entry.phase,taskPhaseLabel(task.phase));
+        const time=['queued','running','waiting','waiting_approval'].includes(task.phase)?taskElapsed(task.started_at_ms,Date.now(),locale()):'';
+        entry.elapsed.hidden=!time;text(entry.elapsed,time);
+        entry.elapsed.id=`task-elapsed-${encodeURIComponent(taskKey)}`;
+        if(time)entry.row.setAttribute('aria-describedby',entry.elapsed.id);else entry.row.removeAttribute('aria-describedby');
+        if(time)entry.elapsed.dataset.startedAt=task.started_at_ms;else delete entry.elapsed.dataset.startedAt;
+        entry.elapsed.title=tr('Total time since execution first started, including waits','自首次开始执行起的总耗时，包含中间等待');
         text(entry.meta,`${task._space_name||''}${task.machine_id?' · '+task.machine_id:''}${task.pending?' · '+task.pending+' '+tr('pending instructions','条待处理指令'):''}${task._stale?' · '+tr('Stale','已过期'):''}`);
       }
       if(!result.items.length)text(retain('empty',()=>({row:n('p','page-empty')})).row,tr('No ongoing tasks. Describe a goal in Chat to get started.','暂无进行中的任务，在聊天中描述目标即可开始。'));
@@ -349,12 +358,14 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       if(focused?.isConnected&&document.activeElement!==focused)focused.focus({preventScroll:true});
       view.rows.scrollTop=scroll;
       text(view.summary,`${result.total} ${tr('items','项')} · ${tr('Page','第')} ${Math.floor(filter.taskOffset/20)+1}`);view.previous.disabled=!filter.taskOffset;view.next.disabled=result.next_offset==null;
+      view.clock.refresh();
     }catch(reason){if(gate.current(view.token)&&reason.name!=='AbortError'){if(!view.result){view.rows.replaceChildren();errorView(reason,view.rows);}else notify(reason.message);}}
 
   }
+  function closeTaskList(){taskListView?.queue.close();taskListView?.clock.dispose();taskListView=null;}
   function closeTaskView(){taskView?.eventsQueue?.close();taskView?.ui?.dispose();taskView=null;host.classList.remove('task-page-host');}
   async function taskDetail(task,{recordHistory=true,returnTo=taskView?.returnTo||taskOrigin||{route:'tasks'}}={}) {
-    rememberTasks([task]);taskOrigin=returnTo;captureView();pageView?.queue.close();pageView=null;taskListView=null;closeTaskView();scheduleView=null;detailParent=true;
+    rememberTasks([task]);taskOrigin=returnTo;captureView();pageView?.queue.close();pageView=null;closeTaskList();closeTaskView();scheduleView=null;detailParent=true;
     if(recordHistory){const replace=history.state?.potTask?.id===task.id&&history.state?.potScope?.space===task._space_id;history[replace?'replaceState':'pushState']({potRoute:'tasks',potScope:{space:task._space_id,owner:task.assistant_id},potTask:{...task},potTaskReturn:returnTo},'',location.href);}
     const path=`/api/v1/tasks/${encodeURIComponent(task.id)}`,fileScope={owner:task.assistant_id,space:task._space_id};
     const result=await load(token=>request(path,{...fileScope,signal:token.signal}));if(!result)return;
@@ -435,7 +446,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   }
   async function scheduleHistory(item,record=true,runsOffset=0) {
     if(scheduleView&&scheduleView.item.id===item.id&&scheduleView.item._space_id===item._space_id&&scheduleView.item._assistant_id===item._assistant_id&&scheduleView.runsOffset===runsOffset&&pageView)return pageView.queue.run();
-    captureView();pageView?.queue.close();pageView=null;taskListView=null;taskView=null;detailParent=true;filter.taskTab='schedules';
+    captureView();pageView?.queue.close();pageView=null;closeTaskList();taskView=null;detailParent=true;filter.taskTab='schedules';
     if(record)history.pushState({potRoute:'tasks',potSchedule:{...item},potScope:{space:item._space_id,owner:item._assistant_id}},'',location.href);
     const token=gate.next(),root=body(),content=n('div');root.append(content);
     const view={item,runsOffset,token,busy:false,confirmed:false,content};scheduleView=view;
@@ -511,7 +522,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const data=pages.length===1?{...pages[0].value,spaces:pages}:combineUsage(pages);
     const {exact,compact}=usageNumbers(locale()),total=(usageOwner?data.lifetime||data.total:data.total)||{},metrics=n('div','usage-metrics'),totalCard=n('section','page-card usage-total');
     for(const [label,value]of [[tr('Total tokens','总 token'),total.input+total.output],[tr('Input (includes cache)','输入（含缓存）'),total.input],[tr('Output','输出'),total.output]]){const item=n('div','metric');item.append(n('span','hint',label),n('strong','',compact(value)));usageTooltip(item,{title:label,rows:usageRows(total,locale(),tr),note:tr('Cached tokens are included in input. Token counts are not billed cost.','缓存已计入输入，token 数量不代表实际费用。')});metrics.append(item);}
-    totalCard.append(metrics,n('p','usage-cache-breakdown',`${tr('Cached input','缓存输入')} ${exact(total.cache)} · ${tr('Cache hit rate','缓存命中率')} ${usageNumbers(locale()).hitRate(total)}`),n('p','hint',`${tr('Model requests','模型请求')} ${exact(total.requests||0)}${total.unknown?' · '+total.unknown+' '+tr('incomplete records','条不完整记录'):''}`));projection.append(totalCard);
+    totalCard.append(metrics,n('p','usage-cache-breakdown',`${tr('Cached input','缓存输入')} ${exact(total.cache)} · ${tr('Cache hit rate','缓存命中率')} ${usageNumbers(locale()).hitRate(total)}`),n('p','hint',`${tr('Model requests','模型请求')} ${exact(total.requests||0)}`));projection.append(totalCard);
     const routing=data.routing_total||{};
     if(routing.requests){const routingCard=card(tr('Task routing turns','任务路由回合'));routingCard.append(usageTooltip(n('p','usage-number',`${compact(routing.input+routing.output)} tokens`),{title:tr('Task routing turns','任务路由回合'),rows:usageRows(routing,locale(),tr),note:tr('Includes the entire main-chat turn that delegated a task. Already included in totals.','包含委派任务的整个主聊天回合，已计入总量。')}));projection.append(routingCard);}
     const trend=usageTrend(data,{locale:locale(),tr,timezone,days:filter.usageDays,segments,onDays:days=>{filter.usageDays=days;if(!usageOwner)usageOffsets.clear();show('usage',{keepUsageOwner:true});}});projection.append(trend);
@@ -608,7 +619,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     if(!force&&route===next&&currentViewKey===viewKey){if(taskListView)return refreshTaskList();if(pageView)return pageView.queue.run();}
     captureView();viewReady=false;pageView?.queue.close();pageView=null;
 
-    closeTaskView();taskOrigin=null;taskListView=null;scheduleView=null;detailParent=false;if(!keepUsageOwner)usageOwner=null;
+    closeTaskView();taskOrigin=null;closeTaskList();scheduleView=null;detailParent=false;if(!keepUsageOwner)usageOwner=null;
     route=next;heading(tr({tasks:filter.taskTab==='schedules'?'Schedules':'Tasks',machines:'Machines',usage:'Usage',settings:'Settings'}[next]||next,{tasks:filter.taskTab==='schedules'?'定时计划':'任务',machines:'机器',usage:'用量',settings:'设置'}[next]||next));
     const version=++pageVersion,token=gate.next(),root=body();currentViewKey=viewKey;
     root.append(n('p','hint',tr('Loading…','正在加载…')));
@@ -634,6 +645,6 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       if(taskView)return refreshTaskEvents();
 
     },
-    dispose(){for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle?.dispose?.();disposed=true;closeTaskView();approvalQueue?.close();pageView?.queue.close();gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
+    dispose(){for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle?.dispose?.();disposed=true;closeTaskList();closeTaskView();approvalQueue?.close();pageView?.queue.close();gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
   };
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/storage"
+	"time"
 )
 
 const SchemaVersion = 5
@@ -270,6 +271,9 @@ func (j *Journal) Claim(ctx context.Context, control, task, run string) (claimed
 			return fmt.Errorf("run belongs to previous boot")
 		}
 		value.Phase = Running
+		if value.StartedAtMS == 0 {
+			value.StartedAtMS = time.Now().UnixMilli()
+		}
 		claimed = true
 		return nil
 	})
