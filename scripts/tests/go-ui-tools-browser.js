@@ -47,6 +47,21 @@ async page => {
   command.tool.output[0].text='retained line 0\nnew output';
   command.status='complete';command.tool.phase='completed';command.tool.finished_at_ms=at+500;command.tool.result={stdout:'final receipt',stderr:'',exit_code:0};await push();
   await call('call-one').getByText('退出码 0',{exact:true}).waitFor();assert(await call('call-one').locator('.tool-excerpt').textContent()==='pwd && rg --files -g README.md','Result cannot overwrite title');assert(await call('call-one').textContent().then(text=>text.includes('retained line 0')),'Completion preserves stream');
+  messages.push(tool('create-task','create_task',{text:'Install GitHub CLI'}, {phase:'completed'}),tool('get-task','get_task',{task_id:'private-task-id'}, {phase:'completed'}),tool('wait-task','wait_task',{task_ids:['private-task-id']}, {phase:'completed'}));await push();
+  await call('get-task').waitFor();
+  for(const [id,label]of [['create-task','安排任务'],['get-task','查看进度'],['wait-task','等待任务']]){
+   assert(await call(id).locator('.tool-title').textContent()===label,'Task operations have readable labels');
+   assert(!await call(id).locator('.tool-excerpt').isVisible(),'Redundant argument preview stays hidden');
+   assert(!await call(id).locator(':scope > summary').textContent().then(text=>text.includes('private-task-id')),'Collapsed coordination does not expose IDs');
+   assert(await call(id).evaluate(node=>node.getBoundingClientRect().height)<=30,'Desktop coordination row stays compact');
+  }
+  await page.setViewportSize({width:390,height:850});
+  assert(await call('get-task').evaluate(node=>node.getBoundingClientRect().height)<=38,'Narrow coordination row stays on one line');
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Narrow coordination fits viewport');
+  await call('get-task').locator(':scope > summary').click();
+  await call('get-task').getByText('get_task',{exact:true}).waitFor();
+  assert(await call('get-task').locator('.tool-code').first().textContent().then(text=>text.includes('private-task-id')),'Expanded details retain actual tool arguments');
+  await call('get-task').locator(':scope > summary').click();await page.setViewportSize({width:1200,height:850});
   const parent=tool('exec-one','exec',{code:'const results = await Promise.all([tools.exec_command({cmd:"pwd"}), tools.exec_command({cmd:"git status"})]);\ntext(results);'},{phase:'completed',target:null,workdir:'',result:{completed:false,exec_id:'job',output:''}}),child=tool('child-one','exec_command',{cmd:'git status'},{parent_id:'exec-one',phase:'waiting_approval',running_at_ms:0,target:{runtime_id:'dev-mac'}});
   messages.push(parent,child);pending=[{id:'approval-one',request:{owner:'alpha',turn:'run-one',call_id:'child-one',machine_id:'dev-mac',tool:'exec_command',args:{cmd:'git status'}}}];await push();await page.evaluate(()=>window.__toolsChanges({permissions:2}));
   await review('approval-one');await approvalCard('approval-one').getByRole('button',{name:'本任务允许',exact:true}).waitFor();
