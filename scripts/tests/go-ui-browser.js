@@ -110,6 +110,42 @@ async page => {
     });
     assert((await page.locator('#app').boundingBox()).height===420,'Pinch zoom does not shrink and reflow the shell');
     await page.evaluate(()=>{for(const key of ['scale','height','offsetTop'])delete window.visualViewport[key];window.visualViewport.dispatchEvent(new Event('resize'));});
+    // Native focus can attempt to scroll the outer document despite hidden
+    // overflow. Keep that frame locked while inner history/textarea still scroll.
+    await page.evaluate(()=>{
+      const column=document.querySelector('.message-column');
+      for(let index=0;index<30;index++){const row=document.createElement('p');row.textContent=`Focus history fixture ${index}`;column.append(row);}
+    });
+    const focusDraft='Long mobile draft keeps native selection and scrolling. '.repeat(30);
+    await input.fill(focusDraft);await input.evaluate(node=>node.blur());
+    await page.locator('.history').evaluate(node=>{node.scrollTop=120;node.dispatchEvent(new Event('scroll'));});
+    await cdp.send('Emulation.setTouchEmulationEnabled',{enabled:true});
+    const touchRect=await input.boundingBox();
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:touchRect.x+touchRect.width/2,y:touchRect.y+touchRect.height/2}]});
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+    const focusState=await page.evaluate(()=>{
+      const input=document.querySelector('#pot-composer');input.setSelectionRange(50,60);input.scrollTop=40;
+      const probe=document.createElement('div');probe.id='focus-scroll-probe';probe.style.cssText='position:absolute;top:1400px;height:1px;width:1px;pointer-events:none';document.body.append(probe);
+      window.scrollTo(0,160);
+      window.focusHeightWrites=0;window.focusObserver=new MutationObserver(records=>window.focusHeightWrites+=records.filter(row=>row.attributeName==='style').length);window.focusObserver.observe(input,{attributes:true});
+      return {rootScroll:scrollY,history:document.querySelector('.history').scrollTop,inputScroll:input.scrollTop};
+    });
+    assert(focusState.rootScroll===0,'Focusing an input cannot scroll the outer browser document');
+    for(const [height,top]of [[420,80],[420,110],[450,50],[852,0]]){
+      await page.evaluate(({height,top})=>{
+        Object.defineProperties(window.visualViewport,{height:{configurable:true,value:height},offsetTop:{configurable:true,value:top}});
+        window.visualViewport.dispatchEvent(new Event('resize'));window.visualViewport.dispatchEvent(new Event('scroll'));
+      },{height,top});
+      const state=await input.evaluate(node=>({top:node.getBoundingClientRect().top,bottom:node.getBoundingClientRect().bottom,focused:document.activeElement===node,start:node.selectionStart,end:node.selectionEnd,scroll:node.scrollTop}));
+      assert(state.top>top+44&&state.bottom<=top+height,'Focused composer stays below the titlebar and above the keyboard');
+      assert(state.focused&&state.start===50&&state.end===60,'Keyboard transitions retain native focus and selection');
+      assert(state.scroll===focusState.inputScroll,'Keyboard panning retains long-draft reading position');
+      assert(await page.locator('.history').evaluate(node=>node.scrollTop)===focusState.history,'Keyboard transitions preserve history reading position');
+    }
+    assert(await page.evaluate(()=>window.focusHeightWrites)===0,'Keyboard transitions never rewrite the focused textarea height');
+    assert(await input.inputValue()===focusDraft,'Keyboard dismissal retains the draft');
+    await page.evaluate(()=>{window.focusObserver.disconnect();document.querySelector('#focus-scroll-probe').remove();for(const key of ['height','offsetTop'])delete window.visualViewport[key];window.visualViewport.dispatchEvent(new Event('resize'));});
+    await cdp.send('Emulation.setTouchEmulationEnabled',{enabled:false});
     // Native surfaces do not inherit browser cutout padding.
     await cdp.send('Emulation.setSafeAreaInsetsOverride',{insets:{top:59,bottom:34,left:0,right:0}});
     await page.evaluate(()=>document.documentElement.dataset.platform='desktop');

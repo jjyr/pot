@@ -18,9 +18,13 @@ export function createEnterGuard(now = () => performance.now()) {
 
 export function bindComposer(input, {onInput, onSend, onCompositionEnd}) {
   const guard = createEnterGuard();
+  let measuredValue, measuredWidth, measuredScrollHeight;
   const resize = () => {
+    const width = input.clientWidth;
+    if (!width || (input.value === measuredValue && width === measuredWidth && input.scrollHeight === measuredScrollHeight)) return;
     input.style.height = 'auto';
     input.style.height = `${Math.min(input.scrollHeight, 150)}px`;
+    measuredValue = input.value; measuredWidth = input.clientWidth; measuredScrollHeight = input.scrollHeight;
   };
   const start = () => guard.start();
   const end = () => { guard.end(); onInput(input.value); resize(); onCompositionEnd?.(); };

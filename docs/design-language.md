@@ -113,6 +113,10 @@ access form and top-layer dialogs also keep controls within the safe area, with
 scrolling available in short viewports. Native windows retain zero web safe insets.
 VisualViewport resize and scroll events update the visible frame for keyboard
 resizing and panning. Pinch zoom remains browser-owned and does not reflow the shell.
+The browser document stays pinned; histories, menus and forms own scrolling and
+contain overscroll. Focusing a composer keeps it at the bottom of the visible
+frame. Keyboard height/offset changes do not re-measure the focused textarea;
+only content changes or available-width changes resize it.
 
 ### Parent navigation
 

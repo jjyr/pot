@@ -13,12 +13,13 @@ viewportHost.innerWidth=393;viewportHost.innerHeight=852;viewportHost.visualView
 Object.assign(visualViewport,{width:393,height:852,offsetTop:0,offsetLeft:0,scale:1});
 const viewportTarget={style:{setProperty:(key,value)=>viewportStyles.set(key,value),removeProperty:key=>viewportStyles.delete(key)}};
 let viewportResizes=0;
-const stopViewport=bindViewport(viewportTarget,{host:viewportHost,onResize:()=>viewportResizes++});
+const stopViewport=bindViewport(viewportTarget,{host:viewportHost,onWidthChange:()=>viewportResizes++});
 assert.equal(viewportStyles.get('--viewport-height'),'852px');
 Object.assign(visualViewport,{height:400,offsetTop:80});visualViewport.dispatchEvent(new Event('resize'));
 assert.equal(viewportStyles.get('--viewport-height'),'400px','Keyboard resizing limits the shell to the visible height');
 visualViewport.offsetTop=100;visualViewport.dispatchEvent(new Event('scroll'));
 assert.equal(viewportStyles.get('--viewport-top'),'100px','Keyboard panning updates the shell even without a resize');
+assert.equal(viewportResizes,1,'Keyboard height and offset changes never re-measure the focused composer');
 Object.assign(visualViewport,{scale:2,height:200,width:196.5,offsetTop:150});visualViewport.dispatchEvent(new Event('resize'));visualViewport.dispatchEvent(new Event('scroll'));
 assert.equal(viewportStyles.get('--viewport-height'),'400px','Pinch zoom does not reflow the application');
 assert.equal(viewportStyles.get('--viewport-top'),'100px','Pinch panning stays browser-owned');
@@ -27,7 +28,7 @@ assert.equal(viewportStyles.get('--viewport-width'),'852px','Rotation updates av
 visualViewport.height=852;viewportHost.dispatchEvent(new Event('pageshow'));
 assert.equal(viewportStyles.get('--viewport-height'),'852px','Page restoration refreshes the visible frame');
 stopViewport();visualViewport.dispatchEvent(new Event('resize'));visualViewport.dispatchEvent(new Event('scroll'));viewportHost.dispatchEvent(new Event('resize'));viewportHost.dispatchEvent(new Event('pageshow'));
-assert.equal(viewportResizes,5,'Disposal removes every viewport listener');assert.equal(viewportStyles.size,0);
+assert.equal(viewportResizes,2,'Only initial layout and rotation re-measure text; disposal removes every listener');assert.equal(viewportStyles.size,0);
 delete viewportHost.visualViewport;
 const stopFallbackViewport=bindViewport(viewportTarget,{host:viewportHost});
 assert.equal(viewportStyles.get('--viewport-height'),'852px','Hosts without VisualViewport use window geometry');
@@ -113,7 +114,7 @@ assert(guard.shouldSend(enter));
 for (const extra of [{isComposing: true}, {keyCode: 229}, {shiftKey: true}, {repeat: true}]) assert(!guard.shouldSend({...enter, ...extra}));
 
 // A small native EventTarget verifies event ordering through the actual binding.
-class Input extends EventTarget { value = ''; style = {}; scrollHeight = 48; }
+class Input extends EventTarget { value = ''; style = {}; clientWidth = 320; scrollHeight = 48; }
 const input = new Input();
 let sent = 0;
 let text = '';
@@ -129,6 +130,13 @@ Object.defineProperty(key, 'key', {value: 'Enter'});
 input.dispatchEvent(key);
 assert.equal(sent, 0);
 assert.equal(text, '你');
+let heightWrites=0,currentHeight=input.style.height;
+Object.defineProperty(input.style,'height',{get:()=>currentHeight,set:value=>{heightWrites++;currentHeight=value;}});
+binding.resize();binding.resize();
+assert.equal(heightWrites,0,'Unchanged focused text never collapses to auto height during shell refresh');
+input.clientWidth=280;binding.resize();assert.equal(heightWrites,2,'A narrower composer remeasures wrapped text');
+input.scrollHeight=72;binding.resize();assert.equal(heightWrites,4,'Font or content geometry changes remeasure text');
+input.clientWidth=0;binding.resize();assert.equal(heightWrites,4,'Hidden composers keep their last measured height');
 binding.destroy();
 input.value = 'after disposal';
 input.dispatchEvent(new Event('input'));
