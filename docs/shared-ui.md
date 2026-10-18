@@ -57,6 +57,49 @@ to 20,000 source characters, 1,000,000 SVG characters and 500 flowchart edges.
 Diagram links and images are disabled, and raw Markdown HTML remains literal.
 Pele uses its own layouts rather than Mermaid's exact appearance.
 
+## Cached resource reads
+
+`state/resource-cache.mjs` provides memory-only reads shared by Web and Wails.
+The client explicitly allows display resources: configuration summaries, directory,
+Tasks and schedules, usage pages, machines and membership status, About, and
+reference completion. A resource key includes Control, boot, Space, owner and the
+full query. Provider summaries share one Space entry across assistant contexts.
+Credentials, editor revision reads, approval decisions and permission reads bypass
+this cache. Membership status contains only identity, role, Control URL and epoch;
+invitation creation remains an uncached command.
+
+```text
+page / directory / completion
+            |
+     client.read (allowlist)
+            |
+     scoped memory cache ---- cached value ---> render immediately
+            |
+     stale / invalidated ---- one shared read --> notify active views
+            |
+     client.request --> HTTP or Wails
+```
+
+Fresh configuration reads last 30 seconds; dynamic lists and completion reads last
+5 seconds. TTL is checked on access and creates no polling. Domain events and
+successful commands invalidate the affected Space; a confirmed new boot drops its
+old resource values. Reconnect resets require revalidation while retaining display
+data. Invalidation during IO requires a follow-up read before publishing. Leaving
+one view never aborts a request shared by other consumers. Failures retain old
+values and show a localized retry notice. The bounded cache clones values for each
+consumer so local projection changes do not mutate other views.
+
+Task and schedule pagination cache each complete source collection as one entry,
+independently of backend page count, and retain the existing global merge/sort. Task detail keeps a bounded transcript cache and resumes events from
+its cursor, reading messages and record updates concurrently. Usage page offsets,
+scroll positions and disclosures remain view state. Chat restores confirmed
+snapshots with Space and Control identity, then waits for the subscription's
+initial authoritative snapshot before enabling sends; it needs no extra snapshot
+GET. Existing cursor and generation fences reject late or older stream responses.
+Background updates do not replace editor sessions or their dirty values. Unsaved
+forms retain their existing leave protection, with no cross-tab draft persistence.
+All commands still validate permissions and versions at the owning service.
+
 ## Native editing and ownership
 
 All hosts use DOM textareas and inputs. The WebView/browser owns shaping, caret,

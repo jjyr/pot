@@ -31,8 +31,8 @@ while handling agent correspondence remain references, never owner guidance.
 
 `internal/inbox` owns atomic envelope insertion and identity/content conflict
 checks. `agent_messages` in the Control's `tasks.sqlite` stores Task inputs,
-assistant correspondence and task-result events. Task input and notification
-views are transcript/receiver projections over this table, not separate queues.
+assistant correspondence, task-result events and plugin notifications. Task input
+and notification views are transcript/receiver projections over this table, not separate queues.
 Task completion and its event commit in the same transaction. Task schema 7 and
 schedule schema 2 require the unified outcome format; older schemas are rejected
 without importing legacy queues or schedule notifications.
@@ -64,7 +64,7 @@ size. Additional messages and arrivals during execution remain for the next turn
 | Category | Group | Processing role |
 | --- | --- | --- |
 | User input | One assistant's pending user messages, in receipt order | Main |
-| Task outcomes | One assistant's pending results, across Task identities | Summary |
+| Runtime notifications | One assistant's pending task outcomes and plugin events, in receipt order | Summary |
 | Agent correspondence | Owning recipient and full sender address | Independent peer context |
 
 User batch selection commits all original projections, queue removal and turn
@@ -74,9 +74,10 @@ user texts together. Retries do not resubmit any member. Uncertain started batch
 remain fenced during restart/recovery, while unstarted queued inputs are retained.
 
 Agent delivery membership is journaled in `agent_delivery_items`, a binding over
-the shared inbox rather than another queue. A Task summary reports every delivered
-success/failure and acknowledges each member after its reply is durable. Peer
-messages from one sender are claimed atomically and supplied together as untrusted
+the shared inbox rather than another queue. A notification summary reports each
+delivered task's success/failure and summarizes external plugin events with their
+provenance and source links. It acknowledges each member after its reply is durable.
+Peer messages from one sender are claimed atomically and supplied together as untrusted
 reference data. Runtime selects the batch member with the highest hop count as
 the processing parent; automatic replies to its sender retain that member's wire
 conversation and the batch's maximum causal hop. Models do not select individual
@@ -96,7 +97,11 @@ completion, failure, interruption or cancellation, including stopping before
 dispatch. Approval hooks only update UI and user reminders. When user chat is
 available, its receiver claims a batch of currently pending outcomes and produces
 one concise report using each Task title and actual outcome. Ordinary and
-scheduled outcomes share this batch, delivery journal and acknowledgment path.
+scheduled outcomes share this batch, delivery journal and acknowledgment path
+with host-accepted [plugin notifications](plugins.md#background-services-and-assistant-notifications).
+Each source keeps its own payload format; plugins never impersonate a Task or an
+assistant peer. The receiver uses one readiness/read/claim/Report/release path,
+and plugin acceptance wakes it through the existing inbox change subscription.
 The receiver reads immutable event data rather than reinterpreting current Task
 state. Schedule policy can suppress an outcome before delivery; no separate
 schedule notification queue or reporting turn exists. Summaries have no

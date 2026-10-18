@@ -3,8 +3,10 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -155,6 +157,65 @@ func TestBrowserReadRoutesReachApplication(t *testing.T) {
 	for _, query := range []string{"after=", "after=-1", "after=9007199254740992", "after=nope"} {
 		if _, err := app.Call(ctx, Request{Method: "GET", Path: "/api/v1/tasks/outcomes?" + query}); err == nil {
 			t.Fatal("invalid outcome cursor accepted", query)
+		}
+	}
+}
+
+func TestModelRequestPagesNewestFirst(t *testing.T) {
+	manager, _ := execution.New("local", "boot", execution.DefaultLimits())
+	keys, _ := secrets.NewMemoryKey(make([]byte, 32))
+	service, err := control.Open(control.Options{Root: t.TempDir(), RuntimeID: "local", BootID: "boot", Manager: manager, Keys: keys})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	ctx := context.Background()
+	at := time.Now().UnixMilli()
+	reserve := func(id, scope string, at int64) {
+		t.Helper()
+		if _, err := service.Usage.Reserve(ctx, usage.ReserveRequest{ID: id, Scope: scope, Turn: "turn", AtMS: at, Model: "fixture", InputEstimate: 10, MaxOutput: 20}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// IDs deliberately disagree with time order. Equal timestamps span two pages.
+	reserve("z-oldest", "main", at-1)
+	for i := 0; i < 22; i++ {
+		reserve(fmt.Sprintf("tie-%02d", i), "main", at)
+	}
+	reserve("a-newest", "main", at+1)
+	reserve("other-scope", "task", at+2)
+	want := []string{"a-newest"}
+	for i := 21; i >= 0; i-- {
+		want = append(want, fmt.Sprintf("tie-%02d", i))
+	}
+	want = append(want, "z-oldest")
+	app := Application{Control: service}
+	for _, offset := range []int{0, 20, 40} {
+		result, err := app.Call(ctx, Request{Method: "GET", Path: fmt.Sprintf("/api/v1/usage/requests?scope=main&timezone=UTC&offset=%d", offset)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := json.Marshal(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var page struct {
+			Items      []usage.RequestRecord `json:"items"`
+			Offset     int                   `json:"offset"`
+			NextOffset *int                  `json:"next_offset"`
+		}
+		if err := json.Unmarshal(data, &page); err != nil {
+			t.Fatal(err)
+		}
+		ids := []string{}
+		for _, row := range page.Items {
+			ids = append(ids, row.ID)
+		}
+		if !reflect.DeepEqual(ids, want[min(offset, len(want)):min(offset+20, len(want))]) || page.Offset != offset {
+			t.Fatalf("offset %d: unexpected request page %s", offset, data)
+		}
+		if (page.NextOffset != nil) != (offset == 0) || page.NextOffset != nil && *page.NextOffset != 20 {
+			t.Fatalf("offset %d: invalid next offset %s", offset, data)
 		}
 	}
 }
