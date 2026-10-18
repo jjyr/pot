@@ -13,6 +13,13 @@ Keep each tool focused on its responsibility. Update affected callers, tests and
 
 # Development
 
+## UI internationalization
+
+New or changed user-visible UI text must use the shared i18n catalog and lookup,
+including notification and backend/native text shown to users. Follow the
+[Internationalization rules](docs/internationalization.md) for scope, locale
+handling and validation.
+
 ## Agent prompts
 
 Changes to Pot agent prompts require explicit user authorization.
