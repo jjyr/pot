@@ -10,7 +10,7 @@ async page=>{
   const sources=new Set();window.EventSource=class extends EventTarget{constructor(url){super();this.url=String(url);sources.add(this);queueMicrotask(()=>this.onopen?.({}));}close(){sources.delete(this);}};
   window.__taskTimeChanges=version=>{for(const source of sources)if(source.url.includes('/changes'))source.dispatchEvent(new MessageEvent('changed',{data:JSON.stringify({tasks:version})}));};
  },now);
- await page.route('**/access/status',route=>route.fulfill({json:{authenticated:true,push_available:false}}));
+ await page.route('**/access/status',route=>route.fulfill({json:{authenticated:true}}));
  await page.route('**/api/v1/**',async route=>{
   const url=new URL(route.request().url()),path=url.pathname,owner=url.searchParams.get('assistant_id');reads.push(path);
   const task=tasks.find(task=>path==='/api/v1/tasks/'+task.id);

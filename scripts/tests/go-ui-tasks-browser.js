@@ -25,7 +25,7 @@ async page => {
   const data=path==='/api/v1/runtime'?{runtime_id:'fixture',boot_id:'boot'}:path==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Local',kind:'local',connected:true}]}:path==='/api/v1/assistants'?[{id:'alpha',name:'Pot',revision:1}]:path==='/api/v1/assistants/bootstrap'?{assistant:null}:path==='/api/v1/snapshot'?{cursor:1,boot_id:'boot',conversation_id:'alpha',messages:[],turn:null,agent:{phase:'ready'}}:path==='/api/v1/permissions'?{pending,policy:{machines:{}}}:path==='/api/v1/tasks/query'?{items:[{id:'task-proof',title:'安装 GitHub CLI 并验证可用',assistant_id:'alpha',machine_id:'fixture-runtime',phase}],total:1}:path==='/api/v1/tasks/task-proof'?{run_id:'run-one',info:{phase,paused,machine_id:'fixture-runtime'},request:{text:goal},result,error:errorText,config:{model:'fixture-model'}}:path==='/api/v1/tasks/task-proof/messages'?inputs:path==='/api/v1/tasks/task-proof/events'?{events:events.filter(row=>row.sequence>Number(url.searchParams.get('after'))),cursor:events.at(-1)?.sequence||0,has_more:false,unavailable:offline}:path==='/api/v1/completions'?{items:[{token:'/skill:review',label:'Review',detail:'Review changes'}]}:{items:[]};
   await route.fulfill({json:data});
  };
- const access=route=>route.fulfill({json:{authenticated:true,push_available:false}});
+ const access=route=>route.fulfill({json:{authenticated:true}});
  await page.route('**/access/status',access);await page.route('**/api/v1/**',routeHandler);
  const push=()=>page.evaluate(value=>window.__taskChanges(value),++version);
  const menu=()=>page.getByRole('button',{name:'任务操作',exact:true});

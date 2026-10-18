@@ -48,17 +48,15 @@ export async function requestPWAInstall() {
   const prompt=installationPrompt;installationPrompt=null;await prompt.prompt();await prompt.userChoice;return true;
 }
 export async function installPWA() {
-  if('serviceWorker'in navigator&&isSecureContext)return navigator.serviceWorker.register('/service-worker.js',{scope:'/'});
+  if('serviceWorker'in navigator&&isSecureContext)return navigator.serviceWorker.register('/service-worker.js',{scope:'/',updateViaCache:'none'});
   return null;
 }
-// Retire this browser installation's old reply-only Web Push subscription before
-// the running-client notification path starts. Other installations are untouched.
-export async function retireBrowserPush(status) {
-  if(status?.push_available){
-    const response=await fetch('/access/push/remove',{method:'POST',credentials:'same-origin'});
-    if(!response.ok)throw Error('Could not retire the previous browser notification subscription. Reload to retry.');
-  }
-  const registration=await navigator.serviceWorker?.getRegistration('/');
-  const subscription=await registration?.pushManager?.getSubscription();
-  await subscription?.unsubscribe();
+// Best-effort local cleanup for browsers upgrading from Web Push. The server
+// no longer accepts or sends subscriptions; cleanup must never delay startup.
+export async function retireBrowserPush() {
+  try {
+    const registration=await navigator.serviceWorker?.getRegistration('/');
+    const subscription=await registration?.pushManager?.getSubscription();
+    await subscription?.unsubscribe();
+  } catch {/* Restricted/offline browsers can still use local system notifications. */}
 }

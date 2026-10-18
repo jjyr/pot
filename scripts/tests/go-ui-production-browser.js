@@ -80,7 +80,7 @@ async page => {
   else {await route.fulfill({status:404,contentType:'application/json',body:JSON.stringify({message:'Unmocked endpoint: '+path})});return;}
   await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(value)});
  };
- const accessStatus=route=>route.fulfill({json:{authenticated:true,push_available:false}});await page.route('**/access/status',accessStatus);
+ const accessStatus=route=>route.fulfill({json:{authenticated:true}});await page.route('**/access/status',accessStatus);
  await page.route('**/api/v1/**',handler);
  try {
   await page.setViewportSize({width:1200,height:792});

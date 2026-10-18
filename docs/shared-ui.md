@@ -160,9 +160,11 @@ UserNotifications service from a bundled, signed App, with the official
 App preferences are independent: the browser stores its preference in local
 storage for the current origin/profile/device; App stores it under its private
 root in `system-notifications.json`. Neither preference is an account setting.
-Browser startup retires this installation's previous reply-only Web Push
-subscription; a failure is shown in the notification setting and prevents the
-new delivery path from starting until reload succeeds.
+Browser startup makes a best-effort local cancellation of any previous Web Push
+subscription without contacting a server endpoint or delaying system notifications.
+The PWA Service Worker retains asset caching only; its updated cache version
+activates immediately and takes over existing pages, with no push or notification
+click handlers.
 
 Notifications observe existing projections on domain invalidations:
 
@@ -193,15 +195,31 @@ IndexedDB read/write transactions claim browser events once across same-origin
 tabs; App uses its Go store to claim events once across native windows. Claims
 remain for seven days, including suppressed events, so re-enabling or leaving a
 Chat does not replay those events. These scopes do not coordinate App with Web,
-different browser profiles/origins, or different machines. Browser installation
-cookies and native Runtime identities provide no shared device identity; this
+different browser profiles/origins, or different machines. Browser sessions
+and native Runtime identities provide no shared device identity; this
 feature adds no registration or coordination service to infer one.
 
 Delivery requires a running client and its live connection. A closed, discarded
 or suspended browser page does not receive new notifications through this path;
-there is no new Web Push subscription or server push infrastructure. The macOS
+Pot no longer provides Web Push offline notifications, subscription APIs, VAPID
+configuration or a server delivery worker. The macOS
 App keeps its WebViews and Runtime resident when its window is hidden; Quit ends
 notification observation. Actual display remains subject to OS/browser policies.
+
+### Removing legacy Web Push deployments
+
+Updated servers never open or read the retired `browser-push.sqlite` subscription
+store, load VAPID keys, poll the old assistant notification feed or send to saved
+subscriptions, including installations that have not reopened Pot. Existing
+subscription files and deployment secrets are inert and are not deleted by this
+source change. The completed-reply records used by the assistant catalogue remain
+local state for sidebar updates and system notification event detection.
+
+Deploy and restart each browser service to stop its old worker. Source changes do
+not hot-update an already running old deployment or an already loaded old page.
+Online browsers adopt the replacement Service Worker on update; until then an old
+worker may still handle an already queued push. The replacement worker has no
+push handler, and local cancellation needs no new notification permission.
 
 ## Browser crash reporting
 

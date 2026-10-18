@@ -103,17 +103,50 @@ const firstFinish=resumed.observe(owner,[{...task('complete'),updated_at_ms:2}],
 resumed.observe(owner,[{...task('running'),updated_at_ms:3}],[]);
 const nextFinish=resumed.observe(owner,[{...task('complete'),updated_at_ms:4}],[])[0];assert.notEqual(firstFinish.id,nextFinish.id);
 
-// Upgrading only retires this browser's previous subscription. It neither asks
-// for permission nor creates a new server push installation.
+// Retirement is local and best-effort. Removed server endpoints (404), browser
+// restrictions and a stalled push provider cannot block the new coordinator.
 const {retireBrowserPush}=await import('../../web/src/adapters/access.mjs');
 const originalNavigator=Object.getOwnPropertyDescriptor(globalThis,'navigator'),originalFetch=globalThis.fetch;
-let retired=0,removed=0;
-Object.defineProperty(globalThis,'navigator',{configurable:true,value:{serviceWorker:{getRegistration:async()=>({pushManager:{getSubscription:async()=>({unsubscribe:async()=>{retired++;}})}})}}});
+let retired=0,serverCalls=0;
+const browser=value=>Object.defineProperty(globalThis,'navigator',{configurable:true,value});
 try{
- globalThis.fetch=async(path,options)=>{assert.equal(path,'/access/push/remove');assert.equal(options.method,'POST');removed++;return {ok:true};};
- await retireBrowserPush({push_available:true});assert.equal(removed,1);assert.equal(retired,1);
- globalThis.fetch=async()=>({ok:false});await assert.rejects(retireBrowserPush({push_available:true}),/Could not retire/);
-}finally{Object.defineProperty(globalThis,'navigator',originalNavigator);globalThis.fetch=originalFetch;}
+ globalThis.fetch=async()=>{serverCalls++;return {ok:false,status:404};};
+ browser({serviceWorker:{getRegistration:async()=>({pushManager:{getSubscription:async()=>({unsubscribe:async()=>{retired++;}})}})}});
+ await retireBrowserPush();assert.equal(retired,1);assert.equal(serverCalls,0);
+ browser({});await retireBrowserPush();
+ browser({serviceWorker:{getRegistration:async()=>undefined}});await retireBrowserPush();
+ for(const operation of ['getRegistration','getSubscription','unsubscribe']){
+  const fail=async()=>{throw Error('Browser denied cleanup');};
+  browser({serviceWorker:{getRegistration:operation==='getRegistration'?fail:async()=>({pushManager:{getSubscription:operation==='getSubscription'?fail:async()=>({unsubscribe:fail})}})}});
+  await retireBrowserPush();
+ }
+ let finishCleanup;
+ browser({serviceWorker:{getRegistration:async()=>({pushManager:{getSubscription:async()=>({unsubscribe:()=>new Promise(resolve=>{finishCleanup=resolve;})})}})}});
+ const cleanup=retireBrowserPush();await new Promise(resolve=>setImmediate(resolve));
+ permission='granted';storage.delete('pot-system-notifications-browser-v1');focused=false;route={route:'chat',space:'space-a',owner:'beta'};
+ const upgradedClient=client(),before=shown.length,prompts=requests;
+ const upgraded=createSystemNotifications({client:upgradedClient,surface:'main',view:()=>route,open:()=>{},locale:()=> 'en',host:host(),claim:claims});
+ await upgraded.directory();assert.equal(upgraded.state.enabled,true);assert.equal(upgraded.state.permission,'granted');
+ upgradedClient.assistants[0]={...owner,reply_id:'after-retirement',reply_count:5};await upgraded.directory();
+ assert.equal(shown.length,before+1);assert.equal(requests,prompts);assert.equal(serverCalls,0);
+ upgraded.dispose();finishCleanup(true);await cleanup;
+}finally{
+ if(originalNavigator)Object.defineProperty(globalThis,'navigator',originalNavigator);else delete globalThis.navigator;
+ globalThis.fetch=originalFetch;
+}
+
+// The replacement PWA worker takes over without an open-tab shutdown and
+// removes only Pot's obsolete asset caches. It cannot deliver offline alerts.
+const {readFile}=await import('node:fs/promises'),{runInNewContext}=await import('node:vm');
+const workerSource=await readFile(new URL('../../web/src/service-worker.js',import.meta.url),'utf8');
+const workerHandlers=new Map(),deleted=[],cached=[];let skipped=0,claimed=0;
+runInNewContext(workerSource,{
+ self:{addEventListener:(name,handler)=>workerHandlers.set(name,handler),skipWaiting:async()=>{skipped++;},clients:{claim:async()=>{claimed++;}}},
+ caches:{open:async()=>({addAll:async assets=>{cached.push(...assets);}}),keys:async()=>['pot-go-ui-v1','pot-go-ui-v2','other-app'],delete:async key=>{deleted.push(key);}},
+});
+for(const name of ['install','activate']){let effect;workerHandlers.get(name)({waitUntil:promise=>{effect=promise;}});await effect;}
+assert.equal(skipped,1);assert.equal(claimed,1);assert.deepEqual(deleted,['pot-go-ui-v1']);assert(cached.includes('/app.js'));
+assert.equal(workerHandlers.has('push'),false);assert.equal(workerHandlers.has('notificationclick'),false);assert(workerHandlers.has('fetch'));
 
 // No browser permission state can implicitly grant permission during delivery.
 focused=false;route={route:'chat',space:'space-a',owner:'beta'};

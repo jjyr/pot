@@ -23,7 +23,7 @@ try {
       client = preview;
     }
   }
-  if(client.production&&!desktop){client.access=access;installPWA().catch(()=>{});try{await retireBrowserPush(access);}catch(reason){client.notificationMigrationError=reason.message;}}
+  if(client.production&&!desktop){client.access=access;installPWA().catch(()=>{});retireBrowserPush();}
   document.title = client.production ? 'Pot' : 'Pot — Go developer preview';
   const dispose = mountApp(root, client, {surface: params.get('surface') === 'tray' ? 'tray' : 'main'});
   window.addEventListener('pagehide', event => { if (!event.persisted) dispose(); });

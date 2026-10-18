@@ -236,15 +236,6 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	}
 	if method == "POST" {
 		switch path {
-		case "/api/v1/assistant-notifications":
-			var body struct {
-				After      map[string]int64 `json:"after"`
-				Initialize bool             `json:"initialize"`
-			}
-			if err = decode(r.Body, &body); err != nil {
-				return nil, err
-			}
-			return s.Notifications(ctx, body.After, body.Initialize)
 		case "/api/v1/providers/resolve":
 			var body control.CheckProvider
 			if err = decode(r.Body, &body); err != nil {

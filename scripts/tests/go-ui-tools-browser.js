@@ -16,7 +16,7 @@ async page => {
   const data=path==='/api/v1/runtime'?{runtime_id:'test',boot_id:'boot'}:path==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Local',kind:'local',connected:true}]}:path==='/api/v1/assistants'?[{id:'alpha',name:'Pot',revision:1},...(showOthers?[{id:'beta',name:'Other',revision:1}]:[])]:path==='/api/v1/assistants/bootstrap'?{assistant:null}:path==='/api/v1/snapshot'?snapshot():path==='/api/v1/permissions'?{pending,policy:{machines:{}}}:path==='/api/v1/usage/summary'?{total:{},quota:{active:false,policy:{period:'none'}}}:path==='/api/v1/tasks/query'?{items:showTasks&&url.searchParams.get('assistant_id')==='alpha'?[{id:'task-proof',title:'Tool transcript',assistant_id:'alpha',phase:'running'}]:[],total:1}:path==='/api/v1/tasks/task-proof'?{run_id:'run-one',info:{phase:'running'},request:{text:'Verify tool transcript'}}:path==='/api/v1/tasks/task-proof/events'?{events:taskEvents,cursor:taskEvents.at(-1)?.sequence||0,has_more:false}:path==='/api/v1/tasks/task-proof/messages'?[]:{items:[]};
   await route.fulfill({json:data});
  };
- const access=route=>route.fulfill({json:{authenticated:true,push_available:false}});
+ const access=route=>route.fulfill({json:{authenticated:true}});
  await page.route('**/access/status',access);await page.route('**/api/v1/**',routeHandler);
  const push=async()=>{await page.evaluate(value=>window.__toolsSnapshot(value),snapshot());};
  const approvalCard=id=>page.locator(`.chat-approvals .approval-card[data-approval-id="${id}"]`);

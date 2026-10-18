@@ -38,7 +38,6 @@ export function createSystemNotifications({client,surface,view,open,locale,host=
     try{
       if(client.desktop){const value=await client.notificationStatus();nextEnabled=value.enabled;nextPermission=value.permission;}
       else {
-        if(client.notificationMigrationError)throw Error(client.notificationMigrationError);
         try{nextEnabled=host.localStorage.getItem(preferenceKey)!=='false';}catch{}
         nextPermission=browserNotificationPermission(host);
       }
@@ -67,7 +66,7 @@ export function createSystemNotifications({client,surface,view,open,locale,host=
     const text=notificationText(event,locale());
     if(client.desktop){await client.notifySystem({...event,...text});return;}
     const ticket=generation,visible=await browserViewing(event);
-    if(disposed||ticket!==generation||client.notificationMigrationError||!await claim(event.id,host.indexedDB))return;
+    if(disposed||ticket!==generation||!await claim(event.id,host.indexedDB))return;
     if(visible||!enabled||browserNotificationPermission(host)!=='granted')return;
     const notification=new host.Notification(text.title,{body:text.body,tag:event.id,icon:'/assets/PotCompanion.png'});
     notification.onclick=()=>{notification.close();host.focus();Promise.resolve(open(event)).catch(fail);};

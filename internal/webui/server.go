@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"bytes"
-	"github.com/jjyr/pot/internal/browserpush"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/instance"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -62,7 +61,6 @@ type Server struct {
 	assets   http.Handler
 	streams  map[uint64]browserStream
 	persist  func(Config) error
-	push     *browserpush.Service
 	next     uint64
 	failures map[string]attempt
 }
@@ -166,17 +164,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c := s.config
 	s.mu.Unlock()
 	auth := s.authenticated(r, c)
-	if strings.HasPrefix(r.URL.Path, "/access/push") && s.push != nil {
-		s.push.ServeHTTP(w, r)
-		return
-	}
 	switch r.URL.Path {
 	case "/access/status":
 		if r.Method != "GET" {
 			failure(w, 405, "method not allowed")
 			return
 		}
-		reply(w, 200, map[string]any{"authenticated": auth, "scope": "control", "push_available": s.push != nil && s.push.Available(), "push_key": s.pushKey()})
+		reply(w, 200, map[string]any{"authenticated": auth, "scope": "control"})
 		return
 	case "/access/token":
 		if c.Disabled {
@@ -247,9 +241,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			s.mu.Unlock()
-			if s.push != nil {
-				_ = s.push.RevokeOwner(r.Context(), sessionOwner(r))
-			}
 		}
 		http.SetCookie(w, &http.Cookie{Name: "pot_session", Value: "", Path: "/", Secure: s.origin.Scheme == "https", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: -1})
 		reply(w, 200, map[string]bool{"accepted": true})
@@ -421,9 +412,6 @@ func (s *Server) Close() {
 	}
 	s.streams = map[uint64]browserStream{}
 	s.mu.Unlock()
-	if s.push != nil {
-		_ = s.push.Close()
-	}
 }
 func (s *Server) String() string { return fmt.Sprintf("Browser server (%s)", s.origin) }
 
@@ -435,21 +423,3 @@ func sessionOwner(r *http.Request) string {
 	sum := sha256.Sum256([]byte(cookie.Value))
 	return hex.EncodeToString(sum[:])
 }
-
-// Authorize yields a stable installation login scope and a live epoch check.
-func (s *Server) Authorize(r *http.Request) (string, func() bool, error) {
-	s.mu.Lock()
-	c := s.config
-	s.mu.Unlock()
-	if !s.authenticated(r, c) {
-		return "", nil, errors.New("browser login required")
-	}
-	return sessionOwner(r), func() bool { return s.authenticated(r, c) }, nil
-}
-func (s *Server) CredentialEpoch() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sum := sha256.Sum256([]byte(s.config.Token + "\n" + strconv.FormatUint(s.config.Generation, 10)))
-	return hex.EncodeToString(sum[:])
-}
-func (s *Server) CheckOrigin(r *http.Request) bool { return s.sameOrigin(r) }
