@@ -283,8 +283,11 @@ forms without automatically retrying the task.
 ### Tool calls
 
 Chat and Task details share compact inline tool disclosures. The closed row shows
-the operation, a deterministic argument preview, explicit status and elapsed time;
-active operations also show their resolved machine and workdir.
+the operation in regular-weight muted text, a nonredundant argument preview when
+useful, explicit status and elapsed time. Routine task coordination uses localized
+operation labels and keeps task IDs in expanded details. Ordinary closed rows use compact
+spacing and no visible border; consecutive tool rows have reduced spacing.
+Active operations also show their resolved machine and workdir.
 Failures keep a concise reason visible while collapsed. Expanded details show
 arguments, ordered output, final results and a secondary raw call/result disclosure.
 Commands, scripts and patches retain monospace formatting; supported image results

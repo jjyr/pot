@@ -2,6 +2,12 @@
 
 Control/execution target adapters own AGENTS.md discovery, execution-target selection, refresh and error policy. `pkg/agent` receives caller-provided text through `core.ExecutionContext.Instructions`; it performs no AGENTS.md filesystem discovery. Standalone callers can inject their own instructions or leave this field empty.
 
+Main replies describe background work with task titles and concrete progress in
+the user's language. Task IDs remain in tool arguments and artifact download URLs;
+prose includes them only when requested or needed for troubleshooting. Creation
+acknowledgements reflect the reported state, including queues and approval waits,
+without claiming that execution has started.
+
 ## Sources and scope
 
 Global Main instructions come from the owning Runtime's
