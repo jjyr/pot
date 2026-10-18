@@ -55,7 +55,7 @@ async page => {
   await call('call-one').evaluate(node=>node.open=false);await call('exec-one').evaluate(node=>node.scrollIntoView({block:'start'}));
   await page.screenshot({path:'docs/pr-images/codex-tool-call-details/nested-approval-desktop-after.png'});
   await call('call-one').evaluate(node=>node.open=true);
-  assert(await approvalCard('approval-one').getByRole('button',{name:'始终允许此命令',exact:true}).count()===1,'Ordinary execution offers machine-wide persistent authorization');
+  assert(await approvalCard('approval-one').getByRole('button',{name:'始终允许此命令',exact:true}).count()===1,'Ordinary execution offers exact-command persistent authorization');
   rejectApproval=true;await approvalCard('approval-one').getByRole('button',{name:'本任务允许',exact:true}).click();await approvalCard('approval-one').getByText('Decision failed; try again',{exact:true}).waitFor();assert(!await approvalCard('approval-one').getByRole('button',{name:'拒绝',exact:true}).isDisabled(),'Failed decision keeps actions available');
   rejectApproval=false;await approvalCard('approval-one').getByRole('button',{name:'拒绝',exact:true}).click();assert(posts.some(post=>post.body.id==='approval-one'&&post.body.action==='deny'&&post.owner==='alpha'&&post.space==='local'),'Decision binds exact approval and scope');
   child.tool.phase='denied';child.tool.result={isError:true,error:'Execution operation denied'};child.status='failed';await push();await call('child-one').evaluate(node=>node.open=true);await call('child-one').locator(':scope > summary').click();await call('child-one').getByText('Execution operation denied',{exact:true}).first().waitFor();assert(!await call('child-one').evaluate(node=>node.open),'Error remains readable while collapsed');

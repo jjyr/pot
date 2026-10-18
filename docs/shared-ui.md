@@ -21,6 +21,10 @@ web/src: shell, pages, composer, drafts, configuration, navigation
 [`components/ui.js`](../web/src/components/ui.js) owns the shell, assistant
 directory, Chat and input lifecycle. [`components/pages.mjs`](../web/src/components/pages.mjs)
 owns Tasks, schedules, Machines, Usage, configuration forms and return contexts.
+[`components/task-conversation.mjs`](../web/src/components/task-conversation.mjs)
+owns the task status, conversation history, menu and fixed composer, reusing the
+shared reply/tool/composer components. Pages retains task requests and owner scope.
+[`components/usage.mjs`](../web/src/components/usage.mjs) owns exact-count usage tooltips, the trend chart and independently loaded detail lists.
 [`components/reply.mjs`](../web/src/components/reply.mjs) owns reply content,
 activity and the single failure presentation; [`state/chat-replies.mjs`](../web/src/state/chat-replies.mjs)
 binds optimistic and durable reply identities without changing execution state.
@@ -119,6 +123,12 @@ identity even if the turn ends before the receipt arrives. The conversation menu
 exposes Pause/Resume; pausing takes effect at a safe model boundary and preserves
 in-flight work. Task Configuration edits Provider allowances with revision CAS,
 independently of concurrency and assistant model selection.
+
+Inline machine permission selections retain a separate draft during background
+updates. A dirty selection keeps its original policy revision for compare-and-swap
+saves. An external change exposes a reload action; only that explicit reload or a
+successful save adopts the latest policy. Refreshing status never silently rebases
+an unsaved choice onto a different revision.
 
 Conversation and Task stream contracts are in [UI events](ui-events.md).
 

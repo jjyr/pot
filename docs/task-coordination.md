@@ -34,6 +34,13 @@ Messages retain trusted sender identity, are consumed once and remain pending fo
 ended Tasks as retained history. They do not grant owner authority. Delivery
 uses `pkg/agent`.
 
+Task input history distinguishes the initial `input`, assistant `guidance`,
+operator `user_guidance` and peer `reference` records. The task messages HTTP
+endpoint stamps operator provenance; `guide_task` stamps assistant provenance.
+Clients cannot choose their source through request fields. Both guidance kinds
+share the same delivery, pending-count and lifecycle rules. Their ordered UI
+projection is described in [UI events](ui-events.md#task-execution-transcripts).
+
 `wait_task` returns Task metadata, not transcripts. Complete, failed, interrupted,
 cancelled, allowance-waiting and `waiting_approval` states can end a wait;
 queued/running cannot. A pending approval for the exact Task/run/generation

@@ -225,6 +225,20 @@ insert drafts without sending them. Task conversations add a fixed stage/action
 row and expose guidance, cancellation, approvals and Usage. Long task titles have
 full-title tooltips.
 
+Task details use the conversation column without an assistant sidebar. A fixed
+status row below the titlebar shows the current task state and an approval locator
+when needed. The initial goal is a collapsed disclosure with a one-line preview.
+Operator guidance uses user bubbles; assistant guidance and peer references use
+neutral bubbles with explicit source labels. Execution prose and the final result
+use the shared assistant reply bubble, without separate Goal/Execution/Result
+chapters or repeated terminal text. Tools and exact approvals remain inline.
+
+The task composer stays at the bottom while history scrolls independently. Its
+nonempty input sends guidance; empty input offers Stop. The titlebar ellipsis owns
+Pause/Resume, Usage, task details and cancellation. Machine/model identifiers live
+in task details rather than the status row. Ended tasks replace the active composer
+with a compact outcome caption; any unsent draft remains visible read-only.
+
 Main Chat shows up to three running or approval-waiting background tasks below
 only the latest assistant message, with a dot, title and overflow entry.
 Approval-waiting rows come first, use an attention color and show Waiting for
@@ -296,7 +310,6 @@ See [UI events](ui-events.md#tool-call-projections) for the event and persistenc
 Tasks keeps Ongoing / Needs attention / Archived groups, search and 20-item
 pagination. Rows group by assistant and show title, state and change time. Filters
 and search remain outside the scrolling list; search/group changes reset paging.
-View Tasks from Machines filters by exact Runtime and execution target.
 
 Schedules share the Tasks destination and provide next run, time zone, policies
 and history linking to tasks. Editing uses the editing-page contract; deletion
@@ -336,10 +349,19 @@ Loading preserves navigation and the chart region; failures retain inline recove
 Unknown or incomplete data is distinct from zero. Accounting and aggregation
 belong in [Token usage](token-usage.md).
 
-Machines groups inventory by Space. Cached offline data remains visible. Machine
-settings expose Ask each time / Always allow execution on this machine; owner
-policy changes are valid without starting a process on that machine. Viewing a
-machine changes neither routing nor authorization. See [Multi-Space UI](multi-space-ui.md).
+Machines groups inventory by Space. Each card keeps machine identity, connection
+status, labels and the Protected / Trusted / Blocked default visible. Permanent
+command permissions start collapsed with a count and expand in place; returning
+from their editor restores the disclosure. Active task grants appear only when
+present. Changed defaults expose Save / Cancel and an execution-interruption
+warning. Drafts survive refresh and preference changes, and navigation uses the
+dirty-exit guard. Pending application and recovery errors remain visible.
+Native label and membership actions use a visible More disclosure beside the
+machine identity. Tasks stays in its own destination, and Settings has no duplicate
+permissions tab. Cached offline data remains visible and read-only when its owner
+is unavailable; a disconnected execution machine can still be configured through
+its online Control. Viewing a machine changes neither routing nor authorization.
+See [Multi-Space UI](multi-space-ui.md).
 
 ### Approvals and About
 

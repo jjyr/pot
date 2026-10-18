@@ -25,6 +25,32 @@ Mutations publish after persistence; no-op reads do not produce invalidations.
 The global subscription remains active even when no assistant exists, so an
 assistant created by another client appears without reloading the page.
 
+Change callbacks retain their originating Space and boot identity. Each view
+declares the domains and Space it reads; unrelated notifications do not refresh
+it. General preferences and build information remain mounted without requesting
+them again on execution updates.
+
+[`state/refresh.mjs`](../web/src/state/refresh.mjs) coalesces invalidations for
+pages, the assistant directory, background tasks, execution transcripts and
+approval requests. Each view runs one read at a time and schedules one later
+read when changes arrive during it. An invalidation never cancels that read.
+Navigation, editor entry and filter/owner changes retire the request generation.
+
+Existing projections remain visible during background reads and after failures,
+with inline errors and retry where appropriate. Multi-Space projections retain
+cached rows with explicit stale status. Cards, table rows and chart buckets
+reconcile by their scoped identities. Search inputs, focus, selection, disclosure
+state and scroll positions survive unchanged projections. Shell navigation,
+approval actions and Chat task strips retain their nodes too. Action handlers use
+the current projection; pending mutations stay disabled across refreshes.
+
+Task details refresh metadata, results, files and guidance alongside their
+incremental execution transcript. Schedule details and run history share the same
+background lifecycle as lists. Machine settings expand locally without reads;
+generated invitations remain visible until replaced or their membership changes.
+Third-party account login status uses the same queue and retains its row during
+the bounded login-session status checks.
+
 Desktop Space adapters consume the same backend subscriptions and emit
 `pot:changed` through Wails. Responses and changes carry their Space identity;
 a failed remote request never falls back to another Control.
@@ -76,6 +102,23 @@ Tasks; an open Task detail fetches only rows after its cursor. Incremental DOM
 updates preserve the guidance draft instead of rebuilding the form. Pagination
 rejects a non-advancing cursor. Tools remain expandable and file links retain the
 Task's explicit Control/assistant identity.
+
+Task invalidations also refresh status, pause controls, guidance/reference delivery
+states and terminal output in place. The original input appears once in a collapsed
+Goal disclosure. The Agent emits an `input_applied` event with the input's request ID
+after checkpoint persistence and before acknowledgment. These durable bookmarks
+place delivered guidance and references before their continuation, independently
+of response arrival order or machine clocks. Repeated bookmarks do not reorder
+history. Pending inputs remain at the tail; retained historical inputs without a
+bookmark remain identifiable without inventing a delivery position.
+
+The task conversation uses the shared reply bubbles, tool disclosures, composer
+binding and reference completions. Only its history scrolls; status and the composer
+remain visible. Following stops when the reader scrolls upward, and Latest resumes
+it. Navigation restores the goal/tool disclosures and reading position. Terminal
+text already present in the final reply is not repeated. Ended tasks retain an
+unsent draft read-only and expose no send action. Only a matching successful send
+clears an unedited draft; failed sends retain their request identity for retry.
 
 ## Tool-call projections
 

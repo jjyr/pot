@@ -178,15 +178,29 @@ func TestIdempotencyOwnershipGuidanceReferencesAndStop(t *testing.T) {
 	if err := s.Guide(ctx, "assistant", record.Info.ID, "guidance", "new work"); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.GuideFromUser(ctx, "assistant", record.Info.ID, "operator-guidance", "operator direction"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Guide(ctx, "assistant", record.Info.ID, "operator-guidance", "operator direction"); err == nil {
+		t.Fatal("assistant retry changed operator provenance")
+	}
+	inputsBefore, err := s.Inputs(ctx, "assistant", record.Info.ID)
+	if err != nil || len(inputsBefore) != 3 || inputsBefore[1].Kind != "guidance" || inputsBefore[2].Kind != "user_guidance" {
+		t.Fatal(inputsBefore, err)
+	}
 	if err := s.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}
 	steering, err := s.Steering(ctx, "assistant", record.Info.ID, record.RunID, false)
-	if err != nil || len(steering) != 1 {
+	if err != nil || len(steering) != 2 {
 		t.Fatal(steering, err)
 	}
-	if err := s.AcknowledgeInputs(ctx, "assistant", record.Info.ID, record.RunID, []string{"guidance"}); err != nil {
+	if err := s.AcknowledgeInputs(ctx, "assistant", record.Info.ID, record.RunID, []string{"guidance", "operator-guidance"}); err != nil {
 		t.Fatal(err)
+	}
+	afterGuidance, err := s.Get(ctx, "assistant", record.Info.ID)
+	if err != nil || afterGuidance.Info.Pending != 0 {
+		t.Fatal("operator guidance did not settle pending count", afterGuidance, err)
 	}
 	if err := s.Stop(ctx, "assistant", record.Info.ID, "interrupt"); err != nil {
 		t.Fatal(err)

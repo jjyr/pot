@@ -2,6 +2,17 @@ import assert from 'node:assert/strict';
 import {createEditorSession,createRequestGate} from '../../web/src/state/editor.mjs';
 import {scopedPath,normalizeSnapshot,createProductionClient,decodeDesktopResponse,APIError} from '../../web/src/adapters/production.mjs';
 import {createTopicVersions} from '../../web/src/state/changes.mjs';
+import {createRefreshQueue,relevantChange} from '../../web/src/state/refresh.mjs';
+const refreshReads=[],refreshErrors=[];let refreshActive=true;
+const refreshQueue=createRefreshQueue(()=>new Promise((resolve,reject)=>refreshReads.push({resolve,reject})),{active:()=>refreshActive,onError:error=>refreshErrors.push(error.message)});
+const refreshFirst=refreshQueue.run();for(let index=0;index<20;index++)refreshQueue.run();
+assert.equal(refreshReads.length,1,'Changes never overlap or cancel an active read');refreshReads[0].resolve();await refreshFirst;await Promise.resolve();
+assert.equal(refreshReads.length,2,'A burst requires just one later read');refreshReads[1].reject(Error('Offline'));await Promise.resolve();await Promise.resolve();
+assert.deepEqual(refreshErrors,['Offline'],'Background failures retain their diagnostic');
+refreshActive=false;refreshQueue.close();const refreshCount=refreshReads.length;await refreshQueue.run();assert.equal(refreshReads.length,refreshCount,'Retired views cannot start reads');
+assert.equal(relevantChange(['usage'],['machines'],'local',{space:'local'}),false);
+assert.equal(relevantChange(['machines'],['machines'],'local',{space:'remote'}),false);
+assert.equal(relevantChange(['machines'],['machines'],'local',{space:'local'}),true);
 const cancelledPreparation={id:'request-proof',state:'cancelled',error:'Cancelled by owner'};
 assert.deepEqual(decodeDesktopResponse(JSON.stringify(cancelledPreparation)),cancelledPreparation,'Successful native cancellation retains its domain error text without a false HTTP failure');
 assert.equal(decodeDesktopResponse(cancelledPreparation),cancelledPreparation,'Object DTO identity is preserved');
@@ -52,6 +63,9 @@ globalThis.EventSource=class {
   addEventListener(type,handler){this.handlers.set(type,handler);}
   close(){this.closed=true;}
 };
+const changeEvents=[],stopChanges=client.changes((topics,source)=>changeEvents.push({topics,source}),{space:'local'});
+sources.at(-1).handlers.get('changed')({data:JSON.stringify({topics:{usage:1}}),lastEventId:'boot:1'});
+assert.deepEqual(changeEvents,[{topics:['usage'],source:{space:'local',boot:'boot'}}],'Change callbacks retain their originating Space and boot');stopChanges();
 const statuses=[];
 const stopStream=client.subscribe(()=>{throw Error('Rendering failed');},(...value)=>statuses.push(value));
 const source=sources.at(-1),receive=source.handlers.get('snapshot');
@@ -69,8 +83,8 @@ const {combineTasks,combineUsage}=await import('../../web/src/state/aggregate.mj
 const combined=combineTasks([{space:{id:'local'},value:{items:[{id:'same',updated_at_ms:1}],counts:{active:1}}},{space:{id:'remote'},value:{items:[{id:'same',updated_at_ms:2}],counts:{active:2}}}],{limit:1});
 assert.equal(combined.items[0]._space_id,'remote');assert.equal(combined.next_offset,1);assert.equal(combined.counts.active,3);
 const combinedUsage=combineUsage([{space:{id:'local'},value:{total:{input:5,output:3},buckets:[{label:'today',input:5,output:3}],tools:[{name:'shell',calls:1}]}},{space:{id:'remote'},value:{total:{input:7,output:2},buckets:[{label:'today',input:7,output:2}],tools:[{name:'shell',calls:2}]}}]);
-assert.equal(combinedUsage.total.input,12);assert.equal(combinedUsage.buckets[0].output,5);assert.equal(combinedUsage.tools[0].calls,3);
-assert.equal(combineUsage([{space:{id:'remote'},owner:'a',value:{requests:[{id:'r'}]}}]).requests[0]._assistant_id,'a');
+assert.equal(combinedUsage.total.input,12);assert.equal(combinedUsage.buckets[0].output,5);
+
 const {modelDefaults}=await import('../../web/src/state/models.mjs');
 const directory={directory:[{id:'a',name:'A',common:true,models:[{id:'same',context:1000,input:900,output:200}]},{id:'b',name:'B',common:false,models:[{id:'same',context:2000,output:400}]}],model_defaults:{unknown:{context:5000,output:600}}};
 assert.equal(modelDefaults(directory,'b','same').context,2000,'provider-specific model facts win');
@@ -82,6 +96,21 @@ appendTaskEvents(transcript,[event(1,'message_started'),event(2,'text_delta',{te
 appendTaskEvents(transcript,[event(2,'text_delta',{text:'duplicate'}),event(5,'text_delta',{text:' reply'}),event(6,'message_finished')]);
 assert.equal(transcript.messages[0].text,'First reply');assert.ok(transcript.messages[1].tool.output[0].text.includes('result'));assert.equal(transcript.cursor,6);
 appendTaskEvents(transcript,[event(7,'turn_finished',{outcome:{kind:'unknown',error:'Execution result is uncertain'}})]);assert.equal(transcript.messages.at(-1).role,'system');
+const {projectTaskMessages}=await import('../../web/src/state/task-transcript.mjs');
+const ordered=createTaskTranscript(),userInput={request_id:'operator',kind:'user_guidance',state:'consumed',text:'User direction'},referenceInput={request_id:'reference',kind:'reference',sender:'peer',state:'pending',text:'Peer information'};
+appendTaskEvents(ordered,[event(1,'message_started'),event(2,'text_delta',{text:'First'}),event(3,'message_finished'),event(4,'input_applied',{id:'operator'}),event(5,'message_started'),event(6,'message_finished',{text:'Done'})]);
+const taskRecord={info:{phase:'complete'},result:{text:'Done'}};
+const projected=projectTaskMessages(ordered,[{request_id:'initial',kind:'input',text:'Goal'},userInput,referenceInput],taskRecord);
+assert.deepEqual(projected.map(row=>row.text),['First','User direction','Done','Peer information'],'Input bookmarks preserve order and final results appear once');
+assert.equal(projected[1].role,'user');assert.equal(projected[3].role,'reference','Peer inputs never look like operator messages');
+appendTaskEvents(ordered,[event(7,'input_applied',{id:'operator'})]);assert.equal(ordered.inputs.get('operator'),4,'Repeated input receipts cannot reorder history');
+const replayed=createTaskTranscript();appendTaskEvents(replayed,[event(1,'message_started'),event(2,'text_delta',{text:'First'}),event(3,'message_finished'),event(4,'input_applied',{id:'operator'}),event(5,'message_started'),event(6,'message_finished',{text:'Done'})]);
+assert.deepEqual(projectTaskMessages(replayed,[userInput,referenceInput],taskRecord),projected,'Fresh history reconstruction preserves conversation order');
+const failedProjection=projectTaskMessages(ordered,[],{info:{phase:'failed'},error:'Failed once',result:{outcome:{error:'Failed once'}}});assert.equal(failedProjection.filter(row=>row.error==='Failed once').length,1,'Terminal failure is shown once');
+const partialTask=createTaskTranscript();appendTaskEvents(partialTask,[event(1,'message_started'),event(2,'text_delta',{text:'Partial output'}),event(3,'turn_finished',{outcome:{kind:'failed',error:'Network failed'}})]);
+const partialFailure=projectTaskMessages(partialTask,[],{info:{phase:'failed'},error:'Network failed'});assert.equal(partialFailure.length,1);assert.equal(partialFailure[0].text,'Partial output');assert.equal(partialFailure[0].error,'Network failed','Partial output and diagnostic share one reply');
+const stoppedTask=createTaskTranscript();appendTaskEvents(stoppedTask,[event(1,'message_started'),event(2,'text_delta',{text:'Partial output'}),event(3,'turn_finished',{outcome:{kind:'cancelled',error:'context canceled'}})]);
+const stoppedReply=projectTaskMessages(stoppedTask,[],{info:{phase:'interrupted'},result:{outcome:{kind:'cancelled',error:'context canceled'}}});assert.equal(stoppedReply.length,1);assert.equal(stoppedReply[0].phase,'stopped');assert.equal(stoppedReply[0].error,undefined,'An owner stop retains partial text without presenting an execution failure');
 const {createReplies}=await import('../../web/src/state/replies.mjs');
 const replies=createReplies();assert.deepEqual(replies.observe('control','a','old',5,true),{unread:0,arrived:false});
 assert.deepEqual(replies.observe('control','a','new',6,true),{unread:1,arrived:true});
@@ -102,7 +131,13 @@ steeringState.snapshot={...steeringState.snapshot,cursor:'2',running:false,turn_
 await client.send({boot_id:'boot',request_id:'s',conversation_id:'c',user_message_id:'original-turn',text:'guidance'});assert.equal(calls.at(-1).url,'/api/v1/turn/steer?assistant_id=b&space_id=local');assert.deepEqual(JSON.parse(calls.at(-1).options.body),{request_id:'s',user_message_id:'original-turn',text:'guidance'});
 await client.controlTurn({user_message_id:'original-turn',action:'pause'},{owner:'a',space:'remote'});assert.equal(calls.at(-1).url,'/api/v1/turn/control?assistant_id=a&space_id=remote');
 
-assert.equal(combineUsage([{space:{id:'a'},value:{agent_models:[{agent:'pot',model:'shared',input:3,output:2}]}},{space:{id:'b'},stale:true,value:{agent_models:[{agent:'pot',model:'shared',input:7,output:1}]}}]).agent_models[0].input,10,'Global Agent/model categories combine identical models across Spaces');
+assert.equal(combineUsage([{space:{id:'a'},value:{bucket_days:7,timezone:'UTC'}}]).bucket_days,7,'Combined yearly trends retain weekly bucket labels');
+const {usageNumbers,usageRows}=await import('../../web/src/components/usage.mjs');
+assert.equal(usageNumbers('en').exact(null),'—');
+assert.equal(usageNumbers('en').uncached({input:120,cache:100}),20);
+assert.equal(usageNumbers('en').hitRate({input:0,cache:0}),'—');
+assert.deepEqual(usageRows({input:null,output:12,cache:0},'en',en=>en).map(row=>row[1]),['—','—','—','—','12','—'],'Unknown input never presents a cache count or total as zero');
+
 
 const {toolForest,applyToolUpdate,toolFailure}=await import('../../web/src/state/tool-calls.mjs');
 const detail=applyToolUpdate({},{type:'tool_started',id:'child',parent_id:'parent',name:'exec_command',args:{cmd:'pwd'},at_ms:10});

@@ -12,6 +12,12 @@ func (s *Service) Guide(ctx context.Context, assistant, task, requestID, text st
 	return s.input(ctx, assistant, task, requestID, text, "guidance", assistant)
 }
 
+// GuideFromUser retains operator provenance instead of attributing UI input to
+// the assistant whose Task is being viewed.
+func (s *Service) GuideFromUser(ctx context.Context, assistant, task, requestID, text string) error {
+	return s.input(ctx, assistant, task, requestID, text, "user_guidance", assistant)
+}
+
 // SendReference stamps sender from the authenticated caller, never model-supplied
 // JSON. Ended tasks retain it as history without starting/resuming execution.
 func (s *Service) SendReference(ctx context.Context, assistant, task, requestID, sender, text string) error {
@@ -41,7 +47,8 @@ func (s *Service) input(ctx context.Context, assistant, task, requestID, text, k
 			return err
 		}
 		active := record.Info.Phase.Scope() == "active" && record.StopMode == "" && !record.Finalizing
-		if kind == "guidance" && !active {
+		guidance := kind == "guidance" || kind == "user_guidance"
+		if guidance && !active {
 			return fmt.Errorf("ended/stopping Task requires a new Task for further work")
 		}
 		state := "pending"
@@ -51,7 +58,7 @@ func (s *Service) input(ctx context.Context, assistant, task, requestID, text, k
 		if _, err := tx.ExecContext(ctx, "INSERT INTO task_inputs(assistant_id,task_id,request_id,digest,kind,sender,text,state) VALUES(?,?,?,?,?,?,?,?)", assistant, task, requestID, hash, kind, sender, text, state); err != nil {
 			return err
 		}
-		if kind == "guidance" && active {
+		if guidance && active {
 			record.Info.Pending++
 		} else {
 			record.Revision++
@@ -132,7 +139,7 @@ func (s *Service) AcknowledgeInputs(ctx context.Context, assistant, task, runID 
 			if _, err := tx.ExecContext(ctx, "UPDATE task_inputs SET state='consumed' WHERE assistant_id=? AND task_id=? AND request_id=?", assistant, task, id); err != nil {
 				return err
 			}
-			if kind == "guidance" && record.Info.Pending > 0 {
+			if (kind == "guidance" || kind == "user_guidance") && record.Info.Pending > 0 {
 				record.Info.Pending--
 			}
 		}

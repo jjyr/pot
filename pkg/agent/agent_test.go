@@ -10,6 +10,7 @@ import (
 	m "github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/protocol"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -365,7 +366,20 @@ func TestSteeringIsSavedBeforeAcknowledgmentAndFinalResponse(t *testing.T) {
 		}
 		return response("done"), nil
 	}
-	if err := a.Execute(context.Background(), execution, thread, core.TurnRequest{RequestID: "turn", Text: "hello"}, false, func(core.AgentEvent) error { return nil }); err != nil || s.calls != 2 || !f.acked["guidance"] {
+	var applied uint64
+	if err := a.Execute(context.Background(), execution, thread, core.TurnRequest{RequestID: "turn", Text: "hello"}, false, func(event core.AgentEvent) error {
+		if event.Update.Type == "input_applied" {
+			var checkpoint Checkpoint
+			if err := json.Unmarshal(f.body, &checkpoint); err != nil || !slices.Contains(checkpoint.SteeringIDs, event.Update.ID) || f.acked[event.Update.ID] {
+				t.Fatal("input bookmark must follow persistence and precede acknowledgment", event, err)
+			}
+			applied = event.Seq
+		}
+		if event.Update.Type == "message_started" && s.calls == 1 && applied == 0 {
+			t.Fatal("continuation started before input bookmark")
+		}
+		return nil
+	}); err != nil || s.calls != 2 || !f.acked["guidance"] || applied == 0 {
 		t.Fatal(err, s.calls, f.acked)
 	}
 }
