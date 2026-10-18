@@ -49,6 +49,8 @@ type Options struct {
 	IntegrationAdapters []integrations.Adapter
 }
 type Service struct {
+	pluginWG            sync.WaitGroup
+	pluginMu            sync.Mutex
 	Attachments         *attachments.Store
 	mu                  sync.Mutex
 	resourceMutations   sync.Mutex
@@ -156,6 +158,11 @@ func Open(options Options) (*Service, error) {
 	if err = s.openTasks(); err != nil {
 		return nil, err
 	}
+	if err = s.Mailbox.InitializeBackground(); err != nil {
+		return nil, err
+	}
+	s.pluginWG.Add(1)
+	go s.pluginLoop()
 	success = true
 	return s, nil
 }
@@ -383,6 +390,7 @@ func (s *Service) Close() error {
 		engines = append(engines, e)
 	}
 	s.mu.Unlock()
+	s.pluginWG.Wait()
 	var result error
 	if s.Terminals != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -131,7 +131,7 @@ func insertMail(ctx context.Context, tx *sql.Tx, message protocol.Envelope, dire
 
 func sameOptional(a, b *string) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
 func sameEnvelope(a, b protocol.Envelope) bool {
-	return a.Kind == b.Kind && a.RequestID == b.RequestID && sameJSONResult(a.Result, b.Result) && a.ID == b.ID && a.From == b.From && a.To == b.To && a.ConversationID == b.ConversationID && sameOptional(a.ReplyTo, b.ReplyTo) && a.Text == b.Text && a.Hops == b.Hops
+	return samePlugin(a.Plugin, b.Plugin) && a.Kind == b.Kind && a.RequestID == b.RequestID && sameJSONResult(a.Result, b.Result) && a.ID == b.ID && a.From == b.From && a.To == b.To && a.ConversationID == b.ConversationID && sameOptional(a.ReplyTo, b.ReplyTo) && a.Text == b.Text && a.Hops == b.Hops
 }
 func newConversation() string {
 	var value [16]byte
@@ -371,4 +371,10 @@ func (m *Mailbox) LatestTaskInput(ctx context.Context, task, run string) (*proto
 		return nil, err
 	}
 	return &values[0], nil
+}
+
+func samePlugin(a, b *protocol.PluginNotification) bool {
+	x, _ := json.Marshal(a)
+	y, _ := json.Marshal(b)
+	return string(x) == string(y)
 }

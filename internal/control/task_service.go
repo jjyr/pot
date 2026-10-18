@@ -275,6 +275,7 @@ func (s *Service) deliverTaskNotices(ctx context.Context) {
 			continue
 		}
 		s.deliverTaskResults(ctx, definition.ID)
+		s.deliverPluginEvents(ctx, definition.ID)
 	}
 }
 

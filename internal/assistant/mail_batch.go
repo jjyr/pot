@@ -133,10 +133,26 @@ func (m *Mailbox) ClaimEventBatch(ctx context.Context, owner string, ids []strin
 		return errors.New("invalid result batch size")
 	}
 	return storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
+		var kind string
+		if err := tx.QueryRowContext(ctx, "SELECT json_extract(envelope,'$.kind') FROM agent_messages WHERE id=?", ids[0]).Scan(&kind); err != nil {
+			return err
+		}
+		if kind == "plugin_event" {
+			var blocked bool
+			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM plugin_delivery_rates WHERE owner=? AND next>?)", owner, storage.Now()).Scan(&blocked); err != nil {
+				return err
+			}
+			if blocked {
+				return errors.New("plugin summary frequency limit")
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO plugin_delivery_rates VALUES(?,?) ON CONFLICT(owner) DO UPDATE SET next=excluded.next", owner, storage.Now()+300000); err != nil {
+				return err
+			}
+		}
 		size := 0
 		for _, id := range ids {
 			var text string
-			if err := tx.QueryRowContext(ctx, `SELECT json_extract(envelope,'$.text') FROM agent_messages WHERE id=? AND recipient=? AND state='queued' AND json_extract(envelope,'$.kind')='task_result'`, id, owner).Scan(&text); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT json_extract(envelope,'$.text') FROM agent_messages WHERE id=? AND recipient=? AND state='queued' AND json_extract(envelope,'$.kind') IN ('task_result','plugin_event')`, id, owner).Scan(&text); err != nil {
 				return err
 			}
 			size += len(text)

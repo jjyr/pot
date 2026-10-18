@@ -35,32 +35,43 @@ type Directory struct {
 	Assistants []MailAssistant `json:"assistants"`
 }
 type Envelope struct {
-	Kind           string           `json:"kind"`
-	Owner          string           `json:"owner,omitempty"`
-	Digest         string           `json:"digest,omitempty"`
-	RequestID      string           `json:"request_id,omitempty"`
-	Result         *TaskResultEvent `json:"result,omitempty"`
-	ID             string           `json:"id" required:"true"`
-	From           AgentRef         `json:"from" required:"true"`
-	To             AgentRef         `json:"to" required:"true"`
-	ConversationID string           `json:"conversation_id" required:"true"`
-	ReplyTo        *string          `json:"reply_to"`
-	Text           string           `json:"text" required:"true"`
-	Hops           uint32           `json:"hops" required:"true"`
+	Kind           string              `json:"kind"`
+	Plugin         *PluginNotification `json:"plugin,omitempty"`
+	Owner          string              `json:"owner,omitempty"`
+	Digest         string              `json:"digest,omitempty"`
+	RequestID      string              `json:"request_id,omitempty"`
+	Result         *TaskResultEvent    `json:"result,omitempty"`
+	ID             string              `json:"id" required:"true"`
+	From           AgentRef            `json:"from" required:"true"`
+	To             AgentRef            `json:"to" required:"true"`
+	ConversationID string              `json:"conversation_id" required:"true"`
+	ReplyTo        *string             `json:"reply_to"`
+	Text           string              `json:"text" required:"true"`
+	Hops           uint32              `json:"hops" required:"true"`
 }
 
 func (e Envelope) Validate() error {
-	if e.Kind != "message" && e.Kind != "input" && e.Kind != "guidance" && e.Kind != "user_guidance" && e.Kind != "reference" && e.Kind != "task_result" {
+	if e.Kind != "message" && e.Kind != "input" && e.Kind != "guidance" && e.Kind != "user_guidance" && e.Kind != "reference" && e.Kind != "task_result" && e.Kind != "plugin_event" {
 		return fmt.Errorf("invalid agent message kind")
 	}
 	if e.Kind == "message" && (e.To.Kind != "assistant" || (e.From.Kind != "assistant" && e.From.Kind != "task") || e.Result != nil || e.Owner != "" || e.RequestID != "" || e.Digest != "") {
 		return fmt.Errorf("invalid agent correspondence")
 	}
-	if e.Kind != "message" && e.Kind != "task_result" && (e.To.Kind != "task" || !mailID(e.Owner) || !core.Identifier(e.RequestID) || e.Result != nil) {
+	if e.Kind != "message" && e.Kind != "task_result" && e.Kind != "plugin_event" && (e.To.Kind != "task" || !mailID(e.Owner) || !core.Identifier(e.RequestID) || e.Result != nil) {
 		return fmt.Errorf("invalid Task inbox message")
 	}
 	if e.Kind == "task_result" && (e.To.Kind != "assistant" || e.From.Kind != "runtime" || e.Result == nil || !core.Identifier(e.Result.TaskID) || !validUUID(e.Result.RunID)) {
 		return fmt.Errorf("invalid Runtime task event")
+	}
+	if e.Kind == "plugin_event" {
+		if e.Plugin == nil || e.From.Kind != "runtime" || e.From.ControlID != e.To.ControlID || e.To.Kind != "assistant" || e.From.AgentID != "plugin-"+e.Plugin.Identity.ID || e.Result != nil || e.Owner != "" || e.RequestID != "" || e.Digest != "" || e.Hops != 0 || e.ReplyTo != nil {
+			return fmt.Errorf("invalid plugin provenance")
+		}
+		if err := e.Plugin.Event.Validate(); err != nil {
+			return err
+		}
+	} else if e.Plugin != nil {
+		return fmt.Errorf("unexpected plugin event")
 	}
 	if e.Result != nil {
 		if err := e.Result.Origin.Validate(); err != nil {
@@ -178,4 +189,10 @@ func (r *RelayRequest) UnmarshalJSON(data []byte) error {
 		return r.Receipt.Message.Validate()
 	}
 	return nil
+}
+
+// PluginNotification provenance is bound by the local background host.
+type PluginNotification struct {
+	Identity core.PluginIdentity `json:"identity"`
+	Event    core.PluginEvent    `json:"event"`
 }

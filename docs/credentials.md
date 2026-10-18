@@ -174,6 +174,9 @@ packages, tool arguments and launch manifests contain references only. Persisten
 plugin sessions must be reset if credentials change; `session_mode: call` starts a
 fresh process for each invocation.
 
+For owner-enabled background notifications, see [GitHub notifications](plugins.md#github-notifications).
+A connected account does not establish notification API permission.
+
 ## GitHub commands
 
 The bundled `github` tool plugin is enabled by default. It runs `gh`
