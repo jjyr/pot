@@ -56,6 +56,7 @@ exclusion until the owner resolves the request.
 
 The Agent continues model/tool rounds until it produces a final response without
 pending tool calls or guidance. There is no fixed model-round count limit.
+Main conversations also have no default per-turn model-request count limit.
 Cancellation, configured request/token allowances, context limits and individual
 operation deadlines still apply; context compaction preserves continuation.
 
