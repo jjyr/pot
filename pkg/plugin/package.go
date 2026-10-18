@@ -154,3 +154,27 @@ func (p Package) ToolBundle() (core.PluginBundle, error) {
 	}
 	return b, b.Validate()
 }
+
+// BackgroundIdentity pins the locally installed capability and its declared files.
+func (p Package) BackgroundIdentity() (core.PluginIdentity, error) {
+	identity := core.PluginIdentity{ID: p.Manifest.ID, Version: p.Manifest.Version}
+	if p.Manifest.Contributes.Background == nil {
+		return identity, errors.New("background capability unavailable")
+	}
+	files := map[string]string{}
+	size := 0
+	for _, name := range p.Manifest.Contributes.Background.Files {
+		data, err := p.ReadFile(name, 512*1024)
+		if err != nil {
+			return identity, err
+		}
+		size += len(data)
+		if size > 512*1024 {
+			return identity, errors.New("background package too large")
+		}
+		files[name] = string(data)
+	}
+	var err error
+	identity.Digest, err = core.HashJSON([]any{p.Manifest, files})
+	return identity, err
+}

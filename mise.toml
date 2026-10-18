@@ -83,7 +83,7 @@ run = "python scripts/go-notices --output .local/licenses/go-dependencies.txt ./
 
 [tasks."test:ui"]
 description = "Verify shared DOM composer and production owner-scoped state contracts"
-run = ["node scripts/tests/go-ui-resource-cache.mjs", "node scripts/tests/go-ui-state.mjs", "node scripts/tests/go-ui-production-state.mjs", "node scripts/tests/script-runs.mjs", "node scripts/tests/go-ui-notifications.mjs", "node scripts/tests/go-ui-attachments.mjs", "node scripts/tests/web-errors.js"]
+run = ["node scripts/tests/go-ui-resource-cache.mjs", "node scripts/tests/go-ui-state.mjs", "node scripts/tests/go-ui-production-state.mjs", "node scripts/tests/script-runs.mjs", "node scripts/tests/go-ui-notifications.mjs", "node --test plugins/github/notifications.test.mjs", "node scripts/tests/go-ui-attachments.mjs", "node scripts/tests/web-errors.js"]
 
 [tasks."test:executor"]
 description = "Verify local executor process ownership, sessions and cleanup"
@@ -104,6 +104,10 @@ python -m venv .local/skill-tests
 .local/skill-tests/bin/python -m pip install --disable-pip-version-check -r skills/skill-creator/scripts/requirements.txt
 .local/skill-tests/bin/python scripts/tests/skill-authoring.py
 """
+
+[tasks."test:plugin-notifications"]
+description = "Verify GitHub background polling and durable assistant delivery"
+run = ["node --test plugins/github/notifications.test.mjs", "go test -race ./internal/assistant ./internal/control -run 'TestPlugin|TestGitHubPlugin' -count=1"]
 
 [tasks."test:i18n"]
 description = "Verify shared product translation completeness"

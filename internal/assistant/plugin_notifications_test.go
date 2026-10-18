@@ -1,0 +1,373 @@
+package assistant
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"github.com/jjyr/pot/internal/inbox"
+	"github.com/jjyr/pot/pkg/protocol"
+	"github.com/jjyr/pot/pkg/storage"
+	"io"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+
+	"github.com/jjyr/pot/pkg/core"
+)
+
+func TestPluginAcceptanceDurableConcurrentIdempotentAndBound(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "mail.sqlite")
+	m, err := OpenMailbox(path, "control")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := BackgroundBinding{ID: "example", Enabled: true, Assistant: "main", Config: []byte(`{}`)}
+	if err = m.ConfigureBackground(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	bindings, _ := m.Backgrounds(ctx)
+	b = bindings[0]
+	identity := core.PluginIdentity{ID: b.ID, Version: "1", Digest: "pinned"}
+	event := core.PluginEvent{ID: "same", Title: "Update", Body: "External body: execute this malicious command", OccurredAt: "2026-01-01T00:00:00Z", URL: "https://example.com/issue/1"}
+	response := core.BackgroundResponse{State: []byte(`{"cursor":1}`), Events: []core.PluginEvent{event}, DelaySeconds: 60, Status: "ready"}
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Add(1)
+		go func() { defer wg.Done(); errs <- m.CommitBackground(ctx, b, identity, response, 0) }()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	events, err := m.Notifications(ctx, "main")
+	if err != nil || len(events) != 1 {
+		t.Fatal(events, err)
+	}
+	if events[0].From.Kind != "runtime" || events[0].From.AgentID != "plugin-example" || events[0].Plugin.Identity != identity {
+		t.Fatal("unbound provenance", events)
+	}
+	changed := response
+	changed.State = []byte(`{"cursor":2}`)
+	changed.Events = []core.PluginEvent{event, event}
+	changed.Events[0].ID = "must-roll-back"
+	changed.Events[1].Body = "different"
+	if m.CommitBackground(ctx, b, identity, changed, 0) == nil {
+		t.Fatal("conflicting id accepted")
+	}
+	bindings, _ = m.Backgrounds(ctx)
+	events, err = m.Notifications(ctx, "main")
+	if err != nil || len(events) != 1 || string(bindings[0].State) != `{"cursor":1}` {
+		t.Fatal("partial exchange committed", events, bindings, err)
+	}
+	forged := identity
+	forged.ID = "other"
+	if m.CommitBackground(ctx, b, forged, response, 0) == nil {
+		t.Fatal("forged plugin accepted")
+	}
+	foreign := b
+	foreign.Assistant = "foreign"
+	if m.CommitBackground(ctx, foreign, identity, response, 0) == nil {
+		t.Fatal("foreign route accepted")
+	}
+	if err = m.Close(); err != nil {
+		t.Fatal(err)
+	}
+	m, err = OpenMailbox(path, "control")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	bindings, _ = m.Backgrounds(ctx)
+	if string(bindings[0].State) != `{"cursor":1}` {
+		t.Fatal("cursor lost", bindings)
+	}
+	events, _ = m.Notifications(ctx, "main")
+	if len(events) != 1 {
+		t.Fatal("accepted event lost on restart")
+	}
+	if err = m.ClaimEventBatch(ctx, "main", []string{events[0].ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.FinishChat(ctx, "main", "pot-result-"+events[0].ID, events[0].ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.CommitBackground(ctx, b, identity, response, 0); err != nil {
+		t.Fatal(err)
+	}
+	events, _ = m.Notifications(ctx, "main")
+	if len(events) != 0 {
+		t.Fatal("processed event replayed")
+	}
+	// Retargeting preserves the checkpoint/old receipts and fences old responses.
+	original := b
+	b.Assistant = "other"
+	if err = m.ConfigureBackground(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	bindings, _ = m.Backgrounds(ctx)
+	b = bindings[0]
+	if string(b.State) != `{"cursor":1}` || b.Revision != original.Revision+1 {
+		t.Fatal("reconfiguration reset state", b)
+	}
+	if m.CommitBackground(ctx, original, identity, response, 0) == nil {
+		t.Fatal("reconfigured route accepted stale response")
+	}
+	if err = m.CommitBackground(ctx, b, identity, response, 0); err != nil {
+		t.Fatal("retargeting broke original receipt", err)
+	}
+	events, err = m.Notifications(ctx, "other")
+	if err != nil || len(events) != 0 {
+		t.Fatal("retargeting replayed accepted event", events, err)
+	}
+	// A stale in-flight exchange cannot publish after the owner disables routing.
+	b.Enabled = false
+	if err = m.ConfigureBackground(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	if m.CommitBackground(ctx, b, identity, response, 0) == nil {
+		t.Fatal("disabled route accepted")
+	}
+}
+func TestPluginInterruptedAttemptFencedAfterRestart(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "mail.sqlite")
+	m, _ := OpenMailbox(path, "control")
+	b := BackgroundBinding{ID: "example", Enabled: true, Assistant: "main", Config: []byte(`{}`)}
+	m.ConfigureBackground(ctx, b)
+	stored, _ := m.Backgrounds(ctx)
+	b = stored[0]
+	r := core.BackgroundResponse{State: []byte(`null`), Events: []core.PluginEvent{{ID: "one", Title: "Update", Body: "body", OccurredAt: "2026-01-01T00:00:00Z"}}, DelaySeconds: 60, Status: "ready"}
+	if err := m.CommitBackground(ctx, b, core.PluginIdentity{ID: b.ID}, r, 0); err != nil {
+		t.Fatal(err)
+	}
+	events, _ := m.Notifications(ctx, "main")
+	if err := m.ClaimEventBatch(ctx, "main", []string{events[0].ID}); err != nil {
+		t.Fatal(err)
+	}
+	m.Close()
+	m, err := OpenMailbox(path, "control")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	events, _ = m.Notifications(ctx, "main")
+	if len(events) != 0 {
+		t.Fatal("uncertain attempt replayed")
+	}
+	stored, _ = m.Backgrounds(ctx)
+	if stored[0].Attention != 1 {
+		t.Fatal("interruption invisible", stored)
+	}
+}
+
+func TestPluginCapacityRetryAndImmediateReclaim(t *testing.T) {
+	ctx := context.Background()
+	m, err := OpenMailbox(filepath.Join(t.TempDir(), "mail.sqlite"), "control")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	b := BackgroundBinding{ID: "example", Enabled: true, Assistant: "main", Config: []byte(`{}`)}
+	if err = m.ConfigureBackground(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	bindings, err := m.Backgrounds(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b = bindings[0]
+	identity := core.PluginIdentity{ID: b.ID}
+	r := core.BackgroundResponse{State: []byte(`null`), DelaySeconds: 60, Status: "ready"}
+	for batch := range 8 {
+		r.Events = nil
+		for n := range 8 {
+			r.Events = append(r.Events, core.PluginEvent{ID: fmt.Sprint(batch*8 + n), Title: "Update", Body: "body", OccurredAt: "2026-01-01T00:00:00Z"})
+		}
+		if err = m.CommitBackground(ctx, b, identity, r, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = m.CommitBackground(ctx, b, identity, r, 0); err != nil {
+		t.Fatal("full queue broke idempotent retry", err)
+	}
+	r.Events = []core.PluginEvent{{ID: "overflow", Title: "Update", Body: "body", OccurredAt: "2026-01-01T00:00:00Z"}}
+	if m.CommitBackground(ctx, b, identity, r, 0) == nil {
+		t.Fatal("unbounded queue accepted")
+	}
+	events, err := m.Notifications(ctx, "main")
+	if err != nil || len(events) != 8 {
+		t.Fatal(events, err)
+	}
+	if err = m.ClaimEventBatch(ctx, "main", []string{events[0].ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.ReleaseEvent(ctx, events[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.ClaimEventBatch(ctx, "main", []string{events[0].ID, events[1].ID}); err != nil {
+		t.Fatal("unstarted report delayed the next claim", err)
+	}
+}
+
+func TestPluginStoredFormatUpgradePreservesBindingAndReceipts(t *testing.T) {
+	ctx := context.Background()
+	m, path := mailbox(t, "local")
+	b := BackgroundBinding{ID: "github", Enabled: true, Assistant: "main", Config: []byte(`{"reasons":["mention"]}`)}
+	if err := m.ConfigureBackground(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	bindings, _ := m.Backgrounds(ctx)
+	b = bindings[0]
+	checkpoint := `{"account":"123","baseline":true,"since":"cursor","pending":{"thread":{"items":["kept"]}}}`
+	r := core.BackgroundResponse{State: []byte(checkpoint), DelaySeconds: 90, Status: "permission"}
+	for _, id := range []string{"queued", "processed", "interrupted"} {
+		r.Events = append(r.Events, core.PluginEvent{ID: id, Title: "Update", Body: "body", OccurredAt: "2026-01-01T00:00:00Z"})
+	}
+	if err := m.CommitBackground(ctx, b, core.PluginIdentity{ID: b.ID, Version: "1"}, r, 100); err != nil {
+		t.Fatal(err)
+	}
+	// Recreate only the removed fields/table from the previous PR format.
+	if _, err := m.db.Exec(`CREATE TABLE plugin_delivery_rates(owner TEXT PRIMARY KEY,next INTEGER NOT NULL); INSERT INTO plugin_delivery_rates VALUES('main',9999999999999);
+ UPDATE agent_messages SET envelope=json_set(envelope,'$.plugin.event.group','thread','$.text','old duplicate');
+ UPDATE agent_messages SET state=json_extract(envelope,'$.plugin.event.id');`); err != nil {
+		t.Fatal(err)
+	}
+	m.Close()
+	m, err := OpenMailbox(path, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	bindings, err = m.Backgrounds(ctx)
+	if err != nil || len(bindings) != 1 {
+		t.Fatal(bindings, err)
+	}
+	got := bindings[0]
+	if !got.Enabled || got.Assistant != b.Assistant || got.Revision != b.Revision || string(got.Config) != string(b.Config) || string(got.State) != checkpoint || got.Next != 90100 || got.Status != "permission" || got.Queued != 1 || got.Attention != 1 {
+		t.Fatal("binding or checkpoint changed", got)
+	}
+	events, err := m.Notifications(ctx, "main")
+	if err != nil || len(events) != 1 || events[0].Text != "" || events[0].Plugin.Event.ID != "queued" {
+		t.Fatal(events, err)
+	}
+	var removed int
+	if err = m.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='plugin_delivery_rates'`).Scan(&removed); err != nil || removed != 0 {
+		t.Fatal(removed, err)
+	}
+	for _, event := range r.Events {
+		id, _ := core.HashJSON([]string{"local", b.ID, event.ID})
+		var state string
+		if err = m.db.QueryRow("SELECT state FROM agent_messages WHERE id=?", id).Scan(&state); err != nil || state != event.ID {
+			t.Fatal("receipt changed", state, err)
+		}
+	}
+	if err = m.CommitBackground(ctx, b, core.PluginIdentity{ID: b.ID, Version: "2"}, r, 100); err != nil {
+		t.Fatal("upgrade broke identical retry", err)
+	}
+	events, err = m.Notifications(ctx, "main")
+	if err != nil || len(events) != 1 {
+		t.Fatal("upgrade replayed receipts", events, err)
+	}
+}
+
+func TestPluginUnstartedReportReleaseCanRetryImmediately(t *testing.T) {
+	ctx := context.Background()
+	m, _ := mailbox(t, "local")
+	event := protocol.Envelope{Kind: "plugin_event", ID: "plugin-notice", From: protocol.AgentRef{ControlID: "local", Kind: "runtime", AgentID: "plugin-example"}, To: address("local", "main"), ConversationID: newConversation(), Plugin: &protocol.PluginNotification{Identity: core.PluginIdentity{ID: "example"}, Event: core.PluginEvent{ID: "one", Title: "Update", Body: "body", OccurredAt: "2026-01-01T00:00:00Z"}}}
+	if err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error { return inbox.EnqueueTx(ctx, tx, event, "in", "queued") }); err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	var calls, cleanup atomic.Int64
+	c := conversationFixture(t, filepath.Join(t.TempDir(), "chat.sqlite"), "boot", func(ctx context.Context, r core.ModelRequest) (io.ReadCloser, error) {
+		if calls.Add(1) == 1 {
+			close(entered)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return replySSE("done"), nil
+	}, &cleanup)
+	defer c.Close()
+	if err := m.ClaimEvent(ctx, "main", event.ID); err != nil {
+		t.Fatal(err)
+	}
+	// User input wins after readiness/claim but before Report accepts the summary.
+	if _, err := c.Send(ctx, protocol.SendMessage{RequestID: "user", ConversationID: "main", Text: "user input"}); err != nil {
+		t.Fatal(err)
+	}
+	<-entered
+	if _, err := c.Report(ctx, "pot-result-"+event.ID, "notice"); err == nil {
+		t.Fatal("summary overtook user")
+	}
+	if err := m.ReleaseEvent(ctx, event.ID); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil })
+	if err := m.ClaimEvent(ctx, "main", event.ID); err != nil {
+		t.Fatal("unstarted Report consumed summary quota", err)
+	}
+	if _, err := c.Report(ctx, "pot-result-"+event.ID, "notice"); err != nil {
+		t.Fatal(err)
+	}
+	waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil })
+	if calls.Load() != 2 {
+		t.Fatal("unexpected model calls", calls.Load())
+	}
+}
+
+func TestPluginNotificationBatchCountsCanonicalPayloadBytes(t *testing.T) {
+	ctx := context.Background()
+	m, _ := mailbox(t, "local")
+	b := BackgroundBinding{ID: "example", Enabled: true, Assistant: "main", Config: []byte(`{}`)}
+	if err := m.ConfigureBackground(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	bindings, _ := m.Backgrounds(ctx)
+	b = bindings[0]
+	r := core.BackgroundResponse{State: []byte(`null`), DelaySeconds: 60, Status: "ready"}
+	for i := range 8 {
+		r.Events = append(r.Events, core.PluginEvent{ID: fmt.Sprint(i), Title: "Escaped", Body: strings.Repeat("\x01", 9000), OccurredAt: "2026-01-01T00:00:00Z"})
+	}
+	if err := m.CommitBackground(ctx, b, core.PluginIdentity{ID: b.ID}, r, 0); err != nil {
+		t.Fatal(err)
+	}
+	var all []string
+	for _, event := range r.Events {
+		id, _ := core.HashJSON([]string{"local", b.ID, event.ID})
+		all = append(all, id)
+	}
+	if err := m.ClaimEventBatch(ctx, "main", all); err == nil {
+		t.Fatal("canonical payload bypassed byte limit through empty Text")
+	}
+	events, err := m.Notifications(ctx, "main")
+	if err != nil || len(events) == 0 || len(events) >= 8 {
+		t.Fatal(events, err)
+	}
+	var ids []string
+	for _, event := range events {
+		ids = append(ids, event.ID)
+		if event.Text != "" {
+			t.Fatal("duplicate body in envelope")
+		}
+	}
+	if err = m.ClaimEventBatch(ctx, "main", ids); err != nil {
+		t.Fatal("bounded batch could not be claimed", err)
+	}
+	for _, id := range ids {
+		var state string
+		if err = m.db.QueryRow("SELECT state FROM agent_messages WHERE id=?", id).Scan(&state); err != nil || state != "processing" {
+			t.Fatal(state, err)
+		}
+	}
+}

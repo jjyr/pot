@@ -289,7 +289,10 @@ func TestResultBatchConcurrentClaimAndRestartFence(t *testing.T) {
 	ctx := context.Background()
 	m, path := mailbox(t, "local")
 	a := enqueueResult(t, m, "A", "main")
-	b := enqueueResult(t, m, "B", "main")
+	b := protocol.Envelope{Kind: "plugin_event", ID: "plugin-B", From: protocol.AgentRef{ControlID: "local", Kind: "runtime", AgentID: "plugin-example"}, To: address("local", "main"), ConversationID: newConversation(), Plugin: &protocol.PluginNotification{Identity: core.PluginIdentity{ID: "example"}, Event: core.PluginEvent{ID: "B", Title: "B", Body: "body", OccurredAt: "2026-01-01T00:00:00Z"}}}
+	if err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error { return inbox.EnqueueTx(ctx, tx, b, "in", "queued") }); err != nil {
+		t.Fatal(err)
+	}
 	errors := make(chan error, 2)
 	for range 2 {
 		go func() { errors <- m.ClaimEventBatch(ctx, "main", []string{a.ID, b.ID}) }()
@@ -386,5 +389,35 @@ func TestUserArrivalDuringBatchStartsNextTurn(t *testing.T) {
 		if message.ID == late.MessageID && (message.Queued || message.Status != protocol.Complete) {
 			t.Fatal(message)
 		}
+	}
+}
+
+func TestNotificationLargeFirstTaskOutcomeDoesNotBlockInbox(t *testing.T) {
+	ctx := context.Background()
+	m, _ := mailbox(t, "local")
+	task := enqueueResult(t, m, "large", "main")
+	task.Text = strings.Repeat("\x01", protocol.MaxMailText)
+	task.Result.Text = task.Text
+	body, err := json.Marshal(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = m.db.Exec("UPDATE agent_messages SET envelope=? WHERE id=?", string(body), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	later := enqueueResult(t, m, "later", "main")
+	events, err := m.Notifications(ctx, "main")
+	if err != nil || len(events) != 1 || events[0].ID != task.ID {
+		t.Fatal("large first outcome blocked inbox", events, err)
+	}
+	if err = m.ClaimEventBatch(ctx, "main", []string{task.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.FinishChat(ctx, "main", "pot-result-"+task.ID, task.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	events, err = m.Notifications(ctx, "main")
+	if err != nil || len(events) != 1 || events[0].ID != later.ID {
+		t.Fatal("later outcome lost", events, err)
 	}
 }
