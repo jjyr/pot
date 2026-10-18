@@ -36,6 +36,7 @@ async page => {
  try{
   await page.emulateMedia({reducedMotion:'reduce'});await page.setViewportSize({width:1200,height:850});await page.goto(new URL('/?locale=zh-CN&theme=light&conversation=alpha',page.url()).href);
   await page.locator('.background-task').waitFor();await page.locator('#pot-composer').fill('保留这条草稿');
+  await page.waitForFunction(count=>document.querySelectorAll('.message-column .message').length===count,messages.length);
   const messageCount=await page.locator('.message-column .message').count();
   pending=[approval('task-approval','task-one')];await change();
   await chatCard().getByText('确认仓库访问权限',{exact:true}).waitFor();
@@ -44,7 +45,7 @@ async page => {
   await row().getByText('等待你的授权 · 1',{exact:true}).waitFor();
   assert(!await chatCard().evaluate(node=>node.open),'Approval cards start collapsed');
   assert(await page.locator('dialog[open]').count()===0,'Approval arrival never opens a dialog');
-  assert(await region().evaluate(node=>node.previousElementSibling.classList.contains('role-assistant')),'Approval region is immediately after the last assistant message');
+  assert(await region().evaluate(node=>node.previousElementSibling.classList.contains('background-tasks')&&node.previousElementSibling.previousElementSibling.querySelector('.role-assistant')!==null),'Approval region follows the task region after the paged messages');
   assert(await page.locator('.message-column .message').count()===messageCount,'Reminder is not a conversation message');
   assert(await row().locator('.unread-badge').count()===0,'Approval does not add ordinary unread replies');
   await page.screenshot({path:'output/pr-images/task-approval-inline-desktop-after.png'});
@@ -58,7 +59,7 @@ async page => {
   assert(await chatCard().getByRole('button',{name:'拒绝',exact:true}).evaluate(node=>document.activeElement===node),'Permission refresh preserves focus');
   messages.push({id:'next-assistant',role:'assistant',reply_to:'u',text:'授权后我会继续检查。',status:'complete'});await push();
   await page.getByText('授权后我会继续检查。',{exact:true}).waitFor();
-  assert(await region().evaluate(node=>node.previousElementSibling.textContent.includes('授权后我会继续检查。')),'Region follows the newest assistant message');
+  assert(await region().evaluate(node=>node.previousElementSibling.classList.contains('background-tasks')&&node.previousElementSibling.previousElementSibling.textContent.includes('授权后我会继续检查。')),'Region follows the newest assistant message');
   assert(await chatCard().evaluate(node=>node.open),'Moving the region preserves expanded review');
   await chatCard().getByRole('alert').getByText('Decision failed; try again',{exact:true}).waitFor();
   rejectDecision=false;await row('Other').click();
@@ -70,6 +71,7 @@ async page => {
   await row().click();await chatCard('task-two').getByText('读取发布文件',{exact:true}).waitFor();
   assert(await region().locator('.approval-card').count()===2,'Chat lists every pending operation');
   await page.reload();await chatCard('task-two').waitFor();await page.locator('#pot-composer').fill('保留这条草稿');
+  await page.waitForFunction(count=>document.querySelectorAll('.message-column .message').length===count,messageCount+1);
   assert(await page.locator('.message-column .message').count()===messageCount+1,'Reload restores approvals without inserting messages');
   await page.setViewportSize({width:390,height:850});await region().evaluate(node=>node.scrollIntoView({block:'end'}));
   await page.screenshot({path:'output/pr-images/task-approval-inline-mobile-after.png'});
