@@ -31,7 +31,7 @@ or approved commands. Task semantics are in [Task coordination](task-coordinatio
 ## JavaScript composition
 
 `exec({code, yield_time_ms?})` runs goja in an isolated Go worker process with top-level `await`, ordinary
-JavaScript processing, `tools.NAME(args)` and `text(value)`. Only `text()` output
+JavaScript processing, `tools.NAME(args)`, `text(value)` and `yield_control()`. Only `text()` output
 enters model history; child operations remain visible in events and approval cards.
 
 ```javascript
@@ -46,6 +46,13 @@ Await dependent calls sequentially. Inspect tool results for failures; transport
 and approval errors reject their Promises. Product tools retain their MCP wrappers.
 Unawaited calls may have effects, but do not survive script completion.
 
+`text()` accumulates output without returning control. Short scripts return their
+complete result immediately when they finish, including execution cleanup.
+`yield_control()` explicitly returns accumulated output while the script keeps
+running. Otherwise `exec` waits up to 30 seconds by default before returning a
+running ID; `wait` defaults to 10 seconds. Both accept `yield_time_ms` (1–60000).
+Output arriving during either wait does not itself cause an early return.
+
 Up to four runs may be active at once; there is no cumulative per-turn run quota.
 At most 64 uncollected runs/results are retained. Collect finished results with
 `wait` to release retained state. Returning a completed result consumes its ID;
@@ -53,7 +60,8 @@ later waits for that ID fail rather than replaying the result.
 
 Results contain `output` and `completed`, plus `exec_id` while running.
 `wait({exec_id, yield_time_ms?})` returns new output or completion without repeating
-previous output. `write_stdin` manages shell sessions. Task completion is delivered
+previous output. Call it only after a running result supplies `exec_id`.
+`write_stdin` manages shell sessions. Task completion is delivered
 through Runtime inbox events; automatic summaries expose no tools.
 
 Runs belong to the current accepted turn and continue while the Agent awaits other

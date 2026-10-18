@@ -80,6 +80,12 @@ configure their own hidden worker handler. Evaluation callers inject the Compose
 through `eval.RunOptions` or the suite/live entry points.
 See [tool composition](tool-composition.md) for lifecycle and memory limits.
 
+`composition.Runner.Run`, `composition.ProcessRunner.Run` and `agent.Composer`
+emit `composition.Event`: `Type: "text"` carries a `Text` chunk, while
+`Type: "yield"` requests delivery of accumulated output without ending execution.
+Consumers should buffer text until completion, an explicit yield or their wait
+deadline rather than treating every text chunk as a running-result boundary.
+
 ## Embed a complete host
 
 Use `pkg/runtime` when the application needs Pot's persistent assistants, Control

@@ -108,8 +108,12 @@ provider is not a fallback. Custom API connections leave catalog provider identi
 empty and search the entire local directory by exact model ID. Known model-family
 prefixes identify official providers, which take precedence; otherwise the first
 matching provider in provider-ID order supplies metadata. Regional official
-providers follow the explicit family preference order. If no provider contains the
-model ID, Pot uses generic defaults. This lookup does not change the configured
+providers follow the explicit family preference order. If the full model ID is
+absent and contains `/`, lookup retries the name after the final `/`, using the
+same provider scope and precedence. The suffix must match exactly; similar names,
+versions and variants are never guessed. Full-ID matches always take precedence
+over suffix matches. If neither lookup finds a model, Pot uses generic defaults.
+This lookup does not change the configured model ID,
 endpoint, request protocol or credentials. Explicitly selected providers
 retain their catalog identity independently of the generated credential-route ID.
 `GET /api/v1/providers` includes a `model_defaults` map selected by Control for

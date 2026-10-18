@@ -137,6 +137,37 @@ type services struct {
 	compactions []json.RawMessage
 }
 
+func TestAgentContinuesBeyond128Rounds(t *testing.T) {
+	a, f, s, thread, execution := setup(t)
+	thread.Config.Params.Agent.AutoCompact = false
+	thread.Config.ContextWindow = 1000000
+	thread.Config.Params.Agent.ContextWindow = 1000000
+	if err := thread.Config.Rehash(); err != nil {
+		t.Fatal(err)
+	}
+	a.Tools = []m.ToolDefinition{{Name: "probe", InputSchema: json.RawMessage(`{"type":"object"}`)}}
+	calls := 0
+	a.Dispatch = func(context.Context, core.ExecutionContext, m.ToolCall, func(core.Update) error) (json.RawMessage, error) {
+		calls++
+		return json.RawMessage(`{"ok":true}`), nil
+	}
+	s.model = func(_ core.ModelRequest, index int) (string, error) {
+		if index == 130 {
+			return response("done"), nil
+		}
+		return response("", m.ToolCall{ID: fmt.Sprintf("probe-%d", index), Name: "probe", Arguments: json.RawMessage(`{}`)}), nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := a.Execute(ctx, execution, thread, core.TurnRequest{RequestID: "turn", Text: "finish the work"}, false, func(core.AgentEvent) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	var checkpoint Checkpoint
+	if err := json.Unmarshal(f.body, &checkpoint); err != nil || checkpoint.CompletedRequest != "turn" || s.calls != 131 || calls != 130 {
+		t.Fatal("long task did not finish normally", err, checkpoint.CompletedRequest, s.calls, calls)
+	}
+}
+
 func (s *services) Model(_ context.Context, request core.ModelRequest) (io.ReadCloser, error) {
 	s.feedback.mu.Lock()
 	var state Checkpoint

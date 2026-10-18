@@ -246,6 +246,17 @@ func official(model string) []string {
 	return nil
 }
 func find(providers map[string]provider, catalog *string, id string) (model, bool) {
+	if m, ok := findExact(providers, catalog, id); ok {
+		return m, true
+	}
+	// Proxy route prefixes do not change the underlying model's public facts.
+	// Preserve full-ID precedence, then search the final name exactly.
+	if slash := strings.LastIndexByte(id, '/'); slash >= 0 && slash+1 < len(id) {
+		return findExact(providers, catalog, id[slash+1:])
+	}
+	return model{}, false
+}
+func findExact(providers map[string]provider, catalog *string, id string) (model, bool) {
 	if catalog != nil {
 		m, ok := providers[*catalog].Models[id]
 		return m, ok

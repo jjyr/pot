@@ -54,6 +54,11 @@ exclusion until the owner resolves the request.
 
 ## Execution time
 
+The Agent continues model/tool rounds until it produces a final response without
+pending tool calls or guidance. There is no fixed model-round count limit.
+Cancellation, configured request/token allowances, context limits and individual
+operation deadlines still apply; context compaction preserves continuation.
+
 The destination Runner persists `started_at_ms` when it first claims an accepted
 run. Subsequent claims after allowance resume retain that timestamp. Control
 copies it into Task info from the original run receipt, including when the first

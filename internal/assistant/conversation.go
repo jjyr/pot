@@ -32,7 +32,6 @@ type RunOptions struct {
 	Ready              func(context.Context) error
 	Observe            func(context.Context, agent.Observation) error
 	Settle             func(context.Context) error
-	MaxRounds          int
 }
 type ConversationOptions struct {
 	Context                                  context.Context
@@ -815,7 +814,7 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 		}
 		return c.recordCleanup(ctx, request.RequestID, thread.Generation)
 	}
-	loop := agent.Agent{Services: options.Services, Feedback: binding, Dispatch: options.Dispatch, Cleanup: cleanup, Composer: options.Composer, Tools: options.Tools, PrepareContext: options.PrepareContext, ResolveAttachments: options.ResolveAttachments, MaxRounds: options.MaxRounds}
+	loop := agent.Agent{Services: options.Services, Feedback: binding, Dispatch: options.Dispatch, Cleanup: cleanup, Composer: options.Composer, Tools: options.Tools, PrepareContext: options.PrepareContext, ResolveAttachments: options.ResolveAttachments}
 	err = loop.Execute(runCtx, options.Execution, thread, core.TurnRequest{RequestID: request.RequestID, Text: inputText, Attachments: inputAttachments}, resuming, binding.event)
 	phase := execution.Succeeded
 	if err != nil {
