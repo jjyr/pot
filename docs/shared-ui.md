@@ -21,6 +21,7 @@ web/src: shell, pages, composer, drafts, configuration, navigation
 [`components/ui.js`](../web/src/components/ui.js) owns the shell, assistant
 directory, Chat and input lifecycle. [`components/pages.mjs`](../web/src/components/pages.mjs)
 owns Tasks, schedules, Machines, Usage, configuration forms and return contexts.
+[`components/usage.mjs`](../web/src/components/usage.mjs) owns exact-count usage tooltips, the trend chart and independently loaded detail lists.
 [`components/reply.mjs`](../web/src/components/reply.mjs) owns reply content,
 activity and the single failure presentation; [`state/chat-replies.mjs`](../web/src/state/chat-replies.mjs)
 binds optimistic and durable reply identities without changing execution state.
