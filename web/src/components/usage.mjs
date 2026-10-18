@@ -75,6 +75,7 @@ export function createUsageList({root,kind,title,params,owner,request,token,curr
   }
   async function load(next=offset){
     if(!current())return;const query=new URLSearchParams({...params,offset:next}),path=`/api/v1/usage/${kind}?${query}`,cacheKey=JSON.stringify([key,next]),attempt=++sequence,buttons=[...content.querySelectorAll('button')].map(button=>[button,button.disabled]);
+    const saved=cache.get(cacheKey);if(saved){offset=next;offsets.set(key,offset);render(saved);}
     region.setAttribute('aria-busy','true');for(const button of region.querySelectorAll('button'))button.disabled=true;
     try{const value=await request(path,{...owner,signal:token.signal});if(!current()||attempt!==sequence)return;offset=next;offsets.set(key,offset);cache.set(cacheKey,value);render(value);}
     catch(reason){if(!current()||attempt!==sequence)return;const saved=cache.get(cacheKey);if(saved){offset=next;offsets.set(key,offset);render(saved,true);}else {content.querySelector('.usage-list-skeleton')?.remove();status.replaceChildren(n('p','inline-error',reason.message),action(tr('Retry','重试'),()=>load(next)));for(const [button,disabled]of buttons)button.disabled=disabled;}}

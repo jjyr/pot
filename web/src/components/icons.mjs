@@ -7,7 +7,7 @@ const navigationGlyphs = {"tasks":[["polyline",{"points":"22 12 16 12 14 15 10 1
 
 navigationGlyphs.cloud=[['path',{d:'M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z'}]];
 const paths = {
-  menu: 'M4 6h16M4 12h16M4 18h16', back: 'm14 5-7 7 7 7', plus: 'M12 5v14M5 12h14',
+  reply: 'm9 10-5 5 5 5M4 15h11a5 5 0 0 0 0-10h-1', menu: 'M4 6h16M4 12h16M4 18h16', back: 'm14 5-7 7 7 7', plus: 'M12 5v14M5 12h14',
   more: 'M5 12h.01M12 12h.01M19 12h.01', send: 'm6 10 6-6 6 6M12 4v16',
   open: 'M14 3h7v7M21 3l-9 9M10 3H3v18h18v-7',
   stop: 'M6 6h12v12H6z', down: 'm6 9 6 6 6-6', close: 'm6 6 12 12M6 18 18 6',

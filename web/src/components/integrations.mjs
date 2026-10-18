@@ -1,6 +1,7 @@
 import {node as n,action} from './primitives.mjs';
 import {icon} from './icons.mjs';
 import {translate} from '../locales/messages.mjs';
+import {createPluginNotifications} from './plugin-notifications.mjs';
 import {reconcile} from './reconcile.mjs';
 
 // The view only sees the integration catalog and login sessions. OAuth tokens
@@ -8,15 +9,18 @@ import {reconcile} from './reconcile.mjs';
 export function createIntegrations({root,request,scope,signal,locale,openExternal,refresh}) {
   const t=key=>translate(locale(),key),context={...scope};
   const section=n('section','integrations');root.append(section);
-  section.append(n('h2','page-heading',t('integrations.title')),n('p','hint',t('integrations.description')));
+  const heading=n('h2','page-heading'),description=n('p','hint');section.append(heading,description);
   const rows=n('div','integration-list');section.append(rows);
+  const updateNotifications=createPluginNotifications({root:section,request,scope:context,signal,locale,refresh});
   let items=[],timer,busy=false;
   const active=()=>!signal.aborted;
-  signal.addEventListener('abort',()=>clearTimeout(timer),{once:true});
+  window.addEventListener('pot:locale',render);
+  signal.addEventListener('abort',()=>{clearTimeout(timer);window.removeEventListener('pot:locale',render);},{once:true});
   const call=(path,options={})=>request(path,{...context,signal,...options});
   const fail=(row,error)=>{if(!active())return;row.querySelector('.inline-error')?.remove();const message=n('p','inline-error',error.message||String(error));message.setAttribute('role','alert');row.append(message);};
   async function work(button,task){const row=button.closest('.integration-row');if(busy)return;busy=true;for(const control of rows.querySelectorAll('button'))control.disabled=true;try{await task();if(active())await refresh();}catch(error){fail(row,error);}finally{busy=false;if(active())for(const control of rows.querySelectorAll('button'))control.disabled=control.dataset.unavailable==='true';}}
   function render(){
+    heading.textContent=t('integrations.title');description.textContent=t('integrations.description');
     clearTimeout(timer);const projection=n('div','integration-list');
     for(const item of items){
       const row=n('article','integration-row'),summary=n('div','integration-summary'),mark=n('span','integration-mark',item.name.slice(0,1)),info=n('div','row-info'),title=n('h3','integration-name',item.name),status=n('span','integration-status');
@@ -44,5 +48,5 @@ export function createIntegrations({root,request,scope,signal,locale,openExterna
     reconcile(rows,projection);
     if(items.some(item=>item.login?.status==='pending'))timer=setTimeout(()=>refresh().catch(error=>{if(active())fail(section,error);}),1500);
   }
-  return value=>{items=value.items||[];render();};
+  return value=>{items=value.items||[];render();updateNotifications(value.notifications);};
 }

@@ -116,8 +116,22 @@ bypass failed hooks. CI separates portable product and macOS packaging checks.
 `resources/app/PotIcon.swift` remains the vector artwork master used by icon and
 tray generation; removing the VM Helper does not remove brand generation.
 
-Paid tests require an explicit `POT_LIVE=1` in the calling process. Copy
-`.env.example` to `.env` in the current repository root and set
+Paid tests require an explicit `POT_LIVE=1` in the calling process.
+
+For a machine's existing configured model, the opt-in
+`TestConfiguredModelMessageReferencesLive` test accepts
+`POT_REFERENCE_LIVE_ROOT` pointing to that Control root and the existing
+`POT_SECRET_KEY_FILE` when applicable. It reads provider metadata and encrypted
+credentials with a read-only SQLite connection, then uses an isolated test
+Control, conversation and accounting. It checks selected-excerpt interpretation,
+generated-message IDs with native replay, and ID-only lookup with the original
+absent from retained model history. It makes
+at most six model requests, with three per turn and 512 output tokens per request.
+Credentials stay on the configured machine and are never logged. Run it with
+`POT_LIVE=1 mise exec -- go test -v ./internal/control -run '^TestConfiguredModelMessageReferencesLive$' -count=1 -timeout=4m`
+and the two explicit path variables above.
+
+For DeepSeek tests, copy `.env.example` to `.env` in the current repository root and set
 `DEEPSEEK_API_KEY`; `DEEPSEEK_BASE_URL` and `DEEPSEEK_MODEL` default to
 `https://api.deepseek.com` and `deepseek-v4-flash`. `.env` is Git-ignored.
 Configuration is loaded only after opt-in; putting `POT_LIVE=1` in `.env` cannot

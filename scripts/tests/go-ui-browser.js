@@ -50,6 +50,61 @@ async page => {
       await page.screenshot({path: `/private/tmp/pot-go-ui-${width}-${theme}-${locale}-${surface}.png`});
       layouts.push({width, theme, locale, surface, geometry});
     }
+    // Wide Markdown must scroll inside its code/table, never widen history.
+    const wideMarkdown = [
+      '长消息应当在聊天窗口内自动换行。'.repeat(12),
+      'https://example.com/' + 'long-path-segment'.repeat(30),
+      '```js\nconst value = "' + 'wide code '.repeat(50) + '";\n```',
+      '| ' + Array.from({length: 32}, (_, i) => 'Column ' + i).join(' | ') + ' |\n| ' + Array(32).fill('---').join(' | ') + ' |\n| ' + Array(32).fill('Table content').join(' | ') + ' |',
+    ].join('\n\n');
+    const wideSnapshot = {...initial, messages: [
+      {id: 'wide-user', role: 'user', text: wideMarkdown, status: 'complete'},
+      {id: 'wide-assistant', role: 'assistant', text: wideMarkdown, status: 'complete'},
+    ]};
+    const wideRoute = route => route.fulfill({json: wideSnapshot});
+    const eventsRoute = route => route.fulfill({contentType: 'text/event-stream', body: ': layout fixture\n\n'});
+    await page.route('**/api/preview/snapshot', wideRoute);
+    await page.route('**/api/preview/events', eventsRoute);
+    try {
+      for (const [width, surface] of [[393, 'main'], [390, 'main'], [719, 'main'], [720, 'main'], [900, 'main'], [1440, 'main'], [390, 'tray']]) {
+        await page.setViewportSize({width, height: 852});
+        await cdp.send('Emulation.setDeviceMetricsOverride', {width, height: 852, deviceScaleFactor: 2, mobile: width < 720});
+        await page.goto(`${base}/?theme=light&locale=zh-CN&surface=${surface}&conversation=preview-conversation`);
+        await page.locator('.role-assistant .markdown-table').waitFor();
+        const geometry = await page.evaluate(() => {
+          const history = document.querySelector('.history');
+          history.scrollLeft = 100;
+          return {
+            viewport: innerWidth, page: document.documentElement.scrollWidth,
+            history: history.clientWidth, historyScroll: history.scrollWidth, historyLeft: history.scrollLeft,
+            bubblesFit: [...document.querySelectorAll('.message-body')].every(node => {
+              const bubble = node.getBoundingClientRect(), row = node.parentElement.getBoundingClientRect();
+              return bubble.left >= row.left && bubble.right <= row.right + 1;
+            }),
+            localScroll: [...document.querySelectorAll('.message-body pre, .markdown-table')].every(node => {
+              node.scrollLeft = 100;
+              return node.scrollWidth > node.clientWidth && node.scrollLeft > 0;
+            }),
+          };
+        });
+        if (width === 393 || width === 1440) {
+          await page.locator('.history').evaluate(node => {
+            node.scrollLeft = 0;
+            for (const content of node.querySelectorAll('pre, .markdown-table')) content.scrollLeft = 0;
+            node.scrollTop = node.scrollHeight;
+          });
+          await page.screenshot({path: `/private/tmp/pot-chat-overflow-${width}.png`});
+        }
+        assert(geometry.page <= geometry.viewport && geometry.historyScroll <= geometry.history && geometry.historyLeft === 0,
+          `Wide Markdown keeps history within ${width}/${surface}: ${JSON.stringify(geometry)}`);
+        assert(geometry.bubblesFit, `User and assistant bubbles fit at ${width}/${surface}`);
+        assert(geometry.localScroll, `Full code and tables remain horizontally scrollable at ${width}/${surface}`);
+      }
+    } finally {
+      await page.unroute('**/api/preview/snapshot', wideRoute);
+      await page.unroute('**/api/preview/events', eventsRoute);
+    }
+
     // Fresh phone visits select the directory. Navigation preserves its search.
     await page.goto(`${base}/?theme=light&locale=en`);
     await page.getByRole('searchbox', {name: 'Search assistants'}).fill('pot');

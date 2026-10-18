@@ -142,7 +142,18 @@ func (a *Agent) compact(ctx context.Context, execution core.ExecutionContext, th
 			return err
 		}
 	}
-	replacement = append(replacement, summaryMessage(summary.Text), *last)
+	replacement = append(replacement, summaryMessage(summary.Text))
+	// Retain all original members of the newest accepted user batch. A batch's
+	// identities and quotes must survive together rather than just its last text.
+	if last.Kind.Key == "" {
+		replacement = append(replacement, *last)
+	} else {
+		for _, message := range state.Messages {
+			if message.Kind.Type == "conversation" && message.Role == "user" && message.Kind.Key == last.Kind.Key {
+				replacement = append(replacement, message)
+			}
+		}
+	}
 	afterInput := *input
 	afterInput.Messages = portable(thread.Config, replacement, vision)
 	if a.ResolveAttachments != nil {

@@ -21,10 +21,11 @@ type TurnControl struct {
 	Action        string `json:"action" required:"true"`
 }
 type SteerRequest struct {
-	Attachments   []core.Attachment `json:"attachments,omitempty"`
-	RequestID     string            `json:"request_id" required:"true"`
-	UserMessageID string            `json:"user_message_id" required:"true"`
-	Text          string            `json:"text" required:"true"`
+	References    []core.MessageReference `json:"references,omitempty"`
+	Attachments   []core.Attachment       `json:"attachments,omitempty"`
+	RequestID     string                  `json:"request_id" required:"true"`
+	UserMessageID string                  `json:"user_message_id" required:"true"`
+	Text          string                  `json:"text" required:"true"`
 }
 
 // Control pauses only at safe Agent model boundaries. The in-flight model/tool
@@ -57,6 +58,7 @@ func (c *Conversation) Control(ctx context.Context, r TurnControl) error {
 // Repeating the original receipt cannot steer a later turn with the same text.
 func (c *Conversation) Steer(ctx context.Context, r SteerRequest) (protocol.SendMessageAccepted, error) {
 	r.Attachments = slices.Clone(r.Attachments)
+	r.References = slices.Clone(r.References)
 	if !core.Identifier(r.RequestID) || strings.HasPrefix(r.RequestID, "pot-result-") || !core.Identifier(r.UserMessageID) || (strings.TrimSpace(r.Text) == "" && len(r.Attachments) == 0) || len(r.Text) > 65536 {
 		return protocol.SendMessageAccepted{}, errors.New("invalid steering input")
 	}
@@ -74,22 +76,25 @@ func (c *Conversation) Steer(ctx context.Context, r SteerRequest) (protocol.Send
 		if err != nil {
 			return protocol.SendMessageAccepted{}, err
 		}
-		if source != r.UserMessageID || old == nil || old.Role != protocol.User || old.Text != r.Text || !slices.Equal(old.Attachments, r.Attachments) {
+		if source != r.UserMessageID || old == nil || old.Role != protocol.User || old.Text != r.Text || (!slices.Equal(old.Attachments, r.Attachments) || !slices.Equal(old.References, r.References)) {
 			return protocol.SendMessageAccepted{}, errors.New("steering identity has different target or content")
 		}
 		return protocol.SendMessageAccepted{MessageID: old.ID, Duplicate: true}, nil
 	}
 	if c.turn != nil && c.turn.UserMessageID == r.UserMessageID && strings.HasPrefix(c.turn.Request.RequestID, "pot-result-") {
-		request := protocol.SendMessage{RequestID: r.RequestID, ConversationID: c.options.ConversationID, Text: r.Text, Attachments: r.Attachments}
+		request := protocol.SendMessage{RequestID: r.RequestID, ConversationID: c.options.ConversationID, Text: r.Text, Attachments: r.Attachments, References: r.References}
 		old, err := c.store.Duplicate(ctx, r.RequestID)
 		if err != nil {
 			return protocol.SendMessageAccepted{}, err
 		}
 		if old != nil {
-			if old.Role != protocol.User || old.Text != r.Text || !slices.Equal(old.Attachments, r.Attachments) {
+			if old.Role != protocol.User || old.Text != r.Text || (!slices.Equal(old.Attachments, r.Attachments) || !slices.Equal(old.References, r.References)) {
 				return protocol.SendMessageAccepted{}, errors.New("steering identity has different content")
 			}
 			return protocol.SendMessageAccepted{MessageID: old.ID, Duplicate: true}, nil
+		}
+		if err := c.validateReferencesLocked(r.References); err != nil {
+			return protocol.SendMessageAccepted{}, err
 		}
 		if err := c.validateAttachmentsLocked(ctx, r.Attachments); err != nil {
 			return protocol.SendMessageAccepted{}, err
@@ -116,7 +121,7 @@ func (c *Conversation) Steer(ctx context.Context, r SteerRequest) (protocol.Send
 		}
 		for _, m := range c.messages {
 			if m.ID == messageID {
-				if !slices.Equal(m.Attachments, r.Attachments) {
+				if !slices.Equal(m.Attachments, r.Attachments) || !slices.Equal(m.References, r.References) {
 					return protocol.SendMessageAccepted{}, errors.New("steering attachment identity changed")
 				}
 				return protocol.SendMessageAccepted{MessageID: messageID, Duplicate: true}, nil
@@ -126,6 +131,9 @@ func (c *Conversation) Steer(ctx context.Context, r SteerRequest) (protocol.Send
 		return protocol.SendMessageAccepted{}, errors.New("turn is not accepting steering")
 	}
 	if !duplicate {
+		if err := c.validateReferencesLocked(r.References); err != nil {
+			return protocol.SendMessageAccepted{}, err
+		}
 		if err := c.validateAttachmentsLocked(ctx, r.Attachments); err != nil {
 			return protocol.SendMessageAccepted{}, err
 		}
@@ -136,7 +144,7 @@ func (c *Conversation) Steer(ctx context.Context, r SteerRequest) (protocol.Send
 	} else {
 		turn = c.turn.Request.RequestID
 	}
-	message := protocol.Message{ID: messageID, ConversationID: c.options.ConversationID, Role: protocol.User, Text: r.Text, Attachments: r.Attachments, Status: protocol.Accepted, CreatedAtMS: storage.Now(), Steering: true}
+	message := protocol.Message{ID: messageID, ConversationID: c.options.ConversationID, Role: protocol.User, Text: r.Text, Attachments: r.Attachments, References: r.References, Status: protocol.Accepted, CreatedAtMS: storage.Now(), Steering: true}
 	event, err := c.store.SaveWithMutation(ctx, message, func(tx *sql.Tx) error {
 		if duplicate {
 			return nil

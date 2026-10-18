@@ -179,6 +179,21 @@ input and compaction independently of total context and output reservation. Toke
 estimation itself continues to follow [Codex's rules](token-usage.md#context-estimation).
 Public metadata does not change prompts, tool descriptions or execution authority.
 Known image and PDF input support supply independent descriptor defaults.
+Provider model discovery also reads an optional `modalities.input` list from
+model-list entries. This is a gateway extension, not a field in the standard
+[OpenAI model-list API](https://developers.openai.com/api/reference/resources/models/methods/list).
+Missing, null or malformed extensions do not prevent model
+discovery and leave capabilities unknown, rather than explicitly unsupported;
+public directory defaults remain available. Unrecognized input kinds are ignored.
+Saving a connection retains valid declarations by exact model ID in
+`Profile.model_settings.input_modalities`. These connection
+facts override public directory modalities, so custom gateway names work without
+guessing aliases; absent facts retain directory defaults. Changing the connection
+address or protocol immediately discards facts from the previous route and
+starts a new discovery. Responses from previous requests cannot restore stale
+facts, including when editing away from and back to the original route.
+Discovery does not save configuration by itself. Assistant model selections use the matching
+connection facts, including when selecting another model from the same Provider.
 Attachment capabilities are booleans intersected with implemented protocol
 encodings; image input never implies PDF input. Explicit model-catalog capability
 overrides take precedence. See [Chat attachments](chat-attachments.md).

@@ -49,8 +49,8 @@ so the same outcome is not reported twice. `wait` collects JavaScript compositio
 results; `write_stdin` manages a worker's command session.
 
 Pending approvals still expose the exact reviewed operation in Chat.
-Approval waiting retains the execution lease, route capacity and shared-resource
-exclusion until the owner resolves the request.
+Approval waiting retains the execution lease and route capacity until the owner
+resolves the request.
 
 ## Execution time
 
@@ -142,7 +142,7 @@ directories on the fixed Runtime. Cleanup closes only that Task's processes and
 sessions; files remain. No shared guest environment or automatic project copy is
 provided.
 
-Task persistence uses schema version 5. Development builds use an independent
+Task persistence uses schema version 7. Development builds use an independent
 data root; unsupported storage formats are rejected without rewriting files.
 
 ## Client notification outcomes

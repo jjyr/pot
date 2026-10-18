@@ -12,7 +12,8 @@ import (
 func mixedPackage(t *testing.T, root string) Package {
 	t.Helper()
 	m := core.PluginManifest{SchemaVersion: 2, ID: "mixed", Version: "1", Contributes: core.PluginContributions{
-		Tools: &core.PluginTools{Runtime: "node", Execution: "runtime", Entrypoint: "index.mjs", Files: []string{"index.mjs"}, Requirements: []string{}, Tools: []json.RawMessage{json.RawMessage(`{"name":"echo","description":"echo","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}`)}},
+		Background: &core.PluginBackground{Runtime: "node", Execution: "control", Entrypoint: "service.mjs", Files: []string{"service.mjs"}},
+		Tools:      &core.PluginTools{Runtime: "node", Execution: "runtime", Entrypoint: "index.mjs", Files: []string{"index.mjs"}, Requirements: []string{}, Tools: []json.RawMessage{json.RawMessage(`{"name":"echo","description":"echo","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}`)}},
 	}}
 	data, err := json.Marshal(m)
 	if err != nil {
@@ -42,11 +43,17 @@ func TestMixedPackageToolProjectionCannotCarryLocalCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(b.Files) != 1 || b.Files["index.mjs"] == "" {
+	if len(b.Files) != 1 || b.Files["index.mjs"] == "" || b.Manifest.Contributes.Background != nil {
 		t.Fatal("local capabilities leaked", b)
 	}
 	if err = b.Validate(); err != nil {
 		t.Fatal(err)
+	}
+	forgedCapability, _ := p.ToolBundle()
+	forgedCapability.Manifest.Contributes.Background = p.Manifest.Contributes.Background
+	forgedCapability.Digest, _ = forgedCapability.Hash()
+	if forgedCapability.Validate() == nil {
+		t.Fatal("local background capability entered transferable bundle")
 	}
 	forged, _ := p.ToolBundle()
 	forged.Files["extra.mjs"] = "unselected payload"

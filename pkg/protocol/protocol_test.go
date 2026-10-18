@@ -17,7 +17,7 @@ func TestWireNullUnknownAndEventShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	var request CreateTask
-	for _, data := range []string{`{"request_id":"r","text":"x","environment_ref":{}}`, `{"request_id":"r","text":null}`, `{"text":"x"}`, `{"request_id":"r","text":"x","request_id":"other"}`} {
+	for _, data := range []string{`{"request_id":"r","text":"x","environment_ref":{}}`, `{"request_id":"r","text":"x","resource":"shared"}`, `{"request_id":"r","text":"x","resource":""}`, `{"request_id":"r","text":null}`, `{"text":"x"}`, `{"request_id":"r","text":"x","request_id":"other"}`} {
 		if err := DecodeStrict([]byte(data), &request); err == nil {
 			t.Fatal(data)
 		}

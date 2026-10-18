@@ -472,7 +472,32 @@ func batchRequestCategory(body []byte) (string, string) {
 			return "peer-other", last
 		}
 	}
-	return "user", last
+	// Chat batches now retain separate original messages and stable IDs. Ignore
+	// context sections and inspect the newest consecutive conversation inputs.
+	latest := []string{}
+	previousUser := false
+	for _, message := range fields.Messages {
+		if message.Role != "user" {
+			previousUser = false
+			continue
+		}
+		text := message.Content
+		if strings.HasPrefix(text, "<pot_context ") {
+			previousUser = false
+			continue
+		}
+		if strings.HasPrefix(text, "<pot_message_metadata>") {
+			if _, body, ok := strings.Cut(text, "</pot_message_metadata>\n"); ok {
+				text = body
+			}
+		}
+		if !previousUser {
+			latest = nil
+		}
+		latest = append(latest, text)
+		previousUser = true
+	}
+	return "user", strings.Join(latest, "\n")
 }
 
 func containsAll(text string, values ...string) bool {

@@ -13,7 +13,7 @@ export async function renderAbout({client,root,scope,locale}) {
   dialog.append(heading,notices);
   const open=action(label,()=>dialog.showModal());open.classList.add('about-notices-trigger');open.setAttribute('aria-haspopup','dialog');card.append(open,dialog);
   try {
-    const about=await client.request('/api/v1/about',captured);
+    const about=await (client.read||client.request)('/api/v1/about',captured);
     if(!root.isConnected||!card.isConnected)return;
     card.prepend(node('p','hint',`${about.version||tr('Development build','开发版本')} · ${about.revision||''}${about.go_version?` · ${about.go_version}`:''}`));
     loading.remove();

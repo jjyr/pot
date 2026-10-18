@@ -1,4 +1,5 @@
 import {icon} from './icons.mjs';
+import {translate} from '../locales/messages.mjs';
 
 export const attachmentLimit = 8 * 1024 * 1024;
 export const attachmentTypes = {image:['image/png','image/jpeg','image/webp'],pdf:['application/pdf']};
@@ -11,11 +12,11 @@ export function attachmentProblem(items,caps,zh=false) {
   }
   return '';
 }
-export function failedAttachmentInput(snapshot) {
+export function failedMessageInput(snapshot) {
   if(!snapshot||snapshot.running)return null;
   const messages=snapshot.messages||[],anchor=messages.findLast(m=>m.role==='user'&&!m.steering);
   if(anchor?.status!=='failed')return null;
-  const input=messages.slice(messages.indexOf(anchor)).findLast(m=>m.role==='user'&&m.attachments?.length);
+  const input=messages.slice(messages.indexOf(anchor)).findLast(m=>m.role==='user'&&(m.attachments?.length||m.references?.length));
   return input?{input,target:anchor.id}:null;
 }
 export function formatAttachmentSize(size) {return size<1024?`${size} B`:size<1024*1024?`${(size/1024).toFixed(1)} KB`:`${(size/1024/1024).toFixed(1)} MB`;}
@@ -31,13 +32,17 @@ export function createAttachmentComposer({client,form,input,getKey,getCaps,canAd
   const strip=node('div','composer-attachments'),hint=node('div','attachment-hint'),toolbar=node('div','composer-toolbar'),menu=node('div','attachment-menu');
   hint.setAttribute('role','status');menu.hidden=true;
   const plus=action('',()=>{menu.hidden=!menu.hidden;});plus.className='attachment-plus control';plus.append(icon('plus'));plus.setAttribute('aria-haspopup','menu');
+  const plusHost=node('span','attachment-trigger'),tooltip=node('span','attachment-tooltip');
+  tooltip.id=`attachment-tooltip-${crypto.randomUUID()}`;tooltip.setAttribute('role','tooltip');tooltip.hidden=true;
+  plusHost.append(plus,tooltip);plusHost.setAttribute('role','group');
   const picker=node('input');picker.type='file';picker.multiple=true;picker.hidden=true;
   const pickImage=action('',()=>pick('image')),pickPDF=action('',()=>pick('pdf'));menu.append(pickImage,pickPDF);menu.setAttribute('role','menu');
   for(const b of [pickImage,pickPDF])b.setAttribute('role','menuitem');
-  toolbar.append(plus,menu,picker);form.prepend(strip);form.append(hint,toolbar);
+  toolbar.append(plusHost,menu,picker);form.prepend(strip);form.append(hint,toolbar);
   const list=(key=getKey())=>drafts.get(key)||[];
   const set=(key,items)=>{drafts.set(key,items);signature='';if(!disposed)changed();};
   const zh=()=>locale()==='zh-CN';
+  const t=key=>translate(locale(),key);
   function message(text){hint.textContent=text;hint.hidden=false;}
   function pick(kind){picker.accept=attachmentTypes[kind].join(',');picker.value='';menu.hidden=true;picker.click();}
   function remove(item,key){
@@ -100,10 +105,14 @@ export function createAttachmentComposer({client,form,input,getKey,getCaps,canAd
     restore(key,refs,scope){if(list(key).length)return;set(key,refs.map(attachment=>({attachment,scope,phase:'ready',progress:1})));},
     matches(refs){return JSON.stringify(this.refs())===JSON.stringify(refs||[]);},
     update(){
-      const caps=getCaps(),items=list(),key=getKey();plus.title=zh()?'添加附件':'Add attachment';plus.setAttribute('aria-label',plus.title);
+      const caps=getCaps(),items=list(),key=getKey();plus.setAttribute('aria-label',t('attachments.add'));
       plus.disabled=!canAdd()||!(caps?.image||caps?.pdf);if(plus.disabled)menu.hidden=true;
-      pickImage.textContent=zh()?'图片':'Images';pickPDF.textContent='PDF';pickImage.disabled=!caps?.image;pickPDF.disabled=!caps?.pdf;
-      pickImage.title=caps?.image?'':(zh()?'当前模型不支持图片':'Current model does not support images');pickPDF.title=caps?.pdf?'':(zh()?'当前模型不支持该类型':'Current model does not support this file type');
+      const reason=caps&&!(caps.image||caps.pdf)?t('attachments.modelUnsupported'):!canAdd()||!caps?t('attachments.unavailable'):'';
+      plus.title=reason||t('attachments.add');tooltip.textContent=reason;tooltip.hidden=!reason;
+      plusHost.tabIndex=plus.disabled?0:-1;plusHost.setAttribute('aria-label',t('attachments.add'));
+      for(const element of [plusHost,plus]){if(reason)element.setAttribute('aria-describedby',tooltip.id);else element.removeAttribute('aria-describedby');}
+      pickImage.textContent=t('attachments.images');pickPDF.textContent=t('attachments.pdf');pickImage.disabled=!caps?.image;pickPDF.disabled=!caps?.pdf;
+      pickImage.title=caps?.image?'':t('attachments.imagesUnsupported');pickPDF.title=caps?.pdf?'':t('attachments.pdfUnsupported');
       const next=JSON.stringify([key,items.map(i=>[i.attachment.id,i.phase,i.progress,i.error]),caps,zh(),isSending()]);
       if(next===signature)return;signature=next;strip.replaceChildren();strip.hidden=!items.length;
       hint.textContent=attachmentProblem(items,caps,zh());hint.hidden=!hint.textContent;
