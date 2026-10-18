@@ -30,8 +30,11 @@ No document text extraction, OCR substitution or format conversion is performed.
 Other document/image formats are disabled. A PDF flag does not require an image
 flag, and an image flag does not enable PDF.
 
-Picker options, drop and paste reject unavailable types. The plus control stays
-available if at least one type is usable. Capability changes retain incompatible
+Picker options, drop and paste reject unavailable types. The plus control always
+stays visible. It is disabled when neither type is usable, with a hover and
+keyboard-focus explanation of the model limitation. If PDF alone is supported,
+the plus control remains enabled and the image menu item explains its disabled
+state. Capability changes retain incompatible
 draft attachments with an explanation and disable Send until they are removed.
 Control repeats validation at upload, acceptance and model request construction.
 Active-turn guidance uses that turn's fixed execution configuration; pending

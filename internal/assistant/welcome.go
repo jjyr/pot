@@ -31,7 +31,9 @@ func initializeWelcome(tx *sql.Tx, options ConversationOptions) error {
 	if _, err = tx.Exec("INSERT INTO events(body) VALUES (?)", string(event)); err != nil {
 		return err
 	}
-	checkpoint, err := json.Marshal(agent.Checkpoint{Type: "context", Version: 2, Messages: []modelprotocol.Message{modelprotocol.TextMessage("assistant", options.InitialWelcome)}, Pending: []modelprotocol.ToolCall{}, Receipts: []agent.ToolReceipt{}, SteeringIDs: []string{}})
+	welcome := modelprotocol.TextMessage("assistant", options.InitialWelcome)
+	welcome.ID = message.ID
+	checkpoint, err := json.Marshal(agent.Checkpoint{Type: "context", Version: 2, Messages: []modelprotocol.Message{welcome}, Pending: []modelprotocol.ToolCall{}, Receipts: []agent.ToolReceipt{}, SteeringIDs: []string{}})
 	if err != nil {
 		return err
 	}

@@ -50,6 +50,19 @@
           }
         }
       ]
+    },
+    "background": {
+      "runtime": "node",
+      "execution": "control",
+      "entrypoint": "notifications.mjs",
+      "files": [
+        "notifications.mjs"
+      ],
+      "credentials": {
+        "GH_TOKEN": {
+          "service": "github"
+        }
+      }
     }
   }
 }

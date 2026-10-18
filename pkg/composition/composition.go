@@ -40,6 +40,13 @@ var (
 // Arguments and results use JSON, never live VM values.
 type Tool func(context.Context, json.RawMessage) (any, error)
 
+// Event separates buffered text from an explicit request to return control.
+// Type is "text" or "yield"; only text events carry Text.
+type Event struct {
+	Type string
+	Text string
+}
+
 // UnconfirmedCleanupError prevents JavaScript from hiding uncertain cleanup by
 // catching a tool rejection. The ordinary execution layer owns the recovery fence.
 type UnconfirmedCleanupError struct{ Cause error }
@@ -82,9 +89,10 @@ type pendingCall struct {
 	reject  func(any) error
 }
 
-// Run executes code with top-level await, tools.NAME(args) and text(value).
-// Only text output reaches emit. Each emitted string includes a trailing newline;
-// chunks are ordered, incremental and never replayed. emit runs on the VM owner,
+// Run executes code with top-level await, tools.NAME(args), text(value) and
+// yield_control(). Text events include a trailing newline; yield events request
+// immediate delivery of accumulated output without stopping the script.
+// Events are ordered and never replayed. emit runs on the VM owner,
 // must return promptly, and may be nil to discard explicit output.
 //
 // Run returns once the script settles or fails, cancelling all unfinished tools.
@@ -92,7 +100,7 @@ type pendingCall struct {
 // layer must track and fence uncertain operations. Unawaited calls can already
 // have effects and are cancelled at script completion. Recursive exec/wait are
 // rejected even if accidentally included in tools.
-func (r Runner) Run(ctx context.Context, code string, tools map[string]Tool, emit func(string) error) error {
+func (r Runner) Run(ctx context.Context, code string, tools map[string]Tool, emit func(Event) error) error {
 	limits, err := r.Limits.defaults()
 	if err != nil {
 		return err
@@ -255,7 +263,19 @@ func (r Runner) Run(ctx context.Context, code string, tools map[string]Tool, emi
 			panic(vm.NewTypeError("%s", messageForError(fatal)))
 		}
 		if emit != nil {
-			if err := emit(output + "\n"); err != nil {
+			if err := emit(Event{Type: "text", Text: output + "\n"}); err != nil {
+				fatal = err
+				panic(vm.NewTypeError("%s", messageForError(err)))
+			}
+		}
+		return goja.Undefined()
+	})
+	yieldControl := vm.ToValue(func(goja.FunctionCall) goja.Value {
+		if fatal != nil {
+			panic(vm.NewTypeError("%s", messageForError(fatal)))
+		}
+		if emit != nil {
+			if err := emit(Event{Type: "yield"}); err != nil {
 				fatal = err
 				panic(vm.NewTypeError("%s", messageForError(err)))
 			}
@@ -264,12 +284,12 @@ func (r Runner) Run(ctx context.Context, code string, tools map[string]Tool, emi
 	})
 	var promise *goja.Promise
 	if err := enter(func() error {
-		value, err := vm.RunString("(async function(tools, text) {\n'use strict';\n" + code + "\n})")
+		value, err := vm.RunString("(async function(tools, text, yield_control) {\n'use strict';\n" + code + "\n})")
 		if err != nil {
 			return err
 		}
 		fn, _ := goja.AssertFunction(value)
-		value, err = fn(goja.Undefined(), toolObject, text)
+		value, err = fn(goja.Undefined(), toolObject, text, yieldControl)
 		if err == nil {
 			promise = value.Export().(*goja.Promise)
 		}

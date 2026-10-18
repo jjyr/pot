@@ -1,7 +1,7 @@
 import {node as n, action, details} from './primitives.mjs';
 
 // Background discovery never participates in the editor's save/dirty lifecycle.
-export function connectProviderEditor({form,request,scope,profile,connection,tr,current,models}) {
+export function connectProviderEditor({form,request,scope,profile,connection,tr,current,models,connectionChanged}) {
   const {controls,session}=form;
   const endpoint=controls.get('endpoint');
   const preview=n('small','hint provider-endpoint-preview'),modelStatus=n('span','provider-model-status'),testStatus=n('span','provider-test-status');
@@ -33,7 +33,7 @@ export function connectProviderEditor({form,request,scope,profile,connection,tr,
       const result=await request('/api/v1/providers/check',{...scope,method:'POST',signal,body:inputs()});
       if(!active()||version!==captured)return;
       if(result.supported===false){modelStatus.textContent=tr('Enter model ID manually','请手填模型 ID');return;}
-      models(result.models||[]);modelStatus.textContent='';
+      models(result.models||[],result.input_modalities||{});modelStatus.textContent='';
     }catch(reason){
       if(!active()||version!==captured||reason.name==='AbortError')return;
       failure(modelStatus,reason,tr('Could not load models','模型获取失败'));
@@ -42,6 +42,7 @@ export function connectProviderEditor({form,request,scope,profile,connection,tr,
   }
   function schedule(){
     clearTimeout(timer);controller?.abort();testController?.abort();resolved=null;version++;
+    connectionChanged(inputs());
     const captured=version;preview.replaceChildren();endpoint.setCustomValidity('');modelStatus.replaceChildren();testStatus.replaceChildren();test.disabled=true;
     test.textContent=tr('Test connection','测试连接');
     if(!session.values.endpoint.trim())return;

@@ -21,12 +21,13 @@ type CheckProvider struct {
 	ProfileID string `json:"profile_id"`
 }
 type ProviderCheck struct {
-	Supported bool     `json:"supported"`
-	Models    []string `json:"models"`
+	Supported       bool                `json:"supported"`
+	Models          []string            `json:"models"`
+	InputModalities map[string][]string `json:"input_modalities"`
 }
 
 func (p *ProfileStore) Check(ctx context.Context, r CheckProvider) (ProviderCheck, error) {
-	result := ProviderCheck{Models: []string{}}
+	result := ProviderCheck{Models: []string{}, InputModalities: map[string][]string{}}
 	resolved, err := resolveProviderEndpoint(r.Endpoint, r.Protocol)
 	if err != nil {
 		return result, err
@@ -73,7 +74,8 @@ func (p *ProfileStore) Check(ctx context.Context, r CheckProvider) (ProviderChec
 	}
 	var value struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID         string          `json:"id"`
+			Modalities json.RawMessage `json:"modalities"`
 		} `json:"data"`
 		Models []struct {
 			Name string `json:"name"`
@@ -95,6 +97,20 @@ func (p *ProfileStore) Check(ctx context.Context, r CheckProvider) (ProviderChec
 		}
 		for _, m := range value.Data {
 			result.Models = append(result.Models, m.ID)
+			// Optional gateway extension, not part of the OpenAI model schema.
+			// A missing or incompatible extension must not reject a valid model list.
+			var modalities struct {
+				Input []string `json:"input"`
+			}
+			if json.Unmarshal(m.Modalities, &modalities) == nil && slices.Contains(modalities.Input, "text") {
+				inputs := []string{"text"}
+				for _, kind := range []string{"image", "audio", "pdf"} {
+					if slices.Contains(modalities.Input, kind) {
+						inputs = append(inputs, kind)
+					}
+				}
+				result.InputModalities[m.ID] = inputs
+			}
 		}
 	}
 	for _, id := range result.Models {

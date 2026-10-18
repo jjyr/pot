@@ -141,6 +141,8 @@ func (f *turnFeedback) Steering(ctx context.Context, finalizing bool) ([]agent.S
 		}
 		for _, message := range c.messages {
 			if message.ID == steeringMessageID(input.ID, c.turn.UserMessageID) {
+				input.MessageID = message.ID
+				input.References = slices.Clone(message.References)
 				input.Attachments = message.Attachments
 				break
 			}
@@ -259,7 +261,10 @@ func (f *turnFeedback) event(event core.AgentEvent) error {
 				return c.putMessageLocked(ctx, message, nil)
 			}
 		}
-		f.reply = storage.ID()
+		f.reply = update.ID
+		if f.reply == "" {
+			return errors.New("assistant response identity missing")
+		}
 		c.turn.ReplyMessageID = f.reply
 		metadata, _ := json.Marshal(c.turn)
 		return c.putMessageLocked(ctx, protocol.Message{ID: f.reply, ConversationID: c.options.ConversationID, Role: protocol.Assistant, ReplyTo: c.turn.UserMessageID, Status: protocol.Streaming, CreatedAtMS: storage.Now()}, map[string]string{"conversation.turn": string(metadata)})

@@ -242,6 +242,10 @@ insert drafts without sending them. Task conversations add a fixed stage/action
 row and expose guidance, cancellation, approvals and Usage. Long task titles have
 full-title tooltips.
 
+Conversation bubbles stay within the available column width on every surface.
+Long text and links wrap; wide code blocks and tables scroll within their own
+containers without making Chat or Task history scroll horizontally.
+
 Task details use the conversation column without an assistant sidebar. A fixed
 status row below the titlebar shows the current task state and an approval locator
 when needed. The initial goal is a collapsed disclosure with a one-line preview.

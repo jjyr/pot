@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 type ShellSettings struct {
@@ -116,9 +117,10 @@ type ToolPolicy struct {
 	Unattended          string `json:"unattended" required:"true"`
 }
 type ModelSettings struct {
-	CatalogProvider *string `json:"catalog_provider"`
-	ContextWindow   *uint64 `json:"context_window"`
-	MaxOutputTokens *uint64 `json:"max_output_tokens"`
+	CatalogProvider *string             `json:"catalog_provider"`
+	ContextWindow   *uint64             `json:"context_window"`
+	MaxOutputTokens *uint64             `json:"max_output_tokens"`
+	InputModalities map[string][]string `json:"input_modalities,omitempty"`
 }
 type Profile struct {
 	ID            string         `json:"id" required:"true"`
@@ -133,6 +135,21 @@ type Profile struct {
 }
 
 func (p Profile) Validate() error {
+	if p.ModelSettings != nil {
+		if len(p.ModelSettings.InputModalities) > 10000 {
+			return fmt.Errorf("too many model input descriptors")
+		}
+		for model, modalities := range p.ModelSettings.InputModalities {
+			if strings.TrimSpace(model) == "" || len(model) > 256 {
+				return fmt.Errorf("invalid model input identity")
+			}
+			d := DefaultModelDescriptor()
+			d.InputModalities = modalities
+			if err := d.Validate(); err != nil {
+				return err
+			}
+		}
+	}
 	if err := p.Params.Agent.Validate(); err != nil {
 		return err
 	}

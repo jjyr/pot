@@ -76,7 +76,7 @@ type ProcessRunner struct {
 	Command []string
 }
 
-func (r ProcessRunner) Run(ctx context.Context, code string, tools map[string]Tool, emit func(string) error) error {
+func (r ProcessRunner) Run(ctx context.Context, code string, tools map[string]Tool, emit func(Event) error) error {
 	limits, err := r.Limits.defaults()
 	if err != nil {
 		return err
@@ -187,14 +187,14 @@ func (r ProcessRunner) Run(ctx context.Context, code string, tools map[string]To
 					recordFatal(errors.New("composition worker tool channel failed"))
 				}
 			}(f, tool)
-		case "text":
+		case "text", "yield":
 			outputBytes += len(f.Text)
 			if outputBytes > limits.OutputBytes {
 				result = ErrOutputLimit
 				break
 			}
 			if emit != nil {
-				result = emit(f.Text)
+				result = emit(Event{Type: f.Kind, Text: f.Text})
 			}
 		case "finish":
 			finished = true
@@ -335,7 +335,7 @@ func ServeWorker(ctx context.Context, input io.Reader, output io.Writer) error {
 			}
 		}
 	}
-	err = (Runner{Limits: start.Limits}).Run(ctx, start.Code, tools, func(text string) error { return writer.send(frame{Kind: "text", Text: text}) })
+	err = (Runner{Limits: start.Limits}).Run(ctx, start.Code, tools, func(event Event) error { return writer.send(frame{Kind: event.Type, Text: event.Text}) })
 	finish := frame{Kind: "finish"}
 	if err != nil {
 		finish.Error = err.Error()

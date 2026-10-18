@@ -14,7 +14,7 @@ import (
 
 func runOutput(ctx context.Context, runner Runner, code string, tools map[string]Tool) (string, error) {
 	var output strings.Builder
-	err := runner.Run(ctx, code, tools, func(chunk string) error { _, err := output.WriteString(chunk); return err })
+	err := runner.Run(ctx, code, tools, func(event Event) error { _, err := output.WriteString(event.Text); return err })
 	return output.String(), err
 }
 
@@ -74,7 +74,7 @@ func TestStreamingOwnerAndToolCancellationOnCompletion(t *testing.T) {
 	finished := make(chan error, 1)
 	go func() {
 		finished <- (Runner{}).Run(ctx, `text('before'); tools.background(); text(await tools.probe());`, tools,
-			func(chunk string) error { chunks <- chunk; return nil })
+			func(event Event) error { chunks <- event.Text; return nil })
 	}()
 	select {
 	case chunk := <-chunks:
@@ -284,7 +284,7 @@ func TestUnconfirmedCleanupAndEmitterFailureCannotBeCaught(t *testing.T) {
 	if !errors.Is(err, cause) {
 		t.Fatal(err)
 	}
-	err = (Runner{}).Run(context.Background(), `try { text('x') } catch(e) {}`, nil, func(string) error { return cause })
+	err = (Runner{}).Run(context.Background(), `try { text('x') } catch(e) {}`, nil, func(Event) error { return cause })
 	if !errors.Is(err, cause) {
 		t.Fatal(err)
 	}

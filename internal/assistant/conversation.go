@@ -32,7 +32,6 @@ type RunOptions struct {
 	Ready              func(context.Context) error
 	Observe            func(context.Context, agent.Observation) error
 	Settle             func(context.Context) error
-	MaxRounds          int
 }
 type ConversationOptions struct {
 	Context                                  context.Context
@@ -464,6 +463,7 @@ func (c *Conversation) validateAttachmentsLocked(ctx context.Context, items []co
 }
 func (c *Conversation) accept(ctx context.Context, request protocol.SendMessage, role protocol.Role) (protocol.SendMessageAccepted, error) {
 	request.Attachments = slices.Clone(request.Attachments)
+	request.References = slices.Clone(request.References)
 	if err := validateConversationRequest(request); err != nil {
 		return protocol.SendMessageAccepted{}, err
 	}
@@ -480,7 +480,7 @@ func (c *Conversation) accept(ctx context.Context, request protocol.SendMessage,
 		return protocol.SendMessageAccepted{}, err
 	}
 	if old != nil {
-		if old.Role != role || old.ConversationID != request.ConversationID || old.Text != request.Text || !slices.Equal(old.Attachments, request.Attachments) {
+		if old.Role != role || old.ConversationID != request.ConversationID || old.Text != request.Text || (!slices.Equal(old.Attachments, request.Attachments) || !slices.Equal(old.References, request.References)) {
 			return protocol.SendMessageAccepted{}, errors.New("request identity already has different content")
 		}
 		return protocol.SendMessageAccepted{MessageID: old.ID, Duplicate: true}, nil
@@ -498,6 +498,9 @@ func (c *Conversation) accept(ctx context.Context, request protocol.SendMessage,
 				return protocol.SendMessageAccepted{}, err
 			}
 		}
+	}
+	if err := c.validateReferencesLocked(request.References); err != nil {
+		return protocol.SendMessageAccepted{}, err
 	}
 	if err := c.validateAttachmentsLocked(ctx, request.Attachments); err != nil {
 		return protocol.SendMessageAccepted{}, err
@@ -523,7 +526,7 @@ func (c *Conversation) accept(ctx context.Context, request protocol.SendMessage,
 	if c.thread == nil {
 		return protocol.SendMessageAccepted{}, errors.New("configure an assistant before sending messages")
 	}
-	message := protocol.Message{ID: storage.ID(), ConversationID: request.ConversationID, Role: role, Text: request.Text, Attachments: request.Attachments, Status: protocol.Accepted, CreatedAtMS: storage.Now(), RequestID: &request.RequestID}
+	message := protocol.Message{ID: storage.ID(), ConversationID: request.ConversationID, Role: role, Text: request.Text, Attachments: request.Attachments, References: request.References, Status: protocol.Accepted, CreatedAtMS: storage.Now(), RequestID: &request.RequestID}
 	c.turn = &savedTurn{Owner: c.options.Owner, BootID: c.options.BootID, Generation: c.thread.Generation, Request: request, UserMessageID: message.ID, State: "queued"}
 	raw, _ := json.Marshal(c.turn)
 	if err := c.putMessageLocked(ctx, message, map[string]string{"conversation.turn": string(raw), "conversation.retry": ""}); err != nil {
@@ -780,6 +783,17 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 		}
 	}
 	inputText := c.turn.inputText()
+	var modelInputs []core.ConversationInput
+	if !strings.HasPrefix(request.RequestID, "pot-result-") {
+		requests, ids := c.turn.Inputs, c.turn.UserMessages
+		if len(requests) == 0 {
+			requests = []protocol.SendMessage{c.turn.Request}
+			ids = []string{c.turn.UserMessageID}
+		}
+		for i, input := range requests {
+			modelInputs = append(modelInputs, core.ConversationInput{ID: ids[i], Text: input.Text, Attachments: input.Attachments, References: input.References})
+		}
+	}
 	threadPointer, loadErr := CurrentThread(ctx, c.store)
 	if loadErr != nil || threadPointer == nil {
 		c.mu.Unlock()
@@ -795,7 +809,7 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 	c.finalizing = false
 	c.mu.Unlock()
 	defer cancel()
-	options, err := c.options.Prepare(runCtx, thread, core.TurnRequest{RequestID: request.RequestID, Text: inputText, Attachments: inputAttachments})
+	options, err := c.options.Prepare(runCtx, thread, core.TurnRequest{RequestID: request.RequestID, Text: inputText, Attachments: inputAttachments, Inputs: modelInputs})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return execution.Result{Phase: execution.Cancelled, Err: err}
@@ -815,8 +829,8 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 		}
 		return c.recordCleanup(ctx, request.RequestID, thread.Generation)
 	}
-	loop := agent.Agent{Services: options.Services, Feedback: binding, Dispatch: options.Dispatch, Cleanup: cleanup, Composer: options.Composer, Tools: options.Tools, PrepareContext: options.PrepareContext, ResolveAttachments: options.ResolveAttachments, MaxRounds: options.MaxRounds}
-	err = loop.Execute(runCtx, options.Execution, thread, core.TurnRequest{RequestID: request.RequestID, Text: inputText, Attachments: inputAttachments}, resuming, binding.event)
+	loop := agent.Agent{MessageID: binding.messageID, Services: options.Services, Feedback: binding, Dispatch: options.Dispatch, Cleanup: cleanup, Composer: options.Composer, Tools: options.Tools, PrepareContext: options.PrepareContext, ResolveAttachments: options.ResolveAttachments}
+	err = loop.Execute(runCtx, options.Execution, thread, core.TurnRequest{RequestID: request.RequestID, Text: inputText, Attachments: inputAttachments, Inputs: modelInputs}, resuming, binding.event)
 	phase := execution.Succeeded
 	if err != nil {
 		phase = execution.Failed

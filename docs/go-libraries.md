@@ -47,6 +47,14 @@ desired built-in tools and plugins explicitly when embedding. Tool permissions,
 credentials, persistence and model HTTP access remain the caller's responsibility.
 Model codecs in `pkg/modelprotocol` do not fetch provider credentials.
 
+For message references, `core.TurnRequest.Inputs` carries each accepted user's
+transcript ID, original text, attachments and selected quotes. `Agent.MessageID`
+is an optional caller callback that supplies the transcript ID for each assistant
+output before streaming starts; that ID also enters the durable model history.
+`SteeringInput.MessageID` and `References` do the same for active-turn input.
+Provider encoders render these identities as text metadata while keeping native
+provider IDs and signed replay independent. See [Chat references](chat-references.md).
+
 `pkg/agent` and `pkg/modelprotocol` do not link Wails, SQLite, Tailscale or the
 complete host. Agent services do not require the product's RPC interface.
 `pkg/execution` can independently provide queueing, concurrency and cancellation;
@@ -79,6 +87,12 @@ application implements Pot's hidden worker entry point. Pot executables explicit
 configure their own hidden worker handler. Evaluation callers inject the Composer
 through `eval.RunOptions` or the suite/live entry points.
 See [tool composition](tool-composition.md) for lifecycle and memory limits.
+
+`composition.Runner.Run`, `composition.ProcessRunner.Run` and `agent.Composer`
+emit `composition.Event`: `Type: "text"` carries a `Text` chunk, while
+`Type: "yield"` requests delivery of accumulated output without ending execution.
+Consumers should buffer text until completion, an explicit yield or their wait
+deadline rather than treating every text chunk as a running-result boundary.
 
 ## Embed a complete host
 

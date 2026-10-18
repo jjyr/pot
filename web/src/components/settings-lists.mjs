@@ -1,3 +1,4 @@
+import {translate} from '../locales/messages.mjs';
 import {node as n,action} from './primitives.mjs';
 import {icon} from './icons.mjs';
 import {keyedRows,setPending} from './reconcile.mjs';
@@ -8,7 +9,7 @@ export function createProviderList({root,tr,request,scope,current,pick,edit,spac
   const header=n('div','page-toolbar provider-heading'),add=action(tr('+ Add Provider','＋ 添加提供商'),()=>pick(snapshot));add.setAttribute('aria-label',tr('Add connection','添加连接'));
   header.append(n('h2','page-heading',tr('Configured Providers','已配置的提供商')),add);root.append(header);
   const empty=n('p','page-empty',tr('Add an AI Provider to get started. The first Provider becomes the default automatically.','添加 AI 提供商以开始使用，第一个提供商将自动设为默认。'));
-  const help=n('p','hint provider-default-help',tr('New assistants preselect the default Provider and its default model.','新助手将预选默认提供商及其默认模型。')),rows=n('div'),entries=new Map(),status=n('div','hint provider-defaults-status');status.setAttribute('role','status');status.setAttribute('aria-live','polite');root.append(empty,help,rows,status);
+  const help=n('p','hint provider-default-help',tr('New assistants preselect the default Provider and its default model.','新助手将预选默认提供商及其默认模型。')),rows=n('div'),entries=new Map(),status=n('div','hint provider-defaults-status');status.setAttribute('role','status');status.setAttribute('aria-live','polite');root.append(empty,help,rows,status);empty.hidden=true;help.hidden=true;
   const spaces=n('section','page-section page-card'),spaceRows=n('div'),spaceEntries=new Map();spaces.append(n('h2','',tr('Spaces and connections','Space 与连接')),spaceRows,action(tr('Connect Space','连接 Space'),spaceEditor));root.append(spaces);
   function defaults(){for(const entry of entries.values()){const selected=entry.item.id===snapshot.default_provider_id;entry.badge.hidden=!selected;entry.default.disabled=saving||selected;entry.default.setAttribute('aria-pressed',String(selected));entry.default.setAttribute('aria-label',`${entry.item.name}: ${selected?tr('Current default Provider','当前默认提供商'):tr('Set as default Provider','设为默认提供商')}`);entry.default.title=selected?tr('Current default Provider','当前默认提供商'):tr('Set as default Provider','设为默认提供商');}}
   async function setDefault(profile){
@@ -32,10 +33,11 @@ export function createProviderList({root,tr,request,scope,current,pick,edit,spac
   };
 }
 
-export function createTaskSettings({root,tr,configure,allowance}) {
+export function createTaskSettings({root,tr,locale,configure,allowance}) {
   const execution=n('section','page-section page-card'),limits=n('section','page-section page-card'),rows=n('div'),quotas=n('div'),entries=new Map(),quotaEntries=new Map();let data;
-  execution.append(n('h2','',tr('Task Configuration','任务配置')),rows);limits.append(n('h2','',tr('Provider allowances','提供商配额')),quotas);root.append(execution,limits);
-  return value=>{data=value;keyedRows(rows,entries,data.providers.profiles||[],{key:profile=>profile.id,create:()=>{const element=n('div','list-row'),name=n('span','row-info'),model=n('span','hint'),entry={element,name,model};element.append(name,model,action(tr('Configure','配置'),()=>configure(entry.item,data.policy)));return entry;},update:(entry,profile)=>{entry.name.textContent=profile.name;entry.model.textContent=profile.model;}});
-    keyedRows(quotas,quotaEntries,data.allowances.providers||[],{key:quota=>quota.provider,create:()=>{const element=n('div','list-row'),name=n('span','row-info'),remaining=n('span','hint'),entry={element,name,remaining};element.append(name,remaining,action(tr('Edit allowance','编辑配额'),()=>allowance(entry.item)));return entry;},update:(entry,quota)=>{entry.name.textContent=(data.providers.profiles||[]).find(profile=>profile.provider===quota.provider)?.name||quota.provider;entry.remaining.textContent=quota.active?`${Number(quota.remaining).toLocaleString()} ${tr('remaining','剩余')}`:tr('Unlimited','无限制');}});
+  const executionStatus=n('p','hint',translate(locale(),'loading.pending')),quotaStatus=n('p','hint',translate(locale(),'loading.pending'));
+  execution.append(n('h2','',tr('Task Configuration','任务配置')),executionStatus,rows);limits.append(n('h2','',tr('Provider allowances','提供商配额')),quotaStatus,quotas);root.append(execution,limits);
+  return value=>{data=value;executionStatus.hidden=!!data.providers&&!!data.policy;quotaStatus.hidden=!!data.allowances;execution.setAttribute('aria-busy',String(!data.providers||!data.policy));limits.setAttribute('aria-busy',String(!data.allowances));keyedRows(rows,entries,data.providers?.profiles||[],{key:profile=>profile.id,create:()=>{const element=n('div','list-row'),name=n('span','row-info'),model=n('span','hint'),entry={element,name,model};element.append(name,model,action(tr('Configure','配置'),()=>configure(entry.item,data.policy)));return entry;},update:(entry,profile)=>{entry.name.textContent=profile.name;entry.model.textContent=profile.model;entry.element.querySelector('button').disabled=!data.policy;}});
+    keyedRows(quotas,quotaEntries,data.allowances?.providers||[],{key:quota=>quota.provider,create:()=>{const element=n('div','list-row'),name=n('span','row-info'),remaining=n('span','hint'),entry={element,name,remaining};element.append(name,remaining,action(tr('Edit allowance','编辑配额'),()=>allowance(entry.item)));return entry;},update:(entry,quota)=>{entry.name.textContent=(data.providers?.profiles||[]).find(profile=>profile.provider===quota.provider)?.name||quota.provider;entry.remaining.textContent=quota.active?`${Number(quota.remaining).toLocaleString()} ${tr('remaining','剩余')}`:tr('Unlimited','无限制');}});
   };
 }

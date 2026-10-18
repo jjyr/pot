@@ -31,6 +31,20 @@ type liveBatchRequest struct {
 	Response string          `json:"response_sse"`
 }
 
+// Fail the continuation after one real model response and its authorized tools.
+type liveBatchFailingContinuation struct {
+	agent.Services
+	started bool
+}
+
+func (s *liveBatchFailingContinuation) Model(ctx context.Context, request core.ModelRequest) (io.ReadCloser, error) {
+	if s.started {
+		return nil, fmt.Errorf("controlled worker continuation failure")
+	}
+	s.started = true
+	return s.Services.Model(ctx, request)
+}
+
 // A transparent recording proxy forwards every response from the real model.
 // The first foreground request is held before forwarding so actual Send calls
 // can fill the production queues. No fixture model output is returned.
@@ -180,13 +194,13 @@ func TestDeepSeekCategoryBatchesLive(t *testing.T) {
 	if err = s.Permissions.Configure("live", MachinePolicy{ExecutionAccess: "allow"}); err != nil {
 		t.Fatal(err)
 	}
-	// A one-round Worker budget produces a real terminal failure after the model
-	// requests the harmless command. Main/Summary and peer defaults are retained.
+	// Inject a model-service failure after the real model requests the harmless
+	// command. Main/Summary and peer services are retained.
 	prepare := s.Runner.Prepare
 	s.Runner.Prepare = func(ctx context.Context, r runner.Run) (runner.Prepared, error) {
 		p, e := prepare(ctx, r)
 		if e == nil && strings.HasPrefix(r.Launch.Text, "TASK_BETA") {
-			p.Agent.MaxRounds = 1
+			p.Agent.Services = &liveBatchFailingContinuation{Services: p.Agent.Services}
 		}
 		return p, e
 	}
@@ -258,7 +272,7 @@ func TestDeepSeekCategoryBatchesLive(t *testing.T) {
 	}
 	a, _ := s.Tasks.Get(ctx, "main", taskIDs[0])
 	b, _ := s.Tasks.Get(ctx, "main", taskIDs[1])
-	if a.Info.Phase != protocol.TaskComplete || b.Info.Phase != protocol.TaskFailed || !strings.Contains(b.Error, "round limit") {
+	if a.Info.Phase != protocol.TaskComplete || b.Info.Phase != protocol.TaskFailed || !strings.Contains(b.Error, "controlled worker continuation failure") {
 		t.Fatal("controlled success/failure did not occur", a.Info.Phase, b.Info.Phase, b.Error)
 	}
 	first, err := c.Send(ctx, protocol.SendMessage{RequestID: "user-one", ConversationID: "main", Text: "请直接回答简单算式 7+5，标记 USER_ONE。无需工具。"})
@@ -458,7 +472,32 @@ func batchRequestCategory(body []byte) (string, string) {
 			return "peer-other", last
 		}
 	}
-	return "user", last
+	// Chat batches now retain separate original messages and stable IDs. Ignore
+	// context sections and inspect the newest consecutive conversation inputs.
+	latest := []string{}
+	previousUser := false
+	for _, message := range fields.Messages {
+		if message.Role != "user" {
+			previousUser = false
+			continue
+		}
+		text := message.Content
+		if strings.HasPrefix(text, "<pot_context ") {
+			previousUser = false
+			continue
+		}
+		if strings.HasPrefix(text, "<pot_message_metadata>") {
+			if _, body, ok := strings.Cut(text, "</pot_message_metadata>\n"); ok {
+				text = body
+			}
+		}
+		if !previousUser {
+			latest = nil
+		}
+		latest = append(latest, text)
+		previousUser = true
+	}
+	return "user", strings.Join(latest, "\n")
 }
 
 func containsAll(text string, values ...string) bool {

@@ -175,13 +175,13 @@ func TestPreparedOutcomeCannotCommitAfterConcurrentTaskChange(t *testing.T) {
 	}
 }
 
-func TestTaskStoreRejectsPreviousOutcomeSchema(t *testing.T) {
+func TestTaskStoreRejectsPreviousSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.sqlite")
 	s, err := Open(path, Options{ControlID: "control", RuntimeID: "machine"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB().Exec("UPDATE task_schema SET version=5"); err != nil {
+	if _, err := s.DB().Exec("UPDATE task_schema SET version=6"); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()

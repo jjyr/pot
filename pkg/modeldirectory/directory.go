@@ -246,6 +246,17 @@ func official(model string) []string {
 	return nil
 }
 func find(providers map[string]provider, catalog *string, id string) (model, bool) {
+	if m, ok := findExact(providers, catalog, id); ok {
+		return m, true
+	}
+	// Proxy route prefixes do not change the underlying model's public facts.
+	// Preserve full-ID precedence, then search the final name exactly.
+	if slash := strings.LastIndexByte(id, '/'); slash >= 0 && slash+1 < len(id) {
+		return findExact(providers, catalog, id[slash+1:])
+	}
+	return model{}, false
+}
+func findExact(providers map[string]provider, catalog *string, id string) (model, bool) {
 	if catalog != nil {
 		m, ok := providers[*catalog].Models[id]
 		return m, ok
@@ -267,6 +278,7 @@ func find(providers map[string]provider, catalog *string, id string) (model, boo
 	}
 	return model{}, false
 }
+
 func (d *Directory) Defaults() map[string]Limits {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -323,7 +335,8 @@ func (d *Directory) Apply(profile core.Profile) (core.Profile, error) {
 	} else {
 		result.Params.Agent.MaxInputTokens = nil
 	}
-	if known {
+	inputs, discovered := settings.InputModalities[result.Model]
+	if known || discovered {
 		catalog := result.Params.Agent.ModelCatalog
 		if catalog == nil {
 			catalog = &core.ModelCatalog{SchemaVersion: 1, Default: json.RawMessage(`{}`), Models: map[string]map[string]json.RawMessage{}}
@@ -334,6 +347,9 @@ func (d *Directory) Apply(profile core.Profile) (core.Profile, error) {
 		}
 		if slices.Contains(m.Modalities.Input, "pdf") {
 			modalities = append(modalities, "pdf")
+		}
+		if discovered {
+			modalities = inputs
 		}
 		defaults := map[string]any{"input_modalities": modalities}
 		var overrides any

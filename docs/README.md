@@ -24,6 +24,7 @@ implementation. Code defines actual behavior.
 | AI providers, model defaults and offline metadata | [Model directory](model-directory.md) |
 | Event-driven updates and stream lifecycle | [UI events](ui-events.md) |
 | Chat image and PDF attachments | [Chat attachments](chat-attachments.md) |
+| Selected text and original-message references | [Chat references](chat-references.md) |
 | Shared UI, language and licenses | [Shared UI](shared-ui.md), [i18n rules](internationalization.md), [licenses](licenses-and-about.md) |
 | Agent evaluation | [CLI](../eval/README.md), [measurement design](token-evaluation.md), [small-budget suite](token-evaluation-next-suite.md) |
 | Product goals | [Product](product-design.md) |

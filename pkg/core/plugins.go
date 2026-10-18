@@ -160,7 +160,8 @@ type PluginManifest struct {
 	Contributes   PluginContributions `json:"contributes"`
 }
 type PluginContributions struct {
-	Tools *PluginTools `json:"tools,omitempty"`
+	Tools      *PluginTools      `json:"tools,omitempty"`
+	Background *PluginBackground `json:"background,omitempty"`
 }
 type PluginTools struct {
 	SessionMode  string             `json:"session_mode,omitempty"`
@@ -236,11 +237,16 @@ func (m PluginManifest) Validate() error {
 		}
 	}
 	c := m.Contributes
-	if c.Tools == nil {
+	if c.Tools == nil && c.Background == nil {
 		return fmt.Errorf("plugin declares no capabilities")
 	}
 	if c.Tools != nil {
-		return validatePluginTools(*c.Tools)
+		if err := validatePluginTools(*c.Tools); err != nil {
+			return err
+		}
+	}
+	if c.Background != nil {
+		return c.Background.Validate()
 	}
 	return nil
 }
@@ -252,7 +258,7 @@ func (b PluginBundle) Validate() error {
 	if err := m.Validate(); err != nil {
 		return err
 	}
-	if m.Contributes.Tools == nil {
+	if m.Contributes.Tools == nil || m.Contributes.Background != nil {
 		return fmt.Errorf("execution bundle must contain only tool capability")
 	}
 	tools := m.Contributes.Tools

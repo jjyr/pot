@@ -277,14 +277,20 @@ def prepare_plugins(destination, platform):
             continue
         manifest = json.loads(manifest_path.read_text())
         contributions = manifest["contributes"]
-        if set(contributions) != {"tools"} or contributions["tools"]["execution"] != "runtime":
+        if not contributions or set(contributions) - {"tools", "background"}:
             raise ValueError("unsupported plugin capability")
+        targets = {"tools": "runtime", "background": "control"}
+        for capability, declaration in contributions.items():
+            if declaration["runtime"] != "node" or declaration["execution"] != targets[capability]:
+                raise ValueError("unsupported plugin execution target")
         package = destination / source.name
         if package.exists():
             shutil.rmtree(package)
         package.mkdir(parents=True)
         shutil.copy2(manifest_path, package / "plugin.json")
-        for name in contributions["tools"]["files"]:
+        for name in sorted(
+            {name for capability in contributions.values() for name in capability["files"]}
+        ):
             relative = Path(name)
             if relative.is_absolute() or ".." in relative.parts or (source / relative).is_symlink():
                 raise ValueError("unsafe plugin file")

@@ -40,6 +40,7 @@ func TestProcessRequiresExplicitWorker(t *testing.T) {
 func TestProcessRPCAndCapabilityBoundary(t *testing.T) {
 	r := subprocessRunner(t)
 	var output strings.Builder
+	yields := 0
 	tools := map[string]Tool{"echo": func(ctx context.Context, args json.RawMessage) (any, error) {
 		var v map[string]any
 		if err := json.Unmarshal(args, &v); err != nil {
@@ -47,9 +48,18 @@ func TestProcessRPCAndCapabilityBoundary(t *testing.T) {
 		}
 		return v, nil
 	}}
-	err := r.Run(context.Background(), `if (typeof process !== "undefined" || typeof require !== "undefined") throw new Error("ambient authority"); const values=await Promise.all([tools.echo({id:1}),tools.echo({id:2})]);text(values);`, tools, func(s string) error { output.WriteString(s); return nil })
-	if err != nil || output.String() != "[{\"id\":1},{\"id\":2}]\n" {
-		t.Fatal(err, output.String())
+	err := r.Run(context.Background(), `if (typeof process !== "undefined" || typeof require !== "undefined") throw new Error("ambient authority"); text("before");yield_control();const values=await Promise.all([tools.echo({id:1}),tools.echo({id:2})]);text(values);`, tools, func(event Event) error {
+		if event.Type == "yield" {
+			if output.String() != "before\n" {
+				return errors.New("yield lost its preceding output")
+			}
+			yields++
+		}
+		output.WriteString(event.Text)
+		return nil
+	})
+	if err != nil || output.String() != "before\n[{\"id\":1},{\"id\":2}]\n" || yields != 1 {
+		t.Fatal(err, output.String(), yields)
 	}
 }
 func TestProcessExitWaitsForChildCleanup(t *testing.T) {

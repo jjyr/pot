@@ -6,7 +6,7 @@ import {avatar} from './avatar.mjs';
 import {translate} from '../locales/messages.mjs';
 import {icon} from './icons.mjs';
 import {node as n, action, field, section, table, details} from './primitives.mjs';
-import {modelDefaults} from '../state/models.mjs';
+import {modelDefaults,createModelInputDiscovery} from '../state/models.mjs';
 import {ownedItems,combineTasks,combineUsage} from '../state/aggregate.mjs';
 import {createEditorSession, createRequestGate} from '../state/editor.mjs';
 import {createTaskTranscript,appendTaskEvents} from '../state/task-transcript.mjs';
@@ -28,6 +28,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   let route = '', title = '', editor = null, disposed = false, pageVersion = 0, configurationSpace = '',taskView=null,taskOrigin=null,taskListView=null,scheduleView=null,detailParent=false,usageOwner=null;
   let filter = {taskScope:'active', taskQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageDays:14, usageScope:'all', usageSpace:'all',settingsTab:'general'};
   let pendingApprovals=[],notificationSettings=null;
+  const taskDetails=new Map(),resourceBoots=new Map();
   const toolMemory=new Map(),usageOffsets=new Map(),usageCache=new Map(),approvalCards=new Map(),taskNames=new Map();
   const chatApprovals=createChatApprovals({host:chatApprovalHost,locale,visible:chatVisible});
   const cached = new Map(),spaceCache = new Map(),machineDrafts=new Map(),editorParents=[],taskDrafts=new Map(),taskDraftVersions=new Map(),taskWrites=new Map(),scheduleWrites=new Map();
@@ -35,6 +36,16 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   const tr = (en, zh) => locale() === 'zh-CN' ? zh : en;
   const scope = () => client.scope();
   const request = (path, options = {}) => client.request(path, options);
+  const read = (path,options={}) => (client.read||client.request)(path,options);
+  const stopResources=client.resources?.subscribe((meta,error)=>{
+    if(disposed||editor||!host.offsetParent)return;
+    if(pageView&&!relevantChange(meta.topics,pageView.topics,pageView.space,{space:meta.space}))return;
+    if(taskListView&&!meta.topics.includes('tasks'))return;
+    if(error){const target=pageView?.root||taskListView?.rows;if(target){let status=target.querySelector('.resource-refresh-error');if(!status){status=n('p','inline-error resource-refresh-error');status.setAttribute('role','alert');target.prepend(status);}status.dataset.resource=JSON.stringify(meta);status.replaceChildren(n('span','',translate(locale(),'loading.stale')),action(translate(locale(),'retry'),()=>{client.resources.invalidate(meta.topics,{space:meta.space});if(pageView)pageView.queue.run();else refreshTaskList();}));}return;}
+    const failure=host.querySelector('.resource-refresh-error');if(failure?.dataset.resource===JSON.stringify(meta))failure.remove();
+    if(pageView&&relevantChange(meta.topics,pageView.topics,pageView.space,{space:meta.space}))pageView.queue.run();
+    else if(taskListView&&meta.topics.includes('tasks'))refreshTaskList();
+  });
   const uid = () => crypto.randomUUID();
   const list = value => Array.isArray(value) ? value : value?.items || [];
   function captureView(){if(!editor&&viewReady&&currentViewKey&&host.offsetParent)cached.set(currentViewKey,{scroll:host.scrollTop,expanded:[...host.querySelectorAll('details[data-cache-key][open]')].map(node=>node.dataset.cacheKey),scrolls:[...host.querySelectorAll('[data-scroll-key]')].map(node=>({key:node.dataset.scrollKey,top:node.scrollTop,left:node.scrollLeft}))});}
@@ -46,12 +57,18 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const results=await Promise.allSettled(targets.map(async({space,owner})=>{
       const key=JSON.stringify([space.id,space.control_id,owner,path]);
       try {
-        let value=await request(path,{owner,space:space.id,signal:token.signal});
-        if(paginate&&value?.next_offset!=null) {
-          let next=value.next_offset,seen=new Set();const items=[...(value.items||[])];
-          while(next!=null&&items.length<5000) {if(seen.has(next))throw Error('Invalid pagination cursor');seen.add(next);const url=new URL(path,location.origin);url.searchParams.set('offset',next);const page=await request(url.pathname+url.search,{owner,space:space.id,signal:token.signal});items.push(...(page.items||[]));next=page.next_offset;}
-          if(next!=null)throw Error(tr('Too many records. Narrow the filter.','记录过多，请缩小筛选范围。'));value={...value,items,next_offset:null};
-        }
+        const shared=paginate&&client.resources;
+        const options={owner,space:space.id,signal:shared?undefined:token.signal};
+        const readPages=async()=>{
+          let value=await (paginate?request:read)(path,options);
+          if(paginate&&value?.next_offset!=null) {
+            let next=value.next_offset,seen=new Set();const items=[...(value.items||[])];
+            while(next!=null&&items.length<5000) {if(seen.has(next))throw Error('Invalid pagination cursor');seen.add(next);const url=new URL(path,location.origin);url.searchParams.set('offset',next);const page=await request(url.pathname+url.search,options);items.push(...(page.items||[]));next=page.next_offset;}
+            if(next!=null)throw Error(tr('Too many records. Narrow the filter.','记录过多，请缩小筛选范围。'));value={...value,items,next_offset:null};
+          }
+          return value;
+        };
+        const value=shared?await client.resources.collection(path,{...options,signal:token.signal},readPages):await readPages();
 
         if(gate.current(token))spaceCache.set(key,value);return {space,owner,value,stale:false};
       }catch(reason){if(reason.name==='AbortError')throw reason;const value=spaceCache.get(key);if(value)return {space,owner,value,stale:true,error:reason.message};throw Object.assign(reason,{space});}
@@ -159,7 +176,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     if(!await leave())return;
     const token=gate.next(),captured=scope(),loading=body();loading.append(n('p','hint',tr('Loading…','正在加载…')));
     try{
-      const [providers,thread,rules]=await Promise.all([request('/api/v1/providers',captured),definition?request('/api/v1/agent',captured):null,definition?request('/api/v1/instructions',captured):null]);
+      const [providers,thread,rules]=await Promise.all([read('/api/v1/providers',captured),definition?request('/api/v1/agent',captured):null,definition?request('/api/v1/instructions',captured):null]);
       if(!gate.current(token)||disposed)return;
       let profiles=providers.profiles||[],revision=definition?.revision,generation=thread?.generation||0,configurationRevision=thread?.revision||0,rulesRevision=rules?.revision||'';
       const selection=thread?.selection||{},profileID=selection.profile_id||thread?.config?.source_profile_id||providers.default_provider_id||'',profile=profiles.find(value=>value.id===profileID);
@@ -206,7 +223,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     }catch(reason){if(gate.current(token))errorView(reason);}
   }
   async function settings(root, token) {
-    root.classList.add('settings-content');root.append(segments([['general',tr('General','通用')],['providers',tr('AI Providers','AI 提供商')],['integrations',translate(locale(),'integrations.title')],['tasks',tr('Task Configuration','任务配置')]],filter.settingsTab,value=>{filter.settingsTab=value;show('settings');}));
+    root.classList.add('settings-content');const settingsKeys=['settings.general','settings.providers','integrations.title','settings.tasks'];const tabs=segments(['general','providers','integrations','tasks'].map((key,i)=>[key,translate(locale(),settingsKeys[i])]),filter.settingsTab,value=>{filter.settingsTab=value;show('settings');});[...tabs.children].forEach((node,i)=>{node.dataset.settingsI18n=settingsKeys[i];});root.append(tabs);
     if(filter.settingsTab==='general'){
     const preferences=card(tr('General','通用'));
     const preference=(key,value)=>{try{localStorage.setItem(key,value);}catch{}window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key,value}}));};
@@ -223,15 +240,18 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     if(client.desktop&&locations.length>1){const location=field(tr('Configuration location','配置位置'),configurationSpace,{choices:locations.map(space=>[space.id,space.name])});location.input.onchange=()=>{configurationSpace=location.input.value;show('settings');};root.append(location.row);}
     const current=()=>gate.current(token)&&!disposed,refresh=()=>pageView?.queue.run(),options={root,tr,request,scope:settingsScope,current,refresh};
     if(filter.settingsTab==='integrations'){
-      const update=createIntegrations({root,request,scope:settingsScope,signal:token.signal,locale,openExternal:client.openExternal,refresh});
-      return connectView(root,token,()=>request('/api/v1/integrations',{...settingsScope,signal:token.signal}),update,{topics:['integrations','spaces'],space:settingsScope.space});
+      const refreshIntegrations=()=>{if(!current())return Promise.resolve();client.resources?.invalidate(['integrations'],{space:settingsScope.space});return refresh();};
+      const update=createIntegrations({root,request,scope:settingsScope,signal:token.signal,locale,openExternal:client.openExternal,refresh:refreshIntegrations});
+      return connectView(root,token,async()=>{const [accounts,notifications]=await Promise.all([read('/api/v1/integrations',{...settingsScope,signal:token.signal}),request('/api/v1/plugin-notifications',{...settingsScope,signal:token.signal})]);return {...accounts,notifications};},update,{topics:['integrations','plugin-notifications','spaces'],space:settingsScope.space});
     }
     if(filter.settingsTab==='tasks'){
-      const update=createTaskSettings({root,tr,configure:(profile,policy)=>routingEditor(profile,policy,settingsScope),allowance:quota=>providerPolicyEditor(quota,settingsScope)});
-      return connectView(root,token,async()=>{const [providers,policy,allowances]=await Promise.all([request('/api/v1/providers',{...settingsScope,signal:token.signal}),request('/api/v1/agent/routing',{...settingsScope,signal:token.signal}),request('/api/v1/usage/providers',{...settingsScope,signal:token.signal})]);return {providers,policy,allowances};},update,{topics:['providers','settings','usage','spaces'],space:settingsScope.space});
+      const update=createTaskSettings({root,tr,locale,configure:(profile,policy)=>routingEditor(profile,policy,settingsScope),allowance:quota=>providerPolicyEditor(quota,settingsScope)});
+      const data={};
+      return connectView(root,token,async()=>{const results=await Promise.allSettled([['providers','/api/v1/providers'],['policy','/api/v1/agent/routing'],['allowances','/api/v1/usage/providers']].map(async([key,path])=>{const value=await read(path,{...settingsScope,signal:token.signal});if(current()){data[key]=value;update(data);}}));const failed=results.find(value=>value.status==='rejected');if(failed)throw failed.reason;return data;},update,{topics:['providers','settings','usage','spaces'],space:settingsScope.space});
     }
     const update=createProviderList({...options,pick:providers=>providerPicker(providers,settingsScope),edit:(profile,providers)=>providerEditor(profile,providers,settingsScope),spaceEditor});
-    return connectView(root,token,async()=>{const [providers,spaces]=await Promise.all([request('/api/v1/providers',{...settingsScope,signal:token.signal}),client.desktop?request('/api/v1/spaces',{signal:token.signal,owner:'',space:''}):null]);return {providers,spaces};},update,{topics:['providers','spaces'],space:settingsScope.space});
+    let providerData={};
+    return connectView(root,token,async()=>{await Promise.all([read('/api/v1/providers',{...settingsScope,signal:token.signal}).then(providers=>{providerData={...providerData,providers};if(current())update(providerData);}),client.desktop?read('/api/v1/spaces',{signal:token.signal,owner:'',space:''}).then(spaces=>{providerData={...providerData,spaces};if(current()&&providerData.providers)update(providerData);}):null]);return providerData;},update,{topics:['providers','spaces'],space:settingsScope.space});
   }
   function providerPolicyEditor(quota,owner) {
     renderEditor(tr('Provider allowance','提供商配额'),quota.policy,[
@@ -248,7 +268,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   }
   async function setupAI() {
     const captured={...scope(),owner:''};
-    const snapshot=await request('/api/v1/providers',captured);
+    const snapshot=await read('/api/v1/providers',captured);
     await providerPicker(snapshot,captured);
     if(editor?.kind==='picker')editor.onboarding=true;
   }
@@ -270,6 +290,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const selectedEntry=(snapshot.directory||[]).find(value=>value.id===providerID);
     const inherited=modelDefaults(snapshot,providerID,profile?.model||'');
     let configuredModels=[...(snapshot.configured_models?.[profile?.id]||[])];
+    const inputDiscovery=createModelInputDiscovery(connection,profile?.model_settings?.input_modalities);
     const baseName=selectedEntry?.name||tr('Custom Provider','自定义供应商'),names=new Set((snapshot.profiles||[]).map(value=>value.name));let defaultName=baseName;for(let index=2;names.has(defaultName);index++)defaultName=`${baseName} ${index}`;
     const initial={name:profile?.name||defaultName,endpoint:connection?.endpoint||selectedEntry?.endpoint||'',api_key:'',model:profile?.model||'',model_selection:'',protocol:connection?.protocol||selectedEntry?.protocol||'openai_responses',context_window:profile?.model_settings?.context_window??null,max_output_tokens:profile?.model_settings?.max_output_tokens??null,reasoning_effort:profile?.params?.reasoning_effort||''};
     const form=renderEditor(profile?tr('Edit Provider','编辑提供商'):tr('Add Provider','添加提供商'),initial,[
@@ -284,7 +305,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       {name:'reasoning_effort',label:tr('Reasoning effort','推理强度'),placeholder:tr('Provider default','提供商默认值')},
     ],(values,context)=>{
       const {model_selection,context_window,...connectionValues}=values;
-      return request('/api/v1/providers',{...context,method:'POST',body:{request_id:context.request_id,profile_id:profile?.id||'',expected_revision:profile?.revision||0,models:[...new Set([...configuredModels,values.model].filter(Boolean))],...connectionValues,reasoning_effort:values.reasoning_effort.trim()||null,max_output_tokens:values.max_output_tokens||modelDefaults(snapshot,providerID,values.model).output,model_settings:{catalog_provider:providerID==='custom'?null:providerID,context_window:context_window||null,max_output_tokens:values.max_output_tokens||null}}});
+      return request('/api/v1/providers',{...context,method:'POST',body:{request_id:context.request_id,profile_id:profile?.id||'',expected_revision:profile?.revision||0,models:[...new Set([...configuredModels,values.model].filter(Boolean))],...connectionValues,reasoning_effort:values.reasoning_effort.trim()||null,max_output_tokens:values.max_output_tokens||modelDefaults(snapshot,providerID,values.model).output,model_settings:{catalog_provider:providerID==='custom'?null:providerID,context_window:context_window||null,max_output_tokens:values.max_output_tokens||null,input_modalities:inputDiscovery.snapshot(values)}}});
     },{capturedScope:settingsScope});
     const controls=form.controls,session=form.session;let endpointEdited=false;
     form.lifecycle.cancel=()=>back({skipPicker:true});form.lifecycle.afterSave=async saved=>{await back({skipPicker:true});await editor?.lifecycle.providersChanged?.(saved);if(onboarding){openChat();changed(saved);}};
@@ -299,7 +320,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     controls.get('endpoint').addEventListener('input',()=>{endpointEdited=true;});
     controls.get('protocol').addEventListener('change',()=>{endpointEdited=true;});
     controls.get('model').addEventListener('input',inherit);inherit();
-    connectProviderEditor({form,request,scope:settingsScope,profile,connection,tr,current:()=>editor?.session===session&&!disposed&&client.runtime.boot_id===session.context.boot,models:entries=>{configuredModels=entries.map(model=>typeof model==='string'?model:model.id);models([...new Map([...(selectedEntry?.models||[]),...configuredModels].map(model=>[typeof model==='string'?model:model.id,model])).values()],controls.get('model_selection').value);}});
+    connectProviderEditor({form,request,scope:settingsScope,profile,connection,tr,current:()=>editor?.session===session&&!disposed&&client.runtime.boot_id===session.context.boot,connectionChanged:value=>inputDiscovery.connectionChanged(value),models:(entries,inputs)=>{inputDiscovery.adopt(session.values,inputs);configuredModels=entries.map(model=>typeof model==='string'?model:model.id);models([...new Map([...(selectedEntry?.models||[]),...configuredModels].map(model=>[typeof model==='string'?model:model.id,model])).values()],controls.get('model_selection').value);}});
 
   }
   function spaceEditor() {
@@ -364,15 +385,18 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
 
   }
   function closeTaskList(){taskListView?.queue.close();taskListView?.clock.dispose();taskListView=null;}
-  function closeTaskView(){taskView?.eventsQueue?.close();taskView?.ui?.dispose();taskView=null;host.classList.remove('task-page-host');}
+  function closeTaskView(){if(taskView)rememberTaskDetail(taskView);taskView?.eventsQueue?.close();taskView?.ui?.dispose();taskView=null;host.classList.remove('task-page-host');}
+  function taskDetailKey(task){const space=client.spaces?.find(value=>value.id===task._space_id);return JSON.stringify([space?.control_id,resourceBoots.get(task._space_id)||resourceBoots.get('')||client.runtime.boot_id,task._space_id,task.assistant_id,task.id]);}
+  function rememberTaskDetail(view){if(view.invalidated)return;taskDetails.delete(view.cacheKey);taskDetails.set(view.cacheKey,structuredClone({record:view.record,state:view.state,inputs:view.inputs}));if(taskDetails.size>64)taskDetails.delete(taskDetails.keys().next().value);}
   async function taskDetail(task,{recordHistory=true,returnTo=taskView?.returnTo||taskOrigin||{route:'tasks'}}={}) {
     rememberTasks([task]);taskOrigin=returnTo;captureView();pageView?.queue.close();pageView=null;closeTaskList();closeTaskView();scheduleView=null;detailParent=true;
     if(recordHistory){const replace=history.state?.potTask?.id===task.id&&history.state?.potScope?.space===task._space_id;history[replace?'replaceState':'pushState']({potRoute:'tasks',potScope:{space:task._space_id,owner:task.assistant_id},potTask:{...task},potTaskReturn:returnTo},'',location.href);}
     const path=`/api/v1/tasks/${encodeURIComponent(task.id)}`,fileScope={owner:task.assistant_id,space:task._space_id};
-    const result=await load(token=>request(path,{...fileScope,signal:token.signal}));if(!result)return;
+    const cacheKey=taskDetailKey(task),saved=taskDetails.get(cacheKey);
+    const result=await load(token=>saved?.record||request(path,{...fileScope,signal:token.signal}));if(!result)return;
     const {root,token}=result,record=result.value;host.classList.add('task-page-host');
     const draftKey=JSON.stringify([task._space_id,task.assistant_id,task.id]);
-    const view={task,record,token,returnTo,scope:fileScope,state:createTaskTranscript(),inputs:[],busy:false,again:false,unavailable:false};
+    const view={task,record,token,returnTo,cacheKey,initialRead:!saved,scope:fileScope,state:saved?.state||createTaskTranscript(),inputs:saved?.inputs||[],busy:false,again:false,unavailable:false};
     const current=()=>gate.current(token)&&taskView===view;
     const mutate=async(suffix,body)=>{if(!current())return;await request(path+suffix,{...fileScope,method:'POST',body});if(current())await refreshTaskEvents(view);};
     const ui=createTaskConversation({root,task,record,locale,client,scope:fileScope,draft:taskDrafts.get(draftKey)||'',onDraft:text=>{taskDraftVersions.set(draftKey,(taskDraftVersions.get(draftKey)||0)+1);if(text)taskDrafts.set(draftKey,text);else taskDrafts.delete(draftKey);},
@@ -393,25 +417,31 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       onRefresh:()=>refreshTaskEvents(view),onSettings:()=>{configurationSpace=task._space_id;filter.settingsTab='providers';routeChanged('settings');return show('settings');},
     });
     view.ui=ui;view.transcript=ui.transcript;taskView=view;heading(task.title);permissions();
-    await refreshTaskEvents(view);if(!current())return;
+    if(saved)renderTaskTranscript(view);
     restoreView(`task:${draftKey}`,token);
+    await refreshTaskEvents(view);
   }
   function refreshTaskEvents(view=taskView){if(!view)return Promise.resolve();view.eventsQueue||=createRefreshQueue(()=>readTaskEvents(view),{active:()=>!disposed&&gate.current(view.token)&&taskView===view});return view.eventsQueue.run();}
   async function readTaskEvents(view) {
+    const generation=view.readGeneration||0,current=()=>gate.current(view.token)&&taskView===view&&generation===(view.readGeneration||0);
     let render=false;
     try{
       const path=`/api/v1/tasks/${encodeURIComponent(view.task.id)}`,options={...view.scope,signal:view.token.signal};
-      const updates=await Promise.allSettled([request(path,options),request(`${path}/messages`,options)]);if(!gate.current(view.token)||taskView!==view)return;
+      const events=(async()=>{let count=0,page;
+        do{page=await request(`${path}/events?${new URLSearchParams({after:view.state.cursor,limit:100})}`,options);if(!current())return;const previous=view.state.cursor;appendTaskEvents(view.state,page.events);if(page.has_more&&view.state.cursor===previous)throw Error('Task event cursor did not advance');count+=(page.events||[]).length;}while(page.has_more&&count<5000);
+        return page;
+      })();
+      const updates=await Promise.allSettled([view.initialRead?Promise.resolve(view.record):request(path,options),request(`${path}/messages`,options),events]);view.initialRead=false;
+      if(!current())return;
       if(updates[0].status==='fulfilled')view.record=updates[0].value;if(updates[1].status==='fulfilled')view.inputs=list(updates[1].value);
       view.connectionError=updates.filter(update=>update.status==='rejected'&&update.reason.name!=='AbortError').map(update=>update.reason.message).join('\n');
-      let count=0,page;
-      do{page=await request(`${path}/events?${new URLSearchParams({after:view.state.cursor,limit:100})}`,options);if(!gate.current(view.token)||taskView!==view)return;const previous=view.state.cursor;appendTaskEvents(view.state,page.events);if(page.has_more&&view.state.cursor===previous)throw Error('Task event cursor did not advance');count+=(page.events||[]).length;}while(page.has_more&&count<5000);
-      view.unavailable=!!page.unavailable;render=true;
-      if(page.has_more)queueMicrotask(()=>refreshTaskEvents(view));
-    }catch(reason){if(gate.current(view.token)&&reason.name!=='AbortError'){view.connectionError=reason.message;render=true;}}
-    if(render&&gate.current(view.token)&&taskView===view)renderTaskTranscript(view);
+      const page=updates[2].status==='fulfilled'?updates[2].value:{};
+      view.unavailable=!!page?.unavailable;render=true;
+      if(page?.has_more)queueMicrotask(()=>refreshTaskEvents(view));
+    }catch(reason){if(current()&&reason.name!=='AbortError'){view.connectionError=reason.message;render=true;}}
+    if(render&&current())renderTaskTranscript(view);
   }
-  function renderTaskTranscript(view){view.ui.update({record:view.record,state:view.state,inputs:view.inputs,unavailable:view.unavailable,connectionError:view.connectionError||'',approvals:pendingApprovals.filter(item=>item.request?.task===view.task.id)});renderApprovals();}
+  function renderTaskTranscript(view){rememberTaskDetail(view);view.ui.update({record:view.record,state:view.state,inputs:view.inputs,unavailable:view.unavailable,connectionError:view.connectionError||'',approvals:pendingApprovals.filter(item=>item.request?.task===view.task.id)});renderApprovals();}
   function approvalFor(tool,task=''){if(approvalOwner!==approvalContext())return;const scope=approvalScope();const approval=pendingApprovals.find(item=>item.request.owner===scope.owner&&(item.request.task||'')===task&&item.request.call_id===tool.id&&item.request.turn===tool.turn_id);return approval?{...approval,task_title:taskNames.get(taskNameKey(scope,task))}:undefined;}
   function taskNeedsApproval(id,phase){return approvalOwner===approvalContext()?pendingApprovals.some(item=>item.request.owner===scope().owner&&item.request.task===id):phase==='waiting_approval';}
   const taskNameKey=(captured,id)=>JSON.stringify([captured.space,captured.owner,id]);
@@ -451,7 +481,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     if(record)history.pushState({potRoute:'tasks',potSchedule:{...item},potScope:{space:item._space_id,owner:item._assistant_id}},'',location.href);
     const token=gate.next(),root=body(),content=n('div');root.append(content);
     const view={item,runsOffset,token,busy:false,confirmed:false,content};scheduleView=view;
-    await connectView(root,token,()=>request(`/api/v1/schedules?${new URLSearchParams({selected:item.id,runs_offset:runsOffset,limit:20})}`,{signal:token.signal,space:item._space_id,owner:item._assistant_id}),value=>{
+    await connectView(root,token,()=>read(`/api/v1/schedules?${new URLSearchParams({selected:item.id,runs_offset:runsOffset,limit:20})}`,{signal:token.signal,space:item._space_id,owner:item._assistant_id}),value=>{
       if(!value.selected||value.selected.deleted){scheduleView=null;return show('tasks',{force:true});}
       view.item={...item,...value.selected};const projection=n('div');renderScheduleHistory(projection,view,value,runsOffset);reconcile(content,projection);
     },{topics:['schedules','tasks','machines','spaces'],space:item._space_id});
@@ -511,14 +541,14 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const listsRoot=n('div','usage-lists'),jobs=[];
     for(const space of (client.spaces||[]).filter(space=>spaceID==='all'||space.id===spaceID)){
       const owner={space:space.id,owner:usageOwner?.owner||''},base={timezone,scope:scopeID};
-      for(const [kind,title]of [['models',usageOwner?tr('Lifetime model usage','累计模型用量'):tr('Agent / model usage','Agent / 模型用量')],...(usageOwner?[['requests',tr('Model requests','模型请求')],['tools',tr('Tool statistics','工具统计')],['compactions',tr('Context compaction','上下文压缩')]]:[])])jobs.push(createUsageList({root:listsRoot,kind,title,params:kind==='models'&&!usageOwner?params:base,owner,request,token,current:()=>gate.current(token),offsets:usageOffsets,cache:usageCache,locale:locale(),tr,spaceName:!usageOwner&&spaceID==='all'?space.name:''}));
+      for(const [kind,title]of [['models',usageOwner?tr('Lifetime model usage','累计模型用量'):tr('Agent / model usage','Agent / 模型用量')],...(usageOwner?[['requests',tr('Model requests','模型请求')],['tools',tr('Tool statistics','工具统计')],['compactions',tr('Context compaction','上下文压缩')]]:[])])jobs.push(createUsageList({root:listsRoot,kind,title,params:kind==='models'&&!usageOwner?params:base,owner,request:read,token,current:()=>gate.current(token),offsets:usageOffsets,cache:usageCache,locale:locale(),tr,spaceName:!usageOwner&&spaceID==='all'?space.name:''}));
     }
     const content=n('div'),limits=n('div','usage-limit-actions');headingActions.append(limits);root.append(content,listsRoot);
     let initial=true;
     return connectView(root,token,async()=>{
       const summary=across(`/api/v1/usage/summary?${new URLSearchParams(params)}`,token,{spaceID,ownerID:usageOwner?.owner||'',errorTarget:root});
-      const [pages]=await Promise.all([summary,...jobs.map(job=>initial?job:job.refresh())]);initial=false;
-      return pages;
+      for(const job of jobs)if(!initial)job.refresh();initial=false;
+      return summary;
     },pages=>{const projection=n('div'),limitProjection=n('div','usage-limit-actions');
     const data=pages.length===1?{...pages[0].value,spaces:pages}:combineUsage(pages);
     const {exact,compact}=usageNumbers(locale()),total=(usageOwner?data.lifetime||data.total:data.total)||{},metrics=n('div','usage-metrics'),totalCard=n('section','page-card usage-total');
@@ -547,7 +577,9 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   }
   async function machines(root,token) {
     const rows=n('div'),entries=new Map(),membership=n('div'),emptyRow=n('p','page-empty',tr('No machines','暂无机器'));root.append(rows,emptyRow,membership);
-    return connectView(root,token,async()=>{const [inventory,permissionPages]=await Promise.all([across('/api/v1/machines',token),across('/api/v1/permissions',token).catch(()=>[])]);return {inventory,permissionPages};},async({inventory,permissionPages})=>{
+    const data={inventory:[],permissionPages:[],permissionsPending:true};
+    const update=async({inventory,permissionPages,permissionsPending})=>{
+      if(!gate.current(token)||disposed)return;
       const items=inventory.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner));emptyRow.hidden=!!items.length;
       keyedRows(rows,entries,items,{key:machine=>JSON.stringify([machine._space_id,machine.runtime_id||machine.id]),create:()=>{
         const element=n('section','page-card machine-card'),header=n('div','machine-header'),mark=n('span','machine-icon'),name=n('span','machine-name'),status=n('span'),tags=n('p','hint machine-tags'),location=n('p','hint machine-location'),permissions=n('div','machine-permissions');mark.append(icon('machines'));header.append(mark,name,status);element.append(location,header,tags,permissions);return {element,name,status,tags,location,permissions};
@@ -555,6 +587,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
         const id=machine.runtime_id||machine.id,permissionPage=permissionPages.find(page=>page.space.id===machine._space_id),policy=permissionPage?.value.policy;
         const stale=machine._stale||permissionPage?.stale||client.spaces.find(space=>space.id===machine._space_id)?.connected===false,permissions=entry.permissions;
         entry.element.dataset.machineId=id;entry.element.dataset.spaceId=machine._space_id;entry.name.textContent=machine.name||id;entry.location.textContent=machine._space_name;entry.status.textContent=stale?tr('Stale','已过期'):machine.connected?tr('Connected','已连接'):tr('Offline','离线');entry.status.className=machine.connected&&!stale?'success-text':'hint';entry.tags.textContent=(machine.tags||[]).join(' · ');entry.tags.hidden=!machine.tags?.length;
+      if(permissionsPending&&!policy?.machines?.[id]){permissions.replaceChildren(n('p','hint',translate(locale(),'loading.pending')));return;}
       if(!policy?.machines?.[id]){permissions.replaceChildren(n('p','inline-error',tr('Execution permissions are unavailable.','执行权限暂不可用。')),action(tr('Retry','重试'),()=>show('machines')));return;}
       const captured={space:machine._space_id,owner:''},controlID=permissionPage.space.control_id,current=policy.machines[id],key=JSON.stringify([machine._space_id,controlID,id]);
       let draft=machineDrafts.get(key);
@@ -565,7 +598,12 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
         edit:({title,initial,fields,save,scope})=>renderEditor(title,initial,fields,save,{capturedScope:scope})});
       }});
       await renderMachineMembership({client,root,membershipRoot:membership,machines:items,locale,notify,refresh:()=>pageView?.queue.run(),edit:({title,initial,fields,save,scope})=>renderEditor(title,initial,fields,save,{capturedScope:scope}),signal:token.signal});
-    },{topics:['machines','spaces','permissions'],space:client.spaces?.length===1?client.spaces[0].id:''});
+    };
+    return connectView(root,token,async()=>{
+      data.permissionsPending=true;
+      const permissions=across('/api/v1/permissions',token).catch(()=>[]).then(pages=>{data.permissionPages=pages;data.permissionsPending=false;if(data.inventory.length)return update(data);});
+      data.inventory=await across('/api/v1/machines',token);await update(data);await permissions;return data;
+    },update,{topics:['machines','spaces','permissions'],space:client.spaces?.length===1?client.spaces[0].id:''});
   }
   const approvalScope=()=>taskView?.scope||scope();
   const approvalContext=()=>JSON.stringify([approvalScope(),taskView?.task.id||'']);
@@ -627,17 +665,19 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     try {root.replaceChildren();await ({settings,tasks,machines,usage}[next]||settings)(root,token);if(gate.current(token))restoreView(viewKey,token);}
     catch(reason){if(gate.current(token)&&version===pageVersion&&!disposed)errorView(reason,root);}
   }
-  function openUsageView(context,record=true){usageOffsets.clear();usageOwner={...context};route='usage';if(record)history.pushState({potRoute:'usage',potScope:{space:context.space,owner:context.owner},potUsage:{...usageOwner}},'',location.href);routeChanged('usage');return show('usage',{keepUsageOwner:true});}
+  function openUsageView(context,record=true){usageOwner={...context};route='usage';if(record)history.pushState({potRoute:'usage',potScope:{space:context.space,owner:context.owner},potUsage:{...usageOwner}},'',location.href);routeChanged('usage');return show('usage',{keepUsageOwner:true});}
   const popstate=async event=>{
     if(!editor)return false;if(event.state?.potEditor===editor.id)return true;
     const current=editor;if(!await back())history.pushState({...history.state,potEditor:current.id},'',location.href);return true;
   };
   const beforeUnload=event=>{if([...(editor?[editor.session]:[]),...editorParents.map(value=>value.session),...machineDrafts.values()].some(session=>session.dirty||session.pending)){event.preventDefault();event.returnValue='';}};
-  const preference=()=>{if(taskView){taskDetail(taskView.task,{recordHistory:false});return;}if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner,force:true});};
+  const preference=()=>{if(route==='settings'&&filter.settingsTab==='integrations'&&!editor){heading(translate(locale(),'settings'));for(const node of host.querySelectorAll('[data-settings-i18n]'))node.textContent=translate(locale(),node.dataset.settingsI18n);return;}if(taskView){taskDetail(taskView.task,{recordHistory:false});return;}if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner,force:true});};
   window.addEventListener('beforeunload',beforeUnload);window.addEventListener('pot:locale',preference);
   return {get title(){return title;},get editing(){return !!editor;},get approvalSpace(){return approvalScope().space;},get notificationContext(){return taskView?{space:taskView.scope.space,owner:taskView.scope.owner,task:taskView.task.id}:null;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner;},show,assistant,setupAI,leave,back,permissions,syncApprovals:renderApprovals,taskMenu(){taskView?.ui.openMenu();},handleHistory:popstate,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalQueue?.close();approvalQueue=null;approvalQueueKey='';approvalGate.close();approvalOwner='';pendingApprovals=[];approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);},approvalFor,decideApproval,taskNeedsApproval,rememberTasks,renderApprovals,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,options={}){route='tasks';return taskDetail(task,options);},
     showProviders(){filter.settingsTab='providers';return show('settings');},
     refresh(topics=[],source={}){
+      if(source.boot&&(resourceBoots.get(source.space)||client.runtime.boot_id)!==source.boot){if(source.boot)resourceBoots.set(source.space,source.boot);for(const key of taskDetails.keys())if(!source.space||JSON.parse(key)[2]===source.space)taskDetails.delete(key);spaceCache.clear();usageCache.clear();if(taskView&&(!source.space||taskView.scope.space===source.space)){taskView.invalidated=true;taskView.readGeneration=(taskView.readGeneration||0)+1;}}
+      if(topics.includes('spaces')){spaceCache.clear();usageCache.clear();taskDetails.clear();if(taskView){taskView.invalidated=true;taskView.readGeneration=(taskView.readGeneration||0)+1;}}
       if(editor||disposed||!route||!host.offsetParent)return;
       if(pageView){if(relevantChange(topics,pageView.topics,pageView.space,source))return pageView.queue.run();return;}
       if(route==='settings')return;
@@ -646,6 +686,6 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       if(taskView)return refreshTaskEvents();
 
     },
-    dispose(){notificationSettings?.dispose();for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle?.dispose?.();disposed=true;closeTaskList();closeTaskView();approvalQueue?.close();pageView?.queue.close();gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
+    dispose(){stopResources?.();notificationSettings?.dispose();for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle?.dispose?.();disposed=true;closeTaskList();closeTaskView();approvalQueue?.close();pageView?.queue.close();gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
   };
 }

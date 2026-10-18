@@ -20,15 +20,22 @@ func TestExplicitCompositionWorker(t *testing.T) {
 		t.Fatal("missing standalone composition worker")
 	}
 	var output strings.Builder
+	yields := 0
 	runner := composition.ProcessRunner{Command: []string{worker}}
-	err := runner.Run(context.Background(), `if (typeof process !== "undefined" || typeof require !== "undefined") throw new Error("ambient authority"); text(await tools.echo({message:"external"}));`, map[string]composition.Tool{
+	err := runner.Run(context.Background(), `if (typeof process !== "undefined" || typeof require !== "undefined") throw new Error("ambient authority"); yield_control();text(await tools.echo({message:"external"}));`, map[string]composition.Tool{
 		"echo": func(_ context.Context, args json.RawMessage) (any, error) {
 			var value map[string]any
 			err := json.Unmarshal(args, &value)
 			return value, err
 		},
-	}, func(value string) error { output.WriteString(value); return nil })
-	if err != nil || output.String() != "{\"message\":\"external\"}\n" {
+	}, func(event composition.Event) error {
+		if event.Type == "yield" {
+			yields++
+		}
+		output.WriteString(event.Text)
+		return nil
+	})
+	if err != nil || output.String() != "{\"message\":\"external\"}\n" || yields != 1 {
 		t.Fatalf("worker: %q %v", output.String(), err)
 	}
 	// The host test executable has no hidden worker dispatch in its main.

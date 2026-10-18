@@ -49,6 +49,8 @@ type Options struct {
 	IntegrationAdapters []integrations.Adapter
 }
 type Service struct {
+	pluginWG            sync.WaitGroup
+	pluginMu            sync.Mutex
 	Attachments         *attachments.Store
 	mu                  sync.Mutex
 	resourceMutations   sync.Mutex
@@ -156,6 +158,8 @@ func Open(options Options) (*Service, error) {
 	if err = s.openTasks(); err != nil {
 		return nil, err
 	}
+	s.pluginWG.Add(1)
+	go s.pluginLoop()
 	success = true
 	return s, nil
 }
@@ -191,7 +195,7 @@ func (s *Service) Conversation(ctx context.Context, id string) (*assistant.Conve
 	if err != nil {
 		return nil, err
 	}
-	options := assistant.ConversationOptions{InitialWelcome: welcome, InitialIntent: intent, Context: s.ctx, Owner: id, RuntimeID: s.options.RuntimeID, BootID: s.options.BootID, Manager: s.options.Manager, InitialSpec: initial, InitialRules: rules, RefreshConfiguration: s.refreshAssistantConfiguration, MaxTurnRequests: 128, OnFinished: func(ctx context.Context, r protocol.SendMessage, result execution.Result) error {
+	options := assistant.ConversationOptions{InitialWelcome: welcome, InitialIntent: intent, Context: s.ctx, Owner: id, RuntimeID: s.options.RuntimeID, BootID: s.options.BootID, Manager: s.options.Manager, InitialSpec: initial, InitialRules: rules, RefreshConfiguration: s.refreshAssistantConfiguration, OnFinished: func(ctx context.Context, r protocol.SendMessage, result execution.Result) error {
 		return s.finishAgentDelivery(ctx, id, r, result)
 	}}
 	options.ValidateAttachments = func(ctx context.Context, spec core.ResolvedSpec, items []core.Attachment) error {
@@ -383,6 +387,7 @@ func (s *Service) Close() error {
 		engines = append(engines, e)
 	}
 	s.mu.Unlock()
+	s.pluginWG.Wait()
 	var result error
 	if s.Terminals != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

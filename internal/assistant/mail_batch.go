@@ -135,12 +135,12 @@ func (m *Mailbox) ClaimEventBatch(ctx context.Context, owner string, ids []strin
 	return storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
 		size := 0
 		for _, id := range ids {
-			var text string
-			if err := tx.QueryRowContext(ctx, `SELECT json_extract(envelope,'$.text') FROM agent_messages WHERE id=? AND recipient=? AND state='queued' AND json_extract(envelope,'$.kind')='task_result'`, id, owner).Scan(&text); err != nil {
+			var body string
+			if err := tx.QueryRowContext(ctx, `SELECT envelope FROM agent_messages WHERE id=? AND recipient=? AND state='queued' AND json_extract(envelope,'$.kind') IN ('task_result','plugin_event')`, id, owner).Scan(&body); err != nil {
 				return err
 			}
-			size += len(text)
-			if size > inbox.MaxBatchBytes {
+			size += len(body)
+			if size > inbox.MaxBatchBytes && len(ids) > 1 {
 				return errors.New("result batch content limit exceeded")
 			}
 			if err := claimBatchItem(ctx, tx, ids[0], id, "queued"); err != nil {

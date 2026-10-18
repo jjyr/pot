@@ -81,6 +81,59 @@ func TestProviderDiscoveryAndInference(t *testing.T) {
 	}
 }
 
+func TestDiscoveredInputModalitiesSurviveSelectionAndReload(t *testing.T) {
+	s, _ := configurationService(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/models" {
+			t.Errorf("unexpected inference request: %s %s", r.Method, r.URL.Path)
+		}
+		fmt.Fprint(w, `{"data":[{"id":"custom/vision","modalities":{"input":["text","image","video"]}},{"id":"custom/pdf","modalities":{"input":["text","pdf"]}},{"id":"custom/unknown"}]}`)
+	}))
+	defer server.Close()
+	ctx := context.Background()
+	check, err := s.Profiles.Check(ctx, CheckProvider{Endpoint: server.URL + "/v1", Protocol: "openai_responses", APIKey: "test-key"})
+	if err != nil || len(check.InputModalities) != 2 {
+		t.Fatal(check, err)
+	}
+	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "save-inputs", Name: "Custom", Model: "custom/vision", Endpoint: server.URL + "/v1", Protocol: "openai_responses", APIKey: "test-key", Models: check.Models, ModelSettings: &core.ModelSettings{InputModalities: check.InputModalities}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenProfiles(s.Profiles.path, s.Profiles.pluginRoot, s.Profiles.registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		model string
+		want  core.AttachmentCapabilities
+	}{
+		{"custom/vision", core.AttachmentCapabilities{Image: true}},
+		{"custom/pdf", core.AttachmentCapabilities{PDF: true}},
+		{"custom/unknown", core.AttachmentCapabilities{}},
+	} {
+		spec, err := reopened.ResolveAssistant(AssistantSelection{ProfileID: profile.ID, ProfileRevision: profile.Revision, Model: tt.model})
+		if err != nil || spec.AttachmentCapabilities() != tt.want {
+			t.Fatalf("%s: caps=%+v err=%v", tt.model, spec.AttachmentCapabilities(), err)
+		}
+	}
+}
+
+func TestModelListOptionalModalitiesCompatibility(t *testing.T) {
+	s, _ := configurationService(t)
+	for _, extension := range []string{"", `,"modalities":null`, `,"modalities":["text","image"]`, `,"modalities":"image"`, `,"modalities":{"input":true}`, `,"modalities":{"input":["text",42]}`, `,"modalities":{"output":["image"]}`, `,"modalities":{"input":[]}`} {
+		t.Run(extension, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, `{"object":"list","data":[{"id":"standard","object":"model","created":123,"owned_by":"openai"%s},{"id":"extended","modalities":{"input":["text","image"]}}]}`, extension)
+			}))
+			defer server.Close()
+			result, err := s.Profiles.Check(context.Background(), CheckProvider{Endpoint: server.URL + "/v1", Protocol: "openai_chat", APIKey: "test-key"})
+			if err != nil || !result.Supported || len(result.Models) != 2 || len(result.InputModalities) != 1 || len(result.InputModalities["extended"]) != 2 {
+				t.Fatalf("valid model list rejected or absent facts treated as unsupported: %+v, %v", result, err)
+			}
+		})
+	}
+}
+
 func TestProviderTestRejectsHTTPAndStreamFailures(t *testing.T) {
 	s, _ := configurationService(t)
 	for _, tt := range []struct {
