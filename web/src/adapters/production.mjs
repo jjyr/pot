@@ -21,10 +21,12 @@ export function scopedPath(path, {owner = '', space = ''} = {}) {
   if (space) params.set('space_id', space);
   return `${base}${params.size ? `?${params}` : ''}`;
 }
-export function normalizeSnapshot(value, runtime, owner, space = '') {
-  if (value?.runtime_id && typeof value.cursor === 'string' && typeof value.running === 'boolean') return value;
-  if (!value || !Number.isSafeInteger(value.cursor) || value.cursor < 0) throw Error('Invalid conversation cursor');
-  return {...value, raw: value, runtime_id: runtime.runtime_id || runtime.id, owner_id: space ? JSON.stringify([space, owner]) : owner,
+export function normalizeSnapshot(frame, runtime, owner, space = '') {
+  if(!frame?.view||!['reset','delta'].includes(frame.kind))throw Error('Invalid conversation frame');
+  const value={...frame.view.state,kind:frame.kind,base_cursor:frame.base_cursor,history:frame.view.history,
+    messages:frame.view.messages.map(({message,...meta})=>({...message,...meta}))};
+  if (!Number.isSafeInteger(value.cursor) || value.cursor < 0) throw Error('Invalid conversation cursor');
+  return {...value, runtime_id: runtime.runtime_id || runtime.id, owner_id: space ? JSON.stringify([space, owner]) : owner,
     cursor: String(value.cursor), running: !!value.turn, turn_id: value.turn?.user_message_id || null};
 }
 export async function createProductionClient({desktop = false, base = ''} = {}) {
@@ -59,7 +61,8 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
   const runtime = await request('/api/v1/runtime', {owner: '', space: ''});
   if (!runtime || !(runtime.runtime_id || runtime.id)) throw Error('Runtime identity is unavailable');
   const readBaselines=desktop?await invoke('AssistantReads'):[];
-  const attachmentURLs=new Map();
+  const attachmentURLs=new Map(),attachmentLeases=new Map();
+  const attachmentKey=(attachment,options)=>{const scope={...context,...options};return JSON.stringify([scope.space,scope.owner,attachment.id]);};
   const client = {production: true, desktop, runtime, request,readBaselines,
     scope: () => ({...context}), setScope: value => Object.assign(context, value),
     snapshot: async options => {
@@ -67,6 +70,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
       const value = await request('/api/v1/snapshot', {...scope, ...options});
       return normalizeSnapshot(value, runtime, scope.owner, scope.space);
     },
+    history: async (query, options = {}) => {const page=await request(`/api/v1/history?${new URLSearchParams(query)}`,options);return {...page,messages:page.messages.map(({message,...meta})=>({...message,...meta}))};},
     send: ({boot_id,user_message_id,retry_user_message_id,...body}) => retry_user_message_id ? request('/api/v1/turn/retry',{method:'POST',body:{request_id:body.request_id,user_message_id:retry_user_message_id}}) : request(user_message_id?'/api/v1/turn/steer':'/api/v1/messages', {method: 'POST', body:user_message_id?{request_id:body.request_id,user_message_id,text:body.text,attachments:body.attachments,references:body.references}:body}),
     controlTurn:(body,scope)=>request('/api/v1/turn/control',{...scope,method:'POST',body}),
     cancel: ({boot_id, turn_id, request_id}) => request('/api/v1/turn/cancel', {method: 'POST', body: {request_id, user_message_id: turn_id}}),
@@ -87,6 +91,10 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
     markRead:desktop?value=>invoke('ReadAssistant',value.space_id,value.owner,value.reply_id,value.reply_count):undefined,
     onRead:desktop?handler=>runtimeAPI.Events.On('pot:read',event=>handler(event.data)):undefined,
     setReducedMotion:desktop?value=>invoke('SetReducedMotion',value):undefined,
+    retainAttachment(attachment,options={}) {
+      const key=attachmentKey(attachment,options);attachmentLeases.set(key,(attachmentLeases.get(key)||0)+1);let released=false;
+      return ()=>{if(released)return;released=true;const count=(attachmentLeases.get(key)||1)-1;if(count){attachmentLeases.set(key,count);return;}attachmentLeases.delete(key);const pending=attachmentURLs.get(key);attachmentURLs.delete(key);pending?.then(url=>URL.revokeObjectURL(url)).catch(()=>{});};
+    },
     async attachmentURL(attachment,options={}) {
       const scope={...context,...options},key=JSON.stringify([scope.space,scope.owner,attachment.id]);
       if(attachmentURLs.has(key))return attachmentURLs.get(key);
@@ -108,7 +116,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
     async downloadAttachment(attachment,options={}){
       const scope={...context,...options};
       if(desktop)return invoke('DownloadAttachment',attachment.id,attachment.name,scope.owner,scope.space);
-      const url=await client.attachmentURL(attachment,scope),link=document.createElement('a');link.href=url;link.download=attachment.name;document.body.append(link);try{link.click();}finally{link.remove();}
+      const release=client.retainAttachment(attachment,scope);let url;try{url=await client.attachmentURL(attachment,scope);}catch(reason){release();throw reason;}const link=document.createElement('a');link.href=url;link.download=attachment.name;document.body.append(link);try{link.click();}finally{link.remove();setTimeout(release,1000);}
     },
     releaseAttachments(){for(const pending of attachmentURLs.values())pending.then(url=>URL.revokeObjectURL(url)).catch(()=>{});attachmentURLs.clear();},
     async downloadFile(task,path,options={}) {
@@ -147,7 +155,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
         return () => { active = false; stop(); stopStatus(); if (token) invoke('Unsubscribe', token).catch(() => {}); };
       }
       const source = new EventSource(`${base}${scopedPath('/api/v1/events', scope)}`);
-      source.addEventListener('snapshot', event => {
+      source.addEventListener('conversation', event => {
         let value;
         try { value = JSON.parse(event.data); }
         catch (reason) { if (active) onStatus('offline', reason); return; }

@@ -136,13 +136,14 @@ export function createAttachmentComposer({client,form,input,getKey,getCaps,canAd
 }
 
 export function renderMessageAttachments(refs,{client,scope,locale,onError,caps}) {
-  const host=node('div','message-attachments');
+  const host=node('div','message-attachments'),releases=[];host.dispose=()=>{for(const release of releases.splice(0))release();};
   for(const attachment of refs||[]){
+    const release=client.retainAttachment?.(attachment,scope);if(release)releases.push(release);
     const image=attachmentKind(attachment.mime_type)==='image',card=node('div',image?'sent-image':'sent-document');
     const open=action('',async()=>{
       const dialog=node('dialog','attachment-viewer'),title=node('span','attachment-name',attachment.name),close=action('×',()=>dialog.close());
       close.setAttribute('aria-label',locale()==='zh-CN'?'关闭':'Close');
-      const header=node('div','attachment-viewer-toolbar');header.append(title,action(locale()==='zh-CN'?'下载':'Download',()=>client.downloadAttachment(attachment,scope).catch(onError)),close);dialog.append(header);document.body.append(dialog);dialog.addEventListener('close',()=>dialog.remove(),{once:true});dialog.showModal();
+      const header=node('div','attachment-viewer-toolbar');header.append(title,action(locale()==='zh-CN'?'下载':'Download',()=>client.downloadAttachment(attachment,scope).catch(onError)),close);dialog.append(header);document.body.append(dialog);const releaseDialog=client.retainAttachment?.(attachment,scope);dialog.addEventListener('close',()=>{releaseDialog?.();dialog.remove();},{once:true});dialog.showModal();
       try{const url=await client.attachmentURL(attachment,scope);if(!dialog.isConnected)return;const content=node(image?'img':'iframe');if(image)content.alt=attachment.name;else content.title=attachment.name;content.src=url;dialog.append(content);}catch(reason){dialog.append(node('p','attachment-error',reason.message));}
     });
     open.className='attachment-preview control';open.setAttribute('aria-label',attachment.name);

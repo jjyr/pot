@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	APIVersion          = 3
+	APIVersion          = 4
 	RuntimePort         = 17700
 	RuntimeEndpointFile = "runtime.json"
 	PathSnapshot        = "/api/v1/snapshot"

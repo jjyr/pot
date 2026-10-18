@@ -1,5 +1,6 @@
 export const messages = {
   en: {
+    'history.earlier':'Load earlier messages', 'history.loading':'Loading messages…', 'history.start':'Beginning of chat', 'history.failed':'Could not load messages. Retry', 'history.missing':'Original message unavailable',
     'attachments.add':'Add attachment', 'attachments.images':'Images', 'attachments.pdf':'PDF',
     'attachments.modelUnsupported':'Current model does not support image or PDF uploads',
     'attachments.imagesUnsupported':'Current model does not support images', 'attachments.pdfUnsupported':'Current model does not support PDF uploads',
@@ -134,6 +135,7 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'history.earlier':'加载更早消息', 'history.loading':'正在加载消息…', 'history.start':'已到聊天开头', 'history.failed':'消息加载失败，点击重试', 'history.missing':'原消息不可用',
     'attachments.add':'添加附件', 'attachments.images':'图片', 'attachments.pdf':'PDF',
     'attachments.modelUnsupported':'当前模型不支持图片或 PDF 上传',
     'attachments.imagesUnsupported':'当前模型不支持图片', 'attachments.pdfUnsupported':'当前模型不支持 PDF 上传',

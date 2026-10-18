@@ -199,7 +199,48 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			return c.Snapshot(ctx)
+			return c.UIFrame(ctx, 0, true)
+		case "/api/v1/history":
+			c, err := conversation()
+			if err != nil {
+				return nil, err
+			}
+			q := u.Query()
+			parse := func(key string) (int64, error) {
+				if q.Get(key) == "" {
+					return 0, nil
+				}
+				n, e := strconv.ParseInt(q.Get(key), 10, 64)
+				if e != nil || n <= 0 || uint64(n) > core.MaxSafeInteger {
+					return 0, errors.New("invalid history cursor")
+				}
+				return n, nil
+			}
+			before, err := parse("before")
+			if err != nil {
+				return nil, err
+			}
+			after, err := parse("after")
+			if err != nil {
+				return nil, err
+			}
+			limit := 0
+			if q.Get("limit") != "" {
+				limit, err = strconv.Atoi(q.Get("limit"))
+				if err != nil || limit < 1 || limit > storage.UIMaxPageSize {
+					return nil, errors.New("invalid history page size")
+				}
+			}
+			around := q.Get("around")
+			if before > 0 && after > 0 || around != "" && (before > 0 || after > 0 || !core.Identifier(around)) {
+				return nil, errors.New("invalid history query")
+			}
+			page, err := c.UIHistory(ctx, before, after, around, limit)
+			if storage.IsMissingUIMessage(err) {
+				return nil, protocol.APIError{Code: "not_found", Message: "Message unavailable"}
+			}
+			return page, err
+
 		case "/api/v1/permissions":
 			type pendingApproval struct {
 				control.Approval

@@ -35,6 +35,7 @@ func Open(path string) (*Store, error) {
 			return errors.New("database schema is newer than this runtime")
 		}
 		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,request_id TEXT UNIQUE,body TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS ui_tool_identity ON messages(json_extract(body,'$.tool.turn_id'),json_extract(body,'$.tool.id')) WHERE json_extract(body,'$.role')='tool';
 CREATE TABLE IF NOT EXISTS events(cursor INTEGER PRIMARY KEY AUTOINCREMENT,body TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS main_message_outbox(sequence INTEGER PRIMARY KEY AUTOINCREMENT,message_id TEXT UNIQUE NOT NULL,body TEXT NOT NULL);

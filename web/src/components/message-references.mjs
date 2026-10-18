@@ -11,7 +11,7 @@ export function renderMessageReferences(refs,{messages,locale,onJump,onRemove,di
   const t=key=>translate(locale(),key),host=node('div','message-references');host.setAttribute('aria-label',t('references.list'));
   for(const [index,ref]of refs.entries()){
     const source=messages.find(m=>m.id===ref.message_id),card=node('div','message-reference');
-    const open=node('button','message-reference-open');open.type='button';open.disabled=!source;
+    const open=node('button','message-reference-open');open.type='button';open.disabled=typeof onJump!=='function';
     const label=t(source?.role==='user'?'references.you':'references.assistant');
     const inner=node('span','message-reference-inner'),heading=node('span','message-reference-source',label),arrow=node('span','message-reference-jump','↗');heading.prepend(icon('reply'));heading.append(arrow);
     const text=ref.quote||source?.text||t('references.unavailable'),excerpt=node('span','message-reference-excerpt',text);

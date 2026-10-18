@@ -87,7 +87,17 @@ an independent external consumer and a standalone composition worker.
 Use `mise run preview` for a disposable browser fixture on loopback port 17702,
 or `mise exec -- go run ./cmd/pot-app -preview` for a native fixture. Neither uses
 product data or model calls. Browser fixtures do not establish real authentication
-or remote transport behavior. `mise run test:ui-http-integration` exercises real
+or remote transport behavior.
+
+For an isolated long-chat browser fixture with real local history/SSE endpoints,
+run `POT_HISTORY_FIXTURE_URL_FILE=/tmp/pot-history-url mise exec -- go test
+./internal/transport -run '^TestHistoryBrowserFixture$' -v -count=1 -timeout=35m`.
+Open the origin from that URL file at
+`/scripts/tests/fixtures/chat-history.html`. Its desktop/mobile controls exercise
+the shared DOM against synthetic messages and a deterministic loopback provider;
+attachment bytes are synthetic local blobs. Stop it with `POST /fixture/stop` at
+that private origin. This opt-in fixture adds no product data or native notifications.
+ `mise run test:ui-http-integration` exercises real
 local HTTP/SSE and downloads with a deterministic loopback model fixture; it needs
 cached Playwright CLI and an installed browser.
 

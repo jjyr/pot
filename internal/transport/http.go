@@ -99,7 +99,7 @@ func streamSnapshots(w http.ResponseWriter, r *http.Request, app *Application) {
 		writeError(w, http.StatusNotFound, protocol.APIError{Code: "owner_unavailable", Message: err.Error()})
 		return
 	}
-	updates, remove, err := c.Subscribe(r.Context())
+	updates, remove, err := c.SubscribeUI(r.Context())
 	if err != nil {
 		writeError(w, http.StatusConflict, protocol.APIError{Code: "subscription_unavailable", Message: err.Error()})
 		return
@@ -113,6 +113,8 @@ func streamSnapshots(w http.ResponseWriter, r *http.Request, app *Application) {
 	}
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
+	var cursor int64
+	initial := true
 	for {
 		select {
 		case <-r.Context().Done():
@@ -121,16 +123,21 @@ func streamSnapshots(w http.ResponseWriter, r *http.Request, app *Application) {
 			if writeHeartbeat(controller, w) != nil {
 				return
 			}
-		case snapshot, ok := <-updates:
+		case _, ok := <-updates:
 			if !ok {
 				return
 			}
-			data, err := json.Marshal(snapshot)
+			frame, err := c.UIFrame(r.Context(), cursor, initial)
 			if err != nil {
 				return
 			}
-			id := app.BootID + ":" + owner + ":" + strconv.FormatInt(snapshot.Cursor, 10)
-			if err = writeSSE(controller, w, "snapshot", id, data); err != nil {
+			cursor, initial = frame.Cursor, false
+			data, err := json.Marshal(frame)
+			if err != nil {
+				return
+			}
+			id := app.BootID + ":" + owner + ":" + strconv.FormatInt(frame.Cursor, 10)
+			if err = writeSSE(controller, w, "conversation", id, data); err != nil {
 				return
 			}
 		}
