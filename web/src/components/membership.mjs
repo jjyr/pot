@@ -54,7 +54,10 @@ export async function renderMachineMembership({client,root,machines,locale,notif
     let state;
     try{state=await client.request('/api/v1/runtime/control',{...scope,signal});}catch(reason){if(reason.name!=='AbortError'&&current())notify(reason.message);return;}
     if(!current())return;
-    for(const machine of owned){const card=[...root.querySelectorAll('.machine-card')].find(card=>card.dataset.machineId===(machine.runtime_id||machine.id)&&card.dataset.spaceId===space),settings=card?.querySelector('.machine-settings');if(!settings)continue;
+    for(const machine of owned){const card=[...root.querySelectorAll('.machine-card')].find(card=>card.dataset.machineId===(machine.runtime_id||machine.id)&&card.dataset.spaceId===space),header=card?.querySelector('.machine-header');if(!header)continue;
+      const menu=n('details','machine-actions'),summary=n('summary','control',tr('More','更多')),settings=n('div','machine-actions-content');summary.setAttribute('aria-label',`${machine.name||machine.runtime_id||machine.id}: ${tr('More machine actions','更多机器操作')}`);menu.append(summary,settings);header.append(menu);
+      menu.addEventListener('keydown',event=>{if(event.key==='Escape'){menu.open=false;summary.focus();}});
+      settings.addEventListener('click',event=>{if(event.target.closest('button'))menu.open=false;});
       settings.append(action(tr('Edit labels','编辑标签'),()=>labelsEditor(machine,scope),{disabled:machine._stale}));
       if(state.role==='control'&&(machine.runtime_id||machine.id)!==state.identity.runtime_id)settings.append(action(tr('Remove machine','移除机器'),()=>confirmRemove(machine,scope),{danger:true,disabled:machine._stale}));
     }

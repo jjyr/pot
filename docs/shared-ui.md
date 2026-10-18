@@ -24,6 +24,7 @@ owns Tasks, schedules, Machines, Usage, configuration forms and return contexts.
 [`components/task-conversation.mjs`](../web/src/components/task-conversation.mjs)
 owns the task status, conversation history, menu and fixed composer, reusing the
 shared reply/tool/composer components. Pages retains task requests and owner scope.
+[`components/usage.mjs`](../web/src/components/usage.mjs) owns exact-count usage tooltips, the trend chart and independently loaded detail lists.
 [`components/reply.mjs`](../web/src/components/reply.mjs) owns reply content,
 activity and the single failure presentation; [`state/chat-replies.mjs`](../web/src/state/chat-replies.mjs)
 binds optimistic and durable reply identities without changing execution state.

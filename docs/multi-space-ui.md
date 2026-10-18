@@ -63,8 +63,11 @@ Machines groups by Control membership, local first and cloud second. A remote
 execution machine joined to the local Control appears in Local. The cloud section
 shows Connect cloud when unconfigured and retains cached inventory when offline.
 Machine permission changes bind to their explicit Space and Runtime,
-independently of the current Chat. Task links filter by Runtime. Machines expose
-execution authorization without VM lifecycle, resource or guest desktop controls.
+independently of the current Chat. Default execution policy is visible on each
+machine, with permanent command rules collapsed and active task grants shown only
+when present. Tasks has its own destination; machine cards have no task links.
+Machines expose execution authorization without VM lifecycle, resource or guest
+desktop controls.
 Machine labels and membership use native operator controls; browser sessions
 cannot reach private enrollment/administration endpoints.
 
