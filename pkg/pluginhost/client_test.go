@@ -43,6 +43,56 @@ func execute(t *testing.T, c *Client, input map[string]any) Result {
 	return result
 }
 
+func TestSupervisedHostWorkingDirectory(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node unavailable: plugin startup probe requires Node")
+	}
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, configured := range []bool{false, true} {
+		name := "inherited"
+		if configured {
+			name = "workspace"
+		}
+		t.Run(name, func(t *testing.T) {
+			workspace := ""
+			expected, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if configured {
+				workspace = t.TempDir()
+				expected, err = filepath.EvalSymlinks(workspace)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			c, err := New(Config{
+				Node: node, ProcessWorker: []string{binary}, Workspace: workspace,
+				Identity: "working-directory-fixture", Entrypoint: "index.mjs", Mode: "text",
+				Files: map[string]string{"index.mjs": `export function createPlugin({emit}) {
+ return {async execute(){emit({type:'text',text:process.cwd()});},async dispose(){}};
+}`},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := c.Close(); err != nil {
+					t.Errorf("cleanup: %v", err)
+				}
+			})
+			result := execute(t, c, map[string]any{})
+			if result.IsError || len(result.Content) != 1 || result.Content[0].Text != expected {
+				t.Fatalf("plugin did not run in %q: %+v", expected, result)
+			}
+		})
+	}
+}
+
 func TestPersistentStateErrorAndDisposal(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "disposed")
 	markerJSON, _ := json.Marshal(marker)
