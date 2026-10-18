@@ -7,6 +7,7 @@ import {createReplyBubble} from './reply.mjs';
 import {createToolCall} from './tool-call.mjs';
 import {renderMarkdown} from './markdown.mjs';
 import {toolForest} from '../state/tool-calls.mjs';
+import {projectScriptRuns} from '../state/script-runs.mjs';
 import {projectTaskMessages} from '../state/task-transcript.mjs';
 
 export function createTaskConversation({root,task,record:initial,locale,client,scope,draft,onDraft,downloadFile,toolMemory,approvalFor,onDecision,onSend,onStop,onPause,onCancel,onUsage,onRefresh,onSettings,assistantName}){
@@ -72,7 +73,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   }
   function renderTranscript(){
     if(!state)return;
-      const rows=projectTaskMessages(state,inputs,record,{offline:unavailable||!!connectionError}),forest=toolForest(rows),keep=new Set();let position=0;
+    const rows=projectScriptRuns(projectTaskMessages(state,inputs,record,{offline:unavailable||!!connectionError}),{activeTurn:active()?[...state.tools.values()].at(-1)?.tool.turn_id:null}),forest=toolForest(rows),keep=new Set();let position=0;
     for(const message of rows){
       keep.add(message.id);let entry=nodes.get(message.id);
       if(!entry){const element=n('div',`message task-event role-${message.role}`);entry={element,text:null};nodes.set(message.id,entry);}

@@ -1,5 +1,6 @@
 import {createToolCall} from './tool-call.mjs';
 import {toolForest} from '../state/tool-calls.mjs';
+import {projectScriptRuns} from '../state/script-runs.mjs';
 import {avatar} from './avatar.mjs';
 import {icon} from './icons.mjs';
 import {messages,translate} from '../locales/messages.mjs';
@@ -393,7 +394,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const previousTop = history.scrollTop;
     const snapshot = state.snapshot||(client.production&&selectedAssistant?cachedSnapshots.get(JSON.stringify([selectedAssistant.space_id||'',selectedAssistant.id])):null);
     const sending=state.sends.get(editorOwner||(snapshot&&ownerKey(snapshot)));
-    const visibleMessages=projectChatReplies(snapshot,sending,{offline:connection==='offline'||disconnected||selectedAssistant?.offline});
+    const activeTurn=snapshot?.running?(snapshot.messages.find(message=>message.id===snapshot.turn_id)?.request_id||snapshot.turn_id):null;
+    const visibleMessages=projectScriptRuns(projectChatReplies(snapshot,sending,{offline:connection==='offline'||disconnected||selectedAssistant?.offline}),{activeTurn});
     const ids = new Set(visibleMessages.map(message => message.viewKey));
     const forest=toolForest(visibleMessages);
     for (const [id, record] of messageNodes) if (!ids.has(id)) { record.row.remove(); messageNodes.delete(id); }
@@ -446,7 +448,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       }else if(record.received){record.received.remove();record.received=null;}
 
       const parent=message.tool&&forest.byID.get(message.tool.turn_id+':'+message.tool.parent_id);
-      if(parent&&parent.children.some(entry=>entry.message.id===message.id)&&messageNodes.get(parent.message.viewKey)?.tool){messageNodes.get(parent.message.viewKey).tool.children.append(row);}
+      if(parent&&parent.children.some(entry=>entry.message.id===message.id)&&messageNodes.get(parent.message.viewKey)?.tool){const host=messageNodes.get(parent.message.viewKey).tool.children;if(row.parentElement!==host)host.append(row);}
       else {if(messageColumn.children[position]===chatApprovals)position++;if (messageColumn.children[position] !== row) messageColumn.insertBefore(row, messageColumn.children[position] || null);position++;}
     }
     const lastAssistant=visibleMessages.findLast(message=>message.role==='assistant');
