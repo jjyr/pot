@@ -74,6 +74,11 @@ updates preserve the guidance draft instead of rebuilding the form. Pagination
 rejects a non-advancing cursor. Tools remain expandable and file links retain the
 Task's explicit Control/assistant identity.
 
+Task invalidations also refresh status, pause controls, guidance/reference delivery
+states and the terminal result in place. The original input appears once as the
+Goal; guidance and references appear before execution output with explicit labels.
+The latest execution output and terminal result remain above the message composer.
+
 ## Tool-call projections
 
 Main Chat persists a structured `message.tool` projection separately from prose:

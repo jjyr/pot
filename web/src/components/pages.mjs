@@ -329,26 +329,43 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const {root}=result, record=result.value;heading(task.title);
     const fileScope={owner:task.assistant_id,space:task._space_id};
     const downloadFile=async({task:id,path})=>{try{await client.downloadFile(id,path,fileScope);}catch(reason){if(gate.current(result.token))errorView(reason,root);}};
-    root.append(n('p','hint',`${record.info?.phase||task.phase} · ${task.machine_id||''}`));
-    if(record.error)root.append(n('p','inline-error',record.error));
+    const status=n('p','hint task-status'),error=n('p','inline-error'),inputs=n('section','page-section task-inputs'),inputRows=n('div');inputs.append(n('h2','',tr('Guidance and references','指导与参考信息')),inputRows);inputs.hidden=true;
+    root.append(status,error);
     if(record.request?.text)root.append(section(tr('Goal','目标')),renderMarkdown(record.request.text,{downloadFile}));
-    if(record.result)root.append(section(tr('Result','结果')),renderMarkdown(typeof record.result==='string'?record.result:JSON.stringify(record.result),{downloadFile}));
-    const transcript=n('div','task-transcript message-body');root.append(transcript);
-    const view={task,token:result.token,scope:fileScope,transcript,state:createTaskTranscript(),nodes:new Map(),busy:false,again:false,downloadFile};taskView=view;titleChanged();permissions();
-    await refreshTaskEvents(view);
-    const inputs=await request(`/api/v1/tasks/${encodeURIComponent(task.id)}/messages`,{owner:task.assistant_id,space:task._space_id});
-    if(!gate.current(result.token))return;
-    for(const input of list(inputs))root.append(n('p','task-input',input.text));
+    const transcript=n('div','task-transcript message-body'),outcome=n('section','page-section task-result'),files=n('div','task-files');root.append(inputs,section(tr('Execution','执行记录')),transcript,outcome,files);
     const draftKey=JSON.stringify([task._space_id,task.assistant_id,task.id]),input=field(tr('Message','消息'),taskDrafts.get(draftKey)||'',{kind:'textarea'});input.input.oninput=()=>taskDrafts.set(draftKey,input.input.value);root.append(input.row);
+    const view={task,record,token:result.token,scope:fileScope,transcript,status,error,inputs,inputRows,outcome,files,state:createTaskTranscript(),nodes:new Map(),busy:false,again:false,downloadFile};taskView=view;titleChanged();permissions();
     let guidance;
     const send=action(tr('Send guidance','发送指导'),()=>{if(!guidance||guidance.text!==input.input.value)guidance={request_id:uid(),text:input.input.value};const attempt={...guidance};return operation(send,async()=>{await request(`/api/v1/tasks/${encodeURIComponent(task.id)}/messages`,{owner:task.assistant_id,space:task._space_id,method:'POST',body:attempt});if(taskDrafts.get(draftKey)===attempt.text)taskDrafts.delete(draftKey);},()=>taskDetail(task));},{primary:true});
-    const actions=toolbar(send,action(tr('Usage','用量'),()=>openUsageView({...fileScope,name:task.title,scope:task.id,returnTask:{...task}})));if((record.info?.phase||task.phase)==='running'&&record.run_id){const paused=!!record.info?.paused,control=action(paused?tr('Resume task','恢复任务'):tr('Pause task','暂停任务'),()=>operation(control,()=>request(`/api/v1/tasks/${encodeURIComponent(task.id)}/control`,{...fileScope,method:'POST',body:{run_id:record.run_id,action:paused?'resume':'pause'}}),()=>taskDetail(task)));actions.append(control);}for(const name of ['interrupt','cancel']) {const requestID=uid(),button=action(tr(name==='cancel'?'Cancel task':'Interrupt',name==='cancel'?'取消任务':'中断'),()=>operation(button,()=>request(`/api/v1/tasks/${encodeURIComponent(task.id)}/${name}`,{method:'POST',owner:task.assistant_id,space:task._space_id,body:{request_id:requestID}}),()=>taskDetail(task)),{danger:true});actions.append(button);}root.append(actions);
-    if(record.files?.length)for(const file of record.files){const link=n('a','',file.name||file.path);link.href='#';link.onclick=event=>{event.preventDefault();downloadFile({task:task.id,path:file.path});};root.append(link);}
+    const control=action('',()=>{const current=view.record;return operation(control,()=>request(`/api/v1/tasks/${encodeURIComponent(task.id)}/control`,{...fileScope,method:'POST',body:{run_id:current.run_id,action:current.info?.paused?'resume':'pause'}}),()=>refreshTaskEvents(view));});view.control=control;view.send=send;
+    const actions=toolbar(send,action(tr('Usage','用量'),()=>openUsageView({...fileScope,name:task.title,scope:task.id,returnTask:{...task}})),control);view.stopButtons=[];for(const name of ['interrupt','cancel']) {const requestID=uid(),button=action(tr(name==='cancel'?'Cancel task':'Interrupt',name==='cancel'?'取消任务':'中断'),()=>operation(button,()=>request(`/api/v1/tasks/${encodeURIComponent(task.id)}/${name}`,{method:'POST',owner:task.assistant_id,space:task._space_id,body:{request_id:requestID}}),()=>refreshTaskEvents(view)),{danger:true});view.stopButtons.push(button);actions.append(button);}root.append(actions);
+    renderTaskRecord(view,record);
+    await refreshTaskEvents(view);
+    if(!gate.current(result.token))return;
     restoreView(`task:${draftKey}`,result.token);
+  }
+  function renderTaskRecord(view,record){
+    view.record=record;const phase=record.info?.phase||view.task.phase,active=['queued','running','waiting'].includes(phase);
+    view.status.textContent=`${phase}${record.info?.paused?' · '+tr('Paused','已暂停'):''} · ${record.info?.machine_id||view.task.machine_id||''}`;
+    view.error.textContent=record.error||'';view.error.hidden=!record.error;
+    view.control.hidden=phase!=='running'||!record.run_id;view.control.textContent=record.info?.paused?tr('Resume task','恢复任务'):tr('Pause task','暂停任务');
+    view.send.hidden=!active;for(const button of view.stopButtons)button.hidden=button===view.stopButtons[0]?!active:phase==='complete'||phase==='cancelled';
+    const text=typeof record.result==='string'?record.result:record.result?.text||'';
+    if(view.resultText!==text){view.resultText=text;view.outcome.replaceChildren(n('h2','',tr('Result','结果')),renderMarkdown(text,{downloadFile:view.downloadFile}));}view.outcome.hidden=!text;
+    const filesKey=JSON.stringify(record.files||[]);if(view.filesKey!==filesKey){view.filesKey=filesKey;view.files.replaceChildren();for(const file of record.files||[]){const link=n('a','',file.name||file.path);link.href='#';link.onclick=event=>{event.preventDefault();view.downloadFile({task:view.task.id,path:file.path});};view.files.append(link);}}
+  }
+  function renderTaskInputs(view,inputs){
+    // The initial input is already shown as the Goal, never as the latest output.
+    const items=list(inputs).filter(input=>input.kind!=='input'),key=JSON.stringify(items);if(view.inputsKey===key)return;view.inputsKey=key;view.inputs.hidden=!items.length;view.inputRows.replaceChildren();
+    for(const input of items){const row=n('div','task-input'),label=input.kind==='reference'?tr('Reference','参考信息'):tr('Guidance','指导');row.append(n('p','hint',`${label}${input.state?' · '+tr({pending:'Pending',active:'Active',consumed:'Delivered',retained:'Retained',cancelled:'Cancelled'}[input.state]||input.state,{pending:'待处理',active:'处理中',consumed:'已送达',retained:'已保留',cancelled:'已取消'}[input.state]||input.state):''}`),renderMarkdown(input.text,{downloadFile:view.downloadFile}));view.inputRows.append(row);}
   }
   async function refreshTaskEvents(view=taskView) {
     if(!view||!gate.current(view.token))return;if(view.busy){view.again=true;return;}view.busy=true;
     try{
+      const path=`/api/v1/tasks/${encodeURIComponent(view.task.id)}`,options={...view.scope,signal:view.token.signal};
+      const updates=await Promise.allSettled([request(path,options),request(`${path}/messages`,options)]);if(!gate.current(view.token)||taskView!==view)return;
+      if(updates[0].status==='fulfilled')renderTaskRecord(view,updates[0].value);if(updates[1].status==='fulfilled')renderTaskInputs(view,updates[1].value);
+      for(const update of updates)if(update.status==='rejected'&&update.reason.name!=='AbortError')notify(update.reason.message);
       let count=0,page;
       do{page=await request(`/api/v1/tasks/${encodeURIComponent(view.task.id)}/events?${new URLSearchParams({after:view.state.cursor,limit:100})}`,{...view.scope,signal:view.token.signal});if(!gate.current(view.token)||taskView!==view)return;const previous=view.state.cursor;appendTaskEvents(view.state,page.events);if(page.has_more&&view.state.cursor===previous)throw Error('Task event cursor did not advance');count+=(page.events||[]).length;}while(page.has_more&&count<5000);
       renderTaskTranscript(view);
