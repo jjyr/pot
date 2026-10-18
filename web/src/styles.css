@@ -542,6 +542,15 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 .attachment-viewer>img,.attachment-viewer>iframe { width: 100%; height: calc(100% - 48px); object-fit: contain; border: 0; }
 @media (pointer: coarse) { .attachment-plus,.attachment-remove { min-width: 36px; min-height: 36px; } }
 
+/* Browser anchoring and the measured windows must not both compensate a resize. */
+.history { overflow-anchor: none; }
+.message-window-spacer { flex: none; width: 100%; pointer-events: none; }
+.history-page-status { display: block; margin: 8px auto 20px; font-size: 12px; }
+.history-page-status:disabled { opacity: .65; cursor: default; }
+.message-window { display: flex; flex-direction: column; gap: 0; }
+.message-window > .message { margin-bottom: 20px; }
+.tool-children { display: flex; flex-direction: column; }
+
 /* One account disclosure contains the complete notification form and sign-out. */
 .github-account{display:block;padding:0}
 .integration-toggle{width:100%;border:0;background:none;color:inherit;text-align:left;padding:20px 0;cursor:pointer;font:inherit}

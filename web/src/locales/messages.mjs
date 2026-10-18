@@ -1,5 +1,6 @@
 export const messages = {
   en: {
+    'history.earlier':'Load earlier messages', 'history.loading':'Loading messages…', 'history.start':'Beginning of chat', 'history.failed':'Could not load messages. Retry', 'history.missing':'Original message unavailable',
     "notifications.setting":"System notifications",
     "notifications.allow":"Allow notifications",
     "notifications.later":"Not now",
@@ -179,6 +180,7 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'history.earlier':'加载更早消息', 'history.loading':'正在加载消息…', 'history.start':'已到聊天开头', 'history.failed':'消息加载失败，点击重试', 'history.missing':'原消息不可用',
     "notifications.setting":"系统通知",
     "notifications.allow":"允许通知",
     "notifications.later":"暂时不用",
