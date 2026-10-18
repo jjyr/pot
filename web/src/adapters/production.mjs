@@ -71,6 +71,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
     controlTurn:(body,scope)=>request('/api/v1/turn/control',{...scope,method:'POST',body}),
     cancel: ({boot_id, turn_id, request_id}) => request('/api/v1/turn/cancel', {method: 'POST', body: {request_id, user_message_id: turn_id}}),
     notificationStatus:desktop?()=>invoke('SystemNotificationStatus'):undefined,
+    notificationReady:desktop?surface=>invoke('NotificationMainReady',surface):undefined,
     requestNotificationPermission:desktop?()=>invoke('RequestSystemNotificationPermission'):undefined,
     setNotificationsEnabled:desktop?value=>invoke('SetSystemNotificationsEnabled',value):undefined,
     notificationView:desktop?(surface,view)=>invoke('SetNotificationView',surface,view):undefined,
