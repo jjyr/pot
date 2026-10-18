@@ -11,6 +11,9 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
+const MaxBatchMessages = 8
+const MaxBatchBytes = 262144
+
 func Initialize(db *sql.DB) error {
 	var legacy bool
 	if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name IN ('assistant_mail','task_inputs','task_notifications'))").Scan(&legacy); err != nil {
@@ -26,7 +29,8 @@ func Initialize(db *sql.DB) error {
  conversation TEXT NOT NULL,recipient TEXT NOT NULL,detail TEXT);
  CREATE INDEX IF NOT EXISTS agent_messages_recipient ON agent_messages(recipient,direction,state,sequence);
  CREATE INDEX IF NOT EXISTS agent_messages_context ON agent_messages(conversation,recipient,state);
- CREATE TABLE IF NOT EXISTS agent_result_observations(owner TEXT NOT NULL,turn TEXT NOT NULL,message TEXT NOT NULL,PRIMARY KEY(owner,turn,message));`)
+ CREATE TABLE IF NOT EXISTS agent_result_observations(owner TEXT NOT NULL,turn TEXT NOT NULL,message TEXT NOT NULL,PRIMARY KEY(owner,turn,message));
+ CREATE TABLE IF NOT EXISTS agent_delivery_items(batch TEXT NOT NULL,message TEXT NOT NULL UNIQUE,PRIMARY KEY(batch,message));`)
 	return err
 }
 

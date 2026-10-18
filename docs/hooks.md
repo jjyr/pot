@@ -57,6 +57,7 @@ priority and uncertainty fences follow [Agent messages](assistant-messages.md).
 Acknowledged results cannot be requeued by repeated reconciliation. Archiving an
 already interrupted run does not create a second execution outcome.
 
-Hooks add no queue beyond the existing user inbox and shared Agent inbox. Delivery
-currently handles one Task outcome per summary turn; batching remains a separate
-receiver policy.
+Hooks add no queue beyond the existing user inbox and shared Agent inbox. Task
+outcomes use the bounded, cross-Task summary policy in
+[Agent messages](assistant-messages.md#category-specific-batches). Approval hooks
+remain outside Agent batching.

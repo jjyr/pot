@@ -220,62 +220,88 @@ func (s *Store) AppendEvent(ctx context.Context, event Event, metadata map[strin
 	return event, nil
 }
 func (s *Store) save(ctx context.Context, m Message, metadata map[string]string, notify bool, mutation func(*sql.Tx) error) (Event, error) {
-	if err := m.Validate(); err != nil {
-		return Event{}, err
-	}
-	body, err := json.Marshal(m)
+	events, err := s.saveMessages(ctx, []Message{m}, metadata, notify, mutation)
 	if err != nil {
 		return Event{}, err
 	}
-	e := Event{EventID: ID(), Type: "message", Message: &m}
-	err = Transaction(ctx, s.db, func(tx *sql.Tx) error {
+	return events[0], nil
+}
+
+// SaveMessagesWithMetadataMutation selects a whole input batch atomically with
+// its turn identity. Each original message retains its own projection and event.
+func (s *Store) SaveMessagesWithMetadataMutation(ctx context.Context, messages []Message, metadata map[string]string, mutation func(*sql.Tx) error) ([]Event, error) {
+	return s.saveMessages(ctx, messages, metadata, true, mutation)
+}
+
+func (s *Store) saveMessages(ctx context.Context, messages []Message, metadata map[string]string, notify bool, mutation func(*sql.Tx) error) ([]Event, error) {
+	if len(messages) == 0 {
+		return nil, errors.New("empty message batch")
+	}
+	for _, m := range messages {
+		if err := m.Validate(); err != nil {
+			return nil, err
+		}
+	}
+	var events []Event
+	err := Transaction(ctx, s.db, func(tx *sql.Tx) error {
 		if mutation != nil {
 			if err := mutation(tx); err != nil {
 				return err
 			}
 		}
-		var old []byte
-		err := tx.QueryRowContext(ctx, "SELECT body FROM messages WHERE id=?", m.ID).Scan(&old)
-		if err == nil {
-			var previous Message
-			if err := protocol.DecodeStrict(old, &previous); err != nil {
+		for _, m := range messages {
+			body, err := json.Marshal(m)
+			if err != nil {
 				return err
 			}
-			if previous.ConversationID != m.ConversationID || previous.Role != m.Role || !sameRequest(previous.RequestID, m.RequestID) {
-				return errors.New("message identity binding changed")
+			e := Event{EventID: ID(), Type: "message", Message: &m}
+			var old []byte
+			err = tx.QueryRowContext(ctx, "SELECT body FROM messages WHERE id=?", m.ID).Scan(&old)
+			if err == nil {
+				var previous Message
+				if err := protocol.DecodeStrict(old, &previous); err != nil {
+					return err
+				}
+				if previous.ConversationID != m.ConversationID || previous.Role != m.Role || !sameRequest(previous.RequestID, m.RequestID) {
+					return errors.New("message identity binding changed")
+				}
+			} else if !errors.Is(err, sql.ErrNoRows) {
+				return err
 			}
-		} else if !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO messages VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body", m.ID, m.RequestID, string(body)); err != nil {
-			return err
+			if _, err := tx.ExecContext(ctx, "INSERT INTO messages VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body", m.ID, m.RequestID, string(body)); err != nil {
+				return err
+			}
+			if notify && m.Role == "assistant" && m.Status == "complete" && strings.TrimSpace(m.Text) != "" && !strings.HasPrefix(m.ID, "task-report-") {
+				if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO main_message_outbox(message_id,body) VALUES (?,?)", m.ID, string(body)); err != nil {
+					return err
+				}
+			}
+			eventBody, err := json.Marshal(e)
+			if err != nil {
+				return err
+			}
+			result, err := tx.ExecContext(ctx, "INSERT INTO events(body) VALUES (?)", string(eventBody))
+			if err != nil {
+				return err
+			}
+			cursor, err := result.LastInsertId()
+			if err != nil {
+				return err
+			}
+			e.Cursor = &cursor
+			events = append(events, e)
 		}
 		for key, value := range metadata {
 			if _, err := tx.ExecContext(ctx, "INSERT INTO metadata VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", key, value); err != nil {
 				return err
 			}
 		}
-		if notify && m.Role == "assistant" && m.Status == "complete" && strings.TrimSpace(m.Text) != "" && !strings.HasPrefix(m.ID, "task-report-") {
-			if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO main_message_outbox(message_id,body) VALUES (?,?)", m.ID, string(body)); err != nil {
-				return err
-			}
-		}
-		eventBody, err := json.Marshal(e)
-		if err != nil {
-			return err
-		}
-		result, err := tx.ExecContext(ctx, "INSERT INTO events(body) VALUES (?)", string(eventBody))
-		if err != nil {
-			return err
-		}
-		cursor, err := result.LastInsertId()
-		e.Cursor = &cursor
-		return err
+		return nil
 	})
 	if err != nil {
-		return Event{}, err
+		return nil, err
 	}
-	return e, nil
+	return events, nil
 }
 func sameRequest(a, b *string) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
 func (s *Store) NotificationCount(ctx context.Context) (int64, error) {

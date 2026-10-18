@@ -3,7 +3,6 @@ package assistant
 import (
 	"context"
 	"database/sql"
-	"errors"
 
 	"github.com/jjyr/pot/pkg/storage"
 )
@@ -16,22 +15,16 @@ func (m *Mailbox) ObserveTaskResult(ctx context.Context, owner, turn, task strin
 }
 
 func (m *Mailbox) ClaimEvent(ctx context.Context, owner, id string) error {
-	result, err := m.db.ExecContext(ctx, `UPDATE agent_messages SET state='processing' WHERE id=? AND recipient=? AND state='queued' AND json_extract(envelope,'$.kind')='task_result'`, id, owner)
-	if err != nil {
-		return err
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n != 1 {
-		return errors.New("event already claimed")
-	}
-	return nil
+	return m.ClaimEventBatch(ctx, owner, []string{id})
 }
 func (m *Mailbox) ReleaseEvent(ctx context.Context, id string) error {
-	_, err := m.db.ExecContext(ctx, "UPDATE agent_messages SET state='queued' WHERE id=? AND state='processing' AND json_extract(envelope,'$.kind')='task_result'", id)
-	return err
+	return storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "UPDATE agent_messages SET state='queued' WHERE (id=? OR id IN (SELECT message FROM agent_delivery_items WHERE batch=?)) AND state='processing' AND json_extract(envelope,'$.kind')='task_result'", id, id); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "DELETE FROM agent_delivery_items WHERE batch=?", id)
+		return err
+	})
 }
 
 func (m *Mailbox) FinishChat(ctx context.Context, owner, turn, event string, success bool) error {
@@ -49,7 +42,7 @@ func (m *Mailbox) FinishChat(ctx context.Context, owner, turn, event string, suc
 			if success {
 				state = "processed"
 			}
-			_, err := tx.ExecContext(ctx, "UPDATE agent_messages SET state=? WHERE id=? AND recipient=? AND state='processing' AND json_extract(envelope,'$.kind')='task_result'", state, event, owner)
+			_, err := tx.ExecContext(ctx, "UPDATE agent_messages SET state=? WHERE (id=? OR id IN (SELECT message FROM agent_delivery_items WHERE batch=?)) AND recipient=? AND state='processing' AND json_extract(envelope,'$.kind')='task_result'", state, event, event, owner)
 			return err
 		}
 		return nil

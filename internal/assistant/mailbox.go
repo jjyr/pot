@@ -270,7 +270,7 @@ func (m *Mailbox) Acknowledge(ctx context.Context, receipt protocol.Receipt) err
 	})
 }
 func (m *Mailbox) Next(ctx context.Context, recipient string) (*protocol.Envelope, error) {
-	values, err := m.envelopes(ctx, `SELECT envelope FROM agent_messages m WHERE direction='in' AND json_extract(envelope,'$.kind')='message' AND json_extract(envelope,'$.to.kind')='assistant' AND state IN ('queued','waiting') AND recipient=? AND NOT EXISTS(SELECT 1 FROM agent_messages b WHERE b.conversation=m.conversation AND b.recipient=m.recipient AND (b.state IN ('processing','interrupted','failed') OR b.state='waiting' AND b.id!=m.id)) ORDER BY sequence LIMIT 1`, recipient)
+	values, err := m.Candidates(ctx, recipient)
 	if err != nil || len(values) == 0 {
 		return nil, err
 	}
@@ -324,18 +324,15 @@ func (m *Mailbox) History(ctx context.Context, assistant string, after int64) ([
 	return out, rows.Err()
 }
 func (m *Mailbox) Claim(ctx context.Context, id string) error {
-	result, err := m.db.ExecContext(ctx, `UPDATE agent_messages AS m SET state='processing' WHERE id=? AND direction='in' AND json_extract(envelope,'$.kind')='message' AND json_extract(envelope,'$.to.kind')='assistant' AND state IN ('queued','waiting') AND NOT EXISTS(SELECT 1 FROM agent_messages b WHERE b.conversation=m.conversation AND b.recipient=m.recipient AND (b.state IN ('processing','interrupted','failed') OR b.state='waiting' AND b.id!=m.id))`, id)
+	message, err := findMail(ctx, m.db, id)
 	if err != nil {
 		return err
 	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return err
+	if message == nil {
+		return errors.New("mail missing")
 	}
-	if n != 1 {
-		return errors.New("message already claimed or conversation fenced")
-	}
-	return nil
+	_, err = m.ClaimMailBatch(ctx, *message)
+	return err
 }
 func (m *Mailbox) Finish(ctx context.Context, id string, success bool, detail string) error {
 	state := "failed"
@@ -360,7 +357,7 @@ func (m *Mailbox) FinishAttempt(ctx context.Context, id, state, detail string) e
 		if previous != "processing" {
 			return errors.New("mail attempt is no longer processing")
 		}
-		_, err := tx.ExecContext(ctx, "UPDATE agent_messages SET state=?,detail=? WHERE id=? AND state='processing'", state, detail, id)
+		_, err := tx.ExecContext(ctx, "UPDATE agent_messages SET state=?,detail=? WHERE (id=? OR id IN (SELECT message FROM agent_delivery_items WHERE batch=?)) AND state='processing'", state, detail, id, id)
 		return err
 	})
 	if err == nil {

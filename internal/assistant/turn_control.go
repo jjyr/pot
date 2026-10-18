@@ -49,7 +49,7 @@ func (c *Conversation) Control(ctx context.Context, r TurnControl) error {
 // Steer atomically records exact-turn guidance and its visible user message.
 // Repeating the original receipt cannot steer a later turn with the same text.
 func (c *Conversation) Steer(ctx context.Context, r SteerRequest) (protocol.SendMessageAccepted, error) {
-	if !core.Identifier(r.RequestID) || !core.Identifier(r.UserMessageID) || strings.TrimSpace(r.Text) == "" || len(r.Text) > 65536 {
+	if !core.Identifier(r.RequestID) || strings.HasPrefix(r.RequestID, "pot-result-") || !core.Identifier(r.UserMessageID) || strings.TrimSpace(r.Text) == "" || len(r.Text) > 65536 {
 		return protocol.SendMessageAccepted{}, errors.New("invalid steering input")
 	}
 	c.mu.Lock()

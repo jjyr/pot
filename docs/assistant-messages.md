@@ -40,12 +40,44 @@ from the user queue are atomic. Retries retain their original target and receipt
 including after the summary ends. Started, uncertain executions remain fenced;
 reconciling the original turn then admits separately accepted pending input.
 
-Each assistant correspondence retains independent model context and transcript.
+Assistant correspondence is grouped by the full sender Agent address and owning
+recipient. A peer retains one independent model context across wire conversations;
+different senders, including equal Agent IDs on different Controls, remain separate.
 Task messages are consumed by the original run at safe model boundaries; they
 do not interrupt commands. Assistant replies to peers use `send_message`; final
 model text is private to that correspondence and is not automatically forwarded.
 User chat remains serial, while background Tasks execute independently under
 Runtime capacity and shared-resource policy.
+
+## Category-specific batches
+
+At each execution boundary, receivers consume currently available messages without
+waiting to collect more. User input has priority. Each batch contains at most eight
+messages and 256 KiB of source text; result delivery also bounds serialized payload
+size. Additional messages and arrivals during execution remain for the next turn.
+
+| Category | Group | Processing role |
+| --- | --- | --- |
+| User input | One assistant's pending user messages, in receipt order | Main |
+| Task outcomes | One assistant's pending results, across Task identities | Summary |
+| Agent correspondence | Owning recipient and full sender address | Independent peer context |
+
+User batch selection commits all original projections, queue removal and turn
+membership atomically. Each message retains its own request receipt and status;
+the first request anchors the execution and reply. The model sees the ordered
+user texts together. Retries do not resubmit any member. Uncertain started batches
+remain fenced during restart/recovery, while unstarted queued inputs are retained.
+
+Agent delivery membership is journaled in `agent_delivery_items`, a binding over
+the shared inbox rather than another queue. A Task summary reports every delivered
+success/failure and acknowledges each member after its reply is durable. Peer
+messages from one sender are claimed atomically and supplied together as untrusted
+reference data. Wire `reply_to` preserves the selected message's conversation;
+automatic replies retain the batch's maximum causal hop. Allowance resume retains
+exact membership and does not absorb later arrivals. An uncertain peer blocks its
+own sender group; unrelated peers continue independently.
+
+Approval events remain UI-only hooks and never join these batches.
 
 ## Completion events
 
@@ -55,9 +87,9 @@ turn. It exposes no Task waiting tool and does not poll for completion.
 A [terminal hook](hooks.md) creates one event identified by Task and run for
 completion, failure, interruption or cancellation, including stopping before
 dispatch. Approval hooks only update UI and user reminders. When user chat is
-available, its receiver claims that event and produces one concise report using
-the Task title and actual outcome. Summaries have no tools, do not infer other
-Tasks' states and omit identifiers from prose. Real Task identifiers remain
+available, its receiver claims a batch of currently pending outcomes and produces
+one concise report using each Task title and actual outcome. Summaries have no
+tools, do not infer undelivered Tasks' states and omit identifiers from prose. Real Task identifiers remain
 available for artifact download URLs.
 
 Events become processed only after the reply is durable. A successful explicit
@@ -95,5 +127,5 @@ Its tagged operations are `directory`, `register`, `pending`, `deliver`,
 Inbox states include queued, processing, waiting, processed, failed and
 interrupted. A processing attempt is persisted before model invocation. Restart
 marks incomplete attempts interrupted. Allowance continuation reuses only a
-stopped checkpoint with no started model/tool effects. A fenced correspondence
-does not replay its input; other contexts remain independent.
+stopped checkpoint with no started model/tool effects. A fenced sender group
+does not replay its input; other peer contexts remain independent.

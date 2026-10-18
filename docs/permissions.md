@@ -59,7 +59,8 @@ still checked against current policy.
 | `allow_task` | Repeated matching commands in the current work/run only |
 | `deny` | Reject the original host request, without creating a permanent deny |
 
-Current work means one accepted foreground user request, one Task run, or one
+Current work means one foreground processing turn (which may aggregate pending
+user requests), one Task run, or one
 scheduled occurrence. Grants do not extend to other commands, subsequent user
 requests, child/sibling Tasks, scheduled occurrences, machines or generations.
 Completion/cancellation, restart, enrollment changes and policy invalidation clear

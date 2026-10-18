@@ -248,7 +248,7 @@ func TestAssistantMailAllowanceWaitResumesSameEnvelopeWithoutMainWaitOrReplay(t 
 	}
 	inputs := 0
 	for _, m := range checkpoint.Messages {
-		if m.Role == "user" && strings.HasPrefix(m.Text, "Process the incoming assistant message in the assistant-mail reference.") {
+		if m.Role == "user" && strings.HasPrefix(m.Text, "Process all incoming messages from this one agent together,") {
 			inputs++
 		}
 	}

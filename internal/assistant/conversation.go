@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jjyr/pot/internal/inbox"
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/composition"
 	"github.com/jjyr/pot/pkg/core"
@@ -46,17 +47,46 @@ type ConversationOptions struct {
 	Prepare                                  func(context.Context, core.Thread, core.TurnRequest) (RunOptions, error)
 }
 type savedTurn struct {
-	Owner          string               `json:"owner"`
-	BootID         string               `json:"boot_id"`
-	Generation     uint64               `json:"generation"`
-	Request        protocol.SendMessage `json:"request"`
-	UserMessageID  string               `json:"user_message_id"`
-	State          string               `json:"state"`
-	Cancelling     bool                 `json:"cancelling"`
-	Paused         bool                 `json:"paused"`
-	Resuming       bool                 `json:"resuming"`
-	ReplyMessageID string               `json:"reply_message_id"`
+	Owner          string                 `json:"owner"`
+	BootID         string                 `json:"boot_id"`
+	Generation     uint64                 `json:"generation"`
+	Request        protocol.SendMessage   `json:"request"`
+	UserMessageID  string                 `json:"user_message_id"`
+	State          string                 `json:"state"`
+	Cancelling     bool                   `json:"cancelling"`
+	Paused         bool                   `json:"paused"`
+	Resuming       bool                   `json:"resuming"`
+	ReplyMessageID string                 `json:"reply_message_id"`
+	Inputs         []protocol.SendMessage `json:"inputs,omitempty"`
+	UserMessages   []string               `json:"user_messages,omitempty"`
 }
+
+func validateConversationRequest(request protocol.SendMessage) error {
+	if strings.HasPrefix(request.RequestID, "pot-result-") {
+		if !core.Identifier(request.RequestID) || !core.Identifier(request.ConversationID) || request.Text == "" || len(request.Text) > 4*inbox.MaxBatchBytes {
+			return errors.New("invalid internal result batch")
+		}
+		return nil
+	}
+	return request.Validate()
+}
+
+func (t *savedTurn) includes(id string) bool {
+	return id == t.UserMessageID || slices.Contains(t.UserMessages, id)
+}
+
+func (t *savedTurn) inputText() string {
+	if len(t.Inputs) <= 1 {
+		return t.Request.Text
+	}
+	texts := make([]string, 0, len(t.Inputs))
+	for _, input := range t.Inputs {
+		texts = append(texts, input.Text)
+	}
+	raw, _ := json.Marshal(texts)
+	return "Handle these user messages together in their original order. Later messages may supplement or correct earlier ones. Preserve each request's constraints:\n" + string(raw)
+}
+
 type Conversation struct {
 	mu                          sync.Mutex
 	store                       *storage.Store
@@ -215,7 +245,7 @@ CREATE TABLE IF NOT EXISTS assistant_observations(sequence INTEGER PRIMARY KEY A
 			stop()
 			return nil, err
 		}
-		if recovered.Owner != options.Owner || thread == nil || recovered.Generation != thread.Generation || recovered.UserMessageID == "" || recovered.Request.Validate() != nil || recovered.Request.ConversationID != options.ConversationID {
+		if recovered.Owner != options.Owner || thread == nil || recovered.Generation != thread.Generation || recovered.UserMessageID == "" || validateConversationRequest(recovered.Request) != nil || recovered.Request.ConversationID != options.ConversationID {
 			stop()
 			return nil, errors.New("persisted recovery turn binding mismatch")
 		}
@@ -230,7 +260,7 @@ CREATE TABLE IF NOT EXISTS assistant_observations(sequence INTEGER PRIMARY KEY A
 			stop()
 			return nil, err
 		}
-		if turn.Owner != options.Owner || thread == nil || turn.Generation != thread.Generation || turn.UserMessageID == "" || turn.Request.Validate() != nil || turn.Request.ConversationID != options.ConversationID {
+		if turn.Owner != options.Owner || thread == nil || turn.Generation != thread.Generation || turn.UserMessageID == "" || validateConversationRequest(turn.Request) != nil || turn.Request.ConversationID != options.ConversationID {
 			stop()
 			return nil, errors.New("persisted turn binding mismatch")
 		}
@@ -406,7 +436,7 @@ func (c *Conversation) Report(ctx context.Context, id, text string) (protocol.Se
 	return c.accept(ctx, protocol.SendMessage{RequestID: id, ConversationID: c.options.ConversationID, Text: text}, protocol.System)
 }
 func (c *Conversation) accept(ctx context.Context, request protocol.SendMessage, role protocol.Role) (protocol.SendMessageAccepted, error) {
-	if err := request.Validate(); err != nil {
+	if err := validateConversationRequest(request); err != nil {
 		return protocol.SendMessageAccepted{}, err
 	}
 	c.mu.Lock()
@@ -435,6 +465,15 @@ func (c *Conversation) accept(ctx context.Context, request protocol.SendMessage,
 			return c.queueUserLocked(ctx, request)
 		}
 		return protocol.SendMessageAccepted{}, errors.New("a conversation turn is already active or waiting")
+	}
+	if role == protocol.System {
+		var pending int
+		if err := c.store.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM chat_user_inbox").Scan(&pending); err != nil {
+			return protocol.SendMessageAccepted{}, err
+		}
+		if pending != 0 {
+			return protocol.SendMessageAccepted{}, errors.New("user input has priority")
+		}
 	}
 	if err := c.applyConfigurationBoundaryLocked(ctx); err != nil {
 		return protocol.SendMessageAccepted{}, err
@@ -482,6 +521,9 @@ func (c *Conversation) Cancel(ctx context.Context, request protocol.CancelTurn) 
 			return err
 		}
 		for _, message := range slices.Clone(c.messages) {
+			if message.Queued || message.Role == protocol.User && message.RequestID != nil && !previous.includes(message.ID) {
+				continue
+			}
 			if message.Status == protocol.Accepted || message.Status == protocol.Streaming {
 				message.Status = protocol.MessageCancelled
 				if message.Tool != nil {
@@ -495,7 +537,12 @@ func (c *Conversation) Cancel(ctx context.Context, request protocol.CancelTurn) 
 				}
 			}
 		}
-		return nil
+		if c.options.OnFinished != nil {
+			if err := c.options.OnFinished(ctx, previous.Request, execution.Result{Phase: execution.Cancelled}); err != nil {
+				return err
+			}
+		}
+		return c.startNextUserLocked(ctx)
 	}
 	if err := c.appendTurnMetadataLocked(ctx, map[string]string{key: request.UserMessageID}); err != nil {
 		c.turn = &previous
@@ -677,6 +724,13 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 		c.mu.Unlock()
 		return execution.Result{Phase: execution.Cancelled, Err: context.Canceled}
 	}
+	if !c.turn.Resuming && c.turn.State == "queued" && !strings.HasPrefix(request.RequestID, "pot-result-") {
+		if err := c.aggregateUsersLocked(ctx); err != nil {
+			c.mu.Unlock()
+			return execution.Result{Phase: execution.Failed, Err: err}
+		}
+	}
+	inputText := c.turn.inputText()
 	threadPointer, loadErr := CurrentThread(ctx, c.store)
 	if loadErr != nil || threadPointer == nil {
 		c.mu.Unlock()
@@ -692,7 +746,7 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 	c.finalizing = false
 	c.mu.Unlock()
 	defer cancel()
-	options, err := c.options.Prepare(runCtx, thread, core.TurnRequest{RequestID: request.RequestID, Text: request.Text})
+	options, err := c.options.Prepare(runCtx, thread, core.TurnRequest{RequestID: request.RequestID, Text: inputText})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return execution.Result{Phase: execution.Cancelled, Err: err}
@@ -713,7 +767,7 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 		return c.recordCleanup(ctx, request.RequestID, thread.Generation)
 	}
 	loop := agent.Agent{Services: options.Services, Feedback: binding, Dispatch: options.Dispatch, Cleanup: cleanup, Composer: options.Composer, Tools: options.Tools, PrepareContext: options.PrepareContext, MaxRounds: options.MaxRounds}
-	err = loop.Execute(runCtx, options.Execution, thread, core.TurnRequest{RequestID: request.RequestID, Text: request.Text}, resuming, binding.event)
+	err = loop.Execute(runCtx, options.Execution, thread, core.TurnRequest{RequestID: request.RequestID, Text: inputText}, resuming, binding.event)
 	phase := execution.Succeeded
 	if err != nil {
 		phase = execution.Failed
@@ -764,7 +818,7 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 		}
 	}
 	for _, m := range slices.Clone(c.messages) {
-		if m.Role == protocol.User && m.RequestID != nil && *m.RequestID != request.RequestID {
+		if m.Role == protocol.User && m.RequestID != nil && !c.turn.includes(m.ID) {
 			continue
 		}
 		if m.Status == protocol.Accepted || m.Status == protocol.Streaming {
