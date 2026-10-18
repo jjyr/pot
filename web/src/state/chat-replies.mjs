@@ -36,9 +36,9 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
     if(active.length)active.at(-1).phase=phase;
     else rows.push({id:`waiting:${input.id}`,viewKey:`reply:${input.request_id||input.id}`,role:'assistant',text:'',status:'streaming',phase,inputID:input.id});
   }
-  if(send&&!send.request.user_message_id&&!messages.some(message=>message.request_id===send.request.request_id)){
+  if(send&&!send.request.user_message_id&&!send.request.retry_user_message_id&&!messages.some(message=>message.request_id===send.request.request_id)){
     const request=send.request;
-    rows.push({id:`pending:${request.request_id}`,viewKey:`input:${request.request_id}`,role:'user',text:request.text,status:'accepted'});
+    rows.push({id:`pending:${request.request_id}`,viewKey:`input:${request.request_id}`,role:'user',text:request.text,attachments:request.attachments,status:'accepted'});
     rows.push({id:`pending-reply:${request.request_id}`,viewKey:`reply:${request.request_id}`,role:'assistant',text:'',status:'accepted',phase:send.phase==='failed'?'failed':send.phase==='uncertain'||offline?'reconnecting':send.phase,error:send.detail||'',local:true});
   }
   if(snapshot?.running&&!offline&&!snapshot.turn?.paused&&snapshot.turn?.state!=='waiting'){

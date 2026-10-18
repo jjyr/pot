@@ -16,8 +16,9 @@ import (
 var ErrUncertainEffects = errors.New("agent checkpoint has an operation with unconfirmed effects")
 
 type SteeringInput struct {
-	ID   string
-	Text string
+	Attachments []core.Attachment
+	ID          string
+	Text        string
 }
 type Observation struct {
 	Kind         string                     `json:"kind"`
@@ -68,16 +69,17 @@ type Services interface {
 // Composer is optional for model-only and ordinary tool use. To enable composed
 // tools, set it to a composition.ProcessRunner with an explicit worker command.
 type Agent struct {
-	Services       Services
-	Feedback       Feedback
-	Dispatch       Dispatch
-	Cleanup        Cleanup
-	Tools          []modelprotocol.ToolDefinition
-	Composer       Composer
-	EstimateTokens TokenEstimator
-	PrepareContext PrepareContext
-	Skills         SkillProvider
-	MaxRounds      int
+	Services           Services
+	Feedback           Feedback
+	Dispatch           Dispatch
+	Cleanup            Cleanup
+	Tools              []modelprotocol.ToolDefinition
+	Composer           Composer
+	EstimateTokens     TokenEstimator
+	ResolveAttachments func(context.Context, core.ResolvedSpec, []modelprotocol.Message) ([]modelprotocol.Message, error)
+	PrepareContext     PrepareContext
+	Skills             SkillProvider
+	MaxRounds          int
 }
 
 // Checkpoint is owner-held persisted model history, distinct from public/UI

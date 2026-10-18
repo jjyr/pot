@@ -17,7 +17,7 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
-const MaxModelBody = 16 * 1024 * 1024
+const MaxModelBody = 96 * 1024 * 1024
 
 // ModelSession is fixed to one accepted execution. Claim runs under the business
 // owner's turn lock immediately before the durable network claim. It must reject

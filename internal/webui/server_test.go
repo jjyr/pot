@@ -145,6 +145,13 @@ func TestBrowserRateLimitAndOrigin(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(string(data), "UI") {
 		t.Fatal(w.Code, string(data))
 	}
+	policy := w.Header().Get("Content-Security-Policy")
+	if !strings.Contains(policy, "frame-src 'self' blob:;") {
+		t.Fatal("browser must permit owner-bound PDF Blob previews", policy)
+	}
+	if !strings.Contains(policy, "connect-src 'self';") || !strings.Contains(policy, "frame-ancestors 'none';") {
+		t.Fatal("attachment previews must retain browser connection and framing restrictions", policy)
+	}
 }
 
 func TestBrowserUsagePagesReachControl(t *testing.T) {
@@ -199,6 +206,25 @@ func TestBrowserUsagePagesReachControl(t *testing.T) {
 	for _, path := range []string{"/api/v1/usage/private", "/api/v1/usage/models/private", "/api/v1/usage/models/"} {
 		if Allowed("GET", path) {
 			t.Fatal("unknown usage route published", path)
+		}
+	}
+}
+
+func TestAttachmentPublicationAllowlist(t *testing.T) {
+	for _, route := range []struct {
+		method, path string
+		allowed      bool
+	}{
+		{"POST", "/api/v1/attachments", true},
+		{"GET", "/api/v1/attachments/file-id", true},
+		{"POST", "/api/v1/turn/retry", true},
+		{"GET", "/api/v1/attachments", false},
+		{"DELETE", "/api/v1/attachments/file-id", false},
+		{"GET", "/api/v1/attachments/../../private", false},
+		{"GET", "/api/v1/attachments/file-id/extra", false},
+	} {
+		if got := Allowed(route.method, route.path); got != route.allowed {
+			t.Errorf("%s %s: got %t", route.method, route.path, got)
 		}
 	}
 }

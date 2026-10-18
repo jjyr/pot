@@ -7,6 +7,7 @@ import {icon} from './icons.mjs';
 import {messages,translate} from '../locales/messages.mjs';
 import {acceptSnapshot, beginSend, beginSubscription, createConversationState, draft, ownerKey, setDraft, settleSend, validSnapshot} from '../state/conversation.mjs';
 import {bindComposer} from './composer.mjs';
+import {createAttachmentComposer,renderMessageAttachments,failedAttachmentInput} from './attachments.mjs';
 import {renderMarkdown} from './markdown.mjs';
 import {createPages} from './pages.mjs';
 import {createReplies,replyKey} from '../state/replies.mjs';
@@ -160,6 +161,23 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     onSend: submit,
     onCompositionEnd: () => { syncEditor(); updateControls(); },
   });
+  const restoredAttachmentFailures=new Set(),attachmentAttempts=new Map();
+  const attachmentUI=client.production?createAttachmentComposer({client,form,input,getKey:()=>editorOwner,getCaps:()=>state.snapshot?.agent?.attachments,isSending:()=>state.pending.has(editorOwner),canAdd:()=>route==='chat'&&!!state.snapshot&&connection==='connected'&&!state.pending.has(editorOwner)&&!selectedAssistant?.offline,changed:()=>updateControls(),locale:()=>locale}):null;
+  if(attachmentUI){form.classList.add('has-attachments');attachmentUI.toolbar.append(send);}
+  function retryAttachmentInput(){
+    const failed=failedAttachmentInput(state.snapshot);
+    return failed&&failed.input.text===draft(state)&&attachmentUI?.matches(failed.input.attachments)?failed.target:null;
+  }
+  function restoreFailedAttachments(){
+    const snapshot=state.snapshot,failed=failedAttachmentInput(snapshot);
+    if(!attachmentUI||!failed||state.pending.has(ownerKey(snapshot)))return;
+    const attempt=attachmentAttempts.get(ownerKey(snapshot));
+    if(attempt&&BigInt(snapshot.cursor)<=BigInt(attempt.cursor))return;
+    const key=JSON.stringify([ownerKey(snapshot),failed.target,attempt?.requestID||'history']);
+    if(restoredAttachmentFailures.has(key))return;
+    restoredAttachmentFailures.add(key);
+    if(!draft(state)&&!attachmentUI.items().length){setDraft(state,failed.input.text);attachmentUI.restore(editorOwner,failed.input.attachments,{...client.scope()});syncEditor();}
+  }
   const completions=client.production?bindCompletions(input,{client,host:composerArea,locale:()=>locale}):null;
   function syncEditor() {
     if (!state.snapshot) return;
@@ -173,18 +191,21 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function requestID() { return crypto.randomUUID(); }
   async function submit() {
     if ((!client.production&&state.snapshot?.running) || connection !== 'connected' || editorOwner !== (state.snapshot && ownerKey(state.snapshot))) return;
-    const receipt = beginSend(state, requestID(),{allowRunning:client.production});
+    if(attachmentUI?.problem())return;
+    const refs=attachmentUI?.refs()||[];
+    const receipt = beginSend(state, requestID(),{allowRunning:client.production,attachments:refs,retryUserMessageID:retryAttachmentInput()});
     if (!receipt) return;
+    if(refs.length)attachmentAttempts.set(receipt.key,{requestID:receipt.request.request_id,cursor:state.snapshot.cursor});
     error = '';
     updateControls();
     try {
       const result = await client.send(receipt.request);
       if (typeof result.message_id !== 'string' || typeof result.duplicate !== 'boolean') throw Error('Invalid message receipt');
-      settleSend(state, receipt, true);
+      if(settleSend(state, receipt, true))attachmentUI?.clearSubmitted(receipt.key,receipt.request.attachments||[]);
     } catch (reason) {
       if (settleSend(state, receipt, false, reason)&&receipt.request.user_message_id) error = reason.message || String(reason);
     }
-    if (!disposed) { syncEditor(); updateControls(); }
+    if (!disposed) { syncEditor();restoreFailedAttachments(); updateControls(); }
   }
   async function cancel() {
     if (cancelPending || !state.snapshot?.running) return;
@@ -197,17 +218,18 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     finally { cancelPending = false; if (!disposed) updateControls(); }
   }
   form.addEventListener('submit', event => { event.preventDefault(); submit(); });
-  send.addEventListener('click', () => state.snapshot?.running&&!draft(state).trim() ? cancel() : submit());
+  send.addEventListener('click', () => state.snapshot?.running&&!draft(state).trim()&&!attachmentUI?.items().length ? cancel() : submit());
   function updateControls() {
     const snapshot = state.snapshot;
     const pending = snapshot && state.pending.has(ownerKey(snapshot));
     const running = snapshot?.running;
-    const stopping=running&&(!client.production||!draft(state).trim());
+    const stopping=running&&(!client.production||(!draft(state).trim()&&!attachmentUI?.items().length));
     const label = stopping ? (cancelPending ? t('stopping') : t('stop')) : running?(locale==='zh-CN'?'发送指导':'Send guidance'):t('send');
     send.replaceChildren(icon(stopping ? 'stop' : 'send'));
     send.title = label;
     send.setAttribute('aria-label', label);
-    send.disabled = stopping ? selectedAssistant?.offline||cancelPending || connection !== 'connected' : selectedAssistant?.offline|| !snapshot || editorOwner !== ownerKey(snapshot) || pending || !draft(state).trim() || connection !== 'connected';
+    send.disabled = stopping ? selectedAssistant?.offline||cancelPending || connection !== 'connected' : selectedAssistant?.offline|| !snapshot || editorOwner !== ownerKey(snapshot) || pending || (!draft(state).trim()&&!attachmentUI?.items().length) || !!attachmentUI?.problem() || connection !== 'connected';
+    attachmentUI?.update();
     input.disabled = !snapshot && !editorOwner;
     const visibleConnection=selectedAssistant?.offline?'offline':connection;
     const projection=status.cloneNode(false);
@@ -335,7 +357,6 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     if (client.production && route === 'chat' && selectedAssistant) { const settings = button('settings', t('assistantSettings')); settings.onclick = () => {route = 'settings'; pages.assistant(selectedAssistant); renderShell();}; titlebar.append(settings); }
     if(!client.production){const cloud=el('span','icon-button');cloud.title=t('remote');cloud.append(icon('cloud'));titlebar.append(cloud);}
-    if (route==='chat'&&state.snapshot?.configuration) titlebar.append(el('span', 'title-meta', `${state.snapshot.configuration.name || ''} · ${state.snapshot.configuration.model || ''}`));
     if (route==='chat'&&state.snapshot?.usage) {const value=state.snapshot.usage,format=new Intl.NumberFormat(locale,{notation:'compact',maximumFractionDigits:1}),usage=el('span','title-meta token-meta'),cached=locale==='zh-CN'?'缓存输入':'Cached input';usage.append(icon('clock'),el('span','',`${format.format(value.input+value.output)} tokens${value.cache==null?'':` · ${cached} ${format.format(value.cache)}`}`));usage.title=`${locale==='zh-CN'?'输入（含缓存）':'Input (includes cache)'}: ${value.input} · ${locale==='zh-CN'?'输出':'Output'}: ${value.output}${value.cache==null?'':` · ${cached}: ${value.cache}`}`;titlebar.append(usage);}
     const more = button(client.production?'more':'settings', t(client.production ? 'preferences' : 'more'));
     more.setAttribute('aria-haspopup', 'dialog');
@@ -456,6 +477,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         record.text = message.text; record.role = message.role;
         row.className = `message role-${message.role}`;
       }
+      const attachmentSignature=JSON.stringify([message.attachments||[],state.snapshot?.agent?.attachments]);
+      if(message.role==='user'&&(record.attachmentSignature!==attachmentSignature||!record.attachmentNode?.isConnected)){
+        record.attachmentNode?.remove();record.attachmentSignature=attachmentSignature;
+        if(message.attachments?.length){record.attachmentNode=renderMessageAttachments(message.attachments,{client,caps:state.snapshot?.agent?.attachments,scope:{...client.scope()},locale:()=>locale,onError:reason=>{error=reason.message;updateControls();}});bubble.append(record.attachmentNode);}
+      }
       if ((message.role === 'assistant'||message.role==='user') && message.text && !record.copy) {
         const copy = button('copy',t('copy'),'copy-message');
         copy.type = 'button';
@@ -529,6 +555,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(client.production)cachedSnapshots.set(JSON.stringify([client.scope().space,client.scope().owner]),snapshot);
     const restorePosition = editorOwner !== ownerKey(snapshot) ? positions.get(ownerKey(snapshot)) : undefined;
     syncEditor();
+    restoreFailedAttachments();
     if(markVisibleRead())renderShell();
     renderMessages(); if (restorePosition !== undefined) requestAnimationFrame(() => {history.scrollTop=restorePosition; latest.hidden=nearBottom();}); updateControls();
     if(client.production)pages.syncApprovals();
@@ -699,7 +726,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   });
   return () => {
     disposed = true; stopResume();taskClock.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
-    completions?.dispose();
+    completions?.dispose();attachmentUI?.destroy();client.releaseAttachments?.();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);
     window.removeEventListener('pot:preference',preferencesChanged);

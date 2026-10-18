@@ -1,0 +1,53 @@
+import assert from 'node:assert/strict';
+import {attachmentAllowed,attachmentProblem,failedAttachmentInput} from '../../web/src/components/attachments.mjs';
+import {createConversationState,beginSubscription,acceptSnapshot,setDraft,draft,beginSend,settleSend} from '../../web/src/state/conversation.mjs';
+import {projectChatReplies} from '../../web/src/state/chat-replies.mjs';
+import {createProductionClient} from '../../web/src/adapters/production.mjs';
+
+const image={id:'image',name:'截图.png',mime_type:'image/png',size:123,width:2,height:3};
+const pdf={id:'pdf',name:'文档.pdf',mime_type:'application/pdf',size:456};
+assert(attachmentAllowed({image:true,pdf:false},image.mime_type));
+assert(!attachmentAllowed({image:true,pdf:false},pdf.mime_type),'Image support never implies PDF support');
+assert(attachmentAllowed({image:false,pdf:true},pdf.mime_type));
+assert(!attachmentAllowed({image:false,pdf:true},image.mime_type));
+assert(!attachmentAllowed({image:true,pdf:true},'text/plain'),'No pretend document support');
+const ready=[{attachment:image,phase:'ready'},{attachment:pdf,phase:'ready'}];
+assert.equal(attachmentProblem(ready,{image:true,pdf:true}), '');
+assert.equal(attachmentProblem(ready,{image:false,pdf:true},true),'当前模型不支持图片');
+assert.equal(attachmentProblem(ready.slice(1),{image:false,pdf:true}), '','Removing only the incompatible image restores send');
+assert(attachmentProblem([{attachment:image,phase:'failed'}],{image:true}));
+assert(attachmentProblem([{attachment:image,phase:'uploading'}],{image:true}));
+const state=createConversationState(),epoch=beginSubscription(state);
+const snapshot={runtime_id:'runtime',boot_id:'boot',owner_id:'remote/alice',conversation_id:'main',cursor:'1',messages:[],running:false,turn_id:null};
+acceptSnapshot(state,snapshot,epoch);
+const first=beginSend(state,'send',{attachments:[image,pdf]});
+assert(first,'An attachment-only message sends');assert.equal(first.request.text,'');
+assert.equal(beginSend(state,'double',{attachments:[image,pdf]}),null);
+settleSend(state,first,false,new Error('Lost receipt'));
+assert.equal(beginSend(state,'retry',{attachments:[image,pdf]}).request.request_id,'send','Uncertain receipt retry reconciles original message');
+settleSend(state,first,false);
+const changed=beginSend(state,'changed',{attachments:[pdf]});assert.equal(changed.request.request_id,'changed','Changed attachment draft has new request identity');
+setDraft(state,'new typing');settleSend(state,changed,true);assert.equal(draft(state),'new typing');
+const rows=projectChatReplies(snapshot,{request:first.request,phase:'sending'});assert.deepEqual(rows[0].attachments,[image,pdf],'Optimistic message retains inline image refs');
+const steeringFailure={running:false,messages:[{id:'original',role:'user',text:'start',status:'failed'},{id:'guide',role:'user',steering:true,text:'',status:'complete',attachments:[pdf]},{id:'reply',role:'assistant',status:'failed'}]};
+assert.deepEqual(failedAttachmentInput(steeringFailure),{input:steeringFailure.messages[1],target:'original'},'Guidance API failure restores its attachment draft and retries the original turn');
+assert.equal(failedAttachmentInput({...steeringFailure,running:true}),null,'A live retry never restores the stale failed draft');
+const requests=[],oldFetch=globalThis.fetch;
+globalThis.fetch=async(url,options)=>{
+  requests.push({url:String(url),options});
+  const data=String(url).includes('/runtime')?{runtime_id:'runtime'}:String(url).includes('/attachments/')?{size:3,offset:0,revision:'three-bytes',data:'AQID'}:{message_id:'original',duplicate:false};
+  return {ok:true,status:200,json:async()=>data};
+};
+try{
+  const client=await createProductionClient();client.setScope({owner:'alice',space:'remote'});
+  await client.send({boot_id:'boot',conversation_id:'main',request_id:'guide',text:'',user_message_id:'turn',attachments:[image]});
+  assert.match(requests.at(-1).url,/turn\/steer/);assert.deepEqual(JSON.parse(requests.at(-1).options.body).attachments,[image]);
+  await client.send({request_id:'retry-original',retry_user_message_id:'original',text:'',attachments:[pdf]});
+  assert.match(requests.at(-1).url,/turn\/retry/);assert.deepEqual(JSON.parse(requests.at(-1).options.body),{request_id:'retry-original',user_message_id:'original'});
+  const ref={id:'three-bytes',size:3,mime_type:'image/png'};
+  const pending=client.attachmentURL(ref,{owner:'alice',space:'remote'});client.setScope({owner:'bob',space:'local'});
+  const url=await pending;assert.match(requests.at(-1).url,/space_id=remote/);assert.match(requests.at(-1).url,/assistant_id=alice/);assert.match(url,/^blob:/);
+  const count=requests.length;assert.equal(await client.attachmentURL(ref,{owner:'alice',space:'remote'}),url);assert.equal(requests.length,count,'Preview and download reuse uploaded original');
+  client.releaseAttachments();
+}finally{globalThis.fetch=oldFetch;}
+console.log('Attachment-only drafts, capability changes, retry identity and remote byte routing passed');

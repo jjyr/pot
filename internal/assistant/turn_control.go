@@ -7,17 +7,24 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
+	"slices"
 	"strings"
 )
+
+func steeringMessageID(request, target string) string {
+	digest, _ := core.HashJSON([]string{"steering", request, target})
+	return "steer-" + digest
+}
 
 type TurnControl struct {
 	UserMessageID string `json:"user_message_id" required:"true"`
 	Action        string `json:"action" required:"true"`
 }
 type SteerRequest struct {
-	RequestID     string `json:"request_id" required:"true"`
-	UserMessageID string `json:"user_message_id" required:"true"`
-	Text          string `json:"text" required:"true"`
+	Attachments   []core.Attachment `json:"attachments,omitempty"`
+	RequestID     string            `json:"request_id" required:"true"`
+	UserMessageID string            `json:"user_message_id" required:"true"`
+	Text          string            `json:"text" required:"true"`
 }
 
 // Control pauses only at safe Agent model boundaries. The in-flight model/tool
@@ -49,8 +56,12 @@ func (c *Conversation) Control(ctx context.Context, r TurnControl) error {
 // Steer atomically records exact-turn guidance and its visible user message.
 // Repeating the original receipt cannot steer a later turn with the same text.
 func (c *Conversation) Steer(ctx context.Context, r SteerRequest) (protocol.SendMessageAccepted, error) {
-	if !core.Identifier(r.RequestID) || strings.HasPrefix(r.RequestID, "pot-result-") || !core.Identifier(r.UserMessageID) || strings.TrimSpace(r.Text) == "" || len(r.Text) > 65536 {
+	r.Attachments = slices.Clone(r.Attachments)
+	if !core.Identifier(r.RequestID) || strings.HasPrefix(r.RequestID, "pot-result-") || !core.Identifier(r.UserMessageID) || (strings.TrimSpace(r.Text) == "" && len(r.Attachments) == 0) || len(r.Text) > 65536 {
 		return protocol.SendMessageAccepted{}, errors.New("invalid steering input")
+	}
+	if err := core.ValidateAttachments(r.Attachments); err != nil {
+		return protocol.SendMessageAccepted{}, err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -63,27 +74,29 @@ func (c *Conversation) Steer(ctx context.Context, r SteerRequest) (protocol.Send
 		if err != nil {
 			return protocol.SendMessageAccepted{}, err
 		}
-		if source != r.UserMessageID || old == nil || old.Role != protocol.User || old.Text != r.Text {
+		if source != r.UserMessageID || old == nil || old.Role != protocol.User || old.Text != r.Text || !slices.Equal(old.Attachments, r.Attachments) {
 			return protocol.SendMessageAccepted{}, errors.New("steering identity has different target or content")
 		}
 		return protocol.SendMessageAccepted{MessageID: old.ID, Duplicate: true}, nil
 	}
 	if c.turn != nil && c.turn.UserMessageID == r.UserMessageID && strings.HasPrefix(c.turn.Request.RequestID, "pot-result-") {
-		request := protocol.SendMessage{RequestID: r.RequestID, ConversationID: c.options.ConversationID, Text: r.Text}
+		request := protocol.SendMessage{RequestID: r.RequestID, ConversationID: c.options.ConversationID, Text: r.Text, Attachments: r.Attachments}
 		old, err := c.store.Duplicate(ctx, r.RequestID)
 		if err != nil {
 			return protocol.SendMessageAccepted{}, err
 		}
 		if old != nil {
-			if old.Role != protocol.User || old.Text != r.Text {
+			if old.Role != protocol.User || old.Text != r.Text || !slices.Equal(old.Attachments, r.Attachments) {
 				return protocol.SendMessageAccepted{}, errors.New("steering identity has different content")
 			}
 			return protocol.SendMessageAccepted{MessageID: old.ID, Duplicate: true}, nil
 		}
+		if err := c.validateAttachmentsLocked(ctx, r.Attachments); err != nil {
+			return protocol.SendMessageAccepted{}, err
+		}
 		return c.queueUserFromLocked(ctx, request, r.UserMessageID)
 	}
-	digest, _ := core.HashJSON([]string{"steering", r.RequestID, r.UserMessageID})
-	messageID := "steer-" + digest
+	messageID := steeringMessageID(r.RequestID, r.UserMessageID)
 	var priorTurn, priorText string
 	err = c.store.DB().QueryRowContext(ctx, "SELECT turn_id,text FROM assistant_steering WHERE id=?", r.RequestID).Scan(&priorTurn, &priorText)
 	duplicate := err == nil
@@ -103,11 +116,19 @@ func (c *Conversation) Steer(ctx context.Context, r SteerRequest) (protocol.Send
 		}
 		for _, m := range c.messages {
 			if m.ID == messageID {
+				if !slices.Equal(m.Attachments, r.Attachments) {
+					return protocol.SendMessageAccepted{}, errors.New("steering attachment identity changed")
+				}
 				return protocol.SendMessageAccepted{MessageID: messageID, Duplicate: true}, nil
 			}
 		}
 	} else if c.closed || c.turn == nil || c.turn.UserMessageID != r.UserMessageID || c.turn.Cancelling || c.finalizing {
 		return protocol.SendMessageAccepted{}, errors.New("turn is not accepting steering")
+	}
+	if !duplicate {
+		if err := c.validateAttachmentsLocked(ctx, r.Attachments); err != nil {
+			return protocol.SendMessageAccepted{}, err
+		}
 	}
 	var turn string
 	if duplicate {
@@ -115,7 +136,7 @@ func (c *Conversation) Steer(ctx context.Context, r SteerRequest) (protocol.Send
 	} else {
 		turn = c.turn.Request.RequestID
 	}
-	message := protocol.Message{ID: messageID, ConversationID: c.options.ConversationID, Role: protocol.User, Text: r.Text, Status: protocol.Accepted, CreatedAtMS: storage.Now(), Steering: true}
+	message := protocol.Message{ID: messageID, ConversationID: c.options.ConversationID, Role: protocol.User, Text: r.Text, Attachments: r.Attachments, Status: protocol.Accepted, CreatedAtMS: storage.Now(), Steering: true}
 	event, err := c.store.SaveWithMutation(ctx, message, func(tx *sql.Tx) error {
 		if duplicate {
 			return nil

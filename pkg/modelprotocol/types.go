@@ -61,11 +61,27 @@ type ModelImage struct {
 
 func (i ModelImage) DataURL() string { return "data:" + i.MIMEType + ";base64," + i.Data }
 func (i ModelImage) Validate() error {
-	if !slices.Contains([]string{"image/png", "image/jpeg", "image/webp"}, i.MIMEType) || i.Width == 0 || i.Width > 4096 || i.Height == 0 || i.Height > 4096 || len(i.Data) == 0 || len(i.Data) > 1400000 {
+	if !slices.Contains([]string{"image/png", "image/jpeg", "image/webp"}, i.MIMEType) || i.Width == 0 || i.Width > 8192 || i.Height == 0 || i.Height > 8192 || len(i.Data) == 0 || len(i.Data) > int((core.AttachmentBytes+2)/3*4) {
 		return fmt.Errorf("invalid model image")
 	}
 	if _, err := base64.StdEncoding.DecodeString(i.Data); err != nil {
 		return fmt.Errorf("invalid image base64: %w", err)
+	}
+	return nil
+}
+
+type ModelDocument struct {
+	Name string `json:"name"`
+	Data string `json:"data"`
+}
+
+func (d ModelDocument) Validate() error {
+	if d.Name == "" || len(d.Name) > 255 || len(d.Data) == 0 || len(d.Data) > int((core.AttachmentBytes+2)/3*4) {
+		return fmt.Errorf("invalid PDF")
+	}
+	raw, err := base64.StdEncoding.DecodeString(d.Data)
+	if err != nil || !strings.HasPrefix(string(raw), "%PDF-") {
+		return fmt.Errorf("invalid PDF data")
 	}
 	return nil
 }
@@ -75,15 +91,17 @@ type TokenUsage struct {
 	Output uint64 `json:"output"`
 }
 type Message struct {
-	Kind        MessageKind     `json:"kind"`
-	Images      []ModelImage    `json:"images,omitempty"`
-	Role        string          `json:"role"`
-	Text        string          `json:"text"`
-	Calls       []ToolCall      `json:"calls,omitempty"`
-	CallID      string          `json:"call_id,omitempty"`
-	Replay      json.RawMessage `json:"replay,omitempty"`
-	ReplayRoute *string         `json:"replay_route,omitempty"`
-	Usage       *TokenUsage     `json:"usage,omitempty"`
+	Attachments []core.Attachment `json:"attachments,omitempty"`
+	Documents   []ModelDocument   `json:"documents,omitempty"`
+	Kind        MessageKind       `json:"kind"`
+	Images      []ModelImage      `json:"images,omitempty"`
+	Role        string            `json:"role"`
+	Text        string            `json:"text"`
+	Calls       []ToolCall        `json:"calls,omitempty"`
+	CallID      string            `json:"call_id,omitempty"`
+	Replay      json.RawMessage   `json:"replay,omitempty"`
+	ReplayRoute *string           `json:"replay_route,omitempty"`
+	Usage       *TokenUsage       `json:"usage,omitempty"`
 }
 
 func TextMessage(role, text string) Message {
