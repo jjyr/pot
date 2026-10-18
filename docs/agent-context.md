@@ -376,7 +376,28 @@ Labels use lowercase ASCII letters, digits, hyphens and underscores.
 ## Recovering a stopped Main turn
 
 After a crash or uncertain termination, Main retains the original stopped turn
-and blocks new input. The private/native owner endpoint
+until its execution records are reconciled. Chat exposes **Continue task** for
+the latest failed, cancelled or recovery-required turn, including after restart.
+Interrupted task-result summaries expose **Restore conversation**, using their
+original read-only Summary execution instead of rerunning completed background
+tasks. The `summary` flag distinguishes this presentation.
+The snapshot's `continuation` carries the original `user_message_id`, exact
+`attempt_id`, and `recovery_required`. `POST /api/v1/turn/continue` accepts these
+two identities plus a fresh `request_id`; browser and native clients use the
+same owner-scoped endpoint. A stale attempt cannot continue a later interruption.
+Exact command retries retain their receipt even if the original acknowledgment
+was lost. New composer drafts and uploads remain separate from continuation.
+
+Control first reconciles an interrupted execution's original receipts and
+cleanup, then resumes its saved model context under the original input identity.
+Confirmed tool results remain in history; never-started calls are closed without
+execution. Failed and cancelled turns resume directly once cleanup is confirmed.
+Continuation neither recreates the original tools nor resets request/token caps.
+Queued user input keeps priority if recovery has already advanced the conversation.
+Unknown tool effects or unproven process shutdowns produce a localized explanation
+with diagnostic details; they cannot be silently retried through a new call ID.
+
+The private/native owner endpoint
 `POST /api/v1/turn/recovery?assistant_id=ID` accepts `action: "inspect"` to expose
 the original `user_message_id`, receipt states and unresolved reasons. Reconcile
 requires `action: "reconcile"` and that exact `user_message_id`. Browser
@@ -388,7 +409,18 @@ Actual original cleanup is recorded before terminal acknowledgment; otherwise
 cleanup must be independently proven. A safe stopped boundary with no uncertain
 effects can be closed, and proven tool results enter the original checkpoint
 once. Remaining never-started calls are closed as interrupted. Recovery does not
-replay accepted input, model samples or tools. Unknown model/tool outcomes and
+replay accepted input, model samples or tools. Interrupted model output is
+discarded once original operation receipts and cleanup are confirmed: tools from
+an uncommitted response have never been dispatched. Unknown tool outcomes and
 previous-boot Host effects without cleanup proof remain fenced. Successful
-reconciliation clears only the original execution and allowance wait; exact
+reconciliation clears only the original execution and allowance wait and retains
+the original input as a continuation candidate; exact
 retries return its retained completion receipt without affecting a later turn.
+
+A model transport error, truncated stream or cancellation during a live turn
+closes the stream and saves the last committed context without an active model
+marker. Failed turns can use the existing retry action with the original input
+and confirmed tool receipts; each new sample gets a new request ID. Partial
+model text and proposed tool calls are not replayed. Cleanup failures and failed
+checkpoint writes still require recovery. Provider usage for an interrupted
+request remains unknown/conservatively reserved independently of retryability.

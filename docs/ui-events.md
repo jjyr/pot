@@ -60,7 +60,9 @@ a failed remote request never falls back to another Control.
 `GET /api/v1/events?assistant_id=...` sends UI-only `conversation` frames.
 The first frame has `kind: reset`; subsequent frames have `kind: delta` and a
 `base_cursor` matching the preceding frame's cursor. `view.state` carries Runtime
-boot identity, conversation cursor, turn, budget and assistant capabilities.
+boot identity, conversation cursor, turn, budget, assistant capabilities and the
+original continuation boundary. Continuation survives bounded reset/delta reads
+even when its original input is outside the loaded message window.
 `view.messages` contains message envelopes (`message`, decimal-string `sequence`,
 `version`, optional `context_only`); `view.history` describes the loaded interval.
 `GET /api/v1/snapshot` returns the same bounded reset frame. Protocol version 4

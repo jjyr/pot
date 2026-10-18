@@ -48,6 +48,7 @@ type ConversationOptions struct {
 	Prepare                                  func(context.Context, core.Thread, core.TurnRequest) (RunOptions, error)
 }
 type savedTurn struct {
+	AttemptID      string                 `json:"attempt_id,omitempty"`
 	Owner          string                 `json:"owner"`
 	BootID         string                 `json:"boot_id"`
 	Generation     uint64                 `json:"generation"`
@@ -60,6 +61,13 @@ type savedTurn struct {
 	ReplyMessageID string                 `json:"reply_message_id"`
 	Inputs         []protocol.SendMessage `json:"inputs,omitempty"`
 	UserMessages   []string               `json:"user_messages,omitempty"`
+}
+
+func (t *savedTurn) attemptID() string {
+	if t.AttemptID != "" {
+		return t.AttemptID
+	}
+	return t.Request.RequestID
 }
 
 func validateConversationRequest(request protocol.SendMessage) error {
@@ -326,7 +334,7 @@ func (c *Conversation) stateLocked() protocol.Snapshot {
 	if c.options.MaxRequests > 0 {
 		budget = &protocol.RequestBudget{Used: c.modelCount, Limit: c.options.MaxRequests, MaxOutputTokens: output}
 	}
-	return protocol.Snapshot{Budget: budget, APIVersion: protocol.APIVersion, BootID: c.options.BootID, Cursor: c.cursor, Agent: protocol.AgentStatus{Attachments: caps, Model: model, Phase: phase, Detail: detail}, ConversationID: c.options.ConversationID, Turn: turn}
+	return protocol.Snapshot{Budget: budget, APIVersion: protocol.APIVersion, BootID: c.options.BootID, Cursor: c.cursor, Agent: protocol.AgentStatus{Attachments: caps, Model: model, Phase: phase, Detail: detail}, ConversationID: c.options.ConversationID, Turn: turn, Continuation: c.continuationLocked()}
 }
 func (c *Conversation) snapshotLocked() protocol.Snapshot {
 	state := c.stateLocked()
@@ -940,7 +948,7 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 			return err
 		}
 	}
-	if result.Phase == execution.Failed && !c.blocked {
+	if (result.Phase == execution.Failed || result.Phase == execution.Cancelled) && !c.blocked {
 		raw, _ := json.Marshal(c.turn)
 		if err := c.store.Set(ctx, "conversation.retry", string(raw)); err != nil {
 			return err

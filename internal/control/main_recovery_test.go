@@ -18,7 +18,7 @@ import (
 	"github.com/jjyr/pot/pkg/storage"
 )
 
-func mainRecoveryFixture(t *testing.T, issued, known, proof bool, boot string) (*Service, *assistant.Conversation) {
+func mainRecoveryFixture(t *testing.T, issued, known, proof bool, boot string, configure ...func(*agent.Checkpoint)) (*Service, *assistant.Conversation) {
 	t.Helper()
 	ctx := context.Background()
 	s := taskControl(t, "runtime", "")
@@ -77,6 +77,9 @@ func mainRecoveryFixture(t *testing.T, issued, known, proof bool, boot string) (
 			t.Fatal(err)
 		}
 	}
+	for _, edit := range configure {
+		edit(&checkpoint)
+	}
 	raw, _ = json.Marshal(checkpoint)
 	if err = store.SaveContext(ctx, raw); err != nil {
 		t.Fatal(err)
@@ -95,6 +98,31 @@ func mainRecoveryFixture(t *testing.T, issued, known, proof bool, boot string) (
 		t.Fatal(err)
 	}
 	return s, c
+}
+
+func TestMainRecoveryInterruptedModelRequiresKnownEffectsAndCleanup(t *testing.T) {
+	for _, test := range []struct {
+		name                            string
+		issued, known, proof, recovered bool
+	}{
+		{"model only", false, false, false, true},
+		{"completed tool", true, true, true, true},
+		{"unknown tool", true, false, true, false},
+		{"unproven cleanup", true, true, false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s, _ := mainRecoveryFixture(t, test.issued, test.known, test.proof, "previous-boot", func(checkpoint *agent.Checkpoint) {
+				id := "interrupted-model"
+				checkpoint.ModelRequestID = &id
+				checkpoint.Started = nil
+				checkpoint.Pending = []m.ToolCall{}
+			})
+			out, err := s.RecoverMain(context.Background(), "main", MainRecoveryCommand{Action: "reconcile", UserMessageID: "original-user"})
+			if err != nil || out.Reconciled != test.recovered {
+				t.Fatal(out, err)
+			}
+		})
+	}
 }
 func TestMainRecoveryOwnerSafeBoundaryAndOriginalKnownReceipt(t *testing.T) {
 	for _, issued := range []bool{false, true} {

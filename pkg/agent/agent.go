@@ -542,6 +542,20 @@ func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoin
 	if err := a.save(ctx, state); err != nil {
 		return response, err
 	}
+	defer func() {
+		if result == nil {
+			return
+		}
+		// A failed sample never dispatches its proposed tools. Discard its
+		// incomplete response so the saved history remains retryable. Provider
+		// usage/reservations are owned by Services and remain independently metered.
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeLimit)
+		defer cancel()
+		state.ModelRequestID = nil
+		if err := a.save(cleanupCtx, state); err != nil {
+			result = errors.Join(result, err)
+		}
+	}()
 	stage := "agent"
 	if compactionID != nil {
 		stage = "compaction"
@@ -567,12 +581,6 @@ func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoin
 	defer cancel()
 	stream, err := a.Services.Model(requestCtx, core.ModelRequest{ID: requestID, Protocol: string(input.Protocol), Provider: thread.Config.Provider, Model: input.Model, Body: body, CompactionID: compactionID})
 	if err != nil {
-		if allowanceError(err) || modelRequestUnsent(err) {
-			state.ModelRequestID = nil
-			if saveErr := a.save(ctx, state); saveErr != nil {
-				return response, saveErr
-			}
-		}
 		return response, err
 	}
 	defer stream.Close()
@@ -635,15 +643,4 @@ func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoin
 	replayRoute := route(thread.Config)
 	response.ReplayRoute = &replayRoute
 	return response, nil
-}
-
-func allowanceError(err error) bool {
-	var value protocol.APIError
-	var pointer *protocol.APIError
-	return errors.As(err, &value) && value.Code == "pot_token_limit" || errors.As(err, &pointer) && pointer.Code == "pot_token_limit"
-}
-
-func modelRequestUnsent(err error) bool {
-	var marker interface{ ModelRequestUnsent() bool }
-	return errors.As(err, &marker) && marker.ModelRequestUnsent()
 }

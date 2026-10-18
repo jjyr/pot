@@ -54,6 +54,9 @@ assert.equal((await pending).owner_id,JSON.stringify(['remote','a']),'in-flight 
 await client.send({boot_id:'boot',request_id:'req',conversation_id:'c',text:'hello'});
 assert.equal(calls.at(-1).url,'/api/v1/messages?assistant_id=b&space_id=local');assert.equal(JSON.parse(calls.at(-1).options.body).boot_id,undefined);
 await client.cancel({boot_id:'boot',request_id:'cancel',turn_id:'u'});assert.deepEqual(JSON.parse(calls.at(-1).options.body),{request_id:'cancel',user_message_id:'u'});
+await client.continueTurn({request_id:'continue',user_message_id:'original',attempt_id:'attempt'},{owner:'a',space:'remote'});
+assert.equal(calls.at(-1).url,'/api/v1/turn/continue?assistant_id=a&space_id=remote');
+assert.deepEqual(JSON.parse(calls.at(-1).options.body),{request_id:'continue',user_message_id:'original',attempt_id:'attempt'});
 await assert.rejects(client.request('/denied'),error=>error instanceof APIError&&error.status===403&&error.message==='Remote denied');
 assert.equal(calls.filter(call=>call.url.includes('/denied')).length,1,'failed remote request never retries locally');
 assert.equal(new APIError(401,{error:'browser authentication required'}).message,'browser authentication required','Browser server diagnostics survive the HTTP adapter');

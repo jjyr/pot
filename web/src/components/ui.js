@@ -18,6 +18,7 @@ import {createReplies,replyKey} from '../state/replies.mjs';
 import {bindCompletions} from './completions.mjs';
 import {projectChatReplies} from '../state/chat-replies.mjs';
 import {createReplyBubble} from './reply.mjs';
+import {createTurnContinuation} from './turn-continuation.mjs';
 import {reconcile} from './reconcile.mjs';
 import {createRefreshQueue,relevantChange} from '../state/refresh.mjs';
 import {bindTaskClock} from './task-time.mjs';
@@ -110,6 +111,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const send = button('send', t('send'), 'send-button');
   form.append(input, send);
   composerArea.append(latest, form, status);
+  const continuation=client.production?createTurnContinuation({client,locale:()=>locale}):null;
+  if(continuation)composerArea.prepend(continuation.root);
   const unavailable = el('div', client.production ? 'page-host' : 'unavailable');
   workspace.append(notice, notificationError, approvals, resourceNotices, history, composerArea, unavailable);
   const menu = el('nav', 'mobile-menu');
@@ -292,6 +295,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const snapshot = state.snapshot;
     const pending = snapshot && state.pending.has(ownerKey(snapshot));
     const running = snapshot?.running;
+    continuation?.update(snapshot,{connected:connection==='connected'&&!selectedAssistant?.offline&&!pending});
     const stopping=running&&(!client.production||(!draft(state).trim()&&!attachmentUI?.items().length));
     const label = stopping ? (cancelPending ? t('stopping') : t('stop')) : running?(locale==='zh-CN'?'发送指导':'Send guidance'):t('send');
     send.replaceChildren(icon(stopping ? 'stop' : 'send'));

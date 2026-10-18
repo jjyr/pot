@@ -232,12 +232,16 @@ func TestConversationWaitingResumeUsesOriginalInput(t *testing.T) {
 		t.Fatal("input replayed on resume", inputs)
 	}
 }
-func TestConversationCancelFencesUnknownModelAndOldCancelCannotStopNewTurn(t *testing.T) {
+func TestConversationCancelModelAllowsNewTurnAndOldCancelIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "conversation.sqlite")
 	var cleanup atomic.Int64
 	started := make(chan struct{})
+	var calls atomic.Int64
 	c := conversationFixture(t, path, "boot", func(ctx context.Context, _ core.ModelRequest) (io.ReadCloser, error) {
+		if calls.Add(1) > 1 {
+			return replySSE("new turn"), nil
+		}
 		close(started)
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -258,9 +262,10 @@ func TestConversationCancelFencesUnknownModelAndOldCancelCannotStopNewTurn(t *te
 	if err := c.Cancel(ctx, cancel); err != nil {
 		t.Fatal("cancellation not idempotent", err)
 	}
-	if _, err := c.Send(ctx, protocol.SendMessage{RequestID: "new", ConversationID: "main", Text: "no replay"}); !errors.Is(err, agent.ErrUncertainEffects) {
-		t.Fatal("uncertain model state silently reused", err)
+	if _, err := c.Send(ctx, protocol.SendMessage{RequestID: "new", ConversationID: "main", Text: "continue"}); err != nil {
+		t.Fatal("cancelled model fenced new input", err)
 	}
+	waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil && len(s.Messages) == 4 })
 }
 func TestConversationCrashTurnNeverReplayedAndOwnerIsolation(t *testing.T) {
 	ctx := context.Background()

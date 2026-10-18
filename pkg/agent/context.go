@@ -115,6 +115,9 @@ func portable(spec core.ResolvedSpec, messages []m.Message, vision bool) []m.Mes
 
 // ReconcileContext only installs confirmed immutable results. Missing receipts
 // never become successes and no model or tool is invoked by reconciliation.
+// Once all started tools are reconciled, an interrupted model sample can be
+// abandoned: none of its uncommitted output has been dispatched. The caller must
+// independently confirm original execution cleanup before installing this state.
 func ReconcileContext(raw json.RawMessage, receipts map[string]json.RawMessage, vision bool) (json.RawMessage, error) {
 	var state Checkpoint
 	if err := core.DecodeJSON(raw, &state); err != nil {
@@ -141,6 +144,9 @@ func ReconcileContext(raw json.RawMessage, receipts map[string]json.RawMessage, 
 		}
 	}
 	state.Pending = pending
+	if state.Started == nil {
+		state.ModelRequestID = nil
+	}
 	return json.Marshal(state)
 }
 func (state Checkpoint) validate() error {

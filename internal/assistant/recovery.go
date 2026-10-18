@@ -89,11 +89,8 @@ func (c *Conversation) ReconcileRecovery(ctx context.Context, state RecoveryStat
 		if err = core.DecodeJSON(raw, &checkpoint); err != nil {
 			return err
 		}
-		if (checkpoint.Started != nil || len(values) > 0) && checkpoint.LastRequest != state.RequestID {
+		if (checkpoint.Started != nil || checkpoint.ModelRequestID != nil || len(values) > 0) && checkpoint.LastRequest != state.RequestID {
 			return errors.New("checkpoint belongs to a different original turn")
-		}
-		if checkpoint.ModelRequestID != nil {
-			return agent.ErrUncertainEffects
 		}
 		vision := false
 		if catalog := state.Config.Params.Agent.ModelCatalog; catalog != nil {
@@ -126,7 +123,8 @@ func (c *Conversation) ReconcileRecovery(ctx context.Context, state RecoveryStat
 	}
 	// Event, checkpoint and admission fence change share one SQLite transaction.
 	receipt, _ := json.Marshal(recoveryReceipt{RequestID: state.RequestID, UserMessageID: state.UserMessageID, Generation: state.Generation, BootID: state.BootID})
-	metadata := map[string]string{"conversation.turn": "null", "conversation.blocked": "false", "conversation.recovery": "null", "conversation.recovered." + state.RequestID: string(receipt)}
+	retry, _ := json.Marshal(c.recovery)
+	metadata := map[string]string{"conversation.turn": "null", "conversation.blocked": "false", "conversation.recovery": "null", "conversation.retry": string(retry), "conversation.recovered." + state.RequestID: string(receipt)}
 	if len(recovered) > 0 {
 		metadata["thread.context"] = string(recovered)
 	}

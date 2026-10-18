@@ -73,6 +73,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
     history: async (query, options = {}) => {const page=await request(`/api/v1/history?${new URLSearchParams(query)}`,options);return {...page,messages:page.messages.map(({message,...meta})=>({...message,...meta}))};},
     send: ({boot_id,user_message_id,retry_user_message_id,...body}) => retry_user_message_id ? request('/api/v1/turn/retry',{method:'POST',body:{request_id:body.request_id,user_message_id:retry_user_message_id}}) : request(user_message_id?'/api/v1/turn/steer':'/api/v1/messages', {method: 'POST', body:user_message_id?{request_id:body.request_id,user_message_id,text:body.text,attachments:body.attachments,references:body.references}:body}),
     controlTurn:(body,scope)=>request('/api/v1/turn/control',{...scope,method:'POST',body}),
+    continueTurn:(body,scope)=>request('/api/v1/turn/continue',{...scope,method:'POST',body}),
     cancel: ({boot_id, turn_id, request_id}) => request('/api/v1/turn/cancel', {method: 'POST', body: {request_id, user_message_id: turn_id}}),
     notificationStatus:desktop?()=>invoke('SystemNotificationStatus'):undefined,
     notificationReady:desktop?surface=>invoke('NotificationMainReady',surface):undefined,
