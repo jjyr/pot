@@ -33,6 +33,9 @@ func OpenMailbox(path, controlID string) (*Mailbox, error) {
 		return nil, err
 	}
 	err = storage.Transaction(context.Background(), db, func(tx *sql.Tx) error {
+		if err := initializeBackgroundTx(tx); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS assistant_mail_identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1),control_id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS assistant_mail_sessions(assistant TEXT NOT NULL,conversation TEXT NOT NULL,config TEXT NOT NULL,context TEXT,PRIMARY KEY(assistant,conversation));
 CREATE TABLE IF NOT EXISTS assistant_mail_events(sequence INTEGER PRIMARY KEY AUTOINCREMENT,message TEXT NOT NULL,event TEXT NOT NULL);
@@ -131,7 +134,7 @@ func insertMail(ctx context.Context, tx *sql.Tx, message protocol.Envelope, dire
 
 func sameOptional(a, b *string) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
 func sameEnvelope(a, b protocol.Envelope) bool {
-	return a.Kind == b.Kind && a.RequestID == b.RequestID && sameJSONResult(a.Result, b.Result) && a.ID == b.ID && a.From == b.From && a.To == b.To && a.ConversationID == b.ConversationID && sameOptional(a.ReplyTo, b.ReplyTo) && a.Text == b.Text && a.Hops == b.Hops
+	return samePlugin(a.Plugin, b.Plugin) && a.Kind == b.Kind && a.RequestID == b.RequestID && sameJSONResult(a.Result, b.Result) && a.ID == b.ID && a.From == b.From && a.To == b.To && a.ConversationID == b.ConversationID && sameOptional(a.ReplyTo, b.ReplyTo) && a.Text == b.Text && a.Hops == b.Hops
 }
 func newConversation() string {
 	var value [16]byte
@@ -371,4 +374,10 @@ func (m *Mailbox) LatestTaskInput(ctx context.Context, task, run string) (*proto
 		return nil, err
 	}
 	return &values[0], nil
+}
+
+func samePlugin(a, b *protocol.PluginNotification) bool {
+	x, _ := json.Marshal(a)
+	y, _ := json.Marshal(b)
+	return string(x) == string(y)
 }

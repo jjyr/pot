@@ -291,6 +291,12 @@ func Allowed(method, path string) bool {
 	if strings.ContainsAny(path, "\\%") || strings.Contains(path, "//") || strings.Contains(path, "/../") {
 		return false
 	}
+	if path == "/api/v1/plugin-notifications" {
+		return method == "GET"
+	}
+	if strings.HasPrefix(path, "/api/v1/plugin-notifications/") {
+		return method == "POST" && core.Identifier(strings.TrimPrefix(path, "/api/v1/plugin-notifications/"))
+	}
 	if path == "/api/v1/integrations" {
 		return method == "GET"
 	}
