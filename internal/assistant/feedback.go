@@ -318,7 +318,7 @@ func (f *turnFeedback) event(event core.AgentEvent) error {
 			c.lastError = nil
 		}
 		return nil
-	case "compaction_observed":
+	case "compaction_observed", "input_applied":
 		return nil
 	default:
 		return errors.New("unsupported assistant event")

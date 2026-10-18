@@ -225,6 +225,20 @@ insert drafts without sending them. Task conversations add a fixed stage/action
 row and expose guidance, cancellation, approvals and Usage. Long task titles have
 full-title tooltips.
 
+Task details use the conversation column without an assistant sidebar. A fixed
+status row below the titlebar shows the current task state and an approval locator
+when needed. The initial goal is a collapsed disclosure with a one-line preview.
+Operator guidance uses user bubbles; assistant guidance and peer references use
+neutral bubbles with explicit source labels. Execution prose and the final result
+use the shared assistant reply bubble, without separate Goal/Execution/Result
+chapters or repeated terminal text. Tools and exact approvals remain inline.
+
+The task composer stays at the bottom while history scrolls independently. Its
+nonempty input sends guidance; empty input offers Stop. The titlebar ellipsis owns
+Pause/Resume, Usage, task details and cancellation. Machine/model identifiers live
+in task details rather than the status row. Ended tasks replace the active composer
+with a compact outcome caption; any unsent draft remains visible read-only.
+
 Main Chat shows up to three executing background tasks below only the latest
 assistant message, with a dot, title and overflow entry. Rows open task details;
 queued, waiting and finished tasks are excluded. The region is presentation state,
