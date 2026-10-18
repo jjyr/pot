@@ -21,6 +21,7 @@ async page=>{
     if(path==='/api/v1/permissions')return {pending:[],policy:{machines:{}}};
     if(path==='/api/v1/providers')return {profiles:[],connections:[],directory:[],default_provider_id:''};
     if(path.startsWith('/api/v1/tasks/query'))return {items:[],counts:{}};
+    if(path.startsWith('/api/v1/tasks/outcomes'))return {items:[],cursor:0,has_more:false};
     throw Error('Unexpected reply fixture endpoint: '+path);
    },
   };
