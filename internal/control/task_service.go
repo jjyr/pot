@@ -60,7 +60,7 @@ func (s *Service) openTasks() error {
 		return err
 	}
 	s.Runner = &runner.Executor{Journal: s.RunnerJournal, Executions: s.options.Manager, Context: s.ctx, Prepare: s.prepareTask}
-	s.Tasks, err = tasks.Open(filepath.Join(s.options.Root, "tasks.sqlite"), tasks.Options{ControlID: s.options.RuntimeID, RuntimeID: s.options.RuntimeID, Port: taskRouter{s}, ResolveModel: s.selectTask, ResolveTarget: s.taskTarget, ResolveMachine: s.selectTaskMachine, ValidateTarget: s.validateTaskTarget, AdmitModel: s.admitTaskModel})
+	s.Tasks, err = tasks.Open(filepath.Join(s.options.Root, "tasks.sqlite"), tasks.Options{ControlID: s.options.RuntimeID, RuntimeID: s.options.RuntimeID, Port: taskRouter{s}, ResolveModel: s.selectTask, ResolveTarget: s.taskTarget, ResolveMachine: s.selectTaskMachine, ValidateTarget: s.validateTaskTarget, AdmitModel: s.admitTaskModel, AwaitingApproval: s.taskAwaitingApproval})
 	if err != nil {
 		return err
 	}
@@ -81,6 +81,15 @@ func (s *Service) openTasks() error {
 		s.StartRunner()
 	}
 	return nil
+}
+func (s *Service) taskAwaitingApproval(assistant, task, run string, generation uint64) bool {
+	for _, approval := range s.Permissions.Pending(assistant) {
+		request := approval.Request
+		if request.Task == task && request.Turn == run && request.Generation == generation {
+			return true
+		}
+	}
+	return false
 }
 func (s *Service) wakeTasks() {
 	if s.taskLife != nil {

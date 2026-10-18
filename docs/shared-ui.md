@@ -49,6 +49,22 @@ requests retain the owning assistant; its Back/history path preserves the
 independently selected Chat. Task approvals follow the Task owner and exact Task,
 including when a different assistant remains selected in Chat. See [Multi-Space UI](multi-space-ui.md).
 
+Chat automatically opens a review dialog when its assistant's background Tasks
+need approval. It names every affected Task and shows each exact operation with
+direct Allow/Deny controls. Review later and Escape close the dialog without
+deciding; a persistent Chat action reopens it. Unchanged events preserve dismissal,
+focus and decision errors. New requests open it again. Switching assistants or
+leaving Chat closes the dialog and fences its decisions to their original owner.
+Task lists, details and the background strip show Waiting for approval, and the
+strip puts these Tasks first. Only approvals for the displayed Chat or exact Task
+may attach to inline calls; matching call and turn IDs alone cannot attach a
+background Task's request to a Chat call.
+
+Task details retain their entry route in navigation history. Opening a Task from
+Chat makes Back return to that assistant's Chat with its draft and reading position;
+opening from Tasks makes Back return to the list. Nested Task Usage and browser
+Back/Forward preserve this origin.
+
 [`adapters/production.mjs`](../web/src/adapters/production.mjs) captures the owner
 and Space before every request. Desktop calls Go through Wails and receives
 `pot:snapshot`, `pot:subscription`, `pot:changed` and `pot:read` events. Browser

@@ -381,6 +381,11 @@ def run(binary, base, env, cli_command):
             )
             if '"passed":true' not in replies:
                 raise RuntimeError("Reply bubble browser contracts did not pass")
+            approvals = browser_cli(
+                "run-code", (ROOT / "scripts/tests/go-ui-task-approvals-browser.js").read_text()
+            )
+            if '"passed":true' not in approvals:
+                raise RuntimeError("Task approval browser contracts did not pass")
             actual = (base / "download.bin").read_bytes()
             assert len(actual) == len(content)
             assert hashlib.sha256(actual).digest() == hashlib.sha256(content).digest()

@@ -225,9 +225,13 @@ insert drafts without sending them. Task conversations add a fixed stage/action
 row and expose guidance, cancellation, approvals and Usage. Long task titles have
 full-title tooltips.
 
-Main Chat shows up to three executing background tasks below only the latest
-assistant message, with a dot, title and overflow entry. Rows open task details;
-queued, waiting and finished tasks are excluded. The region is presentation state,
+Main Chat shows up to three running or approval-waiting background tasks below
+only the latest assistant message, with a dot, title and overflow entry.
+Approval-waiting rows come first, use an attention color and show Waiting for
+approval. New requests automatically open a dialog naming every affected Task
+and offering direct approval decisions. Review later leaves a persistent reopen
+action in Chat. Rows open task details, whose Back action returns to the entry
+Chat; queued, allowance-waiting and finished tasks are excluded. The region is presentation state,
 not persisted assistant prose. Queued guidance has a clock with a Received tooltip;
 applied instructions do not retain a status caption.
 

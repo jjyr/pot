@@ -92,7 +92,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   menu.hidden = true;
   const preferences = el('dialog', 'preferences');
   root.append(rail, titlebar, directory, workspace, menu, preferences);
-  const pages = client.production ? createPages({onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: value => {if(value?.assistant)pendingSelection=value.assistant;loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();}, openChat:()=>{route='chat';directoryOpen=false;renderShell();if(!selectedAssistant)loadDirectory();}}) : null;
+  const pages = client.production ? createPages({chatVisible:()=>route==='chat'&&!root.classList.contains('show-directory'),onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: value => {if(value?.assistant)pendingSelection=value.assistant;loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();}, openChat:async target=>{if(target&&(!selectedAssistant||selectedAssistant.id!==target.owner||selectedAssistant.space_id!==target.space)){const assistant=assistants.find(item=>item.id===target.owner&&item.space_id===target.space);if(assistant)await selectAssistant(assistant,false,false);}route='chat';directoryOpen=false;renderShell();renderMessages();pages.permissions();if(!selectedAssistant)loadDirectory();}}) : null;
   const media = matchMedia('(max-width: 719px)');
   const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
   const saveReads=()=>{if(!client.desktop)persist('pot-ui-read-v1',JSON.stringify(replies.records()));};
@@ -270,6 +270,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const narrow = media.matches && surface !== 'tray';
     root.dataset.route = route;
     root.classList.toggle('show-directory', route === 'chat' && narrow && directoryOpen);
+    pages?.renderApprovals();
     rail.replaceChildren(navigation(false));
     rail.setAttribute('aria-label', t('menu'));
     titlebar.replaceChildren();
@@ -367,7 +368,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   async function refreshBackgroundTasks(){
     if(!client.production||!selectedAssistant)return;
     const scope=client.scope(),key=JSON.stringify([scope.space,scope.owner]),ticket=++taskRefresh;
-    try{const value=await client.request('/api/v1/tasks/query?scope=active&limit=50',{...scope});if(disposed||ticket!==taskRefresh||key!==JSON.stringify([client.scope().space,client.scope().owner]))return;taskCache.set(key,(value.items||[]).filter(task=>task.phase==='running').map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner})));if(route==='chat')renderMessages();}catch{/* Keep owner-scoped cached rows until an authoritative refresh succeeds. */}
+    try{const value=await client.request('/api/v1/tasks/query?scope=active&limit=50',{...scope});if(disposed||ticket!==taskRefresh||key!==JSON.stringify([client.scope().space,client.scope().owner]))return;taskCache.set(key,(value.items||[]).filter(task=>['running','waiting_approval'].includes(task.phase)).map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner})));pages.rememberTasks(taskCache.get(key));if(route==='chat')renderMessages();}catch{/* Keep owner-scoped cached rows until an authoritative refresh succeeds. */}
   }
   function renderMessages() {
     const follow = nearBottom();
@@ -432,12 +433,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     const lastAssistant=visibleMessages.findLast(message=>message.role==='assistant');
     for(const [id,record]of messageNodes){if(id!==lastAssistant?.viewKey){record.tasks?.remove();record.tasks=null;}}
-    if(client.production&&lastAssistant){const record=messageNodes.get(lastAssistant.viewKey),tasks=taskCache.get(JSON.stringify([client.scope().space,client.scope().owner]))||[];record.tasks?.remove();record.tasks=null;if(tasks.length){const strip=el('div','background-tasks');strip.setAttribute('aria-label',locale==='zh-CN'?'正在执行的后台任务':'Executing background tasks');for(const task of tasks.slice(0,3)){const open=el('button','background-task');open.type='button';open.title=task.title;open.append(el('span','task-activity-dot'),el('span','background-task-title',task.title));open.onclick=()=>{route='tasks';pages.openTask(task);renderShell();};strip.append(open);}if(tasks.length>3){const more=el('button','text-button',locale==='zh-CN'?`还有 ${tasks.length-3} 项任务`:`${tasks.length-3} more tasks`);more.onclick=()=>navigate('tasks');strip.append(more);}record.row.append(strip);record.tasks=strip;}}
+    if(client.production&&lastAssistant){const record=messageNodes.get(lastAssistant.viewKey),tasks=[...(taskCache.get(JSON.stringify([client.scope().space,client.scope().owner]))||[])].sort((a,b)=>Number(pages.taskNeedsApproval(b.id,b.phase))-Number(pages.taskNeedsApproval(a.id,a.phase)));record.tasks?.remove();record.tasks=null;if(tasks.length){const strip=el('div','background-tasks');strip.setAttribute('aria-label',locale==='zh-CN'?'正在执行的后台任务':'Executing background tasks');for(const task of tasks.slice(0,3)){const open=el('button','background-task'),waiting=pages.taskNeedsApproval(task.id,task.phase);open.type='button';open.title=task.title;open.classList.toggle('needs-approval',waiting);open.append(el('span','task-activity-dot'),el('span','background-task-title',task.title));if(waiting)open.append(el('span','background-task-status',t('tool.waiting_approval')));open.onclick=()=>{const returnTo={route:'chat',scope:client.scope()};route='tasks';pages.openTask(task,{returnTo});renderShell();};strip.append(open);}if(tasks.length>3){const more=el('button','text-button',locale==='zh-CN'?`还有 ${tasks.length-3} 项任务`:`${tasks.length-3} more tasks`);more.onclick=()=>navigate('tasks');strip.append(more);}record.row.append(strip);record.tasks=strip;}}
     if (snapshot && !visibleMessages.length) {
       if(!messageColumn.querySelector('.empty-chat'))messageColumn.append(el('p', 'empty-chat', t('first')));
     }else if(visibleMessages.length){
       messageColumn.querySelector('.empty-chat')?.remove();
     }
+    pages?.renderApprovals();
     if (follow) requestAnimationFrame(() => { if (!disposed) scrollBottom(); });
     else { history.scrollTop = previousTop; latest.hidden = false; }
   }
@@ -557,7 +559,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if(((value.potRoute||'chat')==='chat'||value.potUsage&&!value.potUsage.returnTask)&&scope.owner&&(!selectedAssistant||selectedAssistant.id!==scope.owner||selectedAssistant.space_id!==scope.space)){const item=assistants.find(item=>item.id===scope.owner&&item.space_id===scope.space);if(!item){error=t('missingAssistant');updateControls();return;}await selectAssistant(item,false,false);}
       if(value.potResource){route='settings';await pages.openResources(false);return;}
       if(value.potSchedule){route='tasks';await pages.openSchedule(value.potSchedule,false);return;}
-      if(value.potTask){route='tasks';await pages.openTask(value.potTask,false);return;}
+      if(value.potTask){route='tasks';await pages.openTask(value.potTask,{recordHistory:false,returnTo:value.potTaskReturn||{route:'tasks'}});return;}
       if(value.potUsage){route='usage';await pages.openUsage(value.potUsage,false);return;}
       await navigate(value.potRoute||'chat',{record:false});if((value.potRoute||'chat')==='chat')directoryOpen=!!value.potDirectory;
     }finally{restoringHistory=false;if(!disposed)renderShell();}

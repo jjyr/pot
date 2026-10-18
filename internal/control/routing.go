@@ -104,7 +104,7 @@ func (s *Service) admitTaskModel(ctx context.Context, tx *sql.Tx, spec core.Reso
 			continue
 		}
 		var active uint64
-		err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks WHERE phase IN ('queued','running','waiting') AND json_extract(body,'$.launch_sent')=1 AND json_extract(body,'$.config."+item.key+"')=?", item.value).Scan(&active)
+		err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks WHERE phase IN ('queued','running','waiting','waiting_approval') AND json_extract(body,'$.launch_sent')=1 AND json_extract(body,'$.config."+item.key+"')=?", item.value).Scan(&active)
 		if err != nil {
 			return false, err
 		}

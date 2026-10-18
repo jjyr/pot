@@ -262,6 +262,55 @@ func TestTaskWaitCursorSuppressesUnchangedAndWakesOnCompletion(t *testing.T) {
 		t.Fatal("wait did not wake")
 	}
 }
+
+func TestTaskApprovalStateWakesWaitAndResumesOriginalRun(t *testing.T) {
+	ctx := context.Background()
+	s, p, _, _ := fixture(t)
+	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "approval", Text: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := false
+	s.options.AwaitingApproval = func(owner, task, run string, generation uint64) bool {
+		if owner != "assistant" || task != record.Info.ID || run != record.RunID || generation != record.Generation {
+			t.Fatal("approval consulted another run")
+		}
+		return pending
+	}
+	if err = s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	running, _ := s.Get(ctx, "assistant", record.Info.ID)
+	pending = true
+	if err = s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wait, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	items, err := s.Wait(wait, "assistant", []WaitTarget{{record.Info.ID, running.Revision}})
+	if err != nil || wait.Err() != nil || len(items) != 1 || items[0].Info.Phase != protocol.TaskWaitingApproval {
+		t.Fatalf("approval did not wake wait: %+v %v", items, err)
+	}
+	phase := protocol.TaskWaitingApproval
+	page, err := s.Page(ctx, "assistant", protocol.TaskQuery{Phase: &phase, Scope: "active"})
+	if err != nil || page.Total != 1 || page.Counts.Active != 1 {
+		t.Fatalf("approval missing from active tasks: %+v %v", page, err)
+	}
+	repeat, stop := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer stop()
+	_, err = s.Wait(repeat, "assistant", []WaitTarget{{record.Info.ID, items[0].Cursor}})
+	if err != nil || repeat.Err() == nil {
+		t.Fatal("unchanged approval should be suppressed by its cursor", err)
+	}
+	pending = false
+	if err = s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := s.Get(ctx, "assistant", record.Info.ID)
+	if err != nil || resumed.Info.Phase != protocol.TaskRunning || resumed.RunID != record.RunID || p.launches != 1 {
+		t.Fatalf("approval resolution replaced the original run: %+v %v", resumed, err)
+	}
+}
 func TestCreateRollbackDoesNotLeaveReceiptOrInput(t *testing.T) {
 	s, _, _, _ := fixture(t)
 	if _, err := s.db.Exec(`CREATE TRIGGER fail_tasks BEFORE INSERT ON tasks BEGIN SELECT RAISE(ABORT,'disk fixture');END`); err != nil {
