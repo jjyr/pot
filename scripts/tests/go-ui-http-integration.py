@@ -395,7 +395,13 @@ def run(binary, base, env, cli_command):
                     .replace("http://127.0.0.1:17702", origin)
                 )
                 output = browser_cli(
-                    "run-code", code.replace("STATE", json.dumps({"origin": origin}))
+                    "run-code",
+                    "async page => { const context = await page.context().browser().newContext({serviceWorkers:'block'}); "
+                    "try { const fixture = await context.newPage(); await fixture.goto("
+                    + json.dumps(origin)
+                    + "); return await ("
+                    + code.replace("STATE", json.dumps({"origin": origin}))
+                    + ")(fixture); } finally { await context.close(); } }",
                 )
                 if '"passed":true' not in output:
                     raise RuntimeError(script + " did not pass")
