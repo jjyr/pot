@@ -2,23 +2,65 @@ name: CI
 
 on:
   push:
-    branches: [main]
-    tags: ["v*.*.*"]
-  pull_request:
+    tags: ["**"]
   workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number to check (blank uses the selected branch/tag)
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-pr-${{ inputs.pr || 'none' }}
   cancel-in-progress: true
 
 env:
   MISE_AUTO_INSTALL: 'false'
 
 jobs:
+  source:
+    name: Resolve source commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      # Resolve before checking out or executing any PR code. Fork heads are
+      # available through the base repository's pull request refs.
+      - name: Resolve selected ref or PR head
+        id: source
+        shell: bash
+        env:
+          PR_NUMBER: ${{ inputs.pr }}
+          SELECTED_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="$SELECTED_SHA"
+          if [[ -n "$PR_NUMBER" ]]; then
+            if [[ ! "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::PR number must be a positive integer."
+              exit 1
+            fi
+            if ! sha=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.head.sha'); then
+              echo "::error::Unable to resolve PR #$PR_NUMBER in $GITHUB_REPOSITORY."
+              exit 1
+            fi
+          fi
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Unable to resolve a valid source commit."
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Checking commit $sha"
+
   product:
+    needs: source
     name: Go product (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -29,12 +71,16 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
         with:
           version: 2026.10.10
+          cache: ${{ inputs.pr == '' }}
           install_args: go python node ruff shfmt shellcheck swiftformat
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      # Skip shared caches when executing manually selected PR code.
+      - if: inputs.pr == ''
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cache/go-build
