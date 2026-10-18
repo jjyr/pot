@@ -40,8 +40,10 @@ instructions, preserving exact user commands and constraints; title-only briefs
 are rejected before a Worker is launched.
 
 After `create_task`, Main ends its chat turn and remains available for independent
-requests. Runtime commits a completion event with each terminal result and
-reports each Task independently. There is no model-visible Task wait operation.
+requests. Runtime commits a completion event with each finalized terminal result and
+reports currently available outcomes together, including scheduled Tasks.
+`get_task` returns the same canonical outcome used for automatic reporting.
+There is no model-visible Task wait operation.
 An explicit result query and the automatic notification share result-report state
 so the same outcome is not reported twice. `wait` collects JavaScript composition
 results; `write_stdin` manages a worker's command session.

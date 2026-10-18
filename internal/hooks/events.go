@@ -18,6 +18,7 @@ const (
 	ApprovalRequested Kind = "approval_requested"
 	ApprovalResolved  Kind = "approval_resolved"
 	ApprovalExpired   Kind = "approval_expired"
+	TaskStarted       Kind = "task_started"
 	TaskCompleted     Kind = "task_completed"
 	TaskFailed        Kind = "task_failed"
 	TaskInterrupted   Kind = "task_interrupted"
@@ -45,6 +46,10 @@ func (e Event) Validate() error {
 		return fmt.Errorf("invalid lifecycle hook identity")
 	}
 	switch e.Kind {
+	case TaskStarted:
+		if !core.Identifier(e.TaskID) || e.Result != nil || e.ApprovalID != "" {
+			return fmt.Errorf("invalid Task start hook")
+		}
 	case ApprovalRequested, ApprovalResolved, ApprovalExpired:
 		if !core.Identifier(e.ApprovalID) || e.Result != nil {
 			return fmt.Errorf("invalid approval hook")
@@ -63,6 +68,8 @@ func (e Event) Validate() error {
 // current pending decisions; a delayed invalidation cannot resurrect an approval.
 func (e Event) Topics() []string {
 	switch e.Kind {
+	case TaskStarted:
+		return []string{"tasks"}
 	case ApprovalRequested, ApprovalResolved, ApprovalExpired:
 		return []string{"permissions", "tasks"}
 	case TaskCompleted, TaskFailed, TaskInterrupted, TaskCancelled:
@@ -79,6 +86,11 @@ func Approval(kind Kind, id, owner, task, run string, generation uint64, decisio
 func Task(owner string, generation uint64, result protocol.TaskResultEvent) Event {
 	id, _ := core.HashJSON([]string{result.TaskID, result.RunID, "terminal"})
 	return Event{ID: id, Kind: taskKind(result.Phase), Owner: owner, TaskID: result.TaskID, RunID: result.RunID, Generation: generation, Result: &result}
+}
+
+func Started(owner, task, run string, generation uint64) Event {
+	id, _ := core.HashJSON([]string{task, run, "started"})
+	return Event{ID: id, Kind: TaskStarted, Owner: owner, TaskID: task, RunID: run, Generation: generation}
 }
 
 func taskKind(phase protocol.TaskPhase) Kind {
@@ -102,8 +114,12 @@ func EnqueueTx(ctx context.Context, tx *sql.Tx, control, runtime string, event E
 		return err
 	}
 	if event.Result == nil {
-		return fmt.Errorf("approval hooks have no Agent inbox recipient")
+		return fmt.Errorf("UI-only hooks have no Agent inbox recipient")
 	}
 	message := protocol.Envelope{ID: event.ID, Kind: "task_result", From: protocol.AgentRef{ControlID: control, Kind: "runtime", AgentID: runtime}, To: protocol.AgentRef{ControlID: control, Kind: "assistant", AgentID: event.Owner}, ConversationID: event.RunID, Text: event.Result.Text, Result: event.Result}
-	return inbox.EnqueueTx(ctx, tx, message, "in", "queued")
+	state := "queued"
+	if event.Result.SuppressionReason != "" {
+		state = "suppressed"
+	}
+	return inbox.EnqueueTx(ctx, tx, message, "in", state)
 }

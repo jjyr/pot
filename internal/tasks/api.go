@@ -34,7 +34,12 @@ type Options struct {
 	ValidateTarget   func(context.Context, core.ExecutionTarget, protocol.TaskRequirements) error
 	MaxTasks         int
 	PublishHook      hooks.Publish
+	PrepareOutcome   func(context.Context, Record, protocol.TaskResultEvent) (OutcomeCommit, error)
 }
+
+// OutcomeCommit applies domain result policy in the Task's terminal transaction.
+// Preparation may read files; the returned commit must only use the supplied tx.
+type OutcomeCommit func(context.Context, *sql.Tx, *protocol.TaskResultEvent) error
 type Service struct {
 	db      *sql.DB
 	options Options
@@ -49,21 +54,23 @@ type Input struct {
 	Sequence  uint64 `json:"sequence"`
 }
 type Record struct {
-	SchemaVersion uint32              `json:"schema_version"`
-	AssistantID   string              `json:"assistant_id"`
-	Info          protocol.TaskInfo   `json:"info"`
-	Request       protocol.CreateTask `json:"request"`
-	Config        core.ResolvedSpec   `json:"config"`
-	Plugins       []string            `json:"plugins"`
-	RunID         string              `json:"run_id"`
-	Generation    uint64              `json:"generation"`
-	Launch        *runner.Launch      `json:"launch"`
-	LaunchSent    bool                `json:"launch_sent"`
-	StopMode      string              `json:"stop_mode"`
-	Finalizing    bool                `json:"finalizing"`
-	Error         string              `json:"error"`
-	Result        *runner.Terminal    `json:"result"`
-	Revision      uint64              `json:"revision"`
+	SchemaVersion uint32                    `json:"schema_version"`
+	AssistantID   string                    `json:"assistant_id"`
+	Info          protocol.TaskInfo         `json:"info"`
+	Request       protocol.CreateTask       `json:"request"`
+	Config        core.ResolvedSpec         `json:"config"`
+	Plugins       []string                  `json:"plugins"`
+	RunID         string                    `json:"run_id"`
+	Generation    uint64                    `json:"generation"`
+	Launch        *runner.Launch            `json:"launch"`
+	LaunchSent    bool                      `json:"launch_sent"`
+	StopMode      string                    `json:"stop_mode"`
+	Finalizing    bool                      `json:"finalizing"`
+	Error         string                    `json:"error"`
+	Result        *runner.Terminal          `json:"result"`
+	Revision      uint64                    `json:"revision"`
+	Origin        protocol.TaskOrigin       `json:"origin"`
+	Outcome       *protocol.TaskResultEvent `json:"outcome,omitempty"`
 }
 type WaitTarget struct {
 	TaskID string
@@ -77,15 +84,13 @@ type WaitItem struct {
 type Notification struct {
 	ID          string
 	AssistantID string
-	TaskID      string
-	Phase       protocol.TaskPhase
-	Text        string
+	protocol.TaskResultEvent
 }
 type Resumer interface {
 	Resume(context.Context, string, string, string) error
 }
 type Enqueue interface {
-	EnqueueTx(context.Context, *sql.Tx, string, protocol.CreateTask, Selection, int64) (Record, error)
+	EnqueueTx(context.Context, *sql.Tx, string, protocol.CreateTask, Selection, protocol.TaskOrigin, int64) (Record, error)
 }
 type ResultReader interface {
 	ReadResult(context.Context, core.ExecutionTarget, string, string, int64) (json.RawMessage, error)
