@@ -1,5 +1,8 @@
 export const messages = {
   en: {
+    'tasks.backgroundCount':'Background tasks · {count}',
+    'tasks.expandOne':'Expand {count} more task', 'tasks.expandMore':'Expand {count} more tasks', 'tasks.collapse':'Collapse',
+    'tasks.elapsedDescription':'Total time since execution first started, including waits',
     'history.earlier':'Load earlier messages', 'history.loading':'Loading messages…', 'history.start':'Beginning of chat', 'history.failed':'Could not load messages. Retry', 'history.missing':'Original message unavailable',
     "notifications.setting":"System notifications",
     "notifications.allow":"Allow notifications",
@@ -180,6 +183,9 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'tasks.backgroundCount':'后台任务 · {count}',
+    'tasks.expandOne':'展开其余 {count} 项任务', 'tasks.expandMore':'展开其余 {count} 项任务', 'tasks.collapse':'收起',
+    'tasks.elapsedDescription':'自首次开始执行起的总耗时，包含中间等待',
     'history.earlier':'加载更早消息', 'history.loading':'正在加载消息…', 'history.start':'已到聊天开头', 'history.failed':'消息加载失败，点击重试', 'history.missing':'原消息不可用',
     "notifications.setting":"系统通知",
     "notifications.allow":"允许通知",

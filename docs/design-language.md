@@ -260,13 +260,20 @@ Pause/Resume, Usage, task details and cancellation. Machine/model identifiers li
 in task details rather than the status row. Ended tasks replace the active composer
 with a compact outcome caption; any unsent draft remains visible read-only.
 
-Main Chat shows up to three running or approval-waiting background tasks below
-only the latest assistant message, with a dot, title and overflow entry.
+Main Chat shows a neutral Background tasks · N region after the current message
+window. The region remains outside recycled message rows, preserving task focus
+and expansion while long-chat history is virtualized. It previews three running or approval-waiting tasks, with a
+full-width Expand remaining tasks row when more are available. Expand and Collapse
+operate in place, using Chat's scroll container. They preserve the reading anchor
+rather than jumping to the bottom. Expansion is scoped to Control, Space and
+assistant for the mounted window and survives detail/settings navigation. Task
+additions and removals retain that choice; an empty region resets it. Task rows
+retain identity and order within each approval group across metadata/clock refreshes.
+Titles show at most two lines, with status and elapsed time on the next line.
 Approval-waiting rows come first, use an attention color and show Waiting for
-approval. Each row shows muted, right-aligned elapsed wall time from the original
+approval. Each row shows muted elapsed wall time from the original
 Runner's first execution claim, excluding the initial queue and including later
-approval, pause and allowance waits. Below 720 px, the title wraps and the status
-and time move below it. Durations show seconds below a minute, minutes/seconds
+approval, pause and allowance waits. Durations show seconds below a minute, minutes/seconds
 below an hour, hours/minutes below a day and days/hours thereafter. The clock
 continues across refresh and reconnect, updates only its text while Chat is visible,
 and never requests backend projections. Unknown start times omit the clock.
