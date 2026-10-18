@@ -54,3 +54,15 @@ callers cannot select another owner or conversation. Workers, peer correspondenc
 and automatic summaries cannot use this reader. It reads the durable transcript,
 so the model can resolve an ID-only reference after context compaction instead of
 automatically expanding every reference into another copy of the source.
+
+Responses annotations are attached once to an existing native message with text,
+retaining its phase, rather than inserted as a separate metadata-only assistant
+turn. Empty assistant messages and tool/reasoning-only native outputs receive no
+annotation; their native fields and signed content remain intact. Encoding does
+not mutate canonical text or replay bytes.
+
+These annotations remain model-visible text. Returned tags are preserved as
+ordinary protocol content in deltas, saved replies and native replay, regardless
+of their message ID or phase. This input correction cannot guarantee that a
+model or gateway will stop returning metadata. Existing stored conversations and
+checkpoints are not rewritten.
