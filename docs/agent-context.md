@@ -2,7 +2,13 @@
 
 Control/execution target adapters own AGENTS.md discovery, execution-target selection, refresh and error policy. `pkg/agent` receives caller-provided text through `core.ExecutionContext.Instructions`; it performs no AGENTS.md filesystem discovery. Standalone callers can inject their own instructions or leave this field empty.
 
-Main dispatches background work and ends its turn without polling or waiting.
+Main handles simple searches, focused research and design discussions directly in
+chat, using available tools to verify current information. Tool use, multiple
+lookups, reasoning steps and diagrams alone do not require a Task. Main delegates
+explicit background requests, prolonged execution, extensive investigation,
+substantial file/report creation and code changes to Tasks.
+
+After dispatching background work, Main ends its turn without polling or waiting.
 Runtime completion events use the shared Agent inbox and report each outcome
 independently; see [Agent messages](assistant-messages.md).
 
