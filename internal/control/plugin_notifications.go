@@ -17,7 +17,7 @@ import (
 func (s *Service) ConfigurePluginNotifications(ctx context.Context, b assistant.BackgroundBinding) error {
 	return s.Machines.OwnerAction(func() error {
 		_, err := s.backgroundPackage(b.ID)
-		if err != nil {
+		if err != nil && b.ID != "github" {
 			return err
 		}
 		definitions, err := s.Registry.Definitions(ctx)
@@ -30,7 +30,7 @@ func (s *Service) ConfigurePluginNotifications(ctx context.Context, b assistant.
 				found = true
 			}
 		}
-		if !found {
+		if b.Enabled && !found {
 			return errors.New("notification assistant unavailable")
 		}
 		if err = s.Mailbox.ConfigureBackground(ctx, b); err == nil {
@@ -68,6 +68,9 @@ func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 	s.pluginMu.Lock()
 	defer s.pluginMu.Unlock()
 	if s.Machines.Role() == "runner" {
+		return
+	}
+	if err := s.ensureGitHubNotifications(ctx); err != nil {
 		return
 	}
 	bindings, err := s.Mailbox.Backgrounds(ctx)
@@ -141,35 +144,103 @@ func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 		s.Changes.Notify("plugin-notifications")
 	}
 }
+
+// Registry definitions are ordered by their persistent creation sequence. Only
+// an absent binding is uninitialized; never infer intent from enabled/target.
+// Reuse the background loop for late account/assistant creation, without a new poller.
+func (s *Service) ensureGitHubNotifications(ctx context.Context) error {
+	if s.Machines.Role() == "runner" {
+		return nil
+	}
+	return s.Machines.OwnerAction(func() error {
+		stored, err := s.Mailbox.Backgrounds(ctx)
+		if err != nil {
+			return err
+		}
+		for _, b := range stored {
+			if b.ID == "github" {
+				return nil
+			}
+		}
+		definitions, err := s.Registry.Definitions(ctx)
+		if err != nil || len(definitions) == 0 {
+			return err
+		}
+		catalog, err := s.Integrations.List(ctx)
+		if err != nil {
+			return err
+		}
+		for _, item := range catalog {
+			if item.ID == "github" && item.Account != nil {
+				return s.Mailbox.EnsureBackground(ctx, "github", definitions[0].ID)
+			}
+		}
+		return nil
+	})
+}
+
 func (s *Service) PluginNotifications(ctx context.Context) (any, error) {
+	if err := s.ensureGitHubNotifications(ctx); err != nil {
+		return nil, err
+	}
 	packages := []plugin.Package{}
 	var err error
 	if s.options.PluginRoot != "" {
 		packages, err = plugin.Discover(s.options.PluginRoot)
 	}
-	if err != nil {
-		return nil, err
-	}
+	discoveryErr := err
 	stored, err := s.Mailbox.Backgrounds(ctx)
 	if err != nil {
 		return nil, err
 	}
-	bindings := []assistant.BackgroundBinding{}
-	for _, p := range packages {
-		if p.Manifest.Contributes.Background == nil {
-			continue
-		}
-		b := assistant.BackgroundBinding{ID: p.Manifest.ID, Assistant: "main", Config: json.RawMessage(`{}`), Status: "disabled"}
-		for _, old := range stored {
-			if old.ID == b.ID {
-				b = old
-			}
-		}
-		bindings = append(bindings, b)
-	}
 	definitions, err := s.Registry.Definitions(ctx)
 	if err != nil {
 		return nil, err
+	}
+	catalog, err := s.Integrations.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := []string{"github"}
+	installed := map[string]bool{}
+	for _, p := range packages {
+		if p.Manifest.Contributes.Background != nil {
+			installed[p.Manifest.ID] = true
+			if p.Manifest.ID != "github" {
+				ids = append(ids, p.Manifest.ID)
+			}
+		}
+	}
+	bindings := []assistant.BackgroundBinding{}
+	for _, id := range ids {
+		b := assistant.BackgroundBinding{ID: id, Enabled: id == "github", Config: json.RawMessage(`{}`), Status: "pending"}
+		for _, old := range stored {
+			if old.ID == id {
+				b = old
+			}
+		}
+		if !b.Enabled {
+			b.Status = "disabled"
+		} else if discoveryErr != nil {
+			b.Status = "unavailable"
+			b.Diagnostic = discoveryErr.Error()
+		} else if !installed[id] {
+			b.Status = "plugin_missing"
+		} else if b.Assistant == "" {
+			b.Status = "waiting_assistant"
+		} else if s.validateNotificationTarget(ctx, b.Assistant) != nil {
+			b.Status = "assistant_missing"
+		} else {
+			for _, item := range catalog {
+				if item.ID == id && item.Account == nil {
+					b.Status = "authorization"
+				}
+			}
+			if b.Status == "disabled" {
+				b.Status = "pending"
+			}
+		}
+		bindings = append(bindings, b)
 	}
 	return map[string]any{"items": bindings, "assistants": definitions}, nil
 }

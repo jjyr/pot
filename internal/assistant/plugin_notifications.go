@@ -14,16 +14,18 @@ import (
 
 // BackgroundBinding is owner configuration; no plugin-supplied address is used.
 type BackgroundBinding struct {
-	ID        string          `json:"id"`
-	Enabled   bool            `json:"enabled"`
-	Assistant string          `json:"assistant"`
-	Config    json.RawMessage `json:"config"`
-	Revision  int64           `json:"revision"`
-	State     json.RawMessage `json:"-"`
-	Next      int64           `json:"next"`
-	Status    string          `json:"status"`
-	Queued    int             `json:"queued"`
-	Attention int             `json:"attention"`
+	// Diagnostic is optional host projection data, never plugin state or config.
+	Diagnostic string          `json:"diagnostic,omitempty"`
+	ID         string          `json:"id"`
+	Enabled    bool            `json:"enabled"`
+	Assistant  string          `json:"assistant"`
+	Config     json.RawMessage `json:"config"`
+	Revision   int64           `json:"revision"`
+	State      json.RawMessage `json:"-"`
+	Next       int64           `json:"next"`
+	Status     string          `json:"status"`
+	Queued     int             `json:"queued"`
+	Attention  int             `json:"attention"`
 }
 
 // Initialize alongside inbox recovery, before receivers start. Preserve all
@@ -58,8 +60,19 @@ func (m *Mailbox) Backgrounds(ctx context.Context) ([]BackgroundBinding, error) 
 	}
 	return out, rows.Err()
 }
+
+// EnsureBackground inserts defaults once. A persisted row, including an explicit
+// disabled binding, always wins. No checkpoint or revision is changed on conflict.
+func (m *Mailbox) EnsureBackground(ctx context.Context, id, target string) error {
+	if !core.Identifier(id) || !core.Identifier(target) {
+		return errors.New("invalid background defaults")
+	}
+	_, err := m.db.ExecContext(ctx, "INSERT INTO plugin_background VALUES(?,1,?,'{}',1,'null',0,'pending',?) ON CONFLICT(id) DO NOTHING", id, target, newConversation())
+	return err
+}
+
 func (m *Mailbox) ConfigureBackground(ctx context.Context, b BackgroundBinding) error {
-	if !core.Identifier(b.ID) || !core.Identifier(b.Assistant) || len(b.Config) > 16384 || !json.Valid(b.Config) {
+	if !core.Identifier(b.ID) || (b.Assistant != "" && !core.Identifier(b.Assistant)) || (b.Enabled && b.Assistant == "") || len(b.Config) > 16384 || !json.Valid(b.Config) {
 		return errors.New("invalid background configuration")
 	}
 	return storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {

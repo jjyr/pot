@@ -541,3 +541,28 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 .attachment-viewer-toolbar .attachment-name { flex: 1; }
 .attachment-viewer>img,.attachment-viewer>iframe { width: 100%; height: calc(100% - 48px); object-fit: contain; border: 0; }
 @media (pointer: coarse) { .attachment-plus,.attachment-remove { min-width: 36px; min-height: 36px; } }
+
+/* One account disclosure contains the complete notification form and sign-out. */
+.github-account{display:block;padding:0}
+.integration-toggle{width:100%;border:0;background:none;color:inherit;text-align:left;padding:20px 0;cursor:pointer;font:inherit}
+.integration-toggle:focus-visible{outline:2px solid var(--focus-ring, currentColor);outline-offset:2px;border-radius:var(--radius)}
+.integration-toggle .row-info{min-width:0;flex:1}
+.integration-toggle .integration-identity{margin-right:8px}
+.integration-notification{display:block;font-size:13px;color:var(--muted);overflow-wrap:anywhere;margin-top:4px}
+.integration-notification[data-error=true]{color:var(--attention)}
+.integration-chevron{margin-left:auto;font-size:22px;padding:8px}
+.github-account-settings{padding:0 0 20px 56px;min-width:0}
+.github-account-settings[hidden],.notification-diagnostics[hidden]{display:none}
+.github-notifications{display:flex;flex-direction:column;gap:12px;min-width:0}
+.github-notifications h3,.github-notifications p{margin:0}
+.github-notifications .form-row{margin:0;padding:8px 0;min-height:44px}
+.github-notifications>.control{align-self:flex-start;max-width:100%;white-space:normal}
+.github-account-settings>.integration-actions{border-top:1px solid var(--divider);padding-top:20px;margin-top:20px}
+.notification-reasons{border:0;padding:0;margin:0;min-width:0}
+.notification-reason-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px;margin:8px 0}
+.notification-reason-options .form-row{display:flex;flex-direction:row-reverse;justify-content:flex-end;align-items:center;gap:10px;border:0;cursor:pointer}
+.notification-reason-options .field-body{flex:none}
+.notification-diagnostics{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;font-size:12px}
+@media(max-width:719px){.github-account-settings{padding-left:0}.notification-reason-options{grid-template-columns:minmax(0,1fr)}.github-notifications .form-row{gap:8px}.github-account-settings .control{min-height:44px}.integration-toggle{min-width:0;gap:10px}}
+
+.integration-connection{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.integration-connection:has(.integration-identity) .integration-status::before{content:"· ";color:var(--muted)}
