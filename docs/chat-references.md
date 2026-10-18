@@ -54,3 +54,18 @@ callers cannot select another owner or conversation. Workers, peer correspondenc
 and automatic summaries cannot use this reader. It reads the durable transcript,
 so the model can resolve an ID-only reference after context compaction instead of
 automatically expanding every reference into another copy of the source.
+
+Responses annotations are attached to an existing native message item, retaining
+its phase, rather than inserted as a separate metadata-only assistant turn.
+Tool/reasoning-only native outputs keep their native identities without inventing
+visible prose. During decoding, output items remain separate; normal commentary
+and final messages are joined with paragraph boundaries. Reconnected SSE events
+with repeated Responses sequence numbers are not appended twice. A standalone commentary
+item containing a complete internal annotation is excluded from streamed text,
+persisted reply text and subsequent native replay when the request uses Pot
+annotations. Recognition requires an exact request annotation or the ID-only
+metadata schema with a 26-character Pot ID; an upstream-generated ID need not
+resolve to a real transcript message. An optionally copied literal `\n` suffix
+is accepted. Tags embedded in prose or code, final answers, other schemas and
+explicit user/reference-quote discussion of the tag remain content. Existing
+stored conversations and checkpoints are not migrated or rewritten.

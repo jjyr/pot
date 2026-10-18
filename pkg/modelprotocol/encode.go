@@ -166,6 +166,9 @@ func Encode(r Request) (json.RawMessage, error) {
 	case OpenAIResponses:
 		for _, m := range r.Messages {
 			metadata := messageMetadata(m)
+			if m.Role == "assistant" && m.Text == "" && len(m.Replay) == 0 {
+				metadata = ""
+			}
 			m.Text = metadata + m.Text
 			if m.Role != "tool" {
 				flushImages()
@@ -176,7 +179,14 @@ func Encode(r Request) (json.RawMessage, error) {
 			}
 			if replay != nil {
 				if metadata != "" {
-					input = append(input, map[string]any{"role": "assistant", "content": metadata})
+					// Annotate the existing message instead of inventing an
+					// assistant turn whose only content is internal metadata.
+					if b := responseMessage(replay); b != nil {
+						parts := array(b["content"])
+						b["content"] = append([]any{map[string]any{"type": "output_text", "text": metadata}}, parts...)
+					}
+					// Tool/reasoning-only items have no visible message to
+					// annotate. Their native IDs and signatures remain intact.
 				}
 				input = append(input, replay...)
 			} else if m.Role == "tool" {
