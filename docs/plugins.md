@@ -33,6 +33,13 @@ not grant execution authority; each call uses [execution authorization](permissi
 
 ## Discovery, synchronization and packaging
 
+Trusted tool implementations may return a preflight failure with `isError:true`,
+an `error` message, an optional `code`, and `execution_status:"not_started"` only
+when no supplied operation ran. The Node host preserves these diagnostics through
+the executor. Exceptions, including those thrown by evaluated JavaScript, retain
+possible-effects warnings and cannot assert a preflight status. Cleanup uncertainty
+remains owned by the execution supervisor.
+
 Runtime loads packages from `PluginRoot`, defaulting to
 `ResourceDirectory/plugins`. Installed tools are enabled by default; Provider
 connection forms only configure models and credentials. Main turns and prepared

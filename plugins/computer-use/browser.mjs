@@ -1,5 +1,5 @@
 // Browser backend owned by the computer-use plugin.
-import { existsSync } from 'node:fs';
+import { accessSync, constants, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -9,6 +9,21 @@ import { randomUUID } from 'node:crypto';
 let chrome, profile, target, session, ownerSession, closing, cleanupError, gracefulExit = false, sequence = 0, nextId = 0, startupDiagnostics = '';
 let pending = new Map(), nodes = new Map(), buffer = Buffer.alloc(0);
 const MAX_IMAGE = 1024 * 1024;
+export function browserAvailability() {
+  const configured = process.env.POT_BROWSER_EXECUTABLE;
+  const candidates = configured ? [configured] : [
+    '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  ];
+  const executable = candidates.find(path => {
+    try { accessSync(path, constants.X_OK); return statSync(path).isFile(); }
+    catch { return false; }
+  });
+  if (executable) return {available: true, executable};
+  return {available: false, error: `Chromium/Chrome unavailable on this execution target${configured ? ': POT_BROWSER_EXECUTABLE is not an executable file' : ': no executable found at the supported paths'}. Install a supported browser or configure POT_BROWSER_EXECUTABLE on this Runtime.`};
+}
 function rejectPending(error) {
   for (const request of pending.values()) { clearTimeout(request.timer); request.reject(error); }
   pending.clear();
@@ -81,14 +96,10 @@ async function close() {
 async function open() {
   if (closing) await closing;
   if (chrome || profile) throw new Error('Browser cleanup must complete before opening another session');
+  const availability = browserAvailability();
+  if (!availability.available) throw new Error(availability.error);
+  const executable = availability.executable;
   profile = await mkdtemp(join(tmpdir(), 'pot-browser-'));
-  const executable = process.env.POT_BROWSER_EXECUTABLE || [
-    '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome',
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    '/Applications/Chromium.app/Contents/MacOS/Chromium',
-    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-  ].find(path => existsSync(path));
-  if (!executable) throw new Error('Chromium/Chrome unavailable in this execution target; install it or configure POT_BROWSER_EXECUTABLE');
   startupDiagnostics = '';
   chrome = spawn(executable, [
     '--headless=new', '--disable-dev-shm-usage', '--no-first-run',

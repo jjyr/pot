@@ -75,6 +75,11 @@ Saved explicit `builtin_tools` lists must include `exec`/`wait` to enable compos
 Expanded schemas count toward context limits. Validation and qualification limits:
 [permission contract](permissions.md).
 
+Tool schemas use omitted optional fields to preserve defaults or request no
+operation. Responses function definitions explicitly set `strict: false` so the
+provider does not normalize those fields into required arguments. Direct and
+composed calls retain the same argument contract.
+
 Operator management endpoints remain separate from model tools. They require
 Control membership and an existing resource. Lost operations are inspected by
 original identity and never resent; unresolved receipts block new effects.

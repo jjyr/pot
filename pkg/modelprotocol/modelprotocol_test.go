@@ -17,6 +17,32 @@ func push(t *testing.T, d *Decoder, event string) StreamEvent {
 func protocols() []Protocol {
 	return []Protocol{OpenAIChat, OpenAIResponses, AnthropicMessages, Gemini}
 }
+func TestResponsesToolsKeepOmissionSemantics(t *testing.T) {
+	schemas := []json.RawMessage{
+		json.RawMessage(`{"type":"object","properties":{"session_id":{"type":"string"},"rows":{"type":"integer","minimum":1},"cols":{"type":"integer","minimum":1}},"required":["session_id"],"additionalProperties":false}`),
+		json.RawMessage(`{"type":"object","properties":{"code":{"type":"string"},"session_id":{"type":"string"},"reset":{"type":"boolean"}},"additionalProperties":false}`),
+	}
+	for _, schema := range schemas {
+		raw, err := Encode(Request{Protocol: OpenAIResponses, Model: "model", MaxOutputTokens: 100, Tools: []ToolDefinition{{"probe", "test", schema}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := object(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tool := obj(array(body["tools"])[0])
+		if strict, exists := tool["strict"]; !exists || strict != false {
+			t.Fatal("Responses must explicitly preserve optional arguments", tool)
+		}
+		want, _ := object(schema)
+		expected, _ := json.Marshal(want)
+		actual, _ := json.Marshal(tool["parameters"])
+		if string(actual) != string(expected) {
+			t.Fatalf("optional argument schema changed: %s", actual)
+		}
+	}
+}
 func TestFourEncodersPreserveSchemasImagesAndReasoning(t *testing.T) {
 	effort := "vendor-mode"
 	schema := json.RawMessage(`{"type":"object","properties":{"partition":{"type":"string","enum":["left","right"]}},"required":["partition"],"additionalProperties":false}`)

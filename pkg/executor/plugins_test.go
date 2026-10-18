@@ -49,6 +49,43 @@ func TestGitHubCLIReceivesCredentialAndArgumentVector(t *testing.T) {
 	}
 }
 
+func TestMissingBrowserReturnsActionableFailureBeforeUserCode(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node unavailable")
+	}
+	t.Setenv("POT_BROWSER_EXECUTABLE", filepath.Join(t.TempDir(), "missing-chrome"))
+	bundle, err := plugin.LoadPlugin("../../plugins/computer-use")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, r := fixture(t)
+	worker, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.options.Node = node
+	e.options.ProcessWorker = []string{worker}
+	r.Operation = "plugin_call"
+	r.Args = pluginArgs(t, bundle, map[string]any{"code": "nodeRepl.write('UNEXPECTED_USER_CODE'); await cua.open('https://example.com');"})
+	r.Args["tool"] = "cua_repl"
+	result, err := e.Execute(context.Background(), r, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(result)
+	if result["isError"] != true || result["code"] != "browser_unavailable" || result["execution_status"] != "not_started" || !strings.Contains(string(raw), "POT_BROWSER_EXECUTABLE") || strings.Contains(string(raw), "UNEXPECTED_USER_CODE") || strings.Contains(string(raw), "prior effects may have occurred") {
+		t.Fatal("browser preflight diagnostic lost", string(raw))
+	}
+	id := result["session_id"].(string)
+	r.Args = pluginArgs(t, bundle, map[string]any{"session_id": id, "reset": true})
+	r.Args["tool"] = "cua_repl"
+	result, err = e.Execute(context.Background(), r, nil)
+	if err != nil || result["closed"] != true {
+		t.Fatal("failed preflight session could not be cleaned up", result, err)
+	}
+}
+
 func counterBundle(t *testing.T) core.PluginBundle {
 	t.Helper()
 	b := core.PluginBundle{Manifest: core.PluginManifest{SchemaVersion: 2, ID: "counter", Version: "1", Contributes: core.PluginContributions{Tools: &core.PluginTools{Runtime: "node", Execution: "runtime", Entrypoint: "index.mjs", Files: []string{"index.mjs"}, Requirements: []string{"node"}, Tools: []json.RawMessage{json.RawMessage(`{"name":"count","description":"count","inputSchema":{"type":"object","properties":{"session_id":{"type":"string"},"reset":{"type":"boolean"}},"additionalProperties":false}}`)}}}}, Files: map[string]string{"index.mjs": "export function createPlugin({emit}) { let n=0; return {async execute(){emit({type:'text',text:String(++n)});},async dispose(){}}; }"}}

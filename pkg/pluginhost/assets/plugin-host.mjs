@@ -25,8 +25,14 @@ for await (const line of createInterface({ input: process.stdin })) {
     // Each execute receives a fresh sink, while plugin state survives calls.
     currentEmit = emit;
     if (!plugin) plugin = (await import(pathToFileURL(entry))).createPlugin({ mode: request.mode, emit: item => currentEmit(item) });
-    await plugin.execute({ tool: request.tool, input: request.input });
-    process.stdout.write(JSON.stringify({ content }) + '\n');
+    const result = await plugin.execute({ tool: request.tool, input: request.input });
+    // Only trusted plugin code returns diagnostics. Exceptions from evaluated
+    // user code still take the uncertain-effects path below.
+    const diagnostic = result?.isError === true ? {
+      isError: true, error: result.error, code: result.code,
+      execution_status: result.execution_status,
+    } : {};
+    process.stdout.write(JSON.stringify({ ...diagnostic, content }) + '\n');
   } catch (error) {
     process.stdout.write(JSON.stringify({ isError: true, error: `${error.message}; prior effects may have occurred`, content }) + '\n');
   }

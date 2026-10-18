@@ -6,6 +6,8 @@ import { mkdtemp, writeFile, readFile, readdir, rm, access } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { browserAvailability } from '../../plugins/computer-use/browser.mjs';
+import { createPlugin } from '../../plugins/computer-use/index.mjs';
 
 const originalSpawn=childProcess.spawn,children=[];
 childProcess.spawn=(...args)=>{const child=originalSpawn(...args);children.push(child);return child;};
@@ -67,6 +69,27 @@ async function scenario(mode, round) {
   assert.equal(events.filter(value=>value.event==='Browser.close').length,mode==='hang'?1:mode==='crash'?0:2,'Concurrent close sends one CDP close per browser');
 }
 try {
+  for (const candidate of ['missing-chrome', 'not-executable']) {
+    process.env.TMPDIR = root;
+    process.env.POT_BROWSER_EXECUTABLE = join(root, candidate);
+    if (candidate === 'not-executable') await writeFile(process.env.POT_BROWSER_EXECUTABLE, 'not executable', {mode:0o600});
+    assert.equal(browserAvailability().available, false);
+    const content = [], count = children.length;
+    const plugin = createPlugin({mode:'text',emit:item=>content.push(item)});
+    const failed = await plugin.execute({tool:'cua_repl',input:{code:"let forbiddenEffect = 1; nodeRepl.write('UNEXPECTED');"}});
+    assert.equal(failed.code, 'browser_unavailable');
+    assert.equal(failed.execution_status, 'not_started');
+    assert.equal(failed.isError, true);
+    assert.match(failed.error, /No browser operation or supplied JavaScript was started/);
+    assert.equal(children.length, count, 'Missing browser must not launch a process');
+    assert.deepEqual(content, [], 'Unavailable browser must not execute supplied code or advertise readiness');
+    assert(!(await readdir(root)).some(name=>name.startsWith('pot-browser-')), 'Availability check must not create browser profiles');
+    process.env.POT_BROWSER_EXECUTABLE = executable;
+    await plugin.execute({tool:'cua_repl',input:{code:'nodeRepl.write(typeof forbiddenEffect);'}});
+    assert.equal(content.at(-1).text, 'undefined', 'Rejected JavaScript must not change retained state');
+    await assert.rejects(plugin.execute({tool:'cua_repl',input:{code:"throw Object.assign(new Error('ordinary error'), {code:'browser_unavailable',execution_status:'not_started'});"}}), /ordinary error/);
+    await plugin.dispose();
+  }
   for(let round=0;round<3;round++)await scenario('graceful',round);
   await scenario('hang',0);
   await scenario('crash',0);

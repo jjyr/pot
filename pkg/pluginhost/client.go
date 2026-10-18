@@ -71,10 +71,12 @@ type Content struct {
 }
 
 type Result struct {
-	SessionID string    `json:"session_id"`
-	Content   []Content `json:"content"`
-	IsError   bool      `json:"isError,omitempty"`
-	Error     string    `json:"error,omitempty"`
+	SessionID       string    `json:"session_id"`
+	Content         []Content `json:"content"`
+	IsError         bool      `json:"isError,omitempty"`
+	Error           string    `json:"error,omitempty"`
+	Code            string    `json:"code,omitempty"`
+	ExecutionStatus string    `json:"execution_status,omitempty"`
 }
 
 // Client owns one immutable package/mode/Host session. Ordinary JavaScript errors
@@ -352,6 +354,11 @@ func (c *Client) exchange(request []byte) (Result, error) {
 	var value Result
 	if err := json.Unmarshal(line, &value); err != nil {
 		return Result{}, err
+	}
+	if value.Code != "" || value.ExecutionStatus != "" {
+		if !value.IsError || value.Error == "" || len(value.Code) > 64 || value.ExecutionStatus != "" && value.ExecutionStatus != "not_started" {
+			return Result{}, errors.New("invalid plugin failure diagnostic")
+		}
 	}
 	if value.Content == nil || len(value.Content) > 1024 {
 		return Result{}, errors.New("invalid plugin content")
