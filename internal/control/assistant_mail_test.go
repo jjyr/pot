@@ -38,8 +38,8 @@ func TestAssistantMailRunsIndependentContextAndOnlyExplicitReplies(t *testing.T)
 		var calls []any
 		if strings.Contains(body, "peer-request") {
 			if peerCalls.Add(1) == 1 {
-				arguments, _ := json.Marshal(map[string]any{"to": protocol.AssistantRef{ControlID: "local", AssistantID: "main"}, "text": "peer-answer"})
-				calls = []any{map[string]any{"index": 0, "id": "reply", "type": "function", "function": map[string]any{"name": "send_assistant_message", "arguments": string(arguments)}}}
+				arguments, _ := json.Marshal(map[string]any{"to": protocol.AgentRef{ControlID: "local", Kind: "assistant", AgentID: "main"}, "text": "peer-answer"})
+				calls = []any{map[string]any{"index": 0, "id": "reply", "type": "function", "function": map[string]any{"name": "send_message", "arguments": string(arguments)}}}
 				text = ""
 			} else {
 				text = "private-peer-final"
@@ -84,7 +84,7 @@ func TestAssistantMailRunsIndependentContextAndOnlyExplicitReplies(t *testing.T)
 	}
 	sub := s.Mailbox.Changes.Subscribe()
 	defer sub.Close()
-	sent, err := s.sendAssistantMail(ctx, "initial-mail", "main", protocol.SendMail{To: protocol.AssistantRef{ControlID: "local", AssistantID: peer.ID}, Text: "peer-request"})
+	sent, err := s.sendAssistantMail(ctx, "initial-mail", "main", protocol.SendMail{To: protocol.AgentRef{ControlID: "local", Kind: "assistant", AgentID: peer.ID}, Text: "peer-request"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestAssistantMailRunsIndependentContextAndOnlyExplicitReplies(t *testing.T)
 			t.Fatalf("peer message contaminated user chat: %+v", snapshot)
 		}
 	}
-	if _, err = s.sendAssistantMail(ctx, "bad-destination", "main", protocol.SendMail{To: protocol.AssistantRef{ControlID: "local", AssistantID: "missing"}, Text: "hello"}); err == nil {
+	if _, err = s.sendAssistantMail(ctx, "bad-destination", "main", protocol.SendMail{To: protocol.AgentRef{ControlID: "local", Kind: "assistant", AgentID: "missing"}, Text: "hello"}); err == nil {
 		t.Fatal("unregistered destination accepted")
 	}
 }
@@ -170,7 +170,7 @@ func TestAssistantMailAllowanceWaitResumesSameEnvelopeWithoutMainWaitOrReplay(t 
 	}
 	changed := s.Mailbox.Changes.Subscribe()
 	defer changed.Close()
-	message, err := s.sendAssistantMail(ctx, "mail", "main", protocol.SendMail{To: protocol.AssistantRef{ControlID: "local", AssistantID: peer.ID}, Text: "wait before this correspondence samples"})
+	message, err := s.sendAssistantMail(ctx, "mail", "main", protocol.SendMail{To: protocol.AgentRef{ControlID: "local", Kind: "assistant", AgentID: peer.ID}, Text: "wait before this correspondence samples"})
 	if err != nil {
 		t.Fatal(err)
 	}

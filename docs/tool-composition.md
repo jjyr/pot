@@ -11,8 +11,8 @@ user agreement; see the repository `AGENTS.md`.
 | Execution | `exec_command`, `write_stdin`, `apply_patch` | Main, Worker |
 | Computer use | `cua_repl` | Main, Worker; fixed Runtime |
 | Composition | `exec`, `wait` | Main, Worker |
-| Tasks | `create_task`, `list_tasks`, `get_task`, `guide_task`, `interrupt`, `cancel_task`, `send_message`, `wait_task` | Main; Summary only list/get |
-| Assistant messages | `list_assistants`, `send_assistant_message` | Main |
+| Tasks | `create_task`, `list_tasks`, `get_task`, `interrupt`, `cancel_task` | Main |
+| Agent messages | `send_message`; `list_assistants` discovers assistants | Main; Worker may message its owner |
 | Schedules | `list_schedules`, `get_schedule`, `manage_schedule` | Main |
 | Assistant rules | `read_agent_instructions`, `update_agent_instructions` (always reviewed) | Main |
 | Execution targets | `list_execution_targets` | Main |
@@ -48,7 +48,8 @@ Unawaited calls may have effects, but do not survive script completion.
 
 Results contain `output` and `completed`, plus `exec_id` while running.
 `wait({exec_id, yield_time_ms?})` returns new output or completion without repeating
-previous output. `wait_task` observes Tasks; `write_stdin` manages shell sessions.
+previous output. `write_stdin` manages shell sessions. Task completion is delivered
+through Runtime inbox events; automatic summaries expose no tools.
 
 Runs belong to the current accepted turn and continue while the Agent awaits other
 work. Await completion before finishing the turn. Ending the turn stops pending

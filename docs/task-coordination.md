@@ -1,11 +1,9 @@
 # Task coordination and lifecycle
 
-Assistant communication is separate from Task reference messages; see
-[Assistant messages](assistant-messages.md). Handoff is agent coordination, not a
-Task migration operation.
-
-Main manages Tasks; Workers cannot create, message, wait for, interrupt or cancel
-other Tasks. Summary sessions only inspect Tasks.
+Task guidance, reference messages and completion events share the Agent inbox;
+see [Agent messages](assistant-messages.md). Main manages Tasks. Workers can
+message only their owning assistant; they cannot create, inspect, stop or wait
+for other Tasks. Automatic result summaries have no tools.
 
 ## Autonomous model routing
 
@@ -22,33 +20,34 @@ Existing Tasks retain their model snapshots; each schedule occurrence creates a
 new Task and resolves its selection then. Machine placement is independent of
 model selection.
 
-## Guidance, messages and waiting
+## Messages and completion
 
-| Tool | Purpose |
-|---|---|
-| `guide_task` | Queue guidance for an active Task |
-| `send_message` | Deliver reference information at a model boundary without starting or resuming work |
-| `wait_task` | Bounded wait for any selected Task to complete or need attention; cursors suppress unchanged results |
+`send_message({to: {control_id, kind: "task", agent_id}, text})` sends an input
+to an existing Task through its owning Control. Runtime records the sender from
+the authenticated execution. User inputs and owner-assistant guidance are
+processed at safe model boundaries, with pending user guidance first. Reference
+messages retain their source and grant no additional authority. Ended Tasks
+retain reference without restarting; further user-directed work needs a new Task.
 
-Messages retain trusted sender identity, are consumed once and remain pending for
-ended Tasks as retained history. They do not grant owner authority. Delivery
-uses `pkg/agent`.
+Task history projects initial input, assistant guidance, user guidance and peer
+reference from the shared `agent_messages` table. The operator messages HTTP
+endpoint binds user provenance; model tools cannot choose their sender. Both
+local and remote workers consume and acknowledge inputs against the original run.
 
-Task input history distinguishes the initial `input`, assistant `guidance`,
-operator `user_guidance` and peer `reference` records. The task messages HTTP
-endpoint stamps operator provenance; `guide_task` stamps assistant provenance.
-Clients cannot choose their source through request fields. Both guidance kinds
-share the same delivery, pending-count and lifecycle rules. Their ordered UI
-projection is described in [UI events](ui-events.md#task-execution-transcripts).
+The model-visible `create_task` requires a title followed by complete execution
+instructions, preserving exact user commands and constraints; title-only briefs
+are rejected before a Worker is launched.
 
-`wait_task` returns Task metadata, not transcripts. Complete, failed, interrupted,
-cancelled, allowance-waiting and `waiting_approval` states can end a wait;
-queued/running cannot. A pending approval for the exact Task/run/generation
-sets `waiting_approval`; resolving the last approval resumes the same run.
-Approval waiting retains its execution lease, route capacity and shared-resource
-exclusion. The assistant's Chat shows the pending operations for owner review.
-`wait` collects JavaScript results;
-`write_stdin` manages commands. Completion notifications also operate without waits.
+After `create_task`, Main ends its chat turn and remains available for independent
+requests. Runtime commits a completion event with each terminal result and
+reports each Task independently. There is no model-visible Task wait operation.
+An explicit result query and the automatic notification share result-report state
+so the same outcome is not reported twice. `wait` collects JavaScript composition
+results; `write_stdin` manages a worker's command session.
+
+Pending approvals still expose the exact reviewed operation in Chat.
+Approval waiting retains the execution lease, route capacity and shared-resource
+exclusion until the owner resolves the request.
 
 ## Pause at a model boundary
 
@@ -123,7 +122,7 @@ directories on the fixed Runtime. Cleanup closes only that Task's processes and
 sessions; files remain. No shared guest environment or automatic project copy is
 provided.
 
-Task persistence uses schema version 4. Development builds use an independent
+Task persistence uses schema version 5. Development builds use an independent
 data root; unsupported storage formats are rejected without rewriting files.
 
 ## Execution transcript

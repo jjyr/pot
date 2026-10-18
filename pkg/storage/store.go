@@ -55,7 +55,7 @@ PRAGMA user_version=1;`)
 	messages, err := s.Messages(context.Background())
 	if err == nil {
 		for _, message := range messages {
-			if message.Status == "accepted" || message.Status == "streaming" {
+			if !message.Queued && (message.Status == "accepted" || message.Status == "streaming") {
 				message.Status = "failed"
 				if message.Tool != nil {
 					message.Tool.Phase = "unknown"
@@ -170,6 +170,12 @@ func (s *Store) SaveWithMetadata(ctx context.Context, m Message, metadata map[st
 }
 func (s *Store) SaveNonNotifying(ctx context.Context, m Message) (Event, error) {
 	return s.save(ctx, m, nil, false, nil)
+}
+
+// SaveWithMetadataMutation commits a message, owner metadata and its journal
+// mutation together. The callback must not perform external effects.
+func (s *Store) SaveWithMetadataMutation(ctx context.Context, m Message, metadata map[string]string, mutation func(*sql.Tx) error) (Event, error) {
+	return s.save(ctx, m, metadata, true, mutation)
 }
 
 // SaveWithMutation commits the message projection/event with owner-local journal

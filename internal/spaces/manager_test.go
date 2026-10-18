@@ -79,7 +79,7 @@ func (c *testControl) Call(ctx context.Context, method, path string, body json.R
 		}
 		switch request.Operation {
 		case "directory":
-			result = protocol.Directory{ControlID: id, Assistants: []protocol.MailAssistant{{Address: protocol.AssistantRef{ControlID: id, AssistantID: "main"}, Name: "Main"}}}
+			result = protocol.Directory{ControlID: id, Assistants: []protocol.MailAssistant{{Address: protocol.AgentRef{ControlID: id, Kind: "assistant", AgentID: "main"}, Name: "Main"}}}
 		case "register":
 			if err := c.mail.Register(ctx, *request.Directory); err != nil {
 				return nil, err
@@ -177,7 +177,7 @@ func TestAppSpacesExplicitTLSAndBidirectionalRelay(t *testing.T) {
 		t.Fatal("selection changed request destination")
 	}
 	for _, pair := range [][2]*testControl{{local, remote}, {remote, local}} {
-		_, err := pair[0].mail.Send(context.Background(), pair[0].mail.ControlID()+"-message", protocol.AssistantRef{ControlID: pair[0].mail.ControlID(), AssistantID: "main"}, protocol.SendMail{To: protocol.AssistantRef{ControlID: pair[1].mail.ControlID(), AssistantID: "main"}, Text: "peer work"}, nil)
+		_, err := pair[0].mail.Send(context.Background(), pair[0].mail.ControlID()+"-message", protocol.AgentRef{ControlID: pair[0].mail.ControlID(), Kind: "assistant", AgentID: "main"}, protocol.SendMail{To: protocol.AgentRef{ControlID: pair[1].mail.ControlID(), Kind: "assistant", AgentID: "main"}, Text: "peer work"}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

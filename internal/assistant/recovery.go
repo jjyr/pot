@@ -64,7 +64,8 @@ func (c *Conversation) recordCleanup(ctx context.Context, request string, genera
 }
 
 // ReconcileRecovery is called only after Control independently verifies original
-// service receipts and cleanup. It closes the old turn; it never queues input.
+// service receipts and cleanup. It closes the old turn without replaying it,
+// then admits any separately accepted user request.
 func (c *Conversation) ReconcileRecovery(ctx context.Context, state RecoveryState, values map[string]json.RawMessage, cleanupConfirmed bool) error {
 	if !cleanupConfirmed {
 		return core.ErrCleanupUnconfirmed
@@ -138,7 +139,7 @@ func (c *Conversation) ReconcileRecovery(ctx context.Context, state RecoveryStat
 	c.lastError = nil
 	c.cursor = *event.Cursor
 	c.changedLocked()
-	return nil
+	return c.startNextUserLocked(ctx)
 }
 
 type recoveryReceipt struct {

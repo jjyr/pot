@@ -54,10 +54,38 @@ func (c *Conversation) Steer(ctx context.Context, r SteerRequest) (protocol.Send
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	source, exists, err := c.store.Get(ctx, "conversation.user_source."+r.RequestID)
+	if err != nil {
+		return protocol.SendMessageAccepted{}, err
+	}
+	if exists {
+		old, err := c.store.Duplicate(ctx, r.RequestID)
+		if err != nil {
+			return protocol.SendMessageAccepted{}, err
+		}
+		if source != r.UserMessageID || old == nil || old.Role != protocol.User || old.Text != r.Text {
+			return protocol.SendMessageAccepted{}, errors.New("steering identity has different target or content")
+		}
+		return protocol.SendMessageAccepted{MessageID: old.ID, Duplicate: true}, nil
+	}
+	if c.turn != nil && c.turn.UserMessageID == r.UserMessageID && strings.HasPrefix(c.turn.Request.RequestID, "pot-result-") {
+		request := protocol.SendMessage{RequestID: r.RequestID, ConversationID: c.options.ConversationID, Text: r.Text}
+		old, err := c.store.Duplicate(ctx, r.RequestID)
+		if err != nil {
+			return protocol.SendMessageAccepted{}, err
+		}
+		if old != nil {
+			if old.Role != protocol.User || old.Text != r.Text {
+				return protocol.SendMessageAccepted{}, errors.New("steering identity has different content")
+			}
+			return protocol.SendMessageAccepted{MessageID: old.ID, Duplicate: true}, nil
+		}
+		return c.queueUserFromLocked(ctx, request, r.UserMessageID)
+	}
 	digest, _ := core.HashJSON([]string{"steering", r.RequestID, r.UserMessageID})
 	messageID := "steer-" + digest
 	var priorTurn, priorText string
-	err := c.store.DB().QueryRowContext(ctx, "SELECT turn_id,text FROM assistant_steering WHERE id=?", r.RequestID).Scan(&priorTurn, &priorText)
+	err = c.store.DB().QueryRowContext(ctx, "SELECT turn_id,text FROM assistant_steering WHERE id=?", r.RequestID).Scan(&priorTurn, &priorText)
 	duplicate := err == nil
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return protocol.SendMessageAccepted{}, err

@@ -37,7 +37,14 @@ func mainRecoveryFixture(t *testing.T, issued, known, proof bool, boot string) (
 	}
 	s.mu.Lock()
 	delete(s.conversations, "main")
-	s.mu.Unlock()
+	locked := true
+	defer func() {
+		if locked {
+			s.mu.Unlock()
+		}
+	}()
+	// Keep background receivers from reopening this externally seeded fixture
+	// before the complete original turn and receipt journal are persisted.
 	store, err := storage.Open(filepath.Join(s.options.Root, "assistants", "main", "conversation.sqlite"))
 	if err != nil {
 		t.Fatal(err)
@@ -81,6 +88,8 @@ func mainRecoveryFixture(t *testing.T, issued, known, proof bool, boot string) (
 		}
 	}
 	store.Close()
+	locked = false
+	s.mu.Unlock()
 	c, err = s.Conversation(ctx, "main")
 	if err != nil {
 		t.Fatal(err)

@@ -15,43 +15,81 @@ const (
 	MaxMailHops      = 16
 )
 
-type AssistantRef struct {
-	ControlID   string `json:"control_id" required:"true"`
-	AssistantID string `json:"assistant_id" required:"true"`
+type AgentRef struct {
+	ControlID string `json:"control_id" required:"true"`
+	Kind      string `json:"kind" required:"true"`
+	AgentID   string `json:"agent_id" required:"true"`
 }
 
-func (r AssistantRef) Valid() bool { return mailID(r.ControlID) && mailID(r.AssistantID) }
-func mailID(value string) bool     { return core.Identifier(value) && !strings.Contains(value, ".") }
+func (r AgentRef) Valid() bool {
+	return mailID(r.ControlID) && mailID(r.AgentID) && (r.Kind == "assistant" || r.Kind == "task" || r.Kind == "user" || r.Kind == "runtime")
+}
+func mailID(value string) bool { return core.Identifier(value) && !strings.Contains(value, ".") }
 
 type MailAssistant struct {
-	Address AssistantRef `json:"address"`
-	Name    string       `json:"name"`
+	Address AgentRef `json:"address"`
+	Name    string   `json:"name"`
 }
 type Directory struct {
 	ControlID  string          `json:"control_id"`
 	Assistants []MailAssistant `json:"assistants"`
 }
 type Envelope struct {
-	ID             string       `json:"id" required:"true"`
-	From           AssistantRef `json:"from" required:"true"`
-	To             AssistantRef `json:"to" required:"true"`
-	ConversationID string       `json:"conversation_id" required:"true"`
-	ReplyTo        *string      `json:"reply_to"`
-	Text           string       `json:"text" required:"true"`
-	Hops           uint32       `json:"hops" required:"true"`
+	Kind           string           `json:"kind"`
+	Owner          string           `json:"owner,omitempty"`
+	Digest         string           `json:"digest,omitempty"`
+	RequestID      string           `json:"request_id,omitempty"`
+	Result         *TaskResultEvent `json:"result,omitempty"`
+	ID             string           `json:"id" required:"true"`
+	From           AgentRef         `json:"from" required:"true"`
+	To             AgentRef         `json:"to" required:"true"`
+	ConversationID string           `json:"conversation_id" required:"true"`
+	ReplyTo        *string          `json:"reply_to"`
+	Text           string           `json:"text" required:"true"`
+	Hops           uint32           `json:"hops" required:"true"`
 }
 
 func (e Envelope) Validate() error {
+	if e.Kind != "message" && e.Kind != "input" && e.Kind != "guidance" && e.Kind != "user_guidance" && e.Kind != "reference" && e.Kind != "task_result" {
+		return fmt.Errorf("invalid agent message kind")
+	}
+	if e.Kind == "message" && (e.To.Kind != "assistant" || (e.From.Kind != "assistant" && e.From.Kind != "task") || e.Result != nil || e.Owner != "" || e.RequestID != "" || e.Digest != "") {
+		return fmt.Errorf("invalid agent correspondence")
+	}
+	if e.Kind != "message" && e.Kind != "task_result" && (e.To.Kind != "task" || !mailID(e.Owner) || !core.Identifier(e.RequestID) || e.Result != nil) {
+		return fmt.Errorf("invalid Task inbox message")
+	}
+	if e.Kind == "task_result" && (e.To.Kind != "assistant" || e.From.Kind != "runtime" || e.Result == nil || !core.Identifier(e.Result.TaskID) || !validUUID(e.Result.RunID)) {
+		return fmt.Errorf("invalid Runtime task event")
+	}
+	if e.Result != nil {
+		switch e.Result.Phase {
+		case TaskComplete, TaskFailed, TaskCancelled, TaskInterrupted:
+		default:
+			return fmt.Errorf("task event is not terminal")
+		}
+		if strings.TrimSpace(e.Result.Title) == "" {
+			return fmt.Errorf("task event title missing")
+		}
+	}
 	if !mailID(e.ID) || !e.From.Valid() || !e.To.Valid() || !validUUID(e.ConversationID) || e.ReplyTo != nil && !mailID(*e.ReplyTo) || strings.TrimSpace(e.Text) == "" || len(e.Text) > MaxMailText || e.Hops > MaxMailHops {
 		return fmt.Errorf("invalid assistant mail envelope")
 	}
 	return nil
 }
 
+type TaskResultEvent struct {
+	TaskID string    `json:"task_id"`
+	RunID  string    `json:"run_id"`
+	Title  string    `json:"title"`
+	Phase  TaskPhase `json:"phase"`
+	Text   string    `json:"text"`
+}
+
 type SendMail struct {
-	To      AssistantRef `json:"to"`
-	Text    string       `json:"text"`
-	ReplyTo *string      `json:"reply_to"`
+	To      AgentRef `json:"to"`
+	Text    string   `json:"text"`
+	ReplyTo *string  `json:"reply_to"`
 }
 type Receipt struct {
 	Message Envelope `json:"message"`

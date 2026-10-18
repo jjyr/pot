@@ -41,6 +41,7 @@ type ConversationOptions struct {
 	InitialWelcome                           string
 	InitialIntent                            json.RawMessage
 	RefreshConfiguration                     func(context.Context, core.Thread, json.RawMessage) (*core.ResolvedSpec, error)
+	OnFinished                               func(context.Context, protocol.SendMessage, execution.Result) error
 	MaxRequests, MaxTurnRequests             uint64 // zero is unlimited; independent of token allowances
 	Prepare                                  func(context.Context, core.Thread, core.TurnRequest) (RunOptions, error)
 }
@@ -111,6 +112,7 @@ func OpenConversation(path string, options ConversationOptions) (*Conversation, 
 		}
 		if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS assistant_model_attempts(id TEXT PRIMARY KEY,owner TEXT NOT NULL,generation INTEGER NOT NULL,turn_id TEXT NOT NULL,at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS assistant_model_turn ON assistant_model_attempts(turn_id);
+CREATE TABLE IF NOT EXISTS chat_user_inbox(sequence INTEGER PRIMARY KEY AUTOINCREMENT,request TEXT NOT NULL,message TEXT NOT NULL UNIQUE);
 CREATE TABLE IF NOT EXISTS assistant_steering(id TEXT PRIMARY KEY,turn_id TEXT NOT NULL,text TEXT NOT NULL,at INTEGER NOT NULL,acknowledged INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS assistant_observations(sequence INTEGER PRIMARY KEY AUTOINCREMENT,turn_id TEXT NOT NULL,generation INTEGER NOT NULL,body TEXT NOT NULL);`); err != nil {
 			return err
@@ -429,6 +431,9 @@ func (c *Conversation) accept(ctx context.Context, request protocol.SendMessage,
 		return protocol.SendMessageAccepted{}, agent.ErrUncertainEffects
 	}
 	if c.turn != nil {
+		if role == protocol.User {
+			return c.queueUserLocked(ctx, request)
+		}
 		return protocol.SendMessageAccepted{}, errors.New("a conversation turn is already active or waiting")
 	}
 	if err := c.applyConfigurationBoundaryLocked(ctx); err != nil {
@@ -759,6 +764,9 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 		}
 	}
 	for _, m := range slices.Clone(c.messages) {
+		if m.Role == protocol.User && m.RequestID != nil && *m.RequestID != request.RequestID {
+			continue
+		}
 		if m.Status == protocol.Accepted || m.Status == protocol.Streaming {
 			if m.Tool != nil {
 				tool := *m.Tool
@@ -808,6 +816,14 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 		saved := *c.turn
 		c.recovery = &saved
 	}
+	if c.options.OnFinished != nil {
+		if err := c.options.OnFinished(ctx, request, result); err != nil {
+			return err
+		}
+	}
 	c.turn = nil
-	return c.appendTurnLocked(ctx)
+	if err := c.appendTurnLocked(ctx); err != nil {
+		return err
+	}
+	return c.startNextUserLocked(ctx)
 }

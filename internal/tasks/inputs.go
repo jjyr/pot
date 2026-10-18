@@ -4,33 +4,52 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/jjyr/pot/internal/inbox"
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
-func (s *Service) Guide(ctx context.Context, assistant, task, requestID, text string) error {
-	return s.input(ctx, assistant, task, requestID, text, "guidance", assistant)
+// SendMessage binds provenance supplied by the authenticated producer. All
+// Task inputs share the same inbox; ended tasks retain reference only.
+func (s *Service) SendMessage(ctx context.Context, assistant, task, requestID string, sender protocol.AgentRef, text string) error {
+	return s.SendMessageWithParent(ctx, assistant, task, requestID, sender, text, nil)
 }
 
-// GuideFromUser retains operator provenance instead of attributing UI input to
-// the assistant whose Task is being viewed.
-func (s *Service) GuideFromUser(ctx context.Context, assistant, task, requestID, text string) error {
-	return s.input(ctx, assistant, task, requestID, text, "user_guidance", assistant)
-}
-
-// SendReference stamps sender from the authenticated caller, never model-supplied
-// JSON. Ended tasks retain it as history without starting/resuming execution.
-func (s *Service) SendReference(ctx context.Context, assistant, task, requestID, sender, text string) error {
-	if sender == "" || len(sender) > 256 {
-		return fmt.Errorf("invalid reference sender")
+// SendMessageWithParent preserves causation and the automatic hop bound. Inputs
+// forwarded from an agent correspondence remain references, never user guidance.
+func (s *Service) SendMessageWithParent(ctx context.Context, assistant, task, requestID string, sender protocol.AgentRef, text string, parent *protocol.Envelope) error {
+	if !sender.Valid() {
+		return fmt.Errorf("invalid message sender")
 	}
-	return s.input(ctx, assistant, task, requestID, text, "reference", sender)
+	kind := "reference"
+	record, err := s.Get(ctx, assistant, task)
+	if err != nil {
+		return err
+	}
+	if record == nil {
+		return fmt.Errorf("Task missing")
+	}
+	if sender.ControlID == s.options.ControlID && sender.AgentID == assistant && (sender.Kind == "user" || sender.Kind == "assistant") {
+		if sender.Kind == "user" {
+			kind = "user_guidance"
+		} else if record.Info.Phase.Scope() == "active" {
+			kind = "guidance"
+		}
+	}
+	if parent != nil {
+		if parent.To != sender {
+			return fmt.Errorf("message parent sender differs")
+		}
+		kind = "reference"
+	}
+	return s.input(ctx, assistant, task, requestID, text, kind, sender, parent)
 }
-func (s *Service) input(ctx context.Context, assistant, task, requestID, text, kind, sender string) error {
+func (s *Service) input(ctx context.Context, assistant, task, requestID, text, kind string, sender protocol.AgentRef, parent *protocol.Envelope) error {
 	if err := validateInput(requestID, text); err != nil {
 		return err
 	}
-	hash, err := core.HashJSON([]string{text, kind, sender})
+	hash, err := core.HashJSON([]any{text, kind, sender, parent})
 	if err != nil {
 		return err
 	}
@@ -55,9 +74,17 @@ func (s *Service) input(ctx context.Context, assistant, task, requestID, text, k
 		if !active {
 			state = "retained"
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO task_inputs(assistant_id,task_id,request_id,digest,kind,sender,text,state) VALUES(?,?,?,?,?,?,?,?)", assistant, task, requestID, hash, kind, sender, text, state); err != nil {
+		messageID, _ := core.HashJSON([]string{task, requestID})
+		message := protocol.Envelope{ID: messageID, Kind: kind, Owner: assistant, RequestID: requestID, Digest: hash, From: sender, To: protocol.AgentRef{ControlID: s.options.ControlID, Kind: "task", AgentID: task}, ConversationID: record.RunID, Text: text}
+		if parent != nil {
+			message.Hops = parent.Hops + 1
+			reply := parent.ID
+			message.ReplyTo = &reply
+		}
+		if err := inbox.EnqueueTx(ctx, tx, message, "in", state); err != nil {
 			return err
 		}
+
 		if guidance && active {
 			record.Info.Pending++
 		} else {
@@ -95,7 +122,7 @@ func (s *Service) Steering(ctx context.Context, assistant, task, runID string, f
 		if record.RunID != runID || record.Launch == nil || record.Info.Phase.Scope() != "active" || record.StopMode != "" {
 			return fmt.Errorf("Task run cannot receive steering")
 		}
-		rows, err := tx.QueryContext(ctx, "SELECT request_id,text,kind,sender FROM task_inputs WHERE assistant_id=? AND task_id=? AND state='pending' ORDER BY sequence", assistant, task)
+		rows, err := tx.QueryContext(ctx, "SELECT request_id,text,kind,sender FROM task_inputs WHERE assistant_id=? AND task_id=? AND state='pending' ORDER BY CASE WHEN kind='user_guidance' THEN 0 ELSE 1 END,sequence", assistant, task)
 		if err != nil {
 			return err
 		}

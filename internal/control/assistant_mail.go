@@ -18,33 +18,13 @@ import (
 type mailParentKey struct{}
 
 func (s *Service) sendAssistantMail(ctx context.Context, id, owner string, send protocol.SendMail) (protocol.Envelope, error) {
-	directory, err := s.MailDirectory(ctx)
+	result, err := s.sendAgentMessage(ctx, id, owner, protocol.AgentRef{ControlID: s.options.RuntimeID, Kind: "assistant", AgentID: owner}, send)
 	if err != nil {
 		return protocol.Envelope{}, err
 	}
-	found := false
-	for _, entry := range directory.Assistants {
-		if entry.Address == send.To {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return protocol.Envelope{}, errors.New("destination assistant unavailable in the current directory")
-	}
-	var parent *protocol.Envelope
-	if value, ok := ctx.Value(mailParentKey{}).(protocol.Envelope); ok {
-		if value.To.ControlID != s.options.RuntimeID || value.To.AssistantID != owner {
-			return protocol.Envelope{}, errors.New("mail sender binding differs")
-		}
-		parent = &value
-		if send.ReplyTo == nil && send.To == value.From {
-			reply := value.ID
-			send.ReplyTo = &reply
-		}
-	}
-	return s.Mailbox.Send(ctx, id, protocol.AssistantRef{ControlID: s.options.RuntimeID, AssistantID: owner}, send, parent)
+	return result.(protocol.Envelope), nil
 }
+
 func (s *Service) deliverAssistantMail(ctx context.Context) {
 	if s.Machines.Role() == "runner" {
 		return
@@ -116,8 +96,8 @@ func (s *Service) runAssistantMail(main *assistant.Conversation, message protoco
 	thread := core.Thread{Owner: owner, Generation: 1, Config: spec}
 	gate := core.NewEventGate(1, message.ID)
 	_, result := s.options.Manager.Execute(ctx, execution.Identity{Owner: owner, RequestID: message.ID, Generation: 1, Role: "assistant"}, func(runCtx context.Context) execution.Result {
-		request := core.TurnRequest{RequestID: message.ID, Text: "Process the incoming assistant message in the assistant-mail reference. Reply only when useful through send_assistant_message. Do not send courtesy acknowledgements."}
-		options, err := s.prepareFor(runCtx, main, thread, request, message.To.AssistantID)
+		request := core.TurnRequest{RequestID: message.ID, Text: "Process the incoming assistant message in the assistant-mail reference. Reply only when useful through send_message. Do not send courtesy acknowledgements."}
+		options, err := s.prepareFor(runCtx, main, thread, request, message.To.AgentID)
 		if err != nil {
 			return execution.Result{Phase: execution.Failed, Err: err}
 		}
@@ -130,7 +110,7 @@ func (s *Service) runAssistantMail(main *assistant.Conversation, message protoco
 		ports.model.Claim = func(ctx context.Context, id string) error { return s.Mailbox.ClaimModel(ctx, message, id) }
 		ports.model.Role = "assistant_message"
 		ports.compaction = func(ctx context.Context, raw json.RawMessage) error {
-			return s.taskCompaction(ctx, message.To.AssistantID, message.ID, raw)
+			return s.taskCompaction(ctx, message.To.AgentID, message.ID, raw)
 		}
 		feedback.ready = options.Ready
 		loop := agent.Agent{Services: options.Services, Feedback: feedback, Dispatch: options.Dispatch, Cleanup: options.Cleanup, Composer: s.options.Composer, Tools: options.Tools, PrepareContext: options.PrepareContext, MaxRounds: options.MaxRounds}
@@ -241,6 +221,6 @@ func (f *mailFeedback) Settle(ctx context.Context) error {
 }
 
 func mailExecutionOwner(message protocol.Envelope) string {
-	hash, _ := core.HashJSON([]string{message.To.AssistantID, message.ConversationID})
+	hash, _ := core.HashJSON([]string{message.To.AgentID, message.ConversationID})
 	return "mail-" + hash
 }

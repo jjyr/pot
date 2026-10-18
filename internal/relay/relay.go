@@ -34,7 +34,7 @@ func Pass(ctx context.Context, a, b Endpoint) (bool, error) {
 		return false, errors.New("relay requires two endpoints")
 	}
 	aid, bid := a.ControlID(), b.ControlID()
-	if aid == bid || !(protocol.AssistantRef{ControlID: aid, AssistantID: "identity"}).Valid() || !(protocol.AssistantRef{ControlID: bid, AssistantID: "identity"}).Valid() {
+	if aid == bid || !(protocol.AgentRef{ControlID: aid, Kind: "assistant", AgentID: "identity"}).Valid() || !(protocol.AgentRef{ControlID: bid, Kind: "assistant", AgentID: "identity"}).Valid() {
 		return false, errors.New("relay endpoints require distinct valid Control identities")
 	}
 	type directoryResult struct {
@@ -74,7 +74,7 @@ func validateDirectory(value protocol.Directory) error {
 	if len(value.Assistants) > 1024 {
 		return errors.New("relay directory exceeds 1024 assistants")
 	}
-	seen := map[protocol.AssistantRef]bool{}
+	seen := map[protocol.AgentRef]bool{}
 	for _, assistant := range value.Assistants {
 		if !assistant.Address.Valid() || assistant.Address.ControlID != value.ControlID || seen[assistant.Address] || !utf8.ValidString(assistant.Name) || strings.TrimSpace(assistant.Name) == "" || utf8.RuneCountInString(assistant.Name) > 128 {
 			return errors.New("invalid relay assistant directory")
@@ -92,7 +92,7 @@ func clone(message protocol.Envelope) protocol.Envelope {
 }
 func equal(a, b protocol.Envelope) bool {
 	sameReply := a.ReplyTo == nil && b.ReplyTo == nil || a.ReplyTo != nil && b.ReplyTo != nil && *a.ReplyTo == *b.ReplyTo
-	return a.ID == b.ID && a.From == b.From && a.To == b.To && a.ConversationID == b.ConversationID && sameReply && a.Text == b.Text && a.Hops == b.Hops
+	return a.Kind == b.Kind && a.Owner == b.Owner && a.Digest == b.Digest && a.RequestID == b.RequestID && a.ID == b.ID && a.From == b.From && a.To == b.To && a.ConversationID == b.ConversationID && sameReply && a.Text == b.Text && a.Hops == b.Hops
 }
 func transfer(ctx context.Context, source, target Endpoint, sourceID, targetID string) (bool, error) {
 	if source.ControlID() != sourceID || target.ControlID() != targetID {

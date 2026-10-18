@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/jjyr/pot/internal/inbox"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -204,11 +205,16 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 			if _, err := tx.ExecContext(ctx, "UPDATE task_inputs SET state='consumed' WHERE assistant_id=? AND task_id=? AND kind='input' AND state='active'", assistant, id); err != nil {
 				return err
 			}
-			noticeID := id + ":terminal"
-			_, err := tx.ExecContext(ctx, "INSERT INTO task_notifications(id,assistant_id,task_id,phase,text) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING", noticeID, assistant, id, current.Info.Phase, run.Result.Text)
-			if err != nil {
+			noticeID, _ := core.HashJSON([]string{id, current.RunID, "terminal"})
+			event := &protocol.TaskResultEvent{TaskID: id, RunID: current.RunID, Title: current.Info.Title, Phase: current.Info.Phase, Text: run.Result.Text}
+			message := protocol.Envelope{ID: noticeID, Kind: "task_result", From: protocol.AgentRef{ControlID: s.options.ControlID, Kind: "runtime", AgentID: s.options.RuntimeID}, To: protocol.AgentRef{ControlID: s.options.ControlID, Kind: "assistant", AgentID: assistant}, ConversationID: current.RunID, Text: run.Result.Text, Result: event}
+			if message.Text == "" {
+				message.Text = "Task ended without a text result."
+			}
+			if err := inbox.EnqueueTx(ctx, tx, message, "in", "queued"); err != nil {
 				return err
 			}
+
 		default:
 			return fmt.Errorf("unknown Runner receipt phase")
 		}
@@ -304,7 +310,7 @@ func (s *Service) ResumeWaiting(ctx context.Context, assistant, id string) error
 	return s.change(ctx, assistant, id, func(tx *sql.Tx, r *Record) error { r.Info.Phase = protocol.TaskQueued; r.Error = ""; return nil })
 }
 func (s *Service) Notifications(ctx context.Context, assistant string) ([]Notification, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id,assistant_id,task_id,phase,text FROM task_notifications WHERE assistant_id=? ORDER BY rowid", assistant)
+	rows, err := s.db.QueryContext(ctx, "SELECT id,assistant_id,task_id,phase,text FROM task_notifications WHERE assistant_id=? ORDER BY sequence", assistant)
 	if err != nil {
 		return nil, err
 	}
