@@ -1,5 +1,7 @@
 export const messages = {
   en: {
+    'loading.pending':'Loading…',
+    'loading.stale':'Refresh failed. Previously loaded data is still shown.',
     'markdown.diagramSource':'Mermaid source', 'markdown.diagramUnavailable':'Could not render this diagram. The source is available below.',
     'markdown.zoomIn':'Zoom in', 'markdown.zoomOut':'Zoom out', 'markdown.resetZoom':'Reset zoom',
     'tool.files':'Affected files','tool.changes':'Changes','tool.added':'Added','tool.modified':'Modified','tool.deleted':'Deleted','tool.moved':'Move destination',
@@ -96,6 +98,8 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'loading.pending':'正在加载…',
+    'loading.stale':'刷新失败，继续显示之前加载的数据。',
     'markdown.diagramSource':'Mermaid 源码', 'markdown.diagramUnavailable':'无法渲染此图表，可在下方查看源码。',
     'markdown.zoomIn':'放大', 'markdown.zoomOut':'缩小', 'markdown.resetZoom':'重置缩放',
     'tool.files':'涉及文件','tool.changes':'变更内容','tool.added':'新增','tool.modified':'修改','tool.deleted':'删除','tool.moved':'移动目标',

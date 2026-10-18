@@ -65,6 +65,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let unsubscribe = () => {}, stopChanges = () => {};
   let directoryEpoch = 0, directorySignature = '';
   const positions = new Map(), cachedSnapshots = new Map();
+  let restoredSnapshot=false,awaitingSnapshot=false;
+  const snapshotKey=(space=client.scope?.().space||'',owner=client.scope?.().owner||'')=>JSON.stringify([(client.spaces||[]).find(item=>item.id===space)?.control_id||client.runtime?.runtime_id||'',space,owner]);
   const t = key => translate(locale,key);
   root.replaceChildren();
   root.className = `pot-app surface-${surface === 'tray' ? 'tray' : 'main'}`;
@@ -440,7 +442,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function renderMessages() {
     const follow = nearBottom();
     const previousTop = history.scrollTop;
-    const snapshot = state.snapshot||(client.production&&selectedAssistant?cachedSnapshots.get(JSON.stringify([selectedAssistant.space_id||'',selectedAssistant.id])):null);
+    const snapshot = state.snapshot||(client.production&&selectedAssistant?cachedSnapshots.get(snapshotKey(selectedAssistant.space_id||'',selectedAssistant.id)):null);
     const sending=state.sends.get(editorOwner||(snapshot&&ownerKey(snapshot)));
     const activeTurn=snapshot?.running?(snapshot.messages.find(message=>message.id===snapshot.turn_id)?.request_id||snapshot.turn_id):null;
     const visibleMessages=projectScriptRuns(projectChatReplies(snapshot,sending,{offline:connection==='offline'||disconnected||selectedAssistant?.offline}),{activeTurn});
@@ -544,15 +546,20 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function pendingSend(){return state.snapshot&&state.pending.has(ownerKey(state.snapshot));}
   function onSnapshot(snapshot, receivedEpoch = epoch) {
     if (disposed || receivedEpoch !== state.epoch) return;
-    if (state.snapshot && validSnapshot(snapshot)
-        && (snapshot.boot_id !== state.snapshot.boot_id || ownerKey(snapshot) !== ownerKey(state.snapshot))) {
+    if(restoredSnapshot&&validSnapshot(snapshot)&&state.snapshot?.boot_id!==snapshot.boot_id){state.snapshot=null;pages?.clearApprovals();}
+    if(state.snapshot&&validSnapshot(snapshot)&&ownerKey(snapshot)===ownerKey(state.snapshot)&&snapshot.boot_id!==state.snapshot.boot_id){
+      cachedSnapshots.delete(snapshotKey());client.resources?.invalidate([],{space:client.scope().space,boot:snapshot.boot_id});pages?.refresh([],{space:client.scope().space,boot:snapshot.boot_id});
+      error='';return loadSnapshot(true);
+    }
+    if (state.snapshot && validSnapshot(snapshot) && ownerKey(snapshot) !== ownerKey(state.snapshot)) {
       connection = 'offline'; error = t('identityChanged'); updateControls(); return;
     }
     const initialSnapshot = !state.snapshot;
+    if(validSnapshot(snapshot)){awaitingSnapshot=false;restoredSnapshot=false;}
     if (!acceptSnapshot(state, snapshot, receivedEpoch)){if(state.snapshot&&validSnapshot(snapshot)&&state.snapshot.cursor===snapshot.cursor){connection='connected';updateControls();}return;}
     connection = 'connected';
     connectionError = '';
-    if(client.production)cachedSnapshots.set(JSON.stringify([client.scope().space,client.scope().owner]),snapshot);
+    if(client.production)cachedSnapshots.set(snapshotKey(),snapshot);
     const restorePosition = editorOwner !== ownerKey(snapshot) ? positions.get(ownerKey(snapshot)) : undefined;
     syncEditor();
     restoreFailedAttachments();
@@ -578,15 +585,17 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   function attach() {
     unsubscribe();
-    const receivedEpoch = epoch;
+    const receivedEpoch = epoch;awaitingSnapshot=!!client.production;connection='connecting';updateControls();
     unsubscribe = client.subscribe(value => onSnapshot(value, receivedEpoch), (value, reason) => {
       if (disposed || receivedEpoch !== state.epoch) return;
       if (value === 'offline') {disconnected = true;connectionError = reason?.message || t('streamDisconnected');}
       if (value === 'connected') connectionError = '';
       if (value === 'connected' && disconnected) { disconnected = false; loadSnapshot(true); }
-      else { connection = value; updateControls(); }
+      else { connection = value==='connected'&&awaitingSnapshot?'connecting':value; updateControls(); }
     });
-    return loadSnapshot();
+    if(!client.production)return loadSnapshot();
+    // Both SSE and the desktop subscription send an authoritative initial snapshot.
+    return Promise.resolve();
   }
   async function selectAssistant(item, initial = false,record=true) {
     completions?.reset();
@@ -596,11 +605,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     pages?.clearApprovals();locateApprovals=item.pending_approvals?JSON.stringify({owner:item.id,space:item.space_id||''}):'';selectedAssistant = item; client.setScope({owner:item.id, space:item.space_id || ''});
     epoch = beginSubscription(state); editorOwner = null; route = 'chat'; if(!initial)directoryOpen = false;
     messageColumn.replaceChildren(); messageNodes.clear(); error = ''; connectionError = ''; disconnected = false;
-    const cached=cachedSnapshots.get(JSON.stringify([item.space_id||'',item.id]));
-    if(cached){acceptSnapshot(state,cached,epoch);syncEditor();renderMessages();}
+    const cached=cachedSnapshots.get(snapshotKey(item.space_id||'',item.id));
+    restoredSnapshot=!!cached;connection='connecting';
+    if(cached){acceptSnapshot(state,cached,epoch);syncEditor();renderMessages();const top=positions.get(ownerKey(cached));if(top!==undefined)requestAnimationFrame(()=>{if(!disposed&&editorOwner===ownerKey(cached)){history.scrollTop=top;latest.hidden=nearBottom();}});}
     if(client.production&&record)saveNavigation('chat',initial);
     renderShell();attach();pages?.permissions();refreshBackgroundTasks();
   }
+  const stopResources=client.resources?.subscribe((meta,reason)=>{if(disposed||!['/api/v1/spaces','/api/v1/assistants'].includes(meta.path))return;if(reason){error=translate(locale,'loading.stale');updateControls();return;}if(error===translate(locale,'loading.stale'))error='';loadDirectory();});
   const directoryQueue=createRefreshQueue(()=>readDirectory(),{active:()=>!disposed});
   function loadDirectory(){return directoryQueue.run();}
   async function readDirectory() {
@@ -608,14 +619,14 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const notificationEpoch=notifications?.epoch;
     const ticket = ++directoryEpoch,previousSpaces=JSON.stringify(spaces),previousOwners=JSON.stringify(assistants.map(item=>[item.space_id,item.id,item.name,item.offline]));
     try {
-      const catalog = await client.request('/api/v1/spaces', {owner:'', space:'',signal:abort.signal});
+      const catalog = await (client.read||client.request)('/api/v1/spaces', {owner:'', space:'',signal:abort.signal});
       if (ticket !== directoryEpoch || disposed) return;
       spaces = catalog.items || [];client.spaces=spaces;
       if (!spaces.length) throw Error('No serving Space');
       if(!selectedAssistant)client.setScope({space:catalog.active_space_id||spaces[0].id,owner:''});
       const projectAssistants=(value,space,offline)=>{let items=value;if(typeof items==='string'){try{items=JSON.parse(items);}catch{items=[];}}return (items?.items||items||[]).map(item=>({...item,control_id:space.control_id||space.id,space_id:space.id,space_name:space.name,space_kind:space.kind,offline}));};
       const results = await Promise.allSettled(spaces.map(async space => {
-        const items = await client.request('/api/v1/assistants', {owner:'', space:space.id,signal:abort.signal});
+        const items = await (client.read||client.request)('/api/v1/assistants', {owner:'', space:space.id,signal:abort.signal});
         return projectAssistants(items,space,space.connected===false);
       }));
       if (ticket !== directoryEpoch || disposed) return;
@@ -710,6 +721,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function attachChanges(){
     stopChanges();stopChanges=client.changes((topics,source={})=>{
       const keys=Array.isArray(topics)?topics:Object.keys(topics||{});
+      client.resources?.invalidate(keys,source);
+      if(source.boot){for(const [key,value]of cachedSnapshots)if((!source.space||JSON.parse(key)[1]===source.space)&&value.boot_id!==source.boot)cachedSnapshots.delete(key);if(state.snapshot&&(!source.space||source.space===client.scope().space)&&state.snapshot.boot_id!==source.boot)loadSnapshot(true);}
       if(source.reset){notifications?.refresh({reset:true,space:source.space});loadDirectory();}
       else if(relevantChange(keys,['task-outcomes','permissions']))notifications?.refresh({topics:keys,space:source.space});
       if(relevantChange(keys,['spaces','assistants','assistant-mail','conversation','runtime','permissions']))loadDirectory();
@@ -725,7 +738,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     await Promise.all([snapshot,loadDirectory()]);
   });
   return () => {
-    disposed = true; stopResume();taskClock.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
+    disposed = true; stopResources?.();client.resources?.clear();stopResume();taskClock.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     completions?.dispose();attachmentUI?.destroy();client.releaseAttachments?.();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);
