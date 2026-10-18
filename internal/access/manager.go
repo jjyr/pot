@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
-	"github.com/jjyr/pot/internal/browserpush"
 	"github.com/jjyr/pot/internal/webui"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/instance"
@@ -39,23 +38,21 @@ type Options struct {
 	Changes  *core.Changes
 }
 type Manager struct {
-	op            sync.Mutex
-	mu            sync.Mutex
-	options       Options
-	settings      Settings
-	store         webui.AccessStore
-	browser       *webui.Server
-	browserCancel context.CancelFunc
-	http          *http.Server
-	listener      net.Listener
-	origin        string
-	port          int
-	ctx           context.Context
-	cancel        context.CancelFunc
-	workers       sync.WaitGroup
-	closed        bool
-	lastError     string
-	applied       uint64
+	op        sync.Mutex
+	mu        sync.Mutex
+	options   Options
+	settings  Settings
+	store     webui.AccessStore
+	browser   *webui.Server
+	http      *http.Server
+	listener  net.Listener
+	origin    string
+	port      int
+	cancel    context.CancelFunc
+	workers   sync.WaitGroup
+	closed    bool
+	lastError string
+	applied   uint64
 }
 
 func Open(ctx context.Context, o Options) (*Manager, error) {
@@ -63,7 +60,7 @@ func Open(ctx context.Context, o Options) (*Manager, error) {
 		return nil, errors.New("tailnet service required")
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	m := &Manager{options: o, store: webui.AccessStore{Path: filepath.Join(o.Root, "browser-access.json")}, ctx: ctx, cancel: cancel}
+	m := &Manager{options: o, store: webui.AccessStore{Path: filepath.Join(o.Root, "browser-access.json")}, cancel: cancel}
 	if data, err := os.ReadFile(filepath.Join(o.Root, "access-settings.json")); err == nil {
 		if err = core.DecodeJSON(data, &m.settings); err != nil {
 			cancel()
@@ -153,34 +150,15 @@ func (m *Manager) replaceBrowser(origin string, config webui.Config) error {
 	if err != nil {
 		return err
 	}
-	sender, err := browserpush.FromEnvironment()
-	if err != nil {
-		browser.Close()
-		return err
-	}
-	var push browserpush.Sender
-	if sender != nil {
-		push = sender
-	}
-	if err = browser.AttachPush(m.options.Root, webui.NotificationSource{ID: m.options.Upstream.ControlID, Upstream: m.options.Upstream}, push); err != nil {
-		browser.Close()
-		return err
-	}
-	runctx, cancel := context.WithCancel(m.ctx)
 	m.mu.Lock()
-	previous, previousCancel := m.browser, m.browserCancel
+	previous := m.browser
 	m.browser = browser
-	m.browserCancel = cancel
 	m.origin = origin
 	m.applied = config.Generation
 	m.mu.Unlock()
-	if previousCancel != nil {
-		previousCancel()
-	}
 	if previous != nil {
 		previous.Close()
 	}
-	m.workers.Go(func() { _ = browser.RunNotifications(runctx) })
 	return nil
 }
 func (m *Manager) enable(ctx context.Context) error {

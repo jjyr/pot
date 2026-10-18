@@ -13,6 +13,7 @@ import (
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/modelprotocol"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 func TestAssistantCatalogueCountsPendingApprovalsWithoutCreatingReplies(t *testing.T) {
@@ -56,6 +57,11 @@ func TestAssistantCatalogueCountsPendingApprovalsWithoutCreatingReplies(t *testi
 		t.Fatal(ctx.Err())
 	}
 	app := &Application{Control: runtime.Control, RuntimeID: id, BootID: runtime.BootID}
+	_, err = app.Call(ctx, Request{Method: "POST", Path: "/api/v1/assistant-notifications", Body: json.RawMessage(`{"initialize":true}`)})
+	var routeError protocol.APIError
+	if !errors.As(err, &routeError) || routeError.Code != "not_found" {
+		t.Fatal("retired push feed is still available", err)
+	}
 	check := func(expected int) {
 		t.Helper()
 		value, err := app.Call(ctx, Request{Method: "GET", Path: "/api/v1/assistants?assistant_id=" + second.ID})

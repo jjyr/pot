@@ -17,12 +17,14 @@ import (
 	"github.com/jjyr/pot/internal/productinfo"
 	product "github.com/jjyr/pot/internal/runtime"
 	"github.com/jjyr/pot/internal/spaces"
+	"github.com/jjyr/pot/internal/systemnotifications"
 	"github.com/jjyr/pot/internal/transport"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 	assets "github.com/jjyr/pot/web"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
+	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
 
 // Service is the desktop adapter to the same application contract used by CLI
@@ -37,6 +39,10 @@ type Service struct {
 	mu                        sync.Mutex
 	subscriptions             map[string]context.CancelFunc
 	reads                     *attention.Store
+	notificationStore         *systemnotifications.Store
+	notifier                  *notifications.NotificationService
+	notificationViews         map[string]NotificationView
+	pendingNotification       map[string]interface{}
 	attentionWake             chan struct{}
 	reduceMotion, motionKnown bool
 }
@@ -109,15 +115,30 @@ func Run(root string) error {
 	if err != nil {
 		return err
 	}
-	service := &Service{ctx: ctx, api: api, subscriptions: map[string]context.CancelFunc{}, reads: reads, attentionWake: make(chan struct{}, 1)}
+	notificationStore, err := systemnotifications.Open(filepath.Join(runtime.Root.Path, "system-notifications.json"))
+	if err != nil {
+		return err
+	}
+	notifier := notifications.New()
+	service := &Service{notificationStore: notificationStore, notifier: notifier, notificationViews: map[string]NotificationView{}, ctx: ctx, api: api, subscriptions: map[string]context.CancelFunc{}, reads: reads, attentionWake: make(chan struct{}, 1)}
 	localClient := socket.Endpoint.Client()
 	localClient.Timeout = 0
-	manager, err := spaces.Open(ctx, spaces.Options{Path: filepath.Join(runtime.Root.Path, "app-spaces.json"), Local: spaces.NewLocalHTTPClient(localClient, socket.Endpoint.Token, api.RuntimeID), LocalID: api.RuntimeID, LocalName: "This Mac", OnChange: func(space string, topics json.RawMessage) {
+	manager, err := spaces.Open(ctx, spaces.Options{Path: filepath.Join(runtime.Root.Path, "app-spaces.json"), Local: spaces.NewLocalHTTPClient(localClient, socket.Endpoint.Token, api.RuntimeID), LocalID: api.RuntimeID, LocalName: "This Mac", OnStreamReset: func(space string) {
+		service.mu.Lock()
+		app := service.app
+		service.mu.Unlock()
+		if app != nil {
+			app.Event.Emit("pot:changed", map[string]any{"space_id": space, "reset": true})
+		}
+	}, OnChange: func(space string, topics json.RawMessage) {
 		service.wakeAttention()
-		if service.app != nil {
+		service.mu.Lock()
+		app := service.app
+		service.mu.Unlock()
+		if app != nil {
 			var value any
 			if json.Unmarshal(topics, &value) == nil {
-				service.app.Event.Emit("pot:changed", map[string]any{"space_id": space, "topics": value})
+				app.Event.Emit("pot:changed", map[string]any{"space_id": space, "topics": value})
 			}
 		}
 	}})
@@ -128,7 +149,7 @@ func Run(root string) error {
 	service.spaces = manager
 	files := application.AssetFileServerFS(assets.FS())
 
-	app := application.New(application.Options{Name: "Pot", Description: "Pot " + buildinfo.Version, Icon: appIcon, Services: []application.Service{application.NewService(service)}, Assets: application.AssetOptions{Handler: files}, Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false}, OnShutdown: func() {
+	app := application.New(application.Options{Name: "Pot", Description: "Pot " + buildinfo.Version, Icon: appIcon, Services: []application.Service{application.NewService(service), application.NewService(notifier)}, Assets: application.AssetOptions{Handler: files}, Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false}, OnShutdown: func() {
 		stop()
 		service.mu.Lock()
 		for _, cancel := range service.subscriptions {
@@ -138,7 +159,10 @@ func Run(root string) error {
 		_ = manager.Close()
 		_ = runtime.Close()
 	}})
+	service.mu.Lock()
 	service.app = app
+	service.mu.Unlock()
+	notifier.OnNotificationResponse(service.notificationResponse)
 	main := app.Window.NewWithOptions(application.WebviewWindowOptions{Name: "pot-main", Title: "Pot", Width: 1100, Height: 760, MinWidth: 390, MinHeight: 480, URL: "/?platform=desktop", Mac: application.MacWindow{TitleBar: application.MacTitleBarHiddenInsetUnified, InvisibleTitleBarHeight: 44}})
 	main.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) { main.Hide(); e.Cancel() })
 	tray := app.Window.NewWithOptions(application.WebviewWindowOptions{Name: "pot-tray", Title: "Pot", Width: 380, Height: 560, URL: "/?platform=desktop&surface=tray", Frameless: true, AlwaysOnTop: true, Hidden: true, DisableResize: true, HideOnEscape: true, HideOnFocusLost: true})

@@ -48,16 +48,15 @@ export async function requestPWAInstall() {
   const prompt=installationPrompt;installationPrompt=null;await prompt.prompt();await prompt.userChoice;return true;
 }
 export async function installPWA() {
-  if('serviceWorker'in navigator&&isSecureContext)return navigator.serviceWorker.register('/service-worker.js',{scope:'/'});
+  if('serviceWorker'in navigator&&isSecureContext)return navigator.serviceWorker.register('/service-worker.js',{scope:'/',updateViaCache:'none'});
   return null;
 }
-export async function configurePush(status,{enabled=true,locale='en',private_preview=false}={}) {
-  if(!status?.push_available||!status.push_key)throw Error('Push notifications are unavailable on this server.');
-  const registration=await navigator.serviceWorker.ready;
-  if(!enabled){const subscription=await registration.pushManager.getSubscription();const response=await fetch('/access/push/remove',{method:'POST',credentials:'same-origin'});if(!response.ok)throw Error('Could not remove notifications.');await subscription?.unsubscribe();return;}
-  if(await Notification.requestPermission()!=='granted')throw Error('Notification permission was not granted.');
-  const key=Uint8Array.from(atob(status.push_key.replace(/-/g,'+').replace(/_/g,'/')),value=>value.charCodeAt(0));
-  const subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
-  const response=await fetch('/access/push',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:subscription.toJSON(),locale,private_preview})});
-  if(!response.ok){await subscription.unsubscribe();throw Error('Could not save notification subscription.');}
+// Best-effort local cleanup for browsers upgrading from Web Push. The server
+// no longer accepts or sends subscriptions; cleanup must never delay startup.
+export async function retireBrowserPush() {
+  try {
+    const registration=await navigator.serviceWorker?.getRegistration('/');
+    const subscription=await registration?.pushManager?.getSubscription();
+    await subscription?.unsubscribe();
+  } catch {/* Restricted/offline browsers can still use local system notifications. */}
 }

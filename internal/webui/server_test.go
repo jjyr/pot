@@ -54,6 +54,14 @@ func TestAuthenticationAllowlistCredentialSeparationAndRotation(t *testing.T) {
 	if !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
 		t.Fatal(cookie)
 	}
+	for _, path := range []string{"/access/push", "/access/push/remove", "/access/push/heartbeat", "/access/push/preferences", "/api/v1/assistant-notifications"} {
+		if w := invoke("POST", path, "", cookie.String(), "http://localhost"); w.Code != 404 {
+			t.Fatalf("retired push route %s: %d %s", path, w.Code, w.Body.String())
+		}
+	}
+	if w := invoke("GET", "/access/status", "", cookie.String(), ""); w.Code != 200 || w.Body.String() != "{\"authenticated\":true,\"scope\":\"control\"}\n" {
+		t.Fatalf("browser access status: %d %s", w.Code, w.Body.String())
+	}
 	if w = invoke("GET", "/api/v1/runtime", "Bearer browser-secret", cookie.String(), ""); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}

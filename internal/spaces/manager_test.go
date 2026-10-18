@@ -329,3 +329,55 @@ func TestConnectedSpaceDoesNotPollCatalogues(t *testing.T) {
 		t.Fatal("unchanged stream version caused work")
 	}
 }
+
+type reconnectControl struct {
+	*testControl
+	connections atomic.Int32
+}
+
+func (c *reconnectControl) Stream(ctx context.Context, _ string, deliver func(Event) error) error {
+	attempt := c.connections.Add(1)
+	frame := Event{Type: "changed", Data: json.RawMessage(`{"usage":1}`)}
+	if err := deliver(frame); err != nil {
+		return err
+	}
+	if err := deliver(frame); err != nil {
+		return err
+	}
+	if attempt == 1 {
+		return errors.New("test disconnect")
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+func TestStreamResetPrecedesEachConnectionBaseline(t *testing.T) {
+	local := &reconnectControl{testControl: newControl(t, "local")}
+	events := make(chan string, 10)
+	manager, err := Open(context.Background(), Options{Path: ConfigurationPath(t.TempDir()), Local: local, LocalID: "local",
+		OnStreamReset: func(space string) {
+			if space != "local" {
+				t.Errorf("reset for wrong Space: %s", space)
+			}
+			events <- "reset"
+		},
+		OnChange: func(space string, _ json.RawMessage) { events <- "change" }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	for _, expected := range []string{"reset", "change", "reset", "change"} {
+		select {
+		case got := <-events:
+			if got != expected {
+				t.Fatalf("got %s, wanted %s", got, expected)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("missing reconnect baseline")
+		}
+	}
+	select {
+	case got := <-events:
+		t.Fatalf("duplicate frame produced %s", got)
+	default:
+	}
+}

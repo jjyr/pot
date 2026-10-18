@@ -30,7 +30,7 @@ points; `internal/` contains product implementation. All packages share one root
 | `pkg/runtime` | Public complete-host facade, lifecycle and authenticated operator handler |
 | `internal/runtime` | Product composition, root ownership and component lifecycle behind the facade |
 | `internal/transport`, `internal/spaces` | Private/native API adapters and owner-scoped local/remote client aggregation |
-| `internal/webui`, `internal/access`, `internal/tailnet`, `internal/browserpush` | Independent browser service, authentication, access operator and embedded Tailscale |
+| `internal/webui`, `internal/access`, `internal/tailnet` | Independent browser service, authentication, access operator and embedded Tailscale |
 | `internal/desktop`, `cmd/pot-app` | Wails v3 windows, tray, native dialogs and shared frontend bridge |
 | `web/` | Shared HTML/CSS/JS frontend, DOM state, themes, localization and host adapters |
 | `pkg/eval`, `cmd/pot-eval`, `eval/` | Independent deterministic and explicitly selected bounded live evaluation |

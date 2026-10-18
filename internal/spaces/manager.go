@@ -58,7 +58,10 @@ type Options struct {
 	LocalID, LocalName             string
 	RefreshInterval, RelayInterval time.Duration
 	OnChange                       func(space string, topics json.RawMessage)
-	OnRelayError                   func(error)
+	// OnStreamReset runs before the first changed frame on each connection.
+	// Consumers must baseline projections rather than notify reconnect history.
+	OnStreamReset func(space string)
+	OnRelayError  func(error)
 }
 type entry struct {
 	space      Space
@@ -506,6 +509,9 @@ func (m *Manager) startWatch(value *entry) {
 			err := value.caller.Stream(value.ctx, "/api/v1/changes", func(event Event) error {
 				if !m.current(value) {
 					return ErrScopeChanged
+				}
+				if versions == nil && m.options.OnStreamReset != nil {
+					m.options.OnStreamReset(value.space.ID)
 				}
 				changed, next, hasChanges := changedEvent(event, versions)
 				versions = next

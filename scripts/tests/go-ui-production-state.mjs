@@ -65,7 +65,9 @@ globalThis.EventSource=class {
 };
 const changeEvents=[],stopChanges=client.changes((topics,source)=>changeEvents.push({topics,source}),{space:'local'});
 sources.at(-1).handlers.get('changed')({data:JSON.stringify({topics:{usage:1}}),lastEventId:'boot:1'});
-assert.deepEqual(changeEvents,[{topics:['usage'],source:{space:'local',boot:'boot'}}],'Change callbacks retain their originating Space and boot');stopChanges();
+assert.deepEqual(changeEvents,[{topics:['usage'],source:{space:'local',boot:'boot'}}],'Change callbacks retain their originating Space and boot');
+sources.at(-1).onerror();sources.at(-1).onopen();
+assert.deepEqual(changeEvents.slice(-2),[{topics:[],source:{space:'local',reset:true}},{topics:[],source:{space:'local',reset:true}}],'Disconnect and reconnect explicitly reset notification baselines');stopChanges();
 const statuses=[];
 const stopStream=client.subscribe(()=>{throw Error('Rendering failed');},(...value)=>statuses.push(value));
 const source=sources.at(-1),receive=source.handlers.get('snapshot');

@@ -11,6 +11,7 @@ import (
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
+	"sync"
 )
 
 var ErrResultPending = errors.New("original target result transport unavailable")
@@ -34,11 +35,14 @@ type Options struct {
 	ValidateTarget   func(context.Context, core.ExecutionTarget, protocol.TaskRequirements) error
 	MaxTasks         int
 	PublishHook      hooks.Publish
+	OutcomesChanged  func()
 }
 type Service struct {
-	db      *sql.DB
-	options Options
-	changes core.Changes
+	db            *sql.DB
+	options       Options
+	changes       core.Changes
+	outcomeMu     sync.Mutex
+	outcomeCursor uint64
 }
 type Input struct {
 	RequestID string `json:"request_id"`
