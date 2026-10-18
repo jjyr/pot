@@ -109,6 +109,36 @@ screenshots under [PR image conventions](pr-images/README.md).
 `hk.pkl` owns pre-commit and pre-push checks. Run commands through `mise`; do not
 bypass failed hooks. CI separates portable product and macOS packaging checks.
 
+## CI and manual PR checks
+
+CI runs automatically on every tag push, including tags outside the release
+version pattern. Branch pushes (including `main`), PR events and GitHub Release
+events do not start CI. The separate Release workflow still publishes only for
+`v*.*.*` tag pushes or its explicit manual release input; it does not wait for CI.
+
+To run CI manually, open **Actions → CI → Run workflow** and choose a trusted
+branch or tag containing the workflow. Leave `pr` blank to check that selected
+ref, or enter a PR number from this repository to check its latest head commit,
+including a fork PR. For example:
+
+```sh
+gh workflow run ci.yml --ref main -f pr=123
+```
+
+The workflow resolves the PR head once at the start and pins both Linux and macOS
+jobs to that SHA in the base repository, rather than the PR merge commit. Invalid
+or inaccessible PR numbers fail before product jobs start. A later push to the PR
+requires another manual run. Runs for different PR numbers do not cancel each
+other; a new run for the same workflow ref and PR cancels the previous run.
+
+Manual PR checks execute the PR's build scripts and tool configuration on GitHub
+hosted runners. Review that code before starting the run and select a trusted
+workflow ref. Only the source-resolution job is granted pull-request read
+permission. Product jobs have read-only repository access, do not persist checkout
+credentials, skip shared mise and Go caches, and receive no release secrets. They
+use the selected workflow's check steps with the PR's source tree; changes to the
+PR's workflow are not run.
+
 ## Source layout
 
 | Directory | Responsibility |
