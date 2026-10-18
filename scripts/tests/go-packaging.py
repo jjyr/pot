@@ -62,7 +62,16 @@ class GoPackaging(unittest.TestCase):
                     self.assertEqual(tools["execution"], "runtime")
                     self.assertEqual(
                         sorted(p.name for p in package.iterdir()),
-                        sorted(["plugin.json", *tools["files"]]),
+                        sorted(
+                            {
+                                "plugin.json",
+                                *(
+                                    name
+                                    for capability in manifest["contributes"].values()
+                                    for name in capability["files"]
+                                ),
+                            }
+                        ),
                     )
 
     def test_node_distribution_preserves_relocatable_npm_links(self):

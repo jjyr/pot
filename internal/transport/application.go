@@ -86,6 +86,9 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	if s.Machines.Role() == "runner" && path != "/api/v1/runtime" && path != "/api/v1/control" {
 		return nil, protocol.APIError{Code: "runner_role", Message: "execution Runtime cannot own assistants or account configuration"}
 	}
+	if result, err, handled := a.pluginNotificationsCall(ctx, method, path, r); handled {
+		return result, err
+	}
 	if result, err, handled := a.integrationCall(ctx, method, path, r); handled {
 		return result, err
 	}

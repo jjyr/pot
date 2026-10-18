@@ -1,3 +1,4 @@
+import {createResourceReads} from '../state/resource-cache.mjs';
 import {createTopicVersions} from '../state/changes.mjs';
 // Shared product transport. Every operation captures its Space/owner before IO.
 export class APIError extends Error {
@@ -34,7 +35,8 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
   const context = {owner: '', space: ''};
   async function request(path, options = {}) {
     const {method = 'GET', body, signal} = options;
-    const fullPath = scopedPath(path, {...context, ...options});
+    const capturedScope={...context,...options};
+    const fullPath = scopedPath(path, capturedScope);
     if (signal?.aborted) throw signal.reason;
     if (desktop) {
       const pending = invoke('Call', method, fullPath, body === undefined ? '' : JSON.stringify(body));
@@ -43,7 +45,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
       try {
         const raw = await pending;
         if (signal?.aborted) throw signal.reason;
-        return decodeDesktopResponse(raw);
+        const value=decodeDesktopResponse(raw);if(method!=='GET')client.resources?.invalidate([],capturedScope);return value;
       } finally { signal?.removeEventListener('abort', abort); }
     }
     const response = await fetch(`${base}${fullPath}`, {method, signal, credentials: 'same-origin',
@@ -51,6 +53,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
       body: body === undefined ? undefined : JSON.stringify(body)});
     const value = response.status === 204 ? null : await response.json().catch(() => null);
     if (!response.ok) throw new APIError(response.status, value);
+    if(method!=='GET')client.resources?.invalidate([],capturedScope);
     return value;
   }
   const runtime = await request('/api/v1/runtime', {owner: '', space: ''});
@@ -170,5 +173,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
       return () => source.close();
     },
   };
+  client.resources=createResourceReads(client);
+  client.read=(path,options)=>client.resources.read(path,options);
   return client;
 }

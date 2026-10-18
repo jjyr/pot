@@ -232,7 +232,7 @@ func (s *Service) taskLoop() {
 		if err := s.Schedules.Tick(s.ctx, storage.Now()); err != nil && s.ctx.Err() == nil {
 			s.Changes.Notify("schedules")
 		}
-		s.deliverTaskNotices(s.ctx)
+		s.deliverNotificationsForOwners(s.ctx)
 		s.deliverAssistantMail(s.ctx)
 		at, err := s.Schedules.NextWake(s.ctx)
 		var timer *time.Timer
@@ -259,22 +259,13 @@ func (s *Service) taskLoop() {
 		}
 	}
 }
-func (s *Service) deliverTaskNotices(ctx context.Context) {
+func (s *Service) deliverNotificationsForOwners(ctx context.Context) {
 	definitions, err := s.Registry.Definitions(ctx)
 	if err != nil {
 		return
 	}
 	for _, definition := range definitions {
-		c, err := s.Conversation(ctx, definition.ID)
-		if err != nil {
-			continue
-		}
-		s.watchTaskOwner(definition.ID, c)
-		ready, err := s.taskReady(ctx, definition.ID)
-		if err != nil || !ready {
-			continue
-		}
-		s.deliverTaskResults(ctx, definition.ID)
+		s.deliverNotifications(ctx, definition.ID)
 	}
 }
 
