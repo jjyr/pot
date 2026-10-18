@@ -25,7 +25,7 @@ assert(viewingNotification({focused:true,route:'tasks',space:'space-a',owner:'al
 for(const view of [{focused:false,route:'chat',space:'space-a',owner:'alpha'},{focused:true,route:'settings',space:'space-a',owner:'alpha'},
  {focused:true,route:'chat',space:'space-b',owner:'alpha'},{focused:true,route:'chat',space:'space-a',owner:'beta'},
  {focused:true,route:'tasks',space:'space-a',owner:'alpha',task:'other'}])assert(!viewingNotification(view,event));
-for(const permission of ['default','granted','denied'])assert.equal(browserNotificationPermission({isSecureContext:true,Notification:{permission}}),permission);
+for(const permission of ['default','granted','denied'])assert.equal(browserNotificationPermission({isSecureContext:true,Notification:Object.assign(function(){},{permission,requestPermission(){}})}),permission);
 assert.equal(browserNotificationPermission({isSecureContext:true}),'unsupported');
 assert.equal(browserNotificationPermission({isSecureContext:false,Notification:{permission:'granted'}}),'insecure');
 
@@ -107,7 +107,7 @@ assert.equal(taskOutcomeNotifications(owner,[task('cancelled')]).length,0);
 function isolatedClient(){
  const alerts=[],calls=[],heads=new Map([['alpha',1000],['beta',2000]]),changes=new Map(),pending=new Map();
  let rejectAlpha=false,stallAlpha=null;
- class Alert {static permission='granted';constructor(title,options){alerts.push({title,...options});}}
+ class Alert {static permission='granted';static requestPermission(){};constructor(title,options){alerts.push({title,...options});}}
  const testHost=new EventTarget(),document=new EventTarget();document.visibilityState='hidden';document.hasFocus=()=>false;
  Object.assign(testHost,{document,Notification:Alert,isSecureContext:true,localStorage:{getItem:()=>null},setTimeout});
  const testClient={desktop:false,spaces:[{id:'space-a',boot_id:'boot',connected:true}],assistants:[{...owner},{...owner,id:'beta',name:'Beta'}],
@@ -246,3 +246,59 @@ for(const state of ['default','denied','unsupported','insecure']){
  assert.equal(shown.length,before,`${state} does not deliver`);assert.equal(requests,prompts,`${state} does not prompt`);coordinator.dispose();
 }
 console.log('System notification state, coordinator, preference, focus, routing and multi-tab checks passed');
+
+// First-run discovery is independent of event observation and permission. The
+// fake atomic claim is shared across clients/Controls, like the durable IDB key.
+{
+const {claimNotificationOnboarding}=await import('../../web/src/adapters/notification-onboarding.mjs');
+assert.equal(await claimNotificationOnboarding({}),false,'blocked persistence skips discovery safely');
+const tick=()=>new Promise(resolve=>setImmediate(resolve));
+function onboardingFixture({permission='default',enabled=true,secure=true,ua='',desktop=false,surface='main',claim,storageError=false}={}){
+ let prompts=0,nativeReady=0,finish,failRequest,permissionValue=permission;
+ class Permission {static get permission(){return permissionValue;} static requestPermission(){prompts++;return new Promise((resolve,reject)=>{finish=value=>{permissionValue=value;resolve(value);};failRequest=reject;});} constructor(){throw Error('discovery must never send notifications');}}
+ const h=new EventTarget(),document=new EventTarget();document.visibilityState='visible';document.hasFocus=()=>true;
+ Object.assign(h,{document,isSecureContext:secure,Notification:Permission,navigator:{userAgent:ua},localStorage:{getItem:()=>{if(storageError)throw Error('storage blocked');return String(enabled);}},setTimeout});
+ const c={desktop,assistants:[],spaces:[],notificationStatus:async()=>({enabled,permission}),notificationReady:async surface=>{assert.equal(surface,'main');nativeReady++;},notificationView:async()=>{}};
+ const manager=createSystemNotifications({client:c,surface,view:()=>({}),open:()=>{},locale:()=> 'en',host:h,onboardingClaim:claim|| (async()=>true)});
+ return {manager,client:c,host:h,get prompts(){return prompts;},get nativeReady(){return nativeReady;},finish:value=>finish(value),fail:()=>failRequest(Error('browser failed'))};
+}
+let claimed=false,claimCount=0;
+const once=async()=>{claimCount++;if(claimed)return false;claimed=true;return true;};
+const first=onboardingFixture({claim:once}),second=onboardingFixture({claim:once});
+assert.equal(first.manager.state.onboarding,false);assert.equal(first.prompts,0,'loading cannot prompt');
+first.manager.ready();second.manager.ready();await tick();
+assert.equal(Number(first.manager.state.onboarding)+Number(second.manager.state.onboarding),1,'one tab claims discovery');
+first.manager.dismissOnboarding();assert.equal(first.manager.state.enabled,true);assert.equal(first.manager.state.permission,'default');
+await first.manager.directory();await first.manager.refresh({reset:true});first.manager.ready();first.host.dispatchEvent(new Event('focus'));await tick();
+assert.equal(first.manager.state.onboarding,false,'navigation/reconnect/focus cannot redisplay');
+const reloaded=onboardingFixture({claim:once});reloaded.manager.ready();await tick();assert.equal(reloaded.manager.state.onboarding,false,'refresh/new Control shares the permanent claim');
+for(const item of [first,second,reloaded])item.manager.dispose();
+assert.equal(claimCount,3);
+for(const options of [{permission:'granted'},{permission:'denied'},{enabled:false},{secure:false},{ua:'iPhone'},{ua:'Android Mobile'}]){
+ const f=onboardingFixture({...options,claim:async()=>{throw Error('ineligible client claimed onboarding');}});f.manager.ready();await tick();assert(!f.manager.state.onboarding);assert.equal(f.prompts,0);f.manager.dispose();
+}
+for(const result of ['granted','denied','default','error']){
+ const f=onboardingFixture();f.manager.ready();await tick();assert(f.manager.state.onboarding);
+ const pending=f.manager.authorize();assert.equal(f.prompts,1,'request invoked before authorize returns / any await');
+ assert.equal(f.manager.authorize(),pending,'double click joins pending request');assert(f.manager.state.authorizing);
+ assert(!f.manager.state.onboarding);
+ if(result==='error'){f.fail();await assert.rejects(pending,/browser failed/);assert(f.manager.state.error);}
+ else{f.finish(result);await pending;assert.equal(f.manager.state.permission,result);}
+ f.host.dispatchEvent(new Event('focus'));f.manager.ready();await tick();assert(!f.manager.state.onboarding);assert(!f.manager.state.authorizing);
+ if(result==='default'||result==='error'){const manual=f.manager.authorize();assert.equal(f.prompts,2,'manual settings retry remains available');f.finish('granted');await manual;}
+ f.manager.dispose();
+}
+const restricted=onboardingFixture({storageError:true});restricted.manager.ready();await tick();assert(restricted.manager.state.onboarding,'localStorage restrictions do not block an IDB claim');restricted.manager.dispose();
+const noStorage=onboardingFixture({claim:async()=>{throw Error('IDB denied');}});noStorage.manager.ready();await tick();assert(!noStorage.manager.state.onboarding);noStorage.manager.dispose();
+const nativeDiscovery=onboardingFixture({desktop:true});await tick();assert.equal(nativeDiscovery.nativeReady,0);nativeDiscovery.manager.ready();nativeDiscovery.manager.ready();await tick();assert.equal(nativeDiscovery.nativeReady,1);assert(!nativeDiscovery.manager.state.onboarding);nativeDiscovery.manager.dispose();
+const trayDiscovery=onboardingFixture({desktop:true,surface:'tray'});trayDiscovery.manager.ready();await tick();assert.equal(trayDiscovery.nativeReady,0,'tray mount never starts native authorization');trayDiscovery.manager.dispose();
+const deferred=onboardingFixture({desktop:true});let readinessCalls=0;
+deferred.client.notificationReady=async()=>({deferred:++readinessCalls===1});deferred.manager.ready();await tick();assert.equal(readinessCalls,1,'hidden native window does not spin');deferred.host.dispatchEvent(new Event('focus'));await tick();assert.equal(readinessCalls,2);deferred.host.dispatchEvent(new Event('focus'));await tick();assert.equal(readinessCalls,2);deferred.manager.dispose();
+let releaseDiscovery;const late=onboardingFixture({claim:()=>new Promise(resolve=>{releaseDiscovery=resolve;})});late.manager.ready();const pendingManual=late.manager.authorize();releaseDiscovery(true);await tick();assert(!late.manager.state.onboarding,'manual request racing a pending claim cannot show the card');late.finish('default');await pendingManual;late.manager.dispose();
+const offDuringClaim=onboardingFixture();offDuringClaim.host.localStorage.setItem=()=>{};offDuringClaim.manager.ready();await tick();assert(offDuringClaim.manager.state.onboarding);await offDuringClaim.manager.setEnabled(false);assert(!offDuringClaim.manager.state.onboarding);await offDuringClaim.manager.authorize();assert.equal(offDuringClaim.prompts,0,'off preference prevents stale controls from authorizing');offDuringClaim.manager.dispose();
+assert.equal(browserNotificationPermission({isSecureContext:true,navigator:{userAgent:'iPhone'}}),'ios','iOS explanation remains specific when Notification is absent');
+assert.equal(browserNotificationPermission({isSecureContext:true,Notification:function(){}}),'unsupported','object presence alone is insufficient');
+assert.equal(browserNotificationPermission({isSecureContext:true,Notification:Object.assign(function(){},{requestPermission(){}}),navigator:{platform:'MacIntel',maxTouchPoints:5}}),'ios','iPad desktop UA still requires mobile delivery');
+console.log('First-run notification eligibility, dismissal, gesture, pending/error, persistence fallback and native readiness checks passed');
+
+}
