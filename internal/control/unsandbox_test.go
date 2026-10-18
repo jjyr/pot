@@ -4,7 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/executor"
@@ -85,6 +92,110 @@ func TestUnsandboxRequestSelectsPermissionRatherThanExecutionMode(t *testing.T) 
 	if engine.calls[2].Mode != "host" {
 		t.Fatal("false incorrectly forced sandbox despite permanent grant")
 	}
+}
+
+func TestRealUnixSocketRequiresHostApproval(t *testing.T) {
+	if os.Getenv("POT_SANDBOX_INTEGRATION") != "1" {
+		t.Skip("set POT_SANDBOX_INTEGRATION=1 for real OS sandbox qualification")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sdk := os.Getenv("POT_SANDBOX_SDK")
+	if sdk == "" {
+		sdk, err = filepath.Abs("../../sandbox")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	workspace, err := os.MkdirTemp("/tmp", "pot-socket-approval-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(workspace)
+	workspace, err = filepath.EvalSymlinks(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(workspace, "agent.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	d, execution, _ := localDispatcher(t)
+	execution.Workspace = workspace
+	if err := d.Permissions.Configure("local", MachinePolicy{ExecutionAccess: "ask"}); err != nil {
+		t.Fatal(err)
+	}
+	worker, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := executor.New(executor.Options{Home: workspace, Node: node, SandboxDirectory: sdk, ProcessWorker: []string{worker}})
+	defer func() {
+		if err := engine.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	d.Host = engine
+	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
+	address, _ := json.Marshal(socket)
+	script := `const s=require('node:net').connect(` + string(address) + `);s.once('connect',()=>{console.log('connected');s.destroy()});s.once('error',e=>{console.error(e.code);process.exitCode=23})`
+	command := quote(node) + " -e " + quote(script)
+	dispatch := func(id, text, decision string) (map[string]any, error) {
+		t.Helper()
+		args := map[string]any{"cmd": text, "login": false, "yield_time_ms": 1000}
+		if decision != "" {
+			args["request_unsandboxed"] = true
+			args["justification"] = "Connect to the synthetic host agent socket"
+		}
+		encoded, _ := json.Marshal(args)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		approvals := 0
+		raw, err := d.Dispatch(ctx, execution, modelprotocol.ToolCall{ID: id, Name: "exec_command", Arguments: encoded}, func(update core.Update) error {
+			if update.Phase != "waiting_approval" {
+				return nil
+			}
+			approvals++
+			pending := d.Permissions.Pending(d.Owner)
+			if decision == "" || len(pending) != 1 {
+				t.Fatal("unexpected approval", pending)
+			}
+			return d.Permissions.Decide(d.Owner, pending[0].ID, decision)
+		})
+		if (decision == "" && approvals != 0) || (decision != "" && approvals != 1) {
+			t.Fatal("missing or unexpected approval", id, approvals)
+		}
+		var result map[string]any
+		if err == nil {
+			if err := json.Unmarshal(raw, &result); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return result, err
+	}
+	checkSandbox := func(id, text string) {
+		t.Helper()
+		result, err := dispatch(id, text, "")
+		if err != nil || result["execution_mode"] != "sandbox" || result["exit_code"] != float64(23) || (!strings.Contains(fmt.Sprint(result["stderr"]), "EPERM") && !strings.Contains(fmt.Sprint(result["stderr"]), "EACCES")) {
+			t.Fatal("socket access did not stay sandboxed and denied", result, err)
+		}
+	}
+	checkSandbox("default", command)
+	if _, err := dispatch("denied", command, "deny"); !errors.Is(err, ErrHostDenied) {
+		t.Fatal("owner denial ignored", err)
+	}
+	checkSandbox("after-denial", command)
+	result, err := dispatch("approved", command, "allow_task")
+	if err != nil || result["execution_mode"] != "host" || result["exit_code"] != float64(0) || result["stdout"] != "connected\n" {
+		t.Fatal("approved host access failed", result, err)
+	}
+	checkSandbox("different-command", " "+command)
+	d.Turn = "next-turn"
+	checkSandbox("next-turn", command)
 }
 
 func TestPreparedExecutionFailureIsVisibleToModel(t *testing.T) {

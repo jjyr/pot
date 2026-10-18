@@ -28,7 +28,14 @@ try {
       allowWrite: request.write.map(literal),
       denyWrite: ['/tmp/claude', '/private/tmp/claude', ...request.denyWrite].map(literal),
     },
-    network: { unrestricted: true, allowedDomains: [], deniedDomains: [], allowAllUnixSockets: false },
+    network: {
+      unrestricted: true, allowedDomains: [], deniedDomains: [], allowAllUnixSockets: false,
+      // Native DNS configuration and Go's system certificate verification.
+      ...(process.platform === 'darwin' ? { allowMachLookup: [
+        'com.apple.SystemConfiguration.DNSConfiguration',
+        'com.apple.trustd.agent',
+      ] } : {}),
+    },
     allowPty: request.tty === true,
   });
   await SandboxManager.initialize(config, undefined, false);

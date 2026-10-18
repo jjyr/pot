@@ -28,9 +28,29 @@ roots and the immutable plugin bundle are readable; unrelated user directories
 and Runtime state are excluded. The launcher itself must not be inside a workload
 write root. It generates a private home, temp and cache directory for each launch.
 Do not interpret a writable workspace as data-loss protection.
+System read roots are selected by the execution OS before checking path existence.
+macOS installation roots and Linux-specific CA, font and browser configuration
+paths are not granted on the other platform. Unsupported platforms fail closed.
+The execution environment preserves a nonempty host `PATH`. Otherwise it uses
+standard executable directories for the execution OS; `/opt/homebrew/bin` is
+included only on macOS.
 
 IP networking is unrestricted; no SRT proxy variables are injected. Unix IPC is
 restricted independently; necessary macOS DNS support is narrowly allowed.
+The macOS DNS configuration and certificate trust services are explicitly allowed
+for native resolvers and TLS verification.
+macOS system path aliases and DNS, timezone and shell-selection symlinks are
+readable as links; their targets still require explicit read access. This lets
+tools reach the allowed DNS configuration and CA bundle through `/etc` without
+exposing other system files.
+Linux preserves allowed system-file symlink names alongside their resolved DNS
+and CA files. Links recreated beneath hidden directories do not expose their
+targets; each target must be independently readable.
+Only public CA bundle files and the certificate directory are readable beneath
+`/etc/ssl`; the entire TLS configuration/private-key tree is not granted.
+Docker and SSH-agent Unix sockets remain inaccessible, including sockets inside
+readable workspaces and Linux abstract sockets. Access requires an authorized host
+command; ambient `DOCKER_HOST` and `SSH_AUTH_SOCK` are not inherited.
 Runtime/model authority is not inherited through ambient environment variables.
 Service credentials are explicitly injected after authorization. Reserved startup,
 loader and Runtime environment names cannot be used as credential destinations.

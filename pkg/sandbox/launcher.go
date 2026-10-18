@@ -46,6 +46,10 @@ func (l Launcher) Prepare(ctx context.Context, command *exec.Cmd, workspace stri
 	if l.Directory == "" || l.Node == "" {
 		return nil, errors.New("sandbox unavailable: packaged SRT and Node are required; request host execution explicitly")
 	}
+	readRoots, err := systemReadPaths(runtime.GOOS)
+	if err != nil {
+		return nil, err
+	}
 	workspace, err = filepath.EvalSymlinks(workspace)
 	if err != nil {
 		return nil, err
@@ -115,9 +119,14 @@ func (l Launcher) Prepare(ctx context.Context, command *exec.Cmd, workspace stri
 	request := launch{CWD: cwd, Argv: command.Args, Read: append([]string{workspace, private}, read...), Write: append([]string{workspace, private}, write...), TTY: tty}
 	// System installation roots are read-only. Never expose the user's home,
 	// sibling temporary directories, Control database, or ambient credentials.
-	for _, root := range []string{"/System", "/Library/Apple", "/Library/Fonts", "/Applications", "/usr", "/bin", "/sbin", "/dev", "/opt", "/etc/ssl", "/etc/hosts", "/etc/resolv.conf", "/etc/services", "/etc/localtime", "/etc/fonts", "/etc/chromium", "/etc/chromium.d", "/var/cache/fontconfig"} {
+	for _, root := range readRoots {
 		if canonical, e := filepath.EvalSymlinks(root); e == nil {
-			request.Read = append(request.Read, canonical)
+			// Preserve the system-facing name as well as its target. Linux
+			// read-deny mounts otherwise hide aliases such as /etc/resolv.conf.
+			request.Read = append(request.Read, root)
+			if canonical != root {
+				request.Read = append(request.Read, canonical)
+			}
 		}
 	}
 	for _, tool := range []string{"go", "node", "npm", "python3", "git", "gh", "rg"} {
@@ -254,7 +263,7 @@ func (l Launcher) Prepare(ctx context.Context, command *exec.Cmd, workspace stri
 
 // Environment excludes ambient application secrets and startup-code variables.
 func Environment() []string {
-	values := map[string]string{"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "C.UTF-8"}
+	values := map[string]string{"PATH": defaultExecutablePath(runtime.GOOS), "LANG": "C.UTF-8"}
 	for _, key := range []string{"PATH", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR"} {
 		if value := os.Getenv(key); value != "" {
 			values[key] = value
@@ -262,6 +271,15 @@ func Environment() []string {
 	}
 	return ReplaceEnvironment(nil, values)
 }
+
+func defaultExecutablePath(goos string) string {
+	path := "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+	if goos == "darwin" {
+		return "/opt/homebrew/bin:" + path
+	}
+	return path
+}
+
 func ReplaceEnvironment(base []string, values map[string]string) []string {
 	result := make([]string, 0, len(base)+len(values))
 	for _, item := range base {
