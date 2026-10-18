@@ -157,6 +157,7 @@ func New(config Config) (*Client, error) {
 		node = "node"
 	}
 	cmd := exec.Command(node, "--input-type=module", "-e", hostSource, filepath.Join(directory, config.Entrypoint))
+	cmd.Dir = config.Workspace
 	cmd.Env = hostEnvironment(directory)
 	if config.Workspace != "" {
 		cmd.Env = append(cmd.Env, "POT_EXECUTION_WORKSPACE="+config.Workspace)

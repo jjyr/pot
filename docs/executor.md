@@ -66,6 +66,9 @@ on the original command; output polling, interrupt and termination remain usable
 Go worker under the same OS policy, so direct Go file writes do not bypass it.
 Persistent plugin sessions pin bundle, observation mode, execution mode, revision
 and environment. Policy changes invalidate them rather than upgrading JS memory.
+Plugin processes start in their configured execution workspace in both host and
+sandbox modes. When a standalone plugin host has no configured workspace, it
+inherits the caller's working directory.
 
 ## SDK adapter and packaging
 

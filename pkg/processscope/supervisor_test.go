@@ -1,6 +1,7 @@
 package processscope
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"os/exec"
@@ -18,6 +19,65 @@ func TestMain(m *testing.M) {
 	}
 	os.Exit(m.Run())
 }
+
+func TestWorkingDirectory(t *testing.T) {
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	inherited, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, directory, expected string
+		invalid                   bool
+	}{
+		{name: "inherited", expected: inherited},
+		{name: "explicit", directory: directory, expected: directory},
+		{name: "missing", directory: filepath.Join(directory, "missing"), invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			command := exec.Command("/bin/pwd")
+			command.Dir = tc.directory
+			command.Env = os.Environ()
+			var output bytes.Buffer
+			command.Stdout = &output
+			scope, err := Prepare(command, []string{binary}, Markers{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = command.Start(); err != nil {
+				scope.Abort()
+				if tc.invalid && errors.Is(err, os.ErrNotExist) {
+					return
+				}
+				t.Fatal(err)
+			}
+			if err = scope.Started(); err != nil {
+				t.Fatal(err)
+			}
+			waitErr := command.Wait()
+			if err = scope.Finish(); err != nil {
+				t.Fatal(err)
+			}
+			if tc.invalid {
+				t.Fatal("missing working directory was accepted")
+			}
+			if waitErr != nil {
+				t.Fatal(waitErr)
+			}
+			if got := strings.TrimSpace(output.String()); got != tc.expected {
+				t.Fatalf("working directory = %q, want %q", got, tc.expected)
+			}
+		})
+	}
+}
+
 func TestDetachedDescendantIsStoppedBeforeReceipt(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {

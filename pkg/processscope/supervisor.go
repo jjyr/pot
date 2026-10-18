@@ -127,7 +127,10 @@ func HandleWorker() bool {
 			os.Exit(125)
 		}
 		input.Close()
-		if len(spec.Argv) == 0 || os.Chdir(spec.Directory) != nil {
+		if len(spec.Argv) == 0 {
+			os.Exit(125)
+		}
+		if spec.Directory != "" && os.Chdir(spec.Directory) != nil {
 			os.Exit(125)
 		}
 		if unix.Exec(spec.Argv[0], spec.Argv, spec.Env) != nil {
