@@ -313,6 +313,21 @@ requests without a transcript row retain a standalone approval card. A failed
 approval submission keeps its diagnostic and controls available. Long-lived machine
 policy remains in Machines.
 
+Consecutive root script executions in the same turn share one collapsed execution
+history in Chat and Task details. Its stable summary shows the latest active
+operation or completed outcome, alongside status and wall time, and
+omits execution counts and source code. Prose, guidance, other root operations and
+turn boundaries split groups. Empty model-round placeholders do not split them.
+Each `wait` receipt joins its originating `exec` by turn and `exec_id`, even across
+a prose boundary, and its incremental output appears on that execution. Unknown
+waits remain independent. Original calls and receipts stay in raw details.
+A yielded script stays active until its final receipt; an unresolved receipt after
+the turn ends is unconfirmed. Group duration spans its earliest execution through
+its latest finish rather than summing parallel durations. Failures remain visible
+in the group summary while later executions continue; selecting the diagnostic
+reveals the affected operation. Expanded history and output reading positions
+survive updates, and pending Task approvals open their group ancestors.
+
 Live output has bounded height and follows only while its reader stays near the
 bottom; Jump to latest resumes following. Expanding, copying, changing locale,
 completion and streamed updates preserve disclosure and reading position. Narrow
