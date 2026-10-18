@@ -266,13 +266,34 @@ func TestSummaryCompactionToolDedupAndCategories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.Buckets) != 53 || len(s.AgentModels) != 20 || s.AgentModelNextOffset == nil || len(s.Requests) != 20 || s.NextOffset == nil || s.Lifetime.Requests != 22 || s.RoutingTotal.Requests != 1 || len(s.Tools) != 1 || s.Tools[0].Calls != 1 || s.Tools[0].DurationMS != 50 || s.CompactionTotal.Requests != 1 || s.CompactionCount != 1 || s.Compactions[0].State != "complete" {
+	if len(s.Buckets) != 53 || s.Lifetime.Requests != 22 || s.RoutingTotal.Requests != 1 {
 		t.Fatalf("summary mismatch: %+v", s)
 	}
-	page, err := l.Summary(ctx, Query{Scope: "main", Offset: 20}, at+200)
-	if err != nil || len(page.AgentModels) != 2 || page.AgentModelNextOffset != nil || page.Lifetime != s.Lifetime {
-		t.Fatal(page, err)
+	models, err := l.Page(ctx, "models", Query{Scope: "main"}, at+200)
+	if err != nil || len(models.Items.([]AgentModel)) != 20 || models.NextOffset == nil {
+		t.Fatal(models, err)
 	}
+	next, err := l.Page(ctx, "models", Query{Scope: "main", Offset: 20}, at+200)
+	if err != nil || len(next.Items.([]AgentModel)) != 2 || next.NextOffset != nil {
+		t.Fatal(next, err)
+	}
+	tools, err := l.Page(ctx, "tools", Query{Scope: "main"}, at+200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := tools.Items.([]ToolTotal)
+	if len(tool) != 1 || tool[0].Calls != 1 || tool[0].DurationMS != 50 {
+		t.Fatal(tools)
+	}
+	compact, err := l.Page(ctx, "compactions", Query{Scope: "main"}, at+200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := compact.Items.([]CompactionRecord)
+	if len(records) != 1 || records[0].Requests != 1 || records[0].State != "complete" {
+		t.Fatal(compact)
+	}
+
 }
 func TestLifetimeRequestFilesRaceAndNeverReset(t *testing.T) {
 	directory := t.TempDir()

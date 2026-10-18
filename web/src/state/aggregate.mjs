@@ -8,17 +8,10 @@ export function combineTasks(pages,{offset=0,limit=20}={}) {
   return {items:items.slice(offset,offset+limit),total:items.length,next_offset:offset+limit<items.length?offset+limit:null,counts};
 }
 function sumRows(rows,keys) {const result={};for(const key of keys)result[key]=rows.reduce((sum,row)=>sum+Number(row?.[key]||0),0);return result;}
+// Only whole-summary values are combined across Spaces. Paginated categories
+// stay per Space so a partial page cannot masquerade as a complete global total.
 export function combineUsage(pages) {
-  const numeric=['input','output','cache','requests','unknown'];
-  const result={total:sumRows(pages.map(page=>page.value.total),numeric),routing_total:sumRows(pages.map(page=>page.value.routing_total),numeric),agent_models:[],buckets:[],requests:[],tools:[],compactions:[],spaces:pages};
-  const buckets=new Map(),tools=new Map(),models=new Map();
-  for(const {value,space,stale,owner=''}of pages) {
-    for(const item of value.agent_models||[]){const key=JSON.stringify([item.agent,item.model]),old=models.get(key);models.set(key,{...item,...sumRows([old,item],numeric),_stale:stale||old?._stale||false});}
-    for(const bucket of value.buckets||[]){const old=buckets.get(bucket.label);buckets.set(bucket.label,{...bucket,...sumRows([old,bucket],numeric)});}
-    for(const tool of value.tools||[]){const old=tools.get(tool.name);tools.set(tool.name,{...tool,...sumRows([old,tool],['calls','failed','bytes','duration_ms','unfinished'])});}
-    result.requests.push(...(value.requests||[]).map(item=>({...item,_assistant_id:item.assistant_id||owner,_space_id:space.id,_space_name:space.name,_stale:stale})));
-    result.compactions.push(...(value.compactions||[]).map(item=>({...item,_assistant_id:item.assistant_id||owner,_space_id:space.id,_space_name:space.name,_stale:stale})));
-  }
-  result.agent_models=[...models.values()].sort((a,b)=>(b.input+b.output)-(a.input+a.output)||a.model.localeCompare(b.model));result.buckets=[...buckets.values()];result.tools=[...tools.values()];result.requests.sort((a,b)=>b.at-a.at);result.next_offset=null;
-  return result;
+  const numeric=['input','output','cache','requests','unknown'],buckets=new Map();
+  for(const {value}of pages)for(const bucket of value.buckets||[]){const old=buckets.get(bucket.label);buckets.set(bucket.label,{...bucket,...sumRows([old,bucket],numeric)});}
+  return {total:sumRows(pages.map(page=>page.value.total),numeric),routing_total:sumRows(pages.map(page=>page.value.routing_total),numeric),buckets:[...buckets.values()],bucket_days:pages[0]?.value.bucket_days,timezone:pages[0]?.value.timezone,spaces:pages};
 }

@@ -149,7 +149,7 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 			} else {
 				var input protocol.TaskInput
 				if err = decode(r.Body, &input); err == nil {
-					err = s.Tasks.Guide(ctx, owner, id, input.RequestID, input.Text)
+					err = s.Tasks.GuideFromUser(ctx, owner, id, input.RequestID, input.Text)
 				}
 				result = map[string]bool{"accepted": err == nil}
 			}

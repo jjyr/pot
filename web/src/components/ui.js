@@ -292,7 +292,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     const title = el('div', 'window-title');
     if (route === 'chat' && !(narrow && directoryOpen)) title.append(assistantAvatar(selectedAssistant,24));
-    title.append(el('span', '', route === 'chat' ? (narrow && directoryOpen ? t('assistants') : selectedAssistant?.name || 'Pot') : pages?.title || t(route)));
+    const titleText=route === 'chat' ? (narrow && directoryOpen ? t('assistants') : selectedAssistant?.name || 'Pot') : pages?.title || t(route);title.title=titleText;
+    title.append(el('span', '', titleText));
     titlebar.append(title);
     if (surface === 'tray' && client.openMain) {
       const open = button('open', t('openMain'));
@@ -301,12 +302,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     if (client.production && route === 'chat' && selectedAssistant) { const settings = button('settings', t('assistantSettings')); settings.onclick = () => {route = 'settings'; pages.assistant(selectedAssistant); renderShell();}; titlebar.append(settings); }
     if(!client.production){const cloud=el('span','icon-button');cloud.title=t('remote');cloud.append(icon('cloud'));titlebar.append(cloud);}
-    if (state.snapshot?.configuration) titlebar.append(el('span', 'title-meta', `${state.snapshot.configuration.name || ''} · ${state.snapshot.configuration.model || ''}`));
-    if (state.snapshot?.usage) {const value=state.snapshot.usage,format=new Intl.NumberFormat(locale,{notation:'compact',maximumFractionDigits:1}),usage=el('span','title-meta token-meta'),cached=locale==='zh-CN'?'缓存输入':'Cached input';usage.append(icon('clock'),el('span','',`${format.format(value.input+value.output)} tokens${value.cache==null?'':` · ${cached} ${format.format(value.cache)}`}`));usage.title=`${locale==='zh-CN'?'输入（含缓存）':'Input (includes cache)'}: ${value.input} · ${locale==='zh-CN'?'输出':'Output'}: ${value.output}${value.cache==null?'':` · ${cached}: ${value.cache}`}`;titlebar.append(usage);}
+    if (route==='chat'&&state.snapshot?.configuration) titlebar.append(el('span', 'title-meta', `${state.snapshot.configuration.name || ''} · ${state.snapshot.configuration.model || ''}`));
+    if (route==='chat'&&state.snapshot?.usage) {const value=state.snapshot.usage,format=new Intl.NumberFormat(locale,{notation:'compact',maximumFractionDigits:1}),usage=el('span','title-meta token-meta'),cached=locale==='zh-CN'?'缓存输入':'Cached input';usage.append(icon('clock'),el('span','',`${format.format(value.input+value.output)} tokens${value.cache==null?'':` · ${cached} ${format.format(value.cache)}`}`));usage.title=`${locale==='zh-CN'?'输入（含缓存）':'Input (includes cache)'}: ${value.input} · ${locale==='zh-CN'?'输出':'Output'}: ${value.output}${value.cache==null?'':` · ${cached}: ${value.cache}`}`;titlebar.append(usage);}
     const more = button(client.production?'more':'settings', t(client.production ? 'preferences' : 'more'));
     more.setAttribute('aria-haspopup', 'dialog');
     more.onclick = () => { preferencesOpen = true; renderPreferences(); preferences.showModal(); };
     if(!client.production||route==='chat')titlebar.append(more);
+    if(route==='tasks'&&pages?.taskOwner){const actions=button('more',locale==='zh-CN'?'任务操作':'Task actions');actions.setAttribute('aria-haspopup','dialog');actions.onclick=()=>pages.taskMenu();titlebar.append(actions);}
     if(!client.production&&titlebar.querySelector('.title-meta'))titlebar.insertBefore(more,titlebar.querySelector('.title-meta'));
     notice.textContent = client.production ? '' : t('notice');
     input.placeholder = t('composer');

@@ -105,11 +105,19 @@ instructions guide model behavior; Control still enforces every approval.
 
 ## Owner management and applying changes
 
-Settings -> Execution permissions groups machine defaults, permanent command
-rules and active task grants by machine. Machines links to this same editor.
+Machines groups authority by Space and machine. Each machine shows its default
+execution policy directly, with permanent command rules collapsed behind a count.
+Active task grants appear only when present; application failures remain visible.
+There is no separate execution-permissions tab in Settings.
 Owners can manually create/edit/delete rules, change machine policy, inspect and
-remove task grants, and retry a pending policy application. These edit current
-authority; deleting a rule is not deleting a history record.
+remove task grants, and retry a pending policy application. Default-policy edits
+require explicit Save or Cancel and explain the execution interruption before
+saving. Unsaved choices survive live refresh and appearance/language changes;
+navigation asks before discarding them. A newer policy revision disables stale
+saves until the owner cancels and reloads the current policy. Cached permissions
+are read-only when their owning Space or policy service is unavailable. An offline
+execution machine can still be configured through its connected Control. Owner
+edits change current authority; deleting a rule is not deleting a history record.
 
 Owner edits persist a new revision, invalidate pending/task grants and close the
 machine's old execution Engines. This conservatively stops existing work on that
