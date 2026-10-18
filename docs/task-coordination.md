@@ -24,8 +24,9 @@ model selection.
 
 `send_message({to: {control_id, kind: "task", agent_id}, text})` sends an input
 to an existing Task through its owning Control. Runtime records the sender from
-the authenticated execution. User inputs and owner-assistant guidance are
-processed at safe model boundaries, with pending user guidance first. Reference
+the authenticated execution and binds any processing parent automatically; the
+model supplies only the recipient and text. User inputs and owner-assistant
+guidance are processed at safe model boundaries, with pending user guidance first. Reference
 messages retain their source and grant no additional authority. Ended Tasks
 retain reference without restarting; further user-directed work needs a new Task.
 

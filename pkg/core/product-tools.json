@@ -135,7 +135,7 @@
   },
   {
     "name": "send_message",
-    "description": "Send a durable message to a Task or assistant. Runtime binds the real sender. Active Tasks receive owner guidance or peer reference at a model boundary; ended Tasks retain reference without restarting. Returns acceptance, never execution completion. Do not send task completion yourself: Runtime reports final results automatically.",
+    "description": "Send a durable message to a Task or assistant using its address and the message text. Runtime binds the real sender, message provenance and reply linkage automatically. Active Tasks receive owner guidance or peer reference at a model boundary; ended Tasks retain reference without restarting. Returns acceptance, never execution completion. Do not send task completion yourself: Runtime reports final results automatically.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -169,10 +169,6 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 65536
-        },
-        "reply_to": {
-          "type": "string",
-          "minLength": 1
         }
       },
       "required": [

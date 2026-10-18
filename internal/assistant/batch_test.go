@@ -164,7 +164,7 @@ func TestResultBatchAtomicClaimReleaseAndPerMemberAcknowledgment(t *testing.T) {
 	a := enqueueResult(t, m, "A", "main")
 	b := enqueueResult(t, m, "B", "main")
 	enqueueResult(t, m, "foreign", "other")
-	sendMail(t, m, "peer", address("local", "peer"), address("local", "main"), nil, nil)
+	sendMail(t, m, "peer", address("local", "peer"), address("local", "main"), nil)
 	if err := m.ClaimEventBatch(ctx, "main", []string{a.ID, "foreign"}); err == nil {
 		t.Fatal("cross-owner result joined batch")
 	}
@@ -206,9 +206,9 @@ func TestPeerBatchGroupsFullAddressAcrossWireConversations(t *testing.T) {
 	ctx := context.Background()
 	m, _ := mailbox(t, "local")
 	from, to := address("local", "peer"), address("local", "main")
-	a := sendMail(t, m, "a", from, to, nil, nil)
-	sendMail(t, m, "other", address("local", "another"), to, nil, nil)
-	b := sendMail(t, m, "b", from, to, nil, nil)
+	a := sendMail(t, m, "a", from, to, nil)
+	sendMail(t, m, "other", address("local", "another"), to, nil)
+	b := sendMail(t, m, "b", from, to, nil)
 	enqueueResult(t, m, "task", "main")
 	batch, err := m.ClaimMailBatch(ctx, a)
 	if err != nil || len(batch.Messages) != 2 || batch.Messages[1].ID != b.ID || a.ConversationID == b.ConversationID {
@@ -241,8 +241,8 @@ func TestPeerBatchWaitAndRestartRetainExactMembership(t *testing.T) {
 	ctx := context.Background()
 	m, path := mailbox(t, "local")
 	from, to := address("local", "peer"), address("local", "main")
-	a := sendMail(t, m, "a", from, to, nil, nil)
-	sendMail(t, m, "b", from, to, nil, nil)
+	a := sendMail(t, m, "a", from, to, nil)
+	sendMail(t, m, "b", from, to, nil)
 	batch, err := m.ClaimMailBatch(ctx, a)
 	if err != nil {
 		t.Fatal(err)
@@ -265,7 +265,7 @@ func TestPeerBatchWaitAndRestartRetainExactMembership(t *testing.T) {
 	if err = m.Wait(ctx, a, "allowance"); err != nil {
 		t.Fatal(err)
 	}
-	sendMail(t, m, "later", from, to, nil, nil)
+	sendMail(t, m, "later", from, to, nil)
 	m.Close()
 	m, err = OpenMailbox(path, "local")
 	if err != nil {
@@ -327,15 +327,15 @@ func TestAgentBatchLimitAndReplyCausation(t *testing.T) {
 	from, to := address("local", "peer"), address("local", "main")
 	var all []protocol.Envelope
 	for i := range inbox.MaxBatchMessages + 1 {
-		all = append(all, sendMail(t, m, fmt.Sprintf("peer-%d", i), from, to, nil, nil))
+		all = append(all, sendMail(t, m, fmt.Sprintf("peer-%d", i), from, to, nil))
 	}
 	batch, err := m.ClaimMailBatch(ctx, all[0])
 	if err != nil || len(batch.Messages) != inbox.MaxBatchMessages {
 		t.Fatal(batch, err)
 	}
-	reply, err := m.Send(ctx, "reply-specific", to, protocol.SendMail{To: from, Text: "reply to second", ReplyTo: &all[1].ID}, &all[0])
-	if err != nil || reply.ConversationID != all[1].ConversationID {
-		t.Fatal("batch reply lost individual conversation", reply, err)
+	reply, err := m.Send(ctx, "reply-auto", to, protocol.SendMail{To: from, Text: "reply to batch"}, &all[0])
+	if err != nil || reply.ConversationID != all[0].ConversationID || reply.ReplyTo == nil || *reply.ReplyTo != all[0].ID || reply.Hops != all[0].Hops+1 {
+		t.Fatal("batch reply lost automatic parent binding", reply, err)
 	}
 	if err = m.Finish(ctx, batch.ID, true, "done"); err != nil {
 		t.Fatal(err)

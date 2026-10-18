@@ -21,9 +21,9 @@ func mailbox(t *testing.T, control string) (*Mailbox, string) {
 	t.Cleanup(func() { m.Close() })
 	return m, path
 }
-func sendMail(t *testing.T, m *Mailbox, id string, from, to protocol.AgentRef, reply *string, parent *protocol.Envelope) protocol.Envelope {
+func sendMail(t *testing.T, m *Mailbox, id string, from, to protocol.AgentRef, parent *protocol.Envelope) protocol.Envelope {
 	t.Helper()
-	message, err := m.Send(context.Background(), id, from, protocol.SendMail{To: to, Text: "Please investigate", ReplyTo: reply}, parent)
+	message, err := m.Send(context.Background(), id, from, protocol.SendMail{To: to, Text: "Please investigate"}, parent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestRemoteMailDurableReceiptDedupAndRestartFence(t *testing.T) {
 	a, _ := mailbox(t, "control-a")
 	b, bpath := mailbox(t, "control-b")
 	from, to := address("control-a", "alice"), address("control-b", "bob")
-	message := sendMail(t, a, "mail-1", from, to, nil, nil)
+	message := sendMail(t, a, "mail-1", from, to, nil)
 	receipt := deliver(t, b, message)
 	deliver(t, b, message)
 	pending, err := a.Pending(ctx, "control-b")
@@ -95,14 +95,14 @@ func TestPeerFenceDoesNotBlockOtherAgent(t *testing.T) {
 	a, _ := mailbox(t, "control-a")
 	b, bpath := mailbox(t, "control-b")
 	alice, bob := address("control-a", "alice"), address("control-b", "bob")
-	one := sendMail(t, a, "one", alice, bob, nil, nil)
+	one := sendMail(t, a, "one", alice, bob, nil)
 	deliver(t, b, one)
 	if err := b.Claim(ctx, "one"); err != nil {
 		t.Fatal(err)
 	}
-	reply := sendMail(t, b, "reply", bob, alice, &one.ID, &one)
+	reply := sendMail(t, b, "reply", bob, alice, &one)
 	deliver(t, a, reply)
-	two := sendMail(t, a, "two", alice, bob, &reply.ID, nil)
+	two := sendMail(t, a, "two", alice, bob, &reply)
 	deliver(t, b, two)
 	b.Close()
 	var err error
@@ -114,12 +114,12 @@ func TestPeerFenceDoesNotBlockOtherAgent(t *testing.T) {
 	if next, err := b.Next(ctx, "bob"); err != nil || next != nil {
 		t.Fatal("same conversation escaped fence", next, err)
 	}
-	samePeer := sendMail(t, a, "same-peer-new-conversation", alice, bob, nil, nil)
+	samePeer := sendMail(t, a, "same-peer-new-conversation", alice, bob, nil)
 	deliver(t, b, samePeer)
 	if next, err := b.Next(ctx, "bob"); err != nil || next != nil {
 		t.Fatal("same peer escaped fence with a new conversation", next, err)
 	}
-	independent := sendMail(t, a, "other-agent", address("control-a", "another-agent"), bob, nil, nil)
+	independent := sendMail(t, a, "other-agent", address("control-a", "another-agent"), bob, nil)
 	deliver(t, b, independent)
 	next, err := b.Next(ctx, "bob")
 	if err != nil || next == nil || next.ID != independent.ID {
@@ -130,16 +130,23 @@ func TestLocalMailReplyParticipantsAndAutomaticHopBound(t *testing.T) {
 	ctx := context.Background()
 	m, _ := mailbox(t, "local")
 	alice, bob, charlie := address("local", "alice"), address("local", "bob"), address("local", "charlie")
-	initial := sendMail(t, m, "one", alice, bob, nil, nil)
+	initial := sendMail(t, m, "one", alice, bob, nil)
 	if pending, err := m.Pending(ctx, "local"); err != nil || len(pending) != 0 {
 		t.Fatal(pending, err)
 	}
-	if _, err := m.Send(ctx, "wrong-reply", charlie, protocol.SendMail{To: alice, Text: "wrong", ReplyTo: &initial.ID}, nil); err == nil {
+	if _, err := m.Send(ctx, "wrong-reply", charlie, protocol.SendMail{To: alice, Text: "wrong"}, &initial); err == nil {
 		t.Fatal("reply participants changed")
 	}
-	reply := sendMail(t, m, "reply", bob, alice, &initial.ID, &initial)
-	if reply.ConversationID != initial.ConversationID || reply.Hops != 1 {
+	reply := sendMail(t, m, "reply", bob, alice, &initial)
+	if reply.ConversationID != initial.ConversationID || reply.ReplyTo == nil || *reply.ReplyTo != initial.ID || reply.Hops != 1 {
 		t.Fatal(reply)
+	}
+	if retried := sendMail(t, m, "reply", bob, alice, &initial); !sameEnvelope(retried, reply) {
+		t.Fatal("automatic reply retry changed the envelope", retried)
+	}
+	forwarded := sendMail(t, m, "forward", bob, charlie, &initial)
+	if forwarded.ReplyTo != nil || forwarded.ConversationID == initial.ConversationID || forwarded.Hops != 1 {
+		t.Fatal("forward lost causation or became a reply to another agent", forwarded)
 	}
 	if err := m.Claim(ctx, "one"); err != nil {
 		t.Fatal(err)

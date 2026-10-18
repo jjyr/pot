@@ -107,7 +107,7 @@ func (s *Service) runAssistantMail(main *assistant.Conversation, message protoco
 	thread := core.Thread{Owner: owner, Generation: 1, Config: spec}
 	gate := core.NewEventGate(1, message.ID)
 	_, result := s.options.Manager.Execute(ctx, execution.Identity{Owner: owner, RequestID: message.ID, Generation: 1, Role: "assistant"}, func(runCtx context.Context) execution.Result {
-		request := core.TurnRequest{RequestID: message.ID, Text: "Process all incoming messages from this one agent together, in order, in the assistant-mail reference. Reply only when useful through send_message. Do not send courtesy acknowledgements. You may use reply_to to preserve the individual wire conversation when replying to a specific message."}
+		request := core.TurnRequest{RequestID: message.ID, Text: "Process all incoming messages from this one agent together, in order, in the assistant-mail reference. Reply only when useful through send_message. Do not send courtesy acknowledgements. Runtime automatically binds message provenance and links replies to the current sender."}
 		options, err := s.prepareFor(runCtx, main, thread, request, message.To.AgentID)
 		if err != nil {
 			return execution.Result{Phase: execution.Failed, Err: err}

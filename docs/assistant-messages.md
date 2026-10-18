@@ -13,15 +13,19 @@ independently of the destination machine running the Task. `list_assistants`
 returns assistant addresses; Task metadata includes its address. Worker context
 contains its own address and its owning assistant's address.
 
-`send_message({to, text, reply_to?})` returns durable acceptance, never execution
+`send_message({to, text})` returns durable acceptance, never execution
 completion. Control binds the envelope's `from` identity to the current execution;
 models cannot provide a sender, impersonate a user or produce Runtime events.
 Owner-origin messages guide active Tasks at a model boundary. Peer information
 is reference data, not new user authority. Ended Tasks retain reference without
 restarting; user requests for more work require a new Task. Workers can message
 only their owning assistant and cannot delegate or acquire management tools.
-`reply_to` binds assistant correspondence participants; Task inputs bind to their
-original run instead of a correspondence reply.
+Runtime binds the processing parent from the authenticated execution, never tool
+arguments. Replies to that parent's sender automatically set wire `reply_to` to
+the parent's message ID and retain its conversation; forwarding starts a new wire
+conversation while retaining the causal hop count. Task inputs bind to their
+original run, with any processing parent recorded automatically. Inputs forwarded
+while handling agent correspondence remain references, never owner guidance.
 
 ## Shared storage and receivers
 
@@ -72,9 +76,11 @@ Agent delivery membership is journaled in `agent_delivery_items`, a binding over
 the shared inbox rather than another queue. A Task summary reports every delivered
 success/failure and acknowledges each member after its reply is durable. Peer
 messages from one sender are claimed atomically and supplied together as untrusted
-reference data. Wire `reply_to` preserves the selected message's conversation;
-automatic replies retain the batch's maximum causal hop. Allowance resume retains
-exact membership and does not absorb later arrivals. An uncertain peer blocks its
+reference data. Runtime selects the batch member with the highest hop count as
+the processing parent; automatic replies to its sender retain that member's wire
+conversation and the batch's maximum causal hop. Models do not select individual
+reply messages. Allowance resume retains exact membership and does not absorb
+later arrivals. An uncertain peer blocks its
 own sender group; unrelated peers continue independently.
 
 Approval events remain UI-only hooks and never join these batches.
