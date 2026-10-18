@@ -33,7 +33,7 @@ while handling agent correspondence remain references, never owner guidance.
 checks. `agent_messages` in the Control's `tasks.sqlite` stores Task inputs,
 assistant correspondence, task-result events and plugin notifications. Task input
 and notification views are transcript/receiver projections over this table, not separate queues.
-Task completion and its event commit in the same transaction. Task schema 6 and
+Task completion and its event commit in the same transaction. Task schema 7 and
 schedule schema 2 require the unified outcome format; older schemas are rejected
 without importing legacy queues or schedule notifications.
 
@@ -52,7 +52,7 @@ Task messages are consumed by the original run at safe model boundaries; they
 do not interrupt commands. Assistant replies to peers use `send_message`; final
 model text is private to that correspondence and is not automatically forwarded.
 User chat remains serial, while background Tasks execute independently under
-Runtime capacity and shared-resource policy.
+Runtime capacity and model admission limits.
 
 ## Category-specific batches
 

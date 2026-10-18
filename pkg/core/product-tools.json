@@ -1,20 +1,13 @@
 [
   {
     "name": "create_task",
-    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. resource shared serializes tasks using shared resources. Interpret the applicable AGENTS.md routing rules semantically using available configured Providers and models. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor. Each task is a new execution. To retry finished work, create a new task. Tasks run in a separate workspace on the fixed selected Runtime. Omitted machine_id uses the owning Control. Files are not copied from other workspaces. Tool calls require current machine authorization; completion closes only this Task's processes and sessions while retaining files. The text must contain a concise title on its first line AND complete instructions on following lines. A title-only brief is rejected. Preserve the user's exact commands and constraints; workers do not see the chat.",
+    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. Interpret the applicable AGENTS.md routing rules semantically using available configured Providers and models. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor. Each task is a new execution. To retry finished work, create a new task. Tasks run in a separate workspace on the fixed selected Runtime. Omitted machine_id uses the owning Control. Files are not copied from other workspaces. Tool calls require current machine authorization; completion closes only this Task's processes and sessions while retaining files. The text must contain a concise title on its first line AND complete instructions on following lines. A title-only brief is rejected. Preserve the user's exact commands and constraints; workers do not see the chat.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "text": {
           "type": "string",
           "minLength": 1
-        },
-        "resource": {
-          "type": "string",
-          "enum": [
-            "",
-            "shared"
-          ]
         },
         "profile": {
           "type": "string",
