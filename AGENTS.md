@@ -13,6 +13,10 @@ Keep each tool focused on its responsibility. Update affected callers, tests and
 
 # Development
 
+## Agent prompts
+
+Changes to Pot agent prompts require explicit user authorization.
+
 ## Backward compatibility
 
 When implementing features or changing schemas, protocols, APIs, or configuration:
