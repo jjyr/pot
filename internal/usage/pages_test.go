@@ -13,10 +13,12 @@ func TestUsagePagesOrderingBoundariesAndScope(t *testing.T) {
 	ctx := context.Background()
 	l, _ := ledger(t)
 	at := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC).UnixMilli()
-	// Insert backwards, including equal timestamps and equal tool call counts.
-	for i := 42; i >= 0; i-- {
+	// Shuffle insertion order, with equal request timestamps across page boundaries
+	// and equal tool call counts.
+	for index := 0; index < 43; index++ {
+		i := index * 17 % 43
 		id := fmt.Sprintf("%02d", i)
-		r := reservation("request-"+id, at+int64(i/2))
+		r := reservation("request-"+id, at+int64(i/3))
 		r.Model = "model-" + id
 		if _, err := l.Reserve(ctx, r); err != nil {
 			t.Fatal(err)
@@ -39,6 +41,11 @@ func TestUsagePagesOrderingBoundariesAndScope(t *testing.T) {
 			}
 		}
 	}
+	other := reservation("other-request", at+100)
+	other.Scope = "task"
+	if _, err := l.Reserve(ctx, other); err != nil {
+		t.Fatal(err)
+	}
 	for _, kind := range []string{"requests", "compactions", "tools", "models"} {
 		t.Run(kind, func(t *testing.T) {
 			var ids []string
@@ -52,13 +59,16 @@ func TestUsagePagesOrderingBoundariesAndScope(t *testing.T) {
 				if (p.NextOffset != nil) != (offset < 40) || p.NextOffset != nil && *p.NextOffset != offset+20 {
 					t.Fatal("invalid next page", p)
 				}
+				if got, want := reflect.ValueOf(p.Items).Len(), max(0, min(20, 43-offset)); got != want {
+					t.Fatalf("offset %d: got %d rows, want %d", offset, got, want)
+				}
 				switch rows := p.Items.(type) {
 				case []RequestRecord:
 					for _, row := range rows {
 						ids = append(ids, row.ID)
-					}
-					if offset == 0 && (rows[0].Input != nil || rows[0].Output != nil || rows[0].Provider != "provider-a") {
-						t.Fatal("unknown usage or route attribution lost", rows[0])
+						if row.ID == "request-00" && (row.Input != nil || row.Output != nil || row.Provider != "provider-a") {
+							t.Fatal("unknown usage or route attribution lost", row)
+						}
 					}
 				case []CompactionRecord:
 					for _, row := range rows {
@@ -84,8 +94,8 @@ func TestUsagePagesOrderingBoundariesAndScope(t *testing.T) {
 					t.Fatal("duplicate across page boundary", id)
 				}
 				seen[id] = true
-				if kind == "requests" && id != fmt.Sprintf("request-%02d", i) || kind == "compactions" && id != fmt.Sprintf("compact-%02d", i) {
-					t.Fatal("records must follow occurrence order", ids)
+				if kind == "requests" && id != fmt.Sprintf("request-%02d", 42-i) || kind == "compactions" && id != fmt.Sprintf("compact-%02d", i) {
+					t.Fatal("requests must be newest first; compactions must follow occurrence order", ids)
 				}
 			}
 			if len(ids) != 43 {
