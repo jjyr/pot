@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/protocol"
 	"sync"
 	"time"
 )
@@ -91,7 +92,7 @@ func (s *Service) reconcileRemoteResources(ctx context.Context) {
 		if err != nil {
 			continue
 		}
-		if stop != "" || (phase != "queued" && phase != "running" && phase != "waiting") {
+		if stop != "" || protocol.TaskPhase(phase).Scope() != "active" {
 			s.closeRemoteRun(id)
 		}
 	}

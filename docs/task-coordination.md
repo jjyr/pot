@@ -42,8 +42,12 @@ share the same delivery, pending-count and lifecycle rules. Their ordered UI
 projection is described in [UI events](ui-events.md#task-execution-transcripts).
 
 `wait_task` returns Task metadata, not transcripts. Complete, failed, interrupted,
-cancelled and allowance-waiting states can end a wait; queued/running cannot.
-Approval requests are not separate Task states. `wait` collects JavaScript results;
+cancelled, allowance-waiting and `waiting_approval` states can end a wait;
+queued/running cannot. A pending approval for the exact Task/run/generation
+sets `waiting_approval`; resolving the last approval resumes the same run.
+Approval waiting retains its execution lease, route capacity and shared-resource
+exclusion. The assistant's Chat shows the pending operations for owner review.
+`wait` collects JavaScript results;
 `write_stdin` manages commands. Completion notifications also operate without waits.
 
 ## Pause at a model boundary
@@ -96,7 +100,7 @@ and `tasks cancel` use the respective `/api/v1/tasks/{id}/interrupt` and `/cance
 
 | Group | Phases |
 |---|---|
-| Ongoing | `queued`, `running`, `waiting` |
+| Ongoing | `queued`, `running`, `waiting`, `waiting_approval` |
 | Needs attention | `failed`, `interrupted` |
 | Archived | `complete`, `cancelled` |
 

@@ -24,7 +24,7 @@ async page => {
    throw Error('Unmocked endpoint '+path);
   }};
   fixture.client=client;
-  fixture.mount=()=>{fixture.pages?.dispose();host.replaceChildren();fixture.pages=createPages({client,host,approvalHost:approvals,locale:()=>fixture.language,notify:text=>fixture.notices.push(text),changed:()=>{},titleChanged:()=>{},openChat:()=>{}});return fixture.pages.show('machines');};
+  fixture.mount=()=>{fixture.pages?.dispose();host.replaceChildren();fixture.pages=createPages({chatApprovalHost:document.createElement('div'),chatVisible:()=>false,client,host,approvalHost:approvals,locale:()=>fixture.language,notify:text=>fixture.notices.push(text),changed:()=>{},titleChanged:()=>{},openChat:()=>{}});return fixture.pages.show('machines');};
   await fixture.mount();
  });
  const local=()=>page.locator('.machine-card[data-space-id="local"]'),cloud=()=>page.locator('.machine-card[data-space-id="cloud"]');

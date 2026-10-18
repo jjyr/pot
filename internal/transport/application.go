@@ -174,6 +174,7 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 					return nil, err
 				}
 				item["working"] = page.Counts.Active
+				item["pending_approvals"] = len(s.Permissions.Pending(d.ID))
 				items = append(items, item)
 			}
 			return items, nil

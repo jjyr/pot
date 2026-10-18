@@ -29,7 +29,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   const nodes=new Map();
   const editor=bindComposer(input,{onInput:text=>{draftVersion++;onDraft(text);updateComposer();},onSend:submit,onCompositionEnd:updateComposer});
   const completion=bindCompletions(input,{client:{scope:()=>scope,request:(path,options)=>client.request(path,options)},host:composerArea,locale,id:`pot-task-${task.id}-completions`});
-  const active=()=>['queued','running','waiting'].includes(record.info?.phase||task.phase);
+  const active=()=>['queued','running','waiting','waiting_approval'].includes(record.info?.phase||task.phase);
   const nearBottom=()=>history.scrollHeight-history.clientHeight-history.scrollTop<64;
   function scrollBottom(){history.scrollTop=history.scrollHeight;following=true;latest.hidden=true;}
   function scheduleFollow(){cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{if(disposed)return;if(following)scrollBottom();else latest.hidden=nearBottom();});}
@@ -57,7 +57,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     if(!running&&input.value)footer.textContent+=' · '+tr('Unsent draft retained','未发送的草稿已保留');
   }
   function renderStage(){
-    const phase=record.info?.phase||task.phase,pending=approvals.length;
+    const rawPhase=record.info?.phase||task.phase,pending=approvals.length,phase=rawPhase==='waiting_approval'?'running':rawPhase;
     stage.dataset.phase=unavailable||connectionError?'offline':pending?'approval':record.info?.paused?'paused':phase;
     const text=connectionError?tr('Connection interrupted · Showing retained history','连接中断 · 显示已有记录'):unavailable?tr('Original machine is offline · Showing cached output','原执行机器离线 · 显示缓存执行输出'):pending?tr(`Waiting for approval · ${pending} pending`,`等待授权 · ${pending} 项待处理`):record.info?.paused?tr('Paused','已暂停'):tr({running:'Running',queued:'Queued',waiting:'Waiting for allowance',complete:'Complete',failed:'Failed',interrupted:'Interrupted',cancelled:'Cancelled'}[phase]||phase,{running:'运行中',queued:'排队中',waiting:'等待配额',complete:'已完成',failed:'失败',interrupted:'已中断',cancelled:'已取消'}[phase]||phase);
     if(stageLabel.textContent!==text)stageLabel.textContent=text;stageLabel.title=connectionError;locate.hidden=!pending||!!connectionError;retry.hidden=!connectionError;retry.disabled=busy;
@@ -113,7 +113,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     if(menuMode==='cancel'){
       dialog.append(n('p','',tr('Stop this task and retain its history?','取消任务并保留已有记录？')));choice(tr('Keep task','保留任务'),()=>{menuMode='actions';renderMenu(true);});choice(tr('Cancel task','取消任务'),()=>run(onCancel),{danger:true});
     }else{
-      if(record.info?.phase==='running')choice(record.info?.paused?tr('Resume task','恢复任务'):tr('Pause task','暂停任务'),()=>run(onPause));
+      if(['running','waiting_approval'].includes(record.info?.phase))choice(record.info?.paused?tr('Resume task','恢复任务'):tr('Pause task','暂停任务'),()=>run(onPause));
       choice(tr('Usage','用量'),()=>{dialog.close();onUsage();});choice(tr('Task details','任务详情'),()=>{menuMode='details';renderMenu(true);});
       if(!['complete','cancelled'].includes(record.info?.phase))choice(tr('Cancel task','取消任务'),()=>{menuMode='cancel';renderMenu(true);},{danger:true});
     }

@@ -18,7 +18,7 @@ async page=>{
     const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(options.body),signal:options.signal});
     const result=await response.json();if(!response.ok)throw Error(result.message||JSON.stringify(result));return result;
    }};
-   f.pages=createPages({client,host:document.querySelector('main'),approvalHost:document.createElement('div'),locale:()=> 'zh-CN',notify:()=>{},changed:()=>{},titleChanged:()=>{},openChat:()=>{}});
+   f.pages=createPages({client,chatVisible:()=>false,host:document.querySelector('main'),approvalHost:document.createElement('div'),chatApprovalHost:document.createElement('section'),locale:()=> 'zh-CN',notify:()=>{},changed:()=>{},titleChanged:()=>{},openChat:()=>{}});
    await f.pages.setupAI();
   });
   await page.getByRole('button',{name:'自定义 API',exact:true}).click();

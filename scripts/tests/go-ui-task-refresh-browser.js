@@ -18,7 +18,7 @@ async page=>{
     return new Promise((resolve,reject)=>{const call={path,options,resolve,reject};f.calls.push(call);f.pending.push(call);});
    }};
    f.reply=()=>{for(const call of f.pending.splice(0))call.resolve({items:structuredClone(f.items),counts:{active:f.items.length}});};
-   f.pages=createPages({client:f.client,host:document.querySelector('main'),approvalHost:document.createElement('div'),locale:()=> 'zh-CN',notify:message=>f.notices.push(message),changed:()=>{},titleChanged:()=>{},openChat:()=>{}});
+   f.pages=createPages({chatApprovalHost:document.createElement('div'),chatVisible:()=>false,client:f.client,host:document.querySelector('main'),approvalHost:document.createElement('div'),locale:()=> 'zh-CN',notify:message=>f.notices.push(message),changed:()=>{},titleChanged:()=>{},openChat:()=>{}});
    f.initial=f.pages.show('tasks');
   });
   await page.evaluate(async()=>{taskFixture.reply();await taskFixture.initial;});

@@ -17,7 +17,10 @@ conversation replay cursors.
 Subscriptions deliver their initial version map and coalesce pending changes.
 The frontend compares versions per Space through
 [`state/changes.mjs`](../web/src/state/changes.mjs). A boot change invalidates the
-version baseline. Usage-only updates do not reload the assistant directory.
+version baseline. Usage-only updates do not reload the assistant directory. Permission changes
+refresh catalogue `pending_approvals` counts for every assistant independently of
+reply identity and unread baselines. They also refresh the selected owner's
+transient Chat approval region; duplicate request IDs do not repeat its notice.
 Mutations publish after persistence; no-op reads do not produce invalidations.
 The global subscription remains active even when no assistant exists, so an
 assistant created by another client appears without reloading the page.

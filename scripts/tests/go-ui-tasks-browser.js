@@ -49,7 +49,7 @@ async page => {
   inputs.push({request_id:'reference',kind:'reference',sender:'peer',state:'pending',text:'已确认仓库访问可用。'});
   pending=[{id:'approval-one',request:{owner:'alpha',task:'task-proof',turn:'run-one',call_id:'probe',machine_id:'fixture-runtime',tool:'exec_command',args:{cmd:'gh --version'},justification:'Verify the installed CLI'}},{id:'other-task',request:{owner:'alpha',task:'elsewhere',turn:'other',call_id:'other'}}];await push();
   await page.locator('.task-status').getByText('等待授权 · 1 项待处理',{exact:true}).waitFor();
-  await tool.getByRole('button',{name:'本任务允许',exact:true}).waitFor();
+  await tool.locator('.approval-card>summary').click();await tool.getByRole('button',{name:'本任务允许',exact:true}).waitFor();
   await page.screenshot({path:'output/pr-images/task-progress/task-approval-desktop-after.png'});await page.setViewportSize({width:390,height:1000});await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));await page.screenshot({path:'output/pr-images/task-progress/task-approval-mobile-after.png'});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Inline approvals fit narrow viewport');await page.setViewportSize({width:1200,height:1000});
   assert(await page.locator('.approval-host').textContent()==='','Task approvals have no duplicate outer locator');
   assert(await page.locator('.role-reference').getByText('参考信息 · peer',{exact:true}).count()===1,'Reference provenance is explicit');

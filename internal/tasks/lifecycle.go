@@ -16,7 +16,7 @@ func (s *Service) Tick(ctx context.Context) error {
 	if s.options.Port == nil || s.options.ResolveTarget == nil {
 		return fmt.Errorf("Task destination ports unavailable")
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT assistant_id,id FROM tasks WHERE phase IN ('queued','running','waiting') ORDER BY created,id")
+	rows, err := s.db.QueryContext(ctx, "SELECT assistant_id,id FROM tasks WHERE phase IN ('queued','running','waiting','waiting_approval') ORDER BY created,id")
 	if err != nil {
 		return err
 	}
@@ -53,7 +53,7 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 	if record.Launch == nil {
 		if record.Request.Resource == "shared" {
 			var busy bool
-			if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE id<>? AND phase IN ('queued','running','waiting') AND json_extract(body,'$.request.resource')='shared' AND json_extract(body,'$.request.machine_id')=? AND json_extract(body,'$.launch_sent')=1)`, id, record.Request.MachineID).Scan(&busy); err != nil {
+			if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE id<>? AND phase IN ('queued','running','waiting','waiting_approval') AND json_extract(body,'$.request.resource')='shared' AND json_extract(body,'$.request.machine_id')=? AND json_extract(body,'$.launch_sent')=1)`, id, record.Request.MachineID).Scan(&busy); err != nil {
 				return err
 			}
 			if busy {
@@ -90,7 +90,7 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 			}
 			if current.Request.Resource == "shared" {
 				var busy bool
-				if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE id<>? AND phase IN ('queued','running','waiting') AND json_extract(body,'$.request.resource')='shared' AND json_extract(body,'$.request.machine_id')=? AND json_extract(body,'$.launch_sent')=1)`, id, current.Request.MachineID).Scan(&busy); err != nil {
+				if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE id<>? AND phase IN ('queued','running','waiting','waiting_approval') AND json_extract(body,'$.request.resource')='shared' AND json_extract(body,'$.request.machine_id')=? AND json_extract(body,'$.launch_sent')=1)`, id, current.Request.MachineID).Scan(&busy); err != nil {
 					return err
 				}
 				if busy {
@@ -160,6 +160,9 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 			current.Info.Phase = protocol.TaskQueued
 		case runner.Running:
 			current.Info.Phase = protocol.TaskRunning
+			if s.options.AwaitingApproval != nil && s.options.AwaitingApproval(assistant, id, current.RunID, current.Generation) {
+				current.Info.Phase = protocol.TaskWaitingApproval
+			}
 		case runner.Waiting:
 			current.Info.Phase = protocol.TaskWaiting
 			current.Error = run.WaitDetail
@@ -346,7 +349,7 @@ func (s *Service) Wait(ctx context.Context, assistant string, targets []WaitTarg
 			}
 			item := WaitItem{record.Info, record.Revision, record.Error}
 			items = append(items, item)
-			if record.Revision > target.After && (record.Info.Phase == protocol.TaskWaiting || record.Info.Phase.Scope() != "active") {
+			if record.Revision > target.After && (record.Info.Phase == protocol.TaskWaiting || record.Info.Phase == protocol.TaskWaitingApproval || record.Info.Phase.Scope() != "active") {
 				ready = true
 			}
 		}

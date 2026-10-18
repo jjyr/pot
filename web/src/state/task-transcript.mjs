@@ -21,7 +21,7 @@ export function appendTaskEvents(state,events){
 // Applied inputs use the Runner's durable bookmark, independent of HTTP fetch
 // order or clocks on separate machines. Unapplied inputs remain at the tail.
 export function projectTaskMessages(state,inputs,record,{offline=false}={}){
-  const phase=record.info?.phase,active=['queued','running','waiting'].includes(phase),rows=[];
+  const phase=record.info?.phase,active=['queued','running','waiting','waiting_approval'].includes(phase),rows=[];
   for(const message of state.messages){
     if(message.role==='assistant'&&!message.text&&message!==state.active)continue;
     if(message.role==='system'){const previous=rows.at(-1);if(previous?.role==='assistant'&&!previous.error){previous.phase='failed';previous.error=message.text;}else rows.push({...message,role:'assistant',text:'',phase:'failed',error:message.text});continue;}

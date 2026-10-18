@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/jjyr/pot/internal/controlplane"
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/protocol"
 	"io"
@@ -114,6 +115,10 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 			if pending[0].Request.Task != record.Info.ID || pending[0].Request.MachineID != "worker" {
 				t.Fatalf("approval scope: %+v", pending)
 			}
+			waiting, waitErr := control.Tasks.Wait(ctx, "main", []tasks.WaitTarget{{TaskID: record.Info.ID}})
+			if waitErr != nil || len(waiting) != 1 || waiting[0].Info.Phase != protocol.TaskWaitingApproval {
+				t.Fatalf("remote approval did not reach Task state: %+v %v", waiting, waitErr)
+			}
 			if err = control.Permissions.Decide("main", pending[0].ID, "allow_task"); err != nil {
 				t.Fatal(err)
 			}
@@ -140,6 +145,12 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 	}
 	data, err := os.ReadFile(filepath.Join(worker.options.Workspace, "tasks", record.Info.ID, "artifact.txt"))
 	if err != nil || string(data) != "remote-proof" {
+		transcript, _ := control.TaskEvents(ctx, "main", record.Info.ID, 0, 100)
+		for _, item := range transcript.Events {
+			if item.Event.Update.Type == "tool_finished" {
+				t.Logf("remote command result: %s", item.Event.Update.Result)
+			}
+		}
 		t.Fatalf("remote artifact: %s %v", data, err)
 	}
 	if _, err = os.Stat(filepath.Join(control.options.Workspace, "tasks", record.Info.ID, "artifact.txt")); !os.IsNotExist(err) {

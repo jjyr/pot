@@ -10,18 +10,19 @@ import (
 type TaskPhase string
 
 const (
-	TaskQueued      TaskPhase = "queued"
-	TaskWaiting     TaskPhase = "waiting"
-	TaskRunning     TaskPhase = "running"
-	TaskComplete    TaskPhase = "complete"
-	TaskFailed      TaskPhase = "failed"
-	TaskCancelled   TaskPhase = "cancelled"
-	TaskInterrupted TaskPhase = "interrupted"
+	TaskQueued          TaskPhase = "queued"
+	TaskWaiting         TaskPhase = "waiting"
+	TaskRunning         TaskPhase = "running"
+	TaskWaitingApproval TaskPhase = "waiting_approval"
+	TaskComplete        TaskPhase = "complete"
+	TaskFailed          TaskPhase = "failed"
+	TaskCancelled       TaskPhase = "cancelled"
+	TaskInterrupted     TaskPhase = "interrupted"
 )
 
 func (p TaskPhase) Scope() string {
 	switch p {
-	case TaskQueued, TaskWaiting, TaskRunning:
+	case TaskQueued, TaskWaiting, TaskRunning, TaskWaitingApproval:
 		return "active"
 	case TaskFailed, TaskInterrupted:
 		return "attention"

@@ -3,7 +3,7 @@ async page=>{
  const state=STATE,assert=(value,message)=>{if(!value)throw Error(message);},errors=[];
  const context=await page.context().browser().newContext({serviceWorkers:'block'});page=await context.newPage();
  page.on('pageerror',error=>errors.push(error.message));
- await page.route('**/refresh-fixture',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="/styles.css"><body><main style="height:700px;width:900px;max-width:100%;margin:30px auto;overflow:auto"></main><div class="approval-host"></div><div class="message-column"></div></body></html>'}));
+ await page.route('**/refresh-fixture',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="/styles.css"><body><main style="height:700px;width:900px;max-width:100%;margin:30px auto;overflow:auto"></main><div class="approval-host"></div><div class="chat-approvals"></div><div class="message-column"></div></body></html>'}));
  const idle=()=>page.waitForFunction(()=>!document.querySelector('main [aria-busy="true"]')&&!refreshFixture.pending.length);
  try{
   await page.setViewportSize({width:1200,height:900});await page.goto(state.origin+'/refresh-fixture');
@@ -41,7 +41,7 @@ async page=>{
     try{return Promise.resolve(structuredClone(f.response(path,options)));}catch(error){return Promise.reject(error);}
    }};
    f.release=()=>{for(const call of f.pending.splice(0))call.resolve(structuredClone(f.response(call.path,call.options)));};
-   f.pages=createPages({client:f.client,host:document.querySelector('main'),approvalHost:document.querySelector('.approval-host'),locale:()=> 'en',notify:message=>f.notices.push(message),changed:()=>{},titleChanged:()=>{},openChat:()=>{}});
+   f.pages=createPages({chatApprovalHost:document.querySelector('.chat-approvals'),chatVisible:()=>true,client:f.client,host:document.querySelector('main'),approvalHost:document.querySelector('.approval-host'),locale:()=> 'en',notify:message=>f.notices.push(message),changed:()=>{},titleChanged:()=>{},openChat:()=>{}});
    await f.pages.show('usage');
   });
   await page.locator('.usage-total strong').filter({hasText:/^12$/}).waitFor();
@@ -97,7 +97,7 @@ async page=>{
   await page.evaluate(async()=>{const f=refreshFixture;f.history=document.querySelector('tbody tr');f.runButton=document.querySelector('.page-card button');f.runs[0].state='complete';await f.pages.refresh(['schedules']);});
   assert(await page.evaluate(()=>refreshFixture.history===document.querySelector('tbody tr')&&refreshFixture.history.textContent.includes('complete')&&refreshFixture.runButton===document.querySelector('.page-card button')),'Schedule history updates in place');
   assert(await page.getByRole('button',{name:'Confirm removal',exact:true}).count()===1,'Background updates retain the removal confirmation');
-  await page.evaluate(async()=>{const f=refreshFixture;f.approvals=[{id:'approval',request:{owner:'a',call_id:'call',turn:'turn',machine_id:'host',tool:'exec_command',args:{cmd:'pwd'}}}];await f.pages.permissions();f.approvalButton=document.querySelector('.approval-actions button');f.approvalButton.focus();await f.pages.permissions();});
+  await page.evaluate(async()=>{const f=refreshFixture;f.approvals=[{id:'approval',request:{owner:'a',call_id:'call',turn:'turn',machine_id:'host',tool:'exec_command',args:{cmd:'pwd'}}}];await f.pages.permissions();document.querySelector('.approval-card').open=true;f.approvalButton=document.querySelector('.approval-actions button');f.approvalButton.focus();await f.pages.permissions();});
   assert(await page.evaluate(()=>refreshFixture.approvalButton===document.querySelector('.approval-actions button')&&document.activeElement===refreshFixture.approvalButton),'Repeated permission reads retain the same approval action');
   await page.evaluate(()=>{refreshFixture.hold='/api/v1/schedules';refreshFixture.pages.refresh(['schedules']);refreshFixture.retired=refreshFixture.pending.splice(0);refreshFixture.hold='';});
   await page.evaluate(()=>refreshFixture.pages.show('usage'));await page.locator('.usage-total strong').filter({hasText:/^22$/}).waitFor();
@@ -124,8 +124,8 @@ async page=>{
   assert(await page.evaluate(()=>refreshFixture.menuAction===document.querySelector('.preferences .menu-destination')&&document.activeElement===refreshFixture.menuAction),'Open menu actions retain keyboard focus during directory updates');
   await page.evaluate(()=>{const f=refreshFixture;document.querySelector('.preferences').close();f.approvals=[{id:'early',request:{owner:'a',turn:'turn',call_id:'call',machine_id:'host',tool:'exec_command',args:{cmd:'pwd'}}}];f.changes(['permissions'],{space:'local'});});
   await page.locator('.approval-card').waitFor();
-  await page.evaluate(()=>{const f=refreshFixture;f.permissionReads=f.calls.filter(call=>call.path==='/api/v1/permissions').length;f.snapshot.cursor='3';f.snapshot.messages.push({id:'call-message',role:'tool',text:'',status:'streaming',tool:{id:'call',turn_id:'turn',name:'exec_command',phase:'waiting_approval',args:{cmd:'pwd'},output:[],target:{runtime_id:'host'},started_at_ms:Date.now()}});f.receive(structuredClone(f.snapshot));});
-  assert(await page.locator('.approval-card').count()===0&&await page.locator('.tool-approval-actions button').count()===3,'A later tool snapshot moves cached approvals into the tool without duplicate cards');
+  await page.evaluate(()=>{const f=refreshFixture;f.earlyCard=document.querySelector('.approval-card');f.permissionReads=f.calls.filter(call=>call.path==='/api/v1/permissions').length;f.snapshot.cursor='3';f.snapshot.messages.push({id:'call-message',role:'tool',text:'',status:'streaming',tool:{id:'call',turn_id:'turn',name:'exec_command',phase:'waiting_approval',args:{cmd:'pwd'},output:[],target:{runtime_id:'host'},started_at_ms:Date.now()}});f.receive(structuredClone(f.snapshot));});
+  assert(await page.locator('.chat-approvals .approval-card').count()===1&&await page.evaluate(()=>refreshFixture.earlyCard===document.querySelector('.chat-approvals .approval-card')),'A later tool snapshot retains the same shared Chat approval without duplication');
   assert(await page.evaluate(()=>refreshFixture.calls.filter(call=>call.path==='/api/v1/permissions').length===refreshFixture.permissionReads),'Snapshot reconciliation uses cached approvals without another network read');
   assert(errors.length===0,errors.join('\n'));return {passed:true,usage:true,machines:true,permission_drafts:true,revision_conflicts:true,integrations:true,schedules:true,approvals:true,navigation:true,shell:true,errors};
  }finally{await page.evaluate(()=>{window.refreshFixture?.unmount?.();window.refreshFixture?.pages.dispose();});await context.close();}

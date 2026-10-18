@@ -22,15 +22,16 @@ type Selection struct {
 type ResolveModel func(context.Context, string, protocol.CreateTask) (Selection, error)
 type ResolveTarget func(context.Context, string) (core.ExecutionTarget, error)
 type Options struct {
-	ControlID      string
-	RuntimeID      string
-	Port           runner.Port
-	ResolveModel   ResolveModel
-	ResolveMachine func(context.Context, string) (string, error)
-	ResolveTarget  ResolveTarget
-	AdmitModel     func(context.Context, *sql.Tx, core.ResolvedSpec) (bool, error)
-	ValidateTarget func(context.Context, core.ExecutionTarget, protocol.TaskRequirements) error
-	MaxTasks       int
+	ControlID        string
+	RuntimeID        string
+	Port             runner.Port
+	ResolveModel     ResolveModel
+	ResolveMachine   func(context.Context, string) (string, error)
+	ResolveTarget    ResolveTarget
+	AdmitModel       func(context.Context, *sql.Tx, core.ResolvedSpec) (bool, error)
+	AwaitingApproval func(assistant, task, run string, generation uint64) bool
+	ValidateTarget   func(context.Context, core.ExecutionTarget, protocol.TaskRequirements) error
+	MaxTasks         int
 }
 type Service struct {
 	db      *sql.DB
