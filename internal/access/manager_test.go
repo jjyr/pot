@@ -5,6 +5,8 @@ import (
 	"github.com/jjyr/pot/internal/webui"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"testing/fstest"
 )
@@ -81,5 +83,30 @@ func TestFreshAccessIsPrivateAndOwnerActionsRotateSessions(t *testing.T) {
 	}
 	if node.connects != 1 || node.webs != 1 || node.closes != 1 {
 		t.Fatal(node)
+	}
+}
+
+// Retired push state must not be opened or validated during browser startup.
+func TestLegacyPushStateIsIgnored(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "browser-push.sqlite")
+	const legacy = "retired subscription store, deliberately not a SQLite database"
+	if err := os.WriteFile(path, []byte(legacy), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("POT_ACCESS_VAPID_KEY", filepath.Join(root, "missing-vapid-key"))
+	t.Setenv("POT_ACCESS_VAPID_CONTACT", "invalid retired configuration")
+	manager, err := Open(context.Background(), Options{
+		Root: root, Origin: "https://fixture.example",
+		Upstream: webui.Upstream{URL: "https://control.invalid", Credential: "control", Client: &http.Client{}, ControlID: "control"},
+		Assets:   fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("UI")}}, Tailnet: &fakeTailnet{},
+	})
+	if err != nil {
+		t.Fatal("legacy push state blocked startup", err)
+	}
+	manager.Close()
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != legacy {
+		t.Fatal("legacy push file was touched", string(data), err)
 	}
 }

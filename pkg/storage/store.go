@@ -18,10 +18,6 @@ func Now() int64 { return time.Now().UnixMilli() }
 
 type Message = protocol.Message
 type Event = protocol.Event
-type Notification struct {
-	Sequence int64   `json:"sequence,string"`
-	Message  Message `json:"message"`
-}
 type Store struct{ db *sql.DB }
 
 func Open(path string) (*Store, error) {
@@ -304,35 +300,13 @@ func (s *Store) saveMessages(ctx context.Context, messages []Message, metadata m
 	return events, nil
 }
 func sameRequest(a, b *string) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
+
+// NotificationCount counts durable completed replies for the assistant catalogue.
+// The outbox remains local projection state; it is not a delivery queue.
 func (s *Store) NotificationCount(ctx context.Context) (int64, error) {
 	var n int64
 	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM main_message_outbox").Scan(&n)
 	return n, err
-}
-func (s *Store) NotificationSequence(ctx context.Context) (int64, error) {
-	var n int64
-	err := s.db.QueryRowContext(ctx, "SELECT COALESCE(MAX(sequence),0) FROM main_message_outbox").Scan(&n)
-	return n, err
-}
-func (s *Store) Notifications(ctx context.Context, after int64) ([]Notification, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT sequence,body FROM main_message_outbox WHERE sequence>? ORDER BY sequence LIMIT 32", after)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []Notification{}
-	for rows.Next() {
-		var n Notification
-		var body []byte
-		if err := rows.Scan(&n.Sequence, &body); err != nil {
-			return nil, err
-		}
-		if err := protocol.DecodeStrict(body, &n.Message); err != nil {
-			return nil, err
-		}
-		out = append(out, n)
-	}
-	return out, rows.Err()
 }
 
 // CheckContext rejects corrupt/missing state instead of silently substituting

@@ -1,3 +1,4 @@
+import {createSystemNotifications} from '../adapters/notifications.mjs';
 import {createToolCall} from './tool-call.mjs';
 import {toolForest} from '../state/tool-calls.mjs';
 import {projectScriptRuns} from '../state/script-runs.mjs';
@@ -71,6 +72,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const directory = el('aside', 'assistant-directory');
   const workspace = el('main', 'workspace');
   const notice = el('p', 'preview-notice');
+  const notificationError=el('div','notification-route-error inline-error');notificationError.hidden=true;notificationError.setAttribute('role','alert');
   const approvals = el('div', 'approval-host');
   const chatApprovals=el('section','chat-approvals');chatApprovals.hidden=true;
   let locateApprovals='';
@@ -95,11 +97,34 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   form.append(input, send);
   composerArea.append(latest, form, status);
   const unavailable = el('div', client.production ? 'page-host' : 'unavailable');
-  workspace.append(notice, approvals, resourceNotices, history, composerArea, unavailable);
+  workspace.append(notice, notificationError, approvals, resourceNotices, history, composerArea, unavailable);
   const menu = el('nav', 'mobile-menu');
   menu.hidden = true;
   const preferences = el('dialog', 'preferences');
   root.append(rail, titlebar, directory, workspace, menu, preferences);
+  const notifications=client.production?createSystemNotifications({client,surface,locale:()=>locale,
+    view:()=>({...((route==='tasks'&&pages?.notificationContext)||{space:selectedAssistant?.space_id||'',owner:selectedAssistant?.id||''}),route:menuOpen||preferencesOpen||root.classList.contains('show-directory')?'navigation':route}),
+    open:openNotification}):null;
+  if(notifications)client.notifications=notifications;
+  async function openNotification(event){
+    notificationError.hidden=true;
+    try{
+      const item=assistants.find(value=>value.space_id===event.space&&value.id===event.owner&&controlOf(value)===event.control);
+      if(!item)throw Error(t('missingAssistant'));
+      if(!await pages.leave())return;
+      if(event.task){
+        route='tasks';directoryOpen=false;
+        await pages.openTask({id:event.task,title:event.name,assistant_id:event.owner,_assistant_id:event.owner,_space_id:event.space});
+        renderShell();return;
+      }
+      await selectAssistant(item,false);
+      locateApprovals=event.kind==='approval'?JSON.stringify({owner:event.owner,space:event.space}):'';
+      renderMessages();await pages.permissions();
+    }catch(reason){
+      const dismiss=button('close',t('close'));dismiss.onclick=()=>{notificationError.hidden=true;};
+      notificationError.replaceChildren(el('span','',reason.message),dismiss);notificationError.hidden=false;throw reason;
+    }
+  }
   const pages = client.production ? createPages({chatVisible:()=>route==='chat'&&!root.classList.contains('show-directory'),onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, chatApprovalHost:chatApprovals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: value => {if(value?.assistant)pendingSelection=value.assistant;loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();}, openChat:async target=>{if(target&&(!selectedAssistant||selectedAssistant.id!==target.owner||selectedAssistant.space_id!==target.space)){const assistant=assistants.find(item=>item.id===target.owner&&item.space_id===target.space);if(assistant)await selectAssistant(assistant,false,false);}route='chat';directoryOpen=false;renderShell();renderMessages();pages.permissions();if(!selectedAssistant)loadDirectory();}}) : null;
   const media = matchMedia('(max-width: 719px)');
   const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
@@ -270,9 +295,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       select.value = current;
     }
   }
-  preferences.addEventListener('close', () => { preferencesOpen = false; });
+  preferences.addEventListener('close', () => { preferencesOpen = false;notifications?.report(); });
   const shellRoots={rail,titlebar,menu};
   function renderShell() {
+    queueMicrotask(()=>{if(!disposed)notifications?.report();});
     const rail=shellRoots.rail.cloneNode(false),titlebar=shellRoots.titlebar.cloneNode(false),menu=shellRoots.menu.cloneNode(false);
     markVisibleRead();
     if(route!=='chat')completions?.reset();
@@ -552,6 +578,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function loadDirectory(){return directoryQueue.run();}
   async function readDirectory() {
     if (!client.production) return;
+    const notificationEpoch=notifications?.epoch;
     const ticket = ++directoryEpoch,previousSpaces=JSON.stringify(spaces),previousOwners=JSON.stringify(assistants.map(item=>[item.space_id,item.id,item.name,item.offline]));
     try {
       const catalog = await client.request('/api/v1/spaces', {owner:'', space:'',signal:abort.signal});
@@ -586,13 +613,14 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         }
         if(!assistants.length){directoryOpen=false;renderShell();const empty=el('div','empty-chat');empty.append(el('h2','',t('welcomeTitle')),el('p','hint',available?t('welcomeSetup'):t('partialOffline')));const setup=el('button','control primary',t(available?'setupAI':'retry'));setup.onclick=async()=>{if(!available){loadDirectory();return;}setup.disabled=true;try{await navigate('settings');await pages.setupAI();}catch(reason){error=reason.message;updateControls();}finally{setup.disabled=false;}};empty.append(setup);messageColumn.replaceChildren(empty);}
       }
-      if(pendingSelection){const chosen=assistants.find(item=>item.id===pendingSelection.id&&item.space_id===pendingSelection.space_id);pendingSelection=null;if(chosen){await selectAssistant(chosen);return;}}
+      if(pendingSelection){const chosen=assistants.find(item=>item.id===pendingSelection.id&&item.space_id===pendingSelection.space_id);pendingSelection=null;if(chosen){await selectAssistant(chosen);notifications?.directory({epoch:notificationEpoch});return;}}
       if (!selectedAssistant && assistants.length && !pages.editing) {
         const requested=params.get('assistant_id');const requestedSpace=params.get('space_id');
         const selected=requested?assistants.find(item=>item.id===requested&&(!requestedSpace||item.space_id===requestedSpace)):assistants[0];
-        if(!selected){error=t('missingAssistant');connection='offline';updateControls();return;}
+        if(!selected){error=t('missingAssistant');connection='offline';updateControls();notifications?.directory({epoch:notificationEpoch});return;}
         await selectAssistant(selected,!requested);
       }
+      notifications?.directory({epoch:notificationEpoch});
     } catch (reason) { if (ticket===directoryEpoch&&!disposed) {error = reason.message; connection='offline'; updateControls();if(!assistants.length){const empty=el('div','empty-chat',reason.message);const retry=el('button','control',t('retry'));retry.onclick=()=>loadDirectory();empty.append(document.createElement('br'),retry);messageColumn.replaceChildren(empty);}} }
   }
   const preferencesChanged = event => {
@@ -655,6 +683,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function attachChanges(){
     stopChanges();stopChanges=client.changes((topics,source={})=>{
       const keys=Array.isArray(topics)?topics:Object.keys(topics||{});
+      if(source.reset){notifications?.refresh({reset:true,space:source.space});loadDirectory();}
+      else if(relevantChange(keys,['task-outcomes','permissions']))notifications?.refresh({topics:keys,space:source.space});
       if(relevantChange(keys,['spaces','assistants','assistant-mail','conversation','runtime','permissions']))loadDirectory();
       if(relevantChange(keys,['tasks','runner'],client.scope().space,source))refreshBackgroundTasks();
       pages.refresh(keys,source);if(relevantChange(keys,['permissions','spaces','runtime'],pages.approvalSpace,source))pages.permissions();
@@ -668,7 +698,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     await Promise.all([snapshot,loadDirectory()]);
   });
   return () => {
-    disposed = true; stopResume();taskClock.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
+    disposed = true; stopResume();taskClock.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     completions?.dispose();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);

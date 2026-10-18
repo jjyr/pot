@@ -510,8 +510,6 @@ def main():
     if not shutil.which("node") or not shutil.which("npx"):
         parser.error("Pinned Node/npx and cached @playwright/cli are required; run through mise")
     env = dict(os.environ)
-    env.pop("POT_ACCESS_VAPID_KEY", None)
-    env.pop("POT_ACCESS_VAPID_CONTACT", None)
     # Dependencies must be cached. Runtime metadata refresh cannot reach outside
     # loopback. The browser script likewise rejects non-loopback resource requests.
     env.update(

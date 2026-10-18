@@ -60,9 +60,9 @@ func TestRestartOutboxAndAppendOnlyEvents(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	out, err := s.Notifications(ctx, 0)
-	if err != nil || len(out) != 1 || out[0].Message.ID != "reply" {
-		t.Fatalf("outbox: %+v %v", out, err)
+	count, err := s.NotificationCount(ctx)
+	if err != nil || count != 1 {
+		t.Fatalf("completed reply count: %d %v", count, err)
 	}
 	if value, ok, err := s.Get(ctx, "checkpoint"); err != nil || !ok || value != "ready" {
 		t.Fatal(value, ok, err)

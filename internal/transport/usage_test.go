@@ -14,6 +14,7 @@ import (
 	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/internal/webui"
 	"github.com/jjyr/pot/pkg/execution"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 func TestUsageSummaryAndIndependentListRoutes(t *testing.T) {
@@ -68,7 +69,11 @@ func TestBrowserReadRoutesReachApplication(t *testing.T) {
 	}
 	defer service.Close()
 	ctx := context.Background()
-	if _, err = service.Registry.Create(ctx, "create", "Pot"); err != nil {
+	owner, err := service.Registry.Create(ctx, "create", "Pot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.Tasks.DB().Exec(`INSERT INTO task_outcomes(assistant_id,task_id,title,phase,updated_at_ms) VALUES(?, 'own-task','Own task','complete',1),('other','other-task','Other task','failed',2)`, owner.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.Usage.Reserve(ctx, usage.ReserveRequest{ID: "request", Scope: "main", Turn: "turn", AtMS: time.Now().UnixMilli(), Model: "fixture", InputEstimate: 10, MaxOutput: 20}); err != nil {
@@ -98,7 +103,7 @@ func TestBrowserReadRoutesReachApplication(t *testing.T) {
 		"/api/v1/providers", "/api/v1/agent", "/api/v1/agent/routing", "/api/v1/instructions", "/api/v1/about",
 		"/api/v1/integrations", "/api/v1/agent/diagnostics",
 		"/api/v1/snapshot", "/api/v1/permissions", "/api/v1/machines", "/api/v1/schedules",
-		"/api/v1/tasks/query", "/api/v1/usage/providers",
+		"/api/v1/tasks/query", "/api/v1/tasks/outcomes", "/api/v1/tasks/outcomes?after=0", "/api/v1/usage/providers",
 		"/api/v1/usage/summary?scope=main&timezone=UTC",
 		"/api/v1/usage/models?scope=main&timezone=UTC&offset=0",
 		"/api/v1/usage/requests?scope=main&timezone=UTC&offset=0",
@@ -127,6 +132,15 @@ func TestBrowserReadRoutesReachApplication(t *testing.T) {
 					t.Fatal("summary must include the policy used by the editor", w.Body.String(), err)
 				}
 			}
+			if path == "/api/v1/tasks/outcomes" || path == "/api/v1/tasks/outcomes?after=0" {
+				var page protocol.TaskOutcomePage
+				if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil || page.Cursor != 1 || page.HasMore {
+					t.Fatal("invalid outcome response", page, err)
+				}
+				if path == "/api/v1/tasks/outcomes" && len(page.Items) != 0 || path != "/api/v1/tasks/outcomes" && (len(page.Items) != 1 || page.Items[0].ID != "own-task") {
+					t.Fatal("baseline history or another owner leaked", page)
+				}
+			}
 		})
 	}
 	for _, path := range []string{"/api/v1/runtime/control", "/api/v1/runtime/resources", "/api/v1/terminals", "/api/v1/usage/policy"} {
@@ -136,6 +150,11 @@ func TestBrowserReadRoutesReachApplication(t *testing.T) {
 		browser.ServeHTTP(w, r)
 		if w.Code != http.StatusNotFound {
 			t.Fatal("private or unsupported route published", path, w.Code, w.Body.String())
+		}
+	}
+	for _, query := range []string{"after=", "after=-1", "after=9007199254740992", "after=nope"} {
+		if _, err := app.Call(ctx, Request{Method: "GET", Path: "/api/v1/tasks/outcomes?" + query}); err == nil {
+			t.Fatal("invalid outcome cursor accepted", query)
 		}
 	}
 }

@@ -246,13 +246,3 @@ type APIError struct {
 }
 
 func (e APIError) Error() string { return e.Code + ": " + e.Message }
-
-type AssistantNotifications struct {
-	Cursors  map[string]int64        `json:"cursors"`
-	Messages []AssistantNotification `json:"messages"`
-}
-type AssistantNotification struct {
-	AssistantID string  `json:"assistant_id"`
-	Sequence    int64   `json:"sequence"`
-	Message     Message `json:"message"`
-}

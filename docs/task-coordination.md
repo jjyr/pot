@@ -137,6 +137,28 @@ provided.
 Task persistence uses schema version 5. Development builds use an independent
 data root; unsupported storage formats are rejected without rewriting files.
 
+## Client notification outcomes
+
+`GET /api/v1/tasks/outcomes` is an owner-scoped, read-only projection for running
+clients. Without `after`, it returns the current outcome `cursor` with empty
+`items`, establishing a baseline without reading the archive. With `after=CURSOR`,
+it returns up to 100 transitions ordered by durable `sequence`, plus `cursor`
+and `has_more`. Advance to the returned cursor and continue while `has_more`.
+Sequences are safe JSON integers; gaps belonging to other owners are expected.
+
+Terminal phase changes append to `task_outcomes` in the same transaction as the
+Task. Rows contain only sequence, owner, Task ID, title, phase and update time;
+they include no goal, result text, tool arguments or credentials. Repeated
+same-phase metadata writes add no row. A complete-to-failed schedule validation
+also records a transition. Owner/sequence indexes bound each incremental read.
+The projection has no subscriptions, delivery workers or acknowledgments and
+does not change Agent result reporting. Initial startup and reconnect establish
+a fresh baseline rather than replaying old outcomes.
+
+After a committed outcome advances the indexed head, Control invalidates
+`task-outcomes`. Ordinary transcript updates still invalidate `tasks` but do not
+wake the client notification reader. See [System notifications](shared-ui.md#system-notifications).
+
 ## Execution transcript
 
 `GET /api/v1/tasks/{id}/events?after=CURSOR&limit=100` reads a bounded,
