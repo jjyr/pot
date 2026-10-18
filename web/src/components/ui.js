@@ -18,6 +18,7 @@ import {reconcile} from './reconcile.mjs';
 import {createRefreshQueue,relevantChange} from '../state/refresh.mjs';
 import {taskElapsed,bindTaskClock} from './task-time.mjs';
 import {bindResumeRecovery} from '../state/resume.mjs';
+import {bindViewport} from './viewport.mjs';
 
 function el(tag, className = '', text) {
   const element = document.createElement(tag);
@@ -151,16 +152,12 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const reducedChanged=()=>{client.setReducedMotion?.(reducedMotion.matches).catch(()=>{});if(reducedMotion.matches)reactions.clear();if(!disposed)renderShell();};
   client.setReducedMotion?.(reducedMotion.matches).catch(()=>{});
   reducedMotion.addEventListener('change',reducedChanged);window.addEventListener('focus',focusRead);document.addEventListener('visibilitychange',focusRead);window.addEventListener('storage',readStorage);
-  const viewport = window.visualViewport;
-  const viewportChanged = () => {
-    root.style.height = `${viewport ? viewport.height : innerHeight}px`;
-    editor.resize();
-  };
   const editor = bindComposer(input, {
     onInput: text => { setDraft(state, text, editorOwner); updateControls(); },
     onSend: submit,
     onCompositionEnd: () => { syncEditor(); updateControls(); },
   });
+  const stopViewport = bindViewport(document.documentElement, {onResize: () => editor.resize()});
   const restoredAttachmentFailures=new Set(),attachmentAttempts=new Map();
   const attachmentUI=client.production?createAttachmentComposer({client,form,input,getKey:()=>editorOwner,getCaps:()=>state.snapshot?.agent?.attachments,isSending:()=>state.pending.has(editorOwner),canAdd:()=>route==='chat'&&!!state.snapshot&&connection==='connected'&&!state.pending.has(editorOwner)&&!selectedAssistant?.offline,changed:()=>updateControls(),locale:()=>locale}):null;
   if(attachmentUI){form.classList.add('has-attachments');attachmentUI.toolbar.append(send);}
@@ -411,7 +408,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const closeMenu = button('close', t('close'));
     closeMenu.onclick = () => { menuOpen = false; renderShell(); };
     menuHeading.append(closeMenu);
-    menu.append(menuHeading, navigation(true));
+    const menuContent=el('div','mobile-menu-content');
+    menuContent.append(menuHeading, navigation(true));menu.append(menuContent);
     menu.hidden = !menuOpen || !narrow;
     menu.setAttribute('aria-label', t('menu'));
     workspace.inert = directory.inert = titlebar.inert = !menu.hidden;
@@ -680,7 +678,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let swipe = null;
   const pointerDown = event => {
     if(!media.matches || surface==='tray' || event.pointerType==='mouse')return;
-    if(!menuOpen&&event.clientX>24)return;
+    if(!menuOpen&&event.clientX>root.getBoundingClientRect().left+parseFloat(getComputedStyle(root).paddingLeft)+24)return;
     swipe={id:event.pointerId,x:event.clientX,y:event.clientY,menu:menuOpen,active:false};
   };
   const pointerMove = event => {
@@ -704,9 +702,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const mediaChanged = () => { menuOpen = false; renderShell(); };
   document.addEventListener('keydown', keydown);
   media.addEventListener('change', mediaChanged);
-  viewport?.addEventListener('resize', viewportChanged);
-  window.addEventListener('resize', viewportChanged);
-  renderShell();viewportChanged();
+  renderShell();editor.resize();
   function attachChanges(){
     stopChanges();stopChanges=client.changes((topics,source={})=>{
       const keys=Array.isArray(topics)?topics:Object.keys(topics||{});
@@ -732,8 +728,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     window.removeEventListener('pot:preference',preferencesChanged);
     document.removeEventListener('keydown', keydown);window.removeEventListener('popstate',popNavigation);
     media.removeEventListener('change', mediaChanged);
-    viewport?.removeEventListener('resize', viewportChanged);
-    window.removeEventListener('resize', viewportChanged);
+    stopViewport();
     root.replaceChildren();
   };
 }
