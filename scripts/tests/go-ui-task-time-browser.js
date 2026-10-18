@@ -39,7 +39,7 @@ async page=>{
   for(const [name,width]of [['desktop',1200],['mobile',390]]){
    await page.setViewportSize({width,height:850});await page.locator('.background-tasks').scrollIntoViewIfNeeded();
    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Tasks fit '+name);
-   if(!state.before){const bounds=await elapsed().boundingBox(),title=await page.locator('.background-task').filter({hasText:'独立 worktree'}).locator('.background-task-title').boundingBox();assert(width<720?bounds.y>=title.y+title.height:bounds.x>=title.x+title.width,'Elapsed time follows responsive layout');}
+   if(!state.before){const bounds=await elapsed().boundingBox(),title=await page.locator('.background-task').filter({hasText:'独立 worktree'}).locator('.background-task-title').boundingBox();assert(bounds.y>=title.y+title.height,'Elapsed time stays in the task metadata below its title');}
    if(state.screenshots)await page.screenshot({path:state.screenshots+'/chat-task-time-'+name+(state.before?'-before.png':'-after.png')});
   }
   await page.setViewportSize({width:1200,height:850});await page.getByRole('button',{name:'任务',exact:true}).first().click();await page.locator('.task-row').first().waitFor();
