@@ -197,10 +197,10 @@ assert.equal(newBootSend.request.boot_id, 'third-boot');
 const fourthEpoch = beginSubscription(state);
 assert(acceptSnapshot(state, snapshot({boot_id: 'third-boot', owner_id: 'new-owner', cursor: '1'}), fourthEpoch));
 const afterReconnect = beginSend(state, 'unused-id');
-assert.equal(afterReconnect.request.request_id, 'new-boot-request', 'uncertain in-flight sends reconcile after reconnect');
-assert(!settleSend(state, newBootSend, true), 'an acknowledgement from a retired attachment cannot settle the new request');
-assert.equal(draft(state), 'uncertain');
-settleSend(state, afterReconnect, true);
+assert.equal(afterReconnect,null,'an unknown in-flight send remains locked across reconnect');
+assert.equal(state.pending.get(newBootSend.key),newBootSend);
+assert(settleSend(state,newBootSend,true),'the captured receipt can settle only its original attempt');
+assert.equal(draft(state),'');
 assert(!acceptSnapshot(state, snapshot({boot_id: 'third-boot', owner_id: 'new-owner', running: true, turn_id: null, cursor: '2'}), fourthEpoch), 'active turns must carry a cancellation target');
 console.log('Go UI state and DOM composer checks passed');
 

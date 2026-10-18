@@ -34,6 +34,11 @@ export const messages = {
     "notifications.failed":"Could not update notification permission or preferences. You can try again in settings.",
     "notifications.details":"Notification error details",
 
+    'send.guidance':'Send guidance',
+    'send.confirming':'Confirming the previous message…',
+    'send.unknown':'The previous message may have been accepted. Confirm it before sending another.',
+    'send.checkRetry':'Check and retry',
+    'send.rejected':'The message was not accepted. Your draft is preserved.',
     'attachments.add':'Add attachment', 'attachments.images':'Images', 'attachments.pdf':'PDF',
     'attachments.modelUnsupported':'Current model does not support image or PDF uploads',
     'attachments.imagesUnsupported':'Current model does not support images', 'attachments.pdfUnsupported':'Current model does not support PDF uploads',
@@ -227,6 +232,11 @@ export const messages = {
     "notifications.failed":"无法更新通知权限或偏好，可在设置中重试。",
     "notifications.details":"通知错误详情",
 
+    'send.guidance':'发送指导',
+    'send.confirming':'正在确认上一条消息…',
+    'send.unknown':'上一条消息可能已被接受，请先确认后再发送。',
+    'send.checkRetry':'查证并重试',
+    'send.rejected':'消息未被接受，已保留草稿。',
     'attachments.add':'添加附件', 'attachments.images':'图片', 'attachments.pdf':'PDF',
     'attachments.modelUnsupported':'当前模型不支持图片或 PDF 上传',
     'attachments.imagesUnsupported':'当前模型不支持图片', 'attachments.pdfUnsupported':'当前模型不支持 PDF 上传',

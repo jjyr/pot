@@ -144,7 +144,7 @@ func (c *Conversation) Steer(ctx context.Context, r SteerRequest) (protocol.Send
 	} else {
 		turn = c.turn.Request.RequestID
 	}
-	message := protocol.Message{ID: messageID, ConversationID: c.options.ConversationID, Role: protocol.User, Text: r.Text, Attachments: r.Attachments, References: r.References, Status: protocol.Accepted, CreatedAtMS: storage.Now(), Steering: true}
+	message := protocol.Message{ID: messageID, ConversationID: c.options.ConversationID, Role: protocol.User, Text: r.Text, Attachments: r.Attachments, References: r.References, Status: protocol.Accepted, CreatedAtMS: storage.Now(), Steering: true, AcceptedRequestID: r.RequestID, AcceptedTurnID: r.UserMessageID}
 	event, err := c.store.SaveWithMutation(ctx, message, func(tx *sql.Tx) error {
 		if duplicate {
 			return nil
