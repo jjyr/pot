@@ -106,6 +106,6 @@ async page => {
   assert(reads.some(read=>read.after==='4')&&reads.some(read=>Number(read.after)>4),'Event reads advance the cursor');
   assert(reads.every(read=>read.owner==='alpha'&&read.space==='local'),'Task reads retain owner and Space');
   assert(errors.length===0,'No browser exceptions: '+errors.join('; '));
-  return {checks:'conversation layout, scoped approvals and provenance, input bookmarks, menu controls, fixed composer, IME, retry identity, scroll following, terminal deduplication, draft/disclosure/navigation retention, mobile layout and cached offline output'};
+  return {passed:true,checks:'conversation layout, scoped approvals and provenance, input bookmarks, menu controls, fixed composer, IME, retry identity, scroll following, terminal deduplication, draft/disclosure/navigation retention, mobile layout and cached offline output'};
  }finally{await page.unroute('**/api/v1/**',routeHandler);await page.unroute('**/access/status',access);page.off('pageerror',onError);}
 }

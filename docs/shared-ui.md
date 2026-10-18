@@ -94,6 +94,12 @@ exposes Pause/Resume; pausing takes effect at a safe model boundary and preserve
 in-flight work. Task Configuration edits Provider allowances with revision CAS,
 independently of concurrency and assistant model selection.
 
+Inline machine permission selections retain a separate draft during background
+updates. A dirty selection keeps its original policy revision for compare-and-swap
+saves. An external change exposes a reload action; only that explicit reload or a
+successful save adopts the latest policy. Refreshing status never silently rebases
+an unsaved choice onto a different revision.
+
 Conversation and Task stream contracts are in [UI events](ui-events.md).
 
 ## Read state and activity

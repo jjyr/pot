@@ -1,7 +1,9 @@
+import {reconcile} from './reconcile.mjs';
 import {node as n,action,field} from './primitives.mjs';
 import {icon} from './icons.mjs';
 
-export function renderMachinePermissions({root,machine,policy,request,scope,locale,refresh,edit,draft,isCurrent,stale=false}) {
+export function renderMachinePermissions({root:target,machine,policy,request,scope,locale,refresh,edit,draft,isCurrent,stale=false}) {
+  const root=n('div','machine-permissions');
   const tr=(en,zh)=>locale()==='zh-CN'?zh:en;
   const labels={ask:tr('Protected · sandbox by default','受保护 · 默认沙箱'),allow:tr('Trusted · host execution','可信 · 宿主执行'),deny:tr('Blocked','禁止执行')};
   const descriptions={ask:tr('Sandbox by default; host execution requires authorization.','默认在沙箱内执行，宿主执行需授权。'),allow:tr('Host execution bypasses file and socket protection.','默认在宿主执行，不受文件和 socket 隔离保护。'),deny:tr('No new execution can start.','不允许启动新的执行。')};
@@ -17,7 +19,7 @@ export function renderMachinePermissions({root,machine,policy,request,scope,loca
       if(!isCurrent())throw Error(tr('Control identity changed. Reopen Machines.','Control 身份已变化，请重新打开机器页。'));
       await request('/api/v1/permissions',{...scope,method:'POST',body});
       draft.settle(configure);await refresh();
-    }catch(error){draft.settle(false);draft.error=error.message;if(root.isConnected)update();else await refresh();}
+    }catch(error){draft.settle(false);draft.error=error.message;if(target.isConnected)update();else await refresh();}
   };
   const editor=existing=>{
     const context=existing?.context||{};
@@ -38,9 +40,9 @@ export function renderMachinePermissions({root,machine,policy,request,scope,loca
   const mode=field(tr('Default execution','默认执行方式'),draft.values.execution_access,{choices:Object.entries(labels)});
   mode.row.classList.add('permission-default');mode.row.querySelector('.form-label').append(n('small','hint',descriptions[current.execution_access]));
   const changes=n('div','permission-changes'),conflict=n('p','inline-error'),save=action(tr('Save permissions','保存权限'),()=>mutate({action:'configure',machine_id:id,machine_policy:{execution_access:draft.values.execution_access,revision:draft.values.revision}},{configure:true}),{primary:true});
-  const cancel=action(tr('Cancel','取消'),()=>{draft.settle(true,current);draft.error='';mode.input.value=current.execution_access;update();});
+  const cancel=action(tr('Cancel','取消'),()=>{draft.settle(true,current);draft.error='';target.querySelector('.permission-default select').value=current.execution_access;update();});
   const controls=n('div','editor-actions');controls.append(cancel,save);changes.append(n('p','hint permission-warning',warning),conflict,controls);
-  mode.input.addEventListener('change',()=>{draft.set('execution_access',mode.input.value);update();});
+  mode.input.onchange=event=>{draft.set('execution_access',event.currentTarget.value);update();};
   root.append(mode.row,changes,status);
   if(stale)root.append(n('p','hint',tr('Space unavailable. Cached permissions are read-only.','Space 不可用，缓存权限只读。')));
   if(application&&application.state!=='applied'){
@@ -53,6 +55,7 @@ export function renderMachinePermissions({root,machine,policy,request,scope,loca
   if(!rules.length)content.append(n('p','hint',tr('No permanent command permissions.','暂无永久命令授权。')));
   for(const rule of rules){
     const row=n('div','permission-rule'),command=n('div','row-info'),controls=n('div','editor-actions');
+    row.dataset.viewKey=rule.id;
     command.append(n('pre','tool-code',rule.context.command),n('p','hint',rule.context.directory),n('small','hint',`${ruleLabels[rule.policy]} · ${rule.context.shell}${rule.context.interactive?' · '+tr('interactive','交互式'):''}`));
     const metadata=n('details','permission-rule-metadata');metadata.append(n('summary','hint',tr('Execution context and update','执行上下文与更新信息')));
     const context=n('pre','tool-code');context.textContent=JSON.stringify(rule.context,null,2);metadata.append(context,n('p','hint',`${rule.updated_at||''} · ${rule.updated_by||''}`));command.append(metadata);
@@ -70,10 +73,12 @@ export function renderMachinePermissions({root,machine,policy,request,scope,loca
   }
   function update(){
     const conflicted=draft.dirty&&draft.values.revision!==current.revision;
-    for(const button of root.querySelectorAll('button'))button.disabled=blocked()||draft.dirty&&button!==save&&button!==cancel;
-    mode.input.disabled=blocked();cancel.disabled=draft.pending;save.disabled=blocked()||conflicted;
+    const liveSave=target.querySelector('.permission-changes .primary'),liveCancel=target.querySelector('.permission-changes .control');
+    for(const button of target.querySelectorAll('button'))button.disabled=blocked()||draft.dirty&&button!==liveSave&&button!==liveCancel;
+    target.querySelector('.permission-default select').disabled=blocked();liveCancel.disabled=draft.pending;liveSave.disabled=blocked()||conflicted;
+    const changes=target.querySelector('.permission-changes'),conflict=changes.querySelector('.inline-error'),status=target.querySelector('.permission-status');
     changes.hidden=!draft.dirty;conflict.hidden=!conflicted;conflict.textContent=conflicted?tr('Permissions changed elsewhere. Cancel to load the latest policy before editing again.','权限已在其他位置变更，请取消以载入最新策略后重新编辑。'):'';
     status.textContent=draft.error||'';
   }
-  update();
+  reconcile(target,root);update();
 }

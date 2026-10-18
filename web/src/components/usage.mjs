@@ -1,3 +1,4 @@
+import {reconcile} from './reconcile.mjs';
 import {node as n,action,table} from './primitives.mjs';
 
 export function usageNumbers(locale) {
@@ -14,16 +15,14 @@ export function usageTooltip(target,{title,rows=[],note=''}) {
   for(const [label,value]of rows){const row=n('div','usage-tooltip-row');row.append(n('span','',label),n('span','',value));tip.append(row);}
   if(note)tip.append(n('p','hint',note));
   target.append(tip);target.tabIndex=0;target.setAttribute('aria-describedby',tip.id);
-  let pinned=false;
-  tip.addEventListener('toggle',event=>{if(event.newState==='closed')pinned=false;});
-  const show=()=>{if(!tip.isConnected)return;tip.showPopover();const rect=target.getBoundingClientRect(),box=tip.getBoundingClientRect();tip.style.left=`${Math.max(8,Math.min(rect.left+(rect.width-box.width)/2,innerWidth-box.width-8))}px`;tip.style.top=`${Math.max(8,rect.top>=box.height+16?rect.top-box.height-8:Math.min(innerHeight-box.height-8,rect.bottom+8))}px`;};
-  const hide=()=>{tip.hidePopover();};
-  target.addEventListener('pointerenter',show);
-  target.addEventListener('pointerleave',()=>{if(!pinned&&!target.matches(':focus-visible'))hide();});
-  target.addEventListener('focus',show);
-  target.addEventListener('blur',()=>{pinned=false;hide();});
-  target.addEventListener('click',()=>{pinned=!pinned;if(pinned)show();else hide();});
-  target.addEventListener('keydown',event=>{if(event.key==='Escape'){pinned=false;hide();}else if(event.key==='Enter'||event.key===' '){event.preventDefault();pinned=!pinned;if(pinned)show();else hide();}});
+  const show=target=>{const tip=target.querySelector('.usage-tooltip');if(!tip?.isConnected)return;tip.showPopover();const rect=target.getBoundingClientRect(),box=tip.getBoundingClientRect();tip.style.left=`${Math.max(8,Math.min(rect.left+(rect.width-box.width)/2,innerWidth-box.width-8))}px`;tip.style.top=`${Math.max(8,rect.top>=box.height+16?rect.top-box.height-8:Math.min(innerHeight-box.height-8,rect.bottom+8))}px`;};
+  const hide=target=>target.querySelector('.usage-tooltip')?.hidePopover();
+  target.onpointerenter=event=>show(event.currentTarget);
+  target.onpointerleave=event=>{const node=event.currentTarget;if(node.dataset.pinned!=='true'&&!node.matches(':focus-visible'))hide(node);};
+  target.onfocus=event=>show(event.currentTarget);
+  target.onblur=event=>{event.currentTarget.dataset.pinned='false';hide(event.currentTarget);};
+  target.onclick=event=>{const node=event.currentTarget;node.dataset.pinned=String(node.dataset.pinned!=='true');if(node.dataset.pinned==='true')show(node);else hide(node);};
+  target.onkeydown=event=>{const node=event.currentTarget;if(event.key==='Escape'){node.dataset.pinned='false';hide(node);}else if(event.key==='Enter'||event.key===' '){event.preventDefault();node.onclick(event);}};
   return target;
 }
 
@@ -65,14 +64,14 @@ export function createUsageList({root,kind,title,params,owner,request,token,curr
   let offset=offsets.get(key)||0,sequence=0;
   const {exact,compact}=usageNumbers(locale);
   function render(value,stale=false){
-    const rows=value.items||[],fragment=document.createDocumentFragment();
+    const rows=value.items||[],fragment=n('div');
     if(!rows.length)fragment.append(n('p','hint',tr('No records yet','暂无记录')));
     else if(kind==='models')for(const model of rows){const row=n('div','usage-model-row'),line=n('div','usage-model-title');line.append(n('span','',`${model.agent==='pot'?'Pot':model.agent} · ${model.model}`),usageTooltip(n('span','usage-value',`${compact(model.input+model.output)} tokens`),{title:model.model,rows:usageRows(model,locale,tr)}));row.append(line,n('p','hint',`${tr('Input','输入')} ${compact(model.input)} · ${tr('Cached input','缓存输入')} ${compact(model.cache)} · ${tr('Output','输出')} ${compact(model.output)}`));if(model.unknown)row.append(n('p','hint',tr(`${model.unknown} incomplete records`,`${model.unknown} 条不完整记录`)));fragment.append(row);}
     else if(kind==='requests')fragment.append(table([tr('Time','时间'),tr('Model','模型'),tr('Input','输入'),tr('Cached input','缓存输入'),tr('Output','输出'),tr('State','状态')],rows.map(record=>[record.label,record.model,usageTooltip(n('span','usage-value',exact(record.input)),{title:record.label,rows:usageRows(record,locale,tr)}),record.input==null?'—':exact(record.cache),exact(record.output),record.state])));
     else if(kind==='tools')fragment.append(table([tr('Tool','工具'),tr('Calls','调用次数'),tr('Failed','失败'),tr('Duration (ms)','耗时（毫秒）')],rows.map(tool=>[tool.name,exact(tool.calls),exact(tool.failed),exact(tool.duration_ms)])));
     else fragment.append(table([tr('Time','时间'),tr('State','状态'),tr('Before','之前'),tr('After','之后')],rows.map(record=>[record.label,record.state,exact(record.tokens_before),exact(record.tokens_after)])));
     if(offset||value.next_offset!=null){const footer=n('div','usage-pagination');footer.append(n('span','hint',`${offset+1}–${offset+rows.length}`),action(tr('Previous page','上一页'),()=>load(Math.max(0,offset-20)),{disabled:!offset||stale}),action(tr('Next page','下一页'),()=>load(value.next_offset),{disabled:value.next_offset==null||stale}));fragment.append(footer);}
-    content.replaceChildren(fragment);status.replaceChildren();if(stale)status.append(n('p','inline-error',tr('Cached data · unavailable','缓存数据 · 当前不可用')),action(tr('Retry','重试'),()=>load(offset)));
+    reconcile(content,fragment);status.replaceChildren();if(stale)status.append(n('p','inline-error',tr('Cached data · unavailable','缓存数据 · 当前不可用')),action(tr('Retry','重试'),()=>load(offset)));
   }
   async function load(next=offset){
     if(!current())return;const query=new URLSearchParams({...params,offset:next}),path=`/api/v1/usage/${kind}?${query}`,cacheKey=JSON.stringify([key,next]),attempt=++sequence,buttons=[...content.querySelectorAll('button')].map(button=>[button,button.disabled]);
@@ -81,5 +80,5 @@ export function createUsageList({root,kind,title,params,owner,request,token,curr
     catch(reason){if(!current()||attempt!==sequence)return;const saved=cache.get(cacheKey);if(saved){offset=next;offsets.set(key,offset);render(saved,true);}else {content.querySelector('.usage-list-skeleton')?.remove();status.replaceChildren(n('p','inline-error',reason.message),action(tr('Retry','重试'),()=>load(next)));for(const [button,disabled]of buttons)button.disabled=disabled;}}
     finally{if(current()&&attempt===sequence)region.removeAttribute('aria-busy');}
   }
-  return load();
+  const ready=load();ready.refresh=()=>load();return ready;
 }

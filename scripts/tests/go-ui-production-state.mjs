@@ -2,6 +2,17 @@ import assert from 'node:assert/strict';
 import {createEditorSession,createRequestGate} from '../../web/src/state/editor.mjs';
 import {scopedPath,normalizeSnapshot,createProductionClient,decodeDesktopResponse,APIError} from '../../web/src/adapters/production.mjs';
 import {createTopicVersions} from '../../web/src/state/changes.mjs';
+import {createRefreshQueue,relevantChange} from '../../web/src/state/refresh.mjs';
+const refreshReads=[],refreshErrors=[];let refreshActive=true;
+const refreshQueue=createRefreshQueue(()=>new Promise((resolve,reject)=>refreshReads.push({resolve,reject})),{active:()=>refreshActive,onError:error=>refreshErrors.push(error.message)});
+const refreshFirst=refreshQueue.run();for(let index=0;index<20;index++)refreshQueue.run();
+assert.equal(refreshReads.length,1,'Changes never overlap or cancel an active read');refreshReads[0].resolve();await refreshFirst;await Promise.resolve();
+assert.equal(refreshReads.length,2,'A burst requires just one later read');refreshReads[1].reject(Error('Offline'));await Promise.resolve();await Promise.resolve();
+assert.deepEqual(refreshErrors,['Offline'],'Background failures retain their diagnostic');
+refreshActive=false;refreshQueue.close();const refreshCount=refreshReads.length;await refreshQueue.run();assert.equal(refreshReads.length,refreshCount,'Retired views cannot start reads');
+assert.equal(relevantChange(['usage'],['machines'],'local',{space:'local'}),false);
+assert.equal(relevantChange(['machines'],['machines'],'local',{space:'remote'}),false);
+assert.equal(relevantChange(['machines'],['machines'],'local',{space:'local'}),true);
 const cancelledPreparation={id:'request-proof',state:'cancelled',error:'Cancelled by owner'};
 assert.deepEqual(decodeDesktopResponse(JSON.stringify(cancelledPreparation)),cancelledPreparation,'Successful native cancellation retains its domain error text without a false HTTP failure');
 assert.equal(decodeDesktopResponse(cancelledPreparation),cancelledPreparation,'Object DTO identity is preserved');
@@ -52,6 +63,9 @@ globalThis.EventSource=class {
   addEventListener(type,handler){this.handlers.set(type,handler);}
   close(){this.closed=true;}
 };
+const changeEvents=[],stopChanges=client.changes((topics,source)=>changeEvents.push({topics,source}),{space:'local'});
+sources.at(-1).handlers.get('changed')({data:JSON.stringify({topics:{usage:1}}),lastEventId:'boot:1'});
+assert.deepEqual(changeEvents,[{topics:['usage'],source:{space:'local',boot:'boot'}}],'Change callbacks retain their originating Space and boot');stopChanges();
 const statuses=[];
 const stopStream=client.subscribe(()=>{throw Error('Rendering failed');},(...value)=>statuses.push(value));
 const source=sources.at(-1),receive=source.handlers.get('snapshot');

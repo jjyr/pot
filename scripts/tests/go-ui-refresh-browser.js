@@ -1,0 +1,132 @@
+// Production views with delayed fixture reads, cross-Space changes and CAS writes.
+async page=>{
+ const state=STATE,assert=(value,message)=>{if(!value)throw Error(message);},errors=[];
+ const context=await page.context().browser().newContext({serviceWorkers:'block'});page=await context.newPage();
+ page.on('pageerror',error=>errors.push(error.message));
+ await page.route('**/refresh-fixture',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="/styles.css"><body><main style="height:700px;width:900px;max-width:100%;margin:30px auto;overflow:auto"></main><div class="approval-host"></div><div class="message-column"></div></body></html>'}));
+ const idle=()=>page.waitForFunction(()=>!document.querySelector('main [aria-busy="true"]')&&!refreshFixture.pending.length);
+ try{
+  await page.setViewportSize({width:1200,height:900});await page.goto(state.origin+'/refresh-fixture');
+  await page.evaluate(async()=>{
+   const {createPages}=await import('/components/pages.mjs');
+   const f=window.refreshFixture={calls:[],pending:[],pendingMutations:[],writes:[],hold:'',notices:[],approvals:[]};
+   f.machines=[{id:'host',runtime_id:'host',name:'Development Mac',connected:true,tags:['macos'],policy:{execution_access:'ask',revision:1}}];
+   f.policy={machines:{host:{execution_access:'ask',revision:1}},rules:[],task_grants:[],application:{}};
+   f.providers={profiles:[{id:'p',provider:'p',name:'Fixture Provider',model:'fixture-model',revision:1}],default_provider_id:'p',directory:[],connections:[]};
+   f.usage={total:{input:10,output:2,cache:1,requests:1},agent_models:[{agent:'pot',model:'fixture-model',input:10,output:2}],buckets:[{label:'Today',input:10,output:2,cache:1}],quota:{active:false,policy:{period:'none'}},tools:[],requests:[]};
+   f.schedule={id:'plan',spec:{title:'Nightly review',goal:'Review notes',enabled:true,timezone:'UTC'},next_label:'Tomorrow',next_at_ms:1};f.runs=[{id:'run',scheduled_label:'Today',state:'running',summary:'Reviewing'}];
+   f.integration={id:'github',name:'GitHub',login_available:true,status:'disconnected',login:{id:'login',status:'pending',user_code:'TEST-CODE',authorization_url:'https://example.invalid/authorize'}};
+   f.response=(path,options)=>{
+    if(options.method){const body=options.body||{};f.writes.push({path,body,...options});
+     if(path==='/api/v1/runtime/control'&&body.action==='create_invitation')return {invitation:'single-use-fixture',expires_at_ms:2000000000000};
+     if(path==='/api/v1/permissions'&&body.action==='configure'){if(body.machine_policy.revision!==f.policy.machines.host.revision)throw Error('Revision conflict');f.policy.machines.host={...body.machine_policy,revision:f.policy.machines.host.revision+1};}
+     return {};
+    }
+    const url=new URL(path,location.origin),name=url.pathname;
+    if(name==='/api/v1/machines')return {items:f.machines};
+    if(name==='/api/v1/runtime/control')return options.space==='remote'?{role:'embedded',identity:{runtime_id:'host'}}:{role:'control',identity:{runtime_id:'host'}};
+    if(name==='/api/v1/permissions')return {policy:f.policy,pending:f.approvals};
+    if(name==='/api/v1/providers')return f.providers;
+    if(name==='/api/v1/integrations')return {items:[f.integration]};
+    if(name==='/api/v1/usage/summary')return f.usage;
+    if(name==='/api/v1/usage/policy')return {period:'none'};
+    if(name==='/api/v1/schedules')return url.searchParams.has('selected')?{selected:f.schedule,runs:f.runs}:{items:[f.schedule]};
+    if(name==='/api/v1/about')return {version:'fixture',licenses:[]};
+    if(name==='/api/v1/usage/providers')return {providers:[]};
+    return {items:[]};
+   };
+   f.client={desktop:true,runtime:{boot_id:'fixture'},spaces:[{id:'local',name:'Local',kind:'local',connected:true}],assistants:[{id:'a',name:'Assistant',space_id:'local'}],scope:()=>({space:'local',owner:'a'}),request:(path,options={})=>{
+    f.calls.push({path,options});if(options.method&&f.holdMutations)return new Promise((resolve,reject)=>f.pendingMutations.push({path,options,resolve,reject}));
+    if(!options.method&&f.hold&&path.startsWith(f.hold))return new Promise((resolve,reject)=>f.pending.push({path,options,resolve,reject}));
+    try{return Promise.resolve(structuredClone(f.response(path,options)));}catch(error){return Promise.reject(error);}
+   }};
+   f.release=()=>{for(const call of f.pending.splice(0))call.resolve(structuredClone(f.response(call.path,call.options)));};
+   f.pages=createPages({client:f.client,host:document.querySelector('main'),approvalHost:document.querySelector('.approval-host'),locale:()=> 'en',notify:message=>f.notices.push(message),changed:()=>{},titleChanged:()=>{},openChat:()=>{}});
+   await f.pages.show('usage');
+  });
+  await page.locator('.usage-total strong').filter({hasText:/^12$/}).waitFor();
+  await page.evaluate(()=>{const f=refreshFixture;f.metric=document.querySelector('.usage-total');f.bar=document.querySelector('.chart-column');f.bar.focus();f.hold='/api/v1/usage/summary';f.refresh=f.pages.refresh(['usage']);for(let i=0;i<20;i++)f.pages.refresh(['usage']);});
+  assert(await page.evaluate(()=>refreshFixture.pending.length===1&&refreshFixture.metric.isConnected&&refreshFixture.bar===document.activeElement),'Usage refresh keeps metrics and focused chart while coalescing a burst');
+  await page.evaluate(async()=>{const f=refreshFixture;f.usage.total.input=20;f.release();await f.refresh;});
+  await page.waitForFunction(()=>refreshFixture.pending.length===1);await page.evaluate(()=>{refreshFixture.hold='';refreshFixture.release();});await idle();
+  assert(await page.evaluate(()=>refreshFixture.metric===document.querySelector('.usage-total')&&refreshFixture.bar===document.querySelector('.chart-column')&&document.activeElement===refreshFixture.bar),'Usage patches the existing cards and chart: '+await page.evaluate(()=>JSON.stringify({metric:refreshFixture.metric===document.querySelector('.usage-total'),bar:refreshFixture.bar===document.querySelector('.chart-column'),focus:document.activeElement?.outerHTML?.slice(0,300),connected:refreshFixture.bar.isConnected})));
+  await page.evaluate(async()=>{const f=refreshFixture;f.hold='/api/v1/usage/summary';f.refresh=f.pages.refresh(['usage']);for(const call of f.pending.splice(0))call.reject(Error('Offline'));await f.refresh;f.hold='';});
+  assert(await page.evaluate(()=>refreshFixture.metric.isConnected&&document.querySelector('.space-availability')),'Usage failures retain the cached projection');
+  await page.evaluate(()=>refreshFixture.pages.show('machines'));await idle();
+  const reads=await page.evaluate(()=>refreshFixture.calls.length);await page.getByText('More',{exact:true}).click();
+  assert(await page.evaluate(()=>refreshFixture.calls.length)===reads,'Expanding a machine performs no network read');
+  await page.getByRole('button',{name:'Create machine invitation',exact:true}).click();await page.getByLabel('Machine invitation',{exact:true}).waitFor();
+  await page.evaluate(async()=>{const f=refreshFixture;f.invitation=document.querySelector('input[readonly]');f.machine=document.querySelector('.machine-card');f.machines[0].name='Renamed Mac';await f.pages.refresh(['machines']);});
+  assert(await page.evaluate(()=>refreshFixture.machine===document.querySelector('.machine-card')&&refreshFixture.invitation===document.querySelector('input[readonly]')&&refreshFixture.invitation.value==='single-use-fixture'&&document.querySelector('.machine-actions').open),'Machine updates retain expansion and generated invitation');
+  await page.evaluate(async()=>{const f=refreshFixture;f.client.spaces.push({id:'remote',name:'Remote',connected:true});await f.pages.refresh(['spaces']);});
+  assert(await page.locator('.machine-card').count()===2,'Identical machine IDs in different Spaces have distinct cards');
+  await page.evaluate(async()=>{const f=refreshFixture;f.client.spaces.pop();await f.pages.refresh(['spaces']);await f.pages.show('settings');});
+  const aboutReads=await page.evaluate(()=>refreshFixture.calls.filter(call=>call.path==='/api/v1/about').length);
+  await page.evaluate(()=>{refreshFixture.pages.refresh(['tasks']);refreshFixture.pages.refresh(['usage']);});
+  assert(await page.evaluate(()=>refreshFixture.calls.filter(call=>call.path==='/api/v1/about').length)===aboutReads,'General settings ignore unrelated runtime changes');
+  await page.evaluate(()=>refreshFixture.pages.show('machines'));await page.getByLabel('Default execution',{exact:true}).selectOption('allow');
+  await page.evaluate(()=>{const f=refreshFixture;f.mode=document.querySelector('.machine-permissions select');f.mode.focus();f.hold='/api/v1/permissions';f.before=f.calls.length;f.pages.refresh(['permissions'],{space:'other'});});
+  assert(await page.evaluate(()=>refreshFixture.calls.length===refreshFixture.before),'Configuration ignores changes from another Space');
+  await page.evaluate(()=>{const f=refreshFixture;f.refresh=f.pages.refresh(['permissions'],{space:'local'});f.policy.machines.host={execution_access:'deny',revision:2};});
+  if(state.screenshot)await page.screenshot({path:state.screenshot});
+  assert(await page.evaluate(()=>refreshFixture.mode.isConnected&&refreshFixture.mode.value==='allow'),'Pending policy refresh preserves the unsaved selection');
+  await page.evaluate(async()=>{refreshFixture.hold='';refreshFixture.release();await refreshFixture.refresh;});
+  assert(await page.evaluate(()=>refreshFixture.mode===document.querySelector('.machine-permissions select')&&refreshFixture.mode.value==='allow'&&document.activeElement===refreshFixture.mode),'Policy updates preserve the exact select node and dirty draft');
+  assert(await page.locator('.permission-changes .primary').isDisabled(),'Conflicting revisions cannot be saved');
+  assert(await page.evaluate(()=>refreshFixture.writes.every(write=>write.path!=='/api/v1/permissions')),'A conflicting draft cannot issue a stale write');
+  await page.getByRole('button',{name:'Cancel',exact:true}).click();await idle();
+  assert(await page.getByLabel('Default execution',{exact:true}).inputValue()==='deny','Explicit reload adopts the latest permission policy');
+  await page.getByLabel('Default execution',{exact:true}).selectOption('ask');await page.locator('.permission-changes .primary').click();await idle();
+  assert(await page.evaluate(()=>refreshFixture.policy.machines.host.execution_access==='ask'),'Retained Save button uses the current view state');
+  await page.getByLabel('Default execution',{exact:true}).selectOption('allow');await page.evaluate(()=>refreshFixture.holdMutations=true);await page.locator('.permission-changes .primary').click();
+  await page.waitForFunction(()=>refreshFixture.pendingMutations.length===1);
+  await page.evaluate(async()=>{const f=refreshFixture;f.policy.application.host={state:'pending',recovery_required:true};await f.pages.refresh(['permissions']);});
+  assert(await page.locator('.permission-changes .primary').isDisabled(),'An invalidation cannot re-enable an in-flight save');
+  await page.evaluate(()=>{const f=refreshFixture;f.holdMutations=false;for(const call of f.pendingMutations.splice(0))call.resolve(f.response(call.path,call.options));});await idle();
+  assert(await page.locator('.permission-changes .primary').isDisabled(),'Settling a save respects the latest recovery-required state');
+  await page.evaluate(()=>refreshFixture.pages.show('settings'));await page.getByRole('button',{name:'Third-party accounts',exact:true}).click();await page.getByText('TEST-CODE',{exact:true}).waitFor();
+  await page.evaluate(()=>{refreshFixture.login=document.querySelector('.integration-row');refreshFixture.cancel=document.querySelector('.integration-actions button');refreshFixture.cancel.focus();});
+  await page.clock.install();await page.clock.fastForward(1500);await idle();
+  assert(await page.evaluate(()=>refreshFixture.login===document.querySelector('.integration-row')&&refreshFixture.cancel===document.querySelector('.integration-actions button')&&document.activeElement===refreshFixture.cancel),'Login status timer retains row and focused action');
+  await page.evaluate(async()=>{const f=refreshFixture;f.integration={id:'github',name:'GitHub',status:'connected',account:{revision:1,identity:{username:'fixture'}}};await f.pages.refresh(['integrations']);});await page.getByRole('button',{name:'Log out',exact:true}).waitFor();
+  await page.evaluate(()=>refreshFixture.pages.show('tasks'));await page.getByRole('button',{name:'Schedules',exact:true}).click();await page.getByRole('button',{name:'Nightly review',exact:true}).waitFor();
+  await page.evaluate(async()=>{const f=refreshFixture;f.scheduleRow=document.querySelector('.schedule-card');f.schedule.spec.enabled=false;await f.pages.refresh(['schedules']);});
+  assert(await page.evaluate(()=>refreshFixture.scheduleRow===document.querySelector('.schedule-card')&&refreshFixture.scheduleRow.textContent.includes('Paused')),'Schedule lists patch existing cards');
+  await page.getByRole('button',{name:'Nightly review',exact:true}).click();await page.getByRole('button',{name:'Run now',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Remove',exact:true}).click();
+  await page.evaluate(async()=>{const f=refreshFixture;f.history=document.querySelector('tbody tr');f.runButton=document.querySelector('.page-card button');f.runs[0].state='complete';await f.pages.refresh(['schedules']);});
+  assert(await page.evaluate(()=>refreshFixture.history===document.querySelector('tbody tr')&&refreshFixture.history.textContent.includes('complete')&&refreshFixture.runButton===document.querySelector('.page-card button')),'Schedule history updates in place');
+  assert(await page.getByRole('button',{name:'Confirm removal',exact:true}).count()===1,'Background updates retain the removal confirmation');
+  await page.evaluate(async()=>{const f=refreshFixture;f.approvals=[{id:'approval',request:{owner:'a',call_id:'call',turn:'turn',machine_id:'host',tool:'exec_command',args:{cmd:'pwd'}}}];await f.pages.permissions();f.approvalButton=document.querySelector('.approval-actions button');f.approvalButton.focus();await f.pages.permissions();});
+  assert(await page.evaluate(()=>refreshFixture.approvalButton===document.querySelector('.approval-actions button')&&document.activeElement===refreshFixture.approvalButton),'Repeated permission reads retain the same approval action');
+  await page.evaluate(()=>{refreshFixture.hold='/api/v1/schedules';refreshFixture.pages.refresh(['schedules']);refreshFixture.retired=refreshFixture.pending.splice(0);refreshFixture.hold='';});
+  await page.evaluate(()=>refreshFixture.pages.show('usage'));await page.locator('.usage-total strong').filter({hasText:/^22$/}).waitFor();
+  await page.evaluate(()=>{for(const call of refreshFixture.retired)call.resolve({selected:{...refreshFixture.schedule,spec:{title:'Stale title'}}});});
+  assert(await page.getByText('Stale title',{exact:true}).count()===0,'Retired detail reads cannot repaint the next page');
+  await page.clock.resume();
+  await page.evaluate(async()=>{
+   const f=refreshFixture;f.pages.dispose();f.approvals=[];document.body.replaceChildren();const root=document.createElement('div');document.body.append(root);
+   const response=f.response;f.response=(path,options)=>{if(path==='/api/v1/spaces')return {active_space_id:'local',items:f.client.spaces};if(path==='/api/v1/assistants')return f.client.assistants;if(path.startsWith('/api/v1/tasks/query'))return {items:[{id:'background',assistant_id:'a',title:'Background review',phase:'running'}]};return response(path,options);};
+   f.selection={space:'local',owner:'a'};f.client.scope=()=>({...f.selection});f.client.setScope=value=>f.selection={...value};f.client.production=true;
+   f.snapshot={runtime_id:'fixture',boot_id:'fixture',owner_id:'local/a',conversation_id:'chat',cursor:'1',running:false,turn_id:null,messages:[{id:'reply',role:'assistant',text:'Ready',status:'complete'}]};
+   f.client.snapshot=()=>Promise.resolve(structuredClone(f.snapshot));f.client.subscribe=(receive,status)=>{f.receive=receive;status('connected');return ()=>{};};f.client.changes=receive=>{f.changes=receive;return ()=>{};};
+   const {mountApp}=await import('/components/ui.js');f.unmount=mountApp(root,f.client);
+  });
+  await page.locator('.background-task').waitFor();await page.locator('.assistant-search').fill('Assist');
+  await page.evaluate(()=>{const f=refreshFixture;f.search=document.querySelector('.assistant-search');f.search.setSelectionRange(1,3);f.assistantRow=document.querySelector('.assistant-row');f.chatTask=document.querySelector('.background-task');f.nav=document.querySelector('.feature-rail button');f.client.assistants[0].name='Assistant renamed';f.changes(['assistants'],{space:'local'});});
+  await page.getByText('Assistant renamed',{exact:true}).first().waitFor();
+  assert(await page.evaluate(()=>refreshFixture.search===document.querySelector('.assistant-search')&&refreshFixture.search.value==='Assist'&&refreshFixture.search.selectionStart===1&&document.activeElement===refreshFixture.search&&refreshFixture.assistantRow===document.querySelector('.assistant-row')&&refreshFixture.nav===document.querySelector('.feature-rail button')),'Directory updates retain search, selection, focus, assistant rows and navigation');
+  await page.evaluate(()=>{const f=refreshFixture;f.snapshot.cursor='2';f.receive(structuredClone(f.snapshot));f.changes(['tasks'],{space:'local'});});
+  assert(await page.evaluate(()=>refreshFixture.chatTask===document.querySelector('.background-task')),'Chat updates retain the executing task action');
+  await page.getByRole('button',{name:'Preferences',exact:true}).click();
+  await page.evaluate(()=>{const f=refreshFixture;f.menuAction=document.querySelector('.preferences .menu-destination');f.menuAction.focus();f.client.assistants[0].preview='New preview';f.changes(['assistants'],{space:'local'});});
+  await page.getByText('New preview',{exact:true}).waitFor();
+  assert(await page.evaluate(()=>refreshFixture.menuAction===document.querySelector('.preferences .menu-destination')&&document.activeElement===refreshFixture.menuAction),'Open menu actions retain keyboard focus during directory updates');
+  await page.evaluate(()=>{const f=refreshFixture;document.querySelector('.preferences').close();f.approvals=[{id:'early',request:{owner:'a',turn:'turn',call_id:'call',machine_id:'host',tool:'exec_command',args:{cmd:'pwd'}}}];f.changes(['permissions'],{space:'local'});});
+  await page.locator('.approval-card').waitFor();
+  await page.evaluate(()=>{const f=refreshFixture;f.permissionReads=f.calls.filter(call=>call.path==='/api/v1/permissions').length;f.snapshot.cursor='3';f.snapshot.messages.push({id:'call-message',role:'tool',text:'',status:'streaming',tool:{id:'call',turn_id:'turn',name:'exec_command',phase:'waiting_approval',args:{cmd:'pwd'},output:[],target:{runtime_id:'host'},started_at_ms:Date.now()}});f.receive(structuredClone(f.snapshot));});
+  assert(await page.locator('.approval-card').count()===0&&await page.locator('.tool-approval-actions button').count()===3,'A later tool snapshot moves cached approvals into the tool without duplicate cards');
+  assert(await page.evaluate(()=>refreshFixture.calls.filter(call=>call.path==='/api/v1/permissions').length===refreshFixture.permissionReads),'Snapshot reconciliation uses cached approvals without another network read');
+  assert(errors.length===0,errors.join('\n'));return {passed:true,usage:true,machines:true,permission_drafts:true,revision_conflicts:true,integrations:true,schedules:true,approvals:true,navigation:true,shell:true,errors};
+ }finally{await page.evaluate(()=>{window.refreshFixture?.unmount?.();window.refreshFixture?.pages.dispose();});await context.close();}
+}

@@ -370,6 +370,7 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 
 /* Schedules retain the original bounded card list and persistent page footer. */
 .schedules-content>.segments{flex:none}
+.schedule-projection{display:flex;flex-direction:column;flex:1;min-height:0}
 .schedule-list{flex:1;min-height:0;overflow:auto}
 .schedule-card{margin:0;gap:14px}
 .schedule-card>.schedule-title{min-height:28px;height:28px;padding:0 8px;border:0;background:transparent;font-size:12px;text-align:center;flex:none;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}

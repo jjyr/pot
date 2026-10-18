@@ -11,6 +11,8 @@ import {createReplies,replyKey} from '../state/replies.mjs';
 import {bindCompletions} from './completions.mjs';
 import {projectChatReplies} from '../state/chat-replies.mjs';
 import {createReplyBubble} from './reply.mjs';
+import {reconcile} from './reconcile.mjs';
+import {createRefreshQueue,relevantChange} from '../state/refresh.mjs';
 
 function el(tag, className = '', text) {
   const element = document.createElement(tag);
@@ -177,17 +179,19 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     send.disabled = stopping ? selectedAssistant?.offline||cancelPending || connection !== 'connected' : selectedAssistant?.offline|| !snapshot || editorOwner !== ownerKey(snapshot) || pending || !draft(state).trim() || connection !== 'connected';
     input.disabled = !snapshot && !editorOwner;
     const visibleConnection=selectedAssistant?.offline?'offline':connection;
-    status.replaceChildren();
-    status.classList.toggle('has-error', Boolean(error || connectionError) || visibleConnection === 'offline');
-    status.classList.toggle('is-connected',!error&&!connectionError&&visibleConnection==='connected');
+    const projection=status.cloneNode(false);
+    projection.replaceChildren();
+    projection.classList.toggle('has-error', Boolean(error || connectionError) || visibleConnection === 'offline');
+    projection.classList.toggle('is-connected',!error&&!connectionError&&visibleConnection==='connected');
     const replyOwnsConnection=state.snapshot?.running||state.sends.has(editorOwner);
-    if(error||!replyOwnsConnection)status.append(el('span', '', error || connectionError || (visibleConnection === 'connected' ? t(client.production?'connected':'preview') : t(visibleConnection))));
+    if(error||!replyOwnsConnection)projection.append(el('span', '', error || connectionError || (visibleConnection === 'connected' ? t(client.production?'connected':'preview') : t(visibleConnection))));
     if (visibleConnection === 'offline'&&!replyOwnsConnection) {
       const retry = el('button', 'text-button', t('retry'));
       retry.type = 'button';
       retry.onclick = () => loadSnapshot(true);
-      status.append(retry);
+      projection.append(retry);
     }
+    reconcile(status,projection);
     renderMessages();
   }
   function saveNavigation(next,replace=false){const value={potRoute:next,potScope:client.scope?.()||{},potDirectory:directoryOpen};window.history[replace?'replaceState':'pushState'](value,'',location.href);}
@@ -215,7 +219,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   let preferenceControls;
   function renderPreferences() {
-    if(client.production){preferences.classList.add('product-actions');preferences.replaceChildren();const close=button('close',t('close'));close.onclick=()=>preferences.close();preferences.append(close);const action=(label,run)=>{const choice=el('button','menu-destination',label);choice.type='button';choice.onclick=()=>{preferences.close();run();};preferences.append(choice);};if(selectedAssistant){action(t('assistantSettings'),()=>{route='settings';pages.assistant(selectedAssistant);renderShell();});action(t('usage'),()=>{route='usage';pages.conversationUsage(selectedAssistant.name);renderShell();});}if(state.snapshot?.running){const captured={...client.scope()},target=state.snapshot.turn_id,paused=!!state.snapshot.turn?.paused;action(paused?(locale==='zh-CN'?'恢复回复':'Resume turn'):(locale==='zh-CN'?'暂停回复':'Pause turn'),async()=>{try{await client.controlTurn({user_message_id:target,action:paused?'resume':'pause'},captured);}catch(reason){error=reason.message;updateControls();}});}action(t('settings'),()=>navigate('settings'));return;}
+    if(client.production){preferences.classList.add('product-actions');const projection=preferences.cloneNode(false);const close=button('close',t('close'));close.onclick=()=>preferences.close();projection.append(close);const action=(label,run)=>{const choice=el('button','menu-destination',label);choice.type='button';choice.onclick=()=>{preferences.close();run();};projection.append(choice);};if(selectedAssistant){action(t('assistantSettings'),()=>{route='settings';pages.assistant(selectedAssistant);renderShell();});action(t('usage'),()=>{route='usage';pages.conversationUsage(selectedAssistant.name);renderShell();});}if(state.snapshot?.running){const captured={...client.scope()},target=state.snapshot.turn_id,paused=!!state.snapshot.turn?.paused;action(paused?(locale==='zh-CN'?'恢复回复':'Resume turn'):(locale==='zh-CN'?'暂停回复':'Pause turn'),async()=>{try{await client.controlTurn({user_message_id:target,action:paused?'resume':'pause'},captured);}catch(reason){error=reason.message;updateControls();}});}action(t('settings'),()=>navigate('settings'));reconcile(preferences,projection);return;}
     if (!preferenceControls) {
       const heading = el('div', 'preferences-heading');
       const title = el('h2');
@@ -261,7 +265,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
   }
   preferences.addEventListener('close', () => { preferencesOpen = false; });
+  const shellRoots={rail,titlebar,menu};
   function renderShell() {
+    const rail=shellRoots.rail.cloneNode(false),titlebar=shellRoots.titlebar.cloneNode(false),menu=shellRoots.menu.cloneNode(false);
     markVisibleRead();
     if(route!=='chat')completions?.reset();
     window.potErrors?.setTranslator(t);
@@ -319,7 +325,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     directorySignature=nextDirectorySignature;
     const searchValue = directory.querySelector('input')?.value || '';
     const scrollTop = directory.querySelector('.assistant-list')?.scrollTop || 0;
-    directory.replaceChildren();
+    const nextDirectory=directory.cloneNode(false);
     const heading = el('div', 'directory-heading');
     heading.append(el('span', '', t('assistants')));
     const add = button('plus', t(client.production ? 'newAssistant' : 'preview'));
@@ -330,21 +336,19 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     search.type = 'search'; search.placeholder = t('search'); search.setAttribute('aria-label', t('search')); search.value = searchValue;
     const list = el('div', 'assistant-list');
     const items = client.production ? assistants : state.snapshot?.assistants || [{id:'main', name:'Pot', preview:t('preview')}];
-    const rows = [];
     for (const item of items) {
       const selected = (!client.production&&item.id==='main') || selectedAssistant?.id === item.id && selectedAssistant?.space_id === item.space_id;
-      const row = el('button', `assistant-row${selected ? ' is-selected' : ''}`); row.type = 'button';
+      const row = el('button', `assistant-row${selected ? ' is-selected' : ''}`); row.type = 'button';row.dataset.viewKey=JSON.stringify([item.space_id,item.id]);row.dataset.searchName=item.name.toLowerCase();
       row.append(assistantAvatar(item,32)); const labels = el('span', 'assistant-labels'); const name = el('span', 'assistant-name');name.append(el('span','assistant-title',item.name));
       const badge=el('span','owner-badge badge-icon');badge.title=item.space_name||t(item.space_kind==='remote'?'remote':'local');badge.append(icon(item.space_kind==='remote'?'cloud':'machines'));name.append(badge);
       const unread=replies.unread(controlOf(item),item.id,item.reply_count||0);if(unread){const badge=el('span','unread-badge',unread>9?'9+':String(unread));badge.title=String(unread);badge.setAttribute('aria-label',`${unread} ${locale==='zh-CN'?'条未读回复':'unread replies'}`);name.append(badge);row.classList.add('has-unread');}
       labels.append(name, el('span', 'assistant-preview', item.offline ? t('offline') : item.preview || ({failed:t('replyFailed'),needs_configuration:t('setupAI'),ready:t('connected')}[item.phase] || item.phase || '')));
       row.append(labels); row.onclick = () => client.production ? selectAssistant(item) : (directoryOpen = false, renderShell());
-      list.append(row); rows.push({row, name:item.name.toLowerCase()});
+      list.append(row);
     }
     const empty = el('p', 'hint', t(items.length ? 'searchEmpty' : 'noAssistants'));
-    const filter = () => { let count = 0; for (const item of rows) {item.row.hidden = !item.name.includes(search.value.toLowerCase()); if(!item.row.hidden) count++;} empty.hidden = count > 0; };
-    search.oninput = filter; list.append(empty);
-    directory.append(heading, search, list); filter(); list.scrollTop = scrollTop;
+    const filter = search => {let count=0;const list=search.nextElementSibling;for(const row of list.querySelectorAll('.assistant-row')){row.hidden=!row.dataset.searchName.includes(search.value.toLowerCase());if(!row.hidden)count++;}list.querySelector('.hint').hidden=count>0;};
+    search.oninput=event=>filter(event.currentTarget);list.append(empty);nextDirectory.append(heading,search,list);filter(search);reconcile(directory,nextDirectory);directory.querySelector('.assistant-list').scrollTop=scrollTop;
     }
     menu.replaceChildren();
     const menuHeading = el('div', 'mobile-menu-heading', 'Pot');
@@ -355,7 +359,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     menu.hidden = !menuOpen || !narrow;
     menu.setAttribute('aria-label', t('menu'));
     workspace.inert = directory.inert = titlebar.inert = !menu.hidden;
-    if (!menu.hidden) closeMenu.focus({preventScroll: true});
+    reconcile(shellRoots.rail,rail);reconcile(shellRoots.titlebar,titlebar);reconcile(shellRoots.menu,menu);
+    if(!menu.hidden&&!shellRoots.menu.contains(document.activeElement))shellRoots.menu.querySelector('.icon-button')?.focus({preventScroll:true});
     if (preferencesOpen) renderPreferences();
     updateControls();
     requestAnimationFrame(() => { if (!disposed) editor.resize(); });
@@ -365,11 +370,15 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   history.addEventListener('scroll', () => { latest.hidden = nearBottom(); }, {passive: true});
   latest.onclick = scrollBottom;
   const messageNodes = new Map(),toolMemory=new Map();
-  const taskCache=new Map();let taskRefresh=0;
-  async function refreshBackgroundTasks(){
-    if(!client.production||!selectedAssistant)return;
-    const scope=client.scope(),key=JSON.stringify([scope.space,scope.owner]),ticket=++taskRefresh;
-    try{const value=await client.request('/api/v1/tasks/query?scope=active&limit=50',{...scope});if(disposed||ticket!==taskRefresh||key!==JSON.stringify([client.scope().space,client.scope().owner]))return;taskCache.set(key,(value.items||[]).filter(task=>task.phase==='running').map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner})));if(route==='chat')renderMessages();}catch{/* Keep owner-scoped cached rows until an authoritative refresh succeeds. */}
+  const taskCache=new Map();
+  let backgroundTasks=null,backgroundTaskKey='';
+  function refreshBackgroundTasks(){
+    if(!client.production||!selectedAssistant)return Promise.resolve();
+    const scope={...client.scope()},key=JSON.stringify([scope.space,scope.owner]);
+    if(!backgroundTasks||key!==backgroundTaskKey){
+      backgroundTasks?.close();backgroundTaskKey=key;
+      backgroundTasks=createRefreshQueue(async()=>{const value=await client.request('/api/v1/tasks/query?scope=active&limit=50',{...scope,signal:abort.signal});if(disposed||key!==JSON.stringify([client.scope().space,client.scope().owner]))return;taskCache.set(key,(value.items||[]).filter(task=>task.phase==='running').map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner})));if(route==='chat')renderMessages();},{active:()=>!disposed&&key===JSON.stringify([client.scope().space,client.scope().owner])});
+    }return backgroundTasks.run();
   }
   function renderMessages() {
     const follow = nearBottom();
@@ -434,7 +443,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     const lastAssistant=visibleMessages.findLast(message=>message.role==='assistant');
     for(const [id,record]of messageNodes){if(id!==lastAssistant?.viewKey){record.tasks?.remove();record.tasks=null;}}
-    if(client.production&&lastAssistant){const record=messageNodes.get(lastAssistant.viewKey),tasks=taskCache.get(JSON.stringify([client.scope().space,client.scope().owner]))||[];record.tasks?.remove();record.tasks=null;if(tasks.length){const strip=el('div','background-tasks');strip.setAttribute('aria-label',locale==='zh-CN'?'正在执行的后台任务':'Executing background tasks');for(const task of tasks.slice(0,3)){const open=el('button','background-task');open.type='button';open.title=task.title;open.append(el('span','task-activity-dot'),el('span','background-task-title',task.title));open.onclick=()=>{route='tasks';pages.openTask(task);renderShell();};strip.append(open);}if(tasks.length>3){const more=el('button','text-button',locale==='zh-CN'?`还有 ${tasks.length-3} 项任务`:`${tasks.length-3} more tasks`);more.onclick=()=>navigate('tasks');strip.append(more);}record.row.append(strip);record.tasks=strip;}}
+    if(client.production&&lastAssistant){const record=messageNodes.get(lastAssistant.viewKey),tasks=taskCache.get(JSON.stringify([client.scope().space,client.scope().owner]))||[];if(tasks.length){const strip=el('div','background-tasks');strip.setAttribute('aria-label',locale==='zh-CN'?'正在执行的后台任务':'Executing background tasks');for(const task of tasks.slice(0,3)){const open=el('button','background-task');open.type='button';open.dataset.viewKey=JSON.stringify([task._space_id,task.assistant_id,task.id]);open.title=task.title;open.append(el('span','task-activity-dot'),el('span','background-task-title',task.title));open.onclick=()=>{route='tasks';pages.openTask(task);renderShell();};strip.append(open);}if(tasks.length>3){const more=el('button','text-button',locale==='zh-CN'?`还有 ${tasks.length-3} 项任务`:`${tasks.length-3} more tasks`);more.onclick=()=>navigate('tasks');strip.append(more);}if(record.tasks)reconcile(record.tasks,strip);else{record.row.append(strip);record.tasks=strip;}}else{record.tasks?.remove();record.tasks=null;}}
     if (snapshot && !visibleMessages.length) {
       if(!messageColumn.querySelector('.empty-chat'))messageColumn.append(el('p', 'empty-chat', t('first')));
     }else if(visibleMessages.length){
@@ -459,7 +468,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     syncEditor();
     if(markVisibleRead())renderShell();
     renderMessages(); if (restorePosition !== undefined) requestAnimationFrame(() => {history.scrollTop=restorePosition; latest.hidden=nearBottom();}); updateControls();
-    if (client.production) { pages.permissions(); if(initialSnapshot)renderShell(); } else if(initialSnapshot)renderShell();
+    if(client.production)pages.syncApprovals();
+    if(initialSnapshot){if(client.production)pages.permissions();renderShell();}
   }
   const abort = new AbortController();
   async function loadSnapshot(reattach = false) {
@@ -501,23 +511,26 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(client.production&&record)saveNavigation('chat',initial);
     renderShell();attach();pages?.permissions();refreshBackgroundTasks();
   }
-  async function loadDirectory(autoSelect = true) {
+  const directoryQueue=createRefreshQueue(()=>readDirectory(),{active:()=>!disposed});
+  function loadDirectory(){return directoryQueue.run();}
+  async function readDirectory() {
     if (!client.production) return;
-    const ticket = ++directoryEpoch;
+    const ticket = ++directoryEpoch,previousSpaces=JSON.stringify(spaces),previousOwners=JSON.stringify(assistants.map(item=>[item.space_id,item.id,item.name,item.offline]));
     try {
-      const catalog = await client.request('/api/v1/spaces', {owner:'', space:''});
+      const catalog = await client.request('/api/v1/spaces', {owner:'', space:'',signal:abort.signal});
       if (ticket !== directoryEpoch || disposed) return;
       spaces = catalog.items || [];client.spaces=spaces;
       if (!spaces.length) throw Error('No serving Space');
       if(!selectedAssistant)client.setScope({space:catalog.active_space_id||spaces[0].id,owner:''});
       const projectAssistants=(value,space,offline)=>{let items=value;if(typeof items==='string'){try{items=JSON.parse(items);}catch{items=[];}}return (items?.items||items||[]).map(item=>({...item,control_id:space.control_id||space.id,space_id:space.id,space_name:space.name,space_kind:space.kind,offline}));};
       const results = await Promise.allSettled(spaces.map(async space => {
-        const items = await client.request('/api/v1/assistants', {owner:'', space:space.id});
+        const items = await client.request('/api/v1/assistants', {owner:'', space:space.id,signal:abort.signal});
         return projectAssistants(items,space,space.connected===false);
       }));
       if (ticket !== directoryEpoch || disposed) return;
       assistants = results.flatMap((result, index) => result.status === 'fulfilled' ? result.value : (()=>{const space=spaces[index],previous=assistants.filter(item=>item.space_id===space.id);return previous.length?previous.map(item=>({...item,offline:true})):projectAssistants(space.assistants||[],space,true);})());
       client.assistants=assistants;
+      const changed=[];if(previousSpaces!==JSON.stringify(spaces))changed.push('spaces');if(previousOwners!==JSON.stringify(assistants.map(item=>[item.space_id,item.id,item.name,item.offline])))changed.push('assistants');if(changed.length)pages.refresh(changed);
       for(const item of assistants){const arrival=replies.observe(controlOf(item),item.id,item.reply_id||'',item.reply_count||0,!item.offline);if(arrival.arrived&&route==='chat'&&document.visibilityState!=='hidden'&&!reducedMotion.matches){reactions.set(replyKey(controlOf(item),item.id),performance.now());setTimeout(()=>{if(!disposed){directorySignature='';renderShell();}},650);}}saveReads();
       if (results.some(result => result.status === 'rejected')) error = t('partialOffline');else if(error===t('partialOffline'))error='';
       if (selectedAssistant){selectedAssistant = assistants.find(item => item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id) || selectedAssistant;if(selectedAssistant.offline)connection='offline';}
@@ -602,9 +615,14 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   viewport?.addEventListener('resize', viewportChanged);
   window.addEventListener('resize', viewportChanged);
   renderShell();viewportChanged();
-  if(client.production){stopChanges=client.changes(topics=>{const keys=Array.isArray(topics)?topics:Object.keys(topics||{});if(!keys.length||keys.some(key=>/^(spaces|assistant|conversation|runtime)/.test(key)))loadDirectory(false);if(keys.some(key=>/^(tasks|runner)/.test(key)))refreshBackgroundTasks();pages.refresh();pages.permissions();},{space:''});loadDirectory();}else attach();
+  if(client.production){stopChanges=client.changes((topics,source={})=>{
+    const keys=Array.isArray(topics)?topics:Object.keys(topics||{});
+    if(relevantChange(keys,['spaces','assistants','assistant-mail','conversation','runtime']))loadDirectory();
+    if(relevantChange(keys,['tasks','runner'],client.scope().space,source))refreshBackgroundTasks();
+    pages.refresh(keys,source);if(relevantChange(keys,['permissions','spaces','runtime'],pages.approvalSpace,source))pages.permissions();
+  },{space:''});loadDirectory();}else attach();
   return () => {
-    disposed = true; directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
+    disposed = true; directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     completions?.dispose();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);

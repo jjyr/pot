@@ -52,5 +52,5 @@ async page => {
  assert(await cloud().getByRole('button',{name:'Owner recovery required',exact:true}).isDisabled(),'Recovery-required application stays visible and cannot manufacture a retry');
  await page.setViewportSize({width:393,height:852});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Narrow machine cards fit the viewport');
  await page.evaluate(()=>{machineFixture.pages.dispose();});
- return {multi_space_identity:true,pending_write_fence:true,nested_command_scope:true,locale_draft:true,partial_offline:true,unknown_policy:true,control_identity:true,recovery_required:true,mobile_width:393};
+ return {passed:true,multi_space_identity:true,pending_write_fence:true,nested_command_scope:true,locale_draft:true,partial_offline:true,unknown_policy:true,control_identity:true,recovery_required:true,mobile_width:393};
 }

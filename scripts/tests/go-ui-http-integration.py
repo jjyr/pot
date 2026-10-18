@@ -372,6 +372,40 @@ def run(binary, base, env, cli_command):
             providers = browser_cli("run-code", code.replace("STATE", json.dumps(provider_state)))
             if '"passed":true' not in providers:
                 raise RuntimeError("Provider editor browser contracts did not pass")
+            (ROOT / "output/pr-images/task-progress").mkdir(parents=True, exist_ok=True)
+            for script in [
+                "go-ui-tasks-browser.js",
+                "go-ui-task-refresh-browser.js",
+                "go-ui-machines-browser.js",
+                "go-ui-membership-browser.js",
+            ]:
+                code = (
+                    (ROOT / "scripts/tests" / script)
+                    .read_text()
+                    .replace("http://127.0.0.1:17702", origin)
+                )
+                output = browser_cli(
+                    "run-code", code.replace("STATE", json.dumps({"origin": origin}))
+                )
+                if '"passed":true' not in output:
+                    raise RuntimeError(script + " did not pass")
+            code = (ROOT / "scripts/tests/go-ui-refresh-browser.js").read_text()
+            refresh = browser_cli("run-code", code.replace("STATE", json.dumps({"origin": origin})))
+            if '"passed":true' not in refresh:
+                raise RuntimeError("Background refresh browser contracts did not pass")
+            code = (ROOT / "scripts/tests/go-ui-production-browser.js").read_text()
+            code = code.replace("http://127.0.0.1:17702", origin).replace(
+                "docs/pr-images/", str(ROOT / "output/pr-images/regression") + "/"
+            )
+            production = browser_cli(
+                "run-code",
+                "async page => { const context = await page.context().browser().newContext({serviceWorkers:'block'}); "
+                "try { return await ("
+                + code
+                + ")(await context.newPage()); } finally { await context.close(); } }",
+            )
+            if '"errors":[]' not in production:
+                raise RuntimeError("Production UI browser contracts did not pass")
             code = (ROOT / "scripts/tests/go-ui-http-browser.js").read_text()
             output = browser_cli("run-code", code.replace("STATE", json.dumps(state)))
             if '"errors":[]' not in output:

@@ -119,7 +119,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
     },
     changes(onChange,{space=context.space}={}) {
       const scope = {...context,space},versions=createTopicVersions();
-      const notify=(topics,sourceSpace,boot)=>{const changed=versions(topics,sourceSpace,boot);if(changed.length)onChange(changed);};
+      const notify=(topics,sourceSpace,boot)=>{const changed=versions(topics,sourceSpace,boot);if(changed.length)onChange(changed,{space:sourceSpace,boot});};
       if (desktop) return runtimeAPI.Events.On('pot:changed', event => { if (!scope.space||event.data.space_id === scope.space) notify(event.data.topics,event.data.space_id,event.data.boot_id||''); });
       const source = new EventSource(`${base}${scopedPath('/api/v1/changes', scope)}`);
       const deliver = event => { try { const value = JSON.parse(event.data); const id=event.lastEventId||'',separator=id.lastIndexOf(':');notify(value.topics || value,scope.space,separator<0?'':id.slice(0,separator)); } catch { /* next version event reconciles */ } };

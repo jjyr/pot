@@ -19,10 +19,10 @@ export function section(title, description) {
   const body = node('section', 'page-section'); body.append(node('h2', '', title));
   if (description) body.append(node('p', 'hint', description)); return body;
 }
-export function table(headers, rows) {
+export function table(headers, rows, keys = []) {
   const wrap = node('div', 'table-scroll'), result = node('table', 'data-table'), head = node('thead'), tr = node('tr');
   wrap.dataset.scrollKey=headers.join('|');for (const label of headers) tr.append(node('th', '', label)); head.append(tr); result.append(head);
-  const body = node('tbody'); for (const values of rows) { const row = node('tr'); for (const value of values) { const cell = node('td'); cell.append(value instanceof Node ? value : node('span', '', value ?? '—')); row.append(cell); } body.append(row); }
+  const body = node('tbody'); for (const [index, values] of rows.entries()) { const row = node('tr'); if(keys[index]!=null)row.dataset.viewKey=String(keys[index]); for (const value of values) { const cell = node('td'); cell.append(value instanceof Node ? value : node('span', '', value ?? '—')); row.append(cell); } body.append(row); }
   result.append(body); wrap.append(result); return wrap;
 }
 export function details(label, value) { const item = node('details', 'detail-disclosure'); item.append(node('summary', '', label), node('pre', '', typeof value === 'string' ? value : JSON.stringify(value, null, 2))); return item; }
