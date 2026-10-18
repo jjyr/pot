@@ -59,7 +59,8 @@ still checked against current policy.
 | `allow_task` | Repeated matching commands in the current work/run only |
 | `deny` | Reject the original host request, without creating a permanent deny |
 
-Current work means one accepted foreground user request, one Task run, or one
+Current work means one foreground processing turn (which may aggregate pending
+user requests), one Task run, or one
 scheduled occurrence. Grants do not extend to other commands, subsequent user
 requests, child/sibling Tasks, scheduled occurrences, machines or generations.
 Completion/cancellation, restart, enrollment changes and policy invalidation clear
@@ -72,6 +73,12 @@ Every pending decision binds owner, Task/run/turn, generation, call ID, Runtime,
 enrollment, tool and full arguments/context. A later grant cannot reverse a denial
 already given to that exact request. Persistent grants are saved before permitting
 execution; write failure leaves approval pending.
+
+Approval creation, resolution and expiration publish [Runtime hooks](hooks.md).
+They refresh current UI cards and user reminders without messaging the assistant
+or making model calls. The UI reads authoritative pending decisions, so delayed
+updates cannot restore an expired approval. Waiting-call cancellation also expires
+its pending decision. Hooks never perform or authorize approval decisions.
 
 ## Sandbox and host boundaries
 

@@ -117,3 +117,11 @@ provide a `runtime.KeySource` with a persistent 32-byte key. Preserve that key
 across restarts and return a fresh byte slice on every call, because the host
 clears it after use. The complete host intentionally includes SQLite and product
 services; use `pkg/agent` when those services are unnecessary.
+
+## Atomic message journals
+
+`storage.Store.SaveWithMetadataMutation` commits a message projection, owner
+metadata and a caller-owned journal mutation in one transaction. Callbacks use
+the supplied transaction and perform no external effects. An accepted user
+message marked `queued` has no started execution and survives storage reopening;
+selecting it clears that flag with the new turn's metadata and queue removal.

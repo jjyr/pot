@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jjyr/pot/internal/hooks"
+	"github.com/jjyr/pot/internal/inbox"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -40,14 +42,22 @@ func Open(path string, options Options) (*Service, error) {
 		return nil, err
 	}
 	s := &Service{db: db, options: options}
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS task_schema(version INTEGER NOT NULL);INSERT INTO task_schema SELECT 4 WHERE NOT EXISTS(SELECT 1 FROM task_schema);CREATE TABLE IF NOT EXISTS tasks(assistant_id TEXT NOT NULL,id TEXT NOT NULL,phase TEXT NOT NULL,created INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(assistant_id,id));CREATE TABLE IF NOT EXISTS task_writes(assistant_id TEXT NOT NULL,request_id TEXT NOT NULL,digest TEXT NOT NULL,task_id TEXT NOT NULL,PRIMARY KEY(assistant_id,request_id));CREATE TABLE IF NOT EXISTS task_inputs(sequence INTEGER PRIMARY KEY AUTOINCREMENT,assistant_id TEXT NOT NULL,task_id TEXT NOT NULL,request_id TEXT NOT NULL,digest TEXT NOT NULL,kind TEXT NOT NULL,sender TEXT NOT NULL,text TEXT NOT NULL,state TEXT NOT NULL,UNIQUE(assistant_id,task_id,request_id));CREATE TABLE IF NOT EXISTS task_notifications(id TEXT PRIMARY KEY,assistant_id TEXT NOT NULL,task_id TEXT NOT NULL,phase TEXT NOT NULL,text TEXT NOT NULL);`); err != nil {
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS task_schema(version INTEGER NOT NULL);INSERT INTO task_schema SELECT 5 WHERE NOT EXISTS(SELECT 1 FROM task_schema);CREATE TABLE IF NOT EXISTS tasks(assistant_id TEXT NOT NULL,id TEXT NOT NULL,phase TEXT NOT NULL,created INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(assistant_id,id));CREATE TABLE IF NOT EXISTS task_writes(assistant_id TEXT NOT NULL,request_id TEXT NOT NULL,digest TEXT NOT NULL,task_id TEXT NOT NULL,PRIMARY KEY(assistant_id,request_id));`); err != nil {
 		db.Close()
 		return nil, err
 	}
 	var version int
-	if err := db.QueryRow("SELECT version FROM task_schema").Scan(&version); err != nil || version != 4 {
+	if err := db.QueryRow("SELECT version FROM task_schema").Scan(&version); err != nil || version != 5 {
 		db.Close()
 		return nil, fmt.Errorf("unsupported task schema")
+	}
+	if err := inbox.Initialize(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := initializeMessageViews(db); err != nil {
+		db.Close()
+		return nil, err
 	}
 	if err := s.validateStored(context.Background()); err != nil {
 		db.Close()
@@ -118,7 +128,7 @@ func (s *Service) validateStored(ctx context.Context) error {
 		if err := core.DecodeJSON([]byte(raw), &r); err != nil {
 			return err
 		}
-		if r.SchemaVersion != 4 || r.AssistantID != assistant || r.Info.AssistantID != assistant || r.Info.ID != id || !core.Identifier(assistant) || !core.Identifier(id) {
+		if r.SchemaVersion != 5 || r.AssistantID != assistant || r.Info.AssistantID != assistant || r.Info.ID != id || !core.Identifier(assistant) || !core.Identifier(id) {
 			return fmt.Errorf("invalid stored Task ownership/schema")
 		}
 		if err := r.Config.Validate(); err != nil {
@@ -285,7 +295,7 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	if len(runes) > 80 {
 		title = string(runes[:80])
 	}
-	record := Record{SchemaVersion: 4, AssistantID: assistant, Info: protocol.TaskInfo{ID: id, AssistantID: assistant, Title: title, Phase: protocol.TaskQueued, CreatedAtMS: at, UpdatedAtMS: at, Resource: request.Resource, Routing: &protocol.TaskRouting{Profile: selection.Config.SourceProfileID, Revision: selection.Config.SourceProfileRevision, Provider: selection.Config.Provider, Reason: "assistant selection", SelectionReason: request.SelectionReason}}, Request: request, Config: selection.Config, Plugins: plugins, RunID: runID, Generation: 1}
+	record := Record{SchemaVersion: 5, AssistantID: assistant, Info: protocol.TaskInfo{Address: &protocol.AgentRef{ControlID: s.options.ControlID, Kind: "task", AgentID: id}, ID: id, AssistantID: assistant, Title: title, Phase: protocol.TaskQueued, CreatedAtMS: at, UpdatedAtMS: at, Resource: request.Resource, Routing: &protocol.TaskRouting{Profile: selection.Config.SourceProfileID, Revision: selection.Config.SourceProfileRevision, Provider: selection.Config.Provider, Reason: "assistant selection", SelectionReason: request.SelectionReason}}, Request: request, Config: selection.Config, Plugins: plugins, RunID: runID, Generation: 1}
 	record.Info.MachineID = request.MachineID
 	if err := write(ctx, tx, &record); err != nil {
 		return Record{}, err
@@ -293,14 +303,19 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	if _, err := tx.ExecContext(ctx, "INSERT INTO task_writes(assistant_id,request_id,digest,task_id) VALUES(?,?,?,?)", assistant, request.RequestID, hash, id); err != nil {
 		return Record{}, err
 	}
-	inputHash, _ := core.HashJSON([]string{request.Text, "input", assistant})
-	if _, err := tx.ExecContext(ctx, "INSERT INTO task_inputs(assistant_id,task_id,request_id,digest,kind,sender,text,state) VALUES(?,?,?,?,?,?,?,'active')", assistant, id, runID, inputHash, "input", assistant, request.Text); err != nil {
+	sender := protocol.AgentRef{ControlID: s.options.ControlID, Kind: "assistant", AgentID: assistant}
+	inputHash, _ := core.HashJSON([]any{request.Text, "input", sender, (*protocol.Envelope)(nil)})
+	messageID, _ := core.HashJSON([]string{id, runID})
+	message := protocol.Envelope{ID: messageID, Kind: "input", Owner: assistant, RequestID: runID, Digest: inputHash, From: sender, To: protocol.AgentRef{ControlID: s.options.ControlID, Kind: "task", AgentID: id}, ConversationID: runID, Text: request.Text}
+	if err := inbox.EnqueueTx(ctx, tx, message, "in", "active"); err != nil {
 		return Record{}, err
 	}
+
 	return record, nil
 }
 func (s *Service) change(ctx context.Context, assistant, id string, fn func(*sql.Tx, *Record) error) error {
 	changed := false
+	var terminal *hooks.Event
 	err := storage.Transaction(ctx, s.db, func(tx *sql.Tx) error {
 		record, err := read(ctx, tx, assistant, id)
 		if err != nil {
@@ -310,6 +325,7 @@ func (s *Service) change(ctx context.Context, assistant, id string, fn func(*sql
 			return fmt.Errorf("task missing")
 		}
 		before, _ := json.Marshal(record)
+		wasActive := record.Info.Phase.Scope() == "active"
 		if err := fn(tx, record); err != nil {
 			return err
 		}
@@ -319,10 +335,33 @@ func (s *Service) change(ctx context.Context, assistant, id string, fn func(*sql
 		}
 		changed = true
 		record.Info.UpdatedAtMS = time.Now().UnixMilli()
+		if wasActive && record.Info.Phase.Scope() != "active" {
+			text := record.Error
+			if record.Result != nil && record.Result.Text != "" {
+				text = record.Result.Text
+			}
+			if record.Result != nil && record.Result.Outcome.Error != "" && record.Result.Outcome.Error != text {
+				if text != "" {
+					text += "\n\n"
+				}
+				text += "Execution error: " + record.Result.Outcome.Error
+			}
+			if strings.TrimSpace(text) == "" {
+				text = "Task ended with status " + string(record.Info.Phase) + "."
+			}
+			event := hooks.Task(assistant, record.Generation, protocol.TaskResultEvent{TaskID: id, RunID: record.RunID, Title: record.Info.Title, Phase: record.Info.Phase, Text: text})
+			if err := hooks.EnqueueTx(ctx, tx, s.options.ControlID, s.options.RuntimeID, event); err != nil {
+				return err
+			}
+			terminal = &event
+		}
 		return write(ctx, tx, record)
 	})
 	if err == nil && changed {
 		s.Notify()
+		if terminal != nil && s.options.PublishHook != nil {
+			s.options.PublishHook(*terminal)
+		}
 	}
 	return err
 }

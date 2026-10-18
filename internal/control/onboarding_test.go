@@ -105,7 +105,7 @@ func TestChatRenameIsOwnerScopedAndRetrySafe(t *testing.T) {
 	if _, err = stale(ctx, core.ExecutionContext{Owner: a.ID}, call, nil); err == nil {
 		t.Fatal("stale generation renamed assistant")
 	}
-	if len(s.productTools(true)) != 0 {
+	if len(s.productTools(true)) != 1 {
 		t.Fatal("worker inherited rename tool")
 	}
 }

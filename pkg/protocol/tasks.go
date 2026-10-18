@@ -33,6 +33,7 @@ func (p TaskPhase) Scope() string {
 }
 
 type TaskInfo struct {
+	Address         *AgentRef             `json:"address,omitempty"`
 	MachineID       string                `json:"machine_id"`
 	RemoteWaiting   bool                  `json:"remote_waiting"`
 	ExecutionTarget *core.ExecutionTarget `json:"execution_target"`

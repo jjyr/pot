@@ -11,10 +11,10 @@ import (
 )
 
 func (m *Mailbox) Candidates(ctx context.Context, recipient string) ([]protocol.Envelope, error) {
-	return m.envelopes(ctx, `SELECT envelope FROM assistant_mail m WHERE direction='in' AND state IN ('queued','waiting') AND recipient=? AND NOT EXISTS(SELECT 1 FROM assistant_mail b WHERE b.conversation=m.conversation AND b.recipient=m.recipient AND (b.state IN ('processing','interrupted','failed') OR b.state='waiting' AND b.id!=m.id)) ORDER BY sequence LIMIT 32`, recipient)
+	return m.envelopes(ctx, `SELECT envelope FROM agent_messages m WHERE direction='in' AND json_extract(envelope,'$.kind')='message' AND json_extract(envelope,'$.to.kind')='assistant' AND state IN ('queued','waiting') AND recipient=?`+blockedMailGroup+` ORDER BY sequence LIMIT 32`, recipient)
 }
 func (m *Mailbox) WaitingMessages(ctx context.Context, recipient string) ([]protocol.Envelope, error) {
-	return m.envelopes(ctx, "SELECT envelope FROM assistant_mail WHERE direction='in' AND state='waiting' AND recipient=? ORDER BY sequence LIMIT 32", recipient)
+	return m.envelopes(ctx, "SELECT envelope FROM agent_messages WHERE direction='in' AND state='waiting' AND recipient=? ORDER BY sequence LIMIT 32", recipient)
 }
 
 // Wait retains only a fully stopped pre-request checkpoint; unknown model/tool
@@ -23,7 +23,7 @@ func (m *Mailbox) Wait(ctx context.Context, message protocol.Envelope, detail st
 	err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
 		var state string
 		var raw []byte
-		if err := tx.QueryRowContext(ctx, "SELECT m.state,s.context FROM assistant_mail m JOIN assistant_mail_sessions s ON s.assistant=m.recipient AND s.conversation=m.conversation WHERE m.id=?", message.ID).Scan(&state, &raw); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT m.state,s.context FROM agent_messages m JOIN assistant_mail_sessions s ON s.assistant=m.recipient AND s.conversation=? WHERE m.id=?", CorrespondenceKey(message), message.ID).Scan(&state, &raw); err != nil {
 			return err
 		}
 		var checkpoint agent.Checkpoint
@@ -33,7 +33,7 @@ func (m *Mailbox) Wait(ctx context.Context, message protocol.Envelope, detail st
 		if state != "processing" || checkpoint.LastRequest != message.ID || checkpoint.Started != nil || checkpoint.ModelRequestID != nil || len(checkpoint.Pending) > 0 {
 			return errors.New("mail attempt is not safely allowance-resumable")
 		}
-		_, err := tx.ExecContext(ctx, "UPDATE assistant_mail SET state='waiting',detail=? WHERE id=?", detail, message.ID)
+		_, err := tx.ExecContext(ctx, "UPDATE agent_messages SET state='waiting',detail=? WHERE state='processing' AND (id=? OR id IN (SELECT message FROM agent_delivery_items WHERE batch=?))", detail, message.ID, message.ID)
 		return err
 	})
 	if err == nil {

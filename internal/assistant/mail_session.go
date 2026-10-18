@@ -12,7 +12,7 @@ import (
 	"github.com/jjyr/pot/pkg/storage"
 )
 
-// Session pins one assistant's selected configuration for one correspondence;
+// Session pins one assistant's selected configuration for one sender Agent;
 // user-chat context and assistant configuration are independent of this store.
 func (m *Mailbox) Session(ctx context.Context, message protocol.Envelope, initial core.ResolvedSpec) (core.ResolvedSpec, json.RawMessage, error) {
 	if message.To.ControlID != m.controlID {
@@ -25,13 +25,13 @@ func (m *Mailbox) Session(ctx context.Context, message protocol.Envelope, initia
 	if err != nil {
 		return initial, nil, err
 	}
-	_, err = m.db.ExecContext(ctx, "INSERT INTO assistant_mail_sessions(assistant,conversation,config)VALUES(?,?,?)ON CONFLICT(assistant,conversation)DO NOTHING", message.To.AssistantID, message.ConversationID, string(raw))
+	_, err = m.db.ExecContext(ctx, "INSERT INTO assistant_mail_sessions(assistant,conversation,config)VALUES(?,?,?)ON CONFLICT(assistant,conversation)DO NOTHING", message.To.AgentID, CorrespondenceKey(message), string(raw))
 	if err != nil {
 		return initial, nil, err
 	}
 	var config []byte
 	var state sql.NullString
-	err = m.db.QueryRowContext(ctx, "SELECT config,context FROM assistant_mail_sessions WHERE assistant=? AND conversation=?", message.To.AssistantID, message.ConversationID).Scan(&config, &state)
+	err = m.db.QueryRowContext(ctx, "SELECT config,context FROM assistant_mail_sessions WHERE assistant=? AND conversation=?", message.To.AgentID, CorrespondenceKey(message)).Scan(&config, &state)
 	if err != nil {
 		return initial, nil, err
 	}
@@ -48,7 +48,7 @@ func (m *Mailbox) Session(ctx context.Context, message protocol.Envelope, initia
 func (m *Mailbox) Processing(ctx context.Context, message protocol.Envelope) error {
 	var state string
 	var raw []byte
-	if err := m.db.QueryRowContext(ctx, "SELECT state,envelope FROM assistant_mail WHERE id=? AND direction='in'", message.ID).Scan(&state, &raw); err != nil {
+	if err := m.db.QueryRowContext(ctx, "SELECT state,envelope FROM agent_messages WHERE id=? AND direction='in'", message.ID).Scan(&state, &raw); err != nil {
 		return err
 	}
 	var stored protocol.Envelope
@@ -66,13 +66,13 @@ func (m *Mailbox) SaveSessionContext(ctx context.Context, message protocol.Envel
 	}
 	return storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
 		var current string
-		if err := tx.QueryRowContext(ctx, "SELECT state FROM assistant_mail WHERE id=?", message.ID).Scan(&current); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT state FROM agent_messages WHERE id=?", message.ID).Scan(&current); err != nil {
 			return err
 		}
 		if current != "processing" {
 			return errors.New("mail attempt is fenced")
 		}
-		_, err := tx.ExecContext(ctx, "UPDATE assistant_mail_sessions SET context=? WHERE assistant=? AND conversation=?", string(state), message.To.AssistantID, message.ConversationID)
+		_, err := tx.ExecContext(ctx, "UPDATE assistant_mail_sessions SET context=? WHERE assistant=? AND conversation=?", string(state), message.To.AgentID, CorrespondenceKey(message))
 		return err
 	})
 }
@@ -80,7 +80,7 @@ func (m *Mailbox) ClaimModel(ctx context.Context, message protocol.Envelope, id 
 	return storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
 		var state string
 		var checkpoint []byte
-		if err := tx.QueryRowContext(ctx, "SELECT m.state,s.context FROM assistant_mail m JOIN assistant_mail_sessions s ON s.assistant=m.recipient AND s.conversation=m.conversation WHERE m.id=?", message.ID).Scan(&state, &checkpoint); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT m.state,s.context FROM agent_messages m JOIN assistant_mail_sessions s ON s.assistant=m.recipient AND s.conversation=? WHERE m.id=?", CorrespondenceKey(message), message.ID).Scan(&state, &checkpoint); err != nil {
 			return err
 		}
 		var parsed agent.Checkpoint

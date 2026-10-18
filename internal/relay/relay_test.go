@@ -28,8 +28,8 @@ func newNode(t *testing.T, id string) *testNode {
 	return &testNode{id: id, mailbox: mailbox}
 }
 func (n *testNode) ControlID() string { return n.id }
-func (n *testNode) address() protocol.AssistantRef {
-	return protocol.AssistantRef{ControlID: n.id, AssistantID: "main"}
+func (n *testNode) address() protocol.AgentRef {
+	return protocol.AgentRef{ControlID: n.id, Kind: "assistant", AgentID: "main"}
 }
 func (n *testNode) Directory(context.Context) (protocol.Directory, error) {
 	if n.offline.Load() {

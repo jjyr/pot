@@ -69,6 +69,7 @@ const (
 )
 
 type Message struct {
+	Queued         bool          `json:"queued,omitempty"`
 	Tool           *ToolCall     `json:"tool,omitempty"`
 	ID             string        `json:"id" required:"true"`
 	ConversationID string        `json:"conversation_id" required:"true"`
@@ -83,6 +84,9 @@ type Message struct {
 }
 
 func (m Message) Validate() error {
+	if m.Queued && (m.Role != User || m.Status != Accepted) {
+		return fmt.Errorf("only accepted user requests may be queued")
+	}
 	if m.Tool != nil {
 		if m.Role != Tool {
 			return fmt.Errorf("tool details require tool role")

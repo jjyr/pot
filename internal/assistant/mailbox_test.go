@@ -8,8 +8,8 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
-func address(control, assistant string) protocol.AssistantRef {
-	return protocol.AssistantRef{ControlID: control, AssistantID: assistant}
+func address(control, assistant string) protocol.AgentRef {
+	return protocol.AgentRef{ControlID: control, Kind: "assistant", AgentID: assistant}
 }
 func mailbox(t *testing.T, control string) (*Mailbox, string) {
 	t.Helper()
@@ -21,7 +21,7 @@ func mailbox(t *testing.T, control string) (*Mailbox, string) {
 	t.Cleanup(func() { m.Close() })
 	return m, path
 }
-func sendMail(t *testing.T, m *Mailbox, id string, from, to protocol.AssistantRef, reply *string, parent *protocol.Envelope) protocol.Envelope {
+func sendMail(t *testing.T, m *Mailbox, id string, from, to protocol.AgentRef, reply *string, parent *protocol.Envelope) protocol.Envelope {
 	t.Helper()
 	message, err := m.Send(context.Background(), id, from, protocol.SendMail{To: to, Text: "Please investigate", ReplyTo: reply}, parent)
 	if err != nil {
@@ -90,7 +90,7 @@ func TestRemoteMailDurableReceiptDedupAndRestartFence(t *testing.T) {
 		t.Fatal("mailbox rebound")
 	}
 }
-func TestConversationFenceDoesNotBlockOtherConversation(t *testing.T) {
+func TestPeerFenceDoesNotBlockOtherAgent(t *testing.T) {
 	ctx := context.Background()
 	a, _ := mailbox(t, "control-a")
 	b, bpath := mailbox(t, "control-b")
@@ -114,11 +114,16 @@ func TestConversationFenceDoesNotBlockOtherConversation(t *testing.T) {
 	if next, err := b.Next(ctx, "bob"); err != nil || next != nil {
 		t.Fatal("same conversation escaped fence", next, err)
 	}
-	independent := sendMail(t, a, "other-conversation", alice, bob, nil, nil)
+	samePeer := sendMail(t, a, "same-peer-new-conversation", alice, bob, nil, nil)
+	deliver(t, b, samePeer)
+	if next, err := b.Next(ctx, "bob"); err != nil || next != nil {
+		t.Fatal("same peer escaped fence with a new conversation", next, err)
+	}
+	independent := sendMail(t, a, "other-agent", address("control-a", "another-agent"), bob, nil, nil)
 	deliver(t, b, independent)
 	next, err := b.Next(ctx, "bob")
 	if err != nil || next == nil || next.ID != independent.ID {
-		t.Fatal("another conversation blocked", next, err)
+		t.Fatal("another agent blocked", next, err)
 	}
 }
 func TestLocalMailReplyParticipantsAndAutomaticHopBound(t *testing.T) {
@@ -148,7 +153,7 @@ func TestLocalMailReplyParticipantsAndAutomaticHopBound(t *testing.T) {
 	if _, err := m.Send(ctx, "one", alice, protocol.SendMail{To: bob, Text: "changed"}, nil); err == nil {
 		t.Fatal("conflicting message ID accepted")
 	}
-	remote := protocol.Envelope{ID: "hop-limit", From: address("remote", "peer"), To: bob, ConversationID: newConversation(), Text: "last allowed hop", Hops: protocol.MaxMailHops}
+	remote := protocol.Envelope{Kind: "message", ID: "hop-limit", From: address("remote", "peer"), To: bob, ConversationID: newConversation(), Text: "last allowed hop", Hops: protocol.MaxMailHops}
 	deliver(t, m, remote)
 	if _, err := m.Send(ctx, "escape", bob, protocol.SendMail{To: alice, Text: "new conversation"}, &remote); err == nil {
 		t.Fatal("new conversation escaped automatic hop bound")

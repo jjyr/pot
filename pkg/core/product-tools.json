@@ -1,7 +1,7 @@
 [
   {
     "name": "create_task",
-    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. resource shared serializes tasks using shared resources. Interpret the applicable AGENTS.md routing rules semantically using available configured Providers and models. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor. Each task is a new execution. To retry finished work, create a new task. Tasks run in a separate workspace on the fixed selected Runtime. Omitted machine_id uses the owning Control. Files are not copied from other workspaces. Tool calls require current machine authorization; completion closes only this Task's processes and sessions while retaining files.",
+    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. resource shared serializes tasks using shared resources. Interpret the applicable AGENTS.md routing rules semantically using available configured Providers and models. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor. Each task is a new execution. To retry finished work, create a new task. Tasks run in a separate workspace on the fixed selected Runtime. Omitted machine_id uses the owning Control. Files are not copied from other workspaces. Tool calls require current machine authorization; completion closes only this Task's processes and sessions while retaining files. The text must contain a concise title on its first line AND complete instructions on following lines. A title-only brief is rejected. Preserve the user's exact commands and constraints; workers do not see the chat.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -134,80 +134,50 @@
     }
   },
   {
-    "name": "guide_task",
-    "description": "Queue a follow-up instruction in an existing task. Applied after the current turn; does not interrupt it. Only active tasks accept guidance. For finished or failed tasks, create a new task.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "task_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "text": {
-          "type": "string",
-          "minLength": 1
-        }
-      },
-      "required": [
-        "task_id",
-        "text"
-      ],
-      "additionalProperties": false
-    }
-  },
-  {
     "name": "send_message",
-    "description": "Send reference information from Main to a pot-agent task. Delivered at a safe model boundary if running, or retained as reference history if the task has ended. Does not create a work turn, interrupt current work, resume stopped tasks or authorize new permissions. Sender identity is trusted Runtime metadata, not caller supplied.",
+    "description": "Send a durable message to a Task or assistant. Runtime binds the real sender. Active Tasks receive owner guidance or peer reference at a model boundary; ended Tasks retain reference without restarting. Returns acceptance, never execution completion. Do not send task completion yourself: Runtime reports final results automatically.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "task_id": {
-          "type": "string",
-          "minLength": 1
+        "to": {
+          "type": "object",
+          "properties": {
+            "control_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "assistant",
+                "task"
+              ]
+            },
+            "agent_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "control_id",
+            "kind",
+            "agent_id"
+          ],
+          "additionalProperties": false
         },
         "text": {
           "type": "string",
           "minLength": 1,
           "maxLength": 65536
+        },
+        "reply_to": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
-        "task_id",
+        "to",
         "text"
-      ],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "wait_task",
-    "description": "Wait for any of up to eight tasks to complete, fail, become interrupted, cancelled, allowance-waiting or waiting_approval. Bounded wait; no busy polling. Returns metadata, per-task cursors and timed_out. A waiting_approval task needs the user's decision in the assistant Chat approval cards. Pass returned cursors as after to suppress unchanged settled states. Does not retrieve transcripts, resume tasks or wait for exec; use wait for JavaScript runs.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "task_ids": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "minItems": 1,
-          "maxItems": 8,
-          "uniqueItems": true
-        },
-        "after": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "timeout_ms": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 60000
-        }
-      },
-      "required": [
-        "task_ids"
       ],
       "additionalProperties": false
     }
@@ -450,44 +420,6 @@
     "inputSchema": {
       "type": "object",
       "properties": {},
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "send_assistant_message",
-    "description": "Send a durable message to another assistant and wake its separate message conversation. Returns acceptance, not completion. Cross-Space delivery waits for App relay connectivity. Use for coordination and replies; no task migration or permissions are implied. Replies to the current correspondent automatically retain the conversation; reply_to can explicitly reference a received message. Automatic exchanges are bounded; do not send unnecessary acknowledgements.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "to": {
-          "type": "object",
-          "properties": {
-            "control_id": {
-              "type": "string"
-            },
-            "assistant_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "control_id",
-            "assistant_id"
-          ],
-          "additionalProperties": false
-        },
-        "text": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 65536
-        },
-        "reply_to": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "to",
-        "text"
-      ],
       "additionalProperties": false
     }
   },

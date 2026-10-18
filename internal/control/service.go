@@ -118,6 +118,7 @@ func Open(options Options) (*Service, error) {
 		}
 	}
 	s.Permissions.Apply = s.applyPermissionRevision
+	s.Permissions.PublishHook = s.publishHook
 	s.Registry, err = assistant.OpenRegistry(filepath.Join(options.Root, "control.sqlite"), "main")
 	if err != nil {
 		return nil, err
@@ -180,12 +181,18 @@ func (s *Service) Conversation(ctx context.Context, id string) (*assistant.Conve
 	if err != nil {
 		return nil, err
 	}
-	options := assistant.ConversationOptions{InitialWelcome: welcome, InitialIntent: intent, Context: s.ctx, Owner: id, RuntimeID: s.options.RuntimeID, BootID: s.options.BootID, Manager: s.options.Manager, InitialSpec: initial, InitialRules: rules, RefreshConfiguration: s.refreshAssistantConfiguration, MaxTurnRequests: 128}
+	options := assistant.ConversationOptions{InitialWelcome: welcome, InitialIntent: intent, Context: s.ctx, Owner: id, RuntimeID: s.options.RuntimeID, BootID: s.options.BootID, Manager: s.options.Manager, InitialSpec: initial, InitialRules: rules, RefreshConfiguration: s.refreshAssistantConfiguration, MaxTurnRequests: 128, OnFinished: func(ctx context.Context, r protocol.SendMessage, result execution.Result) error {
+		return s.finishAgentDelivery(ctx, id, r, result)
+	}}
 	options.Prepare = func(ctx context.Context, thread core.Thread, request core.TurnRequest) (assistant.RunOptions, error) {
 		return s.prepare(ctx, conversation, thread, request)
 	}
 	conversation, err = assistant.OpenConversation(filepath.Join(s.options.Root, "assistants", id, "conversation.sqlite"), options)
 	if err != nil {
+		return nil, err
+	}
+	if err = conversation.StartPendingUsers(ctx); err != nil {
+		conversation.Close()
 		return nil, err
 	}
 	s.conversations[id] = conversation
@@ -247,7 +254,7 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 	}
 	for _, definition := range identities {
 		if definition.ID == principal {
-			identity, _ := json.Marshal(map[string]string{"name": definition.Name})
+			identity, _ := json.Marshal(map[string]any{"name": definition.Name, "address": protocol.AgentRef{ControlID: s.options.RuntimeID, Kind: "assistant", AgentID: principal}})
 			executionContext.MainPrompt += "\nCurrent assistant identity (data): " + string(identity) + ". When the user gives you a new name, use rename_assistant to save it."
 			break
 		}

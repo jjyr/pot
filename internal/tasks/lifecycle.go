@@ -176,6 +176,7 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 			}
 			current.Info.Paused = false
 			current.Result = run.Result
+			current.Error = run.Result.Outcome.Error
 			switch run.Phase {
 			case runner.Complete:
 				current.Info.Phase = protocol.TaskComplete
@@ -202,11 +203,6 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 				}
 			}
 			if _, err := tx.ExecContext(ctx, "UPDATE task_inputs SET state='consumed' WHERE assistant_id=? AND task_id=? AND kind='input' AND state='active'", assistant, id); err != nil {
-				return err
-			}
-			noticeID := id + ":terminal"
-			_, err := tx.ExecContext(ctx, "INSERT INTO task_notifications(id,assistant_id,task_id,phase,text) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING", noticeID, assistant, id, current.Info.Phase, run.Result.Text)
-			if err != nil {
 				return err
 			}
 		default:
@@ -304,7 +300,7 @@ func (s *Service) ResumeWaiting(ctx context.Context, assistant, id string) error
 	return s.change(ctx, assistant, id, func(tx *sql.Tx, r *Record) error { r.Info.Phase = protocol.TaskQueued; r.Error = ""; return nil })
 }
 func (s *Service) Notifications(ctx context.Context, assistant string) ([]Notification, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id,assistant_id,task_id,phase,text FROM task_notifications WHERE assistant_id=? ORDER BY rowid", assistant)
+	rows, err := s.db.QueryContext(ctx, "SELECT id,assistant_id,task_id,phase,text FROM task_notifications WHERE assistant_id=? ORDER BY sequence", assistant)
 	if err != nil {
 		return nil, err
 	}

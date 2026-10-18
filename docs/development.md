@@ -135,3 +135,20 @@ the actual denial and
 that an owner refusal stops further execution. Run just those cases with
 `-run '^TestDeepSeekUnsandboxLive$/^boundary-'`. Default tests skip paid calls.
 Credentials are never logged.
+
+Category-specific message batching can be qualified against real DeepSeek with:
+
+```sh
+POT_LIVE=1 mise exec -- go test -v ./internal/control \
+  -run '^TestDeepSeekCategoryBatchesLive$' -count=1 -timeout=6m
+```
+
+The test uses a private Runtime and a transparent recording proxy that forwards
+real model responses. Holding the first foreground request lets normal send
+entry points populate the production queues. It checks ordered user aggregation,
+one summary for successful and failed Tasks, and peer grouping by full sender
+across wire conversations. A one-round Worker budget creates the controlled
+failure after a real model request. All other processing keeps the production
+prompts and tools. The run is capped at 24 paid requests, 768 output tokens per
+response and 240 seconds. `POT_LIVE_OUTPUT` may name a fresh private output
+directory for the observation; request headers and credentials are never recorded.

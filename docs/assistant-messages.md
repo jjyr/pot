@@ -1,98 +1,131 @@
-# Assistant messages
+# Agent messages
 
-Assistant-to-assistant messaging uses the same addresses, envelopes and processing
-semantics within a Space and across Spaces. A Space corresponds to a Control's
-stable identity. Handoff is coordination expressed by agents in message bodies;
-there is no handoff protocol, task migration state machine or automatic transfer
-of permissions, files, running processes or task ownership.
+`send_message` is the single model-visible primitive for Task and assistant
+messages. Runtime lifecycle hooks use the same durable enqueue operation.
+Messaging coordinates existing agents; it does not migrate Tasks, transfer
+credentials or grant execution permissions.
 
-## Modules
+## Addresses and provenance
 
-- `pkg/protocol` defines addresses, envelopes, directories, receipts and
-  relay API DTOs. An address is `{control_id, assistant_id}`; display names never
-  route messages.
-- `internal/assistant` owns SQLite Inbox/Outbox persistence, deduplication,
-  reply binding, processing state and history.
-- `internal/relay` is a transport-independent library with injected endpoint traits.
-  It knows only protocol types; it has no UI, credential or database dependency.
-- Control binds sender identity to the current assistant, checks destinations and
-  submits message conversations through the existing Runtime execution manager.
-- Server exposes the authenticated adapter. App alone composes relay endpoints
-  from its existing local and remote connections and owns the relay lifecycle.
+An Agent address is `{control_id, kind, agent_id}`. Model recipients may have
+kind `assistant` or `task`; Task addresses belong to their owning Control,
+independently of the destination machine running the Task. `list_assistants`
+returns assistant addresses; Task metadata includes its address. Worker context
+contains its own address and its owning assistant's address.
 
-Control does not connect directly to another Control or receive its credentials.
-No pairing, new account system, certificate or relay credential is introduced.
-Web and CLI do not run a relay. Same-Space messaging does not depend on App.
+`send_message({to, text, reply_to?})` returns durable acceptance, never execution
+completion. Control binds the envelope's `from` identity to the current execution;
+models cannot provide a sender, impersonate a user or produce Runtime events.
+Owner-origin messages guide active Tasks at a model boundary. Peer information
+is reference data, not new user authority. Ended Tasks retain reference without
+restarting; user requests for more work require a new Task. Workers can message
+only their owning assistant and cannot delegate or acquire management tools.
+`reply_to` binds assistant correspondence participants; Task inputs bind to their
+original run instead of a correspondence reply.
 
-## Tools and conversations
+## Shared storage and receivers
 
-`list_assistants({})` lists local assistants and remote assistants discovered by
-App. A cached remote directory does not prove connectivity.
+`internal/inbox` owns atomic envelope insertion and identity/content conflict
+checks. `agent_messages` in the Control's `tasks.sqlite` stores Task inputs,
+assistant correspondence and task-result events. Task input and notification
+views are transcript/receiver projections over this table, not separate queues.
+Task completion and its event commit in the same transaction. Schema 5 does not
+import legacy Task queues or the former standalone assistant mailbox.
 
-`send_assistant_message({to, text, reply_to?})` accepts a durable message and wakes
-an independent conversation belonging to the destination assistant. Replies to
-the current correspondent automatically retain its conversation when `reply_to`
-is omitted. An explicit reply must reference a received message and reverse its
-participants. The tool returns acceptance/queueing, never execution completion.
-The existing Task `send_message` tool retains its reference-only semantics.
-Workers and result-summary sessions cannot invoke Assistant messaging tools.
+The assistant's user inbox is separate and has priority at turn boundaries.
+Accepted requests arriving during an automatic read-only summary start their
+own Main turn afterwards; they do not inherit the summary's role. Pending user
+inputs survive restart. Selecting an input, persisting its turn and removing it
+from the user queue are atomic. Retries retain their original target and receipt,
+including after the summary ends. Started, uncertain executions remain fenced;
+reconciling the original turn then admits separately accepted pending input.
 
-Each communication conversation has separate durable model context and event transcript from
-the assistant's user chat. Incoming text is classified as untrusted reference data, with a fixed processing request; it never becomes user authorization. It uses the receiving assistant's selected configuration
-at conversation creation, current assistant instructions and existing task hub.
-Provider credentials stay at the receiving Control. Messages carry trusted sender
-metadata but their bodies are untrusted peer content, not user authorization.
-Existing machine permissions continue to apply. Agent responses to peers use
-`send_assistant_message`; final model text is not automatically forwarded.
+Assistant correspondence is grouped by the full sender Agent address and owning
+recipient. A peer retains one independent model context across wire conversations;
+different senders, including equal Agent IDs on different Controls, remain separate.
+Task messages are consumed by the original run at safe model boundaries; they
+do not interrupt commands. Assistant replies to peers use `send_message`; final
+model text is private to that correspondence and is not automatically forwarded.
+User chat remains serial, while background Tasks execute independently under
+Runtime capacity and shared-resource policy.
 
-Messages are text-only, bounded to 64 KiB. A source file path or download link does
-not transfer a file or grant access on another Control. Automatic message chains
-are bounded to 16 hops, including new conversations started while processing an
-incoming message, to prevent unbounded agent reply loops. Agents should reply only
-when useful and avoid courtesy-only acknowledgements.
+## Category-specific batches
 
-## Delivery and recovery
+At each execution boundary, receivers consume currently available messages without
+waiting to collect more. User input has priority. Each batch contains at most eight
+messages and 256 KiB of source text; result delivery also bounds serialized payload
+size. Additional messages and arrivals during execution remain for the next turn.
 
-Local sends enter the destination Inbox directly. Cross-Space sends enter the
-source Outbox. App checks endpoint identities, exchanges assistant directories,
-reads bounded batches for the exact destination Control, delivers them and only
-then acknowledges the source. Both directions are attempted independently. UI
-selection has no effect on routing or background relay operation.
+| Category | Group | Processing role |
+| --- | --- | --- |
+| User input | One assistant's pending user messages, in receipt order | Main |
+| Task outcomes | One assistant's pending results, across Task identities | Summary |
+| Agent correspondence | Owning recipient and full sender address | Independent peer context |
 
-The source retains the immutable envelope. The destination durably accepts before
-returning its receipt. A receipt binds the complete envelope, including content and
-both participants. Duplicate IDs with identical content return the original
-acceptance; conflicting content fails. An App crash after delivery but before
-acknowledgement causes safe redelivery, not a second Agent turn. App needs no
-separate message database.
+User batch selection commits all original projections, queue removal and turn
+membership atomically. Each message retains its own request receipt and status;
+the first request anchors the execution and reply. The model sees the ordered
+user texts together. Retries do not resubmit any member. Uncertain started batches
+remain fenced during restart/recovery, while unstarted queued inputs are retained.
 
-App must run to move cross-Space messages. Accepted remote work may continue after
-App exits; replies remain queued until it reconnects. Identity mismatch fails
-explicitly and never redirects queued work to a different Control. The App relay
-uses existing authenticated connections; only owner-authorized native requests
-can register directories, deliver envelopes or acknowledge messages.
+Agent delivery membership is journaled in `agent_delivery_items`, a binding over
+the shared inbox rather than another queue. A Task summary reports every delivered
+success/failure and acknowledges each member after its reply is durable. Peer
+messages from one sender are claimed atomically and supplied together as untrusted
+reference data. Wire `reply_to` preserves the selected message's conversation;
+automatic replies retain the batch's maximum causal hop. Allowance resume retains
+exact membership and does not absorb later arrivals. An uncertain peer blocks its
+own sender group; unrelated peers continue independently.
 
-Inbox states distinguish `queued`, `processing`, `waiting`, `processed`, `failed` and
-`interrupted`; Outbox states are `queued` and `delivered`. A processing attempt is
-persisted before model invocation. Restart marks incomplete attempts interrupted
-instead of replaying potentially effective tools. Failed/interrupted attempts
-fence later inputs in that local conversation; another conversation can proceed.
-Allowance exhaustion before a model request retains a `waiting` envelope only
-when the persisted checkpoint has no started model/tool or pending tool effects.
-Automatic or owner-released continuation reuses that envelope and checkpoint,
-without adding its request twice. Correspondence waits have separate scope keys;
-manual continuation validates the recipient assistant. A waiting correspondence
-fences later messages in that correspondence while other correspondences may run.
-Unknown outcomes require investigation. An unconfigured receiver retains queued
-messages. Diagnostics remain available through history. Native Chat projects the
-latest inbound peer reply for conversations initiated by its assistant; there is
-no separate mailbox or handoff UI. See [Multi-Space UI](multi-space-ui.md).
+Approval events remain UI-only hooks and never join these batches.
 
-## API
+## Completion events
 
-`POST /api/v1/assistant-mail` accepts the tagged `RelayRequest` contract:
-`directory`, `register`, `pending`, `deliver`, `acknowledge`, or `history`.
-History selects an assistant and sequence cursor; batches are bounded to 32
-records. The endpoint requires existing native owner authority, not an execution
-lane token or browser session. Model calls cannot supply their sender identity.
-Protocol schemas and bounds live in `pkg/protocol/mail.go`.
+Main dispatches background work, acknowledges its accepted state and ends its
+turn. It exposes no Task waiting tool and does not poll for completion.
+
+A [terminal hook](hooks.md) creates one event identified by Task and run for
+completion, failure, interruption or cancellation, including stopping before
+dispatch. Approval hooks only update UI and user reminders. When user chat is
+available, its receiver claims a batch of currently pending outcomes and produces
+one concise report using each Task title and actual outcome. Summaries have no
+tools, do not infer undelivered Tasks' states and omit identifiers from prose. Real Task identifiers remain
+available for artifact download URLs.
+
+Events become processed only after the reply is durable. A successful explicit
+result query acknowledges the same result event at turn completion; a failed
+query turn leaves it eligible for automatic delivery. Repeated hooks cannot
+reset a processed event. Failed/interrupted delivery remains recorded for
+inspection rather than automatically replaying uncertain model requests.
+
+## Cross-Space delivery
+
+A Space is a Control identity. Local messages enter the shared inbox directly;
+remote assistant correspondence enters the source Outbox. App verifies endpoint
+identities, exchanges directories, delivers envelopes and then acknowledges their
+immutable receipts. Relay preserves the original sender and does not become the
+author. Both directions operate independently of UI selection. Native owner
+ports perform relay operations; peer transport cannot forge Runtime task events.
+
+App must run to carry cross-Space messages. Assistant replies remain queued while
+it is absent. No new pairing, credential store or network authorization is added.
+Web and CLI do not run a relay. Remote Task inputs continue through their original
+Control/Runner binding rather than moving execution to a different machine.
+
+Messages are bounded to 64 KiB. Files and permissions are not transferred by
+sending text or a path. Automatic peer chains retain a 16-hop bound, including
+new conversations created while handling a received message. Agents reply only
+when useful and avoid acknowledgement loops.
+
+## API and recovery
+
+`POST /api/v1/assistant-mail` remains the owner-authorized relay transport port.
+Its tagged operations are `directory`, `register`, `pending`, `deliver`,
+`acknowledge` and `history`. Addresses and envelopes follow the Agent contract in
+`pkg/protocol/mail.go`; history projects assistant correspondence only.
+
+Inbox states include queued, processing, waiting, processed, failed and
+interrupted. A processing attempt is persisted before model invocation. Restart
+marks incomplete attempts interrupted. Allowance continuation reuses only a
+stopped checkpoint with no started model/tool effects. A fenced sender group
+does not replay its input; other peer contexts remain independent.

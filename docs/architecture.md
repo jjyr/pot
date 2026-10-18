@@ -73,9 +73,16 @@ Provider/model takes precedence; omission snapshots the invoking assistant's
 active configuration. Saved capacity rules admit or queue that route without
 choosing another model. Existing Tasks keep their resolved specification.
 
+Agent messages use one sender-bound `send_message` primitive and a shared
+`agent_messages` inbox for Task inputs, assistant correspondence and Runtime
+completion events. User chat has a separate priority queue. Main releases its
+turn after dispatch; terminal hooks report outcomes independently, with durable
+report deduplication. Approval hooks update UI and user reminders without waking
+an assistant model. See [Hooks](hooks.md) and [Agent messages](assistant-messages.md).
+
 Main and Worker invocations share the destination Runtime execution manager.
-Workers cannot coordinate other Tasks. Summary sessions only inspect Tasks and
-produce owner-chat summaries. Synthetic results remain reference data rather
+Workers cannot coordinate other Tasks. Summary sessions have no tools and
+produce owner-chat reports from delivered outcomes. Synthetic results remain reference data rather
 than new user authority. See [Tasks](task-coordination.md),
 [schedules](scheduled-tasks.md) and [usage](token-usage.md).
 

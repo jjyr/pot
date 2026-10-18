@@ -75,13 +75,20 @@ func (f *turnFeedback) InputStreaming(ctx context.Context, id string) error {
 	if id != f.request.RequestID {
 		return errors.New("streaming input binding mismatch")
 	}
+	found := false
 	for _, m := range c.messages {
-		if m.ID == c.turn.UserMessageID {
+		if c.turn.includes(m.ID) {
+			found = true
 			m.Status = protocol.Streaming
-			return c.putMessageLocked(ctx, m, nil)
+			if err := c.putMessageLocked(ctx, m, nil); err != nil {
+				return err
+			}
 		}
 	}
-	return errors.New("accepted input is missing")
+	if !found {
+		return errors.New("accepted input is missing")
+	}
+	return nil
 }
 func (f *turnFeedback) Ready(ctx context.Context) error {
 	c := f.conversation
