@@ -111,7 +111,7 @@ async page=>{
    f.client.notificationStatus=async()=>({enabled:true,permission:'denied'});f.client.notificationView=async()=>{};f.client.notifySystem=async()=>{};
    const withPages=f.response;f.response=(path,options)=>path.startsWith('/api/v1/tasks/outcomes')?{items:[],cursor:0,has_more:false}:withPages(path,options);
    f.snapshot={runtime_id:'fixture',boot_id:'fixture',owner_id:'local/a',conversation_id:'chat',cursor:'1',running:false,turn_id:null,messages:[{id:'reply',role:'assistant',text:'Ready',status:'complete'}]};
-   f.client.snapshot=()=>Promise.resolve(structuredClone(f.snapshot));f.client.subscribe=(receive,status)=>{f.receive=receive;status('connected');return ()=>{};};f.client.changes=receive=>{f.changes=receive;return ()=>{};};
+   f.client.snapshot=()=>Promise.resolve(structuredClone(f.snapshot));f.client.subscribe=(receive,status)=>{f.receive=receive;status('connected');queueMicrotask(()=>receive(structuredClone(f.snapshot)));return ()=>{};};f.client.changes=receive=>{f.changes=receive;return ()=>{};};
    const {mountApp}=await import('/components/ui.js');f.unmount=mountApp(root,f.client);
   });
   await page.locator('.background-task').waitFor();await page.locator('.assistant-search').fill('Assist');

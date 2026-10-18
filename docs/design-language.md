@@ -105,6 +105,19 @@ with the content. Conversation actions are available through the ellipsis menu.
 The shell follows the visible viewport as browser chrome or the keyboard changes;
 editor input reveal keeps the focused supported input in view.
 
+Web uses `viewport-fit=cover`. The shell reserves the top, right, bottom and left
+safe-area insets once, keeping the 44 px titlebar below the status area and
+landscape controls clear of display cutouts. Chat and Task composers use ordinary
+inner spacing; they do not reserve the bottom inset again. The full-screen menu,
+access form and top-layer dialogs also keep controls within the safe area, with
+scrolling available in short viewports. Native windows retain zero web safe insets.
+VisualViewport resize and scroll events update the visible frame for keyboard
+resizing and panning. Pinch zoom remains browser-owned and does not reflow the shell.
+The browser document stays pinned; histories, menus and forms own scrolling and
+contain overscroll. Focusing a composer keeps it at the bottom of the visible
+frame. Keyboard height/offset changes do not re-measure the focused textarea;
+only content changes or available-width changes resize it.
+
 ### Parent navigation
 
 Back and ⌘[ follow page hierarchy: task → Tasks, schedule → Schedules,

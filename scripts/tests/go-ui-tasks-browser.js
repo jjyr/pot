@@ -9,7 +9,7 @@ async page => {
  const event=(sequence,type,value={})=>({sequence,event:{turn_id:'run-one',update:{type,...value}}});
  let events=[event(1,'message_started'),event(2,'text_delta',{text:'我先检查当前系统，以及 gh 是否已经安装。'}),event(3,'message_finished'),event(4,'tool_started',{id:'probe',name:'exec_command',args:{cmd:'gh --version'}})];
  const add=(type,value={})=>events.push(event(events.length+1,type,value));
- await page.addInitScript(()=>{const sources=new Set();window.EventSource=class extends EventTarget{constructor(url){super();this.url=String(url);sources.add(this);queueMicrotask(()=>this.onopen?.({}));}close(){sources.delete(this);}};window.__taskChanges=value=>{for(const source of sources)if(source.url.includes('/changes'))source.dispatchEvent(new MessageEvent('changed',{data:JSON.stringify({tasks:value,permissions:value})}));};});
+ await page.addInitScript(()=>{const sources=new Set();window.EventSource=class extends EventTarget{constructor(url){super();this.url=String(url);sources.add(this);queueMicrotask(async()=>{this.onopen?.({});if(this.url.includes('/events')){const target=new URL(this.url,location.href);target.pathname=target.pathname.replace(/\/events$/,'/snapshot');const snapshot=await(await fetch(target)).json();if(sources.has(this))this.dispatchEvent(new MessageEvent('snapshot',{data:JSON.stringify(snapshot)}));}});}close(){sources.delete(this);}};window.__taskChanges=value=>{for(const source of sources)if(source.url.includes('/changes'))source.dispatchEvent(new MessageEvent('changed',{data:JSON.stringify({tasks:value,permissions:value})}));};});
  const routeHandler=async route=>{
   const url=new URL(route.request().url()),path=url.pathname;
   if(path.startsWith('/api/v1/tasks/task-proof'))reads.push({path,after:url.searchParams.get('after'),owner:url.searchParams.get('assistant_id'),space:url.searchParams.get('space_id')});
@@ -85,6 +85,24 @@ async page => {
   assert(await page.locator('.task-history').evaluate(node=>node.scrollTop)===0,'Reading history pauses following');
   await page.locator('.task-composer-area .latest-button').click();assert(await page.locator('.task-history').evaluate(node=>node.scrollTop>0),'Latest action resumes following');
   const inputRect=await composer.boundingBox();assert(inputRect.y+inputRect.height<=1000,'Composer stays within viewport during long output');
+  // Task guidance uses the same mobile focus/keyboard behavior as main Chat.
+  const retainedDraft=await composer.inputValue();await page.setViewportSize({width:390,height:852});
+  await composer.fill('Long mobile task guidance. '.repeat(50));await composer.evaluate(node=>node.blur());
+  await page.locator('.task-history').evaluate(node=>{node.scrollTop=120;node.dispatchEvent(new Event('scroll'));});
+  const focusCDP=await page.context().newCDPSession(page);await focusCDP.send('Emulation.setTouchEmulationEnabled',{enabled:true});
+  const touchRect=await composer.boundingBox();await focusCDP.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:touchRect.x+touchRect.width/2,y:touchRect.y+touchRect.height/2}]});await focusCDP.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  const taskFocus=await composer.evaluate(node=>{node.setSelectionRange(30,40);node.scrollTop=40;return {history:document.querySelector('.task-history').scrollTop,inputScroll:node.scrollTop};});
+  for(const [height,top]of [[420,80],[420,110],[852,0]]){
+    await page.evaluate(({height,top})=>{Object.defineProperties(window.visualViewport,{height:{configurable:true,value:height},offsetTop:{configurable:true,value:top}});window.visualViewport.dispatchEvent(new Event('resize'));window.visualViewport.dispatchEvent(new Event('scroll'));},{height,top});
+    const bounds=await composer.boundingBox();
+    assert(bounds.y>top+44&&bounds.y+bounds.height<=top+height,'Task composer stays above the keyboard after a tap');
+    assert(await composer.evaluate(node=>document.activeElement===node&&node.selectionStart===30&&node.selectionEnd===40),'Task keyboard transitions retain native focus and selection');
+    assert(await composer.evaluate(node=>node.scrollTop)===taskFocus.inputScroll,'Task keyboard panning retains long-draft scrolling');
+    assert(await page.locator('.task-history').evaluate(node=>node.scrollTop)===taskFocus.history,'Task keyboard transitions retain history reading position');
+  }
+  await page.evaluate(()=>{for(const key of ['height','offsetTop'])delete window.visualViewport[key];window.visualViewport.dispatchEvent(new Event('resize'));});
+  await focusCDP.send('Emulation.setTouchEmulationEnabled',{enabled:false});await focusCDP.detach();
+  await composer.fill(retainedDraft);await composer.evaluate(node=>node.blur());await page.setViewportSize({width:1200,height:1000});
   inputs.at(-1).state='consumed';add('message_finished');add('input_applied',{id:failedRequest});add('message_started');add('text_delta',{text:'安装与工具调用验证完成。'});add('message_finished');add('turn_finished',{outcome:{kind:'success'}});phase='complete';result={text:'安装与工具调用验证完成。',outcome:{kind:'success'}};await push();
   await page.locator('.task-status').getByText('已完成',{exact:true}).waitFor();
   assert(await page.locator('.task-transcript').getByText(result.text,{exact:true}).count()===1,'Final result appears once as a reply');

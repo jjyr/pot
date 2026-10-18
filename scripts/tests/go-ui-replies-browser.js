@@ -14,7 +14,7 @@ async page=>{
    snapshot:async()=>structuredClone(context.owner==='other'?{...empty,owner_id:JSON.stringify(['local','other']),conversation_id:'other'}:fixture.snapshot),
    send:request=>{fixture.requests.push(request);return new Promise((resolve,reject)=>{fixture.resolveSend=resolve;fixture.rejectSend=reject;});},
    cancel:async()=>{},changes:()=>{fixture.changeSubscriptions++;return ()=>{};},
-   subscribe:(deliver,status)=>{fixture.deliver=deliver;fixture.status=status;fixture.subscriptions++;status('connected');return ()=>{};},
+   subscribe:(deliver,status)=>{fixture.deliver=deliver;fixture.status=status;fixture.subscriptions++;status('connected');queueMicrotask(async()=>deliver(await client.snapshot()));return ()=>{};},
    request:async path=>{
     if(path==='/api/v1/spaces')return {active_space_id:'local',items:[{id:'local',control_id:'reply-runtime',name:'Local',kind:'local',connected:true}]};
     if(path==='/api/v1/assistants')return [{id:'main',name:'Pot',phase:'ready'},{id:'other',name:'Other assistant',phase:'ready'}];

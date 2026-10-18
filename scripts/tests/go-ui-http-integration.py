@@ -137,6 +137,16 @@ def run(binary, base, env, cli_command):
                 "browser service",
             )
 
+        def message_text(message):
+            content = message.get("content")
+            if isinstance(content, str) and content.startswith("<pot_message_metadata>"):
+                metadata, separator, content = content.partition("</pot_message_metadata>\n")
+                assert (
+                    separator
+                    and json.loads(metadata.removeprefix("<pot_message_metadata>"))["message_id"]
+                )
+            return content
+
         class Model(BaseHTTPRequestHandler):
             def log_message(self, *_):
                 pass
@@ -148,7 +158,7 @@ def run(binary, base, env, cli_command):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 model_requests.append(body)
                 if any(
-                    m.get("content") == "以后叫你小白" for m in body.get("messages", [])
+                    message_text(m) == "以后叫你小白" for m in body.get("messages", [])
                 ) and not any(m.get("role") == "tool" for m in body.get("messages", [])):
                     self.send_response(200)
                     self.send_header("Content-Type", "text/event-stream")
@@ -277,7 +287,7 @@ def run(binary, base, env, cli_command):
             welcome = "你好，我是 Pot。\n\n你可以给我起个名字，或者告诉我你希望我如何帮你。"
             assert any(
                 any(
-                    m.get("role") == "assistant" and m.get("content") == welcome
+                    m.get("role") == "assistant" and message_text(m) == welcome
                     for m in body.get("messages", [])
                 )
                 for body in model_requests
@@ -385,7 +395,13 @@ def run(binary, base, env, cli_command):
                     .replace("http://127.0.0.1:17702", origin)
                 )
                 output = browser_cli(
-                    "run-code", code.replace("STATE", json.dumps({"origin": origin}))
+                    "run-code",
+                    "async page => { const context = await page.context().browser().newContext({serviceWorkers:'block'}); "
+                    "try { const fixture = await context.newPage(); await fixture.goto("
+                    + json.dumps(origin)
+                    + "); return await ("
+                    + code.replace("STATE", json.dumps({"origin": origin}))
+                    + ")(fixture); } finally { await context.close(); } }",
                 )
                 if '"passed":true' not in output:
                     raise RuntimeError(script + " did not pass")

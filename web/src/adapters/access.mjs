@@ -1,5 +1,7 @@
 // The installation token is origin-scoped in IndexedDB. API calls use the
 // server's HttpOnly session cookie; credentials never enter routes or logs.
+import {bindViewport} from '../components/viewport.mjs';
+
 const database = 'pot-browser-access';
 let installationPrompt;
 if(typeof window!=='undefined')window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installationPrompt=event;});
@@ -35,10 +37,11 @@ export async function ensureBrowserAccess(root) {
     catch {try{await tokenStore('remove');}catch{}if(status.authenticated&&!fragment)return status;}
   }
   if(status.authenticated&&!fragment)return status;
+  const stopViewport=bindViewport(document.documentElement);
   return new Promise(resolve=>{
     const zh=navigator.language.startsWith('zh'),form=document.createElement('form'),heading=document.createElement('h1'),label=document.createElement('label'),input=document.createElement('input'),submit=document.createElement('button'),error=document.createElement('p');
     root.className='access-setup';heading.textContent=zh?'连接到 Pot':'Connect to Pot';label.textContent=zh?'访问令牌':'Access token';input.type='password';input.autocomplete='off';input.required=true;input.setAttribute('aria-label',label.textContent);input.className='field-input';label.append(input);submit.className='control primary';submit.textContent=zh?'连接':'Connect';error.className='inline-error';error.setAttribute('role','alert');form.append(heading,label,error,submit);root.replaceChildren(form);
-    form.onsubmit=async event=>{event.preventDefault();submit.disabled=true;error.textContent='';try{await exchange(input.value.trim());try{await tokenStore('put',input.value.trim());}catch{}input.value='';root.replaceChildren();resolve({...status,authenticated:true});}catch(reason){error.textContent=reason.message;}finally{submit.disabled=false;}};
+    form.onsubmit=async event=>{event.preventDefault();submit.disabled=true;error.textContent='';try{await exchange(input.value.trim());try{await tokenStore('put',input.value.trim());}catch{}input.value='';root.replaceChildren();stopViewport();resolve({...status,authenticated:true});}catch(reason){error.textContent=reason.message;}finally{submit.disabled=false;}};
   });
 }
 export async function forgetBrowserAccess() {try{await tokenStore('remove');}catch{}await fetch('/access/logout',{method:'POST',credentials:'same-origin'});location.reload();}

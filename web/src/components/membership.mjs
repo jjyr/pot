@@ -52,11 +52,14 @@ export async function renderMachineMembership({client,root,machines,locale,notif
   for(const card of membershipRoot.querySelectorAll('[data-membership-space]'))if(!spaces.includes(card.dataset.membershipSpace))card.remove();
   await Promise.all(spaces.map(async space=>{
     const scope={space,owner:''},owned=machines.filter(machine=>machine._space_id===space);
-    const previous=[...membershipRoot.querySelectorAll('[data-membership-space]')].find(card=>card.dataset.membershipSpace===space);
+    let previous=[...membershipRoot.querySelectorAll('[data-membership-space]')].find(card=>card.dataset.membershipSpace===space);
     if(owned.every(machine=>machine._stale)){for(const button of previous?.querySelectorAll('button')||[])setDisabled(button,true);for(const card of root.querySelectorAll('.machine-card'))if(card.dataset.spaceId===space)for(const button of card.querySelectorAll('[data-membership-action]'))setDisabled(button,true);return;}
     let state;
     try{state=await (client.read||client.request)('/api/v1/runtime/control',{...scope,signal});}catch(reason){if(reason.name!=='AbortError'&&current()){for(const button of previous?.querySelectorAll('button')||[])setDisabled(button,true);notify(reason.message);}return;}
     if(!current())return;
+    // Inventory and permission projections can finish together. Recheck after IO
+    // so concurrent projections reuse the card created by the first response.
+    previous=[...membershipRoot.querySelectorAll('[data-membership-space]')].find(card=>card.dataset.membershipSpace===space);
     for(const machine of owned){const card=[...root.querySelectorAll('.machine-card')].find(card=>card.dataset.machineId===(machine.runtime_id||machine.id)&&card.dataset.spaceId===space),header=card?.querySelector('.machine-header');if(!header)continue;
       let menu=header.querySelector('.machine-actions');
       if(!menu){menu=n('details','machine-actions');const summary=n('summary','control',tr('More','更多')),settings=n('div','machine-actions-content');summary.setAttribute('aria-label',`${machine.name||machine.runtime_id||machine.id}: ${tr('More machine actions','更多机器操作')}`);menu.append(summary,settings);header.append(menu);
