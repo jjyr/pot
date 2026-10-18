@@ -7,9 +7,11 @@ copyright and terms. Third-party dependencies retain their own terms.
 
 The macOS **Pot → About Pot** menu opens the standard AppKit panel. Its name,
 version and copyright come from the packaged `Info.plist` and `LICENSE`.
-**Settings → General → About** shows the product version, source revision, Go
-version and expandable plain-text dependency notices. Browser clients use the
-same read-only `/api/v1/about` projection for their connected Control.
+**Settings → General → About** shows the product version, source revision and Go
+version. Copyright notices stay hidden until the user opens **Copyright notices**;
+a scrollable modal contains the font license link and expandable plain-text
+dependency notices. The modal closes with **Close** or Escape. Browser clients use
+the same read-only `/api/v1/about` projection for their connected Control.
 
 `scripts/build-go-app` and `scripts/build-go-cli` set
 `internal/buildinfo.Version` and `Revision` through Go linker flags. The App

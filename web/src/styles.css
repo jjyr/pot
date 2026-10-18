@@ -146,6 +146,11 @@ h1, h2, p { margin: 0; }
 .preferences::backdrop { background: #0004; }
 .preferences-heading { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .preferences h2 { font-size: 16px; font-weight: 600; }
+.about-notices-trigger { align-self: flex-start; }
+.about-notices { width: min(680px, calc(100% - 32px)); max-height: calc(100dvh - 32px); overflow: hidden; }
+.about-notices[open] { display: flex; flex-direction: column; }
+.about-notices .preferences-heading { flex-shrink: 0; }
+.about-notices-body { min-height: 0; overflow: auto; }
 .hint { font-size: var(--description-size); color: var(--muted); line-height: 1.5; }
 .preference-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; }
 .preference-row select { background: var(--surface); border: 1px solid var(--input-border); border-radius: var(--radius); padding: 4px 8px; min-height: var(--control-height); }
