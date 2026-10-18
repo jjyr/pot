@@ -24,4 +24,27 @@ patch('sandbox-manager.js', '9fc99f9affab4035e360812c5c9f0e980227642fb31c77588ed
 ]);
 patch('macos-sandbox-utils.js', '7f297d6acb08a44adc9198876a38ce49ffa59e3a7aa09692933b3e008b446a32', [
   ["profile.push('(allow network*)');", "profile.push('(allow network-outbound (remote ip \"*:*\"))');\n        profile.push('(allow network-inbound (local ip \"*:*\"))');\n        profile.push('(allow network-bind (local ip \"*:*\"))');\n        // DNS resolution uses this system socket; no workload-controlled socket.\n        profile.push('(allow network-outbound (literal \"/private/var/run/mDNSResponder\"))');"],
+  ['    profile.push(...generateReadRules(resolvedRead, logTag));', `    profile.push(...generateReadRules(resolvedRead, logTag));
+    // Canonical read roots do not authorize traversal through system symlinks.
+    // Permit only these links themselves; their targets still need read grants.
+    profile.push('(allow file-read* (require-all (vnode-type SYMLINK) (require-any');
+    for (const link of ['/etc', '/var', '/tmp', '/private/etc/resolv.conf', '/private/etc/localtime', '/private/var/select/sh']) {
+        profile.push('  (literal ' + escapePath(link) + ')');
+    }
+    profile.push(')))');`],
+]);
+patch('linux-sandbox-utils.js', '3880ba176ec09e5fdda364b1135fbccd291df5dcd9dd1c3c70da02e15f4f6621', [
+  ['        const placement = restorePlacementOf(allowPath);\n        if (placement === undefined)', '        const placement = restorePlacementOf(allowPath);\n        if (placement === undefined || placement.source !== placement.dest)'],
+  ['    return { restoredWrites, restoredReads };', `    // A read entry can name a symlink into a different hidden directory.
+    // Restore only the link: binding its host target here would bypass the
+    // target's own read policy. Directory restores already preserve their links.
+    for (const allowPath of readAllowPaths) {
+        const dest = unit.nameLocation(allowPath);
+        if (!isAtOrUnder(dest, landing)) continue;
+        const { canonical: source, resolved } = unit.resolve(allowPath);
+        if (!resolved || source === dest) continue;
+        if ([...restoredWrites, ...restoredReads].some(p => isAtOrUnder(dest, p.dest))) continue;
+        args.push('--symlink', source, dest);
+    }
+    return { restoredWrites, restoredReads };`],
 ]);

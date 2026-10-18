@@ -115,9 +115,14 @@ func (l Launcher) Prepare(ctx context.Context, command *exec.Cmd, workspace stri
 	request := launch{CWD: cwd, Argv: command.Args, Read: append([]string{workspace, private}, read...), Write: append([]string{workspace, private}, write...), TTY: tty}
 	// System installation roots are read-only. Never expose the user's home,
 	// sibling temporary directories, Control database, or ambient credentials.
-	for _, root := range []string{"/System", "/Library/Apple", "/Library/Fonts", "/Applications", "/usr", "/bin", "/sbin", "/dev", "/opt", "/etc/ssl", "/etc/hosts", "/etc/resolv.conf", "/etc/services", "/etc/localtime", "/etc/fonts", "/etc/chromium", "/etc/chromium.d", "/var/cache/fontconfig"} {
+	for _, root := range []string{"/System", "/Library/Apple", "/Library/Fonts", "/Applications", "/usr", "/bin", "/sbin", "/dev", "/opt", "/etc/ssl/certs", "/etc/ssl/cert.pem", "/etc/ssl/certs/ca-certificates.crt", "/etc/ssl/ca-bundle.pem", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/pki/tls/cacert.pem", "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem", "/etc/hosts", "/etc/resolv.conf", "/etc/services", "/etc/localtime", "/etc/fonts", "/etc/chromium", "/etc/chromium.d", "/var/cache/fontconfig"} {
 		if canonical, e := filepath.EvalSymlinks(root); e == nil {
-			request.Read = append(request.Read, canonical)
+			// Preserve the system-facing name as well as its target. Linux
+			// read-deny mounts otherwise hide aliases such as /etc/resolv.conf.
+			request.Read = append(request.Read, root)
+			if canonical != root {
+				request.Read = append(request.Read, canonical)
+			}
 		}
 	}
 	for _, tool := range []string{"go", "node", "npm", "python3", "git", "gh", "rg"} {

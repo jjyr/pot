@@ -27,10 +27,16 @@ prepare_sandbox(bundle / "sandbox")
 if (bundle / "node").exists():
     shutil.rmtree(bundle / "node")
 shutil.copytree(node("linux-" + goarch), bundle / "node")
-for package in ("executor", "sandbox", "processscope"):
-    (bundle / "pkg" / package).mkdir(parents=True, exist_ok=True)
+packages = {
+    "executor": "pkg/executor",
+    "sandbox": "pkg/sandbox",
+    "processscope": "pkg/processscope",
+    "control": "internal/control",
+}
+for package, source in packages.items():
+    (bundle / source).mkdir(parents=True, exist_ok=True)
     run(
-        ["go", "test", "-c", "-o", bundle / f"{package}.test", f"./pkg/{package}"],
+        ["go", "test", "-c", "-o", bundle / f"{package}.test", f"./{source}"],
         env={**os.environ, "GOOS": "linux", "GOARCH": goarch, "CGO_ENABLED": "0"},
     )
 run(
@@ -46,7 +52,7 @@ run(
 )
 # Only test assets are mounted, read-only. Docker namespace restrictions are
 # relaxed for this disposable test host, not in Pot's production SRT policy.
-for package in ("sandbox", "processscope", "executor"):
+for package in ("sandbox", "processscope", "executor", "control"):
     run(
         [
             "docker",
@@ -63,7 +69,7 @@ for package in ("sandbox", "processscope", "executor"):
             "--mount",
             f"type=bind,src={bundle},dst=/suite,readonly",
             "--workdir",
-            f"/suite/pkg/{package}",
+            f"/suite/{packages[package]}",
             "--env",
             "PATH=/suite/node/bin:/usr/local/bin:/usr/bin:/bin",
             "--env",
@@ -76,7 +82,9 @@ for package in ("sandbox", "processscope", "executor"):
             f"/suite/{package}.test",
             "-test.v",
             "-test.run",
-            "TestReal|TestDetached|TestCancellation",
+            "^TestRealUnixSocketRequiresHostApproval$"
+            if package == "control"
+            else "TestReal|TestDetached|TestCancellation",
             "-test.timeout",
             "90s",
         ]

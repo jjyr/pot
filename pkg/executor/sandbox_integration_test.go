@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,10 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func sandboxFixture(t *testing.T) (*Engine, Request) {
@@ -102,13 +105,51 @@ func TestRealSandboxDetachedGrandchildCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	code := "import os,time\nif os.fork():\n for i in range(500):\n  if os.path.exists('detached-pid'): os._exit(0)\n  time.sleep(.01)\n os._exit(1)\nos.setsid()\nif os.fork(): os._exit(0)\nopen('detached-pid','w').write(str(os.getpid()))\ntime.sleep(90)\n"
+	code := `import os,time
+if os.fork():
+ for i in range(500):
+  if os.path.exists('detached-pid'): os._exit(0)
+  time.sleep(.01)
+ os._exit(1)
+os.setsid()
+if os.fork(): os._exit(0)
+open('detached-heartbeat','w').write('0')
+open('detached-pid','w').write(str(os.getpid()))
+for i in range(1,501):
+ time.sleep(.01)
+ open('heartbeat-next','w').write(str(i))
+ os.replace('heartbeat-next','detached-heartbeat')
+`
 	encoded, _ := json.Marshal(code)
 	script := "import json; exec(json.loads(" + strconv.Quote(string(encoded)) + "))"
 	command := shellQuote(python) + " -c " + shellQuote(script)
 	result := call(t, e, r, "exec_command", map[string]any{"cmd": command})
 	if result["exit_code"] != 0 {
 		t.Fatal(result)
+	}
+	if runtime.GOOS == "linux" {
+		// The recorded PID belongs to bwrap's private PID namespace. Never
+		// signal that number on the host, where it may name an unrelated process.
+		path := filepath.Join(r.CWD, "detached-heartbeat")
+		before, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.NewTimer(500 * time.Millisecond)
+		defer deadline.Stop()
+		ticker := time.NewTicker(20 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-deadline.C:
+				return
+			case <-ticker.C:
+				after, err := os.ReadFile(path)
+				if err != nil || !bytes.Equal(before, after) {
+					t.Fatalf("detached grandchild wrote after cleanup: %q -> %q: %v", before, after, err)
+				}
+			}
+		}
 	}
 	data, err := os.ReadFile(filepath.Join(r.CWD, "detached-pid"))
 	if err != nil {
@@ -119,7 +160,6 @@ func TestRealSandboxDetachedGrandchildCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err = syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
-		_ = syscall.Kill(pid, syscall.SIGKILL)
 		t.Fatalf("detached grandchild survived sandbox cleanup: %v", err)
 	}
 }

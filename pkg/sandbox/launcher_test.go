@@ -2,7 +2,11 @@ package sandbox
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -62,6 +66,10 @@ func TestRealFileNetworkAndSocketIsolation(t *testing.T) {
 	if err = os.Symlink(filepath.Join(root, "secret"), filepath.Join(workspace, "escape")); err != nil {
 		t.Fatal(err)
 	}
+	readAlias := filepath.Join(root, "read-alias")
+	if err := os.Symlink("/etc/passwd", readAlias); err != nil {
+		t.Fatal(err)
+	}
 	if err = os.Mkdir(filepath.Join(workspace, ".git"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -70,26 +78,95 @@ func TestRealFileNetworkAndSocketIsolation(t *testing.T) {
 	}
 	// Socket is deliberately inside the readable workspace: denying its path as
 	// a file is not sufficient to pass this test.
-	socket := filepath.Join(workspace, "daemon.sock")
+	socket := filepath.Join(workspace, "docker.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer listener.Close()
+	agentSocket := filepath.Join(workspace, "agent.sock")
+	agent, err := net.Listen("unix", agentSocket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agent.Close()
+	t.Setenv("SSH_AUTH_SOCK", agentSocket)
+	t.Setenv("DOCKER_HOST", "unix://"+socket)
+	alias := filepath.Join(workspace, "docker-alias.sock")
+	if err := os.Symlink(socket, alias); err != nil {
+		t.Fatal(err)
+	}
+	sockets := map[string]string{"denyDockerSocket": socket, "denySSHAgentSocket": agentSocket, "denySocketAlias": alias}
+	if runtime.GOOS == "linux" {
+		address := "@" + filepath.Base(root)
+		abstract, err := net.Listen("unix", address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer abstract.Close()
+		sockets["denyAbstractSocket"] = address
+	}
+	// These are real, reachable services. A missing or hidden endpoint must not
+	// be mistaken for enforcement of the socket boundary.
+	for name, address := range sockets {
+		connection, err := net.DialTimeout("unix", address, time.Second)
+		if err != nil {
+			t.Fatalf("host socket control %s: %v", name, err)
+		}
+		connection.Close()
+		if strings.HasPrefix(address, "@") {
+			sockets[name] = "\x00" + address[1:]
+		}
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("network-open")) }))
 	defer server.Close()
-	values, _ := json.Marshal(map[string]string{"secret": filepath.Join(root, "secret"), "outside": filepath.Join(root, "outside"), "socket": socket, "url": server.URL})
+	// Exercise system DNS rather than connecting only to a numeric address.
+	url := strings.Replace(server.URL, "127.0.0.1", "localhost", 1)
+	systemFiles := map[string]string{}
+	dnsServers := ""
+	{
+		probe := exec.Command(node, "-p", "JSON.stringify(require('node:dns').getServers())")
+		probe.Env = Environment()
+		output, err := probe.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		dnsServers = strings.TrimSpace(string(output))
+		caFiles := 0
+		for i, path := range []string{"/etc/hosts", "/etc/resolv.conf", "/etc/ssl/cert.pem", "/etc/ssl/certs/ca-certificates.crt", "/etc/ssl/ca-bundle.pem", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/pki/tls/cacert.pem", "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"} {
+			data, err := os.ReadFile(path)
+			if i >= 2 && os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if i >= 2 {
+				caFiles++
+			}
+			digest := sha256.Sum256(data)
+			systemFiles[path] = fmt.Sprintf("%x", digest)
+		}
+		if caFiles == 0 {
+			t.Fatal("no system CA bundle found")
+		}
+	}
+	values, _ := json.Marshal(map[string]any{"secret": filepath.Join(root, "secret"), "readAlias": readAlias, "outside": filepath.Join(root, "outside"), "sockets": sockets, "url": url, "systemFiles": systemFiles, "dnsServers": dnsServers})
 	code := `const fs=require('node:fs'),net=require('node:net'),http=require('node:http');const v=` + string(values) + `;const checks={};
-for(const [key,fn] of Object.entries({denyRead:()=>fs.readFileSync(v.secret),denySymlink:()=>fs.readFileSync('escape'),denyWrite:()=>fs.writeFileSync(v.outside,'x'),denyGitConfig:()=>fs.writeFileSync('.git/config','x')})){try{fn();checks[key]=false}catch(e){checks[key]=['EPERM','EACCES','EROFS','ENOENT'].includes(e.code)}}
+for(const [key,fn] of Object.entries({denyRead:()=>fs.readFileSync(v.secret),denySymlink:()=>fs.readFileSync('escape'),denyReadAlias:()=>fs.readFileSync(v.readAlias),denySystemFile:()=>fs.readFileSync('/etc/passwd'),denyTLSConfig:()=>fs.readFileSync('/etc/ssl/openssl.cnf'),denyWrite:()=>fs.writeFileSync(v.outside,'x'),denyGitConfig:()=>fs.writeFileSync('.git/config','x')})){try{fn();checks[key]=false}catch(e){checks[key]=['EPERM','EACCES','EROFS','ENOENT'].includes(e.code)}}
+checks.systemFiles=Object.entries(v.systemFiles).every(([path,digest])=>{try{return require('node:crypto').createHash('sha256').update(fs.readFileSync(path)).digest('hex')===digest}catch{return false}});
+checks.dnsConfiguration=!v.dnsServers||JSON.stringify(require('node:dns').getServers())===v.dnsServers;
+checks.socketVisible=Object.values(v.sockets).filter(path=>!path.startsWith('\0')).every(path=>fs.statSync(path).isSocket());
 fs.writeFileSync('output','ok');checks.workspace=fs.readFileSync('output','utf8')==='ok';
 checks.noProxy=!process.env.HTTP_PROXY&&!process.env.HTTPS_PROXY&&!process.env.ALL_PROXY;
-Promise.all([new Promise(resolve=>{const s=net.connect(v.socket);s.once('connect',()=>{checks.socket=false;s.destroy();resolve()});s.once('error',()=>{checks.socket=true;resolve()})}),new Promise((resolve,reject)=>{http.get(v.url,r=>{let data='';r.on('data',c=>data+=c);r.on('end',()=>{checks.network=data==='network-open';resolve()})}).on('error',reject)})]).then(()=>console.log(JSON.stringify(checks))).catch(e=>{console.error(e);process.exitCode=1});`
+checks.noAuthorityEnv=!process.env.SSH_AUTH_SOCK&&!process.env.DOCKER_HOST;
+Promise.all([...Object.entries(v.sockets).map(([name,path])=>new Promise(resolve=>{const s=net.connect(path);s.once('connect',()=>{checks[name]=false;s.destroy();resolve()});s.once('error',e=>{checks[name]=['EPERM','EACCES'].includes(e.code);resolve()})})),new Promise((resolve,reject)=>{http.get(v.url,r=>{let data='';r.on('data',c=>data+=c);r.on('end',()=>{checks.network=data==='network-open';resolve()})}).on('error',reject)})]).then(()=>console.log(JSON.stringify(checks))).catch(e=>{console.error(e);process.exitCode=1});`
 	command := exec.Command(node, "-e", code)
 	command.Dir = workspace
 	command.Env = Environment()
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 	defer cancel()
-	finish, err := (Launcher{Node: node, Directory: sdk}).Prepare(ctx, command, workspace, nil, nil, false)
+	finish, err := (Launcher{Node: node, Directory: sdk}).Prepare(ctx, command, workspace, []string{readAlias}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +180,7 @@ Promise.all([new Promise(resolve=>{const s=net.connect(v.socket);s.once('connect
 	if err = json.Unmarshal(output, &checks); err != nil {
 		t.Fatal(err)
 	}
-	if len(checks) != 8 {
+	if len(checks) != 14+len(sockets) {
 		t.Fatal("missing isolation checks", checks)
 	}
 	// Linux hides unreadable directories behind private tmpfs mounts. A write
@@ -122,6 +199,71 @@ Promise.all([new Promise(resolve=>{const s=net.connect(v.socket);s.once('connect
 		if !passed {
 			t.Errorf("failed: %s", name)
 		}
+	}
+}
+
+func TestRealMacOSCertificateTrust(t *testing.T) {
+	// The system trust service must reject a local untrusted certificate with
+	// UnknownAuthorityError, rather than fail to access the service itself.
+	if path := os.Getenv("POT_SANDBOX_TRUST_CERT"); path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cert, err := x509.ParseCertificate(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = cert.Verify(x509.VerifyOptions{DNSName: "example.com"})
+		var untrusted x509.UnknownAuthorityError
+		if !errors.As(err, &untrusted) {
+			t.Fatalf("expected untrusted certificate, got %T: %v", err, err)
+		}
+		return
+	}
+	if os.Getenv("POT_SANDBOX_INTEGRATION") != "1" || runtime.GOOS != "darwin" {
+		t.Skip("macOS sandbox qualification only")
+	}
+	server := httptest.NewTLSServer(nil)
+	defer server.Close()
+	cert := server.Certificate()
+	_, err := cert.Verify(x509.VerifyOptions{DNSName: "example.com"})
+	var untrusted x509.UnknownAuthorityError
+	if !errors.As(err, &untrusted) {
+		t.Fatalf("host fixture: expected untrusted certificate, got %T: %v", err, err)
+	}
+	workspace := t.TempDir()
+	certPath := filepath.Join(workspace, "untrusted.der")
+	if err := os.WriteFile(certPath, cert.Raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sdk := os.Getenv("POT_SANDBOX_SDK")
+	if sdk == "" {
+		sdk, err = filepath.Abs("../../sandbox")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	worker, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, worker, "-test.run=^TestRealMacOSCertificateTrust$")
+	command.Dir = workspace
+	command.Env = append(Environment(), "POT_SANDBOX_TRUST_CERT="+certPath)
+	finish, err := (Launcher{Node: node, Directory: sdk}).Prepare(ctx, command, workspace, nil, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, runErr := command.CombinedOutput()
+	if cleanup := finish(); runErr != nil || cleanup != nil {
+		t.Fatalf("sandbox: %v cleanup: %v\n%s", runErr, cleanup, output)
 	}
 }
 
