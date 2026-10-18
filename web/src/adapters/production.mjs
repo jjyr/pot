@@ -66,6 +66,18 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
     send: ({boot_id,user_message_id,...body}) => request(user_message_id?'/api/v1/turn/steer':'/api/v1/messages', {method: 'POST', body:user_message_id?{request_id:body.request_id,user_message_id,text:body.text}:body}),
     controlTurn:(body,scope)=>request('/api/v1/turn/control',{...scope,method:'POST',body}),
     cancel: ({boot_id, turn_id, request_id}) => request('/api/v1/turn/cancel', {method: 'POST', body: {request_id, user_message_id: turn_id}}),
+    notificationStatus:desktop?()=>invoke('SystemNotificationStatus'):undefined,
+    requestNotificationPermission:desktop?()=>invoke('RequestSystemNotificationPermission'):undefined,
+    setNotificationsEnabled:desktop?value=>invoke('SetSystemNotificationsEnabled',value):undefined,
+    notificationView:desktop?(surface,view)=>invoke('SetNotificationView',surface,view):undefined,
+    notifySystem:desktop?event=>invoke('NotifySystem',event):undefined,
+    onNotificationClick:desktop?handler=>{
+      let active=true;
+      const take=()=>invoke('TakeSystemNotification').then(value=>{if(active&&value)handler(value);}).catch(()=>{});
+      const stop=runtimeAPI.Events.On('pot:notification-click',take);take();
+      return ()=>{active=false;stop();};
+    }:undefined,
+    onNotificationPreference:desktop?handler=>runtimeAPI.Events.On('pot:notification-preference',handler):undefined,
     openMain: desktop ? () => invoke('OpenMain') : undefined,
     openExternal: desktop ? url => runtimeAPI.Browser.OpenURL(url) : undefined,
     markRead:desktop?value=>invoke('ReadAssistant',value.space_id,value.owner,value.reply_id,value.reply_count):undefined,
@@ -120,9 +132,15 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
     changes(onChange,{space=context.space}={}) {
       const scope = {...context,space},versions=createTopicVersions();
       const notify=(topics,sourceSpace,boot)=>{const changed=versions(topics,sourceSpace,boot);if(changed.length)onChange(changed,{space:sourceSpace,boot});};
-      if (desktop) return runtimeAPI.Events.On('pot:changed', event => { if (!scope.space||event.data.space_id === scope.space) notify(event.data.topics,event.data.space_id,event.data.boot_id||''); });
+      if (desktop) return runtimeAPI.Events.On('pot:changed', event => {
+        if(scope.space&&event.data.space_id!==scope.space)return;
+        if(event.data.reset){onChange([],{space:event.data.space_id,reset:true});return;}
+        notify(event.data.topics,event.data.space_id,event.data.boot_id||'');
+      });
       const source = new EventSource(`${base}${scopedPath('/api/v1/changes', scope)}`);
       const deliver = event => { try { const value = JSON.parse(event.data); const id=event.lastEventId||'',separator=id.lastIndexOf(':');notify(value.topics || value,scope.space,separator<0?'':id.slice(0,separator)); } catch { /* next version event reconciles */ } };
+      source.onopen=()=>onChange([],{space:scope.space,reset:true});
+      source.onerror=()=>onChange([],{space:scope.space,reset:true});
       source.addEventListener('changed', deliver); source.addEventListener('changes', deliver); source.onmessage = deliver;
       return () => source.close();
     },

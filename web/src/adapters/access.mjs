@@ -51,13 +51,14 @@ export async function installPWA() {
   if('serviceWorker'in navigator&&isSecureContext)return navigator.serviceWorker.register('/service-worker.js',{scope:'/'});
   return null;
 }
-export async function configurePush(status,{enabled=true,locale='en',private_preview=false}={}) {
-  if(!status?.push_available||!status.push_key)throw Error('Push notifications are unavailable on this server.');
-  const registration=await navigator.serviceWorker.ready;
-  if(!enabled){const subscription=await registration.pushManager.getSubscription();const response=await fetch('/access/push/remove',{method:'POST',credentials:'same-origin'});if(!response.ok)throw Error('Could not remove notifications.');await subscription?.unsubscribe();return;}
-  if(await Notification.requestPermission()!=='granted')throw Error('Notification permission was not granted.');
-  const key=Uint8Array.from(atob(status.push_key.replace(/-/g,'+').replace(/_/g,'/')),value=>value.charCodeAt(0));
-  const subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
-  const response=await fetch('/access/push',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:subscription.toJSON(),locale,private_preview})});
-  if(!response.ok){await subscription.unsubscribe();throw Error('Could not save notification subscription.');}
+// Retire this browser installation's old reply-only Web Push subscription before
+// the running-client notification path starts. Other installations are untouched.
+export async function retireBrowserPush(status) {
+  if(status?.push_available){
+    const response=await fetch('/access/push/remove',{method:'POST',credentials:'same-origin'});
+    if(!response.ok)throw Error('Could not retire the previous browser notification subscription. Reload to retry.');
+  }
+  const registration=await navigator.serviceWorker?.getRegistration('/');
+  const subscription=await registration?.pushManager?.getSubscription();
+  await subscription?.unsubscribe();
 }

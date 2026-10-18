@@ -143,6 +143,66 @@ focused Chat. Browsers keep baselines in local storage and synchronize same-orig
 tabs. Keys include the Control identity so a rebuilt database cannot inherit an
 unrelated baseline. Reduced Motion disables reactions and native tray animation.
 
+## System notifications
+
+General settings has one **System notifications** preference, enabled by default.
+This expresses delivery intent; it does not grant browser or macOS permission.
+The setting shows the current permission, an explicit authorization action while
+permission is undetermined, and instructions for browser/system settings after a
+denial. Mounting, reconnecting and background events never request permission.
+An insecure or unsupported browser reports its actual limitation. Pot does not
+play audio: sound, banners and Do Not Disturb follow browser/macOS settings.
+
+Browsers use the Notification API in a secure context (HTTPS or localhost).
+Windows and Linux are supported through the Web UI. The macOS App uses Wails'
+UserNotifications service from a bundled, signed App, with the official
+`UNNotificationSettings.authorizationStatus` for permission presentation. Web and
+App preferences are independent: the browser stores its preference in local
+storage for the current origin/profile/device; App stores it under its private
+root in `system-notifications.json`. Neither preference is an account setting.
+Browser startup retires this installation's previous reply-only Web Push
+subscription; a failure is shown in the notification setting and prevents the
+new delivery path from starting until reload succeeds.
+
+Notifications observe existing projections on domain invalidations:
+
+- A changed assistant catalogue `reply_id` with an increased `reply_count`
+  identifies a completed assistant reply. Token updates do not notify.
+- Task `complete` notifies success; `failed` and `interrupted` notify failure.
+  Other phases, including explicit cancellation, do not notify. Task identity
+  and `updated_at_ms` distinguish subsequent terminal transitions.
+- New pending permission request IDs notify approval. Tool arguments and full
+  assistant responses are never included; text contains a bounded name and a
+  short event description.
+
+Initial reads, the first read after disconnection, and Runtime boot replacements
+establish baselines. An in-flight read from a previous connection cannot establish
+that baseline. Notifications use explicit Control, Space, assistant and optional
+Task identity. Clicks activate the browser tab or App main window and open that
+exact Chat/Task; a missing destination reports an error. App retains a click until
+its main WebView and directory are ready.
+
+A visible, focused corresponding Chat suppresses its assistant, Task and approval
+notifications. An exact Task detail suppresses that Task's events. Another Chat,
+a background window or a minimized window permits delivery. Browser checks both
+page visibility and window focus; same-origin tabs ask each other whether the
+target is being viewed. App additionally checks actual Wails window visibility
+and focus, coordinating the main and tray windows.
+
+IndexedDB read/write transactions claim browser events once across same-origin
+tabs; App uses its Go store to claim events once across native windows. Claims
+remain for seven days, including suppressed events, so re-enabling or leaving a
+Chat does not replay those events. These scopes do not coordinate App with Web,
+different browser profiles/origins, or different machines. Browser installation
+cookies and native Runtime identities provide no shared device identity; this
+feature adds no registration or coordination service to infer one.
+
+Delivery requires a running client and its live connection. A closed, discarded
+or suspended browser page does not receive new notifications through this path;
+there is no new Web Push subscription or server push infrastructure. The macOS
+App keeps its WebViews and Runtime resident when its window is hidden; Quit ends
+notification observation. Actual display remains subject to OS/browser policies.
+
 ## Browser crash reporting
 
 [`web/src/errors.js`](../web/src/errors.js) loads before the application module.

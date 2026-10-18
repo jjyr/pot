@@ -1,6 +1,6 @@
 import {mountApp} from './components/ui.js';
 import {createBrowserClient} from './adapters/browser.js';
-import {ensureBrowserAccess, installPWA} from './adapters/access.mjs';
+import {ensureBrowserAccess, installPWA, retireBrowserPush} from './adapters/access.mjs';
 import {APIError, createProductionClient} from './adapters/production.mjs';
 
 const root = document.querySelector('#app');
@@ -23,7 +23,7 @@ try {
       client = preview;
     }
   }
-  if(client.production&&!desktop){client.access=access;installPWA().catch(()=>{});}
+  if(client.production&&!desktop){client.access=access;installPWA().catch(()=>{});try{await retireBrowserPush(access);}catch(reason){client.notificationMigrationError=reason.message;}}
   document.title = client.production ? 'Pot' : 'Pot — Go developer preview';
   const dispose = mountApp(root, client, {surface: params.get('surface') === 'tray' ? 'tray' : 'main'});
   window.addEventListener('pagehide', event => { if (!event.persisted) dispose(); });

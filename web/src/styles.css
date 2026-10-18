@@ -225,6 +225,7 @@ textarea.field-input { resize: vertical; min-height: 180px; line-height: 1.5; }
 input[type='checkbox'].field-input { width: 18px; height: 18px; min-height: 18px; margin: 5px 0; }
 .editor-form { max-width: 704px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; }
 .editor-fields { flex: 1; }.editor-actions { display: flex; gap: 8px; justify-content: flex-end; padding: 16px 0; position: sticky; bottom: 0; background: var(--canvas); border-top: 1px solid var(--divider); margin-top: 24px; }
+.notification-route-error{flex:none;padding:0 var(--page-inset);}
 .inline-error { color: var(--danger); overflow-wrap: anywhere; display: flex; gap: 12px; align-items: center; margin: 12px 0; }
 .success-text { color: var(--success); font-size: 12px; }
 .list-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px 0; border-bottom: 1px solid var(--divider); }
