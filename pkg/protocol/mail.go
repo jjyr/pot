@@ -86,7 +86,11 @@ func (e Envelope) Validate() error {
 			return fmt.Errorf("task event title missing")
 		}
 	}
-	if !mailID(e.ID) || !e.From.Valid() || !e.To.Valid() || !validUUID(e.ConversationID) || e.ReplyTo != nil && !mailID(*e.ReplyTo) || strings.TrimSpace(e.Text) == "" || len(e.Text) > MaxMailText || e.Hops > MaxMailHops {
+	validText := strings.TrimSpace(e.Text) != "" && len(e.Text) <= MaxMailText
+	if e.Kind == "plugin_event" {
+		validText = e.Text == ""
+	}
+	if !mailID(e.ID) || !e.From.Valid() || !e.To.Valid() || !validUUID(e.ConversationID) || e.ReplyTo != nil && !mailID(*e.ReplyTo) || !validText || e.Hops > MaxMailHops {
 		return fmt.Errorf("invalid assistant mail envelope")
 	}
 	return nil

@@ -53,11 +53,13 @@ export async function poll(input,options={}) {
  };
  const flush=()=>{
  const events=[];
+ if(state.nextEmitAt>now)return events;
  for(const [key,pending]of Object.entries(state.pending)){
  if(events.length>=8)break;
  if(now-pending.last<60000&&now-pending.first<300000)continue;
- events.push({id:account+':'+key+':'+digest(pending.items),title:pending.title,body:JSON.stringify({repository:pending.repository,reason:pending.reason,updates:pending.items}),url:pending.url,occurred_at:pending.updated,group:key});delete state.pending[key];
+ events.push({id:account+':'+key+':'+digest(pending.items),title:pending.title,body:JSON.stringify({repository:pending.repository,reason:pending.reason,updates:pending.items}),url:pending.url,occurred_at:pending.updated});delete state.pending[key];
  }
+ if(events.length)state.nextEmitAt=now+300000;
  return events;
  };
  if(state.nextPollAt>now)return {state,events:flush(),delay_seconds:Math.min(86400,Math.max(60,Math.ceil((state.nextPollAt-now)/1000))),status:state.retryStatus||'ready'};

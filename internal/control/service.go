@@ -158,9 +158,6 @@ func Open(options Options) (*Service, error) {
 	if err = s.openTasks(); err != nil {
 		return nil, err
 	}
-	if err = s.Mailbox.InitializeBackground(); err != nil {
-		return nil, err
-	}
 	s.pluginWG.Add(1)
 	go s.pluginLoop()
 	success = true

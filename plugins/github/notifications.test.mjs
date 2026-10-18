@@ -18,7 +18,7 @@ test('baseline, overlapping cursor, incremental comments, coalescing, 304, resta
  h.set({rows:[thread(160)],comments:[comment(80),comment(160)]});r=await h.run(180,JSON.parse(JSON.stringify(r.state)));assert.equal(r.events.length,0);
  h.set({code:304});r=await h.run(270,r.state);assert.equal(r.events.length,1);assert.match(r.events[0].body,/comment-160/);assert.match(r.events[0].body,/comment-80/);assert.doesNotMatch(r.events[0].body,/comment--1/);
  const id=r.events[0].id;r=await h.run(360,r.state);assert.equal(r.events.length,0);
- h.set({code:200,comments:[comment(-1),comment(80),comment(160)]});r=await h.run(450,r.state,{existing:'manual-request'});assert.equal(r.events.length,0);h.set({code:304});r=await h.run(540,r.state,{existing:'manual-request'});assert.equal(r.events.length,1);assert.notEqual(r.events[0].id,id);assert.match(r.events[0].body,/comment--1/);
+ h.set({code:200,comments:[comment(-1),comment(80),comment(160)]});r=await h.run(450,r.state,{existing:'manual-request'});assert.equal(r.events.length,0);h.set({code:304});r=await h.run(540,r.state,{existing:'manual-request'});assert.equal(r.events.length,0);r=await h.run(630,JSON.parse(JSON.stringify(r.state)),{existing:'manual-request'});assert.equal(r.events.length,1);assert.notEqual(r.events[0].id,id);assert.match(r.events[0].body,/comment--1/);
 });
 test('filters establish progress without model events; account switch establishes a fresh baseline',async()=>{
  const h=harness();let r=await h.run(0);h.set({rows:[thread(80)]});r=await h.run(90,r.state,{repositories:['other/repo']});assert.deepEqual(r.events,[]);assert.equal(h.calls.length,2);assert.match(h.calls[1].url,/\/repos\/other\/repo\/notifications/);
@@ -62,4 +62,17 @@ test('poll and retry intervals longer than a host wake remain respected across p
  r=await poll({now:start+86400000,state:JSON.parse(JSON.stringify(r.state)),config:{},accounts:{github:'123'}},{fetch:fake});assert.equal(calls,1);assert.equal(r.events.length,0);
  await poll({now:start+172800000,state:r.state,config:{},accounts:{github:'123'}},{fetch:fake});assert.equal(calls,2);
  }
+});
+
+test('emission pacing is checkpointed across threads and restart without losing pending updates',async()=>{
+ const h=harness();let r=await h.run(0);
+ h.set({rows:[thread(80)],comments:[comment(80)]});r=await h.run(90,r.state);
+ h.set({code:304});r=await h.run(180,r.state);assert.equal(r.events.length,1);
+ assert.equal(r.state.nextEmitAt,start+480000);assert.equal('group' in r.events[0],false);
+ const next={...thread(200),id:'t2',subject:{...thread(200).subject,url:'https://api.github.com/repos/me/repo/issues/2'}};
+ h.set({code:200,rows:[next],comments:[comment(200)]});r=await h.run(270,r.state);
+ h.set({code:304});r=await h.run(360,JSON.parse(JSON.stringify(r.state)));assert.equal(r.events.length,0);assert.ok(r.state.pending['me/repo#2']);
+ r=await h.run(479,r.state);assert.equal(r.events.length,0);
+ r=await h.run(480,JSON.parse(JSON.stringify(r.state)));assert.equal(r.events.length,1);assert.match(r.events[0].url,/issues\/2$/);assert.deepEqual(r.state.pending,{});
+ r=await h.run(540,r.state);assert.equal(r.events.length,0);
 });

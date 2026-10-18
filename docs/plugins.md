@@ -112,8 +112,7 @@ value (package logs must not use stdout):
     "title": "Review requested",
     "body": "External text or serialized structured data",
     "url": "https://example.com/repository/pull/42",
-    "occurred_at": "2026-01-01T00:00:00Z",
-    "group": "repository#42"
+    "occurred_at": "2026-01-01T00:00:00Z"
   }]
 }
 ```
@@ -121,9 +120,12 @@ value (package logs must not use stdout):
 `events` is the standard plugin-to-assistant interface. An event contains no
 sender, Control, Space, target address, system prompt or tool permissions. The
 host binds its source to the installed package ID/version/file digest, and its
-target to the owner's configuration. External text enters the existing assistant
-conversation's notification summary lane as reference data. Summaries have no
-tools and provide summaries/suggestions only; they cannot reply externally,
+target to the owner's configuration. The internal `CommitBackground` adapter
+accepts this trusted host binding and calls the same `inbox.EnqueueTx` primitive
+used by `send_message` and task-result hooks, inside the checkpoint transaction.
+It is not a model tool or a public event ingestion API. External text enters the
+existing assistant conversation's notification summary lane as reference data.
+Summaries have no tools and provide summaries/suggestions only; they cannot reply externally,
 mark notifications read or execute instructions found in comments. A user request
 arriving while a summary runs follows the existing independent Main-turn path.
 
@@ -139,12 +141,18 @@ summary. Changed account state also
 fences it. Retargeting does not replay already accepted events.
 
 Bounds are eight events per exchange, 24,000 UTF-8 bytes per body, 512 title bytes,
-256 ID/group bytes, 2,048 URL bytes (HTTPS), 2 MiB checkpoint, 3 MiB response and
+256 ID bytes, 2,048 URL bytes (HTTPS), 2 MiB checkpoint, 3 MiB response and
 16 KiB config. Serialized event text must also fit the existing 64 KiB inbox
 text bound. Wake delays are 60–86,400 seconds. At most 64 queued events per
-plugin are accepted. The receiver batches up to two events into one summary and
-admits at most one plugin summary per assistant per five minutes. Other pending
-events stay durable. Existing model allowance limits still apply. `queued` and
+plugin are accepted. Task results and plugin events share one receiver, in inbox
+receipt order, with at most eight messages and 256 KiB of serialized envelopes
+and summary payload per batch. An individually oversized task outcome is delivered
+alone, preserving the existing task-result progress policy. Plugin events always
+fit the single-event bound. Additional messages stay durable. Claiming a batch
+has no cooldown or model charge; if a user input wins before `Report` starts,
+release makes the same events immediately eligible. Existing model allowance
+limits still apply. Producers own aggregation and emission pacing; Control adds
+no plugin-specific delivery timer, rate table or model role. `queued` and
 `attention` counts expose backlog and failed/interrupted attempts in settings.
 
 Statuses are stable identifiers: `ready`, `baseline`, `backoff`, `rate_limited`,
@@ -156,6 +164,14 @@ there is no false success receipt. Owner management uses authenticated
 `POST /api/v1/plugin-notifications/{plugin-id}` with
 `{enabled, assistant, config, revision}`. Revisions fence stale configuration.
 These are configuration ports, not public event ingestion or token-read APIs.
+
+The event payload is the sole source of plugin title/body/URL data; its inbox
+`text` field is empty. On opening an existing PR database, initialization removes
+the unused persisted event `group`, clears the duplicate inbox `text` and drops
+the obsolete host delivery-rate table/index. It preserves binding configuration,
+revisions, opaque checkpoints (including account baselines, cursors and pending
+aggregation), event IDs, original recipients and delivery states. No rebaseline
+or replay is triggered by this format cleanup.
 
 Queued events survive restart. Claiming a summary journals its membership before
 model invocation; acknowledgment follows a durable reply. Started or uncertain
@@ -192,7 +208,15 @@ Notifications are thread snapshots, not an event log. For changed Issue/PR
 threads, the plugin expands issue comments and PR review comments/reviews,
 filters using stored timestamps/content markers, and includes a reason update
 when a review request/mention has no new comment. Same-thread updates coalesce
-for at least one minute, with a five-minute maximum aggregation window. Context
+for at least one minute, with a five-minute collection threshold for continuously
+updated threads. The plugin releases at most eight ready thread events per five
+minutes across the connected account; the next release time is part of its opaque
+checkpoint and survives process/Control restarts. Older checkpoints without that
+field can release their ready events immediately. Pending threads remain in the
+checkpoint until acceptance; pacing, API backoff or a stopped Control can extend
+their wait. This bounds new event production, rather than delaying a claimed
+summary: an existing backlog can drain in consecutive bounded batches when the
+assistant is available. Context
 is bounded and marked truncated when needed; use source links for full threads.
 The current implementation keeps up to 2,000 thread checkpoints, 128 pending
 thread groups and 20 pages per endpoint. An over-limit response leaves its cursor

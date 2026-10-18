@@ -201,7 +201,7 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 	updated.Store(true)
 	s.runBackgrounds(ctx, now+90000)
 	s.runBackgrounds(ctx, now+180000)
-	events, err := s.Mailbox.PluginEvents(ctx, "main")
+	events, err := s.Mailbox.Notifications(ctx, "main")
 	if err != nil || len(events) != 1 {
 		b, _ := s.Mailbox.Backgrounds(ctx)
 		t.Fatal("plugin event missing", events, b, err)
@@ -224,11 +224,11 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 		}
 	}
 	s.runBackgrounds(ctx, now+270000)
-	s.deliverPluginEvents(ctx, "main")
+	s.deliverNotifications(ctx, "main")
 	if modelCalls.Load() != 2 {
 		t.Fatalf("model calls=%d, GitHub calls=%d", modelCalls.Load(), ghCalls.Load())
 	}
-	events, _ = s.Mailbox.PluginEvents(ctx, "main")
+	events, _ = s.Mailbox.Notifications(ctx, "main")
 	if len(events) != 0 {
 		t.Fatal("summary not acknowledged")
 	}

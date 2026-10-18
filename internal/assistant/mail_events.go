@@ -3,9 +3,35 @@ package assistant
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 
+	"github.com/jjyr/pot/internal/inbox"
+	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 )
+
+// Notifications reads both trusted notification sources in inbox receipt order.
+// Peer correspondence stays in its private context and never enters user chat.
+func (m *Mailbox) Notifications(ctx context.Context, owner string) ([]protocol.Envelope, error) {
+	events, err := m.envelopes(ctx, `SELECT envelope FROM agent_messages WHERE recipient=? AND direction='in' AND state='queued' AND json_extract(envelope,'$.kind') IN ('task_result','plugin_event') ORDER BY sequence LIMIT ?`, owner, inbox.MaxBatchMessages)
+	if err != nil {
+		return nil, err
+	}
+	size := 0
+	for i, event := range events {
+		body, _ := json.Marshal(event)
+		size += len(body)
+		if size > inbox.MaxBatchBytes {
+			// Keep the existing result policy: an individually large Task outcome
+			// travels alone, rather than permanently blocking this assistant's inbox.
+			if i == 0 {
+				return events[:1], nil
+			}
+			return events[:i], nil
+		}
+	}
+	return events, nil
+}
 
 func (m *Mailbox) ObserveTaskResult(ctx context.Context, owner, turn, task string) error {
 	_, err := m.db.ExecContext(ctx, `INSERT INTO agent_result_observations(owner,turn,message)

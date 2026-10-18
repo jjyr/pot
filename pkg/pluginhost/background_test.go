@@ -20,6 +20,7 @@ func TestBackgroundProtocolCannotForgeRouteOrLeakCredential(t *testing.T) {
 		valid        bool
 	}{
 		{"valid", `{state:{cursor:1},events:[{id:'one',title:'Update',body:'external',occurred_at:'2026-01-01T00:00:00Z'}],delay_seconds:60,status:'ready'}`, true},
+		{"removed_group", `{state:null,events:[{id:'one',title:'Update',body:'external',occurred_at:'2026-01-01T00:00:00Z',group:'unused'}],delay_seconds:60,status:'ready'}`, false},
 		{"forged_sender", `{state:null,events:[],delay_seconds:60,status:'ready',from:'user'}`, false},
 		{"forged_target", `{state:null,events:[{id:'one',title:'Update',body:'external',occurred_at:'2026-01-01T00:00:00Z',assistant:'other'}],delay_seconds:60,status:'ready'}`, false},
 		{"credential_output", `{state:{token:process.env.SERVICE_TOKEN},events:[],delay_seconds:60,status:'ready'}`, false},

@@ -41,11 +41,10 @@ type PluginEvent struct {
 	Body       string `json:"body"`
 	URL        string `json:"url,omitempty"`
 	OccurredAt string `json:"occurred_at"`
-	Group      string `json:"group,omitempty"`
 }
 
 func (e PluginEvent) Validate() error {
-	if strings.TrimSpace(e.ID) == "" || len(e.ID) > 256 || len(e.Title) > 512 || strings.TrimSpace(e.Title) == "" || len(e.Body) > 24000 || strings.TrimSpace(e.Body) == "" || len(e.Group) > 256 || len(e.URL) > 2048 {
+	if strings.TrimSpace(e.ID) == "" || len(e.ID) > 256 || len(e.Title) > 512 || strings.TrimSpace(e.Title) == "" || len(e.Body) > 24000 || strings.TrimSpace(e.Body) == "" || len(e.URL) > 2048 {
 		return errors.New("invalid plugin event bounds")
 	}
 	if _, err := time.Parse(time.RFC3339, e.OccurredAt); err != nil {
