@@ -47,7 +47,14 @@ func workspaceLaunch(t *testing.T, s *Service, id string, intent protocol.TaskWo
 func fixtureGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Pot fixture", "GIT_AUTHOR_EMAIL=fixture@example.invalid", "GIT_COMMITTER_NAME=Pot fixture", "GIT_COMMITTER_EMAIL=fixture@example.invalid")
+	// Hooks export Git directory bindings for their invoking checkout. Fixtures
+	// must use their own repositories even when the suite runs inside a hook.
+	for _, variable := range os.Environ() {
+		if !strings.HasPrefix(variable, "GIT_") {
+			cmd.Env = append(cmd.Env, variable)
+		}
+	}
+	cmd.Env = append(cmd.Env, "GIT_AUTHOR_NAME=Pot fixture", "GIT_AUTHOR_EMAIL=fixture@example.invalid", "GIT_COMMITTER_NAME=Pot fixture", "GIT_COMMITTER_EMAIL=fixture@example.invalid")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v %s", args, err, out)
