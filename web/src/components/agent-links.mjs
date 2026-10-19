@@ -1,0 +1,79 @@
+import {translate} from '../locales/messages.mjs';
+import {node as n, action, field} from './primitives.mjs';
+
+const base='/api/v1/agent-links';
+// Shared by Pot's topology and the Codex Bridge's local connection page. Invite
+// capabilities only live in the clipboard operation, never in widget/history data.
+export function createAgentLinks({root,request,locale,notify=()=>{},assistants=()=>[],currentAssistant=()=>'',fixedAssistant=false,scope=()=>({}),edit,onConnected=()=>{},signal,showConnections=false}) {
+  const t=key=>translate(locale(),key),section=n('section','agent-links'),identity=n('div','agent-link-identity'),address=n('code','agent-link-address'),status=n('p','hint'),actions=n('div','page-toolbar'),list=n('div','agent-link-list');
+  const assistant=field(t('agentLinks.assistant'),'',{choices:[]});
+  const copy=action(t('agentLinks.copy'),copyAddress),add=action(t('agentLinks.add'),addAgent,{primary:true}),configure=action(t('agentLinks.configure'),configureAccess);
+  const message=n('p','inline-error');message.setAttribute('role','alert');status.setAttribute('role','status');identity.append(n('span','form-label',t('agentLinks.self')),address);actions.append(copy,add,configure);const unread=n('p','hint agent-link-unread'),recovery=n('div','agent-link-recovery'),recoveryText=n('p','hint'),recover=action(t('agentLinks.recoverMessages'),recoverMessages);recovery.append(recoveryText,recover);section.append(assistant.row,identity,status,unread,recovery,actions,message,list);root.append(section);
+  let snapshot=null,selected='',disposed=false,version=0,busy=false,copyTimer,localEditor=null,loadedScope='';
+  const active=()=>!disposed&&!signal?.aborted&&root.isConnected;
+  const owners=()=>typeof assistants==='function'?assistants():assistants;
+  const captured=()=>typeof scope==='function'?scope():scope;
+  const id=()=>fixedAssistant?(typeof currentAssistant==='function'?currentAssistant():currentAssistant):selected||owners()[0]?.id||'';
+  const call=(path,options={})=>request(path,{...captured(),...options});
+  function errorKey(error) {
+    const code=error?.code||error?.data?.code||error?.error?.code;
+    return {invitation_expired:'agentLinks.expired',agent_link_invitation_expired:'agentLinks.expired',agent_link_expired:'agentLinks.expired',agent_link_revoked:'agentLinks.expired',expired:'agentLinks.expired',identity_mismatch:'agentLinks.identityChanged',agent_link_identity_conflict:'agentLinks.identityChanged',agent_link_conflict:'agentLinks.identityChanged',unauthorized:'agentLinks.authentication',agent_link_authentication_failed:'agentLinks.authentication',agent_link_unauthorized:'agentLinks.authentication',invalid_address:'agentLinks.invalidAddress',agent_link_invalid:'agentLinks.invalidAddress',unreachable:'agentLinks.unreachable',agent_link_unreachable:'agentLinks.unreachable',agent_link_unavailable:'agentLinks.unreachable',agent_link_access_required:'agentLinks.needsAccess',agent_link_assistant_unavailable:'topology.noAssistants',agent_link_listener_unavailable:'agentLinks.listenerUnavailable',agent_link_listener_restart_required:'agentLinks.listenerRestart',agent_link_invalid_listen:'agentLinks.listenerRestart',agent_link_tailscale_missing:'agentLinks.tsMissing',agent_link_tailscale_login_required:'agentLinks.tsLoginRequired',agent_link_tailscale_dns_required:'agentLinks.tsDNSRequired',agent_link_tailscale_unavailable:'agentLinks.tsUnavailable',agent_link_tailscale_conflict:'agentLinks.tsConflict',agent_link_tailscale_setup_required:'agentLinks.tsSetupRequired'}[code]||'agentLinks.failed';
+  }
+  const uiError=error=>Object.assign(Error(t(errorKey(error))),{uiKey:errorKey(error),diagnostic:error?.message});
+  function failure(error,target=message) {
+    target.replaceChildren(n('span','',t(error.uiKey||errorKey(error))));
+    if(error?.message){const details=n('details','detail-disclosure');details.append(n('summary','',t('agentLinks.diagnostics')),n('pre','',error.message));target.append(details);}
+  }
+  function sync() {
+    if(!active())return;
+    const entries=owners();selected=entries.some(item=>item.id===selected)?selected:entries.find(item=>item.id===(typeof currentAssistant==='function'?currentAssistant():currentAssistant))?.id||entries[0]?.id||'';
+    assistant.row.hidden=fixedAssistant||entries.length<2;
+    assistant.input.replaceChildren(...entries.map(item=>{const option=n('option','',item.name||item.id);option.value=item.id;return option;}));assistant.input.value=selected;
+    identity.firstChild.textContent=t('agentLinks.self');assistant.row.querySelector('.form-label').textContent=t('agentLinks.assistant');assistant.input.setAttribute('aria-label',t('agentLinks.assistant'));
+    address.textContent=snapshot?.self?.address||snapshot?.self?.endpoint||t('agentLinks.noAddress');
+    const ready=snapshot?.self?.status==='ready';status.textContent=ready?t('agentLinks.ready'):t(snapshot?.self?.reason_code==='agent_link_assistant_unavailable'?'topology.noAssistants':'agentLinks.needsAccess');
+    copy.textContent=t(copy.dataset.copied==='true'?'copied':'agentLinks.copy');copy.disabled=busy||!ready||!id();add.textContent=t('agentLinks.add');add.disabled=busy||!id();configure.textContent=t('agentLinks.configure');configure.hidden=ready;
+    recovery.hidden=snapshot?.self?.kind!=='codex'||!snapshot?.unconfirmed;recoveryText.textContent=t('agentLinks.unconfirmedMessages').replace('{count}',String(snapshot?.unconfirmed||0));recover.textContent=t('agentLinks.recoverMessages');
+    unread.hidden=snapshot?.self?.kind!=='codex'||!snapshot?.unread;unread.textContent=t('agentLinks.waitingMessages').replace('{count}',String(snapshot?.unread||0));
+    list.hidden=!showConnections;list.replaceChildren();
+    if(showConnections&&!snapshot?.items?.length)list.append(n('p','hint',t('agentLinks.noConnections')));
+    if(showConnections){for(const link of snapshot?.items||[]){const row=n('div','agent-link-row'),info=n('div');info.append(n('strong','',link.peer?.name||link.peer?.id),n('p','hint',t('agentLinks.status.'+(['connected','connecting','offline'].includes(link.status)?link.status:'offline'))));const remove=action(t('agentLinks.disconnect'),()=>disconnect(link));row.append(info,remove);list.append(row);}}
+  }
+  async function load(){const generation=++version,key=JSON.stringify([captured(),id()]);if(key!==loadedScope){loadedScope=key;snapshot=null;sync();}try{const value=await call(base+'?assistant_id='+encodeURIComponent(id()),{signal});if(active()&&generation===version)update(value);return value;}catch(error){if(active()&&generation===version&&error.name!=='AbortError'){snapshot=null;sync();failure(error);}}}
+  function update(value){snapshot=value;sync();}
+  assistant.input.addEventListener('change',()=>{selected=assistant.input.value;load();});
+  async function copyAddress(){if(busy)return;busy=true;copy.disabled=true;message.replaceChildren();try{const value=await call(base+'/invitation',{method:'POST',body:{assistant_id:id()}});await navigator.clipboard.writeText(value.address);if(active()){copy.dataset.copied='true';copy.textContent=t('copied');clearTimeout(copyTimer);copyTimer=setTimeout(()=>{delete copy.dataset.copied;sync();},1600);}}catch(error){if(active())failure(error);}finally{busy=false;sync();}}
+  // In the App, use its editing-page lifecycle and dirty navigation guard. The
+  // standalone Bridge has the same fields in its own bounded editing surface.
+  function openEditor(title,initial,definitions,save,submitLabel){
+    if(edit)return edit({title,initial,fields:definitions,save,scope:captured(),submitLabel});
+    const panel=n('section','agent-link-editor'),heading=n('h2','',title),form=n('form','editor-form'),fields=n('div','editor-fields'),footer=n('div','editor-actions'),error=n('p','inline-error'),controls=new Map();let pending=false,requestID=crypto.randomUUID();
+    for(const definition of definitions){const {name,label,...options}=definition,item=field(label,initial[name],options);controls.set(name,item.input);item.input.addEventListener('input',()=>{requestID=crypto.randomUUID();});fields.append(item.row);}
+    const close=()=>{if(pending)return;if([...controls].some(([key,input])=>input.value!==String(initial[key]??''))){const dialog=n('dialog','preferences'),buttons=n('div','page-toolbar');dialog.append(n('h2','',t('agentLinks.discardTitle')));buttons.append(action(t('agentLinks.keepEditing'),()=>{dialog.close();dialog.remove();}),action(t('agentLinks.discard'),()=>{dialog.close();dialog.remove();finish();},{danger:true}));dialog.append(buttons);document.body.append(dialog);dialog.showModal();}else finish();};
+    const finish=()=>{panel.remove();section.hidden=false;localEditor=null;sync();},cancel=action(t('integrations.cancel'),close),submit=action(submitLabel,()=>form.requestSubmit(),{primary:true});
+    footer.append(cancel,submit);form.append(fields,error,footer);panel.append(heading,form);root.append(panel);section.hidden=true;localEditor={panel,controls};
+    form.onsubmit=async event=>{event.preventDefault();if(pending||!form.reportValidity())return;pending=true;cancel.disabled=submit.disabled=true;for(const input of controls.values())input.disabled=true;error.replaceChildren();const values=Object.fromEntries([...controls].map(([name,input])=>[name,input.value]));try{await save(values,{...captured(),request_id:requestID});finish();}catch(reason){failure(reason,error);}finally{pending=false;cancel.disabled=submit.disabled=false;for(const input of controls.values())input.disabled=false;result.lifecycle.settled?.();}};
+    const result={root:panel,form,controls,lifecycle:{setTitle:value=>{heading.textContent=value;}},session:{values:initial}};localEditor=result;return result;
+  }
+  function addAgent(){
+    const initial={address:'',assistant_id:id()},choices=owners().map(item=>[item.id,item.name||item.id]);
+    const fields=[{name:'address',label:t('agentLinks.peerAddress'),required:true,placeholder:t('agentLinks.pasteAddress')}];if(!fixedAssistant&&choices.length>1)fields.push({name:'assistant_id',label:t('agentLinks.assistant'),choices,required:true});
+    const form=openEditor(t('agentLinks.add'),initial,fields,async(values,context)=>{let result;try{result=await call(base,{...context,method:'POST',body:{action:'connect',address:values.address.trim(),assistant_id:values.assistant_id||initial.assistant_id,request_id:context.request_id}});}catch(error){throw uiError(error);}await onConnected(result);await load();return result;},t('agentLinks.connect'));
+    const submit=form.form.querySelector('.editor-actions .primary');form.form.addEventListener('submit',()=>{if(form.form.checkValidity())submit.textContent=t('agentLinks.pending');});form.lifecycle.settled=()=>{submit.textContent=t('agentLinks.connect');};
+    const note=n('p','hint',t('agentLinks.messageOnly'));form.form.querySelector('.editor-fields')?.append(note);form.lifecycle.locale=()=>{form.lifecycle.setTitle?.(t('agentLinks.add'));note.textContent=t('agentLinks.messageOnly');for(const [name,key]of [['address','agentLinks.peerAddress'],['assistant_id','agentLinks.assistant']]){const control=form.controls.get(name);if(control){control.setAttribute('aria-label',t(key));control.closest('.form-row').querySelector('.form-label').textContent=t(key);}}form.controls.get('address').placeholder=t('agentLinks.pasteAddress');submit.textContent=t('agentLinks.connect');form.form.querySelector('.editor-actions button:not(.primary)').textContent=t('integrations.cancel');};
+  }
+  function configureAccess(){
+    const initial={mode:snapshot?.network?.mode||'https',listen:snapshot?.network?.listen||'',endpoint:snapshot?.network?.endpoint||snapshot?.self?.endpoint||''};
+    const form=openEditor(t('agentLinks.configure'),initial,[{name:'mode',label:t('agentLinks.accessMethod'),choices:[['https',t('agentLinks.existingHTTPS')],['tailscale','Tailscale']]},{name:'listen',label:t('agentLinks.listen'),readOnly:true},{name:'endpoint',label:t('agentLinks.publicAddress'),kind:'url',placeholder:'https://agent.example.com'}],async(values,context)=>{let value;try{value=await call(base,{...context,method:'POST',body:{action:'configure',...values,request_id:context.request_id}});}catch(error){throw uiError(error);}await load();return value;},t('agentLinks.save'));
+    const advanced=n('details','detail-disclosure');advanced.append(n('summary','',t('agentLinks.advanced')),form.controls.get('listen').closest('.form-row'));form.form.querySelector('.editor-fields')?.append(advanced);
+    const guide=n('details','detail-disclosure'),content=n('div','agent-link-guide');guide.append(n('summary','',t('agentLinks.tailscaleSteps')));content.append(n('p','hint',t('agentLinks.accessHint')),n('ol',''));for(const key of ['agentLinks.tsInstall','agentLinks.tsLogin','agentLinks.tsServe','agentLinks.tsAddress'])content.lastChild.append(n('li','',t(key)));const listen=snapshot?.network?.listen;if(listen&&/^(127\.0\.0\.1|localhost):[0-9]+$/.test(listen)){content.append(n('p','hint',t('agentLinks.tsCommand')),n('pre','',`tailscale serve --bg http://${listen}`));}guide.append(content);form.form.querySelector('.editor-fields')?.append(guide);
+  }
+  function recoverMessages(){
+    const dialog=n('dialog','preferences'),buttons=n('div','page-toolbar'),error=n('p','inline-error');dialog.append(n('h2','',t('agentLinks.recoverMessages')),n('p','hint',t('agentLinks.recoverWarning')));const cancel=action(t('integrations.cancel'),()=>{dialog.close();dialog.remove();}),confirm=action(t('agentLinks.recoverConfirm'),async()=>{cancel.disabled=confirm.disabled=true;try{await call(base,{method:'POST',body:{action:'recover_messages',request_id:crypto.randomUUID()}});dialog.close();dialog.remove();await load();}catch(reason){failure(reason,error);cancel.disabled=confirm.disabled=false;}},{primary:true});dialog.addEventListener('cancel',event=>{if(confirm.disabled)event.preventDefault();});buttons.append(cancel,confirm);dialog.append(error,buttons);document.body.append(dialog);dialog.showModal();
+  }
+  async function disconnect(link){
+    const dialog=n('dialog','preferences'),buttons=n('div','page-toolbar'),error=n('p','inline-error');dialog.append(n('h2','',t('agentLinks.disconnectTitle')),n('p','hint',link.peer?.name||link.peer?.id));const cancel=action(t('integrations.cancel'),()=>{dialog.close();dialog.remove();}),remove=action(t('agentLinks.disconnect'),async()=>{cancel.disabled=remove.disabled=true;try{await call(base,{space:link._space||captured().space,method:'POST',body:{action:'disconnect',id:link.id,revision:link.revision,request_id:crypto.randomUUID()}});dialog.close();dialog.remove();await load();onConnected(null);}catch(reason){failure(reason,error);cancel.disabled=remove.disabled=false;}},{danger:true});buttons.append(cancel,remove);dialog.append(error,buttons);document.body.append(dialog);dialog.showModal();
+  }
+  const preference=()=>{sync();localEditor?.lifecycle?.locale?.();};window.addEventListener('pot:locale',preference);signal?.addEventListener('abort',()=>{disposed=true;clearTimeout(copyTimer);window.removeEventListener('pot:locale',preference);},{once:true});sync();
+  return {update,load,addAgent,configureAccess,disconnect,get snapshot(){return snapshot;},dispose(){disposed=true;clearTimeout(copyTimer);window.removeEventListener('pot:locale',preference);localEditor?.root.remove();section.remove();}};
+}

@@ -35,6 +35,9 @@ export function normalizeSnapshot(frame, runtime, owner, space = '') {
 export function mutationTopics(path,body,value) {
   if(path==='/api/v1/attachments'||/\/(resolve|check)$/.test(path))return null;
   if(path==='/api/v1/assistants/bootstrap'&&!value?.assistant)return null;
+  if(path==='/api/v1/agent-links/invitation')return null;
+  if(path.startsWith('/api/v1/agent-links'))return ['agent-links'];
+  if(path==='/api/v1/runtime/control'&&body?.action==='invitation_status')return null;
   if(path.startsWith('/api/v1/providers'))return ['providers','settings','assistants','conversation','usage'];
   if(path.startsWith('/api/v1/assistants'))return ['assistants','conversation'];
   if(path.startsWith('/api/v1/integrations'))return ['integrations'];

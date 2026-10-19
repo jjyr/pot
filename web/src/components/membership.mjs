@@ -1,5 +1,7 @@
 import {node as n,action,field,section} from './primitives.mjs';
 import {setDisabled,setPending} from './reconcile.mjs';
+import {translate} from '../locales/messages.mjs';
+import {parseMachineJoinInfo} from '../state/topology.mjs';
 
 // Membership is an owner operation, separate from connecting the App to a Space.
 // Browser sessions deliberately cannot access the private runtime/control API.
@@ -33,16 +35,18 @@ export async function renderMachineMembership({client,root,machines,locale,notif
     input.addEventListener('keydown',event=>{if(event.isComposing||event.keyCode===229)return;if(event.key==='Enter'){event.preventDefault();commit();}else if(event.key==='Backspace'&&!input.value){const tags=session.values.labels.split(' ').filter(Boolean);tags.pop();session.set('labels',tags.join(' '));draw();}});input.addEventListener('blur',commit);draw();
   }
   function joinEditor(scope) {
-    let preview=null,pinned=null,previewing=false;
+    let preview=null,pinned=null,previewing=false,expected=null;
     const form=edit({title:tr('Join a Control','加入 Control'),initial:{url:'',invitation:'',ca_pem:''},scope,
       fields:[{name:'url',label:tr('Control address','Control 地址'),kind:'url',required:true},{name:'invitation',label:tr('Machine invitation','机器加入邀请'),kind:'password',required:true},{name:'ca_pem',label:tr('Private CA certificate (optional)','私有 CA 证书（可选）'),kind:'textarea'}],
       save:async(values,context)=>{if(!preview||!verified.input.checked||JSON.stringify([values.url,values.ca_pem])!==pinned)throw Error(tr('Preview and verify this Control before joining.','加入前请预览并核验此 Control。'));return command(context,{action:'join',request:{request_id:context.request_id,url:values.url,invitation:values.invitation,expected_runtime_id:preview.runtime_id,expected_fingerprint:preview.fingerprint,ca_pem:values.ca_pem.trim()?values.ca_pem:null}});}});
     const panel=section(tr('Verify Control identity','核验 Control 身份'),tr('Compare this Runtime ID and fingerprint with the Control owner before joining this execution machine.','将 Runtime ID 与指纹和 Control 所有者核对后，再加入此执行机器。')),identity=n('pre','hint'),status=n('p','inline-error'),verified=field(tr('I verified this Runtime ID and fingerprint','我已核验此 Runtime ID 与指纹'),false,{kind:'checkbox'}),submit=form.form.querySelector('.editor-actions .primary');
     const signature=()=>JSON.stringify([form.controls.get('url').value,form.controls.get('ca_pem').value]);
+    const pasteHint=n('p','hint',translate(locale(),'machineJoin.pasteInfo'));form.controls.get('invitation').closest('.form-row').append(pasteHint);
+    form.controls.get('invitation').addEventListener('paste',event=>{const raw=event.clipboardData?.getData('text')||'';if(!raw.trimStart().startsWith('{'))return;try{const info=parseMachineJoinInfo(raw);event.preventDefault();for(const [name,value]of [['url',info.url],['invitation',info.invitation]]){const input=form.controls.get(name);input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));}expected={runtime_id:info.control_id,fingerprint:info.fingerprint};status.textContent='';}catch(reason){event.preventDefault();status.textContent=translate(locale(),'machineJoin.invalidInfo');}});
     const update=()=>{submit.disabled=previewing||!preview||!verified.input.checked||form.session.pending;};
     const previewButton=action(tr('Preview Control','预览 Control'),async()=>{
       const signatureAtStart=signature(),url=form.controls.get('url'),ca=form.controls.get('ca_pem');if(!url.reportValidity())return;previewing=true;preview=null;verified.input.checked=false;previewButton.disabled=true;update();status.textContent='';
-      try{const value=await command(scope,{action:'preview',url:url.value,ca_pem:ca.value.trim()?ca.value:null});if(!form.root.isConnected||signature()!==signatureAtStart)return;if(typeof value?.runtime_id!=='string'||typeof value?.fingerprint!=='string')throw Error(tr('Invalid Control identity','Control 身份无效'));preview=value;pinned=signatureAtStart;identity.textContent=`${tr('Runtime ID','Runtime ID')}: ${value.runtime_id}\n${tr('Fingerprint','指纹')}: ${value.fingerprint}`;}
+      try{const value=await command(scope,{action:'preview',url:url.value,ca_pem:ca.value.trim()?ca.value:null});if(!form.root.isConnected||signature()!==signatureAtStart)return;if(typeof value?.runtime_id!=='string'||typeof value?.fingerprint!=='string')throw Error(tr('Invalid Control identity','Control 身份无效'));if(expected&&(value.runtime_id!==expected.runtime_id||value.fingerprint!==expected.fingerprint))throw Error(translate(locale(),'machineJoin.identityMismatch'));preview=value;pinned=signatureAtStart;identity.textContent=`${tr('Runtime ID','Runtime ID')}: ${value.runtime_id}\n${tr('Fingerprint','指纹')}: ${value.fingerprint}`;}
       catch(reason){if(form.root.isConnected)status.textContent=reason.message||String(reason);}finally{previewing=false;previewButton.disabled=false;update();}
     });
     for(const name of ['url','ca_pem'])form.controls.get(name).addEventListener('input',()=>{preview=null;pinned=null;identity.textContent='';verified.input.checked=false;update();});

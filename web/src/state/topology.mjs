@@ -1,0 +1,34 @@
+// A projection of authorized Control inventory and Agent Links, never a second
+// connection registry. In particular an Agent identity is not a machine fact.
+export const agentNodeID=peer=>'peer:'+JSON.stringify([peer.control_id,peer.kind,peer.id]);
+const identityKey=peer=>JSON.stringify([peer.control_id,peer.kind,peer.id]);
+
+export function projectTopology(spaces,machines,linkPages=[]) {
+  const nodes=[],edges=[],groups=[],selfIDs=new Map(),bySpace=new Map();
+  for(const space of spaces){const page=linkPages.find(item=>item.space.id===space.id),self=page?.value?.self,group={id:space.id,name:space.name,local:space.kind==='local'&&!space.remote,nodes:[]},agent={id:'control:'+space.id,kind:'pot',name:space.name||self?.name||space.control_id,space:space.id,group:space.id,status:space.connected===false||page?.stale?'offline':'connected',identity:self?.control_id||space.control_id,self:true};groups.push(group);nodes.push(agent);group.nodes.push(agent.id);bySpace.set(space.id,agent);if(self?.id)selfIDs.set(identityKey(self),agent);}
+  for(const machine of machines){const group=groups.find(item=>item.id===machine._space_id);if(!group)continue;const node={id:'machine:'+JSON.stringify([machine._space_id,machine.runtime_id||machine.id]),kind:'machine',name:machine.name||machine.runtime_id||machine.id,space:machine._space_id,group:group.id,status:machine._stale||spaces.find(space=>space.id===machine._space_id)?.connected===false?'stale':machine.connected?'connected':'offline',identity:machine.runtime_id||machine.id,machine};nodes.push(node);group.nodes.push(node.id);edges.push({id:'execute:'+node.id,from:bySpace.get(node.space).id,to:node.id,kind:'execute',status:node.status});}
+  for(const page of linkPages){const from=bySpace.get(page.space.id);if(!from)continue;for(const link of page.value?.items||[]){if(!link.peer?.id)continue;let peer=selfIDs.get(identityKey(link.peer))||nodes.find(node=>node.id===agentNodeID(link.peer));const status=page.stale?'stale':link.status;
+      if(!peer){const kind=link.peer.kind==='codex'?'codex':'pot',groupID=kind==='pot'?(spaces.find(space=>space.control_id===link.peer.control_id)?.id||'peer-control:'+link.peer.control_id):'';peer={id:agentNodeID(link.peer),kind,name:link.peer.name||link.peer.id,space:page.space.id,group:groupID,status,identity:link.peer.id,link};nodes.push(peer);if(groupID){const group=groups.find(item=>item.id===groupID);if(group)group.nodes.push(peer.id);else groups.push({id:groupID,name:peer.name,local:false,nodes:[peer.id],remote:true});}}
+      if(from.id===peer.id)continue;const key=[JSON.stringify([page.space.control_id,link.local_assistant_id]),JSON.stringify([link.peer.control_id,link.peer.id])].sort().join('|');const existing=edges.find(edge=>edge.kind==='agent'&&edge.pair===key);if(!existing)edges.push({id:'agent:'+page.space.id+':'+link.id,from:from.id,to:peer.id,pair:key,kind:'agent',status,link,space:page.space.id});
+    }}
+  return {nodes,edges,groups,agents:nodes.filter(node=>node.kind!=='machine').length,machines:nodes.filter(node=>node.kind==='machine').length};
+}
+
+export function layoutTopology(model,width){
+  const narrow=width<500,padding=narrow?10:22,gap=narrow?22:64,columns=2,zoneWidth=(width-padding*2-gap)/columns,positions=new Map(),zones=[];let y=24;
+  for(let row=0;row<model.groups.length;row+=columns){const batch=model.groups.slice(row,row+columns);let rowHeight=0;for(const [column,group]of batch.entries()){const members=group.nodes.map(id=>model.nodes.find(node=>node.id===id)).filter(Boolean),agents=members.filter(node=>node.kind!=='machine'),machines=members.filter(node=>node.kind==='machine'),machineColumns=narrow?1:2,rows=Math.ceil(machines.length/machineColumns),agentRows=Math.ceil(agents.length/(narrow?1:2)),machineStart=248+Math.max(0,agentRows-1)*144,height=Math.max(narrow?210:230,machineStart-78+rows*(narrow?144:152));rowHeight=Math.max(rowHeight,height);const x=padding+column*(zoneWidth+gap);zones.push({id:group.id,name:group.name,x,y,width:zoneWidth,height,group});for(const [index,agent]of agents.entries()){const count=Math.min(narrow?1:2,agents.length);positions.set(agent.id,{x:x+zoneWidth*(index%(narrow?1:2)+.5)/count,y:y+96+Math.floor(index/(narrow?1:2))*144});}for(const [index,machine]of machines.entries()){const count=Math.min(machineColumns,machines.length),cx=x+zoneWidth*(index%machineColumns+.5)/count;positions.set(machine.id,{x:cx,y:y+machineStart+Math.floor(index/machineColumns)*(narrow?144:152)});}}
+    y+=rowHeight+28;
+  }
+  const bottoms=[padding,padding];for(const zone of zones){const column=zone.x<width/2?0:1;bottoms[column]=Math.max(bottoms[column],zone.y+zone.height);}
+  const standalone=model.nodes.filter(node=>!node.group);for(const node of standalone){const edge=model.edges.find(item=>item.to===node.id),source=positions.get(edge?.from),column=!source||source.x<width/2?1:0,cx=padding+zoneWidth/2+column*(zoneWidth+gap),cy=bottoms[column]+88;positions.set(node.id,{x:cx,y:cy});bottoms[column]=cy+68;}
+  return {positions,zones,height:Math.max(460,y,...bottoms.map(value=>value+28)),narrow};
+}
+
+// Join information is data, never a command, and never an owner credential.
+export function parseMachineJoinInfo(raw) {
+  if(typeof raw!=='string'||raw.length>16384)throw Error('Invalid machine join information');
+  const value=JSON.parse(raw);
+  if(value?.version!==1||typeof value.url!=='string'||typeof value.invitation!=='string'||typeof value.control_id!=='string'||typeof value.fingerprint!=='string'||!value.invitation||!value.control_id||!value.fingerprint)throw Error('Invalid machine join information');
+  const url=new URL(value.url);if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.hash||url.search)throw Error('Invalid Control address');
+  return {version:1,url:value.url,invitation:value.invitation,control_id:value.control_id,fingerprint:value.fingerprint};
+}

@@ -25,6 +25,10 @@ import {renderMachinePermissions} from './execution-permissions.mjs';
 import {createApprovalCard} from './approval-card.mjs';
 import {createChatApprovals} from './chat-approvals.mjs';
 import {taskElapsed,bindTaskClock} from './task-time.mjs';
+import {createTopology} from './topology.mjs';
+import {createAgentLinks} from './agent-links.mjs';
+import {projectTopology,agentNodeID} from '../state/topology.mjs';
+import {addMachine} from './machine-add.mjs';
 
 export function createPages({onApprovalsChanged=()=>{},client, host, approvalHost, chatApprovalHost, chatVisible, locale, notify, changed, titleChanged, openChat, routeChanged=()=>{}}) {
   const gate = createRequestGate(), approvalGate = createRequestGate();
@@ -35,7 +39,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   const toolMemory=new Map(),usageOffsets=new Map(),usageCache=new Map(),approvalCards=new Map(),taskNames=new Map();
   const chatApprovals=createChatApprovals({host:chatApprovalHost,locale,visible:chatVisible});
   const cached = new Map(),spaceCache = new Map(),machineDrafts=new Map(),editorParents=[],taskDrafts=new Map(),taskDraftVersions=new Map(),taskWrites=new Map(),scheduleWrites=new Map();
-  let pageView=null,currentViewKey='',viewReady=false,shortcutOpen=null,approvalOwner='';
+  let pageView=null,currentViewKey='',viewReady=false,shortcutOpen=null,approvalOwner='',topologySelection='',topologyPaused=false,agentOwnerSpace='';
   const tr = (en, zh) => locale() === 'zh-CN' ? zh : en;
   const scope = () => client.scope();
   const readTaskPages=createTaskPages(client);
@@ -139,7 +143,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const captured=capturedScope||scope(), caller=route || 'settings';
     const session=createEditorSession({...captured,route:caller,boot:client.runtime.boot_id},initial);
     const root=body(), form=n('form','editor-form'), fields=n('div','editor-fields'), footer=n('div','editor-actions'), status=n('p','inline-error');status.setAttribute('role','alert');
-    const controls=new Map(),lifecycle={};
+    const controls=new Map(),lifecycle={setTitle(value){if(editor?.session===session){editor.label=value;heading(value);}}};
     for(const definition of definitions) {
       if(definition.section) {fields.append(section(definition.section));continue;}
       const {name,label,parse,presets,...options}=definition;
@@ -159,7 +163,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
         if(client.runtime.boot_id!==session.context.boot)throw Error(tr('Runtime identity changed. Reopen this editor.','运行时身份已变化，请重新打开编辑器。'));
         const saved=await save(attempt.values,{...captured,request_id:attempt.request_id},session);
         session.settle(true);changed(saved);if(lifecycle.afterSave)await lifecycle.afterSave(saved);else await back();
-      } catch(reason) {session.settle(false);status.textContent=reason.message||String(reason);}
+      } catch(reason) {session.settle(false);if(reason.uiKey){status.replaceChildren(n('span','',translate(locale(),reason.uiKey)));if(reason.diagnostic){const details=n('details','detail-disclosure');details.append(n('summary','',translate(locale(),'agentLinks.diagnostics')),n('pre','',reason.diagnostic));status.append(details);}}else status.textContent=reason.message||String(reason);}
       finally {for(const control of controls.values())control.disabled=false;cancel.disabled=submit.disabled=false;lifecycle.settled?.();}
     };
     return {session,root,form,controls,lifecycle};
@@ -236,7 +240,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const language=field(tr('Language','语言'),locale(),{choices:[['en','English'],['zh-CN','简体中文']]});language.row.classList.add('preference-setting');language.input.onchange=()=>preference('pot-go-preview-locale',language.input.value);preferences.append(language.row);
     const appearance=n('div','preference-setting appearance-setting');appearance.append(n('span','',tr('Appearance','外观')),segments([['system',tr('System','跟随系统')],['light',tr('Light','浅色')],['dark',tr('Dark','深色')]],document.documentElement.dataset.theme||'system',value=>preference('pot-go-preview-theme',value)));preferences.append(appearance);if(client.notifications){notificationSettings??=notificationSetting({notifications:client.notifications,locale,desktop:client.desktop});preferences.append(notificationSettings.element);}root.append(preferences);
 
-    const shortcuts=n('details','page-card shortcut-card');shortcuts.dataset.cacheKey='keyboard-shortcuts';shortcuts.open=shortcutOpen??innerWidth>=720;const shortcutSummary=n('summary','',tr('Keyboard shortcuts','快捷键'));shortcutSummary.onclick=()=>{shortcutOpen=!shortcuts.open;};shortcuts.append(shortcutSummary);for(const [label,key]of [[tr('Parent page','父页面'),'⌘ ['],[tr('Machines','机器'),'⌘ D'],[tr('Settings','设置'),'⌘ ,'],[tr('New line','换行'),'⇧ ↵']]){const row=n('div','preference-row');row.append(n('span','hint',label),n('kbd','',key));shortcuts.append(row);}root.append(shortcuts);
+    const shortcuts=n('details','page-card shortcut-card');shortcuts.dataset.cacheKey='keyboard-shortcuts';shortcuts.open=shortcutOpen??innerWidth>=720;const shortcutSummary=n('summary','',tr('Keyboard shortcuts','快捷键'));shortcutSummary.onclick=()=>{shortcutOpen=!shortcuts.open;};shortcuts.append(shortcutSummary);for(const [label,key]of [[tr('Parent page','父页面'),'⌘ ['],[translate(locale(),'topology.title'),'⌘ D'],[tr('Settings','设置'),'⌘ ,'],[tr('New line','换行'),'⇧ ↵']]){const row=n('div','preference-row');row.append(n('span','hint',label),n('kbd','',key));shortcuts.append(row);}root.append(shortcuts);
     if(!client.desktop&&client.access){const access=n('section','page-card browser-actions');access.append(action(tr('Add to Home Screen','添加到主屏幕'),async()=>{if(!await requestPWAInstall())access.append(n('p','hint',tr('Use your browser menu to install Pot or add it to the Home Screen.','通过浏览器菜单安装 Pot 或添加到主屏幕。')));}));access.append(action(tr('Change access token','更改访问令牌'),()=>renderEditor(tr('Browser access','浏览器访问'),{token:''},[{name:'token',label:tr('Access token','访问令牌'),kind:'password',required:true}],values=>configureBrowserAccess(values.token))),action(tr('Disconnect this browser','断开此浏览器'),()=>forgetBrowserAccess()));root.append(access);}
 
     await renderAbout({client,root,scope:{owner:'',space:client.desktop?(client.spaces||[]).find(space=>space.kind==='local')?.id||'':scope().space},locale});return;
@@ -600,34 +604,52 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     ],(values,context)=>request('/api/v1/usage/policy',{...context,method:'POST',body:values}),{capturedScope:owner});
   }
   async function machines(root,token) {
-    const rows=n('div'),entries=new Map(),membership=n('div'),emptyRow=n('p','page-empty',tr('No machines','暂无机器'));root.append(rows,emptyRow,membership);
-    const data={inventory:[],permissionPages:[],permissionsPending:true};
-    const update=async({inventory,permissionPages,permissionsPending})=>{
+    const t=key=>translate(locale(),key);root.classList.add('topology-page');
+    const toolbar=n('div','topology-toolbar'),connectionRoot=n('div','topology-connection'),storage=n('div','topology-machine-storage'),membership=n('div'),rows=n('div'),entries=new Map(),linkNotice=n('p','inline-error');storage.hidden=true;storage.append(rows,membership);connectionRoot.className='agent-links-container';toolbar.append(connectionRoot);root.append(toolbar,linkNotice,storage);
+    let model,view,currentNode=null;
+    const data={inventory:[],permissionPages:[],permissionsPending:true,linkPages:[]};
+    agentOwnerSpace=client.spaces.some(space=>space.id===agentOwnerSpace)?agentOwnerSpace:scope().space||client.spaces[0]?.id;
+    const selectedScope=()=>({space:agentOwnerSpace,owner:''}),availableAssistants=()=>(client.assistants||[]).filter(item=>item.space_id===agentOwnerSpace);
+    const edit=({title,initial,fields,save,scope:captured,submitLabel})=>renderEditor(title,initial,fields,save,{capturedScope:captured,submitLabel});
+    if(client.spaces.length>1){const owner=field(t('agentLinks.selectControl'),agentOwnerSpace,{choices:client.spaces.map(space=>[space.id,space.name||space.id])});connectionRoot.append(owner.row);owner.input.onchange=()=>{agentOwnerSpace=owner.input.value;connections.load();};}
+    const connections=createAgentLinks({root:connectionRoot,request,locale,notify,assistants:availableAssistants,currentAssistant:()=>scope().space===agentOwnerSpace?scope().owner:'',scope:selectedScope,edit,signal:token.signal,onConnected:async result=>{const id=result?.id||result?.link?.id;if(id){const peer=result.peer||result.link?.peer;const identity=peer?.address?{id:peer.address.agent_id,control_id:peer.address.control_id,kind:peer.adapter}:peer;const owned=identity?.kind==='pot'&&client.spaces.find(space=>space.control_id===identity.control_id);topologySelection=owned?'control:'+owned.id:agentNodeID(identity);}client.resources?.invalidate(['agent-links'],selectedScope());changed(result);}});
+    const add=action(t('topology.addMachine'),()=>addMachine({client,locale,edit,back,notify,onJoined:async result=>{topologySelection='machine:'+JSON.stringify([result.space,result.runtime_id]);client.resources?.invalidate(['machines'],{space:result.space});}}));toolbar.append(add);
+    function related(node){const section=n('div','topology-related');section.append(n('p','hint',t('topology.related')));for(const edge of model.edges.filter(item=>item.from===node.id||item.to===node.id)){const a=model.nodes.find(item=>item.id===edge.from),b=model.nodes.find(item=>item.id===edge.to);section.append(action(a.name+(edge.kind==='agent'?' ↔ ':' → ')+b.name,()=>showEdge(edge)));}return section;}
+    function keepMachine(){for(const card of view.inspector.querySelectorAll('.machine-card'))rows.append(card);for(const card of view.inspector.querySelectorAll('[data-membership-space]'))membership.append(card);}
+    function showNode(node){if(!node)return;currentNode=node;topologySelection=node.id;keepMachine();view.inspector.replaceChildren();
+      if(node.kind==='machine'){const entry=entries.get(JSON.stringify([node.space,node.identity]));if(entry)view.inspector.append(entry.element);const member=[...membership.children].find(card=>card.dataset.membershipSpace===node.space&&card.dataset.membershipRole!=='control');if(member)view.inspector.append(member);}
+      else {view.inspector.append(view.brand(node),n('p','hint',t('topology.kind.'+node.kind)),n('h2','',node.name),n('p',node.status==='connected'?'success-text':'hint',t(node.status==='stale'?'topology.status.stale':'agentLinks.status.'+(node.status==='connected'?'connected':node.status==='connecting'?'connecting':'offline'))),n('p','topology-identity',node.identity),n('p','hint',t('topology.messageScope')));if(node.link){const assistant=(client.assistants||[]).find(item=>item.space_id===node.space&&item.id===node.link.local_assistant_id);if(assistant)view.inspector.append(n('p','hint',t('agentLinks.boundAssistant').replace('{name}',assistant.name)));view.inspector.append(action(t('agentLinks.disconnect'),()=>connections.disconnect({...node.link,_space:node.space})));}}
+      view.inspector.append(related(node));
+    }
+    function showEdge(edge){keepMachine();view.inspector.replaceChildren();const a=model.nodes.find(node=>node.id===edge.from),b=model.nodes.find(node=>node.id===edge.to);view.inspector.append(n('p','hint',t(edge.kind==='agent'?'topology.agentLegend':'topology.machineLegend')),n('h2','',a.name+(edge.kind==='agent'?' ↔ ':' → ')+b.name),n('p','hint',t(edge.kind==='agent'?'topology.messageScope':'topology.executionScope')),action(t('topology.viewSource'),()=>view.select(a.id)),action(t('topology.viewTarget'),()=>view.select(b.id)));}
+    view=createTopology({root,locale,initialSelection:topologySelection,paused:topologyPaused,onPause:value=>{topologyPaused=value;},onSelect:showNode,onEdge:showEdge,signal:token.signal});
+    const update=async({inventory,permissionPages,permissionsPending,linkPages})=>{
       if(!gate.current(token)||disposed)return;
-      const items=inventory.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner));emptyRow.hidden=!!items.length;
+      const items=inventory.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner));
       keyedRows(rows,entries,items,{key:machine=>JSON.stringify([machine._space_id,machine.runtime_id||machine.id]),create:()=>{
         const element=n('section','page-card machine-card'),header=n('div','machine-header'),mark=n('span','machine-icon'),name=n('span','machine-name'),status=n('span'),tags=n('p','hint machine-tags'),location=n('p','hint machine-location'),permissions=n('div','machine-permissions');mark.append(icon('machines'));header.append(mark,name,status);element.append(location,header,tags,permissions);return {element,name,status,tags,location,permissions};
       },update:(entry,machine)=>{
         const id=machine.runtime_id||machine.id,permissionPage=permissionPages.find(page=>page.space.id===machine._space_id),policy=permissionPage?.value.policy;
         const stale=machine._stale||permissionPage?.stale||client.spaces.find(space=>space.id===machine._space_id)?.connected===false,permissions=entry.permissions;
-        entry.element.dataset.machineId=id;entry.element.dataset.spaceId=machine._space_id;entry.name.textContent=machine.name||id;entry.location.textContent=machine._space_name;entry.status.textContent=stale?tr('Stale','已过期'):machine.connected?tr('Connected','已连接'):tr('Offline','离线');entry.status.className=machine.connected&&!stale?'success-text':'hint';entry.tags.textContent=(machine.tags||[]).join(' · ');entry.tags.hidden=!machine.tags?.length;
-      if(permissionsPending&&!policy?.machines?.[id]){permissions.replaceChildren(n('p','hint',translate(locale(),'loading.pending')));return;}
-      if(!policy?.machines?.[id]){permissions.replaceChildren(n('p','inline-error',tr('Execution permissions are unavailable.','执行权限暂不可用。')),action(tr('Retry','重试'),()=>show('machines')));return;}
-      const captured={space:machine._space_id,owner:''},controlID=permissionPage.space.control_id,current=policy.machines[id],key=JSON.stringify([machine._space_id,controlID,id]);
-      let draft=machineDrafts.get(key);
-      if(!draft||!draft.dirty&&!draft.pending){const error=draft?.error;draft=createEditorSession({...captured,boot:client.runtime.boot_id},current);draft.error=error;machineDrafts.set(key,draft);}
-      renderMachinePermissions({root:permissions,machine,policy,request,scope:captured,locale,draft,stale,
-        isCurrent:()=>client.runtime.boot_id===draft.context.boot&&client.spaces.some(space=>space.id===captured.space&&space.control_id===controlID),
-        refresh:()=>{if(route==='machines'&&!editor)return pageView?.queue.run();},
-        edit:({title,initial,fields,save,scope})=>renderEditor(title,initial,fields,save,{capturedScope:scope})});
+        entry.element.dataset.machineId=id;entry.element.dataset.spaceId=machine._space_id;entry.name.textContent=machine.name||id;entry.location.textContent=machine._space_name;entry.status.textContent=t(stale?'topology.status.stale':machine.connected?'agentLinks.status.connected':'agentLinks.status.offline');entry.status.className=machine.connected&&!stale?'success-text':'hint';entry.tags.textContent=(machine.tags||[]).join(' · ');entry.tags.hidden=!machine.tags?.length;
+        if(permissionsPending&&!policy?.machines?.[id]){permissions.replaceChildren(n('p','hint',t('loading.pending')));return;}
+        if(!policy?.machines?.[id]){permissions.replaceChildren(n('p','inline-error',t('topology.permissionsUnavailable')),action(t('retry'),()=>show('machines')));return;}
+        const captured={space:machine._space_id,owner:''},controlID=permissionPage.space.control_id,current=policy.machines[id],key=JSON.stringify([machine._space_id,controlID,id]);
+        let draft=machineDrafts.get(key);
+        if(!draft||!draft.dirty&&!draft.pending){const error=draft?.error;draft=createEditorSession({...captured,boot:client.runtime.boot_id},current);draft.error=error;machineDrafts.set(key,draft);}
+        renderMachinePermissions({root:permissions,machine,policy,request,scope:captured,locale,draft,stale,isCurrent:()=>client.runtime.boot_id===draft.context.boot&&client.spaces.some(space=>space.id===captured.space&&space.control_id===controlID),refresh:()=>{if(route==='machines'&&!editor)return pageView?.queue.run();},edit});
       }});
-      await renderMachineMembership({client,root,membershipRoot:membership,machines:items,locale,notify,refresh:()=>pageView?.queue.run(),edit:({title,initial,fields,save,scope})=>renderEditor(title,initial,fields,save,{capturedScope:scope}),signal:token.signal});
+      model=projectTopology(client.spaces,items,linkPages);view.update(model);
+      await renderMachineMembership({client,root,membershipRoot:membership,machines:items,locale,notify,refresh:()=>pageView?.queue.run(),edit,signal:token.signal});
+      if(currentNode?.kind==='machine')showNode(currentNode);
     };
+    const connectionRequest=connections.load();
     return connectView(root,token,async()=>{
       data.permissionsPending=true;
       const permissions=across('/api/v1/permissions',token).catch(()=>[]).then(pages=>{data.permissionPages=pages;data.permissionsPending=false;if(data.inventory.length)return update(data);});
-      data.inventory=await across('/api/v1/machines',token);await update(data);await permissions;return data;
-    },update,{topics:['machines','spaces','permissions'],space:client.spaces?.length===1?client.spaces[0].id:''});
+      const links=across('/api/v1/agent-links',token,{errorTarget:connectionRoot}).then(pages=>{data.linkPages=pages;linkNotice.hidden=true;}).catch(reason=>{if(reason.name==='AbortError')return;linkNotice.hidden=false;linkNotice.replaceChildren(n('span','',t('topology.connectionUnavailable')),action(t('retry'),()=>pageView?.queue.run()));});
+      data.inventory=await across('/api/v1/machines',token);await links;await update(data);await permissions;await connectionRequest;return data;
+    },update,{topics:['machines','spaces','permissions','agent-links'],space:client.spaces?.length===1?client.spaces[0].id:''});
   }
   const approvalScope=()=>taskView?.scope||scope();
   const approvalContext=()=>JSON.stringify([approvalScope(),taskView?.task.id||'']);
@@ -683,7 +705,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     captureView();viewReady=false;pageView?.queue.close();pageView=null;
 
     closeTaskView();taskOrigin=null;closeTaskList();scheduleView=null;detailParent=false;if(!keepUsageOwner)usageOwner=null;
-    route=next;heading(tr({tasks:filter.taskTab==='schedules'?'Schedules':'Tasks',machines:'Machines',usage:'Usage',settings:'Settings'}[next]||next,{tasks:filter.taskTab==='schedules'?'定时计划':'任务',machines:'机器',usage:'用量',settings:'设置'}[next]||next));
+    route=next;heading(tr({tasks:filter.taskTab==='schedules'?'Schedules':'Tasks',machines:translate(locale(),'topology.title'),usage:'Usage',settings:'Settings'}[next]||next,{tasks:filter.taskTab==='schedules'?'定时计划':'任务',machines:translate(locale(),'topology.title'),usage:'用量',settings:'设置'}[next]||next));
     const version=++pageVersion,token=gate.next(),root=body();currentViewKey=viewKey;
     root.append(n('p','hint',tr('Loading…','正在加载…')));
     try {root.replaceChildren();await ({settings,tasks,machines,usage}[next]||settings)(root,token);if(gate.current(token))restoreView(viewKey,token);}
@@ -695,7 +717,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const current=editor;if(!await back())history.pushState({...history.state,potEditor:current.id},'',location.href);return true;
   };
   const beforeUnload=event=>{if([...(editor?[editor.session]:[]),...editorParents.map(value=>value.session),...machineDrafts.values()].some(session=>session.dirty||session.pending)){event.preventDefault();event.returnValue='';}};
-  const preference=()=>{if(route==='settings'&&filter.settingsTab==='integrations'&&!editor){heading(translate(locale(),'settings'));for(const node of host.querySelectorAll('[data-settings-i18n]'))node.textContent=translate(locale(),node.dataset.settingsI18n);return;}if(taskView){taskDetail(taskView.task,{recordHistory:false,returnTo:taskView.returnTo});return;}if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner,force:true});};
+  const preference=()=>{if(editor){editor.lifecycle.locale?.();return;}if(route==='settings'&&filter.settingsTab==='integrations'&&!editor){heading(translate(locale(),'settings'));for(const node of host.querySelectorAll('[data-settings-i18n]'))node.textContent=translate(locale(),node.dataset.settingsI18n);return;}if(taskView){taskDetail(taskView.task,{recordHistory:false,returnTo:taskView.returnTo});return;}if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner,force:true});};
   window.addEventListener('beforeunload',beforeUnload);window.addEventListener('pot:locale',preference);
   return {get title(){return title;},get editing(){return !!editor;},get approvalSpace(){return approvalScope().space;},get notificationContext(){return taskView?{space:taskView.scope.space,owner:taskView.scope.owner,task:taskView.task.id}:null;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner;},show,assistant,setupAI,leave,back,permissions,syncApprovals:renderApprovals,taskMenu(){taskView?.ui.openMenu();},handleHistory:popstate,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalQueue?.close();approvalQueue=null;approvalQueueKey='';approvalGate.close();approvalOwner='';pendingApprovals=[];approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);},approvalFor,decideApproval,taskNeedsApproval,rememberTasks,renderApprovals,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,options={}){route='tasks';return taskDetail(task,options);},
     showProviders(){filter.settingsTab='providers';return show('settings');},

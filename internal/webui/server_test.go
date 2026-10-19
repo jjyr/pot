@@ -232,3 +232,23 @@ func TestAttachmentPublicationAllowlist(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentLinkPublicationAllowlist(t *testing.T) {
+	for _, route := range []struct {
+		method, path string
+		allowed      bool
+	}{
+		{"GET", "/api/v1/agent-links", true},
+		{"POST", "/api/v1/agent-links", true},
+		{"POST", "/api/v1/agent-links/invitation", true},
+		{"GET", "/api/v1/agent-links/invitation", false},
+		{"DELETE", "/api/v1/agent-links", false},
+		{"POST", "/api/v1/agent-links/private", false},
+		{"GET", "/api/v1/runtime/control", false},
+		{"POST", "/api/v1/runtime/control", false},
+	} {
+		if got := Allowed(route.method, route.path); got != route.allowed {
+			t.Errorf("%s %s: got %t", route.method, route.path, got)
+		}
+	}
+}

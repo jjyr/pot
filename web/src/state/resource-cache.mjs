@@ -77,6 +77,7 @@ const resources={
   '/api/v1/usage/providers':['usage','providers'],
   '/api/v1/integrations':['integrations'],
   '/api/v1/machines':['machines'],
+  '/api/v1/agent-links':['agent-links'],
   '/api/v1/runtime/control':['machines','spaces'],
   '/api/v1/about':['runtime'],
   '/api/v1/completions':['machines','skills','assistants','settings','permissions'],
