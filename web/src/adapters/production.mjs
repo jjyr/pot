@@ -1,5 +1,6 @@
 import {createResourceReads} from '../state/resource-cache.mjs';
 import {createTopicVersions} from '../state/changes.mjs';
+import {createFileImages} from '../state/file-images.mjs';
 // Shared product transport. Every operation captures its Space/owner before IO.
 export class APIError extends Error {
   constructor(status, value) { super(value?.message || (typeof value?.error === 'string' && value.error) || `HTTP ${status}`); this.status = status; this.code = value?.code || 'http_error'; }
@@ -64,6 +65,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
   const attachmentURLs=new Map(),attachmentLeases=new Map();
   const attachmentKey=(attachment,options)=>{const scope={...context,...options};return JSON.stringify([scope.space,scope.owner,attachment.id]);};
   const client = {production: true, desktop, runtime, request,readBaselines,
+    acquireFileImage:createFileImages(request,()=>context),
     scope: () => ({...context}), setScope: value => Object.assign(context, value),
     snapshot: async options => {
       const scope = {...context};

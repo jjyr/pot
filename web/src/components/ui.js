@@ -579,6 +579,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const disposeMessage=record=>{record.childrenWindow?.close();record.attachmentNode?.dispose?.();record.row.remove();messageNodes.delete(record.row.dataset.windowKey);};
   const requestMessageRender=resize=>{resizeAnchor ||= !!resize;renderMessages();};
   let renderingSnapshot=null,renderingSending=null,renderingForest=null;
+  const markdownFiles=scope=>({
+    acquireFileImage:client.acquireFileImage?({task,path})=>client.acquireFileImage(task,path,scope):undefined,
+    downloadFile:client.downloadFile?async({task,path})=>{try{await client.downloadFile(task,path,scope);}catch(reason){error=reason.message;updateControls();}}:undefined,
+  });
   const renderMessage=(message,existing)=>{
     const snapshot=renderingSnapshot,sending=renderingSending,forest=renderingForest;
     let record = existing;
@@ -594,12 +598,12 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     bubble.dataset.scrollAnchor=`message:${message.viewKey}`;
     if(message.role==='tool'&&message.tool){
       const scope=client.scope?.()||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
-      if(!record.tool){record.tool=createToolCall({memory:toolMemory,key,locale:()=>locale,onDecision:(approval,action)=>pages.decideApproval(approval,action)});bubble.append(record.tool.element);}
+      if(!record.tool){record.tool=createToolCall({memory:toolMemory,key,locale:()=>locale,onDecision:(approval,action)=>pages.decideApproval(approval,action),...markdownFiles(scope)});bubble.append(record.tool.element);}
       record.tool.update(message,{offline:connection==='offline'||disconnected,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
     }else if(message.role==='assistant'){
       record.reply ||= createReplyBubble(bubble);
       const scope=client.scope?.();
-      record.reply.update(message,{t,downloadFile:client.downloadFile?async({task,path})=>{try{await client.downloadFile(task,path,scope);}catch(reason){error=reason.message;updateControls();}}:undefined,
+      record.reply.update(message,{t,...markdownFiles(scope),
         onSettings:async()=>{if(!await pages?.leave())return;route='settings';await pages.showProviders();renderShell();},
         onReconnect:()=>loadSnapshot(true),onRetrySend:submit,canRetrySend:connection==='connected'&&!pendingSend()&&draft(state)===sending?.request.text});
       record.text=message.text;record.role=message.role;
@@ -607,7 +611,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       bubble.replaceChildren();
       if (message.role === 'tool') bubble.append(el('pre','',message.text));
       else if (message.role === 'system') bubble.textContent = message.text;
-      else {const scope=client.scope?.(),prose=el('div','message-prose');prose.append(renderMarkdown(message.text,{downloadFile:client.downloadFile?async({task,path})=>{try{await client.downloadFile(task,path,scope);}catch(reason){error=reason.message;updateControls();}}:undefined}));bubble.append(prose);}
+      else {const scope=client.scope?.(),prose=el('div','message-prose');prose.append(renderMarkdown(message.text,{...markdownFiles(scope)}));bubble.append(prose);}
       record.text = message.text; record.role = message.role;
       row.className = `message role-${message.role}`;
     }

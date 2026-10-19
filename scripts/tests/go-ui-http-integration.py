@@ -450,6 +450,11 @@ def run(binary, base, env, cli_command):
             )
             if '"passed":true' not in mermaid:
                 raise RuntimeError("Mermaid browser contracts did not pass")
+            images = browser_cli(
+                "run-code", (ROOT / "scripts/tests/go-ui-file-images-browser.js").read_text()
+            )
+            if '"passed":true' not in images:
+                raise RuntimeError("Artifact image browser contracts did not pass")
             approvals = browser_cli(
                 "run-code", (ROOT / "scripts/tests/go-ui-task-approvals-browser.js").read_text()
             )

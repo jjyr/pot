@@ -12,8 +12,8 @@ export function createReplyBubble(host) {
   host.classList.add('reply-bubble');host.append(content,status);
   let text,signature;
   return {
-    update(message,{t,downloadFile,onSettings,onReconnect,onRetrySend,canRetrySend}){
-      if(text!==message.text){content.replaceChildren();if(message.text)content.append(renderMarkdown(message.text,{downloadFile}));text=message.text;}
+    update(message,{t,downloadFile,acquireFileImage,onSettings,onReconnect,onRetrySend,canRetrySend}){
+      if(text!==message.text){content.replaceChildren();if(message.text)content.append(renderMarkdown(message.text,{downloadFile,acquireFileImage}));text=message.text;}
       content.hidden=!message.text;
       const next=JSON.stringify([message.phase,message.error,t('replyFailed'),message.local,canRetrySend]);
       if(signature===next)return;signature=next;

@@ -57,6 +57,28 @@ to 20,000 source characters, 1,000,000 SVG characters and 500 flowchart edges.
 Diagram links and images are disabled, and raw Markdown HTML remains literal.
 Pele uses its own layouts rather than Mermaid's exact appearance.
 
+## Generated image previews
+
+The shared Markdown renderer displays owner-bound `pot-file://TASK_ID/PATH`
+images inline in Chat, Task conversations and Markdown tool results. Both image
+syntax (`![description](pot-file://...)`) and ordinary artifact links ending in
+`.png`, `.jpg`, `.jpeg`, `.webp` or `.gif` show a preview, with enlarge and original
+download controls. Other file links retain their download behavior. Remote HTTP
+images remain explicit links and are never fetched automatically.
+
+The production client reads the existing authenticated Task file chunks through
+HTTP or the native bridge, retaining the original assistant and Space for every
+chunk. It validates offsets, total size and revision before creating a Blob URL.
+Previews accept PNG, JPEG, WebP and GIF signatures, up to 16 MiB per image;
+unsupported, oversized and unavailable originals show a localized download
+fallback. No new file routes or model prompt instructions are needed.
+
+Connected `pot-file-image` elements share pending reads for the same owner, Space,
+Task and path. Disconnection releases the lease, aborts unused reads and revokes
+unused Blob URLs; a synchronous streaming replacement reuses its lease. Preview
+dialogs close when their message leaves the document. Loading, error and dialog
+controls follow the current UI language, including during asynchronous reads.
+
 ## Cached resource reads
 
 `state/resource-cache.mjs` provides memory-only reads shared by Web and Wails.

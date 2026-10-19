@@ -1,4 +1,5 @@
 import {createMermaidBlock} from './mermaid.mjs';
+import {createFileImage} from './file-image.mjs';
 
 // Native DOM Markdown. Raw HTML is literal; link protocols are allowlisted.
 export function allowedLink(value) {
@@ -29,12 +30,16 @@ function inline(parent,source,depth=0,options={}) {
       // Remote images are links until explicitly opened, avoiding invisible
       // requests from model content and matching host-controlled navigation.
       const [,label,href]=token.match(/^!\[([^\]]*)\]\((.+)\)$/);
-      if(allowedLink(href)){const link=element('a',label||href);link.href=href;link.target='_blank';link.rel='noopener noreferrer';parent.append(link);}else parent.append(document.createTextNode(token));
+      const file=parseFileLink(href);
+      if(file&&options.acquireFileImage&&options.downloadFile)parent.append(createFileImage(file,label,options));
+      else if(file&&options.downloadFile){const link=element('a',label||file.path);link.href='#';link.onclick=event=>{event.preventDefault();options.downloadFile(file);};parent.append(link);}
+      else if(allowedLink(href)){const link=element('a',label||href);link.href=href;link.target='_blank';link.rel='noopener noreferrer';parent.append(link);}else parent.append(document.createTextNode(token));
     }else {
       const parsed=token.startsWith('[')?token.match(/^\[([^\]]+)\]\((.+)\)$/):[null,token,token];
       const [,label,href]=parsed;
       const file=parseFileLink(href);
-      if(file&&options.downloadFile){const link=element('a',label);link.href='#';link.onclick=event=>{event.preventDefault();options.downloadFile(file);};parent.append(link);}
+      if(file&&options.acquireFileImage&&options.downloadFile&&/\.(png|jpe?g|webp|gif)$/i.test(file.path))parent.append(createFileImage(file,label,options));
+      else if(file&&options.downloadFile){const link=element('a',label);link.href='#';link.onclick=event=>{event.preventDefault();options.downloadFile(file);};parent.append(link);}
       else if(allowedLink(href)){const link=element('a',label);link.href=href;link.target='_blank';link.rel='noopener noreferrer';parent.append(link);}else parent.append(document.createTextNode(token));
     }
     offset=match.index+token.length;

@@ -601,3 +601,12 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 @media(max-width:719px) {
   .notification-onboarding { grid-column: 1; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px; }
 }
+
+/* Owner-bound task artifacts rendered by the shared Markdown component. */
+.message-body:has(pot-file-image) { width: 100%; }
+pot-file-image { display: inline-flex; vertical-align: top; flex-direction: column; align-items: flex-start; gap: 8px; width: min(100%, 440px); margin: 8px 0; white-space: normal; }
+.file-image-preview { display: block; max-width: 100%; padding: 0; border: 0; border-radius: 10px; background: transparent; cursor: zoom-in; overflow: hidden; }
+.file-image-preview img { display: block; max-width: 100%; max-height: 360px; object-fit: contain; }
+.file-image-download { border: 0; background: transparent; color: var(--primary); font: inherit; font-size: 13px; cursor: pointer; }
+.file-image-status { color: var(--muted); font-size: 13px; }
+pot-file-image[data-state="error"] .file-image-status { color: var(--danger); }
