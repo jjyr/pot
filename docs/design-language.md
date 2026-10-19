@@ -464,7 +464,14 @@ The address region displays a nonsecret service endpoint. Copy connection addres
 explicitly obtains a short-lived invitation and copies it without putting it in
 history or cached view data. Add Agent opens a single editing page with the other
 Agent's address and, when needed, a local assistant picker. Successful connection
-returns to the topology and selects that endpoint. The connection permits messages;
+returns to the topology and selects that endpoint. Access defaults to an existing address: HTTP is supported on Tailscale/VPN private
+networks without a TLS certificate; existing HTTPS remains optional. Tailscale
+setup reuses or creates private HTTP Serve, reports the actual address and keeps
+unrelated Serve configuration. Network encryption for private HTTP belongs to the
+private network. Only the dedicated Agent message listener is published; owner and
+execution APIs remain separate.
+
+The connection permits messages;
 the receiving assistant retains its existing tool and approval rules. Account
 services such as GitHub stay in Third-party accounts settings.
 
