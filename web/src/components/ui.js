@@ -503,17 +503,50 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   function selectedSequence(){const selection=getSelection();if(!selection?.rangeCount||selection.isCollapsed||!history.contains(selection.anchorNode))return null;const element=selection.anchorNode.nodeType===Node.ELEMENT_NODE?selection.anchorNode:selection.anchorNode.parentElement;return element?.closest('article.message')?.dataset.sequence||null;}
   function nearBottom() { return history.scrollHeight - history.clientHeight - history.scrollTop < 80; }
-  let following=true,renderFrame=0,lastAnchor=null,resizeAnchor=false;
-  function scrollBottom() { following=true;history.scrollTop = history.scrollHeight; latest.hidden = true; }
+  function atBottom() { return history.scrollHeight - history.clientHeight - history.scrollTop <= 1; }
+  let following=true,renderFrame=0,lastAnchor=null,resizeAnchor=false,lastScrollTop=0,upwardIntent=false;
+  function scrollBottom() { following=true;upwardIntent=false;history.scrollTop = history.scrollHeight;lastScrollTop=history.scrollTop; latest.hidden = true; }
+  function pauseFollowing(){following=false;pendingFollow=false;latest.hidden=false;}
+  function loadEarlierNearTop(){
+    if(!historyLoading&&!historyFailure&&history.scrollTop<Math.max(180,history.clientHeight)&&state.snapshot?.history?.has_more){
+      pauseFollowing();readHistory({before:state.snapshot.history.before});
+    }
+  }
+  function scrollUpIntent(event){
+    if(event.defaultPrevented||!chatShown)return;
+    // Let nested output panes consume their own scrolling first.
+    for(let node=event.target instanceof Element?event.target:null;node&&node!==history;node=node.parentElement){
+      if(node.scrollTop>0&&node.scrollHeight>node.clientHeight&&/^(auto|scroll)$/.test(getComputedStyle(node).overflowY))return;
+    }
+    if(history.scrollHeight<=history.clientHeight+1&&!state.snapshot?.history?.has_more&&!state.snapshot?.history?.has_newer)return;
+    upwardIntent=true;pauseFollowing();loadEarlierNearTop();
+  }
+  history.addEventListener('wheel',event=>{
+    if(!event.ctrlKey&&!event.metaKey&&event.deltaY<0&&Math.abs(event.deltaY)>Math.abs(event.deltaX))scrollUpIntent(event);
+  },{passive:true});
+  let touchY=null;
+  history.addEventListener('touchstart',event=>{touchY=event.touches.length===1?event.touches[0].clientY:null;},{passive:true});
+  history.addEventListener('touchmove',event=>{
+    const nextY=event.touches.length===1?event.touches[0].clientY:null;
+    if(touchY!==null&&nextY!==null&&nextY>touchY)scrollUpIntent(event);
+    touchY=nextY;
+  },{passive:true});
+  history.addEventListener('keydown',event=>{
+    if(event.ctrlKey||event.metaKey||event.altKey||event.target.closest('input,textarea,select,button,a,summary,[contenteditable]'))return;
+    if(['ArrowUp','PageUp','Home'].includes(event.key)||event.key===' '&&event.shiftKey)scrollUpIntent(event);
+  });
   history.addEventListener('scroll', () => {
     if(chatShown)lastTaskReadingPosition=captureReadingPosition(history);
-    following=nearBottom();latest.hidden=following;
+    if(history.scrollTop<lastScrollTop-.5)pauseFollowing();
+    else if(atBottom()){following=true;upwardIntent=false;}
+    lastScrollTop=history.scrollTop;latest.hidden=following;
     lastAnchor=readingAnchor(history);state.uiAnchor=selectedSequence()||lastAnchor?.sequence||null;
     renderMessages();
-    if(!historyLoading&&!historyFailure){if(history.scrollTop<180&&state.snapshot?.history?.has_more)readHistory({before:state.snapshot.history.before});else if(nearBottom()&&state.snapshot?.history?.has_newer){following=false;readHistory({after:state.snapshot.history.after});}}
+    loadEarlierNearTop();
+    if(!historyLoading&&!historyFailure&&nearBottom()&&state.snapshot?.history?.has_newer){pauseFollowing();readHistory({after:state.snapshot.history.after});}
   }, {passive: true});
   latest.onclick = async()=>{if(state.snapshot?.history?.has_newer)await readHistory({},{around:true});following=true;state.uiAnchor=null;renderMessages();requestAnimationFrame(scrollBottom);};
-  historyStatus.onclick=()=>{following=false;if(historyFailure==='history.missing'){historyFailure='';renderMessages();}else if(!historyLoading&&state.snapshot?.history?.has_more)readHistory({before:state.snapshot.history.before});};
+  historyStatus.onclick=()=>{pauseFollowing();if(historyFailure==='history.missing'){historyFailure='';renderMessages();}else if(!historyLoading&&state.snapshot?.history?.has_more)readHistory({before:state.snapshot.history.before});};
   const messageNodes = new Map(),toolMemory=new Map();
   const taskCache=new Map();
   const backgroundTaskView=createBackgroundTasks({locale:()=>locale,
@@ -653,7 +686,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(!chatApprovals.hidden&&locateApprovals===JSON.stringify(client.scope?.())){locateApprovals='';requestAnimationFrame(()=>{if(!disposed&&route==='chat')chatApprovals.scrollIntoView({block:'nearest',behavior:reducedMotion.matches?'instant':'smooth'});});}
     if(restoreTasks&&chatShown&&!pendingFollow){following=false;restoreReadingPosition(history,restoreTasks);pendingReadingPosition=null;latest.hidden=nearBottom();}
     else if(follow)scrollBottom();else{restoreReadingAnchor(history,anchor);latest.hidden=false;}
+    if(snapshot&&!snapshot.history?.has_more&&!snapshot.history?.has_newer&&history.scrollHeight<=history.clientHeight+1)scrollBottom();
     lastTaskReadingPosition=captureReadingPosition(history);
+    lastScrollTop=history.scrollTop;
     lastAnchor=readingAnchor(history);if(!following)state.uiAnchor=selectedSequence()||lastAnchor?.sequence||null;
     if(following)state.uiAnchor=null;
     if(pendingFollow&&!followFrame)followFrame=requestAnimationFrame(()=>{followFrame=0;if(!disposed&&chatShown&&pendingFollow){scrollBottom();pendingFollow=false;}});
@@ -678,7 +713,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if (state.snapshot && validSnapshot(snapshot) && ownerKey(snapshot) !== ownerKey(state.snapshot)) {
       connection = 'offline'; error = t('identityChanged'); updateControls(); return;
     }
-    const wasFollowing=chatShown&&nearBottom();
+    // A return to the bottom can precede its scroll event and the next frame.
+    const wasFollowing=chatShown&&(following&&nearBottom()||!upwardIntent&&atBottom());
     const readingBeforeReset=snapshot.kind==='reset'&&!following?readingAnchor(history):null;
     const initialSnapshot = !state.snapshot;
     if(validSnapshot(snapshot)){awaitingSnapshot=false;restoredSnapshot=false;}
@@ -737,7 +773,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     pages?.clearApprovals();locateApprovals=item.pending_approvals?JSON.stringify({owner:item.id,space:item.space_id||''}):'';selectedAssistant = item; client.setScope({owner:item.id, space:item.space_id || ''});
     epoch = beginSubscription(state); editorOwner = null; route = 'chat'; if(!initial)directoryOpen = false;
     pendingReadingPosition=readingPositions.get(snapshotKey())||null;pendingFollow=false;
-    messageWindow.set([]);windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);messageNodes.clear();windowHeights.clear();following=true;lastAnchor=null;historyGeneration++;historyLoading=false;historyFailure='';state.uiAnchor=null;error = ''; connectionError = ''; disconnected = false;
+    messageWindow.set([]);windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);messageNodes.clear();windowHeights.clear();following=true;upwardIntent=false;lastScrollTop=0;lastAnchor=null;historyGeneration++;historyLoading=false;historyFailure='';state.uiAnchor=null;error = ''; connectionError = ''; disconnected = false;
     const cached=cachedSnapshots.get(snapshotKey(item.space_id||'',item.id));
     restoredSnapshot=!!cached;connection='connecting';
     if(cached){acceptSnapshot(state,cached,epoch);syncEditor();renderMessages();const top=positions.get(ownerKey(cached));if(top!==undefined)requestAnimationFrame(()=>{if(!disposed&&editorOwner===ownerKey(cached)){restoreSavedPosition(top);}});}
