@@ -70,3 +70,29 @@ func TestDirectHTTPAgentListenerPersistsAndKeepsOwnerAPIsPrivate(t *testing.T) {
 		t.Fatal(response.Status)
 	}
 }
+
+func TestMissingVPNInterfaceKeepsControlAndAccessSetupAvailable(t *testing.T) {
+	ctx := context.Background()
+	f := agentControl(t, "vpn-loss")
+	if _, err := f.service.integrationDB.Exec(`UPDATE agent_link_host SET listen='100.127.255.254:63001',endpoint='http://100.127.255.254:63001',mode='address'`); err != nil {
+		t.Fatal(err)
+	}
+	options := f.service.options
+	f.service.Close()
+	var err error
+	f.service, err = Open(options)
+	if err != nil {
+		t.Fatal("missing VPN interface prevented Control startup", err)
+	}
+	value, err := f.service.AgentLinks(ctx, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	self := value.(map[string]any)["self"].(map[string]any)
+	if self["status"] != "needs_access" || self["reason_code"] != "agent_link_listener_unavailable" {
+		t.Fatal(self)
+	}
+	if _, err = f.service.Registry.Definitions(ctx); err != nil {
+		t.Fatal("owner access unavailable", err)
+	}
+}
