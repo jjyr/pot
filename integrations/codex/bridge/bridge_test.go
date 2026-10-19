@@ -258,6 +258,15 @@ func readFrame(t *testing.T, r *bufio.Reader) string {
 		}
 	}
 }
+func readEventFrame(t *testing.T, r *bufio.Reader) string {
+	t.Helper()
+	for {
+		frame := readFrame(t, r)
+		if !strings.HasPrefix(frame, ":") {
+			return frame
+		}
+	}
+}
 func TestSSERealHTTPReplayRegistrationHeartbeatAndExpiry(t *testing.T) {
 	f := setup(t)
 	resp, r := openSSE(t, f, "")
@@ -269,7 +278,7 @@ func TestSSERealHTTPReplayRegistrationHeartbeatAndExpiry(t *testing.T) {
 		t.Fatal("heartbeat")
 	}
 	a := f.submit("live", "stream")
-	frame := readFrame(t, r)
+	frame := readEventFrame(t, r)
 	if !strings.Contains(frame, a.ID) || !strings.Contains(frame, "id: 1\n") {
 		t.Fatal(frame)
 	}
@@ -279,7 +288,7 @@ func TestSSERealHTTPReplayRegistrationHeartbeatAndExpiry(t *testing.T) {
 	resp, r = openSSE(t, f, "1")
 	defer resp.Body.Close()
 	_ = readFrame(t, r)
-	if frame = readFrame(t, r); !strings.Contains(frame, "id: 2\n") {
+	if frame = readEventFrame(t, r); !strings.Contains(frame, "id: 2\n") {
 		t.Fatal(frame)
 	}
 	resp.Body.Close()

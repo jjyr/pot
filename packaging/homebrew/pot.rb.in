@@ -10,6 +10,8 @@ cask "pot" do
   depends_on arch: :arm64
   depends_on macos: :tahoe
 
+  auto_updates true
+
   app "Pot.app"
 
   postflight_steps do

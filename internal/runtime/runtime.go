@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"github.com/jjyr/pot/internal/control"
+	"github.com/jjyr/pot/internal/selfupdate"
 	"github.com/jjyr/pot/pkg/composition"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 type Options struct {
@@ -30,6 +32,8 @@ type Runtime struct {
 	BootID         string
 	Executions     *execution.Manager
 	Control        *control.Service
+	Updates        *selfupdate.Manager
+	Maintaining    func() bool
 
 	cancel     context.CancelFunc
 	once       sync.Once
@@ -72,7 +76,18 @@ func Open(ctx context.Context, options Options) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	host := selfupdate.FromContext(ctx)
+	if host != nil {
+		r.Maintaining = host.Maintaining
+		r.Executions.SetMaintenance(host.Maintaining)
+	}
 	config := options.Control
+	if r.Maintaining != nil {
+		config.Maintenance = r.Maintaining
+	}
+	if host != nil {
+		host.Protect(r.Root.Path, config.Workspace, config.AgentHome)
+	}
 	if config.Composer == nil {
 		// Product executables explicitly host this hidden worker entry point.
 		executable, err := os.Executable()
@@ -96,6 +111,13 @@ func Open(ctx context.Context, options Options) (*Runtime, error) {
 	if !options.DisableMetadataRefresh {
 		r.background.Go(func() { r.Control.Profiles.RunMetadata(runctx) })
 	}
+	r.Updates = selfupdate.New(runctx, host, func() { r.Control.Changes.Notify("updates") })
+	if host != nil {
+		if err = host.Bind(r.Root.Path, r.updateWork); err != nil {
+			return nil, err
+		}
+		r.background.Go(r.Updates.Run)
+	}
 	success = true
 	return r, nil
 }
@@ -106,6 +128,11 @@ func (r *Runtime) Close() error {
 		}
 		r.cancel()
 		r.background.Wait()
+		if r.Control != nil && r.Maintaining != nil && r.Maintaining() {
+			cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			r.closeErr = errors.Join(r.closeErr, r.Executions.Drain(cleanup), r.interruptUpdateTasks(cleanup))
+			cancel()
+		}
 		if r.Control != nil {
 			r.closeErr = errors.Join(r.closeErr, r.Control.Close())
 		}

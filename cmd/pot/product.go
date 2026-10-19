@@ -11,6 +11,7 @@ import (
 	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/productinfo"
 	product "github.com/jjyr/pot/internal/runtime"
+	"github.com/jjyr/pot/internal/selfupdate"
 	"github.com/jjyr/pot/internal/serverconfig"
 	"github.com/jjyr/pot/internal/transport"
 	"github.com/jjyr/pot/internal/webui"
@@ -24,7 +25,7 @@ import (
 	"time"
 )
 
-func productCommand(ctx context.Context, args []string, out io.Writer) error {
+func productCommand(ctx context.Context, args []string, out io.Writer) (result error) {
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	flags.SetOutput(out)
 	root := flags.String("root", "", "private Go data root (default ~/.pot-go)")
@@ -77,11 +78,13 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		defer runtime.Close()
+		defer func() { result = errors.Join(result, runtime.Close()) }()
 		if args[0] == "init" {
 			return json.NewEncoder(out).Encode(runtime.Root.Identity)
 		}
 		app := &transport.Application{RuntimeResources: runtime.ResourceCall, Control: runtime.Control, RuntimeID: runtime.Root.Identity.RuntimeID, BootID: runtime.BootID, Name: "Pot"}
+		app.Updates = runtime.Updates.Call
+		app.Maintenance = runtime.Maintaining
 		app.About = func(context.Context) (any, error) { return productinfo.Read(runtime.AssetDirectory) }
 
 		socket, err := transport.StartSocket(ctx, runtime.Root.Path, app)
@@ -160,6 +163,9 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 				defer cancel()
 				_ = server.Shutdown(shutdown)
 			}()
+			if host := selfupdate.FromContext(ctx); host != nil {
+				host.Ready()
+			}
 			fmt.Fprintf(out, "Browser: %s\nAccess token is stored privately in %s\n", origin, path)
 			select {
 			case <-ctx.Done():
@@ -167,6 +173,9 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 			case err := <-failures:
 				return err
 			case err := <-watchDone:
+				if ctx.Err() != nil {
+					return nil
+				}
 				return err
 			case err := <-done:
 				if errors.Is(err, http.ErrServerClosed) {
@@ -174,6 +183,9 @@ func productCommand(ctx context.Context, args []string, out io.Writer) error {
 				}
 				return err
 			}
+		}
+		if host := selfupdate.FromContext(ctx); host != nil {
+			host.Ready()
 		}
 		select {
 		case <-ctx.Done():

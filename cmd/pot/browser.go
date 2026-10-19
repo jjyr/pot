@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/internal/access"
+	"github.com/jjyr/pot/internal/buildinfo"
+	"github.com/jjyr/pot/internal/selfupdate"
 	"github.com/jjyr/pot/internal/tailnet"
 	"github.com/jjyr/pot/internal/transport"
 	"github.com/jjyr/pot/internal/webui"
@@ -118,6 +120,33 @@ func browserCommand(ctx context.Context, args []string, out io.Writer) error {
 			}
 		}
 		endpoint, err := transport.ReadEndpoint(*controlRoot)
+		if host := selfupdate.FromContext(ctx); host != nil && host.Maintaining() {
+			deadline := time.Now().Add(40 * time.Second)
+			for time.Now().Before(deadline) {
+				endpoint, err = transport.ReadEndpoint(*controlRoot)
+				if err == nil {
+					readyctx, cancel := context.WithTimeout(ctx, time.Second)
+					req, _ := http.NewRequestWithContext(readyctx, "GET", "http://runtime/api/v1/runtime", nil)
+					req.Header.Set("Authorization", "Bearer "+endpoint.Token)
+					res, e := endpoint.Client().Do(req)
+					if e == nil {
+						var v struct{ Version string }
+						e = json.NewDecoder(res.Body).Decode(&v)
+						res.Body.Close()
+						if e == nil && v.Version == buildinfo.Version {
+							cancel()
+							break
+						}
+					}
+					cancel()
+				}
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-time.After(100 * time.Millisecond):
+				}
+			}
+		}
 		if err != nil {
 			return err
 		}
@@ -212,11 +241,22 @@ func browserCommand(ctx context.Context, args []string, out io.Writer) error {
 		defer cancel()
 		_ = httpServer.Shutdown(shutdown)
 	}()
+	if host := selfupdate.FromContext(ctx); host != nil {
+		if err = host.Bind(directory, nil); err != nil {
+			return err
+		}
+	}
+	if host := selfupdate.FromContext(ctx); host != nil {
+		host.Ready()
+	}
 	fmt.Fprintf(out, "Browser server: %s (Control %s)\nAccess configuration: %s\n", *origin, identity.ID, path)
 	select {
 	case <-ctx.Done():
 		return nil
 	case err := <-watchDone:
+		if ctx.Err() != nil {
+			return nil
+		}
 		return err
 	case err := <-done:
 		if errors.Is(err, http.ErrServerClosed) {

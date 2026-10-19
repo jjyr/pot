@@ -31,6 +31,10 @@ func Handler(app *Application, token string) http.Handler {
 			return
 		}
 
+		if app.Maintenance != nil && app.Maintenance() && r.URL.Path != "/api/v1/updates" && r.URL.Path != "/api/v1/runtime" && r.URL.Path != "/api/v1/control" {
+			writeError(w, http.StatusServiceUnavailable, protocol.APIError{Code: "update_maintenance"})
+			return
+		}
 		if app.terminalSocket(w, r) {
 			return
 		}

@@ -53,6 +53,24 @@ def main():
     env = dict(os.environ, POT_APP_RELEASE="1", POT_APP_VERSION=version)
     subprocess.run(["python3", str(REPO / "scripts/build-go-app")], check=True, env=env)
     package(APP, args.output.resolve(), version)
+    for target in ["darwin-arm64", "linux-amd64", "linux-arm64"]:
+        subprocess.run(
+            [
+                "python3",
+                str(REPO / "scripts/build-go-cli"),
+                "--platform",
+                target,
+                "--output",
+                str(args.output.resolve()),
+            ],
+            check=True,
+            env=env,
+        )
+    if os.environ.get("POT_UPDATE_PUBLIC_KEY"):
+        subprocess.run(
+            ["python3", str(REPO / "scripts/update-release"), version, str(args.output.resolve())],
+            check=True,
+        )
 
 
 if __name__ == "__main__":

@@ -318,7 +318,7 @@ func Allowed(method, path string) bool {
 			return true
 		case "/api/v1/tasks/catalog":
 			return true
-		case "/api/v1/agent/diagnostics", "/api/v1/completions", "/api/v1/about", "/api/v1/runtime", "/api/v1/control", "/api/v1/spaces", "/api/v1/assistants", "/api/v1/providers", "/api/v1/agent", "/api/v1/agent/routing", "/api/v1/instructions", "/api/v1/snapshot", "/api/v1/messages/receipt", "/api/v1/history", "/api/v1/events", "/api/v1/changes", "/api/v1/permissions", "/api/v1/usage/summary", "/api/v1/usage/providers", "/api/v1/tasks", "/api/v1/tasks/query", "/api/v1/schedules", "/api/v1/machines":
+		case "/api/v1/updates", "/api/v1/agent/diagnostics", "/api/v1/completions", "/api/v1/about", "/api/v1/runtime", "/api/v1/control", "/api/v1/spaces", "/api/v1/assistants", "/api/v1/providers", "/api/v1/agent", "/api/v1/agent/routing", "/api/v1/instructions", "/api/v1/snapshot", "/api/v1/messages/receipt", "/api/v1/history", "/api/v1/events", "/api/v1/changes", "/api/v1/permissions", "/api/v1/usage/summary", "/api/v1/usage/providers", "/api/v1/tasks", "/api/v1/tasks/query", "/api/v1/schedules", "/api/v1/machines":
 			return true
 		}
 	}
@@ -340,7 +340,7 @@ func Allowed(method, path string) bool {
 	}
 	if method == "POST" {
 		switch path {
-		case "/api/v1/attachments", "/api/v1/assistants", "/api/v1/providers", "/api/v1/providers/default", "/api/v1/providers/check", "/api/v1/providers/resolve", "/api/v1/providers/test", "/api/v1/agent", "/api/v1/agent/routing", "/api/v1/instructions", "/api/v1/messages", "/api/v1/turn/cancel", "/api/v1/turn/retry", "/api/v1/turn/continue", "/api/v1/turn/steer", "/api/v1/turn/control", "/api/v1/permissions", "/api/v1/usage/policy", "/api/v1/usage/providers", "/api/v1/usage/resume", "/api/v1/schedules", protocol.AssistantMailAPI:
+		case "/api/v1/updates", "/api/v1/attachments", "/api/v1/assistants", "/api/v1/providers", "/api/v1/providers/default", "/api/v1/providers/check", "/api/v1/providers/resolve", "/api/v1/providers/test", "/api/v1/agent", "/api/v1/agent/routing", "/api/v1/instructions", "/api/v1/messages", "/api/v1/turn/cancel", "/api/v1/turn/retry", "/api/v1/turn/continue", "/api/v1/turn/steer", "/api/v1/turn/control", "/api/v1/permissions", "/api/v1/usage/policy", "/api/v1/usage/providers", "/api/v1/usage/resume", "/api/v1/schedules", protocol.AssistantMailAPI:
 			return true
 		}
 		if strings.HasPrefix(path, "/api/v1/assistants/") {

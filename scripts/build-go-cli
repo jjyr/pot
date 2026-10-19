@@ -16,6 +16,7 @@ from go_packaging import (
     digest,
     go_build,
     prepare_resources,
+    update_metadata,
 )
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -36,6 +37,7 @@ with tempfile.TemporaryDirectory(prefix=".go-cli-", dir=BUILD) as temporary:
     staged = Path(temporary) / ("pot-go-" + args.platform)
     resources = staged / "Resources"
     prepare_resources(resources, args.platform)
+    update_metadata(resources, "cli", args.platform)
     for name in ("pot",):
         go_build("./cmd/" + name, staged / "bin" / name, args.platform)
     call(

@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""Sign a complete release manifest with the configured Ed25519 release key."""
+
+import argparse
+import base64
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+
+from go_packaging import ROOT, storage_format
+
+
+def sign(version, output):
+    artifacts = []
+    for kind, target, name in [
+        ("app", "darwin-arm64", f"Pot-{version}-arm64.zip"),
+        ("cli", "darwin-arm64", "pot-go-darwin-arm64.tar.gz"),
+        ("cli", "linux-amd64", "pot-go-linux-amd64.tar.gz"),
+        ("cli", "linux-arm64", "pot-go-linux-arm64.tar.gz"),
+    ]:
+        archive = output / name
+        with archive.open("rb") as source:
+            digest = hashlib.file_digest(source, "sha256").hexdigest()
+        artifacts.append(
+            {
+                "kind": kind,
+                "platform": target,
+                "url": f"https://github.com/jjyr/pot/releases/download/v{version}/{name}",
+                "sha256": digest,
+                "size": archive.stat().st_size,
+            }
+        )
+    payload = json.dumps(
+        {"version": version, "storage_format": storage_format(), "artifacts": artifacts},
+        separators=(",", ":"),
+    ).encode()
+    signature = (
+        subprocess.check_output(
+            ["go", "run", "./scripts/sign-release", "sign"],
+            input=payload,
+            cwd=ROOT,
+        )
+        .strip()
+        .decode()
+    )
+    (output / "update.json").write_text(
+        json.dumps(
+            {
+                "payload": base64.b64encode(payload).decode(),
+                "signature": signature,
+            }
+        )
+        + "\n"
+    )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("version")
+    parser.add_argument("output", type=Path)
+    args = parser.parse_args()
+    sign(args.version, args.output)

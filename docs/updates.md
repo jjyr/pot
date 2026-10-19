@@ -1,0 +1,118 @@
+# Local installation updates
+
+Pot checks the signed stable release feed on startup and every four hours. The
+shared chat shell shows one highlighted update action at the bottom of the wide
+navigation rail, or in the narrow titlebar and navigation menu. Its tooltip names the target
+version. There is no separate update settings page.
+
+Clicking downloads and verifies the complete package while work continues. Once
+prepared, the backend continues installation without requiring an open browser.
+If work is active, installation remains prepared until the initiating UI confirms
+**Interrupt and upgrade**. Cancellation retains the package and leaves work
+running. Confirmation covers the installation's active Tasks, replies and terminal
+sessions. Interrupted work is never automatically replayed.
+
+## Installation boundary
+
+An update replaces one complete installation: executable(s), shared frontend,
+Node, sandbox assets, plugins and built-in Skills. Every running App, standalone
+Runtime and browser service launched from that installation registers a private
+local update endpoint. Processes launched from another installation are outside
+the group. No remote Runner installation or cross-machine coordination occurs.
+The browser UI requests the update of its selected Control, never its own browser
+machine. Operators must coordinate remote deployments separately.
+
+```text
+UI -> selected Control update port -> signed package download/staging
+                                  -> independent installer process
+                                       |
+                         prepare each registered local host
+                         cancel work, close servers/stores, confirm cleanup
+                                       |
+                         exclusive installation lock + data snapshots
+                         replace complete installation
+                                       |
+                         hosts exec their original command in place
+                         verify versions/readiness -> release maintenance
+```
+
+Hosts retain their supervisor's PID, original arguments and environment when
+restarting. The installer does not invoke arbitrary shell commands, create new
+user services, or start previously stopped instances. Closing the browser does
+not stop a download or installation; a pending interruption confirmation still
+requires a user. Starting another host during installation is serialized by the
+installation lock.
+
+The installed directory must be replaceable by its service account. Its private
+sibling `<installation>.updates` holds the state, staged package, worker log,
+previous package and data snapshots. These may contain private metadata and must
+remain owner-only. Keep the installation separate from all data roots and
+workspaces. Source builds and builds without a pinned release key do not advertise
+an update action. Development App previews remain independent installations.
+
+## Verification and failure handling
+
+The binary pins an Ed25519 public key. Discovery uses the stable GitHub Release's
+`update.json`, containing a base64 payload and signature. The payload binds the
+version, storage format, target platform, package kind, download URL, byte size
+and SHA-256 digest. Download URLs must belong to this repository's versioned
+release path; redirects must retain HTTPS. Invalid signatures, unsupported storage
+formats, older/equal versions, size mismatches and digest mismatches are rejected.
+Extraction confines files and relative symlinks to the staging directory.
+
+Maintenance prevents new API business operations, Agent invocation and schedule
+admission. Each host cancels its original work and reports full shutdown before
+replacement. Unconfirmed process cleanup or an installation lock still held by a
+host aborts installation. Closed SQLite and JSON metadata are copied privately;
+workspaces, task files and machine identities are not replaced.
+
+After replacement, hosts start with business admission held until every expected
+host reports the new version and readiness. Failed readiness triggers restoration
+of the previous complete package after confirming the new hosts have stopped.
+If that cleanup cannot be confirmed, the installation stays blocked for operator
+inspection; the installer does not kill unknown work or silently release the
+maintenance gate. Execution receipts are retained during rollback, rather than
+replacing them with older database copies.
+
+Only matching `StorageFormat` markers and identical centralized migration-file
+fingerprints are eligible for automatic installation. Build tooling pins the
+fingerprint in each executable and signed manifest, so adding a migration
+automatically blocks that automatic upgrade path. Regular manual upgrades still
+use the [startup migration mechanism](database-migrations.md). Automatic upgrades
+that change schemas need a separate backup/migration/restore design; package-only
+rollback must never reopen a migrated database with an older binary.
+
+## Release setup
+
+Provision one Ed25519 release key outside the checkout and retain it securely:
+
+```sh
+mise exec -- go run ./scripts/sign-release keygen /private/path/pot-update-key.pem
+```
+
+Set the base64 public key as the GitHub Actions repository variable
+`POT_UPDATE_PUBLIC_KEY`, and the private PEM as the secret
+`POT_UPDATE_PRIVATE_KEY`. The Release workflow pins the public key in every
+executable, builds the App and CLI archives for macOS arm64 and Linux amd64/arm64,
+and signs the manifest only after all artifacts exist. A configured public key
+without the matching private key fails publishing preparation. Unsigned local
+builds remain possible, but have no self-update capability.
+
+Install the first build containing the pinned key manually. Existing builds that
+predate this updater cannot bootstrap themselves into it. Key replacement also
+requires an explicit trust/bootstrap plan; the feed cannot change its own pinned
+verification key. Homebrew marks the App as self-updating.
+
+`GET /api/v1/updates` projects availability, phase and current work counts;
+`POST /api/v1/updates` accepts only typed download/install requests with a version,
+request ID and explicit interruption flag. Both use the existing authenticated
+Control/native/browser routes. Progress invalidates the `updates` topic; the UI
+uses bounded reconnection checks only during an initiated restart and reloads
+frontend assets after a successful version change.
+
+Inspect `<installation>.updates/state.json` and `worker.log` after failure. A
+blocked installation or installer process failure requires local operator
+inspection before restarting services; do not delete execution uncertainty fences
+or restore older receipts merely to make startup succeed. Previous packages and
+snapshots are retained for inspection and can be removed by the operator after a
+successful update has been qualified.

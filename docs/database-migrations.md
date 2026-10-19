@@ -123,9 +123,11 @@ marker. Legacy inbox queue tables are also rejected rather than overwritten.
 into a recorded one-time migration, preserving bindings, checkpoints and receipt
 states. It no longer runs on every mailbox open.
 
-Before replacing an installed version, stop all processes using the root and
-take a consistent backup of the complete root, preserving identity and the secret
-master key. Start the new build against the same root; no separate migration
+Before an upgrade that can change migration history, stop all processes using
+the root and take a consistent backup of the complete root, preserving identity
+and the secret master key. The [local self-update path](updates.md) requires an
+identical migration fingerprint and only rolls back the program package, retaining
+newer execution receipts. Start the new build against the same root; no separate migration
 command is required. For rollback, restore the complete pre-upgrade backup and
 matching binary together. Do not erase migration records, change checksums or
 force an older binary to accept upgraded data. Failure diagnostics identify the
