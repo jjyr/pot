@@ -102,6 +102,42 @@ The default message plugin does not load the old delegation-only skill. Its
 unchanged text remains available for an explicitly configured legacy integration;
 the message tools supply their own narrow schemas without a new system prompt.
 
+### Opt-in real Codex CLI qualification
+
+`TestConfiguredCodexCLIAgentMessagesLive` runs an installed Codex CLI against an
+existing configured Responses model. It creates a private temporary Control,
+Codex host, CLI home and workspace. The real signed TCP preview and connection
+carry a synthetic Control message to Codex; the CLI chooses and calls the
+production MCP tools to read, reply, acknowledge and inspect the receipt. The
+test checks both durable inboxes and the reply's conversation and causal parent.
+It does not inject messages into an existing Codex App chat.
+
+Run on the machine that owns the existing model configuration and master key:
+
+```sh
+POT_LIVE=1 \
+POT_CONFIGURED_LIVE_ROOT=/absolute/existing/control-root \
+POT_SECRET_KEY_FILE=/absolute/existing/master.key \
+POT_CODEX_LIVE_CLI=/absolute/installed/codex \
+mise exec -- go test ./integrations/codex/bridge \
+  -run '^TestConfiguredCodexCLIAgentMessagesLive$' -count=1 -v
+```
+
+The existing profile, provider and credential are read without migrations or
+writes. A local in-memory proxy keeps the provider credential out of the CLI
+environment and temporary files. The CLI receives only a placeholder proxy
+credential, uses a separate `CODEX_HOME`, disables shell tools and has a read-only
+workspace. Each run allows at most 12 provider requests, 2048 output tokens per
+request and four minutes. Default test runs skip this qualification.
+
+For a standalone cross-compiled test binary, set
+`POT_CODEX_LIVE_STANDALONE=1` and select exactly
+`-test.run=^TestConfiguredCodexCLIAgentMessagesLive$`; this bypasses the unrelated
+legacy fake App Server build. `POT_CODEX_LIVE_OUTPUT` optionally selects a private
+directory for concise JSON evidence. On CLI failure, bounded diagnostic files
+contain only the isolated CLI's synthetic test session; they never contain the
+production provider credential or configuration.
+
 ## Independent task delegation
 
 The following older, separately authorized delegation API remains independent of

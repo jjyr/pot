@@ -35,6 +35,11 @@ func TestMain(m *testing.M) {
 		}
 		return
 	}
+	// The standalone live binary uses the installed Codex CLI and production
+	// MCP server; it does not require the legacy fake App Server fixture.
+	if codexLiveStandaloneSelection() {
+		os.Exit(m.Run())
+	}
 	dir, err := os.MkdirTemp("", "pot-fake-codex-")
 	if err != nil {
 		panic(err)
