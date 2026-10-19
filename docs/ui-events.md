@@ -134,8 +134,29 @@ within one viewport of the top (at least 180 px); upward gestures also trigger i
 when the loaded content cannot scroll. Page reads remain serialized and preserve
 the visible message anchor. When the complete conversation fits in the viewport,
 upward gestures leave it still, without history reads or a Latest action; new
-messages continue following. Only a matching request receipt clears a submitted
-draft. Connection failure keeps the draft and exposes recovery.
+messages continue following. Only confirmation matching the captured request and
+owner clears a submitted attempt. A user message's `request_id` confirms an ordinary send; steer messages
+carry independent `accepted_request_id` and `accepted_turn_id` fields, leaving
+`request_id`'s turn semantics unchanged. Reset/delta acceptance is checked before
+UI window filtering. It confirms persistence, not Agent consumption.
+
+`GET /api/v1/messages/receipt` reads durable storage outside the message window.
+The authenticated Space/assistant scope and `conversation_id`, `request_id`, and
+optional `user_message_id` (steer) or `retry_user_message_id` identify the attempt.
+The response repeats that identity plus `runtime_id`, `owner_id` and `state`:
+`accepted` includes `message_id`; `unconfirmed` proves neither outcome; `rejected`
+means an absent steer targets a turn that no longer accepts guidance. Reads do
+not start or interrupt Agent work.
+
+The client ends each HTTP wait after ten seconds and keeps the fixed payload and
+request ID while acceptance is unknown. Five receipt reads use bounded backoff;
+a matching persisted message or query unlocks the next send even if the HTTP
+receipt is still held. If unresolved, a localized Check and retry action queries
+first and, only after an unconfirmed result, retries the same ID/payload in the
+captured scope. Unavailable reads retain the unknown attempt. Subscription/boot
+renewals and navigation retain it in the mounted client; newer drafts, references
+and attachments survive late or duplicate confirmation. This is in-memory
+recovery, not persistence across closing/reloading the app.
 Assistant messages bind to their input through `reply_to`; terminal failures retain
 their original diagnostic in the message's `error` field, including preparation
 failures before the first model event. Chat projects a single reply bubble from
