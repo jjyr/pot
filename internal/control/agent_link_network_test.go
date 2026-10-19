@@ -9,15 +9,15 @@ import (
 )
 
 func TestAgentTailscaleOnlyCreatesUnclaimedServe(t *testing.T) {
-	plain := `{"TCP":{"1234":{"HTTP":true}},"Web":{"control.tail.ts.net:1234":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:1234"}}}}}`
-	own := `{"TCP":{"443":{"HTTPS":true}},"Web":{"control.tail.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:1234"}}}}}`
+	plain := `{"TCP":{"1234":{"TCPForward":"127.0.0.1:1234"}}}`
+	own := `{"TCP":{"443":{"TCPForward":"127.0.0.1:1234"}}}`
 	for _, tc := range []struct {
 		name, config string
 		create       bool
 		error        string
 	}{
-		{"unrelatedTCP", `{"TCP":{"22":{"TCPForward":"127.0.0.1:22"}}}`, false, "conflict"},
-		{"empty", "null", true, ""}, {"own", own, false, ""}, {"ownHTTP", plain, false, ""}, {"unrelated", `{"Web":{"other.tail.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:9999"}}}}}`, false, "conflict"},
+		{"occupiedPort", `{"TCP":{"1234":{"TCPForward":"127.0.0.1:22"}}}`, false, "conflict"},
+		{"empty", "null", true, ""}, {"own", own, false, ""}, {"ownTCP", plain, false, ""}, {"unrelated", `{"TCP":{"22":{"TCPForward":"127.0.0.1:22"}}}`, true, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			binary := filepath.Join(t.TempDir(), "tailscale")
@@ -40,9 +40,9 @@ exit 1
 				if err == nil || !strings.Contains(err.Error(), tc.error) {
 					t.Fatal(endpoint, err)
 				}
-			} else if expected := "https://control.tail.ts.net:443"; err != nil || endpoint != func() string {
-				if tc.create || tc.name == "ownHTTP" {
-					return "http://control.tail.ts.net:1234"
+			} else if expected := "tcp://control.tail.ts.net:443"; err != nil || endpoint != func() string {
+				if tc.create || tc.name == "ownTCP" {
+					return "tcp://control.tail.ts.net:1234"
 				}
 				return expected
 			}() {
@@ -50,8 +50,8 @@ exit 1
 			}
 			if tc.create {
 				data, _ := os.ReadFile(binary + ".calls")
-				if !strings.Contains(string(data), "--http=1234") || strings.Contains(string(data), "--https") {
-					t.Fatal("certificate-free setup was not used", string(data))
+				if !strings.Contains(string(data), "--tcp=1234") || strings.Contains(string(data), "--https") {
+					t.Fatal("TCP forwarding was not used", string(data))
 				}
 			}
 			_, err = os.Stat(binary + ".calls")

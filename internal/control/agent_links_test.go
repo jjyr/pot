@@ -3,8 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
+	peertransport "github.com/jjyr/pot/pkg/peer"
 	"strings"
 	"testing"
 	"time"
@@ -18,14 +17,13 @@ import (
 )
 
 type agentControlFixture struct {
-	service *Service
-	server  *httptest.Server
+	service  *Service
+	endpoint string
 }
 
 func agentControl(t *testing.T, id string) *agentControlFixture {
 	t.Helper()
 	fixture := &agentControlFixture{}
-	fixture.server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fixture.service.AgentLinkHandler().ServeHTTP(w, r) }))
 	manager, err := execution.New(id, "boot-"+id, execution.Limits{MaxActive: 1, MaxQueued: 8})
 	if err != nil {
 		t.Fatal(err)
@@ -34,12 +32,12 @@ func agentControl(t *testing.T, id string) *agentControlFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture.service, err = Open(Options{Root: t.TempDir(), RuntimeID: id, BootID: "boot-" + id, Manager: manager, Keys: keys, ControlHTTPClient: fixture.server.Client()})
+	fixture.service, err = Open(Options{Root: t.TempDir(), RuntimeID: id, BootID: "boot-" + id, Manager: manager, Keys: keys})
 	if err != nil {
-		fixture.server.Close()
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { fixture.server.Close(); fixture.service.Close() })
+	fixture.endpoint = controlPeerEndpoint(fixture.service)
+	t.Cleanup(func() { fixture.service.Close() })
 	if _, err = fixture.service.Registry.Create(context.Background(), "create-main", "Main"); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +47,7 @@ func agentControl(t *testing.T, id string) *agentControlFixture {
 func connectAgentControls(t *testing.T, a, b *agentControlFixture) agentlink.Connection {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", AssistantID: "main", Mode: "address", Endpoint: b.server.URL}); err != nil {
+	if _, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", AssistantID: "main", Mode: "address", Endpoint: b.endpoint}); err != nil {
 		t.Fatal(err)
 	}
 	invitation, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "invite", AssistantID: "main"})
@@ -176,35 +174,16 @@ func TestAgentLinkControlBindingRevocationAndNarrowListener(t *testing.T) {
 	if _, err = a.service.sendAssistantMail(ctx, "wrong-peer", "main", protocol.SendMail{To: wrongPeer, Text: "wrong target assistant"}); err == nil {
 		t.Fatal("binding reached another remote assistant")
 	}
-	// Even a valid connection credential cannot access owner or execution APIs.
-	var ref string
-	if err = a.service.integrationDB.QueryRow(`SELECT secret_ref FROM agent_link_connections WHERE id=?`, connection.ID).Scan(&ref); err != nil {
-		t.Fatal(err)
-	}
-	credential, err := a.service.integrationSecrets.Get(ctx, ref)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer clear(credential)
-	var token struct {
-		Token string `json:"token"`
-	}
-	if err = json.Unmarshal(credential, &token); err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{"/api/v1/machines", "/api/v1/assistant-mail", "/api/v1/agent-links", "/api/v1/control"} {
-		request, err := http.NewRequestWithContext(ctx, "POST", b.server.URL+path, strings.NewReader(`{}`))
-		if err != nil {
-			t.Fatal(err)
-		}
-		request.Header.Set("Authorization", "Bearer "+token.Token)
-		response, err := b.server.Client().Do(request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		response.Body.Close()
-		if response.StatusCode != http.StatusNotFound {
-			t.Fatal("peer listener exposed another API", path, response.StatusCode)
+	// An authenticated Agent identity and valid message binding cannot enter
+	// membership, execution or owner services on the shared listener.
+	identity, key := a.service.Machines.TransportIdentity()
+	expected, _ := b.service.Machines.TransportIdentity()
+	auth, _ := json.Marshal(map[string]string{"id": connection.ID})
+	for _, service := range []string{controlplane.ExecutionService, "owner", "unknown"} {
+		session, e := peertransport.Dial(ctx, b.endpoint, peertransport.DialOptions{Identity: identity, PrivateKey: key, Expected: &expected, Service: service, Auth: auth})
+		if e == nil {
+			session.Close()
+			t.Fatal("message binding granted service authority", service)
 		}
 	}
 	if _, err = a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "disconnect", ID: connection.ID}); err != nil {
@@ -234,18 +213,17 @@ func TestAgentLinkRunnerAndMissingAssistantCannotPublishIdentity(t *testing.T) {
 	if err := owner.Machines.EnableControl(); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(owner.ControlServer(nil))
-	defer server.Close()
+	server := controlPeerEndpoint(owner)
 	invitation, err := owner.Machines.Invitation(ctx, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	connector := controlplane.Connector{Directory: executionRuntime.Machines}
-	identity, err := connector.Preview(ctx, server.URL)
+	identity, err := connector.Preview(ctx, server)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = connector.Enroll(ctx, server.URL, identity, invitation.Code, "join-runner"); err != nil {
+	if _, err = connector.Enroll(ctx, server, identity, invitation.Code, "join-runner"); err != nil {
 		t.Fatal(err)
 	}
 	if executionRuntime.Machines.Role() != "runner" {
@@ -256,12 +234,10 @@ func TestAgentLinkRunnerAndMissingAssistantCannotPublishIdentity(t *testing.T) {
 			t.Fatal("Runner admitted Agent management", action)
 		}
 	}
-	for _, path := range []string{agentlink.Prefix + "/ready", agentlink.Prefix + "/pair", agentlink.Prefix + "/exchange"} {
-		recorder := httptest.NewRecorder()
-		request := httptest.NewRequest(http.MethodGet, path, nil)
-		executionRuntime.AgentLinkHandler().ServeHTTP(recorder, request)
-		if recorder.Code != 404 {
-			t.Fatal("Runner exposed message listener", path, recorder.Code)
-		}
+	hostIdentity, key := owner.Machines.TransportIdentity()
+	expected, _ := executionRuntime.Machines.TransportIdentity()
+	if session, e := peertransport.Dial(ctx, controlPeerEndpoint(executionRuntime), peertransport.DialOptions{Identity: hostIdentity, PrivateKey: key, Expected: &expected, Service: agentlink.ServiceName, Auth: json.RawMessage(`{}`)}); e == nil {
+		session.Close()
+		t.Fatal("Runner exposed message service")
 	}
 }

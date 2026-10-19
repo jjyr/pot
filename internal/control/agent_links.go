@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"io"
+	"github.com/jjyr/pot/internal/controlplane"
+	"github.com/jjyr/pot/pkg/peer"
 	"net"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +30,7 @@ type agentLinkHost struct {
 	server       *linkhost.PeerListener
 	setup        sync.Mutex
 	networkError string
+	registry     *linkhost.Registry
 }
 
 type controlLinkMailbox struct{ s *Service }
@@ -66,13 +67,32 @@ func (s *Service) agentLinkIdentity(ctx context.Context, id string) (agentlink.I
 }
 
 func (s *Service) openAgentLinks() error {
-	service, err := agentlink.New(agentlink.Options{DB: s.integrationDB, Secrets: s.integrationSecrets, Identity: s.agentLinkIdentity, Mailbox: controlLinkMailbox{s}, HTTPClient: s.options.ControlHTTPClient, Changed: func() { s.Changes.Notify("agent-links"); s.Changes.Notify("assistant-mail"); s.wakeTasks() }})
+	hostIdentity, hostKey := s.Machines.TransportIdentity()
+	service, err := agentlink.New(agentlink.Options{HostIdentity: hostIdentity, HostKey: hostKey, DB: s.integrationDB, Secrets: s.integrationSecrets, Identity: s.agentLinkIdentity, Mailbox: controlLinkMailbox{s}, Changed: func() { s.Changes.Notify("agent-links"); s.Changes.Notify("assistant-mail"); s.wakeTasks() }})
 	if err != nil {
 		return err
 	}
 	host := &agentLinkHost{service: service, config: agentLinkConfig{Listen: "127.0.0.1:0", Mode: "address"}}
 	err = s.integrationDB.QueryRowContext(s.ctx, "SELECT listen,endpoint,mode FROM agent_link_host WHERE singleton=1").Scan(&host.config.Listen, &host.config.Endpoint, &host.config.Mode)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if s.options.PeerListen != "" {
+		host.config.Listen = s.options.PeerListen
+	}
+	host.registry = linkhost.NewRegistry(hostIdentity, hostKey)
+	machines := s.machinePeerServer(nil)
+	for _, serviceName := range []string{controlplane.MembershipService, controlplane.ExecutionService} {
+		if err = host.registry.Register(serviceName, machines.Authorize, machines.Attach); err != nil {
+			return err
+		}
+	}
+	if err = host.registry.Register(agentlink.ServiceName, func(ctx context.Context, remote peer.Identity, name string, auth json.RawMessage) (peer.Handler, error) {
+		if s.Machines.Role() == "runner" {
+			return nil, peer.ErrUnauthorized
+		}
+		return service.Authorize(ctx, remote, name, auth)
+	}, service.Attach); err != nil {
 		return err
 	}
 	s.agentLinks = host
@@ -104,7 +124,7 @@ func validAgentListen(value string) bool {
 	if port == "0" {
 		return ip.IsLoopback()
 	}
-	_, err = agentlink.ValidateEndpoint(context.Background(), "http://"+value)
+	_, err = peer.ValidateEndpoint(context.Background(), "tcp://"+value)
 	return err == nil
 }
 
@@ -134,7 +154,7 @@ func (s *Service) startAgentListener(config agentLinkConfig) error {
 	if !validAgentListen(config.Listen) {
 		return protocol.APIError{Code: "agent_link_invalid_listen"}
 	}
-	server, err := linkhost.ListenPeer(config.Listen, s.AgentLinkHandler())
+	server, err := linkhost.ListenPeer(s.ctx, config.Listen, s.agentLinks.registry.Server())
 	if err != nil {
 		return protocol.APIError{Code: "agent_link_listener_unavailable"}
 	}
@@ -142,23 +162,6 @@ func (s *Service) startAgentListener(config agentLinkConfig) error {
 		server.Close()
 	}
 	return err
-}
-
-// AgentLinkHandler exposes only authenticated peer messages, never owner APIs.
-func (s *Service) AgentLinkHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.agentLinks == nil || s.Machines.Role() == "runner" {
-			http.NotFound(w, r)
-			return
-		}
-		if r.URL.Path == agentlink.Prefix+"/ready" && r.Method == http.MethodGet {
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Cache-Control", "no-store")
-			_ = json.NewEncoder(w).Encode(map[string]string{"control_id": s.options.RuntimeID})
-			return
-		}
-		s.agentLinks.service.Handler().ServeHTTP(w, r)
-	})
 }
 
 func (s *Service) closeAgentLinks() error {
@@ -238,7 +241,7 @@ func agentLinkError(err error) error {
 	if err == nil {
 		return nil
 	}
-	for _, known := range []error{agentlink.ErrInvalid, agentlink.ErrNotFound, agentlink.ErrUnauthorized, agentlink.ErrExpired, agentlink.ErrConflict, agentlink.ErrRevoked, agentlink.ErrUnavailable} {
+	for _, known := range []error{agentlink.ErrInvalid, agentlink.ErrNotFound, agentlink.ErrUnauthorized, agentlink.ErrExpired, agentlink.ErrConflict, agentlink.ErrRevoked, agentlink.ErrReconnectRequired, agentlink.ErrUnavailable} {
 		if errors.Is(err, known) {
 			return protocol.APIError{Code: known.Error()}
 		}
@@ -314,9 +317,9 @@ func (s *Service) configureAgentAccess(ctx context.Context, command AgentLinkCom
 	} else {
 		return nil, agentlink.ErrInvalid
 	}
-	endpoint, err := agentlink.ValidateEndpoint(ctx, config.Endpoint)
+	endpoint, err := peer.ValidateEndpoint(ctx, config.Endpoint)
 	if err != nil {
-		return nil, err
+		return nil, agentlink.ErrInvalid
 	}
 	config.Endpoint = endpoint
 	var candidate *linkhost.PeerListener
@@ -325,11 +328,11 @@ func (s *Service) configureAgentAccess(ctx context.Context, command AgentLinkCom
 		if !errors.As(err, &unavailable) || unavailable.Code != "agent_link_unreachable" {
 			return nil, err
 		}
-		listen, e := linkhost.HTTPListenAddress(ctx, endpoint)
+		listen, e := linkhost.TCPListenAddress(ctx, endpoint)
 		if e != nil || listen == "" || listen == config.Listen {
 			return nil, err
 		}
-		candidate, e = linkhost.ListenPeer(listen, s.AgentLinkHandler())
+		candidate, e = linkhost.ListenPeer(s.ctx, listen, h.registry.Server())
 		if e != nil {
 			return nil, protocol.APIError{Code: "agent_link_listener_unavailable"}
 		}
@@ -363,21 +366,12 @@ func (s *Service) configureAgentAccess(ctx context.Context, command AgentLinkCom
 func (s *Service) probeAgentEndpoint(ctx context.Context, endpoint string) error {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+agentlink.Prefix+"/ready", nil)
-	if err != nil {
-		return err
-	}
-	client := agentlink.NewHTTPClient(s.options.ControlHTTPClient)
-	response, err := client.Do(request)
-	if err != nil {
+	identity, key := s.Machines.TransportIdentity()
+	if err := linkhost.Probe(ctx, endpoint, identity, key, identity); err != nil {
+		if errors.Is(err, peer.ErrUnauthorized) {
+			return protocol.APIError{Code: "agent_link_identity_conflict"}
+		}
 		return protocol.APIError{Code: "agent_link_unreachable"}
-	}
-	defer response.Body.Close()
-	var body struct {
-		ControlID string `json:"control_id"`
-	}
-	if response.StatusCode != 200 || json.NewDecoder(io.LimitReader(response.Body, 2048)).Decode(&body) != nil || body.ControlID != s.options.RuntimeID {
-		return protocol.APIError{Code: "agent_link_identity_conflict"}
 	}
 	return nil
 }
@@ -413,4 +407,14 @@ func (s *Service) agentLinkPeers(ctx context.Context, owner string) ([]protocol.
 		}
 	}
 	return result, nil
+}
+
+// PeerListenAddress returns the actual TCP listener without publishing an invite.
+func (s *Service) PeerListenAddress() string {
+	if s.agentLinks == nil {
+		return ""
+	}
+	s.agentLinks.mu.Lock()
+	defer s.agentLinks.mu.Unlock()
+	return s.agentLinks.server.Addr()
 }

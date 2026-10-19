@@ -141,6 +141,10 @@ all use of borrowed managers before closing it. `Info()` returns a copy of its
 identity. `Handler(token)` provides the authenticated operator API, including
 streams; the caller owns the listener, transport and token distribution. An empty
 token denies all requests. The facade does not publish the shared browser UI.
+Its separate Agent/Runner peer host runs under the same lifecycle. `PeerListen`
+optionally overrides the TCP bind address; owner HTTP listeners and TLS settings
+are independent. Peer connections use the shared [TCP protocol](peer-protocol.md)
+and do not accept an HTTP client or private CA.
 
 Provider credentials use the system key store by default. Applications can
 provide a `runtime.KeySource` with a persistent 32-byte key. Preserve that key

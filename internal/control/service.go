@@ -25,7 +25,6 @@ import (
 	"github.com/jjyr/pot/pkg/storage"
 	"github.com/jjyr/pot/pkg/terminal"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -45,11 +44,10 @@ type Options struct {
 	CleanupTarget                                                            func(context.Context, string, bool) error
 
 	WorkspaceHome       string // Optional destination home override for embedded/test hosts.
+	PeerListen          string // Explicit TCP peer bind address; owner HTTP remains separate.
 	Embedded            bool
 	SandboxDirectory    string
 	Node                string
-	ControlHTTPClient   *http.Client
-	ControlOrigin       string
 	IntegrationAdapters []integrations.Adapter
 }
 type Service struct {

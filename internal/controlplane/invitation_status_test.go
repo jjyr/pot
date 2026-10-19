@@ -35,7 +35,7 @@ func TestInvitationStatusReplacementAndCancellationPreserveMembership(t *testing
 		t.Fatal(state)
 	}
 	worker := directory(t, "runner")
-	signed, err := worker.prepareJoin("http://localhost:12345", d.Identity(), replacement.Code)
+	signed, err := worker.prepareJoin("tcp://localhost:12345", d.Identity(), replacement.Code)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestInvitationCancellationFencesUnusedCode(t *testing.T) {
 		t.Fatal(state, err)
 	}
 	worker := directory(t, "runner")
-	signed, err := worker.prepareJoin("http://localhost:12345", d.Identity(), inv.Code)
+	signed, err := worker.prepareJoin("tcp://localhost:12345", d.Identity(), inv.Code)
 	if err != nil {
 		t.Fatal(err)
 	}

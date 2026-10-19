@@ -22,7 +22,7 @@ func (a *Application) machineCall(ctx context.Context, method string, u *url.URL
 				if member == nil {
 					return nil
 				}
-				return map[string]any{"control": member.Enrollment.Control, "url": member.Origin, "epoch": member.Enrollment.Epoch}
+				return map[string]any{"control": member.Enrollment.Control, "url": member.Origin, "epoch": member.Enrollment.Epoch, "needs_endpoint": member.Origin == ""}
 			}()}, nil, true
 		}
 		var request control.MembershipCommand

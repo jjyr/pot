@@ -5,26 +5,27 @@ import (
 	"errors"
 	"github.com/jjyr/pot/internal/controlplane"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/protocol"
 	"runtime"
 	"time"
 )
 
 type JoinControl struct {
-	RequestID           string  `json:"request_id" required:"true"`
-	URL                 string  `json:"url" required:"true"`
-	Invitation          string  `json:"invitation" required:"true"`
-	ExpectedRuntimeID   string  `json:"expected_runtime_id" required:"true"`
-	ExpectedFingerprint string  `json:"expected_fingerprint" required:"true"`
-	CAPEM               *string `json:"ca_pem"`
+	RequestID           string `json:"request_id" required:"true"`
+	URL                 string `json:"url" required:"true"`
+	Invitation          string `json:"invitation" required:"true"`
+	ExpectedRuntimeID   string `json:"expected_runtime_id" required:"true"`
+	ExpectedFingerprint string `json:"expected_fingerprint" required:"true"`
 }
 type MembershipCommand struct {
-	Action       string       `json:"action" required:"true"`
-	URL          string       `json:"url"`
-	CAPEM        *string      `json:"ca_pem"`
-	Request      *JoinControl `json:"request"`
-	RuntimeID    string       `json:"runtime_id"`
-	Tags         []string     `json:"tags"`
-	InvitationID string       `json:"invitation_id"`
+	Action              string       `json:"action" required:"true"`
+	URL                 string       `json:"url"`
+	Request             *JoinControl `json:"request"`
+	RuntimeID           string       `json:"runtime_id"`
+	Tags                []string     `json:"tags"`
+	InvitationID        string       `json:"invitation_id"`
+	ExpectedRuntimeID   string       `json:"expected_runtime_id"`
+	ExpectedFingerprint string       `json:"expected_fingerprint"`
 }
 
 func (s *Service) ManageMembership(ctx context.Context, r MembershipCommand) (any, error) {
@@ -33,36 +34,20 @@ func (s *Service) ManageMembership(ctx context.Context, r MembershipCommand) (an
 	}
 	switch r.Action {
 	case "preview":
-		ca := ""
-		if r.CAPEM != nil {
-			ca = *r.CAPEM
-		}
-		client, err := controlplane.ClientForCA(s.options.ControlHTTPClient, ca)
-		if err != nil {
-			return nil, err
-		}
-		connector := controlplane.Connector{Directory: s.Machines, HTTPClient: client, CAPEM: ca}
+		connector := controlplane.Connector{Directory: s.Machines}
 		return connector.Preview(ctx, r.URL)
 	case "join":
 		if r.Request == nil {
 			return nil, errors.New("enrollment request required")
 		}
 		q := r.Request
-		ca := ""
-		if q.CAPEM != nil {
-			ca = *q.CAPEM
-		}
-		client, err := controlplane.ClientForCA(s.options.ControlHTTPClient, ca)
-		if err != nil {
-			return nil, err
-		}
-		connector := controlplane.Connector{Directory: s.Machines, HTTPClient: client, CAPEM: ca}
+		connector := controlplane.Connector{Directory: s.Machines}
 		preview, err := connector.Preview(ctx, q.URL)
 		if err != nil {
 			return nil, err
 		}
 		if preview.RuntimeID != q.ExpectedRuntimeID || preview.Fingerprint != q.ExpectedFingerprint {
-			return nil, errors.New("Control identity does not match pinned Runtime/fingerprint")
+			return nil, protocol.APIError{Code: "runner_endpoint_mismatch"}
 		}
 		member, err := connector.Enroll(ctx, q.URL, preview, q.Invitation, q.RequestID)
 		if err != nil {
@@ -71,6 +56,21 @@ func (s *Service) ManageMembership(ctx context.Context, r MembershipCommand) (an
 		s.StartRunner()
 		s.Changes.Notify("machines")
 		return map[string]any{"role": "runner", "control": member.Enrollment.Control, "epoch": member.Enrollment.Epoch}, nil
+	case "set_endpoint":
+		connector := controlplane.Connector{Directory: s.Machines}
+		preview, err := connector.Preview(ctx, r.URL)
+		if err != nil {
+			return nil, err
+		}
+		if r.ExpectedRuntimeID != preview.RuntimeID || r.ExpectedFingerprint != preview.Fingerprint {
+			return nil, protocol.APIError{Code: "runner_endpoint_mismatch"}
+		}
+		if err = s.Machines.SetEndpoint(ctx, r.URL, preview); err != nil {
+			return nil, protocol.APIError{Code: "runner_endpoint_mismatch"}
+		}
+		s.StartRunner()
+		s.Changes.Notify("machines")
+		return map[string]any{"updated": true, "control": preview, "url": r.URL}, nil
 	case "owner_credential":
 		if s.Machines.Role() != "control" || s.options.Embedded {
 			return nil, errors.New("owner credential export requires a standalone Control")
@@ -166,10 +166,17 @@ func (s *Service) ManageMembership(ctx context.Context, r MembershipCommand) (an
 }
 
 func (s *Service) machineInvitation(i controlplane.Invitation) any {
-	return map[string]any{"id": controlplane.InvitationID(i.Code), "invitation": i.Code, "expires_at_ms": i.ExpiresAtMS, "identity": i.Identity, "control": i.Identity, "url": s.options.ControlOrigin}
+	return map[string]any{"id": controlplane.InvitationID(i.Code), "invitation": i.Code, "expires_at_ms": i.ExpiresAtMS, "identity": i.Identity, "control": i.Identity, "url": s.ControlOrigin()}
 }
 
-func (s *Service) ControlOrigin() string { return s.options.ControlOrigin }
+func (s *Service) ControlOrigin() string {
+	if s.agentLinks == nil {
+		return ""
+	}
+	s.agentLinks.mu.Lock()
+	defer s.agentLinks.mu.Unlock()
+	return s.agentLinks.config.Endpoint
+}
 
 func (s *Service) localMachine(_ context.Context) (map[string]any, error) {
 	policy, _, err := s.Permissions.Policy(s.options.RuntimeID)

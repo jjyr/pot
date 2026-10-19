@@ -51,7 +51,7 @@ func (s *Service) openTasks() error {
 	if err != nil {
 		return err
 	}
-	if err = s.linkPlugins.RegisterExecution(linkhost.Runner{Directory: s.Machines, Connector: controlplane.Connector{Directory: s.Machines, HTTPClient: s.options.ControlHTTPClient, Handler: controlplane.RunnerHandler(s.Machines, remoteRunnerPort{s}, s.runnerRPC)}}); err != nil {
+	if err = s.linkPlugins.RegisterExecution(linkhost.Runner{Directory: s.Machines, Connector: controlplane.Connector{Directory: s.Machines, Handler: controlplane.RunnerHandler(s.Machines, remoteRunnerPort{s}, s.runnerRPC)}}); err != nil {
 		return err
 	}
 	// Directory serializes this gate with enrollment admission and its CanJoin

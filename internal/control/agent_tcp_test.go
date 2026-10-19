@@ -2,22 +2,23 @@ package control
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/jjyr/pot/pkg/peer"
 	"net"
-	"net/http"
 	"testing"
 
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
-func TestDirectHTTPAgentListenerPersistsAndKeepsOwnerAPIsPrivate(t *testing.T) {
+func TestDirectTCPAgentListenerPersistsAndKeepsOwnerAPIsPrivate(t *testing.T) {
 	ctx := context.Background()
 	a, b := agentControl(t, "plain-a"), agentControl(t, "plain-b")
 	available, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoint := "http://" + available.Addr().String()
+	endpoint := "tcp://" + available.Addr().String()
 	available.Close()
 	value, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", AssistantID: "main", Mode: "address", Endpoint: endpoint})
 	if err != nil {
@@ -38,7 +39,7 @@ func TestDirectHTTPAgentListenerPersistsAndKeepsOwnerAPIsPrivate(t *testing.T) {
 	if link.(agentlink.Connection).State != "ready" {
 		t.Fatal(link)
 	}
-	result, err := a.service.sendAssistantMail(ctx, "http-mail", "main", protocol.SendMail{To: protocol.AgentRef{ControlID: "plain-b", Kind: "assistant", AgentID: "main"}, Text: "private network message"})
+	result, err := a.service.sendAssistantMail(ctx, "tcp-mail", "main", protocol.SendMail{To: protocol.AgentRef{ControlID: "plain-b", Kind: "assistant", AgentID: "main"}, Text: "private network message"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,32 +50,25 @@ func TestDirectHTTPAgentListenerPersistsAndKeepsOwnerAPIsPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := agentlink.NewHTTPClient(nil)
-	for _, path := range []string{"/api/v1/agent-links", "/api/v1/runtime/control", "/api/v1/machines"} {
-		request, _ := http.NewRequestWithContext(ctx, "GET", endpoint+path, nil)
-		response, err := client.Do(request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		response.Body.Close()
-		if response.StatusCode != 404 {
-			t.Fatal("peer listener exposed owner API", path, response.StatusCode)
+	identity, key := a.service.Machines.TransportIdentity()
+	expected, _ := b.service.Machines.TransportIdentity()
+	for _, service := range []string{"owner", "/api/v1/machines"} {
+		session, e := peer.Dial(ctx, endpoint, peer.DialOptions{Identity: identity, PrivateKey: key, Expected: &expected, Service: service, Auth: json.RawMessage(`{}`)})
+		if e == nil {
+			session.Close()
+			t.Fatal("peer listener exposed owner API", service)
 		}
 	}
-	response, err := client.Get(endpoint + agentlink.Prefix + "/ready")
-	if err != nil {
+	if err = b.service.probeAgentEndpoint(ctx, endpoint); err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
-	if response.StatusCode != 200 {
-		t.Fatal(response.Status)
-	}
+
 }
 
 func TestMissingVPNInterfaceKeepsControlAndAccessSetupAvailable(t *testing.T) {
 	ctx := context.Background()
 	f := agentControl(t, "vpn-loss")
-	if _, err := f.service.integrationDB.Exec(`UPDATE agent_link_host SET listen='100.127.255.254:63001',endpoint='http://100.127.255.254:63001',mode='address'`); err != nil {
+	if _, err := f.service.integrationDB.Exec(`UPDATE agent_link_host SET listen='100.127.255.254:63001',endpoint='tcp://100.127.255.254:63001',mode='address'`); err != nil {
 		t.Fatal(err)
 	}
 	options := f.service.options

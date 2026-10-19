@@ -134,9 +134,13 @@ inspection rather than automatically replaying uncertain model requests.
 A Space is a Control identity. Local messages enter the shared inbox directly;
 remote assistant correspondence enters the source Outbox. The owning Control
 hosts [Agent Links](agent-links.md), independently of App windows and owner
-connections. Pot and Codex use the same authenticated message exchange, bound to
+connections. Pot and Codex use the same authenticated TCP message service on
+the shared [peer host](peer-protocol.md), bound to
 one assistant identity on each side. One side adding an invitation address
-establishes both directions. At least one peer endpoint must remain reachable.
+establishes both directions through one long-lived session. At least one private
+`tcp://host:port` endpoint must remain reachable. The host verifies the original
+remote Ed25519 identity on every reconnect; a different service requires its own
+admission and cannot inherit the message binding.
 
 The connection carries text messages and immutable receipts. It does not expose
 owner APIs, Task creation, files or Runner execution. An established offline

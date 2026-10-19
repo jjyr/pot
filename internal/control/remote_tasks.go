@@ -75,7 +75,8 @@ func (s *Service) remote() *remoteState {
 	}
 	return s.taskLife.remote
 }
-func (s *Service) ControlServer(owner http.Handler) http.Handler {
+func (s *Service) ControlServer(owner http.Handler) http.Handler { return s.machinePeerServer(owner) }
+func (s *Service) machinePeerServer(owner http.Handler) *controlplane.Server {
 	return &controlplane.Server{Directory: s.Machines, Handler: s.controlRPC, OwnerHandler: owner, OnEnroll: s.enrollRemotePolicy, OnPresence: func(string, bool) { s.Changes.Notify("machines"); s.wakeTasks() }}
 }
 func (s *Service) enrollRemotePolicy(ctx context.Context, m controlplane.Machine) error {

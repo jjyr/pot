@@ -45,7 +45,8 @@ Initialize a dedicated root, then start a foreground listener:
 
 ```sh
 pot init -root "$HOME/.pot-control"
-pot serve -root "$HOME/.pot-control" -listen 127.0.0.1:19443
+pot serve -root "$HOME/.pot-control" -listen 127.0.0.1:19443 \
+  -peer-listen 100.64.0.10:19444
 ```
 
 For HTTPS, supply both `-tls-cert /absolute/control.crt` and
@@ -54,7 +55,13 @@ intended LAN/VPN/Tailscale interface when clients run elsewhere. HTTP does not
 encrypt credentials or content. Deployment network protection and TLS are
 operator choices.
 
-A listener enables standalone Control but creates no assistant. Configure a
+`-listen` exposes the existing owner HTTP API; `-peer-listen` binds a separate
+TCP listener for Agent messages, Runner membership and execution. Both use the
+same stable Runtime identity, while each service validates its own authority.
+Peer endpoints use `tcp://host:port` on a private LAN, VPN or Tailscale network.
+Ed25519 signatures authenticate sessions and frames; the TCP transport does not
+encrypt content. Tailscale/VPN supplies network confidentiality when needed.
+Neither listener creates an assistant. Configure a
 Provider through App; first-use Chat then bootstraps Pot automatically. API callers may use
 `POST /api/v1/assistants`; it requires a stable `request_id` and a `name`, and
 optionally an explicit assistant model selection and `locale` (`en` or `zh-CN`,
@@ -118,7 +125,7 @@ On Runner, preview the destination:
 
 ```sh
 pot api -root "$HOME/.pot-runner" -method POST \
-  -body '{"action":"preview","url":"https://control.example:19443"}' \
+  -body '{"action":"preview","url":"tcp://100.64.0.10:19444"}' \
   /api/v1/runtime/control
 ```
 
@@ -130,7 +137,7 @@ exact values and the invitation:
   "action": "join",
   "request": {
     "request_id": "runner-join-1",
-    "url": "https://control.example:19443",
+    "url": "tcp://100.64.0.10:19444",
     "invitation": "INVITATION",
     "expected_runtime_id": "CONTROL-ID",
     "expected_fingerprint": "CONFIRMED-FINGERPRINT"
@@ -143,13 +150,25 @@ pot api -root "$HOME/.pot-runner" -method POST -body - \
   /api/v1/runtime/control < /absolute/join.json
 ```
 
-For a private HTTPS CA, include its PEM contents as `ca_pem` in both preview and
-nested join requests. Ordinary certificate and hostname verification remain
-active. The CA persists with membership for reconnects. HTTP destinations are
-also supported when explicitly selected.
+Runner joins and reconnects outward through the same signed TCP service host;
+no certificate, private CA, WebSocket or inbound execution listener is needed.
+Owner HTTP/TLS settings remain independent and never become execution endpoints.
+Upgrades preserve Runtime keys, pinned Control identity, membership epoch,
+credentials and execution journals. An obsolete HTTP membership endpoint is
+cleared and shown as `needs_endpoint`. Repair its location without re-enrolling:
 
-Runner reconnects outward over signed WebSocket RPC and needs no inbound
-execution listener, assistant or provider key. A Runtime already owning
+```json
+{
+  "action": "set_endpoint",
+  "url": "tcp://100.64.0.10:19444",
+  "expected_runtime_id": "CONTROL-ID",
+  "expected_fingerprint": "CONFIRMED-FINGERPRINT"
+}
+```
+
+The peer at that address must prove the original Control identity. Repairing an
+endpoint cannot replace a Control, rotate membership or replay original work.
+ A Runtime already owning
 assistants/AI configuration cannot join. Keep its root to retain identity and
 membership; re-enrollment creates a new epoch. `remove_member` on Control uses
 `runtime_id`; `leave` on Runner fences reconnect and confirms original cleanup
@@ -191,7 +210,7 @@ pot web-ui-server -root "$HOME/.pot-web" -control local \
 ```
 
 The local target must be a running standalone Control. Remote serving uses
-`-control https://control.example:19443 -control-token-file /absolute/owner-token`
+`-control tcp://100.64.0.10:19444 -control-token-file /absolute/owner-token`
 and optionally `-control-ca /absolute/ca.pem`. Upstream authentication and identity
 are checked before serving. The browser's public origin, listener TLS and upstream
 Control transport are independent. Browser TLS uses `-tls-cert` and `-tls-key`.
@@ -253,16 +272,17 @@ installing an archive starts a VM or installs a user service.
 ## Agent message access
 
 The topology page manages Agent Links separately from third-party accounts and
-Runner enrollment. Each Control starts a dedicated loopback message listener;
-the page shows its actual bind address. Use its access setup to verify a reachable private HTTP address or an optional
-HTTPS reverse proxy. A direct HTTP endpoint on a local private interface gets a
-dedicated peer listener automatically. Tailscale and VPNs supply network encryption;
-application certificates are not required. The access action can explicitly configure
-Tailscale Serve over HTTP, without enabling tailnet HTTPS certificates. The origin
-must route to this message listener, not the owner API. Setup probes the endpoint
-and checks the returned Control identity before saving it. Merely opening the
-page does not change network configuration. Existing unrelated Serve mappings
-are never overwritten.
+Runner enrollment. Each Control starts a dedicated loopback TCP peer listener;
+the page shows its actual bind address. Access setup verifies a reachable
+`tcp://host:port` on a private interface or explicitly creates a Tailscale TCP
+Serve mapping. Direct private endpoints on local interfaces can start the peer
+listener automatically. Agent messages and Runner services share the listener
+and stable host identity while retaining independent service authorization;
+owner HTTP management remains separate. Setup authenticates the configured host
+identity before saving an endpoint. Merely opening the page does not change
+network configuration. Existing unrelated Serve mappings are never overwritten.
+Tailscale/VPN can encrypt traffic; peer TCP itself authenticates content without
+encryption and requires no application certificate. See [Peer protocol](peer-protocol.md).
 
 Copying an Agent address creates a short-lived, single-use invitation. Treat the
 complete address as a credential and paste it only into the other Agent's
@@ -271,9 +291,7 @@ side validates the invitation and binds it to the selected assistant. A
 connection grants mutual messaging only; assistant execution keeps its existing
 permissions. See [Agent Links](agent-links.md).
 
-Adding a machine uses a separate Control membership address and pinned identity.
-If a listener binds all interfaces, the product cannot infer its public origin:
-enter the reachable Control URL in the add-machine flow. It is verified against
-the selected Control identity before an invitation is issued. Cancelling an
-unused invitation revokes that code; cancellation after successful enrollment
-keeps the joined machine.
+Adding a machine uses the Control's same TCP endpoint with the independent
+membership service and pinned identity. Use the access setup if the endpoint is
+missing; do not reuse an owner HTTP port. Cancelling an unused invitation revokes
+that code; cancellation after successful enrollment keeps the joined machine.

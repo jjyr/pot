@@ -83,8 +83,7 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 	if err := control.Machines.EnableControl(); err != nil {
 		t.Fatal(err)
 	}
-	listener := httptest.NewServer(control.ControlServer(nil))
-	defer listener.Close()
+	listener := controlPeerEndpoint(control)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	inv, err := control.Machines.Invitation(ctx, time.Hour)
@@ -92,7 +91,7 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 		t.Fatal(err)
 	}
 	connector := controlplane.Connector{Directory: worker.Machines}
-	if _, err = connector.Enroll(ctx, listener.URL, control.Machines.Identity(), inv.Code, "enroll-worker"); err != nil {
+	if _, err = connector.Enroll(ctx, listener, control.Machines.Identity(), inv.Code, "enroll-worker"); err != nil {
 		t.Fatal(err)
 	}
 	peer, err := worker.RunnerConnect(ctx)

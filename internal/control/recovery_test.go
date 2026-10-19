@@ -6,7 +6,6 @@ import (
 	"github.com/jjyr/pot/internal/controlplane"
 	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/protocol"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -187,14 +186,13 @@ func TestRecoveryUsesSignedOriginalRunnerAndControlReceipts(t *testing.T) {
 	if err := control.Machines.EnableControl(); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(control.ControlServer(nil))
-	defer server.Close()
+	server := controlPeerEndpoint(control)
 	invitation, err := control.Machines.Invitation(ctx, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	connector := controlplane.Connector{Directory: worker.Machines}
-	if _, err = connector.Enroll(ctx, server.URL, control.Machines.Identity(), invitation.Code, "recovery-enroll"); err != nil {
+	if _, err = connector.Enroll(ctx, server, control.Machines.Identity(), invitation.Code, "recovery-enroll"); err != nil {
 		t.Fatal(err)
 	}
 	peer, err := worker.RunnerConnect(ctx)
