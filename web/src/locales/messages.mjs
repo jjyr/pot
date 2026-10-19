@@ -1,5 +1,6 @@
 export const messages = {
   en: {
+    'tool.updateProfile':'Update assistant profile',
     'continuation.title':'Continue the interrupted task',
     'continuation.summaryTitle':'Restore the interrupted summary',
     'continuation.summaryHint':'Resume the saved task-result summary. Completed background tasks are kept.',
@@ -200,6 +201,7 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'tool.updateProfile':'更新助手资料',
     'continuation.title':'继续中断的任务',
     'continuation.summaryTitle':'恢复中断的结果汇总',
     'continuation.summaryHint':'继续已保存的任务结果汇总，保留已完成的后台任务。',

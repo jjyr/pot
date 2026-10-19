@@ -196,6 +196,20 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 	if _, err = control.ReadTaskFile(ctx, "main", record.Info.ID, "../../control.sqlite", 1024); err == nil {
 		t.Fatal("remote result reader escaped task directory")
 	}
+	if err = os.WriteFile(filepath.Join(taskRoot, "avatar.png"), profileImage(t), 0600); err != nil {
+		t.Fatal(err)
+	}
+	avatarArgs, _ := json.Marshal(agentProfileUpdate{Avatar: &avatarSource{Path: "avatar.png", TaskID: record.Info.ID}})
+	if _, err = control.updateAgentProfile(ctx, "main", "remote-avatar", avatarArgs); err != nil {
+		t.Fatal("importing original Runner avatar", err)
+	}
+	definitions, err := control.Registry.Definitions(ctx)
+	if err != nil || definitions[0].Avatar == "" {
+		t.Fatal("remote avatar was not persisted at Control", err)
+	}
+	if _, err = control.updateAgentProfile(ctx, "another-owner", "foreign-avatar", avatarArgs); err == nil {
+		t.Fatal("profile imported another owner's Task image")
+	}
 	for _, name := range []string{"runner.sqlite", "runner.sqlite-wal"} {
 		raw, _ := os.ReadFile(filepath.Join(worker.options.Root, name))
 		if strings.Contains(string(raw), "remote-fixture-service-token") {

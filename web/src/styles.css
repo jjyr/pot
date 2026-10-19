@@ -601,3 +601,5 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 @media(max-width:719px) {
   .notification-onboarding { grid-column: 1; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px; }
 }
+
+.avatar-image{display:block;width:100%;height:100%;border-radius:inherit;object-fit:cover;}

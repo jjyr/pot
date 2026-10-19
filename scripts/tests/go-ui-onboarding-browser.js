@@ -22,6 +22,16 @@ async page=>{
   await page.waitForFunction(()=>document.querySelectorAll('.role-assistant').length>=2&&!document.querySelector('.activity'));
   await page.getByRole('button',{name:'Assistant settings',exact:true}).click();assert(await page.getByLabel('Name',{exact:true}).inputValue()==='小白','Chat rename reaches settings');await page.getByRole('button',{name:'Cancel',exact:true}).click();
   assistants=await(await page.request.get(state.origin+'/api/v1/assistants')).json();assert(assistants.length===1&&assistants[0].name==='小白','Concurrent bootstrap and chat rename preserve one assistant');
+  await page.screenshot({path:state.avatar_before});
+  await page.locator('#pot-composer').fill('把头像换为测试图片');await page.getByRole('button',{name:'Send',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelectorAll('.avatar-image').length>=2&&[...document.querySelectorAll('.avatar-image')].every(image=>image.complete&&image.naturalWidth===128)&&!document.querySelector('.activity'));
+  await page.getByRole('button',{name:'Send',exact:true}).waitFor();
+  assistants=await(await page.request.get(state.origin+'/api/v1/assistants')).json();assert(assistants[0].name==='小白'&&assistants[0].avatar.startsWith('data:image/png;base64,'),'Avatar-only update preserves name and returns normalized image');
+  await page.screenshot({path:state.avatar_after});
+  await page.reload();await page.waitForFunction(()=>document.querySelector('.window-title .avatar-image')?.naturalWidth===128);
+  await page.getByRole('button',{name:'Assistant settings',exact:true}).click();await page.locator('.editor-fields>.avatar>.avatar-image').waitFor();assert(await page.locator('.editor-fields>.avatar>.avatar-image').count()===1,'Persisted avatar reaches settings after reload');await page.getByRole('button',{name:'Cancel',exact:true}).click();
+  await page.goto(state.origin+'/?theme=light&locale=zh-CN');await page.locator('.window-title .avatar-image').waitFor();await page.locator('.tool-title').filter({hasText:'更新助手资料'}).first().waitFor();
+  await page.getByRole('button',{name:'助手设置',exact:true}).click();await page.locator('.editor-fields>.avatar>.avatar-image').waitFor();await page.getByRole('button',{name:'取消',exact:true}).click();
   assert(errors.length===0,errors.join('\n'));return {first_provider_to_chat:true,localized_durable_welcome:true,concurrent_bootstrap:true,chat_rename:true,errors};
  }finally{page.off('pageerror',onError);}
 }

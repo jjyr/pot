@@ -20,6 +20,7 @@ type Definition struct {
 	Name      string `json:"name"`
 	Revision  uint64 `json:"revision"`
 	RequestID string `json:"request_id"`
+	Avatar    string `json:"avatar,omitempty"`
 }
 type Registry struct {
 	db   *sql.DB
@@ -40,7 +41,8 @@ CREATE TABLE IF NOT EXISTS assistant_definitions(sequence INTEGER PRIMARY KEY AU
 CREATE TABLE IF NOT EXISTS assistant_initial(id TEXT PRIMARY KEY, binding TEXT NOT NULL, spec TEXT NOT NULL,rules TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS assistant_initial_intent(id TEXT PRIMARY KEY,intent TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS assistant_welcome(id TEXT PRIMARY KEY,text TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS assistant_rename_requests(id TEXT PRIMARY KEY,input_hash TEXT NOT NULL,response TEXT NOT NULL);`); err != nil {
+CREATE TABLE IF NOT EXISTS assistant_profiles(assistant_id TEXT PRIMARY KEY,avatar TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS assistant_profile_requests(id TEXT PRIMARY KEY,input_hash TEXT NOT NULL,response TEXT NOT NULL);`); err != nil {
 			return err
 		}
 		if _, err := tx.Exec("INSERT OR IGNORE INTO assistant_registry_identity VALUES (1,?)", root); err != nil {
@@ -74,7 +76,7 @@ func ValidateName(name string) error {
 	return nil
 }
 func (r *Registry) Definitions(ctx context.Context) ([]Definition, error) {
-	rows, err := r.db.QueryContext(ctx, "SELECT id,name,revision,request_id FROM assistant_definitions ORDER BY sequence")
+	rows, err := r.db.QueryContext(ctx, "SELECT id,name,revision,request_id,COALESCE((SELECT avatar FROM assistant_profiles WHERE assistant_id=assistant_definitions.id),'') FROM assistant_definitions ORDER BY sequence")
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +84,7 @@ func (r *Registry) Definitions(ctx context.Context) ([]Definition, error) {
 	out := []Definition{}
 	for rows.Next() {
 		var d Definition
-		if err := rows.Scan(&d.ID, &d.Name, &d.Revision, &d.RequestID); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.Revision, &d.RequestID, &d.Avatar); err != nil {
 			return nil, err
 		}
 		if err := validateDefinition(d); err != nil {
@@ -127,7 +129,7 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 	var definition Definition
 	err = storage.Transaction(ctx, r.db, func(tx *sql.Tx) error {
 		if onlyFirst {
-			err := tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id FROM assistant_definitions ORDER BY sequence LIMIT 1").Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID)
+			err := tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id,COALESCE((SELECT avatar FROM assistant_profiles WHERE assistant_id=assistant_definitions.id),'') FROM assistant_definitions ORDER BY sequence LIMIT 1").Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID, &definition.Avatar)
 			if err == nil {
 				return validateDefinition(definition)
 			}
@@ -136,7 +138,7 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 			}
 		}
 		var createdName string
-		err := tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id,created_name FROM assistant_definitions WHERE request_id=?", request).Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID, &createdName)
+		err := tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id,created_name,COALESCE((SELECT avatar FROM assistant_profiles WHERE assistant_id=assistant_definitions.id),'') FROM assistant_definitions WHERE request_id=?", request).Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID, &createdName, &definition.Avatar)
 		if err == nil {
 			var stored string
 			if err := tx.QueryRowContext(ctx, "SELECT binding FROM assistant_initial WHERE id=?", definition.ID).Scan(&stored); err != nil {
@@ -161,7 +163,7 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 		if count == 0 {
 			id = r.root
 		}
-		definition = Definition{id, name, 1, request}
+		definition = Definition{ID: id, Name: name, Revision: 1, RequestID: request}
 		var spec *core.ResolvedSpec
 		if resolve != nil {
 			spec, err = resolve()
@@ -222,7 +224,7 @@ func (r *Registry) Rename(ctx context.Context, id, name string, revision uint64)
 		if n != 1 {
 			return errors.New("assistant missing or changed; reload before saving")
 		}
-		return tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id FROM assistant_definitions WHERE id=?", id).Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID)
+		return tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id,COALESCE((SELECT avatar FROM assistant_profiles WHERE assistant_id=assistant_definitions.id),'') FROM assistant_definitions WHERE id=?", id).Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID, &definition.Avatar)
 	})
 	return definition, err
 }

@@ -15,6 +15,7 @@ user agreement; see the repository `AGENTS.md`.
 | Agent messages | `send_message`; `list_assistants` discovers assistants | Main; Worker may message its owner |
 | Schedules | `list_schedules`, `get_schedule`, `manage_schedule` | Main |
 | Assistant rules | `read_agent_instructions`, `update_agent_instructions` (always reviewed) | Main |
+| Assistant profile | `update_agent_profile` | Main, user chat only |
 | Execution targets | `list_execution_targets` | Main |
 
 `list_execution_targets` lists enrolled Runtime destinations. `create_task` and
@@ -27,6 +28,38 @@ environment-variable mapping and explicitly reread them with `refresh_credential
 Plugins declare bindings in their manifest. See [Credentials](credentials.md).
 There are no separate file/list tools: inspect with commands and edit with patches
 or approved commands. Task semantics are in [Task coordination](task-coordination.md).
+
+## Assistant display profile
+
+`update_agent_profile` replaces the former name-only tool. Its optional `name`
+and `avatar` fields update one identity atomically; omitted fields stay unchanged
+and an empty update fails. It does not change model configuration or agent rules.
+Workers, peer conversations and background summaries cannot update the profile.
+
+```javascript
+await tools.update_agent_profile({name: "Research"});
+await tools.update_agent_profile({avatar: {path: "avatar.png"}});
+await tools.update_agent_profile({name: "Research", avatar: {task_id: "TASK_ID", path: "images/avatar.png"}});
+await tools.update_agent_profile({avatar: {path: ""}}); // restore default
+```
+
+Avatar paths are relative to the assistant's own workspace, or to an owned Task's
+original workspace when `task_id` is supplied. Task imports reuse the authenticated
+original-Runner file channel, including remote and completed Tasks; cross-owner
+Tasks and paths escaping the selected workspace fail. The tool imports existing
+files rather than generating images, fetching URLs or accepting model-encoded
+image bytes. Source images must be PNG/JPEG/WebP, at most 8 MiB, 8192 pixels per
+dimension and 32 megapixels. Control center-crops and resizes them to a 128×128
+PNG, persisted with the assistant registry independently of source-file lifetime.
+An empty path without a Task restores the default Companion image.
+
+The owning Control publishes the normalized image in authenticated assistant
+directory responses, so browser and native remote Spaces use the same bytes.
+Profile tools return only identity, revision and `has_avatar`, keeping image bytes
+out of model context. The update receipt binds the source arguments and is checked
+before reading a file again; retries return the original result without overwriting
+later edits, even after the original source was removed. Successful changes notify
+the existing `assistants` topic, refreshing the directory and chat title.
 
 ## JavaScript composition
 

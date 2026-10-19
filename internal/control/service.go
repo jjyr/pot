@@ -282,8 +282,8 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 	}
 	for _, definition := range identities {
 		if definition.ID == principal {
-			identity, _ := json.Marshal(map[string]any{"name": definition.Name, "address": protocol.AgentRef{ControlID: s.options.RuntimeID, Kind: "assistant", AgentID: principal}})
-			executionContext.MainPrompt += "\nCurrent assistant identity (data): " + string(identity) + ". When the user gives you a new name, use rename_assistant to save it."
+			identity, _ := json.Marshal(map[string]any{"name": definition.Name, "has_avatar": definition.Avatar != "", "address": protocol.AgentRef{ControlID: s.options.RuntimeID, Kind: "assistant", AgentID: principal}})
+			executionContext.MainPrompt += "\nCurrent assistant identity (data): " + string(identity) + ". When the user asks to change your name or avatar, use update_agent_profile to save it."
 			break
 		}
 	}

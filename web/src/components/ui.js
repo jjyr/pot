@@ -167,7 +167,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     else{const unread=replies.unread(control,item.id,count);replies.mark(control,item.id,id,count);saveReads();return unread>0;}
   }
   function assistantAvatar(item,size){
-    const value=avatar(size,item?.request_id||item?.id||'main'),started=reactions.get(replyKey(controlOf(item),item?.id||''));
+    const value=avatar(size,item?.request_id||item?.id||'main',item?.avatar),started=reactions.get(replyKey(controlOf(item),item?.id||''));
     if(started&&!reducedMotion.matches&&performance.now()-started<650){value.classList.add('is-arriving');value.style.animationDelay=`-${performance.now()-started}ms`;}
     return value;
   }

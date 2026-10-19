@@ -77,7 +77,7 @@ func TestChatRenameIsOwnerScopedAndRetrySafe(t *testing.T) {
 	}
 	c, _ := s.Conversation(ctx, a.ID)
 	thread, _ := c.Thread(ctx)
-	call := modelprotocol.ToolCall{ID: "rename", Name: "rename_assistant", Arguments: json.RawMessage(`{"name":"小白"}`)}
+	call := modelprotocol.ToolCall{ID: "rename", Name: "update_agent_profile", Arguments: json.RawMessage(`{"name":"小白"}`)}
 	dispatch := s.productDispatch(a.ID, "turn", thread.Generation, false)[call.Name]
 	if _, err = dispatch(ctx, core.ExecutionContext{Owner: a.ID}, call, nil); err != nil {
 		t.Fatal(err)

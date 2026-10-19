@@ -163,7 +163,7 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 			}
 			items := []map[string]any{}
 			for _, d := range definitions {
-				item := map[string]any{"id": d.ID, "name": d.Name, "revision": d.Revision, "control_id": a.RuntimeID}
+				item := map[string]any{"id": d.ID, "name": d.Name, "revision": d.Revision, "avatar": d.Avatar, "control_id": a.RuntimeID}
 				c, err := s.Conversation(ctx, d.ID)
 				if err != nil {
 					return nil, err
