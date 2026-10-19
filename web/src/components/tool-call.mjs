@@ -74,8 +74,8 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',onDecis
       approvalCard.update(pending);
     }else{approvalID='';approvalCard=null;approval.replaceChildren();}
     approval.hidden=!pending;
-    if(pending&&!autoOpened){building=true;root.open=true;autoOpened=true;building=false;remember();queueMicrotask(()=>{for(let parent=root.parentElement?.closest('details.tool-call');parent;parent=parent.parentElement?.closest('details.tool-call'))parent.open=true;});}
-    if(!pending)autoOpened=false;
+    if((pending||next.approvalDescendant)&&!autoOpened){building=true;root.open=true;autoOpened=true;building=false;remember();queueMicrotask(()=>{for(let parent=root.parentElement?.closest('details.tool-call');parent;parent=parent.parentElement?.closest('details.tool-call'))parent.open=true;});}
+    if(!pending&&!next.approvalDescendant)autoOpened=false;
     if(activeTool(tool))scheduleClock(tick);
     for(const item of sectionsByKey.values())item.box.hidden=true;
     if(isGroup)return;

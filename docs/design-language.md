@@ -359,6 +359,8 @@ render inline. No tool action implicitly repeats an operation.
 Ordinary calls default to collapsed. Composition children nest under their original
 `exec` call in start order. Exact approval requests open the affected call and its
 ancestors, show the full reviewed operation, and provide Allow this operation / Deny.
+Task execution groups check pending descendant approvals before mounting their
+virtual child rows, so a collapsed group cannot hide a new approval.
 A compact locator exposes pending approvals outside the current reading position;
 requests without a transcript row retain a standalone approval card. A failed
 approval submission keeps its diagnostic and controls available. Long-lived machine
