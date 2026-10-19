@@ -37,32 +37,11 @@ func Open(path string, options Options) (*Service, error) {
 	if options.MaxTasks < 1 {
 		return nil, fmt.Errorf("invalid task limit")
 	}
-	db, err := storage.OpenSQLite(path)
+	db, err := storage.OpenDatabase(path, storage.TasksDatabase)
 	if err != nil {
 		return nil, err
 	}
 	s := &Service{db: db, options: options}
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS task_schema(version INTEGER NOT NULL);INSERT INTO task_schema SELECT 8 WHERE NOT EXISTS(SELECT 1 FROM task_schema);CREATE TABLE IF NOT EXISTS tasks(assistant_id TEXT NOT NULL,id TEXT NOT NULL,phase TEXT NOT NULL,created INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(assistant_id,id));CREATE TABLE IF NOT EXISTS task_writes(assistant_id TEXT NOT NULL,request_id TEXT NOT NULL,digest TEXT NOT NULL,task_id TEXT NOT NULL,PRIMARY KEY(assistant_id,request_id));`); err != nil {
-		db.Close()
-		return nil, err
-	}
-	var version int
-	if err := db.QueryRow("SELECT version FROM task_schema").Scan(&version); err != nil || version != 8 {
-		db.Close()
-		return nil, fmt.Errorf("unsupported task schema")
-	}
-	if err := inbox.Initialize(db); err != nil {
-		db.Close()
-		return nil, err
-	}
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS task_retries(assistant_id TEXT NOT NULL,source_task TEXT NOT NULL,task_id TEXT NOT NULL UNIQUE,PRIMARY KEY(assistant_id,source_task))`); err != nil {
-		db.Close()
-		return nil, err
-	}
-	if err := initializeMessageViews(db); err != nil {
-		db.Close()
-		return nil, err
-	}
 	if err := s.initializeOutcomes(); err != nil {
 		db.Close()
 		return nil, err
@@ -71,7 +50,7 @@ func Open(path string, options Options) (*Service, error) {
 		db.Close()
 		return nil, err
 	}
-	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS task_authority(control_id TEXT NOT NULL,runtime_id TEXT NOT NULL);INSERT INTO task_authority SELECT ?,? WHERE NOT EXISTS(SELECT 1 FROM task_authority)", options.ControlID, options.RuntimeID); err != nil {
+	if _, err := db.Exec("INSERT INTO task_authority SELECT ?,? WHERE NOT EXISTS(SELECT 1 FROM task_authority)", options.ControlID, options.RuntimeID); err != nil {
 		db.Close()
 		return nil, err
 	}

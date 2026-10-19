@@ -26,9 +26,6 @@ func (s *Service) OwnerResourceMutation(ctx context.Context, id, scope, digest s
 	}
 	s.resourceMutations.Lock()
 	defer s.resourceMutations.Unlock()
-	if _, err := s.Tasks.DB().ExecContext(ctx, "CREATE TABLE IF NOT EXISTS owner_resource_commands(id TEXT PRIMARY KEY,digest TEXT NOT NULL,scope TEXT NOT NULL,receipt TEXT NOT NULL)"); err != nil {
-		return nil, err
-	}
 	var oldDigest string
 	var raw []byte
 	err := s.Tasks.DB().QueryRowContext(ctx, "SELECT digest,receipt FROM owner_resource_commands WHERE id=?", id).Scan(&oldDigest, &raw)
@@ -91,9 +88,6 @@ func (s *Service) OwnerResourceMutation(ctx context.Context, id, scope, digest s
 	return receipt.Result, applyErr
 }
 func (s *Service) OwnerResourceReceipts(ctx context.Context) ([]ResourceReceipt, error) {
-	if _, err := s.Tasks.DB().ExecContext(ctx, "CREATE TABLE IF NOT EXISTS owner_resource_commands(id TEXT PRIMARY KEY,digest TEXT NOT NULL,scope TEXT NOT NULL,receipt TEXT NOT NULL)"); err != nil {
-		return nil, err
-	}
 	rows, err := s.Tasks.DB().QueryContext(ctx, "SELECT receipt FROM owner_resource_commands ORDER BY rowid DESC LIMIT 100")
 	if err != nil {
 		return nil, err

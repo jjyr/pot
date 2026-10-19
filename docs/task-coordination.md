@@ -168,8 +168,9 @@ implicitly imported into that new task. Task workspaces are prepared and recorde
 sessions; files remain. No shared guest environment or automatic project copy is
 provided.
 
-Task persistence uses schema version 8. Development builds use an independent
-data root; unsupported storage formats are rejected without rewriting files.
+Task record payloads use schema version 8. Database schemas and automatic
+upgrades are owned by the [DB migration layer](database-migrations.md). Development
+builds use an independent data root; unsupported pre-migration formats are rejected.
 
 ## Client notification outcomes
 

@@ -7,20 +7,16 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jjyr/pot/internal/inbox"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 )
 
 func TestApprovalRoutesNeverEnterAgentInbox(t *testing.T) {
-	db, err := storage.OpenSQLite(filepath.Join(t.TempDir(), "inbox.sqlite"))
+	db, err := storage.OpenDatabase(filepath.Join(t.TempDir(), "inbox.sqlite"), storage.TasksDatabase)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if err = inbox.Initialize(db); err != nil {
-		t.Fatal(err)
-	}
 	for _, kind := range []Kind{ApprovalRequested, ApprovalResolved, ApprovalExpired} {
 		event := Approval(kind, "approval", "assistant", "task", "run", 1, "")
 		if err = event.Validate(); err != nil {

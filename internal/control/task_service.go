@@ -64,9 +64,6 @@ func (s *Service) openTasks() error {
 	if err != nil {
 		return err
 	}
-	if _, err = s.Tasks.DB().Exec(`CREATE TABLE IF NOT EXISTS task_event_cache(task_id TEXT NOT NULL,sequence INTEGER NOT NULL,event TEXT NOT NULL,PRIMARY KEY(task_id,sequence));CREATE TABLE IF NOT EXISTS task_routing(singleton INTEGER PRIMARY KEY CHECK(singleton=1),body TEXT NOT NULL)`); err != nil {
-		return err
-	}
 	s.Schedules, err = schedule.New(schedule.Options{Tasks: s.Tasks, Ready: s.taskReady, Results: taskFiles{s}})
 	if err != nil {
 		return err

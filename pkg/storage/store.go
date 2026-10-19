@@ -21,33 +21,11 @@ type Event = protocol.Event
 type Store struct{ db *sql.DB }
 
 func Open(path string) (*Store, error) {
-	db, err := OpenSQLite(path)
+	db, err := OpenDatabase(path, ConversationDatabase)
 	if err != nil {
 		return nil, err
 	}
 	s := &Store{db: db}
-	err = Transaction(context.Background(), db, func(tx *sql.Tx) error {
-		var version int
-		if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
-			return err
-		}
-		if version > 1 {
-			return errors.New("database schema is newer than this runtime")
-		}
-		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,request_id TEXT UNIQUE,body TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS ui_tool_identity ON messages(json_extract(body,'$.tool.turn_id'),json_extract(body,'$.tool.id')) WHERE json_extract(body,'$.role')='tool';
-CREATE TABLE IF NOT EXISTS events(cursor INTEGER PRIMARY KEY AUTOINCREMENT,body TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS main_message_outbox(sequence INTEGER PRIMARY KEY AUTOINCREMENT,message_id TEXT UNIQUE NOT NULL,body TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS context_history(sequence INTEGER PRIMARY KEY AUTOINCREMENT,classification TEXT NOT NULL,body TEXT NOT NULL,at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS mail(scope TEXT NOT NULL,id TEXT NOT NULL,body TEXT NOT NULL,state TEXT NOT NULL,sequence INTEGER PRIMARY KEY AUTOINCREMENT,UNIQUE(scope,id));
-PRAGMA user_version=1;`)
-		return err
-	})
-	if err != nil {
-		db.Close()
-		return nil, err
-	}
 	// Reopening never replays uncertain model/tool effects. Preserve partial text.
 	messages, err := s.Messages(context.Background())
 	if err == nil {
@@ -75,8 +53,8 @@ PRAGMA user_version=1;`)
 }
 func (s *Store) Close() error { return s.db.Close() }
 
-// DB permits a domain owner to add its own tables/transactions without putting
-// business logic in storage. Never hold an active transaction and call Store methods.
+// DB permits domain queries and transactions over the centralized schema.
+// Never hold an active transaction and call Store methods.
 func (s *Store) DB() *sql.DB { return s.db }
 func (s *Store) Get(ctx context.Context, key string) (string, bool, error) {
 	var value string

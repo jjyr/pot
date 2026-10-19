@@ -10,15 +10,12 @@ import (
 )
 
 // SQLAccounts uses a caller-owned database, which may be shared with other
-// components. It owns only its tables; it does not close the database.
+// components. Storage owns schema migration; SQLAccounts never closes the database.
 type SQLAccounts struct{ db *sql.DB }
 
-func NewSQLAccounts(db *sql.DB) (*SQLAccounts, error) {
-	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS integration_accounts(service TEXT PRIMARY KEY, revision INTEGER NOT NULL, metadata TEXT, secret_ref TEXT NOT NULL)`)
-	if err != nil {
-		return nil, err
-	}
-	return &SQLAccounts{db}, nil
+// NewSQLAccounts binds a caller-owned, migrated Control database.
+func NewSQLAccounts(db *sql.DB) *SQLAccounts {
+	return &SQLAccounts{db}
 }
 func (s *SQLAccounts) List(ctx context.Context) ([]Account, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT metadata,secret_ref FROM integration_accounts WHERE metadata IS NOT NULL ORDER BY service`)

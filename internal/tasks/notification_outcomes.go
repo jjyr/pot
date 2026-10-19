@@ -9,14 +9,6 @@ import (
 )
 
 func (s *Service) initializeOutcomes() error {
-	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS task_outcomes(
- sequence INTEGER PRIMARY KEY AUTOINCREMENT CHECK(sequence<=9007199254740991),
- assistant_id TEXT NOT NULL,task_id TEXT NOT NULL,title TEXT NOT NULL,
- phase TEXT NOT NULL,updated_at_ms INTEGER NOT NULL);
- CREATE INDEX IF NOT EXISTS task_outcomes_owner_sequence ON task_outcomes(assistant_id,sequence);`)
-	if err != nil {
-		return err
-	}
 	return s.db.QueryRow("SELECT COALESCE(MAX(sequence),0) FROM task_outcomes").Scan(&s.outcomeCursor)
 }
 

@@ -147,16 +147,6 @@ func OpenConversation(path string, options ConversationOptions) (*Conversation, 
 		}
 	}()
 	err = storage.Transaction(context.Background(), store.DB(), func(tx *sql.Tx) error {
-		if _, err := tx.Exec("CREATE TABLE IF NOT EXISTS assistant_configuration_requests(id TEXT PRIMARY KEY,input_hash TEXT NOT NULL,response TEXT NOT NULL)"); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS assistant_model_attempts(id TEXT PRIMARY KEY,owner TEXT NOT NULL,generation INTEGER NOT NULL,turn_id TEXT NOT NULL,at INTEGER NOT NULL);
-CREATE INDEX IF NOT EXISTS assistant_model_turn ON assistant_model_attempts(turn_id);
-CREATE TABLE IF NOT EXISTS chat_user_inbox(sequence INTEGER PRIMARY KEY AUTOINCREMENT,request TEXT NOT NULL,message TEXT NOT NULL UNIQUE);
-CREATE TABLE IF NOT EXISTS assistant_steering(id TEXT PRIMARY KEY,turn_id TEXT NOT NULL,text TEXT NOT NULL,at INTEGER NOT NULL,acknowledged INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS assistant_observations(sequence INTEGER PRIMARY KEY AUTOINCREMENT,turn_id TEXT NOT NULL,generation INTEGER NOT NULL,body TEXT NOT NULL);`); err != nil {
-			return err
-		}
 		var initialized bool
 		if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM metadata WHERE key='conversation.initialized')").Scan(&initialized); err != nil {
 			return err

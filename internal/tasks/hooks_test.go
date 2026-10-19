@@ -181,12 +181,12 @@ func TestTaskStoreRejectsPreviousSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB().Exec("UPDATE task_schema SET version=6"); err != nil {
+	if _, err := s.DB().Exec("DROP TABLE pot_migrations; CREATE TABLE task_schema(version INTEGER NOT NULL); INSERT INTO task_schema VALUES(6)"); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()
 	_, err = Open(path, Options{ControlID: "control", RuntimeID: "machine"})
-	if err == nil || !strings.Contains(err.Error(), "unsupported task schema") {
+	if err == nil || !strings.Contains(err.Error(), "unsupported legacy task_schema") {
 		t.Fatal(err)
 	}
 }

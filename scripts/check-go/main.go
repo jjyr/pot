@@ -5,9 +5,16 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -19,6 +26,9 @@ func main() {
 }
 
 func check() error {
+	if err := checkDatabaseBoundary("."); err != nil {
+		return err
+	}
 	format := exec.Command("gofmt", "-l", "cmd", "pkg", "internal", "plugins", "web", "scripts/check-go", "scripts/tests/testdata/go-public-api")
 	output, err := format.Output()
 	if err != nil {
@@ -83,4 +93,54 @@ func check() error {
 	vet := exec.Command("go", "vet", "./...")
 	vet.Stdout, vet.Stderr = os.Stdout, os.Stderr
 	return vet.Run()
+}
+
+// Keep schema evolution reviewable in one migration tree. Business packages may
+// issue DML, but schema DDL and raw database opens must stay in the storage layer.
+func checkDatabaseBoundary(root string) error {
+	ddl := regexp.MustCompile(`(?i)\b(?:CREATE|ALTER|DROP)\s+(?:UNIQUE\s+)?(?:TABLE|INDEX|VIEW|TRIGGER)\b`)
+	for _, directory := range []string{"cmd", "pkg", "internal"} {
+		err := filepath.WalkDir(filepath.Join(root, directory), func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			relative, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			inStorage := strings.HasPrefix(filepath.ToSlash(relative), "pkg/storage/")
+			file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			if err != nil {
+				return err
+			}
+			var violation error
+			ast.Inspect(file, func(node ast.Node) bool {
+				if violation != nil {
+					return false
+				}
+				switch value := node.(type) {
+				case *ast.BasicLit:
+					if value.Kind == token.STRING {
+						content, err := strconv.Unquote(value.Value)
+						if err == nil && ddl.MatchString(content) {
+							violation = fmt.Errorf("%s declares schema outside pkg/storage/migrations", path)
+						}
+					}
+				case *ast.SelectorExpr:
+					if !inStorage && value.Sel.Name == "OpenSQLite" {
+						violation = fmt.Errorf("%s must use storage.OpenDatabase instead of OpenSQLite", path)
+					}
+				}
+				return true
+			})
+			return violation
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

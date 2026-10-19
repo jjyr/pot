@@ -74,15 +74,12 @@ func (a *testAdapter) Refresh(_ context.Context, previous Credential) (Credentia
 }
 func fixture(t *testing.T) (*Service, *testAdapter, *memorySecrets, *sql.DB) {
 	t.Helper()
-	db, err := storage.OpenSQLite(filepath.Join(t.TempDir(), "shared.sqlite"))
+	db, err := storage.OpenDatabase(filepath.Join(t.TempDir(), "shared.sqlite"), storage.ControlDatabase)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	accounts, err := NewSQLAccounts(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	accounts := NewSQLAccounts(db)
 	secrets := &memorySecrets{values: map[string][]byte{}}
 	adapter := &testAdapter{done: make(chan struct{})}
 	service, err := New(Options{Accounts: accounts, Secrets: secrets, Adapters: []Adapter{adapter}})
@@ -334,10 +331,7 @@ func (a namedAdapter) Descriptor() Descriptor {
 func TestAdditionalServiceUsesSameLifecycle(t *testing.T) {
 	original, a, secrets, db := fixture(t)
 	original.Close()
-	store, err := NewSQLAccounts(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	store := NewSQLAccounts(db)
 	b := &testAdapter{done: make(chan struct{})}
 	s, err := New(Options{Accounts: store, Secrets: secrets, Adapters: []Adapter{a, namedAdapter{b, "issue-tracker"}}})
 	if err != nil {
@@ -387,7 +381,7 @@ func TestCancellationDuringChallengeRequest(t *testing.T) {
 		t.Run(map[bool]string{false: "cancel", true: "shutdown"}[closeService], func(t *testing.T) {
 			original, _, secrets, db := fixture(t)
 			original.Close()
-			accounts, _ := NewSQLAccounts(db)
+			accounts := NewSQLAccounts(db)
 			adapter := startingAdapter{make(chan struct{}), make(chan struct{})}
 			s, err := New(Options{Accounts: accounts, Secrets: secrets, Adapters: []Adapter{adapter}})
 			if err != nil {
