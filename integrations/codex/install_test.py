@@ -89,7 +89,7 @@ class InstallTests(unittest.TestCase):
                     self.home, self.home / ".codex", os.environ["POT_CODEX_CLI_TEST"]
                 )
             )
-        cache = self.home / ".codex/plugins/cache/personal/pot/0.2.0"
+        cache = self.home / ".codex/plugins/cache/personal/pot/0.3.0"
         self.assertTrue((cache / ".codex-plugin/plugin.json").is_file())
         self.assertFalse((cache / "local-pair.json").exists())
         self.assertFalse((cache / "bridge.json").exists())

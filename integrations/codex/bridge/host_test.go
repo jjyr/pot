@@ -17,7 +17,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jjyr/pot/pkg/agentlink"
+	"crypto/ed25519"
+	"crypto/rand"
+	"github.com/jjyr/pot/internal/linkhost"
+	"github.com/jjyr/pot/pkg/peer"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -293,9 +296,13 @@ func TestAgentHostPeerDeliveryRemainsUnreadUntilCodexReads(t *testing.T) {
 	defer a.close()
 	b, _ := testHost(t)
 	defer b.close()
-	remote := httptest.NewServer(a.handler())
+	remote, err := linkhost.ListenPeer(ctx, "127.0.0.1:0", a.peerServer())
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer remote.Close()
-	invitation, err := a.links.Invite(ctx, "codex", remote.URL)
+	endpoint := "tcp://" + remote.Addr()
+	invitation, err := a.links.Invite(ctx, "codex", endpoint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,14 +326,14 @@ func TestAgentHostPeerDeliveryRemainsUnreadUntilCodexReads(t *testing.T) {
 			}
 		}
 	}
-	if json.Unmarshal(w.Body.Bytes(), &snapshot) != nil || len(snapshot.Items) != 1 || snapshot.Items[0].LocalAssistantID != "codex" || snapshot.Items[0].Revision != connection.CreatedAt.UnixMilli() || snapshot.Items[0].Peer.ControlID != a.identity.Address.ControlID || snapshot.Items[0].Peer.Address != remote.URL {
+	if json.Unmarshal(w.Body.Bytes(), &snapshot) != nil || len(snapshot.Items) != 1 || snapshot.Items[0].LocalAssistantID != "codex" || snapshot.Items[0].Revision != connection.CreatedAt.UnixMilli() || snapshot.Items[0].Peer.ControlID != a.identity.Address.ControlID || snapshot.Items[0].Peer.Address != endpoint {
 		t.Fatal(w.Body.String())
 	}
 	outgoing, err := a.mailbox.send(ctx, b.identity.Address, "from-a", "peer reference")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = b.links.Sync(ctx, connection.ID); err != nil {
+	if err = a.links.Sync(ctx, connection.ID); err != nil {
 		t.Fatal(err)
 	}
 	messages, err := b.mailbox.messages(ctx)
@@ -353,68 +360,51 @@ func TestAgentHostPeerDeliveryRemainsUnreadUntilCodexReads(t *testing.T) {
 	}
 }
 
-func TestAgentHostConfigureProbesActualHTTPSIdentity(t *testing.T) {
+func TestAgentHostConfigurePinsTCPIdentity(t *testing.T) {
+	ctx := context.Background()
 	h, _ := testHost(t)
 	defer h.close()
-	own := httptest.NewTLSServer(h.handler())
+	own, err := linkhost.ListenPeer(ctx, "127.0.0.1:0", h.peerServer())
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer own.Close()
-	tests := []struct {
-		name    string
-		handler http.Handler
-		want    int
-	}{
-		{"foreign", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(w, 200, map[string]string{"control_id": "foreign"})
-		}), 400},
-		{"oversized", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte(`{"control_id":"` + h.identity.Address.ControlID + `"}` + strings.Repeat(" ", 2048)))
-		}), 400},
-		{"redirect", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, own.URL+agentlink.Prefix+"/ready", 302)
-		}), 400},
-		{"valid", h.handler(), 200},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			server := httptest.NewTLSServer(tc.handler)
-			defer server.Close()
-			h.probeClient = server.Client()
-			payload, _ := json.Marshal(map[string]string{"action": "configure", "mode": "address", "endpoint": server.URL, "listen": hostPeerListen})
-			r := httptest.NewRequest(http.MethodPost, "http://"+hostListen+"/api/v1/agent-links", strings.NewReader(string(payload)))
-			r.Host = hostListen
-			r.RemoteAddr = "127.0.0.1:12345"
-			r.Header.Set("Authorization", "Bearer "+h.token)
-			w := httptest.NewRecorder()
-			h.handler().ServeHTTP(w, r)
-			if w.Code != tc.want {
-				t.Fatal(w.Code, w.Body.String())
-			}
-			var endpoint string
-			if err := h.db.QueryRow("SELECT endpoint FROM codex_agent_host").Scan(&endpoint); err != nil {
-				t.Fatal(err)
-			}
-			if tc.want == 200 && endpoint != server.URL || tc.want != 200 && endpoint != "" {
-				t.Fatal("unverified endpoint persisted", endpoint)
-			}
-		})
-	}
-	var verified string
-	h.db.QueryRow("SELECT endpoint FROM codex_agent_host").Scan(&verified)
-	for _, invalid := range []string{"http://127.0.0.1:8792", "https://user:password@agent.example", "https://agent.example?token=secret"} {
-		payload, _ := json.Marshal(map[string]string{"action": "configure", "mode": "address", "endpoint": invalid})
+	endpoint := "tcp://" + own.Addr()
+	configure := func(endpoint string) int {
+		payload, _ := json.Marshal(map[string]string{"action": "configure", "mode": "address", "endpoint": endpoint, "listen": hostPeerListen})
 		r := httptest.NewRequest(http.MethodPost, "http://"+hostListen+"/api/v1/agent-links", strings.NewReader(string(payload)))
 		r.Host = hostListen
 		r.RemoteAddr = "127.0.0.1:12345"
 		r.Header.Set("Authorization", "Bearer "+h.token)
 		w := httptest.NewRecorder()
 		h.handler().ServeHTTP(w, r)
-		if w.Code != 400 {
-			t.Fatal("invalid endpoint accepted", w.Code)
+		return w.Code
+	}
+	if status := configure(endpoint); status != 200 {
+		t.Fatal(status)
+	}
+	foreign, _ := testHost(t)
+	defer foreign.close()
+	pub, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clear(foreign.peerKey)
+	foreign.peerKey = key
+	foreign.peerIdentity = peer.NewIdentity(h.peerIdentity.ID, pub)
+	foreign.peerRegistry = linkhost.NewRegistry(foreign.peerIdentity, foreign.peerKey)
+	stranger, err := linkhost.ListenPeer(ctx, "127.0.0.1:0", foreign.peerServer())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stranger.Close()
+	for _, invalid := range []string{"tcp://" + stranger.Addr(), "http://127.0.0.1:8793", "https://agent.example", "tcp://8.8.8.8:8793", "tcp://user:password@127.0.0.1:8793", "tcp://127.0.0.1:8793?token=secret"} {
+		if status := configure(invalid); status != 400 {
+			t.Fatal("unverified peer accepted", status)
 		}
-		var after string
-		h.db.QueryRow("SELECT endpoint FROM codex_agent_host").Scan(&after)
-		if after != verified {
-			t.Fatal("invalid endpoint replaced verified address")
+		var saved string
+		if err = h.db.QueryRow("SELECT endpoint FROM codex_agent_host").Scan(&saved); err != nil || saved != endpoint {
+			t.Fatal("invalid peer replaced verified address", saved, err)
 		}
 	}
 }

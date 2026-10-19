@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
@@ -22,12 +23,13 @@ import (
 	"github.com/jjyr/pot/internal/linkhost"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/pkg/agentlink"
+	"github.com/jjyr/pot/pkg/peer"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 	webassets "github.com/jjyr/pot/web"
 )
 
-const hostVersion = "1"
+const hostVersion = "2"
 const hostListen = "127.0.0.1:8792"
 const hostPeerListen = "127.0.0.1:8793"
 
@@ -37,11 +39,14 @@ type agentHost struct {
 	links                    *agentlink.Service
 	mailbox                  *hostMailbox
 	identity                 agentlink.Identity
+	peerIdentity             peer.Identity
+	peerKey                  ed25519.PrivateKey
+	peerRegistry             *linkhost.Registry
 	token, endpoint          string
-	probeClient              *http.Client
 	accessMu                 sync.Mutex
 	loopbackPeer, directPeer *linkhost.PeerListener
 	networkError             string
+	peerCtx                  context.Context
 }
 
 func openAgentHost(root string) (*agentHost, error) {
@@ -59,7 +64,7 @@ func openAgentHost(root string) (*agentHost, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := &agentHost{db: db}
+	h := &agentHost{db: db, peerCtx: context.Background()}
 	ok := false
 	defer func() {
 		if !ok {
@@ -79,7 +84,7 @@ func openAgentHost(root string) (*agentHost, error) {
 		if err = h.secrets.Put(context.Background(), ref, []byte(token)); err != nil {
 			return nil, err
 		}
-		_, err = db.Exec("INSERT INTO codex_agent_host VALUES(1,?,?, '')", id, ref)
+		_, err = db.Exec("INSERT INTO codex_agent_host(singleton,control_id,owner_secret_ref,endpoint) VALUES(1,?,?, '')", id, ref)
 	}
 	if err != nil {
 		return nil, err
@@ -91,18 +96,25 @@ func openAgentHost(root string) (*agentHost, error) {
 	h.token = string(token)
 	clear(token)
 	h.identity = agentlink.Identity{Address: protocol.AgentRef{ControlID: id, Kind: "assistant", AgentID: "codex"}, Name: "Codex", Adapter: "codex"}
+	if err = h.loadPeerIdentity(context.Background()); err != nil {
+		return nil, err
+	}
 	h.tasks, err = storage.OpenDatabase(filepath.Join(root, "tasks.sqlite"), storage.TasksDatabase)
 	if err != nil {
 		return nil, err
 	}
 	h.mailbox = &hostMailbox{db: h.tasks, local: h.identity.Address}
-	h.links, err = agentlink.New(agentlink.Options{DB: db, Secrets: h.secrets, Mailbox: h.mailbox, Identity: func(_ context.Context, assistant string) (agentlink.Identity, error) {
+	h.links, err = agentlink.New(agentlink.Options{DB: db, Secrets: h.secrets, Mailbox: h.mailbox, HostIdentity: h.peerIdentity, HostKey: h.peerKey, Identity: func(_ context.Context, assistant string) (agentlink.Identity, error) {
 		if assistant != "codex" {
 			return agentlink.Identity{}, agentlink.ErrInvalid
 		}
 		return h.identity, nil
 	}})
 	if err != nil {
+		return nil, err
+	}
+	h.peerRegistry = linkhost.NewRegistry(h.peerIdentity, h.peerKey)
+	if err = h.peerRegistry.Register(agentlink.ServiceName, h.links.Authorize, h.links.Attach); err != nil {
 		return nil, err
 	}
 	ok = true
@@ -117,6 +129,7 @@ func (h *agentHost) close() {
 		h.directPeer.Close()
 	}
 	h.accessMu.Unlock()
+	clear(h.peerKey)
 	if h.tasks != nil {
 		h.tasks.Close()
 	}
@@ -133,16 +146,7 @@ func hostOwner(r *http.Request, token string) bool {
 }
 func (h *agentHost) handler() http.Handler {
 	assets := http.FileServer(http.FS(webassets.FS()))
-	peer := h.links.Handler()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == agentlink.Prefix+"/ready" && r.Method == http.MethodGet {
-			writeJSON(w, http.StatusOK, map[string]string{"control_id": h.identity.Address.ControlID})
-			return
-		}
-		if strings.HasPrefix(r.URL.Path, agentlink.Prefix+"/") {
-			peer.ServeHTTP(w, r)
-			return
-		}
 		host, _, _ := net.SplitHostPort(r.RemoteAddr)
 		if net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() || r.Host != hostListen {
 			fail(w, 403, "local_management_only")
@@ -225,7 +229,7 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 			}
 			view = append(view, map[string]any{"id": c.ID, "local_assistant_id": c.Local.Address.AgentID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "control_id": c.Peer.Address.ControlID, "address": c.Endpoint, "kind": c.Peer.Adapter, "name": c.Peer.Name}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
 		}
-		writeJSON(w, 200, map[string]any{"items": view, "self": map[string]any{"id": "codex", "control_id": h.identity.Address.ControlID, "kind": "codex", "name": "Codex", "address": endpoint, "endpoint": endpoint, "status": status, "reason_code": networkError}, "network": map[string]any{"listen": hostPeerListen, "endpoint": endpoint, "mode": "address", "status": status, "reason_code": networkError}, "identity": h.identity, "unread": unread, "unconfirmed": unconfirmed})
+		writeJSON(w, 200, map[string]any{"items": view, "self": map[string]any{"id": "codex", "control_id": h.identity.Address.ControlID, "kind": "codex", "name": "Codex", "address": endpoint, "endpoint": endpoint, "status": status, "reason_code": networkError}, "network": map[string]any{"listen": hostPeerListen, "endpoint": endpoint, "mode": "address", "status": status, "reason_code": networkError}, "identity": h.identity, "peer_identity": h.peerIdentity, "unread": unread, "unconfirmed": unconfirmed})
 		return
 	}
 	if r.Method != "POST" {
@@ -305,23 +309,14 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 func (h *agentHost) probeEndpoint(ctx context.Context, endpoint string) error {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+agentlink.Prefix+"/ready", nil)
-	if err != nil {
+	if _, err := peer.ValidateEndpoint(ctx, endpoint); err != nil {
 		return agentlink.ErrInvalid
 	}
-	client := agentlink.NewHTTPClient(h.probeClient)
-	client.Timeout = 8 * time.Second
-	response, err := client.Do(request)
-	if err != nil {
+	if err := linkhost.Probe(ctx, endpoint, h.peerIdentity, h.peerKey, h.peerIdentity); err != nil {
+		if errors.Is(err, peer.ErrUnauthorized) {
+			return agentlink.ErrConflict
+		}
 		return agentlink.ErrUnavailable
-	}
-	defer response.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(response.Body, 2049))
-	var value struct {
-		ControlID string `json:"control_id"`
-	}
-	if err != nil || len(raw) > 2048 || response.StatusCode != http.StatusOK || protocol.DecodeStrict(raw, &value) != nil || value.ControlID != h.identity.Address.ControlID {
-		return agentlink.ErrConflict
 	}
 	return nil
 }

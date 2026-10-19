@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"io/fs"
-	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -16,7 +15,7 @@ func TestCodexHostUpgradePreservesExistingControlData(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if !entry.IsDir() && !strings.HasSuffix(path, "0005_codex_host.sql") {
+		if !entry.IsDir() && entry.Name() < "0007_" {
 			raw, e := fs.ReadFile(migrationFiles, path)
 			if e != nil {
 				return e
@@ -37,7 +36,7 @@ func TestCodexHostUpgradePreservesExistingControlData(t *testing.T) {
 	if err = Migrate(ctx, db, ControlDatabase); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec("INSERT INTO codex_agent_host VALUES(1,'stable-codex','encrypted-ref','https://codex.example')"); err != nil {
+	if _, err = db.Exec("INSERT INTO codex_agent_host(singleton,control_id,owner_secret_ref,endpoint) VALUES(1,'stable-codex','encrypted-ref','')"); err != nil {
 		t.Fatal(err)
 	}
 	if err = Migrate(ctx, db, ControlDatabase); err != nil {

@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/jjyr/pot/pkg/agentlink"
+	"encoding/json"
+	"github.com/jjyr/pot/internal/linkhost"
+	"github.com/jjyr/pot/pkg/peer"
 )
 
 func freePeerAddress(t *testing.T) string {
@@ -20,26 +22,23 @@ func freePeerAddress(t *testing.T) string {
 	listener.Close()
 	return address
 }
-func TestCodexPrivateHTTPPeerListenerAndRestart(t *testing.T) {
+func TestCodexTCPPeerListenerAndRestart(t *testing.T) {
 	ctx := context.Background()
 	h, root := testHost(t)
 	address := freePeerAddress(t)
-	endpoint := "http://" + address
-	if err := h.configureEndpoint(ctx, endpoint); err != nil {
+	endpoint := "tcp://" + address
+	requestCtx, finishRequest := context.WithCancel(ctx)
+	if err := h.configureEndpoint(requestCtx, endpoint); err != nil {
+		finishRequest()
 		h.close()
 		t.Fatal(err)
 	}
-	request, _ := http.NewRequest(http.MethodGet, endpoint+"/api/v1/agent-host/health", nil)
-	request.Header.Set("Authorization", "Bearer "+h.token)
-	response, err := agentlink.NewHTTPClient(nil).Do(request)
-	if err != nil {
+	finishRequest()
+	session, err := peer.Dial(ctx, endpoint, peer.DialOptions{Identity: h.peerIdentity, PrivateKey: h.peerKey, Expected: &h.peerIdentity, Service: "owner", Auth: json.RawMessage(`{"token":"` + h.token + `"}`)})
+	if err == nil {
+		session.Close()
 		h.close()
-		t.Fatal(err)
-	}
-	response.Body.Close()
-	if response.StatusCode >= 200 && response.StatusCode < 300 {
-		h.close()
-		t.Fatal("peer listener exposed owner API")
+		t.Fatal("peer listener exposed owner service")
 	}
 	if err = h.probeEndpoint(ctx, endpoint); err != nil {
 		h.close()
@@ -62,12 +61,15 @@ func TestCodexPrivateHTTPPeerListenerAndRestart(t *testing.T) {
 	if err = h.probeEndpoint(ctx, endpoint); err != nil {
 		t.Fatal(err)
 	}
-	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]string{"control_id": "someone-else"})
-	}))
-	defer foreign.Close()
-	if err = h.configureEndpoint(ctx, foreign.URL); err == nil {
-		t.Fatal("accepted another host's identity")
+	foreign, _ := testHost(t)
+	defer foreign.close()
+	stranger, err := linkhost.ListenPeer(ctx, "127.0.0.1:0", foreign.peerServer())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stranger.Close()
+	if err = h.configureEndpoint(ctx, "tcp://"+stranger.Addr()); err == nil {
+		t.Fatal("accepted another host identity")
 	}
 	var saved string
 	if err = h.db.QueryRow("SELECT endpoint FROM codex_agent_host").Scan(&saved); err != nil || saved != endpoint {
@@ -76,7 +78,7 @@ func TestCodexPrivateHTTPPeerListenerAndRestart(t *testing.T) {
 	if err = h.probeEndpoint(ctx, endpoint); err != nil {
 		t.Fatal("failed configuration stopped original listener", err)
 	}
-	for _, invalid := range []string{"http://8.8.8.8:8793", "http://user:password@127.0.0.1:8793", "http://127.0.0.1:8793?token=secret"} {
+	for _, invalid := range []string{"tcp://8.8.8.8:8793", "tcp://user:password@127.0.0.1:8793", "tcp://127.0.0.1:8793?token=secret"} {
 		if err = h.configureEndpoint(ctx, invalid); err == nil {
 			t.Fatal("invalid private network endpoint accepted")
 		}
@@ -89,7 +91,7 @@ func TestCodexFailedProbeClosesCandidateListener(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	address := freePeerAddress(t)
-	if err := h.configureEndpoint(ctx, "http://"+address); err == nil {
+	if err := h.configureEndpoint(ctx, "tcp://"+address); err == nil {
 		t.Fatal("cancelled configuration unexpectedly succeeded")
 	}
 	listener, err := net.Listen("tcp", address)
@@ -108,7 +110,7 @@ func TestCodexFailedPersistenceClosesCandidateListener(t *testing.T) {
 	defer h.close()
 	address := freePeerAddress(t)
 	h.db.Close()
-	if err := h.configureEndpoint(context.Background(), "http://"+address); err == nil {
+	if err := h.configureEndpoint(context.Background(), "tcp://"+address); err == nil {
 		t.Fatal("closed storage accepted configuration")
 	}
 	listener, err := net.Listen("tcp", address)
@@ -126,7 +128,7 @@ func TestCodexNetworkRestoreFailureKeepsLocalHostUsable(t *testing.T) {
 	available.Close()
 	h, _ := testHost(t)
 	defer h.close()
-	if _, err = h.db.Exec("UPDATE codex_agent_host SET endpoint=? WHERE singleton=1", "http://"+hostListen); err != nil {
+	if _, err = h.db.Exec("UPDATE codex_agent_host SET endpoint=? WHERE singleton=1", "tcp://"+hostListen); err != nil {
 		t.Fatal(err)
 	}
 	if err = h.startPeerNetwork(context.Background()); err != nil {
@@ -135,7 +137,7 @@ func TestCodexNetworkRestoreFailureKeepsLocalHostUsable(t *testing.T) {
 	if h.networkError == "" {
 		t.Fatal("missing network failure state")
 	}
-	if err = h.probeEndpoint(context.Background(), "http://"+hostPeerListen); err != nil {
+	if err = h.probeEndpoint(context.Background(), "tcp://"+hostPeerListen); err != nil {
 		t.Fatal("loopback peer unavailable", err)
 	}
 	request := httptest.NewRequest(http.MethodGet, "http://"+hostListen+"/api/v1/agent-host/health", nil)

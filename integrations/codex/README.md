@@ -24,30 +24,37 @@ Paste the other side's address to connect in either direction. One reachable
 reachable endpoint is sufficient for authenticated bidirectional messages. Invites
 contain message-only capabilities: keep them out of chat, prompts and logs.
 
-Owner management stays on `127.0.0.1:8792`. The separate message listener starts
-on `127.0.0.1:8793`; only authenticated Agent messages and a narrow identity
-readiness check are served there. Use a reachable private HTTP address over
-Tailscale or another trusted VPN, or an existing HTTPS reverse proxy. HTTP on
-loopback, private addresses and the Tailscale address range needs no certificate.
-Public HTTP addresses are rejected. HTTP DNS results must all be private and are
-checked again and pinned when connecting; proxy environments cannot bypass this
-boundary. HTTPS keeps normal certificate and hostname verification.
+Owner management stays on `127.0.0.1:8792` using the local HTTP API. The
+separate message listener on `127.0.0.1:8793` uses the shared TCP Peer protocol.
+Configure a reachable `tcp://host:port` address over Tailscale or another trusted
+private network. No TLS certificate is needed. The host verifies Ed25519 nonce
+challenges and signs session traffic; invitations pin the remote host's public
+key. TCP endpoints must resolve entirely to private or tailnet addresses, and
+connections recheck DNS and pin the selected address. There is no HTTP peer
+fallback, anonymous readiness route, or owner management service on this socket.
 
 Select Tailscale only after installing and logging in locally. Its explicit
-configure action reads actual Serve settings, reuses this message listener's
-existing HTTP or HTTPS mapping, or creates an HTTP mapping when no other Serve
-configuration exists. It refuses to replace unrelated settings and never enables
-Funnel or changes ACLs. Manual setup, after checking `tailscale serve status`, is
-`tailscale serve --bg --http=8793 http://127.0.0.1:8793`; copy the actual returned
-address. Owner management is never published by this mapping.
+configure action inspects actual Serve settings and reuses a matching TCP
+forwarder, or creates one when the selected port is unused. It refuses to
+replace unrelated settings and never enables Funnel or changes ACLs. Manual
+setup, after checking `tailscale serve status`, is
+`tailscale serve --bg --tcp=8793 tcp://127.0.0.1:8793`; copy the actual TCP address.
+The forwarding target is the message socket, never the owner HTTP listener.
 
-For a direct private HTTP address the host opens a message-only listener on the
-corresponding local interface. It verifies the endpoint's stable Codex identity
-before saving it. Redirects, invalid origins, oversized responses and other
-services are rejected; failed configuration closes its candidate listener and
-keeps the prior address. Restart restores the saved private listener or reuses a
-working Serve/reverse-proxy endpoint. If the VPN is unavailable, local management
-remains usable with a network repair state.
+For a direct private address the host opens a message-only listener on the
+corresponding local interface. Before saving an address it proves that the
+endpoint holds this stable Codex host's private key. A different key, invalid
+address or failed handshake closes the candidate and keeps the prior listener.
+Restart restores the saved listener or reuses a working TCP forwarder. If the VPN
+is unavailable, local management remains usable with a network repair state.
+
+The Ed25519 private key is stored in encrypted Secrets; metadata contains only
+its public key and secret reference. Restore the original database and master
+key if identity material is lost; startup never silently replaces an existing
+host key. Upgrading from the earlier HTTP design invalidates its connection
+address and requires a new TCP invitation. Owner credentials, stable Agent IDs,
+mailbox messages, processing claims and receipts are preserved without launching
+or replaying work.
 
 The first plugin process ensures and verifies a detached user-level daemon;
 subsequent chats reuse it after an authenticated version check. A foreign service

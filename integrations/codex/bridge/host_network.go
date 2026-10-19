@@ -3,29 +3,21 @@ package bridge
 import (
 	"context"
 	"errors"
-	"net/http"
 	"time"
 
 	"github.com/jjyr/pot/internal/linkhost"
 	"github.com/jjyr/pot/pkg/agentlink"
+	"github.com/jjyr/pot/pkg/peer"
 )
 
-// Peer listeners expose only readiness and authenticated message transport.
+// Peer listeners expose only authenticated host identity and message transport.
 // Owner configuration remains on the separate fixed loopback port.
-func (h *agentHost) peerHandler() http.Handler {
-	peer := h.links.Handler()
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == agentlink.Prefix+"/ready" && r.Method == http.MethodGet {
-			writeJSON(w, http.StatusOK, map[string]string{"control_id": h.identity.Address.ControlID})
-			return
-		}
-		peer.ServeHTTP(w, r)
-	})
-}
+func (h *agentHost) peerServer() *peer.Server { return h.peerRegistry.Server() }
 func (h *agentHost) startPeerNetwork(ctx context.Context) error {
 	h.accessMu.Lock()
 	defer h.accessMu.Unlock()
-	peer, err := linkhost.ListenPeer(hostPeerListen, h.peerHandler())
+	h.peerCtx = ctx
+	peer, err := linkhost.ListenPeer(h.peerCtx, hostPeerListen, h.peerServer())
 	if err != nil {
 		return err
 	}
@@ -52,7 +44,7 @@ func (h *agentHost) startPeerNetwork(ctx context.Context) error {
 // A candidate is made usable and checked before replacing durable configuration.
 // Failed probes leave the prior listener, address and connections intact.
 func (h *agentHost) configureEndpoint(ctx context.Context, raw string) error {
-	endpoint, err := agentlink.ValidateEndpoint(ctx, raw)
+	endpoint, err := peer.ValidateEndpoint(ctx, raw)
 	if err != nil {
 		return err
 	}
@@ -79,10 +71,10 @@ func (h *agentHost) configureEndpoint(ctx context.Context, raw string) error {
 	return nil
 }
 func (h *agentHost) preparePeer(ctx context.Context, endpoint string) (*linkhost.PeerListener, error) {
-	if _, err := agentlink.ValidateEndpoint(ctx, endpoint); err != nil {
+	if _, err := peer.ValidateEndpoint(ctx, endpoint); err != nil {
 		return nil, err
 	}
-	// Tailscale Serve and an existing reverse proxy already reach the loopback
+	// Tailscale Serve and an existing TCP forwarder already reach the loopback
 	// peer listener. Do not bind their incoming port a second time.
 	probeErr := h.probeEndpoint(ctx, endpoint)
 	if probeErr == nil {
@@ -91,7 +83,7 @@ func (h *agentHost) preparePeer(ctx context.Context, endpoint string) (*linkhost
 	if errors.Is(probeErr, agentlink.ErrConflict) {
 		return nil, probeErr
 	}
-	listen, err := linkhost.HTTPListenAddress(ctx, endpoint)
+	listen, err := linkhost.TCPListenAddress(ctx, endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +95,7 @@ func (h *agentHost) preparePeer(ctx context.Context, endpoint string) (*linkhost
 	}
 	var candidate *linkhost.PeerListener
 	if !(h.loopbackPeer != nil && listen == h.loopbackPeer.Addr() || h.directPeer != nil && listen == h.directPeer.Addr()) {
-		candidate, err = linkhost.ListenPeer(listen, h.peerHandler())
+		candidate, err = linkhost.ListenPeer(h.peerCtx, listen, h.peerServer())
 		if err != nil {
 			return nil, agentlink.ErrUnavailable
 		}
