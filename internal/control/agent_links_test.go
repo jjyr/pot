@@ -49,7 +49,7 @@ func agentControl(t *testing.T, id string) *agentControlFixture {
 func connectAgentControls(t *testing.T, a, b *agentControlFixture) agentlink.Connection {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", AssistantID: "main", Mode: "https", Endpoint: b.server.URL}); err != nil {
+	if _, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", AssistantID: "main", Mode: "address", Endpoint: b.server.URL}); err != nil {
 		t.Fatal(err)
 	}
 	invitation, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "invite", AssistantID: "main"})

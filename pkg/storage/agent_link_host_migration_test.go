@@ -38,3 +38,33 @@ func TestAgentLinkHostUpgradeAndRepeatedStartup(t *testing.T) {
 		t.Fatal(listen, endpoint, mode)
 	}
 }
+
+func TestAgentNetworkUpgradePreservesEndpointWithoutCertificateRequirement(t *testing.T) {
+	ctx := context.Background()
+	db := migrationDB(t)
+	old := fstest.MapFS{}
+	for _, name := range []string{"0001_baseline.sql", "0002_agent_links.sql", "0003_agent_link_host.sql"} {
+		path := "migrations/control/" + name
+		data, err := migrationFiles.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		old[path] = &fstest.MapFile{Data: data}
+	}
+	if err := migrateDatabase(ctx, db, ControlDatabase, old); err != nil {
+		t.Fatal(err)
+	}
+	execMigrationSQL(t, db, `INSERT INTO agent_link_host VALUES(1,'127.0.0.1:1234','https://retained.example','https')`)
+	for range 2 {
+		if err := Migrate(ctx, db, ControlDatabase); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var endpoint, mode string
+	if err := db.QueryRow(`SELECT endpoint,mode FROM agent_link_host`).Scan(&endpoint, &mode); err != nil {
+		t.Fatal(err)
+	}
+	if endpoint != "https://retained.example" || mode != "address" {
+		t.Fatal(endpoint, mode)
+	}
+}

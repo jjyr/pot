@@ -254,8 +254,11 @@ installing an archive starts a VM or installs a user service.
 
 The topology page manages Agent Links separately from third-party accounts and
 Runner enrollment. Each Control starts a dedicated loopback message listener;
-the page shows its actual bind address. Use its access setup to verify an existing
-HTTPS reverse proxy or explicitly configure Tailscale Serve. The public origin
+the page shows its actual bind address. Use its access setup to verify a reachable private HTTP address or an optional
+HTTPS reverse proxy. A direct HTTP endpoint on a local private interface gets a
+dedicated peer listener automatically. Tailscale and VPNs supply network encryption;
+application certificates are not required. The access action can explicitly configure
+Tailscale Serve over HTTP, without enabling tailnet HTTPS certificates. The origin
 must route to this message listener, not the owner API. Setup probes the endpoint
 and checks the returned Control identity before saving it. Merely opening the
 page does not change network configuration. Existing unrelated Serve mappings

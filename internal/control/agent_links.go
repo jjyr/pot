@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -25,10 +24,12 @@ type agentLinkConfig struct {
 }
 
 type agentLinkHost struct {
-	mu      sync.Mutex
-	service *agentlink.Service
-	config  agentLinkConfig
-	server  *http.Server
+	mu           sync.Mutex
+	service      *agentlink.Service
+	config       agentLinkConfig
+	server       *linkhost.PeerListener
+	setup        sync.Mutex
+	networkError string
 }
 
 type controlLinkMailbox struct{ s *Service }
@@ -69,7 +70,7 @@ func (s *Service) openAgentLinks() error {
 	if err != nil {
 		return err
 	}
-	host := &agentLinkHost{service: service, config: agentLinkConfig{Listen: "127.0.0.1:0", Mode: "https"}}
+	host := &agentLinkHost{service: service, config: agentLinkConfig{Listen: "127.0.0.1:0", Mode: "address"}}
 	err = s.integrationDB.QueryRowContext(s.ctx, "SELECT listen,endpoint,mode FROM agent_link_host WHERE singleton=1").Scan(&host.config.Listen, &host.config.Endpoint, &host.config.Mode)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
@@ -79,7 +80,15 @@ func (s *Service) openAgentLinks() error {
 		return err
 	}
 	if err = s.startAgentListener(host.config); err != nil {
-		return err
+		if host.config.Endpoint == "" {
+			return err
+		}
+		fallback := host.config
+		fallback.Listen = "127.0.0.1:0"
+		if err = s.startAgentListener(fallback); err != nil {
+			return err
+		}
+		host.networkError = "agent_link_listener_unavailable"
 	}
 	s.pluginWG.Add(1)
 	go func() { defer s.pluginWG.Done(); s.linkPlugins.Run(s.ctx) }()
@@ -87,42 +96,48 @@ func (s *Service) openAgentLinks() error {
 }
 
 func validAgentListen(value string) bool {
-	host, _, err := net.SplitHostPort(value)
+	host, port, err := net.SplitHostPort(value)
 	ip := net.ParseIP(host)
-	return err == nil && ip != nil && ip.IsLoopback()
-}
-func validAgentEndpoint(value string) bool {
-	u, err := url.Parse(value)
-	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == "" && (u.Path == "" || u.Path == "/")
+	if err != nil || ip == nil || ip.IsUnspecified() {
+		return false
+	}
+	if port == "0" {
+		return ip.IsLoopback()
+	}
+	_, err = agentlink.ValidateEndpoint(context.Background(), "http://"+value)
+	return err == nil
 }
 
+func (s *Service) installAgentListener(ctx context.Context, config agentLinkConfig, server *linkhost.PeerListener) error {
+	config.Listen = server.Addr()
+	_, err := s.integrationDB.ExecContext(ctx, "INSERT INTO agent_link_host(singleton,listen,endpoint,mode) VALUES(1,?,?,?) ON CONFLICT(singleton) DO UPDATE SET listen=excluded.listen,endpoint=excluded.endpoint,mode=excluded.mode", config.Listen, config.Endpoint, config.Mode)
+	if err != nil {
+		return err
+	}
+	host := s.agentLinks
+	host.mu.Lock()
+	old := host.server
+	host.server = server
+	host.config = config
+	host.networkError = ""
+	host.mu.Unlock()
+	if old != nil {
+		old.Close()
+	}
+	return nil
+}
 func (s *Service) startAgentListener(config agentLinkConfig) error {
 	if !validAgentListen(config.Listen) {
 		return protocol.APIError{Code: "agent_link_invalid_listen"}
 	}
-	listener, err := net.Listen("tcp", config.Listen)
+	server, err := linkhost.ListenPeer(config.Listen, s.AgentLinkHandler())
 	if err != nil {
 		return protocol.APIError{Code: "agent_link_listener_unavailable"}
 	}
-	config.Listen = listener.Addr().String()
-	_, err = s.integrationDB.ExecContext(s.ctx, "INSERT INTO agent_link_host(singleton,listen,endpoint,mode) VALUES(1,?,?,?) ON CONFLICT(singleton) DO UPDATE SET listen=excluded.listen,endpoint=excluded.endpoint,mode=excluded.mode", config.Listen, config.Endpoint, config.Mode)
-	if err != nil {
-		listener.Close()
-		return err
+	if err = s.installAgentListener(s.ctx, config, server); err != nil {
+		server.Close()
 	}
-	host := s.agentLinks
-	server := &http.Server{Handler: s.AgentLinkHandler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384}
-	host.mu.Lock()
-	previous := host.server
-	host.server = server
-	host.config = config
-	host.mu.Unlock()
-	if previous != nil {
-		previous.Close()
-	}
-	s.pluginWG.Add(1)
-	go func() { defer s.pluginWG.Done(); _ = server.Serve(listener) }()
-	return nil
+	return err
 }
 
 // AgentLinkHandler exposes only authenticated peer messages, never owner APIs.
@@ -172,10 +187,14 @@ func (s *Service) AgentLinks(ctx context.Context, assistantID string) (any, erro
 	h := s.agentLinks
 	h.mu.Lock()
 	config := h.config
+	networkError := h.networkError
 	h.mu.Unlock()
 	status, reason := "ready", ""
 	if config.Endpoint == "" {
 		status, reason = "needs_access", "agent_link_access_required"
+	}
+	if networkError != "" {
+		status, reason = "needs_access", networkError
 	}
 	if err != nil {
 		status, reason = "needs_access", "agent_link_assistant_unavailable"
@@ -269,6 +288,8 @@ func (s *Service) ManageAgentLink(ctx context.Context, command AgentLinkCommand)
 
 func (s *Service) configureAgentAccess(ctx context.Context, command AgentLinkCommand) (any, error) {
 	h := s.agentLinks
+	h.setup.Lock()
+	defer h.setup.Unlock()
 	h.mu.Lock()
 	config := h.config
 	h.mu.Unlock()
@@ -284,24 +305,54 @@ func (s *Service) configureAgentAccess(ctx context.Context, command AgentLinkCom
 			return nil, err
 		}
 		config.Endpoint = endpoint
-	} else if config.Mode == "https" {
+	} else if config.Mode == "address" {
 		config.Endpoint = strings.TrimRight(command.Endpoint, "/")
 	} else {
 		return nil, agentlink.ErrInvalid
 	}
-	if !validAgentEndpoint(config.Endpoint) {
-		return nil, agentlink.ErrInvalid
-	}
-	if err := s.probeAgentEndpoint(ctx, config.Endpoint); err != nil {
-		return nil, err
-	}
-	_, err := s.integrationDB.ExecContext(ctx, "UPDATE agent_link_host SET endpoint=?,mode=? WHERE singleton=1", config.Endpoint, config.Mode)
+	endpoint, err := agentlink.ValidateEndpoint(ctx, config.Endpoint)
 	if err != nil {
 		return nil, err
 	}
-	h.mu.Lock()
-	h.config = config
-	h.mu.Unlock()
+	config.Endpoint = endpoint
+	var candidate *linkhost.PeerListener
+	if err = s.probeAgentEndpoint(ctx, endpoint); err != nil {
+		var unavailable protocol.APIError
+		if !errors.As(err, &unavailable) || unavailable.Code != "agent_link_unreachable" {
+			return nil, err
+		}
+		listen, e := linkhost.HTTPListenAddress(ctx, endpoint)
+		if e != nil || listen == "" || listen == config.Listen {
+			return nil, err
+		}
+		candidate, e = linkhost.ListenPeer(listen, s.AgentLinkHandler())
+		if e != nil {
+			return nil, protocol.APIError{Code: "agent_link_listener_unavailable"}
+		}
+		defer func() {
+			if candidate != nil {
+				candidate.Close()
+			}
+		}()
+		if err = s.probeAgentEndpoint(ctx, endpoint); err != nil {
+			return nil, err
+		}
+	}
+	if candidate != nil {
+		if err = s.installAgentListener(ctx, config, candidate); err != nil {
+			return nil, err
+		}
+		candidate = nil
+	} else {
+		_, err = s.integrationDB.ExecContext(ctx, "UPDATE agent_link_host SET endpoint=?,mode=? WHERE singleton=1", config.Endpoint, config.Mode)
+		if err != nil {
+			return nil, err
+		}
+		h.mu.Lock()
+		h.config = config
+		h.networkError = ""
+		h.mu.Unlock()
+	}
 	return s.AgentLinks(ctx, command.AssistantID)
 }
 
@@ -312,13 +363,8 @@ func (s *Service) probeAgentEndpoint(ctx context.Context, endpoint string) error
 	if err != nil {
 		return err
 	}
-	client := s.options.ControlHTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: 8 * time.Second}
-	}
-	copy := *client
-	copy.CheckRedirect = func(*http.Request, []*http.Request) error { return errors.New("redirect denied") }
-	response, err := copy.Do(request)
+	client := agentlink.NewHTTPClient(s.options.ControlHTTPClient)
+	response, err := client.Do(request)
 	if err != nil {
 		return protocol.APIError{Code: "agent_link_unreachable"}
 	}
