@@ -162,11 +162,15 @@ the original capability, identities, names and host key exactly; new claims use
 the current NodeID hash format.
 
 `control/0002_agent_links.sql` adds connection and invitation metadata with
-references into the encrypted secret store. `control/0003_agent_link_host.sql`
-records the dedicated loopback listener and verified public message endpoint.
-Neither migration rewrites existing service accounts or task/run receipts.
+references into the encrypted secret store. `control/0003_agent_link_tcp.sql`
+retires HTTP invitations and credentials, and marks existing connections as
+requiring a new TCP invitation without deleting mailbox messages or receipts.
+`control/0004_agent_link_host.sql` records the peer listener and verified endpoint;
+`control/0005_agent_network.sql` converts the access mode to `address`.
+`control/0006_peer_network.sql` clears old HTTP publication addresses, because
+their ports cannot be assumed to serve the new TCP protocol.
 
-`control/0004_agent_network.sql` changes the access configuration mode from
-`https` to the protocol-neutral `address`, preserving the endpoint, listener,
-connection identities and encrypted credentials. Private HTTP endpoints do not
-require certificates; optional HTTPS endpoints retain certificate verification.
+`machines/0002_peer_tcp.sql` preserves signing identities, membership epochs and
+original join requests while removing old HTTP endpoints and CA settings. Existing
+Runners update their endpoint against the saved Control identity; migration never
+re-enrolls a machine or replays execution. See [Peer protocol](peer-protocol.md).
