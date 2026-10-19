@@ -118,9 +118,9 @@ async function test() {
   const bounded = fixture();
   for (let i = 0; i < 30; i++) bounded.listeners.error({message: `error ${i}`});
   assert.equal(bounded.logs().length, 20);
-  bounded.context.potReportPanic('Bearer secret-value api_key=private sk-fixture https://user:password@example.test/app.js?access_token=private#secret');
+  bounded.context.potReportPanic('Bearer secret-value api_key=fixture-private-value sk-fixture https://user:password@example.test/app.js?access_token=fixture-private-value#secret');
   const serialized = JSON.stringify(bounded.logs().at(-1));
-  for (const secret of ['secret-value', 'private', 'sk-fixture', 'password', '#secret']) assert.ok(!serialized.includes(secret), secret);
+  for (const secret of ['secret-value', 'fixture-private-value', 'sk-fixture', 'password', '#secret']) assert.ok(!serialized.includes(secret), secret);
   console.log('Web errors: capture, panic bridge, timers, deduplication, copy, storage, limits and redaction passed');
 }
 test().catch(error => { console.error(error); process.exitCode = 1; });

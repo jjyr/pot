@@ -53,7 +53,14 @@ existing assistant location is read-only. See
 ## Tasks, schedules and Machines
 
 Tasks combines both Spaces, then applies status grouping, search, ordering and
-pagination to the combined list. Rows group by assistant with ownership badges;
+pagination to the combined list. `GET /api/v1/tasks/catalog` is an authenticated
+operator read across a Control's assistants, ordered by updated time descending,
+then Task ID and assistant ID. It returns at most 50 rows with complete counts and
+totals; agent tools continue to use the assistant-scoped `/tasks/query` endpoint.
+The UI reads a sufficient prefix per Space rather than loading every assistant's
+archive. A completed source can render before a slow Space finishes; the loading
+caption identifies provisional totals and pagination waits for all sources.
+Rows group by assistant with ownership badges;
 Space/object identity disambiguates selection. Task details route to the owning
 Control/assistant and identify the actual execution machine and working directory.
 A task created by a message recipient belongs to that recipient. Back restores

@@ -312,7 +312,7 @@ func TestMigrationConcurrentHandles(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	if got := migrationCount(t, handles[0]); got != 3 {
+	if got := migrationCount(t, handles[0]); got != 4 {
 		t.Fatal(got)
 	}
 }
