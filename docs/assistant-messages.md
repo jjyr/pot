@@ -14,18 +14,20 @@ returns assistant addresses; Task metadata includes its address. Worker context
 contains its own address and its owning assistant's address.
 
 `send_message({to, text})` returns durable acceptance, never execution
-completion. Control binds the envelope's `from` identity to the current execution;
-models cannot provide a sender, impersonate a user or produce Runtime events.
-Owner-origin messages guide active Tasks at a model boundary. Peer information
-is reference data, not new user authority. Ended Tasks retain reference without
-restarting; user requests for more work require a new Task. Workers can message
-only their owning assistant and cannot delegate or acquire management tools.
-Runtime binds the processing parent from the authenticated execution, never tool
+completion. Control binds the envelope's `from` identity to the current
+execution; models cannot provide a sender, impersonate a user or produce Runtime
+events. Owner-origin messages guide active Tasks at a model boundary. Peer
+information is reference data, not new user authority. Owner guidance to an
+ended Task reopens the same Task and starts a new Run using retained context and
+workspace. Peer references do not restart ended Tasks. Workers can message only
+their owning assistant and cannot delegate or acquire management tools. Runtime
+binds the processing parent from the authenticated execution, never tool
 arguments. Replies to that parent's sender automatically set wire `reply_to` to
-the parent's message ID and retain its conversation; forwarding starts a new wire
-conversation while retaining the causal hop count. Task inputs bind to their
-original run, with any processing parent recorded automatically. Inputs forwarded
-while handling agent correspondence remain references, never owner guidance.
+the parent's message ID and retain its conversation; forwarding starts a new
+wire conversation while retaining the causal hop count. Task inputs retain their
+accepted conversation identity, with any processing parent recorded
+automatically. Inputs forwarded while handling agent correspondence remain
+references, never owner guidance.
 
 ## Shared storage and receivers
 
@@ -33,7 +35,7 @@ while handling agent correspondence remain references, never owner guidance.
 checks. `agent_messages` in the Control's `tasks.sqlite` stores Task inputs,
 assistant correspondence, task-result events and plugin notifications. Task input
 and notification views are transcript/receiver projections over this table, not separate queues.
-Task completion and its event commit in the same transaction. Task schema 8 and
+Task completion and its event commit in the same transaction. Task schema 9 and
 schedule schema 2 require the unified outcome format; older schemas are rejected
 without importing legacy queues or schedule notifications.
 
@@ -48,7 +50,8 @@ reconciling the original turn then admits separately accepted pending input.
 Assistant correspondence is grouped by the full sender Agent address and owning
 recipient. A peer retains one independent model context across wire conversations;
 different senders, including equal Agent IDs on different Controls, remain separate.
-Task messages are consumed by the original run at safe model boundaries; they
+Task messages are consumed at safe model boundaries; owner guidance accepted
+after finalization continues in the next Run of the same Task. Messages
 do not interrupt commands. Assistant replies to peers use `send_message`; final
 model text is private to that correspondence and is not automatically forwarded.
 User chat remains serial, while background Tasks execute independently under
@@ -101,21 +104,24 @@ completion; recoverable creation errors are handled before ending the turn.
 A [terminal hook](hooks.md) creates one event identified by Task and run for
 completion, failure, interruption or cancellation, including stopping before
 dispatch. Approval hooks only update UI and user reminders. When user chat is
-available, its receiver claims a batch of currently pending outcomes and produces
-one concise report using each Task title and actual outcome. Ordinary and
-scheduled outcomes share this batch, delivery journal and acknowledgment path
-with host-accepted [plugin notifications](plugins.md#background-services-and-assistant-notifications).
-Failed manual Tasks can enter [bounded recovery](task-coordination.md#automatic-failure-recovery)
-before a report. Successfully accepted recovery needs no user-facing text.
-Each source keeps its own payload format; plugins never impersonate a Task or an
-assistant peer. The receiver uses one readiness/read/claim/Report/release path,
-and plugin acceptance wakes it through the existing inbox change subscription.
-The receiver reads immutable event data rather than reinterpreting current Task
-state. Schedule policy can suppress an outcome before delivery; no separate
-schedule notification queue or reporting turn exists. Ordinary summaries have no
-tools; recovery has only batch-scoped inspection and retry tools. Both omit
-undelivered Tasks' states and identifiers from prose. Real Task identifiers remain
-available for artifact download URLs.
+available, its receiver claims a batch of currently pending outcomes and
+produces one concise report using each Task title and actual outcome. Ordinary
+and scheduled outcomes share this batch, delivery journal and acknowledgment
+path with host-accepted [plugin
+notifications](plugins.md#background-services-and-assistant-notifications).
+Failed manual Tasks can enter [bounded
+recovery](task-coordination.md#automatic-failure-recovery) before a report.
+Successfully accepted recovery needs no user-facing text. Each source keeps its
+own payload format; plugins never impersonate a Task or an assistant peer. The
+receiver uses one readiness/read/claim/Report/release path, and plugin
+acceptance wakes it through the existing inbox change subscription. The receiver
+reads immutable event data rather than reinterpreting current Task state.
+Schedule policy can suppress an outcome before delivery; no separate schedule
+notification queue or reporting turn exists. Task-result handling exposes only
+batch-scoped inspection and archive decisions, plus retry for eligible failures.
+Plugin-only summaries have no tools. Both omit undelivered Tasks' states and
+identifiers from prose. Real Task identifiers remain available for artifact
+download URLs.
 
 Events become processed only after the handling turn is durably complete, including
 a silent turn for routine updates or accepted recovery. A successful explicit

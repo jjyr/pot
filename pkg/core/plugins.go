@@ -223,7 +223,7 @@ func PluginToolName(name string) bool {
 			return false
 		}
 	}
-	return !slices.Contains([]string{"exec_command", "write_stdin", "apply_patch", "plugin_call", "browser", "exec", "wait", "read_agent_instructions", "update_agent_instructions", "create_task", "list_tasks", "get_task", "interrupt", "cancel_task", "send_message", "list_assistants", "send_message", "list_schedules", "get_schedule", "manage_schedule", "list_execution_targets"}, name)
+	return !slices.Contains([]string{"exec_command", "write_stdin", "apply_patch", "plugin_call", "browser", "exec", "wait", "read_agent_instructions", "update_agent_instructions", "create_task", "set_task_dispositions", "list_tasks", "get_task", "interrupt", "cancel_task", "send_message", "list_assistants", "send_message", "list_schedules", "get_schedule", "manage_schedule", "list_execution_targets"}, name)
 }
 
 // Validate checks the common package format and each declared capability.
