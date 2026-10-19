@@ -84,7 +84,7 @@ run = "python scripts/go-notices --output .local/licenses/go-dependencies.txt ./
 [tasks."test:ui"]
 description = "Verify shared DOM composer and production owner-scoped state contracts"
 depends = ["test:ui-fluid"]
-run = ["node scripts/tests/go-ui-history.mjs", "node scripts/tests/go-ui-resource-cache.mjs", "node scripts/tests/go-ui-state.mjs", "node scripts/tests/go-ui-send-confirmation.mjs", "node scripts/tests/go-ui-production-state.mjs", "node scripts/tests/go-ui-usage.mjs", "node scripts/tests/script-runs.mjs", "node scripts/tests/go-ui-notifications.mjs", "node --test plugins/github/notifications.test.mjs plugins/codex/notifications.test.mjs", "node scripts/tests/go-ui-attachments.mjs", "node scripts/tests/go-ui-file-images.mjs", "node scripts/tests/go-ui-references.mjs", "node scripts/tests/web-errors.js"]
+run = ["node scripts/tests/go-ui-history.mjs", "node scripts/tests/go-ui-resource-cache.mjs", "node scripts/tests/go-ui-state.mjs", "node scripts/tests/go-ui-send-confirmation.mjs", "node scripts/tests/go-ui-production-state.mjs", "node scripts/tests/go-ui-usage.mjs", "node scripts/tests/script-runs.mjs", "node scripts/tests/go-ui-notifications.mjs", "node --test plugins/github/notifications.test.mjs plugins/codex/notifications.test.mjs plugins/codex/mcp-client.test.mjs", "node scripts/tests/go-ui-attachments.mjs", "node scripts/tests/go-ui-file-images.mjs", "node scripts/tests/go-ui-references.mjs", "node scripts/tests/web-errors.js"]
 
 
 [tasks."test:executor"]
@@ -195,5 +195,5 @@ description = "Qualify Linux namespaces in a disposable Docker test host"
 run = "python scripts/tests/sandbox-linux.py"
 
 [tasks."test:codex-bridge"]
-description = "Verify Codex REST/SSE, supervised JSONL, local MCP and durable inbox integration"
-run = ["go test -race ./integrations/codex/bridge ./pkg/pluginhost ./pkg/integrations/codex", "go test -race ./internal/control -run TestCodexBridge -count=1", "node --test plugins/codex/notifications.test.mjs", "python integrations/codex/install_test.py"]
+description = "Verify Codex MCP/SSE, supervised JSONL and durable inbox integration"
+run = ["go test -race ./integrations/codex/bridge ./pkg/pluginhost ./pkg/integrations/codex", "go test -race ./internal/control -run TestCodexBridge -count=1", "node --test plugins/codex/notifications.test.mjs plugins/codex/mcp-client.test.mjs", "python integrations/codex/install_test.py"]

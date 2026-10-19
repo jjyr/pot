@@ -98,16 +98,52 @@ func (f *fixture) call(client ClientConfig, method, path string, payload any, st
 	}
 	return body
 }
+
+func (f *fixture) tool(client ClientConfig, name string, args any, wantError string) []byte {
+	f.t.Helper()
+	req, _ := http.NewRequest("POST", f.http.URL+"/mcp", strings.NewReader(encoded(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": name, "arguments": args},
+	})))
+	req.Header.Set("Authorization", "Bearer "+client.Token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("MCP-Protocol-Version", "2025-06-18")
+	resp, err := f.http.Client().Do(req)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	var result struct {
+		Error  json.RawMessage `json:"error"`
+		Result struct {
+			IsError bool `json:"isError"`
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if resp.StatusCode != 200 || json.Unmarshal(raw, &result) != nil || len(result.Error) > 0 || result.Result.IsError {
+		if wantError == "" || wantError != "error" && !strings.Contains(string(raw), wantError) {
+			f.t.Fatalf("%s: %s %s", name, resp.Status, raw)
+		}
+		return raw
+	}
+	if wantError != "" || len(result.Result.Content) != 1 {
+		f.t.Fatalf("%s: expected error %q, got %s", name, wantError, raw)
+	}
+	return []byte(result.Result.Content[0].Text)
+}
 func (f *fixture) submit(id, prompt string) Task {
 	f.t.Helper()
-	raw := f.call(f.remote, "POST", "/v1/tasks", Request{id, "repo", "read-only", prompt}, 202)
+	raw := f.tool(f.remote, "codex_submit", Request{id, "repo", "read-only", prompt}, "")
 	var task Task
 	_ = json.Unmarshal(raw, &task)
 	return task
 }
 func (f *fixture) task(id string) Task {
 	var task Task
-	_ = json.Unmarshal(f.call(f.remote, "GET", "/v1/tasks/"+id, nil, 200), &task)
+	_ = json.Unmarshal(f.tool(f.remote, "codex_status", map[string]string{"task_id": id}, ""), &task)
 	return task
 }
 func (f *fixture) wait(id string, predicate func(Task) bool) Task {
@@ -133,16 +169,16 @@ func TestAuthenticationIdempotencyAndIsolation(t *testing.T) {
 	if a.ID != b.ID {
 		t.Fatal("duplicate task")
 	}
-	f.call(f.remote, "POST", "/v1/tasks", Request{"same", "repo", "read-only", "different"}, 409)
+	f.tool(f.remote, "codex_submit", Request{"same", "repo", "read-only", "different"}, "request_id_conflict")
 	for _, r := range []Request{{"path", "/etc", "read-only", "x"}, {"write", "repo", "workspace-write", "x"}, {"mode", "repo", "danger-full-access", "x"}} {
-		f.call(f.remote, "POST", "/v1/tasks", r, 403)
+		f.tool(f.remote, "codex_submit", r, "error")
 	}
-	f.call(f.local, "POST", "/v1/tasks", Request{"local", "repo", "read-only", "x"}, 404)
+	f.tool(f.local, "codex_submit", Request{"local", "repo", "read-only", "x"}, "error")
 	r, _, _ := f.s.Pair(Pair{Control: "other", Assistant: "main", Workspaces: []string{"repo"}})
-	f.call(r, "GET", "/v1/tasks/"+a.ID, nil, 404)
-	f.call(r, "POST", "/v1/tasks/"+a.ID+"/cancel", nil, 404)
-	f.call(f.remote, "POST", "/v1/tasks", map[string]any{"request_id": "inject", "workspace": "repo", "mode": "read-only", "prompt": "x", "assistant": "other"}, 400)
-	f.call(f.remote, "POST", "/v1/tasks", Request{"huge", "repo", "read-only", strings.Repeat("x", maxBody+1)}, 400)
+	f.tool(r, "codex_status", map[string]string{"task_id": a.ID}, "not_found")
+	f.tool(r, "codex_cancel", map[string]string{"task_id": a.ID}, "not_found")
+	f.tool(f.remote, "codex_submit", map[string]any{"request_id": "inject", "workspace": "repo", "mode": "read-only", "prompt": "x", "assistant": "other"}, "error")
+	f.tool(f.remote, "codex_submit", Request{"huge", "repo", "read-only", strings.Repeat("x", maxBody+1)}, "error")
 }
 func TestAppServerSubprocessCompletionApprovalAndCancellation(t *testing.T) {
 	f := setup(t)
@@ -164,7 +200,7 @@ func TestAppServerSubprocessCompletionApprovalAndCancellation(t *testing.T) {
 	}
 	a = f.submit("cancel", "hang")
 	f.wait(a.ID, func(t Task) bool { return t.TurnID != "" })
-	f.call(f.remote, "POST", "/v1/tasks/"+a.ID+"/cancel", map[string]any{}, 202)
+	f.tool(f.remote, "codex_cancel", map[string]string{"task_id": a.ID}, "")
 	if f.task(a.ID).Status != "cancelling" {
 		t.Fatal("premature cancellation confirmation")
 	}
@@ -335,6 +371,8 @@ func TestMCPStdioToolsCallsAndReceipt(t *testing.T) {
 	if result["protocolVersion"] != "2025-06-18" {
 		t.Fatal(result)
 	}
+	// A notification must be forwarded without introducing a stdout response.
+	_ = json.NewEncoder(stdin).Encode(map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"})
 	result = call(2, "tools/list", map[string]any{})
 	if len(result["tools"].([]any)) != 3 {
 		t.Fatal(result)
@@ -355,12 +393,12 @@ func TestMCPStdioToolsCallsAndReceipt(t *testing.T) {
 	if !strings.Contains(encoded(result), "received") {
 		t.Fatal(result)
 	}
-	f.call(f.remote, "POST", "/v1/messages/"+msg.ID+"/reply", map[string]string{"result": "authorized answer"}, 200)
+	f.tool(f.remote, "codex_reply", map[string]string{"message_id": msg.ID, "result": "authorized answer"}, "")
 	result = call(5, "tools/call", map[string]any{"name": "pot_receipt", "arguments": map[string]any{"message_id": msg.ID}})
 	if !strings.Contains(encoded(result), "authorized answer") {
 		t.Fatal(result)
 	}
-	f.call(f.remote, "POST", "/v1/messages/"+msg.ID+"/reply", map[string]string{"result": "different"}, 409)
+	f.tool(f.remote, "codex_reply", map[string]string{"message_id": msg.ID, "result": "different"}, "request_id_conflict")
 }
 
 func waitStreams(t *testing.T, f *fixture, n int) {
@@ -381,7 +419,7 @@ func waitStreams(t *testing.T, f *fixture, n int) {
 func TestEventProjectionEscapingAndSnapshotPagination(t *testing.T) {
 	f := setup(t)
 	for i := 0; i < 10; i++ {
-		raw := f.call(f.local, "POST", "/v1/messages", map[string]any{"request_id": fmt.Sprint("message-", i), "kind": "request", "body": strings.Repeat("\x00", 8000)}, 202)
+		raw := f.tool(f.local, "pot_request", map[string]any{"request_id": fmt.Sprint("message-", i), "body": strings.Repeat("\x00", 8000)}, "")
 		var msg Message
 		if json.Unmarshal(raw, &msg) != nil {
 			t.Fatal("message result")
@@ -443,7 +481,7 @@ func TestUnknownCleanupFencesAdmissionAndQueuedExecution(t *testing.T) {
 	}, "terminal", true); err != nil {
 		t.Fatal(err)
 	}
-	f.call(f.remote, "POST", "/v1/tasks", Request{"new", "repo", "read-only", "new work"}, 503)
+	f.tool(f.remote, "codex_submit", Request{"new", "repo", "read-only", "new work"}, "cleanup_unconfirmed_requires_operator_reconciliation")
 	// The original request identity remains inspectable and idempotent.
 	if got := f.submit("uncertain", "original"); got.ID != task.ID || got.Error == "" {
 		t.Fatal(got)

@@ -9,7 +9,7 @@ export function pairing() {
 }
 
 export async function request(config, path, {method = 'GET', body, headers = {}, stream = false, signal} = {}) {
-  if (!path.startsWith('/v1/')) throw Error('invalid_bridge_path');
+  if (path !== '/mcp' && !path.startsWith('/v1/')) throw Error('invalid_bridge_path');
   const data = body === undefined ? undefined : JSON.stringify(body);
   return new Promise((resolve, reject) => {
     const req = https.request(new URL(path, config.endpoint), {
@@ -26,7 +26,7 @@ export async function request(config, path, {method = 'GET', body, headers = {},
       let size = 0; const chunks = [];
       response.on('data', chunk => { size += chunk.length; if (size > 2 * 1024 * 1024) response.destroy(Error('bridge_response_limit')); else chunks.push(chunk); });
       response.on('error', reject);
-      response.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch { reject(Error('invalid_bridge_json')); } });
+      response.on('end', () => { if (path === '/mcp' && response.statusCode === 202 && size === 0) { resolve(undefined); return; } try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch { reject(Error('invalid_bridge_json')); } });
     });
     req.on('error', () => reject(Error('bridge_connection_failed_check_tls_address_and_pairing')));
     req.setTimeout(stream ? 45000 : 15000, () => req.destroy(Error('bridge_timeout')));

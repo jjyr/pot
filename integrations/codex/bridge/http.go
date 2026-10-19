@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,14 +35,17 @@ type Server struct {
 	rates     map[string]*rate
 	wake      chan struct{}
 	wg        sync.WaitGroup
+	mcp       http.Handler
 }
 type rate struct {
 	at    time.Time
 	count int
 }
 
-func NewServer(ctx context.Context, s *Store, c Config, worker []string) *Server {
-	return &Server{Store: s, Config: c, Worker: worker, ctx: ctx, Heartbeat: 15 * time.Second, active: map[string]*appSession{}, streams: map[string]int{}, rates: map[string]*rate{}, wake: make(chan struct{}, 1)}
+func NewServer(ctx context.Context, store *Store, c Config, worker []string) *Server {
+	s := &Server{Store: store, Config: c, Worker: worker, ctx: ctx, Heartbeat: 15 * time.Second, active: map[string]*appSession{}, streams: map[string]int{}, rates: map[string]*rate{}, wake: make(chan struct{}, 1)}
+	s.mcp = s.newMCPHandler()
+	return s
 }
 func validID(s string) bool {
 	if len(s) < 1 || len(s) > 128 {
@@ -101,6 +103,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, 429, "rate_limited")
 		return
 	}
+	if r.URL.Path == "/mcp" {
+		w.Header().Set("Cache-Control", "no-store")
+		s.mcp.ServeHTTP(w, r)
+		return
+	}
+	if !strings.HasPrefix(r.URL.Path, "/v1/") {
+		fail(w, 404, "not_found")
+		return
+	}
 	path := strings.TrimPrefix(r.URL.Path, "/v1/")
 	parts := strings.Split(path, "/")
 	switch {
@@ -110,37 +121,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			role = "codex"
 		}
 		writeJSON(w, 200, map[string]any{"id": p.ID, "device": p.Device, "control": p.Control, "assistant": p.Assistant, "workspaces": p.Workspaces, "write": p.Write, "role": role})
-	case !local && path == "tasks" && r.Method == "POST":
-		var req Request
-		if !body(w, r, &req) {
-			return
-		}
-		if !validID(req.RequestID) || !slices.Contains(p.Workspaces, req.Workspace) || s.Config.Workspaces[req.Workspace] == "" || !(req.Mode == "read-only" || req.Mode == "workspace-write" && p.Write) || len(req.Prompt) == 0 || len(req.Prompt) > 24000 {
-			fail(w, 403, "workspace_mode_or_payload_denied")
-			return
-		}
-		task, err := s.Store.submit(p, req)
-		if handleError(w, err) {
-			return
-		}
-		writeJSON(w, 202, task)
-		s.signal()
-	case !local && len(parts) == 2 && parts[0] == "tasks" && validID(parts[1]) && r.Method == "GET":
-		var data string
-		err = s.Store.db.QueryRow("SELECT data FROM tasks WHERE pair=? AND id=?", p.ID, parts[1]).Scan(&data)
-		if handleError(w, err) {
-			return
-		}
-		writeJSON(w, 200, json.RawMessage(data))
-	case !local && len(parts) == 3 && parts[0] == "tasks" && parts[2] == "cancel" && validID(parts[1]) && r.Method == "POST":
-		if r.ContentLength != 0 && !body(w, r, &struct{}{}) {
-			return
-		}
-		err = s.cancel(p.ID, parts[1])
-		if handleError(w, err) {
-			return
-		}
-		writeJSON(w, 202, map[string]string{"status": "cancellation_requested"})
 	case !local && path == "events" && r.Method == "GET":
 		s.events(w, r, p)
 	case !local && path == "snapshot" && r.Method == "GET":
@@ -159,97 +139,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, map[string]string{"status": "received"})
-	case local && path == "messages" && r.Method == "POST":
-		var req struct {
-			RequestID   string `json:"request_id"`
-			Kind        string `json:"kind"`
-			Body        string `json:"body"`
-			Correlation string `json:"correlation"`
-			Depth       int    `json:"depth"`
-		}
-		if !body(w, r, &req) {
-			return
-		}
-		if !validID(req.RequestID) || !(req.Kind == "notify" || req.Kind == "request") || len(req.Body) == 0 || len(req.Body) > 12000 || len(req.Correlation) > 128 || req.Depth < 0 || req.Depth > 1 {
-			fail(w, 400, "invalid_message")
-			return
-		}
-		var m Message
-		err = s.Store.mutate(func(tx *sql.Tx) error {
-			var old, payload string
-			e := tx.QueryRow("SELECT data,payload FROM messages WHERE pair=? AND request=?", p.ID, req.RequestID).Scan(&old, &payload)
-			if e == nil {
-				if payload != encoded(req) {
-					return errConflict
-				}
-				return json.Unmarshal([]byte(old), &m)
-			}
-			if !errors.Is(e, sql.ErrNoRows) {
-				return e
-			}
-			if e = capacity(tx, p.ID, "messages"); e != nil {
-				return e
-			}
-			m = Message{ID: identifier(), RequestID: req.RequestID, Kind: req.Kind, Body: req.Body, Correlation: req.Correlation, Depth: req.Depth, Status: "accepted", Updated: now()}
-			if _, e = tx.Exec("INSERT INTO messages VALUES(?,?,?,?,?)", m.ID, p.ID, req.RequestID, encoded(req), encoded(m)); e != nil {
-				return e
-			}
-			return s.Store.publish(tx, p.ID, "message", m, true)
-		})
-		if handleError(w, err) {
-			return
-		}
-		writeJSON(w, 202, m)
-	case len(parts) == 2 && parts[0] == "messages" && validID(parts[1]) && r.Method == "GET":
-		var data string
-		err = s.Store.db.QueryRow("SELECT data FROM messages WHERE pair=? AND id=?", p.ID, parts[1]).Scan(&data)
-		if handleError(w, err) {
-			return
-		}
-		var m Message
-		_ = json.Unmarshal([]byte(data), &m)
-		if m.Status == "accepted" {
-			var accepted int
-			_ = s.Store.db.QueryRow("SELECT COUNT(*) FROM notices WHERE pair=? AND accepted=1 AND json_extract(data,'$.data.id')=?", p.ID, m.ID).Scan(&accepted)
-			if accepted > 0 {
-				m.Status = "received"
-			}
-		}
-		writeJSON(w, 200, m)
-	case !local && len(parts) == 3 && parts[0] == "messages" && parts[2] == "reply" && validID(parts[1]) && r.Method == "POST":
-		var req struct {
-			Result string `json:"result"`
-		}
-		if !body(w, r, &req) {
-			return
-		}
-		if len(req.Result) == 0 || len(req.Result) > 12000 {
-			fail(w, 400, "invalid_result")
-			return
-		}
-		err = s.Store.mutate(func(tx *sql.Tx) error {
-			var data string
-			if e := tx.QueryRow("SELECT data FROM messages WHERE pair=? AND id=?", p.ID, parts[1]).Scan(&data); e != nil {
-				return e
-			}
-			var m Message
-			_ = json.Unmarshal([]byte(data), &m)
-			if m.Status == "answered" {
-				if m.Result != req.Result {
-					return errConflict
-				}
-				return nil
-			}
-			m.Status = "answered"
-			m.Result = req.Result
-			m.Updated = now()
-			_, e := tx.Exec("UPDATE messages SET data=? WHERE id=?", encoded(m), m.ID)
-			return e
-		})
-		if handleError(w, err) {
-			return
-		}
-		writeJSON(w, 200, map[string]string{"status": "answered"})
 	default:
 		fail(w, 404, "not_found")
 	}
