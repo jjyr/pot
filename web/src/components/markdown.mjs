@@ -49,7 +49,10 @@ function inline(parent,source,depth=0,options={}) {
 const isBlock=line=>/^( {0,3}#{1,6}\s|\s*(```|~~~)|\s*[-*+]\s|\s*\d+[.)]\s|\s*>|\s*([-*_])(?:\s*\3){2,}\s*$)/.test(line);
 export function renderMarkdown(source,options={}) {
   const result=document.createDocumentFragment(),lines=String(source).replace(/\r\n/g,'\n').split('\n');
+  let offset=0;const offsets=lines.map(line=>{const at=offset;offset+=line.length+1;return at;});
+  const append=(node,index)=>{node.markdownOffset=offsets[index];result.append(node);};
   for(let index=0;index<lines.length;) {
+    const start=index;
     const line=lines[index];if(!line.trim()){index++;continue;}
     const fence=line.match(/^\s*(`{3,}|~{3,})(.*)$/);
     if(fence){
@@ -59,13 +62,13 @@ export function renderMarkdown(source,options={}) {
       const closed=index<lines.length;index++;
       language.className='code-language';code.textContent=body.join('\n');pre.append(language,code);
       // Incomplete streamed fences remain ordinary code until their closing line.
-      result.append(closed&&fence[2].trim().split(/\s+/)[0].toLowerCase()==='mermaid'?createMermaidBlock(code.textContent,pre):pre);
+      append(closed&&fence[2].trim().split(/\s+/)[0].toLowerCase()==='mermaid'?createMermaidBlock(code.textContent,pre):pre,start);
       continue;
     }
     const heading=line.match(/^ {0,3}(#{1,6})\s+(.+?)(?:\s+#+)?$/);
-    if(heading){const node=element(`h${heading[1].length}`);inline(node,heading[2],0,options);result.append(node);index++;continue;}
-    if(/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)){result.append(element('hr'));index++;continue;}
-    if(/^\s*>/.test(line)){const node=element('blockquote'),body=[];while(index<lines.length&&/^\s*>/.test(lines[index]))body.push(lines[index++].replace(/^\s*> ?/,''));node.append(renderMarkdown(body.join('\n'),options));result.append(node);continue;}
+    if(heading){const node=element(`h${heading[1].length}`);inline(node,heading[2],0,options);append(node,start);index++;continue;}
+    if(/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)){append(element('hr'),start);index++;continue;}
+    if(/^\s*>/.test(line)){const node=element('blockquote'),body=[];while(index<lines.length&&/^\s*>/.test(lines[index]))body.push(lines[index++].replace(/^\s*> ?/,''));node.append(renderMarkdown(body.join('\n'),options));append(node,start);continue;}
     if(/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(line)) {
       const ordered=/^\s*\d/.test(line),list=element(ordered?'ol':'ul'),base=line.match(/^\s*/)[0].length;
       if(ordered)list.start=parseInt(line.trimStart(),10);
@@ -74,14 +77,52 @@ export function renderMarkdown(source,options={}) {
         const node=element('li'),text=match[2],task=text.match(/^\[([ xX])\]\s+(.*)$/);index++;
         if(task){const check=element('input');check.type='checkbox';check.disabled=true;check.checked=task[1]!==' ';node.append(check);inline(node,task[2],0,options);}else inline(node,text,0,options);
         const nested=[];while(index<lines.length&&lines[index].trim()&&lines[index].match(/^\s*/)[0].length>base)nested.push(lines[index++].slice(base+2));if(nested.length)node.append(renderMarkdown(nested.join('\n'),options));list.append(node);
-      }result.append(list);continue;
+      }append(list,start);continue;
     }
     if(index+1<lines.length&&line.includes('|')&&/^\s*\|?\s*:?-{3,}/.test(lines[index+1])) {
       const table=element('table'),head=element('thead'),row=element('tr'),split=value=>value.trim().replace(/^\||\|$/g,'').split('|').map(value=>value.trim());
       for(const cell of split(line)){const th=element('th');inline(th,cell,0,options);row.append(th);}head.append(row);table.append(head);index+=2;const body=element('tbody');
-      while(index<lines.length&&lines[index].includes('|')&&lines[index].trim()){const row=element('tr');for(const cell of split(lines[index++])){const td=element('td');inline(td,cell,0,options);row.append(td);}body.append(row);}table.append(body);const wrap=element('div');wrap.className='markdown-table';wrap.append(table);result.append(wrap);continue;
+      while(index<lines.length&&lines[index].includes('|')&&lines[index].trim()){const row=element('tr');for(const cell of split(lines[index++])){const td=element('td');inline(td,cell,0,options);row.append(td);}body.append(row);}table.append(body);const wrap=element('div');wrap.className='markdown-table';wrap.append(table);append(wrap,start);continue;
     }
     const paragraph=element('p'),body=[line];for(index++;index<lines.length&&lines[index].trim()&&!isBlock(lines[index]);index++) {if(index+1<lines.length&&lines[index].includes('|')&&/^\s*\|?\s*:?-{3,}/.test(lines[index+1]))break;body.push(lines[index]);}
-    const joined=body.join('\n').split(/ {2,}\n|\\\n/);for(const [partIndex,part]of joined.entries()){if(partIndex)paragraph.append(element('br'));inline(paragraph,part.replace(/\n/g,' '),0,options);}result.append(paragraph);
+    const joined=body.join('\n').split(/ {2,}\n|\\\n/);for(const [partIndex,part]of joined.entries()){if(partIndex)paragraph.append(element('br'));inline(paragraph,part.replace(/\n/g,' '),0,options);}append(paragraph,start);
   }return result;
+}
+
+// Appended output reparses only the last (potentially incomplete) block. Keep
+// completed blocks and live media, selections and code/table scroll positions.
+export function createMarkdownView(host) {
+  let source='',blocks=[];
+  function patch(old,next) {
+    if(!old||old.nodeType!==next.nodeType||old.nodeName!==next.nodeName)return next;
+    if(old.nodeType===3){if(old.data!==next.data)old.data=next.data;return old;}
+    if(old.localName==='pot-mermaid')return old.sourceText===next.sourceText?old:next;
+    if(old.localName==='pot-file-image')return old.file.task===next.file.task&&old.file.path===next.file.path&&old.label===next.label?old:next;
+    if(old.isEqualNode(next))return old;
+    for(const attr of [...old.attributes])if(!next.hasAttribute(attr.name))old.removeAttribute(attr.name);
+    for(const attr of next.attributes)if(old.getAttribute(attr.name)!==attr.value)old.setAttribute(attr.name,attr.value);
+    old.onclick=next.onclick;
+    if(old.localName==='input')old.checked=next.checked;
+    const children=[...next.childNodes];
+    for(const [index,child]of children.entries()){
+      const current=old.childNodes[index],retained=patch(current,child);
+      if(retained!==current){if(current)current.replaceWith(retained);else old.append(retained);}
+    }
+    while(old.childNodes.length>children.length)old.lastChild.remove();
+    return old;
+  }
+  return {update(text,options={}){
+    const next=String(text||'').replace(/\r\n/g,'\n');if(next===source)return;
+    const retained=next.startsWith(source)&&blocks.length?blocks.length-1:0;
+    const offset=retained?blocks[retained].markdownOffset:0;
+    const tail=[...renderMarkdown(next.slice(offset),options).childNodes];
+    for(const [index,node]of tail.entries()){
+      const position=retained+index,current=blocks[position],at=offset+node.markdownOffset,value=patch(current,node);
+      value.markdownOffset=at;
+      if(value!==current){if(current)current.replaceWith(value);else host.append(value);}
+      blocks[position]=value;
+    }
+    for(const block of blocks.splice(retained+tail.length))block.remove();
+    source=next;
+  }};
 }

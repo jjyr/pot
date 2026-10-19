@@ -203,6 +203,7 @@ def linker_flags(stripped=True):
     values += [
         "-X=github.com/jjyr/pot/internal/buildinfo.Version=" + version,
         "-X=github.com/jjyr/pot/internal/buildinfo.UpdatePublicKey=" + public_key,
+        "-X=github.com/jjyr/pot/internal/buildinfo.UpdateSchemaDigest=" + schema_digest(),
         "-X=github.com/jjyr/pot/internal/buildinfo.Revision=" + revision,
         "-X=github.com/jjyr/pot/pkg/eval.Revision=" + revision,
     ]
@@ -370,4 +371,13 @@ def update_metadata(resources, kind, target):
 
 def storage_format():
     source = (ROOT / "internal/selfupdate/release.go").read_text()
-    return re.search(r'const StorageFormat = "([^"]+)"', source).group(1)
+    return re.search(r'const StorageFormat = "([^"]+)"', source).group(1) + "-" + schema_digest()
+
+
+def schema_digest():
+    root = ROOT / "pkg/storage/migrations"
+    digest = hashlib.sha256()
+    for path in sorted(root.glob("*/*.sql")):
+        digest.update(path.relative_to(root).as_posix().encode() + b"\0")
+        digest.update(path.read_bytes() + b"\0")
+    return digest.hexdigest()

@@ -411,3 +411,18 @@ func TestObsoletePreparedUpdateCannotDowngradeInstallation(t *testing.T) {
 		}
 	}
 }
+
+func TestReleasePinsCentralizedMigrationFingerprint(t *testing.T) {
+	previous := buildinfo.UpdateSchemaDigest
+	defer func() { buildinfo.UpdateSchemaDigest = previous }()
+	buildinfo.UpdateSchemaDigest = strings.Repeat("ab", 32)
+	release := Release{Version: "0.2.0", StorageFormat: storageFormat()}
+	data, key := signed(t, release)
+	if _, err := Verify(data, key); err != nil {
+		t.Fatal(err)
+	}
+	buildinfo.UpdateSchemaDigest = strings.Repeat("cd", 32)
+	if _, err := Verify(data, key); err == nil {
+		t.Fatal("allowed migration-changing package rollback")
+	}
+}

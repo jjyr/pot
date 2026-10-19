@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jjyr/pot/internal/buildinfo"
 	"io"
 	"net/http"
 	"net/url"
@@ -20,8 +21,8 @@ import (
 	"time"
 )
 
-// StorageFormat must change whenever an on-disk contract changes. Updates across
-// formats require an explicit migration design and are rejected by this updater.
+// StorageFormat versions non-SQL persisted contracts. The build additionally pins
+// the centralized SQL migration fingerprint; automatic schema changes are rejected.
 const StorageFormat = "pot-go-2026-10-1"
 const releaseOrigin = "https://github.com/jjyr/pot/releases/download/"
 
@@ -82,7 +83,7 @@ func Verify(data []byte, key string) (Release, error) {
 	if err = json.Unmarshal(payload, &r); err != nil {
 		return r, err
 	}
-	if !versionPattern.MatchString(r.Version) || r.StorageFormat != StorageFormat {
+	if !versionPattern.MatchString(r.Version) || r.StorageFormat != storageFormat() {
 		return r, errors.New("unsupported release version or storage format")
 	}
 	seen := map[string]bool{}
@@ -126,4 +127,11 @@ func fetch(ctx context.Context, c *http.Client, address string, limit int64) ([]
 		err = errors.New("update size limit")
 	}
 	return data, err
+}
+
+func storageFormat() string {
+	if buildinfo.UpdateSchemaDigest == "" {
+		return StorageFormat
+	}
+	return StorageFormat + "-" + buildinfo.UpdateSchemaDigest
 }

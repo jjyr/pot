@@ -69,7 +69,10 @@ func (s *Service) finish(ctx context.Context, snapshot Record, phase protocol.Ta
 		current.Info.Phase = event.Phase
 		current.Info.Paused = false
 		current.Info.RemoteWaiting = false
-		current.Info.Pending = 0
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM task_inputs WHERE assistant_id=? AND task_id=? AND state='pending' AND kind IN ('guidance','user_guidance')", current.AssistantID, current.Info.ID).Scan(&current.Info.Pending); err != nil {
+			return err
+		}
+		current.Info.Archived = current.StopMode == "cancel" || stopMode == "cancel"
 		if current.Info.StartedAtMS == 0 {
 			current.Info.StartedAtMS = started
 		}
@@ -84,8 +87,11 @@ func (s *Service) finish(ctx context.Context, snapshot Record, phase protocol.Ta
 		if current.StopMode == "cancel" {
 			state = "cancelled"
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE task_inputs SET state=? WHERE assistant_id=? AND task_id=? AND state='pending'", state, current.AssistantID, current.Info.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE task_inputs SET state=? WHERE assistant_id=? AND task_id=? AND state='pending' AND (kind='reference' OR ?!='')", state, current.AssistantID, current.Info.ID, current.StopMode); err != nil {
 			return err
+		}
+		if current.StopMode != "" {
+			current.Info.Pending = 0
 		}
 		if stopMode != "" {
 			_, err := tx.ExecContext(ctx, "UPDATE task_inputs SET state=? WHERE assistant_id=? AND task_id=? AND state='active'", state, current.AssistantID, current.Info.ID)

@@ -46,12 +46,8 @@ func Open(path string, keys KeySource) (*Store, error) {
 	if keys == nil {
 		return nil, errors.New("secret KeySource is required")
 	}
-	db, err := storage.OpenSQLite(path)
+	db, err := storage.OpenDatabase(path, storage.ControlDatabase)
 	if err != nil {
-		return nil, err
-	}
-	if _, err = db.Exec("CREATE TABLE IF NOT EXISTS secrets(id TEXT PRIMARY KEY,nonce BLOB NOT NULL,ciphertext BLOB NOT NULL,tag BLOB NOT NULL)"); err != nil {
-		db.Close()
 		return nil, err
 	}
 	return &Store{db, keys}, nil

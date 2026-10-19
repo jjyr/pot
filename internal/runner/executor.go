@@ -263,7 +263,11 @@ func (e *Executor) Execute(ctx context.Context, control, task, runID string) (te
 				resuming = checkpoint.LastRequest == runID
 			}
 		}
-		err = engine.Execute(ctx, prepared.Context, prepared.Thread, core.TurnRequest{RequestID: runID, Text: record.Launch.Text}, resuming, func(event core.AgentEvent) error {
+		request := core.TurnRequest{RequestID: runID, Text: record.Launch.Text}
+		if record.Launch.InputID != "" {
+			request.Inputs = []core.ConversationInput{{ID: record.Launch.InputID, Text: record.Launch.Text}}
+		}
+		err = engine.Execute(ctx, prepared.Context, prepared.Thread, request, resuming, func(event core.AgentEvent) error {
 			if err := e.Journal.AppendEvent(context.WithoutCancel(ctx), control, task, runID, event); err != nil {
 				return err
 			}

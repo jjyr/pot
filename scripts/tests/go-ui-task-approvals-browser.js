@@ -17,7 +17,7 @@ async page => {
    if(rejectDecision){await route.fulfill({status:503,json:{message:'Decision failed; try again'}});return;}
    pending=pending.filter(item=>item.id!==body.id);
   }
-  const data=path==='/api/v1/runtime'?{runtime_id:'fixture',boot_id:'boot'}:path==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Local',connected:true}]}:path==='/api/v1/assistants'?[{id:'alpha',name:'Pot',revision:1,pending_approvals:pending.filter(item=>item.request.owner==='alpha').length,reply_count:0},{id:'beta',name:'Other',revision:1,pending_approvals:0,reply_count:0}]:path==='/api/v1/snapshot'?{api_version:3,cursor:revision++,boot_id:'boot',conversation_id:owner,messages:owner==='alpha'?messages:[],turn:null,agent:{phase:'ready'}}:path==='/api/v1/permissions'?{pending:pending.filter(item=>item.request.owner===owner),policy:{machines:{}}}:path==='/api/v1/tasks/outcomes'?{items:[],cursor:0,has_more:false}:path==='/api/v1/tasks/query'?{items:owner==='alpha'?[{id:'task-one',title:'确认仓库访问权限',assistant_id:'alpha',started_at_ms:Date.now()-754000,phase:phase('task-one')}]:[],total:1}:path==='/api/v1/tasks/task-one'?{run_id:'shared-turn',info:{phase:phase('task-one'),title:taskTitle('task-one')},request:{text:taskTitle('task-one')}}:path==='/api/v1/tasks/task-two'?{run_id:'shared-turn',info:{phase:phase('task-two'),title:taskTitle('task-two')},request:{text:taskTitle('task-two')}}:path==='/api/v1/tasks/task-one/events'?{events:[{sequence:1,event:{turn_id:'shared-turn',update:{type:'tool_started',id:'shared-call',name:'exec_command',args:approval('','').request.args}}},{sequence:2,event:{turn_id:'shared-turn',update:{type:'tool_state',id:'shared-call',phase:'waiting_approval'}}}],cursor:2,has_more:false}:path==='/api/v1/tasks/task-one/messages'?[]:path==='/api/v1/usage/summary'?{total:{},quota:{active:false,policy:{period:'none'}},buckets:[]}:{items:[]};
+  const data=path==='/api/v1/runtime'?{runtime_id:'fixture',boot_id:'boot'}:path==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Local',connected:true}]}:path==='/api/v1/assistants'?[{id:'alpha',name:'Pot',revision:1,pending_approvals:pending.filter(item=>item.request.owner==='alpha').length,reply_count:0},{id:'beta',name:'Other',revision:1,pending_approvals:0,reply_count:0}]:path==='/api/v1/snapshot'?{api_version:3,cursor:revision++,boot_id:'boot',conversation_id:owner,messages:owner==='alpha'?messages:[],turn:null,agent:{phase:'ready'}}:path==='/api/v1/permissions'?{pending:pending.filter(item=>item.request.owner===owner),policy:{machines:{}}}:path==='/api/v1/tasks/outcomes'?{items:[],cursor:0,has_more:false}:(path==='/api/v1/tasks/query'||path==='/api/v1/tasks/catalog')?{items:(owner==='alpha'||path==='/api/v1/tasks/catalog')?[{id:'task-one',title:'确认仓库访问权限',assistant_id:'alpha',started_at_ms:Date.now()-754000,phase:phase('task-one')}]:[],total:1}:path==='/api/v1/tasks/task-one'?{run_id:'shared-turn',info:{phase:phase('task-one'),title:taskTitle('task-one')},request:{text:taskTitle('task-one')}}:path==='/api/v1/tasks/task-two'?{run_id:'shared-turn',info:{phase:phase('task-two'),title:taskTitle('task-two')},request:{text:taskTitle('task-two')}}:path==='/api/v1/tasks/task-one/events'?{events:[{sequence:1,event:{turn_id:'shared-turn',update:{type:'tool_started',id:'shared-call',name:'exec_command',args:approval('','').request.args}}},{sequence:2,event:{turn_id:'shared-turn',update:{type:'tool_state',id:'shared-call',phase:'waiting_approval'}}}],cursor:2,has_more:false}:path==='/api/v1/tasks/task-one/messages'?[]:path==='/api/v1/usage/summary'?{total:{},quota:{active:false,policy:{period:'none'}},buckets:[]}:{items:[]};
   await route.fulfill({json:data});
  };
  await page.route('**/access/status',access);await page.route('**/api/v1/**',handler);
@@ -92,15 +92,15 @@ async page => {
   await page.locator('.task-status').getByText(/等待授权/).waitFor();
   await back().click();await page.locator('#pot-composer:visible').waitFor();
   assert(await page.locator('#pot-composer').inputValue()==='保留这条草稿','Task Back preserves Chat and draft');
-  await page.locator('.background-task').click();await page.getByLabel('任务指导',{exact:true}).waitFor();
+  await page.locator('.background-task').click();await page.getByLabel('任务追加',{exact:true}).waitFor();
   await page.goBack();await page.locator('#pot-composer:visible').waitFor();
-  await page.goForward();await page.getByLabel('任务指导',{exact:true}).waitFor();
+  await page.goForward();await page.getByLabel('任务追加',{exact:true}).waitFor();
   await page.getByRole('button',{name:'任务操作',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'用量',exact:true}).click();
-  await page.getByText('累计用量',{exact:true}).waitFor();await back().click();await page.getByLabel('任务指导',{exact:true}).waitFor();
+  await page.getByText('累计用量',{exact:true}).waitFor();await back().click();await page.getByLabel('任务追加',{exact:true}).waitFor();
   await back().click();await page.locator('#pot-composer:visible').waitFor();
   await page.getByRole('button',{name:'任务',exact:true}).first().click();
   await page.locator('.task-row').getByText('等待授权',{exact:true}).waitFor();
-  await page.getByRole('button',{name:'确认仓库访问权限',exact:true}).click();await page.getByLabel('任务指导',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'确认仓库访问权限',exact:true}).click();await page.getByLabel('任务追加',{exact:true}).waitFor();
   await back().click();await page.locator('.task-list').waitFor();
   await page.getByRole('button',{name:'确认仓库访问权限',exact:true}).click();await taskCard().waitFor();await expand(taskCard());
   await taskCard().getByRole('button',{name:'拒绝',exact:true}).click();

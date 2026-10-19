@@ -7,6 +7,7 @@ implementation. Code defines actual behavior.
 |---|---|
 | Deployment, resource APIs, Control membership and web-ui-server | [Deployment](deployment.md) |
 | Local updates, interruption confirmation and release signing | [Updates](updates.md) |
+| Database schemas, version history and automatic upgrades | [Database migrations](database-migrations.md) |
 | Build, test and release | [Development](development.md) |
 | PR screenshot storage and naming | [PR images](pr-images/README.md) |
 | Current product scope and deferred platform work | [Development plan](development-plan.md) |
@@ -19,6 +20,7 @@ implementation. Code defines actual behavior.
 | Backend responsibilities and API contracts | [Backend components](backend-components.md) |
 | Reusable Go packages and embedding a host | [Go libraries](go-libraries.md) |
 | Plugins, tools, approvals and browser execution | [Plugin packages](plugins.md), [composition](tool-composition.md), [permissions](permissions.md), [computer use](computer-use.md) |
+| Codex delegation and local plugin | [Codex Bridge](../integrations/codex/README.md) |
 | Assistant messaging and App relay | [Assistant messages](assistant-messages.md) |
 | Runtime hooks and notification routes | [Hooks](hooks.md) |
 | Tasks, schedules and usage | [Tasks](task-coordination.md), [schedules](scheduled-tasks.md), [token usage](token-usage.md) |

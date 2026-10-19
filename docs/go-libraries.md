@@ -26,7 +26,10 @@ Internal implementation types do not appear in its public signatures. See
 `Adapter`, `AccountStore` and `SecretStore` ports. `SQLAccounts` accepts a
 caller-owned database. `CredentialResolver` provides scoped reads for execution
 callers. `pkg/integrations/github` implements GitHub browser device authorization.
-Neither package imports Control or internal product code. See
+`pkg/integrations/codex` verifies owner-supplied Bridge pairings over HTTPS.
+These adapters do not import Control or internal product code. The standalone
+Bridge implementation lives in `integrations/codex/bridge`, with its executable
+entry point in `cmd/pot-codex-bridge`; see the [integration guide](../integrations/codex/README.md). See
 [Integrations](credentials.md) for API and lifecycle contracts.
 
 ## Embed an Agent loop

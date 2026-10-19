@@ -3,8 +3,9 @@
 Task guidance, reference messages and completion events share the Agent inbox;
 see [Agent messages](assistant-messages.md). Main manages Tasks. Workers can
 message only their owning assistant; they cannot create, inspect, stop or wait
-for other Tasks. Automatic summaries have no tools; a result batch with eligible
-failed work uses the bounded recovery role described below.
+for other Tasks. Task-result batches expose bounded inspection and batch archive decisions; a batch
+with eligible failed work also exposes the bounded recovery tool described below.
+Plugin-only summaries have no tools.
 
 ## Autonomous model routing
 
@@ -27,9 +28,11 @@ model selection.
 to an existing Task through its owning Control. Runtime records the sender from
 the authenticated execution and binds any processing parent automatically; the
 model supplies only the recipient and text. User inputs and owner-assistant
-guidance are processed at safe model boundaries, with pending user guidance first. Reference
-messages retain their source and grant no additional authority. Ended Tasks
-retain reference without restarting; further user-directed work needs a new Task.
+guidance are processed at safe model boundaries, with pending user guidance
+first. Reference messages retain their source and grant no additional authority.
+Owner guidance to an ended Task reopens it and starts a new Run with its
+retained context and original workspace. Peer references never restart ended
+Tasks.
 
 Task history projects initial input, assistant guidance, user guidance and peer
 reference from the shared `agent_messages` table. The operator messages HTTP
@@ -111,15 +114,18 @@ separate from releasing an allowance-waiting run.
 running --interrupt--> stopping --cleanup confirmed--> interrupted
 running --cancel_task--> stopping --cleanup confirmed--> cancelled
 interrupted --cancel_task--> cancelled (Archived)
-ended Task --create_task--> new Task ID + current machine policy
+ended Task --owner guidance--> open Task + new Run ID + original workspace
 ```
 
-`interrupt` retains never-started guidance as history. It does not replay executing
-input, including suspended allowance-waiting input. Ended Tasks reject guidance;
-a rerun is a new Task. Control restart reconciles an accepted remote run by its
-original input identity, without relaunching it or changing its execution context.
-Execution Runtime restart fences original runs. Explicit owner reconciliation
-settles known receipts and proven scope cleanup; unknown outcomes block replacement. See [persistence and updates](architecture.md#persistence-and-updates).
+`interrupt` retains never-started guidance as history. It does not replay
+executing input, including suspended allowance-waiting input. New owner guidance
+can continue an ended Task after cleanup is confirmed. Inputs retained by an
+interruption are history and are not automatically replayed. Control restart
+reconciles an accepted remote run by its original input identity, without
+relaunching it or changing its execution context. Execution Runtime restart
+fences original runs. Explicit owner reconciliation settles known receipts and
+proven scope cleanup; unknown outcomes block replacement. See [persistence and
+updates](architecture.md#persistence-and-updates).
 
 Owner recovery uses `POST /api/v1/tasks/{id}/recovery` with the original
 `run_id` and `action: "inspect" | "reconcile"`. A Runtime owner can address the
@@ -134,42 +140,65 @@ Host run with issued operations and no recorded cleanup proof remains fenced.
 Missing/unknown effects are never converted into failure or retried.
 
 `cancel_task` discards pending guidance and abandons the Task. History/files survive;
-completed results stay complete. No terminal phase can be reopened.
+completed Run results stay complete. Continuing creates a new Run; it never
+rewrites a terminal receipt or replays interrupted operations.
 
 Both operations reject guidance during cleanup. Running Tasks hold capacity and
 leases until shutdown is confirmed; unconfirmed shutdown fails visibly and retains
 active leases until original receipts and cleanup are reconciled. App/Web Stop interrupts. CLI `tasks interrupt`
 and `tasks cancel` use the respective `/api/v1/tasks/{id}/interrupt` and `/cancel` APIs.
 
-## Archive
+## Archive and continuation
 
-| Group | Phases |
+Archive is an independent `TaskInfo.archived` flag, not a Run phase. A successful
+Worker result ends the Run and releases execution resources, leaving the Task
+open for the owning assistant's decision. Without a model decision, it stays open.
+
+| Group | Selection |
 |---|---|
-| Ongoing | `queued`, `running`, `waiting`, `waiting_approval` |
-| Needs attention | `failed`, `interrupted` |
-| Archived | `complete`, `cancelled` |
+| Ongoing | Non-archived `queued`, `running`, `waiting`, `waiting_approval` |
+| Needs attention | Non-archived ended Runs, including successful work kept for follow-up |
+| Archived | `archived: true`, independent of the last Run's outcome |
 
-Archive is currently a phase-derived list grouping. It does not delete data or
-reclaim storage. Long-inactive unfinished Tasks are not automatically archived.
-An independent archive flag and inactivity rules remain deferred.
+The assistant's `set_task_dispositions({decisions})` accepts 1–8 decisions in one
+atomic batch. Each decision supplies `task_id`, current `run_id`, `archived` and
+`reason`. `POST /api/v1/tasks/dispositions` exposes the same owner-scoped operation
+for clients. A running Run, pending owner guidance, or a different current Run
+rejects the batch without partial changes. During result handling only Runs in
+the currently claimed delivery batch are eligible. Workers cannot make archive
+decisions. Explicit cancellation archives after confirmed cleanup.
 
-Schemas and lifecycle code: `pkg/core/product-tools.json`, `internal/tasks` and `internal/control/task_service.go`.
-Checks and live qualification limits: [permission contract](permissions.md).
+The owning assistant judges whether delivery is complete or feedback is needed.
+Runtime imposes no Git cleanliness, commit, push, PR or merge requirement. Archive
+retains files, model context and history; it never deletes a workspace or reclaims
+storage. Inactivity does not archive a Task.
 
-## Execution policy and reruns
+Owner guidance, including `POST /api/v1/tasks/{id}/messages`, removes the archive
+flag and durably queues input. An active Run consumes guidance at a safe boundary.
+Guidance arriving after its finalization boundary starts the next Run after the
+terminal result commits. Multiple arrivals join that Run's input queue. A reference
+message alone never starts execution, and stopping Runs reject new guidance until
+cleanup is confirmed.
 
-New tasks use the selected machine's current execution authorization for subsequent tool operations.
-The actual Runtime destination is retained as execution information for the active
-run, receipts and file retrieval. It is not reused as a default for future tasks.
-Guidance is accepted only while a task remains active. Complete, failed, cancelled
-and interrupted tasks require a new task to run again; retained files are not
-implicitly imported into that new task. Task workspaces are prepared and recorded on the fixed Runtime according to
-[workspace selection](task-workspaces.md). Cleanup closes only that Task's processes and
-sessions; files remain. No shared guest environment or automatic project copy is
-provided.
+Continuation preserves Task identity/address, creation brief, model selection,
+original machine and execution target, workspace, and settled model history. A
+new Run ID has separate execution receipts, approvals, start time and outcome.
+The session generation stays fixed. Previous terminal Control records are retained
+in `task_run_history`; destination Runner journals retain every Run. Task transcripts
+use one monotonic cursor across Runs. Original input is not executed again; only
+the new owner guidance starts the continuation. Scheduled occurrences still create
+independent Tasks; a user continuation becomes manual work without changing that
+occurrence's result or baseline.
 
-Task persistence uses schema version 8. Development builds use an independent
-data root; unsupported storage formats are rejected without rewriting files.
+A missing workspace or unavailable original machine is reported rather than
+silently selecting another directory or destination. A previous run with uncertain
+effects must be reconciled before a continuation can execute. Subsequent tools
+always use the machine's current execution authorization.
+
+Task and Runner record payloads use schema versions 9 and 7. Database schemas and
+automatic upgrades are owned by the [DB migration layer](database-migrations.md).
+Development builds use an independent data root; unsupported pre-migration formats
+are rejected.
 
 ## Client notification outcomes
 
@@ -197,7 +226,7 @@ wake the client notification reader. See [System notifications](shared-ui.md#sys
 ## Execution transcript
 
 `GET /api/v1/tasks/{id}/events?after=CURSOR&limit=100` reads a bounded,
-append-only page from the original Runner run. Each item carries a durable
+append-only page from the original Runner across all of the Task's Runs. Each item carries a durable
 `sequence` plus its generation/turn-bound Agent event. The page returns `cursor`
 and `has_more`; clients advance only through contiguous sequences. Control
 persists fetched remote pages, so an unavailable original Runner returns cached

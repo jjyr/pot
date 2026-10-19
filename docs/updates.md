@@ -74,9 +74,13 @@ inspection; the installer does not kill unknown work or silently release the
 maintenance gate. Execution receipts are retained during rollback, rather than
 replacing them with older database copies.
 
-Only the same `StorageFormat` is eligible for automatic installation. This version
-performs no schema migration. Any persisted-format change must change that marker
-and receive a separate migration design before enabling that upgrade path.
+Only matching `StorageFormat` markers and identical centralized migration-file
+fingerprints are eligible for automatic installation. Build tooling pins the
+fingerprint in each executable and signed manifest, so adding a migration
+automatically blocks that automatic upgrade path. Regular manual upgrades still
+use the [startup migration mechanism](database-migrations.md). Automatic upgrades
+that change schemas need a separate backup/migration/restore design; package-only
+rollback must never reopen a migrated database with an older binary.
 
 ## Release setup
 

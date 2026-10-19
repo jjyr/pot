@@ -93,3 +93,14 @@ func TestPanicFencesCapacity(t *testing.T) {
 		t.Fatal(e, r)
 	}
 }
+
+func TestMaintenanceIsRecheckedAtAdmission(t *testing.T) {
+	m, _ := New("runtime", "boot", Limits{1, 1})
+	var checks atomic.Int32
+	m.SetMaintenance(func() bool { return checks.Add(1) > 1 })
+	called := false
+	_, result := m.Execute(context.Background(), identity("maintenance-race"), func(context.Context) Result { called = true; return Result{Succeeded, nil} })
+	if called || !errors.Is(result.Err, ErrStopping) || len(m.Snapshot()) != 0 {
+		t.Fatal("work crossed the maintenance admission barrier", called, result)
+	}
+}

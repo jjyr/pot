@@ -81,12 +81,13 @@ report deduplication. Approval hooks update UI and user reminders without waking
 an assistant model. See [Hooks](hooks.md) and [Agent messages](assistant-messages.md).
 
 Main and Worker invocations share the destination Runtime execution manager.
-Workers cannot coordinate other Tasks. Summary sessions have no tools; eligible
-failed results use a recovery role with only batch-scoped Task inspection and one
-durable replacement. Accepted recovery is silent. Both roles produce owner-chat
-reports only when useful. Synthetic results remain reference data rather
-than new user authority. See [Tasks](task-coordination.md),
-[schedules](scheduled-tasks.md) and [usage](token-usage.md).
+Workers cannot coordinate other Tasks. Plugin-only summaries have no tools; Task
+results use a bounded role for batch-scoped inspection and archive decisions.
+Eligible failures additionally allow one durable replacement. Accepted recovery
+is silent. Both roles produce owner-chat reports only when useful. Synthetic
+results remain reference data rather than new user authority. See
+[Tasks](task-coordination.md), [schedules](scheduled-tasks.md) and
+[usage](token-usage.md).
 
 Assistant communication uses separate durable model contexts and transcripts.
 An inbound peer message is untrusted reference data. Replies require an explicit
@@ -173,6 +174,11 @@ access while leaving network access open. It provides no VM isolation or quotas.
 placement and remote Main tools remain deferred under issue #74.
 
 ## Persistence and updates
+
+`pkg/storage` owns all SQLite schemas and runs embedded, versioned migrations
+before returning a database handle. Business components own queries and restart
+recovery. See [Database migrations](database-migrations.md) for history, upgrade
+behavior and schema-change rules.
 
 A Go data root has a stable `identity.json`, exclusive process lock and private
 component stores. Initialize each root independently and retain its machine

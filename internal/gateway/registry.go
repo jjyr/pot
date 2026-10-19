@@ -20,13 +20,8 @@ func Open(path string, keys secrets.KeySource) (*Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	db, err := storage.OpenSQLite(path)
+	db, err := storage.OpenDatabase(path, storage.ControlDatabase)
 	if err != nil {
-		encrypted.Close()
-		return nil, err
-	}
-	if _, err = db.Exec("CREATE TABLE IF NOT EXISTS providers(id TEXT PRIMARY KEY,metadata TEXT NOT NULL)"); err != nil {
-		db.Close()
 		encrypted.Close()
 		return nil, err
 	}

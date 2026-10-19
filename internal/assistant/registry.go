@@ -31,20 +31,11 @@ func OpenRegistry(path, root string) (*Registry, error) {
 	if !core.Identifier(root) {
 		return nil, errors.New("invalid root assistant identity")
 	}
-	db, err := storage.OpenSQLite(path)
+	db, err := storage.OpenDatabase(path, storage.ControlDatabase)
 	if err != nil {
 		return nil, err
 	}
 	err = storage.Transaction(context.Background(), db, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS assistant_registry_identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1),root TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS assistant_definitions(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,name TEXT NOT NULL,revision INTEGER NOT NULL,request_id TEXT NOT NULL UNIQUE,created_name TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS assistant_initial(id TEXT PRIMARY KEY, binding TEXT NOT NULL, spec TEXT NOT NULL,rules TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS assistant_initial_intent(id TEXT PRIMARY KEY,intent TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS assistant_welcome(id TEXT PRIMARY KEY,text TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS assistant_profiles(assistant_id TEXT PRIMARY KEY,avatar TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS assistant_profile_requests(id TEXT PRIMARY KEY,input_hash TEXT NOT NULL,response TEXT NOT NULL);`); err != nil {
-			return err
-		}
 		if _, err := tx.Exec("INSERT OR IGNORE INTO assistant_registry_identity VALUES (1,?)", root); err != nil {
 			return err
 		}

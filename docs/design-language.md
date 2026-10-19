@@ -62,8 +62,23 @@ text of 16 px on narrow windows or touch-capable browsers. Other custom controls
 own their geometry; this is not a global minimum applied to every element.
 Desktop mouse controls stay compact. Wide iPad windows retain touch density.
 Wrap secondary actions and keep labels readable rather than shrinking buttons.
+Chat keeps attachment, input and send controls in one compact row by default;
+references and attachments expand above it and multiline input grows naturally.
+Desktop copy actions appear beside messages on hover or keyboard focus without
+reserving an extra row; touch actions stay visible. Copy success acknowledges in
+place for 1.6 seconds, retaining the current language.
 Keep copy concise; put detailed operating explanations behind disclosures or in
 field help.
+
+### Motion
+
+Shared motion tokens use 110 ms for control feedback, 180 ms for transient panels
+and disclosure arrows, and about 220 ms for gesture settling. Edge navigation
+follows the finger while opening or closing the menu and returning from Chat or
+an editor. Release uses distance and velocity; cancellation and reversal settle
+back. Existing editor leave guards still decide whether Back may complete.
+Reduced Motion removes transitions, activity animation and gesture settling.
+Content updates preserve reading anchors rather than animating the whole history.
 
 ## Application shell and navigation
 
@@ -344,19 +359,28 @@ render inline. No tool action implicitly repeats an operation.
 Ordinary calls default to collapsed. Composition children nest under their original
 `exec` call in start order. Exact approval requests open the affected call and its
 ancestors, show the full reviewed operation, and provide Allow this operation / Deny.
+Task execution groups check pending descendant approvals before mounting their
+virtual child rows, so a collapsed group cannot hide a new approval.
 A compact locator exposes pending approvals outside the current reading position;
 requests without a transcript row retain a standalone approval card. A failed
 approval submission keeps its diagnostic and controls available. Long-lived machine
 policy remains in Machines.
 
-Consecutive root script executions in the same turn share one collapsed execution
-history in Chat and Task details. Its stable summary shows the latest active
-operation or completed outcome, alongside status and wall time, and
-omits execution counts and source code. Prose, guidance, other root operations and
+Consecutive root command and script executions in the same turn share one collapsed
+execution history in Chat and Task details. Its stable summary shows Execution
+history alongside status and wall time, and omits execution counts and source code. Prose, guidance, other root operations and
 turn boundaries split groups. Empty model-round placeholders do not split them.
 Each `wait` receipt joins its originating `exec` by turn and `exec_id`, even across
 a prose boundary, and its incremental output appears on that execution. Unknown
-waits remain independent. Original calls and receipts stay in raw details.
+waits remain independent. Process `write_stdin` receipts similarly join their
+originating `exec_command` by turn, machine and `session_id`, including commands
+nested inside compositions.
+Pure polling adds no row; input, terminal controls and approvals remain inspectable
+under the command. Unknown sessions stay independent. Ordinary summaries and
+details omit session IDs; raw details and exact approval arguments retain them. Command output combines retained chunks in receipt order without
+duplicating the same receipt's streamed and final output. A live process session
+shows Running, and an unresolved session after its turn ends is unconfirmed.
+Original calls and receipts stay in raw details.
 A yielded script stays active until its final receipt; an unresolved receipt after
 the turn ends is unconfirmed. Group duration spans its earliest execution through
 its latest finish rather than summing parallel durations. Failures remain visible

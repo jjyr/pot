@@ -57,8 +57,9 @@ Goja compositions run in a bounded process worker. Goja supplies no independent
 per-runtime hard heap limit. See [Go libraries](go-libraries.md).
 
 Signed self-update releases require the release key configuration in [Updates](updates.md).
-Changes to persisted storage contracts must update `selfupdate.StorageFormat`;
-automatic upgrades across formats are rejected until a migration is designed.
+Automatic updates require matching `selfupdate.StorageFormat` markers and
+centralized migration fingerprints. Schema changes automatically block package-only
+rollback; non-database persisted-format changes must also change the marker.
 
 ## Checks and isolated previews
 
@@ -164,6 +165,12 @@ credentials, skip shared mise and Go caches, and receive no release secrets. The
 use the selected workflow's check steps with the PR's source tree; changes to the
 PR's workflow are not run.
 
+## Database changes
+
+Every persisted schema or JSON format change must add a migration under
+`pkg/storage/migrations/` in the same change. Follow [Database migrations](database-migrations.md)
+for versioning, startup upgrades and required upgrade coverage.
+
 ## Source layout
 
 | Directory | Responsibility |
@@ -173,6 +180,7 @@ PR's workflow are not run.
 | `internal/` | Product services and adapters |
 | `web/` | Shared product frontend |
 | `plugins/` | Tool manifests and Node implementations |
+| `integrations/` | External application packages, local connectors and installation entry points |
 | `skills/` | Built-in Skill bundles |
 | `resources/` | Brand assets, model metadata and notices |
 | `scripts/` | Build, release, source checks and fixtures |
@@ -225,6 +233,16 @@ at most six model requests, with three per turn and 512 output tokens per reques
 Credentials stay on the configured machine and are never logged. Run it with
 `POT_LIVE=1 mise exec -- go test -v ./internal/control -run '^TestConfiguredModelMessageReferencesLive$' -count=1 -timeout=4m`
 and the two explicit path variables above.
+
+`TestConfiguredModelTaskLifecycleLive` uses `POT_LIVE=1`,
+`POT_CONFIGURED_LIVE_ROOT` and the existing key selector to qualify batch archive
+choices and continuation with the machine's configured model. It uses production
+prompts without overrides and isolated stores with a synthetic Git remote/worktree.
+It caps requests at 32 with 2048 output tokens each. It checks that delivered local
+work can archive while work needing user input remains open, then continues the
+archived Task with its original files and model context. Model policy failures
+remain test failures rather than being hidden by prompt overrides.
+`POT_LIVE_OUTPUT` optionally saves private evidence outside the repository.
 
 For the configured model Task workspace qualification, use `POT_LIVE=1`,
 `POT_WORKSPACE_LIVE_ROOT` and the existing `POT_SECRET_KEY_FILE` on that machine:

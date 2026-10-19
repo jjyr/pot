@@ -110,6 +110,11 @@ func (m *Manager) register(ctx context.Context, id Identity) (*entry, error) {
 	if m.stopped {
 		return nil, ErrStopping
 	}
+	// Recheck under the same lock used by Snapshot: maintenance may have begun
+	// after Execute checked the gate but before this invocation was registered.
+	if m.maintenance != nil && m.maintenance() {
+		return nil, ErrStopping
+	}
 	for _, e := range m.active {
 		if e.execution.Identity.Owner == id.Owner && e.execution.Identity.RequestID == id.RequestID && e.execution.Identity.Generation == id.Generation {
 			return nil, ErrDuplicate

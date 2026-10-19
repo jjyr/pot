@@ -63,17 +63,17 @@ async page=>{
   await page.evaluate(()=>{for(const call of taskFixture.retired)call.resolve({items:[{id:'stale',title:'过期任务'}]});});
   assert(await page.getByRole('button',{name:'当前筛选任务',exact:true}).count()===1&&await page.getByRole('button',{name:'过期任务',exact:true}).count()===0,'Late responses cannot repaint the new view');
   // The same task ID on another assistant remains a distinct row and owner.
-  await page.evaluate(async()=>{const f=taskFixture;f.client.assistants.push({id:'b',space_id:'local',name:'第二助手'});f.refresh=f.pages.refresh(['assistants']);for(const call of f.pending.splice(0))call.resolve({items:[{...f.items[0],assistant_id:call.options.owner,title:'助手 '+call.options.owner}],counts:{active:1}});await f.refresh;});
+  await page.evaluate(async()=>{const f=taskFixture;f.client.assistants.push({id:'b',space_id:'local',name:'第二助手'});f.refresh=f.pages.refresh(['assistants']);for(const call of f.pending.splice(0))call.resolve({items:['a','b'].map(owner=>({...f.items[0],assistant_id:owner,title:'助手 '+owner})),total:2,counts:{active:2}});await f.refresh;});
   assert(await page.locator('.task-row').count()===2,'Row identity includes assistant identity');
   await page.getByRole('button',{name:'助手 b',exact:true}).click();
   await page.evaluate(()=>{taskFixture.pages.refresh(['tasks']);});
   assert(await page.evaluate(()=>taskFixture.pending.length===1&&taskFixture.pending[0].options.owner==='b'&&!taskFixture.pending[0].options.signal.aborted),'Changes during detail loading do not navigate back to the list');
   await page.evaluate(()=>{taskFixture.detailRecord={info:{phase:'running'},request:{text:'目标'}};taskFixture.pending.shift().resolve(taskFixture.detailRecord);});
-  await page.getByLabel('任务指导',{exact:true}).waitFor();
-  await page.getByLabel('任务指导',{exact:true}).fill('保留任务指导');
+  await page.getByLabel('任务追加',{exact:true}).waitFor();
+  await page.getByLabel('任务追加',{exact:true}).fill('保留任务指导');
   await page.evaluate(async()=>{taskFixture.guidance=document.querySelector('textarea');taskFixture.detailRecord.info.phase='complete';taskFixture.detailRecord.result={text:'完成结果'};await taskFixture.pages.refresh(['tasks']);});
   assert(await page.getByText('完成结果',{exact:true}).count()===1,'Task metadata and results refresh with the transcript');
-  assert(await page.getByLabel('任务指导',{exact:true}).getAttribute('readonly')!==null,'Completed Tasks reject further guidance');
+  assert(await page.getByLabel('任务追加',{exact:true}).getAttribute('readonly')===null,'Completed Tasks accept follow-up');
   assert(await page.evaluate(()=>taskFixture.guidance===document.querySelector('textarea')&&taskFixture.guidance.value==='保留任务指导'),'Transcript updates retain the guidance draft');
   assert(errors.length===0,errors.join('\n'));
   return {passed:true,coalesced_refresh:true,stable_dom:true,retained_search:true,offline_recovery:true,stale_responses_ignored:true,owner_identity:true,detail_navigation:true,errors};

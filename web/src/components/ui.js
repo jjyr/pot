@@ -28,6 +28,7 @@ import {createBackgroundTasks} from './background-tasks.mjs';
 import {captureReadingPosition,restoreReadingPosition} from './reading-position.mjs';
 import {bindResumeRecovery} from '../state/resume.mjs';
 import {bindViewport} from './viewport.mjs';
+import {settleMotion,copyFeedback} from './motion.mjs';
 
 function el(tag, className = '', text) {
   const element = document.createElement(tag);
@@ -635,13 +636,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if ((message.role === 'assistant'||message.role==='user') && message.text && !record.copy) {
       const copy = button('copy',t('copy'),'copy-message');
       copy.type = 'button';
-      copy.onclick = async () => {
-        try { await navigator.clipboard.writeText(record.text); copy.title = t('copied'); }
-        catch (reason) { error = reason.message; updateControls(); }
-      };
+      copyFeedback(copy,{text:()=>record.text,locale:()=>locale,translate,onError:reason=>{error=reason.message;updateControls();}});
       row.append(copy); record.copy = copy;
     }
-    if (record.copy) {record.copy.title=t('copy');record.copy.setAttribute('aria-label',t('copy'));}
+    if (record.copy) {const label=t(record.copy.dataset.copied?'copied':'copy');record.copy.title=label;record.copy.setAttribute('aria-label',label);}
     if (message.role==='tool'&&!message.tool&&message.status === 'streaming' && !record.dot) {
       record.dot = el('span', 'activity-dot'); row.append(record.dot);
     } else if (message.status !== 'streaming' && record.dot) { record.dot.remove(); record.dot = null; }
@@ -872,29 +870,46 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if (event.metaKey && event.key === '[' && pages?.hasParent) {event.preventDefault(); pages.back(); return;}
     if (event.metaKey && event.key === '[' && media.matches && !directoryOpen) { event.preventDefault(); directoryOpen = true; renderShell(); }
   };
-  let swipe = null;
+  let swipe = null,settling=false;
+  const clearSwipe=()=>{menu.style.transform='';menu.inert=false;workspace.style.transform='';titlebar.style.transform='';root.classList.remove('is-edge-back');};
   const pointerDown = event => {
-    if(!media.matches || surface==='tray' || event.pointerType==='mouse')return;
+    if(!media.matches || surface==='tray' || event.pointerType==='mouse'||settling||preferences.open)return;
     if(!menuOpen&&event.clientX>root.getBoundingClientRect().left+parseFloat(getComputedStyle(root).paddingLeft)+24)return;
-    swipe={id:event.pointerId,x:event.clientX,y:event.clientY,menu:menuOpen,active:false};
+    swipe={id:event.pointerId,x:event.clientX,y:event.clientY,lastX:event.clientX,at:event.timeStamp,velocity:0,mode:menuOpen?'close':pages?.hasParent||route==='chat'&&!directoryOpen?'back':'open',active:false};
   };
   const pointerMove = event => {
     if(!swipe||swipe.id!==event.pointerId)return;
     const dx=event.clientX-swipe.x,dy=event.clientY-swipe.y;
     if(!swipe.active&&Math.abs(dy)>Math.abs(dx)&&Math.abs(dy)>10){swipe=null;return;}
+    if(!swipe.active&&(swipe.mode==='close'?dx>=0:dx<=0))return;
     if(Math.abs(dx)>12&&Math.abs(dx)>Math.abs(dy))swipe.active=true;
     if(!swipe.active)return;
-    if(swipe.menu&&dx<0){menu.style.transform=`translateX(${dx}px)`;event.preventDefault();}
+    const elapsed=event.timeStamp-swipe.at;if(elapsed>0)swipe.velocity=(event.clientX-swipe.lastX)/elapsed;
+    swipe.at=event.timeStamp;swipe.lastX=event.clientX;
+    const width=root.clientWidth,travel=Math.min(width,Math.max(0,swipe.mode==='close'?-dx:dx));
+    swipe.travel=travel;
+    if(swipe.mode==='back'){
+      root.classList.toggle('is-edge-back',route==='chat'&&!pages?.hasParent);
+      workspace.style.transform=titlebar.style.transform=`translateX(${travel}px)`;
+    }else{menu.hidden=false;menu.inert=swipe.mode==='open';menu.style.transform=`translateX(${swipe.mode==='open'?travel-width:-travel}px)`;}
+    event.preventDefault();
   };
-  const pointerUp = event => {
+  const finishSwipe=async(event,cancel=false)=>{
     if(!swipe||swipe.id!==event.pointerId)return;
-    const gesture=swipe;swipe=null;menu.style.transform='';
-    if(!gesture.active||Math.abs(event.clientY-gesture.y)>Math.abs(event.clientX-gesture.x))return;
-    const dx=event.clientX-gesture.x,threshold=Math.min(innerWidth/4,100);
-    if(gesture.menu&&dx < -threshold){menuOpen=false;renderShell();}
-    else if(!gesture.menu&&dx>threshold){if(pages?.hasParent)pages.back();else if(route==='chat'&&!directoryOpen){directoryOpen=true;renderShell();}else{menuOpen=true;renderShell();}}
+    const gesture=swipe;swipe=null;
+    if(!gesture.active){clearSwipe();return;}
+    const width=root.clientWidth,travel=gesture.travel||0,direction=gesture.mode==='close'?-1:1,velocity=gesture.velocity*direction;
+    const commit=!cancel&&velocity>=-.15&&(travel>Math.min(width/4,100)||travel>24&&velocity>.45);
+    const targets=gesture.mode==='back'?[workspace,titlebar]:[menu];
+    const end=gesture.mode==='back'?(commit?width:0):gesture.mode==='open'?(commit?0:-width):(commit?-width:0);
+    settling=true;
+    await Promise.all(targets.map(target=>settleMotion(target,{transform:target.style.transform},{transform:`translateX(${end}px)`})));
+    if(disposed)return;
+    if(commit){if(gesture.mode==='back'){if(pages?.hasParent)await pages.back();else directoryOpen=true;}else menuOpen=gesture.mode==='open';}
+    clearSwipe();settling=false;renderShell();
   };
-  const pointerCancel = () => {swipe=null;menu.style.transform='';};
+  const pointerUp=event=>{finishSwipe(event).catch(reason=>{clearSwipe();settling=false;error=reason.message;updateControls();});};
+  const pointerCancel=event=>{finishSwipe(event,true).catch(()=>{clearSwipe();settling=false;});};
   root.addEventListener('pointerdown',pointerDown,{passive:true});root.addEventListener('pointermove',pointerMove,{passive:false});root.addEventListener('pointerup',pointerUp);root.addEventListener('pointercancel',pointerCancel);
   const mediaChanged = () => { menuOpen = false; renderShell(); };
   document.addEventListener('keydown', keydown);

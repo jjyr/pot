@@ -339,7 +339,7 @@ func (m *Manager) download(ctx context.Context, a Artifact, version string) erro
 	if err = json.Unmarshal(data, &installed); err != nil {
 		return err
 	}
-	if installed.Version != version || installed.StorageFormat != StorageFormat || installed.Kind != a.Kind || installed.Platform != a.Platform {
+	if installed.Version != version || installed.StorageFormat != storageFormat() || installed.Kind != a.Kind || installed.Platform != a.Platform {
 		return errors.New("update package metadata mismatch")
 	}
 	// Prepared paths are private installation state; package bytes were verified above.

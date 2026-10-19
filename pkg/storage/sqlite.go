@@ -1,5 +1,5 @@
-// Package storage owns durable conversation projections, append-only events and
-// checkpoints. It has no transport, Control or execution dependencies.
+// Package storage owns product SQLite schemas, automatic migrations and durable
+// conversation projections. It has no transport, Control or execution dependencies.
 package storage
 
 import (

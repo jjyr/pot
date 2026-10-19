@@ -21,9 +21,11 @@ Linux Node requires a glibc-based host. Install any tools required by your selec
 plugins, including Chrome/Chromium for browser execution. Runtime creates no VMs
 or containers. Keep private data roots on a local filesystem supporting Unix
 sockets and file locks. See [Development](development.md) for packaging.
-Upgrade Control, Runners and App from the same revision. The chat UI can update
-one local installation and its running hosts; see [Updates](updates.md). Remote
-installations still require separate coordination.
+Upgrade Control, Runners and App from the same revision. Manual upgrades can
+apply pending [database migrations](database-migrations.md); stop the old
+processes and back up the complete data root before schema-changing upgrades.
+The chat UI can update one local installation and its running hosts; see
+[Updates](updates.md). Remote installations require separate coordination.
 
 The default Go root is `~/.pot-go` on macOS and Linux. Use `-root /absolute/path`
 for an independent instance. New roots require empty directories and receive a

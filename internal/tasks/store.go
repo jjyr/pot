@@ -37,32 +37,11 @@ func Open(path string, options Options) (*Service, error) {
 	if options.MaxTasks < 1 {
 		return nil, fmt.Errorf("invalid task limit")
 	}
-	db, err := storage.OpenSQLite(path)
+	db, err := storage.OpenDatabase(path, storage.TasksDatabase)
 	if err != nil {
 		return nil, err
 	}
 	s := &Service{db: db, options: options}
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS task_schema(version INTEGER NOT NULL);INSERT INTO task_schema SELECT 8 WHERE NOT EXISTS(SELECT 1 FROM task_schema);CREATE TABLE IF NOT EXISTS tasks(assistant_id TEXT NOT NULL,id TEXT NOT NULL,phase TEXT NOT NULL,created INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(assistant_id,id));CREATE TABLE IF NOT EXISTS task_writes(assistant_id TEXT NOT NULL,request_id TEXT NOT NULL,digest TEXT NOT NULL,task_id TEXT NOT NULL,PRIMARY KEY(assistant_id,request_id));`); err != nil {
-		db.Close()
-		return nil, err
-	}
-	var version int
-	if err := db.QueryRow("SELECT version FROM task_schema").Scan(&version); err != nil || version != 8 {
-		db.Close()
-		return nil, fmt.Errorf("unsupported task schema")
-	}
-	if err := inbox.Initialize(db); err != nil {
-		db.Close()
-		return nil, err
-	}
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS task_retries(assistant_id TEXT NOT NULL,source_task TEXT NOT NULL,task_id TEXT NOT NULL UNIQUE,PRIMARY KEY(assistant_id,source_task))`); err != nil {
-		db.Close()
-		return nil, err
-	}
-	if err := initializeMessageViews(db); err != nil {
-		db.Close()
-		return nil, err
-	}
 	if err := s.initializeOutcomes(); err != nil {
 		db.Close()
 		return nil, err
@@ -71,7 +50,7 @@ func Open(path string, options Options) (*Service, error) {
 		db.Close()
 		return nil, err
 	}
-	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS task_authority(control_id TEXT NOT NULL,runtime_id TEXT NOT NULL);INSERT INTO task_authority SELECT ?,? WHERE NOT EXISTS(SELECT 1 FROM task_authority)", options.ControlID, options.RuntimeID); err != nil {
+	if _, err := db.Exec("INSERT INTO task_authority SELECT ?,? WHERE NOT EXISTS(SELECT 1 FROM task_authority)", options.ControlID, options.RuntimeID); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -150,7 +129,7 @@ func (s *Service) validateStored(ctx context.Context) error {
 		if err := core.DecodeJSON([]byte(raw), &r); err != nil {
 			return err
 		}
-		if r.SchemaVersion != 8 || r.AssistantID != assistant || r.Info.AssistantID != assistant || r.Info.ID != id || !core.Identifier(assistant) || !core.Identifier(id) {
+		if r.SchemaVersion != 9 || r.AssistantID != assistant || r.Info.AssistantID != assistant || r.Info.ID != id || r.Info.RunID != r.RunID || !core.Identifier(assistant) || !core.Identifier(id) {
 			return fmt.Errorf("invalid stored Task ownership/schema")
 		}
 		if err := r.Origin.Validate(); err != nil {
@@ -307,8 +286,9 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	if len(runes) > 80 {
 		title = string(runes[:80])
 	}
-	record := Record{SchemaVersion: 8, Origin: origin, AssistantID: assistant, Info: protocol.TaskInfo{Address: &protocol.AgentRef{ControlID: s.options.ControlID, Kind: "task", AgentID: id}, ID: id, AssistantID: assistant, Title: title, Phase: protocol.TaskQueued, CreatedAtMS: at, UpdatedAtMS: at, Routing: &protocol.TaskRouting{Profile: selection.Config.SourceProfileID, Revision: selection.Config.SourceProfileRevision, Provider: selection.Config.Provider, Reason: "assistant selection", SelectionReason: request.SelectionReason}}, Request: request, Config: selection.Config, Plugins: plugins, RunID: runID, Generation: 1}
+	record := Record{SchemaVersion: 9, Origin: origin, AssistantID: assistant, Info: protocol.TaskInfo{Address: &protocol.AgentRef{ControlID: s.options.ControlID, Kind: "task", AgentID: id}, ID: id, AssistantID: assistant, Title: title, Phase: protocol.TaskQueued, CreatedAtMS: at, UpdatedAtMS: at, Routing: &protocol.TaskRouting{Profile: selection.Config.SourceProfileID, Revision: selection.Config.SourceProfileRevision, Provider: selection.Config.Provider, Reason: "assistant selection", SelectionReason: request.SelectionReason}}, Request: request, Config: selection.Config, Plugins: plugins, RunID: runID, Generation: 1}
 	record.Info.MachineID = request.MachineID
+	record.Info.RunID = runID
 	if err := write(ctx, tx, &record); err != nil {
 		return Record{}, err
 	}

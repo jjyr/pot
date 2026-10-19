@@ -149,7 +149,8 @@ Permission format 6 stores machines, enrollment epochs, exact command rules and
 durable policy-application fences. Restart retains pending/uncertain application.
 Temporary grants and pending decisions are not restored after restart. Unsupported
 old formats fail without rewriting the file or inferring new grants. Runner
-journal schema 6 separates execution mode/context-bearing requests from old runs.
+journal schema 7 retains execution mode/context-bearing requests and separates
+original Run receipts from same-Task continuations.
 
 `GET /api/v1/permissions` returns `policy` (machines, rules, task_grants,
 application states) and conversation-owner-scoped pending approvals.

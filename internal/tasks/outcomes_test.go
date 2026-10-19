@@ -18,8 +18,8 @@ func TestOutcomeCursorSkipsArchiveAndReadsBoundedOwnerTransitions(t *testing.T) 
 	config := selection(t).Config
 	if err := storage.Transaction(ctx, s.db, func(tx *sql.Tx) error {
 		for i := range 1000 {
-			r := Record{SchemaVersion: 8, Origin: protocol.TaskOrigin{Kind: "manual"}, AssistantID: "assistant", Config: config, Plugins: []string{}, RunID: fmt.Sprint("run", i), Generation: 1,
-				Info:    protocol.TaskInfo{ID: fmt.Sprint("task", i), AssistantID: "assistant", Title: "History", Phase: protocol.TaskComplete},
+			r := Record{SchemaVersion: 9, Origin: protocol.TaskOrigin{Kind: "manual"}, AssistantID: "assistant", Config: config, Plugins: []string{}, RunID: fmt.Sprint("run", i), Generation: 1,
+				Info:    protocol.TaskInfo{ID: fmt.Sprint("task", i), AssistantID: "assistant", Title: "History", Phase: protocol.TaskComplete, RunID: fmt.Sprint("run", i), Archived: true},
 				Request: protocol.CreateTask{Text: "private task goal"}}
 			if err := write(ctx, tx, &r); err != nil {
 				return err

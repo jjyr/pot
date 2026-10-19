@@ -14,7 +14,7 @@ async page=>{
  await page.route('**/api/v1/**',async route=>{
   const url=new URL(route.request().url()),path=url.pathname,owner=url.searchParams.get('assistant_id');reads.push(path);
   const task=tasks.find(task=>path==='/api/v1/tasks/'+task.id);
-  const data=path==='/api/v1/runtime'?{runtime_id:'fixture',boot_id:'boot'}:path==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Local',connected:true}]}:path==='/api/v1/assistants'?[{id:'alpha',name:'Pot',revision:1,reply_count:0},{id:'beta',name:'其他助手',revision:1,reply_count:0}]:path==='/api/v1/snapshot'?{api_version:3,cursor:revision++,boot_id:'boot',conversation_id:owner,messages:owner==='alpha'?[{id:'u',role:'user',text:'请处理图片附件和项目文档。',status:'complete'},{id:'a',role:'assistant',reply_to:'u',text:'任务正在进行，有结果我会告诉你。',status:'complete'}]:[],turn:null,agent:{phase:'ready'}}:path==='/api/v1/permissions'?{pending:[],policy:{machines:{}}}:path==='/api/v1/tasks/outcomes'?{items:[],cursor:0,has_more:false}:path==='/api/v1/tasks/query'?{items:owner==='alpha'?tasks:[],total:owner==='alpha'?tasks.length:0,counts:{active:owner==='alpha'?tasks.filter(task=>['queued','running','waiting','waiting_approval'].includes(task.phase)).length:0,attention:0,archived:0}}:task?{run_id:'run',info:task,request:{text:task.title}}:path.endsWith('/events')?{events:[],cursor:0,has_more:false}:path.endsWith('/messages')?[]:{items:[]};
+  const data=path==='/api/v1/runtime'?{runtime_id:'fixture',boot_id:'boot'}:path==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Local',connected:true}]}:path==='/api/v1/assistants'?[{id:'alpha',name:'Pot',revision:1,reply_count:0},{id:'beta',name:'其他助手',revision:1,reply_count:0}]:path==='/api/v1/snapshot'?{api_version:3,cursor:revision++,boot_id:'boot',conversation_id:owner,messages:owner==='alpha'?[{id:'u',role:'user',text:'请处理图片附件和项目文档。',status:'complete'},{id:'a',role:'assistant',reply_to:'u',text:'任务正在进行，有结果我会告诉你。',status:'complete'}]:[],turn:null,agent:{phase:'ready'}}:path==='/api/v1/permissions'?{pending:[],policy:{machines:{}}}:path==='/api/v1/tasks/outcomes'?{items:[],cursor:0,has_more:false}:(path==='/api/v1/tasks/query'||path==='/api/v1/tasks/catalog')?{items:(owner==='alpha'||path==='/api/v1/tasks/catalog')?tasks:[],total:(owner==='alpha'||path==='/api/v1/tasks/catalog')?tasks.length:0,counts:{active:(owner==='alpha'||path==='/api/v1/tasks/catalog')?tasks.filter(task=>['queued','running','waiting','waiting_approval'].includes(task.phase)).length:0,attention:0,archived:0}}:task?{run_id:'run',info:task,request:{text:task.title}}:path.endsWith('/events')?{events:[],cursor:0,has_more:false}:path.endsWith('/messages')?[]:{items:[]};
   await route.fulfill({json:data});
  });
  const change=async()=>{const response=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/v1/tasks/query');await page.evaluate(version=>window.__taskTimeChanges(version),++revision);await response;};
@@ -55,6 +55,7 @@ async page=>{
   if(state.before)return {passed:true,before:true,errors};
   await page.setViewportSize({width:1200,height:850});
   const search=page.locator('.task-search input');await search.fill('未提交的搜索');await search.focus();
+  await page.waitForTimeout(220);await page.waitForFunction(()=>document.querySelector('.task-list')?.getAttribute('aria-busy')==='false');
   await listRow().evaluate(node=>window.__retainedListTimeRow=node);const listReads=reads.length;
   await page.evaluate(()=>window.__taskTimeNow+=5000);await listTime().getByText('已用 12分39秒',{exact:true}).waitFor();
   assert(reads.length===listReads,'Task-list clock does not fetch backend projections');
@@ -67,7 +68,7 @@ async page=>{
   tasks[0].started_at_ms=started;await page.evaluate(()=>window.__taskTimeNow-=5000);await change();await listTime().getByText('已用 12分34秒',{exact:true}).waitFor();
   await page.getByRole('button',{name:'聊天',exact:true}).first().click();await elapsed().getByText('已用 12分34秒',{exact:true}).waitFor();
   await page.setViewportSize({width:1200,height:850});
-  await page.locator('.background-task').filter({hasText:'独立 worktree'}).click();await page.getByLabel('任务指导',{exact:true}).waitFor();
+  await page.locator('.background-task').filter({hasText:'独立 worktree'}).click();await page.getByLabel('任务追加',{exact:true}).waitFor();
   await page.getByRole('button',{name:'任务操作',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'任务详情',exact:true}).click();
   await page.getByRole('dialog').getByText('开始时间',{exact:true}).waitFor();
   await page.getByRole('dialog').getByRole('button',{name:'关闭',exact:true}).click();await page.getByRole('button',{name:'返回',exact:true}).click();

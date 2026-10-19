@@ -193,7 +193,8 @@ history. Pending inputs remain at the tail; retained historical inputs without a
 bookmark remain identifiable without inventing a delivery position.
 
 The task conversation uses the shared reply bubbles, tool disclosures, composer
-binding and reference completions. Only its history scrolls; status and the composer
+binding, measured message windows and reference completions. Expanded tool trees
+share its scroll container and retain disclosure state when recycled. Only its history scrolls; status and the composer
 remain visible. Following stops when the reader scrolls upward, and Latest resumes
 it. Navigation restores the goal/tool disclosures and reading position. Terminal
 text already present in the final reply is not repeated. Ended tasks retain an
@@ -216,6 +217,10 @@ run-bound state updates to the original Runner, whose Agent sequences them into
 its durable log; destination executors stream output through that same Agent.
 Composition children have explicit `parent_id` values scoped by the original turn.
 A returned process session or yielded script is distinct from completed execution.
+The shared execution-history projection folds command session receipts before
+building the composition forest. It associates process receipts by turn, machine
+and session ID, and script receipts by turn and execution ID. This is presentation
+only: original arguments, results and lifecycle events remain unchanged.
 
 Chat and Tasks use the shared `components/tool-call.mjs` disclosure. Ordinary calls
 start collapsed; exact approval requests open their call and composition ancestors.

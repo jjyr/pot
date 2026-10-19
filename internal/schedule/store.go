@@ -18,14 +18,6 @@ func New(options Options) (*Service, error) {
 		return nil, fmt.Errorf("schedules require Task coordination and explicit readiness")
 	}
 	s := &Service{db: options.Tasks.DB(), options: options}
-	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS schedule_schema(version INTEGER NOT NULL);INSERT INTO schedule_schema SELECT 2 WHERE NOT EXISTS(SELECT 1 FROM schedule_schema);CREATE TABLE IF NOT EXISTS schedules(assistant_id TEXT NOT NULL,id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(assistant_id,id));CREATE TABLE IF NOT EXISTS schedule_runs(assistant_id TEXT NOT NULL,schedule_id TEXT NOT NULL,id TEXT NOT NULL,scheduled INTEGER NOT NULL,finished INTEGER,body TEXT NOT NULL,PRIMARY KEY(assistant_id,schedule_id,id));CREATE TABLE IF NOT EXISTS schedule_writes(assistant_id TEXT NOT NULL,request_id TEXT NOT NULL,digest TEXT NOT NULL,reply TEXT NOT NULL,PRIMARY KEY(assistant_id,request_id));`)
-	if err != nil {
-		return nil, err
-	}
-	var version int
-	if err := s.db.QueryRow("SELECT version FROM schedule_schema").Scan(&version); err != nil || version != 2 {
-		return nil, fmt.Errorf("unsupported schedule schema")
-	}
 	return s, nil
 }
 

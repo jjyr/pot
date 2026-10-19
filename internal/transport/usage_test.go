@@ -105,7 +105,7 @@ func TestBrowserReadRoutesReachApplication(t *testing.T) {
 		"/api/v1/providers", "/api/v1/agent", "/api/v1/agent/routing", "/api/v1/instructions", "/api/v1/about",
 		"/api/v1/integrations", "/api/v1/agent/diagnostics",
 		"/api/v1/snapshot", "/api/v1/permissions", "/api/v1/machines", "/api/v1/schedules",
-		"/api/v1/tasks/query", "/api/v1/tasks/outcomes", "/api/v1/tasks/outcomes?after=0", "/api/v1/usage/providers",
+		"/api/v1/tasks/query", "/api/v1/tasks/catalog", "/api/v1/tasks/outcomes", "/api/v1/tasks/outcomes?after=0", "/api/v1/usage/providers",
 		"/api/v1/usage/summary?scope=main&timezone=UTC",
 		"/api/v1/usage/models?scope=main&timezone=UTC&offset=0",
 		"/api/v1/usage/requests?scope=main&timezone=UTC&offset=0",

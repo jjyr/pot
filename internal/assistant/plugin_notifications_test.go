@@ -235,7 +235,7 @@ func TestPluginStoredFormatUpgradePreservesBindingAndReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Recreate only the removed fields/table from the previous PR format.
-	if _, err := m.db.Exec(`CREATE TABLE plugin_delivery_rates(owner TEXT PRIMARY KEY,next INTEGER NOT NULL); INSERT INTO plugin_delivery_rates VALUES('main',9999999999999);
+	if _, err := m.db.Exec(`DROP TABLE pot_migrations; CREATE TABLE plugin_delivery_rates(owner TEXT PRIMARY KEY,next INTEGER NOT NULL); INSERT INTO plugin_delivery_rates VALUES('main',9999999999999);
  UPDATE agent_messages SET envelope=json_set(envelope,'$.plugin.event.group','thread','$.text','old duplicate');
  UPDATE agent_messages SET state=json_extract(envelope,'$.plugin.event.id');`); err != nil {
 		t.Fatal(err)

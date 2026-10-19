@@ -124,7 +124,7 @@ func OpenHost() (*Host, error) {
 	if err = json.Unmarshal(data, &info); err != nil {
 		return nil, err
 	}
-	if info.Version != buildinfo.Version || info.StorageFormat != StorageFormat || (info.Kind != "cli" && info.Kind != "app") {
+	if info.Version != buildinfo.Version || info.StorageFormat != storageFormat() || (info.Kind != "cli" && info.Kind != "app") {
 		return nil, errors.New("installed update metadata does not match executable")
 	}
 	directory := install + ".updates"

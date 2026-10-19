@@ -23,9 +23,6 @@ func (c *Conversation) PrepareInstructionUpdate(ctx context.Context, id, text st
 	if !core.Identifier(id) || len(text) > 262144 {
 		return result, errors.New("invalid instruction update")
 	}
-	if _, err := c.store.DB().ExecContext(ctx, `CREATE TABLE IF NOT EXISTS assistant_instruction_updates(id TEXT PRIMARY KEY,text TEXT NOT NULL,before_rules TEXT NOT NULL,result TEXT)`); err != nil {
-		return result, err
-	}
 	before, err := c.Instructions(ctx)
 	if err != nil {
 		return result, err
