@@ -22,14 +22,11 @@ const githubClientID = "Ov23lijqmW8fsHmUPXl9"
 func (s *Service) openIntegrations() error {
 	path := filepath.Join(s.options.Root, "control.sqlite")
 	var err error
-	s.integrationDB, err = storage.OpenSQLite(path)
+	s.integrationDB, err = storage.OpenDatabase(path, storage.ControlDatabase)
 	if err != nil {
 		return err
 	}
-	s.integrationAccounts, err = integrations.NewSQLAccounts(s.integrationDB)
-	if err != nil {
-		return err
-	}
+	s.integrationAccounts = integrations.NewSQLAccounts(s.integrationDB)
 	s.integrationSecrets, err = secrets.Open(path, s.options.Keys)
 	if err != nil {
 		return err

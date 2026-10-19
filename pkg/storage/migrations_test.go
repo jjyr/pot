@@ -1,0 +1,387 @@
+package storage
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"io/fs"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"testing/fstest"
+)
+
+func migrationDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := OpenSQLite(filepath.Join(t.TempDir(), "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+func migrationFixture(statements ...string) fstest.MapFS {
+	files := fstest.MapFS{}
+	for index, statement := range statements {
+		files[fmt.Sprintf("migrations/tasks/%04d_step.sql", index+1)] = &fstest.MapFile{Data: []byte("-- +migrate Up\n-- +migrate StatementBegin\n" + statement + "\n-- +migrate StatementEnd\n")}
+	}
+	return files
+}
+
+func execMigrationSQL(t *testing.T, db *sql.DB, statement string) {
+	t.Helper()
+	if _, err := db.Exec(statement); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func migrationCount(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM pot_migrations").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+func TestDatabaseSchemasCreateAndReopen(t *testing.T) {
+	for _, kind := range []Database{ControlDatabase, TasksDatabase, RunnerDatabase, ConversationDatabase, MachinesDatabase, UsageDatabase, OperationsDatabase} {
+		t.Run(string(kind), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "db.sqlite")
+			db, err := OpenDatabase(path, kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var integrity string
+			if err := db.QueryRow("PRAGMA integrity_check").Scan(&integrity); err != nil || integrity != "ok" {
+				t.Fatal(integrity, err)
+			}
+			definitions, err := loadMigrations(migrationFiles, kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := migrationCount(t, db); got != len(definitions) {
+				t.Fatal(got, len(definitions))
+			}
+			db.Close()
+			db, err = OpenDatabase(path, kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			if got := migrationCount(t, db); got != len(definitions) {
+				t.Fatal(got)
+			}
+		})
+	}
+}
+
+func TestMigrationSkipsVersionsAndTransformsJSONOnce(t *testing.T) {
+	db := migrationDB(t)
+	ctx := context.Background()
+	first := `CREATE TABLE records(id TEXT PRIMARY KEY,body TEXT NOT NULL); INSERT INTO records VALUES('task','{"schema_version":1,"goal":"keep me"}');`
+	files := migrationFixture(first)
+	if err := migrateDatabase(ctx, db, TasksDatabase, files); err != nil {
+		t.Fatal(err)
+	}
+	files = migrationFixture(first,
+		`ALTER TABLE records ADD COLUMN revision INTEGER NOT NULL DEFAULT 0; UPDATE records SET body=json_set(body,'$.schema_version',2,'$.instructions',json_extract(body,'$.goal'));`,
+		`UPDATE records SET body=json_remove(body,'$.goal'),revision=revision+1; CREATE INDEX records_revision ON records(revision);`)
+	for range 2 {
+		if err := migrateDatabase(ctx, db, TasksDatabase, files); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var body string
+	var revision int
+	if err := db.QueryRow("SELECT body,revision FROM records WHERE id='task'").Scan(&body, &revision); err != nil {
+		t.Fatal(err)
+	}
+	if body != `{"schema_version":2,"instructions":"keep me"}` || revision != 1 || migrationCount(t, db) != 3 {
+		t.Fatal(body, revision)
+	}
+}
+
+func TestMigrationFailureRollsBackAndRetries(t *testing.T) {
+	db := migrationDB(t)
+	ctx := context.Background()
+	first := `CREATE TABLE records(value INTEGER NOT NULL); INSERT INTO records VALUES(10);`
+	if err := migrateDatabase(ctx, db, TasksDatabase, migrationFixture(first)); err != nil {
+		t.Fatal(err)
+	}
+	files := migrationFixture(first, `ALTER TABLE records ADD COLUMN added TEXT; UPDATE records SET value=value+1; INSERT INTO ready VALUES(1);`)
+	if err := migrateDatabase(ctx, db, TasksDatabase, files); err == nil {
+		t.Fatal("missing prerequisite did not fail")
+	}
+	var value, added int
+	if err := db.QueryRow("SELECT value FROM records").Scan(&value); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('records') WHERE name='added'").Scan(&added); err != nil {
+		t.Fatal(err)
+	}
+	if value != 10 || added != 0 || migrationCount(t, db) != 1 {
+		t.Fatal(value, added)
+	}
+	// Resolve the environmental prerequisite; retry the exact same migration.
+	execMigrationSQL(t, db, "CREATE TABLE ready(value INTEGER)")
+	if err := migrateDatabase(ctx, db, TasksDatabase, files); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow("SELECT value FROM records").Scan(&value); err != nil || value != 11 {
+		t.Fatal(value, err)
+	}
+	if migrationCount(t, db) != 2 {
+		t.Fatal("failed migration was not retried")
+	}
+}
+
+func TestMigrationRejectsInvalidHistoryBeforeWriting(t *testing.T) {
+	for _, mode := range []string{"changed", "newer", "gap", "wrong-database"} {
+		t.Run(mode, func(t *testing.T) {
+			db := migrationDB(t)
+			ctx := context.Background()
+			files := migrationFixture("CREATE TABLE records(value INTEGER); INSERT INTO records VALUES(1);", "UPDATE records SET value=2;")
+			if err := migrateDatabase(ctx, db, TasksDatabase, files); err != nil {
+				t.Fatal(err)
+			}
+			kind := TasksDatabase
+			switch mode {
+			case "changed":
+				files["migrations/tasks/0001_step.sql"].Data = append(files["migrations/tasks/0001_step.sql"].Data, []byte("-- changed\n")...)
+			case "newer":
+				delete(files, "migrations/tasks/0002_step.sql")
+			case "gap":
+				execMigrationSQL(t, db, "DELETE FROM pot_migrations WHERE id LIKE '0001_%'")
+			case "wrong-database":
+				kind = ControlDatabase
+				files["migrations/control/0001_step.sql"] = files["migrations/tasks/0001_step.sql"]
+			}
+			before := migrationCount(t, db)
+			if err := migrateDatabase(ctx, db, kind, files); err == nil || !strings.Contains(err.Error(), "history mismatch") {
+				t.Fatal(err)
+			}
+			var value int
+			if err := db.QueryRow("SELECT value FROM records").Scan(&value); err != nil || value != 2 {
+				t.Fatal(value, err)
+			}
+			if migrationCount(t, db) != before {
+				t.Fatal("rejected history was changed")
+			}
+		})
+	}
+}
+
+func TestMigrationRejectsInvalidDefinitions(t *testing.T) {
+	for _, mode := range []string{"gap", "duplicate", "down", "nontransactional", "empty", "unknown-kind"} {
+		t.Run(mode, func(t *testing.T) {
+			db := migrationDB(t)
+			files := migrationFixture("CREATE TABLE records(value INTEGER);")
+			kind := TasksDatabase
+			switch mode {
+			case "gap":
+				files["migrations/tasks/0003_step.sql"] = files["migrations/tasks/0001_step.sql"]
+			case "duplicate":
+				files["migrations/tasks/0001_other.sql"] = files["migrations/tasks/0001_step.sql"]
+			case "down":
+				files["migrations/tasks/0001_step.sql"].Data = append(files["migrations/tasks/0001_step.sql"].Data, []byte("-- +migrate Down\nDROP TABLE records;\n")...)
+			case "nontransactional":
+				files["migrations/tasks/0001_step.sql"].Data = []byte("-- +migrate Up notransaction\nCREATE TABLE records(value INTEGER);\n")
+			case "empty":
+				files["migrations/tasks/0001_step.sql"].Data = []byte("-- +migrate Up\n")
+			case "unknown-kind":
+				kind = "../tasks"
+			}
+			if err := migrateDatabase(context.Background(), db, kind, files); err == nil {
+				t.Fatal("accepted invalid definition")
+			}
+			if exists, err := tableExists(context.Background(), db, "pot_migrations"); err != nil || exists {
+				t.Fatal(exists, err)
+			}
+		})
+	}
+}
+
+func TestMigrationAdoptsLegacyDatabaseWithoutRewritingHistory(t *testing.T) {
+	for _, kind := range []Database{ControlDatabase, TasksDatabase, RunnerDatabase, ConversationDatabase, MachinesDatabase, UsageDatabase, OperationsDatabase} {
+		t.Run(string(kind), func(t *testing.T) {
+			db := migrationDB(t)
+			// Recreate the untracked baseline, retaining its old version markers.
+			data, err := fs.ReadFile(migrationFiles, "migrations/"+string(kind)+"/0001_baseline.sql")
+			if err != nil {
+				t.Fatal(err)
+			}
+			sql := string(data)
+			for _, table := range []string{"task_schema", "schedule_schema", "runner_schema"} {
+				sql = strings.ReplaceAll(sql, "DROP TABLE IF EXISTS "+table+";", "")
+			}
+			execMigrationSQL(t, db, sql)
+			switch kind {
+			case TasksDatabase:
+				execMigrationSQL(t, db, `CREATE TABLE task_schema(version INTEGER); INSERT INTO task_schema VALUES(8); CREATE TABLE schedule_schema(version INTEGER); INSERT INTO schedule_schema VALUES(2); INSERT INTO task_authority VALUES('control','runtime'); INSERT INTO tasks VALUES('owner','task','running',123,'{"original":"unchanged"}'); INSERT INTO task_writes VALUES('owner','request','digest','task');`)
+			case RunnerDatabase:
+				execMigrationSQL(t, db, `CREATE TABLE runner_schema(version INTEGER); INSERT INTO runner_schema VALUES(6); INSERT INTO task_runs VALUES('control','task','run','digest','running','boot','{"original":"unchanged"}');`)
+			case ConversationDatabase:
+				execMigrationSQL(t, db, `PRAGMA user_version=1; INSERT INTO messages VALUES('message','request','{"original":"unchanged"}');`)
+			case ControlDatabase:
+				execMigrationSQL(t, db, `INSERT INTO secrets VALUES('credential',X'01',X'0203',X'04');`)
+			}
+			if err := Migrate(context.Background(), db, kind); err != nil {
+				t.Fatal(err)
+			}
+			var body string
+			switch kind {
+			case TasksDatabase:
+				var phase string
+				if err := db.QueryRow("SELECT phase,body FROM tasks").Scan(&phase, &body); err != nil || phase != "running" {
+					t.Fatal(phase, err)
+				}
+			case RunnerDatabase:
+				var phase string
+				if err := db.QueryRow("SELECT phase,body FROM task_runs").Scan(&phase, &body); err != nil || phase != "running" {
+					t.Fatal(phase, err)
+				}
+			case ConversationDatabase:
+				if err := db.QueryRow("SELECT body FROM messages").Scan(&body); err != nil {
+					t.Fatal(err)
+				}
+			case ControlDatabase:
+				var ciphertext string
+				if err := db.QueryRow("SELECT hex(ciphertext) FROM secrets").Scan(&ciphertext); err != nil || ciphertext != "0203" {
+					t.Fatal(ciphertext, err)
+				}
+			}
+			if body != "" && body != `{"original":"unchanged"}` {
+				t.Fatal(body)
+			}
+			if migrationCount(t, db) == 0 {
+				t.Fatal("baseline not recorded")
+			}
+		})
+	}
+}
+
+func TestMigrationRejectsUnsupportedLegacyWithoutChanges(t *testing.T) {
+	for _, fixture := range []struct {
+		kind Database
+		sql  string
+	}{
+		{TasksDatabase, "CREATE TABLE task_schema(version INTEGER); INSERT INTO task_schema VALUES(7)"},
+		{TasksDatabase, "CREATE TABLE schedule_schema(version INTEGER); INSERT INTO schedule_schema VALUES(1)"},
+		{TasksDatabase, "CREATE TABLE task_schema(version INTEGER); INSERT INTO task_schema VALUES(8),(8)"},
+		{TasksDatabase, "CREATE TABLE task_schema(version INTEGER)"},
+		{TasksDatabase, "CREATE TABLE task_inputs(value TEXT)"},
+		{RunnerDatabase, "CREATE TABLE runner_schema(version INTEGER); INSERT INTO runner_schema VALUES(5)"},
+		{ConversationDatabase, "PRAGMA user_version=2"},
+	} {
+		t.Run(fixture.sql, func(t *testing.T) {
+			db := migrationDB(t)
+			execMigrationSQL(t, db, fixture.sql)
+			for range 2 {
+				if err := Migrate(context.Background(), db, fixture.kind); err == nil {
+					t.Fatal("accepted unsupported legacy database")
+				}
+				if exists, err := tableExists(context.Background(), db, "pot_migrations"); err != nil || exists {
+					t.Fatal(exists, err)
+				}
+			}
+		})
+	}
+}
+
+func TestMigrationConcurrentHandles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shared.sqlite")
+	// Open handles first; OpenSQLite's journal PRAGMA itself is not a migration.
+	var handles []*sql.DB
+	for range 4 {
+		db, err := OpenSQLite(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		handles = append(handles, db)
+	}
+	var wg sync.WaitGroup
+	for _, db := range handles {
+		wg.Go(func() {
+			if err := Migrate(context.Background(), db, TasksDatabase); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	wg.Wait()
+	if got := migrationCount(t, handles[0]); got != 4 {
+		t.Fatal(got)
+	}
+}
+
+func TestMigrationCancellationDoesNotWrite(t *testing.T) {
+	db := migrationDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := Migrate(ctx, db, TasksDatabase); err != context.Canceled {
+		t.Fatal(err)
+	}
+	if exists, err := tableExists(context.Background(), db, "pot_migrations"); err != nil || exists {
+		t.Fatal(exists, err)
+	}
+}
+
+func TestContinuationMigrationsPreserveLegacyRunsAndArchiveState(t *testing.T) {
+	ctx := context.Background()
+	for _, phase := range []string{"running", "complete", "cancelled", "failed", "interrupted"} {
+		t.Run(phase, func(t *testing.T) {
+			db := migrationDB(t)
+			for _, name := range []string{"0001_baseline.sql", "0002_plugin_event_payload.sql"} {
+				data, err := fs.ReadFile(migrationFiles, "migrations/tasks/"+name)
+				if err != nil {
+					t.Fatal(err)
+				}
+				execMigrationSQL(t, db, string(data))
+			}
+			execMigrationSQL(t, db, fmt.Sprintf(`CREATE TABLE task_schema(version INTEGER); INSERT INTO task_schema VALUES(8);
+INSERT INTO tasks VALUES('owner','task','%s',123,'{"schema_version":8,"run_id":"run","info":{"phase":"%s"},"request":{"text":"original"},"outcome":{"text":"retained"}}');
+INSERT INTO task_writes VALUES('owner','request','original-digest','task');`, phase, phase))
+			for range 2 {
+				if err := Migrate(ctx, db, TasksDatabase); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var version int
+			var run, text, outcome, digest string
+			var archived bool
+			if err := db.QueryRow(`SELECT json_extract(body,'$.schema_version'),json_extract(body,'$.info.run_id'),json_extract(body,'$.info.archived'),json_extract(body,'$.request.text'),json_extract(body,'$.outcome.text') FROM tasks`).Scan(&version, &run, &archived, &text, &outcome); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.QueryRow("SELECT digest FROM task_writes").Scan(&digest); err != nil {
+				t.Fatal(err)
+			}
+			if version != 9 || run != "run" || archived != (phase == "complete" || phase == "cancelled") || text != "original" || outcome != "retained" || digest != "original-digest" {
+				t.Fatal(version, run, archived, text, outcome, digest)
+			}
+		})
+	}
+	db := migrationDB(t)
+	data, err := fs.ReadFile(migrationFiles, "migrations/runner/0001_baseline.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	execMigrationSQL(t, db, string(data))
+	execMigrationSQL(t, db, `CREATE TABLE runner_schema(version INTEGER); INSERT INTO runner_schema VALUES(6);
+INSERT INTO task_runs VALUES('control','task','run','digest','complete','boot','{"schema_version":6,"launch":{"run_id":"run"},"launch_digest":"digest","context":{"checkpoint":"retained"}}');`)
+	for range 2 {
+		if err := Migrate(ctx, db, RunnerDatabase); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var version int
+	var run, digest, checkpoint string
+	if err := db.QueryRow(`SELECT json_extract(body,'$.schema_version'),json_extract(body,'$.launch.run_id'),json_extract(body,'$.launch_digest'),json_extract(body,'$.context.checkpoint') FROM task_runs`).Scan(&version, &run, &digest, &checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	if version != 7 || run != "run" || digest != "digest" || checkpoint != "retained" {
+		t.Fatal(version, run, digest, checkpoint)
+	}
+}

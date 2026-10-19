@@ -175,6 +175,11 @@ placement and remote Main tools remain deferred under issue #74.
 
 ## Persistence and updates
 
+`pkg/storage` owns all SQLite schemas and runs embedded, versioned migrations
+before returning a database handle. Business components own queries and restart
+recovery. See [Database migrations](database-migrations.md) for history, upgrade
+behavior and schema-change rules.
+
 A Go data root has a stable `identity.json`, exclusive process lock and private
 component stores. Initialize each root independently and retain its machine
 identity across restarts. The same root cannot be opened by

@@ -20,6 +20,12 @@ including notification and backend/native text shown to users. Follow the
 [Internationalization rules](docs/internationalization.md) for scope, locale
 handling and validation.
 
+## Database changes
+
+Keep all schema DDL and migrations in `pkg/storage/migrations/`. Every persisted
+schema or JSON format change must include a new migration and upgrade coverage
+in the same change. Follow [Database migrations](docs/database-migrations.md).
+
 ## Agent prompts
 
 Changes to Pot agent prompts require explicit user authorization.

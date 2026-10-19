@@ -195,11 +195,10 @@ silently selecting another directory or destination. A previous run with uncerta
 effects must be reconciled before a continuation can execute. Subsequent tools
 always use the machine's current execution authorization.
 
-Schemas and lifecycle code: `pkg/core/product-tools.json`, `internal/tasks` and
-`internal/control/task_service.go`. Task persistence uses schema version 9 and
-Runner schema version 7. Unsupported formats are rejected without conversion;
-production upgrades need an explicit data conversion before switching builds.
-Development builds use an independent data root.
+Task and Runner record payloads use schema versions 9 and 7. Database schemas and
+automatic upgrades are owned by the [DB migration layer](database-migrations.md).
+Development builds use an independent data root; unsupported pre-migration formats
+are rejected.
 
 ## Client notification outcomes
 

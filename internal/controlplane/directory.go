@@ -64,15 +64,12 @@ func Open(path string, options Options) (*Directory, error) {
 	if !core.Identifier(options.RuntimeID) {
 		return nil, fmt.Errorf("invalid Runtime identity")
 	}
-	db, err := storage.OpenSQLite(path)
+	db, err := storage.OpenDatabase(path, storage.MachinesDatabase)
 	if err != nil {
 		return nil, err
 	}
 	d := &Directory{db: db, options: options, peers: map[string]*Peer{}}
 	fail := func(err error) (*Directory, error) { db.Close(); return nil, err }
-	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS controlplane_state(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL)`); err != nil {
-		return fail(err)
-	}
 	err = storage.Transaction(context.Background(), db, func(tx *sql.Tx) error {
 		var raw []byte
 		err := tx.QueryRow("SELECT body FROM controlplane_state WHERE id=1").Scan(&raw)

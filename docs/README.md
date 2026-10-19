@@ -6,6 +6,7 @@ implementation. Code defines actual behavior.
 | Topic | Read |
 |---|---|
 | Deployment, resource APIs, Control membership and web-ui-server | [Deployment](deployment.md) |
+| Database schemas, version history and automatic upgrades | [Database migrations](database-migrations.md) |
 | Build, test and release | [Development](development.md) |
 | PR screenshot storage and naming | [PR images](pr-images/README.md) |
 | Current product scope and deferred platform work | [Development plan](development-plan.md) |

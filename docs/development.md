@@ -160,6 +160,12 @@ credentials, skip shared mise and Go caches, and receive no release secrets. The
 use the selected workflow's check steps with the PR's source tree; changes to the
 PR's workflow are not run.
 
+## Database changes
+
+Every persisted schema or JSON format change must add a migration under
+`pkg/storage/migrations/` in the same change. Follow [Database migrations](database-migrations.md)
+for versioning, startup upgrades and required upgrade coverage.
+
 ## Source layout
 
 | Directory | Responsibility |

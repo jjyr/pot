@@ -28,17 +28,6 @@ type BackgroundBinding struct {
 	Attention  int             `json:"attention"`
 }
 
-// Initialize alongside inbox recovery, before receivers start. Preserve all
-// bindings/checkpoints, event IDs and delivery states from the earlier format.
-func initializeBackgroundTx(tx *sql.Tx) error {
-	_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS plugin_background(id TEXT PRIMARY KEY, enabled INTEGER NOT NULL, assistant TEXT NOT NULL, config TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, next INTEGER NOT NULL, status TEXT NOT NULL, conversation TEXT NOT NULL);
- CREATE INDEX IF NOT EXISTS agent_plugin_state ON agent_messages(json_extract(envelope,'$.plugin.identity.id'),state);
- DROP INDEX IF EXISTS agent_plugin_pending;
- DROP TABLE IF EXISTS plugin_delivery_rates;
- UPDATE agent_messages SET envelope=json_set(json_remove(envelope,'$.plugin.event.group'),'$.text','')
- WHERE json_extract(envelope,'$.kind')='plugin_event' AND (json_type(envelope,'$.plugin.event.group') IS NOT NULL OR json_extract(envelope,'$.text')!='');`)
-	return err
-}
 func (m *Mailbox) Backgrounds(ctx context.Context) ([]BackgroundBinding, error) {
 	rows, err := m.db.QueryContext(ctx, `SELECT id,enabled,assistant,config,revision,state,next,status,
  (SELECT COUNT(*) FROM agent_messages WHERE json_extract(envelope,'$.plugin.identity.id')=p.id AND state='queued'),

@@ -24,25 +24,11 @@ func OpenMailbox(path, controlID string) (*Mailbox, error) {
 	if !(protocol.AgentRef{ControlID: controlID, Kind: "assistant", AgentID: "identity"}).Valid() {
 		return nil, errors.New("invalid Control identity")
 	}
-	db, err := storage.OpenSQLite(path)
+	db, err := storage.OpenDatabase(path, storage.TasksDatabase)
 	if err != nil {
 		return nil, err
 	}
-	if err = inbox.Initialize(db); err != nil {
-		db.Close()
-		return nil, err
-	}
 	err = storage.Transaction(context.Background(), db, func(tx *sql.Tx) error {
-		if err := initializeBackgroundTx(tx); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS assistant_mail_identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1),control_id TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS assistant_mail_sessions(assistant TEXT NOT NULL,conversation TEXT NOT NULL,config TEXT NOT NULL,context TEXT,PRIMARY KEY(assistant,conversation));
-CREATE TABLE IF NOT EXISTS assistant_mail_events(sequence INTEGER PRIMARY KEY AUTOINCREMENT,message TEXT NOT NULL,event TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS assistant_mail_models(message TEXT NOT NULL,request TEXT NOT NULL,PRIMARY KEY(message,request));
-CREATE TABLE IF NOT EXISTS assistant_contacts(control TEXT PRIMARY KEY,directory TEXT NOT NULL);`); err != nil {
-			return err
-		}
 		if _, err := tx.Exec("INSERT OR IGNORE INTO assistant_mail_identity VALUES (1,?)", controlID); err != nil {
 			return err
 		}
