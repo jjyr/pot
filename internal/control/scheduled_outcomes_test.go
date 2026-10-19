@@ -41,7 +41,7 @@ func TestScheduledAndManualOutcomesShareSummaryDelivery(t *testing.T) {
 					return
 				}
 				last := body.Messages[len(body.Messages)-1].Content
-				if strings.Contains(body.Messages[0].Content, "Summarize background task results") {
+				if strings.Contains(body.Messages[0].Content, "Process background updates") {
 					if summaries.Add(1) != 1 {
 						t.Error("summary replayed")
 						batchReply(w, "duplicate")

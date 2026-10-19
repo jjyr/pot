@@ -50,13 +50,9 @@ func (s recoveryLiveServices) Model(ctx context.Context, request core.ModelReque
 // Main, successful Workers and result handling use the configured real model.
 // Failure injection happens before a Worker model request, with no tool effects.
 func TestConfiguredModelTaskRecoveryLive(t *testing.T) {
-	production := os.Getenv("POT_CONFIGURED_LIVE_ROOT")
-	if os.Getenv("POT_LIVE") != "1" || production == "" {
-		t.Skip("requires POT_LIVE=1 and POT_CONFIGURED_LIVE_ROOT on the configured machine")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
-	profile, provider, credential := configuredLiveModel(t, ctx, production)
+	profile, provider, credential := notificationLiveModel(t, ctx)
 	reasoning := "default"
 	if profile.Params.ReasoningEffort != nil {
 		reasoning = *profile.Params.ReasoningEffort
@@ -239,7 +235,7 @@ func TestConfiguredModelTaskRecoveryLive(t *testing.T) {
 					t.Fatal("baseline unexpectedly omitted dispatch confirmation")
 				}
 			} else if len(prose) > 0 {
-				t.Fatal("unnecessary dispatch reply:", prose)
+				t.Error("unnecessary dispatch reply:", prose)
 			}
 			final := wait(func(snapshot protocol.Snapshot) bool {
 				if snapshot.Turn != nil {
@@ -286,6 +282,12 @@ func TestConfiguredModelTaskRecoveryLive(t *testing.T) {
 			for _, message := range final.Messages[len(dispatched.Messages):] {
 				if message.Role == protocol.Assistant && strings.TrimSpace(message.Text) != "" {
 					finalProse = append(finalProse, message.Text)
+				}
+			}
+
+			for _, reply := range finalProse {
+				if strings.Contains(reply, "<pot_message_metadata>") {
+					t.Error("outcome leaked internal message metadata", reply)
 				}
 			}
 			if scenario.failures > 0 && len(finalProse) != 1 {

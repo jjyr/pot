@@ -43,7 +43,9 @@ are rejected before a Worker is launched.
 After arranging all requested work, Main ends its chat turn silently and remains
 available for independent requests. Creation failures remain in the current turn
 for model-directed repair. Runtime commits a completion event with each finalized terminal result and
-reports currently available outcomes together, including scheduled Tasks.
+processes currently available outcomes together, including scheduled Tasks.
+Useful results, unresolved blockers and needed user decisions produce a reply;
+routine updates can complete silently.
 `get_task` returns the same canonical outcome used for automatic reporting.
 There is no model-visible Task wait operation.
 An explicit result query and the automatic notification share result-report state
@@ -64,7 +66,7 @@ under current machine authorization in a new workspace; old files are not import
 The model supplies only a repair approach and must not repeat owner-denied work
 or uncertain effects that it cannot verify. An unresolved blocker or required
 decision is reported to the user. Accepted recovery is silent; completion is
-reported through the replacement's normal result event.
+processed through the replacement's normal result event under the same reply policy.
 
 The replacement and its retry receipt commit atomically. Repeated calls return
 the same Task, and a replacement cannot itself be retried automatically, including

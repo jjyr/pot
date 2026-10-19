@@ -30,7 +30,7 @@ func TestFailedTaskRecoveryIsSilentAndReplacementReportsOnce(t *testing.T) {
 					t.Error(err)
 					return
 				}
-				if strings.Contains(body.Messages[0].Content, "Summarize background task results") {
+				if strings.Contains(body.Messages[0].Content, "Process background updates") {
 					if len(body.Tools) > 0 {
 						for _, tool := range body.Tools {
 							if tool.Function.Name != "retry_task" && tool.Function.Name != "get_task" {

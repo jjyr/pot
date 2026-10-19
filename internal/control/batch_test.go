@@ -72,7 +72,7 @@ func TestQueuedUserAndTaskOutcomesUseSeparateAggregatedModelTurns(t *testing.T) 
 	s, _ := batchService(t, func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		body := string(raw)
-		if strings.Contains(body, "Summarize background task results") {
+		if strings.Contains(body, "Process background updates") {
 			summaries.Add(1)
 			if !strings.Contains(body, "Task A") || !strings.Contains(body, "Task B") || !strings.Contains(body, "HTTP 400") {
 				t.Error("summary omitted a success or failure", body)
@@ -282,7 +282,7 @@ func TestNotificationsShareOrderedBatchAfterUserInput(t *testing.T) {
 			return
 		}
 		last := request.Messages[len(request.Messages)-1].Content
-		if strings.Contains(last, "Handle all delivered notifications") {
+		if strings.Contains(last, "Process the following background updates") {
 			summaries.Add(1)
 			if users.Load() != 2 || len(request.Tools) != 0 {
 				t.Error("summary bypassed user input or acquired tools", users.Load(), request.Tools)

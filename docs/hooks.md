@@ -81,7 +81,8 @@ same inbox as `suppressed`, retain their history and do not wake a model.
 After commit, UI invalidations wake the current projections. The existing assistant
 receiver claims the durable result when user chat is available. Eligible failed
 manual Tasks first allow bounded model-directed recovery; accepted recovery is
-silent, while successes and unresolved blockers produce a report. Failed outcome
+silent. The assistant replies only with a useful result, an unresolved blocker or
+a needed user decision; routine updates can finish with empty text. Failed outcome
 transitions do not send an immediate system notification ahead of recovery;
 unresolved failures notify through the assistant's reply. Reply acknowledgment, explicit-query deduplication, user-input
 priority and uncertainty fences follow [Agent messages](assistant-messages.md).

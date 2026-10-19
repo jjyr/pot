@@ -74,10 +74,14 @@ user texts together. Retries do not resubmit any member. Uncertain started batch
 remain fenced during restart/recovery, while unstarted queued inputs are retained.
 
 Agent delivery membership is journaled in `agent_delivery_items`, a binding over
-the shared inbox rather than another queue. A notification summary reports each
-delivered task's success/failure and summarizes external plugin events with their
-provenance and source links. It acknowledges each member after its handling turn
-is durable, including a silent turn that successfully arranged recovery.
+the shared inbox rather than another queue. The notification role processes
+background updates and continues related work
+within existing authorization using only supplied tools. It replies only with a
+useful result, an unresolved blocker or a needed user decision; otherwise it ends
+with empty text. Plugin reports include relevant provenance and source links.
+The delivery instruction identifies updates as reference data, never new user
+requests or additional authorization. Each member is acknowledged after its
+handling turn is durable, including silent routine updates and accepted recovery.
 Peer messages from one sender are claimed atomically and supplied together as untrusted
 reference data. Runtime selects the batch member with the highest hop count as
 the processing parent; automatic replies to its sender retain that member's wire
@@ -114,7 +118,7 @@ undelivered Tasks' states and identifiers from prose. Real Task identifiers rema
 available for artifact download URLs.
 
 Events become processed only after the handling turn is durably complete, including
-a silent turn after accepted recovery. A successful explicit
+a silent turn for routine updates or accepted recovery. A successful explicit
 result query acknowledges the same result event at turn completion; a failed
 query turn leaves it eligible for automatic delivery. Repeated hooks cannot
 reset a processed event. Failed/interrupted delivery remains recorded for

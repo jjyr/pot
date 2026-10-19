@@ -84,6 +84,27 @@ streamed output. Eval uses the production Agent with deterministic local fixture
 paid model calls run only through explicit live commands. Public API tests build
 an independent external consumer and a standalone composition worker.
 
+The opt-in `TestConfiguredModelBackgroundUpdatesLive` and
+`TestConfiguredModelTaskRecoveryLive` tests use production prompts and delivery
+with isolated stores and coordination-only tools. Run them on the configured
+machine with `POT_LIVE=1`, `POT_CONFIGURED_LIVE_ROOT` and its existing key selector.
+Alternatively, select a local Pi DeepSeek configuration with `POT_PI_LIVE_ROOT`
+(the directory containing `models.json`) and `POT_PI_LIVE_MODEL` (a configured
+model ID), leaving `POT_CONFIGURED_LIVE_ROOT` unset. Pi command-backed keys are
+not executed. Credentials stay on that machine and must not enter logs.
+
+```sh
+POT_LIVE=1 POT_PI_LIVE_ROOT=/path/to/pi/agent POT_PI_LIVE_MODEL=MODEL_ID \
+  mise exec -- go test ./internal/control \
+  -run '^TestConfiguredModel(BackgroundUpdates|TaskRecovery)Live$' -count=1 -v -timeout=10m
+```
+
+Each suite caps real requests at 32 and output at 2048 tokens per request.
+`POT_LIVE_OUTPUT` optionally writes synthetic evidence outside the repository.
+Failures in recovery scenarios are injected before Worker model invocation;
+Main, successful Workers and notification handling call the real API. Live tests
+assert behavior and may fail when a model emits redundant acknowledgments.
+
 Use `mise run preview` for a disposable browser fixture on loopback port 17702,
 or `mise exec -- go run ./cmd/pot-app -preview` for a native fixture. Neither uses
 product data or model calls. Browser fixtures do not establish real authentication
