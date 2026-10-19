@@ -11,6 +11,7 @@ import {projectScriptRuns} from '../state/script-runs.mjs';
 import {projectTaskMessages} from '../state/task-transcript.mjs';
 
 export function createTaskConversation({root,task,record:initial,locale,client,scope,draft,onDraft,downloadFile,toolMemory,approvalFor,onDecision,onSend,onStop,onPause,onCancel,onUsage,onRefresh,onSettings,assistantName}){
+  const acquireFileImage=client.acquireFileImage?({task,path})=>client.acquireFileImage(task,path,scope):undefined;
   const tr=(en,zh)=>locale()==='zh-CN'?zh:en,t=key=>translate(locale(),key);
   const label=(button,text)=>{button.title=text;button.setAttribute('aria-label',text);};
   const iconButton=(name,text,className='icon-button')=>{const button=action('',()=>{},{});button.className=className;button.append(icon(name));label(button,text);return button;};
@@ -18,7 +19,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   stage.setAttribute('role','status');stageInner.append(stageLabel,locate,retry);stage.append(stageInner);
   const history=n('div','task-history'),column=n('div','task-column'),goal=n('details','task-goal'),goalSummary=n('summary'),goalPreview=n('span','task-goal-preview'),goalBody=n('div','message-body task-goal-body');
   history.dataset.scrollKey='task-history';goal.dataset.cacheKey='task-goal';goalSummary.append(icon('chevron-right'),n('span','task-goal-label',tr('Task goal','任务目标')),goalPreview);goal.append(goalSummary,goalBody);
-  goalPreview.textContent=(initial.request?.text||'').replace(/\s+/g,' ');goalBody.append(renderMarkdown(initial.request?.text||'',{downloadFile}));
+  goalPreview.textContent=(initial.request?.text||'').replace(/\s+/g,' ');goalBody.append(renderMarkdown(initial.request?.text||'',{downloadFile,acquireFileImage}));
   const transcript=n('div','task-transcript'),files=n('div','task-files');transcript.setAttribute('role','log');transcript.setAttribute('aria-label',tr('Task conversation','任务对话'));
   const approvalHost=n('div','task-unmatched-approvals');column.append(goal,approvalHost,transcript,files);history.append(column);
   const composerArea=n('div','composer-area task-composer-area'),form=n('form','composer'),input=n('textarea','composer-input'),send=iconButton('stop',tr('Stop task','停止任务'),'send-button'),latest=iconButton('down',t('latest'),'latest-button'),footer=n('p','task-ended'),error=n('p','task-action-error');
@@ -78,19 +79,19 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
       keep.add(message.id);let entry=nodes.get(message.id);
       if(!entry){const element=n('div',`message task-event role-${message.role}`);entry={element,text:null};nodes.set(message.id,entry);}
       if(message.tool){
-        if(!entry.tool){entry.tool=createToolCall({memory:toolMemory,key:JSON.stringify([scope,task.id,message.id]),locale,onDecision,downloadFile});entry.element.append(entry.tool.element);}
+        if(!entry.tool){entry.tool=createToolCall({memory:toolMemory,key:JSON.stringify([scope,task.id,message.id]),locale,onDecision,downloadFile,acquireFileImage});entry.element.append(entry.tool.element);}
         const children=forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children||[];
         entry.tool.update(message,{approval:approvalFor(message.tool),offline:unavailable||!!connectionError,children:children.map(child=>child.message)});
         const parent=forest.byID.get(message.tool.turn_id+':'+message.tool.parent_id),parentEntry=parent&&nodes.get(parent.message.id);
         if(parent&&parent.children.some(child=>child.message.id===message.id)&&parentEntry?.tool){if(entry.element.parentElement!==parentEntry.tool.children)parentEntry.tool.children.append(entry.element);continue;}
       }else{
         if(!entry.body){entry.body=n('div','message-body');entry.element.append(entry.body);if(message.role==='assistant')entry.reply=createReplyBubble(entry.body);}
-        if(message.role==='assistant')entry.reply.update(message,{t,downloadFile,onReconnect:()=>run(onRefresh),onSettings});
+        if(message.role==='assistant')entry.reply.update(message,{t,downloadFile,acquireFileImage,onReconnect:()=>run(onRefresh),onSettings});
         else{
           if(!entry.source){entry.source=n('div','task-message-source');entry.element.prepend(entry.source);}
           const sender=message.input?.sender,name=sender===task.assistant_id?assistantName:(client.assistants||[]).find(item=>item.id===sender&&item.space_id===scope.space)?.name||sender;
           entry.source.textContent=message.role==='user'?tr('You · Guidance','你 · 指导'):`${message.input?.kind==='reference'?tr('Reference','参考信息'):tr('Guidance','指导')}${name?' · '+name:''}`;
-          if(entry.text!==message.text)entry.body.replaceChildren(renderMarkdown(message.text,{downloadFile}));
+          if(entry.text!==message.text)entry.body.replaceChildren(renderMarkdown(message.text,{downloadFile,acquireFileImage}));
           if(!entry.delivery){entry.delivery=n('span','task-input-delivery');entry.element.append(entry.delivery);}
           const status=message.input?.state;entry.delivery.hidden=status==='consumed';entry.delivery.textContent=tr({pending:'Pending delivery',retained:'Retained in history',cancelled:'Cancelled'}[status]||'',{pending:'待送达',retained:'已保留在记录中',cancelled:'已取消'}[status]||'');
         }

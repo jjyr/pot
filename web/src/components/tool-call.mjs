@@ -10,7 +10,7 @@ function scheduleClock(update){clocks.add(update);if(clockFrame)return;const fra
 
 
 // Stable nodes preserve native disclosure, selection and output scroll on updates.
-export function createToolCall({memory=new Map(),key='',locale=()=> 'en',onDecision,downloadFile}={}){
+export function createToolCall({memory=new Map(),key='',locale=()=> 'en',onDecision,downloadFile,acquireFileImage}={}){
   const t=name=>translate(locale(),`tool.${name}`),root=n('details','tool-call'),summary=n('summary','tool-summary');
   root.dataset.cacheKey=`tool:${key}`;
   const title=n('span','tool-title'),excerpt=n('span','tool-excerpt'),status=n('span','tool-status'),duration=n('span','tool-duration');summary.append(title,excerpt,status,duration);
@@ -30,7 +30,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',onDecis
     item.heading.textContent=label;item.copy.textContent=t('copy');item.box.hidden=false;
     const text=pretty(value);item.value=text;
     const visible=output?(item.following?text.slice(-LIMIT):(text.length>LIMIT?item.displayed??text.slice(0,LIMIT):text)):text.slice(0,LIMIT);
-    if(item.displayed!==visible){const top=item.pre.scrollTop;item.displayed=visible;if(markdown)item.pre.replaceChildren(renderMarkdown(visible,{downloadFile}));else item.pre.textContent=visible;if(output&&item.following)item.pre.scrollTop=item.pre.scrollHeight;else item.pre.scrollTop=top;}
+    if(item.displayed!==visible){const top=item.pre.scrollTop;item.displayed=visible;if(markdown)item.pre.replaceChildren(renderMarkdown(visible,{downloadFile,acquireFileImage}));else item.pre.textContent=visible;if(output&&item.following)item.pre.scrollTop=item.pre.scrollHeight;else item.pre.scrollTop=top;}
 
     item.truncated.hidden=text.length<=LIMIT;item.truncated.textContent=t('displayTruncated');
     if(item.follow)item.follow.textContent=t(item.following?'following':'latest');

@@ -21,6 +21,11 @@ func awaitConversation(t *testing.T, c *assistant.Conversation, predicate func(p
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	return awaitConversationContext(t, ctx, c, predicate)
+}
+
+func awaitConversationContext(t *testing.T, ctx context.Context, c *assistant.Conversation, predicate func(protocol.Snapshot) bool) protocol.Snapshot {
+	t.Helper()
 	updates, remove, err := c.Subscribe(ctx)
 	if err != nil {
 		t.Fatal(err)

@@ -66,6 +66,8 @@ export const messages = {
 
 
     'markdown.diagramSource':'Mermaid source', 'markdown.diagramUnavailable':'Could not render this diagram. The source is available below.',
+    'markdown.imagePreview':'Enlarge image', 'markdown.imageDownload':'Download image', 'markdown.imageClose':'Close preview',
+    'markdown.imageLoading':'Loading image…', 'markdown.imageUnavailable':'Could not preview this image. You can still download the original.',
     'markdown.zoomIn':'Zoom in', 'markdown.zoomOut':'Zoom out', 'markdown.resetZoom':'Reset zoom',
     'tool.files':'Affected files','tool.changes':'Changes','tool.added':'Added','tool.modified':'Modified','tool.deleted':'Deleted','tool.moved':'Move destination',
     'tool.scriptYielded':'Script yielded', 'tool.scriptRunning':'Running script', 'tool.scriptOutput':'Script output',
@@ -277,6 +279,8 @@ export const messages = {
 
 
     'markdown.diagramSource':'Mermaid 源码', 'markdown.diagramUnavailable':'无法渲染此图表，可在下方查看源码。',
+    'markdown.imagePreview':'放大图片', 'markdown.imageDownload':'下载图片', 'markdown.imageClose':'关闭预览',
+    'markdown.imageLoading':'正在加载图片……', 'markdown.imageUnavailable':'无法预览此图片，仍可下载原文件。',
     'markdown.zoomIn':'放大', 'markdown.zoomOut':'缩小', 'markdown.resetZoom':'重置缩放',
     'tool.files':'涉及文件','tool.changes':'变更内容','tool.added':'新增','tool.modified':'修改','tool.deleted':'删除','tool.moved':'移动目标',
     'tool.scriptYielded':'脚本已让出', 'tool.scriptRunning':'正在执行脚本', 'tool.scriptOutput':'脚本输出',
