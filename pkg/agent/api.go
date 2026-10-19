@@ -80,8 +80,11 @@ type Agent struct {
 	Composer           Composer
 	EstimateTokens     TokenEstimator
 	ResolveAttachments func(context.Context, core.ResolvedSpec, []modelprotocol.Message) ([]modelprotocol.Message, error)
-	PrepareContext     PrepareContext
-	Skills             SkillProvider
+	// ResolveReferences supplies request-local quoted content from the owning
+	// transcript. Return a copy; canonical checkpoint messages must stay intact.
+	ResolveReferences func(context.Context, []modelprotocol.Message) ([]modelprotocol.Message, error)
+	PrepareContext    PrepareContext
+	Skills            SkillProvider
 }
 
 // Checkpoint is owner-held persisted model history, distinct from public/UI

@@ -140,14 +140,7 @@ def run(binary, base, env, cli_command, profile_only=False):
             )
 
         def message_text(message):
-            content = message.get("content")
-            if isinstance(content, str) and content.startswith("<pot_message_metadata>"):
-                metadata, separator, content = content.partition("</pot_message_metadata>\n")
-                assert (
-                    separator
-                    and json.loads(metadata.removeprefix("<pot_message_metadata>"))["message_id"]
-                )
-            return content
+            return message.get("content")
 
         class Model(BaseHTTPRequestHandler):
             def log_message(self, *_):

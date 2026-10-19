@@ -248,13 +248,10 @@ func TestAgentCommunicationBatchesBySenderNotWireConversation(t *testing.T) {
 }
 
 func TestBatchRequestCategoryPreservesOriginalInputs(t *testing.T) {
-	marker := func(id, text string) string {
-		return "<pot_message_metadata>{\"message_id\":\"" + id + "\"}</pot_message_metadata>\n" + text
-	}
 	for _, texts := range [][]string{{"foreground gate"}, {"USER_ONE", "USER_TWO"}} {
 		messages := []map[string]string{{"role": "system", "content": "Main"}, {"role": "user", "content": "<pot_context key=\"environment\">data</pot_context>"}}
-		for i, text := range texts {
-			messages = append(messages, map[string]string{"role": "user", "content": marker(fmt.Sprint(i), text)})
+		for _, text := range texts {
+			messages = append(messages, map[string]string{"role": "user", "content": text})
 		}
 		raw, _ := json.Marshal(map[string]any{"messages": messages})
 		category, text := batchRequestCategory(raw)

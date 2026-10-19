@@ -259,11 +259,9 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 		if err := a.compact(ctx, execution, thread, &state, &input, sections, descriptor.Vision(), emit); err != nil {
 			return err
 		}
-		if a.ResolveAttachments != nil {
-			input.Messages, err = a.ResolveAttachments(ctx, thread.Config, input.Messages)
-			if err != nil {
-				return err
-			}
+		input.Messages, err = a.resolveMessages(ctx, thread.Config, input.Messages)
+		if err != nil {
+			return err
 		}
 		if a.PrepareContext != nil {
 			input.Messages, err = a.PrepareContext(ctx, execution, input.Messages)
@@ -526,12 +524,9 @@ func failedResult(raw json.RawMessage) bool {
 	return reason
 }
 func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoint, input m.Request, compactionID *string, emit func(core.Update) error) (response m.Message, result error) {
-	if a.ResolveAttachments != nil {
-		var err error
-		input.Messages, err = a.ResolveAttachments(ctx, thread.Config, input.Messages)
-		if err != nil {
-			return response, err
-		}
+	input.Messages, result = a.resolveMessages(ctx, thread.Config, input.Messages)
+	if result != nil {
+		return response, result
 	}
 	body, err := m.Encode(input)
 	if err != nil {

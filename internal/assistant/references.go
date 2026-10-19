@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 	"slices"
+	"strings"
+	"unicode/utf8"
 )
 
 func (c *Conversation) validateReferencesLocked(refs []core.MessageReference) error {
@@ -24,34 +27,66 @@ func (c *Conversation) validateReferencesLocked(refs []core.MessageReference) er
 	return nil
 }
 
-// ReadMessages is bound to this conversation. Callers cannot supply another
-// assistant, Control or conversation to widen the read.
-func (c *Conversation) ReadMessages(ctx context.Context, ids []string) ([]protocol.Message, error) {
+const referenceContextBytes = 8192
+
+func (f *turnFeedback) resolveReferences(ctx context.Context, messages []modelprotocol.Message) ([]modelprotocol.Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	c := f.conversation
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if len(ids) == 0 || len(ids) > core.MessageReferenceCount {
-		return nil, errors.New("request one to eight message IDs")
+	if err := f.checkLocked(); err != nil {
+		return nil, err
 	}
-	out := make([]protocol.Message, 0, len(ids))
-	for _, id := range ids {
-		found := false
-		for _, m := range c.messages {
-			if m.ID == id && (m.Role == protocol.User || m.Role == protocol.Assistant) {
-				m.Attachments = slices.Clone(m.Attachments)
-				m.References = slices.Clone(m.References)
-				out = append(out, m)
-				found = true
-				break
+	out := slices.Clone(messages)
+	var sources map[string]protocol.Message
+	for i, message := range out {
+		out[i].ReferenceContents = nil
+		if err := core.ValidateMessageReferences(message.References); err != nil {
+			return nil, err
+		}
+		if len(message.References) > 0 && sources == nil {
+			sources = make(map[string]protocol.Message)
+			for _, source := range c.messages {
+				if source.ConversationID == c.options.ConversationID && (source.Role == protocol.User || source.Role == protocol.Assistant) && source.Text != "" {
+					sources[source.ID] = source
+				}
 			}
 		}
-		if !found {
-			return nil, errors.New("referenced message is unavailable in this conversation")
+		for _, ref := range message.References {
+			source, ok := sources[ref.MessageID]
+			if !ok {
+				return nil, errors.New("referenced message is unavailable in this conversation")
+			}
+			text, truncated := referenceContext(source.Text, ref.Quote)
+			out[i].ReferenceContents = append(out[i].ReferenceContents, modelprotocol.ReferenceContent{Role: string(source.Role), Quote: ref.Quote, Context: text, Truncated: truncated})
 		}
 	}
 	return out, nil
+}
+
+// Prefer context surrounding a literal selection. Rendered Markdown selections
+// need not match source bytes, so retain the quote separately and fall back to
+// the source's opening text when no literal match exists.
+func referenceContext(text, quote string) (string, bool) {
+	if len(text) <= referenceContextBytes {
+		return text, false
+	}
+	start := 0
+	if quote != "" {
+		if at := strings.Index(text, quote); at >= 0 {
+			start = max(0, at-(referenceContextBytes-len(quote))/2)
+		}
+	}
+	for start > 0 && !utf8.RuneStart(text[start]) {
+		start--
+	}
+	end := min(len(text), start+referenceContextBytes)
+	for end < len(text) && !utf8.RuneStart(text[end]) {
+		end--
+	}
+	return text[start:end], true
 }
 
 func (f *turnFeedback) messageID(ctx context.Context) (string, error) {

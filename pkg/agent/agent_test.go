@@ -515,8 +515,40 @@ func TestCompositionWaitStreamsWithoutRepeatingAndUsesAuthorizedDispatch(t *test
 		t.Fatal(outputs)
 	}
 }
+func TestResolvedReferencesCountTowardContextLimit(t *testing.T) {
+	a, _, s, thread, execution := setup(t)
+	limit := uint64(512)
+	thread.Config.Params.Agent.MaxInputTokens = &limit
+	thread.Config.Params.Agent.AutoCompact = false
+	if err := thread.Config.Rehash(); err != nil {
+		t.Fatal(err)
+	}
+	a.ResolveReferences = func(_ context.Context, messages []m.Message) ([]m.Message, error) {
+		out := append([]m.Message(nil), messages...)
+		for i, message := range out {
+			if len(message.References) > 0 {
+				out[i].ReferenceContents = []m.ReferenceContent{{Role: "assistant", Context: strings.Repeat("source words ", 600)}}
+			}
+		}
+		return out, nil
+	}
+	err := a.Execute(context.Background(), execution, thread, core.TurnRequest{RequestID: "turn", Text: "Why?", Inputs: []core.ConversationInput{{ID: "input", Text: "Why?", References: []core.MessageReference{{MessageID: "source"}}}}}, false, func(core.AgentEvent) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "context exceeds configured model limits") || s.calls != 0 {
+		t.Fatal("expanded references bypassed the model input cap", err, s.calls)
+	}
+}
+
 func TestCompactionPersistsReducedClassifiedHistory(t *testing.T) {
 	a, f, s, thread, execution := setup(t)
+	a.ResolveReferences = func(_ context.Context, messages []m.Message) ([]m.Message, error) {
+		out := append([]m.Message(nil), messages...)
+		for i, message := range out {
+			for _, ref := range message.References {
+				out[i].ReferenceContents = []m.ReferenceContent{{Role: "assistant", Quote: ref.Quote, Context: "Original source with selected words."}}
+			}
+		}
+		return out, nil
+	}
 	threshold := uint64(100)
 	thread.Config.Params.Agent.CompactAt = &threshold
 	if err := thread.Config.Rehash(); err != nil {
@@ -528,6 +560,9 @@ func TestCompactionPersistsReducedClassifiedHistory(t *testing.T) {
 	}
 	f.body, _ = json.Marshal(state)
 	s.model = func(request core.ModelRequest, index int) (string, error) {
+		if !strings.Contains(string(request.Body), "Original source with selected words.") || strings.Contains(string(request.Body), "batch-first") {
+			return "", fmt.Errorf("compaction omitted resolved reference content or leaked an internal ID")
+		}
 		if index == 0 {
 			if request.CompactionID == nil || strings.Contains(string(request.Body), `"tools"`) {
 				return "", fmt.Errorf("invalid summary request")

@@ -19,50 +19,48 @@ message; the user supplies text or an attachment.
 ## Storage and model input
 
 `SendMessage`, `SteerRequest` and the resulting user `Message` carry
-`references: [{message_id, quote?}]`. Omission of `quote` references the complete
-message by ID. The normal selection UI supplies the selected rendered text;
-Markdown offsets are not stored. No complete source-message copy is added to the
-reply. There are at most eight references, each quote at most 4096 UTF-8 bytes,
+`references: [{message_id, quote?}]`. Omission of `quote` references the whole
+message. IDs are internal associations used for validation and UI navigation;
+they are not sent to the model. The normal selection UI supplies selected
+rendered text; Markdown offsets are not stored. There are at most eight
+references, each quote at most 4096 UTF-8 bytes,
 with at most 16 KiB of quote text in one input. Control verifies that every source
 is a user or assistant message in the same owning conversation. `reply_to`
 continues to identify the input responsible for an assistant output.
 
 ```text
-DOM selection -> owner-scoped reference draft -> accepted user message
-                                                    |
-                                       original message IDs + quotes
-                                                    v
-                                    durable Agent history / checkpoint
-                                                    |
-                                    provider text metadata annotations
-                                                    v
-                                  model -> read_chat_messages -> original
+DOM selection -> accepted user message -> internal source IDs + quotes
+                                                   |
+                                      owning transcript lookup
+                                                   v
+                                  source role + quote + source context
+                                                   |
+                                   current user input's quoted data
+                                                   v
+                                                 model
 ```
 
-Agent history preserves the transcript IDs of user inputs and assistant outputs,
-including the initial welcome. Members of a user batch keep their individual
-identities, text and references; compaction retains the latest batch together.
-All four provider encoders emit text-based `pot_message_metadata` annotations
-containing the message's own ID and any references. Canonical text remains
-unchanged. Native provider IDs and signed reasoning replay remain separate from
-Pot identities. Selected quotes and fetched originals are reference data, not new
-instructions or authority.
+The owning conversation resolves references from its transcript before token
+estimation and model requests, including compaction requests. Each resolved entry
+contains `role`, an optional selected `quote`, `context` and a `truncated` flag
+when applicable. Context is at most 8192 UTF-8 bytes per entry. Long sources use
+a window around a literal selection; rendered Markdown selections without a
+literal source match retain their quote alongside the source's opening context.
+Whole-message references use the opening context when the source exceeds the
+limit. Truncation preserves UTF-8 boundaries and is explicit to the model.
 
-Main exposes `read_chat_messages({message_ids})` for one to eight original
-messages. Its binding fixes the assistant and current execution generation;
-callers cannot select another owner or conversation. Workers, peer correspondence
-and automatic summaries cannot use this reader. It reads the durable transcript,
-so the model can resolve an ID-only reference after context compaction instead of
-automatically expanding every reference into another copy of the source.
+All four provider encoders prepend a `quoted_messages` data block only to the
+user input carrying those references. The block contains quoted content and
+source roles, with no Pot message IDs or lookup instructions. JSON escaping keeps
+quoted delimiters inside the data. Quotes and source context are reference data,
+never additional instructions or authority. No model-side message reader is
+exposed. Inputs without references receive no extra text, and historical
+assistant messages and native replay receive no annotations.
 
-Responses annotations are attached once to an existing native message with text,
-retaining its phase, rather than inserted as a separate metadata-only assistant
-turn. Empty assistant messages and tool/reasoning-only native outputs receive no
-annotation; their native fields and signed content remain intact. Encoding does
-not mutate canonical text or replay bytes.
-
-These annotations remain model-visible text. Returned tags are preserved as
-ordinary protocol content in deltas, saved replies and native replay, regardless
-of their message ID or phase. This input correction cannot guarantee that a
-model or gateway will stop returning metadata. Existing stored conversations and
-checkpoints are not rewritten.
+Agent history retains the internal IDs and references of individual user inputs;
+compaction retains the latest accepted batch together. Resolved source text is
+request-local and is not added to the canonical message or checkpoint. The
+transcript can resolve references after restart or after the original leaves
+retained model history. Native provider IDs and signed replay remain independent.
+Returned model text is streamed and saved verbatim, with no metadata filtering.
+Existing stored conversations and checkpoints are not rewritten.

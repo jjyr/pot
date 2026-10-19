@@ -214,8 +214,9 @@ For a machine's existing configured model, the opt-in
 `POT_SECRET_KEY_FILE` when applicable. It reads provider metadata and encrypted
 credentials with a read-only SQLite connection, then uses an isolated test
 Control, conversation and accounting. It checks selected-excerpt interpretation,
-generated-message IDs with native replay, and ID-only lookup with the original
-absent from retained model history. It makes
+references to native assistant replay, and direct whole-message reference content
+with the original absent from retained model history. No message lookup tools are
+available to the model. It makes
 at most six model requests, with three per turn and 512 output tokens per request.
 Credentials stay on the configured machine and are never logged. Run it with
 `POT_LIVE=1 mise exec -- go test -v ./internal/control -run '^TestConfiguredModelMessageReferencesLive$' -count=1 -timeout=4m`

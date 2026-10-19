@@ -91,19 +91,29 @@ type TokenUsage struct {
 	Output uint64 `json:"output"`
 }
 type Message struct {
-	ID          string                  `json:"id,omitempty"`
-	References  []core.MessageReference `json:"references,omitempty"`
-	Attachments []core.Attachment       `json:"attachments,omitempty"`
-	Documents   []ModelDocument         `json:"documents,omitempty"`
-	Kind        MessageKind             `json:"kind"`
-	Images      []ModelImage            `json:"images,omitempty"`
-	Role        string                  `json:"role"`
-	Text        string                  `json:"text"`
-	Calls       []ToolCall              `json:"calls,omitempty"`
-	CallID      string                  `json:"call_id,omitempty"`
-	Replay      json.RawMessage         `json:"replay,omitempty"`
-	ReplayRoute *string                 `json:"replay_route,omitempty"`
-	Usage       *TokenUsage             `json:"usage,omitempty"`
+	ID         string                  `json:"id,omitempty"`
+	References []core.MessageReference `json:"references,omitempty"`
+	// ReferenceContents are resolved by the owning host for each model request.
+	// Internal IDs remain in References and never enter provider text.
+	ReferenceContents []ReferenceContent `json:"-"`
+	Attachments       []core.Attachment  `json:"attachments,omitempty"`
+	Documents         []ModelDocument    `json:"documents,omitempty"`
+	Kind              MessageKind        `json:"kind"`
+	Images            []ModelImage       `json:"images,omitempty"`
+	Role              string             `json:"role"`
+	Text              string             `json:"text"`
+	Calls             []ToolCall         `json:"calls,omitempty"`
+	CallID            string             `json:"call_id,omitempty"`
+	Replay            json.RawMessage    `json:"replay,omitempty"`
+	ReplayRoute       *string            `json:"replay_route,omitempty"`
+	Usage             *TokenUsage        `json:"usage,omitempty"`
+}
+
+type ReferenceContent struct {
+	Role      string `json:"role"`
+	Quote     string `json:"quote,omitempty"`
+	Context   string `json:"context"`
+	Truncated bool   `json:"truncated,omitempty"`
 }
 
 func TextMessage(role, text string) Message {

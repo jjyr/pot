@@ -853,6 +853,7 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 		return c.recordCleanup(ctx, request.RequestID, thread.Generation)
 	}
 	loop := agent.Agent{MessageID: binding.messageID, Services: options.Services, Feedback: binding, Dispatch: options.Dispatch, Cleanup: cleanup, Composer: options.Composer, Tools: options.Tools, PrepareContext: options.PrepareContext, ResolveAttachments: options.ResolveAttachments}
+	loop.ResolveReferences = binding.resolveReferences
 	err = loop.Execute(runCtx, options.Execution, thread, core.TurnRequest{RequestID: request.RequestID, Text: inputText, Attachments: inputAttachments, Inputs: modelInputs}, resuming, binding.event)
 	phase := execution.Succeeded
 	if err != nil {

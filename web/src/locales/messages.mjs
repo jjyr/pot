@@ -60,7 +60,6 @@ export const messages = {
     'references.list':'Message references', 'references.assistant':'Replying to assistant', 'references.you':'Replying to you',
     'references.open':'View original: {source}', 'references.remove':'Remove reference', 'references.unavailable':'Original message unavailable',
     'references.limit':'Select up to 8 excerpts, each at most 4 KiB and totaling at most 16 KiB.', 'references.added':'Reference added', 'references.removed':'Reference removed',
-    'references.read':'Read chat messages',
 
     'loading.pending':'Loading…',
     'loading.stale':'Refresh failed. Previously loaded data is still shown.',
@@ -272,7 +271,6 @@ export const messages = {
     'references.list':'消息引用', 'references.assistant':'引用助手的消息', 'references.you':'引用你的消息',
     'references.open':'查看原消息：{source}', 'references.remove':'移除引用', 'references.unavailable':'原消息不可用',
     'references.limit':'最多引用 8 处，每处不超过 4 KiB，总计不超过 16 KiB。', 'references.added':'已加入引用', 'references.removed':'已移除引用',
-    'references.read':'读取聊天消息',
 
     'loading.pending':'正在加载…',
     'loading.stale':'刷新失败，继续显示之前加载的数据。',

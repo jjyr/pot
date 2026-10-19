@@ -52,8 +52,12 @@ transcript ID, original text, attachments and selected quotes. `Agent.MessageID`
 is an optional caller callback that supplies the transcript ID for each assistant
 output before streaming starts; that ID also enters the durable model history.
 `SteeringInput.MessageID` and `References` do the same for active-turn input.
-Provider encoders render these identities as text metadata while keeping native
-provider IDs and signed replay independent. See [Chat references](chat-references.md).
+Hosts using references supply `Agent.ResolveReferences` to resolve their internal
+associations into request-local `Message.ReferenceContents` before token
+estimation and model calls, including compaction. Encoders provide source roles,
+selected quotes and source context directly to the model; unresolved references
+are rejected. Internal transcript IDs are never encoded as text. Native provider
+IDs and signed replay stay independent. See [Chat references](chat-references.md).
 
 `pkg/agent` and `pkg/modelprotocol` do not link Wails, SQLite, Tailscale or the
 complete host. Agent services do not require the product's RPC interface.

@@ -15,8 +15,13 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
-func TestResponsesReturnedMetadataPersistsUnchanged(t *testing.T) {
-	for _, scenario := range []struct{ snapshotOnly, generatedID, discussion bool }{{false, false, false}, {true, false, false}, {false, true, false}, {true, true, false}, {false, true, true}, {true, true, true}} {
+func TestResponsesReturnedTextPersistsUnchanged(t *testing.T) {
+	for _, scenario := range []struct{ snapshotOnly, discussion, attached bool }{
+		{false, false, false}, {true, false, false},
+		{false, true, false}, {true, true, false},
+		{false, false, true}, {true, false, true},
+		{false, true, true}, {true, true, true},
+	} {
 		t.Run(fmt.Sprint(scenario), func(t *testing.T) {
 			snapshotOnly := scenario.snapshotOnly
 			ctx := context.Background()
@@ -40,35 +45,17 @@ func TestResponsesReturnedMetadataPersistsUnchanged(t *testing.T) {
 					if err := c.ClaimModel(ctx, request.RequestID, thread.Generation, r.ID); err != nil {
 						return nil, err
 					}
-					var body struct {
-						Input []struct {
-							Role    string
-							Content string
-						}
+					if !scenario.discussion && strings.Contains(string(r.Body), "pot_message_metadata") {
+						return nil, fmt.Errorf("provider input contains internal metadata")
 					}
-					if err := json.Unmarshal(r.Body, &body); err != nil {
-						return nil, err
-					}
-					var tag string
-					for _, item := range body.Input {
-						if item.Role == "assistant" {
-							end := strings.Index(item.Content, "</pot_message_metadata>")
-							if end >= 0 {
-								tag = item.Content[:end+len("</pot_message_metadata>")] + `\n`
-								break
-							}
-						}
-					}
-					if scenario.generatedID {
-						tag = `<pot_message_metadata>{"message_id":"ABCDEFGHIJKLMNOPQRSTUVWXYZ"}</pot_message_metadata>\n`
-					}
-					if tag == "" {
-						return nil, fmt.Errorf("fixture has no annotation")
-					}
+					tag := `<pot_message_metadata>{"message_id":"ABCDEFGHIJKLMNOPQRSTUVWXYZ"}</pot_message_metadata>\n`
 					item := func(id, phase, text string) map[string]any {
 						return map[string]any{"id": id, "type": "message", "role": "assistant", "phase": phase, "content": []any{map[string]any{"type": "output_text", "text": text}}}
 					}
 					items := []map[string]any{item("meta", "commentary", tag), item("progress", "commentary", "Queued."), item("final", "final_answer", "Separate worktree.")}
+					if scenario.attached {
+						items = []map[string]any{item("progress", "commentary", tag+"Queued."), item("final", "final_answer", "Separate worktree.")}
+					}
 					want = tag + "Queued.Separate worktree."
 					wantReplay, _ = json.Marshal(items)
 					var wire strings.Builder
@@ -129,7 +116,7 @@ func TestResponsesReturnedMetadataPersistsUnchanged(t *testing.T) {
 			if last.Text != want || string(last.Replay) != string(wantReplay) {
 				t.Fatalf("invalid checkpoint: %+v", last)
 			}
-			// Durable streamed snapshots must preserve every prefix, including the tag.
+			// Output stays verbatim, including old tags returned by the provider.
 			events, err := c.store.Events(ctx, 0)
 			if err != nil {
 				t.Fatal(err)
