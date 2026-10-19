@@ -34,6 +34,14 @@ func (s *Service) productDispatch(owner, turn string, generation uint64, worker 
 }
 func (s *Service) productDispatchBound(owner, executionOwner, turn string, generation uint64, worker bool) map[string]agent.Dispatch {
 	out := map[string]agent.Dispatch{}
+	if !worker && owner == executionOwner && strings.HasPrefix(turn, "pot-result-") {
+		out["retry_task"] = func(ctx context.Context, e core.ExecutionContext, call modelprotocol.ToolCall, emit func(core.Update) error) (json.RawMessage, error) {
+			if e.Owner != executionOwner || generation == 0 {
+				return nil, errors.New("stale recovery tool binding")
+			}
+			return s.retryDeliveredTask(ctx, owner, turn, call.Arguments)
+		}
+	}
 	for _, d := range s.productTools(worker) {
 		out[d.Name] = func(ctx context.Context, e core.ExecutionContext, call modelprotocol.ToolCall, emit func(core.Update) error) (json.RawMessage, error) {
 			if e.Owner != executionOwner || generation == 0 {
@@ -119,6 +127,17 @@ func (s *Service) productDispatchBound(owner, executionOwner, turn string, gener
 				return nil, err
 			}
 			if call.Name == "get_task" {
+				if strings.HasPrefix(turn, "pot-result-") {
+					var query struct {
+						TaskID string `json:"task_id"`
+					}
+					if err := json.Unmarshal(call.Arguments, &query); err != nil {
+						return nil, err
+					}
+					if err := s.deliveredTask(ctx, owner, turn, query.TaskID); err != nil {
+						return nil, err
+					}
+				}
 				if err := s.observeTaskResult(ctx, owner, turn, call.Arguments); err != nil {
 					return nil, err
 				}

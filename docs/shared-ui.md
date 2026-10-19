@@ -268,7 +268,9 @@ Notifications observe owner-scoped projections on domain invalidations:
 
 - A changed assistant catalogue `reply_id` with an increased `reply_count`
   identifies a completed assistant reply. Token updates do not notify.
-- Task `complete` notifies success; `failed` and `interrupted` notify failure.
+- Task `complete` notifies success and `interrupted` notifies interruption.
+  A `failed` transition first enters assistant recovery; unresolved failures
+  notify through the assistant reply rather than an immediate Task alert.
   Other phases, including explicit cancellation, do not notify. Task identity
   and a durable outcome sequence distinguish subsequent terminal transitions.
   The compact [Task outcome API](task-coordination.md#client-notification-outcomes)

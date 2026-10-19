@@ -282,7 +282,7 @@ func TestNotificationsShareOrderedBatchAfterUserInput(t *testing.T) {
 			return
 		}
 		last := request.Messages[len(request.Messages)-1].Content
-		if strings.Contains(last, "Report all delivered notifications") {
+		if strings.Contains(last, "Handle all delivered notifications") {
 			summaries.Add(1)
 			if users.Load() != 2 || len(request.Tools) != 0 {
 				t.Error("summary bypassed user input or acquired tools", users.Load(), request.Tools)

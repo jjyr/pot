@@ -38,7 +38,7 @@ schedule schema 2 require the unified outcome format; older schemas are rejected
 without importing legacy queues or schedule notifications.
 
 The assistant's user inbox is separate and has priority at turn boundaries.
-Accepted requests arriving during an automatic read-only summary start their
+Accepted requests arriving during automatic result handling start their
 own Main turn afterwards; they do not inherit the summary's role. Pending user
 inputs survive restart. Selecting an input, persisting its turn and removing it
 from the user queue are atomic. Retries retain their original target and receipt,
@@ -76,7 +76,8 @@ remain fenced during restart/recovery, while unstarted queued inputs are retaine
 Agent delivery membership is journaled in `agent_delivery_items`, a binding over
 the shared inbox rather than another queue. A notification summary reports each
 delivered task's success/failure and summarizes external plugin events with their
-provenance and source links. It acknowledges each member after its reply is durable.
+provenance and source links. It acknowledges each member after its handling turn
+is durable, including a silent turn that successfully arranged recovery.
 Peer messages from one sender are claimed atomically and supplied together as untrusted
 reference data. Runtime selects the batch member with the highest hop count as
 the processing parent; automatic replies to its sender retain that member's wire
@@ -89,8 +90,9 @@ Approval events remain UI-only hooks and never join these batches.
 
 ## Completion events
 
-Main dispatches background work, acknowledges its accepted state and ends its
-turn. It exposes no Task waiting tool and does not poll for completion.
+Main arranges all requested background work and ends its turn silently. Task
+cards show acceptance. It exposes no Task waiting tool and does not poll for
+completion; recoverable creation errors are handled before ending the turn.
 
 A [terminal hook](hooks.md) creates one event identified by Task and run for
 completion, failure, interruption or cancellation, including stopping before
@@ -99,16 +101,20 @@ available, its receiver claims a batch of currently pending outcomes and produce
 one concise report using each Task title and actual outcome. Ordinary and
 scheduled outcomes share this batch, delivery journal and acknowledgment path
 with host-accepted [plugin notifications](plugins.md#background-services-and-assistant-notifications).
+Failed manual Tasks can enter [bounded recovery](task-coordination.md#automatic-failure-recovery)
+before a report. Successfully accepted recovery needs no user-facing text.
 Each source keeps its own payload format; plugins never impersonate a Task or an
 assistant peer. The receiver uses one readiness/read/claim/Report/release path,
 and plugin acceptance wakes it through the existing inbox change subscription.
 The receiver reads immutable event data rather than reinterpreting current Task
 state. Schedule policy can suppress an outcome before delivery; no separate
-schedule notification queue or reporting turn exists. Summaries have no
-tools, do not infer undelivered Tasks' states and omit identifiers from prose. Real Task identifiers remain
+schedule notification queue or reporting turn exists. Ordinary summaries have no
+tools; recovery has only batch-scoped inspection and retry tools. Both omit
+undelivered Tasks' states and identifiers from prose. Real Task identifiers remain
 available for artifact download URLs.
 
-Events become processed only after the reply is durable. A successful explicit
+Events become processed only after the handling turn is durably complete, including
+a silent turn after accepted recovery. A successful explicit
 result query acknowledges the same result event at turn completion; a failed
 query turn leaves it eligible for automatic delivery. Repeated hooks cannot
 reset a processed event. Failed/interrupted delivery remains recorded for

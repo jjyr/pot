@@ -4,7 +4,9 @@ const identity=assistant=>({space:assistant.space_id,control:assistant.control_i
 const event=(base,kind,id,task='')=>({...base,kind,task,id:JSON.stringify([base.control,base.owner,kind,id])});
 export function taskOutcomeNotifications(assistant,items) {
   const base=identity(assistant);
-  return items.filter(item=>['complete','failed','interrupted'].includes(item.phase)).map(item=>
+  // Failed tasks first enter assistant recovery. Only an unresolved failure
+  // produces a reply notification; do not interrupt before recovery is attempted.
+  return items.filter(item=>['complete','interrupted'].includes(item.phase)).map(item=>
     event({...base,name:String(item.title||base.name).slice(0,60)},item.phase==='complete'?'task-complete':'task-failed',JSON.stringify([item.id,item.sequence]),item.id));
 }
 export function createNotificationProjection() {

@@ -134,7 +134,7 @@ func (a *Agent) compact(ctx context.Context, execution core.ExecutionContext, th
 		return fmt.Errorf("compaction returned tools or empty summary")
 	}
 	replacement := []m.Message{}
-	if execution.Role == core.Summary {
+	if execution.Role.IsNotification() {
 		replacement = retainedSections(state.Messages)
 	} else {
 		replacement, err = SynchronizeSections(nil, sections)

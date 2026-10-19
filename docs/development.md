@@ -158,6 +158,25 @@ tray generation; removing the VM Helper does not remove brand generation.
 
 Paid tests require an explicit `POT_LIVE=1` in the calling process.
 
+For quiet task dispatch and bounded automatic recovery, run
+`TestConfiguredModelTaskRecoveryLive` with `POT_LIVE=1`,
+`POT_CONFIGURED_LIVE_ROOT` pointing to the selected machine's existing Control
+root, and its existing `POT_SECRET_KEY_FILE` when applicable. Configuration and
+credentials are read on that machine; all Runtime writes use private test roots.
+The test preserves the configured model, protocol and reasoning effort, caps
+output at 2048 tokens and real requests at 32, and exposes only coordination
+tools. Single/multiple dispatch must be silent; injected pre-execution failures
+exercise successful recovery and exhaustion of the one-replacement budget.
+`POT_LIVE_OUTPUT` optionally retains private transcript evidence outside the repo.
+`POT_BASELINE_MAIN_PROMPT_FILE` optionally adds a creation-confirmation comparison
+using an explicitly supplied earlier prompt. For example:
+
+```sh
+POT_LIVE=1 POT_CONFIGURED_LIVE_ROOT=/absolute/control/root \
+  mise exec -- go test -v ./internal/control \
+  -run '^TestConfiguredModelTaskRecoveryLive$' -count=1 -timeout=9m
+```
+
 For a machine's existing configured model, the opt-in
 `TestConfiguredModelMessageReferencesLive` test accepts
 `POT_REFERENCE_LIVE_ROOT` pointing to that Control root and the existing

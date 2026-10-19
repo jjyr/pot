@@ -3,7 +3,8 @@
 Task guidance, reference messages and completion events share the Agent inbox;
 see [Agent messages](assistant-messages.md). Main manages Tasks. Workers can
 message only their owning assistant; they cannot create, inspect, stop or wait
-for other Tasks. Automatic result summaries have no tools.
+for other Tasks. Automatic summaries have no tools; a result batch with eligible
+failed work uses the bounded recovery role described below.
 
 ## Autonomous model routing
 
@@ -39,14 +40,37 @@ The model-visible `create_task` requires a title followed by complete execution
 instructions, preserving exact user commands and constraints; title-only briefs
 are rejected before a Worker is launched.
 
-After `create_task`, Main ends its chat turn and remains available for independent
-requests. Runtime commits a completion event with each finalized terminal result and
+After arranging all requested work, Main ends its chat turn silently and remains
+available for independent requests. Creation failures remain in the current turn
+for model-directed repair. Runtime commits a completion event with each finalized terminal result and
 reports currently available outcomes together, including scheduled Tasks.
 `get_task` returns the same canonical outcome used for automatic reporting.
 There is no model-visible Task wait operation.
 An explicit result query and the automatic notification share result-report state
 so the same outcome is not reported twice. `wait` collects JavaScript composition
 results; `write_stdin` manages a worker's command session.
+
+### Automatic failure recovery
+
+A delivered failed manual Task may receive one model-directed replacement through
+`retry_task({task_id, instructions})`. Runtime binds the source to the owner's
+currently claimed result batch. `get_task` can inspect only Tasks in that batch;
+the recovery role has no command, messaging, scheduling or general creation tools.
+Worker output and plugin events remain untrusted reference data.
+
+The replacement retains the original brief, all additional inputs with their
+provenance, machine, resolved model, plugins, Skills and requirements. It runs
+under current machine authorization in a new workspace; old files are not imported.
+The model supplies only a repair approach and must not repeat owner-denied work
+or uncertain effects that it cannot verify. An unresolved blocker or required
+decision is reported to the user. Accepted recovery is silent; completion is
+reported through the replacement's normal result event.
+
+The replacement and its retry receipt commit atomically. Repeated calls return
+the same Task, and a replacement cannot itself be retried automatically, including
+after restart. Result handling admits at most eight model requests per delivery.
+Cancelled/interrupted Tasks are not restarted. Scheduled failures retain their
+existing occurrence and notification policy rather than launching a manual copy.
 
 Pending approvals still expose the exact reviewed operation in Chat.
 Approval waiting retains the execution lease and route capacity until the owner

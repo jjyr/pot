@@ -12,7 +12,7 @@ import (
 )
 
 // User requests have a separate durable queue, ahead of background inbox events.
-// A request received during a read-only summary must start a Main turn rather
+// A request received during result handling must start a Main turn rather
 // than inheriting the summary's restricted tools and instruction role.
 func (c *Conversation) queueUserLocked(ctx context.Context, request protocol.SendMessage) (protocol.SendMessageAccepted, error) {
 	return c.queueUserFromLocked(ctx, request, "")

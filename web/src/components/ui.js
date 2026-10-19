@@ -534,7 +534,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
           if(disposed||key!==JSON.stringify([client.scope().space,client.scope().owner]))return;
           items.push(...(value.items||[]));offset=value.next_offset;
         }while(offset!=null);
-        taskCache.set(key,items.filter(task=>['running','waiting_approval'].includes(task.phase)).map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner})));
+        taskCache.set(key,items.filter(task=>['queued','running','waiting','waiting_approval'].includes(task.phase)).map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner})));
         pages.rememberTasks(taskCache.get(key));if(route==='chat')renderMessages();
       },{active:()=>!disposed&&key===JSON.stringify([client.scope().space,client.scope().owner])});
     }return backgroundTasks.run();

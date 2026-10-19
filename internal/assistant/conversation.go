@@ -458,7 +458,8 @@ func (c *Conversation) Send(ctx context.Context, request protocol.SendMessage) (
 }
 
 // Report atomically claims an automatic result summary using a stable ID. It is
-// system transcript data, enters the shared summary lane and has read-only tools.
+// system transcript data and enters the shared summary lane. Control may supply
+// bounded recovery tools for delivered failures.
 func (c *Conversation) Report(ctx context.Context, id, text string) (protocol.SendMessageAccepted, error) {
 	if !strings.HasPrefix(id, "pot-result-") {
 		return protocol.SendMessageAccepted{}, errors.New("invalid notification identity")
@@ -746,6 +747,9 @@ func (c *Conversation) ClaimModel(ctx context.Context, turn string, generation u
 		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM assistant_model_attempts WHERE turn_id=?", turn).Scan(&count); err != nil {
 			return err
 		}
+		if strings.HasPrefix(turn, "pot-result-") && count >= 8 {
+			return errors.New("automatic result handling model request budget exhausted")
+		}
 		if c.options.MaxTurnRequests > 0 && uint64(count) >= c.options.MaxTurnRequests {
 			return errors.New("per-turn model request budget exhausted")
 		}
@@ -838,7 +842,7 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 	if options.Execution.Owner != thread.Owner || options.Services == nil || options.Cleanup == nil {
 		return execution.Result{Phase: execution.Failed, Err: errors.New("invalid fixed assistant execution ports")}
 	}
-	if strings.HasPrefix(request.RequestID, "pot-result-") {
+	if strings.HasPrefix(request.RequestID, "pot-result-") && options.Execution.Role != core.Recovery {
 		options.Execution.Role = core.Summary
 	}
 	binding := &turnFeedback{conversation: c, thread: thread, request: request, options: options, gate: core.NewEventGate(thread.Generation, request.RequestID), toolMessages: map[string]string{}}

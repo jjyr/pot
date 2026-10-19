@@ -17,7 +17,7 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
       const input=inputs.get(replyInputs.get(message.id));
       // Tool-only model rounds have no prose to keep. The next output adopts
       // their waiting bubble instead of leaving empty cards in the transcript.
-      if(!message.text&&message.status==='complete'&&(!snapshot.running||input?.id!==snapshot.turn_id||latestReplies.get(input?.id)!==message.id))continue;
+      if(!message.text.trim()&&message.status==='complete'&&(!snapshot.running||input?.id!==snapshot.turn_id||latestReplies.get(input?.id)!==message.id))continue;
       row.inputID=input?.id||message.reply_to;
       if(input&&!firstReplies.has(input.id)){
         row.viewKey=`reply:${input.request_id||input.id}`;firstReplies.add(input.id);

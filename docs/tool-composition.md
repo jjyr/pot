@@ -62,7 +62,9 @@ Results contain `output` and `completed`, plus `exec_id` while running.
 `wait({exec_id, yield_time_ms?})` returns new output or completion without repeating
 previous output. Call it only after a running result supplies `exec_id`.
 `write_stdin` manages shell sessions. Task completion is delivered
-through Runtime inbox events; automatic summaries expose no tools.
+through Runtime inbox events; automatic summaries expose no composition tools.
+Eligible failures may use the separate batch-scoped inspection and retry tools
+documented in [Task coordination](task-coordination.md#automatic-failure-recovery).
 
 Runs belong to the current accepted turn and continue while the Agent awaits other
 work. Await completion before finishing the turn. Ending the turn stops pending
