@@ -8,15 +8,19 @@ lookups, reasoning steps and diagrams alone do not require a Task. Main delegate
 explicit background requests, prolonged execution, extensive investigation,
 substantial file/report creation and code changes to Tasks.
 
-After dispatching background work, Main ends its turn without polling or waiting.
-Runtime completion events use the shared Agent inbox and report each outcome
-independently; see [Agent messages](assistant-messages.md).
+Main arranges all requested background work, then ends its turn without polling,
+waiting or a routine confirmation. Task cards provide acceptance feedback. Creation
+errors go back to the model for diagnosis and repair; only an unresolved blocker
+or required user decision warrants an interruption. Successful schedule creation
+also needs no chat recap. Runtime completion events use the shared Agent inbox;
+see [Agent messages](assistant-messages.md).
 
 Main replies describe background work with task titles and concrete progress in
 the user's language. Task IDs remain in tool arguments and artifact download URLs;
-prose includes them only when requested or needed for troubleshooting. Creation
-acknowledgements reflect the reported state, including queues and approval waits,
-without claiming that execution has started.
+prose includes them only when requested or needed for troubleshooting. When a
+reply is needed, it reflects the reported state, including queues and approval
+waits, without claiming that execution has started. Empty successful replies
+produce neither a completed chat bubble nor a reply notification.
 
 ## Sources and scope
 

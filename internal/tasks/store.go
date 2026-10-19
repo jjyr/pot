@@ -55,6 +55,10 @@ func Open(path string, options Options) (*Service, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS task_retries(assistant_id TEXT NOT NULL,source_task TEXT NOT NULL,task_id TEXT NOT NULL UNIQUE,PRIMARY KEY(assistant_id,source_task))`); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := initializeMessageViews(db); err != nil {
 		db.Close()
 		return nil, err

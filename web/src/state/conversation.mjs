@@ -20,19 +20,21 @@ export function validSnapshot(value) {
 }
 
 export function createConversationState() {
-  return {epoch: 0, snapshot: null, drafts: new Map(), referenceDrafts: new Map(), pending: new Map(), retries: new Map(), sends: new Map(), seenRequests: new Set()};
+  return {epoch: 0, snapshot: null, drafts: new Map(), draftVersions: new Map(), referenceVersions: new Map(), referenceDrafts: new Map(), pending: new Map(), retries: new Map(), sends: new Map(), seenRequests: new Set()};
 }
 
-export function beginSubscription(state,{retainPending=false}={}) {
+export function beginSubscription(state) {
   state.epoch++;
-  if(retainPending){for(const pending of state.pending.values())pending.epoch=state.epoch;}
-  else{
-    for (const [key, pending] of state.pending) state.retries.set(key, pending.request);
-    for (const send of state.sends.values())if(send.phase==='sending')send.phase='uncertain';
-    state.pending.clear();
-  }
+  // Navigation and reconnects cannot turn an unknown send into a new attempt.
   state.snapshot = null;
   return state.epoch;
+}
+
+export function messageConfirmsSend(message, receipt) {
+  const request=receipt.request;
+  return !request.retry_user_message_id && message.role==='user' && (request.user_message_id
+    ? message.accepted_request_id===request.request_id && message.steering && message.accepted_turn_id===request.user_message_id
+    : message.request_id===request.request_id);
 }
 
 export function acceptSnapshot(state, snapshot, epoch) {
@@ -46,10 +48,11 @@ export function acceptSnapshot(state, snapshot, epoch) {
   const receivedMessages=snapshot.messages;
   snapshot = mergeUIFrame(previous, snapshot, state.uiAnchor);
   state.snapshot = snapshot;
-  const key=ownerKey(snapshot),send=state.sends.get(key);
+  const key=ownerKey(snapshot),pending=state.pending.get(key),send=state.sends.get(key);
   for(const message of receivedMessages)if(message.request_id){const receipt=JSON.stringify([key,message.request_id]);state.seenRequests.delete(receipt);state.seenRequests.add(receipt);}
   while(state.seenRequests.size>256)state.seenRequests.delete(state.seenRequests.values().next().value);
   if(send&&(state.seenRequests.has(JSON.stringify([key,send.request.request_id]))||snapshot.messages.some(message=>message.request_id===send.request.request_id)))state.sends.delete(key);
+  if(pending && receivedMessages.some(message=>messageConfirmsSend(message,pending)))settleSend(state,pending,true);
   return true;
 }
 
@@ -58,11 +61,11 @@ export function draft(state, key = state.snapshot && ownerKey(state.snapshot)) {
 }
 
 export function setDraft(state, text, key = state.snapshot && ownerKey(state.snapshot)) {
-  if (key) state.drafts.set(key, text);
+  if (key && draft(state,key)!==text) { state.drafts.set(key, text); state.draftVersions.set(key,(state.draftVersions.get(key)||0)+1); }
 }
 
 export function draftReferences(state, key = state.snapshot && ownerKey(state.snapshot)) { return state.referenceDrafts.get(key) || []; }
-export function setDraftReferences(state, refs, key = state.snapshot && ownerKey(state.snapshot)) { if(key)state.referenceDrafts.set(key,refs.map(ref=>({...ref}))); }
+export function setDraftReferences(state, refs, key = state.snapshot && ownerKey(state.snapshot)) { if(key && JSON.stringify(draftReferences(state,key))!==JSON.stringify(refs)){state.referenceDrafts.set(key,refs.map(ref=>({...ref})));state.referenceVersions.set(key,(state.referenceVersions.get(key)||0)+1);} }
 
 export function beginSend(state, requestID, {allowRunning=false,attachments=[],retryUserMessageID}={}) {
   if (!state.snapshot || (state.snapshot.running&&!allowRunning)) return null;
@@ -71,9 +74,10 @@ export function beginSend(state, requestID, {allowRunning=false,attachments=[],r
   const references = draftReferences(state,key);
   if ((!text.trim() && !attachments.length) || state.pending.has(key)) return null;
   const retry = state.retries.get(key);
-  const request = retry?.text === text && JSON.stringify(retry.references||[])===JSON.stringify(references) && JSON.stringify(retry.attachments||[])===JSON.stringify(attachments) && retry.boot_id === state.snapshot.boot_id ? retry
-    : {request_id: requestID, boot_id: state.snapshot.boot_id, conversation_id: state.snapshot.conversation_id, text,...(references.length?{references:references.map(ref=>({...ref}))}:{}),...(attachments.length?{attachments}:{}),...(retryUserMessageID?{retry_user_message_id:retryUserMessageID}:{}),...(state.snapshot.running?{user_message_id:state.snapshot.turn_id}:{})};
-  const receipt = {request, key, epoch: state.epoch};
+  const sameTarget=retry?.user_message_id===(state.snapshot.running?state.snapshot.turn_id:undefined) && retry?.retry_user_message_id===retryUserMessageID;
+  const request = sameTarget && retry?.text === text && JSON.stringify(retry.references||[])===JSON.stringify(references) && JSON.stringify(retry.attachments||[])===JSON.stringify(attachments) && retry.boot_id === state.snapshot.boot_id ? retry
+    : {request_id: requestID, boot_id: state.snapshot.boot_id, conversation_id: state.snapshot.conversation_id, text,...(references.length?{references:references.map(ref=>({...ref}))}:{}),...(attachments.length?{attachments:attachments.map(item=>({...item}))}:{}),...(retryUserMessageID?{retry_user_message_id:retryUserMessageID}:{}),...(state.snapshot.running?{user_message_id:state.snapshot.turn_id}:{})};
+  const receipt = {request, key, epoch: state.epoch, phase:'sending', draftVersion:state.draftVersions.get(key)||0, referenceVersion:state.referenceVersions.get(key)||0};
   state.pending.set(key, receipt);
   if(!request.user_message_id)state.sends.set(key,{request,phase:'sending'});
   return receipt;
@@ -81,14 +85,14 @@ export function beginSend(state, requestID, {allowRunning=false,attachments=[],r
 
 export function settleSend(state, receipt, accepted, reason) {
   const pending = state.pending.get(receipt.key);
-  if (pending?.request.request_id !== receipt.request.request_id || pending.epoch !== receipt.epoch) return false;
+  if (pending !== receipt) return false;
   state.pending.delete(receipt.key);
   if (accepted) state.retries.delete(receipt.key);
   else state.retries.set(receipt.key, receipt.request);
   if(!receipt.request.user_message_id&&!state.seenRequests.has(JSON.stringify([receipt.key,receipt.request.request_id]))&&!state.snapshot?.messages.some(message=>message.request_id===receipt.request.request_id))state.sends.set(receipt.key,{request:receipt.request,phase:accepted?'thinking':reason?.status?'failed':'uncertain',detail:reason?.message||''});
-  if(accepted && JSON.stringify(draftReferences(state,receipt.key))===JSON.stringify(receipt.request.references||[]))state.referenceDrafts.delete(receipt.key);
+  if(accepted && (state.referenceVersions.get(receipt.key)||0)===receipt.referenceVersion && JSON.stringify(draftReferences(state,receipt.key))===JSON.stringify(receipt.request.references||[]))state.referenceDrafts.delete(receipt.key);
   // An acknowledgement clears only the exact submitted draft. New typing and
   // drafts belonging to a different assistant survive late acknowledgements.
-  if (accepted && (!state.snapshot || state.snapshot.boot_id === receipt.request.boot_id) && draft(state, receipt.key) === receipt.request.text) state.drafts.delete(receipt.key);
+  if (accepted && (state.draftVersions.get(receipt.key)||0)===receipt.draftVersion && draft(state, receipt.key) === receipt.request.text) state.drafts.delete(receipt.key);
   return true;
 }

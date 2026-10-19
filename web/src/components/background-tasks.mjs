@@ -34,7 +34,8 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
       const open=node('button','background-task');open.type='button';open.dataset.viewKey=taskKey(task);open.dataset.scrollAnchor=`task:${taskKey(task)}`;open.title=task.title;
       const waiting=needsApproval(task.id,task.phase),meta=node('span','background-task-meta');open.classList.toggle('needs-approval',waiting);
       open.append(node('span','task-activity-dot'),node('span','background-task-title',task.title));
-      meta.append(node('span','background-task-status',t(waiting?'tool.waiting_approval':'tool.running')));
+      const status=waiting?'tool.waiting_approval':task.phase==='queued'?'tasks.queued':task.phase==='waiting'?'tasks.waiting':'tool.running';
+      meta.append(node('span','background-task-status',t(status)));
       const time=taskElapsed(task.started_at_ms,Date.now(),locale());
       if(time){
         const separator=node('span','','·');separator.setAttribute('aria-hidden','true');

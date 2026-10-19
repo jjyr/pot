@@ -1,6 +1,7 @@
 import {mergeHistoryPage} from '../state/chat-history.mjs';
 import {createMessageWindow,readingAnchor,restoreReadingAnchor} from './message-window.mjs';
 import {notificationOnboarding} from './notification-onboarding.mjs';
+import {createSendConfirmation} from '../state/send-confirmation.mjs';
 import {bindMessageSelection,renderMessageReferences,referenceProblem} from './message-references.mjs';
 import {createSystemNotifications} from '../adapters/notifications.mjs';
 import {createToolCall} from './tool-call.mjs';
@@ -9,7 +10,7 @@ import {projectScriptRuns} from '../state/script-runs.mjs';
 import {avatar} from './avatar.mjs';
 import {icon} from './icons.mjs';
 import {messages,translate} from '../locales/messages.mjs';
-import {acceptSnapshot, beginSend, beginSubscription, createConversationState, draft, draftReferences, setDraftReferences, ownerKey, setDraft, settleSend, validSnapshot} from '../state/conversation.mjs';
+import {acceptSnapshot, beginSend, beginSubscription, createConversationState, draft, draftReferences, setDraftReferences, ownerKey, setDraft, validSnapshot} from '../state/conversation.mjs';
 import {bindComposer} from './composer.mjs';
 import {createAttachmentComposer,renderMessageAttachments,failedMessageInput} from './attachments.mjs';
 import {renderMarkdown} from './markdown.mjs';
@@ -261,8 +262,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     editor.setValue(draft(state, editorOwner));
   }
   function requestID() { return crypto.randomUUID(); }
-  async function submit() {
-    if ((!client.production&&state.snapshot?.running) || connection !== 'connected' || editorOwner !== (state.snapshot && ownerKey(state.snapshot))) return;
+  const confirmations=createSendConfirmation({state,client,
+    accepted:receipt=>attachmentUI?.clearSubmitted(receipt.key,receipt.request.attachments||[]),
+    rejected:receipt=>{if(receipt.key===editorOwner)error=t('send.rejected');},
+    changed:()=>{if(!disposed){syncEditor();restoreFailedAttachments();updateControls();}},
+  });
+  function submit() {
+    if ((!client.production&&state.snapshot?.running) || selectedAssistant?.offline || connection !== 'connected' || editorOwner !== (state.snapshot && ownerKey(state.snapshot))) return;
     if(attachmentUI?.problem())return;
     const refs=attachmentUI?.refs()||[];
     const receipt = beginSend(state, requestID(),{allowRunning:client.production,attachments:refs,retryUserMessageID:retryAttachmentInput()});
@@ -270,14 +276,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(refs.length||receipt.request.references?.length)attachmentAttempts.set(receipt.key,{requestID:receipt.request.request_id,cursor:state.snapshot.cursor});
     error = '';
     updateControls();
-    try {
-      const result = await client.send(receipt.request);
-      if (typeof result.message_id !== 'string' || typeof result.duplicate !== 'boolean') throw Error('Invalid message receipt');
-      if(settleSend(state, receipt, true))attachmentUI?.clearSubmitted(receipt.key,receipt.request.attachments||[]);
-    } catch (reason) {
-      if (settleSend(state, receipt, false, reason)&&receipt.request.user_message_id) error = reason.message || String(reason);
-    }
-    if (!disposed) { syncEditor();restoreFailedAttachments(); updateControls(); }
+    confirmations.start(receipt);
   }
   async function cancel() {
     if (cancelPending || !state.snapshot?.running) return;
@@ -293,11 +292,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   send.addEventListener('click', () => state.snapshot?.running&&!draft(state).trim()&&!attachmentUI?.items().length ? cancel() : submit());
   function updateControls() {
     const snapshot = state.snapshot;
-    const pending = snapshot && state.pending.has(ownerKey(snapshot));
+    const pending = snapshot && state.pending.get(ownerKey(snapshot));
     const running = snapshot?.running;
     continuation?.update(snapshot,{connected:connection==='connected'&&!selectedAssistant?.offline&&!pending});
     const stopping=running&&(!client.production||(!draft(state).trim()&&!attachmentUI?.items().length));
-    const label = stopping ? (cancelPending ? t('stopping') : t('stop')) : running?(locale==='zh-CN'?'发送指导':'Send guidance'):t('send');
+    const label = stopping ? (cancelPending ? t('stopping') : t('stop')) : running?t('send.guidance'):t('send');
     send.replaceChildren(icon(stopping ? 'stop' : 'send'));
     send.title = label;
     send.setAttribute('aria-label', label);
@@ -309,8 +308,12 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const projection=status.cloneNode(false);
     projection.replaceChildren();
     projection.classList.toggle('has-error', Boolean(error || connectionError) || visibleConnection === 'offline');
-    projection.classList.toggle('is-connected',!error&&!connectionError&&visibleConnection==='connected');
+    projection.classList.toggle('is-connected',!pending&&!error&&!connectionError&&visibleConnection==='connected');
     const replyOwnsConnection=state.snapshot?.running||state.sends.has(editorOwner);
+    if(pending){
+      projection.append(el('span','',t(pending.phase==='uncertain'?'send.unknown':'send.confirming')));
+      if(pending.recoverable){const retry=el('button','text-button',t('send.checkRetry'));retry.type='button';retry.disabled=visibleConnection!=='connected';retry.onclick=()=>confirmations.recover(pending);projection.append(retry);}
+    }
     if(error||!replyOwnsConnection)projection.append(el('span', '', error || connectionError || (visibleConnection === 'connected' ? t(client.production?'connected':'preview') : t(visibleConnection))));
     if (visibleConnection === 'offline'&&!replyOwnsConnection) {
       const retry = el('button', 'text-button', t('retry'));
@@ -503,17 +506,50 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   function selectedSequence(){const selection=getSelection();if(!selection?.rangeCount||selection.isCollapsed||!history.contains(selection.anchorNode))return null;const element=selection.anchorNode.nodeType===Node.ELEMENT_NODE?selection.anchorNode:selection.anchorNode.parentElement;return element?.closest('article.message')?.dataset.sequence||null;}
   function nearBottom() { return history.scrollHeight - history.clientHeight - history.scrollTop < 80; }
-  let following=true,renderFrame=0,lastAnchor=null,resizeAnchor=false;
-  function scrollBottom() { following=true;history.scrollTop = history.scrollHeight; latest.hidden = true; }
+  function atBottom() { return history.scrollHeight - history.clientHeight - history.scrollTop <= 1; }
+  let following=true,renderFrame=0,lastAnchor=null,resizeAnchor=false,lastScrollTop=0,upwardIntent=false;
+  function scrollBottom() { following=true;upwardIntent=false;history.scrollTop = history.scrollHeight;lastScrollTop=history.scrollTop; latest.hidden = true; }
+  function pauseFollowing(){following=false;pendingFollow=false;latest.hidden=false;}
+  function loadEarlierNearTop(){
+    if(!historyLoading&&!historyFailure&&history.scrollTop<Math.max(180,history.clientHeight)&&state.snapshot?.history?.has_more){
+      pauseFollowing();readHistory({before:state.snapshot.history.before});
+    }
+  }
+  function scrollUpIntent(event){
+    if(event.defaultPrevented||!chatShown)return;
+    // Let nested output panes consume their own scrolling first.
+    for(let node=event.target instanceof Element?event.target:null;node&&node!==history;node=node.parentElement){
+      if(node.scrollTop>0&&node.scrollHeight>node.clientHeight&&/^(auto|scroll)$/.test(getComputedStyle(node).overflowY))return;
+    }
+    if(history.scrollHeight<=history.clientHeight+1&&!state.snapshot?.history?.has_more&&!state.snapshot?.history?.has_newer)return;
+    upwardIntent=true;pauseFollowing();loadEarlierNearTop();
+  }
+  history.addEventListener('wheel',event=>{
+    if(!event.ctrlKey&&!event.metaKey&&event.deltaY<0&&Math.abs(event.deltaY)>Math.abs(event.deltaX))scrollUpIntent(event);
+  },{passive:true});
+  let touchY=null;
+  history.addEventListener('touchstart',event=>{touchY=event.touches.length===1?event.touches[0].clientY:null;},{passive:true});
+  history.addEventListener('touchmove',event=>{
+    const nextY=event.touches.length===1?event.touches[0].clientY:null;
+    if(touchY!==null&&nextY!==null&&nextY>touchY)scrollUpIntent(event);
+    touchY=nextY;
+  },{passive:true});
+  history.addEventListener('keydown',event=>{
+    if(event.ctrlKey||event.metaKey||event.altKey||event.target.closest('input,textarea,select,button,a,summary,[contenteditable]'))return;
+    if(['ArrowUp','PageUp','Home'].includes(event.key)||event.key===' '&&event.shiftKey)scrollUpIntent(event);
+  });
   history.addEventListener('scroll', () => {
     if(chatShown)lastTaskReadingPosition=captureReadingPosition(history);
-    following=nearBottom();latest.hidden=following;
+    if(history.scrollTop<lastScrollTop-.5)pauseFollowing();
+    else if(atBottom()){following=true;upwardIntent=false;}
+    lastScrollTop=history.scrollTop;latest.hidden=following;
     lastAnchor=readingAnchor(history);state.uiAnchor=selectedSequence()||lastAnchor?.sequence||null;
     renderMessages();
-    if(!historyLoading&&!historyFailure){if(history.scrollTop<180&&state.snapshot?.history?.has_more)readHistory({before:state.snapshot.history.before});else if(nearBottom()&&state.snapshot?.history?.has_newer){following=false;readHistory({after:state.snapshot.history.after});}}
+    loadEarlierNearTop();
+    if(!historyLoading&&!historyFailure&&nearBottom()&&state.snapshot?.history?.has_newer){pauseFollowing();readHistory({after:state.snapshot.history.after});}
   }, {passive: true});
   latest.onclick = async()=>{if(state.snapshot?.history?.has_newer)await readHistory({},{around:true});following=true;state.uiAnchor=null;renderMessages();requestAnimationFrame(scrollBottom);};
-  historyStatus.onclick=()=>{following=false;if(historyFailure==='history.missing'){historyFailure='';renderMessages();}else if(!historyLoading&&state.snapshot?.history?.has_more)readHistory({before:state.snapshot.history.before});};
+  historyStatus.onclick=()=>{pauseFollowing();if(historyFailure==='history.missing'){historyFailure='';renderMessages();}else if(!historyLoading&&state.snapshot?.history?.has_more)readHistory({before:state.snapshot.history.before});};
   const messageNodes = new Map(),toolMemory=new Map();
   const taskCache=new Map();
   const backgroundTaskView=createBackgroundTasks({locale:()=>locale,
@@ -534,7 +570,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
           if(disposed||key!==JSON.stringify([client.scope().space,client.scope().owner]))return;
           items.push(...(value.items||[]));offset=value.next_offset;
         }while(offset!=null);
-        taskCache.set(key,items.filter(task=>['running','waiting_approval'].includes(task.phase)).map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner})));
+        taskCache.set(key,items.filter(task=>['queued','running','waiting','waiting_approval'].includes(task.phase)).map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner})));
         pages.rememberTasks(taskCache.get(key));if(route==='chat')renderMessages();
       },{active:()=>!disposed&&key===JSON.stringify([client.scope().space,client.scope().owner])});
     }return backgroundTasks.run();
@@ -653,7 +689,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(!chatApprovals.hidden&&locateApprovals===JSON.stringify(client.scope?.())){locateApprovals='';requestAnimationFrame(()=>{if(!disposed&&route==='chat')chatApprovals.scrollIntoView({block:'nearest',behavior:reducedMotion.matches?'instant':'smooth'});});}
     if(restoreTasks&&chatShown&&!pendingFollow){following=false;restoreReadingPosition(history,restoreTasks);pendingReadingPosition=null;latest.hidden=nearBottom();}
     else if(follow)scrollBottom();else{restoreReadingAnchor(history,anchor);latest.hidden=false;}
+    if(snapshot&&!snapshot.history?.has_more&&!snapshot.history?.has_newer&&history.scrollHeight<=history.clientHeight+1)scrollBottom();
     lastTaskReadingPosition=captureReadingPosition(history);
+    lastScrollTop=history.scrollTop;
     lastAnchor=readingAnchor(history);if(!following)state.uiAnchor=selectedSequence()||lastAnchor?.sequence||null;
     if(following)state.uiAnchor=null;
     if(pendingFollow&&!followFrame)followFrame=requestAnimationFrame(()=>{followFrame=0;if(!disposed&&chatShown&&pendingFollow){scrollBottom();pendingFollow=false;}});
@@ -678,13 +716,16 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if (state.snapshot && validSnapshot(snapshot) && ownerKey(snapshot) !== ownerKey(state.snapshot)) {
       connection = 'offline'; error = t('identityChanged'); updateControls(); return;
     }
-    const wasFollowing=chatShown&&nearBottom();
+    // A return to the bottom can precede its scroll event and the next frame.
+    const wasFollowing=chatShown&&(following&&nearBottom()||!upwardIntent&&atBottom());
     const readingBeforeReset=snapshot.kind==='reset'&&!following?readingAnchor(history):null;
     const initialSnapshot = !state.snapshot;
     if(validSnapshot(snapshot)){awaitingSnapshot=false;restoredSnapshot=false;}
+    const pendingReceipt=state.pending.get(ownerKey(snapshot));
     let accepted;try{accepted=acceptSnapshot(state,snapshot,receivedEpoch);}catch(reason){if(reason.message==='conversation_gap'){loadSnapshot(true);return;}throw reason;}
     if (!accepted){if(state.snapshot&&validSnapshot(snapshot)&&state.snapshot.cursor===snapshot.cursor){connection='connected';updateControls();}return;}
     if(wasFollowing){following=true;pendingFollow=true;}
+    if(pendingReceipt && !state.pending.has(pendingReceipt.key))confirmations.confirmed(pendingReceipt);
     connection = 'connected';
     connectionError = '';
     snapshot=state.snapshot;
@@ -737,7 +778,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     pages?.clearApprovals();locateApprovals=item.pending_approvals?JSON.stringify({owner:item.id,space:item.space_id||''}):'';selectedAssistant = item; client.setScope({owner:item.id, space:item.space_id || ''});
     epoch = beginSubscription(state); editorOwner = null; route = 'chat'; if(!initial)directoryOpen = false;
     pendingReadingPosition=readingPositions.get(snapshotKey())||null;pendingFollow=false;
-    messageWindow.set([]);windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);messageNodes.clear();windowHeights.clear();following=true;lastAnchor=null;historyGeneration++;historyLoading=false;historyFailure='';state.uiAnchor=null;error = ''; connectionError = ''; disconnected = false;
+    messageWindow.set([]);windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);messageNodes.clear();windowHeights.clear();following=true;upwardIntent=false;lastScrollTop=0;lastAnchor=null;historyGeneration++;historyLoading=false;historyFailure='';state.uiAnchor=null;error = ''; connectionError = ''; disconnected = false;
     const cached=cachedSnapshots.get(snapshotKey(item.space_id||'',item.id));
     restoredSnapshot=!!cached;connection='connecting';
     if(cached){acceptSnapshot(state,cached,epoch);syncEditor();renderMessages();const top=positions.get(ownerKey(cached));if(top!==undefined)requestAnimationFrame(()=>{if(!disposed&&editorOwner===ownerKey(cached)){restoreSavedPosition(top);}});}
@@ -870,7 +911,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     await Promise.all([snapshot,loadDirectory()]);
   });
   return () => {
-    disposed = true;cancelAnimationFrame(renderFrame);cancelAnimationFrame(followFrame);viewportObserver.disconnect();messageWindow.close();stopResources?.();client.resources?.clear();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
+    disposed = true;confirmations.close();cancelAnimationFrame(renderFrame);cancelAnimationFrame(followFrame);viewportObserver.disconnect();messageWindow.close();stopResources?.();client.resources?.clear();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     stopMessageSelection();completions?.dispose();attachmentUI?.destroy();client.releaseAttachments?.();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);

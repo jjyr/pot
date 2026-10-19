@@ -63,7 +63,7 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 		var fields map[string]json.RawMessage
 		json.Unmarshal(raw, &fields)
 		var event any
-		if strings.Contains(string(fields["messages"]), "Summarize background task results") {
+		if strings.Contains(string(fields["messages"]), "Process background updates") {
 			summaries.Add(1)
 			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "Remote result summarized"}, "finish_reason": "stop"}}}
 		} else if workerCalls.Add(1) == 1 {

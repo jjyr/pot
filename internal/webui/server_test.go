@@ -154,7 +154,7 @@ func TestBrowserRateLimitAndOrigin(t *testing.T) {
 	}
 }
 
-func TestBrowserUsagePagesReachControl(t *testing.T) {
+func TestBrowserReadPagesReachControl(t *testing.T) {
 	requests := make(chan string, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer control-secret" || r.Header.Get("Cookie") != "" {
@@ -179,18 +179,21 @@ func TestBrowserUsagePagesReachControl(t *testing.T) {
 		t.Fatal("login failed", response.Code)
 	}
 	cookie := response.Result().Cookies()[0]
-	for _, kind := range []string{"models", "requests", "tools", "compactions"} {
+	for _, kind := range []string{"models", "requests", "tools", "compactions", "send-receipt"} {
 		t.Run(kind, func(t *testing.T) {
 			path := "/api/v1/usage/" + kind + "?scope=main&timezone=Asia%2FShanghai&days=30&offset=20"
+			if kind == "send-receipt" {
+				path = "/api/v1/messages/receipt?space_id=remote&assistant_id=alice&conversation_id=main&request_id=send&user_message_id=original"
+			}
 			r := httptest.NewRequest("GET", "http://localhost"+path, nil)
 			r.AddCookie(cookie)
 			w := httptest.NewRecorder()
 			server.ServeHTTP(w, r)
 			if w.Code != http.StatusOK || w.Body.String() != `{"items":[],"offset":20,"next_offset":null}` {
-				t.Fatalf("usage page not proxied: status=%d body=%s", w.Code, w.Body.String())
+				t.Fatalf("read page not proxied: status=%d body=%s", w.Code, w.Body.String())
 			}
 			if received := <-requests; received != path {
-				t.Fatal("usage query changed", received)
+				t.Fatal("read query changed", received)
 			}
 			for _, method := range []string{"POST", "PUT", "DELETE"} {
 				r = httptest.NewRequest(method, "http://localhost"+path, nil)
@@ -198,7 +201,7 @@ func TestBrowserUsagePagesReachControl(t *testing.T) {
 				w = httptest.NewRecorder()
 				server.ServeHTTP(w, r)
 				if w.Code != http.StatusNotFound {
-					t.Fatal("usage page allowed mutation", method, w.Code)
+					t.Fatal("read page allowed mutation", method, w.Code)
 				}
 			}
 		})

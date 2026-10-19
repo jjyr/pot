@@ -16,6 +16,13 @@ async function run(mobile){
   const {client,metrics}=app().fixture,history=doc().querySelector('.history');
   check(metrics.frames[0].kind==='reset'&&metrics.frames[0].count<=113,'bounded initial snapshot: '+metrics.frames[0].count+' messages, '+metrics.frames[0].bytes+' bytes');
   check(doc().querySelectorAll('article.message').length<80,'initial mounted messages: '+doc().querySelectorAll('article.message').length);
+  history.scrollTop-=24;await pause(200);
+  check(history.scrollHeight-history.clientHeight-history.scrollTop>=23,'small upward scroll escapes bottom following');
+  const smallScroll=anchor(),smallFrames=metrics.frames.length;
+  await client.send({request_id:'small-scroll-'+Date.now(),conversation_id:'main',text:'Small-scroll reading fixture'});
+  await wait(()=>metrics.frames.slice(smallFrames).some(value=>value.kind==='delta'),'update near bottom');await pause(800);
+  check(Math.abs(position(smallScroll.id)-smallScroll.offset)<5,'streaming within 80px of bottom preserves paused reading');
+  doc().querySelector('.latest-button').click();await pause(200);
   history.scrollTop=Math.max(300,history.scrollHeight/2);history.dispatchEvent(new Event('scroll'));await pause(300);
   const before=anchor(),pages=metrics.pages.length;doc().querySelector('.history-page-status').click();
   await wait(()=>metrics.pages.length>pages,'older page');await pause(800);
@@ -48,6 +55,7 @@ async function run(mobile){
   const setInput=text=>{input.value=text;input.dispatchEvent(new Event('input',{bubbles:true}));};
   const submit=()=>doc().querySelector('form.composer').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
   if(!mobile){await client.send({request_id:'failure-fixture-'+Date.now(),conversation_id:'main',text:'fail-once-fixture',references:[{message_id:'m-0002',quote:'Synthetic answer'}]});await wait(()=>doc().querySelector('.reply-bubble.is-failed'),'provider failure');await wait(()=>input.value==='fail-once-fixture','failed original draft restored');submit();await wait(()=>!doc().querySelector('.reply-bubble.is-failed')&&!input.value,'original retry');await pause(600);check([...doc().querySelectorAll('.message-prose')].filter(node=>node.textContent==='fail-once-fixture').length===1,'failed resend keeps one original input');}
+  await wait(()=>!doc().querySelector('.reply-bubble.is-waiting,.reply-bubble.is-streaming'),'previous turn completed');
   setInput('steering-primary-fixture');submit();await wait(()=>doc().querySelector('.reply-bubble.is-waiting,.reply-bubble.is-streaming'),'active turn');setInput('steering-addition-fixture');await wait(()=>!doc().querySelector('.send-button').disabled,'steering receipt ready');submit();await pause(1000);const afterSteering=await client.snapshot();check(afterSteering.messages.some(message=>message.steering&&message.text==='steering-addition-fixture'),'steering input reconciles during streaming');
   let maxDOM=doc().querySelectorAll('article.message').length;
   for(let page=0;page<10;page++){
@@ -62,6 +70,56 @@ async function run(mobile){
  }catch(reason){results.textContent+='FAIL '+reason.stack+'\n';}
 }
 document.querySelector('#run').onclick=()=>run(false);document.querySelector('#mobile').onclick=()=>run(true);
+document.querySelector('#scroll').onclick=async()=>{
+ results.textContent='Running upward-scroll boundary checks…\n';
+ try{
+  for(const mobile of [false,true]){
+   frame.style.width=mobile?'390px':'1100px';frame.style.height=mobile?'700px':'650px';
+   for(const gesture of ['wheel','touch','keyboard']){
+    frame.src=`chat-history-app.html?conversation=main&locale=${mobile?'zh-CN':'en'}&theme=light&short=1&case=${gesture}`;
+    await new Promise(resolve=>frame.addEventListener('load',resolve,{once:true}));
+    await wait(()=>app().fixture&&doc().querySelector('article.message'),'short chat');await pause(500);
+    const history=doc().querySelector('.history'),{metrics,client}=app().fixture;
+    check(history.scrollHeight<=history.clientHeight+1,`${mobile?'mobile':'desktop'} ${gesture}: short window cannot scroll`);
+    if(gesture==='wheel'){
+     history.dispatchEvent(new WheelEvent('wheel',{deltaY:-1,ctrlKey:true,bubbles:true}));
+     history.dispatchEvent(new WheelEvent('wheel',{deltaY:-1,deltaX:20,bubbles:true}));
+     const pane=doc().createElement('div'),content=doc().createElement('div');pane.style.cssText='height:20px;overflow-y:auto';content.style.height='100px';pane.append(content);history.append(pane);pane.scrollTop=10;
+     content.dispatchEvent(new WheelEvent('wheel',{deltaY:-1,bubbles:true}));await pause(100);
+     check(metrics.pages.length===0,'zoom, horizontal gestures and nested output scrolling do not page chat');pane.remove();
+    }
+    const read=client.history;client.history=async(...args)=>{await pause(150);return read(...args);};
+    const dispatchTouch=(type,y)=>{const event=new Event(type,{bubbles:true});Object.defineProperty(event,'touches',{value:[{clientY:y}]});history.dispatchEvent(event);};
+    const gestureUp=()=>{
+     if(gesture==='wheel')history.dispatchEvent(new WheelEvent('wheel',{deltaY:-1,bubbles:true}));
+     else if(gesture==='touch'){dispatchTouch('touchstart',100);dispatchTouch('touchmove',101);}
+     else history.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true}));
+    };
+    gestureUp();gestureUp();gestureUp();
+    await wait(()=>metrics.pages.length>0,'gesture loads history without scroll event');await pause(300);
+    check(metrics.pages.length===1,`${gesture}: repeated gestures share one pending history read`);
+    check(history.scrollHeight>history.clientHeight,`${gesture}: older messages become scrollable`);
+    const count=metrics.pages.length;history.scrollTop=history.clientHeight-10;
+    await wait(()=>metrics.pages.length>count,'one viewport prefetch');
+    check(metrics.errors.length===0,'no browser errors');
+   }
+   frame.src=`chat-history-app.html?conversation=main&locale=${mobile?'zh-CN':'en'}&theme=light&short=complete`;
+   await new Promise(resolve=>frame.addEventListener('load',resolve,{once:true}));
+   await wait(()=>app().fixture&&doc().querySelector('article.message'),'complete short chat');await pause(500);
+   const history=doc().querySelector('.history'),{metrics}=app().fixture;
+   check(history.scrollHeight<=history.clientHeight+1,'all history fits within viewport');
+   history.dispatchEvent(new WheelEvent('wheel',{deltaY:-24,bubbles:true}));
+   history.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true}));await pause(200);
+   check(metrics.pages.length===0&&history.scrollTop===0&&doc().querySelector('.latest-button').hidden,'complete short history stays still without paging or Latest');
+   check(doc().querySelector('.history-page-status').disabled,'beginning of conversation has no more pages');
+   const framesBefore=metrics.frames.length;
+   await app().fixture.client.send({request_id:'short-follow-'+Date.now(),conversation_id:'main',text:'New message after scrolling a complete short conversation'});
+   await wait(()=>metrics.frames.slice(framesBefore).some(value=>value.kind==='delta'),'short chat receives new messages');await pause(800);
+   check(history.scrollHeight-history.clientHeight-history.scrollTop<=1&&doc().querySelector('.latest-button').hidden,'new messages still follow after gestures on complete short history');
+  }
+  results.textContent+='DONE upward-scroll boundary checks\n';
+ }catch(reason){results.textContent+='FAIL '+reason.stack+'\n';}
+};
 document.querySelector('#earlier').onclick=()=>doc().querySelector('.history-page-status').click();document.querySelector('#latest').onclick=()=>doc().querySelector('.latest-button').click();
 
 document.querySelector('#extras').onclick=async()=>{

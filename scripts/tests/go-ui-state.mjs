@@ -197,10 +197,10 @@ assert.equal(newBootSend.request.boot_id, 'third-boot');
 const fourthEpoch = beginSubscription(state);
 assert(acceptSnapshot(state, snapshot({boot_id: 'third-boot', owner_id: 'new-owner', cursor: '1'}), fourthEpoch));
 const afterReconnect = beginSend(state, 'unused-id');
-assert.equal(afterReconnect.request.request_id, 'new-boot-request', 'uncertain in-flight sends reconcile after reconnect');
-assert(!settleSend(state, newBootSend, true), 'an acknowledgement from a retired attachment cannot settle the new request');
-assert.equal(draft(state), 'uncertain');
-settleSend(state, afterReconnect, true);
+assert.equal(afterReconnect,null,'an unknown in-flight send remains locked across reconnect');
+assert.equal(state.pending.get(newBootSend.key),newBootSend);
+assert(settleSend(state,newBootSend,true),'the captured receipt can settle only its original attempt');
+assert.equal(draft(state),'');
 assert(!acceptSnapshot(state, snapshot({boot_id: 'third-boot', owner_id: 'new-owner', running: true, turn_id: null, cursor: '2'}), fourthEpoch), 'active turns must carry a cancellation target');
 console.log('Go UI state and DOM composer checks passed');
 
@@ -220,6 +220,10 @@ const toolInput={...chatReply,text:'',status:'complete'},toolOutput={id:'tool',r
 const toolRound=projectChatReplies({...waiting,messages:[chatInput,toolInput,toolOutput]});
 const afterTool=projectChatReplies({...waiting,messages:[chatInput,toolInput,toolOutput,nextOutput]});
 assert.equal(afterTool.filter(row=>row.role==='assistant').length,1,'Tool-only rounds do not leave empty reply bubbles');
+for(const text of ['',' \n\t']){
+  const silent=projectChatReplies({...waiting,running:false,turn_id:null,messages:[chatInput,{...chatReply,text,status:'complete'}]});
+  assert.equal(silent.filter(row=>row.role==='assistant').length,0,'Silent completion must not leave an empty reply bubble');
+}
 assert.equal(toolRound[1].viewKey,afterTool.at(-1).viewKey,'Output after a tool round adopts the waiting bubble');
 assert.equal(projectChatReplies(waiting,null,{offline:true})[1].phase,'reconnecting','Connection loss does not declare execution failed');
 const failed=projectChatReplies({...waiting,running:false,turn_id:null,messages:[chatInput,{...chatReply,text:'Partial',status:'failed',error:'HTTP 404'}]});
