@@ -617,7 +617,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     function related(node){const section=n('div','topology-related');section.append(n('p','hint',t('topology.related')));for(const edge of model.edges.filter(item=>item.from===node.id||item.to===node.id)){const a=model.nodes.find(item=>item.id===edge.from),b=model.nodes.find(item=>item.id===edge.to);section.append(action(a.name+(edge.kind==='agent'?' ↔ ':' → ')+b.name,()=>showEdge(edge)));}return section;}
     function keepMachine(){for(const card of view.inspector.querySelectorAll('.machine-card'))rows.append(card);for(const card of view.inspector.querySelectorAll('[data-membership-space]'))membership.append(card);}
     function showNode(node){if(!node)return;currentNode=node;topologySelection=node.id;keepMachine();view.inspector.replaceChildren();
-      if(node.kind==='machine'){const entry=entries.get(JSON.stringify([node.space,node.identity]));if(entry)view.inspector.append(entry.element);const member=[...membership.children].find(card=>card.dataset.membershipSpace===node.space&&card.dataset.membershipRole!=='control');if(member)view.inspector.append(member);}
+      if(node.kind==='machine'){const entry=entries.get(JSON.stringify([node.space,node.identity]));if(entry){entry.renderPermissions?.();view.inspector.append(entry.element);}const member=[...membership.children].find(card=>card.dataset.membershipSpace===node.space&&card.dataset.membershipRole!=='control');if(member)view.inspector.append(member);}
       else {view.inspector.append(view.brand(node),n('p','hint',t('topology.kind.'+node.kind)),n('h2','',node.name),n('p',node.status==='connected'?'success-text':'hint',t(node.status==='stale'?'topology.status.stale':'agentLinks.status.'+(node.status==='connected'?'connected':node.status==='connecting'?'connecting':'offline'))),n('p','topology-identity',node.identity),n('p','hint',t('topology.messageScope')));if(node.link){const assistant=(client.assistants||[]).find(item=>item.space_id===node.space&&item.id===node.link.local_assistant_id);if(assistant)view.inspector.append(n('p','hint',t('agentLinks.boundAssistant').replace('{name}',assistant.name)));view.inspector.append(action(t('agentLinks.disconnect'),()=>connections.disconnect({...node.link,_space:node.space})));}}
       view.inspector.append(related(node));
     }
@@ -632,12 +632,15 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
         const id=machine.runtime_id||machine.id,permissionPage=permissionPages.find(page=>page.space.id===machine._space_id),policy=permissionPage?.value.policy;
         const stale=machine._stale||permissionPage?.stale||client.spaces.find(space=>space.id===machine._space_id)?.connected===false,permissions=entry.permissions;
         entry.element.dataset.machineId=id;entry.element.dataset.spaceId=machine._space_id;entry.name.textContent=machine.name||id;entry.location.textContent=machine._space_name;entry.status.textContent=t(stale?'topology.status.stale':machine.connected?'agentLinks.status.connected':'agentLinks.status.offline');entry.status.className=machine.connected&&!stale?'success-text':'hint';entry.tags.textContent=(machine.tags||[]).join(' · ');entry.tags.hidden=!machine.tags?.length;
+        entry.renderPermissions=()=>{
         if(permissionsPending&&!policy?.machines?.[id]){permissions.replaceChildren(n('p','hint',t('loading.pending')));return;}
         if(!policy?.machines?.[id]){permissions.replaceChildren(n('p','inline-error',t('topology.permissionsUnavailable')),action(t('retry'),()=>show('machines')));return;}
         const captured={space:machine._space_id,owner:''},controlID=permissionPage.space.control_id,current=policy.machines[id],key=JSON.stringify([machine._space_id,controlID,id]);
         let draft=machineDrafts.get(key);
         if(!draft||!draft.dirty&&!draft.pending){const error=draft?.error;draft=createEditorSession({...captured,boot:client.runtime.boot_id},current);draft.error=error;machineDrafts.set(key,draft);}
         renderMachinePermissions({root:permissions,machine,policy,request,scope:captured,locale,draft,stale,isCurrent:()=>client.runtime.boot_id===draft.context.boot&&client.spaces.some(space=>space.id===captured.space&&space.control_id===controlID),refresh:()=>{if(route==='machines'&&!editor)return pageView?.queue.run();},edit});
+        };
+        if(currentNode?.kind==='machine'&&currentNode.space===machine._space_id&&currentNode.identity===id)entry.renderPermissions();
       }});
       model=projectTopology(client.spaces,items,linkPages);view.update(model);
       await renderMachineMembership({client,root,membershipRoot:membership,machines:items,locale,notify,refresh:()=>pageView?.queue.run(),edit,signal:token.signal});

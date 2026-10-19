@@ -5,6 +5,9 @@ async page => {
  await page.goto(new URL('/scripts/tests/fixtures/topology.html',page.url()).href);
  await page.getByText('3 Agents · 4 machines',{exact:true}).waitFor();
  assert(await page.locator('.topology-node.machine').count()===4,'Only actual inventory creates machine nodes');
+ assert(await page.locator('.machine-permissions select').count()===0,'Hidden machines do not eagerly render every permission form');
+ await page.getByRole('button',{name:'My Mac · Execution machine · Connected',exact:true}).click();
+ assert(await page.locator('.topology-inspector .machine-permissions select').count()===1,'Selecting a machine loads its existing execution policy controls');
  await page.locator('.topology-node').filter({hasText:'Codex'}).click();
  assert(await page.locator('.topology-inspector').getByRole('heading',{name:'Codex',exact:true}).count()===1,'Click opens Codex without a fictional machine wrapper');
  assert(!await page.locator('[data-tooltip]').count(),'No rejected hover-information layer');
