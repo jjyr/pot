@@ -59,7 +59,7 @@ func (s *Service) Page(ctx context.Context, assistant string, query protocol.Tas
 		if record == nil {
 			return page, fmt.Errorf("Task vanished from page")
 		}
-		switch record.Info.Phase.Scope() {
+		switch record.Info.Scope() {
 		case "active":
 			page.Counts.Active++
 		case "attention":
@@ -71,7 +71,7 @@ func (s *Service) Page(ctx context.Context, assistant string, query protocol.Tas
 			info := record.Info
 			page.Selected = &info
 		}
-		if scope != "all" && record.Info.Phase.Scope() != scope || query.Phase != nil && record.Info.Phase != *query.Phase || query.Q != "" && !strings.Contains(strings.ToLower(record.Info.Title+" "+record.Request.Text), strings.ToLower(query.Q)) {
+		if scope != "all" && record.Info.Scope() != scope || query.Phase != nil && record.Info.Phase != *query.Phase || query.Q != "" && !strings.Contains(strings.ToLower(record.Info.Title+" "+record.Request.Text), strings.ToLower(query.Q)) {
 			continue
 		}
 		if target != nil && (record.Info.ExecutionTarget == nil || *record.Info.ExecutionTarget != *target) {

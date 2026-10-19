@@ -11,7 +11,7 @@ import (
 )
 
 // SendMessage binds provenance supplied by the authenticated producer. All
-// Task inputs share the same inbox; ended tasks retain reference only.
+// Task inputs share the same inbox; owner guidance can continue ended Tasks.
 func (s *Service) SendMessage(ctx context.Context, assistant, task, requestID string, sender protocol.AgentRef, text string) error {
 	return s.SendMessageWithParent(ctx, assistant, task, requestID, sender, text, nil)
 }
@@ -23,17 +23,10 @@ func (s *Service) SendMessageWithParent(ctx context.Context, assistant, task, re
 		return fmt.Errorf("invalid message sender")
 	}
 	kind := "reference"
-	record, err := s.Get(ctx, assistant, task)
-	if err != nil {
-		return err
-	}
-	if record == nil {
-		return fmt.Errorf("Task missing")
-	}
 	if sender.ControlID == s.options.ControlID && sender.AgentID == assistant && (sender.Kind == "user" || sender.Kind == "assistant") {
 		if sender.Kind == "user" {
 			kind = "user_guidance"
-		} else if record.Info.Phase.Scope() == "active" {
+		} else {
 			kind = "guidance"
 		}
 	}
@@ -67,11 +60,15 @@ func (s *Service) input(ctx context.Context, assistant, task, requestID, text, k
 		}
 		active := record.Info.Phase.Scope() == "active" && record.StopMode == "" && !record.Finalizing
 		guidance := kind == "guidance" || kind == "user_guidance"
-		if guidance && !active {
-			return fmt.Errorf("ended/stopping Task requires a new Task for further work")
+		if guidance && record.Info.Phase.Scope() == "active" && record.StopMode != "" {
+			return fmt.Errorf("Task is stopping; wait for confirmed cleanup")
+		}
+		if guidance {
+			record.Info.Archived = false
+			record.Info.ArchiveReason = ""
 		}
 		state := "pending"
-		if !active {
+		if !active && !guidance {
 			state = "retained"
 		}
 		messageID, _ := core.HashJSON([]string{task, requestID})
@@ -85,7 +82,7 @@ func (s *Service) input(ctx context.Context, assistant, task, requestID, text, k
 			return err
 		}
 
-		if guidance && active {
+		if guidance {
 			record.Info.Pending++
 		} else {
 			record.Revision++

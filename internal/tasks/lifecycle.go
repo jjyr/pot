@@ -16,7 +16,7 @@ func (s *Service) Tick(ctx context.Context) error {
 	if s.options.Port == nil || s.options.ResolveTarget == nil {
 		return fmt.Errorf("Task destination ports unavailable")
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT assistant_id,id FROM tasks WHERE phase IN ('queued','running','waiting','waiting_approval') ORDER BY created,id")
+	rows, err := s.db.QueryContext(ctx, "SELECT assistant_id,id FROM tasks WHERE phase IN ('queued','running','waiting','waiting_approval') OR EXISTS(SELECT 1 FROM task_inputs i WHERE i.assistant_id=tasks.assistant_id AND i.task_id=tasks.id AND i.state='pending' AND i.kind IN ('guidance','user_guidance')) ORDER BY created,id")
 	if err != nil {
 		return err
 	}
@@ -47,11 +47,23 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 		return err
 	}
 	if record.Info.Phase.Scope() != "active" {
-		return nil
+		if err := s.continuePending(ctx, assistant, id); err != nil {
+			return err
+		}
+		record, err = s.Get(ctx, assistant, id)
+		if err != nil || record == nil {
+			return err
+		}
+		if record.Info.Phase.Scope() != "active" {
+			return nil
+		}
 	}
 	launchNow := false
 	if record.Launch == nil {
 		target, err := s.options.ResolveTarget(ctx, record.Request.MachineID)
+		if err == nil && record.Info.ExecutionTarget != nil && target != *record.Info.ExecutionTarget {
+			err = fmt.Errorf("original Task execution target changed")
+		}
 		if err != nil {
 			return s.markWaiting(ctx, assistant, id, err)
 		}
@@ -79,7 +91,10 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 					return nil
 				}
 			}
-			launch := runner.Launch{ControlID: s.options.ControlID, AssistantID: assistant, RuntimeID: target.RuntimeID, TaskID: id, RunID: current.RunID, Generation: current.Generation, ExecutionTarget: target, Config: current.Config, Plugins: current.Plugins, Skills: current.Request.Skills, Workspace: current.Request.Workspace, Text: current.Request.Text}
+			launch := runner.Launch{ControlID: s.options.ControlID, AssistantID: assistant, RuntimeID: target.RuntimeID, TaskID: id, RunID: current.RunID, Generation: current.Generation, ExecutionTarget: target, Config: current.Config, Plugins: current.Plugins, Skills: current.Request.Skills, Workspace: current.Request.Workspace, Text: current.Request.Text, InputID: current.RunInputID}
+			if current.RunInputID != "" {
+				launch.Text = current.RunText
+			}
 			if err := launch.Validate(target.RuntimeID); err != nil {
 				return err
 			}
@@ -222,17 +237,18 @@ func (s *Service) Stop(ctx context.Context, assistant, id, mode string) error {
 	send := false
 	var launch *runner.Launch
 	err := s.change(ctx, assistant, id, func(tx *sql.Tx, r *Record) error {
-		if r.Info.Phase == protocol.TaskComplete {
-			return nil
-		}
 		if r.Info.Phase.Scope() != "active" {
-			if mode == "cancel" && r.Info.Phase == protocol.TaskInterrupted {
-				r.Info.Phase = protocol.TaskCancelled
-				r.Info.Pending = 0
-				_, err := tx.ExecContext(ctx, "UPDATE task_inputs SET state='cancelled' WHERE assistant_id=? AND task_id=? AND state IN ('pending','active','retained')", assistant, id)
-				return err
+			state := "retained"
+			if mode == "cancel" {
+				if r.Info.Phase == protocol.TaskInterrupted {
+					r.Info.Phase = protocol.TaskCancelled
+				}
+				r.Info.Archived = true
+				state = "cancelled"
 			}
-			return nil
+			r.Info.Pending = 0
+			_, err := tx.ExecContext(ctx, "UPDATE task_inputs SET state=? WHERE assistant_id=? AND task_id=? AND state IN ('pending','active','retained')", state, assistant, id)
+			return err
 		}
 		if r.StopMode != "" {
 			return nil

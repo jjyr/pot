@@ -31,9 +31,13 @@ func TestFailedTaskRecoveryIsSilentAndReplacementReportsOnce(t *testing.T) {
 					return
 				}
 				if strings.Contains(body.Messages[0].Content, "Process background updates") {
-					if len(body.Tools) > 0 {
+					hasRetry := false
+					for _, tool := range body.Tools {
+						hasRetry = hasRetry || tool.Function.Name == "retry_task"
+					}
+					if hasRetry {
 						for _, tool := range body.Tools {
-							if tool.Function.Name != "retry_task" && tool.Function.Name != "get_task" {
+							if tool.Function.Name != "retry_task" && tool.Function.Name != "get_task" && tool.Function.Name != "set_task_dispositions" {
 								t.Error("unbounded recovery tool", tool)
 							}
 						}

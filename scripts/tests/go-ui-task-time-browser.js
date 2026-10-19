@@ -67,7 +67,7 @@ async page=>{
   tasks[0].started_at_ms=started;await page.evaluate(()=>window.__taskTimeNow-=5000);await change();await listTime().getByText('已用 12分34秒',{exact:true}).waitFor();
   await page.getByRole('button',{name:'聊天',exact:true}).first().click();await elapsed().getByText('已用 12分34秒',{exact:true}).waitFor();
   await page.setViewportSize({width:1200,height:850});
-  await page.locator('.background-task').filter({hasText:'独立 worktree'}).click();await page.getByLabel('任务指导',{exact:true}).waitFor();
+  await page.locator('.background-task').filter({hasText:'独立 worktree'}).click();await page.getByLabel('任务追加',{exact:true}).waitFor();
   await page.getByRole('button',{name:'任务操作',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'任务详情',exact:true}).click();
   await page.getByRole('dialog').getByText('开始时间',{exact:true}).waitFor();
   await page.getByRole('dialog').getByRole('button',{name:'关闭',exact:true}).click();await page.getByRole('button',{name:'返回',exact:true}).click();
