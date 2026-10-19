@@ -54,7 +54,7 @@ func (s *Service) sendAgentMessage(ctx context.Context, id, owner string, sender
 		messageID, _ := core.HashJSON([]string{send.To.AgentID, id})
 		return map[string]any{"accepted": true, "message_id": messageID}, nil
 	case "assistant":
-		if send.To.ControlID != s.options.RuntimeID && !s.linkedPeer(ctx, sender, send.To) {
+		if send.To.NodeID != s.options.RuntimeID && !s.linkedPeer(ctx, sender, send.To) {
 			return nil, errors.New("agent_link_target_not_connected")
 		}
 		directory, err := s.MailDirectory(ctx)
@@ -68,7 +68,7 @@ func (s *Service) sendAgentMessage(ctx context.Context, id, owner string, sender
 				break
 			}
 		}
-		if !found && send.To.ControlID == s.options.RuntimeID {
+		if !found && send.To.NodeID == s.options.RuntimeID {
 			return nil, errors.New("destination assistant unavailable in the current directory")
 		}
 		var parent *protocol.Envelope

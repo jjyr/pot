@@ -39,7 +39,7 @@ func TestDirectTCPAgentListenerPersistsAndKeepsOwnerAPIsPrivate(t *testing.T) {
 	if link.(agentlink.Connection).State != "ready" {
 		t.Fatal(link)
 	}
-	result, err := a.service.sendAssistantMail(ctx, "tcp-mail", "main", protocol.SendMail{To: protocol.AgentRef{ControlID: "plain-b", Kind: "assistant", AgentID: "main"}, Text: "private network message"})
+	result, err := a.service.sendAssistantMail(ctx, "tcp-mail", "main", protocol.SendMail{To: protocol.AgentRef{NodeID: "plain-b", Kind: "assistant", AgentID: "main"}, Text: "private network message"})
 	if err != nil {
 		t.Fatal(err)
 	}
