@@ -75,7 +75,7 @@ func productCommand(ctx context.Context, args []string, out io.Writer) (result e
 			return errors.New("unexpected positional arguments")
 		}
 		controlOrigin := ""
-		if host, _, e := net.SplitHostPort(*listen); e == nil && host != "" && host != "0.0.0.0" && host != "::" {
+		if host, port, e := net.SplitHostPort(*listen); e == nil && port != "0" && host != "" && host != "localhost" && !(net.ParseIP(host) != nil && (net.ParseIP(host).IsUnspecified() || net.ParseIP(host).IsLoopback())) {
 			scheme := "http"
 			if *cert != "" {
 				scheme = "https"
