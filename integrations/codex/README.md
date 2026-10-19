@@ -74,6 +74,10 @@ Plugin version 0.4.0 requires message host version 3 and does not reuse an older
 daemon. Stop the old daemon before starting the updated plugin. The Node ID,
 encrypted keys, message IDs and consumer claims survive the database upgrade;
 old wire field names are not accepted by the new Peer protocol.
+When a daemon holds its ownership lock, startup reads only its existing owner
+credential and checks its authenticated version. It does not migrate that
+daemon's databases. Initialization and upgrades require the exclusive daemon
+lock; concurrent plugin starts share one start lock until the new host is ready.
 
 `pot_connections` lists established peers. `pot_send` queues an explicitly
 authorized message, with exact-retry idempotency. `pot_messages` reads this stable

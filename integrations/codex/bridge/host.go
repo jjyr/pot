@@ -416,6 +416,10 @@ func ensureAgentHost(root string) (hostClient, error) {
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return c, err
 	}
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
+		return c, errors.New("host_root_must_be_owner_only")
+	}
 	lock, err := os.OpenFile(filepath.Join(root, "start.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return c, err
@@ -425,27 +429,36 @@ func ensureAgentHost(root string) (hostClient, error) {
 		return c, err
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	h, err := openAgentHost(root)
+	daemon, err := os.OpenFile(filepath.Join(root, "daemon.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return c, err
 	}
-	c = hostClient{h.token, &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("redirect_denied") }}}
-	h.close()
-	healthy := func() bool {
-		var v struct {
-			Version string `json:"version"`
+	defer daemon.Close()
+	if err = syscall.Flock(int(daemon.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+			return c, err
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		return c.call(ctx, "/api/v1/agent-host/health", nil, &v) == nil && v.Version == hostVersion
+		c, err = existingAgentHostClient(root)
+		if err != nil {
+			return c, err
+		}
+		if c.healthy() {
+			return c, nil
+		}
+		return c, errors.New("agent_host_port_in_use_or_version_mismatch")
 	}
-	if healthy() {
-		return c, nil
-	}
+	defer syscall.Flock(int(daemon.Fd()), syscall.LOCK_UN)
+	// Refuse a foreign listener before opening or migrating this root's data.
 	if conn, e := net.DialTimeout("tcp", hostListen, 300*time.Millisecond); e == nil {
 		conn.Close()
 		return c, errors.New("agent_host_port_in_use_or_version_mismatch")
 	}
+	h, err := openAgentHost(root)
+	if err != nil {
+		return c, err
+	}
+	c = agentHostClient(h.token)
+	h.close()
 	binary, err := os.Executable()
 	if err != nil {
 		return c, err
@@ -460,13 +473,18 @@ func ensureAgentHost(root string) (hostClient, error) {
 	cmd.Stdout = log
 	cmd.Stderr = log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	// start.lock remains held until the child reports healthy. The child must
+	// acquire daemon.lock itself before opening any databases.
+	if err = syscall.Flock(int(daemon.Fd()), syscall.LOCK_UN); err != nil {
+		return c, err
+	}
 	if err = cmd.Start(); err != nil {
 		return c, err
 	}
 	cmd.Process.Release()
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
-		if healthy() {
+		if c.healthy() {
 			return c, nil
 		}
 		time.Sleep(100 * time.Millisecond)
