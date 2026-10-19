@@ -474,6 +474,11 @@ def run(binary, base, env, cli_command, profile_only=False):
             )
             if '"passed":true' not in replies:
                 raise RuntimeError("Reply bubble browser contracts did not pass")
+            process_checks = browser_cli(
+                "run-code", (ROOT / "scripts/tests/go-ui-process-runs-browser.js").read_text()
+            )
+            if '"passed":true' not in process_checks:
+                raise RuntimeError("Process session browser contracts did not pass")
             continuation = browser_cli(
                 "run-code", (ROOT / "scripts/tests/go-ui-continuation-browser.js").read_text()
             )
