@@ -233,7 +233,7 @@ func TestInvitationsAreSingleUseRouteBoundAndEncrypted(t *testing.T) {
 	if same.Address != inv.Address {
 		t.Fatal("unclaimed invitation should be reused")
 	}
-	parsed, _ := parseAddress(inv.Address)
+	parsed, _ := parseAddress(ctx, inv.Address)
 	if _, err = a.service.Connect(ctx, "assistant", inv.Address); err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func TestInvitationsAreSingleUseRouteBoundAndEncrypted(t *testing.T) {
 	}
 	// A token cannot select another recipient, even within the same Control.
 	newInv, _ := b.service.Invite(ctx, "assistant", b.server.URL)
-	bad, _ := parseAddress(newInv.Address)
+	bad, _ := parseAddress(ctx, newInv.Address)
 	bad.Identity.Address.AgentID = "other"
 	raw, _ := json.Marshal(bad)
 	newInv.Address = b.server.URL + Prefix + "/connect#" + base64URL(raw)
@@ -366,7 +366,7 @@ func TestInvitationExpirationAndPublicBoundary(t *testing.T) {
 	ctx := context.Background()
 	a, b := newFixture(t, "control-a"), newFixture(t, "control-b")
 	inv, _ := b.service.Invite(ctx, "assistant", b.server.URL)
-	value, _ := parseAddress(inv.Address)
+	value, _ := parseAddress(ctx, inv.Address)
 	if _, err := b.db.Exec(`UPDATE agent_link_invitations SET expires_at=? WHERE id=?`, time.Now().Add(-time.Minute).UnixMilli(), value.Invitation); err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func TestInvitationExpirationAndPublicBoundary(t *testing.T) {
 	if _, err = a.service.Connect(ctx, "assistant", fresh.Address); err != nil {
 		t.Fatal(err)
 	}
-	for _, endpoint := range []string{"http://remote.example", "https://example.com/path", "https://user:pass@example.com", "https://example.com?token=oops"} {
+	for _, endpoint := range []string{"http://203.0.113.1", "https://example.com/path", "https://user:pass@example.com", "https://example.com?token=oops"} {
 		if _, err := b.service.Invite(ctx, "assistant", endpoint); !errors.Is(err, ErrInvalid) {
 			t.Fatal(endpoint, err)
 		}

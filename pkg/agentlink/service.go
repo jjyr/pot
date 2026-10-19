@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -71,15 +70,7 @@ func New(options Options) (*Service, error) {
 	if options.PollInterval < 100*time.Millisecond {
 		return nil, ErrInvalid
 	}
-	client := http.Client{Timeout: 15 * time.Second}
-	if options.HTTPClient != nil {
-		client = *options.HTTPClient
-	}
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return ErrInvalid }
-	if client.Timeout == 0 {
-		client.Timeout = 15 * time.Second
-	}
-	return &Service{options: options, client: &client, rates: map[string]rate{}}, nil
+	return &Service{options: options, client: NewHTTPClient(options.HTTPClient), rates: map[string]rate{}}, nil
 }
 
 func validIdentity(identity Identity) bool {
@@ -110,20 +101,7 @@ func route(local, peer protocol.AgentRef) string {
 	return digest(value)
 }
 func validID(id string) bool { return len(id) == 48 && strings.Trim(id, "0123456789abcdef") == "" }
-func validateEndpoint(raw string) (string, error) {
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" || (u.Path != "" && u.Path != "/") {
-		return "", ErrInvalid
-	}
-	if u.Scheme != "https" {
-		ip := net.ParseIP(u.Hostname())
-		if u.Scheme != "http" || !(u.Hostname() == "localhost" || ip != nil && ip.IsLoopback()) {
-			return "", ErrInvalid
-		}
-	}
-	return strings.TrimSuffix(u.String(), "/"), nil
-}
-func parseAddress(raw string) (address, error) {
+func parseAddress(ctx context.Context, raw string) (address, error) {
 	var value address
 	if len(raw) > 16384 {
 		return value, ErrInvalid
@@ -136,7 +114,7 @@ func parseAddress(raw string) (address, error) {
 	if err != nil || decodeJSON(data, &value) != nil || value.Version != 1 || !validIdentity(value.Identity) || !validID(value.Invitation) || !validToken(value.Token) {
 		return address{}, ErrInvalid
 	}
-	origin, err := validateEndpoint(value.Endpoint)
+	origin, err := ValidateEndpoint(ctx, value.Endpoint)
 	if err != nil || u.Scheme+"://"+u.Host+u.Path != origin+Prefix+"/connect" || u.RawQuery != "" || u.User != nil {
 		return address{}, ErrInvalid
 	}
@@ -152,7 +130,7 @@ func (s *Service) Invite(ctx context.Context, assistantID, endpoint string) (Inv
 	if !validIdentity(identity) {
 		return Invitation{}, ErrInvalid
 	}
-	endpoint, err = validateEndpoint(endpoint)
+	endpoint, err = ValidateEndpoint(ctx, endpoint)
 	if err != nil {
 		return Invitation{}, err
 	}
@@ -259,7 +237,7 @@ func (s *Service) update(ctx context.Context, c Connection) error {
 }
 
 func (s *Service) Connect(ctx context.Context, assistantID, raw string) (Connection, error) {
-	address, err := parseAddress(raw)
+	address, err := parseAddress(ctx, raw)
 	if err != nil {
 		return Connection{}, err
 	}

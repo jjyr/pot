@@ -67,10 +67,12 @@ type SecretStore interface {
 
 type Options struct {
 	// DB is a caller-owned, migrated storage.ControlDatabase. Service never closes it.
-	DB         *sql.DB
-	Secrets    SecretStore
-	Identity   func(context.Context, string) (Identity, error)
-	Mailbox    Mailbox
+	DB       *sql.DB
+	Secrets  SecretStore
+	Identity func(context.Context, string) (Identity, error)
+	Mailbox  Mailbox
+	// HTTPClient customizes HTTPS (for example CA roots). HTTP always uses the
+	// private-network, proxy-free transport enforced by NewHTTPClient.
 	HTTPClient *http.Client
 	Changed    func()
 	// PollInterval is bounded below by 100 ms; default is two seconds.

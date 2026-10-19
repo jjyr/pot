@@ -28,9 +28,21 @@ machine identity. Connection IDs are independent of plugin IDs and Agent IDs.
 The protected host UI calls `Invite` with its assistant and actual reachable
 origin. The returned URL contains a versioned invitation in its fragment. The
 fragment is a bearer capability and must not be logged, included in model tools
-or sent through chat. Origins require HTTPS except for explicit loopback HTTP.
-URLs with embedded credentials, query strings or arbitrary paths are rejected.
-HTTP redirects are refused. A host without a published origin can still call
+or sent through chat. Origins may use HTTPS or HTTP over a private network: loopback,
+RFC 1918 IPv4, IPv6 ULA, or the Tailscale `100.64.0.0/10` range. VPN and tailnet
+DNS names are accepted only when every resolved address is in these ranges.
+HTTP uses the existing trusted network and does not require installing a TLS
+certificate. Public Internet HTTP origins are rejected; public origins use
+HTTPS with normal certificate verification.
+
+`ValidateEndpoint` applies these rules before publishing or importing an address.
+`NewHTTPClient` supplies the same policy for connection traffic and host probes.
+Each new HTTP connection resolves and verifies the destination again, then dials
+the validated numeric address, so a DNS change cannot redirect bearer credentials
+to a public server. The HTTP transport never uses an environment or configured
+proxy, nor a caller's custom dialer. HTTPS retains the caller's transport and CA
+configuration. URLs with embedded credentials, query strings or arbitrary paths
+are rejected. HTTP redirects are refused. A host without a published origin can still call
 `Connect` to establish an outgoing connection.
 
 One side pastes the other's URL. `Connect` first persists a connection intent
