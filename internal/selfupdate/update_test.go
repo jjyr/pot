@@ -29,6 +29,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	buildinfo.Version = "0.1.0"
 	if len(os.Args) == 3 && os.Args[1] == "_update-worker" {
 		if Worker(os.Args[2]) != nil {
 			os.Exit(1)
@@ -390,5 +391,23 @@ func TestProtectedDataRootsDisableReplacement(t *testing.T) {
 	h.Protect(filepath.Join(base, "pot", "data"))
 	if !h.unsupported {
 		t.Fatal("installation-contained user data could be replaced")
+	}
+}
+
+func TestObsoletePreparedUpdateCannotDowngradeInstallation(t *testing.T) {
+	directory := t.TempDir()
+	m := New(context.Background(), &Host{Directory: directory}, nil)
+	for _, version := range []string{"0.0.9", "0.1.0"} {
+		mustWrite(t, filepath.Join(directory, "state.json"), State{Version: version, Phase: "ready"})
+		status, err := m.Status()
+		if err != nil || status.Version != buildinfo.Version || status.Phase != "current" {
+			t.Fatal("obsolete update remained advertised", status, err)
+		}
+		body, _ := json.Marshal(Command{Action: "install", Version: version, RequestID: "new-attempt"})
+		_, err = m.Call(context.Background(), "POST", body)
+		var api protocol.APIError
+		if !errors.As(err, &api) || api.Code != "update_stale" {
+			t.Fatal("accepted obsolete prepared update", err)
+		}
 	}
 }

@@ -73,6 +73,9 @@ func (m *Manager) Status() (Status, error) {
 		return s, nil
 	}
 	s.State = m.state()
+	if s.Version != "" && !newer(s.Version, buildinfo.Version) && s.Phase != "installing" && s.Phase != "restarting" && s.Phase != "blocked" {
+		s.State = State{Version: buildinfo.Version, Phase: "current"}
+	}
 	peers, err := participants(m.Host.Directory)
 	if err != nil {
 		return s, err
@@ -195,6 +198,9 @@ func (m *Manager) Call(ctx context.Context, method string, body json.RawMessage)
 	s := m.state()
 	if s.RequestID == command.RequestID && s.Version == command.Version {
 		return m.Status()
+	}
+	if !newer(command.Version, buildinfo.Version) {
+		return nil, protocol.APIError{Code: "update_stale"}
 	}
 	if m.busy || s.Phase == "downloading" || s.Phase == "installing" || s.Phase == "restarting" || s.Phase == "blocked" {
 		return nil, protocol.APIError{Code: "update_busy"}
