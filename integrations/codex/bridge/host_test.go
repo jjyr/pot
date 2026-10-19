@@ -212,14 +212,14 @@ func TestAgentHostRestartStableIdentityAndMailbox(t *testing.T) {
 	if err != nil || len(messages) != 1 || messages[0].State != "queued" {
 		t.Fatal(messages, err)
 	}
-	if _, err = h.tool(ctx, hostToolInput{Operation: "messages"}); err != nil {
+	if _, err = h.tool(ctx, hostToolInput{Operation: "messages", ConsumerID: "test-consumer"}); err != nil {
 		t.Fatal(err)
 	}
 	messages, err = h.mailbox.messages(ctx)
 	if err != nil || messages[0].State != "read" {
 		t.Fatal(messages, err)
 	}
-	if _, err = h.tool(ctx, hostToolInput{Operation: "acknowledge", MessageID: incoming.ID}); err != nil {
+	if _, err = h.tool(ctx, hostToolInput{Operation: "acknowledge", ConsumerID: "test-consumer", MessageID: incoming.ID}); err != nil {
 		t.Fatal(err)
 	}
 	messages, err = h.mailbox.messages(ctx)
@@ -334,7 +334,7 @@ func TestAgentHostPeerDeliveryRemainsUnreadUntilCodexReads(t *testing.T) {
 		t.Fatal(messages, err)
 	}
 	// Durable transport delivery must not pretend that a Codex model read it.
-	if _, err = b.tool(ctx, hostToolInput{Operation: "messages"}); err != nil {
+	if _, err = b.tool(ctx, hostToolInput{Operation: "messages", ConsumerID: "test-consumer"}); err != nil {
 		t.Fatal(err)
 	}
 	messages, err = b.mailbox.messages(ctx)

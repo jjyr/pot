@@ -312,7 +312,11 @@ func TestMigrationConcurrentHandles(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	if got := migrationCount(t, handles[0]); got != 6 {
+	definitions, err := loadMigrations(migrationFiles, TasksDatabase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := migrationCount(t, handles[0]); got != len(definitions) {
 		t.Fatal(got)
 	}
 }

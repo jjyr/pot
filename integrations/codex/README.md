@@ -54,6 +54,21 @@ the reader. This does not inject messages into an existing Codex App chat or
 silently start an independent App Server task. Transport receipt means remote
 durable inbox acceptance, distinct from reading, processing or execution.
 
+Each MCP process has a private reader identity. Inbox batches are claimed
+atomically, so two Codex chats cannot handle the same batch concurrently.
+Retries by that reader resume its original batch. The host binds the deepest
+claimed processing parent to subsequent sends, including forwards to another
+peer; acknowledging a message does not reset the causal limit. A daemon restart
+keeps reader claims. If the original chat is lost, stop it and explicitly use
+**Recover unconfirmed messages** on the local connection page. This invalidates
+old readers and reopens only unconfirmed messages with their original causal
+facts. Previously performed actions can remain uncertain; recovery does not
+execute a model or mark a message processed.
+
+The default message plugin does not load the old delegation-only skill. Its
+unchanged text remains available for an explicitly configured legacy integration;
+the message tools supply their own narrow schemas without a new system prompt.
+
 ## Independent task delegation
 
 The following older, separately authorized delegation API remains independent of
@@ -73,7 +88,7 @@ A: Pot tools ── HTTPS MCP ──> B: Bridge daemon ── JSONL stdio ──
       │                             ▲
       └─ checkpoint + inbox ACK ────┘
                                     ▲
-                         local stdio MCP proxy (pot plugin)
+                         local stdio MCP proxy (optional legacy registration)
                                     │
                          user's Codex App / CLI chat
 ```
@@ -115,8 +130,11 @@ See [App Server](https://developers.openai.com/codex/app-server),
 WebSocket is exposed. Tools use MCP Streamable HTTP at `/mcp`; durable
 notification recovery uses the Bridge's version 1 HTTP/SSE protocol.
 
-## Install the Codex-side package on B
+## Legacy delegation: optional local MCP registration
 
+The installer enables the message host by default. The following installation
+details and manual registration are relevant only when also choosing the
+independent delegation API. They do not replace the message connection flow.
 From this checkout:
 
 ```sh
@@ -145,15 +163,15 @@ delegation API. If your Codex surface has no plugin marketplace, use its officia
 supported local MCP configuration instead:
 
 ```toml
-# Add this table to your own Codex config.toml, preserving existing tables.
-[mcp_servers.pot]
+# Optional independent delegation only. Keep the default message host entry.
+[mcp_servers.pot_delegation]
 command = "/absolute/home/.codex/plugins/pot/bin/pot-codex-bridge"
 args = ["mcp", "--config", "/absolute/home/.config/pot-codex/local-pair.json"]
 ```
 
-That fallback installs the same MCP tools; the plugin's skill must also be read or
-installed using your surface's supported Skills workflow. Do not register both
-methods in the same chat. Never put a bearer token in MCP arguments or config.
+This explicit legacy entry exposes the older paired tools; use the unchanged
+legacy skill only with this separately configured integration. Do not register
+duplicate legacy proxies. Never put a bearer token in MCP arguments or config.
 
 ## Configure B and pair the devices
 

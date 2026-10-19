@@ -58,7 +58,8 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(
             mcp["args"], ["host", "--root", str(self.home / ".config/pot-codex/agent")]
         )
-        self.assertTrue((destination / manifest["skills"] / "pot/SKILL.md").is_file())
+        self.assertNotIn("skills", manifest)
+        self.assertTrue((destination / "skills/pot/SKILL.md").is_file())
 
     def test_local_edits_are_retained(self):
         destination = self.install()

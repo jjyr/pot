@@ -2,6 +2,5 @@
   "name": "pot",
   "version": "0.2.0",
   "description": "Connect Pot and Codex Agents through a local connection page and exchange durable peer messages.",
-  "skills": "./skills/",
   "mcpServers": "./.mcp.json"
 }

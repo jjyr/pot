@@ -190,6 +190,8 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		var unread int
 		_ = h.tasks.QueryRow("SELECT count(*) FROM agent_messages WHERE direction='incoming' AND state='queued'").Scan(&unread)
+		var unconfirmed int
+		_ = h.tasks.QueryRow("SELECT count(*) FROM agent_messages WHERE direction='incoming' AND state IN('read','interrupted')").Scan(&unconfirmed)
 		status := "needs_access"
 		if endpoint != "" {
 			status = "ready"
@@ -205,7 +207,7 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 			}
 			view = append(view, map[string]any{"id": c.ID, "local_assistant_id": c.Local.Address.AgentID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "control_id": c.Peer.Address.ControlID, "address": c.Endpoint, "kind": c.Peer.Adapter, "name": c.Peer.Name}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
 		}
-		writeJSON(w, 200, map[string]any{"items": view, "self": map[string]any{"id": "codex", "kind": "codex", "name": "Codex", "address": endpoint, "endpoint": endpoint, "status": status}, "network": map[string]any{"listen": hostListen, "endpoint": endpoint, "mode": "https", "status": status}, "identity": h.identity, "unread": unread})
+		writeJSON(w, 200, map[string]any{"items": view, "self": map[string]any{"id": "codex", "control_id": h.identity.Address.ControlID, "kind": "codex", "name": "Codex", "address": endpoint, "endpoint": endpoint, "status": status}, "network": map[string]any{"listen": hostListen, "endpoint": endpoint, "mode": "https", "status": status}, "identity": h.identity, "unread": unread, "unconfirmed": unconfirmed})
 		return
 	}
 	if r.Method != "POST" {
@@ -242,6 +244,8 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 	var v any = map[string]bool{"ok": true}
 	var err error
 	switch in.Action {
+	case "recover_messages":
+		err = h.mailbox.recoverConsumers(r.Context())
 	case "connect":
 		v, err = h.links.Connect(r.Context(), "codex", in.Address)
 	case "disconnect":

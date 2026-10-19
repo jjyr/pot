@@ -62,7 +62,10 @@ func (m *hostMailbox) Acknowledge(ctx context.Context, r protocol.Receipt) error
 	}
 	return nil
 }
-func (m *hostMailbox) send(ctx context.Context, peer protocol.AgentRef, requestID, text string, replyTo ...string) (protocol.Envelope, error) {
+func (m *hostMailbox) send(ctx context.Context, peer protocol.AgentRef, requestID, text string) (protocol.Envelope, error) {
+	return m.sendConsumer(ctx, "", peer, requestID, text)
+}
+func (m *hostMailbox) sendConsumer(ctx context.Context, consumer string, peer protocol.AgentRef, requestID, text string) (protocol.Envelope, error) {
 	if !validID(requestID) {
 		return protocol.Envelope{}, errors.New("invalid_request_id")
 	}
@@ -73,23 +76,54 @@ func (m *hostMailbox) send(ctx context.Context, peer protocol.AgentRef, requestI
 	uuid[8] = (uuid[8] & 63) | 128
 	conv := fmt.Sprintf("%x-%x-%x-%x-%x", uuid[:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:16])
 	e := protocol.Envelope{ID: id, Kind: "message", From: m.local, To: peer, ConversationID: conv, Text: text}
-	if len(replyTo) > 0 && replyTo[0] != "" {
-		var raw string
-		var parent protocol.Envelope
-		if err := m.db.QueryRowContext(ctx, "SELECT envelope FROM agent_messages WHERE id=? AND direction='incoming'", replyTo[0]).Scan(&raw); err != nil {
-			return protocol.Envelope{}, err
+	err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
+		if consumer != "" {
+			if err := consumerTx(ctx, tx, consumer); err != nil {
+				return err
+			}
 		}
-		if err := json.Unmarshal([]byte(raw), &parent); err != nil {
-			return protocol.Envelope{}, err
+		var previous string
+		err := tx.QueryRowContext(ctx, "SELECT envelope FROM agent_messages WHERE id=? AND direction='outgoing'", id).Scan(&previous)
+		if err == nil {
+			var old protocol.Envelope
+			if err = json.Unmarshal([]byte(previous), &old); err != nil {
+				return err
+			}
+			if old.From != m.local || old.To != peer || old.Text != text {
+				return errors.New("message identity has different content")
+			}
+			e = old
+			return nil
 		}
-		if parent.From != peer || parent.To != m.local || parent.Hops >= protocol.MaxMailHops {
-			return protocol.Envelope{}, errors.New("invalid_reply_route_or_hop_limit")
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
 		}
-		e.ReplyTo = &parent.ID
-		e.ConversationID = parent.ConversationID
-		e.Hops = parent.Hops + 1
-	}
-	err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error { return inbox.EnqueueTx(ctx, tx, e, "outgoing", "queued") })
+		if consumer != "" {
+			var parentID sql.NullString
+			if err = tx.QueryRowContext(ctx, "SELECT parent_id FROM codex_mail_consumers WHERE id=?", consumer).Scan(&parentID); err != nil {
+				return err
+			}
+			if parentID.Valid {
+				var raw string
+				var parent protocol.Envelope
+				if err = tx.QueryRowContext(ctx, "SELECT envelope FROM agent_messages WHERE id=?", parentID.String).Scan(&raw); err != nil {
+					return err
+				}
+				if err = json.Unmarshal([]byte(raw), &parent); err != nil {
+					return err
+				}
+				if parent.Hops >= protocol.MaxMailHops {
+					return errors.New("agent_message_hop_limit")
+				}
+				e.Hops = parent.Hops + 1
+				if parent.From == peer {
+					e.ReplyTo = &parent.ID
+					e.ConversationID = parent.ConversationID
+				}
+			}
+		}
+		return inbox.EnqueueTx(ctx, tx, e, "outgoing", "queued")
+	})
 	return e, err
 }
 func (m *hostMailbox) messages(ctx context.Context) ([]protocol.MailRecord, error) {
@@ -116,15 +150,4 @@ func (m *hostMailbox) messages(ctx context.Context) ([]protocol.MailRecord, erro
 		items = append(items, r)
 	}
 	return items, rows.Err()
-}
-func (m *hostMailbox) mark(ctx context.Context, id, state string) error {
-	res, err := m.db.ExecContext(ctx, "UPDATE agent_messages SET state=? WHERE id=? AND direction='incoming'", state, id)
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n != 1 {
-		return sql.ErrNoRows
-	}
-	return nil
 }
