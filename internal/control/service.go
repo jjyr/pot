@@ -52,6 +52,7 @@ type Options struct {
 type Service struct {
 	pluginWG            sync.WaitGroup
 	pluginMu            sync.Mutex
+	pluginStreams       map[string]backgroundStream
 	Attachments         *attachments.Store
 	mu                  sync.Mutex
 	resourceMutations   sync.Mutex
