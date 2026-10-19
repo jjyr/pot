@@ -11,10 +11,11 @@ const background=['#dce9e2','#f5ddd2','#e5ddf1','#dce8f4','#f4e8c8','#f1dce6','#
 const palettes=new Map();
 let instance=0;
 
-export function avatar(size = 32, key = '') {
+export function avatar(size = 32, key = '', image = '') {
   const result = node('span', 'avatar');
   result.style.width = result.style.height = `${size}px`;
   result.setAttribute('aria-hidden', 'true');
+  if(image?.startsWith('data:image/png;base64,')){const photo=node('img','avatar-image');photo.src=image;photo.alt='';result.append(photo);return result;}
   const mark=node('span','avatar-mark');result.append(mark);
   // Async painting belongs to this decorative node. Reconciliation must insert
   // it rather than copy its still-unpainted projection onto a retained node.

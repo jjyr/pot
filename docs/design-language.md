@@ -200,6 +200,9 @@ one of 64 combinations, unchanged by theme or rename. Creation previews, rows
 and titles share the image. A new completed live reply triggers one 650 ms whole
 image scale-and-tilt rebound. Initial history, duplicate updates and reconnect
 catch-up do not replay it; hidden pages do not queue reactions.
+Custom avatars use the same shape and animation. They display the assistant's
+persisted square PNG in the directory, chat title and settings preview; restoring
+the default uses the original deterministic Companion colors.
 
 First-use Chat offers Connect AI provider when no connection exists. Saving that
 connection returns to Chat and automatically creates Pot using the Space's default
@@ -213,9 +216,9 @@ describe how it can help. The welcome is committed to both the durable transcrip
 and the model checkpoint, so the first model request includes it as an assistant
 message. It makes no inference call, generates no unread notification and is never
 reinserted or translated on reopening. Existing conversations are not backfilled.
-The assistant can save a user-requested name through `rename_assistant`; directory,
-title and settings use that same identity. Workers and peer conversations cannot
-rename the assistant.
+The assistant saves user-requested names and avatars through `update_agent_profile`;
+directory, title and settings use that same identity. Optional fields preserve
+omitted values. Workers and peer conversations cannot edit the assistant profile.
 
 The + action opens creation with name, destination Space, Provider and model
 visible. The destination Space's default Provider is preselected, and the model

@@ -17,6 +17,7 @@ import secrets
 import shutil
 import signal
 import socket
+import struct
 import subprocess
 import tempfile
 import threading
@@ -25,6 +26,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import build_opener, ProxyHandler, Request
 import uuid
+import zlib
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -51,7 +53,7 @@ def stop(process):
             process.wait(timeout=5)
 
 
-def run(binary, base, env, cli_command):
+def run(binary, base, env, cli_command, profile_only=False):
     processes = []
     servers = []
     session = "pot-http-" + uuid.uuid4().hex[:10]
@@ -157,9 +159,19 @@ def run(binary, base, env, cli_command):
                     return
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 model_requests.append(body)
-                if any(
-                    message_text(m) == "以后叫你小白" for m in body.get("messages", [])
-                ) and not any(m.get("role") == "tool" for m in body.get("messages", [])):
+                messages = body.get("messages", [])
+                last_user = max(
+                    (i for i, m in enumerate(messages) if m.get("role") == "user"),
+                    default=-1,
+                )
+                text = message_text(messages[last_user]) if last_user >= 0 else ""
+                changes = {
+                    "以后叫你小白": {"name": "小白"},
+                    "把头像换为测试图片": {"avatar": {"path": "profile-avatar.png"}},
+                }
+                if text in changes and not any(
+                    m.get("role") == "tool" for m in messages[last_user + 1 :]
+                ):
                     self.send_response(200)
                     self.send_header("Content-Type", "text/event-stream")
                     self.end_headers()
@@ -174,8 +186,8 @@ def run(binary, base, env, cli_command):
                                             "id": "rename-onboarding",
                                             "type": "function",
                                             "function": {
-                                                "name": "rename_assistant",
-                                                "arguments": json.dumps({"name": "小白"}),
+                                                "name": "update_agent_profile",
+                                                "arguments": json.dumps(changes[text]),
                                             },
                                         }
                                     ]
@@ -256,6 +268,28 @@ def run(binary, base, env, cli_command):
                 )
             )
             wait_for(lambda: cli("status", "-root", str(base / "runtime")), "Runtime")
+            avatar_workspace = base / "runtime/agent-workspace/assistants/main"
+            avatar_workspace.mkdir(parents=True, exist_ok=True)
+            avatar_path = avatar_workspace / "profile-avatar.png"
+            if image := env.get("POT_PROFILE_FIXTURE_IMAGE"):
+                avatar_path.write_bytes(Path(image).read_bytes())
+            else:
+
+                def chunk(kind, data):
+                    return (
+                        struct.pack("!I", len(data))
+                        + kind
+                        + data
+                        + struct.pack("!I", zlib.crc32(kind + data))
+                    )
+
+                pixels = b"".join(b"\x00" + bytes([40 + y, 120, 180]) * 128 for y in range(128))
+                avatar_path.write_bytes(
+                    b"\x89PNG\r\n\x1a\n"
+                    + chunk(b"IHDR", struct.pack("!2I5B", 128, 128, 8, 2, 0, 0, 0))
+                    + chunk(b"IDAT", zlib.compress(pixels))
+                    + chunk(b"IEND", b"")
+                )
             runtime = api("GET", "/api/v1/runtime")
             api(
                 "POST",
@@ -280,6 +314,8 @@ def run(binary, base, env, cli_command):
                 "token": cli("access", "-browser-root", str(base / "browser"), "token").strip(),
                 "endpoint": f"http://127.0.0.1:{model.server_port}",
                 "screenshot": str(ROOT / "output/pr-images/onboarding-after.png"),
+                "avatar_before": str(ROOT / "output/pr-images/agent-profile-desktop-before.png"),
+                "avatar_after": str(ROOT / "output/pr-images/agent-profile-desktop-after.png"),
             }
             (ROOT / "output/pr-images").mkdir(parents=True, exist_ok=True)
             code = (ROOT / "scripts/tests/go-ui-onboarding-browser.js").read_text()
@@ -292,6 +328,11 @@ def run(binary, base, env, cli_command):
                 )
                 for body in model_requests
             ), "Welcome missing from actual HTTP model request"
+            if profile_only:
+                print(
+                    "Assistant profile HTTP/SSE, image persistence, settings and bilingual browser checks passed"
+                )
+                return
             api(
                 "POST",
                 "/api/v1/providers",
@@ -541,6 +582,11 @@ def run(binary, base, env, cli_command):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, help="Use an already built current Go CLI")
+    parser.add_argument(
+        "--profile-only",
+        action="store_true",
+        help="Run first-use and assistant profile browser checks only",
+    )
     args = parser.parse_args()
     if not shutil.which("node") or not shutil.which("npx"):
         parser.error("Pinned Node/npx and cached @playwright/cli are required; run through mise")
@@ -575,7 +621,7 @@ def main():
                 env=env,
                 check=True,
             )
-        run(binary, base, env, cli_command)
+        run(binary, base, env, cli_command, args.profile_only)
 
 
 if __name__ == "__main__":

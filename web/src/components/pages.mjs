@@ -208,7 +208,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       // Creation identity also owns the preview color. Keep it even when an
       // edited retry rotates the editor's generic mutation request identity.
       const creationRequestID=session.requestID;
-      const preview=avatar(56,assistantAvatarKey(definition||{request_id:creationRequestID}));
+      const preview=avatar(56,assistantAvatarKey(definition||{request_id:creationRequestID}),definition?.avatar);
       form.form.querySelector('.editor-fields').prepend(preview);
       const set=(name,value)=>{controls.get(name).value=value??'';session.set(name,value);};
       const defaults=()=>{const profile=profiles.find(value=>value.id===session.values.profile_id),catalog=profile?.model_settings?.catalog_provider||'custom',limits=modelDefaults(providers,catalog,session.values.model);const same=profile?.model===session.values.model;controls.get('context_window').placeholder=String(same?(profile?.model_settings?.context_window||limits.context):limits.context);controls.get('max_output_tokens').placeholder=String(same?(profile?.model_settings?.max_output_tokens||limits.output):limits.output);controls.get('reasoning_effort').placeholder=profile?.params?.reasoning_effort||tr('Provider default','提供商默认值');controls.get('model').required=!!profile;form.form.querySelector('.editor-actions .primary').disabled=!profile;};

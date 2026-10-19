@@ -179,6 +179,16 @@ tray generation; removing the VM Helper does not remove brand generation.
 
 Paid tests require an explicit `POT_LIVE=1` in the calling process.
 
+`TestConfiguredModelAgentProfileLive` uses `POT_CONFIGURED_LIVE_ROOT` and the
+machine's existing key-file selector to read its configured model credentials
+locally. It runs the production Agent, executor and profile tool in a disposable
+Control, asking the model to draw an original cow/horse PNG and set both its name
+and avatar. The test caps provider calls at 12 and output at 4096 tokens per call.
+`POT_LIVE_OUTPUT` optionally saves the normalized PNG and non-secret evidence
+outside the repository. Production conversations, profiles and services are not
+modified. Run with `POT_LIVE=1 mise exec -- go test ./internal/control -run
+'^TestConfiguredModelAgentProfileLive$' -count=1 -v -timeout=6m`.
+
 For quiet task dispatch and bounded automatic recovery, run
 `TestConfiguredModelTaskRecoveryLive` with `POT_LIVE=1`,
 `POT_CONFIGURED_LIVE_ROOT` pointing to the selected machine's existing Control
