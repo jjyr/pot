@@ -60,7 +60,7 @@ func (s *Service) agentLinkIdentity(ctx context.Context, id string) (agentlink.I
 	}
 	for _, d := range definitions {
 		if d.ID == id {
-			return agentlink.Identity{Address: protocol.AgentRef{ControlID: s.options.RuntimeID, Kind: "assistant", AgentID: id}, Name: d.Name, Adapter: "pot"}, nil
+			return agentlink.Identity{Address: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "assistant", AgentID: id}, Name: d.Name, Adapter: "pot"}, nil
 		}
 	}
 	return agentlink.Identity{}, protocol.APIError{Code: "agent_link_assistant_unavailable"}
@@ -206,7 +206,7 @@ func (s *Service) AgentLinks(ctx context.Context, assistantID string) (any, erro
 	if err != nil {
 		status, reason = "needs_access", "agent_link_assistant_unavailable"
 	}
-	self := map[string]any{"id": identity.Address.AgentID, "control_id": s.options.RuntimeID, "kind": "pot", "name": identity.Name, "address": config.Endpoint, "endpoint": config.Endpoint, "status": status, "reason_code": reason}
+	self := map[string]any{"id": identity.Address.AgentID, "node_id": s.options.RuntimeID, "kind": "pot", "name": identity.Name, "address": config.Endpoint, "endpoint": config.Endpoint, "status": status, "reason_code": reason}
 	connections, err := h.service.List(ctx)
 	if err != nil {
 		return nil, err
@@ -220,7 +220,7 @@ func (s *Service) AgentLinks(ctx context.Context, assistantID string) (any, erro
 		if state == "ready" || state == "active" {
 			state = "connected"
 		}
-		items = append(items, map[string]any{"id": c.ID, "local_assistant_id": c.Local.Address.AgentID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "control_id": c.Peer.Address.ControlID, "kind": c.Peer.Adapter, "name": c.Peer.Name, "address": c.Endpoint}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
+		items = append(items, map[string]any{"id": c.ID, "local_assistant_id": c.Local.Address.AgentID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "node_id": c.Peer.Address.NodeID, "kind": c.Peer.Adapter, "name": c.Peer.Name, "address": c.Endpoint}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
 	}
 	return map[string]any{"self": self, "items": items, "network": map[string]any{"listen": config.Listen, "endpoint": config.Endpoint, "mode": config.Mode, "status": status, "reason_code": reason}}, nil
 }
@@ -276,7 +276,7 @@ func (s *Service) ManageAgentLink(ctx context.Context, command AgentLinkCommand)
 			return nil, agentLinkError(e)
 		}
 		return map[string]any{
-			"peer":     map[string]any{"id": preview.Identity.Address.AgentID, "control_id": preview.Identity.Address.ControlID, "kind": preview.Identity.Adapter, "name": preview.Identity.Name},
+			"peer":     map[string]any{"id": preview.Identity.Address.AgentID, "node_id": preview.Identity.Address.NodeID, "kind": preview.Identity.Adapter, "name": preview.Identity.Name},
 			"endpoint": preview.Endpoint, "fingerprint": preview.Fingerprint, "expires_at_ms": preview.ExpiresAt.UnixMilli(),
 		}, nil
 	case "connect":

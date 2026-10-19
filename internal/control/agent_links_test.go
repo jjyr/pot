@@ -93,7 +93,7 @@ func awaitAgentLinkMail(t *testing.T, s *Service, id string) protocol.MailRecord
 func TestAgentLinkControlsExchangeWithoutAppAndDoNotGrantExecution(t *testing.T) {
 	ctx := context.Background()
 	a, b := agentControl(t, "link-a"), agentControl(t, "link-b")
-	peer := protocol.AgentRef{ControlID: "link-b", Kind: "assistant", AgentID: "main"}
+	peer := protocol.AgentRef{NodeID: "link-b", Kind: "assistant", AgentID: "main"}
 	if _, err := a.service.sendAssistantMail(ctx, "before-link", "main", protocol.SendMail{To: peer, Text: "not connected"}); err == nil {
 		t.Fatal("remote communication admitted before connection")
 	}
@@ -141,7 +141,7 @@ func TestAgentLinkControlsExchangeWithoutAppAndDoNotGrantExecution(t *testing.T)
 			t.Fatal("Agent Link exposed remote execution")
 		}
 		peers, err := item.local.agentLinkPeers(ctx, "main")
-		if err != nil || len(peers) != 1 || peers[0].Address.ControlID != item.remote.options.RuntimeID {
+		if err != nil || len(peers) != 1 || peers[0].Address.NodeID != item.remote.options.RuntimeID {
 			t.Fatal(peers, err)
 		}
 		links, err := item.local.AgentLinks(ctx, "main")
@@ -167,7 +167,7 @@ func TestAgentLinkControlBindingRevocationAndNarrowListener(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	peer := protocol.AgentRef{ControlID: "binding-b", Kind: "assistant", AgentID: "main"}
+	peer := protocol.AgentRef{NodeID: "binding-b", Kind: "assistant", AgentID: "main"}
 	if _, err = a.service.sendAssistantMail(ctx, "wrong-local", other.ID, protocol.SendMail{To: peer, Text: "wrong local assistant"}); err == nil {
 		t.Fatal("another local assistant used the binding")
 	}
@@ -261,7 +261,7 @@ func TestAgentLinkControlPreviewDoesNotClaimInvitation(t *testing.T) {
 		t.Fatal(err)
 	}
 	preview := value.(map[string]any)
-	if len(preview) != 4 || !reflect.DeepEqual(preview["peer"], map[string]any{"id": "main", "control_id": "preview-b", "kind": "pot", "name": "Main"}) || preview["endpoint"] != b.endpoint || preview["expires_at_ms"] != invite["expires_at_ms"] {
+	if len(preview) != 4 || !reflect.DeepEqual(preview["peer"], map[string]any{"id": "main", "node_id": "preview-b", "kind": "pot", "name": "Main"}) || preview["endpoint"] != b.endpoint || preview["expires_at_ms"] != invite["expires_at_ms"] {
 		t.Fatalf("unexpected preview projection: %#v", preview)
 	}
 	fingerprint, ok := preview["fingerprint"].(string)

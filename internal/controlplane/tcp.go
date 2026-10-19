@@ -20,10 +20,10 @@ type executionAuth struct {
 }
 
 func (d *Directory) TransportIdentity() (peer.Identity, ed25519.PrivateKey) {
-	return peer.Identity{ID: d.identity.RuntimeID, PublicKey: d.identity.PublicKey}, append(ed25519.PrivateKey(nil), d.key...)
+	return peer.Identity{NodeID: d.identity.RuntimeID, PublicKey: d.identity.PublicKey}, append(ed25519.PrivateKey(nil), d.key...)
 }
 func (i Identity) TransportIdentity() peer.Identity {
-	return peer.Identity{ID: i.RuntimeID, PublicKey: i.PublicKey}
+	return peer.Identity{NodeID: i.RuntimeID, PublicKey: i.PublicKey}
 }
 
 // Authorize scopes a signed TCP session to either enrollment or an existing
@@ -90,11 +90,11 @@ func (s *Server) executionPrincipal(remote peer.Identity, raw json.RawMessage) (
 	d := s.Directory
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	member, ok := d.state.Members[remote.ID]
+	member, ok := d.state.Members[remote.NodeID]
 	if d.state.Role != "control" || !ok || !member.Machine.Enabled || member.Machine.Epoch != auth.Epoch || member.Machine.Identity.TransportIdentity() != remote || !secureToken(auth.Token, member.Token) {
 		return Principal{}, ErrUnauthorized
 	}
-	return Principal{RuntimeID: remote.ID, Epoch: auth.Epoch}, nil
+	return Principal{RuntimeID: remote.NodeID, Epoch: auth.Epoch}, nil
 }
 func (s *Server) Attach(session *peer.Session) {
 	if session.Service() != ExecutionService {
