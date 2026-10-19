@@ -7,7 +7,7 @@ import {createSystemNotifications} from '../adapters/notifications.mjs';
 import {createToolCall} from './tool-call.mjs';
 import {toolForest} from '../state/tool-calls.mjs';
 import {projectScriptRuns} from '../state/script-runs.mjs';
-import {avatar} from './avatar.mjs';
+import {avatar,assistantAvatarKey} from './avatar.mjs';
 import {icon} from './icons.mjs';
 import {messages,translate} from '../locales/messages.mjs';
 import {acceptSnapshot, beginSend, beginSubscription, createConversationState, draft, draftReferences, setDraftReferences, ownerKey, setDraft, validSnapshot} from '../state/conversation.mjs';
@@ -167,7 +167,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     else{const unread=replies.unread(control,item.id,count);replies.mark(control,item.id,id,count);saveReads();return unread>0;}
   }
   function assistantAvatar(item,size){
-    const value=avatar(size,item?.request_id||item?.id||'main'),started=reactions.get(replyKey(controlOf(item),item?.id||''));
+    const value=avatar(size,assistantAvatarKey(item)),started=reactions.get(replyKey(controlOf(item),item?.id||''));
     if(started&&!reducedMotion.matches&&performance.now()-started<650){value.classList.add('is-arriving');value.style.animationDelay=`-${performance.now()-started}ms`;}
     return value;
   }

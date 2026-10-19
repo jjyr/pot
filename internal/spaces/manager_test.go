@@ -61,7 +61,7 @@ func (c *testControl) Call(ctx context.Context, method, path string, body json.R
 	case "/api/v1/control":
 		result = map[string]any{"id": id, "runtime_id": id, "name": "Remote", "role": role}
 	case "/api/v1/assistants":
-		result = []any{map[string]any{"id": "main", "name": "Main"}}
+		result = []any{map[string]any{"id": "main", "name": "Main", "request_id": "appearance-" + id}}
 	case "/api/v1/delayed":
 		if c.entered != nil {
 			close(c.entered)
@@ -214,6 +214,14 @@ func TestIdentityChangeAndOfflineCachesNeverFallback(t *testing.T) {
 	remote.offline.Store(true)
 	m.Refresh(context.Background())
 	snapshot := m.Snapshot()
+	for _, space := range snapshot.Items {
+		var items []struct {
+			RequestID string `json:"request_id"`
+		}
+		if err := json.Unmarshal(space.Assistants, &items); err != nil || len(items) != 1 || items[0].RequestID != "appearance-"+space.ControlID {
+			t.Fatalf("Space directory/cache lost appearance seed: %s %s (%v)", space.ControlID, space.Assistants, err)
+		}
+	}
 	if !snapshot.Items[0].Connected || snapshot.Items[1].Connected || len(snapshot.Items[1].Assistants) == 0 {
 		t.Fatalf("independent cached state: %+v", snapshot)
 	}
