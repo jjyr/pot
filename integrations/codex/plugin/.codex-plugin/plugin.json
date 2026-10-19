@@ -1,0 +1,7 @@
+{
+  "name": "pot",
+  "version": "0.1.0",
+  "description": "Send messages and requests to your paired Pot assistant and query durable receipts.",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}

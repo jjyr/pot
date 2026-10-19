@@ -65,6 +65,9 @@ type Record struct {
 	Config        core.ResolvedSpec         `json:"config"`
 	Plugins       []string                  `json:"plugins"`
 	RunID         string                    `json:"run_id"`
+	PreviousRunID string                    `json:"previous_run_id,omitempty"`
+	RunText       string                    `json:"run_text,omitempty"`
+	RunInputID    string                    `json:"run_input_id,omitempty"`
 	Generation    uint64                    `json:"generation"`
 	Launch        *runner.Launch            `json:"launch"`
 	LaunchSent    bool                      `json:"launch_sent"`

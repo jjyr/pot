@@ -18,7 +18,7 @@ func (s *Service) CanRetry(ctx context.Context, assistant, task string) (bool, e
 	if err != nil || r == nil {
 		return false, err
 	}
-	if r.Info.Phase != protocol.TaskFailed || r.Origin.Kind != "manual" || r.StopMode != "" {
+	if r.Info.Phase != protocol.TaskFailed || r.Origin.Kind != "manual" || r.StopMode != "" || r.Info.Pending > 0 || r.Info.Archived {
 		return false, nil
 	}
 	var used bool

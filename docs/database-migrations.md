@@ -113,8 +113,9 @@ The first migration adopts the last format supported before this mechanism:
 Task 8, Schedule 2, Runner 6 and conversation `user_version` 1, plus current
 unversioned component tables. Empty databases are initialized normally. Legacy
 version tables are checked before writes and removed by the baseline; the
-conversation user version is retired. Task/Runner record payload versions retain
-their existing values. Earlier formats that were already rejected remain
+conversation user version is retired. Subsequent migrations convert Task/Runner record payloads to versions 9/7,
+preserve run identities and receipts, and retain the previous archive state of
+completed/cancelled Tasks. New Tasks use explicit assistant-managed archiving. Earlier formats that were already rejected remain
 unsupported; they require explicit conversion migrations, not an edited version
 marker. Legacy inbox queue tables are also rejected rather than overwritten.
 

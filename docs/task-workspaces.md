@@ -135,8 +135,10 @@ preparation result before using the workspace so preparation retries cannot
 allocate another temporary directory, worktree or branch. Model context and tools
 must use that same result.
 
-Allowance resume, retry and restart recovery retain the original workspace. They
-do not generate another random ID or reinterpret the brief. If the original
+Allowance resume, same-Task owner continuation and restart recovery retain the
+original workspace. Automatic failure replacement remains a separate new Task
+with a new workspace. Resuming the same Task does not generate another random
+ID or reinterpret the brief. If the original
 directory is missing, report its loss rather than silently recreating an empty
 workspace and resuming as if files survived. OS temporary storage is not a durable
 artifact store.
@@ -162,9 +164,9 @@ a `project_dir` is supplied, in which case it selects direct directory use.
 The invoking model selects `worktree` for feature development in Git repositories.
 An omitted feature branch becomes `codex/task-TASK_ID`.
 
-Runner schema 6 persists the preparation fence and resolved workspace alongside
+Runner schema 7 persists the preparation fence and resolved workspace alongside
 the original launch. Preparation interrupted before a ready receipt is not
-automatically replayed; inspect its original effects. Task schema 8 includes the
+automatically replayed; inspect its original effects. Task schema 9 includes the
 structured intent in launch and creation receipts. Older schemas are rejected;
 production upgrades require an explicit data conversion before switching builds.
 

@@ -58,7 +58,7 @@ func (j *Journal) Events(ctx context.Context, control, task, run string, after, 
 	if record == nil {
 		return result, errors.New("original Runner run missing")
 	}
-	rows, err := j.db.QueryContext(ctx, "SELECT sequence,event FROM task_events WHERE control_id=? AND task_id=? AND run_id=? AND sequence>? ORDER BY sequence LIMIT ?", control, task, run, after, limit)
+	rows, err := j.db.QueryContext(ctx, "SELECT sequence,event FROM task_events WHERE control_id=? AND task_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?", control, task, after, record.EventSequence, limit)
 	if err != nil {
 		return result, err
 	}

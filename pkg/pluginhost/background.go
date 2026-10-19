@@ -1,6 +1,7 @@
 package pluginhost
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,17 +11,31 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/plugin"
 	"github.com/jjyr/pot/pkg/processscope"
-	"syscall"
-	"time"
 )
 
 // RunBackground performs one bounded service exchange. Only owner-installed
 // package files run here. Transient credentials are never in argv or diagnostics.
 func RunBackground(ctx context.Context, node string, p plugin.Package, input core.BackgroundRequest, credentials map[string]string, worker []string) (core.BackgroundResponse, error) {
+	return runBackground(ctx, node, p, input, credentials, worker, nil)
+}
+
+// RunBackgroundStream maintains one supervised process. Each bounded frame is
+// validated and durably accepted before ACK; no unacknowledged checkpoint can
+// escape into the next exchange. Cancellation drains the entire process scope.
+func RunBackgroundStream(ctx context.Context, node string, p plugin.Package, input core.BackgroundRequest, credentials map[string]string, worker []string, accept func(core.BackgroundResponse) error) error {
+	if accept == nil || p.Manifest.Contributes.Background == nil || p.Manifest.Contributes.Background.Mode != "stream" {
+		return errors.New("stream capability required")
+	}
+	_, err := runBackground(ctx, node, p, input, credentials, worker, accept)
+	return err
+}
+func runBackground(ctx context.Context, node string, p plugin.Package, input core.BackgroundRequest, credentials map[string]string, worker []string, accept func(core.BackgroundResponse) error) (core.BackgroundResponse, error) {
 	var result core.BackgroundResponse
 	if err := p.Manifest.Validate(); err != nil {
 		return result, err
@@ -63,9 +78,21 @@ func RunBackground(ctx context.Context, node string, p plugin.Package, input cor
 	}
 	// Package code cannot select the entrypoint or impersonate another package.
 	script := `import {pathToFileURL} from 'node:url'; let input=''; for await(const c of process.stdin) {input+=c;if(input.length>3000000)throw Error('input limit');} const {poll}=await import(pathToFileURL(process.argv[1])); process.stdout.write(JSON.stringify(await poll(JSON.parse(input))));`
+	if accept != nil {
+		script = `import {pathToFileURL} from 'node:url';import {createInterface} from 'node:readline';const lines=createInterface({input:process.stdin,crlfDelay:Infinity})[Symbol.asyncIterator]();const first=await lines.next();if(first.done||first.value.length>3000000)throw Error('input limit');const {stream}=await import(pathToFileURL(process.argv[1]));await stream(JSON.parse(first.value),async frame=>{process.stdout.write(JSON.stringify(frame)+'\n');const ack=await lines.next();if(ack.done||ack.value!=='{"accepted":true}')throw Error('acceptance failed');});`
+	}
 	cmd := exec.CommandContext(ctx, node, "--input-type=module", "-e", script, entry)
 	cmd.Dir = p.Root
-	cmd.Stdin = bytes.NewReader(data)
+	var inputPipe io.WriteCloser
+	if accept == nil {
+		cmd.Stdin = bytes.NewReader(data)
+	} else {
+		inputPipe, err = cmd.StdinPipe()
+		if err != nil {
+			return result, err
+		}
+		defer inputPipe.Close()
+	}
 	// Do not inherit unrelated service tokens from the host environment.
 	for _, key := range []string{"PATH", "HOME", "TMPDIR", "SYSTEMROOT"} {
 		if v, ok := os.LookupEnv(key); ok {
@@ -100,6 +127,49 @@ func RunBackground(ctx context.Context, node string, p plugin.Package, input cor
 		_ = supervisor.Finish()
 		return result, errors.New("background supervisor unavailable")
 	}
+	if accept != nil {
+		streamErr := func() error {
+			if _, err := inputPipe.Write(append(data, '\n')); err != nil {
+				return err
+			}
+			scanner := bufio.NewScanner(output)
+			scanner.Buffer(make([]byte, 4096), 3*1024*1024+1)
+			for scanner.Scan() {
+				raw := scanner.Bytes()
+				if len(raw) > 3*1024*1024 {
+					return errors.New("background frame limit")
+				}
+				var frame core.BackgroundResponse
+				if err := core.DecodeJSON(raw, &frame); err != nil {
+					return errors.New("invalid background protocol")
+				}
+				if err := frame.Validate(); err != nil {
+					return err
+				}
+				for _, value := range credentials {
+					if containsBackgroundCredential(raw, value) {
+						return errors.New("credential in background response")
+					}
+				}
+				if err := accept(frame); err != nil {
+					return err
+				}
+				if _, err := io.WriteString(inputPipe, "{\"accepted\":true}\n"); err != nil {
+					return err
+				}
+			}
+			if err := scanner.Err(); err != nil {
+				return errors.New("background stream failed")
+			}
+			return errors.New("background stream ended")
+		}()
+		_ = supervisor.Stop(cmd.Process.Pid)
+		_ = cmd.Wait()
+		if supervisor.Finish() != nil {
+			return result, errors.New("background cleanup unconfirmed")
+		}
+		return result, streamErr
+	}
 	raw, readErr := io.ReadAll(io.LimitReader(output, 3*1024*1024+1))
 	if len(raw) > 3*1024*1024 {
 		_ = supervisor.Stop(cmd.Process.Pid)
@@ -120,9 +190,27 @@ func RunBackground(ctx context.Context, node string, p plugin.Package, input cor
 	}
 	// Defense in depth: no credential material may enter durable state/events.
 	for _, value := range credentials {
-		if value != "" && strings.Contains(string(raw), value) {
+		if containsBackgroundCredential(raw, value) {
 			return core.BackgroundResponse{}, errors.New("credential in background response")
 		}
 	}
 	return result, nil
+}
+
+// Structured credentials may carry public routing metadata alongside a token.
+// Check secret fields too, without treating public device IDs as credentials.
+func containsBackgroundCredential(raw []byte, value string) bool {
+	if value != "" && strings.Contains(string(raw), value) {
+		return true
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal([]byte(value), &object) == nil {
+		for _, key := range []string{"token", "access_token", "refresh_token", "secret"} {
+			var token string
+			if json.Unmarshal(object[key], &token) == nil && len(token) >= 8 && strings.Contains(string(raw), token) {
+				return true
+			}
+		}
+	}
+	return false
 }

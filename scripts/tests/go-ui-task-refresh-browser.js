@@ -69,11 +69,11 @@ async page=>{
   await page.evaluate(()=>{taskFixture.pages.refresh(['tasks']);});
   assert(await page.evaluate(()=>taskFixture.pending.length===1&&taskFixture.pending[0].options.owner==='b'&&!taskFixture.pending[0].options.signal.aborted),'Changes during detail loading do not navigate back to the list');
   await page.evaluate(()=>{taskFixture.detailRecord={info:{phase:'running'},request:{text:'目标'}};taskFixture.pending.shift().resolve(taskFixture.detailRecord);});
-  await page.getByLabel('任务指导',{exact:true}).waitFor();
-  await page.getByLabel('任务指导',{exact:true}).fill('保留任务指导');
+  await page.getByLabel('任务追加',{exact:true}).waitFor();
+  await page.getByLabel('任务追加',{exact:true}).fill('保留任务指导');
   await page.evaluate(async()=>{taskFixture.guidance=document.querySelector('textarea');taskFixture.detailRecord.info.phase='complete';taskFixture.detailRecord.result={text:'完成结果'};await taskFixture.pages.refresh(['tasks']);});
   assert(await page.getByText('完成结果',{exact:true}).count()===1,'Task metadata and results refresh with the transcript');
-  assert(await page.getByLabel('任务指导',{exact:true}).getAttribute('readonly')!==null,'Completed Tasks reject further guidance');
+  assert(await page.getByLabel('任务追加',{exact:true}).getAttribute('readonly')===null,'Completed Tasks accept follow-up');
   assert(await page.evaluate(()=>taskFixture.guidance===document.querySelector('textarea')&&taskFixture.guidance.value==='保留任务指导'),'Transcript updates retain the guidance draft');
   assert(errors.length===0,errors.join('\n'));
   return {passed:true,coalesced_refresh:true,stable_dom:true,retained_search:true,offline_recovery:true,stale_responses_ignored:true,owner_identity:true,detail_navigation:true,errors};

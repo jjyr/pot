@@ -29,7 +29,7 @@ func check() error {
 	if err := checkDatabaseBoundary("."); err != nil {
 		return err
 	}
-	format := exec.Command("gofmt", "-l", "cmd", "pkg", "internal", "plugins", "web", "scripts/check-go", "scripts/tests/testdata/go-public-api")
+	format := exec.Command("gofmt", "-l", "cmd", "pkg", "internal", "plugins", "integrations", "web", "scripts/check-go", "scripts/tests/testdata/go-public-api")
 	output, err := format.Output()
 	if err != nil {
 		return err
@@ -37,7 +37,7 @@ func check() error {
 	if len(output) != 0 {
 		return fmt.Errorf("run gofmt on:\n%s", output)
 	}
-	list := exec.Command("go", "list", "-mod=readonly", "-json", "./cmd/...", "./pkg/...", "./internal/...", "./resources/...", "./plugins/...", "./web")
+	list := exec.Command("go", "list", "-mod=readonly", "-json", "./cmd/...", "./pkg/...", "./internal/...", "./resources/...", "./plugins/...", "./integrations/...", "./web")
 	output, err = list.Output()
 	if err != nil {
 		return fmt.Errorf("list packages: %w", err)

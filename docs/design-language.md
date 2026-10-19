@@ -349,14 +349,21 @@ requests without a transcript row retain a standalone approval card. A failed
 approval submission keeps its diagnostic and controls available. Long-lived machine
 policy remains in Machines.
 
-Consecutive root script executions in the same turn share one collapsed execution
-history in Chat and Task details. Its stable summary shows the latest active
-operation or completed outcome, alongside status and wall time, and
-omits execution counts and source code. Prose, guidance, other root operations and
+Consecutive root command and script executions in the same turn share one collapsed
+execution history in Chat and Task details. Its stable summary shows Execution
+history alongside status and wall time, and omits execution counts and source code. Prose, guidance, other root operations and
 turn boundaries split groups. Empty model-round placeholders do not split them.
 Each `wait` receipt joins its originating `exec` by turn and `exec_id`, even across
 a prose boundary, and its incremental output appears on that execution. Unknown
-waits remain independent. Original calls and receipts stay in raw details.
+waits remain independent. Process `write_stdin` receipts similarly join their
+originating `exec_command` by turn, machine and `session_id`, including commands
+nested inside compositions.
+Pure polling adds no row; input, terminal controls and approvals remain inspectable
+under the command. Unknown sessions stay independent. Ordinary summaries and
+details omit session IDs; raw details and exact approval arguments retain them. Command output combines retained chunks in receipt order without
+duplicating the same receipt's streamed and final output. A live process session
+shows Running, and an unresolved session after its turn ends is unconfirmed.
+Original calls and receipts stay in raw details.
 A yielded script stays active until its final receipt; an unresolved receipt after
 the turn ends is unconfirmed. Group duration spans its earliest execution through
 its latest finish rather than summing parallel durations. Failures remain visible

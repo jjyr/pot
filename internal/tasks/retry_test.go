@@ -41,6 +41,12 @@ func TestRetryPreservesScopeAndHasOneDurableReplacement(t *testing.T) {
 	if err := s.SendMessage(ctx, "assistant", original.Info.ID, "guidance", protocol.AgentRef{ControlID: "control", Kind: "assistant", AgentID: "assistant"}, "Preserve this additional constraint."); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AcknowledgeInputs(ctx, "assistant", original.Info.ID, original.RunID, []string{"guidance"}); err != nil {
+		t.Fatal(err)
+	}
 	failRetryTask(t, s, p, original)
 	retry, err := s.Retry(ctx, "assistant", original.Info.ID, "Check upstream availability before continuing.")
 	if err != nil {

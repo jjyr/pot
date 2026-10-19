@@ -19,6 +19,7 @@ implementation. Code defines actual behavior.
 | Backend responsibilities and API contracts | [Backend components](backend-components.md) |
 | Reusable Go packages and embedding a host | [Go libraries](go-libraries.md) |
 | Plugins, tools, approvals and browser execution | [Plugin packages](plugins.md), [composition](tool-composition.md), [permissions](permissions.md), [computer use](computer-use.md) |
+| Codex delegation and local plugin | [Codex Bridge](../integrations/codex/README.md) |
 | Assistant messaging and App relay | [Assistant messages](assistant-messages.md) |
 | Runtime hooks and notification routes | [Hooks](hooks.md) |
 | Tasks, schedules and usage | [Tasks](task-coordination.md), [schedules](scheduled-tasks.md), [token usage](token-usage.md) |

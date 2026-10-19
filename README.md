@@ -52,3 +52,22 @@ browser tools use Chrome/Chromium installed on the execution machine.
 - **Persistent workspaces** — retain files in assistant and Task directories.
 
 See the [documentation](docs/README.md) for details.
+
+## Codex integration
+
+Delegate independent tasks from Pot to your local Codex on another Tailscale
+machine. An authenticated HTTPS Bridge starts separate Codex App Server threads;
+SSE pushes progress and durable results back to Pot. The local Codex plugin can
+also send messages/requests to a paired Pot assistant and query receipts. Your
+current Codex App chat stays separate. See the [installation and pairing guide](integrations/codex/README.md).
+
+Copy this prompt into Codex from a checkout containing the integration (use the PR
+branch before merge, `main` after merge):
+
+> Read `integrations/codex/README.md` in this Pot checkout, then run its idempotent
+> installer and verify the local plugin/MCP setup using my normal permissions.
+> Preserve existing checkout and configuration changes. Infer defaults; ask only
+> for the Bridge/Pot endpoint, pairing route or allowed workspaces that you cannot
+> determine. Keep credentials in private files, never in chat or command output.
+> Report separately whether the plugin is installed/enabled and whether both
+> machines are paired and connected; do not change Tailscale ACLs or enable Funnel.

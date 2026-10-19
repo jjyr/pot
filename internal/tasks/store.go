@@ -129,7 +129,7 @@ func (s *Service) validateStored(ctx context.Context) error {
 		if err := core.DecodeJSON([]byte(raw), &r); err != nil {
 			return err
 		}
-		if r.SchemaVersion != 8 || r.AssistantID != assistant || r.Info.AssistantID != assistant || r.Info.ID != id || !core.Identifier(assistant) || !core.Identifier(id) {
+		if r.SchemaVersion != 9 || r.AssistantID != assistant || r.Info.AssistantID != assistant || r.Info.ID != id || r.Info.RunID != r.RunID || !core.Identifier(assistant) || !core.Identifier(id) {
 			return fmt.Errorf("invalid stored Task ownership/schema")
 		}
 		if err := r.Origin.Validate(); err != nil {
@@ -286,8 +286,9 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	if len(runes) > 80 {
 		title = string(runes[:80])
 	}
-	record := Record{SchemaVersion: 8, Origin: origin, AssistantID: assistant, Info: protocol.TaskInfo{Address: &protocol.AgentRef{ControlID: s.options.ControlID, Kind: "task", AgentID: id}, ID: id, AssistantID: assistant, Title: title, Phase: protocol.TaskQueued, CreatedAtMS: at, UpdatedAtMS: at, Routing: &protocol.TaskRouting{Profile: selection.Config.SourceProfileID, Revision: selection.Config.SourceProfileRevision, Provider: selection.Config.Provider, Reason: "assistant selection", SelectionReason: request.SelectionReason}}, Request: request, Config: selection.Config, Plugins: plugins, RunID: runID, Generation: 1}
+	record := Record{SchemaVersion: 9, Origin: origin, AssistantID: assistant, Info: protocol.TaskInfo{Address: &protocol.AgentRef{ControlID: s.options.ControlID, Kind: "task", AgentID: id}, ID: id, AssistantID: assistant, Title: title, Phase: protocol.TaskQueued, CreatedAtMS: at, UpdatedAtMS: at, Routing: &protocol.TaskRouting{Profile: selection.Config.SourceProfileID, Revision: selection.Config.SourceProfileRevision, Provider: selection.Config.Provider, Reason: "assistant selection", SelectionReason: request.SelectionReason}}, Request: request, Config: selection.Config, Plugins: plugins, RunID: runID, Generation: 1}
 	record.Info.MachineID = request.MachineID
+	record.Info.RunID = runID
 	if err := write(ctx, tx, &record); err != nil {
 		return Record{}, err
 	}

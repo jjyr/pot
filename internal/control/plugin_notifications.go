@@ -64,6 +64,14 @@ func (s *Service) pluginLoop() {
 		}
 	}
 }
+
+type backgroundStream struct {
+	revision int64
+	accounts string
+	digest   string
+	cancel   context.CancelFunc
+}
+
 func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 	s.pluginMu.Lock()
 	defer s.pluginMu.Unlock()
@@ -77,7 +85,28 @@ func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 	if err != nil {
 		return
 	}
+	if s.pluginStreams == nil {
+		s.pluginStreams = map[string]backgroundStream{}
+	}
+	catalogNow, catalogErr := s.Integrations.List(ctx)
+	catalogJSON, _ := json.Marshal(catalogNow)
+	for id, active := range s.pluginStreams {
+		valid := false
+		for _, b := range bindings {
+			if b.ID == id && b.Enabled && b.Revision == active.revision {
+				valid = true
+			}
+		}
+		p, e := s.backgroundPackage(id)
+		identity, identityErr := p.BackgroundIdentity()
+		if !valid || catalogErr != nil || string(catalogJSON) != active.accounts || e != nil || identityErr != nil || identity.Digest != active.digest {
+			active.cancel()
+		}
+	}
 	for _, b := range bindings {
+		if _, active := s.pluginStreams[b.ID]; active {
+			continue
+		}
 		if !b.Enabled || b.Next > now {
 			continue
 		}
@@ -87,7 +116,15 @@ func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 			err = s.validateNotificationTarget(ctx, b.Assistant)
 		}
 		if err == nil {
-			exchangeCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+			streaming := p.Manifest.Contributes.Background.Mode == "stream"
+			exchangeCtx, cancel := context.WithCancel(ctx)
+			if streaming {
+				cancel()
+				exchangeCtx, cancel = context.WithCancel(s.ctx)
+			} else {
+				cancel()
+				exchangeCtx, cancel = context.WithTimeout(ctx, 45*time.Second)
+			}
 			env := map[string]string{}
 			accounts := map[string]string{}
 			scope := "plugin-background-" + b.ID
@@ -114,6 +151,45 @@ func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 				worker, workerErr := os.Executable()
 				if workerErr != nil {
 					cancel()
+					continue
+				}
+				if streaming {
+					identity, identityErr := p.BackgroundIdentity()
+					if identityErr != nil {
+						cancel()
+						continue
+					}
+					catalogBytes, _ := json.Marshal(catalog)
+					s.pluginStreams[b.ID] = backgroundStream{revision: b.Revision, cancel: cancel, accounts: string(catalogBytes), digest: identity.Digest}
+					s.pluginWG.Add(1)
+					go func() {
+						defer s.pluginWG.Done()
+						defer cancel()
+						defer s.Integrations.Forget(scope)
+						streamErr := pluginhost.RunBackgroundStream(exchangeCtx, s.options.Node, p, core.BackgroundRequest{Version: 1, Now: now, Config: b.Config, State: b.State, Accounts: accounts}, env, []string{worker}, func(frame core.BackgroundResponse) error {
+							after, e := s.Integrations.List(exchangeCtx)
+							beforeJSON, _ := json.Marshal(catalog)
+							afterJSON, _ := json.Marshal(after)
+							if e != nil || string(beforeJSON) != string(afterJSON) {
+								return errors.New("integration changed during stream")
+							}
+							if e = s.validateNotificationTarget(exchangeCtx, b.Assistant); e != nil {
+								return e
+							}
+							if e = s.Mailbox.CommitBackground(exchangeCtx, b, identity, frame, storage.Now()); e != nil {
+								return e
+							}
+							s.Changes.Notify("plugin-notifications")
+							return nil
+						})
+						s.pluginMu.Lock()
+						defer s.pluginMu.Unlock()
+						delete(s.pluginStreams, b.ID)
+						if streamErr != nil && s.ctx.Err() == nil {
+							_ = s.Mailbox.BackgroundError(ctx, b, "unavailable", storage.Now())
+						}
+						s.Changes.Notify("plugin-notifications")
+					}()
 					continue
 				}
 				response, err = pluginhost.RunBackground(exchangeCtx, s.options.Node, p, core.BackgroundRequest{Version: 1, Now: now, Config: b.Config, State: b.State, Accounts: accounts}, env, []string{worker})

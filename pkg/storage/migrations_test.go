@@ -312,7 +312,7 @@ func TestMigrationConcurrentHandles(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	if got := migrationCount(t, handles[0]); got != 2 {
+	if got := migrationCount(t, handles[0]); got != 3 {
 		t.Fatal(got)
 	}
 }
@@ -326,5 +326,62 @@ func TestMigrationCancellationDoesNotWrite(t *testing.T) {
 	}
 	if exists, err := tableExists(context.Background(), db, "pot_migrations"); err != nil || exists {
 		t.Fatal(exists, err)
+	}
+}
+
+func TestContinuationMigrationsPreserveLegacyRunsAndArchiveState(t *testing.T) {
+	ctx := context.Background()
+	for _, phase := range []string{"running", "complete", "cancelled", "failed", "interrupted"} {
+		t.Run(phase, func(t *testing.T) {
+			db := migrationDB(t)
+			for _, name := range []string{"0001_baseline.sql", "0002_plugin_event_payload.sql"} {
+				data, err := fs.ReadFile(migrationFiles, "migrations/tasks/"+name)
+				if err != nil {
+					t.Fatal(err)
+				}
+				execMigrationSQL(t, db, string(data))
+			}
+			execMigrationSQL(t, db, fmt.Sprintf(`CREATE TABLE task_schema(version INTEGER); INSERT INTO task_schema VALUES(8);
+INSERT INTO tasks VALUES('owner','task','%s',123,'{"schema_version":8,"run_id":"run","info":{"phase":"%s"},"request":{"text":"original"},"outcome":{"text":"retained"}}');
+INSERT INTO task_writes VALUES('owner','request','original-digest','task');`, phase, phase))
+			for range 2 {
+				if err := Migrate(ctx, db, TasksDatabase); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var version int
+			var run, text, outcome, digest string
+			var archived bool
+			if err := db.QueryRow(`SELECT json_extract(body,'$.schema_version'),json_extract(body,'$.info.run_id'),json_extract(body,'$.info.archived'),json_extract(body,'$.request.text'),json_extract(body,'$.outcome.text') FROM tasks`).Scan(&version, &run, &archived, &text, &outcome); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.QueryRow("SELECT digest FROM task_writes").Scan(&digest); err != nil {
+				t.Fatal(err)
+			}
+			if version != 9 || run != "run" || archived != (phase == "complete" || phase == "cancelled") || text != "original" || outcome != "retained" || digest != "original-digest" {
+				t.Fatal(version, run, archived, text, outcome, digest)
+			}
+		})
+	}
+	db := migrationDB(t)
+	data, err := fs.ReadFile(migrationFiles, "migrations/runner/0001_baseline.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	execMigrationSQL(t, db, string(data))
+	execMigrationSQL(t, db, `CREATE TABLE runner_schema(version INTEGER); INSERT INTO runner_schema VALUES(6);
+INSERT INTO task_runs VALUES('control','task','run','digest','complete','boot','{"schema_version":6,"launch":{"run_id":"run"},"launch_digest":"digest","context":{"checkpoint":"retained"}}');`)
+	for range 2 {
+		if err := Migrate(ctx, db, RunnerDatabase); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var version int
+	var run, digest, checkpoint string
+	if err := db.QueryRow(`SELECT json_extract(body,'$.schema_version'),json_extract(body,'$.launch.run_id'),json_extract(body,'$.launch_digest'),json_extract(body,'$.context.checkpoint') FROM task_runs`).Scan(&version, &run, &digest, &checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	if version != 7 || run != "run" || digest != "digest" || checkpoint != "retained" {
+		t.Fatal(version, run, digest, checkpoint)
 	}
 }

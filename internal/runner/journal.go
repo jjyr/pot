@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const SchemaVersion = 6
+const SchemaVersion = 7
 
 type Journal struct {
 	db        *sql.DB
@@ -197,7 +197,7 @@ func (j *Journal) Accept(ctx context.Context, launch Launch) (value Run, err err
 				rows.Close()
 				return err
 			}
-			if !r.Phase.Ended() {
+			if !r.Phase.Ended() || !r.CleanupConfirmed {
 				rows.Close()
 				return fmt.Errorf("previous task run requires reconciliation")
 			}
@@ -206,10 +206,15 @@ func (j *Journal) Accept(ctx context.Context, launch Launch) (value Run, err err
 				previous = &copy
 			}
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
 		if err := rows.Close(); err != nil {
 			return err
 		}
 		var checkpoint json.RawMessage
+		var eventSequence uint64
 		if previous != nil {
 			if previous.Launch.Workspace != launch.Workspace {
 				return fmt.Errorf("Task workspace selection changed")
@@ -218,11 +223,12 @@ func (j *Journal) Accept(ctx context.Context, launch Launch) (value Run, err err
 				return fmt.Errorf("task sequence exhausted")
 			}
 			sequence = previous.Sequence + 1
+			eventSequence = previous.EventSequence
 			if previous.Launch.Generation == launch.Generation && previous.Launch.ExecutionTarget == launch.ExecutionTarget && previous.Launch.Config.SpecHash == launch.Config.SpecHash {
 				checkpoint = previous.Context
 			}
 		}
-		value = Run{SchemaVersion: SchemaVersion, Launch: launch, LaunchDigest: hash, BootID: j.BootID, Phase: Accepted, Context: checkpoint, Sequence: sequence}
+		value = Run{SchemaVersion: SchemaVersion, Launch: launch, LaunchDigest: hash, BootID: j.BootID, Phase: Accepted, Context: checkpoint, Sequence: sequence, EventSequence: eventSequence}
 		return writeRun(ctx, tx, value)
 	})
 	return value, err

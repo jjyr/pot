@@ -87,6 +87,22 @@ Packages own HTTP/business behavior, polling intervals, retries, filtering,
 aggregation and their opaque checkpoint. They must make repeated exchanges safe;
 a failed exchange can run again with the previously committed checkpoint.
 
+A package can opt into `"mode": "stream"` on `contributes.background` for a
+controlled persistent connection. The host starts a supervised process independently
+of the poll scheduler, passing the same version-1 input once as a JSON line. The
+entrypoint exports `stream(input, emit)` instead of `poll(input)`. Each awaited
+`emit(response)` writes one bounded response line; the host validates and commits
+it through the same checkpoint/inbox transaction, then sends `{"accepted":true}`.
+Only that ACK lets the plugin advance its in-memory checkpoint. A rejected frame
+ends the process without acknowledging it. Stream frames retain the ordinary
+response/event bounds; `delay_seconds` applies after exit, not to a healthy stream.
+The plugin owns heartbeats, protocol retries, reconnect backoff, aggregation and
+quiet-state behavior. Control does not interpret service events or add a model
+consumer. A binding revision, account change, package identity change, disabled
+binding or Control shutdown cancels the process and drains descendants. Host
+failures retain the last accepted checkpoint and use the ordinary retry delay.
+See [Codex Bridge](../integrations/codex/README.md) for an SSE implementation.
+
 The version-1 stdin request is:
 
 ```json
