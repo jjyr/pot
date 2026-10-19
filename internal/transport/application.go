@@ -127,6 +127,12 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	}
 	if method == "GET" {
 		switch path {
+		case "/api/v1/messages/receipt":
+			c, err := conversation()
+			if err != nil {
+				return nil, err
+			}
+			return c.SendReceipt(ctx, assistant.SendReceiptQuery{RequestID: u.Query().Get("request_id"), ConversationID: u.Query().Get("conversation_id"), UserMessageID: u.Query().Get("user_message_id"), RetryUserMessageID: u.Query().Get("retry_user_message_id")})
 		case "/api/v1/agent/diagnostics":
 			if task := u.Query().Get("task_id"); task != "" {
 				after, err := strconv.ParseUint(u.Query().Get("after"), 10, 64)

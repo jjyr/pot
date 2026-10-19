@@ -10,8 +10,8 @@ const refs=[{message_id:'source',quote:'只有选中的字🙂'}];setDraftRefere
 const receipt=beginSend(state,'first');assert.deepEqual(receipt.request.references,refs);
 assert.deepEqual(projectChatReplies(snapshot,{request:receipt.request,phase:'sending'})[0].references,refs);
 settleSend(state,receipt,false,new Error('lost receipt'));
-assert.equal(beginSend(state,'replacement').request.request_id,'first','Lost receipt reconciles original input including refs');
-settleSend(state,receipt,false);
+const replacement=beginSend(state,'replacement');assert.equal(replacement.request.request_id,'first','Lost receipt reconciles original input including refs');
+settleSend(state,replacement,false);
 setDraftReferences(state,[{message_id:'other',quote:'另一条'}]);
 const changed=beginSend(state,'changed');assert.equal(changed.request.request_id,'changed','Changed reference has a fresh receipt');
 setDraftReferences(state,refs);settleSend(state,changed,true);
@@ -29,5 +29,11 @@ try{
  await client.send({...receipt.request,user_message_id:'active'});
  assert.deepEqual(JSON.parse(requests.at(-1).options.body).references,refs,'Guidance carries references through the production adapter');
  assert.match(requests.at(-1).url,/turn\/steer/);
+ client.setScope({owner:'bob',space:'different'});
+ await client.sendReceipt({...receipt.request,user_message_id:'active'},{owner:'alice',space:'remote'});
+ const query=new URL(requests.at(-1).url,'http://fixture').searchParams;
+ assert.equal(query.get('assistant_id'),'alice');assert.equal(query.get('space_id'),'remote');
+ assert.equal(query.get('request_id'),'first');assert.equal(query.get('user_message_id'),'active');
+ assert.equal(requests.at(-1).options.method,'GET','Acceptance query is a scoped read');
 }finally{globalThis.fetch=oldFetch;}
 console.log('Message reference ownership, receipt reconciliation, UTF-8 limits and guidance transport passed');

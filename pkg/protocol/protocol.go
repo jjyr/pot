@@ -71,20 +71,22 @@ const (
 )
 
 type Message struct {
-	References     []core.MessageReference `json:"references,omitempty"`
-	Attachments    []core.Attachment       `json:"attachments,omitempty"`
-	Queued         bool                    `json:"queued,omitempty"`
-	Tool           *ToolCall               `json:"tool,omitempty"`
-	ID             string                  `json:"id" required:"true"`
-	ConversationID string                  `json:"conversation_id" required:"true"`
-	Role           Role                    `json:"role" required:"true"`
-	Text           string                  `json:"text" required:"true"`
-	Status         MessageStatus           `json:"status" required:"true"`
-	CreatedAtMS    int64                   `json:"created_at_ms" required:"true"`
-	RequestID      *string                 `json:"request_id"`
-	Steering       bool                    `json:"steering,omitempty"`
-	ReplyTo        string                  `json:"reply_to,omitempty"`
-	Error          string                  `json:"error,omitempty"`
+	References        []core.MessageReference `json:"references,omitempty"`
+	Attachments       []core.Attachment       `json:"attachments,omitempty"`
+	Queued            bool                    `json:"queued,omitempty"`
+	Tool              *ToolCall               `json:"tool,omitempty"`
+	ID                string                  `json:"id" required:"true"`
+	ConversationID    string                  `json:"conversation_id" required:"true"`
+	Role              Role                    `json:"role" required:"true"`
+	Text              string                  `json:"text" required:"true"`
+	Status            MessageStatus           `json:"status" required:"true"`
+	CreatedAtMS       int64                   `json:"created_at_ms" required:"true"`
+	RequestID         *string                 `json:"request_id"`
+	AcceptedTurnID    string                  `json:"accepted_turn_id,omitempty"`
+	AcceptedRequestID string                  `json:"accepted_request_id,omitempty"`
+	Steering          bool                    `json:"steering,omitempty"`
+	ReplyTo           string                  `json:"reply_to,omitempty"`
+	Error             string                  `json:"error,omitempty"`
 }
 
 func (m Message) Validate() error {
@@ -110,6 +112,9 @@ func (m Message) Validate() error {
 		if err := m.Tool.Validate(); err != nil {
 			return err
 		}
+	}
+	if (m.AcceptedRequestID != "" || m.AcceptedTurnID != "") && (!m.Steering || !core.Identifier(m.AcceptedRequestID) || !core.Identifier(m.AcceptedTurnID)) {
+		return fmt.Errorf("invalid steering acceptance identity")
 	}
 	if !core.Identifier(m.ID) || !core.Identifier(m.ConversationID) || m.RequestID != nil && !core.Identifier(*m.RequestID) {
 		return fmt.Errorf("invalid message identity")
