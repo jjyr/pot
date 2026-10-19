@@ -37,6 +37,7 @@ type agentHost struct {
 	mailbox         *hostMailbox
 	identity        agentlink.Identity
 	token, endpoint string
+	probeClient     *http.Client
 }
 
 func openAgentHost(root string) (*agentHost, error) {
@@ -122,6 +123,10 @@ func (h *agentHost) handler() http.Handler {
 	assets := http.FileServer(http.FS(webassets.FS()))
 	peer := h.links.Handler()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == agentlink.Prefix+"/ready" && r.Method == http.MethodGet {
+			writeJSON(w, http.StatusOK, map[string]string{"control_id": h.identity.Address.ControlID})
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, agentlink.Prefix+"/") {
 			peer.ServeHTTP(w, r)
 			return
@@ -198,7 +203,7 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 			if state == "ready" {
 				state = "connected"
 			}
-			view = append(view, map[string]any{"id": c.ID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "kind": c.Peer.Adapter, "name": c.Peer.Name}, "status": state})
+			view = append(view, map[string]any{"id": c.ID, "local_assistant_id": c.Local.Address.AgentID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "control_id": c.Peer.Address.ControlID, "address": c.Endpoint, "kind": c.Peer.Adapter, "name": c.Peer.Name}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
 		}
 		writeJSON(w, 200, map[string]any{"items": view, "self": map[string]any{"id": "codex", "kind": "codex", "name": "Codex", "address": endpoint, "endpoint": endpoint, "status": status}, "network": map[string]any{"listen": hostListen, "endpoint": endpoint, "mode": "https", "status": status}, "identity": h.identity, "unread": unread})
 		return
@@ -240,10 +245,22 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 	case "connect":
 		v, err = h.links.Connect(r.Context(), "codex", in.Address)
 	case "disconnect":
-		err = h.links.Revoke(r.Context(), in.ID)
+		var c agentlink.Connection
+		c, err = h.links.Get(r.Context(), in.ID)
+		if err == nil {
+			if in.Revision != c.CreatedAt.UnixMilli() {
+				err = agentlink.ErrConflict
+			} else {
+				err = h.links.Revoke(r.Context(), in.ID)
+			}
+		}
 	case "configure":
+		if in.Mode != "" && in.Mode != "https" && in.Mode != "tailscale" {
+			err = agentlink.ErrInvalid
+			break
+		}
 		if in.Listen != "" && in.Listen != hostListen {
-			err = errors.New("codex_host_listen_is_fixed")
+			err = errors.New("agent_link_listener_restart_required")
 			break
 		}
 		if in.Mode == "tailscale" {
@@ -254,9 +271,12 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		u, e := url.Parse(in.Endpoint)
 		if e != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" && u.Path != "/" {
-			err = errors.New("agent_link_https_required")
+			err = agentlink.ErrInvalid
 		} else {
-			_, err = h.db.Exec("UPDATE codex_agent_host SET endpoint=? WHERE singleton=1", strings.TrimRight(in.Endpoint, "/"))
+			endpoint := strings.TrimRight(in.Endpoint, "/")
+			if err = h.probeEndpoint(r.Context(), endpoint); err == nil {
+				_, err = h.db.Exec("UPDATE codex_agent_host SET endpoint=? WHERE singleton=1", endpoint)
+			}
 		}
 	default:
 		err = agentlink.ErrInvalid
@@ -266,6 +286,33 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, v)
+}
+
+func (h *agentHost) probeEndpoint(ctx context.Context, endpoint string) error {
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+agentlink.Prefix+"/ready", nil)
+	if err != nil {
+		return agentlink.ErrInvalid
+	}
+	client := http.Client{Timeout: 8 * time.Second}
+	if h.probeClient != nil {
+		client = *h.probeClient
+	}
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return errors.New("redirect_denied") }
+	response, err := client.Do(request)
+	if err != nil {
+		return agentlink.ErrUnavailable
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(response.Body, 2049))
+	var value struct {
+		ControlID string `json:"control_id"`
+	}
+	if err != nil || len(raw) > 2048 || response.StatusCode != http.StatusOK || protocol.DecodeStrict(raw, &value) != nil || value.ControlID != h.identity.Address.ControlID {
+		return agentlink.ErrConflict
+	}
+	return nil
 }
 
 func agentServe(root string) error {

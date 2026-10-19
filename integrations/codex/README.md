@@ -33,6 +33,10 @@ For manual configuration, inspect `tailscale serve status` first, then use
 `tailscale serve --bg http://127.0.0.1:8792` and copy its actual HTTPS URL.
 Owner management requires a separate private loopback bearer and exact local
 Host; publishing the peer endpoint does not expose local management.
+Before saving an address, the host probes its narrow HTTPS readiness endpoint
+and checks that it reaches this stable Codex identity. Redirects, invalid origins,
+oversized responses and other services are rejected without replacing the prior
+verified address.
 
 The first plugin process ensures and verifies a detached user-level daemon;
 subsequent chats reuse it after an authenticated version check. A foreign service

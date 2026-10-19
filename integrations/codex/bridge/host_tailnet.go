@@ -14,7 +14,7 @@ import (
 func configureHostTailscale(ctx context.Context) (string, error) {
 	binary, err := exec.LookPath("tailscale")
 	if err != nil {
-		return "", errors.New("tailscale_not_installed")
+		return "", errors.New("agent_link_tailscale_missing")
 	}
 	return configureHostTailscaleBinary(ctx, binary)
 }
@@ -23,18 +23,18 @@ func configureHostTailscaleBinary(ctx context.Context, binary string) (string, e
 	defer cancel()
 	raw, err := exec.CommandContext(ctx, binary, "status", "--json").Output()
 	if err != nil {
-		return "", errors.New("tailscale_status_failed")
+		return "", errors.New("agent_link_tailscale_login_required")
 	}
 	var status struct {
 		BackendState string
 		Self         *struct{ DNSName string }
 	}
 	if json.Unmarshal(raw, &status) != nil || status.BackendState != "Running" || status.Self == nil {
-		return "", errors.New("tailscale_login_required")
+		return "", errors.New("agent_link_tailscale_login_required")
 	}
 	dns := strings.TrimSuffix(status.Self.DNSName, ".")
 	if dns == "" {
-		return "", errors.New("tailscale_magicdns_required")
+		return "", errors.New("agent_link_tailscale_dns_required")
 	}
 	read := func() (map[string]json.RawMessage, error) {
 		raw, e := exec.CommandContext(ctx, binary, "serve", "status", "--json").Output()
@@ -47,7 +47,7 @@ func configureHostTailscaleBinary(ctx context.Context, binary string) (string, e
 	}
 	config, err := read()
 	if err != nil {
-		return "", errors.New("tailscale_serve_status_failed")
+		return "", errors.New("agent_link_tailscale_unavailable")
 	}
 	existing := false
 	for _, v := range config {
@@ -69,14 +69,14 @@ func configureHostTailscaleBinary(ctx context.Context, binary string) (string, e
 		return "https://" + dns, nil
 	}
 	if existing {
-		return "", errors.New("tailscale_serve_in_use_keep_existing_configuration")
+		return "", errors.New("agent_link_tailscale_conflict")
 	}
 	if err = exec.CommandContext(ctx, binary, "serve", "--bg", "http://"+hostListen).Run(); err != nil {
-		return "", errors.New("tailscale_serve_failed_check_https_settings")
+		return "", errors.New("agent_link_tailscale_setup_required")
 	}
 	config, err = read()
 	if err != nil || !matches(config) {
-		return "", errors.New("tailscale_serve_endpoint_not_confirmed")
+		return "", errors.New("agent_link_tailscale_setup_required")
 	}
 	return "https://" + dns, nil
 }

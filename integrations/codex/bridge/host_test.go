@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -302,6 +303,25 @@ func TestAgentHostPeerDeliveryRemainsUnreadUntilCodexReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	get := httptest.NewRequest(http.MethodGet, "http://"+hostListen+"/api/v1/agent-links", nil)
+	get.Host = hostListen
+	get.RemoteAddr = "127.0.0.1:12345"
+	get.Header.Set("Authorization", "Bearer "+b.token)
+	w := httptest.NewRecorder()
+	b.handler().ServeHTTP(w, get)
+	var snapshot struct {
+		Items []struct {
+			LocalAssistantID string `json:"local_assistant_id"`
+			Revision         int64  `json:"revision"`
+			Peer             struct {
+				ControlID string `json:"control_id"`
+				Address   string `json:"address"`
+			}
+		}
+	}
+	if json.Unmarshal(w.Body.Bytes(), &snapshot) != nil || len(snapshot.Items) != 1 || snapshot.Items[0].LocalAssistantID != "codex" || snapshot.Items[0].Revision != connection.CreatedAt.UnixMilli() || snapshot.Items[0].Peer.ControlID != a.identity.Address.ControlID || snapshot.Items[0].Peer.Address != remote.URL {
+		t.Fatal(w.Body.String())
+	}
 	outgoing, err := a.mailbox.send(ctx, b.identity.Address, "from-a", "peer reference")
 	if err != nil {
 		t.Fatal(err)
@@ -330,5 +350,71 @@ func TestAgentHostPeerDeliveryRemainsUnreadUntilCodexReads(t *testing.T) {
 	messages, err = a.mailbox.messages(ctx)
 	if err != nil || len(messages) != 1 || messages[0].Message.Text != "authorized reply" {
 		t.Fatal(messages, err)
+	}
+}
+
+func TestAgentHostConfigureProbesActualHTTPSIdentity(t *testing.T) {
+	h, _ := testHost(t)
+	defer h.close()
+	own := httptest.NewTLSServer(h.handler())
+	defer own.Close()
+	tests := []struct {
+		name    string
+		handler http.Handler
+		want    int
+	}{
+		{"foreign", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, 200, map[string]string{"control_id": "foreign"})
+		}), 400},
+		{"oversized", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(`{"control_id":"` + h.identity.Address.ControlID + `"}` + strings.Repeat(" ", 2048)))
+		}), 400},
+		{"redirect", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, own.URL+agentlink.Prefix+"/ready", 302)
+		}), 400},
+		{"valid", h.handler(), 200},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(tc.handler)
+			defer server.Close()
+			h.probeClient = server.Client()
+			payload, _ := json.Marshal(map[string]string{"action": "configure", "mode": "https", "endpoint": server.URL, "listen": hostListen})
+			r := httptest.NewRequest(http.MethodPost, "http://"+hostListen+"/api/v1/agent-links", strings.NewReader(string(payload)))
+			r.Host = hostListen
+			r.RemoteAddr = "127.0.0.1:12345"
+			r.Header.Set("Authorization", "Bearer "+h.token)
+			w := httptest.NewRecorder()
+			h.handler().ServeHTTP(w, r)
+			if w.Code != tc.want {
+				t.Fatal(w.Code, w.Body.String())
+			}
+			var endpoint string
+			if err := h.db.QueryRow("SELECT endpoint FROM codex_agent_host").Scan(&endpoint); err != nil {
+				t.Fatal(err)
+			}
+			if tc.want == 200 && endpoint != server.URL || tc.want != 200 && endpoint != "" {
+				t.Fatal("unverified endpoint persisted", endpoint)
+			}
+		})
+	}
+	var verified string
+	h.db.QueryRow("SELECT endpoint FROM codex_agent_host").Scan(&verified)
+	for _, invalid := range []string{"http://127.0.0.1:8792", "https://user:password@agent.example", "https://agent.example?token=secret"} {
+		payload, _ := json.Marshal(map[string]string{"action": "configure", "mode": "https", "endpoint": invalid})
+		r := httptest.NewRequest(http.MethodPost, "http://"+hostListen+"/api/v1/agent-links", strings.NewReader(string(payload)))
+		r.Host = hostListen
+		r.RemoteAddr = "127.0.0.1:12345"
+		r.Header.Set("Authorization", "Bearer "+h.token)
+		w := httptest.NewRecorder()
+		h.handler().ServeHTTP(w, r)
+		if w.Code != 400 {
+			t.Fatal("invalid endpoint accepted", w.Code)
+		}
+		var after string
+		h.db.QueryRow("SELECT endpoint FROM codex_agent_host").Scan(&after)
+		if after != verified {
+			t.Fatal("invalid endpoint replaced verified address")
+		}
 	}
 }

@@ -15,7 +15,7 @@ func TestCodexTailscaleOnlyCreatesUnclaimedServe(t *testing.T) {
 		create       bool
 		error        string
 	}{
-		{"empty", "null", true, ""}, {"own", own, false, ""}, {"unrelated", `{"Web":{"other.tail.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:9999"}}}}}`, false, "in_use"},
+		{"empty", "null", true, ""}, {"own", own, false, ""}, {"unrelated", `{"Web":{"other.tail.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:9999"}}}}}`, false, "conflict"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			binary := filepath.Join(t.TempDir(), "tailscale")
