@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,7 +28,7 @@ type sqlMailbox struct {
 }
 
 func (m sqlMailbox) Pending(ctx context.Context, local, peer protocol.AgentRef) ([]protocol.Envelope, error) {
-	rows, err := m.db.QueryContext(ctx, `SELECT envelope FROM agent_messages WHERE direction='out' AND state='queued' AND json_extract(envelope,'$.from.control_id')=? AND json_extract(envelope,'$.from.agent_id')=? AND json_extract(envelope,'$.to.control_id')=? AND json_extract(envelope,'$.to.agent_id')=? ORDER BY sequence LIMIT ?`, local.ControlID, local.AgentID, peer.ControlID, peer.AgentID, protocol.MailPageSize)
+	rows, err := m.db.QueryContext(ctx, `SELECT envelope FROM agent_messages WHERE direction='out' AND state='queued' AND json_extract(envelope,'$.from.control_id')=? AND json_extract(envelope,'$.from.kind')=? AND json_extract(envelope,'$.from.agent_id')=? AND json_extract(envelope,'$.to.control_id')=? AND json_extract(envelope,'$.to.kind')=? AND json_extract(envelope,'$.to.agent_id')=? ORDER BY sequence LIMIT ?`, local.ControlID, local.Kind, local.AgentID, peer.ControlID, peer.Kind, peer.AgentID, protocol.MailPageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -372,6 +373,18 @@ func TestInvitationExpirationAndPublicBoundary(t *testing.T) {
 	if _, err := a.service.Connect(ctx, "assistant", inv.Address); !errors.Is(err, ErrExpired) {
 		t.Fatal(err)
 	}
+	// Fetching a fresh address repairs a definitively expired, never-established
+	// intent without requiring the user to discover and remove hidden state.
+	fresh, err := b.service.Invite(ctx, "assistant", b.server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Address == inv.Address {
+		t.Fatal("expired invitation reused")
+	}
+	if _, err = a.service.Connect(ctx, "assistant", fresh.Address); err != nil {
+		t.Fatal(err)
+	}
 	for _, endpoint := range []string{"http://remote.example", "https://example.com/path", "https://user:pass@example.com", "https://example.com?token=oops"} {
 		if _, err := b.service.Invite(ctx, "assistant", endpoint); !errors.Is(err, ErrInvalid) {
 			t.Fatal(endpoint, err)
@@ -386,5 +399,51 @@ func TestInvitationExpirationAndPublicBoundary(t *testing.T) {
 		if response.StatusCode == 200 {
 			t.Fatal("unexpected public capability", path)
 		}
+	}
+}
+
+func TestOtherAssistantBacklogCannotBlockOrLeakIntoConnection(t *testing.T) {
+	ctx := context.Background()
+	a, b := newFixture(t, "control-a"), newFixture(t, "control-b")
+	connection := connect(t, a, b)
+	other, _ := a.service.options.Identity(ctx, "other")
+	for index := 0; index < protocol.MailPageSize+1; index++ {
+		if _, err := a.mail.Send(ctx, fmt.Sprintf("other-%d", index), other.Address, protocol.SendMail{To: b.identity().Address, Text: "not for this connection"}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send(t, a, b, "after-other-backlog", "for the bound assistant")
+	if err := a.service.Sync(ctx, connection.ID); err != nil {
+		t.Fatal(err)
+	}
+	if mailCount(t, b, "after-other-backlog") != 1 || mailCount(t, b, "other-0") != 0 {
+		t.Fatal("route filtering failed")
+	}
+}
+
+func TestListenerAvailabilityUsesLastSuccessfulTransport(t *testing.T) {
+	ctx := context.Background()
+	a, b := newFixture(t, "control-a"), newFixture(t, "control-b")
+	connection := connect(t, a, b)
+	remote, err := b.service.Get(ctx, connection.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Minute)
+	remote.LastSeen = &old
+	if err = b.service.update(ctx, remote); err != nil {
+		t.Fatal(err)
+	}
+	b.service.expireListener(ctx, connection.ID)
+	remote, _ = b.service.Get(ctx, connection.ID)
+	if remote.State != "offline" || !remote.LastSeen.Equal(old) {
+		t.Fatal(remote)
+	}
+	if err = a.service.Sync(ctx, connection.ID); err != nil {
+		t.Fatal(err)
+	}
+	remote, _ = b.service.Get(ctx, connection.ID)
+	if remote.State != "ready" || !remote.LastSeen.After(old) {
+		t.Fatal(remote)
 	}
 }
