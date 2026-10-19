@@ -330,6 +330,15 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 		definitions = append(definitions, definition)
 	}
 	definitions = append(definitions, s.productTools(false)...)
+	if strings.HasPrefix(request.RequestID, "pot-result-") {
+		definitions, err = s.resultTools(ctx, principal, request.RequestID)
+		if err != nil {
+			return assistant.RunOptions{}, err
+		}
+		if len(definitions) > 0 {
+			executionContext.Role = core.Recovery
+		}
+	}
 	return assistant.RunOptions{ResolveAttachments: s.resolveAttachments(principal, request.RequestID), Composer: s.options.Composer, Execution: executionContext, Services: ports, Dispatch: dispatch.Dispatch, Tools: definitions, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
 		s.Integrations.Forget(credentialScope(thread.Owner, request.RequestID, thread.Generation))
 		s.Permissions.Expire(principal, request.RequestID, thread.Generation)

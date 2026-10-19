@@ -125,7 +125,9 @@ accepts this trusted host binding and calls the same `inbox.EnqueueTx` primitive
 used by `send_message` and task-result hooks, inside the checkpoint transaction.
 It is not a model tool or a public event ingestion API. External text enters the
 existing assistant conversation's notification summary lane as reference data.
-Summaries have no tools and provide summaries/suggestions only; they cannot reply externally,
+Plugin events grant no tool authority and provide summaries/suggestions only. A
+mixed batch may also recover eligible failed Tasks through batch-scoped tools;
+plugin content cannot select or authorize recovery. These turns cannot reply externally,
 mark notifications read or execute instructions found in comments. A user request
 arriving while a summary runs follows the existing independent Main-turn path.
 

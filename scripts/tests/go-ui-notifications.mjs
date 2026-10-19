@@ -98,9 +98,10 @@ await native.setEnabled(false);await native.setEnabled(true);assert.equal(storag
 // Distinct committed terminal transitions keep distinct event IDs even when
 // their timestamps coincide. Explicit cancellations remain silent.
 const firstFinish=taskOutcomeNotifications(owner,[{...task('complete'),sequence:1,updated_at_ms:2}])[0];
-const nextFinish=taskOutcomeNotifications(owner,[{...task('failed'),sequence:2,updated_at_ms:2}])[0];
+const nextFinish=taskOutcomeNotifications(owner,[{...task('interrupted'),sequence:2,updated_at_ms:2}])[0];
 assert.notEqual(firstFinish.id,nextFinish.id);
 assert.equal(taskOutcomeNotifications(owner,[task('cancelled')]).length,0);
+assert.equal(taskOutcomeNotifications(owner,[task('failed')]).length,0,'Failure must allow assistant recovery before notifying');
 
 // A task query failure or stall cannot clear another owner's baseline, delay
 // approvals, or consume the failing owner's last successful outcome cursor.
@@ -125,7 +126,7 @@ function isolatedClient(){
 }
 const isolated=isolatedClient();await isolated.coordinator.directory();assert.equal(isolated.alerts.length,0);
 isolated.reject=true;
-isolated.heads.set('alpha',1001);isolated.changes.set('alpha',[{...task('failed','alpha-task'),sequence:1001}]);
+isolated.heads.set('alpha',1001);isolated.changes.set('alpha',[{...task('interrupted','alpha-task'),sequence:1001}]);
 isolated.heads.set('beta',2001);isolated.changes.set('beta',[{...task('complete','beta-task'),sequence:2001}]);
 isolated.pending.set('alpha',[{...approval('alpha-approval'),task_title:'Alpha needs approval'}]);
 isolated.pending.set('beta',[{...approval('beta-approval'),request:{owner:'beta'},task_title:'Beta needs approval'}]);
@@ -141,7 +142,7 @@ await isolated.coordinator.refresh({topics:['tasks','runner','usage']});
 assert.equal(isolated.calls.length,beforeToken,'Token/output invalidations must not query notifications');
 assert(isolated.calls.some(item=>item.path==='/api/v1/tasks/outcomes?after=1000'),'Only read changes after the 1000-row archive baseline');
 let releaseAlpha;isolated.stall=new Promise(resolve=>{releaseAlpha=resolve;});
-isolated.heads.set('beta',2002);isolated.changes.get('beta').push({...task('failed','beta-fast'),sequence:2002});
+isolated.heads.set('beta',2002);isolated.changes.get('beta').push({...task('interrupted','beta-fast'),sequence:2002});
 isolated.pending.get('alpha').push({...approval('alpha-second'),task_title:'Second approval'});
 const stalledRead=isolated.coordinator.refresh();
 await new Promise(resolve=>setImmediate(resolve));
@@ -166,7 +167,7 @@ paged.client.request=async(path,scope)=>{
  if(scope.owner!=='alpha'||!path.startsWith('/api/v1/tasks/outcomes'))return oldRequest(path,scope);
  pageReads++;const after=Number(new URL(path,'http://fixture').searchParams.get('after'));
  return after===1000?{items:[{...task('complete','fast-one'),sequence:1001}],cursor:1001,has_more:true}:
-  {items:[{...task('failed','fast-two'),sequence:1002}],cursor:1002,has_more:false};
+  {items:[{...task('interrupted','fast-two'),sequence:1002}],cursor:1002,has_more:false};
 };
 await paged.coordinator.refresh({topics:['task-outcomes']});
 assert.equal(pageReads,2);assert.equal(paged.alerts.length,2);paged.coordinator.dispose();

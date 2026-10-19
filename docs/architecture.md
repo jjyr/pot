@@ -81,8 +81,10 @@ report deduplication. Approval hooks update UI and user reminders without waking
 an assistant model. See [Hooks](hooks.md) and [Agent messages](assistant-messages.md).
 
 Main and Worker invocations share the destination Runtime execution manager.
-Workers cannot coordinate other Tasks. Summary sessions have no tools and
-produce owner-chat reports from delivered outcomes. Synthetic results remain reference data rather
+Workers cannot coordinate other Tasks. Summary sessions have no tools; eligible
+failed results use a recovery role with only batch-scoped Task inspection and one
+durable replacement. Accepted recovery is silent. Both roles produce owner-chat
+reports only when useful. Synthetic results remain reference data rather
 than new user authority. See [Tasks](task-coordination.md),
 [schedules](scheduled-tasks.md) and [usage](token-usage.md).
 

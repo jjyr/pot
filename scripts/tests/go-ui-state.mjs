@@ -220,6 +220,10 @@ const toolInput={...chatReply,text:'',status:'complete'},toolOutput={id:'tool',r
 const toolRound=projectChatReplies({...waiting,messages:[chatInput,toolInput,toolOutput]});
 const afterTool=projectChatReplies({...waiting,messages:[chatInput,toolInput,toolOutput,nextOutput]});
 assert.equal(afterTool.filter(row=>row.role==='assistant').length,1,'Tool-only rounds do not leave empty reply bubbles');
+for(const text of ['',' \n\t']){
+  const silent=projectChatReplies({...waiting,running:false,turn_id:null,messages:[chatInput,{...chatReply,text,status:'complete'}]});
+  assert.equal(silent.filter(row=>row.role==='assistant').length,0,'Silent completion must not leave an empty reply bubble');
+}
 assert.equal(toolRound[1].viewKey,afterTool.at(-1).viewKey,'Output after a tool round adopts the waiting bubble');
 assert.equal(projectChatReplies(waiting,null,{offline:true})[1].phase,'reconnecting','Connection loss does not declare execution failed');
 const failed=projectChatReplies({...waiting,running:false,turn_id:null,messages:[chatInput,{...chatReply,text:'Partial',status:'failed',error:'HTTP 404'}]});

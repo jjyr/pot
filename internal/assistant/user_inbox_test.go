@@ -31,7 +31,7 @@ func TestUserSteeringDuringSummaryQueuesIndependentMainTurn(t *testing.T) {
 		}
 		system := body.Messages[0].Content
 		if calls.Add(1) == 1 {
-			if !strings.Contains(system, "Summarize background task results") || len(body.Tools) != 0 {
+			if !strings.Contains(system, "Process background updates") || len(body.Tools) != 0 {
 				t.Error("summary must have its own read-only role")
 			}
 			close(entered)
@@ -42,7 +42,7 @@ func TestUserSteeringDuringSummaryQueuesIndependentMainTurn(t *testing.T) {
 			}
 			return replySSE("A completed"), nil
 		}
-		if strings.Contains(system, "Summarize background task results") {
+		if strings.Contains(system, "Process background updates") {
 			t.Error("user request inherited summary role")
 		}
 		if !strings.Contains(string(r.Body), "start B") {

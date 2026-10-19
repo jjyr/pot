@@ -71,6 +71,11 @@ async function regression(frame,completed){
   const w=frame.contentWindow,d=frame.contentDocument,f=w.taskExpansionFixture;
   const rows=()=>[...d.querySelectorAll('.background-task')],toggle=()=>d.querySelector('.background-tasks-toggle'),history=()=>d.querySelector('.history'),key=node=>node.dataset.viewKey,top=node=>node.getBoundingClientRect().top-history().getBoundingClientRect().top;
   f.preference('locale','zh-CN');f.preference('theme','light');await settle();
+  await f.setTasks(2);f.items.get('one')[0].phase='queued';f.items.get('one')[1].phase='waiting';f.change();
+  await waitFor(()=>rows().length===2&&rows()[0].textContent.includes('排队中')&&rows()[1].textContent.includes('等待中'));
+  check(rows().length===2,'Queued and allowance-waiting tasks remain visible after silent dispatch');
+  f.preference('locale','en');await settle();check(rows()[0].textContent.includes('Queued')&&rows()[1].textContent.includes('Waiting'),'Background phases follow English locale');
+  f.preference('locale','zh-CN');await settle();check(rows()[0].textContent.includes('排队中')&&rows()[1].textContent.includes('等待中'),'Background phases follow Chinese locale');
   for(const n of [0,1,3,4,10]){await f.setTasks(n);check(rows().length===Math.min(n,3),'Preview count '+n);check(!!toggle()===(n>3),'Toggle threshold '+n);check(!n||d.querySelector('.background-tasks-heading').textContent===`后台任务 · ${n}`,'Localized count '+n);}
   d.querySelector('.background-tasks').scrollIntoView({block:'end'});await settle();
   const scroll=history().scrollTop,url=w.location.href,route=JSON.stringify(w.history.state),first=rows()[0],firstY=top(first);

@@ -455,7 +455,7 @@ func batchRequestCategory(body []byte) (string, string) {
 			last = m.Content
 		}
 	}
-	if strings.Contains(fields.Messages[0].Content, "Summarize background task results") {
+	if strings.Contains(fields.Messages[0].Content, "Process background updates") {
 		return "summary", last
 	}
 	if strings.Contains(fields.Messages[0].Content, "Complete the assigned task.") {

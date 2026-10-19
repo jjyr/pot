@@ -28,7 +28,7 @@ func TestLocalTaskUsesRunnerSharedCapacityControlModelAndSummary(t *testing.T) {
 		raw, _ := io.ReadAll(r.Body)
 		var fields map[string]json.RawMessage
 		json.Unmarshal(raw, &fields)
-		isSummary := strings.Contains(string(fields["messages"]), "Summarize background task results")
+		isSummary := strings.Contains(string(fields["messages"]), "Process background updates")
 		var event any
 		if isSummary {
 			summaryCalls.Add(1)
