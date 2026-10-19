@@ -213,7 +213,7 @@
         "to": {
           "type": "object",
           "properties": {
-            "control_id": {
+            "node_id": {
               "type": "string",
               "minLength": 1
             },
@@ -230,7 +230,7 @@
             }
           },
           "required": [
-            "control_id",
+            "node_id",
             "kind",
             "agent_id"
           ],
