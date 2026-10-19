@@ -10,6 +10,7 @@
       "entrypoint": "index.mjs",
       "files": [
         "index.mjs",
+        "mcp-client.mjs",
         "client.mjs",
         "instructions.md"
       ],

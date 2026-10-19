@@ -7,12 +7,12 @@ without polling or waking a model for every token. This does not attach to or
 synchronize the conversation currently open in the Codex App.
 
 ```text
-A: Pot tools ── HTTPS JSON ──> B: Bridge daemon ── JSONL stdio ──> codex app-server
+A: Pot tools ── HTTPS MCP ──> B: Bridge daemon ── JSONL stdio ──> codex app-server
    Control   <── SSE events ──      SQLite                           independent thread
       │                             ▲
       └─ checkpoint + inbox ACK ────┘
                                     ▲
-                         local stdio MCP (pot plugin)
+                         local stdio MCP proxy (pot plugin)
                                     │
                          user's Codex App / CLI chat
 ```
@@ -25,10 +25,9 @@ external effects unknown. They are reported as failures; tasks are never replaye
 
 ## Source and prerequisites
 
-Build this integration from the same revision as Pot. Before this PR merges, use
-`feat/codex-bridge` or the PR's exact commit in an isolated checkout; `main` does
-not contain these files until merge. After merge, a fresh main checkout is the
-normal entry point:
+Build this integration from the same revision as Pot. A fresh main checkout is
+the normal entry point; when testing a PR, use its exact commit in an isolated
+checkout:
 
 ```sh
 git clone https://github.com/jjyr/pot.git pot
@@ -52,7 +51,8 @@ uses the official v2 App Server JSONL API: `initialize`, `initialized`,
 See [App Server](https://developers.openai.com/codex/app-server),
 [plugin authoring](https://learn.chatgpt.com/plugins/build/plugins), and
 [MCP](https://developers.openai.com/codex/mcp). No experimental network App Server
-WebSocket is exposed. The Bridge's own HTTP protocol is version 1.
+WebSocket is exposed. Tools use MCP Streamable HTTP at `/mcp`; durable
+notification recovery uses the Bridge's version 1 HTTP/SSE protocol.
 
 ## Install the Codex-side package on B
 
@@ -206,19 +206,62 @@ response forwarding or delegation loop runs, and message depth is capped at 1.
 
 ## Event recovery and bounds
 
-The task API uses the Pot-side bearer; the local MCP credential can only create
-messages and inspect its pair's message receipts. All IDs are scoped to that pair.
+The Bridge serves sessionless MCP Streamable HTTP at `POST /mcp`, using the
+official Go MCP SDK and JSON responses. It supports MCP protocol versions
+`2025-11-25` and `2025-06-18`, `initialize`, `notifications/initialized`,
+`tools/list`, `tools/call`, and `ping`. Clients send
+`Accept: application/json, text/event-stream`, `Content-Type: application/json`,
+and the negotiated `MCP-Protocol-Version` after initialization. The endpoint
+requires the pairing bearer on every request, rejects cross-origin browser
+writes, and does not expose an unauthenticated discovery endpoint. There are no
+MCP sessions to persist; `GET` and `DELETE /mcp` return 405.
+
+The Pot-side bearer discovers and calls only the five `codex_*` tools. The local
+credential discovers and calls only the three `pot_*` tools. Discovery and each
+operation enforce that role and scope all IDs to the authenticated pair.
+Successful calls return JSON text plus the same object in `structuredContent`;
+operation failures use MCP `isError`. Request conflicts, missing IDs and capacity
+errors remain distinguishable by their error codes. Do not retry an uncertain
+submission with a new `request_id`.
+
+| MCP tool | Meaning |
+|---|---|
+| `codex_submit` | Persist `{request_id, workspace, mode, prompt}`; return the original task on an exact retry |
+| `codex_status` | Inspect `{task_id}` state, final text and B-relative file references |
+| `codex_cancel` | Request cancellation of `{task_id}`; inspect the later terminal state |
+| `codex_message` | Inspect `{message_id}` and its original complete body |
+| `codex_reply` | Persist an explicit `{message_id, result}` answer, idempotently |
+| `pot_notify`, `pot_request` | Persist `{request_id, body, correlation?, depth?}` for the paired Pot assistant |
+| `pot_receipt` | Inspect `{message_id}` acceptance, Pot inbox receipt, or explicit answer |
+
+Any MCP client supporting Streamable HTTP can use `https://BRIDGE-HOST/mcp`
+with the appropriate pairing credential from its secure credential store.
+Alternatively, a local stdio-only client can run `pot-codex-bridge mcp --config
+/absolute/private/pair.json`. That process forwards JSON-RPC to the same MCP
+endpoint, including initialization and tool discovery; it contains no separate
+tool implementation. Use the remote pairing for delegation or the local pairing
+for Pot messaging, and never expose either credential in a prompt or command-line
+argument. The daemon must already be running for either transport.
+
+MCP makes the Bridge callable from other agents; Codex remains the execution
+backend. Adding another execution backend requires its own adapter for lifecycle,
+permissions and results. Pot's packaged plugin uses a transport-independent MCP
+client module for tool calls; its durable background consumer continues to use
+the following authenticated endpoints. The former task and message REST routes
+have been removed, so upgrade the Bridge and Pot plugin together.
 
 | Method/path | Meaning |
 |---|---|
-| `POST /v1/tasks` | Persist `{request_id, workspace, mode, prompt}`; return the original task on an exact retry |
-| `GET /v1/tasks/{id}` | Inspect task state, final text and B-relative file references |
-| `POST /v1/tasks/{id}/cancel` | Accept a cancellation request; inspect the later terminal state |
+| `GET /v1/identity` | Verify pairing identity, role and destination during setup |
 | `GET /v1/events?after={cursor}` | Subscribe to durable SSE events (`Last-Event-ID` takes precedence) |
 | `GET /v1/snapshot` | Initial task states, current watermark and a bounded page of unaccepted notices |
 | `POST /v1/receipts/{notice-id}` | Record Pot's durable inbox acceptance after the host ACK |
-| `POST /v1/messages`, `GET /v1/messages/{id}` | Local Codex messaging and receipt/result inspection |
-| `POST /v1/messages/{id}/reply` | Persist an explicit Pot-side answer, idempotently |
+
+MCP tool results do not replace durable delivery. Long-running execution returns
+a task ID immediately; Pot receives completion through the existing SSE inbox,
+and other MCP clients can query `codex_status`. Disconnecting a tool client does
+not cancel a persisted task. MCP progress notifications and MCP task extensions
+are not used for task completion or recovery.
 
 `GET /v1/events?after=CURSOR` is a real SSE stream with ordered numeric event IDs,
 `Last-Event-ID` support, initial `hello`, and 15-second heartbeats. Every projection
@@ -278,7 +321,7 @@ Run reproducible tests without model credentials:
 ```sh
 mise exec -- go test -race ./integrations/codex/bridge ./pkg/pluginhost ./pkg/integrations/codex
 mise exec -- go test -race ./internal/control -run TestCodexBridge
-mise exec -- node --test plugins/codex/notifications.test.mjs
+mise exec -- node --test plugins/codex/notifications.test.mjs plugins/codex/mcp-client.test.mjs
 python3 integrations/codex/install_test.py
 ```
 

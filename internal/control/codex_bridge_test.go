@@ -1,6 +1,7 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"encoding/pem"
@@ -280,7 +281,7 @@ func TestCodexBridgeToolsSSEBusyInboxAndMCPReceipt(t *testing.T) {
 	if err = os.WriteFile(localPath, localJSON, 0600); err != nil {
 		t.Fatal(err)
 	}
-	request := strings.NewReader("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\"}}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"pot_notify\",\"arguments\":{\"request_id\":\"mcp-e2e\",\"body\":\"reference data\"}}}\n")
+	request := strings.NewReader("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"1\"}}}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"pot_notify\",\"arguments\":{\"request_id\":\"mcp-e2e\",\"body\":\"reference data\"}}}\n")
 	var output strings.Builder
 	if err = bridge.MCP(request, &output, localPath); err != nil {
 		t.Fatal(err)
@@ -301,15 +302,23 @@ func TestCodexBridgeToolsSSEBusyInboxAndMCPReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	wait(func() bool {
-		req, _ := http.NewRequest("GET", httpBridge.URL+"/v1/messages/"+message.ID, nil)
+		payload, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "pot_receipt", "arguments": map[string]string{"message_id": message.ID}}})
+		req, _ := http.NewRequest("POST", httpBridge.URL+"/mcp", bytes.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set("MCP-Protocol-Version", "2025-06-18")
 		req.Header.Set("Authorization", "Bearer "+local.Token)
 		resp, e := httpBridge.Client().Do(req)
 		if e != nil {
 			return false
 		}
 		defer resp.Body.Close()
-		var got bridge.Message
-		_ = json.NewDecoder(resp.Body).Decode(&got)
-		return got.Status == "received"
+		var envelope struct {
+			Result struct {
+				StructuredContent bridge.Message `json:"structuredContent"`
+			} `json:"result"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&envelope)
+		return envelope.Result.StructuredContent.Status == "received"
 	})
 }

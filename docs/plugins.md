@@ -53,8 +53,10 @@ receipts and uncertainty fences apply to plugin calls as to built-in tools.
 
 `mise run build:plugins` packages only manifests and declared capability files.
 Packages contain no VM engines, images or guest bootstrap. Stop Runtime before
-replacing a complete package. Live reload, automatic installation, remote MCP
-connections and a plugin marketplace remain outside this contract.
+replacing a complete package. Live reload, automatic installation, arbitrary MCP
+server configuration and a plugin marketplace remain outside this contract. The
+[Codex Bridge](../integrations/codex/README.md) package owns its paired remote MCP
+connection and durable SSE consumer.
 
 ## Background services and assistant notifications
 
