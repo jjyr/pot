@@ -99,7 +99,7 @@ export function createAgentLinks({root,request,locale,notify=()=>{},assistants=(
       if(!value){phase='empty';paint();return;}
       const controller=previewRequest=new AbortController();form.form.querySelector(':scope > .inline-error')?.replaceChildren();phase='checking';paint();
       try{const result=await request(base,{...ownerScope,signal:controller.signal,method:'POST',body:{action:'preview',address:value}});if(!alive()||version!==previewVersion||controller.signal.aborted)return;
-        if(!result?.peer?.id||!result.peer.name||!['pot','codex'].includes(result.peer.kind)||!result.endpoint||!result.fingerprint)throw uiError(null,'agentLinks.failed');
+        if(!result?.peer?.id||typeof result.peer.node_id!=='string'||!result.peer.node_id.trim()||!result.peer.name||!['pot','codex'].includes(result.peer.kind)||!result.endpoint||!result.fingerprint)throw uiError(null,'agentLinks.failed');
         verified=result;verifiedAddress=value;phase='identified';
       }catch(reason){if(!alive()||version!==previewVersion||controller.signal.aborted)return;previewError=reason;phase='error';}paint();
     }
