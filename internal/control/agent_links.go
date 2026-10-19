@@ -116,6 +116,10 @@ func (s *Service) installAgentListener(ctx context.Context, config agentLinkConf
 	}
 	host := s.agentLinks
 	host.mu.Lock()
+	if err := s.ctx.Err(); err != nil {
+		host.mu.Unlock()
+		return err
+	}
 	old := host.server
 	host.server = server
 	host.config = config
