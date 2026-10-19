@@ -91,11 +91,12 @@ func checkCodex(binary string) error {
 
 func Main(args []string, in io.Reader, out io.Writer) error {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fmt.Fprintln(out, "usage: pot-codex-bridge serve|pair|mcp|check --config PATH (Codex CLI 0.163.0)")
+		fmt.Fprintln(out, "usage: pot-codex-bridge host|connections --root PRIVATE_DIRECTORY; serve|pair|mcp|check --config PATH (delegation: Codex CLI 0.163.0)")
 		return nil
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
+	root := flags.String("root", "", "private Codex Agent host directory")
 	config := flags.String("config", "", "configuration file")
 	endpoint := flags.String("endpoint", "", "HTTPS Tailnet bridge URL")
 	device := flags.String("device", "pot", "device label")
@@ -110,6 +111,23 @@ func Main(args []string, in io.Reader, out io.Writer) error {
 	}
 	if len(flags.Args()) != 0 {
 		return errors.New("unexpected_arguments")
+	}
+	if args[0] == "host" || args[0] == "agent-serve" || args[0] == "connections" {
+		if *root == "" {
+			return errors.New("host_root_required")
+		}
+		if args[0] == "agent-serve" {
+			return agentServe(*root)
+		}
+		if args[0] == "host" {
+			return hostMCP(in, out, *root)
+		}
+		client, err := ensureAgentHost(*root)
+		if err != nil {
+			return err
+		}
+		defer client.client.CloseIdleConnections()
+		return openExternalURL("http://" + hostListen + "/codex-connections.html#" + client.token)
 	}
 	if *config == "" {
 		return errors.New("config_required")

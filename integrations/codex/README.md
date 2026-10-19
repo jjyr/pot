@@ -1,5 +1,62 @@
 # Pot ↔ Codex Bridge
 
+## Message connections
+
+The Codex plugin now starts a message-only Agent host automatically. Its stable
+Codex Agent identity and durable messages survive chat windows and host restarts.
+It shares the same typed Agent Link plugin host as Pot; connecting grants only
+peer messaging, not file access, execution permission or Control administration.
+
+Install using `mise exec -- python3 integrations/codex/install.py`, then enable
+Pot in Codex. The MCP command is `pot-codex-bridge host --root
+/absolute/home/.config/pot-codex/agent`. No pairing file, workspace choice or
+App Server model run is needed to open connections. `pot_open_connections` opens
+the local page; alternatively run:
+
+```sh
+~/.codex/plugins/pot/bin/pot-codex-bridge connections \
+  --root ~/.config/pot-codex/agent
+```
+
+The page shows this Agent's public service endpoint, **Copy address**, and **Add
+Agent**. Copy creates a short-lived invitation only in the local clipboard flow.
+Paste the other side's address to connect in either direction. One reachable
+HTTPS endpoint is sufficient for authenticated bidirectional messages. Invites
+contain message-only capabilities: keep them out of chat, prompts and logs.
+
+The host listens on `127.0.0.1:8792`. Configure an existing verified HTTPS reverse
+proxy or select Tailscale in the local page. Tailscale must be installed and logged
+in; the explicit configure action reads its real status, reuses a Serve mapping
+to this host, or creates one if no other Serve configuration exists. It refuses
+to replace unrelated Serve settings and never enables Funnel or changes ACLs.
+For manual configuration, inspect `tailscale serve status` first, then use
+`tailscale serve --bg http://127.0.0.1:8792` and copy its actual HTTPS URL.
+Owner management requires a separate private loopback bearer and exact local
+Host; publishing the peer endpoint does not expose local management.
+
+The first plugin process ensures and verifies a detached user-level daemon;
+subsequent chats reuse it after an authenticated version check. A foreign service
+on that port is an error, never assumed to be the Bridge. The daemon continues
+after the MCP chat closes and receives no model-start instruction from startup.
+Private identity, encrypted credentials and logs live under the supplied root;
+the directory must be owner-only. Stop the owning daemon process to stop service;
+starting the plugin again resumes its persisted inbox and transport.
+
+`pot_connections` lists established peers. `pot_send` queues an explicitly
+authorized message, with exact-retry idempotency. `pot_messages` reads this stable
+Agent's durable inbox, and `pot_message_ack` marks an actually handled message
+processed. Unread messages remain queued until a Codex chat explicitly invokes
+the reader. This does not inject messages into an existing Codex App chat or
+silently start an independent App Server task. Transport receipt means remote
+durable inbox acceptance, distinct from reading, processing or execution.
+
+## Independent task delegation
+
+The following older, separately authorized delegation API remains independent of
+message connections. A message invitation cannot call its task tools or relax
+its workspace and mode policy. Existing task records and uncertain outcomes are
+preserved; this API still uses its explicit daemon and pairing configuration.
+
 Delegate an independent task from Pot on machine A to Codex on machine B. Both
 machines can be on the same Tailscale network. Pot connects outward to B over
 HTTPS; A needs no inbound listener. Durable SSE delivers progress and results
@@ -78,8 +135,9 @@ status through `codex plugin list --json` (it uses your existing marketplace nam
 if different). Restart Codex and start a new chat. With an older CLI or
 `--source-only`, select **Pot** in the personal plugin directory to install and
 enable it manually. Registered local source is not the same as
-installed/enabled in Codex. The MCP tools will report a missing pairing until the
-next step. If your Codex surface has no plugin marketplace, use its officially
+installed/enabled in Codex. The default plugin now exposes message connections;
+the following manual MCP registration is specifically for the independent
+delegation API. If your Codex surface has no plugin marketplace, use its officially
 supported local MCP configuration instead:
 
 ```toml
