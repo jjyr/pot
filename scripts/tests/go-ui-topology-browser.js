@@ -40,6 +40,6 @@ async page => {
  await page.setViewportSize({width:393,height:852});
  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Narrow graph and inspector fit the viewport');
  await page.emulateMedia({reducedMotion:'reduce'});
- assert(await page.locator('.topology-signal').first().evaluate(element=>getComputedStyle(element).display)==='none','Reduced motion removes communication particles');
+ await page.waitForFunction(()=>{const signal=document.querySelector('.topology-signal');return signal&&getComputedStyle(signal).display==='none';});
  return {passed:true,agentOnly:true,identityProjection:true,localeDraft:true,expiryRepair:true,ownershipFence:true,joinedCancelRace:true,mobileWidth:393,reducedMotion:true};
 }
