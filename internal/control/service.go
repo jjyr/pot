@@ -34,6 +34,7 @@ import (
 )
 
 type Options struct {
+	Maintenance                                                              func() bool
 	Composer                                                                 agent.Composer
 	Context                                                                  context.Context
 	Root, RuntimeID, BootID, Workspace, AgentHome, BuiltinSkills, PluginRoot string

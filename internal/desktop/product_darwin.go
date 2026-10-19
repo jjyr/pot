@@ -16,6 +16,7 @@ import (
 	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/productinfo"
 	product "github.com/jjyr/pot/internal/runtime"
+	"github.com/jjyr/pot/internal/selfupdate"
 	"github.com/jjyr/pot/internal/spaces"
 	"github.com/jjyr/pot/internal/systemnotifications"
 	"github.com/jjyr/pot/internal/transport"
@@ -94,14 +95,27 @@ func (s *Service) Unsubscribe(token string) {
 	}
 }
 func Run(root string) error {
-	ctx, stop := context.WithCancel(context.Background())
+	ctx := context.Background()
+	host, err := selfupdate.OpenHost()
+	if err != nil {
+		return err
+	}
+	if host != nil {
+		return host.Run(ctx, func(ctx context.Context) error { return runProduct(ctx, root) })
+	}
+	return runProduct(ctx, root)
+}
+func runProduct(parent context.Context, root string) (result error) {
+	ctx, stop := context.WithCancel(parent)
 	defer stop()
 	runtime, err := product.Open(ctx, product.Options{Root: root, Control: control.Options{Embedded: true}})
 	if err != nil {
 		return err
 	}
-	defer runtime.Close()
+	defer func() { result = errors.Join(result, runtime.Close()) }()
 	api := &transport.Application{RuntimeResources: runtime.ResourceCall, Control: runtime.Control, RuntimeID: runtime.Root.Identity.RuntimeID, BootID: runtime.BootID, Name: "Pot"}
+	api.Updates = runtime.Updates.Call
+	api.Maintenance = runtime.Maintaining
 	api.About = func(context.Context) (any, error) { return productinfo.Read(runtime.AssetDirectory) }
 	socket, err := transport.StartSocket(ctx, runtime.Root.Path, api)
 	if err != nil {
@@ -195,6 +209,9 @@ func Run(root string) error {
 	status.SetMenu(trayMenu)
 	app.Event.OnApplicationEvent(events.Common.ThemeChanged, func(*application.ApplicationEvent) { service.wakeAttention() })
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		if host := selfupdate.FromContext(ctx); host != nil {
+			host.Ready()
+		}
 		go service.runAttention(ctx, status)
 		go func() {
 			sub := manager.Changes.Subscribe()
@@ -214,5 +231,6 @@ func Run(root string) error {
 		}()
 
 	})
+	go func() { <-ctx.Done(); app.Quit() }()
 	return app.Run()
 }

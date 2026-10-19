@@ -16,6 +16,7 @@ import (
 
 	"github.com/jjyr/pot/internal/buildinfo"
 	"github.com/jjyr/pot/internal/preview"
+	"github.com/jjyr/pot/internal/selfupdate"
 	"github.com/jjyr/pot/pkg/composition"
 	"github.com/jjyr/pot/pkg/executor"
 	"github.com/jjyr/pot/pkg/processscope"
@@ -38,9 +39,31 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) == 3 && os.Args[1] == "_update-worker" {
+		if err := selfupdate.Worker(os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	if err := run(ctx, os.Args[1:], os.Stdout); err != nil {
+	execute := func(ctx context.Context) error { return run(ctx, os.Args[1:], os.Stdout) }
+	var err error
+	if len(os.Args) > 1 && (os.Args[1] == "serve" || os.Args[1] == "web-ui-server") {
+		var host *selfupdate.Host
+		host, err = selfupdate.OpenHost()
+		if err == nil {
+			if host != nil {
+				err = host.Run(ctx, execute)
+			} else {
+				err = execute(ctx)
+			}
+		}
+	} else {
+		err = execute(ctx)
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

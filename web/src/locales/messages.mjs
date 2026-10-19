@@ -1,5 +1,12 @@
 export const messages = {
   en: {
+    'updates.update':'Update', 'updates.tooltip':'Upgrade to {version}',
+    'updates.downloading':'Downloading…', 'updates.installing':'Upgrading…',
+    'updates.interruptTitle':'Upgrading will interrupt running work',
+    'updates.interruptBody':'Upgrading will interrupt {count} running tasks, replies or terminal sessions and restart Pot. History and files are kept; interrupted work will not resume automatically.',
+    'updates.cancel':'Cancel', 'updates.interrupt':'Interrupt and upgrade',
+    'updates.failed':'Pot could not finish the upgrade. Your history and files are kept. Try again or check the server update log.',
+
     'usage.calendarTitle':'Agent / model usage', 'usage.lastYear':'Last year',
     'usage.calendarLabel':'Daily token usage over the last year',
     'usage.dayLabel':'{date} · {count} tokens', 'usage.tokens':'{count} tokens',
@@ -213,6 +220,13 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'updates.update':'更新', 'updates.tooltip':'升级到 {version}',
+    'updates.downloading':'下载中…', 'updates.installing':'升级中…',
+    'updates.interruptTitle':'升级会中断正在运行的工作',
+    'updates.interruptBody':'当前有 {count} 项工作正在运行，升级将中断它们并重启 Pot。记录和文件会保留，中断的工作不会自动继续。',
+    'updates.cancel':'取消', 'updates.interrupt':'中断并升级',
+    'updates.failed':'Pot 未能完成升级。记录和文件已保留，请重试或检查服务器更新日志。',
+
     'usage.calendarTitle':'Agent / 模型用量', 'usage.lastYear':'最近一年',
     'usage.calendarLabel':'最近一年每日 token 用量',
     'usage.dayLabel':'{date} · {count} tokens', 'usage.tokens':'{count} tokens',

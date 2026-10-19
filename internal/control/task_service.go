@@ -223,6 +223,14 @@ func (s *Service) taskLoop() {
 		if s.ctx.Err() != nil {
 			return
 		}
+		if s.options.Maintenance != nil && s.options.Maintenance() {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-time.After(100 * time.Millisecond):
+				continue
+			}
+		}
 		if err := s.Tasks.Tick(s.ctx); err != nil && s.ctx.Err() == nil {
 			s.Changes.Notify("tasks")
 		}

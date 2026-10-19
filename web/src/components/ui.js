@@ -1,3 +1,4 @@
+import {createUpdates} from './updates.mjs';
 import {mergeHistoryPage} from '../state/chat-history.mjs';
 import {createMessageWindow,readingAnchor,restoreReadingAnchor} from './message-window.mjs';
 import {notificationOnboarding} from './notification-onboarding.mjs';
@@ -152,7 +153,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       notificationError.replaceChildren(el('span','',reason.message),dismiss);notificationError.hidden=false;throw reason;
     }
   }
-  const pages = client.production ? createPages({chatVisible:()=>route==='chat'&&!root.classList.contains('show-directory'),onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, chatApprovalHost:chatApprovals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: value => {if(value?.assistant)pendingSelection=value.assistant;loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();}, openChat:async target=>{if(target&&(!selectedAssistant||selectedAssistant.id!==target.owner||selectedAssistant.space_id!==target.space)){const assistant=assistants.find(item=>item.id===target.owner&&item.space_id===target.space);if(assistant)await selectAssistant(assistant,false,false);}route='chat';directoryOpen=false;renderShell();renderMessages();pages.permissions();if(!selectedAssistant)loadDirectory();}}) : null;
+  const updates=client.production?createUpdates({client,locale:()=>locale,changed:()=>{if(!disposed)renderShell();},notify:message=>{error=message;updateControls();}}):null;
+ if(updates)root.append(updates.dialog);
+ const pages = client.production ? createPages({chatVisible:()=>route==='chat'&&!root.classList.contains('show-directory'),onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, chatApprovalHost:chatApprovals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: value => {if(value?.assistant)pendingSelection=value.assistant;loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();}, openChat:async target=>{if(target&&(!selectedAssistant||selectedAssistant.id!==target.owner||selectedAssistant.space_id!==target.space)){const assistant=assistants.find(item=>item.id===target.owner&&item.space_id===target.space);if(assistant)await selectAssistant(assistant,false,false);}route='chat';directoryOpen=false;renderShell();renderMessages();pages.permissions();if(!selectedAssistant)loadDirectory();}}) : null;
   const media = matchMedia('(max-width: 719px)');
   const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
   const saveReads=()=>{if(!client.desktop)persist('pot-ui-read-v1',JSON.stringify(replies.records()));};
@@ -337,7 +340,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function navigation(inMenu) {
     const fragment = document.createDocumentFragment();
     for (const name of ['chat', 'tasks', 'machines', 'usage', 'settings']) {
-      const item = button(name, t(name), inMenu ? 'menu-destination' : `rail-button${name === 'settings' ? ' rail-bottom' : ''}`);
+      const update=name==='settings'?updates?.button(inMenu):null;if(update)fragment.append(update);
+ const item = button(name, t(name), inMenu ? 'menu-destination' : `rail-button${name === 'settings'&&!update ? ' rail-bottom' : ''}`);
       if (name === 'chat') { item.replaceChildren(); const image = el('img', 'pot-icon'); image.src = new URL('../assets/PotCompanion.png', import.meta.url).href; image.alt = ''; item.append(image); }
       if (inMenu) item.append(el('span', '', t(name === 'chat' ? 'assistants' : name)));
       item.classList.toggle('is-selected', route === name);
@@ -431,6 +435,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const titleText=route === 'chat' ? (narrow && directoryOpen ? t('assistants') : selectedAssistant?.name || 'Pot') : pages?.title || t(route);title.title=titleText;
     title.append(el('span', '', titleText));
     titlebar.append(title);
+ if(narrow){const update=updates?.button();if(update){update.className="update-button icon-button";titlebar.append(update);}}
     if (surface === 'tray' && client.openMain) {
       const open = button('open', t('openMain'));
       open.onclick = async () => { try { await client.openMain(); } catch (reason) { error = reason.message; updateControls(); } };
@@ -779,7 +784,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if (editor.composing) { input.blur(); if (editor.composing) return; }
     if (pages && !await pages.leave()) return;
     if (state.snapshot) {positions.set(ownerKey(state.snapshot),{top:history.scrollTop,anchor:readingAnchor(history),following});if(chatShown)readingPositions.set(snapshotKey(),captureReadingPosition(history));}
-    pages?.clearApprovals();locateApprovals=item.pending_approvals?JSON.stringify({owner:item.id,space:item.space_id||''}):'';selectedAssistant = item; client.setScope({owner:item.id, space:item.space_id || ''});
+    pages?.clearApprovals();locateApprovals=item.pending_approvals?JSON.stringify({owner:item.id,space:item.space_id||''}):'';selectedAssistant = item; client.setScope({owner:item.id, space:item.space_id || ''});updates?.refresh(client.scope());
     epoch = beginSubscription(state); editorOwner = null; route = 'chat'; if(!initial)directoryOpen = false;
     pendingReadingPosition=readingPositions.get(snapshotKey())||null;pendingFollow=false;
     messageWindow.set([]);windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);messageNodes.clear();windowHeights.clear();following=true;upwardIntent=false;lastScrollTop=0;lastAnchor=null;historyGeneration++;historyLoading=false;historyFailure='';state.uiAnchor=null;error = ''; connectionError = ''; disconnected = false;
@@ -801,7 +806,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if (ticket !== directoryEpoch || disposed) return;
       spaces = catalog.items || [];client.spaces=spaces;
       if (!spaces.length) throw Error('No serving Space');
-      if(!selectedAssistant)client.setScope({space:catalog.active_space_id||spaces[0].id,owner:''});
+      if(!selectedAssistant){client.setScope({space:catalog.active_space_id||spaces[0].id,owner:''});updates?.refresh(client.scope());}
       const projectAssistants=(value,space,offline)=>{let items=value;if(typeof items==='string'){try{items=JSON.parse(items);}catch{items=[];}}return (items?.items||items||[]).map(item=>({...item,control_id:space.control_id||space.id,space_id:space.id,space_name:space.name,space_kind:space.kind,offline}));};
       const results = await Promise.allSettled(spaces.map(async space => {
         const items = await (client.read||client.request)('/api/v1/assistants', {owner:'', space:space.id,signal:abort.signal});
@@ -899,6 +904,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     stopChanges();stopChanges=client.changes((topics,source={})=>{
       const keys=Array.isArray(topics)?topics:Object.keys(topics||{});
       client.resources?.invalidate(keys,source);
+ if(relevantChange(keys,['updates','spaces','runtime'],client.scope().space,source))updates?.refresh(client.scope());
       if(source.boot){for(const [key,value]of cachedSnapshots)if((!source.space||JSON.parse(key)[1]===source.space)&&value.boot_id!==source.boot)cachedSnapshots.delete(key);if(state.snapshot&&(!source.space||source.space===client.scope().space)&&state.snapshot.boot_id!==source.boot)loadSnapshot(true);}
       if(source.reset){notifications?.refresh({reset:true,space:source.space});loadDirectory();}
       else if(relevantChange(keys,['task-outcomes','permissions']))notifications?.refresh({topics:keys,space:source.space});
@@ -907,7 +913,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       pages.refresh(keys,source);if(relevantChange(keys,['permissions','spaces','runtime'],pages.approvalSpace,source))pages.permissions();
     },{space:''});
   }
-  if(client.production){attachChanges();loadDirectory();}else attach();
+  if(client.production){attachChanges();loadDirectory();updates?.refresh(client.scope());}else attach();
   const stopResume=bindResumeRecovery(async()=>{
     if(disposed)return;
     const snapshot=selectedAssistant||!client.production?loadSnapshot(true):Promise.resolve();
@@ -915,7 +921,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     await Promise.all([snapshot,loadDirectory()]);
   });
   return () => {
-    disposed = true;confirmations.close();cancelAnimationFrame(renderFrame);cancelAnimationFrame(followFrame);viewportObserver.disconnect();messageWindow.close();stopResources?.();client.resources?.clear();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
+    disposed = true;updates?.close();confirmations.close();cancelAnimationFrame(renderFrame);cancelAnimationFrame(followFrame);viewportObserver.disconnect();messageWindow.close();stopResources?.();client.resources?.clear();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     stopMessageSelection();completions?.dispose();attachmentUI?.destroy();client.releaseAttachments?.();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);
