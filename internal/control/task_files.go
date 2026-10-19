@@ -5,8 +5,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
-	"os"
-	"path/filepath"
 
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -57,14 +55,7 @@ func (s *Service) localTaskFileChunk(ctx context.Context, target core.ExecutionT
 	if !protocol.ValidFilePath(path) || offset > TaskFileSizeLimit || len(revision) > 128 {
 		return result, errors.New("invalid Task file query")
 	}
-	base := s.options.Workspace
-
-	anchor, err := os.OpenRoot(base)
-	if err != nil {
-		return result, err
-	}
-	defer anchor.Close()
-	root, err := anchor.OpenRoot(filepath.Join("tasks", task))
+	root, err := s.openTaskWorkspace(ctx, task)
 	if err != nil {
 		return result, err
 	}

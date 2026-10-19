@@ -56,7 +56,7 @@ func (e *Engine) sandboxPatch(ctx context.Context, r Request) (string, error) {
 	var output, diagnostic bytes.Buffer
 	command.Stdout = &output
 	command.Stderr = &diagnostic
-	finish, err := e.sandboxLauncher().Prepare(ctx, command, r.CWD, nil, nil, false)
+	finish, err := e.sandboxLauncher().Prepare(ctx, command, r.CWD, e.options.SandboxRead, e.options.SandboxWrite, false)
 	if err != nil {
 		return "", &PreparationError{Cause: err}
 	}

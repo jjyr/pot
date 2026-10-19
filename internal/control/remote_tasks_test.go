@@ -143,7 +143,11 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 			t.Fatalf("remote task did not complete: %+v %v", current, err)
 		}
 	}
-	data, err := os.ReadFile(filepath.Join(worker.options.Workspace, "tasks", record.Info.ID, "artifact.txt"))
+	taskRoot, err := worker.taskWorkspacePath(ctx, record.Info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(taskRoot, "artifact.txt"))
 	if err != nil || string(data) != "remote-proof" {
 		transcript, _ := control.TaskEvents(ctx, "main", record.Info.ID, 0, 100)
 		for _, item := range transcript.Events {

@@ -77,8 +77,9 @@ func (s *Service) prepareExecutionFor(ctx context.Context, owner, workspaceOwner
 		}
 	}
 	if worker {
-		cwd = filepath.Join(cwd, "tasks", owner)
-		if err := os.MkdirAll(cwd, 0700); err != nil {
+		var err error
+		cwd, err = s.taskWorkspacePath(ctx, owner)
+		if err != nil {
 			return result, err
 		}
 	}

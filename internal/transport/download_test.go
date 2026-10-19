@@ -74,7 +74,11 @@ func TestCompletedTaskDownloadStreamsBeyondOldProxyLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	directory := filepath.Join(root, "agent-workspace", "tasks", task.Info.ID)
+	workspace, err := s.RunnerJournal.TaskWorkspace(ctx, task.Info.ID)
+	if err != nil || workspace == nil {
+		t.Fatal(workspace, err)
+	}
+	directory := workspace.Path
 	if err = os.MkdirAll(directory, 0700); err != nil {
 		t.Fatal(err)
 	}

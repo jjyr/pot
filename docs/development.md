@@ -171,6 +171,23 @@ Credentials stay on the configured machine and are never logged. Run it with
 `POT_LIVE=1 mise exec -- go test -v ./internal/control -run '^TestConfiguredModelMessageReferencesLive$' -count=1 -timeout=4m`
 and the two explicit path variables above.
 
+For the configured model Task workspace qualification, use `POT_LIVE=1`,
+`POT_WORKSPACE_LIVE_ROOT` and the existing `POT_SECRET_KEY_FILE` on that machine:
+
+```sh
+POT_LIVE=1 mise exec -- go test -v ./internal/control \
+  -run '^TestConfiguredModelTaskWorkspacesLive$' -count=1 -timeout=9m
+```
+
+The fixture uses a private Control, local bare Git remote and synthetic project
+files. It exercises managed worktree base refresh, direct-project and OS temporary
+workspaces, real model-generated patches/commands, instruction discovery and file
+delivery, capped at 18 model requests. Model/account credentials remain in memory
+on that machine. `POT_WORKSPACE_LIVE_RESOURCES` points to installed package assets;
+`POT_WORKSPACE_LIVE_PROTECTED=1` additionally selects Protected mode for worktree
+and temporary cases and requires SRT host dependencies. The deterministic Linux
+sandbox suite also exercises Runtime Git preparation and linked Git metadata.
+
 For DeepSeek tests, copy `.env.example` to `.env` in the current repository root and set
 `DEEPSEEK_API_KEY`; `DEEPSEEK_BASE_URL` and `DEEPSEEK_MODEL` default to
 `https://api.deepseek.com` and `deepseek-v4-flash`. `.env` is Git-ignored.

@@ -17,7 +17,6 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 	"io"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -332,6 +331,13 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 		return runner.Prepared{}, err
 	}
 	config := resources.Config
+	policy, _, err := s.Permissions.Policy(l.RuntimeID)
+	if err != nil {
+		return runner.Prepared{}, err
+	}
+	if _, err = s.prepareTaskWorkspace(ctx, l, policy); err != nil {
+		return runner.Prepared{}, err
+	}
 	// The Runner independently verifies selected names and its pinned resource digest.
 	roots, err := s.installTaskSkills(ctx, resources, l.TaskID, revision, l.ExecutionTarget)
 	if err != nil {
@@ -536,14 +542,7 @@ func (f taskFiles) ReadResult(ctx context.Context, target core.ExecutionTarget, 
 	if !protocol.ValidFilePath(path) {
 		return nil, errors.New("invalid result path")
 	}
-	base := f.s.options.Workspace
-
-	anchor, err := os.OpenRoot(base)
-	if err != nil {
-		return nil, err
-	}
-	defer anchor.Close()
-	root, err := anchor.OpenRoot(filepath.Join("tasks", task))
+	root, err := f.s.openTaskWorkspace(ctx, task)
 	if err != nil {
 		return nil, err
 	}

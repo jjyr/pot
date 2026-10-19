@@ -79,7 +79,7 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 					return nil
 				}
 			}
-			launch := runner.Launch{ControlID: s.options.ControlID, AssistantID: assistant, RuntimeID: target.RuntimeID, TaskID: id, RunID: current.RunID, Generation: current.Generation, ExecutionTarget: target, Config: current.Config, Plugins: current.Plugins, Skills: current.Request.Skills, Text: current.Request.Text}
+			launch := runner.Launch{ControlID: s.options.ControlID, AssistantID: assistant, RuntimeID: target.RuntimeID, TaskID: id, RunID: current.RunID, Generation: current.Generation, ExecutionTarget: target, Config: current.Config, Plugins: current.Plugins, Skills: current.Request.Skills, Workspace: current.Request.Workspace, Text: current.Request.Text}
 			if err := launch.Validate(target.RuntimeID); err != nil {
 				return err
 			}

@@ -115,7 +115,18 @@ func TestScheduledAndManualOutcomesShareSummaryDelivery(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			root := filepath.Join(s.options.Workspace, "tasks", accepted.TaskID)
+			var root string
+			for {
+				root, err = s.taskWorkspacePath(ctx, accepted.TaskID)
+				if err == nil {
+					break
+				}
+				select {
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				case <-time.After(5 * time.Millisecond):
+				}
+			}
 			if err := os.MkdirAll(root, 0700); err != nil {
 				t.Fatal(err)
 			}

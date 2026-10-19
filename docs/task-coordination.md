@@ -137,12 +137,12 @@ The actual Runtime destination is retained as execution information for the acti
 run, receipts and file retrieval. It is not reused as a default for future tasks.
 Guidance is accepted only while a task remains active. Complete, failed, cancelled
 and interrupted tasks require a new task to run again; retained files are not
-implicitly imported into that new task. Task workspaces are separate local
-directories on the fixed Runtime. Cleanup closes only that Task's processes and
+implicitly imported into that new task. Task workspaces are prepared and recorded on the fixed Runtime according to
+[workspace selection](task-workspaces.md). Cleanup closes only that Task's processes and
 sessions; files remain. No shared guest environment or automatic project copy is
 provided.
 
-Task persistence uses schema version 7. Development builds use an independent
+Task persistence uses schema version 8. Development builds use an independent
 data root; unsupported storage formats are rejected without rewriting files.
 
 ## Client notification outcomes

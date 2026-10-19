@@ -284,7 +284,7 @@ func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process,
 	if r.Mode == "sandbox" {
 		launcher := e.sandboxLauncher()
 		launcher.Markers = &p.markers
-		p.finishSandbox, err = launcher.Prepare(ctx, command, r.CWD, nil, nil, r.Args["tty"] == true)
+		p.finishSandbox, err = launcher.Prepare(ctx, command, r.CWD, e.options.SandboxRead, e.options.SandboxWrite, r.Args["tty"] == true)
 		if err != nil {
 			return "", nil, &PreparationError{Cause: err}
 		}

@@ -10,24 +10,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/protocol"
 	"strings"
 )
 
 type Launch struct {
-	ControlID       string               `json:"control_id" required:"true"`
-	AssistantID     string               `json:"assistant_id" required:"true"`
-	RuntimeID       string               `json:"runtime_id" required:"true"`
-	TaskID          string               `json:"task_id" required:"true"`
-	RunID           string               `json:"run_id" required:"true"`
-	Generation      uint64               `json:"generation" required:"true"`
-	ExecutionTarget core.ExecutionTarget `json:"execution_target" required:"true"`
-	Config          core.ResolvedSpec    `json:"config" required:"true"`
-	Plugins         []string             `json:"plugins" required:"true"`
-	Skills          *[]string            `json:"skills"`
-	Text            string               `json:"text" required:"true"`
+	Workspace       protocol.TaskWorkspace `json:"workspace"`
+	ControlID       string                 `json:"control_id" required:"true"`
+	AssistantID     string                 `json:"assistant_id" required:"true"`
+	RuntimeID       string                 `json:"runtime_id" required:"true"`
+	TaskID          string                 `json:"task_id" required:"true"`
+	RunID           string                 `json:"run_id" required:"true"`
+	Generation      uint64                 `json:"generation" required:"true"`
+	ExecutionTarget core.ExecutionTarget   `json:"execution_target" required:"true"`
+	Config          core.ResolvedSpec      `json:"config" required:"true"`
+	Plugins         []string               `json:"plugins" required:"true"`
+	Skills          *[]string              `json:"skills"`
+	Text            string                 `json:"text" required:"true"`
 }
 
 func (l Launch) Validate(runtimeID string) error {
+	if err := l.Workspace.Validate(); err != nil {
+		return err
+	}
 	for _, id := range []string{l.ControlID, l.AssistantID, l.RuntimeID, l.TaskID, l.RunID} {
 		if !core.Identifier(id) {
 			return fmt.Errorf("invalid launch identity")

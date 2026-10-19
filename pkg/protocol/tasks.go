@@ -63,7 +63,52 @@ type TaskRequirements struct {
 	ExactBudget  bool `json:"exact_budget"`
 	LiveSteering bool `json:"live_steering"`
 }
+
+// TaskWorkspace is creation intent; destination Runtime resolves the actual path.
+// An omitted kind selects a direct project when supplied, otherwise OS temporary storage.
+type TaskWorkspace struct {
+	Kind       string `json:"kind,omitempty"`
+	ProjectDir string `json:"project_dir,omitempty"`
+	Remote     string `json:"remote,omitempty"`
+	Base       string `json:"base,omitempty"`
+	Branch     string `json:"branch,omitempty"`
+	Commit     string `json:"commit,omitempty"`
+}
+
+func (w TaskWorkspace) Mode() string {
+	if w.Kind != "" {
+		return w.Kind
+	}
+	if w.ProjectDir != "" {
+		return "directory"
+	}
+	return "temporary"
+}
+func (w TaskWorkspace) Validate() error {
+	mode := w.Mode()
+	if mode != "temporary" && mode != "directory" && mode != "worktree" {
+		return fmt.Errorf("invalid workspace kind")
+	}
+	for _, value := range []string{w.ProjectDir, w.Remote, w.Base, w.Branch, w.Commit} {
+		if len(value) > 4096 || strings.ContainsAny(value, "\x00\r\n") {
+			return fmt.Errorf("invalid workspace selection")
+		}
+	}
+	if (mode == "temporary") != (w.ProjectDir == "") {
+		return fmt.Errorf("workspace requires a project directory except for temporary work")
+	}
+	if mode != "worktree" && (w.Remote != "" || w.Base != "" || w.Branch != "" || w.Commit != "") {
+		return fmt.Errorf("Git selection requires worktree mode")
+	}
+	if w.Base != "" && w.Commit != "" {
+		return fmt.Errorf("choose a base branch or pinned commit")
+	}
+	return nil
+}
+
 type CreateTask struct {
+	Workspace TaskWorkspace `json:"workspace"`
+
 	MachineID       string           `json:"machine_id"`
 	Skills          *[]string        `json:"skills"`
 	RequestID       string           `json:"request_id" required:"true"`
@@ -75,6 +120,9 @@ type CreateTask struct {
 }
 
 func (t CreateTask) Validate() error {
+	if err := t.Workspace.Validate(); err != nil {
+		return err
+	}
 	if t.RequestID == "" || len(t.RequestID) > 128 || strings.ContainsRune(t.RequestID, 0) || strings.TrimSpace(t.Text) == "" || len(t.Text) > 65536 || t.MachineID != "" && !core.Identifier(t.MachineID) {
 		return fmt.Errorf("invalid task request")
 	}

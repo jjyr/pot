@@ -90,3 +90,16 @@ func TestSSEChunksAndBounds(t *testing.T) {
 		t.Fatal("bound not enforced")
 	}
 }
+
+func TestTaskWorkspaceIntentValidation(t *testing.T) {
+	for _, w := range []TaskWorkspace{{}, {ProjectDir: "/project"}, {Kind: "worktree", ProjectDir: "/project", Base: "main"}, {Kind: "directory", ProjectDir: "/project"}} {
+		if err := w.Validate(); err != nil {
+			t.Fatal(w, err)
+		}
+	}
+	for _, w := range []TaskWorkspace{{Kind: "unknown"}, {Kind: "worktree"}, {Kind: "temporary", ProjectDir: "/project"}, {Kind: "directory", ProjectDir: "/project", Remote: "origin"}, {Kind: "worktree", ProjectDir: "/project", Base: "main", Commit: "deadbeef"}, {Kind: "directory", ProjectDir: "/project\nother"}} {
+		if err := w.Validate(); err == nil {
+			t.Fatalf("accepted invalid workspace: %+v", w)
+		}
+	}
+}

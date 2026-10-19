@@ -366,6 +366,23 @@ func (s *Service) controlRPC(ctx context.Context, p controlplane.Principal, requ
 			}
 		}
 		result = map[string]bool{"closed": true}
+	case "task.workspace.github":
+		if launch.Workspace.Mode() != "worktree" {
+			return nil, controlplane.ErrUnauthorized
+		}
+		policy, _, err := s.Permissions.Policy(launch.RuntimeID)
+		if err != nil || policy.ExecutionAccess == "deny" {
+			return nil, controlplane.ErrUnauthorized
+		}
+		scope := "workspace:" + credentialScope(launch.TaskID, launch.RunID, launch.Generation)
+		defer s.Integrations.Forget(scope)
+		token, err := s.Integrations.Credential(ctx, scope, "github", false)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(struct {
+			Token string `json:"token"`
+		}{token})
 	case "task.dispatch":
 		var q remoteDispatch
 		if err = core.DecodeJSON(r.Data, &q); err != nil {
@@ -812,6 +829,13 @@ func (s *Service) prepareRemoteTask(ctx context.Context, r runner.Run) (runner.P
 	if err != nil {
 		return runner.Prepared{}, err
 	}
+	var policy MachinePolicy
+	if err = s.remoteCall(ctx, peer, binding(l), "task.execution_policy", "execution-policy:"+storage.ID(), nil, &policy); err != nil {
+		return runner.Prepared{}, err
+	}
+	if _, err = s.prepareTaskWorkspace(ctx, l, policy); err != nil {
+		return runner.Prepared{}, err
+	}
 	roots, err := s.installTaskSkills(ctx, resources, l.TaskID, revision, l.ExecutionTarget)
 	if err != nil {
 		return runner.Prepared{}, err
@@ -820,11 +844,7 @@ func (s *Service) prepareRemoteTask(ctx context.Context, r runner.Run) (runner.P
 	if err != nil {
 		return runner.Prepared{}, err
 	}
-	var policy MachinePolicy
-	if err = s.remoteCall(ctx, peer, binding(l), "task.execution_policy", "execution-policy:"+storage.ID(), nil, &policy); err != nil {
-		return runner.Prepared{}, err
-	}
-	execution.ContextSections = append(execution.ContextSections, executionEnvironment(policy, l.ExecutionTarget, execution.Workspace))
+	execution.ContextSections = append(execution.ContextSections, core.ContextSection{Key: "environment", Text: "cwd: " + execution.Workspace})
 	execution.Role = core.Worker
 	addresses, _ := json.Marshal(map[string]protocol.AgentRef{"self": {ControlID: l.ControlID, Kind: "task", AgentID: l.TaskID}, "owner_assistant": {ControlID: l.ControlID, Kind: "assistant", AgentID: l.AssistantID}})
 	execution.ContextSections = append(execution.ContextSections, core.ContextSection{Key: "agent-addresses", Text: string(addresses)})

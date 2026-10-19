@@ -82,7 +82,7 @@ for package in ("sandbox", "processscope", "executor", "control"):
             f"/suite/{package}.test",
             "-test.v",
             "-test.run",
-            "^TestRealUnixSocketRequiresHostApproval$"
+            "^TestReal(UnixSocketRequiresHostApproval|TaskWorktreePreparation)$"
             if package == "control"
             else "TestReal|TestDetached|TestCancellation",
             "-test.timeout",

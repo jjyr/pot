@@ -30,7 +30,10 @@ AGENTS.md and project skills at the execution workspace; see
 Permission storage is separate from instruction discovery; see
 [Agent permissions](permissions.md). Project discovery uses the actual tool execution cwd. Main resolves the machine's
 local workspace at the start of each run. Workers use their recorded destination
-Runtime workspace throughout an active execution.
+Runtime workspace throughout an active execution; see [workspace selection](task-workspaces.md).
+Worker workspace context contains only the prepared `cwd`, without source project,
+branch/base or allocation metadata. Applicable project instructions and Skills
+remain ordinary injected instructions.
 
 Discovery starts at the execution cwd and finds the nearest ancestor with a `.git` file or directory. Discovery uses the nearest project root as its boundary, or cwd when there is no repository marker. It loads AGENTS.md files from that root through cwd in root-to-leaf order. Without a root marker it reads only cwd. Nested repositories stop inheritance from outer repositories. Descendants below cwd are not eagerly scanned; the injected guidance tells the agent to inspect applicable descendant AGENTS.md files before editing there.
 
@@ -73,7 +76,7 @@ Sections have stable keys and deterministic lexical ordering:
 | Key | Source and update behavior |
 |---|---|
 | `environment` | Optional caller-provided Runtime clock and execution workspace |
-| `execution-environment` | Product-provided destination machine policy/revision, workspace, private temp usage and file/network/Unix socket boundaries; snapshotted for Main and Workers, including remote Runners using Control policy |
+| `execution-environment` | Main-only destination policy/revision, workspace and file/temp/network boundaries. Workers receive their prepared cwd through `environment`; tools still enforce current Control-owned policy |
 | `instructions` | Applicable global, assistant and project instructions; append a complete replacement on change |
 | `models` | Main-only configured routing summary; append a complete bounded replacement on change |
 | `plugins` | Enabled plugin instructions; append a complete replacement on change |
