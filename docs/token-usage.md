@@ -1,6 +1,24 @@
 # Token usage and allowances
 
-Usage shows overall Pot statistics, trends, and Agent/model categories over the last 14/30/90 days or year (365 days including today). The default is the last 14 days including today. Always retain every date slot in the selected range, including days with no usage; one active day must not expand to fill the chart. The range selector belongs to the trend; session totals and detail lists are explicitly lifetime values. The first three ranges use daily buckets; year uses consecutive 7-day groups, possibly a partial final group. Dates follow the current system IANA zone; today is incomplete. Trend bars split uncached input, cached input and output. Hovering or focusing any date column (including zero-usage dates), or tapping it, shows exact total/input/cache/uncached/output counts and cache hit rate. Current buckets say statistics are through now; the IANA zone is in the tooltip. Escape or an outside tap dismisses the tooltip. Totals and model categories show cached input, uncached input and the input cache hit rate. Cached tokens remain part of input and total tokens; token counts are not billed cost.
+Usage shows a GitHub-style calendar for the last 365 days including today. Each
+column is a week starting Sunday; tiles keep every calendar date, including days
+with no usage. Tile intensity represents daily input + output tokens on a shared
+scale across the year. Narrow views stack the two halves of the year. Dates follow
+the current system IANA zone; today is incomplete. Hovering, keyboard-focusing or
+tapping a tile shows its total, a horizontal stacked bar of Agent categories,
+category counts and percentages, and exact input/cache/uncached/output counts and
+cache hit rate. Escape or an outside tap dismisses the tooltip. Daily tooltips
+combine all models within each category and do not list model names.
+
+Below the calendar, matching stacked bars show complete annual category and model
+shares, token counts and percentages. A model's full ID determines its stable
+color independently of sorting, refreshes and other models. Small shares retain
+their true widths and remain readable in the labeled list. Overall Usage combines
+all available selected Spaces by date/category/model; unavailable Spaces retain
+availability notices. These summaries are complete aggregates, not first pages of
+model details. Conversation totals and detail lists remain lifetime values; their
+calendar and share bars cover the last year only. Cached tokens remain part of
+input and total tokens; token counts are not billed cost.
 
 Each task (including archived tasks) and main chat has a usage entry. Details show cumulative usage, model consumption, and tool call rankings. Guidance continues the same task; turn IDs link records. Global usage does not list tasks.
 
@@ -20,7 +38,7 @@ Go Control captures provider usage through the generic model gateway. Shared SQL
 - Skills lack a reliable independent metering boundary, so no Skills statistics tab or estimated allocation. Skills loading remains unintegrated and unchanged here.
 - Pi development sessions and old usage databases are not imported; this revision starts a new usage database.
 
-Runtime uses indexed SQL aggregation, bounded time buckets, and independent 20-item pages for models, requests, tools and compactions. Requests sort by request start time descending, then ID descending; compactions sort by occurrence time ascending, then ID; tools sort by call count descending, then name. The summary never loads these lists. Initial summary/list queries run concurrently; subsequent paging refreshes only its list and retains rows while pending or on failure. The shared HTML frontend refreshes from persisted usage updates, keeps the displayed page while preparing replacements, preserves scroll, and rejects stale query responses. Disconnected cached values are labelled with their availability. Shared CSS and components render the charts, allowance bars and editing controls.
+Runtime uses indexed SQL aggregation over explicit local-day boundaries and independent 20-item pages for lifetime models, requests, tools and compactions. The summary defaults to 365 daily buckets with ISO dates and complete daily/annual Agent and annual model totals. Explicit 14/30/90-day API queries also use daily buckets. Calendar aggregation groups date/Agent/model in SQL without loading request records; all summary projections share one transaction. Requests sort by request start time descending, then ID descending; compactions sort by occurrence time ascending, then ID; tools sort by call count descending, then name. The summary never loads these lists. Initial summary/list queries run concurrently; subsequent paging refreshes only its list and retains rows while pending or on failure. The shared HTML frontend refreshes from persisted usage updates, keeps the displayed page while preparing replacements, preserves scroll, and rejects stale query responses. Disconnected cached values are labelled with their availability. Shared CSS and components render the charts, allowance bars and editing controls.
 
 ## Context estimation
 
@@ -78,7 +96,7 @@ policy described below; they are not context estimates.
 
 ## Main-chat routing subset
 
-The `routing_total` summary reports whole main-chat turns that attempt task delegation, already included in total usage. Global scope follows the selected date window; main-chat details use lifetime scope. It includes all requests in the marked turn, even before the delegation tool call, and preserves incomplete usage. It is not a separately measured routing fee; no extra model call is introduced. Task scope reports no main-chat routing subset. Markers are durable/idempotent and historical unmarked turns are not inferred. See [Execution preferences](agent-context.md).
+The `routing_total` summary reports whole main-chat turns that attempt task delegation, already included in total usage. Global scope covers the displayed year; main-chat details use lifetime scope. It includes all requests in the marked turn, even before the delegation tool call, and preserves incomplete usage. It is not a separately measured routing fee; no extra model call is introduced. Task scope reports no main-chat routing subset. Markers are durable/idempotent and historical unmarked turns are not inferred. See [Execution preferences](agent-context.md).
 
 
 ## Display and limits
