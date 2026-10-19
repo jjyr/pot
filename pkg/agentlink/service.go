@@ -115,7 +115,7 @@ func parseAddress(ctx context.Context, raw string) (address, error) {
 		return address{}, ErrInvalid
 	}
 	origin, err := ValidateEndpoint(ctx, value.Endpoint)
-	if err != nil || u.Scheme+"://"+u.Host+u.Path != origin+Prefix+"/connect" || u.RawQuery != "" || u.User != nil {
+	if err != nil || u.Scheme+"://"+u.Host+u.Path != origin+Prefix+"/connect" || u.RawQuery != "" || u.ForceQuery || u.RawPath != "" || u.User != nil {
 		return address{}, ErrInvalid
 	}
 	value.Endpoint = origin
