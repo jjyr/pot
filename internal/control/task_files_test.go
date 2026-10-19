@@ -16,6 +16,7 @@ func TestTaskChunksBoundMemoryPreserveRevisionAndConfineLinks(t *testing.T) {
 	root := filepath.Join(s.options.Workspace, "tasks", "worker")
 	name := filepath.Join(root, "large.bin")
 	writeTaskFixture(t, name, "")
+	bindTestWorkspace(t, s, "worker", root)
 	file, err := os.OpenFile(name, os.O_RDWR, 0600)
 	if err != nil {
 		t.Fatal(err)

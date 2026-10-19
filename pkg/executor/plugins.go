@@ -171,7 +171,7 @@ func (e *Engine) executePlugin(ctx context.Context, r Request) (map[string]any, 
 				cmd.Dir = r.CWD
 				launcher := e.sandboxLauncher()
 				launcher.Markers = markers
-				finish, err := launcher.Prepare(ctx, cmd, r.CWD, []string{bundle}, nil, false)
+				finish, err := launcher.Prepare(ctx, cmd, r.CWD, append(append([]string{}, e.options.SandboxRead...), bundle), e.options.SandboxWrite, false)
 				if err != nil {
 					return nil, &PreparationError{Cause: err}
 				}

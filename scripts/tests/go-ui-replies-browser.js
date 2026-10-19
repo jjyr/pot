@@ -110,7 +110,8 @@ async page=>{
  assert(await page.evaluate(()=>replyFixture.requests.at(-1).request_id)===retryID,'Rejected-send retry retains its original receipt identity');
  assert(await page.locator('.role-user').count()===2,'Retry does not add another optimistic user message');
  await page.evaluate(()=>replyFixture.rejectSend(Error('Connection closed')));
- await page.getByText('连接中断，正在重新连接…',{exact:true}).waitFor();
+ await page.getByText('上一条消息可能已被接受，请先确认后再发送。',{exact:true}).waitFor();
+ assert(await page.getByRole('button',{name:'发送',exact:true}).isDisabled(),'Unknown acceptance keeps the next send locked until confirmation');
  assert(await page.getByRole('button',{name:'重试',exact:true}).count()===0,'Unknown send outcomes offer state reconciliation instead of resending');
  await page.evaluate(()=>replyFixture.dispose());
  page.off('pageerror',onError);assert(errors.length===0,errors.join('\n'));

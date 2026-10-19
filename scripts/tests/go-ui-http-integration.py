@@ -326,6 +326,8 @@ def run(binary, base, env, cli_command):
                     },
                 },
             )
+            artifact_workspace = base / "artifact-workspace"
+            artifact_workspace.mkdir()
             task = api(
                 "POST",
                 "/api/v1/tasks?assistant_id=" + assistant["id"],
@@ -333,6 +335,7 @@ def run(binary, base, env, cli_command):
                     "request_id": "binary-artifact",
                     "text": "Prepare isolated artifact task",
                     "machine_id": runtime["runtime_id"],
+                    "workspace": {"kind": "directory", "project_dir": str(artifact_workspace)},
                 },
             )
 
@@ -344,8 +347,7 @@ def run(binary, base, env, cli_command):
 
             wait_for(completed, "artifact Task")
             task_id = task["id"]
-            artifact = base / "runtime/agent-workspace/tasks" / task_id / "proof.bin"
-            artifact.parent.mkdir(parents=True, exist_ok=True)
+            artifact = artifact_workspace / "proof.bin"
             content = bytes(range(256)) * 4097 + b"\x00GO\xffEND"
             artifact.write_bytes(content)
             state = {

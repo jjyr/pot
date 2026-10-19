@@ -1,7 +1,7 @@
 [
   {
     "name": "create_task",
-    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. Interpret the applicable AGENTS.md routing rules semantically using available configured Providers and models. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor. Each task is a new execution. To retry finished work, create a new task. Tasks run in a separate workspace on the fixed selected Runtime. Omitted machine_id uses the owning Control. Files are not copied from other workspaces. Tool calls require current machine authorization; completion closes only this Task's processes and sessions while retaining files. The text must contain a concise title on its first line AND complete instructions on following lines. A title-only brief is rejected. Preserve the user's exact commands and constraints; workers do not see the chat.",
+    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. Interpret the applicable AGENTS.md routing rules semantically using available configured Providers and models. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor. Each task is a new execution. To retry finished work, create a new task. Runtime prepares the workspace before the Worker starts. For Git feature development select workspace.kind=worktree and its source project_dir; reuse an existing worktree or explicitly requested in-place project with kind=directory. Without a project use temporary (the default). Runtime refreshes the remote base and creates managed worktrees; do not ask the Worker to choose directories, pull the base or create its own worktree. Keep workspace setup metadata out of the Worker text; the Worker receives its cwd. Omitted machine_id uses the owning Control. Files are not copied from other workspaces. Tool calls require current machine authorization; completion closes only this Task's processes and sessions while retaining files. The text must contain a concise title on its first line AND complete instructions on following lines. A title-only brief is rejected. Preserve the user's exact commands and constraints; workers do not see the chat.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -53,6 +53,41 @@
           "type": "string",
           "minLength": 1,
           "description": "Concrete model ID supported by the selected Provider. Omitted uses that Provider’s default model; with no Provider selection, uses the invoking assistant’s active model."
+        },
+        "workspace": {
+          "type": "object",
+          "description": "Destination-local workspace intent. Feature development in a Git project defaults to worktree; explicit reuse/in-place overrides it. Runtime generates and binds the actual path.",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "temporary",
+                "directory",
+                "worktree"
+              ]
+            },
+            "project_dir": {
+              "type": "string",
+              "description": "Existing absolute source project path on the selected execution machine; omit for temporary."
+            },
+            "remote": {
+              "type": "string",
+              "description": "Optional Git remote; otherwise origin or the sole remote."
+            },
+            "base": {
+              "type": "string",
+              "description": "Optional remote base branch; otherwise discover the remote default branch."
+            },
+            "branch": {
+              "type": "string",
+              "description": "Optional new feature branch; otherwise Runtime generates a unique codex/ branch."
+            },
+            "commit": {
+              "type": "string",
+              "description": "Optional exact pinned commit instead of updating a base branch."
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": [

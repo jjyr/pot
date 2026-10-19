@@ -94,10 +94,13 @@ func TestWorkerResourcesKeepDestinationInstructionsAndSkills(t *testing.T) {
 		}
 	}
 	cwd := filepath.Join(s.options.Workspace, "tasks", "worker")
-	writeTaskFixture(t, filepath.Join(cwd, ".git"), "")
+	if err := os.MkdirAll(cwd, 0700); err != nil {
+		t.Fatal(err)
+	}
+	fixtureGit(t, cwd, "init")
 	writeTaskFixture(t, filepath.Join(cwd, "AGENTS.md"), "DESTINATION_PROJECT")
 	writeTaskFixture(t, filepath.Join(cwd, ".agents", "skills", "destination", "SKILL.md"), "---\nname: destination\ndescription: Destination skill\n---\nDestination")
-	launch := runner.Launch{ControlID: "local", RuntimeID: "local", AssistantID: "main", TaskID: "worker", RunID: "run", Generation: 1, ExecutionTarget: core.RuntimeTarget("local"), Config: selected.Config, Plugins: selected.Plugins, Skills: &[]string{"global"}, Text: "work"}
+	launch := runner.Launch{ControlID: "local", RuntimeID: "local", AssistantID: "main", TaskID: "worker", RunID: "run", Generation: 1, ExecutionTarget: core.RuntimeTarget("local"), Config: selected.Config, Plugins: selected.Plugins, Skills: &[]string{"global"}, Workspace: protocol.TaskWorkspace{Kind: "directory", ProjectDir: cwd}, Text: "work"}
 	run, err := s.RunnerJournal.Accept(ctx, launch)
 	if err != nil {
 		t.Fatal(err)

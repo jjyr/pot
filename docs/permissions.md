@@ -48,10 +48,10 @@ not an accepted tool input. Results/events report the actual `host`/`sandbox`
 boundary; owned process polling retains the original process mode. The model
 cannot supply sandbox profiles, upgrade a live session or change destinations.
 
-Main and Worker contexts include an `execution-environment` snapshot of the
-Control-owned destination policy, workspace and protected file/temp/network
-boundaries. This is planning information, not authorization. Every operation is
-still checked against current policy.
+Main context includes an `execution-environment` snapshot of the Control-owned
+destination policy and file/temp/network boundaries. Worker workspace context
+contains its prepared cwd; policy remains enforced by Runtime. Neither context
+grants authorization. Every operation is checked against current policy.
 
 | Decision | Scope |
 | --- | --- |
@@ -149,7 +149,7 @@ Permission format 6 stores machines, enrollment epochs, exact command rules and
 durable policy-application fences. Restart retains pending/uncertain application.
 Temporary grants and pending decisions are not restored after restart. Unsupported
 old formats fail without rewriting the file or inferring new grants. Runner
-journal schema 5 separates execution mode/context-bearing requests from old runs.
+journal schema 6 separates execution mode/context-bearing requests from old runs.
 
 `GET /api/v1/permissions` returns `policy` (machines, rules, task_grants,
 application states) and conversation-owner-scoped pending approvals.

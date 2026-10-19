@@ -42,6 +42,7 @@ type Options struct {
 	Target                                                                   TargetDispatch
 	CleanupTarget                                                            func(context.Context, string, bool) error
 
+	WorkspaceHome       string // Optional destination home override for embedded/test hosts.
 	Embedded            bool
 	SandboxDirectory    string
 	Node                string
@@ -235,7 +236,17 @@ func (s *Service) host(owner string, generation uint64) (*executor.Engine, error
 		if err != nil {
 			return nil, err
 		}
-		e = executor.New(executor.Options{ProcessWorker: []string{worker}, Admit: s.executionAdmission, Node: s.options.Node, Home: s.options.AgentHome, SandboxDirectory: s.options.SandboxDirectory, ProtectedPaths: []string{s.options.Root}})
+		options := executor.Options{ProcessWorker: []string{worker}, Admit: s.executionAdmission, Node: s.options.Node, Home: s.options.AgentHome, SandboxDirectory: s.options.SandboxDirectory, ProtectedPaths: []string{s.options.Root}}
+		workspace, workspaceErr := s.RunnerJournal.TaskWorkspace(s.ctx, owner)
+		if workspaceErr != nil {
+			return nil, workspaceErr
+		}
+		if workspace != nil {
+			options.SandboxRead = append(options.SandboxRead, workspace.GitDirs...)
+			options.SandboxWrite = append(options.SandboxWrite, workspace.GitDirs...)
+			options.SandboxRead = append(options.SandboxRead, filepath.Join(s.options.Root, "resource-cache", "task-skills", owner))
+		}
+		e = executor.New(options)
 		s.hosts[owner] = e
 		if s.hostGenerations == nil {
 			s.hostGenerations = map[string]uint64{}

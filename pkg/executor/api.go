@@ -75,6 +75,8 @@ type Options struct {
 	Node             string
 	SandboxDirectory string
 	ProtectedPaths   []string
+	SandboxRead      []string
+	SandboxWrite     []string
 	PatchWorker      []string
 }
 

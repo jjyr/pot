@@ -249,20 +249,23 @@ func (s *Service) installTaskSkills(ctx context.Context, r taskResource, owner, 
 		return nil, errors.New("resource installation requires destination Runtime")
 	}
 	roots := []core.SkillRoot{}
-	workspaceRoot := s.options.Workspace
-	workspace := filepath.Join(workspaceRoot, "tasks", owner)
+	workspaceRoot := filepath.Join(s.options.Root, "resource-cache", "task-skills")
+	if err := os.MkdirAll(workspaceRoot, 0700); err != nil {
+		return nil, err
+	}
+	workspace := filepath.Join(workspaceRoot, owner)
 
 	anchor, err := os.OpenRoot(workspaceRoot)
 	if err != nil {
 		return nil, err
 	}
 	defer anchor.Close()
-	relative := filepath.Join("tasks", owner, ".pot/control-resources", revision)
+	relative := filepath.Join(owner, revision)
 	if err = anchor.RemoveAll(relative); err != nil {
 		return nil, err
 	}
 	for i, tree := range r.Roots {
-		directory := filepath.Join(workspace, ".pot/control-resources", revision, fmt.Sprint(i))
+		directory := filepath.Join(workspace, revision, fmt.Sprint(i))
 		relativeRoot := filepath.Join(relative, fmt.Sprint(i))
 		if err := anchor.MkdirAll(relativeRoot, 0700); err != nil {
 			return nil, err
@@ -299,7 +302,7 @@ func (s *Service) installTaskSkills(ctx context.Context, r taskResource, owner, 
 			}
 		}
 		fs.Close()
-		roots = append(roots, core.SkillRoot{Path: directory, Location: filepath.ToSlash(filepath.Join(workspace, ".pot/control-resources", revision, fmt.Sprint(i))), Builtin: tree.Builtin})
+		roots = append(roots, core.SkillRoot{Path: directory, Location: filepath.ToSlash(filepath.Join(workspace, revision, fmt.Sprint(i))), Builtin: tree.Builtin})
 	}
 	return roots, ctx.Err()
 }

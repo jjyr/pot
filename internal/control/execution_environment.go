@@ -26,6 +26,10 @@ func (s *Service) addExecutionEnvironment(execution *core.ExecutionContext, targ
 	if err != nil {
 		return err
 	}
-	execution.ContextSections = append(execution.ContextSections, executionEnvironment(policy, target, execution.Workspace))
+	if execution.Role == core.Worker {
+		execution.ContextSections = append(execution.ContextSections, core.ContextSection{Key: "environment", Text: "cwd: " + execution.Workspace})
+	} else {
+		execution.ContextSections = append(execution.ContextSections, executionEnvironment(policy, target, execution.Workspace))
+	}
 	return nil
 }

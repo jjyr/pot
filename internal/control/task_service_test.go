@@ -97,7 +97,11 @@ func TestLocalTaskUsesRunnerSharedCapacityControlModelAndSummary(t *testing.T) {
 			t.Fatalf("Task did not finish: %+v: %v", r, err)
 		}
 	}
-	data, err := os.ReadFile(filepath.Join(root, "agent-workspace", "tasks", accepted.Info.ID, "artifact.txt"))
+	taskRoot, err := s.taskWorkspacePath(ctx, accepted.Info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(taskRoot, "artifact.txt"))
 	if err != nil || string(data) != "proof" {
 		t.Fatalf("fixed worker artifact: %s %v", data, err)
 	}

@@ -36,8 +36,9 @@ func TestHostAssistantWorkspaceAndInstructionDiscoveryAreOwnerScoped(t *testing.
 	if err != nil || mail.Owner != "mail-execution" || mail.Workspace != a {
 		t.Fatal(mail, err)
 	}
+	workerRoot := bindTestWorkspace(t, s, "worker", t.TempDir())
 	worker, err := s.prepareExecution(ctx, "worker", core.RuntimeTarget("local"), true, "")
-	if err != nil || worker.Workspace != filepath.Join(s.options.Workspace, "tasks", "worker") {
+	if err != nil || worker.Workspace != workerRoot {
 		t.Fatal(worker, err)
 	}
 }

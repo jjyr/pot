@@ -17,10 +17,14 @@ Dispatcher -> machine/default + exact command authorization
 
 ## Workspaces, files and environment
 
-Main uses `WORKSPACE/assistants/ASSISTANT_ID`; Workers use
-`WORKSPACE/tasks/TASK_ID`. Instructions and Skills come from the destination.
-Control resources synchronize before first Task preparation. Project replication,
-VM images and host/guest path translation are absent.
+Main uses `WORKSPACE/assistants/ASSISTANT_ID`. Workers bind their selected project,
+a managed Git worktree, or an OS temporary directory before their first model
+request. Commands, patches, plugins, instruction discovery and protected execution
+use this same binding. [Task workspace selection](task-workspaces.md) defines
+selection, base refresh, directory naming and recovery. Control resources
+synchronize before preparation and selected Skills remain in the destination
+Runtime resource cache. Project replication, VM images and host/guest path
+translation are absent.
 
 Protected launches require packaged Node/SRT assets and a confined workspace.
 Workspace/project files are writable. System libraries, selected installation

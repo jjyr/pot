@@ -33,7 +33,7 @@ while handling agent correspondence remain references, never owner guidance.
 checks. `agent_messages` in the Control's `tasks.sqlite` stores Task inputs,
 assistant correspondence, task-result events and plugin notifications. Task input
 and notification views are transcript/receiver projections over this table, not separate queues.
-Task completion and its event commit in the same transaction. Task schema 7 and
+Task completion and its event commit in the same transaction. Task schema 8 and
 schedule schema 2 require the unified outcome format; older schemas are rejected
 without importing legacy queues or schedule notifications.
 
