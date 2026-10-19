@@ -20,6 +20,15 @@ complete-host facade and may compose `internal/` services behind private fields.
 Internal implementation types do not appear in its public signatures. See
 [component boundaries](backend-components.md) for package responsibilities.
 
+## Native peer transport
+
+`pkg/peer` provides framed TCP sessions with Ed25519 identity verification,
+session-bound signed frames, service admission and bidirectional RPC. Hosts inject
+keys and handlers; the package has no product or third-party dependencies.
+Use `Server` with a caller-created listener and `Dial` with a trusted expected
+identity. Business permissions and durable recovery remain in the service;
+uncertain calls are never automatically replayed. See [Peer protocol](peer-protocol.md).
+
 ## Third-party integrations
 
 `pkg/integrations` provides account and OAuth session lifecycle behind injected

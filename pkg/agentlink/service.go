@@ -2,6 +2,7 @@ package agentlink
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -10,7 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"net/http"
+	"github.com/jjyr/pot/pkg/peer"
 	"net/url"
 	"strings"
 	"sync"
@@ -22,12 +23,12 @@ import (
 )
 
 type Service struct {
-	options Options
-	client  *http.Client
-	mu      sync.Mutex
-	running sync.Mutex
-	syncMu  sync.Mutex
-	rates   map[string]rate
+	options  Options
+	sessions map[string]*peer.Session
+	mu       sync.Mutex
+	running  sync.Mutex
+	syncMu   sync.Mutex
+	rates    map[string]rate
 }
 type rate struct {
 	At     time.Time
@@ -35,27 +36,26 @@ type rate struct {
 	Active int
 }
 type address struct {
-	Version    int      `json:"version"`
-	Endpoint   string   `json:"endpoint"`
-	Identity   Identity `json:"identity"`
-	Invitation string   `json:"invitation"`
-	Token      string   `json:"token"`
+	Version    int           `json:"version"`
+	Host       peer.Identity `json:"host"`
+	Endpoint   string        `json:"endpoint"`
+	Identity   Identity      `json:"identity"`
+	Invitation string        `json:"invitation"`
+	Code       string        `json:"code"`
 }
 type credential struct {
-	Token           string       `json:"token"`
-	InvitationToken string       `json:"invitation_token,omitempty"`
-	Pair            *pairRequest `json:"pair,omitempty"`
+	Pair *pairRequest `json:"pair,omitempty"`
 }
 type pairRequest struct {
 	ID         string   `json:"id"`
 	Invitation string   `json:"invitation"`
 	Local      Identity `json:"local"`
 	Peer       Identity `json:"peer"`
-	Token      string   `json:"token"`
+	Code       string   `json:"code"`
 }
 
 func New(options Options) (*Service, error) {
-	if options.DB == nil || options.Secrets == nil || options.Identity == nil || options.Mailbox == nil {
+	if options.DB == nil || options.Secrets == nil || options.Identity == nil || options.Mailbox == nil || len(options.HostKey) != ed25519.PrivateKeySize || options.HostIdentity.Validate() != nil || options.HostIdentity != peer.NewIdentity(options.HostIdentity.ID, options.HostKey.Public().(ed25519.PublicKey)) {
 		return nil, ErrInvalid
 	}
 	if options.InvitationTTL == 0 {
@@ -70,7 +70,8 @@ func New(options Options) (*Service, error) {
 	if options.PollInterval < 100*time.Millisecond {
 		return nil, ErrInvalid
 	}
-	return &Service{options: options, client: NewHTTPClient(options.HTTPClient), rates: map[string]rate{}}, nil
+	options.HostKey = append(ed25519.PrivateKey(nil), options.HostKey...)
+	return &Service{options: options, sessions: map[string]*peer.Session{}, rates: map[string]rate{}}, nil
 }
 
 func validIdentity(identity Identity) bool {
@@ -111,11 +112,11 @@ func parseAddress(ctx context.Context, raw string) (address, error) {
 		return value, ErrInvalid
 	}
 	data, err := base64.RawURLEncoding.DecodeString(u.Fragment)
-	if err != nil || decodeJSON(data, &value) != nil || value.Version != 1 || !validIdentity(value.Identity) || !validID(value.Invitation) || !validToken(value.Token) {
+	if err != nil || decodeJSON(data, &value) != nil || value.Version != 2 || value.Host.Validate() != nil || value.Host.ID != value.Identity.Address.ControlID || !validIdentity(value.Identity) || !validID(value.Invitation) || !validToken(value.Code) {
 		return address{}, ErrInvalid
 	}
-	origin, err := ValidateEndpoint(ctx, value.Endpoint)
-	if err != nil || u.Scheme+"://"+u.Host+u.Path != origin+Prefix+"/connect" || u.RawQuery != "" || u.ForceQuery || u.RawPath != "" || u.User != nil {
+	origin, err := peer.ValidateEndpoint(ctx, value.Endpoint)
+	if err != nil || u.Scheme+"://"+u.Host+u.Path != origin || u.RawQuery != "" || u.ForceQuery || u.RawPath != "" || u.User != nil {
 		return address{}, ErrInvalid
 	}
 	value.Endpoint = origin
@@ -127,12 +128,12 @@ func (s *Service) Invite(ctx context.Context, assistantID, endpoint string) (Inv
 	if err != nil {
 		return Invitation{}, err
 	}
-	if !validIdentity(identity) {
+	if !validIdentity(identity) || identity.Address.ControlID != s.options.HostIdentity.ID {
 		return Invitation{}, ErrInvalid
 	}
-	endpoint, err = ValidateEndpoint(ctx, endpoint)
+	endpoint, err = peer.ValidateEndpoint(ctx, endpoint)
 	if err != nil {
-		return Invitation{}, err
+		return Invitation{}, ErrInvalid
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -157,8 +158,8 @@ func (s *Service) Invite(ctx context.Context, assistantID, endpoint string) (Inv
 		return Invitation{}, err
 	}
 	defer clear(secret)
-	value, _ := json.Marshal(address{1, endpoint, identity, id, string(secret)})
-	return Invitation{Address: endpoint + Prefix + "/connect#" + base64.RawURLEncoding.EncodeToString(value), ExpiresAt: time.UnixMilli(expires).UTC()}, nil
+	value, _ := json.Marshal(address{Version: 2, Host: s.options.HostIdentity, Endpoint: endpoint, Identity: identity, Invitation: id, Code: string(secret)})
+	return Invitation{Address: endpoint + "#" + base64.RawURLEncoding.EncodeToString(value), ExpiresAt: time.UnixMilli(expires).UTC()}, nil
 }
 
 func (s *Service) List(ctx context.Context) ([]Connection, error) {
@@ -201,7 +202,7 @@ func (s *Service) save(ctx context.Context, c Connection, cred credential) error
 		return err
 	}
 	raw, _ := json.Marshal(c)
-	_, err := s.options.DB.ExecContext(ctx, `INSERT INTO agent_link_connections(id,route,state,metadata,secret_ref,token_hash)VALUES(?,?,?,?,?,?)`, c.ID, route(c.Local.Address, c.Peer.Address), c.State, string(raw), ref, digest([]byte(cred.Token)))
+	_, err := s.options.DB.ExecContext(ctx, `INSERT INTO agent_link_connections(id,route,state,metadata,secret_ref,peer_key)VALUES(?,?,?,?,?,?)`, c.ID, route(c.Local.Address, c.Peer.Address), c.State, string(raw), ref, c.PeerHost.PublicKey)
 	return err
 }
 func (s *Service) secret(ctx context.Context, id string) (credential, error) {
@@ -245,7 +246,7 @@ func (s *Service) Connect(ctx context.Context, assistantID, raw string) (Connect
 	if err != nil {
 		return Connection{}, err
 	}
-	if !validIdentity(local) || local.Address.ControlID == address.Identity.Address.ControlID {
+	if !validIdentity(local) || local.Address.ControlID != s.options.HostIdentity.ID || local.Address.ControlID == address.Identity.Address.ControlID {
 		return Connection{}, ErrInvalid
 	}
 	s.mu.Lock()
@@ -254,19 +255,22 @@ func (s *Service) Connect(ctx context.Context, assistantID, raw string) (Connect
 	var value Connection
 	if errors.Is(err, sql.ErrNoRows) {
 		now := time.Now().UTC()
-		value = Connection{ID: newID(), Local: local, Peer: address.Identity, Endpoint: address.Endpoint, State: "connecting", CreatedAt: now, UpdatedAt: now}
-		request := pairRequest{ID: value.ID, Invitation: address.Invitation, Local: local, Peer: address.Identity, Token: token()}
-		err = s.save(ctx, value, credential{Token: request.Token, InvitationToken: address.Token, Pair: &request})
+		value = Connection{SchemaVersion: 2, PeerHost: address.Host, ID: newID(), Local: local, Peer: address.Identity, Endpoint: address.Endpoint, State: "connecting", CreatedAt: now, UpdatedAt: now}
+		request := pairRequest{ID: value.ID, Invitation: address.Invitation, Local: local, Peer: address.Identity, Code: address.Code}
+		err = s.save(ctx, value, credential{Pair: &request})
 	} else if err == nil {
 		value, err = s.Get(ctx, id)
 		// A definitively expired invitation never established a remote binding.
 		// A newly copied invitation may replace that failed intent; ambiguous
 		// network failures keep their original idempotent handshake instead.
-		if err == nil && value.LastSeen == nil && value.LastError == ErrExpired.Error() {
+		if err == nil && value.LastSeen == nil && (value.LastError == ErrExpired.Error() || value.LastError == ErrReconnectRequired.Error()) {
 			previous, secretErr := s.secret(ctx, value.ID)
+			if value.LastError == ErrReconnectRequired.Error() {
+				secretErr = nil
+			}
 			if secretErr != nil {
 				err = secretErr
-			} else if previous.Pair != nil && previous.Pair.Invitation != address.Invitation {
+			} else if value.PeerHost.PublicKey == "" || previous.Pair != nil && previous.Pair.Invitation != address.Invitation {
 				value.State = "revoked"
 				err = s.update(ctx, value)
 				if err == nil {
@@ -274,9 +278,9 @@ func (s *Service) Connect(ctx context.Context, assistantID, raw string) (Connect
 				}
 				if err == nil {
 					now := time.Now().UTC()
-					value = Connection{ID: newID(), Local: local, Peer: address.Identity, Endpoint: address.Endpoint, State: "connecting", CreatedAt: now, UpdatedAt: now}
-					request := pairRequest{ID: value.ID, Invitation: address.Invitation, Local: local, Peer: address.Identity, Token: token()}
-					err = s.save(ctx, value, credential{Token: request.Token, InvitationToken: address.Token, Pair: &request})
+					value = Connection{SchemaVersion: 2, PeerHost: address.Host, ID: newID(), Local: local, Peer: address.Identity, Endpoint: address.Endpoint, State: "connecting", CreatedAt: now, UpdatedAt: now}
+					request := pairRequest{ID: value.ID, Invitation: address.Invitation, Local: local, Peer: address.Identity, Code: address.Code}
+					err = s.save(ctx, value, credential{Pair: &request})
 				}
 			}
 		}
@@ -291,8 +295,8 @@ func (s *Service) Connect(ctx context.Context, assistantID, raw string) (Connect
 	return s.Get(ctx, value.ID)
 }
 
-func (s *Service) accept(ctx context.Context, request pairRequest, provided string) (Connection, error) {
-	if !validID(request.ID) || !validID(request.Invitation) || !validIdentity(request.Local) || !validIdentity(request.Peer) || !validToken(request.Token) || !validToken(provided) || request.Local.Address.ControlID == request.Peer.Address.ControlID {
+func (s *Service) accept(ctx context.Context, request pairRequest, remote peer.Identity) (Connection, error) {
+	if !validID(request.ID) || !validID(request.Invitation) || !validIdentity(request.Local) || !validIdentity(request.Peer) || !validToken(request.Code) || remote.Validate() != nil || remote.ID != request.Local.Address.ControlID || request.Local.Address.ControlID == request.Peer.Address.ControlID {
 		return Connection{}, ErrInvalid
 	}
 	s.mu.Lock()
@@ -317,10 +321,10 @@ func (s *Service) accept(ctx context.Context, request pairRequest, provided stri
 		return Connection{}, err
 	}
 	defer clear(secret)
-	if subtle.ConstantTimeCompare(secret, []byte(provided)) != 1 {
+	if subtle.ConstantTimeCompare(secret, []byte(request.Code)) != 1 {
 		return Connection{}, ErrUnauthorized
 	}
-	requestRaw, _ := json.Marshal(request)
+	requestRaw, _ := json.Marshal([]any{request, remote})
 	hash := digest(requestRaw)
 	if claim != "" {
 		if claim != hash {
@@ -332,8 +336,8 @@ func (s *Service) accept(ctx context.Context, request pairRequest, provided stri
 		return Connection{}, ErrExpired
 	}
 	now := time.Now().UTC()
-	value := Connection{ID: request.ID, Local: current, Peer: request.Local, State: "connecting", CreatedAt: now, UpdatedAt: now}
-	credential := credential{Token: request.Token}
+	value := Connection{SchemaVersion: 2, PeerHost: remote, ID: request.ID, Local: current, Peer: request.Local, State: "connecting", CreatedAt: now, UpdatedAt: now}
+	credential := credential{}
 	secretRaw, _ := json.Marshal(credential)
 	secretRef := "agent-link/connection/" + value.ID
 	if err = s.options.Secrets.Put(ctx, secretRef, secretRaw); err != nil {
@@ -341,7 +345,7 @@ func (s *Service) accept(ctx context.Context, request pairRequest, provided stri
 	}
 	metadata, _ := json.Marshal(value)
 	err = storage.Transaction(ctx, s.options.DB, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `INSERT INTO agent_link_connections(id,route,state,metadata,secret_ref,token_hash)VALUES(?,?,?,?,?,?)`, value.ID, route(value.Local.Address, value.Peer.Address), value.State, string(metadata), secretRef, digest([]byte(request.Token)))
+		_, err := tx.ExecContext(ctx, `INSERT INTO agent_link_connections(id,route,state,metadata,secret_ref,peer_key)VALUES(?,?,?,?,?,?)`, value.ID, route(value.Local.Address, value.Peer.Address), value.State, string(metadata), secretRef, remote.PublicKey)
 		if err != nil {
 			return ErrConflict
 		}
@@ -368,6 +372,7 @@ func (s *Service) Run(ctx context.Context) {
 		return
 	}
 	defer s.running.Unlock()
+	defer s.closeSessions()
 	ticker := time.NewTicker(s.options.PollInterval)
 	defer ticker.Stop()
 	for {
@@ -377,15 +382,19 @@ func (s *Service) Run(ctx context.Context) {
 				if ctx.Err() != nil {
 					return
 				}
-				if c.Endpoint != "" {
-					if c.State != "revoked" {
-						_ = s.Sync(ctx, c.ID)
-					} else if c.RevocationPending {
+				if c.State == "revoked" {
+					if c.RevocationPending && c.Endpoint != "" {
 						_ = s.propagateRevoke(ctx, c)
 					}
-				} else if c.State == "ready" {
-					s.expireListener(ctx, c.ID)
+					continue
 				}
+				if c.PeerHost.Validate() != nil {
+					continue
+				}
+				if s.session(c.ID) == nil && c.Endpoint == "" {
+					continue
+				}
+				_ = s.Sync(ctx, c.ID)
 			}
 		}
 		select {
@@ -393,16 +402,5 @@ func (s *Service) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-	}
-}
-
-func (s *Service) expireListener(ctx context.Context, id string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	current, err := s.Get(ctx, id)
-	if err == nil && current.State == "ready" && current.LastSeen != nil && time.Since(*current.LastSeen) > 30*time.Second {
-		current.State = "offline"
-		current.LastError = ErrUnavailable.Error()
-		_ = s.update(ctx, current)
 	}
 }

@@ -4,24 +4,26 @@ package agentlink
 
 import (
 	"context"
+	"crypto/ed25519"
 	"database/sql"
 	"errors"
-	"net/http"
+	"github.com/jjyr/pot/pkg/peer"
 	"time"
 
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
-const Prefix = "/api/v1/agent-link"
+const ServiceName = "agent-link"
 
 var (
-	ErrInvalid      = errors.New("agent_link_invalid")
-	ErrNotFound     = errors.New("agent_link_not_found")
-	ErrUnauthorized = errors.New("agent_link_authentication_failed")
-	ErrExpired      = errors.New("agent_link_invitation_expired")
-	ErrConflict     = errors.New("agent_link_identity_conflict")
-	ErrRevoked      = errors.New("agent_link_revoked")
-	ErrUnavailable  = errors.New("agent_link_unreachable")
+	ErrInvalid           = errors.New("agent_link_invalid")
+	ErrNotFound          = errors.New("agent_link_not_found")
+	ErrUnauthorized      = errors.New("agent_link_authentication_failed")
+	ErrExpired           = errors.New("agent_link_invitation_expired")
+	ErrConflict          = errors.New("agent_link_identity_conflict")
+	ErrRevoked           = errors.New("agent_link_revoked")
+	ErrReconnectRequired = errors.New("agent_link_reconnect_required")
+	ErrUnavailable       = errors.New("agent_link_unreachable")
 )
 
 type Identity struct {
@@ -31,16 +33,18 @@ type Identity struct {
 }
 
 type Connection struct {
-	ID                string     `json:"id"`
-	Local             Identity   `json:"local"`
-	Peer              Identity   `json:"peer"`
-	Endpoint          string     `json:"endpoint,omitempty"`
-	State             string     `json:"state"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	LastSeen          *time.Time `json:"last_seen,omitempty"`
-	LastError         string     `json:"last_error,omitempty"`
-	RevocationPending bool       `json:"revocation_pending,omitempty"`
+	SchemaVersion     int           `json:"schema_version"`
+	PeerHost          peer.Identity `json:"peer_host"`
+	ID                string        `json:"id"`
+	Local             Identity      `json:"local"`
+	Peer              Identity      `json:"peer"`
+	Endpoint          string        `json:"endpoint,omitempty"`
+	State             string        `json:"state"`
+	CreatedAt         time.Time     `json:"created_at"`
+	UpdatedAt         time.Time     `json:"updated_at"`
+	LastSeen          *time.Time    `json:"last_seen,omitempty"`
+	LastError         string        `json:"last_error,omitempty"`
+	RevocationPending bool          `json:"revocation_pending,omitempty"`
 }
 
 // Invitation.Address contains a single-use capability. Expose it only to the
@@ -67,14 +71,13 @@ type SecretStore interface {
 
 type Options struct {
 	// DB is a caller-owned, migrated storage.ControlDatabase. Service never closes it.
-	DB       *sql.DB
-	Secrets  SecretStore
-	Identity func(context.Context, string) (Identity, error)
-	Mailbox  Mailbox
-	// HTTPClient customizes HTTPS (for example CA roots). HTTP always uses the
-	// private-network, proxy-free transport enforced by NewHTTPClient.
-	HTTPClient *http.Client
-	Changed    func()
+	DB           *sql.DB
+	Secrets      SecretStore
+	Identity     func(context.Context, string) (Identity, error)
+	Mailbox      Mailbox
+	HostIdentity peer.Identity
+	HostKey      ed25519.PrivateKey
+	Changed      func()
 	// PollInterval is bounded below by 100 ms; default is two seconds.
 	PollInterval time.Duration
 	// InvitationTTL defaults to one hour and cannot exceed 24 hours.
