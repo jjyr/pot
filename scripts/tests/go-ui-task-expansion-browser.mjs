@@ -17,6 +17,7 @@ async function mountFixture(){
   for(const [space,count]of [['one',4],['two',4]])f.items.set(space,f.makeTasks(count,space));
   const snapshot=()=>({runtime_id:'fixture',boot_id:'boot',owner_id:JSON.stringify([scope.space,scope.owner]),conversation_id:scope.space,cursor:String(++cursor),running:false,turn_id:null,agent:{phase:'ready'},messages:[...Array.from({length:12},(_,index)=>({id:`old-${index}`,role:index%2?'assistant':'user',text:`Fixture history ${index+1}. `+'Only synthetic conversation data is used for checking reading positions. '.repeat(5),status:'complete',...index%2?{reply_to:`old-${index-1}`}:{}})),{id:'user',role:'user',text:'请同时处理这些后台任务。',status:'complete'},{id:'assistant',role:'assistant',reply_to:'user',text:'任务正在进行，有结果我会告诉你。',status:'complete'},...f.extraMessages]});
   const client=f.client={production:true,runtime:{runtime_id:'fixture',boot_id:'boot'},scope:()=>({...scope}),setScope:value=>scope={...scope,...value},snapshot:async()=>snapshot(),
+    onNotificationClick:callback=>{f.notificationClick=callback;return()=>{f.notificationClick=null;};},
     subscribe:(onSnapshot,status)=>{receive=onSnapshot;queueMicrotask(()=>{status('connected');onSnapshot(snapshot());});return()=>{receive=null;};},
     changes:callback=>{changes.add(callback);return()=>changes.delete(callback);},
     request:async(path,options={})=>{
@@ -30,6 +31,10 @@ async function mountFixture(){
         return {items:structuredClone(items.slice(offset,offset+limit)),total:items.length,next_offset:offset+limit<items.length?offset+limit:null,counts:{active:items.length}};
       }
       if(url.pathname==='/api/v1/tasks/outcomes')return {items:[],cursor:0,has_more:false};
+      if(url.pathname==='/api/v1/schedules'){
+        const plan={id:'plan',spec:{title:'Fixture schedule '+space,goal:'Fixture goal',enabled:true,kind:'daily',timezone:'UTC',time:'09:00'}};
+        return {items:[plan],selected:url.searchParams.get('selected')?plan:null,runs:[{id:'run',task_id:'task-0',summary:'Fixture scheduled task',state:'complete',scheduled_label:'Yesterday'}],runs_next_offset:null};
+      }
       const task=items.find(item=>url.pathname==='/api/v1/tasks/'+item.id);
       if(task)return {run_id:'run',info:task,request:{text:task.title}};
       if(url.pathname.endsWith('/events'))return {events:[],cursor:0,has_more:false};
@@ -123,5 +128,38 @@ async function regression(frame,completed){
   check(w.getComputedStyle(toggle()).textDecorationLine==='none'&&d.documentElement.dataset.theme==='dark','Dark theme');
   await f.setTasks(0);history().scrollTop=history().scrollHeight;f.extraMessages.push({id:'last-user',role:'user',text:'New turn',status:'complete'},{id:'last-assistant',role:'assistant',reply_to:'last-user',text:'A new live response should still follow when the reader is at the bottom. '.repeat(20),status:'complete'});f.snapshot();await settle();check(history().scrollHeight-history().clientHeight-history().scrollTop<2,'Ordinary new replies still follow across coalesced renders');
   await f.setTasks(4);d.querySelector('.background-tasks').scrollIntoView({block:'end'});await settle();
-  check(f.errors.length===0,'No page errors: '+f.errors.join('; '));completed.push(`${w.innerWidth}×${w.innerHeight}: counts, expansion, focus, clocks, refresh, additions/removals, anchors, details/settings, ownership, pagination, en/zh, dark PASS`);
+  await taskNavigationRegression(w,d,f);
+  check(f.errors.length===0,'No page errors: '+f.errors.join('; '));completed.push(`${w.innerWidth}×${w.innerHeight}: counts, expansion, focus, clocks, refresh, additions/removals, anchors, details/settings, ownership, pagination, en/zh, dark, task entry/return rules PASS`);
+}
+
+async function taskNavigationRegression(w,d,f){
+  const back=()=>d.querySelector('.titlebar button[aria-label="Back"]');
+  const chat=()=>!d.querySelector('.history').hidden&&!d.querySelector('.pot-app').classList.contains('show-directory');
+  const clickText=(selector,text)=>{const button=[...d.querySelectorAll(selector)].find(node=>node.textContent===text);check(button,'Missing '+text);button.click();};
+  await f.setTasks(51);
+  const draft=d.querySelector('#pot-composer');draft.value='Retain assistant draft';draft.dispatchEvent(new w.Event('input',{bubbles:true}));
+  d.querySelector('.rail-button[aria-label="Tasks"]').click();await waitFor(()=>d.querySelector('.task-list .task-row'));
+  const list=d.querySelector('.task-list');list.scrollTop=80;const scroll=list.scrollTop;check(scroll>0,'List return exercises a nonzero scroll position');
+  d.querySelector('.task-row').click();await waitFor(()=>d.querySelector('.task-page-host'));
+  check(w.history.state.potTaskReturn.route==='tasks','Only list entry captures a Tasks return');
+  f.preference('locale','zh-CN');await settle();await waitFor(()=>d.querySelector('.task-page-host'));
+  f.preference('locale','en');await settle();await waitFor(()=>d.querySelector('.task-page-host'));
+  check(w.history.state.potTaskReturn.route==='tasks','Locale changes retain list return');
+  back().click();await waitFor(()=>d.querySelector('.task-list'));await settle();
+  check(d.querySelector('.task-list').scrollTop===scroll&&d.querySelector('.history').hidden,'List entry returns to list and restores scroll');
+  clickText('.tasks-content>.segments button','Schedules');await waitFor(()=>[...d.querySelectorAll('.schedule-card button')].some(node=>node.textContent==='Fixture schedule two'));
+  clickText('.schedule-card button','Fixture schedule two');await waitFor(()=>[...d.querySelectorAll('button')].some(node=>node.textContent==='View task'));
+  clickText('button','View task');await waitFor(()=>d.querySelector('.task-page-host'));
+  check(w.history.state.potTaskReturn.scope?.space==='two','Schedule entry captures task owner Space');
+  d.dispatchEvent(new w.KeyboardEvent('keydown',{key:'[',metaKey:true,bubbles:true}));await waitFor(()=>chat()&&f.client.scope().space==='two');await settle();
+  check(d.querySelector('#pot-composer').value==='','Schedule task returns to its owner, without another Space draft');
+  f.notificationClick({space:'one',owner:'alpha',control:'control-a',task:'task-0',name:'Notification task',kind:'approval'});await waitFor(()=>d.querySelector('.task-page-host'));
+  const taskState=structuredClone(w.history.state);
+  check(taskState.potTaskReturn.route==='chat'&&taskState.potTaskReturn.scope.space==='one','Notification entry captures task owner instead of prior list context');
+  // Exercise browser history restoration of the explicit task return destination.
+  d.querySelector('.rail-button[aria-label="Tasks"]').click();await waitFor(()=>d.querySelector('.tasks-content'));
+  w.history.back();await waitFor(()=>d.querySelector('.task-page-host'));await settle();
+  check(JSON.stringify(w.history.state.potTaskReturn)===JSON.stringify(taskState.potTaskReturn),'History restores the task return destination');
+  back().click();await waitFor(()=>chat()&&f.client.scope().space==='one');await settle();
+  check(d.querySelector('#pot-composer').value==='Retain assistant draft','Notification Back restores owner conversation and draft');
 }

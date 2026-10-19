@@ -120,11 +120,19 @@ only content changes or available-width changes resize it.
 
 ### Parent navigation
 
-Back and ⌘[ follow page hierarchy: task → Tasks, schedule → Schedules,
+Back and ⌘[ follow page hierarchy: schedule → Schedules,
 conversation Usage → conversation, allowance editor → overall Usage. Narrow Chat
 returns to Assistants; wide Chat hides Back. Root lists, Machines, Usage and
 Settings have no parent button. There is no forward button or ⌘] binding.
 Editors instead restore their captured caller as described below.
+
+Task Back depends on its entry point. Opening a task from the Tasks list returns
+to that list, preserving its filters, pagination and scroll. All other task
+entries return to an assistant conversation: Chat restores the originating
+conversation; notifications and schedule run history open the task owner's
+conversation in its original Space. The titlebar button, ⌘[ and narrow edge Back
+share this rule. Task Usage returns to the task first and retains its return
+destination. Locale changes and browser history restoration retain that destination.
 
 Navigation caches filters, pagination, scroll and expansion state. The assistant
 directory belongs to the window; conversation and task state is scoped by owner.

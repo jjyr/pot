@@ -850,7 +850,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if(((value.potRoute||'chat')==='chat'||value.potUsage&&!value.potUsage.returnTask)&&scope.owner&&(!selectedAssistant||selectedAssistant.id!==scope.owner||selectedAssistant.space_id!==scope.space)){const item=assistants.find(item=>item.id===scope.owner&&item.space_id===scope.space);if(!item){error=t('missingAssistant');updateControls();return;}await selectAssistant(item,false,false);}
       if(value.potResource){route='settings';await pages.openResources(false);return;}
       if(value.potSchedule){route='tasks';await pages.openSchedule(value.potSchedule,false);return;}
-      if(value.potTask){route='tasks';await pages.openTask(value.potTask,{recordHistory:false,returnTo:value.potTaskReturn||{route:'tasks'}});return;}
+      if(value.potTask){route='tasks';await pages.openTask(value.potTask,{recordHistory:false,returnTo:value.potTaskReturn});return;}
       if(value.potUsage){route='usage';await pages.openUsage(value.potUsage,false);return;}
       await navigate(value.potRoute||'chat',{record:false});if((value.potRoute||'chat')==='chat')directoryOpen=!!value.potDirectory;
     }finally{restoringHistory=false;if(!disposed)renderShell();}
