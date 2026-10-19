@@ -115,4 +115,11 @@ function fixture(){
   assert.equal(r.request.attachments[0].id,'original');assert.equal(r.request.references[0].message_id,'ref');
   f.manager.close();
 }
+{
+  const state=createConversationState();beginSubscription(state);
+  acceptSnapshot(state,snapshot({running:false,turn_id:null}),state.epoch);setDraft(state,'rejected draft');
+  const first=beginSend(state,'original',{retryUserMessageID:null});settleSend(state,first,false,{status:409});
+  const retry=beginSend(state,'new-id',{retryUserMessageID:null});
+  assert.equal(retry.request,first.request,'the composer passes null for an absent retry target; rejection retry retains its request');
+}
 console.log('Send confirmation: held receipts, snapshot/query acceptance, bounded unknown recovery, immutable retries, identity fences and drafts passed');

@@ -74,7 +74,7 @@ export function beginSend(state, requestID, {allowRunning=false,attachments=[],r
   const references = draftReferences(state,key);
   if ((!text.trim() && !attachments.length) || state.pending.has(key)) return null;
   const retry = state.retries.get(key);
-  const sameTarget=retry?.user_message_id===(state.snapshot.running?state.snapshot.turn_id:undefined) && retry?.retry_user_message_id===retryUserMessageID;
+  const sameTarget=retry?.user_message_id===(state.snapshot.running?state.snapshot.turn_id:undefined) && (retry?.retry_user_message_id||undefined)===(retryUserMessageID||undefined);
   const request = sameTarget && retry?.text === text && JSON.stringify(retry.references||[])===JSON.stringify(references) && JSON.stringify(retry.attachments||[])===JSON.stringify(attachments) && retry.boot_id === state.snapshot.boot_id ? retry
     : {request_id: requestID, boot_id: state.snapshot.boot_id, conversation_id: state.snapshot.conversation_id, text,...(references.length?{references:references.map(ref=>({...ref}))}:{}),...(attachments.length?{attachments:attachments.map(item=>({...item}))}:{}),...(retryUserMessageID?{retry_user_message_id:retryUserMessageID}:{}),...(state.snapshot.running?{user_message_id:state.snapshot.turn_id}:{})};
   const receipt = {request, key, epoch: state.epoch, phase:'sending', draftVersion:state.draftVersions.get(key)||0, referenceVersion:state.referenceVersions.get(key)||0};
