@@ -15,7 +15,7 @@ import (
 // Session pins one assistant's selected configuration for one sender Agent;
 // user-chat context and assistant configuration are independent of this store.
 func (m *Mailbox) Session(ctx context.Context, message protocol.Envelope, initial core.ResolvedSpec) (core.ResolvedSpec, json.RawMessage, error) {
-	if message.To.ControlID != m.controlID {
+	if message.To.NodeID != m.nodeID {
 		return initial, nil, errors.New("mail session belongs to another Control")
 	}
 	if err := initial.Validate(); err != nil {

@@ -26,7 +26,7 @@ func (s *Service) Preview(ctx context.Context, raw string) (Preview, error) {
 	if err != nil {
 		return Preview{}, err
 	}
-	if address.Host.ID == s.options.HostIdentity.ID {
+	if address.Host.NodeID == s.options.HostIdentity.NodeID {
 		return Preview{}, ErrInvalid
 	}
 	// The hello is sent before the server's key can be checked. Keep its auth
@@ -62,7 +62,7 @@ func hostFingerprint(identity peer.Identity) string {
 }
 
 func (s *Service) previewInvitation(ctx context.Context, request previewRequest) (Preview, error) {
-	if !validID(request.Invitation) || !validToken(request.Code) || !validIdentity(request.Target) || request.Target.Address.ControlID != s.options.HostIdentity.ID {
+	if !validID(request.Invitation) || !validToken(request.Code) || !validIdentity(request.Target) || request.Target.Address.NodeID != s.options.HostIdentity.NodeID {
 		return Preview{}, ErrInvalid
 	}
 	var raw []byte

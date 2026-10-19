@@ -116,7 +116,7 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 			case "history":
 				result, err = s.Mailbox.History(ctx, request.AssistantID, request.After)
 			case "pending":
-				result, err = s.Mailbox.Pending(ctx, request.TargetControlID)
+				result, err = s.Mailbox.Pending(ctx, request.TargetNodeID)
 			case "deliver":
 				result, err = s.Mailbox.Deliver(ctx, *request.Message)
 			case "acknowledge":
@@ -173,7 +173,7 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 			} else {
 				var input protocol.TaskInput
 				if err = decode(r.Body, &input); err == nil {
-					err = s.Tasks.SendMessage(ctx, owner, id, input.RequestID, protocol.AgentRef{ControlID: s.Tasks.ControlID(), Kind: "user", AgentID: owner}, input.Text)
+					err = s.Tasks.SendMessage(ctx, owner, id, input.RequestID, protocol.AgentRef{NodeID: s.Tasks.ControlID(), Kind: "user", AgentID: owner}, input.Text)
 				}
 				result = map[string]bool{"accepted": err == nil}
 			}

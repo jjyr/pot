@@ -132,3 +132,24 @@ command is required. For rollback, restore the complete pre-upgrade backup and
 matching binary together. Do not erase migration records, change checksums or
 force an older binary to accept upgraded data. Failure diagnostics identify the
 database and migration; resolve the cause and restart with the same migration.
+
+## Key-dependent Agent identity conversion
+
+Control migration `0009_message_node_identity` performs typed JSON and route
+conversion and writes a pending receipt only when historical credentials or
+invitation claims need the existing master key. `secrets.Open` calls
+`storage.FinalizeNodeIdentity` before returning. The finalizer transforms only
+Agent Link pair intents, rebuilds the original invitation claim binding, reseals
+under the same key/reference, and removes the receipt in one transaction. A
+missing key or interrupted conversion leaves the receipt for a safe restart.
+Normally deleted credentials of fully revoked links remain deleted. A custom
+Agent Link SecretStore must complete its own conversion before starting the
+host; `agentlink.New` fences an incomplete pending stage.
+
+Tasks migration `0006_message_node_identity` preserves historical input digest
+bindings with an explicit per-message format receipt when the original full
+parent is not reconstructable. The frozen hash codec still checks every input
+field. This is an internal storage hash format, not legacy protocol acceptance.
+Typed mailbox and Task address conversions retain message IDs, delivery states,
+consumer membership and peer context. Historical model messages, plugin data,
+provider replay and arbitrary tool output remain untouched.

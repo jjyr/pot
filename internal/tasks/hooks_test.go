@@ -153,7 +153,7 @@ func TestPreparedOutcomeCannotCommitAfterConcurrentTaskChange(t *testing.T) {
 	port.mu.Unlock()
 	commits := 0
 	s.options.PrepareOutcome = func(ctx context.Context, snapshot Record, event protocol.TaskResultEvent) (OutcomeCommit, error) {
-		if err := s.SendMessage(ctx, "assistant", record.Info.ID, "reference", protocol.AgentRef{ControlID: "control", Kind: "task", AgentID: "peer"}, "late reference"); err != nil {
+		if err := s.SendMessage(ctx, "assistant", record.Info.ID, "reference", protocol.AgentRef{NodeID: "control", Kind: "task", AgentID: "peer"}, "late reference"); err != nil {
 			return nil, err
 		}
 		return func(context.Context, *sql.Tx, *protocol.TaskResultEvent) error { commits++; return nil }, nil

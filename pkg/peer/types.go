@@ -28,22 +28,22 @@ var ErrClosed = errors.New("peer session closed")
 var ErrUncertain = errors.New("peer request outcome uncertain")
 
 type Identity struct {
-	ID        string `json:"id"`
+	NodeID    string `json:"node_id"`
 	PublicKey string `json:"public_key"`
 }
 
 func NewIdentity(id string, key ed25519.PublicKey) Identity {
-	return Identity{ID: id, PublicKey: base64.RawURLEncoding.EncodeToString(key)}
+	return Identity{NodeID: id, PublicKey: base64.RawURLEncoding.EncodeToString(key)}
 }
 func (i Identity) Validate() error {
 	key, err := base64.RawURLEncoding.DecodeString(i.PublicKey)
-	if err != nil || len(key) != ed25519.PublicKeySize || len(i.ID) == 0 || len(i.ID) > 256 || !utf8.ValidString(i.ID) || strings.IndexFunc(i.ID, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) }) >= 0 {
+	if err != nil || len(key) != ed25519.PublicKeySize || len(i.NodeID) == 0 || len(i.NodeID) > 256 || !utf8.ValidString(i.NodeID) || strings.IndexFunc(i.NodeID, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) }) >= 0 {
 		return ErrUnauthorized
 	}
 	return nil
 }
 func validLocal(i Identity, key ed25519.PrivateKey) error {
-	if i.Validate() != nil || len(key) != ed25519.PrivateKeySize || NewIdentity(i.ID, key.Public().(ed25519.PublicKey)) != i {
+	if i.Validate() != nil || len(key) != ed25519.PrivateKeySize || NewIdentity(i.NodeID, key.Public().(ed25519.PublicKey)) != i {
 		return ErrUnauthorized
 	}
 	return nil

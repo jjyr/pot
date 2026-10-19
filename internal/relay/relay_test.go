@@ -27,9 +27,9 @@ func newNode(t *testing.T, id string) *testNode {
 	t.Cleanup(func() { mailbox.Close() })
 	return &testNode{id: id, mailbox: mailbox}
 }
-func (n *testNode) ControlID() string { return n.id }
+func (n *testNode) NodeID() string { return n.id }
 func (n *testNode) address() protocol.AgentRef {
-	return protocol.AgentRef{ControlID: n.id, Kind: "assistant", AgentID: "main"}
+	return protocol.AgentRef{NodeID: n.id, Kind: "assistant", AgentID: "main"}
 }
 func (n *testNode) Directory(context.Context) (protocol.Directory, error) {
 	if n.offline.Load() {
@@ -39,7 +39,7 @@ func (n *testNode) Directory(context.Context) (protocol.Directory, error) {
 	if n.wrongIdentity.Load() {
 		id = "changed"
 	}
-	return protocol.Directory{ControlID: id, Assistants: []protocol.MailAssistant{{Address: n.address(), Name: "Main"}}}, nil
+	return protocol.Directory{NodeID: id, Assistants: []protocol.MailAssistant{{Address: n.address(), Name: "Main"}}}, nil
 }
 func (n *testNode) Register(ctx context.Context, d protocol.Directory) error {
 	return n.mailbox.Register(ctx, d)

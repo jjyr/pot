@@ -235,7 +235,7 @@ func TestPluginStoredFormatUpgradePreservesBindingAndReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Recreate only the removed fields/table from the previous PR format.
-	if _, err := m.db.Exec(`DROP TABLE pot_migrations; CREATE TABLE plugin_delivery_rates(owner TEXT PRIMARY KEY,next INTEGER NOT NULL); INSERT INTO plugin_delivery_rates VALUES('main',9999999999999);
+	if _, err := m.db.Exec(`ALTER TABLE assistant_mail_identity RENAME COLUMN node_id TO control_id; ALTER TABLE assistant_contacts RENAME COLUMN node TO control; DROP TABLE task_input_digest_formats; DROP TABLE codex_mail_consumers; DROP TABLE pot_migrations; CREATE TABLE plugin_delivery_rates(owner TEXT PRIMARY KEY,next INTEGER NOT NULL); INSERT INTO plugin_delivery_rates VALUES('main',9999999999999);
  UPDATE agent_messages SET envelope=json_set(envelope,'$.plugin.event.group','thread','$.text','old duplicate');
  UPDATE agent_messages SET state=json_extract(envelope,'$.plugin.event.id');`); err != nil {
 		t.Fatal(err)
@@ -281,7 +281,7 @@ func TestPluginStoredFormatUpgradePreservesBindingAndReceipts(t *testing.T) {
 func TestPluginUnstartedReportReleaseCanRetryImmediately(t *testing.T) {
 	ctx := context.Background()
 	m, _ := mailbox(t, "local")
-	event := protocol.Envelope{Kind: "plugin_event", ID: "plugin-notice", From: protocol.AgentRef{ControlID: "local", Kind: "runtime", AgentID: "plugin-example"}, To: address("local", "main"), ConversationID: newConversation(), Plugin: &protocol.PluginNotification{Identity: core.PluginIdentity{ID: "example"}, Event: core.PluginEvent{ID: "one", Title: "Update", Body: "body", OccurredAt: "2026-01-01T00:00:00Z"}}}
+	event := protocol.Envelope{Kind: "plugin_event", ID: "plugin-notice", From: protocol.AgentRef{NodeID: "local", Kind: "runtime", AgentID: "plugin-example"}, To: address("local", "main"), ConversationID: newConversation(), Plugin: &protocol.PluginNotification{Identity: core.PluginIdentity{ID: "example"}, Event: core.PluginEvent{ID: "one", Title: "Update", Body: "body", OccurredAt: "2026-01-01T00:00:00Z"}}}
 	if err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error { return inbox.EnqueueTx(ctx, tx, event, "in", "queued") }); err != nil {
 		t.Fatal(err)
 	}

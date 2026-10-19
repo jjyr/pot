@@ -129,7 +129,7 @@ func (s *Service) validateStored(ctx context.Context) error {
 		if err := core.DecodeJSON([]byte(raw), &r); err != nil {
 			return err
 		}
-		if r.SchemaVersion != 9 || r.AssistantID != assistant || r.Info.AssistantID != assistant || r.Info.ID != id || r.Info.RunID != r.RunID || !core.Identifier(assistant) || !core.Identifier(id) {
+		if r.SchemaVersion != 10 || r.AssistantID != assistant || r.Info.AssistantID != assistant || r.Info.ID != id || r.Info.RunID != r.RunID || !core.Identifier(assistant) || !core.Identifier(id) {
 			return fmt.Errorf("invalid stored Task ownership/schema")
 		}
 		if err := r.Origin.Validate(); err != nil {
@@ -286,7 +286,7 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	if len(runes) > 80 {
 		title = string(runes[:80])
 	}
-	record := Record{SchemaVersion: 9, Origin: origin, AssistantID: assistant, Info: protocol.TaskInfo{Address: &protocol.AgentRef{ControlID: s.options.ControlID, Kind: "task", AgentID: id}, ID: id, AssistantID: assistant, Title: title, Phase: protocol.TaskQueued, CreatedAtMS: at, UpdatedAtMS: at, Routing: &protocol.TaskRouting{Profile: selection.Config.SourceProfileID, Revision: selection.Config.SourceProfileRevision, Provider: selection.Config.Provider, Reason: "assistant selection", SelectionReason: request.SelectionReason}}, Request: request, Config: selection.Config, Plugins: plugins, RunID: runID, Generation: 1}
+	record := Record{SchemaVersion: 10, Origin: origin, AssistantID: assistant, Info: protocol.TaskInfo{Address: &protocol.AgentRef{NodeID: s.options.ControlID, Kind: "task", AgentID: id}, ID: id, AssistantID: assistant, Title: title, Phase: protocol.TaskQueued, CreatedAtMS: at, UpdatedAtMS: at, Routing: &protocol.TaskRouting{Profile: selection.Config.SourceProfileID, Revision: selection.Config.SourceProfileRevision, Provider: selection.Config.Provider, Reason: "assistant selection", SelectionReason: request.SelectionReason}}, Request: request, Config: selection.Config, Plugins: plugins, RunID: runID, Generation: 1}
 	record.Info.MachineID = request.MachineID
 	record.Info.RunID = runID
 	if err := write(ctx, tx, &record); err != nil {
@@ -295,10 +295,10 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	if _, err := tx.ExecContext(ctx, "INSERT INTO task_writes(assistant_id,request_id,digest,task_id) VALUES(?,?,?,?)", assistant, request.RequestID, hash, id); err != nil {
 		return Record{}, err
 	}
-	sender := protocol.AgentRef{ControlID: s.options.ControlID, Kind: "assistant", AgentID: assistant}
-	inputHash, _ := core.HashJSON([]any{request.Text, "input", sender, (*protocol.Envelope)(nil)})
+	sender := protocol.AgentRef{NodeID: s.options.ControlID, Kind: "assistant", AgentID: assistant}
+	inputHash, _ := inputDigest(currentInputDigestFormat, request.Text, "input", sender, nil)
 	messageID, _ := core.HashJSON([]string{id, runID})
-	message := protocol.Envelope{ID: messageID, Kind: "input", Owner: assistant, RequestID: runID, Digest: inputHash, From: sender, To: protocol.AgentRef{ControlID: s.options.ControlID, Kind: "task", AgentID: id}, ConversationID: runID, Text: request.Text}
+	message := protocol.Envelope{ID: messageID, Kind: "input", Owner: assistant, RequestID: runID, Digest: inputHash, From: sender, To: protocol.AgentRef{NodeID: s.options.ControlID, Kind: "task", AgentID: id}, ConversationID: runID, Text: request.Text}
 	if err := inbox.EnqueueTx(ctx, tx, message, "in", "active"); err != nil {
 		return Record{}, err
 	}

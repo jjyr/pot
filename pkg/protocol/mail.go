@@ -16,13 +16,13 @@ const (
 )
 
 type AgentRef struct {
-	ControlID string `json:"control_id" required:"true"`
-	Kind      string `json:"kind" required:"true"`
-	AgentID   string `json:"agent_id" required:"true"`
+	NodeID  string `json:"node_id" required:"true"`
+	Kind    string `json:"kind" required:"true"`
+	AgentID string `json:"agent_id" required:"true"`
 }
 
 func (r AgentRef) Valid() bool {
-	return mailID(r.ControlID) && mailID(r.AgentID) && (r.Kind == "assistant" || r.Kind == "task" || r.Kind == "user" || r.Kind == "runtime")
+	return mailID(r.NodeID) && mailID(r.AgentID) && (r.Kind == "assistant" || r.Kind == "task" || r.Kind == "user" || r.Kind == "runtime")
 }
 func mailID(value string) bool { return core.Identifier(value) && !strings.Contains(value, ".") }
 
@@ -31,7 +31,7 @@ type MailAssistant struct {
 	Name    string   `json:"name"`
 }
 type Directory struct {
-	ControlID  string          `json:"control_id"`
+	NodeID     string          `json:"node_id"`
 	Assistants []MailAssistant `json:"assistants"`
 }
 type Envelope struct {
@@ -64,7 +64,7 @@ func (e Envelope) Validate() error {
 		return fmt.Errorf("invalid Runtime task event")
 	}
 	if e.Kind == "plugin_event" {
-		if e.Plugin == nil || e.From.Kind != "runtime" || e.From.ControlID != e.To.ControlID || e.To.Kind != "assistant" || e.From.AgentID != "plugin-"+e.Plugin.Identity.ID || e.Result != nil || e.Owner != "" || e.RequestID != "" || e.Digest != "" || e.Hops != 0 || e.ReplyTo != nil {
+		if e.Plugin == nil || e.From.Kind != "runtime" || e.From.NodeID != e.To.NodeID || e.To.Kind != "assistant" || e.From.AgentID != "plugin-"+e.Plugin.Identity.ID || e.Result != nil || e.Owner != "" || e.RequestID != "" || e.Digest != "" || e.Hops != 0 || e.ReplyTo != nil {
 			return fmt.Errorf("invalid plugin provenance")
 		}
 		if err := e.Plugin.Event.Validate(); err != nil {
@@ -140,13 +140,13 @@ type MailRecord struct {
 	Detail   *string  `json:"detail"`
 }
 type RelayRequest struct {
-	Operation       string     `json:"operation" required:"true"`
-	AssistantID     string     `json:"assistant_id,omitempty"`
-	After           int64      `json:"after,omitempty"`
-	Directory       *Directory `json:"directory,omitempty"`
-	TargetControlID string     `json:"target_control_id,omitempty"`
-	Message         *Envelope  `json:"message,omitempty"`
-	Receipt         *Receipt   `json:"receipt,omitempty"`
+	Operation    string     `json:"operation" required:"true"`
+	AssistantID  string     `json:"assistant_id,omitempty"`
+	After        int64      `json:"after,omitempty"`
+	Directory    *Directory `json:"directory,omitempty"`
+	TargetNodeID string     `json:"target_node_id,omitempty"`
+	Message      *Envelope  `json:"message,omitempty"`
+	Receipt      *Receipt   `json:"receipt,omitempty"`
 }
 
 func (r *RelayRequest) UnmarshalJSON(data []byte) error {
@@ -166,7 +166,7 @@ func (r *RelayRequest) UnmarshalJSON(data []byte) error {
 	case "register":
 		required = []string{"directory"}
 	case "pending":
-		required = []string{"target_control_id"}
+		required = []string{"target_node_id"}
 	case "deliver":
 		required = []string{"message"}
 	case "acknowledge":

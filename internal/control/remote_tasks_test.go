@@ -238,7 +238,7 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 	if _, err = control.Tasks.SetDispositions(ctx, "main", []protocol.TaskDisposition{{TaskID: record.Info.ID, RunID: record.RunID, Archived: true, Reason: "delivered"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err = control.Tasks.SendMessage(ctx, "main", record.Info.ID, "remote-followup", protocol.AgentRef{ControlID: control.Tasks.ControlID(), Kind: "user", AgentID: "main"}, "Continue using the existing remote artifact."); err != nil {
+	if err = control.Tasks.SendMessage(ctx, "main", record.Info.ID, "remote-followup", protocol.AgentRef{NodeID: control.Tasks.ControlID(), Kind: "user", AgentID: "main"}, "Continue using the existing remote artifact."); err != nil {
 		t.Fatal(err)
 	}
 	next := awaitLifecycleTask(t, ctx, control, record.Info.ID, func(r *tasks.Record) bool { return r.RunID != record.RunID && r.Info.Phase == protocol.TaskComplete })

@@ -56,8 +56,11 @@ type pairRequest struct {
 }
 
 func New(options Options) (*Service, error) {
-	if options.DB == nil || options.Secrets == nil || options.Identity == nil || options.Mailbox == nil || len(options.HostKey) != ed25519.PrivateKeySize || options.HostIdentity.Validate() != nil || options.HostIdentity != peer.NewIdentity(options.HostIdentity.ID, options.HostKey.Public().(ed25519.PublicKey)) {
+	if options.DB == nil || options.Secrets == nil || options.Identity == nil || options.Mailbox == nil || len(options.HostKey) != ed25519.PrivateKeySize || options.HostIdentity.Validate() != nil || options.HostIdentity != peer.NewIdentity(options.HostIdentity.NodeID, options.HostKey.Public().(ed25519.PublicKey)) {
 		return nil, ErrInvalid
+	}
+	if err := storage.CheckNodeIdentityReady(context.Background(), options.DB); err != nil {
+		return nil, err
 	}
 	if options.InvitationTTL == 0 {
 		options.InvitationTTL = time.Hour
@@ -113,7 +116,7 @@ func parseAddress(ctx context.Context, raw string) (address, error) {
 		return value, ErrInvalid
 	}
 	data, err := base64.RawURLEncoding.DecodeString(u.Fragment)
-	if err != nil || decodeJSON(data, &value) != nil || value.Version != 2 || value.Host.Validate() != nil || value.Host.ID != value.Identity.Address.ControlID || !validIdentity(value.Identity) || !validID(value.Invitation) || !validToken(value.Code) {
+	if err != nil || decodeJSON(data, &value) != nil || value.Version != 3 || value.Host.Validate() != nil || value.Host.NodeID != value.Identity.Address.NodeID || !validIdentity(value.Identity) || !validID(value.Invitation) || !validToken(value.Code) {
 		return address{}, ErrInvalid
 	}
 	origin, err := peer.ValidateEndpoint(ctx, value.Endpoint)
@@ -129,7 +132,7 @@ func (s *Service) Invite(ctx context.Context, assistantID, endpoint string) (Inv
 	if err != nil {
 		return Invitation{}, err
 	}
-	if !validIdentity(identity) || identity.Address.ControlID != s.options.HostIdentity.ID {
+	if !validIdentity(identity) || identity.Address.NodeID != s.options.HostIdentity.NodeID {
 		return Invitation{}, ErrInvalid
 	}
 	endpoint, err = peer.ValidateEndpoint(ctx, endpoint)
@@ -159,7 +162,7 @@ func (s *Service) Invite(ctx context.Context, assistantID, endpoint string) (Inv
 		return Invitation{}, err
 	}
 	defer clear(secret)
-	value, _ := json.Marshal(address{Version: 2, Host: s.options.HostIdentity, Endpoint: endpoint, Identity: identity, Invitation: id, Code: string(secret)})
+	value, _ := json.Marshal(address{Version: 3, Host: s.options.HostIdentity, Endpoint: endpoint, Identity: identity, Invitation: id, Code: string(secret)})
 	return Invitation{Address: endpoint + "#" + base64.RawURLEncoding.EncodeToString(value), ExpiresAt: time.UnixMilli(expires).UTC()}, nil
 }
 
@@ -247,7 +250,7 @@ func (s *Service) Connect(ctx context.Context, assistantID, raw string) (Connect
 	if err != nil {
 		return Connection{}, err
 	}
-	if !validIdentity(local) || local.Address.ControlID != s.options.HostIdentity.ID || local.Address.ControlID == address.Identity.Address.ControlID {
+	if !validIdentity(local) || local.Address.NodeID != s.options.HostIdentity.NodeID || local.Address.NodeID == address.Identity.Address.NodeID {
 		return Connection{}, ErrInvalid
 	}
 	s.mu.Lock()
@@ -256,7 +259,7 @@ func (s *Service) Connect(ctx context.Context, assistantID, raw string) (Connect
 	var value Connection
 	if errors.Is(err, sql.ErrNoRows) {
 		now := time.Now().UTC()
-		value = Connection{SchemaVersion: 2, PeerHost: address.Host, ID: newID(), Local: local, Peer: address.Identity, Endpoint: address.Endpoint, State: "connecting", CreatedAt: now, UpdatedAt: now}
+		value = Connection{SchemaVersion: 3, PeerHost: address.Host, ID: newID(), Local: local, Peer: address.Identity, Endpoint: address.Endpoint, State: "connecting", CreatedAt: now, UpdatedAt: now}
 		request := pairRequest{ID: value.ID, Invitation: address.Invitation, Local: local, Peer: address.Identity, Code: address.Code}
 		err = s.save(ctx, value, credential{Pair: &request})
 	} else if err == nil {
@@ -279,7 +282,7 @@ func (s *Service) Connect(ctx context.Context, assistantID, raw string) (Connect
 				}
 				if err == nil {
 					now := time.Now().UTC()
-					value = Connection{SchemaVersion: 2, PeerHost: address.Host, ID: newID(), Local: local, Peer: address.Identity, Endpoint: address.Endpoint, State: "connecting", CreatedAt: now, UpdatedAt: now}
+					value = Connection{SchemaVersion: 3, PeerHost: address.Host, ID: newID(), Local: local, Peer: address.Identity, Endpoint: address.Endpoint, State: "connecting", CreatedAt: now, UpdatedAt: now}
 					request := pairRequest{ID: value.ID, Invitation: address.Invitation, Local: local, Peer: address.Identity, Code: address.Code}
 					err = s.save(ctx, value, credential{Pair: &request})
 				}
@@ -297,7 +300,7 @@ func (s *Service) Connect(ctx context.Context, assistantID, raw string) (Connect
 }
 
 func (s *Service) accept(ctx context.Context, request pairRequest, remote peer.Identity) (Connection, error) {
-	if !validID(request.ID) || !validID(request.Invitation) || !validIdentity(request.Local) || !validIdentity(request.Peer) || !validToken(request.Code) || remote.Validate() != nil || remote.ID != request.Local.Address.ControlID || request.Local.Address.ControlID == request.Peer.Address.ControlID {
+	if !validID(request.ID) || !validID(request.Invitation) || !validIdentity(request.Local) || !validIdentity(request.Peer) || !validToken(request.Code) || remote.Validate() != nil || remote.NodeID != request.Local.Address.NodeID || request.Local.Address.NodeID == request.Peer.Address.NodeID {
 		return Connection{}, ErrInvalid
 	}
 	s.mu.Lock()
@@ -337,7 +340,7 @@ func (s *Service) accept(ctx context.Context, request pairRequest, remote peer.I
 		return Connection{}, ErrExpired
 	}
 	now := time.Now().UTC()
-	value := Connection{SchemaVersion: 2, PeerHost: remote, ID: request.ID, Local: current, Peer: request.Local, State: "connecting", CreatedAt: now, UpdatedAt: now}
+	value := Connection{SchemaVersion: 3, PeerHost: remote, ID: request.ID, Local: current, Peer: request.Local, State: "connecting", CreatedAt: now, UpdatedAt: now}
 	credential := credential{}
 	secretRaw, _ := json.Marshal(credential)
 	secretRef := "agent-link/connection/" + value.ID

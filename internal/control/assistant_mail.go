@@ -18,7 +18,7 @@ import (
 type mailParentKey struct{}
 
 func (s *Service) sendAssistantMail(ctx context.Context, id, owner string, send protocol.SendMail) (protocol.Envelope, error) {
-	result, err := s.sendAgentMessage(ctx, id, owner, protocol.AgentRef{ControlID: s.options.RuntimeID, Kind: "assistant", AgentID: owner}, send)
+	result, err := s.sendAgentMessage(ctx, id, owner, protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "assistant", AgentID: owner}, send)
 	if err != nil {
 		return protocol.Envelope{}, err
 	}

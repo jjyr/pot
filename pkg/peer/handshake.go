@@ -76,7 +76,7 @@ func writeSigned(c net.Conn, key ed25519.PrivateKey, domain string, value any) (
 	return raw, err
 }
 func validHello(h hello) bool {
-	return h.Version == 1 && h.Identity.Validate() == nil && validNonce(h.Nonce) && len(h.Service) > 0 && len(h.Service) <= 128 && len(h.Auth) <= 32*1024 && json.Valid(h.Auth) && (h.Expected == nil || h.Expected.Validate() == nil)
+	return h.Version == 2 && h.Identity.Validate() == nil && validNonce(h.Nonce) && len(h.Service) > 0 && len(h.Service) <= 128 && len(h.Auth) <= 32*1024 && json.Valid(h.Auth) && (h.Expected == nil || h.Expected.Validate() == nil)
 }
 
 // Dial authenticates a peer over private TCP. A nil Expected is suitable only
@@ -112,11 +112,11 @@ func dialConn(ctx context.Context, c net.Conn, o DialOptions) (*Session, error) 
 	if o.Auth == nil {
 		o.Auth = json.RawMessage("null")
 	}
-	h := hello{1, o.Identity, nonce(), o.Expected, o.Service, o.Auth}
+	h := hello{2, o.Identity, nonce(), o.Expected, o.Service, o.Auth}
 	if !validHello(h) {
 		return nil, fmt.Errorf("invalid peer handshake")
 	}
-	hraw, err := writeSigned(c, o.PrivateKey, "pot-peer/client-hello/v1", h)
+	hraw, err := writeSigned(c, o.PrivateKey, "pot-peer/client-hello/v2", h)
 	if err != nil {
 		return nil, err
 	}
@@ -126,11 +126,11 @@ func dialConn(ctx context.Context, c net.Conn, o DialOptions) (*Session, error) 
 	}
 	var envelope signed
 	var ch challenge
-	if decode(craw, &envelope) != nil || decode(envelope.Payload, &ch) != nil || ch.Version != 1 || !validNonce(ch.Nonce) || ch.Hello != hash(hraw) || open(craw, ch.Identity, "pot-peer/server-challenge/v1", &ch) != nil || (o.Expected != nil && *o.Expected != ch.Identity) {
+	if decode(craw, &envelope) != nil || decode(envelope.Payload, &ch) != nil || ch.Version != 2 || !validNonce(ch.Nonce) || ch.Hello != hash(hraw) || open(craw, ch.Identity, "pot-peer/server-challenge/v2", &ch) != nil || (o.Expected != nil && *o.Expected != ch.Identity) {
 		return nil, ErrUnauthorized
 	}
 	sid := hash(hraw, craw)
-	if _, err = writeSigned(c, o.PrivateKey, "pot-peer/client-confirm/v1", confirmation{sid}); err != nil {
+	if _, err = writeSigned(c, o.PrivateKey, "pot-peer/client-confirm/v2", confirmation{sid}); err != nil {
 		return nil, err
 	}
 	araw, err := readPacket(c, maxHandshake)
@@ -138,7 +138,7 @@ func dialConn(ctx context.Context, c net.Conn, o DialOptions) (*Session, error) 
 		return nil, err
 	}
 	var accepted acceptance
-	if open(araw, ch.Identity, "pot-peer/server-accept/v1", &accepted) != nil || accepted.Session != sid {
+	if open(araw, ch.Identity, "pot-peer/server-accept/v2", &accepted) != nil || accepted.Session != sid {
 		return nil, ErrUnauthorized
 	}
 	if accepted.Error != "" {
@@ -185,10 +185,10 @@ func (s *Server) Accept(ctx context.Context, c net.Conn) (_ *Session, err error)
 	}
 	var envelope signed
 	var h hello
-	if decode(hraw, &envelope) != nil || decode(envelope.Payload, &h) != nil || !validHello(h) || open(hraw, h.Identity, "pot-peer/client-hello/v1", &h) != nil || (h.Expected != nil && *h.Expected != s.Identity) {
+	if decode(hraw, &envelope) != nil || decode(envelope.Payload, &h) != nil || !validHello(h) || open(hraw, h.Identity, "pot-peer/client-hello/v2", &h) != nil || (h.Expected != nil && *h.Expected != s.Identity) {
 		return nil, ErrUnauthorized
 	}
-	craw, err := writeSigned(c, s.PrivateKey, "pot-peer/server-challenge/v1", challenge{1, s.Identity, nonce(), hash(hraw)})
+	craw, err := writeSigned(c, s.PrivateKey, "pot-peer/server-challenge/v2", challenge{2, s.Identity, nonce(), hash(hraw)})
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +198,7 @@ func (s *Server) Accept(ctx context.Context, c net.Conn) (_ *Session, err error)
 		return nil, err
 	}
 	var confirmed confirmation
-	if open(fraw, h.Identity, "pot-peer/client-confirm/v1", &confirmed) != nil || confirmed.Session != sid {
+	if open(fraw, h.Identity, "pot-peer/client-confirm/v2", &confirmed) != nil || confirmed.Session != sid {
 		return nil, ErrUnauthorized
 	}
 	var handler Handler
@@ -211,7 +211,7 @@ func (s *Server) Accept(ctx context.Context, c net.Conn) (_ *Session, err error)
 	if err != nil {
 		a.Error = boundedError(err).Message
 	}
-	if _, sendErr := writeSigned(c, s.PrivateKey, "pot-peer/server-accept/v1", a); sendErr != nil {
+	if _, sendErr := writeSigned(c, s.PrivateKey, "pot-peer/server-accept/v2", a); sendErr != nil {
 		return nil, sendErr
 	}
 	if err != nil {

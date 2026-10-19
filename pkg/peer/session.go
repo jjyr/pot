@@ -109,7 +109,7 @@ func (s *Session) send(ctx context.Context, value frame) error {
 	value.Session = s.id
 	value.Direction = s.outDirection
 	value.Sequence = s.outSeq
-	raw, err := seal(s.key, "pot-peer/frame/v1", value)
+	raw, err := seal(s.key, "pot-peer/frame/v2", value)
 	if err != nil {
 		return err
 	}
@@ -209,7 +209,7 @@ func (s *Session) readLoop() {
 			return
 		}
 		var f frame
-		if open(raw, s.remote, "pot-peer/frame/v1", &f) != nil || f.Session != s.id || f.Direction != s.inDirection || s.inSeq == math.MaxUint64 || f.Sequence != s.inSeq+1 {
+		if open(raw, s.remote, "pot-peer/frame/v2", &f) != nil || f.Session != s.id || f.Direction != s.inDirection || s.inSeq == math.MaxUint64 || f.Sequence != s.inSeq+1 {
 			return
 		}
 		s.inSeq = f.Sequence

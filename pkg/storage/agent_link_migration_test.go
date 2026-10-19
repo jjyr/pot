@@ -85,7 +85,7 @@ INSERT INTO agent_link_invitations VALUES('old-invite','{}','https://old.example
 	if err = db.QueryRow(`SELECT state,peer_key,secret_ref,json_extract(metadata,'$.schema_version'),json_extract(metadata,'$.endpoint'),json_extract(metadata,'$.last_error'),json_extract(metadata,'$.revocation_pending') FROM agent_link_connections WHERE id='old-link'`).Scan(&state, &peerKey, &secretRef, &version, &endpoint, &lastError, &pending); err != nil {
 		t.Fatal(err)
 	}
-	if state != "offline" || peerKey != "" || secretRef != "" || version != 2 || endpoint != "" || lastError != "agent_link_reconnect_required" || pending != 0 {
+	if state != "offline" || peerKey != "" || secretRef != "" || version != 3 || endpoint != "" || lastError != "agent_link_reconnect_required" || pending != 0 {
 		t.Fatal(state, peerKey, secretRef, version, endpoint, lastError, pending)
 	}
 	if err = db.QueryRow(`SELECT state,json_extract(metadata,'$.last_error') FROM agent_link_connections WHERE id='revoked-link'`).Scan(&state, &lastError); err != nil || state != "revoked" || lastError != "" {

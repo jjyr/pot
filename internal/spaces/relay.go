@@ -12,7 +12,7 @@ type mailEndpoint struct {
 	id      string
 }
 
-func (e mailEndpoint) ControlID() string { return e.id }
+func (e mailEndpoint) NodeID() string { return e.id }
 func (e mailEndpoint) call(ctx context.Context, request protocol.RelayRequest, result any) error {
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -37,7 +37,7 @@ func (e mailEndpoint) Register(ctx context.Context, directory protocol.Directory
 }
 func (e mailEndpoint) Pending(ctx context.Context, target string) ([]protocol.Envelope, error) {
 	var value []protocol.Envelope
-	err := e.call(ctx, protocol.RelayRequest{Operation: "pending", TargetControlID: target}, &value)
+	err := e.call(ctx, protocol.RelayRequest{Operation: "pending", TargetNodeID: target}, &value)
 	return value, err
 }
 func (e mailEndpoint) Deliver(ctx context.Context, message protocol.Envelope) (protocol.Receipt, error) {

@@ -161,8 +161,8 @@ func TestHandshakeReplayRequiresFreshChallenge(t *testing.T) {
 			done <- err
 		}()
 		if attempt == 0 {
-			h := hello{1, client, nonce(), &serverID, "mail", json.RawMessage("null")}
-			firstHello, _ = seal(key, "pot-peer/client-hello/v1", h)
+			h := hello{2, client, nonce(), &serverID, "mail", json.RawMessage("null")}
+			firstHello, _ = seal(key, "pot-peer/client-hello/v2", h)
 		}
 		if err := writePacket(b, firstHello, maxHandshake); err != nil {
 			t.Fatal(err)
@@ -172,7 +172,7 @@ func TestHandshakeReplayRequiresFreshChallenge(t *testing.T) {
 			t.Fatal(err)
 		}
 		if attempt == 0 {
-			firstConfirmation, _ = seal(key, "pot-peer/client-confirm/v1", confirmation{hash(firstHello, ch)})
+			firstConfirmation, _ = seal(key, "pot-peer/client-confirm/v2", confirmation{hash(firstHello, ch)})
 		}
 		if err = writePacket(b, firstConfirmation, maxHandshake); err != nil {
 			t.Fatal(err)
@@ -222,9 +222,9 @@ func TestFrameTamperingReflectionAndCrossSessionReplay(t *testing.T) {
 			case "direction":
 				f.Direction = "server"
 			}
-			raw, _ := seal(remoteKey, "pot-peer/frame/v1", f)
+			raw, _ := seal(remoteKey, "pot-peer/frame/v2", f)
 			if kind == "signature" {
-				raw, _ = seal(localKey, "pot-peer/frame/v1", f)
+				raw, _ = seal(localKey, "pot-peer/frame/v2", f)
 			}
 			if err := writePacket(b, raw, MaxFrame); err != nil {
 				t.Fatal(err)
@@ -297,7 +297,7 @@ func TestLateResponseCannotCompleteAnotherAttemptWithSameRequestID(t *testing.T)
 				finished <- err
 				return
 			}
-			if err = open(raw, clientID, "pot-peer/frame/v1", &requests[index]); err != nil {
+			if err = open(raw, clientID, "pot-peer/frame/v2", &requests[index]); err != nil {
 				finished <- err
 				return
 			}
@@ -307,7 +307,7 @@ func TestLateResponseCannotCompleteAnotherAttemptWithSameRequestID(t *testing.T)
 			if index == 1 {
 				value = json.RawMessage(`"new"`)
 			}
-			raw, _ := seal(serverKey, "pot-peer/frame/v1", frame{Session: "session", Direction: "server", Sequence: uint64(index + 1), Kind: "response", ID: request.ID, Correlation: request.Correlation, Method: request.Method, Params: value})
+			raw, _ := seal(serverKey, "pot-peer/frame/v2", frame{Session: "session", Direction: "server", Sequence: uint64(index + 1), Kind: "response", ID: request.ID, Correlation: request.Correlation, Method: request.Method, Params: value})
 			if err := writePacket(b, raw, MaxFrame); err != nil {
 				finished <- err
 				return
@@ -430,5 +430,21 @@ func TestHeartbeatDoesNotBlockDuplexLargeWrites(t *testing.T) {
 	first, second := duplexWithQueuedHeartbeats(t, true)
 	if first != nil || second != nil {
 		t.Fatalf("heartbeat blocked duplex writes: %v, %v", first, second)
+	}
+}
+
+func TestPeerNodeIdentityRejectsOldWireFormat(t *testing.T) {
+	public, _, _ := ed25519.GenerateKey(rand.Reader)
+	identity := NewIdentity("logical-node", public)
+	raw, err := json.Marshal(identity)
+	if err != nil || identity.NodeID != "logical-node" || !strings.Contains(string(raw), `"node_id":"logical-node"`) || strings.Contains(string(raw), `"id":`) {
+		t.Fatal(string(raw), err)
+	}
+	var old Identity
+	if err = decode([]byte(`{"id":"logical-node","public_key":"`+identity.PublicKey+`"}`), &old); err == nil {
+		t.Fatal("old peer identity accepted")
+	}
+	if validHello(hello{1, identity, nonce(), nil, "message", json.RawMessage("null")}) {
+		t.Fatal("old handshake version accepted")
 	}
 }

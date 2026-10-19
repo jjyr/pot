@@ -30,7 +30,7 @@ type sqlMailbox struct {
 }
 
 func (m sqlMailbox) Pending(ctx context.Context, local, peer protocol.AgentRef) ([]protocol.Envelope, error) {
-	rows, err := m.db.QueryContext(ctx, `SELECT envelope FROM agent_messages WHERE direction='out' AND state='queued' AND json_extract(envelope,'$.from.control_id')=? AND json_extract(envelope,'$.from.kind')=? AND json_extract(envelope,'$.from.agent_id')=? AND json_extract(envelope,'$.to.control_id')=? AND json_extract(envelope,'$.to.kind')=? AND json_extract(envelope,'$.to.agent_id')=? ORDER BY sequence LIMIT ?`, local.ControlID, local.Kind, local.AgentID, peer.ControlID, peer.Kind, peer.AgentID, protocol.MailPageSize)
+	rows, err := m.db.QueryContext(ctx, `SELECT envelope FROM agent_messages WHERE direction='out' AND state='queued' AND json_extract(envelope,'$.from.node_id')=? AND json_extract(envelope,'$.from.kind')=? AND json_extract(envelope,'$.from.agent_id')=? AND json_extract(envelope,'$.to.node_id')=? AND json_extract(envelope,'$.to.kind')=? AND json_extract(envelope,'$.to.agent_id')=? ORDER BY sequence LIMIT ?`, local.NodeID, local.Kind, local.AgentID, peer.NodeID, peer.Kind, peer.AgentID, protocol.MailPageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func (f *fixture) open() {
 		if id != "assistant" && id != "other" {
 			return Identity{}, ErrNotFound
 		}
-		return Identity{Address: protocol.AgentRef{ControlID: f.id, Kind: "assistant", AgentID: id}, Name: f.id + " " + id, Adapter: "pot"}, nil
+		return Identity{Address: protocol.AgentRef{NodeID: f.id, Kind: "assistant", AgentID: id}, Name: f.id + " " + id, Adapter: "pot"}, nil
 	}})
 	if err != nil {
 		f.t.Fatal(err)
@@ -187,7 +187,7 @@ func TestTCPConnectionUsesOneSignedSessionForBothDirectionsAndRestart(t *testing
 	ctx := context.Background()
 	a, b := newFixture(t, "control-a"), newFixture(t, "control-b")
 	c := connect(t, a, b)
-	if c.SchemaVersion != 2 || c.PeerHost != b.service.options.HostIdentity || c.State != "ready" || c.LastSeen == nil {
+	if c.SchemaVersion != 3 || c.PeerHost != b.service.options.HostIdentity || c.State != "ready" || c.LastSeen == nil {
 		t.Fatal(c)
 	}
 	remote, err := b.service.Get(ctx, c.ID)
@@ -305,7 +305,7 @@ func TestTCPInvitationClaimBindsSignedHostAndExactAssistantRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-func TestTCPRejectsAnotherHostKeyEvenWhenControlIDIsSame(t *testing.T) {
+func TestTCPRejectsAnotherHostKeyEvenWhenNodeIDIsSame(t *testing.T) {
 	ctx := context.Background()
 	a, b := newFixture(t, "control-a"), newFixture(t, "control-b")
 	connection := connect(t, a, b)
@@ -448,5 +448,136 @@ func TestTCPListenerPushesWithoutDialerPollingAndIdleHasNoBusinessRPC(t *testing
 	}
 	if b.exchanges.Load() != before || b.accepted.Load() != 1 {
 		t.Fatal("idle business poll or replacement connection", before, b.exchanges.Load(), b.accepted.Load())
+	}
+}
+
+func TestNodeIdentityUpgradeReopensOriginalSignedPairAndReceipts(t *testing.T) {
+	ctx := context.Background()
+	a, b := newFixture(t, "upgrade-a"), newFixture(t, "upgrade-b")
+	invitation, err := b.service.Invite(ctx, "assistant", b.endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := a.service.Connect(ctx, "assistant", invitation.Address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err := a.service.secret(ctx, connection.ID)
+	if err != nil || credential.Pair == nil {
+		t.Fatal(credential, err)
+	}
+	oldPair, _ := json.Marshal(credential.Pair)
+	oldPair = []byte(strings.ReplaceAll(string(oldPair), `"node_id":`, `"control_id":`))
+	oldHost, _ := json.Marshal(a.service.options.HostIdentity)
+	oldHost = []byte(strings.ReplaceAll(string(oldHost), `"node_id":`, `"id":`))
+	oldClaim := digest(append(append(append([]byte("["), oldPair...), ','), append(oldHost, ']')...))
+	endpointA, endpointB := a.endpoint, b.endpoint
+	a.stop()
+	b.stop()
+	// Recreate the exact previous persisted format, including encrypted outgoing
+	// pair intent. Every database and key belongs to this private test fixture.
+	for _, fixture := range []*fixture{a, b} {
+		links, err := fixture.service.List(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, link := range links {
+			raw, _ := json.Marshal(link)
+			legacy := strings.ReplaceAll(string(raw), `"node_id":`, `"control_id":`)
+			legacy = strings.Replace(legacy, `"peer_host":{"control_id":`, `"peer_host":{"id":`, 1)
+			legacy = strings.Replace(legacy, `"schema_version":3`, `"schema_version":2`, 1)
+			routeRaw, _ := json.Marshal([]protocol.AgentRef{link.Local.Address, link.Peer.Address})
+			oldRoute := digest([]byte(strings.ReplaceAll(string(routeRaw), `"node_id":`, `"control_id":`)))
+			if _, err = fixture.db.Exec("UPDATE agent_link_connections SET metadata=?,route=? WHERE id=?", legacy, oldRoute, link.ID); err != nil {
+				t.Fatal(err)
+			}
+			ref := "agent-link/connection/" + link.ID
+			secret, err := fixture.secret.Get(ctx, ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = fixture.secret.Delete(ctx, ref); err != nil {
+				t.Fatal(err)
+			}
+			if err = fixture.secret.Put(ctx, ref, []byte(strings.ReplaceAll(string(secret), `"node_id":`, `"control_id":`))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err = fixture.db.Exec(`UPDATE agent_link_invitations SET identity=replace(identity,'"node_id":','"control_id":');
+ALTER TABLE codex_agent_host RENAME COLUMN node_id TO control_id;
+DROP TABLE node_identity_secret_migration;
+DELETE FROM pot_migrations WHERE id LIKE '0009_%';`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = b.db.Exec("UPDATE agent_link_invitations SET claim_hash=? WHERE id=?", oldClaim, credential.Pair.Invitation); err != nil {
+		t.Fatal(err)
+	}
+	a.close()
+	b.close()
+	a.open()
+	b.open()
+	a.start(strings.TrimPrefix(endpointA, "tcp://"))
+	b.start(strings.TrimPrefix(endpointB, "tcp://"))
+	if err = a.service.Sync(ctx, connection.ID); err != nil {
+		t.Fatal("original pair failed after upgrade", err)
+	}
+	current, err := a.service.Get(ctx, connection.ID)
+	if err != nil || current.ID != connection.ID || current.PeerHost != connection.PeerHost || current.State != "ready" || current.SchemaVersion != 3 {
+		t.Fatal(current, err)
+	}
+	sender := current.Local.Address
+	message, err := a.mail.Send(ctx, "migration-receipt", sender, protocol.SendMail{To: current.Peer.Address, Text: "original route after upgrade"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = a.service.Sync(ctx, connection.ID); err != nil {
+		t.Fatal(err)
+	}
+	records, err := b.mail.History(ctx, "assistant", 0)
+	if err != nil || len(records) != 1 || records[0].Message != message {
+		t.Fatal(records, err)
+	}
+}
+
+type memoryNodeSecrets map[string][]byte
+
+func (m memoryNodeSecrets) Put(_ context.Context, id string, value []byte) error {
+	m[id] = append([]byte(nil), value...)
+	return nil
+}
+func (m memoryNodeSecrets) Get(_ context.Context, id string) ([]byte, error) {
+	value, ok := m[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return append([]byte(nil), value...), nil
+}
+func (m memoryNodeSecrets) Delete(_ context.Context, id string) error { delete(m, id); return nil }
+func TestFreshCustomSecretStoreCanReopenAfterConnecting(t *testing.T) {
+	ctx := context.Background()
+	a, b := newFixture(t, "custom-a"), newFixture(t, "custom-b")
+	options := a.service.options
+	options.Secrets = memoryNodeSecrets{}
+	service, err := New(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.service = service
+	invite, err := b.service.Invite(ctx, "assistant", b.endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := a.service.Connect(ctx, "assistant", invite.Address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.service.closeSessions()
+	a.service, err = New(options)
+	if err != nil {
+		t.Fatal("fresh custom store acquired a false migration obligation", err)
+	}
+	if _, err = a.service.Get(ctx, connection.ID); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -15,7 +15,7 @@ import (
 // sendAgentMessage receives sender only from an authenticated execution binding.
 // Tool arguments describe a recipient and content, never authority or provenance.
 func (s *Service) sendAgentMessage(ctx context.Context, id, owner string, sender protocol.AgentRef, send protocol.SendMail) (any, error) {
-	if !sender.Valid() || sender.ControlID != s.options.RuntimeID || !send.To.Valid() {
+	if !sender.Valid() || sender.NodeID != s.options.RuntimeID || !send.To.Valid() {
 		return nil, errors.New("invalid agent address")
 	}
 	if sender.Kind == "task" {
@@ -30,13 +30,13 @@ func (s *Service) sendAgentMessage(ctx context.Context, id, owner string, sender
 		if parent != nil {
 			ctx = context.WithValue(ctx, mailParentKey{}, *parent)
 		}
-		if send.To.Kind != "assistant" || send.To.ControlID != s.options.RuntimeID || send.To.AgentID != owner {
+		if send.To.Kind != "assistant" || send.To.NodeID != s.options.RuntimeID || send.To.AgentID != owner {
 			return nil, errors.New("Task messages may address only their owning assistant")
 		}
 	}
 	switch send.To.Kind {
 	case "task":
-		if send.To.ControlID != s.options.RuntimeID {
+		if send.To.NodeID != s.options.RuntimeID {
 			return nil, errors.New("address the Task through its owning Control")
 		}
 		var parent *protocol.Envelope

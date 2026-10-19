@@ -846,7 +846,7 @@ func (s *Service) prepareRemoteTask(ctx context.Context, r runner.Run) (runner.P
 	}
 	execution.ContextSections = append(execution.ContextSections, core.ContextSection{Key: "environment", Text: "cwd: " + execution.Workspace})
 	execution.Role = core.Worker
-	addresses, _ := json.Marshal(map[string]protocol.AgentRef{"self": {ControlID: l.ControlID, Kind: "task", AgentID: l.TaskID}, "owner_assistant": {ControlID: l.ControlID, Kind: "assistant", AgentID: l.AssistantID}})
+	addresses, _ := json.Marshal(map[string]protocol.AgentRef{"self": {NodeID: l.ControlID, Kind: "task", AgentID: l.TaskID}, "owner_assistant": {NodeID: l.ControlID, Kind: "assistant", AgentID: l.AssistantID}})
 	execution.ContextSections = append(execution.ContextSections, core.ContextSection{Key: "agent-addresses", Text: string(addresses)})
 	execution.SkillResources.Roots = append(execution.SkillResources.Roots, roots...)
 	execution.SkillResources.Selection = nil

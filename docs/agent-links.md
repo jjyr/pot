@@ -19,7 +19,7 @@ existing peer receiver                 explicit Agent consumer
 
 ## Host identity and invitations
 
-Agent identity remains `{control_id, kind, agent_id}` with `kind=assistant`.
+Agent identity remains `{node_id, kind, agent_id}` with `kind=assistant`.
 Adapter identity is `pot` or `codex`; display names do not identify machines.
 Connection IDs are distinct from plugin IDs and assistant IDs. The host injects
 its durable `peer.Identity` and Ed25519 private key through `Options`; keys are
@@ -27,7 +27,7 @@ never derived from assistant names or addresses. The assistant's Control ID must
 match the authenticated host identity.
 
 The protected host UI calls `Invite` with an assistant and its actual reachable
-`tcp://host:port` endpoint. Public-key-pinned invitation version 2 carries that
+`tcp://host:port` endpoint. Public-key-pinned invitation version 3 carries that
 host identity, the target assistant and a single-use invitation code in the URL
 fragment. This capability stays in local protected UI and encrypted storage;
 never log it, expose it to model tools, or send it through chat.
@@ -141,3 +141,29 @@ handshake reports the existing revoked binding and resolves that uncertainty.
 An incoming-side tombstone rejects the original dialer's next handshake.
 Revocation does not delete business messages, receipts or execution facts. A
 later explicit connection receives a new invitation and connection ID.
+
+## Logical node identity and upgrades
+
+`node_id` identifies a logical communication endpoint, with `agent_id` selecting
+an Agent beneath it. One machine may host several nodes. `peer.Identity` binds
+`{node_id, public_key}` to the endpoint's stable Ed25519 key. Pot currently reuses
+its Runtime ID value as its node ID; this does not make message addressing a
+Control membership claim. Runner launch ownership, `Space.control_id` and Task
+Control authority retain their existing meaning and names.
+
+The peer handshake is version 2, copied Agent invitations are version 3, and
+connection snapshots are schema 3. Old wire identity fields and old invitation
+versions are rejected. Database migrations preserve IDs, keys, invitations,
+message states and receipts while converting the persisted address fields and
+their route/claim bindings. The existing invitation capability remains usable
+through its newly copied version 3 address; an old copied version 2 address must
+be copied again after the upgrade.
+
+Product `secrets.Open` completes the key-dependent migration before returning.
+`storage.FinalizeNodeIdentity` uses the existing master key to atomically convert
+encrypted pair intents and invitation claim hashes; its pending receipt survives
+failures for restart. `agentlink.New` refuses an incompletely migrated host with
+historical credentials. An embedding host using an external SecretStore owns
+conversion of that external store and must complete the database's migration
+receipt only after its credentials and claims are safely converted. The product
+key-based finalizer applies only to Pot's encrypted SQLite secret format.

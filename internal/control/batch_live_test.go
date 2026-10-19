@@ -283,7 +283,7 @@ func TestDeepSeekCategoryBatchesLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	destination := protocol.AgentRef{ControlID: "live", Kind: "assistant", AgentID: "main"}
+	destination := protocol.AgentRef{NodeID: "live", Kind: "assistant", AgentID: "main"}
 	peerInputs := []struct{ owner, text string }{
 		{alpha.ID, "请协助确认简单算式 6×6；反馈中标记 PEER_ALPHA_ONE。"},
 		{beta.ID, "请确认 8×8，以 PEER_BETA_ONE 标记，只反馈本发送者内容。"},

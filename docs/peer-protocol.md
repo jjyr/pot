@@ -29,7 +29,8 @@ connection resolves again and dials a validated numeric address; HTTP proxy
 environment variables have no effect. A listener's wildcard bind address is not
 a publishable endpoint.
 
-`Identity` contains a stable host ID and base64url Ed25519 public key. A copied
+`Identity` contains `{node_id, public_key}`: a stable logical endpoint ID and
+base64url Ed25519 public key. Multiple logical nodes may share one machine. A copied
 invitation binds the expected identity to the endpoint. Discovery without a pin
 proves possession of the discovered key but does not establish trust. Service
 admission must independently validate the invitation or saved binding. A key
@@ -41,6 +42,7 @@ confidentiality without application certificates. This protocol is not Noise.
 
 ## Handshake and frames
 
+Protocol version 2 rejects the former identity `id` field and version 1 hello.
 Every packet has a four-byte unsigned big-endian length followed by JSON.
 Signed packets contain an exact JSON payload and base64url signature over a
 domain separator and that payload. The client hello binds protocol version,

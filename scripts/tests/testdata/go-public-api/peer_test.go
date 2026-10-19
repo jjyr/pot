@@ -16,6 +16,9 @@ func TestStandalonePeerService(t *testing.T) {
 	serverPub, serverKey, _ := ed25519.GenerateKey(rand.Reader)
 	clientPub, clientKey, _ := ed25519.GenerateKey(rand.Reader)
 	serverID := peer.NewIdentity("external-server", serverPub)
+	if serverID.NodeID != "external-server" {
+		t.Fatal(serverID)
+	}
 	clientID := peer.NewIdentity("external-client", clientPub)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

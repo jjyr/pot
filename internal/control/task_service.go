@@ -359,7 +359,7 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 	execution.SkillResources.Selection = nil
 	execution.SkillResources.ReservedNames = resources.ReservedNames
 	execution.Role = core.Worker
-	addresses, _ := json.Marshal(map[string]protocol.AgentRef{"self": {ControlID: l.ControlID, Kind: "task", AgentID: l.TaskID}, "owner_assistant": {ControlID: l.ControlID, Kind: "assistant", AgentID: l.AssistantID}})
+	addresses, _ := json.Marshal(map[string]protocol.AgentRef{"self": {NodeID: l.ControlID, Kind: "task", AgentID: l.TaskID}, "owner_assistant": {NodeID: l.ControlID, Kind: "assistant", AgentID: l.AssistantID}})
 	execution.ContextSections = append(execution.ContextSections, core.ContextSection{Key: "agent-addresses", Text: string(addresses)})
 	engine, err := s.host(l.TaskID, l.Generation)
 	if err != nil {

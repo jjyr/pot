@@ -156,7 +156,7 @@ func TestUserBatchBoundLeavesOverflowForNextTurn(t *testing.T) {
 func enqueueResult(t *testing.T, m *Mailbox, id string, owner string) protocol.Envelope {
 	t.Helper()
 	run := newConversation()
-	e := protocol.Envelope{ID: id, Kind: "task_result", From: protocol.AgentRef{ControlID: m.controlID, Kind: "runtime", AgentID: "runtime"}, To: address(m.controlID, owner), ConversationID: run, Text: "outcome " + id, Result: &protocol.TaskResultEvent{Origin: protocol.TaskOrigin{Kind: "manual"}, TaskID: "task-" + id, RunID: run, Title: id, Phase: protocol.TaskFailed, Text: "failure " + id}}
+	e := protocol.Envelope{ID: id, Kind: "task_result", From: protocol.AgentRef{NodeID: m.nodeID, Kind: "runtime", AgentID: "runtime"}, To: address(m.nodeID, owner), ConversationID: run, Text: "outcome " + id, Result: &protocol.TaskResultEvent{Origin: protocol.TaskOrigin{Kind: "manual"}, TaskID: "task-" + id, RunID: run, Title: id, Phase: protocol.TaskFailed, Text: "failure " + id}}
 	if err := storage.Transaction(context.Background(), m.db, func(tx *sql.Tx) error { return inbox.EnqueueTx(context.Background(), tx, e, "in", "queued") }); err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestResultBatchConcurrentClaimAndRestartFence(t *testing.T) {
 	ctx := context.Background()
 	m, path := mailbox(t, "local")
 	a := enqueueResult(t, m, "A", "main")
-	b := protocol.Envelope{Kind: "plugin_event", ID: "plugin-B", From: protocol.AgentRef{ControlID: "local", Kind: "runtime", AgentID: "plugin-example"}, To: address("local", "main"), ConversationID: newConversation(), Plugin: &protocol.PluginNotification{Identity: core.PluginIdentity{ID: "example"}, Event: core.PluginEvent{ID: "B", Title: "B", Body: "body", OccurredAt: "2026-01-01T00:00:00Z"}}}
+	b := protocol.Envelope{Kind: "plugin_event", ID: "plugin-B", From: protocol.AgentRef{NodeID: "local", Kind: "runtime", AgentID: "plugin-example"}, To: address("local", "main"), ConversationID: newConversation(), Plugin: &protocol.PluginNotification{Identity: core.PluginIdentity{ID: "example"}, Event: core.PluginEvent{ID: "B", Title: "B", Body: "body", OccurredAt: "2026-01-01T00:00:00Z"}}}
 	if err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error { return inbox.EnqueueTx(ctx, tx, b, "in", "queued") }); err != nil {
 		t.Fatal(err)
 	}

@@ -79,14 +79,14 @@ func (c *testControl) Call(ctx context.Context, method, path string, body json.R
 		}
 		switch request.Operation {
 		case "directory":
-			result = protocol.Directory{ControlID: id, Assistants: []protocol.MailAssistant{{Address: protocol.AgentRef{ControlID: id, Kind: "assistant", AgentID: "main"}, Name: "Main"}}}
+			result = protocol.Directory{NodeID: id, Assistants: []protocol.MailAssistant{{Address: protocol.AgentRef{NodeID: id, Kind: "assistant", AgentID: "main"}, Name: "Main"}}}
 		case "register":
 			if err := c.mail.Register(ctx, *request.Directory); err != nil {
 				return nil, err
 			}
 			result = map[string]bool{"ok": true}
 		case "pending":
-			messages, err := c.mail.Pending(ctx, request.TargetControlID)
+			messages, err := c.mail.Pending(ctx, request.TargetNodeID)
 			if err != nil {
 				return nil, err
 			}
@@ -177,7 +177,7 @@ func TestAppSpacesExplicitTLSAndBidirectionalRelay(t *testing.T) {
 		t.Fatal("selection changed request destination")
 	}
 	for _, pair := range [][2]*testControl{{local, remote}, {remote, local}} {
-		_, err := pair[0].mail.Send(context.Background(), pair[0].mail.ControlID()+"-message", protocol.AgentRef{ControlID: pair[0].mail.ControlID(), Kind: "assistant", AgentID: "main"}, protocol.SendMail{To: protocol.AgentRef{ControlID: pair[1].mail.ControlID(), Kind: "assistant", AgentID: "main"}, Text: "peer work"}, nil)
+		_, err := pair[0].mail.Send(context.Background(), pair[0].mail.NodeID()+"-message", protocol.AgentRef{NodeID: pair[0].mail.NodeID(), Kind: "assistant", AgentID: "main"}, protocol.SendMail{To: protocol.AgentRef{NodeID: pair[1].mail.NodeID(), Kind: "assistant", AgentID: "main"}, Text: "peer work"}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

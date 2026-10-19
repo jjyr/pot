@@ -24,7 +24,7 @@ func testCompletionInboxClaimsAndReportsTheSameResultOnce(t *testing.T, origin p
 		t.Fatal(err)
 	}
 	defer m.Close()
-	event := protocol.Envelope{ID: "completion", Kind: "task_result", From: protocol.AgentRef{ControlID: "control", Kind: "runtime", AgentID: "runtime"}, To: address("control", "main"), ConversationID: newConversation(), Text: "done", Result: &protocol.TaskResultEvent{Origin: origin, TaskID: "task-a", RunID: newConversation(), Title: "A", Phase: protocol.TaskComplete, Text: "done"}}
+	event := protocol.Envelope{ID: "completion", Kind: "task_result", From: protocol.AgentRef{NodeID: "control", Kind: "runtime", AgentID: "runtime"}, To: address("control", "main"), ConversationID: newConversation(), Text: "done", Result: &protocol.TaskResultEvent{Origin: origin, TaskID: "task-a", RunID: newConversation(), Title: "A", Phase: protocol.TaskComplete, Text: "done"}}
 	enqueue := func() error {
 		return storage.Transaction(ctx, m.db, func(tx *sql.Tx) error { return inbox.EnqueueTx(ctx, tx, event, "in", "queued") })
 	}
@@ -70,7 +70,7 @@ func testCompletionInboxClaimsAndReportsTheSameResultOnce(t *testing.T, origin p
 		t.Fatal("successful query caused a duplicate automatic report")
 	}
 	event.ID = "forged-event"
-	event.From.ControlID = "remote"
+	event.From.NodeID = "remote"
 	if _, err = m.Deliver(ctx, event); err == nil {
 		t.Fatal("remote transport forged a Runtime lifecycle event")
 	}

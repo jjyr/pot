@@ -39,7 +39,7 @@ func (s *Service) Authorize(ctx context.Context, remote peer.Identity, service s
 		return nil, ErrInvalid
 	}
 	if auth.Preview != nil {
-		if auth.ID != "" || auth.Pair != nil || auth.Preview.Code != "" || !validID(auth.Preview.Invitation) || !validIdentity(auth.Preview.Target) || auth.Preview.Target.Address.ControlID != s.options.HostIdentity.ID {
+		if auth.ID != "" || auth.Pair != nil || auth.Preview.Code != "" || !validID(auth.Preview.Invitation) || !validIdentity(auth.Preview.Target) || auth.Preview.Target.Address.NodeID != s.options.HostIdentity.NodeID {
 			return nil, ErrInvalid
 		}
 		return s.previewHandler(*auth.Preview), nil
@@ -48,7 +48,7 @@ func (s *Service) Authorize(ctx context.Context, remote peer.Identity, service s
 		return nil, ErrInvalid
 	}
 	if auth.Pair != nil {
-		if auth.Pair.ID != auth.ID || auth.Pair.Code != "" || !validID(auth.Pair.Invitation) || !validIdentity(auth.Pair.Local) || !validIdentity(auth.Pair.Peer) || auth.Pair.Local.Address.ControlID != remote.ID || auth.Pair.Peer.Address.ControlID != s.options.HostIdentity.ID {
+		if auth.Pair.ID != auth.ID || auth.Pair.Code != "" || !validID(auth.Pair.Invitation) || !validIdentity(auth.Pair.Local) || !validIdentity(auth.Pair.Peer) || auth.Pair.Local.Address.NodeID != remote.NodeID || auth.Pair.Peer.Address.NodeID != s.options.HostIdentity.NodeID {
 			return nil, ErrConflict
 		}
 		return s.pairHandler(*auth.Pair, remote), nil
@@ -64,17 +64,17 @@ func (s *Service) authenticate(ctx context.Context, id string, remote peer.Ident
 	if err != nil {
 		return Connection{}, ErrUnauthorized
 	}
-	if connection.SchemaVersion != 2 || connection.PeerHost.Validate() != nil {
+	if connection.SchemaVersion != 3 || connection.PeerHost.Validate() != nil {
 		return connection, ErrReconnectRequired
 	}
-	if connection.PeerHost != remote || connection.Peer.Address.ControlID != remote.ID {
+	if connection.PeerHost != remote || connection.Peer.Address.NodeID != remote.NodeID {
 		return connection, ErrUnauthorized
 	}
 	if connection.State == "revoked" {
 		return connection, ErrRevoked
 	}
 	identity, err := s.options.Identity(ctx, connection.Local.Address.AgentID)
-	if err != nil || !equalIdentity(identity, connection.Local) || identity.Address.ControlID != s.options.HostIdentity.ID {
+	if err != nil || !equalIdentity(identity, connection.Local) || identity.Address.NodeID != s.options.HostIdentity.NodeID {
 		return connection, ErrConflict
 	}
 	return connection, nil
@@ -187,7 +187,7 @@ func (s *Service) ensureSession(ctx context.Context, connection Connection) (*pe
 	if session := s.session(connection.ID); session != nil {
 		return session, nil
 	}
-	if connection.SchemaVersion != 2 || connection.PeerHost.Validate() != nil {
+	if connection.SchemaVersion != 3 || connection.PeerHost.Validate() != nil {
 		return nil, ErrReconnectRequired
 	}
 	if connection.Endpoint == "" {

@@ -21,7 +21,7 @@ func TestLegacyTaskMigrationPreservesAcceptedRun(t *testing.T) {
 	if err := s.DB().QueryRow("SELECT body FROM tasks WHERE id=?", record.Info.ID).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB().Exec(`DROP TABLE pot_migrations;
+	if _, err := s.DB().Exec(`ALTER TABLE assistant_mail_identity RENAME COLUMN node_id TO control_id; ALTER TABLE assistant_contacts RENAME COLUMN node TO control; DROP TABLE task_input_digest_formats; DROP TABLE codex_mail_consumers; DROP TABLE pot_migrations;
 CREATE TABLE task_schema(version INTEGER NOT NULL); INSERT INTO task_schema VALUES(8);
 CREATE TABLE schedule_schema(version INTEGER NOT NULL); INSERT INTO schedule_schema VALUES(2);`); err != nil {
 		t.Fatal(err)

@@ -312,7 +312,7 @@ func TestMigrationConcurrentHandles(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	if got := migrationCount(t, handles[0]); got != 4 {
+	if got := migrationCount(t, handles[0]); got != 6 {
 		t.Fatal(got)
 	}
 }
@@ -358,7 +358,7 @@ INSERT INTO task_writes VALUES('owner','request','original-digest','task');`, ph
 			if err := db.QueryRow("SELECT digest FROM task_writes").Scan(&digest); err != nil {
 				t.Fatal(err)
 			}
-			if version != 9 || run != "run" || archived != (phase == "complete" || phase == "cancelled") || text != "original" || outcome != "retained" || digest != "original-digest" {
+			if version != 10 || run != "run" || archived != (phase == "complete" || phase == "cancelled") || text != "original" || outcome != "retained" || digest != "original-digest" {
 				t.Fatal(version, run, archived, text, outcome, digest)
 			}
 		})

@@ -15,13 +15,13 @@ import (
 )
 
 type Mailbox struct {
-	db        *sql.DB
-	controlID string
-	Changes   core.Changes
+	db      *sql.DB
+	nodeID  string
+	Changes core.Changes
 }
 
-func OpenMailbox(path, controlID string) (*Mailbox, error) {
-	if !(protocol.AgentRef{ControlID: controlID, Kind: "assistant", AgentID: "identity"}).Valid() {
+func OpenMailbox(path, nodeID string) (*Mailbox, error) {
+	if !(protocol.AgentRef{NodeID: nodeID, Kind: "assistant", AgentID: "identity"}).Valid() {
 		return nil, errors.New("invalid Control identity")
 	}
 	db, err := storage.OpenDatabase(path, storage.TasksDatabase)
@@ -29,14 +29,14 @@ func OpenMailbox(path, controlID string) (*Mailbox, error) {
 		return nil, err
 	}
 	err = storage.Transaction(context.Background(), db, func(tx *sql.Tx) error {
-		if _, err := tx.Exec("INSERT OR IGNORE INTO assistant_mail_identity VALUES (1,?)", controlID); err != nil {
+		if _, err := tx.Exec("INSERT OR IGNORE INTO assistant_mail_identity VALUES (1,?)", nodeID); err != nil {
 			return err
 		}
 		var existing string
-		if err := tx.QueryRow("SELECT control_id FROM assistant_mail_identity WHERE singleton=1").Scan(&existing); err != nil {
+		if err := tx.QueryRow("SELECT node_id FROM assistant_mail_identity WHERE singleton=1").Scan(&existing); err != nil {
 			return err
 		}
-		if existing != controlID {
+		if existing != nodeID {
 			return errors.New("mailbox belongs to another Control")
 		}
 		_, err := tx.Exec("UPDATE agent_messages SET state='interrupted',detail='Execution outcome requires attention after restart' WHERE state='processing'")
@@ -46,12 +46,12 @@ func OpenMailbox(path, controlID string) (*Mailbox, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Mailbox{db: db, controlID: controlID}, nil
+	return &Mailbox{db: db, nodeID: nodeID}, nil
 }
-func (m *Mailbox) Close() error      { return m.db.Close() }
-func (m *Mailbox) ControlID() string { return m.controlID }
+func (m *Mailbox) Close() error   { return m.db.Close() }
+func (m *Mailbox) NodeID() string { return m.nodeID }
 func (m *Mailbox) Register(ctx context.Context, directory protocol.Directory) error {
-	if directory.ControlID == m.controlID || !(protocol.AgentRef{ControlID: directory.ControlID, Kind: "assistant", AgentID: "identity"}).Valid() {
+	if directory.NodeID == m.nodeID || !(protocol.AgentRef{NodeID: directory.NodeID, Kind: "assistant", AgentID: "identity"}).Valid() {
 		return errors.New("invalid peer Control")
 	}
 	if len(directory.Assistants) > 1024 {
@@ -62,7 +62,7 @@ func (m *Mailbox) Register(ctx context.Context, directory protocol.Directory) er
 		if err := ValidateName(assistant.Name); err != nil {
 			return err
 		}
-		if !assistant.Address.Valid() || assistant.Address.Kind != "assistant" || assistant.Address.ControlID != directory.ControlID || seen[assistant.Address] {
+		if !assistant.Address.Valid() || assistant.Address.Kind != "assistant" || assistant.Address.NodeID != directory.NodeID || seen[assistant.Address] {
 			return errors.New("invalid assistant directory")
 		}
 		seen[assistant.Address] = true
@@ -71,11 +71,11 @@ func (m *Mailbox) Register(ctx context.Context, directory protocol.Directory) er
 	if err != nil {
 		return err
 	}
-	_, err = m.db.ExecContext(ctx, "INSERT INTO assistant_contacts VALUES (?,?) ON CONFLICT(control) DO UPDATE SET directory=excluded.directory WHERE assistant_contacts.directory!=excluded.directory", directory.ControlID, string(body))
+	_, err = m.db.ExecContext(ctx, "INSERT INTO assistant_contacts VALUES (?,?) ON CONFLICT(node) DO UPDATE SET directory=excluded.directory WHERE assistant_contacts.directory!=excluded.directory", directory.NodeID, string(body))
 	return err
 }
 func (m *Mailbox) Contacts(ctx context.Context) ([]protocol.MailAssistant, error) {
-	rows, err := m.db.QueryContext(ctx, "SELECT directory FROM assistant_contacts ORDER BY control")
+	rows, err := m.db.QueryContext(ctx, "SELECT directory FROM assistant_contacts ORDER BY node")
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +137,7 @@ func newConversation() string {
 // currently processed inbound message. Replies to its sender are linked
 // automatically; forwarding to another agent retains the causal hop bound.
 func (m *Mailbox) Send(ctx context.Context, id string, from protocol.AgentRef, send protocol.SendMail, parent *protocol.Envelope) (protocol.Envelope, error) {
-	if from.ControlID != m.controlID || from == send.To {
+	if from.NodeID != m.nodeID || from == send.To {
 		return protocol.Envelope{}, errors.New("invalid sender or self-message")
 	}
 	var message protocol.Envelope
@@ -178,7 +178,7 @@ func (m *Mailbox) Send(ctx context.Context, id string, from protocol.AgentRef, s
 			return err
 		}
 		direction := "out"
-		if message.To.ControlID == m.controlID {
+		if message.To.NodeID == m.nodeID {
 			direction = "in"
 		}
 		return insertMail(ctx, tx, message, direction)
@@ -192,7 +192,7 @@ func (m *Mailbox) Deliver(ctx context.Context, message protocol.Envelope) (proto
 	if err := message.Validate(); err != nil {
 		return protocol.Receipt{}, err
 	}
-	if message.Kind != "message" || message.From.Kind != "assistant" || message.To.Kind != "assistant" || message.To.ControlID != m.controlID || message.From.ControlID == m.controlID {
+	if message.Kind != "message" || message.From.Kind != "assistant" || message.To.Kind != "assistant" || message.To.NodeID != m.nodeID || message.From.NodeID == m.nodeID {
 		return protocol.Receipt{}, errors.New("invalid remote delivery")
 	}
 	err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
@@ -231,7 +231,7 @@ func (m *Mailbox) Deliver(ctx context.Context, message protocol.Envelope) (proto
 	return protocol.Receipt{Message: message}, err
 }
 func (m *Mailbox) Pending(ctx context.Context, target string) ([]protocol.Envelope, error) {
-	return m.envelopes(ctx, "SELECT envelope FROM agent_messages WHERE direction='out' AND state='queued' AND json_extract(envelope,'$.to.control_id')=? ORDER BY sequence LIMIT ?", target, protocol.MailPageSize)
+	return m.envelopes(ctx, "SELECT envelope FROM agent_messages WHERE direction='out' AND state='queued' AND json_extract(envelope,'$.to.node_id')=? ORDER BY sequence LIMIT ?", target, protocol.MailPageSize)
 }
 func (m *Mailbox) Acknowledge(ctx context.Context, receipt protocol.Receipt) error {
 	return storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
@@ -242,7 +242,7 @@ func (m *Mailbox) Acknowledge(ctx context.Context, receipt protocol.Receipt) err
 		if old == nil || !sameEnvelope(*old, receipt.Message) {
 			return errors.New("receipt does not match immutable message")
 		}
-		if receipt.Message.From.ControlID != m.controlID || receipt.Message.To.ControlID == m.controlID {
+		if receipt.Message.From.NodeID != m.nodeID || receipt.Message.To.NodeID == m.nodeID {
 			return errors.New("not an outbound message")
 		}
 		_, err = tx.ExecContext(ctx, "UPDATE agent_messages SET state='delivered' WHERE id=? AND direction='out'", receipt.Message.ID)
@@ -277,10 +277,10 @@ func (m *Mailbox) envelopes(ctx context.Context, query string, args ...any) ([]p
 	return out, rows.Err()
 }
 func (m *Mailbox) Conversation(ctx context.Context, assistant, conversation string) ([]protocol.Envelope, error) {
-	return m.envelopes(ctx, `SELECT envelope FROM agent_messages WHERE json_extract(envelope,'$.kind')='message' AND conversation=? AND ((json_extract(envelope,'$.from.control_id')=? AND json_extract(envelope,'$.from.kind')='assistant' AND json_extract(envelope,'$.from.agent_id')=?) OR (json_extract(envelope,'$.to.control_id')=? AND json_extract(envelope,'$.to.kind')='assistant' AND recipient=?)) ORDER BY sequence LIMIT 32`, conversation, m.controlID, assistant, m.controlID, assistant)
+	return m.envelopes(ctx, `SELECT envelope FROM agent_messages WHERE json_extract(envelope,'$.kind')='message' AND conversation=? AND ((json_extract(envelope,'$.from.node_id')=? AND json_extract(envelope,'$.from.kind')='assistant' AND json_extract(envelope,'$.from.agent_id')=?) OR (json_extract(envelope,'$.to.node_id')=? AND json_extract(envelope,'$.to.kind')='assistant' AND recipient=?)) ORDER BY sequence LIMIT 32`, conversation, m.nodeID, assistant, m.nodeID, assistant)
 }
 func (m *Mailbox) History(ctx context.Context, assistant string, after int64) ([]protocol.MailRecord, error) {
-	rows, err := m.db.QueryContext(ctx, `SELECT sequence,envelope,state,detail FROM agent_messages WHERE json_extract(envelope,'$.kind')='message' AND sequence>? AND ((json_extract(envelope,'$.from.control_id')=? AND json_extract(envelope,'$.from.kind')='assistant' AND json_extract(envelope,'$.from.agent_id')=?) OR (json_extract(envelope,'$.to.control_id')=? AND json_extract(envelope,'$.to.kind')='assistant' AND recipient=?)) ORDER BY sequence LIMIT ?`, after, m.controlID, assistant, m.controlID, assistant, protocol.MailPageSize)
+	rows, err := m.db.QueryContext(ctx, `SELECT sequence,envelope,state,detail FROM agent_messages WHERE json_extract(envelope,'$.kind')='message' AND sequence>? AND ((json_extract(envelope,'$.from.node_id')=? AND json_extract(envelope,'$.from.kind')='assistant' AND json_extract(envelope,'$.from.agent_id')=?) OR (json_extract(envelope,'$.to.node_id')=? AND json_extract(envelope,'$.to.kind')='assistant' AND recipient=?)) ORDER BY sequence LIMIT ?`, after, m.nodeID, assistant, m.nodeID, assistant, protocol.MailPageSize)
 	if err != nil {
 		return nil, err
 	}

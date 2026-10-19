@@ -116,7 +116,7 @@ func EnqueueTx(ctx context.Context, tx *sql.Tx, control, runtime string, event E
 	if event.Result == nil {
 		return fmt.Errorf("UI-only hooks have no Agent inbox recipient")
 	}
-	message := protocol.Envelope{ID: event.ID, Kind: "task_result", From: protocol.AgentRef{ControlID: control, Kind: "runtime", AgentID: runtime}, To: protocol.AgentRef{ControlID: control, Kind: "assistant", AgentID: event.Owner}, ConversationID: event.RunID, Text: event.Result.Text, Result: event.Result}
+	message := protocol.Envelope{ID: event.ID, Kind: "task_result", From: protocol.AgentRef{NodeID: control, Kind: "runtime", AgentID: runtime}, To: protocol.AgentRef{NodeID: control, Kind: "assistant", AgentID: event.Owner}, ConversationID: event.RunID, Text: event.Result.Text, Result: event.Result}
 	state := "queued"
 	if event.Result.SuppressionReason != "" {
 		state = "suppressed"

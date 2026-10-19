@@ -7,7 +7,7 @@ credentials or grant execution permissions.
 
 ## Addresses and provenance
 
-An Agent address is `{control_id, kind, agent_id}`. Model recipients may have
+An Agent address is `{node_id, kind, agent_id}`. Model recipients may have
 kind `assistant` or `task`; Task addresses belong to their owning Control,
 independently of the destination machine running the Task. `list_assistants`
 returns assistant addresses; Task metadata includes its address. Worker context
@@ -35,9 +35,8 @@ references, never owner guidance.
 checks. `agent_messages` in the Control's `tasks.sqlite` stores Task inputs,
 assistant correspondence, task-result events and plugin notifications. Task input
 and notification views are transcript/receiver projections over this table, not separate queues.
-Task completion and its event commit in the same transaction. Task schema 9 and
-schedule schema 2 require the unified outcome format; older schemas are rejected
-without importing legacy queues or schedule notifications.
+Task completion and its event commit in the same transaction. Task schema 10 stores node addresses; automatic migrations upgrade the prior
+unified outcome format without importing legacy queues or schedule notifications.
 
 The assistant's user inbox is separate and has priority at turn boundaries.
 Accepted requests arriving during automatic result handling start their
@@ -161,3 +160,20 @@ and policy-suppressed (`suppressed`) outcomes. A processing attempt is persisted
 before model invocation. Restart marks incomplete attempts interrupted. Allowance continuation reuses only a
 stopped checkpoint with no started model/tool effects. A fenced sender group
 does not replay its input; other peer contexts remain independent.
+
+## Durable identity migration
+
+Migrating a message address changes its field name, not its logical node ID,
+message ID, conversation, delivery receipt or processing state. Mailbox context
+keys are migrated with their full sender and recipient addresses. Task snapshots
+convert `info.address`; Task/Runner Control ownership stays intact.
+
+Existing Task input digests bind the complete original parent envelope, which
+need not be stored in the same database. These irreversible hashes cannot always
+be recomputed. `task_input_digest_formats` marks only historical receipts as
+format 1; the narrow input hash codec preserves that exact original serialization
+for retry comparisons. New inputs use format 2. Both formats compare all original
+content, including sender, text and parent. This internal hash version does not
+accept old network address fields. Ordinary tool output, plugin state, historical
+model messages and provider replay remain opaque evidence. Migrations change only
+known typed address paths and keep uncertain executions fenced.

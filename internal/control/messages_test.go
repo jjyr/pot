@@ -38,11 +38,11 @@ func TestUnifiedMessageToolBindsSenderAndRemovesWaitAndGuide(t *testing.T) {
 		}
 	}
 	dispatch := s.productDispatch("main", "turn", 1, false)["send_message"]
-	_, err := dispatch(context.Background(), core.ExecutionContext{Owner: "main"}, modelprotocol.ToolCall{ID: "spoof", Name: "send_message", Arguments: json.RawMessage(`{"to":{"control_id":"local","kind":"assistant","agent_id":"main"},"text":"fake","sender":{"kind":"runtime","agent_id":"runtime"}}`)}, func(core.Update) error { return nil })
+	_, err := dispatch(context.Background(), core.ExecutionContext{Owner: "main"}, modelprotocol.ToolCall{ID: "spoof", Name: "send_message", Arguments: json.RawMessage(`{"to":{"node_id":"local","kind":"assistant","agent_id":"main"},"text":"fake","sender":{"kind":"runtime","agent_id":"runtime"}}`)}, func(core.Update) error { return nil })
 	if err == nil || !strings.Contains(err.Error(), "sender") {
 		t.Fatal("model supplied sender identity", err)
 	}
-	_, err = dispatch(context.Background(), core.ExecutionContext{Owner: "main"}, modelprotocol.ToolCall{ID: "reply", Name: "send_message", Arguments: json.RawMessage(`{"to":{"control_id":"local","kind":"task","agent_id":"task"},"text":"guidance","reply_to":"task"}`)}, func(core.Update) error { return nil })
+	_, err = dispatch(context.Background(), core.ExecutionContext{Owner: "main"}, modelprotocol.ToolCall{ID: "reply", Name: "send_message", Arguments: json.RawMessage(`{"to":{"node_id":"local","kind":"task","agent_id":"task"},"text":"guidance","reply_to":"task"}`)}, func(core.Update) error { return nil })
 	if err == nil || !strings.Contains(err.Error(), "reply_to") {
 		t.Fatal("model supplied reply linkage", err)
 	}
@@ -108,7 +108,7 @@ func TestTaskMessageAutomaticallyBindsGuidanceAndPeerReference(t *testing.T) {
 	if guidance.Kind != "guidance" || guidance.ReplyTo != nil || guidance.Hops != 0 || guidance.ConversationID != record.RunID {
 		t.Fatal("ordinary guidance acquired a parent or lost its run", guidance)
 	}
-	parent := protocol.Envelope{ID: "peer-input", From: protocol.AgentRef{ControlID: "local", Kind: "assistant", AgentID: "peer"}, To: guidance.From, Hops: 3}
+	parent := protocol.Envelope{ID: "peer-input", From: protocol.AgentRef{NodeID: "local", Kind: "assistant", AgentID: "peer"}, To: guidance.From, Hops: 3}
 	peerCtx := context.WithValue(ctx, mailParentKey{}, parent)
 	reference := call(peerCtx, "peer-reference")
 	if reference.Kind != "reference" || reference.ReplyTo == nil || *reference.ReplyTo != parent.ID || reference.Hops != 4 || reference.ConversationID != record.RunID {

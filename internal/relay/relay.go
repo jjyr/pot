@@ -14,7 +14,7 @@ import (
 )
 
 type Endpoint interface {
-	ControlID() string
+	NodeID() string
 	Directory(context.Context) (protocol.Directory, error)
 	Register(context.Context, protocol.Directory) error
 	Pending(context.Context, string) ([]protocol.Envelope, error)
@@ -33,8 +33,8 @@ func Pass(ctx context.Context, a, b Endpoint) (bool, error) {
 	if a == nil || b == nil {
 		return false, errors.New("relay requires two endpoints")
 	}
-	aid, bid := a.ControlID(), b.ControlID()
-	if aid == bid || !(protocol.AgentRef{ControlID: aid, Kind: "assistant", AgentID: "identity"}).Valid() || !(protocol.AgentRef{ControlID: bid, Kind: "assistant", AgentID: "identity"}).Valid() {
+	aid, bid := a.NodeID(), b.NodeID()
+	if aid == bid || !(protocol.AgentRef{NodeID: aid, Kind: "assistant", AgentID: "identity"}).Valid() || !(protocol.AgentRef{NodeID: bid, Kind: "assistant", AgentID: "identity"}).Valid() {
 		return false, errors.New("relay endpoints require distinct valid Control identities")
 	}
 	type directoryResult struct {
@@ -48,7 +48,7 @@ func Pass(ctx context.Context, a, b Endpoint) (bool, error) {
 	if err := errors.Join(av.err, bv.err); err != nil {
 		return false, fmt.Errorf("relay directories: %w", err)
 	}
-	if av.value.ControlID != aid || bv.value.ControlID != bid || a.ControlID() != aid || b.ControlID() != bid {
+	if av.value.NodeID != aid || bv.value.NodeID != bid || a.NodeID() != aid || b.NodeID() != bid {
 		return false, errors.New("relay Control identity changed")
 	}
 	if err := errors.Join(validateDirectory(av.value), validateDirectory(bv.value)); err != nil {
@@ -76,7 +76,7 @@ func validateDirectory(value protocol.Directory) error {
 	}
 	seen := map[protocol.AgentRef]bool{}
 	for _, assistant := range value.Assistants {
-		if !assistant.Address.Valid() || assistant.Address.ControlID != value.ControlID || seen[assistant.Address] || !utf8.ValidString(assistant.Name) || strings.TrimSpace(assistant.Name) == "" || utf8.RuneCountInString(assistant.Name) > 128 {
+		if !assistant.Address.Valid() || assistant.Address.NodeID != value.NodeID || seen[assistant.Address] || !utf8.ValidString(assistant.Name) || strings.TrimSpace(assistant.Name) == "" || utf8.RuneCountInString(assistant.Name) > 128 {
 			return errors.New("invalid relay assistant directory")
 		}
 		seen[assistant.Address] = true
@@ -95,7 +95,7 @@ func equal(a, b protocol.Envelope) bool {
 	return a.Kind == b.Kind && a.Owner == b.Owner && a.Digest == b.Digest && a.RequestID == b.RequestID && a.ID == b.ID && a.From == b.From && a.To == b.To && a.ConversationID == b.ConversationID && sameReply && a.Text == b.Text && a.Hops == b.Hops
 }
 func transfer(ctx context.Context, source, target Endpoint, sourceID, targetID string) (bool, error) {
-	if source.ControlID() != sourceID || target.ControlID() != targetID {
+	if source.NodeID() != sourceID || target.NodeID() != targetID {
 		return false, errors.New("relay Control identity changed")
 	}
 	messages, err := source.Pending(ctx, targetID)
@@ -111,11 +111,11 @@ func transfer(ctx context.Context, source, target Endpoint, sourceID, targetID s
 			return false, errors.Join(append(failures, err)...)
 		}
 		message := clone(value)
-		if err := message.Validate(); err != nil || message.From.ControlID != sourceID || message.To.ControlID != targetID {
+		if err := message.Validate(); err != nil || message.From.NodeID != sourceID || message.To.NodeID != targetID {
 			failures = append(failures, errors.New("relay message route mismatch"))
 			continue
 		}
-		if source.ControlID() != sourceID || target.ControlID() != targetID {
+		if source.NodeID() != sourceID || target.NodeID() != targetID {
 			failures = append(failures, errors.New("relay Control identity changed"))
 			continue
 		}
@@ -128,7 +128,7 @@ func transfer(ctx context.Context, source, target Endpoint, sourceID, targetID s
 			failures = append(failures, errors.New("relay delivery receipt mismatch"))
 			continue
 		}
-		if source.ControlID() != sourceID || target.ControlID() != targetID {
+		if source.NodeID() != sourceID || target.NodeID() != targetID {
 			failures = append(failures, errors.New("relay Control identity changed before acknowledgement"))
 			continue
 		}
