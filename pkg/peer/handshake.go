@@ -175,7 +175,9 @@ func (s *Server) Accept(ctx context.Context, c net.Conn) (_ *Session, err error)
 	if validLocal(s.Identity, s.PrivateKey) != nil {
 		return nil, ErrUnauthorized
 	}
-	finish := handshakeContext(ctx, c)
+	admissionCtx, cancelAdmission := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelAdmission()
+	finish := handshakeContext(admissionCtx, c)
 	defer func() { finish() }()
 	hraw, err := readPacket(c, maxHandshake)
 	if err != nil {
@@ -203,7 +205,7 @@ func (s *Server) Accept(ctx context.Context, c net.Conn) (_ *Session, err error)
 	if s.Authorize == nil {
 		err = ErrUnauthorized
 	} else {
-		handler, err = s.Authorize(ctx, h.Identity, h.Service, append(json.RawMessage(nil), h.Auth...))
+		handler, err = s.Authorize(admissionCtx, h.Identity, h.Service, append(json.RawMessage(nil), h.Auth...))
 	}
 	a := acceptance{Session: sid}
 	if err != nil {

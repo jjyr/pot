@@ -13,22 +13,24 @@ import (
 )
 
 type frame struct {
-	Session   string          `json:"session"`
-	Direction string          `json:"direction"`
-	Sequence  uint64          `json:"sequence"`
-	Kind      string          `json:"kind"`
-	ID        string          `json:"id,omitempty"`
-	Method    string          `json:"method,omitempty"`
-	Params    json.RawMessage `json:"params,omitempty"`
-	Error     *RemoteError    `json:"error,omitempty"`
+	Session     string          `json:"session"`
+	Direction   string          `json:"direction"`
+	Sequence    uint64          `json:"sequence"`
+	Kind        string          `json:"kind"`
+	ID          string          `json:"id,omitempty"`
+	Correlation string          `json:"correlation,omitempty"`
+	Method      string          `json:"method,omitempty"`
+	Params      json.RawMessage `json:"params,omitempty"`
+	Error       *RemoteError    `json:"error,omitempty"`
 }
 type response struct {
 	raw json.RawMessage
 	err error
 }
 type pendingCall struct {
-	method string
-	result chan response
+	method      string
+	correlation string
+	result      chan response
 }
 
 type Session struct {
@@ -51,11 +53,12 @@ type Session struct {
 	pending                   map[string]pendingCall
 	inflight                  map[string]bool
 	handlers                  chan struct{}
+	pongs                     chan struct{}
 }
 
 func newSession(ctx context.Context, c net.Conn, local Identity, key ed25519.PrivateKey, remote Identity, id, service string, auth json.RawMessage, handler Handler, out, in string) *Session {
 	ctx, cancel := context.WithCancel(ctx)
-	return &Session{conn: c, local: local, key: append(ed25519.PrivateKey(nil), key...), remote: remote, id: id, service: service, auth: append(json.RawMessage(nil), auth...), handler: handler, outDirection: out, inDirection: in, ctx: ctx, cancel: cancel, done: make(chan struct{}), writer: make(chan struct{}, 1), pending: map[string]pendingCall{}, inflight: map[string]bool{}, handlers: make(chan struct{}, maxPending)}
+	return &Session{conn: c, local: local, key: append(ed25519.PrivateKey(nil), key...), remote: remote, id: id, service: service, auth: append(json.RawMessage(nil), auth...), handler: handler, outDirection: out, inDirection: in, ctx: ctx, cancel: cancel, done: make(chan struct{}), writer: make(chan struct{}, 1), pending: map[string]pendingCall{}, inflight: map[string]bool{}, handlers: make(chan struct{}, maxPending), pongs: make(chan struct{}, 1)}
 }
 func (s *Session) Remote() Identity      { return s.remote }
 func (s *Session) Service() string       { return s.service }
@@ -74,6 +77,10 @@ func (s *Session) start() {
 				return
 			case <-ticker.C:
 				if s.send(s.ctx, frame{Kind: "ping"}) != nil {
+					return
+				}
+			case <-s.pongs:
+				if s.send(s.ctx, frame{Kind: "pong"}) != nil {
 					return
 				}
 			}
@@ -140,10 +147,11 @@ func (s *Session) Call(ctx context.Context, r Request) (json.RawMessage, error) 
 		return nil, fmt.Errorf("peer request conflict/capacity")
 	}
 	ch := make(chan response, 1)
-	s.pending[r.ID] = pendingCall{r.Method, ch}
+	correlation := nonce()
+	s.pending[r.ID] = pendingCall{r.Method, correlation, ch}
 	s.mu.Unlock()
 	defer func() { s.mu.Lock(); delete(s.pending, r.ID); s.mu.Unlock() }()
-	if err := s.send(ctx, frame{Kind: "request", ID: r.ID, Method: r.Method, Params: r.Params}); err != nil {
+	if err := s.send(ctx, frame{Kind: "request", ID: r.ID, Correlation: correlation, Method: r.Method, Params: r.Params}); err != nil {
 		s.Close()
 		return nil, fmt.Errorf("%w: %v", ErrUncertain, err)
 	}
@@ -206,22 +214,27 @@ func (s *Session) readLoop() {
 		}
 		s.inSeq = f.Sequence
 		if f.Kind == "ping" || f.Kind == "pong" {
-			if f.ID != "" || f.Method != "" || len(f.Params) != 0 || f.Error != nil {
+			if f.ID != "" || f.Correlation != "" || f.Method != "" || len(f.Params) != 0 || f.Error != nil {
 				return
 			}
-			if f.Kind == "ping" && s.send(s.ctx, frame{Kind: "pong"}) != nil {
-				return
+			if f.Kind == "ping" {
+				// The reader must drain large concurrent writes even when
+				// its own writer is busy. Keep heartbeat replies bounded.
+				select {
+				case s.pongs <- struct{}{}:
+				default:
+				}
 			}
 			continue
 		}
 		if f.Kind == "response" {
-			if len(f.Params) > MaxPayload || !json.Valid(f.Params) {
+			if !validNonce(f.Correlation) || len(f.Params) > MaxPayload || !json.Valid(f.Params) {
 				return
 			}
 			s.mu.Lock()
 			p, ok := s.pending[f.ID]
 			s.mu.Unlock()
-			if ok {
+			if ok && p.correlation == f.Correlation {
 				if p.method != f.Method {
 					return
 				}
@@ -240,6 +253,9 @@ func (s *Session) readLoop() {
 			continue
 		}
 		if (f.Kind != "request" && f.Kind != "event") || f.Error != nil || validRequest(Request{f.ID, f.Method, f.Params}) != nil {
+			return
+		}
+		if f.Kind == "request" && !validNonce(f.Correlation) || f.Kind == "event" && f.Correlation != "" {
 			return
 		}
 		if f.Kind == "event" && (len(f.Method) < 6 || f.Method[:6] != "event.") {
@@ -279,7 +295,7 @@ func (s *Session) handle(f frame) {
 		result = json.RawMessage("null")
 		err = fmt.Errorf("invalid peer response size/JSON")
 	}
-	reply := frame{Kind: "response", ID: f.ID, Method: f.Method, Params: result}
+	reply := frame{Kind: "response", ID: f.ID, Correlation: f.Correlation, Method: f.Method, Params: result}
 	if err != nil {
 		reply.Error = boundedError(err)
 	}

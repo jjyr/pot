@@ -53,7 +53,7 @@ Handshake packets are limited to 64 KiB and have a ten-second deadline.
 
 The transcript hash identifies the session. Every application frame signs that
 session ID, its client/server direction, a strictly increasing per-direction
-sequence, message kind, request ID, method and payload. A modified signature,
+sequence, message kind, request ID, per-attempt correlation nonce, method and payload. A modified signature,
 wrong direction, skipped/repeated sequence or replay from another connection
 closes the session before dispatch. Each connection admits one service; a host
 can dispatch multiple service names through one `Server` and TCP listener.
@@ -74,9 +74,9 @@ and must return promptly. Hosts may register a narrow `identity` service for
 signed identity probes; management HTTP APIs are not mounted on the peer listener.
 
 Sessions carry requests, responses and lossy `event.*` notifications in either
-direction. Responses preserve the request ID and method. A handler may return a
+direction. Responses preserve the request ID, method and per-attempt correlation nonce, so a late response cannot complete a later call reusing a business ID. A handler may return a
 bounded `RemoteError` with opaque service fault data. Heartbeats run every twenty
-seconds, reads expire after ninety seconds, and writes have bounded deadlines.
+seconds, reads expire after ninety seconds, and writes have bounded deadlines. Readers enqueue bounded heartbeat replies without waiting for writers, so duplex large writes continue draining.
 
 The transport never reconnects or replays business requests automatically. A call
 whose delivery or result is uncertain returns `ErrUncertain`. Agent messaging
