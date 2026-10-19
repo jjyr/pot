@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/internal/controlplane"
+	"github.com/jjyr/pot/internal/linkhost"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/internal/tasks"
@@ -50,6 +51,9 @@ func (s *Service) openTasks() error {
 	if err != nil {
 		return err
 	}
+	if err = s.linkPlugins.RegisterExecution(linkhost.Runner{Directory: s.Machines, Connector: controlplane.Connector{Directory: s.Machines, HTTPClient: s.options.ControlHTTPClient, Handler: controlplane.RunnerHandler(s.Machines, remoteRunnerPort{s}, s.runnerRPC)}}); err != nil {
+		return err
+	}
 	// Directory serializes this gate with enrollment admission and its CanJoin
 	// configuration check, so a concurrent Provider save cannot hide AI state.
 	s.Profiles.ownerAction = s.Machines.OwnerAction
@@ -72,8 +76,6 @@ func (s *Service) openTasks() error {
 	if err != nil {
 		return err
 	}
-	s.taskLife.wg.Add(1)
-	go s.taskLoop()
 	if s.Machines.Role() == "runner" {
 		s.StartRunner()
 	}
@@ -291,13 +293,21 @@ func (p taskRouter) original(ctx context.Context, control, task, run string) (ru
 	if r.Launch.RuntimeID == p.s.options.RuntimeID {
 		return p.s.Runner, nil
 	}
-	return controlplane.RemotePort{Directory: p.s.Machines, RuntimeID: r.Launch.RuntimeID}, nil
+	plugin, err := p.s.linkPlugins.Execution("runner")
+	if err != nil {
+		return nil, err
+	}
+	return plugin.Target(r.Launch.RuntimeID), nil
 }
 func (p taskRouter) Launch(ctx context.Context, l runner.Launch) (runner.Run, error) {
 	if l.RuntimeID == p.s.options.RuntimeID {
 		return p.s.Runner.Launch(ctx, l)
 	}
-	return (controlplane.RemotePort{Directory: p.s.Machines, RuntimeID: l.RuntimeID}).Launch(ctx, l)
+	plugin, err := p.s.linkPlugins.Execution("runner")
+	if err != nil {
+		return runner.Run{}, err
+	}
+	return plugin.Target(l.RuntimeID).Launch(ctx, l)
 }
 func (p taskRouter) Inspect(ctx context.Context, c, t, r string) (*runner.Run, error) {
 	port, err := p.original(ctx, c, t, r)

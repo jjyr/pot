@@ -30,7 +30,7 @@ func TestAttachmentChunksStayOnExplicitRemoteSpace(t *testing.T) {
 	}))
 	defer server.Close()
 	ca := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}))
-	manager, err := Open(context.Background(), Options{Path: ConfigurationPath(t.TempDir()), Local: local, LocalID: "local", RefreshInterval: time.Hour, RelayInterval: time.Hour})
+	manager, err := Open(context.Background(), Options{Path: ConfigurationPath(t.TempDir()), Local: local, LocalID: "local", RefreshInterval: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}

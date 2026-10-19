@@ -145,14 +145,14 @@ func (c *testControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 func openManager(t *testing.T, local *testControl) *Manager {
 	t.Helper()
-	m, err := Open(context.Background(), Options{Path: ConfigurationPath(t.TempDir()), Local: local, LocalID: "local", RefreshInterval: time.Hour, RelayInterval: time.Hour})
+	m, err := Open(context.Background(), Options{Path: ConfigurationPath(t.TempDir()), Local: local, LocalID: "local", RefreshInterval: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { m.Close() })
 	return m
 }
-func TestAppSpacesExplicitTLSAndBidirectionalRelay(t *testing.T) {
+func TestAppSpacesExplicitTLSDoesNotRelayAgentMessages(t *testing.T) {
 	local, remote := newControl(t, "local"), newControl(t, "remote")
 	server := httptest.NewTLSServer(remote)
 	t.Cleanup(server.Close)
@@ -182,13 +182,11 @@ func TestAppSpacesExplicitTLSAndBidirectionalRelay(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := m.Exchange(context.Background()); err != nil {
-		t.Fatal(err)
-	}
+	// Owner Space management must not relay assistant messages.
 	for _, node := range []*testControl{local, remote} {
 		next, err := node.mail.Next(context.Background(), "main")
-		if err != nil || next == nil {
-			t.Fatalf("peer delivery: %v %v", next, err)
+		if err != nil || next != nil {
+			t.Fatalf("owner connection granted agent messaging: %v %v", next, err)
 		}
 	}
 	persisted, err := os.ReadFile(m.options.Path)
@@ -314,7 +312,7 @@ func TestRemoteHandshakeRejectsEmbeddedAndRedirect(t *testing.T) {
 }
 func TestConnectedSpaceDoesNotPollCatalogues(t *testing.T) {
 	local := newControl(t, "local")
-	m, err := Open(context.Background(), Options{Path: ConfigurationPath(t.TempDir()), Local: local, LocalID: "local", RefreshInterval: 10 * time.Millisecond, RelayInterval: 10 * time.Millisecond})
+	m, err := Open(context.Background(), Options{Path: ConfigurationPath(t.TempDir()), Local: local, LocalID: "local", RefreshInterval: 10 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,11 +323,11 @@ func TestConnectedSpaceDoesNotPollCatalogues(t *testing.T) {
 		t.Fatal("connected Space was polled without an event or explicit refresh")
 	}
 	first, versions, changed := changedEvent(Event{Data: json.RawMessage(`{"assistants":1,"usage":1}`)}, nil)
-	if !changed || !relayDirty(first) {
+	if !changed || !catalogDirty(first) {
 		t.Fatal("initial assistant event lost")
 	}
 	usage, versions, changed := changedEvent(Event{Data: json.RawMessage(`{"assistants":1,"usage":2}`)}, versions)
-	if !changed || relayDirty(usage) || catalogDirty(usage) {
+	if !changed || catalogDirty(usage) {
 		t.Fatal("unchanged assistant version caused a catalogue/mail refresh")
 	}
 	_, _, changed = changedEvent(Event{Data: json.RawMessage(`{"assistants":1,"usage":2}`)}, versions)

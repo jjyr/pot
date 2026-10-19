@@ -9,6 +9,7 @@ import (
 	"github.com/jjyr/pot/internal/attachments"
 	"github.com/jjyr/pot/internal/controlplane"
 	"github.com/jjyr/pot/internal/gateway"
+	"github.com/jjyr/pot/internal/linkhost"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/internal/secrets"
@@ -48,9 +49,12 @@ type Options struct {
 	SandboxDirectory    string
 	Node                string
 	ControlHTTPClient   *http.Client
+	ControlOrigin       string
 	IntegrationAdapters []integrations.Adapter
 }
 type Service struct {
+	agentLinks          *agentLinkHost
+	linkPlugins         *linkhost.Host
 	pluginWG            sync.WaitGroup
 	pluginMu            sync.Mutex
 	pluginStreams       map[string]backgroundStream
@@ -106,7 +110,7 @@ func Open(options Options) (*Service, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(options.Context)
-	s := &Service{options: options, ctx: ctx, cancel: cancel, conversations: map[string]*assistant.Conversation{}, hosts: map[string]*executor.Engine{}}
+	s := &Service{options: options, ctx: ctx, cancel: cancel, conversations: map[string]*assistant.Conversation{}, hosts: map[string]*executor.Engine{}, linkPlugins: linkhost.New()}
 	s.Terminals = terminal.New()
 	success := false
 	defer func() {
@@ -161,6 +165,11 @@ func Open(options Options) (*Service, error) {
 	if err = s.openTasks(); err != nil {
 		return nil, err
 	}
+	if err = s.openAgentLinks(); err != nil {
+		return nil, err
+	}
+	s.taskLife.wg.Add(1)
+	go s.taskLoop()
 	s.pluginWG.Add(1)
 	go s.pluginLoop()
 	success = true
@@ -409,8 +418,9 @@ func (s *Service) Close() error {
 		engines = append(engines, e)
 	}
 	s.mu.Unlock()
+	linkErr := s.closeAgentLinks()
 	s.pluginWG.Wait()
-	var result error
+	var result error = linkErr
 	if s.Terminals != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		result = errors.Join(result, s.Terminals.Close(ctx))

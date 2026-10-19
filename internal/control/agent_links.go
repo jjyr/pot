@@ -1,0 +1,366 @@
+package control
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/jjyr/pot/internal/linkhost"
+	"github.com/jjyr/pot/pkg/agentlink"
+	"github.com/jjyr/pot/pkg/protocol"
+)
+
+type agentLinkConfig struct {
+	Listen   string `json:"listen"`
+	Endpoint string `json:"endpoint"`
+	Mode     string `json:"mode"`
+}
+
+type agentLinkHost struct {
+	mu      sync.Mutex
+	service *agentlink.Service
+	config  agentLinkConfig
+	server  *http.Server
+}
+
+type controlLinkMailbox struct{ s *Service }
+
+func (m controlLinkMailbox) Pending(ctx context.Context, local, peer protocol.AgentRef) ([]protocol.Envelope, error) {
+	return m.s.Mailbox.PendingLink(ctx, local, peer)
+}
+func (m controlLinkMailbox) Deliver(ctx context.Context, value protocol.Envelope) (protocol.Receipt, error) {
+	if _, err := m.s.agentLinkIdentity(ctx, value.To.AgentID); err != nil {
+		return protocol.Receipt{}, err
+	}
+	receipt, err := m.s.Mailbox.Deliver(ctx, value)
+	if err == nil {
+		m.s.wakeTasks()
+		m.s.Changes.Notify("assistant-mail")
+	}
+	return receipt, err
+}
+func (m controlLinkMailbox) Acknowledge(ctx context.Context, value protocol.Receipt) error {
+	return m.s.Mailbox.Acknowledge(ctx, value)
+}
+
+func (s *Service) agentLinkIdentity(ctx context.Context, id string) (agentlink.Identity, error) {
+	definitions, err := s.Registry.Definitions(ctx)
+	if err != nil {
+		return agentlink.Identity{}, err
+	}
+	for _, d := range definitions {
+		if d.ID == id {
+			return agentlink.Identity{Address: protocol.AgentRef{ControlID: s.options.RuntimeID, Kind: "assistant", AgentID: id}, Name: d.Name, Adapter: "pot"}, nil
+		}
+	}
+	return agentlink.Identity{}, protocol.APIError{Code: "agent_link_assistant_unavailable"}
+}
+
+func (s *Service) openAgentLinks() error {
+	service, err := agentlink.New(agentlink.Options{DB: s.integrationDB, Secrets: s.integrationSecrets, Identity: s.agentLinkIdentity, Mailbox: controlLinkMailbox{s}, HTTPClient: s.options.ControlHTTPClient, Changed: func() { s.Changes.Notify("agent-links"); s.Changes.Notify("assistant-mail"); s.wakeTasks() }})
+	if err != nil {
+		return err
+	}
+	host := &agentLinkHost{service: service, config: agentLinkConfig{Listen: "127.0.0.1:0", Mode: "https"}}
+	err = s.integrationDB.QueryRowContext(s.ctx, "SELECT listen,endpoint,mode FROM agent_link_host WHERE singleton=1").Scan(&host.config.Listen, &host.config.Endpoint, &host.config.Mode)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	s.agentLinks = host
+	if err = s.linkPlugins.RegisterAgent(linkhost.Messages{Name: "pot", Service: service}); err != nil {
+		return err
+	}
+	if err = s.startAgentListener(host.config); err != nil {
+		return err
+	}
+	s.pluginWG.Add(1)
+	go func() { defer s.pluginWG.Done(); s.linkPlugins.Run(s.ctx) }()
+	return nil
+}
+
+func validAgentListen(value string) bool {
+	host, _, err := net.SplitHostPort(value)
+	ip := net.ParseIP(host)
+	return err == nil && ip != nil && ip.IsLoopback()
+}
+func validAgentEndpoint(value string) bool {
+	u, err := url.Parse(value)
+	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == "" && (u.Path == "" || u.Path == "/")
+}
+
+func (s *Service) startAgentListener(config agentLinkConfig) error {
+	if !validAgentListen(config.Listen) {
+		return protocol.APIError{Code: "agent_link_invalid_listen"}
+	}
+	listener, err := net.Listen("tcp", config.Listen)
+	if err != nil {
+		return protocol.APIError{Code: "agent_link_listener_unavailable"}
+	}
+	config.Listen = listener.Addr().String()
+	_, err = s.integrationDB.ExecContext(s.ctx, "INSERT INTO agent_link_host(singleton,listen,endpoint,mode) VALUES(1,?,?,?) ON CONFLICT(singleton) DO UPDATE SET listen=excluded.listen,endpoint=excluded.endpoint,mode=excluded.mode", config.Listen, config.Endpoint, config.Mode)
+	if err != nil {
+		listener.Close()
+		return err
+	}
+	host := s.agentLinks
+	server := &http.Server{Handler: s.AgentLinkHandler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384}
+	host.mu.Lock()
+	previous := host.server
+	host.server = server
+	host.config = config
+	host.mu.Unlock()
+	if previous != nil {
+		previous.Close()
+	}
+	s.pluginWG.Add(1)
+	go func() { defer s.pluginWG.Done(); _ = server.Serve(listener) }()
+	return nil
+}
+
+// AgentLinkHandler exposes only authenticated peer messages, never owner APIs.
+func (s *Service) AgentLinkHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.agentLinks == nil || s.Machines.Role() == "runner" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Path == agentlink.Prefix+"/ready" && r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			_ = json.NewEncoder(w).Encode(map[string]string{"control_id": s.options.RuntimeID})
+			return
+		}
+		s.agentLinks.service.Handler().ServeHTTP(w, r)
+	})
+}
+
+func (s *Service) closeAgentLinks() error {
+	if s.agentLinks == nil {
+		return nil
+	}
+	s.agentLinks.mu.Lock()
+	server := s.agentLinks.server
+	s.agentLinks.mu.Unlock()
+	if server != nil {
+		return server.Close()
+	}
+	return nil
+}
+
+func (s *Service) AgentLinks(ctx context.Context, assistantID string) (any, error) {
+	if s.agentLinks == nil {
+		return nil, protocol.APIError{Code: "agent_link_unavailable"}
+	}
+	identity, err := s.agentLinkIdentity(ctx, assistantID)
+	if err != nil {
+		definitions, e := s.Registry.Definitions(ctx)
+		if e != nil {
+			return nil, e
+		}
+		if len(definitions) > 0 {
+			identity, err = s.agentLinkIdentity(ctx, definitions[0].ID)
+		}
+	}
+	h := s.agentLinks
+	h.mu.Lock()
+	config := h.config
+	h.mu.Unlock()
+	status, reason := "ready", ""
+	if config.Endpoint == "" {
+		status, reason = "needs_access", "agent_link_access_required"
+	}
+	if err != nil {
+		status, reason = "needs_access", "agent_link_assistant_unavailable"
+	}
+	self := map[string]any{"id": identity.Address.AgentID, "kind": "pot", "name": identity.Name, "address": config.Endpoint, "endpoint": config.Endpoint, "status": status, "reason_code": reason}
+	connections, err := h.service.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items := []any{}
+	for _, c := range connections {
+		if c.State == "revoked" {
+			continue
+		}
+		state := c.State
+		if state == "ready" || state == "active" {
+			state = "connected"
+		}
+		items = append(items, map[string]any{"id": c.ID, "local_assistant_id": c.Local.Address.AgentID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "control_id": c.Peer.Address.ControlID, "kind": c.Peer.Adapter, "name": c.Peer.Name, "address": c.Endpoint}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
+	}
+	return map[string]any{"self": self, "items": items, "network": map[string]any{"listen": config.Listen, "endpoint": config.Endpoint, "mode": config.Mode, "status": status, "reason_code": reason}}, nil
+}
+
+type AgentLinkCommand struct {
+	Action      string `json:"action"`
+	AssistantID string `json:"assistant_id"`
+	Address     string `json:"address"`
+	ID          string `json:"id"`
+	Revision    int64  `json:"revision"`
+	RequestID   string `json:"request_id"`
+	Listen      string `json:"listen"`
+	Endpoint    string `json:"endpoint"`
+	Mode        string `json:"mode"`
+}
+
+func agentLinkError(err error) error {
+	if err == nil {
+		return nil
+	}
+	for _, known := range []error{agentlink.ErrInvalid, agentlink.ErrNotFound, agentlink.ErrUnauthorized, agentlink.ErrExpired, agentlink.ErrConflict, agentlink.ErrRevoked, agentlink.ErrUnavailable} {
+		if errors.Is(err, known) {
+			return protocol.APIError{Code: known.Error()}
+		}
+	}
+	var api protocol.APIError
+	if errors.As(err, &api) {
+		return err
+	}
+	return protocol.APIError{Code: "agent_link_failed"}
+}
+
+func (s *Service) ManageAgentLink(ctx context.Context, command AgentLinkCommand) (any, error) {
+	if s.agentLinks == nil || s.Machines.Role() == "runner" {
+		return nil, protocol.APIError{Code: "agent_link_unavailable"}
+	}
+	var result any
+	var err error
+	switch command.Action {
+	case "invite":
+		s.agentLinks.mu.Lock()
+		endpoint := s.agentLinks.config.Endpoint
+		s.agentLinks.mu.Unlock()
+		if endpoint == "" {
+			return nil, protocol.APIError{Code: "agent_link_access_required"}
+		}
+		invite, e := s.agentLinks.service.Invite(ctx, command.AssistantID, endpoint)
+		err = e
+		result = map[string]any{"address": invite.Address, "expires_at_ms": invite.ExpiresAt.UnixMilli()}
+	case "connect":
+		result, err = s.agentLinks.service.Connect(ctx, command.AssistantID, command.Address)
+	case "disconnect":
+		var current agentlink.Connection
+		current, err = s.agentLinks.service.Get(ctx, command.ID)
+		if err == nil && command.Revision != 0 && current.CreatedAt.UnixMilli() != command.Revision {
+			return nil, protocol.APIError{Code: "agent_link_identity_conflict"}
+		}
+		if err == nil {
+			err = s.agentLinks.service.Revoke(ctx, command.ID)
+		}
+		result = map[string]bool{"disconnected": err == nil}
+	case "configure":
+		result, err = s.configureAgentAccess(ctx, command)
+	default:
+		err = agentlink.ErrInvalid
+	}
+	if err == nil {
+		s.Changes.Notify("agent-links")
+	}
+	return result, agentLinkError(err)
+}
+
+func (s *Service) configureAgentAccess(ctx context.Context, command AgentLinkCommand) (any, error) {
+	h := s.agentLinks
+	h.mu.Lock()
+	config := h.config
+	h.mu.Unlock()
+	if command.Listen != "" && command.Listen != config.Listen {
+		return nil, protocol.APIError{Code: "agent_link_listener_restart_required"}
+	}
+	if command.Mode != "" {
+		config.Mode = command.Mode
+	}
+	if config.Mode == "tailscale" {
+		endpoint, err := configureAgentTailscale(ctx, config.Listen)
+		if err != nil {
+			return nil, err
+		}
+		config.Endpoint = endpoint
+	} else if config.Mode == "https" {
+		config.Endpoint = strings.TrimRight(command.Endpoint, "/")
+	} else {
+		return nil, agentlink.ErrInvalid
+	}
+	if !validAgentEndpoint(config.Endpoint) {
+		return nil, agentlink.ErrInvalid
+	}
+	if err := s.probeAgentEndpoint(ctx, config.Endpoint); err != nil {
+		return nil, err
+	}
+	_, err := s.integrationDB.ExecContext(ctx, "UPDATE agent_link_host SET endpoint=?,mode=? WHERE singleton=1", config.Endpoint, config.Mode)
+	if err != nil {
+		return nil, err
+	}
+	h.mu.Lock()
+	h.config = config
+	h.mu.Unlock()
+	return s.AgentLinks(ctx, command.AssistantID)
+}
+
+func (s *Service) probeAgentEndpoint(ctx context.Context, endpoint string) error {
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+agentlink.Prefix+"/ready", nil)
+	if err != nil {
+		return err
+	}
+	client := s.options.ControlHTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 8 * time.Second}
+	}
+	copy := *client
+	copy.CheckRedirect = func(*http.Request, []*http.Request) error { return errors.New("redirect denied") }
+	response, err := copy.Do(request)
+	if err != nil {
+		return protocol.APIError{Code: "agent_link_unreachable"}
+	}
+	defer response.Body.Close()
+	var body struct {
+		ControlID string `json:"control_id"`
+	}
+	if response.StatusCode != 200 || json.NewDecoder(io.LimitReader(response.Body, 2048)).Decode(&body) != nil || body.ControlID != s.options.RuntimeID {
+		return protocol.APIError{Code: "agent_link_identity_conflict"}
+	}
+	return nil
+}
+
+func (s *Service) linkedPeer(ctx context.Context, local, peer protocol.AgentRef) bool {
+	if s.agentLinks == nil {
+		return false
+	}
+	links, err := s.agentLinks.service.List(ctx)
+	if err != nil {
+		return false
+	}
+	for _, link := range links {
+		if link.State != "revoked" && link.LastSeen != nil && link.Local.Address == local && link.Peer.Address == peer {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) agentLinkPeers(ctx context.Context, owner string) ([]protocol.MailAssistant, error) {
+	result := []protocol.MailAssistant{}
+	if s.agentLinks == nil {
+		return result, nil
+	}
+	links, err := s.agentLinks.service.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, link := range links {
+		if link.State != "revoked" && link.LastSeen != nil && (owner == "" || link.Local.Address.AgentID == owner) {
+			result = append(result, protocol.MailAssistant{Address: link.Peer.Address, Name: link.Peer.Name})
+		}
+	}
+	return result, nil
+}

@@ -17,7 +17,8 @@ points; `internal/` contains product implementation. All packages share one root
 | `pkg/storage` | SQLite transactions, messages, events and context persistence |
 | `pkg/instance`, `pkg/modeldirectory` | Private data-root identity/locking and provider model metadata |
 | `internal/assistant` | Identities, rules, conversation Threads, chat driver and durable mailboxes/sessions |
-| `internal/relay` | Transport-independent assistant-message delivery; composed only by native App |
+| `pkg/agentlink` | Assistant-bound authenticated message exchange, encrypted connection references and durable recovery |
+| `internal/linkhost` | Typed Agent message and Runner execution adapters, composed by their owning host |
 | `internal/gateway`, `internal/secrets` | Control-owned provider HTTP routes and encrypted credential references |
 | `pkg/integrations`, `pkg/integrations/github` | Independent service login, single-account connections and credential caching through injected account/Secrets stores; GitHub device authorization adapter |
 | `internal/usage` | Durable reservations, allowances, usage settlement, tools and compaction accounting |

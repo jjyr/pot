@@ -132,16 +132,17 @@ inspection rather than automatically replaying uncertain model requests.
 ## Cross-Space delivery
 
 A Space is a Control identity. Local messages enter the shared inbox directly;
-remote assistant correspondence enters the source Outbox. App verifies endpoint
-identities, exchanges directories, delivers envelopes and then acknowledges their
-immutable receipts. Relay preserves the original sender and does not become the
-author. Both directions operate independently of UI selection. Native owner
-ports perform relay operations; peer transport cannot forge Runtime task events.
+remote assistant correspondence enters the source Outbox. The owning Control
+hosts [Agent Links](agent-links.md), independently of App windows and owner
+connections. Pot and Codex use the same authenticated message exchange, bound to
+one assistant identity on each side. One side adding an invitation address
+establishes both directions. At least one peer endpoint must remain reachable.
 
-App must run to carry cross-Space messages. Assistant replies remain queued while
-it is absent. No new pairing, credential store or network authorization is added.
-Web and CLI do not run a relay. Remote Task inputs continue through their original
-Control/Runner binding rather than moving execution to a different machine.
+The connection carries text messages and immutable receipts. It does not expose
+owner APIs, Task creation, files or Runner execution. An established offline
+connection retains queued messages until transport recovers. Disconnect fences
+new exchanges immediately and propagates revocation when the peer is reachable.
+Remote Task inputs continue through their original Control/Runner binding.
 
 Messages are bounded to 64 KiB. Files and permissions are not transferred by
 sending text or a path. Automatic peer chains retain a 16-hop bound, including
@@ -150,7 +151,7 @@ when useful and avoid acknowledgement loops.
 
 ## API and recovery
 
-`POST /api/v1/assistant-mail` remains the owner-authorized relay transport port.
+`POST /api/v1/assistant-mail` is an owner-authorized mailbox inspection port.
 Its tagged operations are `directory`, `register`, `pending`, `deliver`,
 `acknowledge` and `history`. Addresses and envelopes follow the Agent contract in
 `pkg/protocol/mail.go`; history projects assistant correspondence only.

@@ -87,8 +87,14 @@ func (s *Service) enrollRemotePolicy(ctx context.Context, m controlplane.Machine
 	return s.Permissions.Enroll(m.Identity.RuntimeID, epoch)
 }
 func (s *Service) RunnerConnect(ctx context.Context) (*controlplane.Peer, error) {
-	connector := controlplane.Connector{Directory: s.Machines, HTTPClient: s.options.ControlHTTPClient, Handler: controlplane.RunnerHandler(s.Machines, remoteRunnerPort{s}, s.runnerRPC)}
-	return connector.Connect(ctx)
+	if s.linkPlugins == nil {
+		return nil, errors.New("execution plugin unavailable")
+	}
+	plugin, err := s.linkPlugins.Execution("runner")
+	if err != nil {
+		return nil, err
+	}
+	return plugin.Connect(ctx)
 }
 
 // RunnerServe reconnects the outward session only. Agent/command/model requests

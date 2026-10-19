@@ -91,9 +91,10 @@ results remain reference data rather than new user authority. See
 
 Assistant communication uses separate durable model contexts and transcripts.
 An inbound peer message is untrusted reference data. Replies require an explicit
-send tool; final model text is not automatically forwarded. Native App composes
-cross-Space relay endpoints from existing owner connections. Control, CLI and
-browser do not independently relay between Controls. See
+send tool; final model text is not automatically forwarded. The owning Control hosts authenticated
+Agent Link message exchange through typed connectivity plugins; App owner
+connections are not message relays. Pot and Codex share this protocol. Execution
+Links use the original Runner membership and signed RPC boundary. See
 [assistant messages](assistant-messages.md).
 
 ## Membership and remote execution

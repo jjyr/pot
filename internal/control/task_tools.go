@@ -221,6 +221,13 @@ func (s *Service) productCall(ctx context.Context, owner, id, name string, args 
 		return map[string]any{"local": map[string]any{"runtime_id": s.options.RuntimeID, "policy": policy}, "machines": machines}, nil
 	case "list_assistants":
 		directory, err := s.MailDirectory(ctx)
+		if err == nil {
+			peers, e := s.agentLinkPeers(ctx, owner)
+			if e != nil {
+				return nil, e
+			}
+			directory.Assistants = append(directory.Assistants, peers...)
+		}
 		return map[string]any{"assistants": directory.Assistants}, err
 	case "get_model_catalog":
 		var query ModelCatalogQuery

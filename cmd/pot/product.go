@@ -74,7 +74,15 @@ func productCommand(ctx context.Context, args []string, out io.Writer) (result e
 		if flags.NArg() != 0 {
 			return errors.New("unexpected positional arguments")
 		}
-		runtime, err := product.Open(ctx, product.Options{Root: *root, ResourceDirectory: *resources, Control: control.Options{Workspace: *workspace}})
+		controlOrigin := ""
+		if host, _, e := net.SplitHostPort(*listen); e == nil && host != "" && host != "0.0.0.0" && host != "::" {
+			scheme := "http"
+			if *cert != "" {
+				scheme = "https"
+			}
+			controlOrigin = scheme + "://" + *listen
+		}
+		runtime, err := product.Open(ctx, product.Options{Root: *root, ResourceDirectory: *resources, Control: control.Options{Workspace: *workspace, ControlOrigin: controlOrigin}})
 		if err != nil {
 			return err
 		}

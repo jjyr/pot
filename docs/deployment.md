@@ -249,3 +249,28 @@ macOS or Linux. Install writes a reviewable definition without overwriting an
 existing one. Start/stop act on that definition, and the recorded root must match.
 Use the same account/root when restarting after upgrades. Neither building nor
 installing an archive starts a VM or installs a user service.
+
+## Agent message access
+
+The topology page manages Agent Links separately from third-party accounts and
+Runner enrollment. Each Control starts a dedicated loopback message listener;
+the page shows its actual bind address. Use its access setup to verify an existing
+HTTPS reverse proxy or explicitly configure Tailscale Serve. The public origin
+must route to this message listener, not the owner API. Setup probes the endpoint
+and checks the returned Control identity before saving it. Merely opening the
+page does not change network configuration. Existing unrelated Serve mappings
+are never overwritten.
+
+Copying an Agent address creates a short-lived, single-use invitation. Treat the
+complete address as a credential and paste it only into the other Agent's
+connection page. Ordinary status displays the nonsecret endpoint. The receiving
+side validates the invitation and binds it to the selected assistant. A
+connection grants mutual messaging only; assistant execution keeps its existing
+permissions. See [Agent Links](agent-links.md).
+
+Adding a machine uses a separate Control membership address and pinned identity.
+If a listener binds all interfaces, the product cannot infer its public origin:
+enter the reachable Control URL in the add-machine flow. It is verified against
+the selected Control identity before an invitation is issued. Cancelling an
+unused invitation revokes that code; cancellation after successful enrollment
+keeps the joined machine.

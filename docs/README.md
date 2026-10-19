@@ -22,7 +22,7 @@ implementation. Code defines actual behavior.
 | Native cross-machine transport, identities and session recovery | [Peer protocol](peer-protocol.md) |
 | Plugins, tools, approvals and browser execution | [Plugin packages](plugins.md), [composition](tool-composition.md), [permissions](permissions.md), [computer use](computer-use.md) |
 | Codex delegation and local plugin | [Codex Bridge](../integrations/codex/README.md) |
-| Assistant messaging and App relay | [Assistant messages](assistant-messages.md) |
+| Assistant messaging and Agent Links | [Assistant messages](assistant-messages.md) |
 | Scoped Agent connections and reliable message transport | [Agent Link](agent-links.md) |
 | Runtime hooks and notification routes | [Hooks](hooks.md) |
 | Tasks, schedules and usage | [Tasks](task-coordination.md), [schedules](scheduled-tasks.md), [token usage](token-usage.md) |

@@ -17,7 +17,7 @@ func (a *Application) machineCall(ctx context.Context, method string, u *url.URL
 		return nil, errors.New("machines inventory requires GET"), true
 	case "/api/v1/runtime/control":
 		if method == "GET" {
-			return map[string]any{"identity": a.Control.Machines.Identity(), "role": a.Control.ControlRole(), "membership": func() any {
+			return map[string]any{"identity": a.Control.Machines.Identity(), "url": a.Control.ControlOrigin(), "role": a.Control.ControlRole(), "membership": func() any {
 				member := a.Control.Machines.Membership()
 				if member == nil {
 					return nil

@@ -18,12 +18,13 @@ type JoinControl struct {
 	CAPEM               *string `json:"ca_pem"`
 }
 type MembershipCommand struct {
-	Action    string       `json:"action" required:"true"`
-	URL       string       `json:"url"`
-	CAPEM     *string      `json:"ca_pem"`
-	Request   *JoinControl `json:"request"`
-	RuntimeID string       `json:"runtime_id"`
-	Tags      []string     `json:"tags"`
+	Action       string       `json:"action" required:"true"`
+	URL          string       `json:"url"`
+	CAPEM        *string      `json:"ca_pem"`
+	Request      *JoinControl `json:"request"`
+	RuntimeID    string       `json:"runtime_id"`
+	Tags         []string     `json:"tags"`
+	InvitationID string       `json:"invitation_id"`
 }
 
 func (s *Service) ManageMembership(ctx context.Context, r MembershipCommand) (any, error) {
@@ -76,7 +77,24 @@ func (s *Service) ManageMembership(ctx context.Context, r MembershipCommand) (an
 		}
 		return map[string]string{"runtime_id": s.options.RuntimeID, "credential": s.Machines.OwnerCredential()}, nil
 	case "create_invitation":
-		return s.Machines.Invitation(ctx, time.Hour)
+		i, err := s.Machines.Invitation(ctx, time.Hour)
+		if err != nil {
+			return nil, err
+		}
+		return s.machineInvitation(i), nil
+	case "invitation_status":
+		return s.Machines.InvitationStatus(ctx, r.InvitationID)
+	case "revoke_invitation":
+		return s.Machines.RevokeInvitation(ctx, r.InvitationID)
+	case "replace_invitation":
+		i, state, err := s.Machines.ReplaceInvitation(ctx, r.InvitationID, time.Hour)
+		if err != nil {
+			return nil, err
+		}
+		if i == nil {
+			return state, nil
+		}
+		return s.machineInvitation(*i), nil
 	case "remove_member":
 		if r.RuntimeID == s.options.RuntimeID {
 			return nil, errors.New("cannot remove local Runtime")
@@ -146,6 +164,12 @@ func (s *Service) ManageMembership(ctx context.Context, r MembershipCommand) (an
 	}
 	return nil, errors.New("unknown membership action")
 }
+
+func (s *Service) machineInvitation(i controlplane.Invitation) any {
+	return map[string]any{"id": controlplane.InvitationID(i.Code), "invitation": i.Code, "expires_at_ms": i.ExpiresAtMS, "identity": i.Identity, "control": i.Identity, "url": s.options.ControlOrigin}
+}
+
+func (s *Service) ControlOrigin() string { return s.options.ControlOrigin }
 
 func (s *Service) localMachine(_ context.Context) (map[string]any, error) {
 	policy, _, err := s.Permissions.Policy(s.options.RuntimeID)

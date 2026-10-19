@@ -30,7 +30,7 @@ belongs to the complete database, including tables used by other components:
 
 | Kind | Product location | Contents |
 |---|---|---|
-| `control` | `control.sqlite` | Assistant registry, providers, encrypted secrets, integration accounts |
+| `control` | `control.sqlite` | Assistant registry, providers, encrypted secrets, integration accounts, Agent Link connections and host access configuration |
 | `tasks` | `tasks.sqlite` | Tasks, schedules, inbox, mailbox, plugin checkpoints, routing and resource receipts |
 | `runner` | `runner.sqlite` | Runs, execution receipts, events, resources and workspaces |
 | `conversation` | Each conversation database | Messages, context, configuration, steering and instruction updates |
@@ -160,3 +160,8 @@ names, while the receiver may save a later registry name. Migration therefore
 cannot reconstruct every original claim preimage. The frozen claim codec checks
 the original capability, identities, names and host key exactly; new claims use
 the current NodeID hash format.
+
+`control/0002_agent_links.sql` adds connection and invitation metadata with
+references into the encrypted secret store. `control/0003_agent_link_host.sql`
+records the dedicated loopback listener and verified public message endpoint.
+Neither migration rewrites existing service accounts or task/run receipts.
