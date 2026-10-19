@@ -88,7 +88,7 @@ func TestFailedTaskRecoveryIsSilentAndReplacementReportsOnce(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			awaitConversation(t, c, func(snapshot protocol.Snapshot) bool { return snapshot.Turn == nil && reports.Load() == 1 })
+			awaitConversationContext(t, ctx, c, func(snapshot protocol.Snapshot) bool { return snapshot.Turn == nil && reports.Load() == 1 })
 			if workers.Load() != 2 || recoveryRounds.Load() != 2 {
 				t.Fatal("unexpected recovery loop", workers.Load(), recoveryRounds.Load())
 			}
