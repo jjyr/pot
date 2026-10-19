@@ -24,10 +24,8 @@ func (p TaskPhase) Scope() string {
 	switch p {
 	case TaskQueued, TaskWaiting, TaskRunning, TaskWaitingApproval:
 		return "active"
-	case TaskFailed, TaskInterrupted:
+	case TaskFailed, TaskInterrupted, TaskComplete, TaskCancelled:
 		return "attention"
-	case TaskComplete, TaskCancelled:
-		return "archived"
 	}
 	return ""
 }
@@ -39,16 +37,37 @@ type TaskInfo struct {
 	ExecutionTarget *core.ExecutionTarget `json:"execution_target"`
 	AssistantID     string                `json:"assistant_id"`
 
-	ID           string       `json:"id"`
-	Title        string       `json:"title"`
-	Phase        TaskPhase    `json:"phase"`
-	Paused       bool         `json:"paused,omitempty"`
-	Pending      uint64       `json:"pending"`
-	CreatedAtMS  int64        `json:"created_at_ms"`
-	StartedAtMS  int64        `json:"started_at_ms"`
-	UpdatedAtMS  int64        `json:"updated_at_ms"`
-	Routing      *TaskRouting `json:"routing"`
-	ExecutorIcon string       `json:"executor_icon"`
+	ID            string       `json:"id"`
+	Title         string       `json:"title"`
+	Phase         TaskPhase    `json:"phase"`
+	RunID         string       `json:"run_id"`
+	Archived      bool         `json:"archived"`
+	ArchiveReason string       `json:"archive_reason,omitempty"`
+	Paused        bool         `json:"paused,omitempty"`
+	Pending       uint64       `json:"pending"`
+	CreatedAtMS   int64        `json:"created_at_ms"`
+	StartedAtMS   int64        `json:"started_at_ms"`
+	UpdatedAtMS   int64        `json:"updated_at_ms"`
+	Routing       *TaskRouting `json:"routing"`
+	ExecutorIcon  string       `json:"executor_icon"`
+}
+
+func (t TaskInfo) Scope() string {
+	if t.Archived {
+		return "archived"
+	}
+	return t.Phase.Scope()
+}
+
+type TaskDisposition struct {
+	TaskID   string `json:"task_id" required:"true"`
+	RunID    string `json:"run_id" required:"true"`
+	Archived bool   `json:"archived" required:"true"`
+	Reason   string `json:"reason" required:"true"`
+}
+
+type TaskDispositions struct {
+	Decisions []TaskDisposition `json:"decisions" required:"true"`
 }
 type TaskRouting struct {
 	Profile         string  `json:"profile"`

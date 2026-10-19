@@ -217,6 +217,10 @@ run-bound state updates to the original Runner, whose Agent sequences them into
 its durable log; destination executors stream output through that same Agent.
 Composition children have explicit `parent_id` values scoped by the original turn.
 A returned process session or yielded script is distinct from completed execution.
+The shared execution-history projection folds command session receipts before
+building the composition forest. It associates process receipts by turn, machine
+and session ID, and script receipts by turn and execution ID. This is presentation
+only: original arguments, results and lifecycle events remain unchanged.
 
 Chat and Tasks use the shared `components/tool-call.mjs` disclosure. Ordinary calls
 start collapsed; exact approval requests open their call and composition ancestors.

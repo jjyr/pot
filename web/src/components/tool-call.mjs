@@ -14,7 +14,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',onDecis
   const t=name=>translate(locale(),`tool.${name}`),root=n('details','tool-call'),summary=n('summary','tool-summary');
   root.dataset.cacheKey=`tool:${key}`;
   const title=n('span','tool-title'),excerpt=n('span','tool-excerpt'),status=n('span','tool-status'),duration=n('span','tool-duration');summary.append(title,excerpt,status,duration);
-  const context=n('div','tool-context'),failure=n('p','tool-failure'),body=n('div','tool-body'),metadata=n('dl','tool-metadata'),approval=n('div','tool-approval'),history=n('div','tool-history-label'),children=n('div','tool-children'),sections=n('div'),raw=n('details','tool-raw'),rawTitle=n('summary'),rawBody=n('div');raw.append(rawTitle,rawBody);body.append(metadata,approval,history,children,sections,raw);summary.append(context,failure);root.append(summary,body);history.hidden=true;
+  const context=n('div','tool-context'),failure=n('p','tool-failure'),body=n('div','tool-body'),metadata=n('dl','tool-metadata'),approval=n('div','tool-approval'),children=n('div','tool-children'),sections=n('div'),raw=n('details','tool-raw'),rawTitle=n('summary'),rawBody=n('div');raw.append(rawTitle,rawBody);body.append(metadata,approval,children,sections,raw);summary.append(context,failure);root.append(summary,body);
   let current,options={},signature='',approvalID='',approvalCard=null,rawSignature='',autoOpened=false,building=false;
   const sectionsByKey=new Map();
   root.open=memory.get(key)?.open||false;raw.open=memory.get(key)?.raw||false;
@@ -38,24 +38,23 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',onDecis
   }
   function update(message,next={}){
     current=message;options=next;const tool=message.tool;if(!tool)return;
-    const result=toolResult(tool),pending=next.approval,script=tool.script,isGroup=tool.name==='script_group';
+    const result=tool.process?tool.process.result:toolResult(tool),pending=next.approval,script=tool.script,isGroup=tool.name==='script_group';
     root.classList.toggle('script-group',isGroup);root.classList.toggle('script-run',!!script&&!isGroup);
-    metadata.hidden=isGroup;raw.hidden=isGroup;history.hidden=!isGroup;history.textContent=t('executionHistory');
+    metadata.hidden=isGroup;raw.hidden=isGroup;
 
     const phase=pending?'waiting_approval':tool.phase;
-    const names={exec_command:'command',write_stdin:'session',apply_patch:'patch',exec:'script',wait:'wait',cua_repl:'computer',create_task:'createTask',get_task:'getTask',wait_task:'waitTask',update_agent_profile:'updateProfile'};
+    const names={exec_command:'command',write_stdin:'session',apply_patch:'patch',exec:'script',wait:'wait',cua_repl:'computer',create_task:'createTask',set_task_dispositions:'setTaskDispositions',get_task:'getTask',wait_task:'waitTask',update_agent_profile:'updateProfile'};
     title.textContent=names[tool.name]?t(names[tool.name]):tool.name;
     const preview=toolSummary(tool);
     excerpt.textContent=preview===tool.name||preview===title.textContent?'':preview;excerpt.title=excerpt.textContent;excerpt.hidden=!excerpt.textContent;
     let shown=phase;
-    if(phase==='completed'&&result?.session_id)shown='sessionReturned';
     if(phase==='completed'&&result?.completed===false&&result?.exec_id&&!script)shown='scriptYielded';
     const childTools=(next.children||[]).map(child=>child.tool);
     status.textContent=t(next.offline&&activeTool(tool)?'reconnecting':shown);
-    if(childTools.length&&!script){const complete=childTools.filter(child=>!activeTool(child)).length;if(complete<childTools.length&&!next.offline)status.textContent=t(childTools.filter(activeTool).every(child=>child.phase==='waiting_approval')?'waiting_approval':'scriptRunning');status.textContent+=` · ${complete}/${childTools.length}`;}
+    if(childTools.length&&!script&&!tool.process){const complete=childTools.filter(child=>!activeTool(child)).length;if(complete<childTools.length&&!next.offline)status.textContent=t(childTools.filter(activeTool).every(child=>child.phase==='waiting_approval')?'waiting_approval':'scriptRunning');status.textContent+=` · ${complete}/${childTools.length}`;}
     if(script){
       const focus=script.focus,label=focus?.name==='exec_command'?focus.args?.cmd?.trim().split('\n')[0]:focus?(names[focus.name]?t(names[focus.name]):focus.name):'';
-      title.textContent=isGroup&&phase==='completed'?t('scriptCompleted'):label||t(isGroup&&activeTool(tool)?'scriptRunning':'script');
+      title.textContent=isGroup?t('executionHistory'):label||t('script');
       excerpt.hidden=true;excerpt.textContent='';title.title=title.textContent;
       if(isGroup&&tool.failurePhase&&['failed','denied'].includes(tool.failurePhase)&&!activeTool(tool))status.textContent=t('hasFailures');
     }
@@ -89,14 +88,17 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',onDecis
       const item=section('input',t('changes'),patch||pretty(args));
       if(item.patch!==patch){item.patch=patch;item.pre.replaceChildren();for(const line of patch.slice(0,LIMIT).split('\n'))item.pre.append(n('span',line.startsWith('+')?'tool-diff-add':line.startsWith('-')?'tool-diff-remove':'',line+'\n'));}
     }
-    else section('input',t('arguments'),args);
+    else if(tool.name==='write_stdin'){
+      const actions=[args.chars?`${t('sendInput')}\n${args.chars}`:'',args.interrupt?t('interruptProcess'):'',args.terminate?t('terminateProcess'):'',args.close_stdin?t('closeInput'):'',args.rows||args.cols?t('resizeTerminal').replace('{rows}',args.rows||'—').replace('{cols}',args.cols||'—'):''].filter(Boolean);
+      if(actions.length)section('input',t('sessionActions'),actions.join('\n'));
+    }else section('input',t('arguments'),args);
     const output=(tool.output||[]).map(chunk=>`${chunk.stream?`[${chunk.stream}]\n`:''}${chunk.text}`).join('\n');
     if(output)section('output',t('output'),output,{output:true});
     else if(activeTool(tool)&&!pending&&phase!=='waiting_approval'&&!['exec','wait'].includes(tool.name))section('output',t('output'),t('noOutput'),{output:true});
     if(result!==undefined){
-      if(result&&typeof result==='object'&&('stdout'in result||'stderr'in result)){
+      if(result&&typeof result==='object'&&('stdout'in result||'stderr'in result||['exec_command','write_stdin'].includes(tool.name))){
         if(!output)section('output',t('output'),[result.stdout,result.stderr?`[stderr]\n${result.stderr}`:''].filter(Boolean).join('\n')||t('emptyOutput'),{output:true});
-        const info=[result.exit_code!=null?`${t('exitCode')} ${result.exit_code}`:'',result.session_id?`${t('sessionID')} ${result.session_id}`:'',result.truncated?t('sourceTruncated'):''].filter(Boolean).join(' · ');section('result',t('result'),info||result);
+        const info=[result.exit_code!=null?`${t('exitCode')} ${result.exit_code}`:'',result.truncated?t('sourceTruncated'):''].filter(Boolean).join(' · ');if(info)section('result',t('result'),info);
       }else if(['exec','wait'].includes(tool.name)&&typeof result?.output==='string'){
         section('result',t('scriptOutput'),script?.output||result.output||t('emptyOutput'),{output:true});
       }else if(Array.isArray(result?.content)){
@@ -106,8 +108,8 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',onDecis
         if(media.result!==result){media.result=result;media.box.replaceChildren();for(const block of images){const img=n('img');img.alt=t('image');img.loading='lazy';img.src=`data:${block.mimeType};base64,${block.data}`;media.box.append(img);}}
       }else section('result',t('result'),result);
     }
-    rawTitle.textContent=t('raw');const calls=script?.calls||[tool],rawValue=JSON.stringify([locale(),calls]);
-    if(rawSignature!==rawValue){rawSignature=rawValue;rawBody.replaceChildren();for(const call of calls){rawBody.append(n('p','tool-call-id',script?`${call.name} · ${call.id}`:call.id),n('p','tool-call-time',call.started_at_ms?new Date(call.started_at_ms).toLocaleString(locale()):''));for(const [label,value]of [[t('arguments'),call.args],[t('result'),call.result]])if(value!==undefined){const text=pretty(value),head=n('div','tool-section-heading');head.append(n('strong','',label),copyButton(t('copyJSON'),()=>text));rawBody.append(head,n('pre','tool-code',text.slice(0,LIMIT)));if(text.length>LIMIT)rawBody.append(n('p','tool-truncated',t('displayTruncated')));}}}
+    rawTitle.textContent=t('raw');const calls=tool.process?.calls||script?.calls||[tool],rawValue=JSON.stringify([locale(),calls]);
+    if(rawSignature!==rawValue){rawSignature=rawValue;rawBody.replaceChildren();for(const call of calls){rawBody.append(n('p','tool-call-id',script||tool.process?`${call.name} · ${call.id}`:call.id),n('p','tool-call-time',call.started_at_ms?new Date(call.started_at_ms).toLocaleString(locale()):''));for(const [label,value]of [[t('arguments'),call.args],[t('result'),call.result]])if(value!==undefined){const text=pretty(value),head=n('div','tool-section-heading');head.append(n('strong','',label),copyButton(t('copyJSON'),()=>text));rawBody.append(head,n('pre','tool-code',text.slice(0,LIMIT)));if(text.length>LIMIT)rawBody.append(n('p','tool-truncated',t('displayTruncated')));}}}
   }
   function tick(){if(!root.isConnected||!activeTool(current?.tool))return false;if(document.hidden)return true;const tool=current.tool,waiting=options.approval||tool.phase==='waiting_approval',start=tool.script?tool.started_at_ms:waiting?(tool.waiting_at_ms||tool.started_at_ms):tool.running_at_ms||tool.started_at_ms;if(start)duration.textContent=`${waiting&&!tool.script?t('waited')+' ':''}${Math.max(0,Math.floor((Date.now()-start)/1000))}s`;return true;}
   return {element:root,children,update};

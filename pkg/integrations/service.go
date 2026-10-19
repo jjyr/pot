@@ -447,3 +447,50 @@ func (s *Service) Credential(ctx context.Context, scope, service string, force b
 	return c.AccessToken, nil
 }
 func (s *Service) Forget(scope string) { s.mu.Lock(); defer s.mu.Unlock(); delete(s.scopes, scope) }
+
+// Importer is an optional adapter port for manually paired services. Import must
+// verify the service identity before returning a grant; input is never logged.
+type Importer interface {
+	Import(context.Context, json.RawMessage) (Grant, error)
+}
+
+func (s *Service) Connect(ctx context.Context, service string, payload json.RawMessage) (Account, error) {
+	s.mu.Lock()
+	adapter, ok := s.adapters[service].(Importer)
+	s.mu.Unlock()
+	if !ok {
+		return Account{}, ErrNotFound
+	}
+	grant, err := adapter.Import(ctx, payload)
+	if err != nil {
+		return Account{}, err
+	}
+	var result Account
+	err = s.mutate(func() error {
+		accounts, e := s.accounts(ctx)
+		if e != nil {
+			return e
+		}
+		if old, exists := accounts[service]; exists {
+			previous, e := s.readCredential(ctx, old)
+			if e != nil {
+				return e
+			}
+			if old.Identity == grant.Identity && previous.AccessToken == grant.Credential.AccessToken {
+				result = old
+				return nil
+			}
+			return ErrChanged
+		}
+		revision, e := s.opts.Accounts.Revision(ctx, service)
+		if e != nil {
+			return e
+		}
+		result, e = s.save(ctx, Account{Service: service, Identity: grant.Identity}, grant.Credential, revision)
+		return e
+	})
+	if err == nil {
+		s.changed()
+	}
+	return result, err
+}

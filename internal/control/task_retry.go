@@ -55,6 +55,18 @@ func (s *Service) retryDeliveredTask(ctx context.Context, owner, turn string, ar
 }
 
 func (s *Service) resultTools(ctx context.Context, owner, turn string) ([]modelprotocol.ToolDefinition, error) {
+	tools := []modelprotocol.ToolDefinition{}
+	var hasTasks bool
+	if err := s.Tasks.DB().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_messages m JOIN agent_delivery_items d ON d.message=m.id WHERE d.batch=? AND m.recipient=? AND m.state='processing' AND json_extract(m.envelope,'$.kind')='task_result' AND EXISTS(SELECT 1 FROM tasks t WHERE t.assistant_id=m.recipient AND t.id=json_extract(m.envelope,'$.result.task_id') AND json_extract(t.body,'$.run_id')=json_extract(m.envelope,'$.result.run_id')))`, strings.TrimPrefix(turn, "pot-result-"), owner).Scan(&hasTasks); err != nil {
+		return nil, err
+	}
+	if hasTasks {
+		for _, tool := range s.productTools(false) {
+			if tool.Name == "get_task" || tool.Name == "set_task_dispositions" {
+				tools = append(tools, tool)
+			}
+		}
+	}
 	rows, err := s.Tasks.DB().QueryContext(ctx, `SELECT json_extract(m.envelope,'$.result.task_id') FROM agent_messages m
  JOIN agent_delivery_items d ON d.message=m.id WHERE d.batch=? AND m.recipient=? AND m.state='processing'
  AND json_extract(m.envelope,'$.kind')='task_result' AND json_extract(m.envelope,'$.result.phase')='failed'`, strings.TrimPrefix(turn, "pot-result-"), owner)
@@ -81,12 +93,23 @@ func (s *Service) resultTools(ctx context.Context, owner, turn string) ([]modelp
 			return nil, err
 		}
 		if eligible {
-			for _, tool := range s.productTools(false) {
-				if tool.Name == "get_task" {
-					return []modelprotocol.ToolDefinition{tool, retryTaskTool}, nil
-				}
-			}
+			return append(tools, retryTaskTool), nil
 		}
 	}
-	return nil, nil
+	return tools, nil
+}
+
+func (s *Service) deliveredTaskRun(ctx context.Context, owner, turn, task, run string) error {
+	if err := s.deliveredTask(ctx, owner, turn, task); err != nil {
+		return err
+	}
+	var bound bool
+	err := s.Tasks.DB().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_messages m JOIN agent_delivery_items d ON d.message=m.id WHERE d.batch=? AND m.recipient=? AND m.state='processing' AND json_extract(m.envelope,'$.result.task_id')=? AND json_extract(m.envelope,'$.result.run_id')=?)`, strings.TrimPrefix(turn, "pot-result-"), owner, task, run).Scan(&bound)
+	if err != nil {
+		return err
+	}
+	if !bound {
+		return errors.New("run is outside the current result delivery")
+	}
+	return nil
 }

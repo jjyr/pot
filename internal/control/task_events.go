@@ -24,7 +24,13 @@ func (s *Service) TaskEvents(ctx context.Context, owner, task string, after, lim
 	if record == nil {
 		return empty, errors.New("Task missing")
 	}
-	if record.Launch == nil {
+	if record.Launch == nil && record.PreviousRunID != "" {
+		record, err = s.Tasks.Run(ctx, owner, task, record.PreviousRunID)
+		if err != nil {
+			return empty, err
+		}
+	}
+	if record == nil || record.Launch == nil {
 		return empty, nil
 	}
 	launch := record.Launch
@@ -38,11 +44,24 @@ func (s *Service) TaskEvents(ctx context.Context, owner, task string, after, lim
 	}
 	if remoteErr == nil {
 		cursor := after
+		launches := map[string]runner.Launch{launch.RunID: *launch}
 		if len(page.Events) > int(limit) {
 			return empty, errors.New("Runner transcript page exceeds limit")
 		}
 		for _, item := range page.Events {
-			if item.Sequence != cursor+1 || item.Event.Generation != launch.Generation || item.Event.TurnID != launch.RunID {
+			eventLaunch, known := launches[item.Event.TurnID]
+			if !known {
+				eventRun, err := s.Tasks.Run(ctx, owner, task, item.Event.TurnID)
+				if err != nil {
+					return empty, err
+				}
+				if eventRun == nil || eventRun.Launch == nil {
+					return empty, errors.New("Runner transcript run missing")
+				}
+				eventLaunch = *eventRun.Launch
+				launches[item.Event.TurnID] = eventLaunch
+			}
+			if item.Sequence != cursor+1 || item.Event.Generation != eventLaunch.Generation || eventLaunch.RuntimeID != launch.RuntimeID {
 				return empty, errors.New("Runner transcript binding/order mismatch")
 			}
 			raw, err := json.Marshal(item.Event)

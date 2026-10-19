@@ -4,7 +4,7 @@ async page => {
  const assert=(value,message)=>{if(!value)throw Error(message);};
  const errors=[],reads=[],posts=[];const onError=error=>errors.push(error.message);page.on('pageerror',onError);
  const goal='安装 GitHub CLI 并验证可用。先检查操作系统与当前安装状态，再报告安装结果。';
- let phase='running',paused=false,result=null,version=1,offline=false,rejectGuidance=false,failEvents=false,errorText='',pending=[];
+ let phase='running',archived=false,runID='run-one',paused=false,result=null,version=1,offline=false,rejectGuidance=false,failEvents=false,errorText='',pending=[];
  let inputs=[{request_id:'initial',kind:'input',state:'active',text:goal}];
  const event=(sequence,type,value={})=>({sequence,event:{turn_id:'run-one',update:{type,...value}}});
  let events=[event(1,'message_started'),event(2,'text_delta',{text:'我先检查当前系统，以及 gh 是否已经安装。'}),event(3,'message_finished'),event(4,'tool_started',{id:'probe',name:'exec_command',args:{cmd:'gh --version'}})];
@@ -18,11 +18,13 @@ async page => {
    const body=route.request().postDataJSON();posts.push({path,body,owner:url.searchParams.get('assistant_id'),space:url.searchParams.get('space_id')});
    if(path.endsWith('/control'))paused=body.action==='pause';
    if(path.endsWith('/interrupt'))phase='interrupted';
-   if(path.endsWith('/cancel'))phase='cancelled';
+   if(path.endsWith('/cancel')){phase='cancelled';archived=true;}
+   if(path==='/api/v1/tasks/dispositions')archived=body.decisions[0].archived;
    if(path==='/api/v1/permissions')pending=pending.filter(item=>item.id!==body.id);
-   if(path.endsWith('/messages')){if(rejectGuidance){await route.fulfill({status:503,json:{message:'Guidance failed; try again'}});return;}if(!inputs.some(input=>input.request_id===body.request_id))inputs.push({...body,kind:'user_guidance',sender:'alpha',state:'pending'});}
+   if(path.endsWith('/messages')){if(rejectGuidance){await route.fulfill({status:503,json:{message:'Guidance failed; try again'}});return;}if(!inputs.some(input=>input.request_id===body.request_id))inputs.push({...body,kind:'user_guidance',sender:'alpha',state:'pending'});if(['complete','failed','cancelled','interrupted'].includes(phase)){phase='queued';archived=false;runID='run-two';result=null;}}
   }
-  const data=path==='/api/v1/runtime'?{runtime_id:'fixture',boot_id:'boot'}:path==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Local',kind:'local',connected:true}]}:path==='/api/v1/assistants'?[{id:'alpha',name:'Pot',revision:1}]:path==='/api/v1/assistants/bootstrap'?{assistant:null}:path==='/api/v1/snapshot'?{cursor:1,boot_id:'boot',conversation_id:'alpha',messages:[],turn:null,agent:{phase:'ready'}}:path==='/api/v1/permissions'?{pending,policy:{machines:{}}}:path==='/api/v1/tasks/outcomes'?{items:[],cursor:0,has_more:false}:(path==='/api/v1/tasks/query'||path==='/api/v1/tasks/catalog')?{items:[{id:'task-proof',title:'安装 GitHub CLI 并验证可用',assistant_id:'alpha',machine_id:'fixture-runtime',phase}],total:1}:path==='/api/v1/tasks/task-proof'?{run_id:'run-one',info:{phase,paused,machine_id:'fixture-runtime'},request:{text:goal},result,error:errorText,config:{model:'fixture-model'}}:path==='/api/v1/tasks/task-proof/messages'?inputs:path==='/api/v1/tasks/task-proof/events'?{events:events.filter(row=>row.sequence>Number(url.searchParams.get('after'))),cursor:events.at(-1)?.sequence||0,has_more:false,unavailable:offline}:path==='/api/v1/completions'?{items:[{token:'/skill:review',label:'Review',detail:'Review changes'}]}:{items:[]};
+  const data=path==='/api/v1/runtime'?{runtime_id:'fixture',boot_id:'boot'}:path==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Local',kind:'local',connected:true}]}:path==='/api/v1/assistants'?[{id:'alpha',name:'Pot',revision:1}]:path==='/api/v1/assistants/bootstrap'?{assistant:null}:path==='/api/v1/snapshot'?{cursor:1,boot_id:'boot',conversation_id:'alpha',messages:[],turn:null,agent:{phase:'ready'}}:path==='/api/v1/permissions'?{pending,policy:{machines:{}}}:path==='/api/v1/tasks/outcomes'?{items:[],cursor:0,has_more:false}:(path==='/api/v1/tasks/query'||path==='/api/v1/tasks/catalog')?{items:[{id:'task-proof',title:'安装 GitHub CLI 并验证可用',assistant_id:'alpha',machine_id:'fixture-runtime',phase}],total:1}:path==='/api/v1/tasks/task-proof'?{run_id:runID,info:{phase,archived,paused,machine_id:'fixture-runtime'},request:{text:goal},result,error:errorText,config:{model:'fixture-model'}}:path==='/api/v1/tasks/task-proof/messages'?inputs:path==='/api/v1/tasks/task-proof/events'?{events:events.filter(row=>row.sequence>Number(url.searchParams.get('after'))),cursor:events.at(-1)?.sequence||0,has_more:false,unavailable:offline}:path==='/api/v1/completions'?{items:[{token:'/skill:review',label:'Review',detail:'Review changes'}]}:{items:[]};
+
   await route.fulfill({json:data});
  };
  const access=route=>route.fulfill({json:{authenticated:true}});
@@ -33,24 +35,24 @@ async page => {
  try{
   await page.setViewportSize({width:1200,height:1000});await page.goto('http://127.0.0.1:17702/?theme=light&locale=zh-CN&conversation=alpha');await openTask();
   await page.locator('.task-transcript .reply-bubble').getByText('我先检查当前系统，以及 gh 是否已经安装。',{exact:true}).waitFor();
-  const composer=page.getByRole('textbox',{name:'任务指导',exact:true}),tool=page.locator('.tool-call[data-call-id="probe"]');
+  const composer=page.getByRole('textbox',{name:'任务追加',exact:true}),tool=page.locator('.tool-call[data-call-id="probe"]');
   assert(!await page.locator('.task-goal').evaluate(node=>node.open),'Goal defaults to collapsed');
   assert(await page.locator('.task-transcript').getByText(goal,{exact:true}).count()===0,'Goal is not repeated in the conversation');
   assert(await page.getByRole('button',{name:'停止任务',exact:true}).count()===1,'Empty composer offers Stop');
   assert(await composer.evaluate(node=>document.activeElement!==node),'Opening Task does not focus the composer');
-  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));await page.screenshot({path:'output/pr-images/task-progress/task-desktop-after.png'});
-  await page.setViewportSize({width:390,height:1000});await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));await page.screenshot({path:'output/pr-images/task-progress/task-mobile-after.png'});
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));await page.screenshot({path:'output/playwright/task-lifecycle/task-desktop-after.png'});
+  await page.setViewportSize({width:390,height:1000});await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));await page.screenshot({path:'output/playwright/task-lifecycle/task-mobile-after.png'});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Narrow task detail fits viewport');
   await page.setViewportSize({width:1200,height:1000});
   await composer.fill('/skill:r');await page.locator('.task-composer-area .completion-option').first().waitFor();const beforeCompletion=posts.length;await composer.press('Enter');assert(await composer.inputValue()==='/skill:review '&&posts.length===beforeCompletion,'Scoped completion chooses a reference without sending');
   assert(await composer.getAttribute('aria-controls')==='pot-task-task-proof-completions','Task and main composers use distinct completion identities');
-  await page.locator('.task-goal > summary').click();await composer.fill('保留这条尚未发送的指导');await tool.locator(':scope > summary').click();
+  await page.locator('.task-goal > summary').click();await composer.fill('保留这条尚未发送的指导');await page.locator('.task-transcript .script-group > summary').click();await tool.locator(':scope > summary').click();
   await composer.evaluate(node=>{window.__taskComposer=node;});
   inputs.push({request_id:'reference',kind:'reference',sender:'peer',state:'pending',text:'已确认仓库访问可用。'});
   pending=[{id:'approval-one',request:{owner:'alpha',task:'task-proof',turn:'run-one',call_id:'probe',machine_id:'fixture-runtime',tool:'exec_command',args:{cmd:'gh --version'},justification:'Verify the installed CLI'}},{id:'other-task',request:{owner:'alpha',task:'elsewhere',turn:'other',call_id:'other'}}];await push();
   await page.locator('.task-status').getByText('等待授权 · 1 项待处理',{exact:true}).waitFor();
   await tool.locator('.approval-card>summary').click();await tool.getByRole('button',{name:'本任务允许',exact:true}).waitFor();
-  await page.screenshot({path:'output/pr-images/task-progress/task-approval-desktop-after.png'});await page.setViewportSize({width:390,height:1000});await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));await page.screenshot({path:'output/pr-images/task-progress/task-approval-mobile-after.png'});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Inline approvals fit narrow viewport');await page.setViewportSize({width:1200,height:1000});
+  await page.screenshot({path:'output/playwright/task-lifecycle/task-approval-desktop-after.png'});await page.setViewportSize({width:390,height:1000});await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));await page.screenshot({path:'output/playwright/task-lifecycle/task-approval-mobile-after.png'});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Inline approvals fit narrow viewport');await page.setViewportSize({width:1200,height:1000});
   assert(await page.locator('.approval-host').textContent()==='','Task approvals have no duplicate outer locator');
   assert(await page.locator('.role-reference').getByText('参考信息 · peer',{exact:true}).count()===1,'Reference provenance is explicit');
   await page.getByRole('button',{name:'查看授权',exact:true}).click();
@@ -71,9 +73,9 @@ async page => {
   const postCount=posts.length;await composer.evaluate(node=>{node.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));node.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',keyCode:229,isComposing:true,bubbles:true,cancelable:true}));node.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));});
   assert(posts.length===postCount,'IME confirmation cannot send guidance');
   // A failed send preserves the editor and its request identity for a retry.
-  rejectGuidance=true;await page.getByRole('button',{name:'发送指导',exact:true}).click();await page.getByText('Guidance failed; try again',{exact:true}).waitFor();const failedRequest=posts.at(-1).body.request_id;
+  rejectGuidance=true;await page.getByRole('button',{name:'发送追加要求',exact:true}).click();await page.getByText('Guidance failed; try again',{exact:true}).waitFor();const failedRequest=posts.at(-1).body.request_id;
   assert(await composer.inputValue()==='保留这条尚未发送的指导','Failed send retains draft');rejectGuidance=false;
-  await page.getByRole('button',{name:'发送指导',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.task-conversation .composer-input').value==='');
+  await page.getByRole('button',{name:'发送追加要求',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.task-conversation .composer-input').value==='');
   assert(posts.filter(post=>post.path.endsWith('/messages')).at(-1).body.request_id===failedRequest,'Retry retains guidance request identity');
   await page.locator('.role-user').getByText('你 · 指导',{exact:true}).waitFor();
   await composer.fill('完成时也保留这条草稿 /skill:r');await composer.press('Tab');
@@ -105,18 +107,23 @@ async page => {
   await page.evaluate(()=>{for(const key of ['height','offsetTop'])delete window.visualViewport[key];window.visualViewport.dispatchEvent(new Event('resize'));});
   await focusCDP.send('Emulation.setTouchEmulationEnabled',{enabled:false});await focusCDP.detach();
   await composer.fill(retainedDraft);await composer.evaluate(node=>node.blur());await page.setViewportSize({width:1200,height:1000});
-  inputs.at(-1).state='consumed';add('message_finished');add('input_applied',{id:failedRequest});add('message_started');add('text_delta',{text:'安装与工具调用验证完成。'});add('message_finished');add('turn_finished',{outcome:{kind:'success'}});phase='complete';result={text:'安装与工具调用验证完成。',outcome:{kind:'success'}};await push();
+  inputs.at(-1).state='consumed';add('message_finished');add('input_applied',{id:failedRequest});add('message_started');add('text_delta',{text:'安装与工具调用验证完成。'});add('message_finished');add('turn_finished',{outcome:{kind:'success'}});phase='complete';archived=true;result={text:'安装与工具调用验证完成。',outcome:{kind:'success'}};await push();
   await page.locator('.task-status').getByText('已完成',{exact:true}).waitFor();
   if(await page.locator('.task-composer-area .latest-button').isVisible())await page.locator('.task-composer-area .latest-button').click();
   await page.locator('.task-transcript').getByText(result.text,{exact:true}).waitFor();assert(await page.locator('.task-transcript').getByText(result.text,{exact:true}).count()===1,'Final result appears once as a reply');
-  assert(await composer.inputValue()==='完成时也保留这条草稿 /skill:r'&&await composer.evaluate(node=>node.readOnly),'Completion retains unsent draft read-only');
-  assert(await page.getByRole('button',{name:'发送指导',exact:true}).count()===0,'Ended Tasks cannot receive guidance');await composer.click();await composer.evaluate(node=>node.dispatchEvent(new Event('select',{bubbles:true})));assert(await page.locator('.task-composer-area .completion-list').isHidden(),'Completed drafts cannot be changed through reference completion');
+  assert(await composer.inputValue()==='完成时也保留这条草稿 /skill:r'&&!await composer.evaluate(node=>node.readOnly),'Completion retains an editable draft');
+  assert(await page.getByRole('button',{name:'发送追加要求',exact:true}).isEnabled(),'Archived tasks accept follow-up');
+  await page.getByText('已归档 · 发送追加要求可继续此任务。',{exact:true}).waitFor();
+  await page.screenshot({path:'output/playwright/task-lifecycle/archived-desktop-after.png'});await page.setViewportSize({width:390,height:852});await page.screenshot({path:'output/playwright/task-lifecycle/archived-mobile-after.png'});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Archived follow-up fits mobile');await page.setViewportSize({width:1200,height:1000});
+
   await page.locator('.task-history').evaluate(node=>{node.scrollTop=0;node.dispatchEvent(new Event('scroll'));});
   await page.getByRole('button',{name:'返回',exact:true}).first().click();await page.getByRole('button',{name:'安装 GitHub CLI 并验证可用',exact:true}).click();await page.locator('.task-status').getByText('已完成',{exact:true}).waitFor();
   await page.waitForFunction(()=>document.querySelector('.task-goal')?.open&&document.querySelector('[data-call-id="probe"]')?.open);
   assert(await composer.inputValue()==='完成时也保留这条草稿 /skill:r','Navigation retains Task draft');
   assert(await page.locator('.task-goal').evaluate(node=>node.open)&&await tool.evaluate(node=>node.open),'Navigation restores disclosures');
   assert(await page.locator('.task-history').evaluate(node=>node.scrollTop)===0,'Navigation restores reading position');
+  await menu().click();await page.getByRole('button',{name:'保留待跟进',exact:true}).click();assert(posts.at(-1).path==='/api/v1/tasks/dispositions'&&!posts.at(-1).body.decisions[0].archived,'Unarchive is separate from cancellation');
+  await menu().click();await page.getByRole('button',{name:'归档任务',exact:true}).click();assert(posts.at(-1).body.decisions[0].archived,'Manual archive retains the run');
   offline=true;await push();await page.locator('.task-status').getByText('原执行机器离线 · 显示缓存执行输出',{exact:true}).waitFor();
   await page.locator('.task-composer-area .latest-button').click();await page.locator('.task-transcript').getByText(result.text,{exact:true}).waitFor();
   assert(await page.locator('.task-transcript').getByText(result.text,{exact:true}).count()===1,'Offline refresh retains result');
@@ -125,9 +132,12 @@ async page => {
   phase='failed';result=null;errorText='Task fixture failed';inputs=[inputs[0]];events=[event(1,'message_started'),event(2,'text_delta',{text:'保留的部分输出。'}),event(3,'turn_finished',{outcome:{kind:'failed',error:errorText}})];await page.reload();await openTask();await page.locator('.task-status').getByText('失败',{exact:true}).waitFor();await page.locator('.task-transcript .reply-bubble.is-failed').getByText('保留的部分输出。',{exact:true}).waitFor();assert(await page.locator('.task-transcript .reply-bubble').count()===1,'Failure and partial output share one bubble');
   phase='running';errorText='';events=[event(1,'message_started'),event(2,'text_delta',{text:'等待后续操作。'})];await page.reload();await openTask();await page.getByRole('button',{name:'停止任务',exact:true}).click();await page.locator('.task-status').getByText('已中断',{exact:true}).waitFor();assert(posts.at(-1).path.endsWith('/interrupt'),'Empty composer Stop interrupts its Task');
   await menu().click();await page.getByRole('button',{name:'取消任务',exact:true}).click();await page.getByRole('button',{name:'保留任务',exact:true}).waitFor();await page.getByRole('button',{name:'取消任务',exact:true}).click();await page.locator('.task-status').getByText('已取消',{exact:true}).waitFor();assert(posts.at(-1).path.endsWith('/cancel'),'Menu cancellation uses the Task cancellation endpoint');
+  await composer.fill('追加修改');await page.getByRole('button',{name:'发送追加要求',exact:true}).click();await page.locator('.task-status').getByText('排队中',{exact:true}).waitFor();assert(posts.at(-1).path==='/api/v1/tasks/task-proof/messages'&&runID==='run-two'&&!archived,'Follow-up reuses the Task and opens another run');
+  phase='complete';archived=true;await page.goto('http://127.0.0.1:17702/?theme=light&locale=en&conversation=alpha');await page.getByRole('button',{name:'Tasks',exact:true}).first().click();await page.getByRole('button',{name:'安装 GitHub CLI 并验证可用',exact:true}).click();await page.getByRole('textbox',{name:'Task follow-up',exact:true}).waitFor();await page.getByText('Archived · Send a follow-up to continue this task.',{exact:true}).waitFor();await page.screenshot({path:'output/playwright/task-lifecycle/archived-english-after.png'});
+  await page.getByRole('textbox',{name:'Task follow-up',exact:true}).fill('English follow-up');await page.getByRole('button',{name:'Send follow-up',exact:true}).click();assert(posts.at(-1).body.text==='English follow-up','English follow-up keeps the same input flow');
   assert(reads.some(read=>read.after==='4')&&reads.some(read=>Number(read.after)>4),'Event reads advance the cursor');
   assert(reads.every(read=>read.owner==='alpha'&&read.space==='local'),'Task reads retain owner and Space');
   assert(errors.length===0,'No browser exceptions: '+errors.join('; '));
-  return {passed:true,checks:'conversation layout, scoped approvals and provenance, input bookmarks, menu controls, fixed composer, IME, retry identity, scroll following, terminal deduplication, draft/disclosure/navigation retention, mobile layout and cached offline output'};
+  return {passed:true,checks:'conversation layout, scoped approvals and provenance, input bookmarks, menu controls, fixed composer, IME, retry identity, scroll following, archive and continuation in both locales, terminal deduplication, draft/disclosure/navigation retention, mobile layout and cached offline output'};
  }finally{await page.unroute('**/api/v1/**',routeHandler);await page.unroute('**/access/status',access);page.off('pageerror',onError);}
 }

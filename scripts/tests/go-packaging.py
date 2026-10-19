@@ -54,7 +54,7 @@ class GoPackaging(unittest.TestCase):
                 ):
                     go_packaging.prepare_plugins(installed, platform)
                 self.assertEqual(
-                    sorted(p.name for p in installed.iterdir()), ["computer-use", "github"]
+                    sorted(p.name for p in installed.iterdir()), ["codex", "computer-use", "github"]
                 )
                 for package in installed.iterdir():
                     manifest = json.loads((package / "plugin.json").read_text())

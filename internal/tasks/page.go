@@ -51,10 +51,11 @@ func (s *Service) page(ctx context.Context, assistant string, query protocol.Tas
 	if scope == "" {
 		scope = "active"
 	}
+	archived := "(CASE WHEN json_valid(body) THEN json_extract(body,'$.info.archived') ELSE 0 END)"
 	phases := map[string]string{
-		"active":    "phase IN ('queued','waiting','running','waiting_approval')",
-		"attention": "phase IN ('failed','interrupted')",
-		"archived":  "phase IN ('complete','cancelled')", "all": "1=1",
+		"active":    archived + " IS NOT TRUE AND phase IN ('queued','waiting','running','waiting_approval')",
+		"attention": archived + " IS NOT TRUE AND phase IN ('failed','interrupted','complete','cancelled')",
+		"archived":  archived + " IS TRUE", "all": "1=1",
 	}
 	if phases[scope] == "" {
 		return page, fmt.Errorf("invalid Task scope")
@@ -79,10 +80,7 @@ func (s *Service) page(ctx context.Context, assistant string, query protocol.Tas
 	}
 	defer tx.Rollback()
 	ownerWhere := "(?='' OR assistant_id=?)"
-	if err := tx.QueryRowContext(ctx, `SELECT
-	 COALESCE(SUM(phase IN ('queued','waiting','running','waiting_approval')),0),
-	 COALESCE(SUM(phase IN ('failed','interrupted')),0),
-	 COALESCE(SUM(phase IN ('complete','cancelled')),0) FROM tasks WHERE `+ownerWhere, assistant, assistant).Scan(&page.Counts.Active, &page.Counts.Attention, &page.Counts.Archived); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(SUM("+phases["active"]+"),0),COALESCE(SUM("+phases["attention"]+"),0),COALESCE(SUM("+phases["archived"]+"),0) FROM tasks WHERE "+ownerWhere, assistant, assistant).Scan(&page.Counts.Active, &page.Counts.Attention, &page.Counts.Archived); err != nil {
 		return page, err
 	}
 	where += " AND " + phases[scope]

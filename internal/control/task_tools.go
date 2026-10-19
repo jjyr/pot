@@ -83,6 +83,20 @@ func (s *Service) productDispatchBound(owner, executionOwner, turn string, gener
 				}
 				return json.Marshal(result)
 			}
+			if call.Name == "set_task_dispositions" && strings.HasPrefix(turn, "pot-result-") {
+				var request protocol.TaskDispositions
+				if err := core.DecodeJSON(call.Arguments, &request); err != nil {
+					return nil, err
+				}
+				for _, decision := range request.Decisions {
+					if err := s.deliveredTaskRun(ctx, owner, turn, decision.TaskID, decision.RunID); err != nil {
+						return nil, err
+					}
+				}
+			}
+			if call.Name == "set_task_dispositions" && owner != executionOwner {
+				return nil, errors.New("task disposition requires the owning assistant")
+			}
 			result, err := s.productCall(ctx, owner, id, call.Name, call.Arguments)
 			if err != nil {
 				return nil, err
@@ -149,6 +163,13 @@ func (s *Service) productCall(ctx context.Context, owner, id, name string, args 
 			return nil, errors.New("Task missing")
 		}
 		return map[string]any{"task": r.Info, "error": r.Error, "result": r.Outcome}, nil
+	case "set_task_dispositions":
+		var request protocol.TaskDispositions
+		if err := core.DecodeJSON(args, &request); err != nil {
+			return nil, err
+		}
+		items, err := s.Tasks.SetDispositions(ctx, owner, request.Decisions)
+		return map[string]any{"items": items}, err
 	case "interrupt", "cancel_task":
 		mode := "cancel"
 		if name == "interrupt" {

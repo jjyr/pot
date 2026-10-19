@@ -436,6 +436,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       onStop:()=>mutate('/interrupt',{request_id:view.stopID||=(uid())}),
       onCancel:()=>mutate('/cancel',{request_id:view.cancelID||=(uid())}),
       onPause:()=>mutate('/control',{run_id:view.record.run_id,action:view.record.info?.paused?'resume':'pause'}),
+      onArchive:async()=>{await request('/api/v1/tasks/dispositions',{...fileScope,method:'POST',body:{decisions:[{task_id:task.id,run_id:view.record.run_id,archived:!view.record.info?.archived,reason:''}]}});if(current())await refreshTaskEvents(view);},
       onUsage:()=>openUsageView({...fileScope,name:task.title,scope:task.id,returnTask:{...task},taskReturn:returnTo}),
       onRefresh:()=>refreshTaskEvents(view),onSettings:()=>{configurationSpace=task._space_id;filter.settingsTab='providers';routeChanged('settings');return show('settings');},
     });

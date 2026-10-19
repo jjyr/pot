@@ -235,6 +235,36 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 	if workerCalls.Load() != 2 || summaries.Load() != 1 {
 		t.Fatalf("model count worker=%d summary=%d", workerCalls.Load(), summaries.Load())
 	}
+	if _, err = control.Tasks.SetDispositions(ctx, "main", []protocol.TaskDisposition{{TaskID: record.Info.ID, RunID: record.RunID, Archived: true, Reason: "delivered"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err = control.Tasks.SendMessage(ctx, "main", record.Info.ID, "remote-followup", protocol.AgentRef{ControlID: control.Tasks.ControlID(), Kind: "user", AgentID: "main"}, "Continue using the existing remote artifact."); err != nil {
+		t.Fatal(err)
+	}
+	next := awaitLifecycleTask(t, ctx, control, record.Info.ID, func(r *tasks.Record) bool { return r.RunID != record.RunID && r.Info.Phase == protocol.TaskComplete })
+	if next.Info.MachineID != "worker" || next.Info.ExecutionTarget == nil || next.Info.ExecutionTarget.RuntimeID != "worker" {
+		t.Fatal("continuation moved machines", next.Info)
+	}
+	continuedRoot, err := worker.taskWorkspacePath(ctx, record.Info.ID)
+	if err != nil || continuedRoot != taskRoot {
+		t.Fatal("remote continuation changed workspace", continuedRoot, err)
+	}
+	continued, err := control.TaskEvents(ctx, "main", record.Info.ID, transcript.Cursor, 100)
+	if err != nil || continued.Unavailable || len(continued.Events) == 0 {
+		t.Fatal("continued transcript failed", continued, err)
+	}
+	for _, item := range continued.Events {
+		if item.Event.TurnID != next.RunID || item.Sequence <= transcript.Cursor {
+			t.Fatal("continued transcript mixed bindings", item)
+		}
+	}
+	all, err := control.TaskEvents(ctx, "main", record.Info.ID, 0, 100)
+	if err != nil || len(all.Events) != len(transcript.Events)+len(continued.Events) {
+		t.Fatal("full remote transcript lost a run", all, err)
+	}
+	if data, err = control.ReadTaskFile(ctx, "main", record.Info.ID, "artifact.txt", 1024); err != nil || string(data) != "remote-proof" {
+		t.Fatal("remote continuation lost delivered file", string(data), err)
+	}
 	for _, execution := range control.options.Manager.Snapshot() {
 		if execution.Role == "task" {
 			t.Fatal("remote wait acquired Control task slot")

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "pot": {
+      "command": "__POT_BRIDGE_EXECUTABLE__",
+      "args": ["mcp", "--config", "__POT_LOCAL_PAIR_FILE__"]
+    }
+  }
+}

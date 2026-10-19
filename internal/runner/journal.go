@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const SchemaVersion = 6
+const SchemaVersion = 7
 
 type Journal struct {
 	db        *sql.DB
@@ -30,7 +30,7 @@ func Open(path, runtimeID, bootID string) (*Journal, error) {
 		return nil, err
 	}
 	j := &Journal{db: db, RuntimeID: runtimeID, BootID: bootID}
-	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS runner_schema(version INTEGER NOT NULL); INSERT INTO runner_schema SELECT 6 WHERE NOT EXISTS(SELECT 1 FROM runner_schema); CREATE TABLE IF NOT EXISTS run_workspaces(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id)); CREATE TABLE IF NOT EXISTS task_runs(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,digest TEXT NOT NULL,phase TEXT NOT NULL,boot_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id)); CREATE TABLE IF NOT EXISTS task_events(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,sequence INTEGER NOT NULL,event TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id,sequence)); CREATE TABLE IF NOT EXISTS run_command_inputs(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,command_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id,command_id)); CREATE TABLE IF NOT EXISTS run_resources(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,digest TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id)); CREATE TABLE IF NOT EXISTS run_commands(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,command_id TEXT NOT NULL,digest TEXT NOT NULL,phase TEXT NOT NULL,reply TEXT,PRIMARY KEY(control_id,task_id,run_id,command_id));`); err != nil {
+	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS runner_schema(version INTEGER NOT NULL); INSERT INTO runner_schema SELECT 7 WHERE NOT EXISTS(SELECT 1 FROM runner_schema); CREATE TABLE IF NOT EXISTS run_workspaces(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id)); CREATE TABLE IF NOT EXISTS task_runs(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,digest TEXT NOT NULL,phase TEXT NOT NULL,boot_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id)); CREATE TABLE IF NOT EXISTS task_events(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,sequence INTEGER NOT NULL,event TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id,sequence)); CREATE TABLE IF NOT EXISTS run_command_inputs(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,command_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id,command_id)); CREATE TABLE IF NOT EXISTS run_resources(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,digest TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id)); CREATE TABLE IF NOT EXISTS run_commands(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,command_id TEXT NOT NULL,digest TEXT NOT NULL,phase TEXT NOT NULL,reply TEXT,PRIMARY KEY(control_id,task_id,run_id,command_id));`); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -38,6 +38,10 @@ func Open(path, runtimeID, bootID string) (*Journal, error) {
 	if err = db.QueryRow("SELECT version FROM runner_schema").Scan(&version); err != nil || version != SchemaVersion {
 		db.Close()
 		return nil, fmt.Errorf("unsupported Runner journal schema")
+	}
+	if _, err = db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS task_events_task_sequence ON task_events(control_id,task_id,sequence)"); err != nil {
+		db.Close()
+		return nil, err
 	}
 	err = storage.Transaction(context.Background(), db, func(tx *sql.Tx) error {
 		rows, err := tx.Query("SELECT control_id,task_id,run_id,body FROM task_runs")
@@ -206,7 +210,7 @@ func (j *Journal) Accept(ctx context.Context, launch Launch) (value Run, err err
 				rows.Close()
 				return err
 			}
-			if !r.Phase.Ended() {
+			if !r.Phase.Ended() || !r.CleanupConfirmed {
 				rows.Close()
 				return fmt.Errorf("previous task run requires reconciliation")
 			}
@@ -215,10 +219,15 @@ func (j *Journal) Accept(ctx context.Context, launch Launch) (value Run, err err
 				previous = &copy
 			}
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
 		if err := rows.Close(); err != nil {
 			return err
 		}
 		var checkpoint json.RawMessage
+		var eventSequence uint64
 		if previous != nil {
 			if previous.Launch.Workspace != launch.Workspace {
 				return fmt.Errorf("Task workspace selection changed")
@@ -227,11 +236,12 @@ func (j *Journal) Accept(ctx context.Context, launch Launch) (value Run, err err
 				return fmt.Errorf("task sequence exhausted")
 			}
 			sequence = previous.Sequence + 1
+			eventSequence = previous.EventSequence
 			if previous.Launch.Generation == launch.Generation && previous.Launch.ExecutionTarget == launch.ExecutionTarget && previous.Launch.Config.SpecHash == launch.Config.SpecHash {
 				checkpoint = previous.Context
 			}
 		}
-		value = Run{SchemaVersion: SchemaVersion, Launch: launch, LaunchDigest: hash, BootID: j.BootID, Phase: Accepted, Context: checkpoint, Sequence: sequence}
+		value = Run{SchemaVersion: SchemaVersion, Launch: launch, LaunchDigest: hash, BootID: j.BootID, Phase: Accepted, Context: checkpoint, Sequence: sequence, EventSequence: eventSequence}
 		return writeRun(ctx, tx, value)
 	})
 	return value, err

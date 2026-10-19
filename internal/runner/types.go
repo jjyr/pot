@@ -27,6 +27,7 @@ type Launch struct {
 	Plugins         []string               `json:"plugins" required:"true"`
 	Skills          *[]string              `json:"skills"`
 	Text            string                 `json:"text" required:"true"`
+	InputID         string                 `json:"input_id,omitempty"`
 }
 
 func (l Launch) Validate(runtimeID string) error {
@@ -46,6 +47,9 @@ func (l Launch) Validate(runtimeID string) error {
 	}
 	if l.Generation == 0 || l.Generation > core.MaxSafeInteger || strings.TrimSpace(l.Text) == "" || len(l.Text) > 256*1024 {
 		return fmt.Errorf("invalid task generation/input")
+	}
+	if len(l.InputID) > 128 || strings.ContainsRune(l.InputID, 0) {
+		return fmt.Errorf("invalid continuation input")
 	}
 	if err := l.Config.Validate(); err != nil {
 		return err

@@ -38,6 +38,13 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 	var result any
 	var err error
 	switch {
+	case method == "POST" && path == "/api/v1/tasks/dispositions":
+		var request protocol.TaskDispositions
+		if err = decode(r.Body, &request); err == nil {
+			var items []protocol.TaskInfo
+			items, err = s.Tasks.SetDispositions(ctx, owner, request.Decisions)
+			result = map[string]any{"items": items}
+		}
 	case method == "GET" && path == "/api/v1/tasks/outcomes":
 		var after *uint64
 		if u.Query().Has("after") {
