@@ -127,7 +127,14 @@ The shared conversation state validates owner/Runtime/boot identity and rejects
 older cursors. Navigation generations fence late responses, including A → B → A.
 Snapshot refresh retains composer nodes, drafts and reading position. It follows
 the bottom only when the reader was already near it; otherwise the latest-message
-action remains available. Only confirmation matching the captured request and
+action remains available. Upward wheel, touch and keyboard gestures pause following
+immediately, including small movements within the bottom proximity threshold.
+Following resumes at the bottom or through Latest. Older history starts loading
+within one viewport of the top (at least 180 px); upward gestures also trigger it
+when the loaded content cannot scroll. Page reads remain serialized and preserve
+the visible message anchor. When the complete conversation fits in the viewport,
+upward gestures leave it still, without history reads or a Latest action; new
+messages continue following. Only confirmation matching the captured request and
 owner clears a submitted attempt. A user message's `request_id` confirms an ordinary send; steer messages
 carry independent `accepted_request_id` and `accepted_turn_id` fields, leaving
 `request_id`'s turn semantics unchanged. Reset/delta acceptance is checked before
@@ -150,7 +157,6 @@ captured scope. Unavailable reads retain the unknown attempt. Subscription/boot
 renewals and navigation retain it in the mounted client; newer drafts, references
 and attachments survive late or duplicate confirmation. This is in-memory
 recovery, not persistence across closing/reloading the app.
-
 Assistant messages bind to their input through `reply_to`; terminal failures retain
 their original diagnostic in the message's `error` field, including preparation
 failures before the first model event. Chat projects a single reply bubble from
