@@ -23,7 +23,7 @@ Agent identity remains `{node_id, kind, agent_id}` with `kind=assistant`.
 Adapter identity is `pot` or `codex`; display names do not identify machines.
 Connection IDs are distinct from plugin IDs and assistant IDs. The host injects
 its durable `peer.Identity` and Ed25519 private key through `Options`; keys are
-never derived from assistant names or addresses. The assistant's Control ID must
+never derived from assistant names or addresses. The assistant's `node_id` must
 match the authenticated host identity.
 
 The protected host UI calls `Invite` with an assistant and its actual reachable
