@@ -16,7 +16,7 @@ func TestCodexHostUpgradePreservesExistingControlData(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if !entry.IsDir() && !strings.HasSuffix(path, "0004_codex_host.sql") {
+		if !entry.IsDir() && !strings.HasSuffix(path, "0005_codex_host.sql") {
 			raw, e := fs.ReadFile(migrationFiles, path)
 			if e != nil {
 				return e

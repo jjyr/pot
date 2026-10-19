@@ -379,7 +379,7 @@ func TestAgentHostConfigureProbesActualHTTPSIdentity(t *testing.T) {
 			server := httptest.NewTLSServer(tc.handler)
 			defer server.Close()
 			h.probeClient = server.Client()
-			payload, _ := json.Marshal(map[string]string{"action": "configure", "mode": "https", "endpoint": server.URL, "listen": hostListen})
+			payload, _ := json.Marshal(map[string]string{"action": "configure", "mode": "address", "endpoint": server.URL, "listen": hostPeerListen})
 			r := httptest.NewRequest(http.MethodPost, "http://"+hostListen+"/api/v1/agent-links", strings.NewReader(string(payload)))
 			r.Host = hostListen
 			r.RemoteAddr = "127.0.0.1:12345"
@@ -401,7 +401,7 @@ func TestAgentHostConfigureProbesActualHTTPSIdentity(t *testing.T) {
 	var verified string
 	h.db.QueryRow("SELECT endpoint FROM codex_agent_host").Scan(&verified)
 	for _, invalid := range []string{"http://127.0.0.1:8792", "https://user:password@agent.example", "https://agent.example?token=secret"} {
-		payload, _ := json.Marshal(map[string]string{"action": "configure", "mode": "https", "endpoint": invalid})
+		payload, _ := json.Marshal(map[string]string{"action": "configure", "mode": "address", "endpoint": invalid})
 		r := httptest.NewRequest(http.MethodPost, "http://"+hostListen+"/api/v1/agent-links", strings.NewReader(string(payload)))
 		r.Host = hostListen
 		r.RemoteAddr = "127.0.0.1:12345"

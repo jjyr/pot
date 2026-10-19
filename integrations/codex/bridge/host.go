@@ -9,13 +9,13 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -29,15 +29,19 @@ import (
 
 const hostVersion = "1"
 const hostListen = "127.0.0.1:8792"
+const hostPeerListen = "127.0.0.1:8793"
 
 type agentHost struct {
-	db, tasks       *sql.DB
-	secrets         *secrets.Store
-	links           *agentlink.Service
-	mailbox         *hostMailbox
-	identity        agentlink.Identity
-	token, endpoint string
-	probeClient     *http.Client
+	db, tasks                *sql.DB
+	secrets                  *secrets.Store
+	links                    *agentlink.Service
+	mailbox                  *hostMailbox
+	identity                 agentlink.Identity
+	token, endpoint          string
+	probeClient              *http.Client
+	accessMu                 sync.Mutex
+	loopbackPeer, directPeer *linkhost.PeerListener
+	networkError             string
 }
 
 func openAgentHost(root string) (*agentHost, error) {
@@ -105,6 +109,14 @@ func openAgentHost(root string) (*agentHost, error) {
 	return h, nil
 }
 func (h *agentHost) close() {
+	h.accessMu.Lock()
+	if h.loopbackPeer != nil {
+		h.loopbackPeer.Close()
+	}
+	if h.directPeer != nil {
+		h.directPeer.Close()
+	}
+	h.accessMu.Unlock()
 	if h.tasks != nil {
 		h.tasks.Close()
 	}
@@ -193,8 +205,14 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 		var unconfirmed int
 		_ = h.tasks.QueryRow("SELECT count(*) FROM agent_messages WHERE direction='incoming' AND state IN('read','interrupted')").Scan(&unconfirmed)
 		status := "needs_access"
+		h.accessMu.Lock()
+		networkError := h.networkError
+		h.accessMu.Unlock()
 		if endpoint != "" {
 			status = "ready"
+		}
+		if networkError != "" {
+			status = "needs_access"
 		}
 		view := []map[string]any{}
 		for _, c := range items {
@@ -207,7 +225,7 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 			}
 			view = append(view, map[string]any{"id": c.ID, "local_assistant_id": c.Local.Address.AgentID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "control_id": c.Peer.Address.ControlID, "address": c.Endpoint, "kind": c.Peer.Adapter, "name": c.Peer.Name}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
 		}
-		writeJSON(w, 200, map[string]any{"items": view, "self": map[string]any{"id": "codex", "control_id": h.identity.Address.ControlID, "kind": "codex", "name": "Codex", "address": endpoint, "endpoint": endpoint, "status": status}, "network": map[string]any{"listen": hostListen, "endpoint": endpoint, "mode": "https", "status": status}, "identity": h.identity, "unread": unread, "unconfirmed": unconfirmed})
+		writeJSON(w, 200, map[string]any{"items": view, "self": map[string]any{"id": "codex", "control_id": h.identity.Address.ControlID, "kind": "codex", "name": "Codex", "address": endpoint, "endpoint": endpoint, "status": status, "reason_code": networkError}, "network": map[string]any{"listen": hostPeerListen, "endpoint": endpoint, "mode": "address", "status": status, "reason_code": networkError}, "identity": h.identity, "unread": unread, "unconfirmed": unconfirmed})
 		return
 	}
 	if r.Method != "POST" {
@@ -259,11 +277,11 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	case "configure":
-		if in.Mode != "" && in.Mode != "https" && in.Mode != "tailscale" {
+		if in.Mode != "" && in.Mode != "address" && in.Mode != "tailscale" {
 			err = agentlink.ErrInvalid
 			break
 		}
-		if in.Listen != "" && in.Listen != hostListen {
+		if in.Listen != "" && in.Listen != hostPeerListen {
 			err = errors.New("agent_link_listener_restart_required")
 			break
 		}
@@ -273,15 +291,7 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		u, e := url.Parse(in.Endpoint)
-		if e != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" && u.Path != "/" {
-			err = agentlink.ErrInvalid
-		} else {
-			endpoint := strings.TrimRight(in.Endpoint, "/")
-			if err = h.probeEndpoint(r.Context(), endpoint); err == nil {
-				_, err = h.db.Exec("UPDATE codex_agent_host SET endpoint=? WHERE singleton=1", endpoint)
-			}
-		}
+		err = h.configureEndpoint(r.Context(), in.Endpoint)
 	default:
 		err = agentlink.ErrInvalid
 	}
@@ -299,11 +309,8 @@ func (h *agentHost) probeEndpoint(ctx context.Context, endpoint string) error {
 	if err != nil {
 		return agentlink.ErrInvalid
 	}
-	client := http.Client{Timeout: 8 * time.Second}
-	if h.probeClient != nil {
-		client = *h.probeClient
-	}
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return errors.New("redirect_denied") }
+	client := agentlink.NewHTTPClient(h.probeClient)
+	client.Timeout = 8 * time.Second
 	response, err := client.Do(request)
 	if err != nil {
 		return agentlink.ErrUnavailable
@@ -344,6 +351,9 @@ func agentServe(root string) error {
 	defer listener.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if err = h.startPeerNetwork(ctx); err != nil {
+		return err
+	}
 	plugins := linkhost.New()
 	if err = plugins.RegisterAgent(linkhost.Messages{Name: "codex", Service: h.links}); err != nil {
 		return err

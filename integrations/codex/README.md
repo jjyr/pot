@@ -21,22 +21,33 @@ the local page; alternatively run:
 The page shows this Agent's public service endpoint, **Copy address**, and **Add
 Agent**. Copy creates a short-lived invitation only in the local clipboard flow.
 Paste the other side's address to connect in either direction. One reachable
-HTTPS endpoint is sufficient for authenticated bidirectional messages. Invites
+reachable endpoint is sufficient for authenticated bidirectional messages. Invites
 contain message-only capabilities: keep them out of chat, prompts and logs.
 
-The host listens on `127.0.0.1:8792`. Configure an existing verified HTTPS reverse
-proxy or select Tailscale in the local page. Tailscale must be installed and logged
-in; the explicit configure action reads its real status, reuses a Serve mapping
-to this host, or creates one if no other Serve configuration exists. It refuses
-to replace unrelated Serve settings and never enables Funnel or changes ACLs.
-For manual configuration, inspect `tailscale serve status` first, then use
-`tailscale serve --bg http://127.0.0.1:8792` and copy its actual HTTPS URL.
-Owner management requires a separate private loopback bearer and exact local
-Host; publishing the peer endpoint does not expose local management.
-Before saving an address, the host probes its narrow HTTPS readiness endpoint
-and checks that it reaches this stable Codex identity. Redirects, invalid origins,
-oversized responses and other services are rejected without replacing the prior
-verified address.
+Owner management stays on `127.0.0.1:8792`. The separate message listener starts
+on `127.0.0.1:8793`; only authenticated Agent messages and a narrow identity
+readiness check are served there. Use a reachable private HTTP address over
+Tailscale or another trusted VPN, or an existing HTTPS reverse proxy. HTTP on
+loopback, private addresses and the Tailscale address range needs no certificate.
+Public HTTP addresses are rejected. HTTP DNS results must all be private and are
+checked again and pinned when connecting; proxy environments cannot bypass this
+boundary. HTTPS keeps normal certificate and hostname verification.
+
+Select Tailscale only after installing and logging in locally. Its explicit
+configure action reads actual Serve settings, reuses this message listener's
+existing HTTP or HTTPS mapping, or creates an HTTP mapping when no other Serve
+configuration exists. It refuses to replace unrelated settings and never enables
+Funnel or changes ACLs. Manual setup, after checking `tailscale serve status`, is
+`tailscale serve --bg --http=8793 http://127.0.0.1:8793`; copy the actual returned
+address. Owner management is never published by this mapping.
+
+For a direct private HTTP address the host opens a message-only listener on the
+corresponding local interface. It verifies the endpoint's stable Codex identity
+before saving it. Redirects, invalid origins, oversized responses and other
+services are rejected; failed configuration closes its candidate listener and
+keeps the prior address. Restart restores the saved private listener or reuses a
+working Serve/reverse-proxy endpoint. If the VPN is unavailable, local management
+remains usable with a network repair state.
 
 The first plugin process ensures and verifies a detached user-level daemon;
 subsequent chats reuse it after an authenticated version check. A foreign service
