@@ -180,7 +180,7 @@ func (s *Service) AgentLinks(ctx context.Context, assistantID string) (any, erro
 	if err != nil {
 		status, reason = "needs_access", "agent_link_assistant_unavailable"
 	}
-	self := map[string]any{"id": identity.Address.AgentID, "kind": "pot", "name": identity.Name, "address": config.Endpoint, "endpoint": config.Endpoint, "status": status, "reason_code": reason}
+	self := map[string]any{"id": identity.Address.AgentID, "control_id": s.options.RuntimeID, "kind": "pot", "name": identity.Name, "address": config.Endpoint, "endpoint": config.Endpoint, "status": status, "reason_code": reason}
 	connections, err := h.service.List(ctx)
 	if err != nil {
 		return nil, err
