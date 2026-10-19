@@ -6,6 +6,8 @@ The Codex plugin now starts a message-only Agent host automatically. Its stable
 Codex Agent identity and durable messages survive chat windows and host restarts.
 It shares the same typed Agent Link plugin host as Pot; connecting grants only
 peer messaging, not file access, execution permission or Control administration.
+The host and message addresses use `node_id` for this generic communication
+identity. Execution Control authorization remains a separate responsibility.
 
 Install using `mise exec -- python3 integrations/codex/install.py`, then enable
 Pot in Codex. The MCP command is `pot-codex-bridge host --root
@@ -68,6 +70,10 @@ after the MCP chat closes and receives no model-start instruction from startup.
 Private identity, encrypted credentials and logs live under the supplied root;
 the directory must be owner-only. Stop the owning daemon process to stop service;
 starting the plugin again resumes its persisted inbox and transport.
+Plugin version 0.4.0 requires message host version 3 and does not reuse an older
+daemon. Stop the old daemon before starting the updated plugin. The Node ID,
+encrypted keys, message IDs and consumer claims survive the database upgrade;
+old wire field names are not accepted by the new Peer protocol.
 
 `pot_connections` lists established peers. `pot_send` queues an explicitly
 authorized message, with exact-retry idempotency. `pot_messages` reads this stable

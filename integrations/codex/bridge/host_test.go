@@ -60,7 +60,7 @@ func TestAgentHostMCPWithoutPairingAndActualInboxRead(t *testing.T) {
 	if err != nil || result.IsError {
 		t.Fatal(result, err)
 	}
-	peer := protocol.AgentRef{ControlID: "pot-peer", Kind: "assistant", AgentID: "helper"}
+	peer := protocol.AgentRef{NodeID: "pot-peer", Kind: "assistant", AgentID: "helper"}
 	e, err := h.mailbox.send(ctx, peer, "fixture", "external reference")
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestAgentHostRestartStableIdentityAndMailbox(t *testing.T) {
 	ctx := context.Background()
 	h, root := testHost(t)
 	identity, owner := h.identity, h.token
-	peer := protocol.AgentRef{ControlID: "peer", Kind: "assistant", AgentID: "helper"}
+	peer := protocol.AgentRef{NodeID: "peer", Kind: "assistant", AgentID: "helper"}
 	outgoing, err := h.mailbox.send(ctx, peer, "request-1", "reference")
 	if err != nil {
 		t.Fatal(err)
@@ -233,7 +233,7 @@ func TestAgentHostRestartStableIdentityAndMailbox(t *testing.T) {
 	if err != nil || len(pending) != 1 {
 		t.Fatal(pending, err)
 	}
-	pending, err = h.mailbox.Pending(ctx, identity.Address, protocol.AgentRef{ControlID: "other", Kind: "assistant", AgentID: "helper"})
+	pending, err = h.mailbox.Pending(ctx, identity.Address, protocol.AgentRef{NodeID: "other", Kind: "assistant", AgentID: "helper"})
 	if err != nil || len(pending) != 0 {
 		t.Fatal(pending, err)
 	}
@@ -288,6 +288,9 @@ func TestAgentHostOwnerIsolation(t *testing.T) {
 	if value["self"].(map[string]any)["status"] != "needs_access" {
 		t.Fatal(value)
 	}
+	if value["self"].(map[string]any)["node_id"] != h.identity.Address.NodeID || value["peer_identity"].(map[string]any)["node_id"] != h.peerIdentity.NodeID || strings.Contains(w.Body.String(), `"control_id"`) {
+		t.Fatal("message host exposed a Control identity", w.Body.String())
+	}
 }
 
 func TestAgentHostPreviewDoesNotConnectOrConsumeInvitation(t *testing.T) {
@@ -319,10 +322,10 @@ func TestAgentHostPreviewDoesNotConnectOrConsumeInvitation(t *testing.T) {
 	w := preview(invitation.Address)
 	var result struct {
 		Peer struct {
-			ID        string `json:"id"`
-			ControlID string `json:"control_id"`
-			Kind      string `json:"kind"`
-			Name      string `json:"name"`
+			ID     string `json:"id"`
+			NodeID string `json:"node_id"`
+			Kind   string `json:"kind"`
+			Name   string `json:"name"`
 		} `json:"peer"`
 		Endpoint    string `json:"endpoint"`
 		Fingerprint string `json:"fingerprint"`
@@ -331,7 +334,7 @@ func TestAgentHostPreviewDoesNotConnectOrConsumeInvitation(t *testing.T) {
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if result.Peer.ID != "codex" || result.Peer.ControlID != remote.identity.Address.ControlID || result.Peer.Kind != "codex" || result.Peer.Name != remote.identity.Name || result.Endpoint != endpoint || result.Fingerprint == "" || result.ExpiresAt != invitation.ExpiresAt.UnixMilli() {
+	if result.Peer.ID != "codex" || result.Peer.NodeID != remote.identity.Address.NodeID || result.Peer.Kind != "codex" || result.Peer.Name != remote.identity.Name || result.Endpoint != endpoint || result.Fingerprint == "" || result.ExpiresAt != invitation.ExpiresAt.UnixMilli() {
 		t.Fatal(result)
 	}
 	if strings.Contains(w.Body.String(), "#") || strings.Contains(w.Body.String(), local.token) {
@@ -382,12 +385,12 @@ func TestAgentHostPeerDeliveryRemainsUnreadUntilCodexReads(t *testing.T) {
 			LocalAssistantID string `json:"local_assistant_id"`
 			Revision         int64  `json:"revision"`
 			Peer             struct {
-				ControlID string `json:"control_id"`
-				Address   string `json:"address"`
+				NodeID  string `json:"node_id"`
+				Address string `json:"address"`
 			}
 		}
 	}
-	if json.Unmarshal(w.Body.Bytes(), &snapshot) != nil || len(snapshot.Items) != 1 || snapshot.Items[0].LocalAssistantID != "codex" || snapshot.Items[0].Revision != connection.CreatedAt.UnixMilli() || snapshot.Items[0].Peer.ControlID != a.identity.Address.ControlID || snapshot.Items[0].Peer.Address != endpoint {
+	if json.Unmarshal(w.Body.Bytes(), &snapshot) != nil || len(snapshot.Items) != 1 || snapshot.Items[0].LocalAssistantID != "codex" || snapshot.Items[0].Revision != connection.CreatedAt.UnixMilli() || snapshot.Items[0].Peer.NodeID != a.identity.Address.NodeID || snapshot.Items[0].Peer.Address != endpoint {
 		t.Fatal(w.Body.String())
 	}
 	outgoing, err := a.mailbox.send(ctx, b.identity.Address, "from-a", "peer reference")
@@ -452,7 +455,7 @@ func TestAgentHostConfigurePinsTCPIdentity(t *testing.T) {
 	}
 	clear(foreign.peerKey)
 	foreign.peerKey = key
-	foreign.peerIdentity = peer.NewIdentity(h.peerIdentity.ID, pub)
+	foreign.peerIdentity = peer.NewIdentity(h.peerIdentity.NodeID, pub)
 	foreign.peerRegistry = linkhost.NewRegistry(foreign.peerIdentity, foreign.peerKey)
 	stranger, err := linkhost.ListenPeer(ctx, "127.0.0.1:0", foreign.peerServer())
 	if err != nil {

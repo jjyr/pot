@@ -22,7 +22,7 @@ type hostMailbox struct {
 }
 
 func (m *hostMailbox) Pending(ctx context.Context, local, peer protocol.AgentRef) ([]protocol.Envelope, error) {
-	rows, err := m.db.QueryContext(ctx, `SELECT envelope FROM agent_messages WHERE direction='outgoing' AND state='queued' AND json_extract(envelope,'$.from.control_id')=? AND json_extract(envelope,'$.from.agent_id')=? AND json_extract(envelope,'$.to.control_id')=? AND json_extract(envelope,'$.to.agent_id')=? ORDER BY sequence LIMIT 32`, local.ControlID, local.AgentID, peer.ControlID, peer.AgentID)
+	rows, err := m.db.QueryContext(ctx, `SELECT envelope FROM agent_messages WHERE direction='outgoing' AND state='queued' AND json_extract(envelope,'$.from.node_id')=? AND json_extract(envelope,'$.from.agent_id')=? AND json_extract(envelope,'$.to.node_id')=? AND json_extract(envelope,'$.to.agent_id')=? ORDER BY sequence LIMIT 32`, local.NodeID, local.AgentID, peer.NodeID, peer.AgentID)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +69,7 @@ func (m *hostMailbox) sendConsumer(ctx context.Context, consumer string, peer pr
 	if !validID(requestID) {
 		return protocol.Envelope{}, errors.New("invalid_request_id")
 	}
-	digest := sha256.Sum256([]byte(m.local.ControlID + "\x00" + requestID))
+	digest := sha256.Sum256([]byte(m.local.NodeID + "\x00" + requestID))
 	id := hex.EncodeToString(digest[:])
 	uuid := digest
 	uuid[6] = (uuid[6] & 15) | 64

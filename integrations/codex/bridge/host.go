@@ -29,7 +29,7 @@ import (
 	webassets "github.com/jjyr/pot/web"
 )
 
-const hostVersion = "2"
+const hostVersion = "3"
 const hostListen = "127.0.0.1:8792"
 const hostPeerListen = "127.0.0.1:8793"
 
@@ -76,7 +76,7 @@ func openAgentHost(root string) (*agentHost, error) {
 		return nil, err
 	}
 	var id, ref string
-	err = db.QueryRow("SELECT control_id,owner_secret_ref,endpoint FROM codex_agent_host WHERE singleton=1").Scan(&id, &ref, &h.endpoint)
+	err = db.QueryRow("SELECT node_id,owner_secret_ref,endpoint FROM codex_agent_host WHERE singleton=1").Scan(&id, &ref, &h.endpoint)
 	if errors.Is(err, sql.ErrNoRows) {
 		id = "codex-" + identifier()
 		ref = "codex-host-owner-" + id
@@ -84,7 +84,7 @@ func openAgentHost(root string) (*agentHost, error) {
 		if err = h.secrets.Put(context.Background(), ref, []byte(token)); err != nil {
 			return nil, err
 		}
-		_, err = db.Exec("INSERT INTO codex_agent_host(singleton,control_id,owner_secret_ref,endpoint) VALUES(1,?,?, '')", id, ref)
+		_, err = db.Exec("INSERT INTO codex_agent_host(singleton,node_id,owner_secret_ref,endpoint) VALUES(1,?,?, '')", id, ref)
 	}
 	if err != nil {
 		return nil, err
@@ -95,7 +95,7 @@ func openAgentHost(root string) (*agentHost, error) {
 	}
 	h.token = string(token)
 	clear(token)
-	h.identity = agentlink.Identity{Address: protocol.AgentRef{ControlID: id, Kind: "assistant", AgentID: "codex"}, Name: "Codex", Adapter: "codex"}
+	h.identity = agentlink.Identity{Address: protocol.AgentRef{NodeID: id, Kind: "assistant", AgentID: "codex"}, Name: "Codex", Adapter: "codex"}
 	if err = h.loadPeerIdentity(context.Background()); err != nil {
 		return nil, err
 	}
@@ -227,9 +227,9 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 			if state == "ready" {
 				state = "connected"
 			}
-			view = append(view, map[string]any{"id": c.ID, "local_assistant_id": c.Local.Address.AgentID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "control_id": c.Peer.Address.ControlID, "address": c.Endpoint, "kind": c.Peer.Adapter, "name": c.Peer.Name}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
+			view = append(view, map[string]any{"id": c.ID, "local_assistant_id": c.Local.Address.AgentID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "node_id": c.Peer.Address.NodeID, "address": c.Endpoint, "kind": c.Peer.Adapter, "name": c.Peer.Name}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
 		}
-		writeJSON(w, 200, map[string]any{"items": view, "self": map[string]any{"id": "codex", "control_id": h.identity.Address.ControlID, "kind": "codex", "name": "Codex", "address": endpoint, "endpoint": endpoint, "status": status, "reason_code": networkError}, "network": map[string]any{"listen": hostPeerListen, "endpoint": endpoint, "mode": "address", "status": status, "reason_code": networkError}, "identity": h.identity, "peer_identity": h.peerIdentity, "unread": unread, "unconfirmed": unconfirmed})
+		writeJSON(w, 200, map[string]any{"items": view, "self": map[string]any{"id": "codex", "node_id": h.identity.Address.NodeID, "kind": "codex", "name": "Codex", "address": endpoint, "endpoint": endpoint, "status": status, "reason_code": networkError}, "network": map[string]any{"listen": hostPeerListen, "endpoint": endpoint, "mode": "address", "status": status, "reason_code": networkError}, "identity": h.identity, "peer_identity": h.peerIdentity, "unread": unread, "unconfirmed": unconfirmed})
 		return
 	}
 	if r.Method != "POST" {
@@ -272,7 +272,7 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 		var preview agentlink.Preview
 		preview, err = h.links.Preview(r.Context(), in.Address)
 		if err == nil {
-			v = map[string]any{"peer": map[string]any{"id": preview.Identity.Address.AgentID, "control_id": preview.Identity.Address.ControlID, "kind": preview.Identity.Adapter, "name": preview.Identity.Name}, "endpoint": preview.Endpoint, "fingerprint": preview.Fingerprint, "expires_at_ms": preview.ExpiresAt.UnixMilli()}
+			v = map[string]any{"peer": map[string]any{"id": preview.Identity.Address.AgentID, "node_id": preview.Identity.Address.NodeID, "kind": preview.Identity.Adapter, "name": preview.Identity.Name}, "endpoint": preview.Endpoint, "fingerprint": preview.Fingerprint, "expires_at_ms": preview.ExpiresAt.UnixMilli()}
 		}
 	case "connect":
 		v, err = h.links.Connect(r.Context(), "codex", in.Address)

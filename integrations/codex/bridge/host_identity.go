@@ -54,7 +54,7 @@ func (h *agentHost) loadPeerIdentity(ctx context.Context) error {
 	if !bytes.Equal(key, reconstructed) || base64.RawURLEncoding.EncodeToString(key.Public().(ed25519.PublicKey)) != public {
 		return errors.New("codex_peer_identity_mismatch_restore_original_key")
 	}
-	h.peerIdentity = peer.NewIdentity(h.identity.Address.ControlID, key.Public().(ed25519.PublicKey))
+	h.peerIdentity = peer.NewIdentity(h.identity.Address.NodeID, key.Public().(ed25519.PublicKey))
 	if err = h.peerIdentity.Validate(); err != nil {
 		return err
 	}

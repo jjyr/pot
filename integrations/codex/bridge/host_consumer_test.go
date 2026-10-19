@@ -27,8 +27,8 @@ func TestCodexConsumersAtomicallyClaimAndBindCausalParent(t *testing.T) {
 	ctx := context.Background()
 	h, _ := testHost(t)
 	defer h.close()
-	peer := protocol.AgentRef{ControlID: "peer-one", Kind: "assistant", AgentID: "helper"}
-	other := protocol.AgentRef{ControlID: "peer-two", Kind: "assistant", AgentID: "helper"}
+	peer := protocol.AgentRef{NodeID: "peer-one", Kind: "assistant", AgentID: "helper"}
+	other := protocol.AgentRef{NodeID: "peer-two", Kind: "assistant", AgentID: "helper"}
 	low := seedPeerMessage(t, h, "low", 2, other)
 	high := seedPeerMessage(t, h, "high", 15, peer)
 	type result struct {
@@ -104,7 +104,7 @@ func TestCodexConsumersAtomicallyClaimAndBindCausalParent(t *testing.T) {
 func TestCodexConsumerRestartAndExplicitRecoveryFenceOldReaders(t *testing.T) {
 	ctx := context.Background()
 	h, root := testHost(t)
-	peer := protocol.AgentRef{ControlID: "peer", Kind: "assistant", AgentID: "helper"}
+	peer := protocol.AgentRef{NodeID: "peer", Kind: "assistant", AgentID: "helper"}
 	original := seedPeerMessage(t, h, "fenced", 15, peer)
 	if _, err := h.mailbox.claim(ctx, "original-consumer"); err != nil {
 		t.Fatal(err)

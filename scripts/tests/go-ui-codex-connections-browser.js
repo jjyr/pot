@@ -15,7 +15,7 @@ async parentPage => {
   const request=route.request(),body=JSON.parse(request.postData()||'{}');calls.push({method:request.method(),body});
   if(body.action==='preview'){
    await new Promise(resolve=>{releasePreview=resolve;});
-   return route.fulfill({json:{peer:{id:'pot',control_id:'cloud-control',kind:'pot',name:'Cloud Pot'},endpoint:'tcp://cloud-pot.tailnet.ts.net:8793',fingerprint:'SHA256:synthetic-fixture',expires_at_ms:Date.now()+3600000}}).catch(()=>{});
+   return route.fulfill({json:{peer:{id:'pot',node_id:'cloud-node',kind:'pot',name:'Cloud Pot'},endpoint:'tcp://cloud-pot.tailnet.ts.net:8793',fingerprint:'SHA256:synthetic-fixture',expires_at_ms:Date.now()+3600000}}).catch(()=>{});
   }
   if(body.action==='connect'){
    await new Promise(resolve=>{releaseConnect=resolve;});
