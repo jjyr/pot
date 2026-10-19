@@ -110,6 +110,9 @@ Codex host, CLI home and workspace. The real signed TCP preview and connection
 carry a synthetic Control message to Codex; the CLI chooses and calls the
 production MCP tools to read, reply, acknowledge and inspect the receipt. The
 test checks both durable inboxes and the reply's conversation and causal parent.
+The initial challenge is seeded by the harness; a real Pot model receiver
+processes the CLI's reply through the normal background mailbox lifecycle, with
+no manual processing acknowledgment or execution tools enabled.
 It does not inject messages into an existing Codex App chat.
 
 Run on the machine that owns the existing model configuration and master key:
@@ -127,8 +130,9 @@ The existing profile, provider and credential are read without migrations or
 writes. A local in-memory proxy keeps the provider credential out of the CLI
 environment and temporary files. The CLI receives only a placeholder proxy
 credential, uses a separate `CODEX_HOME`, disables shell tools and has a read-only
-workspace. Each run allows at most 12 provider requests, 2048 output tokens per
-request and four minutes. Default test runs skip this qualification.
+workspace. Both clients retain the configured model and reasoning effort. Each
+run allows at most 24 provider requests in total, 2048 output tokens per request
+and five minutes. Default test runs skip this qualification.
 
 For a standalone cross-compiled test binary, set
 `POT_CODEX_LIVE_STANDALONE=1` and select exactly

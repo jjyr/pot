@@ -40,19 +40,28 @@ func TestConfiguredCodexCLIAgentMessagesLive(t *testing.T) {
 	if os.Getenv("POT_LIVE") != "1" || production == "" || cli == "" {
 		t.Skip("requires explicit configured-model and installed-Codex live opt-in")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	profile, provider, credential := codexLiveProvider(t, ctx, production)
 	defer clear(credential)
 	if provider.Protocol != "openai_responses" {
 		t.Fatal("Codex CLI qualification requires the configured Responses provider")
 	}
-	var requests atomic.Int32
+	var requests, cliRequests, potRequests atomic.Int32
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || requests.Add(1) > 12 {
+		if r.Method != http.MethodPost || requests.Add(1) > 24 {
 			http.Error(w, "live request bound reached", http.StatusTooManyRequests)
 			return
 		}
+		if strings.HasPrefix(r.URL.Path, "/cli/") {
+			cliRequests.Add(1)
+		} else if strings.HasPrefix(r.URL.Path, "/pot/") {
+			potRequests.Add(1)
+		} else {
+			http.Error(w, "unknown qualification client", http.StatusBadRequest)
+			return
+		}
+		t.Logf("bounded configured-model request: cli=%d pot=%d", cliRequests.Load(), potRequests.Load())
 		raw, err := io.ReadAll(io.LimitReader(r.Body, 8*1024*1024+1))
 		var body map[string]json.RawMessage
 		if err != nil || len(raw) > 8*1024*1024 || json.Unmarshal(raw, &body) != nil {
@@ -102,6 +111,36 @@ func TestConfiguredCodexCLIAgentMessagesLive(t *testing.T) {
 	if _, err = pot.Registry.Create(ctx, "create-live-main", "Main"); err != nil {
 		t.Fatal(err)
 	}
+	settings := core.ModelSettings{}
+	if profile.ModelSettings != nil {
+		settings = *profile.ModelSettings
+	}
+	outputTokens := uint64(2048)
+	settings.MaxOutputTokens = &outputTokens
+	saved, err := pot.Profiles.Save(ctx, control.SaveProfile{RequestID: "live-profile", ProfileID: "live", Name: "Codex receiver qualification", Model: profile.Model, Endpoint: proxy.URL + "/pot/responses", Protocol: provider.Protocol, APIKey: "isolated-proxy", ModelSettings: &settings, MaxOutputTokens: outputTokens, ReasoningEffort: profile.Params.ReasoningEffort})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := pot.Profiles.Resolve(saved.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed := []string{}
+	spec.Params.Agent.AllowedTools = &allowed
+	spec.Params.Agent.BuiltinTools = []string{}
+	spec.Params.Agent.Plugins = map[string]core.PluginConfig{}
+	spec.Params.Agent.AutoCompact = false
+	spec.Params.Agent.RequestTimeoutMS = 90000
+	if err = spec.Rehash(); err != nil {
+		t.Fatal(err)
+	}
+	conversation, err := pot.Conversation(ctx, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = conversation.Configure(ctx, spec, 0); err != nil {
+		t.Fatal(err)
+	}
 	hostRoot := filepath.Join(root, "codex-host")
 	h, err := openAgentHost(hostRoot)
 	if err != nil {
@@ -140,6 +179,7 @@ func TestConfiguredCodexCLIAgentMessagesLive(t *testing.T) {
 	})
 	var operationsMu sync.Mutex
 	operations := []hostToolInput{}
+	failedOperations := 0
 	owner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/agent-host/tool" {
 			raw, _ := io.ReadAll(io.LimitReader(r.Body, 128*1024))
@@ -147,9 +187,22 @@ func TestConfiguredCodexCLIAgentMessagesLive(t *testing.T) {
 			r.Body = io.NopCloser(bytes.NewReader(raw))
 			var operation hostToolInput
 			if json.Unmarshal(raw, &operation) == nil {
+				response := httptest.NewRecorder()
+				h.handler().ServeHTTP(response, r)
 				operationsMu.Lock()
-				operations = append(operations, operation)
+				if response.Code == http.StatusOK {
+					operations = append(operations, operation)
+				} else {
+					failedOperations++
+				}
 				operationsMu.Unlock()
+				t.Logf("real Codex MCP operation: %s successful=%t", operation.Operation, response.Code == http.StatusOK)
+				for name, values := range response.Header() {
+					w.Header()[name] = values
+				}
+				w.WriteHeader(response.Code)
+				w.Write(response.Body.Bytes())
+				return
 			}
 		}
 		h.handler().ServeHTTP(w, r)
@@ -165,10 +218,13 @@ func TestConfiguredCodexCLIAgentMessagesLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	reasoning := ""
+	if profile.Params.ReasoningEffort != nil {
+		reasoning = fmt.Sprintf("model_reasoning_effort = %q\n", *profile.Params.ReasoningEffort)
+	}
 	config := fmt.Sprintf(`model = %q
 model_provider = "qualification"
-model_reasoning_effort = "low"
-approval_policy = "never"
+%sapproval_policy = "never"
 sandbox_mode = "read-only"
 web_search = "disabled"
 [features]
@@ -185,9 +241,10 @@ stream_max_retries = 0
 [mcp_servers.pot]
 command = %q
 args = ["-test.run=^TestCodexCLILiveMCPProcess$"]
+env_vars = ["POT_CODEX_LIVE_STANDALONE", "POT_CODEX_LIVE_MCP_ROOT", "POT_CODEX_LIVE_MCP_HTTP"]
 startup_timeout_sec = 15
 tool_timeout_sec = 30
-`, profile.Model, proxy.URL, binary)
+`, profile.Model, reasoning, proxy.URL+"/cli", binary)
 	if err = os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -196,19 +253,33 @@ tool_timeout_sec = 30
 	command.Env = []string{"PATH=" + filepath.Dir(cli) + ":" + os.Getenv("PATH"), "HOME=" + home, "CODEX_HOME=" + home, "POT_CODEX_LIVE_PROXY_KEY=isolated-proxy", "POT_CODEX_LIVE_MCP_ROOT=" + hostRoot, "POT_CODEX_LIVE_MCP_HTTP=" + owner.URL, "POT_CODEX_LIVE_STANDALONE=1"}
 	stdout, stderr := &codexLiveBuffer{limit: 1024 * 1024}, &codexLiveBuffer{limit: 64 * 1024}
 	command.Stdout, command.Stderr = stdout, stderr
+	t.Log("signed TCP preview/connect and Control challenge delivery passed; starting isolated real Codex CLI")
 	if err = command.Run(); err != nil {
-		if output := os.Getenv("POT_CODEX_LIVE_OUTPUT"); output != "" {
-			if os.MkdirAll(output, 0700) == nil {
-				// The child only knows synthetic messages and a placeholder local
-				// proxy credential, never production credentials or configuration.
-				os.WriteFile(filepath.Join(output, "codex-cli-failure.jsonl"), stdout.Bytes(), 0600)
-				os.WriteFile(filepath.Join(output, "codex-cli-failure.stderr"), stderr.Bytes(), 0600)
-			}
-		}
+		codexLiveDiagnostics(stdout, stderr)
 		t.Fatalf("isolated Codex CLI failed: %v; model_requests=%d stdout_bytes=%d stderr_bytes=%d", err, requests.Load(), stdout.Len(), stderr.Len())
 	}
 	if bytes.Contains(stdout.Bytes(), []byte(`"type":"command_execution"`)) || bytes.Contains(stdout.Bytes(), []byte(`"type":"file_change"`)) {
 		t.Fatal("live CLI attempted an unrelated local action")
+	}
+	operationsMu.Lock()
+	counts := map[string]int{}
+	for _, operation := range operations {
+		counts[operation.Operation]++
+	}
+	failedCount := failedOperations
+	operationsMu.Unlock()
+	t.Logf("real CLI exited: cli_requests=%d successful_MCP_operations=%v failed_MCP_operations=%d", cliRequests.Load(), counts, failedCount)
+	for _, name := range []string{"connections", "messages", "send", "acknowledge", "receipt"} {
+		if counts[name] == 0 {
+			codexLiveDiagnostics(stdout, stderr)
+			t.Fatal("live CLI did not call required MCP operation", name)
+		}
+	}
+	var handled string
+	var sentCount int
+	if h.tasks.QueryRowContext(ctx, "SELECT state FROM agent_messages WHERE id=?", challenge.ID).Scan(&handled) != nil || handled != "processed" || h.tasks.QueryRowContext(ctx, "SELECT count(*) FROM agent_messages WHERE direction='outgoing' AND json_extract(envelope,'$.text')=?", expected).Scan(&sentCount) != nil || sentCount != 1 {
+		codexLiveDiagnostics(stdout, stderr)
+		t.Fatalf("CLI operations did not finish the authorized message: challenge_state=%s expected_replies=%d", handled, sentCount)
 	}
 	var reply protocol.Envelope
 	awaitCodexLive(t, ctx, func() bool {
@@ -227,31 +298,19 @@ tool_timeout_sec = 30
 	if reply.ReplyTo == nil || *reply.ReplyTo != challenge.ID || reply.ConversationID != challenge.ConversationID || reply.Hops != challenge.Hops+1 {
 		t.Fatal("live reply lost its claimed processing parent")
 	}
-	if err = pot.Mailbox.Claim(ctx, reply.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err = pot.Mailbox.Finish(ctx, reply.ID, true, "live qualification processed"); err != nil {
-		t.Fatal(err)
-	}
 	awaitCodexLive(t, ctx, func() bool {
 		var incoming, outgoing string
-		return h.tasks.QueryRowContext(ctx, "SELECT state FROM agent_messages WHERE id=?", challenge.ID).Scan(&incoming) == nil && incoming == "processed" && h.tasks.QueryRowContext(ctx, "SELECT state FROM agent_messages WHERE id=?", reply.ID).Scan(&outgoing) == nil && outgoing == "received"
-	})
-	operationsMu.Lock()
-	counts := map[string]int{}
-	for _, operation := range operations {
-		counts[operation.Operation]++
-	}
-	operationsMu.Unlock()
-	for _, name := range []string{"connections", "messages", "send", "acknowledge", "receipt"} {
-		if counts[name] == 0 {
-			t.Fatal("live CLI did not call required MCP operation", name)
+		var potState string
+		var potModelCalls int
+		if pot.Tasks.DB().QueryRowContext(ctx, "SELECT state FROM agent_messages WHERE id=?", reply.ID).Scan(&potState) == nil && (potState == "failed" || potState == "interrupted") {
+			t.Fatal("real Pot model receiver did not complete", potState)
 		}
-	}
-	if requests.Load() == 0 || requests.Load() > 12 {
+		return h.tasks.QueryRowContext(ctx, "SELECT state FROM agent_messages WHERE id=?", challenge.ID).Scan(&incoming) == nil && incoming == "processed" && h.tasks.QueryRowContext(ctx, "SELECT state FROM agent_messages WHERE id=?", reply.ID).Scan(&outgoing) == nil && outgoing == "received" && potState == "processed" && pot.Tasks.DB().QueryRowContext(ctx, "SELECT count(*) FROM assistant_mail_models WHERE message=?", reply.ID).Scan(&potModelCalls) == nil && potModelCalls > 0
+	})
+	if cliRequests.Load() == 0 || potRequests.Load() == 0 || requests.Load() > 24 {
 		t.Fatal("invalid live model request count")
 	}
-	evidence := map[string]any{"model": profile.Model, "protocol": provider.Protocol, "requests": requests.Load(), "mcp_operations": counts, "signed_tcp_preview_and_connection": true, "control_to_codex_processed": true, "codex_to_control_processed": true, "codex_transport_receipt": "received", "causal_reply_preserved": true, "real_codex_cli": true, "app_chat_injection": false}
+	evidence := map[string]any{"model": profile.Model, "reasoning_effort": profile.Params.ReasoningEffort, "protocol": provider.Protocol, "requests": requests.Load(), "cli_requests": cliRequests.Load(), "pot_requests": potRequests.Load(), "successful_mcp_operations": counts, "failed_mcp_operations": failedCount, "signed_tcp_preview_and_connection": true, "harness_seeded_control_challenge": true, "control_to_codex_processed_by_cli": true, "codex_reply_processed_by_pot_model": true, "codex_transport_receipt": "received", "causal_reply_preserved": true, "real_codex_cli": true, "app_chat_injection": false}
 	if output := os.Getenv("POT_CODEX_LIVE_OUTPUT"); output != "" {
 		if err = os.MkdirAll(output, 0700); err != nil {
 			t.Fatal(err)
@@ -261,7 +320,7 @@ tool_timeout_sec = 30
 			t.Fatal(err)
 		}
 	}
-	t.Logf("real Codex CLI + configured model passed: model=%s protocol=%s requests=%d operations=%v", profile.Model, provider.Protocol, requests.Load(), counts)
+	t.Logf("real Codex CLI + Pot model receiver passed: model=%s protocol=%s requests=%d cli=%d pot=%d operations=%v", profile.Model, provider.Protocol, requests.Load(), cliRequests.Load(), potRequests.Load(), counts)
 }
 
 func TestCodexCLILiveMCPProcess(t *testing.T) {
@@ -323,8 +382,8 @@ func (w codexLiveFlusher) Write(p []byte) (int, error) {
 }
 
 type codexLiveBuffer struct {
-	bytes.Buffer
-	limit int
+	buffer bytes.Buffer
+	limit  int
 }
 
 func (b *codexLiveBuffer) Write(p []byte) (int, error) {
@@ -332,8 +391,31 @@ func (b *codexLiveBuffer) Write(p []byte) (int, error) {
 	if len(p) > b.limit-b.Len() {
 		p = p[:b.limit-b.Len()]
 	}
-	b.Buffer.Write(p)
+	b.buffer.Write(p)
 	return n, nil
+}
+
+func (b *codexLiveBuffer) Len() int      { return b.buffer.Len() }
+func (b *codexLiveBuffer) Bytes() []byte { return b.buffer.Bytes() }
+
+func TestCodexLiveOutputBufferIsBounded(t *testing.T) {
+	buffer := &codexLiveBuffer{limit: 8}
+	// LimitedReader makes io.Copy exercise destination interface detection;
+	// embedding bytes.Buffer would promote ReadFrom and bypass the Write cap.
+	n, err := io.Copy(buffer, io.LimitReader(strings.NewReader(strings.Repeat("x", 64)), 64))
+	if err != nil || n != 64 || buffer.Len() != 8 {
+		t.Fatal("live diagnostic output exceeded its memory cap", n, buffer.Len(), err)
+	}
+}
+
+func codexLiveDiagnostics(stdout, stderr *codexLiveBuffer) {
+	if output := os.Getenv("POT_CODEX_LIVE_OUTPUT"); output != "" {
+		if os.MkdirAll(output, 0700) == nil {
+			// The CLI only knows synthetic messages and a placeholder credential.
+			os.WriteFile(filepath.Join(output, "codex-cli-failure.jsonl"), stdout.Bytes(), 0600)
+			os.WriteFile(filepath.Join(output, "codex-cli-failure.stderr"), stderr.Bytes(), 0600)
+		}
+	}
 }
 
 func awaitCodexLive(t *testing.T, ctx context.Context, ready func() bool) {
