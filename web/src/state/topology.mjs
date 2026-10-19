@@ -29,6 +29,6 @@ export function parseMachineJoinInfo(raw) {
   if(typeof raw!=='string'||raw.length>16384)throw Error('Invalid machine join information');
   const value=JSON.parse(raw);
   if(value?.version!==1||typeof value.url!=='string'||typeof value.invitation!=='string'||typeof value.control_id!=='string'||typeof value.fingerprint!=='string'||!value.invitation||!value.control_id||!value.fingerprint)throw Error('Invalid machine join information');
-  const url=new URL(value.url);if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.hash||url.search)throw Error('Invalid Control address');
+  const url=new URL(value.url);if(url.protocol!=='tcp:'||!url.hostname||!url.port||Number(url.port)<1||Number(url.port)>65535||url.pathname||url.username||url.password||url.hash||url.search)throw Error('Invalid Control address');
   return {version:1,url:value.url,invitation:value.invitation,control_id:value.control_id,fingerprint:value.fingerprint};
 }

@@ -14,9 +14,9 @@ async page => {
  await page.getByRole('button',{name:'Pause animation',exact:true}).click();
  assert(await page.locator('.topology-map').evaluate(element=>element.classList.contains('topology-paused')),'Ready animation can be paused');
  await page.getByRole('button',{name:'Add Agent',exact:true}).click();
- await page.getByLabel('Other Agent address',{exact:true}).fill('https://second.example/connect#synthetic');
+ await page.getByLabel('Other Agent address',{exact:true}).fill('tcp://second.example:8793#synthetic');
  await page.locator('#fixture-language').selectOption('zh-CN');
- assert(await page.getByLabel('对方连接地址',{exact:true}).inputValue()==='https://second.example/connect#synthetic','Locale changes preserve sensitive memory-only input');
+ assert(await page.getByLabel('对方连接地址',{exact:true}).inputValue()==='tcp://second.example:8793#synthetic','Locale changes preserve sensitive memory-only input');
  await page.locator('#fixture-scenario').selectOption('expired');await page.getByRole('button',{name:'连接',exact:true}).click();
  await page.getByText('连接地址已失效，请对方重新复制。',{exact:true}).waitFor();
  assert(await page.getByLabel('对方连接地址',{exact:true}).inputValue().then(value=>value.includes('#synthetic')),'Rejected connection retains its draft');

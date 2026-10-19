@@ -10,9 +10,9 @@ const remote=projectTopology(spaces,[],[{space:spaces[0],value:{items:[{id:'fore
 for(const width of [329,393,680,1000]){const layout=layoutTopology(model,width);assert.equal(layout.positions.size,model.nodes.length);for(const position of layout.positions.values()){assert.ok(position.x>=40&&position.x<=width-40,'Nodes stay inside narrow and wide maps');assert.ok(position.y>0&&position.y<layout.height,'Every node fits the canvas');}}
 console.log('Topology projection: exact ownership, independent Codex, deduplication and responsive layout passed');
 
-const info={version:1,url:'https://control.example',control_id:'control-id',fingerprint:'SHA256:sample',invitation:'synthetic-invite'};
+const info={version:1,url:'tcp://control.example:8793',control_id:'control-id',fingerprint:'SHA256:sample',invitation:'synthetic-invite'};
 assert.deepEqual(parseMachineJoinInfo(JSON.stringify({...info,command:'rm -rf /'})),info,'Join import projects only typed fields, never a command');
-for(const invalid of [{...info,version:2},{...info,url:'javascript:alert(1)'},{...info,url:'https://owner:credential@control.example'},{...info,url:'https://control.example#credential'},{...info,fingerprint:''},{...info,invitation:[]},null])assert.throws(()=>parseMachineJoinInfo(JSON.stringify(invalid)));
+for(const invalid of [{...info,version:2},{...info,url:'https://control.example'},{...info,url:'tcp://control.example:8793/path'},{...info,url:'tcp://control.example:8793?token=secret'},{...info,url:'tcp://control.example:0'},{...info,url:'javascript:alert(1)'},{...info,url:'https://owner:credential@control.example'},{...info,url:'tcp://control.example:8793#credential'},{...info,fingerprint:''},{...info,invitation:[]},null])assert.throws(()=>parseMachineJoinInfo(JSON.stringify(invalid)));
 assert.throws(()=>parseMachineJoinInfo(' '.repeat(16385)));
 console.log('Machine join data: bounded typed parsing and credential/URL rejection passed');
 

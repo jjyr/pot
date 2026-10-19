@@ -8,7 +8,7 @@ export function addMachine({client,locale,edit,back,onJoined=()=>{},notify=()=>{
   let form,state=null,invitation=null,timer,disposed=false,generation=0,polling=false;
   const command=(scope,body)=>client.request('/api/v1/runtime/control',{...scope,owner:'',method:'POST',body});
   const scope=()=>({space:form.controls.get('space_id')?.value||initial.space_id,owner:''});
-  form=edit({title:t('topology.addMachine'),initial,fields:[{name:'space_id',label:t('machineJoin.owner'),choices:spaces.map(space=>[space.id,space.name||space.id]),required:true},{name:'control_url',label:t('machineJoin.controlAddress'),kind:'url',placeholder:'https://control.example.com'}],scope:{space:initial.space_id,owner:''},submitLabel:t('machineJoin.create'),save:async(values,context)=>{
+  form=edit({title:t('topology.addMachine'),initial,fields:[{name:'space_id',label:t('machineJoin.owner'),choices:spaces.map(space=>[space.id,space.name||space.id]),required:true},{name:'control_url',label:t('machineJoin.controlAddress'),kind:'url',placeholder:'tcp://100.101.102.103:8793'}],scope:{space:initial.space_id,owner:''},submitLabel:t('machineJoin.create'),save:async(values,context)=>{
     if(!state||state.role!=='control'||values.space_id!==scope().space)throw Error(t('machineJoin.noControl'));
     const target={space:values.space_id,owner:''};const result=await command(target,{url:values.control_url||state.url||'',action:invitation?'replace_invitation':'create_invitation',invitation_id:invitation?.id,request_id:context.request_id});
     if(result.state==='joined')return result;
