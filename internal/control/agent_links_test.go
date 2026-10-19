@@ -3,7 +3,9 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	peertransport "github.com/jjyr/pot/pkg/peer"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -229,7 +231,7 @@ func TestAgentLinkRunnerAndMissingAssistantCannotPublishIdentity(t *testing.T) {
 	if executionRuntime.Machines.Role() != "runner" {
 		t.Fatal("fixture did not establish real Runner membership")
 	}
-	for _, action := range []string{"invite", "connect", "configure", "disconnect"} {
+	for _, action := range []string{"invite", "preview", "connect", "configure", "disconnect"} {
 		if _, err = executionRuntime.ManageAgentLink(ctx, AgentLinkCommand{Action: action, AssistantID: "main"}); err == nil {
 			t.Fatal("Runner admitted Agent management", action)
 		}
@@ -239,5 +241,69 @@ func TestAgentLinkRunnerAndMissingAssistantCannotPublishIdentity(t *testing.T) {
 	if session, e := peertransport.Dial(ctx, controlPeerEndpoint(executionRuntime), peertransport.DialOptions{Identity: hostIdentity, PrivateKey: key, Expected: &expected, Service: agentlink.ServiceName, Auth: json.RawMessage(`{}`)}); e == nil {
 		session.Close()
 		t.Fatal("Runner exposed message service")
+	}
+}
+
+func TestAgentLinkControlPreviewDoesNotClaimInvitation(t *testing.T) {
+	ctx := context.Background()
+	a, b := agentControl(t, "preview-a"), agentControl(t, "preview-b")
+	if _, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", AssistantID: "main", Mode: "address", Endpoint: b.endpoint}); err != nil {
+		t.Fatal(err)
+	}
+	invitation, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "invite", AssistantID: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invite := invitation.(map[string]any)
+	address := invite["address"].(string)
+	value, err := a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "preview", Address: address})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := value.(map[string]any)
+	if len(preview) != 4 || !reflect.DeepEqual(preview["peer"], map[string]any{"id": "main", "control_id": "preview-b", "kind": "pot", "name": "Main"}) || preview["endpoint"] != b.endpoint || preview["expires_at_ms"] != invite["expires_at_ms"] {
+		t.Fatalf("unexpected preview projection: %#v", preview)
+	}
+	fingerprint, ok := preview["fingerprint"].(string)
+	if !ok || !strings.HasPrefix(fingerprint, "SHA256:") || len(fingerprint) != 50 {
+		t.Fatal("missing host fingerprint", fingerprint)
+	}
+	for _, service := range []*Service{a.service, b.service} {
+		links, err := service.agentLinks.service.List(ctx)
+		if err != nil || len(links) != 0 {
+			t.Fatal("preview created a connection", links, err)
+		}
+	}
+	var count, claimed int
+	if err := b.service.integrationDB.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(SUM(CASE WHEN claim_hash!='' OR connection_id!='' THEN 1 ELSE 0 END),0) FROM agent_link_invitations").Scan(&count, &claimed); err != nil || count != 1 || claimed != 0 {
+		t.Fatal("preview consumed its invitation", count, claimed, err)
+	}
+	if _, err = a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "connect", AssistantID: "main", Address: address}); err != nil {
+		t.Fatal("preview prevented subsequent connection", err)
+	}
+	_, err = a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "preview", Address: address})
+	var api protocol.APIError
+	if !errors.As(err, &api) || api.Code != "agent_link_invitation_used" {
+		t.Fatal("used invitation did not expose an actionable error", err)
+	}
+}
+
+func TestAgentLinkControlPreviewExpiredInvitation(t *testing.T) {
+	ctx := context.Background()
+	a, b := agentControl(t, "expired-a"), agentControl(t, "expired-b")
+	if _, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", AssistantID: "main", Mode: "address", Endpoint: b.endpoint}); err != nil {
+		t.Fatal(err)
+	}
+	invitation, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "invite", AssistantID: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = b.service.integrationDB.ExecContext(ctx, "UPDATE agent_link_invitations SET expires_at=?", time.Now().Add(-time.Second).UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	_, err = a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "preview", Address: invitation.(map[string]any)["address"].(string)})
+	var api protocol.APIError
+	if !errors.As(err, &api) || api.Code != "agent_link_invitation_expired" {
+		t.Fatal("expired invitation did not expose an actionable error", err)
 	}
 }

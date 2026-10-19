@@ -241,7 +241,7 @@ func agentLinkError(err error) error {
 	if err == nil {
 		return nil
 	}
-	for _, known := range []error{agentlink.ErrInvalid, agentlink.ErrNotFound, agentlink.ErrUnauthorized, agentlink.ErrExpired, agentlink.ErrConflict, agentlink.ErrRevoked, agentlink.ErrReconnectRequired, agentlink.ErrUnavailable} {
+	for _, known := range []error{agentlink.ErrInvalid, agentlink.ErrNotFound, agentlink.ErrUnauthorized, agentlink.ErrExpired, agentlink.ErrUsed, agentlink.ErrConflict, agentlink.ErrRevoked, agentlink.ErrReconnectRequired, agentlink.ErrUnavailable} {
 		if errors.Is(err, known) {
 			return protocol.APIError{Code: known.Error()}
 		}
@@ -270,6 +270,15 @@ func (s *Service) ManageAgentLink(ctx context.Context, command AgentLinkCommand)
 		invite, e := s.agentLinks.service.Invite(ctx, command.AssistantID, endpoint)
 		err = e
 		result = map[string]any{"address": invite.Address, "expires_at_ms": invite.ExpiresAt.UnixMilli()}
+	case "preview":
+		preview, e := s.agentLinks.service.Preview(ctx, command.Address)
+		if e != nil {
+			return nil, agentLinkError(e)
+		}
+		return map[string]any{
+			"peer":     map[string]any{"id": preview.Identity.Address.AgentID, "control_id": preview.Identity.Address.ControlID, "kind": preview.Identity.Adapter, "name": preview.Identity.Name},
+			"endpoint": preview.Endpoint, "fingerprint": preview.Fingerprint, "expires_at_ms": preview.ExpiresAt.UnixMilli(),
+		}, nil
 	case "connect":
 		result, err = s.agentLinks.service.Connect(ctx, command.AssistantID, command.Address)
 	case "disconnect":
