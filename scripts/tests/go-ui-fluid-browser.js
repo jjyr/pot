@@ -40,7 +40,7 @@ async page=>{
   const before=await page.locator('.task-history').evaluate(node=>node.scrollTop);
   await page.evaluate(()=>{fluidFixture.state.messages.push({id:'new',role:'assistant',sequence:2001,text:'New offscreen task output',phase:'streaming'});fluidFixture.ui.update({state:fluidFixture.state});});
   await page.waitForTimeout(100);assert(Math.abs(await page.locator('.task-history').evaluate(node=>node.scrollTop)-before)<2,'New output preserves the older reading position');
-  assert(await page.getByLabel('Task guidance',{exact:true}).inputValue()==='Retain this draft','Virtualization retains guidance');
+  assert(await page.getByLabel('Task follow-up',{exact:true}).inputValue()==='Retain this draft','Virtualization retains guidance');
   await page.locator('.task-composer-area .latest-button').click();await page.getByText('New offscreen task output',{exact:true}).waitFor();
   await page.evaluate(()=>{fluidFixture.ui.dispose();document.querySelector('#app').replaceChildren();});
   await page.evaluate(async()=>{

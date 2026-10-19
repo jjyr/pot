@@ -79,6 +79,8 @@ async page => {
   assert(posts.filter(post=>post.path.endsWith('/messages')).at(-1).body.request_id===failedRequest,'Retry retains guidance request identity');
   await page.locator('.role-user').getByText('你 · 指导',{exact:true}).waitFor();
   await composer.fill('完成时也保留这条草稿 /skill:r');await composer.press('Tab');
+  // Resume following after navigating to an inline approval before testing live output.
+  if(await page.locator('.task-composer-area .latest-button').isVisible())await page.locator('.task-composer-area .latest-button').click();
   // Long history follows the bottom only until the reader scrolls upward.
   for(let index=0;index<25;index++){add('message_finished');add('message_started');add('text_delta',{text:`验证步骤 ${index+1}：工具返回了预期结果。`});}await push();
   await page.locator('.task-transcript').getByText('验证步骤 25：工具返回了预期结果。',{exact:true}).waitFor();
