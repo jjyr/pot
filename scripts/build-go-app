@@ -17,6 +17,7 @@ from go_packaging import (
     prepare_resources,
     linker_flags,
     prepare_wails_module,
+    update_metadata,
 )
 
 if platform.system() != "Darwin" or platform.machine() != "arm64":
@@ -35,6 +36,8 @@ with tempfile.TemporaryDirectory(prefix=".go-app-", dir=BUILD) as temporary:
     resources = contents / "Resources"
     binary.parent.mkdir(parents=True)
     prepare_resources(resources, "darwin-arm64")
+    if release:
+        update_metadata(resources, "app", "darwin-arm64")
     environment = os.environ.copy()
     environment["MACOSX_DEPLOYMENT_TARGET"] = "26.0"
     for name in ("CGO_CFLAGS", "CGO_LDFLAGS"):

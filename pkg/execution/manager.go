@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 )
 
 type Phase string
@@ -73,6 +74,7 @@ type Manager struct {
 	queue             []*entry
 	held              int
 	stopped           bool
+	maintenance       func() bool
 	changed           chan struct{}
 }
 
@@ -108,6 +110,11 @@ func (m *Manager) register(ctx context.Context, id Identity) (*entry, error) {
 	if m.stopped {
 		return nil, ErrStopping
 	}
+	// Recheck under the same lock used by Snapshot: maintenance may have begun
+	// after Execute checked the gate but before this invocation was registered.
+	if m.maintenance != nil && m.maintenance() {
+		return nil, ErrStopping
+	}
 	for _, e := range m.active {
 		if e.execution.Identity.Owner == id.Owner && e.execution.Identity.RequestID == id.RequestID && e.execution.Identity.Generation == id.Generation {
 			return nil, ErrDuplicate
@@ -141,6 +148,23 @@ func (m *Manager) register(ctx context.Context, id Identity) (*entry, error) {
 func (m *Manager) Execute(ctx context.Context, id Identity, fn Invocation) (execution Execution, result Result) {
 	if fn == nil {
 		return Execution{}, Result{Failed, errors.New("missing Agent invocation")}
+	}
+	for {
+		m.mu.Lock()
+		maintenance := m.maintenance
+		stopped := m.stopped
+		m.mu.Unlock()
+		if stopped {
+			return Execution{}, Result{Cancelled, ErrStopping}
+		}
+		if maintenance == nil || !maintenance() {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return Execution{}, Result{Cancelled, ctx.Err()}
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 	e, err := m.register(ctx, id)
 	if err != nil {
@@ -267,4 +291,11 @@ func (m *Manager) ReconcileInterrupted(id Identity) error {
 		}
 	}
 	return nil
+}
+
+// SetMaintenance holds new Agent invocations while an installation is restarting.
+func (m *Manager) SetMaintenance(check func() bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.maintenance = check
 }

@@ -31,7 +31,7 @@ uses the production identity. Do not replace a running product's files implicitl
 | `mise run build` | Complete Wails macOS bundle |
 | `mise run build:web-ui` | Embedded shared HTML/CSS/JS frontend |
 | `mise run build:plugins` | Tool manifests and declared sources |
-| `mise run release -- VERSION` | Local archive/checksum/cask; publishing is separate |
+| `mise run release -- VERSION` | App/CLI archives, checksums, cask and configured signed update feed; publishing is separate |
 
 `scripts/build-go-app`, `scripts/build-go-cli` and `scripts/go_packaging.py` own
 layout and checksums. Packages include no VM engines, images, guest bootstrap,
@@ -55,6 +55,11 @@ manager, such as `mise exec`. Browser tools also need Chrome/Chromium on the
 execution machine.
 Goja compositions run in a bounded process worker. Goja supplies no independent
 per-runtime hard heap limit. See [Go libraries](go-libraries.md).
+
+Signed self-update releases require the release key configuration in [Updates](updates.md).
+Automatic updates require matching `selfupdate.StorageFormat` markers and
+centralized migration fingerprints. Schema changes automatically block package-only
+rollback; non-database persisted-format changes must also change the marker.
 
 ## Checks and isolated previews
 

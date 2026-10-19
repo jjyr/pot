@@ -193,9 +193,17 @@ def linker_flags(stripped=True):
             revision += "-dirty"
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", revision):
         raise ValueError("Invalid POT_BUILD_REVISION")
+    public_key = os.environ.get("POT_UPDATE_PUBLIC_KEY", "")
+    if public_key:
+        import base64
+
+        if len(base64.b64decode(public_key, validate=True)) != 32:
+            raise ValueError("POT_UPDATE_PUBLIC_KEY must be a base64 Ed25519 public key")
     values = ["-s", "-w"] if stripped else []
     values += [
         "-X=github.com/jjyr/pot/internal/buildinfo.Version=" + version,
+        "-X=github.com/jjyr/pot/internal/buildinfo.UpdatePublicKey=" + public_key,
+        "-X=github.com/jjyr/pot/internal/buildinfo.UpdateSchemaDigest=" + schema_digest(),
         "-X=github.com/jjyr/pot/internal/buildinfo.Revision=" + revision,
         "-X=github.com/jjyr/pot/pkg/eval.Revision=" + revision,
     ]
@@ -341,3 +349,35 @@ def prepare_sandbox(destination):
                 f"{package.get('name', manifest.parent.name)} {package.get('version', '')}\n{license_file.read_text()}"
             )
     (destination / "THIRD-PARTY-NOTICES.txt").write_text("\n\n".join(notices) + "\n")
+
+
+def update_metadata(resources, kind, target):
+    """Record the complete installation contract beside its immutable assets."""
+    import json
+
+    version = os.environ.get("POT_APP_VERSION", "0.1.0")
+    (resources / "update.json").write_text(
+        json.dumps(
+            {
+                "version": version,
+                "kind": kind,
+                "platform": target,
+                "storage_format": storage_format(),
+            }
+        )
+        + "\n"
+    )
+
+
+def storage_format():
+    source = (ROOT / "internal/selfupdate/release.go").read_text()
+    return re.search(r'const StorageFormat = "([^"]+)"', source).group(1) + "-" + schema_digest()
+
+
+def schema_digest():
+    root = ROOT / "pkg/storage/migrations"
+    digest = hashlib.sha256()
+    for path in sorted(root.glob("*/*.sql")):
+        digest.update(path.relative_to(root).as_posix().encode() + b"\0")
+        digest.update(path.read_bytes() + b"\0")
+    return digest.hexdigest()

@@ -6,6 +6,7 @@ implementation. Code defines actual behavior.
 | Topic | Read |
 |---|---|
 | Deployment, resource APIs, Control membership and web-ui-server | [Deployment](deployment.md) |
+| Local updates, interruption confirmation and release signing | [Updates](updates.md) |
 | Database schemas, version history and automatic upgrades | [Database migrations](database-migrations.md) |
 | Build, test and release | [Development](development.md) |
 | PR screenshot storage and naming | [PR images](pr-images/README.md) |

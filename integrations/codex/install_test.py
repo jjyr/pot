@@ -21,8 +21,9 @@ class InstallTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.home = Path(self.temp.name) / "home"
-        self.binary = Path(self.temp.name) / "bridge"
+        root = Path(self.temp.name).resolve()
+        self.home = root / "home"
+        self.binary = root / "bridge"
         self.binary.write_bytes(b"fixture executable")
 
     def install(self):

@@ -118,6 +118,8 @@ func Open(ctx context.Context, options Options) (*Runtime, error) {
 		BootID: inner.BootID, Name: name,
 		About: func(context.Context) (any, error) { return productinfo.Read(resources) },
 	}
+	app.Updates = inner.Updates.Call
+	app.Maintenance = inner.Maintaining
 	return &Runtime{inner: inner, app: app}, nil
 }
 

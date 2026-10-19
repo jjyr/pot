@@ -652,3 +652,12 @@ pot-file-image { display: inline-flex; vertical-align: top; flex-direction: colu
 .file-image-download { border: 0; background: transparent; color: var(--primary); font: inherit; font-size: 13px; cursor: pointer; }
 .file-image-status { color: var(--muted); font-size: 13px; }
 pot-file-image[data-state="error"] .file-image-status { color: var(--danger); }
+
+/* An available update is a single highlighted action in the existing shell. */
+.update-button { color: var(--primary); background: color-mix(in srgb, currentColor 13%, transparent); }
+.update-button:hover { background: color-mix(in srgb, currentColor 21%, transparent); }
+.update-button:disabled { opacity: .7; }
+.update-button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.update-confirmation { max-width: 440px; }
+.update-confirmation p { line-height: 1.6; color: var(--muted); }
+.update-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }

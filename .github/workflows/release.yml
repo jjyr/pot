@@ -19,12 +19,13 @@ concurrency:
 
 jobs:
   release:
-    # Wails and the native macOS VM Helper require an Apple Silicon Mac.
+    # Wails release packaging requires an Apple Silicon Mac.
     runs-on: [self-hosted, macOS, ARM64, pot-release]
     timeout-minutes: 120
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
       HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      POT_UPDATE_PUBLIC_KEY: ${{ vars.POT_UPDATE_PUBLIC_KEY }}
     steps:
       - name: Validate release tag
         run: |
@@ -41,7 +42,9 @@ jobs:
         run: |
           mise run doctor
       - name: Build release
-        # Packaging does not build or embed Sandbox VM images.
+        # Complete App and CLI packages share one signed update manifest.
+        env:
+          POT_UPDATE_PRIVATE_KEY: ${{ secrets.POT_UPDATE_PRIVATE_KEY }}
         run: |
           mise run test:release
           mise run release "$RELEASE_TAG" --output "$RUNNER_TEMP/pot-release-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
@@ -54,7 +57,10 @@ jobs:
             gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --draft
           fi
           gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber \
-            "$output"/*.zip "$output"/*.sha256 "$output/pot.rb"
+            "$output"/*.zip "$output"/*.tar.gz "$output"/*.sha256 "$output/pot.rb"
+          if [ -f "$output/update.json" ]; then
+            gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber "$output/update.json"
+          fi
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
       - name: Check out Homebrew tap
         if: env.HOMEBREW_TAP_TOKEN != ''

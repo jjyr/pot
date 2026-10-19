@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jjyr/pot/internal/assistant"
+	"github.com/jjyr/pot/internal/buildinfo"
 	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/pkg/core"
@@ -21,6 +22,8 @@ import (
 type Application struct {
 	RuntimeResources func(context.Context, string, json.RawMessage) (any, error)
 	About            func(context.Context) (any, error)
+	Updates          func(context.Context, string, json.RawMessage) (any, error)
+	Maintenance      func() bool
 	Control          *control.Service
 
 	RuntimeID, BootID string
@@ -58,6 +61,15 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	}
 	path := u.Path
 	s := a.Control
+	if path == "/api/v1/updates" {
+		if a.Updates == nil {
+			return map[string]bool{"supported": false}, nil
+		}
+		return a.Updates(ctx, method, r.Body)
+	}
+	if a.Maintenance != nil && a.Maintenance() && path != "/api/v1/runtime" && path != "/api/v1/control" {
+		return nil, protocol.APIError{Code: "update_maintenance"}
+	}
 	if path == "/api/v1/about" && method == "GET" {
 		if a.About == nil {
 			return nil, errors.New("product information unavailable")
@@ -153,7 +165,7 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 		case "/api/v1/completions":
 			return s.Completions(ctx, owner, u.Query().Get("q"))
 		case "/api/v1/runtime":
-			return map[string]any{"api_version": protocol.APIVersion, "runtime_id": a.RuntimeID, "boot_id": a.BootID, "implementation": "go", "control_id": a.RuntimeID, "name": a.Name}, nil
+			return map[string]any{"api_version": protocol.APIVersion, "runtime_id": a.RuntimeID, "boot_id": a.BootID, "implementation": "go", "version": buildinfo.Version, "control_id": a.RuntimeID, "name": a.Name}, nil
 		case "/api/v1/control":
 			return map[string]any{"id": a.RuntimeID, "name": a.Name, "runtime_id": a.RuntimeID, "connected": true, "role": s.ControlRole()}, nil
 		case "/api/v1/assistants":
