@@ -39,7 +39,7 @@ func TestCodexPeerUpgradeRetainsIdentityAndInvalidatesOldAddress(t *testing.T) {
 		t.Fatal(err)
 	}
 	var id, owner, endpoint, public, secret string
-	if err := db.QueryRow("SELECT control_id,owner_secret_ref,endpoint,peer_public_key,peer_secret_ref FROM codex_agent_host").Scan(&id, &owner, &endpoint, &public, &secret); err != nil {
+	if err := db.QueryRow("SELECT node_id,owner_secret_ref,endpoint,peer_public_key,peer_secret_ref FROM codex_agent_host").Scan(&id, &owner, &endpoint, &public, &secret); err != nil {
 		t.Fatal(err)
 	}
 	if id != "stable-host" || owner != "encrypted-owner" || endpoint != "" || public != "" || secret != "" {

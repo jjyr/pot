@@ -36,7 +36,7 @@ func TestCodexHostUpgradePreservesExistingControlData(t *testing.T) {
 	if err = Migrate(ctx, db, ControlDatabase); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec("INSERT INTO codex_agent_host(singleton,control_id,owner_secret_ref,endpoint) VALUES(1,'stable-codex','encrypted-ref','')"); err != nil {
+	if _, err = db.Exec("INSERT INTO codex_agent_host(singleton,node_id,owner_secret_ref,endpoint) VALUES(1,'stable-codex','encrypted-ref','')"); err != nil {
 		t.Fatal(err)
 	}
 	if err = Migrate(ctx, db, ControlDatabase); err != nil {
@@ -46,7 +46,7 @@ func TestCodexHostUpgradePreservesExistingControlData(t *testing.T) {
 	if err = db.QueryRow("SELECT metadata FROM providers WHERE id='fixture'").Scan(&metadata); err != nil || metadata != "{\"keep\":true}" {
 		t.Fatal(metadata, err)
 	}
-	if err = db.QueryRow("SELECT control_id FROM codex_agent_host").Scan(&id); err != nil || id != "stable-codex" {
+	if err = db.QueryRow("SELECT node_id FROM codex_agent_host").Scan(&id); err != nil || id != "stable-codex" {
 		t.Fatal(id, err)
 	}
 }
