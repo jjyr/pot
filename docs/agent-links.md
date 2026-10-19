@@ -161,9 +161,16 @@ be copied again after the upgrade.
 
 Product `secrets.Open` completes the key-dependent migration before returning.
 `storage.FinalizeNodeIdentity` uses the existing master key to atomically convert
-encrypted pair intents and invitation claim hashes; its pending receipt survives
+encrypted pair intents; its pending receipt survives
 failures for restart. `agentlink.New` refuses an incompletely migrated host with
 historical credentials. An embedding host using an external SecretStore owns
 conversion of that external store and must complete the database's migration
 receipt only after its credentials and claims are safely converted. The product
 key-based finalizer applies only to Pot's encrypted SQLite secret format.
+
+Historical Agent Link claim hashes also retain their exact format through
+`agent_link_claim_digest_formats`. A Pair request binds its original display
+names, while the receiver may save a later registry name. Migration therefore
+cannot reconstruct every original claim preimage. The frozen claim codec checks
+the original capability, identities, names and host key exactly; new claims use
+the current NodeID hash format.

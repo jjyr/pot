@@ -139,7 +139,7 @@ Control migration `0009_message_node_identity` performs typed JSON and route
 conversion and writes a pending receipt only when historical credentials or
 invitation claims need the existing master key. `secrets.Open` calls
 `storage.FinalizeNodeIdentity` before returning. The finalizer transforms only
-Agent Link pair intents, rebuilds the original invitation claim binding, reseals
+Agent Link pair intents, preserves the versioned invitation claim binding, reseals
 under the same key/reference, and removes the receipt in one transaction. A
 missing key or interrupted conversion leaves the receipt for a safe restart.
 Normally deleted credentials of fully revoked links remain deleted. A custom
@@ -153,3 +153,10 @@ field. This is an internal storage hash format, not legacy protocol acceptance.
 Typed mailbox and Task address conversions retain message IDs, delivery states,
 consumer membership and peer context. Historical model messages, plugin data,
 provider replay and arbitrary tool output remain untouched.
+
+Historical Agent Link claim hashes also retain their exact format through
+`agent_link_claim_digest_formats`. A Pair request binds its original display
+names, while the receiver may save a later registry name. Migration therefore
+cannot reconstruct every original claim preimage. The frozen claim codec checks
+the original capability, identities, names and host key exactly; new claims use
+the current NodeID hash format.

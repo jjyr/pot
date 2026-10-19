@@ -471,6 +471,14 @@ func TestNodeIdentityUpgradeReopensOriginalSignedPairAndReceipts(t *testing.T) {
 	oldHost, _ := json.Marshal(a.service.options.HostIdentity)
 	oldHost = []byte(strings.ReplaceAll(string(oldHost), `"node_id":`, `"id":`))
 	oldClaim := digest(append(append(append([]byte("["), oldPair...), ','), append(oldHost, ']')...))
+	remoteConnection, err := b.service.Get(ctx, connection.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteConnection.Local.Name = "Renamed after invitation was copied"
+	if err = b.service.update(ctx, remoteConnection); err != nil {
+		t.Fatal(err)
+	}
 	endpointA, endpointB := a.endpoint, b.endpoint
 	a.stop()
 	b.stop()
@@ -506,7 +514,8 @@ func TestNodeIdentityUpgradeReopensOriginalSignedPairAndReceipts(t *testing.T) {
 		if _, err = fixture.db.Exec(`UPDATE agent_link_invitations SET identity=replace(identity,'"node_id":','"control_id":');
 ALTER TABLE codex_agent_host RENAME COLUMN node_id TO control_id;
 DROP TABLE node_identity_secret_migration;
-DELETE FROM pot_migrations WHERE id LIKE '0009_%';`); err != nil {
+DROP TABLE agent_link_claim_digest_formats;
+DELETE FROM pot_migrations WHERE id LIKE '0009_%' OR id LIKE '0010_%';`); err != nil {
 			t.Fatal(err)
 		}
 	}

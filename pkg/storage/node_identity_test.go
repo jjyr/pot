@@ -202,10 +202,12 @@ INSERT INTO codex_agent_host VALUES(1,'stable-codex-node','owner-secret','tcp://
 	}); err != nil {
 		t.Fatal(err)
 	}
-	convertedPair := strings.ReplaceAll(pair, `"control_id":`, `"node_id":`)
-	expectedClaim := sha256.Sum256([]byte("[" + convertedPair + `,{"node_id":"local","public_key":"stable-local-public-key"}]`))
-	if err = db.QueryRow("SELECT claim_hash FROM agent_link_invitations").Scan(&claim); err != nil || claim != hex.EncodeToString(expectedClaim[:]) {
-		t.Fatal("claim cannot reconcile original pair", claim, hex.EncodeToString(expectedClaim[:]), err)
+	if err = db.QueryRow("SELECT claim_hash FROM agent_link_invitations").Scan(&claim); err != nil || claim != hex.EncodeToString(oldClaim[:]) {
+		t.Fatal("original claim hash changed", claim, err)
+	}
+	var hashFormat int
+	if err = db.QueryRow("SELECT format FROM agent_link_claim_digest_formats WHERE invitation='original-invitation'").Scan(&hashFormat); err != nil || hashFormat != 1 {
+		t.Fatal(hashFormat, err)
 	}
 	if err = db.QueryRow("SELECT node_id,peer_public_key,peer_secret_ref FROM codex_agent_host").Scan(&codexID, &pub, &hostKey); err != nil || codexID != "stable-codex-node" || pub != "stable-public-key" || hostKey != "host-key" {
 		t.Fatal(codexID, pub, hostKey, err)

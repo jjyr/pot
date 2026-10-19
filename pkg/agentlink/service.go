@@ -308,7 +308,8 @@ func (s *Service) accept(ctx context.Context, request pairRequest, remote peer.I
 	var rawIdentity []byte
 	var endpoint, ref, claim, connectionID string
 	var expiry int64
-	err := s.options.DB.QueryRowContext(ctx, `SELECT identity,endpoint,expires_at,secret_ref,claim_hash,connection_id FROM agent_link_invitations WHERE id=?`, request.Invitation).Scan(&rawIdentity, &endpoint, &expiry, &ref, &claim, &connectionID)
+	var hashFormat int
+	err := s.options.DB.QueryRowContext(ctx, `SELECT identity,endpoint,expires_at,secret_ref,claim_hash,connection_id,COALESCE((SELECT format FROM agent_link_claim_digest_formats WHERE invitation=agent_link_invitations.id),2) FROM agent_link_invitations WHERE id=?`, request.Invitation).Scan(&rawIdentity, &endpoint, &expiry, &ref, &claim, &connectionID, &hashFormat)
 	if err != nil {
 		return Connection{}, ErrUnauthorized
 	}
@@ -328,8 +329,10 @@ func (s *Service) accept(ctx context.Context, request pairRequest, remote peer.I
 	if subtle.ConstantTimeCompare(secret, []byte(request.Code)) != 1 {
 		return Connection{}, ErrUnauthorized
 	}
-	requestRaw, _ := json.Marshal([]any{request, remote})
-	hash := digest(requestRaw)
+	hash, err := claimDigest(request, remote, hashFormat)
+	if err != nil {
+		return Connection{}, err
+	}
 	if claim != "" {
 		if claim != hash {
 			return Connection{}, ErrConflict

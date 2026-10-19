@@ -5,10 +5,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 )
 
@@ -31,7 +28,7 @@ func FinalizeNodeIdentity(ctx context.Context, db *sql.DB, keys MigrationKeys) e
 			return nil
 		}
 		var count int
-		if err := tx.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM agent_link_connections WHERE secret_ref!='' AND (state!='revoked' OR json_extract(metadata,'$.revocation_pending')=1))+(SELECT COUNT(*) FROM agent_link_invitations WHERE claim_hash!='')").Scan(&count); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM agent_link_connections WHERE secret_ref!='' AND (state!='revoked' OR json_extract(metadata,'$.revocation_pending')=1)").Scan(&count); err != nil {
 			return err
 		}
 		if count == 0 {
@@ -88,62 +85,6 @@ func FinalizeNodeIdentity(ctx context.Context, db *sql.DB, keys MigrationKeys) e
 			}
 			clear(converted)
 		}
-		rows, err = tx.QueryContext(ctx, "SELECT i.id,i.secret_ref,c.metadata FROM agent_link_invitations i JOIN agent_link_connections c ON c.id=i.connection_id WHERE i.claim_hash!=''")
-		if err != nil {
-			return err
-		}
-		type claimed struct {
-			id, ref string
-			raw     []byte
-		}
-		var claims []claimed
-		for rows.Next() {
-			var c claimed
-			if err = rows.Scan(&c.id, &c.ref, &c.raw); err != nil {
-				rows.Close()
-				return err
-			}
-			claims = append(claims, c)
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return err
-		}
-		for _, claim := range claims {
-			code, err := readNodeSecret(ctx, tx, aead, claim.ref)
-			if err != nil {
-				return err
-			}
-			var connection struct {
-				ID          string `json:"id"`
-				Local, Peer json.RawMessage
-				PeerHost    json.RawMessage `json:"peer_host"`
-			}
-			if err = json.Unmarshal(claim.raw, &connection); err != nil {
-				clear(code)
-				return err
-			}
-			// Pair request order and host identity order are part of this historical
-			// digest. Values and invitation IDs remain the original durable binding.
-			request := struct {
-				ID         string          `json:"id"`
-				Invitation string          `json:"invitation"`
-				Local      json.RawMessage `json:"local"`
-				Peer       json.RawMessage `json:"peer"`
-				Code       string          `json:"code"`
-			}{connection.ID, claim.id, connection.Peer, connection.Local, string(code)}
-			raw, err := json.Marshal([]any{request, connection.PeerHost})
-			clear(code)
-			if err != nil {
-				return err
-			}
-			hash := sha256.Sum256(raw)
-			clear(raw)
-			if _, err = tx.ExecContext(ctx, "UPDATE agent_link_invitations SET claim_hash=? WHERE id=?", hex.EncodeToString(hash[:]), claim.id); err != nil {
-				return err
-			}
-		}
 		_, err = tx.ExecContext(ctx, "DELETE FROM node_identity_secret_migration")
 		return err
 	})
@@ -174,7 +115,7 @@ func writeNodeSecret(ctx context.Context, tx *sql.Tx, aead cipher.AEAD, ref stri
 // decrypt an external store. New databases with no credential rows are ready.
 func CheckNodeIdentityReady(ctx context.Context, db *sql.DB) error {
 	var count int
-	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM node_identity_secret_migration WHERE EXISTS(SELECT 1 FROM agent_link_connections WHERE secret_ref!='' AND (state!='revoked' OR json_extract(metadata,'$.revocation_pending')=1)) OR EXISTS(SELECT 1 FROM agent_link_invitations WHERE claim_hash!='')`).Scan(&count)
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM node_identity_secret_migration WHERE EXISTS(SELECT 1 FROM agent_link_connections WHERE secret_ref!='' AND (state!='revoked' OR json_extract(metadata,'$.revocation_pending')=1))`).Scan(&count)
 	if err != nil {
 		return err
 	}

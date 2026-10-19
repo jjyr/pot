@@ -264,3 +264,39 @@ func TestPreviewHonorsCallerDeadlineAgainstUnresponsiveEndpoint(t *testing.T) {
 	default:
 	}
 }
+
+func TestHistoricalClaimDigestRetainsOriginalNamesAndCapability(t *testing.T) {
+	a, b := newFixture(t, "claim-a"), newFixture(t, "claim-b")
+	ctx := context.Background()
+	local, _ := a.service.options.Identity(ctx, "assistant")
+	remote, _ := b.service.options.Identity(ctx, "assistant")
+	request := pairRequest{ID: newID(), Invitation: newID(), Local: local, Peer: remote, Code: token()}
+	// Derive the actual previous-wire bytes independently of the frozen codec.
+	oldPair, _ := json.Marshal(request)
+	oldPair = []byte(strings.ReplaceAll(string(oldPair), `"node_id":`, `"control_id":`))
+	oldHost, _ := json.Marshal(a.service.options.HostIdentity)
+	oldHost = []byte(strings.ReplaceAll(string(oldHost), `"node_id":`, `"id":`))
+	expected := digest(append(append(append([]byte("["), oldPair...), ','), append(oldHost, ']')...))
+	actual, err := claimDigest(request, a.service.options.HostIdentity, 1)
+	if err != nil || actual != expected {
+		t.Fatal(actual, expected, err)
+	}
+	for _, change := range []string{"name", "code", "sender", "host"} {
+		modified := request
+		host := a.service.options.HostIdentity
+		switch change {
+		case "name":
+			modified.Peer.Name = "different display name"
+		case "code":
+			modified.Code = token()
+		case "sender":
+			modified.Local.Address.AgentID = "other"
+		case "host":
+			host.PublicKey = b.service.options.HostIdentity.PublicKey
+		}
+		value, err := claimDigest(modified, host, 1)
+		if err != nil || value == expected {
+			t.Fatal("historical claim weakened "+change, value, err)
+		}
+	}
+}
