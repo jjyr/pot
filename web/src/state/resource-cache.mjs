@@ -90,7 +90,7 @@ export function createResourceReads(client) {
     const scope={...client.scope(),...options},space=(client.spaces||[]).find(item=>item.id===scope.space);
     const base=path.split('?')[0];
     const topics=resources[base]||(base.startsWith('/api/v1/usage/')?['usage']:
-      base==='/api/v1/tasks/query'?['tasks','runner']:base==='/api/v1/schedules'?['schedules','tasks']:null);
+      ['/api/v1/tasks/query','/api/v1/tasks/catalog'].includes(base)?['tasks','runner']:base==='/api/v1/schedules'?['schedules','tasks']:null);
     return {path,space:scope.space||'',owner:base==='/api/v1/providers'?'':scope.owner||'',
       control:space?.control_id||client.runtime.runtime_id||client.runtime.id,
       boot:boots.get(scope.space)||boots.get('')||client.runtime.boot_id||'',topics};

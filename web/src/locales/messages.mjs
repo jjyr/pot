@@ -1,5 +1,9 @@
 export const messages = {
   en: {
+    'tasks.search':'Search task title or ID…', 'tasks.scope.active':'Ongoing',
+    'tasks.scope.attention':'Needs attention', 'tasks.scope.archived':'Archived',
+    'tasks.pageSummary':'{count} items · Page {page}',
+    'tasks.partialSources':'Some Spaces are unavailable. Cached tasks are marked stale; totals may be incomplete.',
     'usage.calendarTitle':'Agent / model usage', 'usage.lastYear':'Last year',
     'usage.calendarLabel':'Daily token usage over the last year',
     'usage.dayLabel':'{date} · {count} tokens', 'usage.tokens':'{count} tokens',
@@ -221,6 +225,10 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'tasks.search':'搜索任务标题或 ID…', 'tasks.scope.active':'进行中',
+    'tasks.scope.attention':'需关注', 'tasks.scope.archived':'已归档',
+    'tasks.pageSummary':'{count} 项 · 第 {page} 页',
+    'tasks.partialSources':'部分 Space 不可用。缓存任务标记为过期，汇总数量可能不完整。',
     'usage.calendarTitle':'Agent / 模型用量', 'usage.lastYear':'最近一年',
     'usage.calendarLabel':'最近一年每日 token 用量',
     'usage.dayLabel':'{date} · {count} tokens', 'usage.tokens':'{count} tokens',

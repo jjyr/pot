@@ -47,7 +47,9 @@ streamed fences remain code. The component loads the pinned, bundled Pele ESM
 module only when a diagram enters the document; no CDN is needed.
 
 Each `pot-mermaid` element owns its Pele mount and destroys it on disconnection,
-including when a streaming message replaces its content. A late module load
+including when a message is recycled or its diagram source changes. Appended
+reply text reparses only the final Markdown block; completed paragraphs, code,
+tables, image previews and diagrams retain their nodes and local state. A late module load
 cannot mount a detached or superseded element. Container resizing and pending
 font loading trigger Pele's layout refresh. Semantic CSS variables keep diagrams
 in the current light/dark theme, and shrinking diagrams support zoom and pan.
@@ -104,15 +106,20 @@ page / directory / completion
 
 Fresh configuration reads last 30 seconds; dynamic lists and completion reads last
 5 seconds. TTL is checked on access and creates no polling. Domain events and
-successful commands invalidate the affected Space; a confirmed new boot drops its
+successful commands invalidate their display domains within the captured Space;
+upload chunks and model checks do not invalidate unrelated resources. A confirmed new boot drops its
 old resource values. Reconnect resets require revalidation while retaining display
 data. Invalidation during IO requires a follow-up read before publishing. Leaving
 one view never aborts a request shared by other consumers. Failures retain old
 values and show a localized retry notice. The bounded cache clones values for each
 consumer so local projection changes do not mutate other views.
 
-Task and schedule pagination cache each complete source collection as one entry,
-independently of backend page count, and retain the existing global merge/sort. Task detail keeps a bounded transcript cache and resumes events from
+Task lists read the operator catalogue once per Space and cache backend pages.
+Each source supplies only the ordered prefix needed for the current global page;
+assistant count does not multiply reads. Fast Spaces render while other sources
+load, with pagination enabled when the combined page settles. Counts represent
+complete source totals. Schedule pagination retains complete source collections.
+Task detail keeps a bounded transcript cache and resumes events from
 its cursor, reading messages and record updates concurrently. Usage page offsets,
 scroll positions and disclosures remain view state. Chat restores confirmed
 snapshots with Space and Control identity, then waits for the subscription's

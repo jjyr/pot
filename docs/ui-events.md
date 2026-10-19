@@ -193,7 +193,8 @@ history. Pending inputs remain at the tail; retained historical inputs without a
 bookmark remain identifiable without inventing a delivery position.
 
 The task conversation uses the shared reply bubbles, tool disclosures, composer
-binding and reference completions. Only its history scrolls; status and the composer
+binding, measured message windows and reference completions. Expanded tool trees
+share its scroll container and retain disclosure state when recycled. Only its history scrolls; status and the composer
 remain visible. Following stops when the reader scrolls upward, and Latest resumes
 it. Navigation restores the goal/tool disclosures and reading position. Terminal
 text already present in the final reply is not repeated. Ended tasks retain an

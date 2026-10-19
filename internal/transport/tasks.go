@@ -22,8 +22,11 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 	if s.Machines.Role() == "runner" {
 		return nil, errors.New("execution Runner cannot own assistant APIs"), true
 	}
-	if _, err := s.Conversation(ctx, owner); err != nil {
-		return nil, err, true
+	catalog := method == "GET" && path == "/api/v1/tasks/catalog"
+	if !catalog {
+		if _, err := s.Conversation(ctx, owner); err != nil {
+			return nil, err, true
+		}
 	}
 	integer := func(key string) (uint64, error) {
 		value := u.Query().Get(key)
@@ -52,7 +55,7 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 		if err == nil {
 			result, err = s.Tasks.Outcomes(ctx, owner, after)
 		}
-	case method == "GET" && path == "/api/v1/tasks/query":
+	case method == "GET" && (path == "/api/v1/tasks/query" || catalog):
 		var q protocol.TaskQuery
 		q.Scope = u.Query().Get("scope")
 		q.Q = u.Query().Get("q")
@@ -67,7 +70,11 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 			q.Phase = &p
 		}
 		if err == nil {
-			result, err = s.Tasks.Page(ctx, owner, q)
+			if catalog {
+				result, err = s.Tasks.Catalog(ctx, q)
+			} else {
+				result, err = s.Tasks.Page(ctx, owner, q)
+			}
 		}
 	case method == "POST" && path == "/api/v1/tasks":
 		var request protocol.CreateTask
