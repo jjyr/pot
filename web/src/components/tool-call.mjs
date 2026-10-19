@@ -44,7 +44,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',onDecis
 
     const phase=pending?'waiting_approval':tool.phase;
     const names={exec_command:'command',write_stdin:'session',apply_patch:'patch',exec:'script',wait:'wait',cua_repl:'computer',create_task:'createTask',get_task:'getTask',wait_task:'waitTask'};
-    title.textContent=tool.name==='read_chat_messages'?translate(locale(),'references.read'):names[tool.name]?t(names[tool.name]):tool.name;
+    title.textContent=names[tool.name]?t(names[tool.name]):tool.name;
     const preview=toolSummary(tool);
     excerpt.textContent=preview===tool.name||preview===title.textContent?'':preview;excerpt.title=excerpt.textContent;excerpt.hidden=!excerpt.textContent;
     let shown=phase;

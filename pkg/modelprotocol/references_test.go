@@ -11,10 +11,11 @@ func TestMessageReferenceEncodingAcrossProtocols(t *testing.T) {
 	for _, protocol := range []Protocol{OpenAIChat, OpenAIResponses, AnthropicMessages, Gemini} {
 		t.Run(string(protocol), func(t *testing.T) {
 			source := TextMessage("assistant", "完整的原消息不应重复复制")
-			source.ID = "source"
+			source.ID = "INTERNAL-SOURCE-ID"
 			input := TextMessage("user", "为什么？")
-			input.ID = "input"
-			input.References = []core.MessageReference{{MessageID: "source", Quote: "选中🙂 <tag>"}}
+			input.ID = "INTERNAL-INPUT-ID"
+			input.References = []core.MessageReference{{MessageID: source.ID, Quote: "选中🙂 <tag>"}}
+			input.ReferenceContents = []ReferenceContent{{Role: "assistant", Quote: "选中🙂 <tag>", Context: "选中🙂 <tag> 附近的上下文", Truncated: true}}
 			for _, replay := range []bool{false, true} {
 				if replay {
 					switch protocol {
@@ -56,8 +57,11 @@ func TestMessageReferenceEncodingAcrossProtocols(t *testing.T) {
 				}
 				walk(decoded)
 				joined := strings.Join(texts, "\n")
-				if strings.Count(joined, "完整的原消息不应重复复制") != 1 || !strings.Contains(joined, `"message_id":"source"`) || !strings.Contains(joined, `"references":[`) {
-					t.Fatal("identity or reference lost", joined)
+				if strings.Count(joined, "完整的原消息不应重复复制") != 1 || !strings.Contains(joined, `<quoted_messages>`) || !strings.Contains(joined, `"quote":"选中🙂 \u003ctag\u003e"`) || !strings.Contains(joined, `"context":`) || !strings.Contains(joined, `"truncated":true`) {
+					t.Fatal("quoted content or context lost", joined)
+				}
+				if strings.Contains(joined, source.ID) || strings.Contains(joined, input.ID) || strings.Contains(joined, "pot_message_metadata") || strings.Contains(joined, "read_chat_messages") {
+					t.Fatal("internal message identity leaked", joined)
 				}
 				if source.Text != "完整的原消息不应重复复制" || input.Text != "为什么？" || string(source.Replay) != before {
 					t.Fatal("encoding mutated canonical history")
@@ -67,5 +71,15 @@ func TestMessageReferenceEncodingAcrossProtocols(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestUnresolvedMessageReferencesAreRejected(t *testing.T) {
+	for _, protocol := range protocols() {
+		input := TextMessage("user", "Why?")
+		input.References = []core.MessageReference{{MessageID: "source"}}
+		if _, err := Encode(Request{Protocol: protocol, Model: "model", Messages: []Message{input}, MaxOutputTokens: 100}); err == nil {
+			t.Fatal(protocol, "unresolved references silently omitted")
+		}
 	}
 }

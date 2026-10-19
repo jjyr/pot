@@ -61,7 +61,7 @@ func TestConfiguredModelMessageReferencesLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	allowed := []string{"read_chat_messages"}
+	allowed := []string{}
 	spec.Params.Agent.BuiltinTools = []string{}
 	spec.Params.Agent.AllowedTools = &allowed
 	spec.Params.Agent.Plugins = map[string]core.PluginConfig{}
@@ -116,9 +116,9 @@ func TestConfiguredModelMessageReferencesLive(t *testing.T) {
 	snapshot = send("replay", "我选中的这条回复写了哪个代号？只回复代号。", []core.MessageReference{{MessageID: generated, Quote: "代号"}})
 	response = snapshot.Messages[len(snapshot.Messages)-1].Text
 	if !strings.Contains(response, "JADE") || strings.Contains(response, "PEARL") {
-		t.Fatal("native replay lost the referenced assistant identity", response)
+		t.Fatal("native replay lost the selected assistant content", response)
 	}
-	t.Log("generated assistant message ID understood with native replay:", response)
+	t.Log("selected assistant content understood with native replay:", response)
 
 	if err = conversation.Close(); err != nil {
 		t.Fatal(err)
@@ -143,14 +143,13 @@ func TestConfiguredModelMessageReferencesLive(t *testing.T) {
 	service.conversations["main"] = conversation
 	snapshot = send("compacted", "只回复所引用原消息中方案 B 的地点和代号。", []core.MessageReference{{MessageID: source}})
 	response = snapshot.Messages[len(snapshot.Messages)-1].Text
-	usedReader := false
 	for _, message := range snapshot.Messages {
 		if message.Tool != nil && message.Tool.Name == "read_chat_messages" {
-			usedReader = true
+			t.Fatal("references must not require a model-side message lookup")
 		}
 	}
-	if !usedReader || !strings.Contains(response, "苏州") || !strings.Contains(response, "PEARL") {
-		t.Fatal("model failed original lookup after compaction", response)
+	if !strings.Contains(response, "苏州") || !strings.Contains(response, "PEARL") {
+		t.Fatal("model lost supplied reference content after compaction", response)
 	}
-	t.Log("ID-only reference resolved through production reader:", response)
+	t.Log("whole-message reference supplied directly after compaction:", response)
 }

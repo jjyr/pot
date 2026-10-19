@@ -11,7 +11,7 @@ func responseItem(id, phase, text string) map[string]any {
 	return map[string]any{"id": id, "type": "message", "role": "assistant", "phase": phase, "status": "completed", "content": []any{map[string]any{"type": "output_text", "text": text, "annotations": []any{}}}}
 }
 
-func TestResponsesReplayAnnotationUsesExistingText(t *testing.T) {
+func TestResponsesReplayPreservesNativeItemsWithoutAnnotations(t *testing.T) {
 	for _, scenario := range []string{"commentary", "final_answer", "empty-native", "tools-only", "portable-text", "portable-tools", "empty-assistant", "null-replay", "invalid-replay", "native-only-text"} {
 		t.Run(scenario, func(t *testing.T) {
 			source := TextMessage("assistant", "Original 中文🙂")
@@ -63,27 +63,20 @@ func TestResponsesReplayAnnotationUsesExistingText(t *testing.T) {
 				previous = string(raw)
 				body, _ := object(raw)
 				input := array(body["input"])
-				wantAnnotation := scenario == "commentary" || scenario == "final_answer" || scenario == "portable-text" || scenario == "native-only-text"
 				if len(source.Replay) > 0 && scenario != "null-replay" && scenario != "invalid-replay" {
 					if len(input) != len(items) {
 						t.Fatalf("invented replay item: %s", raw)
 					}
-					if wantAnnotation {
-						content := array(obj(input[3])["content"])
-						if len(content) != 2 || obj(content[0])["text"] != messageMetadata(source) {
-							t.Fatalf("annotation not attached once to existing text: %s", raw)
-						}
-						obj(input[3])["content"] = content[1:]
-					}
 					if !reflect.DeepEqual(input, items) {
 						t.Fatalf("native fields changed: %#v", input)
 					}
-				} else if wantAnnotation {
-					if len(input) != 1 || obj(input[0])["content"] != messageMetadata(source)+source.Text {
-						t.Fatalf("portable annotation changed: %s", raw)
+				} else if scenario == "portable-text" {
+					if len(input) != 1 || obj(input[0])["content"] != source.Text {
+						t.Fatalf("portable text changed: %s", raw)
 					}
-				} else if strings.Contains(string(raw), "pot_message_metadata") {
-					t.Fatalf("annotation added without carrier text: %s", raw)
+				}
+				if strings.Contains(string(raw), "pot_message_metadata") || strings.Contains(string(raw), source.ID) {
+					t.Fatalf("internal message metadata added to provider input: %s", raw)
 				}
 				after, _ := json.Marshal(request.Messages[0])
 				if string(before) != string(after) || string(request.Messages[0].Replay) != replayBefore {
@@ -129,9 +122,7 @@ func responseWire(items []any, mode string) []byte {
 }
 
 func TestResponsesReturnedMetadataIsPreserved(t *testing.T) {
-	source := TextMessage("assistant", "Original.")
-	source.ID = "source"
-	known := messageMetadata(source)
+	known := "<pot_message_metadata>{\"message_id\":\"source\"}</pot_message_metadata>\n"
 	unknown := `<pot_message_metadata>{"message_id":"ABCDEFGHIJKLMNOPQRSTUVWXYZ"}</pot_message_metadata>\n`
 	for _, tc := range []struct{ name, phase, text string }{
 		{"known", "commentary", known},

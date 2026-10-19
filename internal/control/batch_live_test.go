@@ -486,11 +486,6 @@ func batchRequestCategory(body []byte) (string, string) {
 			previousUser = false
 			continue
 		}
-		if strings.HasPrefix(text, "<pot_message_metadata>") {
-			if _, body, ok := strings.Cut(text, "</pot_message_metadata>\n"); ok {
-				text = body
-			}
-		}
 		if !previousUser {
 			latest = nil
 		}
