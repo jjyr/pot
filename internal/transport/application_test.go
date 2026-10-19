@@ -71,6 +71,18 @@ func TestSocketProductCreateEventsAuthAndRestart(t *testing.T) {
 	if err = json.Unmarshal(data, &definition); err != nil {
 		t.Fatal(err)
 	}
+	assertAppearanceSeed := func() {
+		t.Helper()
+		code, data := call("GET", "/api/v1/assistants", "", endpoint.Token)
+		var items []map[string]any
+		if code != 200 || json.Unmarshal(data, &items) != nil || len(items) != 1 || items[0]["request_id"] != "create" || items[0]["id"] != definition["id"] {
+			t.Fatalf("directory lost persisted appearance seed: %d %s", code, data)
+		}
+	}
+	if definition["request_id"] != "create" {
+		t.Fatal("creation response lost appearance seed", definition)
+	}
+	assertAppearanceSeed()
 	c, err := runtime.Control.Conversation(ctx, definition["id"].(string))
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +135,22 @@ func TestSocketProductCreateEventsAuthAndRestart(t *testing.T) {
 	if runtime.BootID == endpoint.BootID || runtime.Root.Identity.RuntimeID != endpoint.RuntimeID {
 		t.Fatal("restart identity")
 	}
+	app = &Application{Control: runtime.Control, RuntimeID: runtime.Root.Identity.RuntimeID, BootID: runtime.BootID, Name: "Pot"}
+	s, err = StartSocket(ctx, root, app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close(ctx)
+	endpoint, err = ReadEndpoint(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client = endpoint.Client()
+	assertAppearanceSeed()
+	if code, data := call("POST", "/api/v1/assistants/"+definition["id"].(string), `{"name":"Renamed","revision":1}`, endpoint.Token); code != 200 {
+		t.Fatal(code, string(data))
+	}
+	assertAppearanceSeed()
 	c, err = runtime.Control.Conversation(ctx, "main")
 	if err != nil {
 		t.Fatal(err)

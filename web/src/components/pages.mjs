@@ -3,7 +3,7 @@ import {notificationSetting} from './notification-setting.mjs';
 import {usageNumbers,usageRows,usageTooltip,createUsageList} from './usage.mjs';
 import {createTaskConversation} from './task-conversation.mjs';
 import {connectProviderEditor} from './provider-connection.mjs';
-import {avatar} from './avatar.mjs';
+import {avatar,assistantAvatarKey} from './avatar.mjs';
 import {translate} from '../locales/messages.mjs';
 import {icon} from './icons.mjs';
 import {node as n, action, field, section, table, details} from './primitives.mjs';
@@ -197,8 +197,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       ],async(values,context,session)=>{
         const options={owner:captured.owner,space:captured.space,method:'POST'},selection=selectValue(values);
         if(!selection)throw Error(tr('Connect and select a Provider first.','请先连接并选择提供商。'));
-        preview.replaceWith(preview=avatar(56,definition?.request_id||definition?.id||context.request_id));
-        if(!definition){const saved=await request('/api/v1/assistants',{...options,space:values.space_id,owner:'',body:{request_id:context.request_id,name:values.name,text:values.text,locale:locale(),...(selection?{selection}:{})}});return {assistant:{...saved,space_id:values.space_id}};}
+        if(!definition){const saved=await request('/api/v1/assistants',{...options,space:values.space_id,owner:'',body:{request_id:creationRequestID,name:values.name,text:values.text,locale:locale(),...(selection?{selection}:{})}});return {assistant:{...saved,space_id:values.space_id}};}
         if(values.name!==initial.name){const saved=await request(`/api/v1/assistants/${encodeURIComponent(definition.id)}`,{...options,body:{name:values.name,revision}});revision=saved.revision;initial.name=values.name;session.acknowledge({name:values.name});}
         const signature=JSON.stringify(selection);
         if(selection&&signature!==initialSelection){const saved=await request('/api/v1/agent',{...options,body:{request_id:context.request_id,expected_generation:generation,expected_revision:configurationRevision,selection}});generation=saved.generation;configurationRevision=saved.revision;initialSelection=signature;session.acknowledge(Object.fromEntries(['profile_id','model','model_selection','context_window','max_output_tokens','reasoning_effort'].map(key=>[key,values[key]])));}
@@ -206,7 +205,10 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       },{returnChat:true,submitLabel:definition?tr('Save','保存'):tr('Create and start chatting','创建并开始聊天')});
       const controls=form.controls,session=form.session;
       editor.kind='assistant';
-      let preview=avatar(56,definition?.request_id||definition?.id||session.requestID);
+      // Creation identity also owns the preview color. Keep it even when an
+      // edited retry rotates the editor's generic mutation request identity.
+      const creationRequestID=session.requestID;
+      const preview=avatar(56,assistantAvatarKey(definition||{request_id:creationRequestID}));
       form.form.querySelector('.editor-fields').prepend(preview);
       const set=(name,value)=>{controls.get(name).value=value??'';session.set(name,value);};
       const defaults=()=>{const profile=profiles.find(value=>value.id===session.values.profile_id),catalog=profile?.model_settings?.catalog_provider||'custom',limits=modelDefaults(providers,catalog,session.values.model);const same=profile?.model===session.values.model;controls.get('context_window').placeholder=String(same?(profile?.model_settings?.context_window||limits.context):limits.context);controls.get('max_output_tokens').placeholder=String(same?(profile?.model_settings?.max_output_tokens||limits.output):limits.output);controls.get('reasoning_effort').placeholder=profile?.params?.reasoning_effort||tr('Provider default','提供商默认值');controls.get('model').required=!!profile;form.form.querySelector('.editor-actions .primary').disabled=!profile;};

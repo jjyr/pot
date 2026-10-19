@@ -1,0 +1,26 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Isolated assistant avatar regression</title>
+<style>body{margin:0;font:14px system-ui}#controls{padding:8px}iframe{display:block;border:1px solid #999;height:760px;max-width:100%}pre{white-space:pre-wrap;margin:8px}</style>
+<div id="controls"><button id="desktop">Desktop 1200</button> <button id="mobile">Mobile 390</button> <button id="run">Run avatar regression</button> <button id="reload">Verify stored colors after page reload</button><pre id="result">Ready — disposable Control only; no model calls.</pre></div><div id="app"></div>
+<script type="module">
+if(!new URLSearchParams(location.search).has('app')){
+  const frame=document.createElement('iframe');frame.width=1200;frame.src=location.pathname+'?app=1&locale=en';document.body.append(frame);
+  document.querySelector('#desktop').onclick=()=>{frame.width=1200;frame.src=location.pathname+'?app=1&locale=en';};
+  document.querySelector('#mobile').onclick=()=>{frame.width=390;frame.src=location.pathname+'?app=1&locale=en';};
+  document.querySelector('#run').onclick=async()=>{const result=document.querySelector('#result');result.textContent='Running…';try{const value=await frame.contentWindow.runAvatarRegression();window.avatarResult=value;result.textContent='PASS '+value.view+': '+value.checks.length+' checks\nPreview = directory = chat = settings = tray; failed/edited retry, rename and remount stable.\nFirst: '+value.first.join(' / ')+'\nSecond: '+value.second.join(' / ');}catch(error){result.textContent='FAIL\n'+error.stack;}};
+  document.querySelector('#reload').onclick=async()=>{const result=document.querySelector('#result');result.textContent='Reloading…';try{await new Promise(resolve=>{frame.onload=resolve;frame.src=frame.src;});while(!frame.contentWindow.verifyAvatarReload)await new Promise(resolve=>setTimeout(resolve,20));result.textContent='PASS '+await frame.contentWindow.verifyAvatarReload();}catch(error){result.textContent='FAIL\n'+error.stack;}};
+}else{
+  document.querySelector('#controls').remove();
+  const style=document.createElement('link');style.rel='stylesheet';style.href='/web/src/styles.css';document.head.append(style);
+  const {mountApp}=await import('/web/src/components/ui.js');
+  const {createProductionClient}=await import('/web/src/adapters/production.mjs');
+  const {runAvatarRegression,verifyAvatarReload}=await import('/scripts/tests/go-ui-assistant-avatar-browser.mjs');
+  const probe={posts:[],errors:[],failNext:false};let dispose;
+  window.addEventListener('error',event=>probe.errors.push(event.message));window.addEventListener('unhandledrejection',event=>probe.errors.push(String(event.reason)));
+  probe.remount=async(surface='main')=>{
+    dispose?.();probe.client=await createProductionClient();const request=probe.client.request;
+    probe.client.request=async(path,options={})=>{if(path==='/api/v1/assistants'&&options.method==='POST'){probe.posts.push(structuredClone(options.body));if(probe.failNext){probe.failNext=false;throw Error('Deliberate creation failure');}}return request(path,options);};
+    dispose=mountApp(document.querySelector('#app'),probe.client,{surface});
+  };
+  await probe.remount();window.runAvatarRegression=()=>runAvatarRegression(probe);window.verifyAvatarReload=verifyAvatarReload;
+}
+</script></html>
