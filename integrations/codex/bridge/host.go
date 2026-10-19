@@ -268,6 +268,12 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 	switch in.Action {
 	case "recover_messages":
 		err = h.mailbox.recoverConsumers(r.Context())
+	case "preview":
+		var preview agentlink.Preview
+		preview, err = h.links.Preview(r.Context(), in.Address)
+		if err == nil {
+			v = map[string]any{"peer": map[string]any{"id": preview.Identity.Address.AgentID, "control_id": preview.Identity.Address.ControlID, "kind": preview.Identity.Adapter, "name": preview.Identity.Name}, "endpoint": preview.Endpoint, "fingerprint": preview.Fingerprint, "expires_at_ms": preview.ExpiresAt.UnixMilli()}
+		}
 	case "connect":
 		v, err = h.links.Connect(r.Context(), "codex", in.Address)
 	case "disconnect":

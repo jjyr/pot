@@ -290,6 +290,67 @@ func TestAgentHostOwnerIsolation(t *testing.T) {
 	}
 }
 
+func TestAgentHostPreviewDoesNotConnectOrConsumeInvitation(t *testing.T) {
+	ctx := context.Background()
+	remote, _ := testHost(t)
+	defer remote.close()
+	local, _ := testHost(t)
+	defer local.close()
+	listener, err := linkhost.ListenPeer(ctx, "127.0.0.1:0", remote.peerServer())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	endpoint := "tcp://" + listener.Addr()
+	invitation, err := remote.links.Invite(ctx, "codex", endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := func(address string) *httptest.ResponseRecorder {
+		payload, _ := json.Marshal(map[string]string{"action": "preview", "address": address})
+		r := httptest.NewRequest(http.MethodPost, "http://"+hostListen+"/api/v1/agent-links", strings.NewReader(string(payload)))
+		r.Host = hostListen
+		r.RemoteAddr = "127.0.0.1:12345"
+		r.Header.Set("Authorization", "Bearer "+local.token)
+		w := httptest.NewRecorder()
+		local.handler().ServeHTTP(w, r)
+		return w
+	}
+	w := preview(invitation.Address)
+	var result struct {
+		Peer struct {
+			ID        string `json:"id"`
+			ControlID string `json:"control_id"`
+			Kind      string `json:"kind"`
+			Name      string `json:"name"`
+		} `json:"peer"`
+		Endpoint    string `json:"endpoint"`
+		Fingerprint string `json:"fingerprint"`
+		ExpiresAt   int64  `json:"expires_at_ms"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if result.Peer.ID != "codex" || result.Peer.ControlID != remote.identity.Address.ControlID || result.Peer.Kind != "codex" || result.Peer.Name != remote.identity.Name || result.Endpoint != endpoint || result.Fingerprint == "" || result.ExpiresAt != invitation.ExpiresAt.UnixMilli() {
+		t.Fatal(result)
+	}
+	if strings.Contains(w.Body.String(), "#") || strings.Contains(w.Body.String(), local.token) {
+		t.Fatal("preview exposed invitation or owner credential")
+	}
+	for _, host := range []*agentHost{local, remote} {
+		connections, err := host.links.List(ctx)
+		if err != nil || len(connections) != 0 {
+			t.Fatal("preview created a connection", connections, err)
+		}
+	}
+	if invalid := preview("https://untrusted.example"); invalid.Code != 400 {
+		t.Fatal("invalid address accepted", invalid.Code)
+	}
+	if _, err = local.links.Connect(ctx, "codex", invitation.Address); err != nil {
+		t.Fatal("preview consumed invitation", err)
+	}
+}
+
 func TestAgentHostPeerDeliveryRemainsUnreadUntilCodexReads(t *testing.T) {
 	ctx := context.Background()
 	a, _ := testHost(t)

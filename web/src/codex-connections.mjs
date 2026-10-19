@@ -8,20 +8,23 @@ const locale=()=>{const value=parameters.get('locale')||localStorage.getItem('po
 document.documentElement.lang=locale();document.documentElement.dataset.platform='browser';
 document.documentElement.dataset.theme=parameters.get('theme')||localStorage.getItem('pot-go-preview-theme')||'system';
 const root=document.getElementById('connections');
-root.style.cssText='max-width:820px;margin:32px auto;padding:0 24px';
+root.style.cssText='width:100%;max-width:820px;height:100%;overflow-y:auto;margin:0 auto;padding:32px 24px;box-sizing:border-box';
 const heading=document.createElement('h1');heading.textContent=translate(locale(),'agentLinks.title');root.append(heading);
+const notice=document.createElement('p');notice.className='hint';notice.setAttribute('role','status');notice.hidden=true;root.append(notice);
 const content=document.createElement('div');root.append(content);
 const lifecycle=new AbortController();
+let noticeTimer;
+function notify(value){clearTimeout(noticeTimer);notice.textContent=value;notice.hidden=false;noticeTimer=setTimeout(()=>{notice.hidden=true;},4000);}
 async function request(path,options={}){
  const headers={...options.headers,Authorization:`Bearer ${token}`,'Content-Type':'application/json'};
- const response=await fetch(path,{...options,signal:AbortSignal.any([lifecycle.signal,AbortSignal.timeout(15000)]),headers,body:options.body&&typeof options.body!=='string'?JSON.stringify(options.body):options.body});
+ const response=await fetch(path,{...options,signal:AbortSignal.any([lifecycle.signal,options.signal,AbortSignal.timeout(15000)].filter(Boolean)),headers,body:options.body&&typeof options.body!=='string'?JSON.stringify(options.body):options.body});
  const data=await response.json();if(!response.ok)throw Object.assign(new Error(data.error),{code:data.error});return data;
 }
-const component=createAgentLinks({root:content,request,locale,currentAssistant:()=> 'codex',assistants:()=>[{id:'codex',name:'Codex'}],fixedAssistant:true,showConnections:true,signal:lifecycle.signal});
+const component=createAgentLinks({root:content,request,locale,notify,currentAssistant:()=> 'codex',assistants:()=>[{id:'codex',name:'Codex'}],fixedAssistant:true,showConnections:true,signal:lifecycle.signal});
 let stopped=false,pending=false,timer;
 async function refresh(){if(stopped||pending||document.hidden)return;pending=true;try{await component.load();}finally{pending=false;if(!stopped)timer=setTimeout(refresh,3000);}}
 await refresh();
 function visibility(){clearTimeout(timer);if(!document.hidden)refresh();}
 document.addEventListener('visibilitychange',visibility);
-window.addEventListener('pagehide',()=>{stopped=true;clearTimeout(timer);lifecycle.abort();document.removeEventListener('visibilitychange',visibility);component.dispose();},{once:true});
-window.addEventListener('pot:locale',()=>{heading.textContent=translate(locale(),'agentLinks.title');component.load();});
+window.addEventListener('pagehide',()=>{stopped=true;clearTimeout(timer);clearTimeout(noticeTimer);lifecycle.abort();document.removeEventListener('visibilitychange',visibility);component.dispose();},{once:true});
+window.addEventListener('pot:locale',()=>{document.documentElement.lang=locale();heading.textContent=translate(locale(),'agentLinks.title');if(!notice.hidden)notice.textContent=translate(locale(),'agentLinks.connected');component.load();});

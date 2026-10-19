@@ -21,7 +21,12 @@ the local page; alternatively run:
 The page shows this Agent's public service endpoint, **Copy address**, and **Add
 Agent**. Copy creates a short-lived invitation only in the local clipboard flow.
 Paste the other side's address to connect in either direction. One reachable
-reachable endpoint is sufficient for authenticated bidirectional messages. Invites
+endpoint is sufficient for authenticated bidirectional messages. The page checks
+the pasted address automatically and shows the verified Agent before **Add
+Agent** becomes available. Checking does not create a connection or consume the
+invitation. Connection address and identity fingerprint remain in collapsed
+details; adding uses one final action and shows a brief success confirmation.
+No separate messaging permission step is required. Invites
 contain message-only capabilities: keep them out of chat, prompts and logs.
 
 Owner management stays on `127.0.0.1:8792` using the local HTTP API. The
