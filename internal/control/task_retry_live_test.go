@@ -28,13 +28,14 @@ type recoveryLiveServices struct {
 
 func (s recoveryLiveServices) Model(ctx context.Context, request core.ModelRequest) (io.ReadCloser, error) {
 	var limits struct {
-		MaxOutput uint64 `json:"max_output_tokens"`
-		MaxTokens uint64 `json:"max_tokens"`
+		MaxOutput     uint64 `json:"max_output_tokens"`
+		MaxTokens     uint64 `json:"max_tokens"`
+		MaxCompletion uint64 `json:"max_completion_tokens"`
 	}
 	if err := json.Unmarshal(request.Body, &limits); err != nil {
 		return nil, err
 	}
-	if limits.MaxOutput > 2048 || limits.MaxTokens > 2048 {
+	if limits.MaxOutput > 2048 || limits.MaxTokens > 2048 || limits.MaxCompletion > 2048 {
 		return nil, fmt.Errorf("live request exceeds the 2048-token output cap")
 	}
 	if s.fail {
@@ -106,7 +107,13 @@ func TestConfiguredModelTaskRecoveryLive(t *testing.T) {
 			if _, err = s.Registry.Create(ctx, "create", "Live recovery"); err != nil {
 				t.Fatal(err)
 			}
-			saved, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "configured", Name: "Configured live qualification", Model: profile.Model, Endpoint: provider.Endpoint, Protocol: provider.Protocol, APIKey: string(credential), MaxOutputTokens: 2048, ReasoningEffort: profile.Params.ReasoningEffort, ModelSettings: profile.ModelSettings})
+			modelSettings := core.ModelSettings{}
+			if profile.ModelSettings != nil {
+				modelSettings = *profile.ModelSettings
+			}
+			outputLimit := uint64(2048)
+			modelSettings.MaxOutputTokens = &outputLimit
+			saved, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "configured", Name: "Configured live qualification", Model: profile.Model, Endpoint: provider.Endpoint, Protocol: provider.Protocol, APIKey: string(credential), MaxOutputTokens: 2048, ReasoningEffort: profile.Params.ReasoningEffort, ModelSettings: &modelSettings})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -257,6 +264,23 @@ func TestConfiguredModelTaskRecoveryLive(t *testing.T) {
 			}
 			if scenario.failures > 0 && (retries != 1 || attempts.Load() != 2) {
 				t.Fatalf("recovery attempts=%d replacements=%d", attempts.Load(), retries)
+			}
+			if scenario.failures == 0 && (retries != 0 || int(attempts.Load()) != scenario.count) {
+				t.Fatalf("successful dispatch unexpectedly needed recovery: attempts=%d replacements=%d", attempts.Load(), retries)
+			}
+			var completed, failed int
+			if err := s.Tasks.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks WHERE phase='complete'").Scan(&completed); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Tasks.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks WHERE phase='failed'").Scan(&failed); err != nil {
+				t.Fatal(err)
+			}
+			wantComplete, wantFailed := scenario.count, scenario.failures
+			if scenario.failures == 2 {
+				wantComplete = 0
+			}
+			if completed != wantComplete || failed != wantFailed {
+				t.Fatalf("unexpected terminal outcomes: complete=%d failed=%d", completed, failed)
 			}
 			var finalProse []string
 			for _, message := range final.Messages[len(dispatched.Messages):] {
