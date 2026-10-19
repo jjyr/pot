@@ -266,7 +266,7 @@ func TestSummaryCompactionToolDedupAndCategories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.Buckets) != 53 || s.Lifetime.Requests != 22 || s.RoutingTotal.Requests != 1 {
+	if len(s.Buckets) != 365 || s.Lifetime.Requests != 22 || s.RoutingTotal.Requests != 1 {
 		t.Fatalf("summary mismatch: %+v", s)
 	}
 	models, err := l.Page(ctx, "models", Query{Scope: "main"}, at+200)

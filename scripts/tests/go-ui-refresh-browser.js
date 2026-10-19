@@ -13,7 +13,7 @@ async page=>{
    f.machines=[{id:'host',runtime_id:'host',name:'Development Mac',connected:true,tags:['macos'],policy:{execution_access:'ask',revision:1}}];
    f.policy={machines:{host:{execution_access:'ask',revision:1}},rules:[],task_grants:[],application:{}};
    f.providers={profiles:[{id:'p',provider:'p',name:'Fixture Provider',model:'fixture-model',revision:1}],default_provider_id:'p',directory:[],connections:[]};
-   f.usage={total:{input:10,output:2,cache:1,requests:1},agent_models:[{agent:'pot',model:'fixture-model',input:10,output:2}],buckets:[{label:'Today',input:10,output:2,cache:1}],quota:{active:false,policy:{period:'none'}},tools:[],requests:[]};
+   f.usage={total:{input:10,output:2,cache:1,requests:1},agents:[{agent:'pot',input:10,output:2}],models:[{model:'fixture-model',input:10,output:2}],buckets:[{date:'2026-10-19',input:10,output:2,cache:1,agents:[{agent:'pot',input:10,output:2}]}],quota:{active:false,policy:{period:'none'}}};
    f.schedule={id:'plan',spec:{title:'Nightly review',goal:'Review notes',enabled:true,timezone:'UTC'},next_label:'Tomorrow',next_at_ms:1};f.runs=[{id:'run',scheduled_label:'Today',state:'running',summary:'Reviewing'}];
    f.integration={id:'github',name:'GitHub',login_available:true,status:'disconnected',login:{id:'login',status:'pending',user_code:'TEST-CODE',authorization_url:'https://example.invalid/authorize'}};
    f.response=(path,options)=>{
@@ -45,11 +45,11 @@ async page=>{
    await f.pages.show('usage');
   });
   await page.locator('.usage-total strong').filter({hasText:/^12$/}).waitFor();
-  await page.evaluate(()=>{const f=refreshFixture;f.metric=document.querySelector('.usage-total');f.bar=document.querySelector('.chart-column');f.bar.focus();f.hold='/api/v1/usage/summary';f.refresh=f.pages.refresh(['usage']);for(let i=0;i<20;i++)f.pages.refresh(['usage']);});
+  await page.evaluate(()=>{const f=refreshFixture;f.metric=document.querySelector('.usage-total');f.bar=document.querySelector('.usage-day');f.bar.focus();f.hold='/api/v1/usage/summary';f.refresh=f.pages.refresh(['usage']);for(let i=0;i<20;i++)f.pages.refresh(['usage']);});
   assert(await page.evaluate(()=>refreshFixture.pending.length===1&&refreshFixture.metric.isConnected&&refreshFixture.bar===document.activeElement),'Usage refresh keeps metrics and focused chart while coalescing a burst');
   await page.evaluate(async()=>{const f=refreshFixture;f.usage.total.input=20;f.release();await f.refresh;});
   await page.waitForFunction(()=>refreshFixture.pending.length===1);await page.evaluate(()=>{refreshFixture.hold='';refreshFixture.release();});await idle();
-  assert(await page.evaluate(()=>refreshFixture.metric===document.querySelector('.usage-total')&&refreshFixture.bar===document.querySelector('.chart-column')&&document.activeElement===refreshFixture.bar),'Usage patches the existing cards and chart: '+await page.evaluate(()=>JSON.stringify({metric:refreshFixture.metric===document.querySelector('.usage-total'),bar:refreshFixture.bar===document.querySelector('.chart-column'),focus:document.activeElement?.outerHTML?.slice(0,300),connected:refreshFixture.bar.isConnected})));
+  assert(await page.evaluate(()=>refreshFixture.metric===document.querySelector('.usage-total')&&refreshFixture.bar===document.querySelector('.usage-day')&&document.activeElement===refreshFixture.bar),'Usage patches the existing cards and chart: '+await page.evaluate(()=>JSON.stringify({metric:refreshFixture.metric===document.querySelector('.usage-total'),bar:refreshFixture.bar===document.querySelector('.usage-day'),focus:document.activeElement?.outerHTML?.slice(0,300),connected:refreshFixture.bar.isConnected})));
   await page.evaluate(async()=>{const f=refreshFixture;f.hold='/api/v1/usage/summary';f.refresh=f.pages.refresh(['usage']);for(const call of f.pending.splice(0))call.reject(Error('Offline'));await f.refresh;f.hold='';});
   assert(await page.evaluate(()=>refreshFixture.metric.isConnected&&document.querySelector('.space-availability')),'Usage failures retain the cached projection');
   await page.evaluate(()=>refreshFixture.pages.show('machines'));await idle();

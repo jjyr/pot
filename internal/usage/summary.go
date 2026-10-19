@@ -23,11 +23,17 @@ type Totals struct {
 	Requests int64 `json:"requests"`
 }
 type Bucket struct {
-	Label  string `json:"label"`
-	Range  string `json:"range"`
-	Input  int64  `json:"input"`
-	Output int64  `json:"output"`
-	Cache  int64  `json:"cache"`
+	Date string `json:"date"`
+	Totals
+	Agents []AgentTotal `json:"agents"`
+}
+type AgentTotal struct {
+	Agent string `json:"agent"`
+	Totals
+}
+type ModelTotal struct {
+	Model string `json:"model"`
+	Totals
 }
 type AgentModel struct {
 	Agent string `json:"agent"`
@@ -72,11 +78,12 @@ type Summary struct {
 	Days         int             `json:"days"`
 	Timezone     string          `json:"timezone"`
 	Scope        string          `json:"scope"`
-	BucketDays   int             `json:"bucket_days"`
 	Total        Totals          `json:"total"`
 	Lifetime     Totals          `json:"lifetime"`
 	Historical   Totals          `json:"historical"`
 	Buckets      []Bucket        `json:"buckets"`
+	Agents       []AgentTotal    `json:"agents"`
+	Models       []ModelTotal    `json:"models"`
 	Quota        Quota           `json:"quota"`
 	Waiting      *Waiting        `json:"waiting"`
 	Capabilities map[string]bool `json:"capabilities"`
@@ -102,7 +109,7 @@ func (l *Ledger) Summary(ctx context.Context, q Query, atMS int64) (Summary, err
 }
 func summary(ctx context.Context, db queryDB, q Query, atMS int64) (Summary, error) {
 	if q.Days == 0 {
-		q.Days = 14
+		q.Days = 365
 	}
 	if q.Timezone == "" {
 		q.Timezone = "Asia/Shanghai"
@@ -127,11 +134,8 @@ func summary(ctx context.Context, db queryDB, q Query, atMS int64) (Summary, err
 		return Summary{}, err
 	}
 	stop := min(end.UnixMilli(), atMS+1)
-	s := Summary{Days: q.Days, Timezone: q.Timezone, Scope: q.Scope, BucketDays: 1, Buckets: []Bucket{}, Capabilities: map[string]bool{"compaction": true, "provider_quota": true}}
-	if q.Days == 365 {
-		s.BucketDays = 7
-	}
-	if s.Total, err = aggregate(ctx, db, q.Scope, begin.UnixMilli(), stop, ""); err != nil {
+	s := Summary{Days: q.Days, Timezone: q.Timezone, Scope: q.Scope, Capabilities: map[string]bool{"compaction": true, "provider_quota": true}}
+	if err = calendarSummary(ctx, db, q, first, zone, atMS, &s); err != nil {
 		return s, err
 	}
 	if s.Lifetime, err = aggregate(ctx, db, q.Scope, 0, math.MaxInt64, ""); err != nil {
@@ -139,23 +143,6 @@ func summary(ctx context.Context, db queryDB, q Query, atMS int64) (Summary, err
 	}
 	if s.Historical, err = aggregate(ctx, db, q.Scope, 0, 1, ""); err != nil {
 		return s, err
-	}
-	for offset := 0; offset < q.Days; offset += s.BucketDays {
-		a := first.AddDate(0, 0, offset)
-		b := first.AddDate(0, 0, min(q.Days, offset+s.BucketDays))
-		start, err := midnight(zone, a)
-		if err != nil {
-			return s, err
-		}
-		end, err := midnight(zone, b)
-		if err != nil {
-			return s, err
-		}
-		t, err := aggregate(ctx, db, q.Scope, start.UnixMilli(), min(end.UnixMilli(), atMS+1), "")
-		if err != nil {
-			return s, err
-		}
-		s.Buckets = append(s.Buckets, Bucket{a.Format("01-02"), a.Format("2006-01-02") + " — " + b.AddDate(0, 0, -1).Format("2006-01-02"), t.Input, t.Output, t.Cache})
 	}
 	groupStart, groupEnd := begin.UnixMilli(), stop
 	if q.Scope != "" {

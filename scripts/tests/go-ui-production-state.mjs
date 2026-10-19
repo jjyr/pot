@@ -88,7 +88,7 @@ console.log('Production UI owner fencing, partial-save reconciliation, and trans
 const {combineTasks,combineUsage}=await import('../../web/src/state/aggregate.mjs');
 const combined=combineTasks([{space:{id:'local'},value:{items:[{id:'same',updated_at_ms:1}],counts:{active:1}}},{space:{id:'remote'},value:{items:[{id:'same',updated_at_ms:2}],counts:{active:2}}}],{limit:1});
 assert.equal(combined.items[0]._space_id,'remote');assert.equal(combined.next_offset,1);assert.equal(combined.counts.active,3);
-const combinedUsage=combineUsage([{space:{id:'local'},value:{total:{input:5,output:3},buckets:[{label:'today',input:5,output:3}],tools:[{name:'shell',calls:1}]}},{space:{id:'remote'},value:{total:{input:7,output:2},buckets:[{label:'today',input:7,output:2}],tools:[{name:'shell',calls:2}]}}]);
+const combinedUsage=combineUsage([{space:{id:'local'},value:{total:{input:5,output:3},buckets:[{date:'2026-10-19',input:5,output:3}],tools:[{name:'shell',calls:1}]}},{space:{id:'remote'},value:{total:{input:7,output:2},buckets:[{date:'2026-10-19',input:7,output:2}],tools:[{name:'shell',calls:2}]}}]);
 assert.equal(combinedUsage.total.input,12);assert.equal(combinedUsage.buckets[0].output,5);
 
 const {modelDefaults,createModelInputDiscovery}=await import('../../web/src/state/models.mjs');
@@ -171,12 +171,12 @@ steeringState.snapshot={...steeringState.snapshot,cursor:'2',running:false,turn_
 await client.send({boot_id:'boot',request_id:'s',conversation_id:'c',user_message_id:'original-turn',text:'guidance'});assert.equal(calls.at(-1).url,'/api/v1/turn/steer?assistant_id=b&space_id=local');assert.deepEqual(JSON.parse(calls.at(-1).options.body),{request_id:'s',user_message_id:'original-turn',text:'guidance'});
 await client.controlTurn({user_message_id:'original-turn',action:'pause'},{owner:'a',space:'remote'});assert.equal(calls.at(-1).url,'/api/v1/turn/control?assistant_id=a&space_id=remote');
 
-assert.equal(combineUsage([{space:{id:'a'},value:{bucket_days:7,timezone:'UTC'}}]).bucket_days,7,'Combined yearly trends retain weekly bucket labels');
+assert.equal(combineUsage([{space:{id:'a'},value:{days:365,timezone:'UTC'}}]).days,365,'Combined calendars retain the annual range');
 const {usageNumbers,usageRows}=await import('../../web/src/components/usage.mjs');
 assert.equal(usageNumbers('en').exact(null),'—');
 assert.equal(usageNumbers('en').uncached({input:120,cache:100}),20);
 assert.equal(usageNumbers('en').hitRate({input:0,cache:0}),'—');
-assert.deepEqual(usageRows({input:null,output:12,cache:0},'en',en=>en).map(row=>row[1]),['—','—','—','—','12','—'],'Unknown input never presents a cache count or total as zero');
+assert.deepEqual(usageRows({input:null,output:12,cache:0},'en').map(row=>row[1]),['—','—','—','—','12','—'],'Unknown input never presents a cache count or total as zero');
 
 
 const {toolForest,applyToolUpdate,toolFailure}=await import('../../web/src/state/tool-calls.mjs');

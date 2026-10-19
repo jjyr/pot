@@ -10,10 +10,10 @@ async page => {
  const scheduleExecutions=new Set();let allowanceFixture=false,mainWaitTurn='main-original',mailWaitTurn='mail-original',mainWaitSince=11,mailWaitSince=21;
  const schedulePlan=index=>({id:index?'plan-'+index:'plan-proof',next_at_ms:index+1,spec:{title:index?'Extra schedule '+index:'Schedule proof',goal:'Full goal retained only in selected schedule',enabled:true,timezone:'UTC',kind:'daily',time:'09:00',weekdays:[],misfire:'coalesce',notify:'changes'},next_label:'Tomorrow'});
  const usageBuckets=days=>{
-  const step=days===365?7:1,buckets=[];
-  for(let offset=0;offset<days;offset+=step){
-   const start=new Date(Date.UTC(2026,9,18-days+offset)).toISOString().slice(0,10),end=new Date(Date.UTC(2026,9,17-days+Math.min(days,offset+step))).toISOString().slice(0,10),active=offset+step>=days;
-   buckets.push({label:start.slice(5),range:`${start} — ${end}`,input:active?4:0,output:active?2:0,cache:0});
+  const buckets=[];
+  for(let offset=0;offset<days;offset++){
+   const start=new Date(Date.UTC(2026,9,19-days+offset)).toISOString().slice(0,10),active=offset===days-1;
+   buckets.push({date:start,agents:[],input:active?4:0,output:active?2:0,cache:0});
   }
   return buckets;
  };
@@ -76,7 +76,7 @@ async page => {
   }
   else if(path==='/api/v1/machines')value={items:[{id:'machine-one',runtime_id:'machine-one',name:'Machine One',connected:true,policy:{execution_access:'ask'}},{id:'machine-offline',runtime_id:'machine-offline',name:'Offline machine',connected:false,policy:{execution_access:'ask'}}]};
   else if(path==='/api/v1/usage/resume')value={accepted:true};
-  else if(path==='/api/v1/usage/summary')value={...(allowanceFixture?{waiting:{turn:url.searchParams.get('scope')==='task-proof'?'task-fixed-run':mainWaitTurn,since:url.searchParams.get('scope')==='task-proof'?31:mainWaitSince,provider:'route-p'},mail_waits:[{scope:'mail:stable',turn:mailWaitTurn,since:mailWaitSince,provider:'route-p'}]}:{}),days:Number(url.searchParams.get('days')||14),timezone:url.searchParams.get('timezone')||'UTC',bucket_days:url.searchParams.get('days')==='365'?7:1,total:{input:4,output:2,requests:1},lifetime:{input:900,output:100,requests:2},buckets:usageBuckets(Number(url.searchParams.get('days')||14)),requests:[],tools:[],compactions:[],quota:{active:false,policy:{period:'none',limit:100,timezone:'UTC',auto_resume:true}}};
+  else if(path==='/api/v1/usage/summary')value={...(allowanceFixture?{waiting:{turn:url.searchParams.get('scope')==='task-proof'?'task-fixed-run':mainWaitTurn,since:url.searchParams.get('scope')==='task-proof'?31:mainWaitSince,provider:'route-p'},mail_waits:[{scope:'mail:stable',turn:mailWaitTurn,since:mailWaitSince,provider:'route-p'}]}:{}),days:Number(url.searchParams.get('days')||365),timezone:url.searchParams.get('timezone')||'UTC',agents:[],models:[],total:{input:4,output:2,requests:1},lifetime:{input:900,output:100,requests:2},buckets:usageBuckets(Number(url.searchParams.get('days')||365)),quota:{active:false,policy:{period:'none',limit:100,timezone:'UTC',auto_resume:true}}};
   else if(path.startsWith('/api/v1/assistants/')){const body=route.request().postDataJSON();const definition=definitions.find(value=>value.id===path.split('/').pop());Object.assign(definition,{name:body.name,revision:definition.revision+1});value=definition;}
   else {await route.fulfill({status:404,contentType:'application/json',body:JSON.stringify({message:'Unmocked endpoint: '+path})});return;}
   if(path==='/api/v1/snapshot')value={kind:'reset',base_cursor:0,view:{state:{...value,messages:[]},messages:value.messages.map((message,index)=>({message,sequence:String(index+1),version:value.cursor})),history:{before:'1',after:String(value.messages.length),has_more:false,has_newer:false}}};

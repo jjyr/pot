@@ -8,10 +8,10 @@ export function combineTasks(pages,{offset=0,limit=20}={}) {
   return {items:items.slice(offset,offset+limit),total:items.length,next_offset:offset+limit<items.length?offset+limit:null,counts};
 }
 function sumRows(rows,keys) {const result={};for(const key of keys)result[key]=rows.reduce((sum,row)=>sum+Number(row?.[key]||0),0);return result;}
-// Only whole-summary values are combined across Spaces. Paginated categories
-// stay per Space so a partial page cannot masquerade as a complete global total.
+// Combine complete summary aggregates, never paginated detail rows.
 export function combineUsage(pages) {
   const numeric=['input','output','cache','requests'],buckets=new Map();
-  for(const {value}of pages)for(const bucket of value.buckets||[]){const old=buckets.get(bucket.label);buckets.set(bucket.label,{...bucket,...sumRows([old,bucket],numeric)});}
-  return {total:sumRows(pages.map(page=>page.value.total),numeric),routing_total:sumRows(pages.map(page=>page.value.routing_total),numeric),buckets:[...buckets.values()],bucket_days:pages[0]?.value.bucket_days,timezone:pages[0]?.value.timezone,spaces:pages};
+  const groups=(rows,key)=>{const values=new Map();for(const row of rows){const old=values.get(row[key]);values.set(row[key],{[key]:row[key],...sumRows([old,row],numeric)});}return [...values.values()];};
+  for(const {value}of pages)for(const bucket of value.buckets||[]){const old=buckets.get(bucket.date);buckets.set(bucket.date,{date:bucket.date,...sumRows([old,bucket],numeric),agents:groups([...(old?.agents||[]),...(bucket.agents||[])],'agent')});}
+  return {total:sumRows(pages.map(page=>page.value.total),numeric),lifetime:sumRows(pages.map(page=>page.value.lifetime),numeric),routing_total:sumRows(pages.map(page=>page.value.routing_total),numeric),buckets:[...buckets.values()].sort((a,b)=>a.date.localeCompare(b.date)),agents:groups(pages.flatMap(page=>page.value.agents||[]),'agent'),models:groups(pages.flatMap(page=>page.value.models||[]),'model'),days:pages[0]?.value.days,timezone:pages[0]?.value.timezone,spaces:pages};
 }

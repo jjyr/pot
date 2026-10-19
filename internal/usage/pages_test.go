@@ -135,17 +135,15 @@ func TestSummaryFortnightRange(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, days := range []int{0, 14} {
-		s, err := l.Summary(ctx, Query{Days: days, Timezone: "UTC"}, at.UnixMilli())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if s.Days != 14 || s.BucketDays != 1 || len(s.Buckets) != 14 || s.Total.Requests != 3 || s.Lifetime.Requests != 4 {
-			t.Fatal("expected fourteen daily slots and range-limited totals", s)
-		}
-		if s.Buckets[0].Range != "2026-10-05 — 2026-10-05" || s.Buckets[0].Input != 100 || s.Buckets[1].Input != 0 || s.Buckets[13].Range != "2026-10-18 — 2026-10-18" || s.Buckets[13].Input != 100 {
-			t.Fatal("range must include the first midnight, empty dates and today", s.Buckets)
-		}
+	s, err := l.Summary(ctx, Query{Days: 14, Timezone: "UTC"}, at.UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Days != 14 || len(s.Buckets) != 14 || s.Total.Requests != 3 || s.Lifetime.Requests != 4 {
+		t.Fatal("expected fourteen daily slots and range-limited totals", s)
+	}
+	if s.Buckets[0].Date != "2026-10-05" || s.Buckets[0].Input != 100 || s.Buckets[1].Input != 0 || s.Buckets[13].Date != "2026-10-18" || s.Buckets[13].Input != 100 {
+		t.Fatal("range must include the first midnight, empty dates and today", s.Buckets)
 	}
 }
 
@@ -166,7 +164,7 @@ func TestModelPagesGlobalRangeAndSessionLifetime(t *testing.T) {
 		scope string
 		days  int
 		count int64
-	}{{"", 0, 3}, {"", 14, 3}, {"", 30, 4}, {"main", 14, 4}} {
+	}{{"", 0, 4}, {"", 14, 3}, {"", 30, 4}, {"main", 14, 4}} {
 		p, err := l.Page(ctx, "models", Query{Scope: test.scope, Days: test.days, Timezone: "UTC"}, at.UnixMilli())
 		if err != nil {
 			t.Fatal(err)

@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {usageCalendarWeeks,usageModelColor,usagePercent} from '../../web/src/components/usage-calendar.mjs';
+import {combineUsage} from '../../web/src/state/aggregate.mjs';
+
+for(let weekday=0;weekday<7;weekday++){
+  const buckets=Array.from({length:365},(_,i)=>({date:new Date(Date.UTC(2024,1,25+weekday+i)).toISOString().slice(0,10),input:i}));
+  const weeks=usageCalendarWeeks(buckets);
+  assert.equal(weeks.length,53);
+  assert.deepEqual(weeks.flat().filter(Boolean),buckets,'Calendar retains every date, including leap day and empty usage');
+  assert.equal(weeks[0].filter(value=>!value).length,new Date(buckets[0].date+'T12:00:00Z').getUTCDay());
+  assert.ok(weeks.every(week=>week.length===7));
+}
+assert.deepEqual(usageCalendarWeeks([]),[]);
+const color=usageModelColor('provider/model-a');
+assert.equal(usageModelColor('provider/model-a'),color);
+for(const name of ['provider/model-b','other/model-a','provider/<model-a>'])assert.notEqual(usageModelColor(name),color);
+assert.equal(usagePercent(0,0,'en'),'0%');
+assert.equal(usagePercent(1,4,'en'),'25%');
+assert.equal(usagePercent(1,100000,'en'),'<0.01%');
+assert.equal(usagePercent(1,100000,'zh-CN'),'＜0.01%');
+assert.equal(usagePercent(25000,208025000,'en'),'0.01%','Small correspondence shares are not rounded to zero');
+
+const row=(agent,input,output=0)=>({agent,input,output,cache:0,requests:1});
+const a={days:365,timezone:'Asia/Shanghai',total:row('',100),buckets:[{date:'2026-10-18',input:100,agents:[row('task',100)]},{date:'2026-10-19',input:0,agents:[]}],agents:[row('task',100)],models:[{model:'shared',input:100}]};
+const b={days:365,timezone:'Asia/Shanghai',total:row('',200,20),buckets:[{date:'2026-10-19',input:200,output:20,agents:[row('task',120,10),row('pot',80,10)]}],agents:[row('task',120,10),row('pot',80,10)],models:[{model:'shared',input:120,output:10},{model:'other',input:80,output:10}]};
+const combined=combineUsage([{space:{id:'local'},value:a},{space:{id:'remote'},value:b,stale:true}]);
+assert.equal(combined.total.input+combined.total.output,320);
+assert.deepEqual(combined.buckets.map(row=>row.date),['2026-10-18','2026-10-19']);
+assert.equal(combined.buckets[1].agents[0].input,120);
+assert.equal(combined.agents.find(row=>row.agent==='task').input,220);
+assert.equal(combined.models.find(row=>row.model==='shared').input,220,'The same model is merged across Spaces and categories');
+assert.equal(combined.models.reduce((n,row)=>n+row.input+(row.output||0),0),320,'Complete model shares reconcile with annual totals');
+assert.equal(combined.spaces[1].stale,true);
+assert.equal(usageModelColor(combined.models[0].model),usageModelColor('shared'),'Aggregation order never affects model colors');
+console.log('Usage calendar dates, stable colors, small shares and cross-Space aggregation passed');
