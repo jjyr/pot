@@ -287,11 +287,16 @@ encryption and requires no application certificate. See [Peer protocol](peer-pro
 Copying an Agent address creates a short-lived, single-use invitation. Treat the
 complete address as a credential and paste it only into the other Agent's
 connection page. Ordinary status displays the nonsecret endpoint. The receiving
-side validates the invitation and binds it to the selected assistant. A
+side verifies the invitation and real endpoint through a read-only identity
+preview before Add binds it to the selected assistant. Preview does not consume
+the invitation or establish a connection. A
 connection grants mutual messaging only; assistant execution keeps its existing
 permissions. See [Agent Links](agent-links.md).
 
 Adding a machine uses the Control's same TCP endpoint with the independent
 membership service and pinned identity. Use the access setup if the endpoint is
-missing; do not reuse an owner HTTP port. Cancelling an unused invitation revokes
-that code; cancellation after successful enrollment keeps the joined machine.
+missing; do not reuse an owner HTTP port. Copy join information creates and copies
+a complete invitation in one action. The target Runner automatically checks its
+Control identity before enabling Join. Returning from the invitation page keeps
+the code valid; explicitly revoking it requires confirmation. Revocation after
+successful enrollment keeps the joined machine.

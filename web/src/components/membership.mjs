@@ -1,17 +1,16 @@
 import {node as n,action,field,section} from './primitives.mjs';
-import {setDisabled,setPending} from './reconcile.mjs';
+import {setDisabled} from './reconcile.mjs';
 import {translate} from '../locales/messages.mjs';
+import {icon} from './icons.mjs';
 import {parseMachineJoinInfo} from '../state/topology.mjs';
 
 // Membership is an owner operation, separate from connecting the App to a Space.
 // Browser sessions deliberately cannot access the private runtime/control API.
-export async function renderMachineMembership({client,root,machines,locale,notify,refresh,edit,signal,membershipRoot=root}) {
+export async function renderMachineMembership({client,root,machines,locale,notify,refresh,edit,signal,membershipRoot=root,back,onJoined=()=>{}}) {
   if(!client.desktop)return;
   const tr=(en,zh)=>locale()==='zh-CN'?zh:en,t=key=>translate(locale(),key);
   const current=()=>root.isConnected&&!signal?.aborted;
   const command=(scope,body)=>client.request('/api/v1/runtime/control',{...scope,method:'POST',body});
-  const error=(target,reason)=>{if(!current()||!target.isConnected)return;let box=target.querySelector('.membership-error');if(!box){box=n('p','inline-error membership-error');box.setAttribute('role','alert');target.append(box);}box.textContent=reason.message||String(reason);};
-  async function run(button,target,work){if(button.disabled)return;setPending(button,true);try{await work();}catch(reason){error(target,reason);}finally{setPending(button,false);}}
   function confirmRemove(machine,scope) {
     const dialog=n('dialog','preferences'),buttons=n('div','page-toolbar'),status=n('p','inline-error');status.setAttribute('role','alert');
     const close=()=>{dialog.close();dialog.remove();};
@@ -35,25 +34,73 @@ export async function renderMachineMembership({client,root,machines,locale,notif
     input.addEventListener('keydown',event=>{if(event.isComposing||event.keyCode===229)return;if(event.key==='Enter'){event.preventDefault();commit();}else if(event.key==='Backspace'&&!input.value){const tags=session.values.labels.split(' ').filter(Boolean);tags.pop();session.set('labels',tags.join(' '));draw();}});input.addEventListener('blur',commit);draw();
   }
   function joinEditor(scope) {
-    let preview=null,pinned=null,previewing=false,expected=null,statusKey='',diagnostic='';
-    const form=edit({title:t('machineJoin.joinTitle'),initial:{url:'',invitation:''},scope,
-      fields:[{name:'url',label:t('machineJoin.controlAddress'),kind:'url',placeholder:'tcp://100.101.102.103:8793',required:true},{name:'invitation',label:t('machineJoin.invitation'),kind:'password',required:true}],
-      save:async(values,context)=>{if(!preview||!verified.input.checked||values.url!==pinned)throw Error(t('machineJoin.verifyFirst'));return command(context,{action:'join',request:{request_id:context.request_id,url:values.url,invitation:values.invitation,expected_runtime_id:preview.runtime_id,expected_fingerprint:preview.fingerprint}});}});
-    const panel=section(t('machineJoin.verifyTitle'),t('machineJoin.verifyHint')),identity=n('pre','hint'),status=n('p','inline-error'),verified=field(t('machineJoin.verified'),false,{kind:'checkbox'}),submit=form.form.querySelector('.editor-actions .primary');
-    const signature=()=>form.controls.get('url').value;
-    const pasteHint=n('p','hint',t('machineJoin.pasteInfo'));form.controls.get('invitation').closest('.form-row').append(pasteHint);
-    const drawStatus=()=>{status.replaceChildren();if(statusKey)status.append(n('span','',t(statusKey)));if(diagnostic){const details=n('details','detail-disclosure');details.append(n('summary','',t('agentLinks.diagnostics')),n('pre','',diagnostic));status.append(details);}};
-    form.controls.get('invitation').addEventListener('paste',event=>{const raw=event.clipboardData?.getData('text')||'';if(!raw.trimStart().startsWith('{'))return;try{const info=parseMachineJoinInfo(raw);event.preventDefault();for(const [name,value]of [['url',info.url],['invitation',info.invitation]]){const input=form.controls.get(name);input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));}expected={runtime_id:info.control_id,fingerprint:info.fingerprint};statusKey='';diagnostic='';drawStatus();}catch(reason){event.preventDefault();statusKey='machineJoin.invalidInfo';diagnostic='';drawStatus();}});
-    const update=()=>{submit.disabled=previewing||!preview||!verified.input.checked||form.session.pending;};
-    const drawIdentity=()=>{identity.textContent=preview?`${t('machineJoin.controlID')}: ${preview.runtime_id}\n${t('machineJoin.fingerprint')}: ${preview.fingerprint}`:'';};
-    const previewButton=action(t('machineJoin.preview'),async()=>{
-      const signatureAtStart=signature(),url=form.controls.get('url');if(!url.reportValidity())return;previewing=true;preview=null;verified.input.checked=false;previewButton.disabled=true;update();statusKey='';diagnostic='';drawStatus();
-      try{const value=await command(scope,{action:'preview',url:url.value});if(!form.root.isConnected||signature()!==signatureAtStart)return;if(typeof value?.runtime_id!=='string'||typeof value?.fingerprint!=='string')throw Error(t('machineJoin.identityUnknown'));if(expected&&(value.runtime_id!==expected.runtime_id||value.fingerprint!==expected.fingerprint)){statusKey='machineJoin.identityMismatch';drawStatus();return;}preview=value;pinned=signatureAtStart;drawIdentity();}
-      catch(reason){if(form.root.isConnected){statusKey='machineJoin.statusFailed';diagnostic=reason.message;drawStatus();}}finally{previewing=false;previewButton.disabled=false;update();}
-    });
-    form.controls.get('url').addEventListener('input',()=>{preview=null;pinned=null;identity.textContent='';verified.input.checked=false;update();});
-    verified.input.addEventListener('change',update);form.lifecycle.settled=update;submit.textContent=t('machineJoin.joinSubmit');panel.append(previewButton,identity,verified.row,status);form.form.insertBefore(panel,form.form.querySelector('.editor-actions'));update();
-    form.lifecycle.locale=()=>{form.lifecycle.setTitle?.(t('machineJoin.joinTitle'));panel.querySelector('h2').textContent=t('machineJoin.verifyTitle');panel.querySelector(':scope>p.hint').textContent=t('machineJoin.verifyHint');for(const [name,key]of [['url','machineJoin.controlAddress'],['invitation','machineJoin.invitation']]){const input=form.controls.get(name);input.setAttribute('aria-label',t(key));input.closest('.form-row').querySelector('.form-label').textContent=t(key);}verified.input.setAttribute('aria-label',t('machineJoin.verified'));verified.row.querySelector('.form-label').textContent=t('machineJoin.verified');pasteHint.textContent=t('machineJoin.pasteInfo');previewButton.textContent=t('machineJoin.preview');submit.textContent=t('machineJoin.joinSubmit');drawIdentity();drawStatus();};
+    let preview=null,source=null,version=0,checking=false,statusKey='',verified=false,joined=false,disposed=false,pasting=false,submitted=null;
+    const form=edit({title:t('machineJoin.joinTitle'),initial:{join_info:'',invitation:''},scope,submitLabel:t('machineJoin.joinSubmit'),
+      fields:[{name:'join_info',label:t('machineJoin.infoLabel'),placeholder:t('machineJoin.infoPlaceholder'),required:true},{name:'invitation',label:t('machineJoin.invitation'),kind:'password'}],
+      save:async(values,context)=>{
+        draw();
+        if(!preview||!source||checking||(!source.expected&&!verified))throw Object.assign(Error(t('machineJoin.verifyFirst')),{uiKey:'machineJoin.verifyFirst'});
+        const invitation=source.expected?source.invitation:values.invitation;
+        if(!invitation)throw Object.assign(Error(t('machineJoin.invitationRequired')),{uiKey:'machineJoin.invitationRequired'});
+        submitted={source:structuredClone(source),preview:structuredClone(preview)};
+        try{const result=await command(context,{action:'join',request:{request_id:context.request_id,url:submitted.source.url,invitation,expected_runtime_id:submitted.preview.runtime_id,expected_fingerprint:submitted.preview.fingerprint}});if(result?.role!=='runner')throw Error();return result;}
+        catch(reason){throw Object.assign(Error(t('machineJoin.joinFailed')),{uiKey:reason.code==='runner_endpoint_mismatch'?'machineJoin.identityMismatch':'machineJoin.joinFailed'});}
+      }});
+    const active=()=>!disposed&&form.root.isConnected;
+    form.form.classList.add('machine-connection-editor','machine-runner-editor');
+    const fields=form.form.querySelector('.editor-fields'),footer=form.form.querySelector('.editor-actions'),submit=footer.querySelector('.primary'),cancel=footer.querySelector('button:not(.primary)'),input=form.controls.get('join_info'),invitationInput=form.controls.get('invitation'),invitationRow=invitationInput.closest('.form-row');
+    input.autocomplete='off';input.spellcheck=false;invitationInput.autocomplete='off';
+    const intro=n('header','machine-connection-intro'),title=n('h2','',t('machineJoin.joinTitle')),description=n('p','hint',t('machineJoin.joinHint'));intro.append(title,description);fields.prepend(intro);
+    const paste=action(t('machineJoin.paste'),async()=>{if(!active()||form.session.pending||joined||pasting)return;const token=version;pasting=true;draw();try{const raw=await navigator.clipboard.readText();if(active()&&version===token&&!form.session.pending&&!joined)accept(raw);}catch{if(active()&&version===token&&!form.session.pending&&!joined)statusKey='machineJoin.pasteFailed';}finally{pasting=false;if(active())draw();}});paste.prepend(icon('copy'));input.parentElement.append(paste);input.closest('.form-row').classList.add('machine-join-input');
+    const hint=n('p','hint machine-join-input-hint'),status=n('div','machine-join-status');status.setAttribute('role','status');input.closest('.form-row').after(hint,status);
+    const identity=n('section','machine-verified-identity'),brand=n('img','machine-connection-brand'),identityBody=n('div','machine-identity-body'),identityName=n('strong'),identityHint=n('p','hint'),match=n('span','machine-identity-match');brand.src=new URL('../assets/PotCompanion.png',import.meta.url).href;brand.alt='';identityBody.append(identityName,identityHint);identity.append(brand,identityBody,match);fields.append(identity);
+    const manual=n('div','machine-manual-verification'),manualHint=n('p','hint'),confirmation=field(t('machineJoin.verified'),false,{kind:'checkbox'});manual.append(manualHint,invitationRow,confirmation.row);fields.append(manual);
+    const footnote=n('p','hint machine-connection-footnote'),details=n('details','detail-disclosure machine-connection-details'),detailsSummary=n('summary'),values=n('dl','machine-connection-values');details.append(detailsSummary,values);fields.append(footnote,details);
+    const controlName=()=>client.spaces?.find(space=>space.control_id===preview?.runtime_id)?.name||preview?.runtime_id||'';
+    function draw(){
+      if(!active())return;
+      const manualMode=!!source&&!source.expected,valid=!!preview&&(!manualMode||verified)&&!checking;
+      input.setAttribute('aria-label',t('machineJoin.infoLabel'));input.placeholder=t('machineJoin.infoPlaceholder');input.closest('.form-row').querySelector('.form-label').textContent=t('machineJoin.infoLabel');paste.textContent=t('machineJoin.paste');paste.prepend(icon('copy'));paste.disabled=checking||pasting||form.session.pending||joined;
+      hint.textContent=t(source?.expected?'machineJoin.informationRead':'machineJoin.pasteInfo');status.replaceChildren();status.hidden=!statusKey&&!checking;
+      if(checking){status.append(n('span','machine-wait-dot'),n('span','',t('machineJoin.checkingIdentity')));}else if(statusKey){status.append(icon('alert'),n('span','',t(statusKey)));if(statusKey==='machineJoin.identityUnavailable')status.append(action(t('retry'),()=>source&&verify(source)));}
+      status.classList.toggle('inline-error',!!statusKey);manual.hidden=!manualMode||joined;manualHint.textContent=t('machineJoin.manualHint');invitationInput.required=manualMode&&!joined;invitationInput.setAttribute('aria-label',t('machineJoin.invitation'));invitationRow.querySelector('.form-label').textContent=t('machineJoin.invitation');confirmation.input.setAttribute('aria-label',t('machineJoin.verified'));confirmation.row.querySelector('.form-label').textContent=t('machineJoin.verified');confirmation.input.checked=verified;confirmation.input.disabled=checking||form.session.pending||!preview;
+      identity.hidden=!preview;identityName.textContent=controlName();identityHint.textContent=t(joined?'machineJoin.registeredHint':'machineJoin.machineBelongsTo');match.textContent=t(joined?'machineJoin.registeredBadge':manualMode?'machineJoin.manualIdentity':'machineJoin.identityMatches');match.classList.toggle('manual',manualMode&&!verified);
+      title.textContent=t(joined?'machineJoin.registeredTitle':'machineJoin.joinTitle');description.textContent=t(joined?'machineJoin.registeredOffline':'machineJoin.joinHint');
+      footnote.hidden=!preview;footnote.textContent=t('machineJoin.executionRules');details.hidden=!preview;detailsSummary.textContent=t('machineJoin.connectionDetails');values.replaceChildren();if(preview)for(const [key,value]of [['machineJoin.controlAddress',source.url],['machineJoin.controlID',preview.runtime_id],['machineJoin.fingerprint',preview.fingerprint]])values.append(n('dt','',t(key)),n('dd','',value));
+      submit.hidden=joined;submit.disabled=!valid||form.session.pending;submit.textContent=checking?t('machineJoin.checkingIdentity'):preview?t('machineJoin.joinNamed').replace('{name}',controlName()):t('machineJoin.joinSubmit');cancel.textContent=t(joined?'machineJoin.returnTopology':'integrations.cancel');cancel.classList.toggle('primary',joined);
+    }
+    async function verify(candidate){
+      if(!active())return;const token=++version;checking=true;preview=null;verified=false;statusKey='';draw();
+      try{const value=await command(scope,{action:'preview',url:candidate.url});if(!active()||token!==version)return;
+        if(typeof value?.runtime_id!=='string'||!value.runtime_id.trim()||typeof value?.fingerprint!=='string'||!value.fingerprint.trim()){statusKey='machineJoin.identityUnknown';return;}
+        if(candidate.expected&&(value.runtime_id!==candidate.expected.runtime_id||value.fingerprint!==candidate.expected.fingerprint)){statusKey='machineJoin.identityMismatch';return;}
+        preview=value;
+      }catch{if(active()&&token===version)statusKey='machineJoin.identityUnavailable';}
+      finally{if(active()&&token===version){checking=false;draw();}}
+    }
+    function accept(raw){
+      if(!active()||form.session.pending||joined)return;version++;preview=null;source=null;verified=false;checking=false;statusKey='';
+      const value=raw.trim();
+      if(!value){input.value='';form.session.set('join_info','');draw();return;}
+      if(value.startsWith('{')){
+        try{const info=parseMachineJoinInfo(value);source={url:info.url,invitation:info.invitation,expected:{runtime_id:info.control_id,fingerprint:info.fingerprint}};
+          // Keep invitation material in the editor session, never in visible DOM.
+          input.value=info.url;form.session.set('join_info',value);form.session.set('invitation','');invitationInput.value='';}
+        catch{input.value='';form.session.set('join_info',value);statusKey='machineJoin.invalidInfo';draw();return;}
+      }else{
+        input.value=value;form.session.set('join_info',value);
+        try{const url=new URL(value);if(url.protocol!=='tcp:'||!url.hostname||!url.port||url.pathname||url.hash||url.search||url.username||url.password)throw Error();source={url:value};}
+        catch{statusKey='machineJoin.invalidInfo';draw();return;}
+      }
+      draw();verify(source);
+    }
+    input.addEventListener('paste',event=>{const raw=event.clipboardData?.getData('text');if(raw===undefined)return;event.preventDefault();accept(raw);});
+    input.addEventListener('input',()=>{const value=input.value;if(value.trimStart().startsWith('{')||value.trim().startsWith('tcp://'))accept(value);else{version++;preview=null;source=null;checking=false;verified=false;statusKey='';draw();}});
+    confirmation.input.addEventListener('change',()=>{verified=confirmation.input.checked;draw();});
+    form.lifecycle.afterSave=async result=>{const accepted=submitted;if(!accepted||!active())return;joined=true;source={...accepted.source,invitation:''};preview=accepted.preview;submitted=null;input.value=source.url;form.session.set('join_info',source.url);form.session.set('invitation','');form.session.acknowledge({join_info:source.url,invitation:''});invitationInput.value='';input.readOnly=true;draw();notify(t('machineJoin.registeredTitle'));await onJoined({space:scope.space,control:preview,runtime_id:client.runtime.runtime_id,result});if(form.root.isConnected&&back)await back();};
+    form.lifecycle.settled=draw;
+    form.lifecycle.locale=()=>{form.lifecycle.setTitle?.(t('machineJoin.joinTitle'));draw();};
+    form.lifecycle.dispose=()=>{disposed=true;version++;source=null;preview=null;submitted=null;};draw();
   }
   function repairEndpoint(scope,state){
     const form=edit({title:t('machineJoin.repairAddress'),initial:{url:state.membership?.url||''},fields:[{name:'url',label:t('machineJoin.controlAddress'),kind:'url',placeholder:'tcp://100.101.102.103:8793',required:true}],scope,submitLabel:t('agentLinks.save'),save:async(values,context)=>{try{return await command(context,{action:'set_endpoint',url:values.url,expected_runtime_id:state.membership?.control?.runtime_id,expected_fingerprint:state.membership?.control?.fingerprint});}catch(reason){throw Error(t(reason.code==='runner_endpoint_mismatch'?'machineJoin.endpointMismatch':'machineJoin.statusFailed'));}}});
@@ -86,8 +133,7 @@ export async function renderMachineMembership({client,root,machines,locale,notif
     if(state.role==='embedded')return;
     const card=section(tr('Execution machine membership','执行机器成员资格'),owned[0]?._space_name||'');card.classList.add('page-card');card.dataset.membershipSpace=space;card.dataset.membershipRole=state.role;membershipRoot.append(card);
     if(state.role==='control'){
-      card.append(n('p','hint',tr('Create an invitation on this Control, then use it on the execution machine to join. The machine connects to Control and appears here after joining.','在此 Control 创建邀请，然后在执行机器上使用它加入。机器连接 Control 后会显示在这里。')));
-      const output=n('div'),create=action(tr('Create machine invitation','创建机器加入邀请'),()=>run(create,card,async()=>{const invitation=await command(scope,{action:'create_invitation'});if(!current()||!card.isConnected)return;const code=field(tr('Machine invitation','机器加入邀请'),invitation.invitation,{readOnly:true}),copy=action(tr('Copy invitation','复制加入邀请'),async()=>{try{await navigator.clipboard.writeText(invitation.invitation);notify(tr('Copied','已复制'));}catch(reason){error(card,reason);}});output.replaceChildren(code.row,n('p','hint',`${tr('Expires','过期时间')}: ${new Date(invitation.expires_at_ms).toLocaleString(locale())}`),copy);}));card.append(create,output);
+      card.append(n('p','hint',t('machineJoin.fromTopology')));
     }else if(state.role==='runner'){
       const repair=action(t('machineJoin.repairAddress'),()=>repairEndpoint(scope,state));repair.dataset.membershipAction='endpoint';const endpointHint=n('p','hint membership-endpoint-hint',t('machineJoin.repairHint'));endpointHint.hidden=!state.membership?.needs_endpoint;card.append(n('p','hint membership-address',state.membership?.url||state.membership?.control?.runtime_id||''),endpointHint,repair);
       const leave=action(tr('Leave Control','离开 Control'),()=>{const editor=edit({title:tr('Leave Control','离开 Control'),initial:{confirmed:false},fields:[{name:'confirmed',label:tr('Disconnect this execution machine after its active operations have been cleaned up','清理活跃操作后断开此执行机器'),kind:'checkbox'}],scope,save:async(values,context)=>{if(!values.confirmed)throw Error(tr('Confirm leaving this Control.','请确认离开此 Control。'));return command(context,{action:'leave'});}});editor.form.querySelector('.editor-actions .primary').textContent=tr('Leave Control','离开 Control');},{danger:true});card.append(leave);

@@ -463,7 +463,11 @@ and pause state survive configuration navigation and locale changes.
 The address region displays a nonsecret service endpoint. Copy connection address
 explicitly obtains a short-lived invitation and copies it without putting it in
 history or cached view data. Add Agent opens a single editing page with the other
-Agent's address and, when needed, a local assistant picker. Successful connection
+Agent's address with a clipboard action and, when needed, a local assistant picker.
+A bounded, read-only preview verifies the endpoint and invitation before showing
+the real Agent identity; it neither consumes the invitation nor creates a link.
+Editing the address immediately invalidates that preview. One Add action creates
+the connection, with concise retry or replacement guidance on failure. Successful connection
 returns to the topology and selects that endpoint. Access defaults to an existing
 private `tcp://host:port` address without a certificate field. Tailscale setup
 reuses or creates TCP forwarding, reports the actual address and keeps unrelated
@@ -478,13 +482,22 @@ services such as GitHub stay in Third-party accounts settings.
 
 Add machine is a separate membership editor. It reuses existing native owner
 access, allows only a standalone Control to issue invitations, and keeps embedded
-or unavailable Controls visibly unavailable. The invitation view supplies the
-actual Control endpoint, ID and fingerprint. Where no reachable endpoint is
-configured, it requests an actual address and verifies its identity. Waiting and
-completion use the exact invitation's server-side state. Cancelling an invitation
-never removes a machine that already joined. Target machines can paste bounded
-join-information data, preview the Control and explicitly verify its ID and
-fingerprint before joining; changing address or CA invalidates that preview.
+or unavailable Controls visibly unavailable. One Copy join information action
+creates and copies a complete invitation; the payload stays out of the visible
+page. Installation help and nonsecret connection details start collapsed. Missing
+access addresses direct users to access setup. Returning to Topology keeps the
+invitation valid, and reopening resumes it within the current window session.
+Revocation requires a separate confirmation and never removes an enrolled machine.
+Waiting and completion use the exact invitation's server-side state; enrollment
+and online status remain distinct facts.
+
+Target machines paste bounded join information and automatically compare the
+reachable Control's ID and fingerprint with it. A match enables one Join action;
+a bare address requires a separately entered invitation and explicit identity
+confirmation. Changing the source invalidates the preview. Successful enrollment
+returns to Topology, where inventory supplies actual connectivity. Clipboard
+failures retain the same invitation for retry, and expired invitations offer one
+regenerate-and-copy action. Credentials remain in memory and out of history.
 
 Clicking an execution machine preserves its existing policy, command rules, labels
 and member operations. Permanent command permissions start collapsed and retain

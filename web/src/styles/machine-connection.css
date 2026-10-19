@@ -1,0 +1,79 @@
+/* Machine membership shares the editor lifecycle; connection credentials never
+   enter this visual surface. The execution link uses a dashed device relation. */
+.editor-form.machine-connection-editor{max-width:600px;padding-top:12px;min-width:0}
+.machine-connection-editor .editor-fields{min-width:0;flex:initial}
+.machine-connection-intro{margin:8px 0 28px}
+.machine-connection-intro h2{font-size:24px;font-weight:600;line-height:1.3;margin:0 0 9px;letter-spacing:-.35px}
+.machine-connection-intro p{margin:0;line-height:1.6}
+.machine-connection-editor .form-row{padding:0;min-width:0}
+.machine-connection-editor .machine-control-selection{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:13px 0;margin:0 0 18px;border-bottom:1px solid var(--divider)}
+.machine-control-selection .form-label{color:var(--muted);font-weight:400;flex:1}
+.machine-control-selection .field-body{flex:initial;min-width:0;max-width:70%}
+.machine-control-selection .field-input{min-height:34px;max-width:100%;width:190px;font-size:14px}
+.machine-invitation-panel{border:1px solid var(--divider);border-radius:14px;background:color-mix(in srgb,var(--surface) 65%,var(--navigation));padding:28px 22px 22px;text-align:center}
+.machine-connection-pair{display:flex;align-items:flex-start;justify-content:center;gap:12px;margin:0 auto 25px;max-width:360px}
+.machine-connection-node{width:112px;min-width:0;display:flex;align-items:center;flex-direction:column;gap:10px}
+.machine-connection-node>span:last-child{font-size:13px;line-height:1.4;max-width:100%;overflow-wrap:anywhere;color:var(--muted)}
+.machine-connection-brand{display:block;width:54px;height:54px;object-fit:contain;flex:none}
+.machine-connection-device{display:grid;place-items:center;width:54px;height:54px;color:var(--muted)}
+.machine-connection-device>svg{width:39px;height:39px;stroke-width:1.25}
+.machine-connection-wire{display:block;flex:1;height:1px;max-width:100px;min-width:28px;margin-top:27px;background:repeating-linear-gradient(90deg,var(--input-border) 0,var(--input-border) 4px,transparent 4px,transparent 8px)}
+.machine-connection-wire.ready{background:repeating-linear-gradient(90deg,var(--success) 0,var(--success) 4px,transparent 4px,transparent 8px)}
+.machine-invitation-panel h3{font-size:15px;font-weight:500;line-height:1.5;margin:0 0 7px}
+.machine-invitation-panel>p.hint{font-size:13px;margin:0;line-height:1.6}
+.machine-invitation-panel>.control{display:inline-flex;justify-content:center;align-items:center;gap:8px;min-height:38px;margin:20px 0 12px;padding:8px 18px}
+.machine-invitation-panel>.control>svg{width:16px;height:16px}
+.machine-invitation-panel>.machine-invitation-expiry{font-size:12px}
+.machine-connection-status{display:flex;align-items:flex-start;gap:11px;padding:18px 0 10px}
+.machine-connection-status strong{font-size:14px;font-weight:500;line-height:1.5}
+.machine-connection-status p{margin:4px 0 0;font-size:13px;line-height:1.6}
+.machine-wait-dot{display:block;flex:none;width:7px;height:7px;border-radius:50%;background:var(--muted);margin-top:7px;animation:machine-wait 2s ease-in-out infinite}
+.machine-wait-dot.online{background:var(--success);animation:none}
+.machine-connection-status.registered .machine-wait-dot{animation:none}
+.machine-invitation-availability:empty{display:none}
+.machine-invitation-availability{font-size:13px;line-height:1.6;margin:14px 0 0}
+.machine-invitation-availability>.control{margin-left:10px}
+.machine-connection-help{margin:20px 0 0;border-top:1px solid var(--divider)}
+.machine-connection-editor .detail-disclosure{margin:0;border-bottom:1px solid var(--divider);padding:13px 0;font-size:13px}
+.machine-connection-editor .detail-disclosure>summary{cursor:pointer;color:var(--muted);font-weight:400;line-height:1.5}
+.machine-connection-help .detail-disclosure p{margin:12px 0;font-size:13px;line-height:1.6}
+.machine-connection-help a{font-size:13px;color:var(--primary)}
+.machine-connection-values{display:grid;grid-template-columns:112px minmax(0,1fr);gap:10px 14px;padding:5px 0 0;font-size:12px;line-height:1.6;min-width:0}
+.machine-connection-values dt{color:var(--muted)}
+.machine-connection-values dd{margin:0;overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px}
+.machine-connection-editor .editor-actions{position:static;align-items:center;margin-top:26px;padding:18px 0;border:0;background:transparent;gap:10px}
+.machine-connection-editor .editor-actions>.control{min-height:36px;padding:7px 15px}
+.machine-connection-editor .editor-actions>.machine-revoke{margin-right:auto;background:transparent;border-color:transparent;padding-left:0;font-size:13px}
+.machine-connection-editor .editor-actions .control[hidden],.machine-connection-editor [hidden]{display:none!important}
+.machine-connection-editor .machine-join-input{display:flex;flex-direction:column;align-items:stretch;gap:9px}
+.machine-connection-editor .machine-join-input>.form-label{font-size:13px;font-weight:500}
+.machine-connection-editor .machine-join-input .field-body{display:flex;flex-direction:row;align-items:stretch;gap:8px;width:100%;min-width:0}
+.machine-connection-editor .machine-join-input .field-input{flex:1;width:0;min-width:0;height:42px;padding:10px 12px;font-size:13px}
+.machine-connection-editor .machine-join-input .control{display:flex;align-items:center;justify-content:center;gap:7px;padding:8px 12px;min-height:42px;font-size:13px}
+.machine-connection-editor .machine-join-input .control svg{width:15px;height:15px}
+.machine-connection-editor .machine-join-input-hint{font-size:12px;line-height:1.6;margin:10px 0 20px}
+.machine-join-status{display:flex;align-items:center;gap:8px;font-size:13px;line-height:1.6;margin:12px 0 20px;min-width:0}
+.machine-join-status>svg{width:16px;height:16px;flex:none}
+.machine-join-status .machine-wait-dot{margin-top:0}
+.machine-join-status .control{font-size:12px;margin-left:auto;flex:none}
+.machine-verified-identity{display:flex;align-items:center;gap:13px;padding:16px;border:1px solid var(--divider);border-radius:12px;margin:24px 0 18px;min-width:0}
+.machine-verified-identity .machine-connection-brand{width:38px;height:38px}
+.machine-identity-body{flex:1;min-width:0;overflow-wrap:anywhere}
+.machine-identity-body strong{font-size:14px;font-weight:500}
+.machine-identity-body p{font-size:12px;line-height:1.5;margin:4px 0 0}
+.machine-identity-match{font-size:11px;color:var(--success);flex:none;max-width:120px;line-height:1.5}
+.machine-identity-match.manual{color:var(--attention)}
+.machine-manual-verification{border-left:2px solid var(--input-border);padding:1px 0 1px 14px;margin:18px 0}
+.machine-manual-verification>p{margin:0 0 14px;font-size:12px;line-height:1.6}
+.machine-manual-verification .form-row{display:flex;flex-direction:column;align-items:stretch;gap:8px;margin-top:12px}
+.machine-manual-verification .form-label{font-size:13px;line-height:1.6}
+.machine-manual-verification .field-input{max-width:100%}
+.machine-manual-verification input[type=checkbox]{width:18px;height:18px}
+.machine-connection-footnote{font-size:12px;line-height:1.7;margin:18px 0 20px}
+.machine-revoke-dialog{max-width:400px;width:calc(100% - 40px)}
+.machine-revoke-dialog h2{font-size:18px}
+.machine-revoke-dialog p{font-size:13px;line-height:1.6}
+.machine-revoke-dialog .page-toolbar{justify-content:flex-end}
+@keyframes machine-wait{50%{opacity:.38}}
+@media(max-width:719px){.machine-connection-editor{padding-top:8px}.machine-connection-intro{margin:7px 0 23px}.machine-connection-intro h2{font-size:23px}.machine-invitation-panel{padding:25px 16px 20px}.machine-connection-pair{gap:8px}.machine-connection-node{width:94px}.machine-connection-editor .editor-actions>.primary{width:auto;margin-left:auto}.machine-connection-editor .editor-actions>.control{min-height:44px;font-size:14px}.machine-invitation-panel>.control{min-height:44px;font-size:14px}.machine-connection-editor .machine-join-input .field-input{font-size:16px;height:44px}.machine-connection-editor .machine-join-input .control{min-height:44px;font-size:14px}.machine-verified-identity{padding:14px 12px;flex-wrap:wrap;gap:10px}.machine-identity-match{margin-left:48px;max-width:none;flex-basis:100%}.machine-connection-values{grid-template-columns:90px minmax(0,1fr);gap:9px 10px}.machine-control-selection .field-input{font-size:16px;min-height:44px}.machine-manual-verification .field-input{font-size:16px;min-height:44px}}
+@media(prefers-reduced-motion:reduce){.machine-wait-dot{animation:none}}
