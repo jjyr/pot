@@ -78,3 +78,40 @@ func TestBackgroundCancellationUsesSupervisorForDetachedDescendants(t *testing.T
 		t.Fatal("supervised background descendant survived", pid, err)
 	}
 }
+
+func TestBackgroundStreamAcknowledgesOnlyCommittedFrames(t *testing.T) {
+	root := t.TempDir()
+	source := `export async function stream(input,emit){await emit({state:{cursor:1},events:[],delay_seconds:60,status:'ready'});await emit({state:{cursor:2},events:[],delay_seconds:60,status:'ready'});await new Promise(()=>{});}`
+	if err := os.WriteFile(filepath.Join(root, "service.mjs"), []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	p := plugin.Package{Root: root, Manifest: core.PluginManifest{SchemaVersion: 2, ID: "example", Version: "1", Contributes: core.PluginContributions{Background: &core.PluginBackground{Runtime: "node", Execution: "control", Mode: "stream", Entrypoint: "service.mjs", Files: []string{"service.mjs"}}}}}
+	worker, _ := os.Executable()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	count := 0
+	rejected := errors.New("transaction_rejected")
+	err := RunBackgroundStream(ctx, "", p, core.BackgroundRequest{Version: 1, State: []byte(`null`), Config: []byte(`{}`)}, nil, []string{worker}, func(frame core.BackgroundResponse) error {
+		count++
+		if string(frame.State) != `{"cursor":`+strconv.Itoa(count)+`}` {
+			t.Fatal("checkpoint order", string(frame.State))
+		}
+		if count == 2 {
+			return rejected
+		}
+		return nil
+	})
+	if !errors.Is(err, rejected) || count != 2 {
+		t.Fatal(count, err)
+	}
+}
+
+func TestBackgroundStructuredCredentialsProtectTokenButNotPublicRoute(t *testing.T) {
+	credential := `{"id":"public-device","token":"private-pairing-token"}`
+	if containsBackgroundCredential([]byte(`{"pair":"public-device"}`), credential) {
+		t.Fatal("public checkpoint rejected")
+	}
+	if !containsBackgroundCredential([]byte(`{"body":"private-pairing-token"}`), credential) {
+		t.Fatal("nested token leaked")
+	}
+}

@@ -12,6 +12,7 @@ import (
 // PluginBackground is a local, owner-enabled service capability. It never enters
 // a transferable tool bundle and does not confer model/tool execution authority.
 type PluginBackground struct {
+	Mode        string             `json:"mode,omitempty"`
 	Runtime     string             `json:"runtime"`
 	Execution   string             `json:"execution"`
 	Entrypoint  string             `json:"entrypoint"`
@@ -20,7 +21,7 @@ type PluginBackground struct {
 }
 
 func (b PluginBackground) Validate() error {
-	if b.Runtime != "node" || b.Execution != "control" || len(b.Files) == 0 || len(b.Files) > 32 || !slices.Contains(b.Files, b.Entrypoint) {
+	if (b.Mode != "" && b.Mode != "stream") || b.Runtime != "node" || b.Execution != "control" || len(b.Files) == 0 || len(b.Files) > 32 || !slices.Contains(b.Files, b.Entrypoint) {
 		return errors.New("invalid background capability")
 	}
 	seen := map[string]bool{}

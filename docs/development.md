@@ -169,6 +169,7 @@ PR's workflow are not run.
 | `internal/` | Product services and adapters |
 | `web/` | Shared product frontend |
 | `plugins/` | Tool manifests and Node implementations |
+| `integrations/` | External application packages, local connectors and installation entry points |
 | `skills/` | Built-in Skill bundles |
 | `resources/` | Brand assets, model metadata and notices |
 | `scripts/` | Build, release, source checks and fixtures |
