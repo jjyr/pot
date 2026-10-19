@@ -377,8 +377,22 @@ func TestTCPListenerRevocationAndPendingBacklogIsolation(t *testing.T) {
 	if err := b.service.Revoke(ctx, connection.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.service.Sync(ctx, connection.ID); !errors.Is(err, ErrRevoked) {
-		t.Fatal(err)
+	// Closing the remote socket is observed asynchronously. An idle Sync can
+	// still see its live session before the reader processes EOF; it must then
+	// reconnect, discover the remote tombstone and fence further delivery.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		err := a.service.Sync(ctx, connection.ID)
+		if errors.Is(err, ErrRevoked) {
+			break
+		}
+		if err != nil && !errors.Is(err, ErrUnavailable) {
+			t.Fatal(err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("remote revocation was not observed", err)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 func TestTCPInvitationExpiryRepairAndNoHTTPCompatibility(t *testing.T) {
