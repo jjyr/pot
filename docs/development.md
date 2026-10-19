@@ -191,6 +191,22 @@ tray generation; removing the VM Helper does not remove brand generation.
 
 Paid tests require an explicit `POT_LIVE=1` in the calling process.
 
+`TestConfiguredModelAgentLinksLive` qualifies two independent Controls with the
+machine's configured model and production prompts. Set `POT_CONFIGURED_LIVE_ROOT`
+and its existing `POT_SECRET_KEY_FILE`; configuration is read only and credentials
+stay on that machine. Both Controls use disposable roots and expose only
+`list_assistants` and `send_message` to the model. The test checks read-only
+preview, symmetric pinned pairing, full node-address matching with equal display
+names, model-generated messages and replies in both directions, processing and
+provenance, and identity-preserving reconnection after restart. It caps the whole
+run at 24 real requests, 2048 output tokens per request and five minutes. Run:
+
+```sh
+POT_LIVE=1 POT_CONFIGURED_LIVE_ROOT=/absolute/control/root \
+  mise exec -- go test -v ./internal/control \
+  -run '^TestConfiguredModelAgentLinksLive$' -count=1 -timeout=6m
+```
+
 `TestConfiguredModelAgentProfileLive` uses `POT_CONFIGURED_LIVE_ROOT` and the
 machine's existing key-file selector to read its configured model credentials
 locally. It runs the production Agent, executor and profile tool in a disposable
