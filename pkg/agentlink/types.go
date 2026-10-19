@@ -20,6 +20,7 @@ var (
 	ErrNotFound          = errors.New("agent_link_not_found")
 	ErrUnauthorized      = errors.New("agent_link_authentication_failed")
 	ErrExpired           = errors.New("agent_link_invitation_expired")
+	ErrUsed              = errors.New("agent_link_invitation_used")
 	ErrConflict          = errors.New("agent_link_identity_conflict")
 	ErrRevoked           = errors.New("agent_link_revoked")
 	ErrReconnectRequired = errors.New("agent_link_reconnect_required")
@@ -52,6 +53,16 @@ type Connection struct {
 type Invitation struct {
 	Address   string    `json:"address"`
 	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// Preview is a live, read-only verification result. It contains no invitation
+// material and grants no communication or execution authority.
+type Preview struct {
+	Identity    Identity      `json:"identity"`
+	Host        peer.Identity `json:"host"`
+	Endpoint    string        `json:"endpoint"`
+	Fingerprint string        `json:"fingerprint"`
+	ExpiresAt   time.Time     `json:"expires_at"`
 }
 
 // Mailbox owns durable business messages. Deliver commits before returning its

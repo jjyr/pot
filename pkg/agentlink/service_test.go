@@ -123,15 +123,12 @@ func (f *fixture) start(address string) {
 		if err != nil {
 			return nil, err
 		}
-		if f.dropPair.Swap(false) {
-			return nil, ErrUnavailable
-		}
 		return func(ctx context.Context, request peer.Request) (json.RawMessage, error) {
 			if request.Method == "exchange" {
 				f.exchanges.Add(1)
 			}
 			raw, err := handler(ctx, request)
-			if err == nil && request.Method == "exchange" && f.dropExchange.Swap(false) {
+			if err == nil && (request.Method == "exchange" && f.dropExchange.Swap(false) || request.Method == "pair" && f.dropPair.Swap(false)) {
 				return nil, ErrUnavailable
 			}
 			return raw, err

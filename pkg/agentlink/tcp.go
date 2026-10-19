@@ -13,8 +13,9 @@ import (
 )
 
 type sessionAuth struct {
-	ID   string       `json:"id"`
-	Pair *pairRequest `json:"pair,omitempty"`
+	ID      string          `json:"id"`
+	Pair    *pairRequest    `json:"pair,omitempty"`
+	Preview *previewRequest `json:"preview,omitempty"`
 }
 
 func decodeJSON(data []byte, value any) error {
@@ -34,16 +35,23 @@ func (s *Service) Authorize(ctx context.Context, remote peer.Identity, service s
 		return nil, ErrUnauthorized
 	}
 	var auth sessionAuth
-	if decodeJSON(raw, &auth) != nil || !validID(auth.ID) {
+	if decodeJSON(raw, &auth) != nil {
+		return nil, ErrInvalid
+	}
+	if auth.Preview != nil {
+		if auth.ID != "" || auth.Pair != nil || auth.Preview.Code != "" || !validID(auth.Preview.Invitation) || !validIdentity(auth.Preview.Target) || auth.Preview.Target.Address.ControlID != s.options.HostIdentity.ID {
+			return nil, ErrInvalid
+		}
+		return s.previewHandler(*auth.Preview), nil
+	}
+	if !validID(auth.ID) {
 		return nil, ErrInvalid
 	}
 	if auth.Pair != nil {
-		if auth.Pair.ID != auth.ID {
+		if auth.Pair.ID != auth.ID || auth.Pair.Code != "" || !validID(auth.Pair.Invitation) || !validIdentity(auth.Pair.Local) || !validIdentity(auth.Pair.Peer) || auth.Pair.Local.Address.ControlID != remote.ID || auth.Pair.Peer.Address.ControlID != s.options.HostIdentity.ID {
 			return nil, ErrConflict
 		}
-		if _, err := s.accept(ctx, *auth.Pair, remote); err != nil {
-			return nil, err
-		}
+		return s.pairHandler(*auth.Pair, remote), nil
 	}
 	if _, err := s.authenticate(ctx, auth.ID, remote); err != nil {
 		return nil, err
@@ -123,12 +131,33 @@ func (s *Service) Attach(session *peer.Session) {
 	if decodeJSON(session.Auth(), &auth) != nil {
 		return
 	}
+	if auth.Preview != nil {
+		time.AfterFunc(5*time.Second, session.Close)
+		return
+	}
 	connection, err := s.Get(context.Background(), auth.ID)
+	if errors.Is(err, ErrNotFound) && auth.Pair != nil {
+		s.mu.Lock()
+		s.pendingSessions[session] = true
+		s.mu.Unlock()
+		time.AfterFunc(10*time.Second, func() {
+			s.mu.Lock()
+			pending := s.pendingSessions[session]
+			delete(s.pendingSessions, session)
+			s.mu.Unlock()
+			if pending {
+				session.Close()
+			}
+		})
+		go func() { <-session.Done(); s.mu.Lock(); delete(s.pendingSessions, session); s.mu.Unlock() }()
+		return
+	}
 	if err != nil || connection.PeerHost != session.Remote() {
 		session.Close()
 		return
 	}
 	s.mu.Lock()
+	delete(s.pendingSessions, session)
 	previous := s.sessions[auth.ID]
 	s.sessions[auth.ID] = session
 	s.mu.Unlock()
@@ -165,12 +194,18 @@ func (s *Service) ensureSession(ctx context.Context, connection Connection) (*pe
 		return nil, ErrUnavailable
 	}
 	auth := sessionAuth{ID: connection.ID}
+	var originalPair *pairRequest
 	if connection.LastSeen == nil {
 		credential, err := s.secret(ctx, connection.ID)
 		if err != nil {
 			return nil, err
 		}
-		auth.Pair = credential.Pair
+		originalPair = credential.Pair
+		if originalPair != nil {
+			metadata := *originalPair
+			metadata.Code = ""
+			auth.Pair = &metadata
+		}
 	}
 	raw, _ := json.Marshal(auth)
 	dialCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -178,6 +213,19 @@ func (s *Service) ensureSession(ctx context.Context, connection Connection) (*pe
 	session, err := peer.Dial(dialCtx, connection.Endpoint, peer.DialOptions{Identity: s.options.HostIdentity, PrivateKey: s.options.HostKey, Expected: &connection.PeerHost, Service: ServiceName, Auth: raw, Handler: s.handler(connection.ID, connection.PeerHost)})
 	if err != nil {
 		return nil, transportError(err)
+	}
+	if originalPair != nil {
+		var accepted Connection
+		err = s.call(ctx, session, "pair", struct {
+			Code string `json:"code"`
+		}{Code: originalPair.Code}, &accepted)
+		if err == nil && (accepted.ID != connection.ID || !equalIdentity(accepted.Local, connection.Peer) || !equalIdentity(accepted.Peer, connection.Local) || accepted.PeerHost != s.options.HostIdentity) {
+			err = ErrConflict
+		}
+		if err != nil {
+			session.Close()
+			return nil, err
+		}
 	}
 	s.Attach(session)
 	return session, nil
@@ -204,7 +252,7 @@ func transportError(err error) error {
 	if errors.Is(err, peer.ErrUnauthorized) {
 		return ErrUnauthorized
 	}
-	for _, known := range []error{ErrInvalid, ErrNotFound, ErrUnauthorized, ErrExpired, ErrConflict, ErrRevoked, ErrReconnectRequired} {
+	for _, known := range []error{ErrInvalid, ErrNotFound, ErrUnauthorized, ErrExpired, ErrUsed, ErrConflict, ErrRevoked, ErrReconnectRequired} {
 		if errors.Is(err, known) || strings.Contains(err.Error(), known.Error()) {
 			return known
 		}
@@ -230,6 +278,9 @@ func (s *Service) closeSessions() {
 	s.mu.Lock()
 	sessions := make([]*peer.Session, 0, len(s.sessions))
 	for _, session := range s.sessions {
+		sessions = append(sessions, session)
+	}
+	for session := range s.pendingSessions {
 		sessions = append(sessions, session)
 	}
 	s.mu.Unlock()

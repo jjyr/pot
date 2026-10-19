@@ -61,13 +61,34 @@ owner, execution or directory management APIs. The separate `identity` service
 and local management UI belong to the host. Agent Link does not create a second
 network listener or configure Tailscale itself.
 
-Initial session authorization includes the exact invitation claim. Subsequent
+Initial session admission contains only the invitation's public target metadata.
+The invitation code is sent in a dedicated `pair` RPC only after the server has
+proved possession of the pinned key. Before this claim, the temporary session
+cannot exchange messages; a successful durable claim activates that same session.
+An unanswered claim session closes after ten seconds. Subsequent
 reconnections authenticate the pinned Ed25519 host key and connection ID; they
 do not use reusable bearer session tokens. Every RPC is signed and scoped to its
 authenticated session and monotonic frame sequence by `pkg/peer`. The service
-exposes only `identity`, `exchange` and `revoke` business methods, each restricted
+exposes only `pair`, `identity`, `exchange` and `revoke` business methods, each restricted
 to the session's connection. Per-connection rate and concurrent admission limits
 supplement the shared transport's frame and request bounds.
+
+## Read-only identity preview
+
+`Service.Preview(ctx, address)` performs an actual pinned handshake and returns
+the current target `Identity`, host public identity, endpoint, public-key
+fingerprint and invitation expiry. It does not claim the invitation, create a
+connection, write credentials or attach a durable message session. Expired,
+already-used, mismatched and invalid invitations produce separate errors.
+
+Preview handshake admission likewise contains no invitation code. Only after
+verifying the server's signed identity does the client reveal that code to the
+restricted `preview` RPC. This temporary session cannot call `pair`, `exchange`,
+`revoke` or other services. Both the client operation and the server-side preview
+session are bounded to five seconds. Address input is capped at 16 KiB; preview
+RPC input is capped at 128 bytes and the returned card at 8 KiB. The server reads
+the current invitation state again for each card request, so preview does not
+reserve it or substitute for the final add operation's checks.
 
 After one initial exchange confirms the new message channel, both hosts scan
 their own durable outbox and independently push available messages through the
