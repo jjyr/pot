@@ -2,7 +2,7 @@ import {createAgentLinks} from './components/agent-links.mjs';
 import {translate} from './locales/messages.mjs';
 
 const token=location.hash.slice(1)||sessionStorage.getItem('pot-agent-owner')||'';
-if(location.hash){sessionStorage.setItem('pot-agent-owner',token);history.replaceState(null,'',location.pathname);}
+if(location.hash){sessionStorage.setItem('pot-agent-owner',token);history.replaceState(null,'',location.pathname+location.search);}
 const parameters=new URLSearchParams(location.search);
 const locale=()=>{const value=parameters.get('locale')||localStorage.getItem('pot-go-preview-locale')||(navigator.language.startsWith('zh')?'zh-CN':'en');return value==='zh-CN'?'zh-CN':'en';};
 document.documentElement.lang=locale();document.documentElement.dataset.platform='browser';
