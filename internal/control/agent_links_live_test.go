@@ -121,7 +121,7 @@ func TestConfiguredModelAgentLinksLive(t *testing.T) {
 		}
 		output := uint64(2048)
 		settings.MaxOutputTokens = &output
-		saved, err := f.service.Profiles.Save(ctx, SaveProfile{RequestID: "live-profile", ProfileID: "live", Name: "Agent Link qualification", Model: profile.Model, Endpoint: proxy.URL, Protocol: provider.Protocol, APIKey: string(credential), ModelSettings: &settings, MaxOutputTokens: output, ReasoningEffort: profile.Params.ReasoningEffort})
+		saved, err := f.service.Profiles.Save(ctx, SaveProfile{RequestID: "live-profile", ProfileID: "live", Name: "Agent Link qualification", Model: profile.Model, Endpoint: proxy.URL, Protocol: provider.Protocol, APIKey: "isolated-configured-model-proxy", ModelSettings: &settings, MaxOutputTokens: output, ReasoningEffort: profile.Params.ReasoningEffort})
 		if err != nil {
 			t.Fatal(err)
 		}
