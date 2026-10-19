@@ -62,8 +62,23 @@ text of 16 px on narrow windows or touch-capable browsers. Other custom controls
 own their geometry; this is not a global minimum applied to every element.
 Desktop mouse controls stay compact. Wide iPad windows retain touch density.
 Wrap secondary actions and keep labels readable rather than shrinking buttons.
+Chat keeps attachment, input and send controls in one compact row by default;
+references and attachments expand above it and multiline input grows naturally.
+Desktop copy actions appear beside messages on hover or keyboard focus without
+reserving an extra row; touch actions stay visible. Copy success acknowledges in
+place for 1.6 seconds, retaining the current language.
 Keep copy concise; put detailed operating explanations behind disclosures or in
 field help.
+
+### Motion
+
+Shared motion tokens use 110 ms for control feedback, 180 ms for transient panels
+and disclosure arrows, and about 220 ms for gesture settling. Edge navigation
+follows the finger while opening or closing the menu and returning from Chat or
+an editor. Release uses distance and velocity; cancellation and reversal settle
+back. Existing editor leave guards still decide whether Back may complete.
+Reduced Motion removes transitions, activity animation and gesture settling.
+Content updates preserve reading anchors rather than animating the whole history.
 
 ## Application shell and navigation
 

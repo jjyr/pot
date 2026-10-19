@@ -1,5 +1,5 @@
 import {icon} from './icons.mjs';
-import {renderMarkdown} from './markdown.mjs';
+import {createMarkdownView} from './markdown.mjs';
 import {replyFailureKind} from '../state/chat-replies.mjs';
 
 const node=(tag,className='',text)=>{const value=document.createElement(tag);value.className=className;if(text!==undefined)value.textContent=text;return value;};
@@ -10,10 +10,11 @@ export function createReplyBubble(host) {
   const content=node('div','reply-content'),status=node('div','reply-status');
   status.setAttribute('aria-live','polite');
   host.classList.add('reply-bubble');host.append(content,status);
+  const markdown=createMarkdownView(content);
   let text,signature;
   return {
     update(message,{t,downloadFile,acquireFileImage,onSettings,onReconnect,onRetrySend,canRetrySend}){
-      if(text!==message.text){content.replaceChildren();if(message.text)content.append(renderMarkdown(message.text,{downloadFile,acquireFileImage}));text=message.text;}
+      if(text!==message.text){markdown.update(message.text,{downloadFile,acquireFileImage});text=message.text;}
       content.hidden=!message.text;
       const next=JSON.stringify([message.phase,message.error,t('replyFailed'),message.local,canRetrySend]);
       if(signature===next)return;signature=next;

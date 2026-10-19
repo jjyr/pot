@@ -71,6 +71,10 @@ func Open(path string, options Options) (*Service, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS tasks_catalog_order ON tasks(CASE WHEN json_valid(body) THEN json_extract(body,'$.info.updated_at_ms') END DESC,id,assistant_id);CREATE INDEX IF NOT EXISTS tasks_owner_order ON tasks(assistant_id,CASE WHEN json_valid(body) THEN json_extract(body,'$.info.updated_at_ms') END DESC,id);CREATE INDEX IF NOT EXISTS tasks_catalog_phase ON tasks(phase);`); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS task_authority(control_id TEXT NOT NULL,runtime_id TEXT NOT NULL);INSERT INTO task_authority SELECT ?,? WHERE NOT EXISTS(SELECT 1 FROM task_authority)", options.ControlID, options.RuntimeID); err != nil {
 		db.Close()
 		return nil, err

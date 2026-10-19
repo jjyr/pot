@@ -139,7 +139,7 @@ async parentPage=>{
       const f=mermaidFixture;f.old=f.host.querySelector('pot-mermaid');f.reply.update({phase:'complete',text:f.fence('flowchart TD\n A --> B')+'\n\n完成。'},{t:f.t});
     });
     await page.locator('pot-mermaid[data-state="ready"]').waitFor();
-    assert(await page.evaluate(()=>!mermaidFixture.old.diagram&&mermaidFixture.active.size===1),'Reply replacement destroys the preceding mount');
+    assert(await page.evaluate(()=>mermaidFixture.old===mermaidFixture.host.querySelector('pot-mermaid')&&mermaidFixture.active.size===1),'Appending reply text retains the existing diagram mount');
     await page.evaluate(()=>{
       const f=mermaidFixture,root=f.host.querySelector('pot-mermaid');root.remove();f.host.querySelector('.reply-content').append(root);
     });

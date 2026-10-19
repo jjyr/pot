@@ -469,6 +469,11 @@ def run(binary, base, env, cli_command, profile_only=False):
             output = browser_cli("run-code", code.replace("STATE", json.dumps(state)))
             if '"errors":[]' not in output:
                 raise RuntimeError("Browser did not return successful integration evidence")
+            fluid = browser_cli(
+                "run-code", (ROOT / "scripts/tests/go-ui-fluid-browser.js").read_text()
+            )
+            if '"passed":true' not in fluid:
+                raise RuntimeError("Fluid UI browser contracts did not pass")
             replies = browser_cli(
                 "run-code", (ROOT / "scripts/tests/go-ui-replies-browser.js").read_text()
             )

@@ -30,6 +30,24 @@ export function normalizeSnapshot(frame, runtime, owner, space = '') {
   return {...value, runtime_id: runtime.runtime_id || runtime.id, owner_id: space ? JSON.stringify([space, owner]) : owner,
     cursor: String(value.cursor), running: !!value.turn, turn_id: value.turn?.user_message_id || null};
 }
+// Commands invalidate their display dependencies, never every cached resource
+// for upload chunks, login polling, model checks or other read-like commands.
+export function mutationTopics(path,body,value) {
+  if(path==='/api/v1/attachments'||/\/(resolve|check)$/.test(path))return null;
+  if(path==='/api/v1/assistants/bootstrap'&&!value?.assistant)return null;
+  if(path.startsWith('/api/v1/providers'))return ['providers','settings','assistants','conversation','usage'];
+  if(path.startsWith('/api/v1/assistants'))return ['assistants','conversation'];
+  if(path.startsWith('/api/v1/integrations'))return ['integrations'];
+  if(path.startsWith('/api/v1/permissions'))return ['permissions','machines','assistants','tasks'];
+  if(path.startsWith('/api/v1/tasks'))return ['tasks','runner','usage'];
+  if(path.startsWith('/api/v1/schedules'))return ['schedules','tasks'];
+  if(path.startsWith('/api/v1/usage'))return ['usage','settings'];
+  if(path.startsWith('/api/v1/agent')||path==='/api/v1/instructions')return ['settings','assistants','conversation'];
+  if(path==='/api/v1/messages'||path.startsWith('/api/v1/turn/'))return ['conversation','assistants'];
+  if(path.startsWith('/api/v1/machines'))return ['machines','permissions'];
+  if(path.startsWith('/api/v1/spaces')||path==='/api/v1/runtime/control')return ['spaces','machines'];
+  return [];
+}
 export async function createProductionClient({desktop = false, base = ''} = {}) {
   let runtimeAPI;
   if (desktop) runtimeAPI = await import('/wails/runtime.js');
@@ -48,7 +66,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
       try {
         const raw = await pending;
         if (signal?.aborted) throw signal.reason;
-        const value=decodeDesktopResponse(raw);if(method!=='GET'&&(path!=='/api/v1/assistants/bootstrap'||value?.assistant))client.resources?.invalidate([],capturedScope);return value;
+        const value=decodeDesktopResponse(raw);if(method!=='GET'){const topics=mutationTopics(path,body,value);if(topics)client.resources?.invalidate(topics,capturedScope);}return value;
       } finally { signal?.removeEventListener('abort', abort); }
     }
     const response = await fetch(`${base}${fullPath}`, {method, signal, credentials: 'same-origin',
@@ -56,7 +74,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
       body: body === undefined ? undefined : JSON.stringify(body)});
     const value = response.status === 204 ? null : await response.json().catch(() => null);
     if (!response.ok) throw new APIError(response.status, value);
-    if(method!=='GET'&&(path!=='/api/v1/assistants/bootstrap'||value?.assistant))client.resources?.invalidate([],capturedScope);
+    if(method!=='GET'){const topics=mutationTopics(path,body,value);if(topics)client.resources?.invalidate(topics,capturedScope);}
     return value;
   }
   const runtime = await request('/api/v1/runtime', {owner: '', space: ''});

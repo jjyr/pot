@@ -9,6 +9,8 @@ import {renderMarkdown} from './markdown.mjs';
 import {toolForest} from '../state/tool-calls.mjs';
 import {projectScriptRuns} from '../state/script-runs.mjs';
 import {projectTaskMessages} from '../state/task-transcript.mjs';
+import {createMessageWindow,readingAnchor,restoreReadingAnchor} from './message-window.mjs';
+import {copyFeedback} from './motion.mjs';
 
 export function createTaskConversation({root,task,record:initial,locale,client,scope,draft,onDraft,downloadFile,toolMemory,approvalFor,onDecision,onSend,onStop,onPause,onCancel,onUsage,onRefresh,onSettings,assistantName}){
   const acquireFileImage=client.acquireFileImage?({task,path})=>client.acquireFileImage(task,path,scope):undefined;
@@ -27,17 +29,21 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   input.value=draft;form.append(input,send);composerArea.append(latest,form,footer,error);latest.hidden=true;footer.hidden=true;error.hidden=true;error.setAttribute('role','alert');
   root.classList.add('task-conversation');root.append(stage,history,composerArea);
   const dialog=n('dialog','preferences product-actions task-actions');dialog.setAttribute('aria-label',tr('Task actions','任务操作'));root.append(dialog);
-  let record=initial,state,inputs=[],approvals=[],unavailable=false,connectionError='',busy=false,disposed=false,following=true,restored=false,frame=0,menuMode='actions',menuSignature='',fileSignature='',draftVersion=0;
-  const nodes=new Map();
+  let record=initial,state,inputs=[],approvals=[],unavailable=false,connectionError='',busy=false,disposed=false,following=true,pendingFollow=false,restored=false,frame=0,menuMode='actions',menuSignature='',fileSignature='',draftVersion=0;
+  let forest,reading=null;
   const editor=bindComposer(input,{onInput:text=>{draftVersion++;onDraft(text);updateComposer();},onSend:submit,onCompositionEnd:updateComposer});
   const completion=bindCompletions(input,{client:{scope:()=>scope,request:(path,options)=>client.request(path,options)},host:composerArea,locale,mobile:editor.mobile,id:`pot-task-${task.id}-completions`});
   const active=()=>['queued','running','waiting','waiting_approval'].includes(record.info?.phase||task.phase);
   const nearBottom=()=>history.scrollHeight-history.clientHeight-history.scrollTop<64;
   function scrollBottom(){history.scrollTop=history.scrollHeight;following=true;latest.hidden=true;}
-  function scheduleFollow(){cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{if(disposed)return;if(following)scrollBottom();else latest.hidden=nearBottom();});}
+  function scheduleFollow(){if(frame||disposed)return;frame=requestAnimationFrame(()=>{frame=0;if(disposed)return;const follow=following||pendingFollow;renderTranscript();if(follow){scrollBottom();renderTranscript();scrollBottom();}else{restoreReadingAnchor(history,reading);latest.hidden=nearBottom();}pendingFollow=false;reading=readingAnchor(history);});}
   let previousWidth=0,resizeFrame=0;
   const resizeObserver=new ResizeObserver(()=>{if(root.clientWidth!==previousWidth){previousWidth=root.clientWidth;cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{if(!disposed)editor.resize();});}scheduleFollow();});resizeObserver.observe(column);resizeObserver.observe(composerArea);
-  history.addEventListener('scroll',()=>{following=nearBottom();latest.hidden=following;},{passive:true});latest.onclick=scrollBottom;
+  history.addEventListener('scroll',()=>{if(!pendingFollow)following=nearBottom();latest.hidden=following;reading=readingAnchor(history);scheduleFollow();},{passive:true});latest.onclick=()=>{scrollBottom();scheduleFollow();};
+  const pauseFollow=()=>{following=false;pendingFollow=false;};
+  history.addEventListener('wheel',event=>{if(event.deltaY<0)pauseFollow();},{passive:true});
+  let touchY;history.addEventListener('touchstart',event=>{touchY=event.touches[0]?.clientY;},{passive:true});
+  history.addEventListener('touchmove',event=>{const y=event.touches[0]?.clientY;if(y>touchY)pauseFollow();touchY=y;},{passive:true});
   async function run(work){
     if(busy||disposed)return;busy=true;error.hidden=true;updateComposer();renderMenu();
     try{await work();if(!disposed){dialog.close();error.textContent='';}}
@@ -65,25 +71,29 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     if(stageLabel.textContent!==text)stageLabel.textContent=text;stageLabel.title=connectionError;locate.hidden=!pending||!!connectionError;retry.hidden=!connectionError;retry.disabled=busy;
   }
   function locateApproval(){
+    for(const message of projectTaskMessages(state,inputs,record))if(message.tool&&approvalFor(message.tool)){
+      let parent=message;while(parent?.tool){const key=JSON.stringify([scope,task.id,parent.id]);toolMemory.set(key,{...toolMemory.get(key),open:true});parent=forest?.byID.get(parent.tool.turn_id+':'+parent.tool.parent_id)?.message;}
+      renderTranscript();parent=message;while(parent?.tool?.parent_id){const ancestor=forest.byID.get(parent.tool.turn_id+':'+parent.tool.parent_id)?.message;if(!ancestor)break;parent=ancestor;}transcriptWindow.seek(parent.id);renderTranscript();break;
+    }
     const approval=transcript.querySelector('.tool-call[data-phase="waiting_approval"]')||column.querySelector('.approval-card');
     if(!approval)return;for(let parent=approval;parent&&parent!==transcript;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;
     approval.scrollIntoView({block:'center',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});approval.querySelector('summary,button')?.focus({preventScroll:true});
   }
   function copyButton(entry){
-    if(entry.copy)return;entry.copy=iconButton('copy',t('copy'),'copy-message');entry.copy.onclick=()=>{navigator.clipboard.writeText(entry.text||'').then(()=>label(entry.copy,t('copied'))).catch(reason=>{error.textContent=reason.message;error.hidden=false;});};entry.element.append(entry.copy);
+    if(entry.copy){label(entry.copy,t(entry.copy.dataset.copied?'copied':'copy'));return;}entry.copy=iconButton('copy',t('copy'),'copy-message');copyFeedback(entry.copy,{text:()=>entry.text||'',locale,translate,onError:reason=>{error.textContent=reason.message;error.hidden=false;}});entry.element.append(entry.copy);
   }
-  function renderTranscript(){
-    if(!state)return;
-    const rows=projectScriptRuns(projectTaskMessages(state,inputs,record,{offline:unavailable||!!connectionError}),{activeTurn:active()?[...state.tools.values()].at(-1)?.tool.turn_id:null}),forest=toolForest(rows),keep=new Set();let position=0;
-    for(const message of rows){
-      keep.add(message.id);let entry=nodes.get(message.id);
-      if(!entry){const element=n('div',`message task-event role-${message.role}`);entry={element,text:null};nodes.set(message.id,entry);}
+  const heights=new Map();
+  const disposeMessage=entry=>{entry.childrenWindow?.close();entry.element.remove();};
+  function renderMessage(message,existing){
+      let entry=existing;
+      if(!entry){const element=n('article',`message task-event role-${message.role}`);entry={element,row:element,text:null};}
+      entry.element.dataset.messageId=message.id;
       if(message.tool){
         if(!entry.tool){entry.tool=createToolCall({memory:toolMemory,key:JSON.stringify([scope,task.id,message.id]),locale,onDecision,downloadFile,acquireFileImage});entry.element.append(entry.tool.element);}
         const children=forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children||[];
         entry.tool.update(message,{approval:approvalFor(message.tool),offline:unavailable||!!connectionError,children:children.map(child=>child.message)});
-        const parent=forest.byID.get(message.tool.turn_id+':'+message.tool.parent_id),parentEntry=parent&&nodes.get(parent.message.id);
-        if(parent&&parent.children.some(child=>child.message.id===message.id)&&parentEntry?.tool){if(entry.element.parentElement!==parentEntry.tool.children)parentEntry.tool.children.append(entry.element);continue;}
+        if(!entry.childrenWindow){entry.childrenWindow=createMessageWindow({scroller:history,host:entry.tool.children,render:renderMessage,dispose:disposeMessage,requestRender:scheduleFollow,heights});entry.tool.element.addEventListener('toggle',scheduleFollow);}
+        entry.childrenWindow.set(entry.tool.element.open?children.map(child=>({...child.message,viewKey:child.message.id})):[]);
       }else{
         if(!entry.body){entry.body=n('div','message-body');entry.element.append(entry.body);if(message.role==='assistant')entry.reply=createReplyBubble(entry.body);}
         if(message.role==='assistant')entry.reply.update(message,{t,downloadFile,acquireFileImage,onReconnect:()=>run(onRefresh),onSettings});
@@ -97,10 +107,15 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
         }
         entry.text=message.text;if(message.text)copyButton(entry);
       }
-      if(transcript.children[position]!==entry.element)transcript.insertBefore(entry.element,transcript.children[position]||null);position++;
-    }
-    for(const [id,entry]of nodes)if(!keep.has(id)){entry.element.remove();nodes.delete(id);}
-    scheduleFollow();
+      return entry;
+  }
+  const transcriptWindow=createMessageWindow({scroller:history,host:transcript,render:renderMessage,dispose:disposeMessage,requestRender:scheduleFollow,heights});
+  function renderTranscript(){
+    if(!state)return;
+    const rows=projectScriptRuns(projectTaskMessages(state,inputs,record,{offline:unavailable||!!connectionError}),{activeTurn:active()?[...state.tools.values()].at(-1)?.tool.turn_id:null});forest=toolForest(rows);
+    const anchor=readingAnchor(history);
+    transcriptWindow.set(rows.filter(message=>!message.tool?.parent_id||!forest.byID.has(message.tool.turn_id+':'+message.tool.parent_id)).map(message=>({...message,viewKey:message.id})),{anchor:anchor?.id});
+    if(!following)restoreReadingAnchor(history,anchor);
   }
   function renderMenu(force=false){
     if(!dialog.open&&!force)return;
@@ -128,12 +143,13 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     update(next){
       if(disposed)return;
       if(next.record)record=next.record;if(next.state)state=next.state;if(next.inputs)inputs=next.inputs;if(next.approvals)approvals=next.approvals;if(next.unavailable!==undefined)unavailable=next.unavailable;if(next.connectionError!==undefined)connectionError=next.connectionError;
-      renderStage();renderTranscript();updateComposer();renderMenu();
+      pendingFollow ||= following;
+      renderStage();renderTranscript();scheduleFollow();updateComposer();renderMenu();
       const signature=JSON.stringify(record.files||[]);if(fileSignature!==signature){fileSignature=signature;files.replaceChildren();for(const file of record.files||[]){const link=action(file.name||file.path,()=>downloadFile({task:task.id,path:file.path}));files.append(link);}}
     },
     openMenu(){menuMode='actions';menuSignature='';renderMenu(true);dialog.showModal();},
-    restore(){restored=true;following=nearBottom();latest.hidden=following;editor.resize();},
+    restore(){restored=true;pendingFollow=false;following=nearBottom();reading=readingAnchor(history);latest.hidden=following;editor.resize();scheduleFollow();},
     start(){if(!restored)scrollBottom();editor.resize();},
-    dispose(){disposed=true;cancelAnimationFrame(frame);cancelAnimationFrame(resizeFrame);resizeObserver.disconnect();completion.dispose();editor.destroy();goal.removeEventListener('toggle',onToggle);dialog.close();dialog.remove();},
+    dispose(){disposed=true;cancelAnimationFrame(frame);cancelAnimationFrame(resizeFrame);transcriptWindow.close();resizeObserver.disconnect();completion.dispose();editor.destroy();goal.removeEventListener('toggle',onToggle);dialog.close();dialog.remove();},
   };
 }
