@@ -81,7 +81,8 @@ func TestPotLinkDirectChatUsesExistingMailboxAndSeparateUserProjection(t *testin
 	}
 }
 func TestPotLinkDelegationOwnsTaskOnReceiverAndNotifiesOriginalAssistant(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// Allow the complete multi-step workflow to finish under the race detector.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { batchReply(w, "receiver-result") }))
 	defer upstream.Close()

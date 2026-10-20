@@ -71,7 +71,8 @@ func awaitLifecycleResults(t *testing.T, ctx context.Context, s *Service, catalo
 }
 
 func TestTaskArchiveBatchAndContinuedWorkspace(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	// Allow the complete multi-step workflow to finish under the race detector.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	entered, release := make(chan struct{}), make(chan struct{})
 	var batches, workers atomic.Int32

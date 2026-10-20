@@ -157,7 +157,8 @@ func TestAgentContinuesBeyond128Rounds(t *testing.T) {
 		}
 		return response("", m.ToolCall{ID: fmt.Sprintf("probe-%d", index), Name: "probe", Arguments: json.RawMessage(`{}`)}), nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Allow the complete multi-step workflow to finish under the race detector.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	if err := a.Execute(ctx, execution, thread, core.TurnRequest{RequestID: "turn", Text: "finish the work"}, false, func(core.AgentEvent) error { return nil }); err != nil {
 		t.Fatal(err)
