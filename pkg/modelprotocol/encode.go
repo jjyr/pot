@@ -311,6 +311,16 @@ func Encode(r Request) (json.RawMessage, error) {
 			generation["thinkingConfig"] = map[string]any{"thinkingLevel": strings.ToUpper(*r.ReasoningEffort)}
 		}
 	}
+	if r.DisableTools && len(functions) > 0 {
+		switch r.Protocol {
+		case OpenAIChat, OpenAIResponses:
+			body["tool_choice"] = "none"
+		case AnthropicMessages:
+			body["tool_choice"] = map[string]any{"type": "none"}
+		case Gemini:
+			body["toolConfig"] = map[string]any{"functionCallingConfig": map[string]any{"mode": "NONE"}}
+		}
+	}
 	return json.Marshal(body)
 }
 func anthropicImage(image ModelImage) any {

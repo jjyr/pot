@@ -163,3 +163,15 @@ paused executions keep their immutable route and resource snapshots. Fresh turns
 can adopt updated facts for the same saved connection revision; explicit overrides
 survive those updates. Changing a connection default affects future selections,
 not existing assistant intent.
+
+## Idle compaction timing
+
+A saved connection's `model_settings.idle_compact_minutes` sets its positive idle
+maintenance delay in minutes (blank inherits 15). `idle_compact_models` maps exact
+model IDs to positive overrides; missing entries inherit the connection delay.
+Values range from 1 to 525,600 minutes. The provider editor shows the effective
+value and whether it comes from the model, connection or default. Connections
+with the same model name retain independent timing. Changes apply to unstarted
+timers using the original last-model-completion time. Already running requests
+use their captured execution settings. Provider cache TTL is advisory, not a
+scheduling guarantee; the delay never silently subtracts a safety margin.

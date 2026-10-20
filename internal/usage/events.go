@@ -75,7 +75,7 @@ func (l *Ledger) Compaction(ctx context.Context, scope, turn string, e Compactio
 	return storage.Transaction(ctx, l.db, func(tx *sql.Tx) error {
 		switch e.Action {
 		case "start":
-			if e.Reason != "manual" && e.Reason != "threshold" && e.Reason != "overflow" {
+			if e.Reason != "manual" && e.Reason != "threshold" && e.Reason != "overflow" && e.Reason != "idle" {
 				return errors.New("invalid compaction reason")
 			}
 			var owner, oldTurn string

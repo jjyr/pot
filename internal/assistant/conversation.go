@@ -34,6 +34,9 @@ type RunOptions struct {
 	Settle             func(context.Context) error
 }
 type ConversationOptions struct {
+	IdlePolicy  func(context.Context, core.Thread) (IdleCompactionPolicy, error)
+	CompactGate func(context.Context, func() error) error
+
 	Context                                  context.Context
 	Owner, ConversationID, RuntimeID, BootID string
 	Manager                                  *execution.Manager
@@ -71,6 +74,12 @@ func (t *savedTurn) attemptID() string {
 }
 
 func validateConversationRequest(request protocol.SendMessage) error {
+	if isCompactRequest(request.RequestID) {
+		if !core.Identifier(request.RequestID) || !core.Identifier(request.ConversationID) || request.Text != "" || len(request.Attachments) != 0 || len(request.References) != 0 {
+			return errors.New("invalid internal compaction")
+		}
+		return nil
+	}
 	if strings.HasPrefix(request.RequestID, "pot-result-") {
 		if !core.Identifier(request.RequestID) || !core.Identifier(request.ConversationID) || request.Text == "" || len(request.Text) > 4*inbox.MaxBatchBytes {
 			return errors.New("invalid internal result batch")
@@ -102,6 +111,7 @@ type Conversation struct {
 	options                     ConversationOptions
 	ctx                         context.Context
 	stop                        context.CancelFunc
+	idleDone                    chan struct{}
 	done                        chan struct{}
 	input                       chan protocol.SendMessage
 	thread                      *core.Thread
@@ -209,7 +219,7 @@ func OpenConversation(path string, options ConversationOptions) (*Conversation, 
 		return nil, errors.New("thread belongs to another assistant")
 	}
 	ctx, stop := context.WithCancel(options.Context)
-	c := &Conversation{store: store, options: options, ctx: ctx, stop: stop, done: make(chan struct{}), input: make(chan protocol.SendMessage, 1), thread: thread, subscribers: map[chan protocol.Snapshot]struct{}{}, controlChanged: make(chan struct{})}
+	c := &Conversation{store: store, options: options, ctx: ctx, stop: stop, done: make(chan struct{}), idleDone: make(chan struct{}), input: make(chan protocol.SendMessage, 1), thread: thread, subscribers: map[chan protocol.Snapshot]struct{}{}, controlChanged: make(chan struct{})}
 	if c.messages, err = store.Messages(context.Background()); err != nil {
 		stop()
 		return nil, err
@@ -223,6 +233,10 @@ func OpenConversation(path string, options ConversationOptions) (*Conversation, 
 		}
 	}
 	if c.cursor, err = store.Cursor(context.Background()); err != nil {
+		stop()
+		return nil, err
+	}
+	if err = c.finishCompactionMessagesLocked(context.Background(), "interrupted"); err != nil {
 		stop()
 		return nil, err
 	}
@@ -260,12 +274,21 @@ func OpenConversation(path string, options ConversationOptions) (*Conversation, 
 			stop()
 			return nil, err
 		}
-		if turn.Owner != options.Owner || thread == nil || turn.Generation != thread.Generation || turn.UserMessageID == "" || validateConversationRequest(turn.Request) != nil || turn.Request.ConversationID != options.ConversationID {
+		if turn.Owner != options.Owner || thread == nil || turn.Generation != thread.Generation || (turn.UserMessageID == "" && !isCompactRequest(turn.Request.RequestID)) || validateConversationRequest(turn.Request) != nil || turn.Request.ConversationID != options.ConversationID {
 			stop()
 			return nil, errors.New("persisted turn binding mismatch")
 		}
 		c.turn = &turn
-		if turn.State != "waiting" {
+		if isCompactRequest(turn.Request.RequestID) {
+			if err := c.abandonIdleLocked(context.Background()); err != nil {
+				stop()
+				return nil, err
+			}
+			if err := c.startNextUserLocked(context.Background()); err != nil {
+				stop()
+				return nil, err
+			}
+		} else if turn.State != "waiting" {
 			c.blocked = true
 			c.lastError = errors.New("previous execution was interrupted; inspect its receipts before continuing")
 			c.recovery = &turn
@@ -276,6 +299,7 @@ func OpenConversation(path string, options ConversationOptions) (*Conversation, 
 			}
 		}
 	}
+	go c.idleLoop()
 	go func() { defer close(c.done); _ = (Driver{Manager: options.Manager, Services: c}).Serve(ctx, c.input) }()
 	ok = true
 	return c, nil
@@ -330,6 +354,10 @@ func (c *Conversation) snapshotLocked() protocol.Snapshot {
 	state := c.stateLocked()
 	state.Messages = slices.Clone(c.messages)
 	for i := range state.Messages {
+		if state.Messages[i].Compaction != nil {
+			value := *state.Messages[i].Compaction
+			state.Messages[i].Compaction = &value
+		}
 		state.Messages[i].Attachments = slices.Clone(state.Messages[i].Attachments)
 		if state.Messages[i].RequestID != nil {
 			request := *state.Messages[i].RequestID
@@ -446,8 +474,8 @@ func (c *Conversation) appendTurnMetadataLocked(ctx context.Context, metadata ma
 	return nil
 }
 func (c *Conversation) Send(ctx context.Context, request protocol.SendMessage) (protocol.SendMessageAccepted, error) {
-	if strings.HasPrefix(request.RequestID, "pot-result-") {
-		return protocol.SendMessageAccepted{}, errors.New("reserved notification identity")
+	if strings.HasPrefix(request.RequestID, "pot-result-") || isCompactRequest(request.RequestID) {
+		return protocol.SendMessageAccepted{}, errors.New("reserved maintenance identity")
 	}
 	return c.accept(ctx, request, protocol.User)
 }
@@ -706,6 +734,7 @@ func (c *Conversation) Close() error {
 		}
 		c.mu.Unlock()
 		<-c.done
+		<-c.idleDone
 		c.mu.Lock()
 		if c.turn != nil && c.turn.State == "queued" {
 			c.turn = nil
@@ -787,11 +816,21 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 		c.mu.Unlock()
 		return execution.Result{Phase: execution.Cancelled, Err: context.Canceled}
 	}
-	if !c.turn.Resuming && c.turn.State == "queued" && !strings.HasPrefix(request.RequestID, "pot-result-") {
+	if !c.turn.Resuming && c.turn.State == "queued" && !strings.HasPrefix(request.RequestID, "pot-result-") && !isCompactRequest(request.RequestID) {
 		if err := c.aggregateUsersLocked(ctx); err != nil {
 			c.mu.Unlock()
 			return execution.Result{Phase: execution.Failed, Err: err}
 		}
+	}
+	if isCompactRequest(request.RequestID) {
+		if err := c.startIdleLocked(ctx); err != nil {
+			c.mu.Unlock()
+			return execution.Result{Phase: execution.Cancelled, Err: err}
+		}
+	}
+	var compactSchedule json.RawMessage
+	if isCompactRequest(request.RequestID) {
+		compactSchedule = c.idleScheduleLocked(ctx)
 	}
 	inputAttachments := append([]core.Attachment(nil), c.turn.Request.Attachments...)
 	if len(c.turn.Inputs) > 0 {
@@ -802,7 +841,7 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 	}
 	inputText := c.turn.inputText()
 	var modelInputs []core.ConversationInput
-	if !strings.HasPrefix(request.RequestID, "pot-result-") {
+	if !strings.HasPrefix(request.RequestID, "pot-result-") && !isCompactRequest(request.RequestID) {
 		requests, ids := c.turn.Inputs, c.turn.UserMessages
 		if len(requests) == 0 {
 			requests = []protocol.SendMessage{c.turn.Request}
@@ -848,6 +887,20 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 		return c.recordCleanup(ctx, request.RequestID, thread.Generation)
 	}
 	loop := agent.Agent{MessageID: binding.messageID, Services: options.Services, Feedback: binding, Dispatch: options.Dispatch, Cleanup: cleanup, Composer: options.Composer, Tools: options.Tools, PrepareContext: options.PrepareContext, ResolveAttachments: options.ResolveAttachments}
+	if isCompactRequest(request.RequestID) {
+		loop.CompactOnly = true
+		loop.CompactSchedule = compactSchedule
+		c.mu.Lock()
+		var raw string
+		err = c.store.DB().QueryRowContext(runCtx, "SELECT prefix FROM assistant_idle_compaction WHERE singleton=1").Scan(&raw)
+		c.mu.Unlock()
+		if err != nil {
+			return execution.Result{Phase: execution.Failed, Err: err}
+		}
+		if err = json.Unmarshal([]byte(raw), &loop.IdlePrefix); err != nil {
+			return execution.Result{Phase: execution.Failed, Err: err}
+		}
+	}
 	loop.ResolveReferences = binding.resolveReferences
 	err = loop.Execute(runCtx, options.Execution, thread, core.TurnRequest{RequestID: request.RequestID, Text: inputText, Attachments: inputAttachments, Inputs: modelInputs}, resuming, binding.event)
 	phase := execution.Succeeded
@@ -878,6 +931,14 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 	}
 	c.runCancel = nil
 	c.finalizing = false
+	if isCompactRequest(request.RequestID) {
+		c.lastError = nil
+		if err := c.abandonIdleLocked(ctx); err != nil {
+			return err
+		}
+		return c.startNextUserLocked(ctx)
+	}
+
 	if IsWaiting(result.Err) && !c.turn.Cancelling {
 		c.turn.State = "waiting"
 		return c.appendTurnLocked(ctx)

@@ -5,7 +5,7 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
   const messages=snapshot?.messages||[],inputs=new Map(),replyInputs=new Map(),latestReplies=new Map(),firstReplies=new Set(),rows=[];
   let currentInput='';
   for(const message of messages){
-    if((message.role==='user'&&!message.steering)||message.role==='system'){
+    if((message.role==='user'&&!message.steering)||message.role==='system'&&!message.compaction){
       inputs.set(message.id,message);currentInput=message.id;
     }
     if(message.role==='assistant'){const input=message.reply_to||currentInput;replyInputs.set(message.id,input);latestReplies.set(input,message.id);}

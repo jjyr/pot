@@ -565,7 +565,7 @@ func TestCompactionPersistsReducedClassifiedHistory(t *testing.T) {
 			return "", fmt.Errorf("compaction omitted resolved reference content or leaked an internal ID")
 		}
 		if index == 0 {
-			if request.CompactionID == nil || strings.Contains(string(request.Body), `"tools"`) {
+			if request.CompactionID == nil || !strings.Contains(string(request.Body), "pot_compact_request") {
 				return "", fmt.Errorf("invalid summary request")
 			}
 			return response("short factual summary"), nil
@@ -578,7 +578,7 @@ func TestCompactionPersistsReducedClassifiedHistory(t *testing.T) {
 	}}, false, func(core.AgentEvent) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if len(s.compactions) != 2 || s.calls != 2 {
+	if len(s.compactions) != 6 || s.calls != 2 {
 		t.Fatal(len(s.compactions), s.calls)
 	}
 	var result Checkpoint

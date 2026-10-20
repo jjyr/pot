@@ -9,7 +9,6 @@ import (
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/internal/tasks"
-	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/modelprotocol"
@@ -433,26 +432,7 @@ func (f *taskFeedback) Observe(ctx context.Context, o agent.Observation) error {
 }
 
 func (s *Service) taskCompaction(ctx context.Context, owner, turn string, raw json.RawMessage) error {
-	var report struct {
-		ID     string `json:"id"`
-		Action string `json:"action"`
-		Tokens uint64 `json:"tokens"`
-	}
-	if err := core.DecodeJSON(raw, &report); err != nil {
-		return err
-	}
-	if report.Tokens > core.MaxSafeInteger {
-		return errors.New("compaction token count exceeds precision")
-	}
-	event := usage.CompactionEvent{ID: report.ID, Action: report.Action}
-	tokens := int64(report.Tokens)
-	if report.Action == "start" {
-		event.Reason = "threshold"
-		event.TokensBefore = &tokens
-	} else if report.Action == "complete" {
-		event.TokensAfter = &tokens
-	}
-	return s.Usage.Compaction(ctx, owner, turn, event, storage.Now())
+	return s.recordCompaction(ctx, owner, turn, raw)
 }
 func (s *Service) resumeTaskAllowance(ctx context.Context) {
 	rows, err := s.Tasks.DB().QueryContext(ctx, "SELECT assistant_id,id FROM tasks WHERE phase='waiting' AND json_extract(body,'$.info.remote_waiting')=0 AND json_extract(body,'$.stop_mode')=''")

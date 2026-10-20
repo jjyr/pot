@@ -75,6 +75,9 @@ func (f *turnFeedback) InputStreaming(ctx context.Context, id string) error {
 	if id != f.request.RequestID {
 		return errors.New("streaming input binding mismatch")
 	}
+	if isCompactRequest(id) {
+		return nil
+	}
 	found := false
 	for _, m := range c.messages {
 		if c.turn.includes(m.ID) {
@@ -213,6 +216,13 @@ func (f *turnFeedback) Observe(ctx context.Context, observation agent.Observatio
 		c.mu.Unlock()
 		return err
 	}
+	if observation.Kind == "request_finished" && observation.Stage == "agent" && observation.Error == nil {
+		prefix, _ := json.Marshal(observation.RequestPrefix)
+		if _, err := c.store.DB().ExecContext(ctx, "UPDATE assistant_idle_compaction SET request_id=?,finished_at=?,route=?,prefix=? WHERE singleton=1", observation.ID, storage.Now(), idleRoute(f.thread.Config), string(prefix)); err != nil {
+			c.mu.Unlock()
+			return err
+		}
+	}
 	body, err := json.Marshal(observation)
 	if err == nil {
 		_, err = c.store.DB().ExecContext(ctx, "INSERT INTO assistant_observations(turn_id,generation,body) VALUES (?,?,?)", f.request.RequestID, f.thread.Generation, string(body))
@@ -252,6 +262,32 @@ func (f *turnFeedback) event(event core.AgentEvent) error {
 	ctx := context.WithoutCancel(c.ctx)
 	update := event.Update
 	switch update.Type {
+	case "compaction":
+		var report core.CompactionReport
+		if err := core.DecodeJSON(update.Result, &report); err != nil {
+			return err
+		}
+		id := "compact-" + report.ID
+		message := protocol.Message{ID: id, ConversationID: c.options.ConversationID, Role: protocol.System, Status: protocol.Streaming, CreatedAtMS: update.AtMS, Compaction: &protocol.Compaction{ID: report.ID, Reason: report.Reason, State: "running", Before: report.Tokens}}
+		for _, old := range c.messages {
+			if old.ID == id {
+				message = old
+				copy := *old.Compaction
+				message.Compaction = &copy
+				break
+			}
+		}
+		if report.Action != "start" {
+			message.Compaction.State = report.Action
+			message.Compaction.FinishedAtMS = update.AtMS
+			message.Status = protocol.Complete
+			if report.Action == "complete" {
+				message.Compaction.After = report.Tokens
+			} else {
+				message.Status = protocol.Failed
+			}
+		}
+		return c.putMessageLocked(ctx, message, nil)
 	case "message_started":
 		for _, message := range c.messages {
 			if message.ID == c.turn.ReplyMessageID && (message.Status == protocol.Streaming || (c.turn.Resuming || message.Status == protocol.Failed) && message.Text == "") {

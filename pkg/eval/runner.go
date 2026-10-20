@@ -148,16 +148,14 @@ func (s *captureServices) Model(ctx context.Context, r core.ModelRequest) (io.Re
 	return io.NopCloser(bytes.NewReader(body.Bytes())), nil
 }
 func (s *captureServices) Compaction(ctx context.Context, raw json.RawMessage) error {
-	var data struct {
-		ID     string `json:"id"`
-		Action string `json:"action"`
-		Tokens uint64 `json:"tokens"`
-	}
+	var data core.CompactionReport
 	if err := core.DecodeJSON(raw, &data); err != nil {
 		return err
 	}
-	if err := s.feedback.record("observation", agent.Observation{Kind: "compaction_lifecycle", ID: data.ID, Stage: data.Action, Tokens: data.Tokens}); err != nil {
-		return err
+	if data.Action != "evidence" {
+		if err := s.feedback.record("observation", agent.Observation{Kind: "compaction_lifecycle", ID: data.ID, Stage: data.Action, Tokens: data.Tokens}); err != nil {
+			return err
+		}
 	}
 	if s.inner != nil {
 		return s.inner.Compaction(ctx, raw)

@@ -1,3 +1,4 @@
+import {createCompaction} from './compaction.mjs';
 import {taskAgentSource} from './connection-visuals.mjs';
 import {agentFailureKey} from '../state/agent-links.mjs';
 import {node as n,action} from './primitives.mjs';
@@ -94,7 +95,10 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
       let entry=existing;
       if(!entry){const element=n('article',`message task-event role-${message.role}`);entry={element,row:element,text:null};}
       entry.element.dataset.messageId=message.id;
-      if(message.tool){
+      if(message.compaction){
+ if(!entry.compact){entry.compact=createCompaction({locale,request:(path,options)=>client.request(path,options),scope:task.id,owner:scope});entry.element.append(entry.compact.element);}
+ entry.compact.update(message);
+ }else if(message.tool){
         if(!entry.tool){entry.tool=createToolCall({memory:toolMemory,key:JSON.stringify([scope,task.id,message.id]),locale,onDecision,downloadFile,acquireFileImage});entry.element.append(entry.tool.element);}
         const children=forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children||[];
         const approvalDescendant=children.some(function pending(entry){return !!approvalFor(entry.message.tool)||entry.children.some(pending);});

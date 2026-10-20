@@ -1,3 +1,4 @@
+import {downloadCompaction} from './compaction.mjs';
 import {reconcile} from './reconcile.mjs';
 import {node as n,action,table} from './primitives.mjs';
 import {translate} from '../locales/messages.mjs';
@@ -51,7 +52,7 @@ export function createUsageList({root,kind,title,params,owner,request,token,curr
     else if(kind==='models')for(const model of rows){const row=n('div','usage-model-row'),line=n('div','usage-model-title');line.append(n('span','',`${model.agent==='pot'?'Pot':model.agent} · ${model.model}`),usageTooltip(n('span','usage-value',`${compact(model.input+model.output)} tokens`),{title:model.model,rows:usageRows(model,locale)}));row.append(line,n('p','hint',`${tr('Input','输入')} ${compact(model.input)} · ${tr('Cached input','缓存输入')} ${compact(model.cache)} · ${tr('Output','输出')} ${compact(model.output)}`));fragment.append(row);}
     else if(kind==='requests')fragment.append(table([tr('Time','时间'),tr('Model','模型'),tr('Input','输入'),tr('Cached input','缓存输入'),tr('Output','输出'),tr('State','状态')],rows.map(record=>[record.label,record.model,usageTooltip(n('span','usage-value',exact(record.input)),{title:record.label,rows:usageRows(record,locale)}),record.input==null?'—':exact(record.cache),exact(record.output),record.state])));
     else if(kind==='tools')fragment.append(table([tr('Tool','工具'),tr('Calls','调用次数'),tr('Failed','失败'),tr('Duration (ms)','耗时（毫秒）')],rows.map(tool=>[tool.name,exact(tool.calls),exact(tool.failed),exact(tool.duration_ms)])));
-    else fragment.append(table([tr('Time','时间'),tr('State','状态'),tr('Before','之前'),tr('After','之后')],rows.map(record=>[record.label,record.state,exact(record.tokens_before),exact(record.tokens_after)])));
+    else fragment.append(table([tr('Time','时间'),tr('State','状态'),tr('Before','之前'),tr('After','之后'),translate(locale,'compact.download')],rows.map(record=>[record.label,record.state,exact(record.tokens_before),exact(record.tokens_after),action(translate(locale,'compact.download'),async()=>{try{await downloadCompaction(request,params.scope,record.id,owner);}catch{status.replaceChildren(n('p','inline-error',translate(locale,'compact.downloadFailed')));}})])));
     if(offset||value.next_offset!=null){const footer=n('div','usage-pagination');footer.append(n('span','hint',`${offset+1}–${offset+rows.length}`),action(tr('Previous page','上一页'),()=>load(Math.max(0,offset-20)),{disabled:!offset||stale}),action(tr('Next page','下一页'),()=>load(value.next_offset),{disabled:value.next_offset==null||stale}));fragment.append(footer);}
     reconcile(content,fragment);status.replaceChildren();if(stale)status.append(n('p','inline-error',tr('Cached data · unavailable','缓存数据 · 当前不可用')),action(tr('Retry','重试'),()=>load(offset)));
   }

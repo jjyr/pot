@@ -144,6 +144,8 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	}
 	if method == "GET" {
 		switch path {
+		case "/api/v1/usage/compaction-record":
+			return s.CompactionRecord(ctx, owner, u.Query().Get("scope"), u.Query().Get("id"))
 		case "/api/v1/messages/receipt":
 			c, err := conversation()
 			if err != nil {

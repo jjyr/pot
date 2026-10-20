@@ -1,3 +1,4 @@
+import {createCompaction} from './compaction.mjs';
 import {projectLinkedAssistants} from '../state/agent-links.mjs';
 import {agentSource} from './connection-visuals.mjs';
 import {createUpdates} from './updates.mjs';
@@ -717,7 +718,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const {row, bubble} = record;
     row.dataset.messageId=message.id;row.dataset.sequence=message.sequence||'';
     bubble.dataset.scrollAnchor=`message:${message.viewKey}`;
-    if(message.role==='tool'&&message.tool){
+    if(message.compaction){
+ if(!record.compact){const scope=client.scope();record.compact=createCompaction({locale:()=>locale,request:(path,options)=>client.request(path,options),scope:scope.owner,owner:scope});bubble.append(record.compact.element);}
+ record.compact.update(message);
+ }else if(message.role==='tool'&&message.tool){
       const scope=client.scope?.()||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
       if(!record.tool){record.tool=createToolCall({memory:toolMemory,key,locale:()=>locale,onDecision:(approval,action)=>pages.decideApproval(approval,action),...markdownFiles(scope)});bubble.append(record.tool.element);}
       record.tool.update(message,{offline:connection==='offline'||disconnected,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});

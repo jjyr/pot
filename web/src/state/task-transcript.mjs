@@ -7,6 +7,7 @@ export function appendTaskEvents(state,events){
     const update=row.event?.update;if(!update||typeof update.type!=='string')throw Error('Invalid Task event');
     state.cursor=row.sequence;
     switch(update.type){
+      case'compaction':{const report=typeof update.result==='string'?JSON.parse(update.result):update.result;if(!report)break;let message=state.messages.find(value=>value.id==='compact-'+report.id);if(!message){message={id:'compact-'+report.id,sequence:row.sequence,role:'system',text:'',created_at_ms:update.at_ms,compaction:{id:report.id,reason:report.reason,before:report.tokens||0}};state.messages.push(message);}Object.assign(message.compaction,{state:report.action==='start'?'running':report.action,...(report.action==='complete'?{after:report.tokens}:{}),...(report.action!=='start'?{finished_at_ms:update.at_ms}:{})});break;}
       case'input_applied':if(!state.inputs.has(update.id))state.inputs.set(update.id,row.sequence);break;
       case'message_started':state.active={id:`message-${row.sequence}`,sequence:row.sequence,role:'assistant',text:'',phase:'thinking'};state.messages.push(state.active);break;
       case'text_delta':if(!state.active){state.active={id:`message-${row.sequence}`,sequence:row.sequence,role:'assistant',text:''};state.messages.push(state.active);}state.active.text+=update.text||'';state.active.phase='streaming';break;
@@ -25,7 +26,7 @@ export function projectTaskMessages(state,inputs,record,{offline=false}={}){
   const phase=record.info?.phase,active=['queued','running','waiting','waiting_approval'].includes(phase),rows=[];
   for(const message of state.messages){
     if(message.role==='assistant'&&!message.text&&message!==state.active)continue;
-    if(message.role==='system'){const previous=rows.at(-1);if(previous?.role==='assistant'&&!previous.error){previous.phase='failed';previous.error=message.text;}else rows.push({...message,role:'assistant',text:'',phase:'failed',error:message.text});continue;}
+    if(message.role==='system'&&!message.compaction){const previous=rows.at(-1);if(previous?.role==='assistant'&&!previous.error){previous.phase='failed';previous.error=message.text;}else rows.push({...message,role:'assistant',text:'',phase:'failed',error:message.text});continue;}
     let projected=message.phase;
     if(message===state.active){if(!active)projected=phase==='complete'?'complete':'stopped';else if(offline)projected='reconnecting';else if(record.info?.paused)projected='paused';else if(phase==='waiting')projected='waiting';}
     rows.push({...message,phase:projected});
