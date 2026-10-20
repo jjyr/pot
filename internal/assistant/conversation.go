@@ -969,3 +969,18 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 	}
 	return c.startNextUserLocked(ctx)
 }
+
+// Retire fences new inputs atomically with an idle owner's deletion commit.
+func (c *Conversation) Retire(commit func() error) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.turn != nil || c.finalizing {
+		return protocol.APIError{Code: "assistant_busy"}
+	}
+	if err := commit(); err != nil {
+		return err
+	}
+	c.closed = true
+	c.stop()
+	return nil
+}

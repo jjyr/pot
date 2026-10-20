@@ -249,6 +249,15 @@ without changing the shared Provider or other assistants. Model parameters and
 assistant instructions start collapsed; expanding instructions reveals AGENTS.md.
 Nested Provider setup preserves the assistant draft and returns to its caller.
 Create and start chatting saves the assistant and opens its conversation.
+Existing assistant settings end with a collapsed **More actions** disclosure
+containing a red **Delete assistant** button. A confirmation names the assistant
+and explains that deletion removes it from the directory, stops its schedules
+and prevents reopening its conversations. Cancel and Escape preserve the editor
+draft. Ongoing replies or Tasks must end before deletion. Successful deletion
+returns to Chat; deleting the last assistant offers explicit creation and never
+restarts first-use bootstrap. Historical records remain private on disk and
+assistant identities and creation receipts are never reused.
+
 Assistant settings contain no task routing controls: the assistant chooses task
 models autonomously, guided by its instructions.
 

@@ -62,3 +62,37 @@ func TestResourceToolsSnapshotActualFilesAndFenceOwnership(t *testing.T) {
 		t.Fatal("worker imported another task")
 	}
 }
+
+func TestDeletedAssistantCannotReadOrRegisterResources(t *testing.T) {
+	s, _ := configurationService(t)
+	ctx := context.Background()
+	a, err := s.CreateAssistant(ctx, CreateAssistant{RequestID: "resource-owner", Name: "Resources"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, _ := s.ExecutionWorkspace(a.ID)
+	if err := os.WriteFile(filepath.Join(workspace, "report.txt"), []byte("private"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	args := json.RawMessage(`{"path":"report.txt"}`)
+	raw, err := s.registerResource(ctx, a.ID, a.ID, "original", false, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resource resources.Resource
+	if err := json.Unmarshal(raw, &resource); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteAssistant(ctx, a.ID, a.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Resources.Get(ctx, a.ID, resource.ID); err == nil {
+		t.Fatal("retired owner read resource metadata")
+	}
+	if _, err := s.Resources.Chunk(ctx, a.ID, resource.ID, "", 0); err == nil {
+		t.Fatal("retired owner read resource bytes")
+	}
+	if _, err := s.registerResource(ctx, a.ID, a.ID, "original", false, args); err == nil {
+		t.Fatal("registration receipt revived retired owner")
+	}
+}

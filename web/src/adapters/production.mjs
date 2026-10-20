@@ -40,7 +40,7 @@ export function mutationTopics(path,body,value) {
   if(path.startsWith('/api/v1/agent-links'))return ['agent-links'];
   if(path==='/api/v1/runtime/control'&&body?.action==='invitation_status')return null;
   if(path.startsWith('/api/v1/providers'))return ['providers','settings','assistants','conversation','usage'];
-  if(path.startsWith('/api/v1/assistants'))return ['assistants','conversation'];
+  if(path.startsWith('/api/v1/assistants'))return ['assistants','conversation','schedules'];
   if(path.startsWith('/api/v1/integrations'))return ['integrations'];
   if(path.startsWith('/api/v1/permissions'))return ['permissions','machines','assistants','tasks'];
   if(path.startsWith('/api/v1/tasks'))return ['tasks','runner','usage'];

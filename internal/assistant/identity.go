@@ -72,7 +72,7 @@ func (r *Registry) UpdateProfileOnce(ctx context.Context, owner string, patch Pr
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if err = tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id,COALESCE((SELECT avatar FROM assistant_profiles WHERE assistant_id=assistant_definitions.id),'') FROM assistant_definitions WHERE id=?", owner).Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID, &definition.Avatar); err != nil {
+		if err = tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id,COALESCE((SELECT avatar FROM assistant_profiles WHERE assistant_id=assistant_definitions.id),'') FROM assistant_definitions WHERE id=? AND deleted=0", owner).Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID, &definition.Avatar); err != nil {
 			return err
 		}
 		if definition.Revision >= core.MaxSafeInteger {

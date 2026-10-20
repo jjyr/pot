@@ -40,6 +40,8 @@ call returns its original receipt even if the source has changed or disappeared.
 Changed inputs under the same receipt identity fail. Resource reads require the
 owning assistant and authenticated channel; IDs are references, not credentials.
 Referenced originals are retained independently of Task workspace lifetime.
+Retiring an assistant makes its resource metadata, originals and registration
+receipts inaccessible, while retaining private history on disk.
 Storage is bounded to 1 GiB and 4096 resources; exhaustion rejects registration
 without deleting earlier deliveries. Files/resources are at most 64 MiB; HTML
 bundles are at most 16 MiB and 64 files. Preview and browser codec limits can be

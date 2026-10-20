@@ -38,9 +38,10 @@ type File = core.ResourceFile
 type Resource = core.Resource
 type Presentation = core.ResourcePresentation
 type Store struct {
-	db   *sql.DB
-	root string
-	mu   sync.Mutex
+	ValidateOwner func(context.Context, string) error
+	db            *sql.DB
+	root          string
+	mu            sync.Mutex
 }
 
 func Open(root, database string) (*Store, error) {
@@ -55,6 +56,11 @@ func Open(root, database string) (*Store, error) {
 }
 func (s *Store) Close() error { return s.db.Close() }
 func (s *Store) Receipt(ctx context.Context, owner, request, hash string) (*Resource, error) {
+	if s.ValidateOwner != nil {
+		if err := s.ValidateOwner(ctx, owner); err != nil {
+			return nil, err
+		}
+	}
 	var raw, storedOwner, storedHash string
 	err := s.db.QueryRowContext(ctx, "SELECT owner,input_hash,metadata FROM display_resources WHERE request_id=?", request).Scan(&storedOwner, &storedHash, &raw)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -74,6 +80,11 @@ func (s *Store) Get(ctx context.Context, owner, id string) (Resource, error) {
 	var resource Resource
 	if !core.Identifier(owner) || !core.Identifier(id) {
 		return resource, errors.New("invalid resource identity")
+	}
+	if s.ValidateOwner != nil {
+		if err := s.ValidateOwner(ctx, owner); err != nil {
+			return resource, err
+		}
 	}
 	var raw string
 	err := s.db.QueryRowContext(ctx, "SELECT metadata FROM display_resources WHERE id=? AND owner=?", id, owner).Scan(&raw)
