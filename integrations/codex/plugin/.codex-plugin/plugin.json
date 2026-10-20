@@ -1,6 +1,12 @@
 {
   "name": "pot",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Connect Pot and Codex Agents through a local connection page and share persistent Codex assistants for chat and delegated tasks.",
-  "mcpServers": "./.mcp.json"
+  "mcpServers": "./.mcp.json",
+  "skills": "./skills/",
+  "extensions": {
+    "com.openai": {
+      "onboardingSkill": "./skills/pot-setup/SKILL.md"
+    }
+  }
 }

@@ -82,7 +82,7 @@ launches or new delegations. SQLite schemas and upgrades belong to
 ## Transport and presentation
 
 [Peer transport](peer-protocol.md) uses stable Ed25519 identities and signed TCP
-sessions. Service admission separately verifies the saved Agent Link. Private
+sessions. Service admission separately verifies the saved Agent Link. Unicast
 `tcp://host:port` endpoints authenticate content; VPN or Tailscale supplies
 confidentiality. The listener exposes identity and collaboration services.
 

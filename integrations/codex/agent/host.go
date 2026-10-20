@@ -29,7 +29,7 @@ import (
 	webassets "github.com/jjyr/pot/web"
 )
 
-const hostVersion = "4"
+const hostVersion = "5"
 const hostListen = "127.0.0.1:8792"
 const hostPeerListen = "127.0.0.1:8793"
 
@@ -48,6 +48,13 @@ type agentHost struct {
 	loopbackPeer, directPeer *linkhost.PeerListener
 	networkError             string
 	peerCtx                  context.Context
+	additionalPeers          map[string]*linkhost.PeerListener
+	discoveryMu              sync.Mutex
+	discoveryAt              time.Time
+	discovered               []hostAddress
+	discover                 func(context.Context) []hostAddress
+	browserMu                sync.Mutex
+	browserTokens            map[string]time.Time
 }
 
 func openAgentHost(root string) (*agentHost, error) {
@@ -134,6 +141,9 @@ func (h *agentHost) close() {
 	if h.directPeer != nil {
 		h.directPeer.Close()
 	}
+	for _, listener := range h.additionalPeers {
+		listener.Close()
+	}
 	h.accessMu.Unlock()
 	clear(h.peerKey)
 	if h.tasks != nil {
@@ -164,12 +174,16 @@ func (h *agentHost) handler() http.Handler {
 			assets.ServeHTTP(w, r)
 			return
 		}
-		if !hostOwner(r, h.token) {
+		if !hostOwner(r, h.token) && !h.browserOwner(r) {
 			fail(w, 401, "authentication_required")
 			return
 		}
 		if origin := r.Header.Get("Origin"); origin != "" && origin != "http://"+hostListen {
 			fail(w, 403, "cross_origin_denied")
+			return
+		}
+		if r.URL.Path == "/api/v1/agent-host/browser" && r.Method == "POST" {
+			writeJSON(w, 200, h.browserPage())
 			return
 		}
 		if r.URL.Path == "/api/v1/agent-host/health" {
@@ -262,7 +276,7 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 		if handleError(w, err) {
 			return
 		}
-		writeJSON(w, 200, map[string]any{"items": view, "directory": directory, "self_assistants": directory.Assistants, "self": map[string]any{"id": "codex", "node_id": h.identity.Address.NodeID, "kind": "codex", "name": "Codex", "address": endpoint, "endpoint": endpoint, "status": status, "reason_code": networkError}, "network": map[string]any{"listen": hostPeerListen, "endpoint": endpoint, "mode": "address", "status": status, "reason_code": networkError}, "identity": h.identity, "peer_identity": h.peerIdentity})
+		writeJSON(w, 200, map[string]any{"items": view, "directory": directory, "self_assistants": directory.Assistants, "addresses": h.addresses(r.Context()), "self": map[string]any{"id": "codex", "node_id": h.identity.Address.NodeID, "kind": "codex", "name": "Codex", "address": endpoint, "endpoint": endpoint, "status": status, "reason_code": networkError}, "network": map[string]any{"listen": hostPeerListen, "endpoint": endpoint, "mode": "address", "status": status, "reason_code": networkError}, "identity": h.identity, "peer_identity": h.peerIdentity})
 		return
 	}
 	if r.Method != "POST" {
@@ -270,6 +284,18 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/api/v1/agent-links/invitation" {
+		var input struct {
+			Endpoint string `json:"endpoint"`
+		}
+		if !body(w, r, &input) {
+			return
+		}
+		var err error
+		endpoint, err = h.selectAddress(r.Context(), input.Endpoint)
+		if err != nil {
+			fail(w, 400, err.Error())
+			return
+		}
 		inv, err := h.links.Invite(r.Context(), "codex", endpoint)
 		if err != nil {
 			fail(w, 400, err.Error())

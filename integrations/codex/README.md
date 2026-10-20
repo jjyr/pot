@@ -38,15 +38,38 @@ prebuilt binary; `--home /absolute/temporary/home --source-only` tests installat
 in isolation. The plugin starts its local Agent Link host automatically. It does
 not start model work merely by being enabled or connected.
 
-Open the existing connections page with `pot_open_connections`, or:
+Run the plugin's setup entry (`pot-setup`) after installation. It calls
+`pot_open_connections` and passes the returned temporary URL directly to Codex's
+in-app browser through `open_in_codex`. The tool prepares a page; it does not
+launch the system browser. The URL grants connection-management access for 30
+minutes and must not be printed or shared. It never contains the durable owner
+credential. Reopen setup if the page expires.
+
+For a system-browser fallback outside Codex:
 
 ```sh
 ~/.codex/plugins/pot/bin/pot-codex-agent connections \
   --root ~/.config/pot-codex/agent
 ```
 
+The connection page discovers loopback, active public and private interface
+addresses (IPv4 and IPv6), and Tailscale addresses. Tailscale names appear first,
+followed by Tailscale IPs, public IPs, other private IPs, loopback and unclassified
+saved addresses. Each row has its own **Copy
+connection address** action. Choose loopback for Pot on the same computer, a LAN
+address for the same private network, a public address for other networks, or
+Tailscale for the same tailnet. Discovery
+only reads network state. Copying enables the selected signed peer listener and
+creates an invitation bound to that exact endpoint. A Tailscale row without an
+existing mapping explains that copying also enables its private TCP forwarding;
+unrelated Serve mappings are preserved. Selected addresses are persisted and
+restored independently on restart. An unavailable address does not prevent the
+local page or other addresses from working. A firewall or remote network can
+still prevent access; discovery does not prove remote reachability.
+
 Copy the connection segment on one side and paste it into **Add Agent** on the
-other side. The node directory supplies available assistants. An explicitly
+other side. Only one side needs a reachable address; the same connection carries
+traffic in both directions. The node directory supplies available assistants. An explicitly
 selected assistant handles the work; otherwise the receiver uses its persisted
 default, initially its first assistant. An accepted task keeps its original
 assistant even when the default subsequently changes.
@@ -67,13 +90,13 @@ using the same command with the original workspace and mode. These are local
 owner operations, never remote task arguments.
 
 The owner HTTP listener is bound to `127.0.0.1:8792`; signed peer TCP uses
-`127.0.0.1:8793`. Configure a reachable private or Tailscale endpoint through the
-existing connection settings. One reachable endpoint permits bidirectional
-communication. The TCP endpoint never exposes the owner HTTP API. Identity keys
+`127.0.0.1:8793`. Choose and copy a discovered address directly from the connection
+page; no separate Configure access step is needed. One reachable endpoint permits
+bidirectional communication. The TCP endpoint never exposes the owner HTTP API. Identity keys
 and owner credentials are encrypted; the host root must be owner-only.
 
 The detached host keeps receiving work after an MCP chat closes. Subsequent
-plugin processes verify and reuse that host. Version 4 requires stopping an old
+plugin processes verify and reuse that host. Version 5 requires stopping an old
 message host before upgrading. Stable node identity, message IDs and history
 survive the database migration. The old independent Bridge pairing, HTTP/SSE
 channel, `codex_*` tools and Pot-side Codex integration plugin have been removed.

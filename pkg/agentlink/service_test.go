@@ -502,6 +502,7 @@ DROP TABLE agent_link_node_settings;
 DROP TABLE agent_link_delegations;
 DROP TABLE agent_link_received_tasks;
 DROP TABLE agent_link_chat;
+DROP TABLE codex_agent_endpoints;
 DROP TABLE display_resources;
 DROP TABLE provider_metadata;
 DROP TABLE extension_settings;

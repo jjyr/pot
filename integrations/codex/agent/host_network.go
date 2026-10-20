@@ -14,6 +14,12 @@ import (
 // Owner configuration remains on the separate fixed loopback port.
 func (h *agentHost) peerServer() *peer.Server { return h.peerRegistry.Server() }
 func (h *agentHost) startPeerNetwork(ctx context.Context) error {
+	if err := h.startDefaultPeerNetwork(ctx); err != nil {
+		return err
+	}
+	return h.restoreAddresses(ctx)
+}
+func (h *agentHost) startDefaultPeerNetwork(ctx context.Context) error {
 	h.accessMu.Lock()
 	defer h.accessMu.Unlock()
 	h.peerCtx = ctx
@@ -26,18 +32,17 @@ func (h *agentHost) startPeerNetwork(ctx context.Context) error {
 	if err = h.db.QueryRowContext(ctx, "SELECT endpoint FROM codex_agent_host WHERE singleton=1").Scan(&endpoint); err != nil {
 		return err
 	}
-	if endpoint == "" {
-		return nil
+	if endpoint != "" {
+		startup, cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+		candidate, restoreErr := h.preparePeer(startup, endpoint)
+		cancel()
+		if restoreErr != nil {
+			h.networkError = agentlink.ErrUnavailable.Error()
+		} else {
+			h.directPeer = candidate
+			h.networkError = ""
+		}
 	}
-	startup, cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
-	defer cancel()
-	candidate, err := h.preparePeer(startup, endpoint)
-	if err != nil {
-		h.networkError = agentlink.ErrUnavailable.Error()
-		return nil
-	}
-	h.directPeer = candidate
-	h.networkError = ""
 	return nil
 }
 

@@ -65,6 +65,14 @@ func TestAgentHostMCPDirectoryWithoutCompetingInboxReader(t *testing.T) {
 	if !strings.Contains(string(raw), "default_assistant_id") || strings.Contains(string(raw), h.token) {
 		t.Fatal("bad directory result", string(raw))
 	}
+	page, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "pot_open_connections", Arguments: map[string]any{}})
+	if err != nil || page.IsError {
+		t.Fatal(page, err)
+	}
+	raw, _ = json.Marshal(page)
+	if !strings.Contains(string(raw), "/codex-connections.html#") || strings.Contains(string(raw), h.token) {
+		t.Fatal("browser handoff exposed owner credential or omitted page")
+	}
 }
 
 func TestAgentHostDaemonProcess(t *testing.T) {
@@ -442,7 +450,7 @@ func TestAgentHostConfigurePinsTCPIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stranger.Close()
-	for _, invalid := range []string{"tcp://" + stranger.Addr(), "http://127.0.0.1:8793", "https://agent.example", "tcp://8.8.8.8:8793", "tcp://user:password@127.0.0.1:8793", "tcp://127.0.0.1:8793?token=secret"} {
+	for _, invalid := range []string{"tcp://" + stranger.Addr(), "http://127.0.0.1:8793", "https://agent.example", "tcp://0.0.0.0:8793", "tcp://user:password@127.0.0.1:8793", "tcp://127.0.0.1:8793?token=secret"} {
 		if status := configure(invalid); status != 400 {
 			t.Fatal("unverified peer accepted", status)
 		}

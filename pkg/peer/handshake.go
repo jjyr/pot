@@ -79,7 +79,7 @@ func validHello(h hello) bool {
 	return h.Version == 2 && h.Identity.Validate() == nil && validNonce(h.Nonce) && len(h.Service) > 0 && len(h.Service) <= 128 && len(h.Auth) <= 32*1024 && json.Valid(h.Auth) && (h.Expected == nil || h.Expected.Validate() == nil)
 }
 
-// Dial authenticates a peer over private TCP. A nil Expected is suitable only
+// Dial authenticates a peer over direct TCP. A nil Expected is suitable only
 // for untrusted identity discovery; service admission must use a trusted pin.
 // It never retries a request or falls back to another protocol.
 func Dial(ctx context.Context, endpoint string, options DialOptions) (*Session, error) {

@@ -204,3 +204,8 @@ fresh node-wide admission, preserving mailbox history and keys.
 sender bindings. `tasks/0010_codex_link` stores persistent Codex assistant sessions
 and accepted jobs. `tasks/0011_agent_link_task_targets` adds optional target/source
 metadata without changing existing task/run identities or effect receipts.
+
+`control/0019_codex_addresses` adds the independent set of Codex peer endpoints
+enabled by copying a discovered address. It preserves the existing configured
+endpoint, host identity, encrypted secret references and connection history.
+Listener restoration happens after migration and never replays model work.

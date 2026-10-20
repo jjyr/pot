@@ -10,20 +10,18 @@ import (
 	"strings"
 )
 
-var tailnetRange = netip.MustParsePrefix("100.64.0.0/10")
-
-func privateAddress(ip net.IP) bool {
+func usableAddress(ip net.IP) bool {
 	a, ok := netip.AddrFromSlice(ip)
 	if !ok {
 		return false
 	}
 	a = a.Unmap()
-	return a.IsLoopback() || a.IsPrivate() || tailnetRange.Contains(a)
+	return a.IsLoopback() || a.IsGlobalUnicast() && !a.IsLinkLocalUnicast()
 }
 
-// ValidateEndpoint only accepts private, direct TCP endpoints. DNS must resolve
-// entirely to private addresses. Dial resolves again and dials a validated IP;
-// neither proxy environments nor DNS rebinding can redirect credentials publicly.
+// ValidateEndpoint accepts direct unicast TCP endpoints, including public IPs.
+// Dial resolves again and dials a validated numeric address. The signed handshake
+// checks the invitation or saved identity pin independently of DNS and IP range.
 func ValidateEndpoint(ctx context.Context, raw string) (string, error) {
 	u, _, err := resolveEndpoint(ctx, raw)
 	if err != nil {
@@ -34,7 +32,7 @@ func ValidateEndpoint(ctx context.Context, raw string) (string, error) {
 func resolveEndpoint(ctx context.Context, raw string) (*url.URL, []net.IPAddr, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.Scheme != "tcp" || u.Host == "" || u.User != nil || u.Path != "" || u.RawPath != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
-		return nil, nil, fmt.Errorf("invalid private TCP endpoint")
+		return nil, nil, fmt.Errorf("invalid TCP endpoint")
 	}
 	port, err := strconv.Atoi(u.Port())
 	if err != nil || port < 1 || port > 65535 || u.Hostname() == "" || strings.Contains(u.Hostname(), "%") {
@@ -45,8 +43,8 @@ func resolveEndpoint(ctx context.Context, raw string) (*url.URL, []net.IPAddr, e
 		return nil, nil, fmt.Errorf("TCP endpoint resolution failed")
 	}
 	for _, addr := range addresses {
-		if !privateAddress(addr.IP) {
-			return nil, nil, fmt.Errorf("TCP endpoint requires a private network")
+		if !usableAddress(addr.IP) {
+			return nil, nil, fmt.Errorf("TCP endpoint requires a unicast address")
 		}
 	}
 	u.Host = net.JoinHostPort(strings.ToLower(u.Hostname()), strconv.Itoa(port))
