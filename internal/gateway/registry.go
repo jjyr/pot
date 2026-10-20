@@ -69,7 +69,7 @@ func (r *Registry) Save(ctx context.Context, p Provider, key []byte) error {
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	if err == nil && existing != string(data) {
+	if err == nil && !sameProviderMetadata(existing, data) {
 		return errors.New("provider reference already contains another configuration")
 	}
 	if err = r.secrets.Put(ctx, p.SecretRef, key); err != nil {
@@ -79,7 +79,7 @@ func (r *Registry) Save(ctx context.Context, p Provider, key []byte) error {
 		var saved string
 		err := tx.QueryRowContext(ctx, "SELECT metadata FROM providers WHERE id=?", p.ID).Scan(&saved)
 		if err == nil {
-			if saved != string(data) {
+			if !sameProviderMetadata(saved, data) {
 				return errors.New("provider reference already contains another configuration")
 			}
 			return nil
@@ -102,4 +102,42 @@ func (r *Registry) Credential(ctx context.Context, p Provider) ([]byte, error) {
 		return nil, errors.New("provider route differs from its registered configuration")
 	}
 	return r.secrets.Get(ctx, saved.SecretRef)
+}
+
+// ReadMetadata returns a bounded, validated-by-the-caller snapshot for one
+// immutable route and current contribution digest. It never contains credentials.
+func (r *Registry) ReadMetadata(ctx context.Context, route, method, digest string) (json.RawMessage, error) {
+	var raw string
+	err := r.db.QueryRowContext(ctx, "SELECT payload FROM provider_metadata WHERE route_id=? AND method=? AND source_digest=?", route, method, digest).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > 3*1024*1024 {
+		return nil, errors.New("provider metadata exceeds limit")
+	}
+	return json.RawMessage(raw), nil
+}
+func (r *Registry) SaveMetadata(ctx context.Context, route, method, digest string, payload json.RawMessage) error {
+	if len(payload) > 3*1024*1024 || !json.Valid(payload) {
+		return errors.New("invalid provider metadata")
+	}
+	_, err := r.db.ExecContext(ctx, "INSERT INTO provider_metadata(route_id,method,source_digest,payload) VALUES(?,?,?,?) ON CONFLICT(route_id,method) DO UPDATE SET source_digest=excluded.source_digest,payload=excluded.payload", route, method, digest, string(payload))
+	return err
+}
+
+func (r *Registry) ClearMetadata(ctx context.Context, route, method string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM provider_metadata WHERE route_id=? AND method=?", route, method)
+	return err
+}
+
+func sameProviderMetadata(saved string, current []byte) bool {
+	var value Provider
+	if json.Unmarshal([]byte(saved), &value) != nil {
+		return false
+	}
+	canonical, err := json.Marshal(value)
+	return err == nil && string(canonical) == string(current)
 }

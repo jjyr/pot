@@ -18,24 +18,26 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/plugin"
 	"github.com/jjyr/pot/pkg/storage"
+	standardproviders "github.com/jjyr/pot/plugins/standard-model-providers"
 )
 
 type Extension struct {
-	ID           string   `json:"id"`
-	Kind         string   `json:"kind"`
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	Source       string   `json:"source"`
-	Location     string   `json:"location"`
-	Version      string   `json:"version,omitempty"`
-	Icon         string   `json:"icon,omitempty"`
-	Enabled      bool     `json:"enabled"`
-	Revision     int64    `json:"revision"`
-	Origin       string   `json:"origin,omitempty"`
-	Tools        []string `json:"tools,omitempty"`
-	Requirements []string `json:"requirements,omitempty"`
-	Background   bool     `json:"background,omitempty"`
-	Manual       bool     `json:"manual,omitempty"`
+	ID             string   `json:"id"`
+	Kind           string   `json:"kind"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description"`
+	Source         string   `json:"source"`
+	Location       string   `json:"location"`
+	Version        string   `json:"version,omitempty"`
+	Icon           string   `json:"icon,omitempty"`
+	Enabled        bool     `json:"enabled"`
+	Revision       int64    `json:"revision"`
+	Origin         string   `json:"origin,omitempty"`
+	Tools          []string `json:"tools,omitempty"`
+	Requirements   []string `json:"requirements,omitempty"`
+	Background     bool     `json:"background,omitempty"`
+	ModelProviders bool     `json:"model_providers,omitempty"`
+	Manual         bool     `json:"manual,omitempty"`
 }
 type ExtensionCommand struct {
 	Action   string `json:"action"`
@@ -83,6 +85,16 @@ func discoverPlugins(roots ...string) ([]plugin.Package, error) {
 			result = append(result, p)
 		}
 	}
+	if !seen["standard-model-providers"] {
+		var manifest core.PluginManifest
+		if err := core.DecodeJSON(standardproviders.Manifest, &manifest); err != nil {
+			return nil, err
+		}
+		if err := manifest.Validate(); err != nil {
+			return nil, err
+		}
+		result = append(result, plugin.Package{Root: "builtin:standard-model-providers", Manifest: manifest})
+	}
 	return result, nil
 }
 func (s *Service) installedPlugins() ([]plugin.Package, error) {
@@ -115,6 +127,9 @@ func (s *Service) extensionCatalog(ctx context.Context, owner string) ([]Extensi
 			}
 		}
 		item.Background = p.Manifest.Contributes.Background != nil
+		if p.Manifest.Contributes.ModelProviders != nil {
+			item.ModelProviders = true
+		}
 		entries = append(entries, item)
 	}
 	// Main's actual workspace supplies project context. Global management works
@@ -404,6 +419,14 @@ func (s *Service) installExtension(ctx context.Context, c ExtensionCommand, entr
 					return nil, err
 				}
 				files = append(files, p.Manifest.Contributes.Background.Files...)
+			}
+			if p.Manifest.Contributes.ModelProviders != nil {
+				if _, err = p.ModelProviderIdentity(); err != nil {
+					return nil, err
+				}
+				if adapter := p.Manifest.Contributes.ModelProviders.Adapter; adapter != nil {
+					files = append(files, adapter.Files...)
+				}
 			}
 			if name, _, iconErr := p.IconAsset(); iconErr == nil {
 				files = append(files, name)

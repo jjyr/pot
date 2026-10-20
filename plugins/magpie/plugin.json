@@ -1,0 +1,37 @@
+{
+  "schema_version": 2,
+  "id": "magpie",
+  "version": "0.1.0",
+  "contributes": {
+    "model_providers": {
+      "providers": [
+        {
+          "id": "magpie",
+          "name": "Magpie",
+          "endpoint": "http://127.0.0.1:3425",
+          "protocol": "openai_responses",
+          "capabilities": {
+            "catalog": "plugin",
+            "allowances": true
+          },
+          "protocols": [
+            "openai_responses",
+            "openai_chat",
+            "anthropic_messages",
+            "gemini"
+          ],
+          "default_credential": "magpie-pot"
+        }
+      ],
+      "adapter": {
+        "runtime": "node",
+        "execution": "control",
+        "entrypoint": "provider.mjs",
+        "files": [
+          "provider.mjs"
+        ],
+        "credential_env": "MAGPIE_API_KEY"
+      }
+    }
+  }
+}

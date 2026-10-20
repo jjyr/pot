@@ -204,3 +204,45 @@ only while still following the same saved profile revision. Running and paused
 executions, existing Task launch manifests and other persisted spec copies remain
 immutable. Manual overrides survive directory updates. Explicit configuration
 changes continue through the existing pending-config and revision contracts.
+
+## Provider contributions
+
+Connection types come from enabled schema-2 `contributes.model_providers`
+packages. The bundled `standard-model-providers` package declaratively expands
+supported directory providers and contributes Custom API. An embedded copy of
+that same validated manifest is available when a headless host has no packaged
+plugin directory. Installed copies take precedence; the Extensions enablement
+setting gates both. Optional adapters such as Magpie contribute types through the
+same registry, without product-specific provider branches.
+
+`GET /api/v1/providers` projects `provider_types` and connection source,
+capabilities and availability. These are derived views, not fields added to the
+editable profiles file. Save, model-list check, endpoint resolution and inference
+test requests accept `provider_type_id`. New immutable gateway routes retain the
+namespaced type and package identity in Control's provider metadata; control
+migration 0015 assigns existing routes to Custom API without changing endpoints,
+protocols, credential references or route IDs. Existing public-directory bindings
+are preserved separately from the connection type.
+
+Plugin metadata adapters run on Control through bounded, supervised local JSON
+RPC. Credentials are injected only into the adapter's declared environment slot
+for that connection. They do not enter RPC payloads, task bundles, metadata
+snapshots or diagnostics. Standard readers use Pot's shared HTTP implementation.
+All inference continues directly through Pot's Gateway and protocol codecs.
+
+Catalog and allowance snapshots are independently cached by immutable route,
+method and current package digest. Concurrent saved-connection reads share a
+bounded exchange. A changed connection revision, disabled package or replaced
+adapter fences an in-flight result before caching or returning it. Authorization
+or permission failures invalidate the corresponding saved snapshot. A package
+update permits new reads through the current contribution; the original route's
+source identity remains provenance, rather than a requirement to keep obsolete
+code installed.
+
+Discovered exact model limits and supported input modalities supplement directory
+facts for fresh selections and turns. Explicit token overrides must fit known
+limits before a connection is published. Disabling a provider plugin makes its
+connection types unavailable for fresh selections, tests and metadata reads.
+Already issued Gateway requests and prepared immutable execution snapshots retain
+their original route and lifecycle. Quota reads remain an optional independent
+capability; a quota permission error does not disable model inference.

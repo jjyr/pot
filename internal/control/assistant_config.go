@@ -131,7 +131,7 @@ func (p *ProfileStore) ResolveAssistant(selection AssistantSelection) (core.Reso
 	profile.Params.Agent.Plugins = defaults.Plugins
 	profile.Params.Agent.BuiltinTools = defaults.BuiltinTools
 	profile.Params.Agent.AllowedTools = nil
-	resolved, err := p.directory.Apply(*profile)
+	resolved, err := p.applyModelMetadata(*profile)
 	if err != nil {
 		return core.ResolvedSpec{}, err
 	}
@@ -227,6 +227,9 @@ func (s *Service) refreshAssistantConfiguration(ctx context.Context, current cor
 		}
 	}
 	if !sameRevision {
+		if err := s.Profiles.sourceAvailable(ctx, current.Config.Provider); err != nil {
+			return nil, err
+		}
 		// Keep the original model selection while adopting product tool defaults
 		// only at a fresh turn boundary, including older Provider revisions.
 		settings, err := s.Profiles.defaultAgentSettings()
