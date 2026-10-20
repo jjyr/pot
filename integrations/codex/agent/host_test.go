@@ -119,7 +119,7 @@ func TestAgentHostConcurrentEnsureAndForeignPort(t *testing.T) {
 	}
 	process.Signal(syscall.SIGTERM)
 	process.Wait()
-	// A foreign service, even on the expected port, is never reused as a Bridge.
+	// A foreign service, even on the expected port, is never reused as an Agent Link host.
 	listener, err = net.Listen("tcp", hostListen)
 	if err != nil {
 		t.Fatal(err)
@@ -199,18 +199,18 @@ func TestAgentHostRestartStableIdentityAndMailbox(t *testing.T) {
 		t.Fatal("manual consumer can steal a session message")
 	}
 
-	pending, err := h.mailbox.Pending(ctx, identity.Address, peer)
+	pending, err := h.mailbox.PendingNode(ctx, identity.Address.NodeID, peer.NodeID)
 	if err != nil || len(pending) != 1 {
 		t.Fatal(pending, err)
 	}
-	pending, err = h.mailbox.Pending(ctx, identity.Address, protocol.AgentRef{NodeID: "other", Kind: "assistant", AgentID: "helper"})
+	pending, err = h.mailbox.PendingNode(ctx, identity.Address.NodeID, "other")
 	if err != nil || len(pending) != 0 {
 		t.Fatal(pending, err)
 	}
 	if err = h.mailbox.Acknowledge(ctx, protocol.Receipt{Message: outgoing}); err != nil {
 		t.Fatal(err)
 	}
-	pending, err = h.mailbox.Pending(ctx, identity.Address, peer)
+	pending, err = h.mailbox.PendingNode(ctx, identity.Address.NodeID, peer.NodeID)
 	if err != nil || len(pending) != 0 {
 		t.Fatal(pending, err)
 	}
@@ -351,17 +351,26 @@ func TestAgentHostPeerDeliveryRemainsUnreadUntilCodexReads(t *testing.T) {
 	w := httptest.NewRecorder()
 	b.handler().ServeHTTP(w, get)
 	var snapshot struct {
-		Items []struct {
-			LocalAssistantID string `json:"local_assistant_id"`
-			Revision         int64  `json:"revision"`
-			Peer             struct {
+		Directory agentlink.Directory `json:"directory"`
+		Items     []struct {
+			Assistants         []agentlink.Identity `json:"assistants"`
+			DefaultAssistantID string               `json:"default_assistant_id"`
+			Revision           int64                `json:"revision"`
+			Peer               struct {
 				NodeID  string `json:"node_id"`
 				Address string `json:"address"`
 			}
 		}
 	}
-	if json.Unmarshal(w.Body.Bytes(), &snapshot) != nil || len(snapshot.Items) != 1 || snapshot.Items[0].LocalAssistantID != "codex" || snapshot.Items[0].Revision != connection.CreatedAt.UnixMilli() || snapshot.Items[0].Peer.NodeID != a.identity.Address.NodeID || snapshot.Items[0].Peer.Address != endpoint {
+	if json.Unmarshal(w.Body.Bytes(), &snapshot) != nil || len(snapshot.Items) != 1 {
 		t.Fatal(w.Body.String())
+	}
+	if snapshot.Directory.NodeID != b.identity.Address.NodeID || snapshot.Directory.DefaultAssistantID != "codex" || len(snapshot.Directory.Assistants) != 1 || snapshot.Directory.Assistants[0].Address != b.identity.Address {
+		t.Fatal("local node directory mismatch", w.Body.String())
+	}
+	item := snapshot.Items[0]
+	if item.DefaultAssistantID != "codex" || len(item.Assistants) != 1 || item.Assistants[0].Address != a.identity.Address || item.Revision != connection.CreatedAt.UnixMilli() || item.Peer.NodeID != a.identity.Address.NodeID || item.Peer.Address != endpoint {
+		t.Fatal("connected node directory mismatch", w.Body.String())
 	}
 	outgoing, err := a.mailbox.send(ctx, b.identity.Address, "from-a", "peer reference")
 	if err != nil {

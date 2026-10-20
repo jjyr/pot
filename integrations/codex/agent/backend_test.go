@@ -107,7 +107,7 @@ func TestPersistentSessionSerializesChatAndTasks(t *testing.T) {
 	if err != nil || after.ThreadID != original.ThreadID {
 		t.Fatal("session replaced", after, err)
 	}
-	outgoing, err := mailbox.Pending(ctx, parent.To, from)
+	outgoing, err := mailbox.PendingNode(ctx, parent.To.NodeID, from.NodeID)
 	if err != nil || len(outgoing) != 1 {
 		t.Fatal(outgoing, err)
 	}
@@ -118,7 +118,7 @@ func TestPersistentSessionSerializesChatAndTasks(t *testing.T) {
 	if err = b.publishMessages(ctx); err != nil {
 		t.Fatal(err)
 	}
-	outgoing, _ = mailbox.Pending(ctx, parent.To, from)
+	outgoing, _ = mailbox.PendingNode(ctx, parent.To.NodeID, from.NodeID)
 	if len(outgoing) != 1 {
 		t.Fatal("duplicate reply", outgoing)
 	}

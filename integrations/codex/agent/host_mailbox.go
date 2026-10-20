@@ -42,28 +42,6 @@ func (m *hostMailbox) PendingNode(ctx context.Context, local, peer string) ([]pr
 	}
 	return out, rows.Err()
 }
-func (m *hostMailbox) Pending(ctx context.Context, local, peer protocol.AgentRef) ([]protocol.Envelope, error) {
-	rows, err := m.db.QueryContext(ctx, `SELECT envelope FROM agent_messages WHERE direction='outgoing' AND state='queued' AND json_extract(envelope,'$.from.node_id')=? AND json_extract(envelope,'$.from.agent_id')=? AND json_extract(envelope,'$.to.node_id')=? AND json_extract(envelope,'$.to.agent_id')=? ORDER BY sequence LIMIT 32`, local.NodeID, local.AgentID, peer.NodeID, peer.AgentID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var result []protocol.Envelope
-	for rows.Next() {
-		var raw string
-		var e protocol.Envelope
-		if err = rows.Scan(&raw); err != nil {
-			return nil, err
-		}
-		if err = json.Unmarshal([]byte(raw), &e); err != nil {
-			return nil, err
-		}
-		if e.From == local && e.To == peer {
-			result = append(result, e)
-		}
-	}
-	return result, rows.Err()
-}
 func (m *hostMailbox) Deliver(ctx context.Context, e protocol.Envelope) (protocol.Receipt, error) {
 	if e.Kind != "message" || e.To.NodeID != m.local.NodeID {
 		return protocol.Receipt{}, errors.New("agent_link_target_mismatch")
