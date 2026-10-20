@@ -257,8 +257,8 @@ func (m PluginManifest) Validate() error {
 	return nil
 }
 
-// Validate accepts only a tool capability snapshot. Native providers and resource
-// catalogs are local installation capabilities and must never cross Task sync.
+// Validate accepts only a tool capability snapshot. Background services and
+// model connection contributions remain local and must never cross Task sync.
 func (b PluginBundle) Validate() error {
 	m := b.Manifest
 	if err := m.Validate(); err != nil {

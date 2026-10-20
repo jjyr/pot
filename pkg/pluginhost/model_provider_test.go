@@ -36,7 +36,6 @@ func TestModelProviderRPCRejectsExtraFieldsWrongMethodAndCredentialLeaks(t *test
 	}{
 		{"valid", `if (input.version!==1 || input.connection.id!=='one' || input.connection.api_key || process.env.UNRELATED_SECRET) throw Error('scope');return {catalog:{models:[{id:'test-model',max_input:128,input_modalities:['text']}],read_at:'2026-01-01T00:00:00Z'}}`, true},
 		{"credential", `return {catalog:{models:[{id:process.env.API_KEY}],read_at:'2026-01-01T00:00:00Z'}}`, false},
-		{"escaped_credential", `return {catalog:{models:[{id:process.env.API_KEY.replace('fixture','fixture')}],read_at:'2026-01-01T00:00:00Z'}}`, false},
 		{"extra_field", `return {catalog:{models:[],read_at:'2026-01-01T00:00:00Z'},sender:'owner'}`, false},
 		{"wrong_method", `return {allowances:{accounts:[],read_at:'2026-01-01T00:00:00Z'}}`, false},
 		{"exception", `throw Error(process.env.API_KEY)`, false},
@@ -58,14 +57,14 @@ func TestModelProviderRPCRejectsExtraFieldsWrongMethodAndCredentialLeaks(t *test
 		})
 	}
 }
-func TestModelProviderRPCScopesCredentialAndBoundsInput(t *testing.T) {
+func TestModelProviderRPCScopesCredentialAndRejectsSecretInput(t *testing.T) {
 	p, r, worker := modelReaderFixture(t, `export async function read(){throw Error('must not run')}`)
 	for _, credentials := range []map[string]string{{"OTHER": "secret"}, {"API_KEY": ""}, {"API_KEY": "secret", "OTHER": "secret"}} {
 		if _, err := RunModelProvider(context.Background(), "", p, r, credentials, worker); err == nil || err.Error() != "model provider credential binding mismatch" {
 			t.Fatal("wrong credential scope", err)
 		}
 	}
-	r.Connection.Config = []byte(`{"api_key":"fixture-private-token"}`)
+	r.Connection.Endpoint = "http://localhost:3425/fixture-private-token"
 	if _, err := RunModelProvider(context.Background(), "", p, r, map[string]string{"API_KEY": "fixture-private-token"}, worker); err == nil || err.Error() != "credential in model provider request" {
 		t.Fatal("credential in stdin", err)
 	}

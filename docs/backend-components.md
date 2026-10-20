@@ -13,7 +13,7 @@ points; `internal/` contains product implementation. All packages share one root
 | `pkg/agent` | Injected model/tool loop, classified context, compaction and Skill metadata discovery |
 | `pkg/modelprotocol` | Pure Chat Completions, Responses, Anthropic Messages and Gemini codecs |
 | `pkg/composition` | goja orchestration, isolated worker process, turn-scoped exec/wait lifecycle |
-| `pkg/executor`, `pkg/pluginhost` | Commands, patches, process sessions and retained Node plugin execution |
+| `pkg/executor`, `pkg/pluginhost` | Commands, patches, tool process sessions and Control-local background/metadata readers |
 | `pkg/storage` | SQLite transactions, messages, events and context persistence |
 | `pkg/instance`, `pkg/modeldirectory` | Private data-root identity/locking and provider model metadata |
 | `internal/assistant` | Identities, rules, conversation Threads, chat driver and durable mailboxes/sessions |
@@ -49,8 +49,8 @@ through the destination's shared execution manager. Control owns provider keys,
 approvals, accounting and global resources. Connected Workers run beside their
 fixed Runtime and call Control through run-bound signed ports.
 
-Tool plugin manifests and Node sources live under `plugins/`. Runtime asset loading
-is independent of execution; no VM lifecycle or driver package is linked.
+Plugin manifests and declared assets under `plugins/` are packaged runtime data.
+The Go host loads them independently of execution.
 
 `mise run check:go` checks formatting, vet and architectural imports. Headless
 packages must not depend on Wails; execution components must not depend on product

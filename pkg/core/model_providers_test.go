@@ -1,7 +1,6 @@
 package core
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -67,11 +66,11 @@ func TestModelProviderSnapshotsPreserveUnknownAndRejectInvalidIdentity(t *testin
 }
 func TestProviderReaderRequestCannotChooseUndeclaredTypeProtocolOrMethod(t *testing.T) {
 	p := PluginModelProviders{Providers: []ModelProviderDefinition{{ID: "test", Name: "Test", Protocol: "openai_responses", Capabilities: ModelProviderCapabilities{Catalog: "plugin"}}}, Adapter: &ModelProviderAdapter{Runtime: "node", Execution: "control", Entrypoint: "reader.mjs", Files: []string{"reader.mjs"}}}
-	r := ModelProviderRequest{Version: 1, Method: "list_models", Connection: ModelProviderConnection{ID: "connection", Type: "test", Endpoint: "http://localhost:3425", Protocol: "openai_responses", Config: json.RawMessage(`{}`)}}
+	r := ModelProviderRequest{Version: 1, Method: "list_models", Connection: ModelProviderConnection{ID: "connection", Type: "test", Endpoint: "http://localhost:3425", Protocol: "openai_responses"}}
 	if err := r.Validate(p); err != nil {
 		t.Fatal(err)
 	}
-	for _, mutate := range []func(*ModelProviderRequest){func(r *ModelProviderRequest) { r.Connection.Type = "other" }, func(r *ModelProviderRequest) { r.Connection.Protocol = "gemini" }, func(r *ModelProviderRequest) { r.Method = "infer" }, func(r *ModelProviderRequest) { r.Connection.Config = []byte(`null`) }, func(r *ModelProviderRequest) { r.Connection.Endpoint = "http://user:pass@localhost" }} {
+	for _, mutate := range []func(*ModelProviderRequest){func(r *ModelProviderRequest) { r.Connection.Type = "other" }, func(r *ModelProviderRequest) { r.Connection.Protocol = "gemini" }, func(r *ModelProviderRequest) { r.Method = "infer" }, func(r *ModelProviderRequest) { r.Connection.Endpoint = "http://user:pass@localhost" }} {
 		changed := r
 		mutate(&changed)
 		if changed.Validate(p) == nil {
@@ -115,5 +114,12 @@ func TestProviderPublicDefaultCredentialIsBoundedHeaderSafeData(t *testing.T) {
 		if p.Validate() == nil {
 			t.Fatal("invalid public default accepted")
 		}
+	}
+}
+
+func TestProviderReaderRequestRejectsUndeclaredConfiguration(t *testing.T) {
+	var request ModelProviderRequest
+	if err := DecodeJSON([]byte(`{"version":1,"method":"list_models","connection":{"id":"connection","type":"test","revision":1,"endpoint":"http://localhost:3425","protocol":"openai_responses","config":{}}}`), &request); err == nil {
+		t.Fatal("undeclared connection configuration accepted")
 	}
 }

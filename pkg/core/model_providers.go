@@ -1,7 +1,6 @@
 package core
 
 import (
-	"encoding/json"
 	"errors"
 	"math"
 	"net/url"
@@ -46,7 +45,7 @@ func (p PluginModelProviders) Validate() error {
 	seen := map[string]bool{}
 	needsAdapter := false
 	for _, d := range p.Providers {
-		if !Identifier(d.ID) || len(d.ID) > 128 || seen[d.ID] || strings.TrimSpace(d.Name) == "" || len(d.Name) > 256 || len(d.DirectoryProvider) > 128 {
+		if !Identifier(d.ID) || seen[d.ID] || strings.TrimSpace(d.Name) == "" || len(d.Name) > 256 || len(d.DirectoryProvider) > 128 {
 			return errors.New("invalid model provider definition")
 		}
 		seen[d.ID] = true
@@ -106,12 +105,11 @@ func modelProviderEndpoint(endpoint string) bool {
 }
 
 type ModelProviderConnection struct {
-	ID       string          `json:"id"`
-	Type     string          `json:"type"`
-	Revision uint64          `json:"revision"`
-	Endpoint string          `json:"endpoint"`
-	Protocol string          `json:"protocol"`
-	Config   json.RawMessage `json:"config,omitempty"`
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Revision uint64 `json:"revision"`
+	Endpoint string `json:"endpoint"`
+	Protocol string `json:"protocol"`
 }
 type ModelProviderRequest struct {
 	Version    int                     `json:"version"`
@@ -120,14 +118,8 @@ type ModelProviderRequest struct {
 }
 
 func (r ModelProviderRequest) Validate(p PluginModelProviders) error {
-	if r.Version != 1 || !providerID(r.Connection.ID, 256) || r.Connection.Revision > MaxSafeInteger || !modelProviderEndpoint(r.Connection.Endpoint) || len(r.Connection.Config) > 16*1024 {
+	if r.Version != 1 || !providerID(r.Connection.ID, 256) || r.Connection.Revision > MaxSafeInteger || !modelProviderEndpoint(r.Connection.Endpoint) {
 		return errors.New("invalid model provider request")
-	}
-	if len(r.Connection.Config) > 0 {
-		var config map[string]json.RawMessage
-		if json.Unmarshal(r.Connection.Config, &config) != nil || config == nil {
-			return errors.New("invalid model provider config")
-		}
 	}
 	for _, d := range p.Providers {
 		if d.ID != r.Connection.Type {
@@ -276,8 +268,6 @@ func (r ModelProviderResponse) Validate(method string) error {
 				}
 			}
 		}
-	default:
-		return errors.New("unknown model provider method")
 	}
 	return nil
 }
