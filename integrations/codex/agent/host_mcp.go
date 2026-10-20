@@ -85,7 +85,7 @@ func hostMCPServer(client hostClient) *mcp.Server {
 	assistantID := os.Getenv("POT_CODEX_ASSISTANT_ID")
 	server := mcp.NewServer(&mcp.Implementation{Name: "pot-agent-link", Version: hostVersion}, nil)
 	tools := []*mcp.Tool{
-		{Name: "pot_open_connections", Description: "Open the local Pot connections page to copy your address or add another Agent. Connection invitations stay in that local UI; they are never returned to this tool.", InputSchema: toolSchema(map[string]any{})},
+		{Name: "pot_open_connections", Description: "Prepare the local Pot connections page. Open the returned temporary URL in the Codex in-app browser using open_in_codex (target type browser). Do not print or share the URL. It grants short-lived connection-page access, never the durable owner credential. Invitations stay in the page clipboard and are never returned to this tool.", InputSchema: toolSchema(map[string]any{})},
 		{Name: "pot_connections", Description: "List established Agent Link nodes and their available assistants and capabilities. Receiver-owned task execution uses the same authenticated connection; owner administration remains local.", InputSchema: toolSchema(map[string]any{})},
 		{Name: "pot_assistants", Description: "List this node's persistent virtual assistants and its default. Each assistant owns one serialized chat/task session.", InputSchema: toolSchema(map[string]any{})},
 		{Name: "pot_send", Description: "Send an explicitly authorized peer message to an established connection. The host binds the processing parent from this virtual assistant's active message, preserving its conversation and causal bound. Reuse request_id only for an identical retry. Durable acceptance is not remote assistant completion.", InputSchema: toolSchema(map[string]any{"connection_id": idSchema(), "assistant_id": idSchema(), "request_id": idSchema(), "text": textSchema(65536)}, "connection_id", "request_id", "text")},
@@ -94,11 +94,11 @@ func hostMCPServer(client hostClient) *mcp.Server {
 	for _, tool := range tools {
 		mcp.AddTool(server, tool, func(ctx context.Context, req *mcp.CallToolRequest, args json.RawMessage) (*mcp.CallToolResult, any, error) {
 			if tool.Name == "pot_open_connections" {
-				err := openExternalURL("http://" + hostListen + "/codex-connections.html#" + client.token)
-				if err != nil {
-					return toolResult(nil, "local_browser_open_failed_use_connections_command"), nil, nil
+				var page map[string]any
+				if err := client.call(ctx, "/api/v1/agent-host/browser", map[string]any{}, &page); err != nil {
+					return toolResult(nil, "local_browser_prepare_failed"), nil, nil
 				}
-				return toolResult(map[string]bool{"opened": true}, ""), nil, nil
+				return toolResult(page, ""), nil, nil
 			}
 			var data hostToolInput
 			var input map[string]string

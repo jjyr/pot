@@ -49,7 +49,7 @@ required. The topology graph, regions, edges and responsive inspector remain.
 The inspector shows provided assistants, opens their existing chat UI, and offers
 disconnect, reconnect and confirmed deletion.
 
-Invitation version 4 carries the pinned node key, reachable private TCP endpoint,
+Invitation version 4 carries the pinned node key, reachable TCP endpoint,
 public display anchor and a single-use capability in its URL fragment. Never
 log this capability, expose it through model tools or send it in chat. Preview
 proves the server key before revealing the capability and cannot claim it or
@@ -57,8 +57,9 @@ exchange business data. The pair intent persists before confirmation, so
 lost responses retry the original request. Both directions use one authenticated
 session; only the dialing side needs an endpoint.
 
-Endpoints permit loopback, private LAN, IPv6 ULA and Tailscale addresses, including
-DNS resolving entirely to allowed ranges. Dialing validates the actual numeric
+Endpoints permit public unicast IPv4/IPv6, loopback, private LAN and Tailscale
+addresses, including DNS resolving entirely to usable unicast addresses. Unspecified,
+multicast and link-local addresses are rejected. Dialing validates the actual numeric
 address again. There is no public HTTP, proxy or protocol downgrade fallback.
 TLS 1.3 encrypts frames and invitation capabilities, with mutual Ed25519 key
 proof and the invitation or saved public-key pin. Self-signed certificates are

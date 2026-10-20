@@ -20,14 +20,15 @@ Agent Link collaboration          Authenticated identity probes
                                 |
                                TCP
                                 |
-                       private network / VPN
+                    public / private network / VPN
 ```
 
 ## Endpoints and identity
 
 Endpoints are `tcp://host:port`, without a path, query, credentials or fragment.
-Dialing accepts loopback, RFC 1918 IPv4, IPv6 ULA and Tailscale's
-`100.64.0.0/10`. A DNS name must resolve entirely to permitted addresses. Each
+Dialing accepts public unicast IPv4/IPv6, loopback, private LAN and Tailscale
+addresses. Unspecified, multicast and link-local addresses are rejected. A DNS
+name must resolve entirely to permitted addresses. Each
 connection resolves again and dials a validated numeric address; HTTP proxy
 environment variables have no effect. A listener's wildcard bind address is not
 a publishable endpoint.

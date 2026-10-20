@@ -78,7 +78,7 @@ func TestCodexTCPPeerListenerAndRestart(t *testing.T) {
 	if err = h.probeEndpoint(ctx, endpoint); err != nil {
 		t.Fatal("failed configuration stopped original listener", err)
 	}
-	for _, invalid := range []string{"tcp://8.8.8.8:8793", "tcp://user:password@127.0.0.1:8793", "tcp://127.0.0.1:8793?token=secret"} {
+	for _, invalid := range []string{"tcp://0.0.0.0:8793", "tcp://user:password@127.0.0.1:8793", "tcp://127.0.0.1:8793?token=secret"} {
 		if err = h.configureEndpoint(ctx, invalid); err == nil {
 			t.Fatal("invalid private network endpoint accepted")
 		}

@@ -226,12 +226,12 @@ func TestFrameBoundsAndTruncation(t *testing.T) {
 	}
 }
 func TestEndpointPolicy(t *testing.T) {
-	for _, endpoint := range []string{"http://127.0.0.1:8793", "tcp://8.8.8.8:80", "tcp://0.0.0.0:42", "tcp://user@127.0.0.1:1", "tcp://127.0.0.1:1/path", "tcp://127.0.0.1:1?query", "tcp://127.0.0.1:1#secret", "tcp://127.0.0.1:0", "tcp://[fe80::1%25en0]:42"} {
+	for _, endpoint := range []string{"http://127.0.0.1:8793", "tcp://224.0.0.1:80", "tcp://0.0.0.0:42", "tcp://[::]:42", "tcp://[fe80::1]:42", "tcp://169.254.1.1:42", "tcp://user@127.0.0.1:1", "tcp://127.0.0.1:1/path", "tcp://127.0.0.1:1?query", "tcp://127.0.0.1:1#secret", "tcp://127.0.0.1:0", "tcp://[fe80::1%25en0]:42"} {
 		if _, err := ValidateEndpoint(context.Background(), endpoint); err == nil {
 			t.Errorf("accepted %s", endpoint)
 		}
 	}
-	for _, endpoint := range []string{"tcp://127.0.0.1:8793", "tcp://100.64.0.1:8793", "tcp://192.168.1.2:42", "tcp://[::1]:42", "tcp://[fd00::123]:42"} {
+	for _, endpoint := range []string{"tcp://8.8.8.8:8793", "tcp://[2606:4700:4700::1111]:8793", "tcp://127.0.0.1:8793", "tcp://100.64.0.1:8793", "tcp://192.168.1.2:42", "tcp://[::1]:42", "tcp://[fd00::123]:42"} {
 		if _, err := ValidateEndpoint(context.Background(), endpoint); err != nil {
 			t.Errorf("rejected %s: %v", endpoint, err)
 		}

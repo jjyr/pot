@@ -61,7 +61,7 @@ func validHello(h hello) bool {
 	return h.Service == "identity" && string(h.Auth) == "null"
 }
 
-// Dial authenticates a peer over TLS 1.3 on private TCP. A nil Expected permits
+// Dial authenticates a peer over TLS 1.3 on direct TCP. A nil Expected permits
 // only capability-free identity discovery, whose result does not establish trust.
 // It never retries a request or falls back to another protocol.
 func Dial(ctx context.Context, endpoint string, options DialOptions) (*Session, error) {

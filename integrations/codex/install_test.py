@@ -57,8 +57,12 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(
             mcp["args"], ["host", "--root", str(self.home / ".config/pot-codex/agent")]
         )
-        self.assertNotIn("skills", manifest)
-        self.assertFalse((destination / "skills").exists())
+        self.assertEqual(manifest["skills"], "./skills/")
+        setup = manifest["extensions"]["com.openai"]["onboardingSkill"]
+        self.assertTrue((destination / setup).is_file())
+        self.assertEqual(
+            (destination / setup).read_bytes(), (installer.SOURCE / setup).read_bytes()
+        )
 
     def test_local_edits_are_retained(self):
         destination = self.install()

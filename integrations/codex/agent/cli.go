@@ -40,7 +40,13 @@ func Main(args []string, in io.Reader, out io.Writer) error {
 			return err
 		}
 		defer client.client.CloseIdleConnections()
-		return openExternalURL("http://" + hostListen + "/codex-connections.html#" + client.token)
+		var page struct {
+			URL string `json:"url"`
+		}
+		if err := client.call(context.Background(), "/api/v1/agent-host/browser", map[string]any{}, &page); err != nil {
+			return err
+		}
+		return openExternalURL(page.URL)
 	case "assistant":
 		client, err := ensureAgentHost(*root)
 		if err != nil {

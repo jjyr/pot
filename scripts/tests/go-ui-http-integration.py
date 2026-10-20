@@ -430,6 +430,12 @@ def run(binary, base, env, cli_command, profile_only=False):
                 + "}}); }",
             )
             code = (ROOT / "scripts/tests/go-ui-providers-browser.js").read_text()
+            codex_connections = browser_cli(
+                "run-code",
+                (ROOT / "scripts/tests/go-ui-codex-connections-browser.js").read_text(),
+            )
+            if '"passed":true' not in codex_connections:
+                raise RuntimeError("Codex connection page browser contracts did not pass")
             providers = browser_cli("run-code", code.replace("STATE", json.dumps(provider_state)))
             if '"passed":true' not in providers:
                 raise RuntimeError("Provider editor browser contracts did not pass")
