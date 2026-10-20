@@ -19,6 +19,8 @@ workspace is remote; failed remote reads never fall back to a local path.
 `present_resource` accepts a registered `resource_id`, `mode: preview | download`
 and optional caption. Preview displays the appropriate component; download shows
 a file delivery card. Both require a separate user action to save a file.
+Download failures have their own localized retry notice and leave a working
+preview intact.
 Multi-file HTML originals download as a ZIP containing all declared originals.
 The isolated rendering transformation never replaces the downloadable originals.
 

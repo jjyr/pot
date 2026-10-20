@@ -12,17 +12,17 @@ function register(){
       const t=key=>translate(document.documentElement.lang,`resource.${key}`);
       this.dataset.kind=kind;this.dataset.mode=mode;
       const head=node('div','resource-heading'),identity=node('div','resource-identity'),badge=node('span','resource-type'),title=node('strong','resource-name',caption||resource.name),details=node('span','resource-details');
-      const actions=node('div','resource-actions'),download=node('button','resource-action'),expand=node('button','resource-action'),status=node('p','resource-status'),body=node('div','resource-body'),notice=node('p','resource-status');
-      download.type=expand.type='button';status.setAttribute('role','status');identity.append(title,details);head.append(badge,identity,actions);actions.append(expand,download);notice.hidden=!this.noticeKey;this.replaceChildren(head,status,body,notice);
+      const actions=node('div','resource-actions'),download=node('button','resource-action'),expand=node('button','resource-action'),status=node('p','resource-status'),saveStatus=node('p','resource-status resource-download-error'),body=node('div','resource-body'),notice=node('p','resource-status');
+      download.type=expand.type='button';status.setAttribute('role','status');saveStatus.setAttribute('role','alert');saveStatus.hidden=true;identity.append(title,details);head.append(badge,identity,actions);actions.append(expand,download);notice.hidden=!this.noticeKey;this.replaceChildren(head,status,saveStatus,body,notice);
       this.lease=this.acquireResource?.(resource);const lease=this.lease;
       let error=false;
       const current=()=>this.isConnected&&generation===this.generation;
       const setURL=(element,url)=>Promise.resolve(url).then(value=>{if(current())element.src=value;}).catch(fail);
-      const refresh=()=>{const size=resource.size,unit=size<1024?'byte':size<1024*1024?'kilobyte':'megabyte',divisor=size<1024?1:size<1024*1024?1024:1024*1024;details.textContent=`${resource.name} · ${new Intl.NumberFormat(document.documentElement.lang,{style:'unit',unit,unitDisplay:'narrow',maximumFractionDigits:1}).format(size/divisor)}`;badge.textContent=t(mode==='download'?'file':kind);download.textContent=t(resource.files.length>1?'downloadBundle':'download');download.setAttribute('aria-label',t('downloadName').replace('{name}',resource.download?.path.split('/').at(-1)||resource.name));expand.textContent=t(this.classList.contains('is-expanded')?'collapse':'expand');status.textContent=t(error?'unavailable':'loading');if(this.noticeKey)notice.textContent=translate(document.documentElement.lang,this.noticeKey);const resultTitle=this.querySelector('.resource-result-title');if(resultTitle)resultTitle.textContent=t('result');};
+      const refresh=()=>{const size=resource.size,unit=size<1024?'byte':size<1024*1024?'kilobyte':'megabyte',divisor=size<1024?1:size<1024*1024?1024:1024*1024;details.textContent=`${resource.name} · ${new Intl.NumberFormat(document.documentElement.lang,{style:'unit',unit,unitDisplay:'narrow',maximumFractionDigits:1}).format(size/divisor)}`;badge.textContent=t(mode==='download'?'file':kind);download.textContent=t(resource.files.length>1?'downloadBundle':'download');download.setAttribute('aria-label',t('downloadName').replace('{name}',resource.download?.path.split('/').at(-1)||resource.name));expand.textContent=t(this.classList.contains('is-expanded')?'collapse':'expand');status.textContent=t(error?'unavailable':'loading');saveStatus.textContent=t('downloadFailed');if(this.noticeKey)notice.textContent=translate(document.documentElement.lang,this.noticeKey);const resultTitle=this.querySelector('.resource-result-title');if(resultTitle)resultTitle.textContent=t('result');};
       const fail=()=>{if(!current())return;error=true;this.dataset.state='error';status.hidden=false;refresh();};
       const ready=()=>{if(!current())return;this.dataset.state='ready';status.hidden=true;};
       refresh();window.addEventListener('pot:locale',refresh);this.stopLocale=()=>window.removeEventListener('pot:locale',refresh);
-      download.onclick=()=>Promise.resolve().then(()=>this.downloadResource(resource)).catch(fail);
+      download.onclick=async()=>{download.disabled=true;saveStatus.hidden=true;try{await this.downloadResource(resource);}catch{if(current()){saveStatus.textContent=t('downloadFailed');saveStatus.hidden=false;}}finally{if(current())download.disabled=false;}};
       expand.onclick=()=>{this.classList.toggle('is-expanded');refresh();};
       expand.hidden=kind==='audio';
       if(mode==='download'||kind==='file'){body.hidden=expand.hidden=status.hidden=true;this.dataset.state='ready';return;}
@@ -62,6 +62,7 @@ function register(){
     disconnectedCallback(){
       ++this.generation;this.stopLocale?.();this.stopMessages?.();clearTimeout(this.loadTimer);
       for(const media of this.querySelectorAll('audio,video')){media.pause();media.removeAttribute('src');media.load();}
+      for(const image of this.querySelectorAll('img'))image.removeAttribute('src');
       for(const frame of this.querySelectorAll('iframe')){frame.removeAttribute('src');frame.srcdoc='';}
       this.lease?.release();this.lease=null;
     }

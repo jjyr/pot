@@ -1,5 +1,6 @@
 export const messages = {
   en: {
+    'resource.downloadFailed':'Could not download this file. Try again.',
     'resource.result':'Component result',
     'resource.downloadBundle':'Download ZIP',
     'tool.registerResource':'Prepare resource', 'tool.presentResource':'Show resource',
@@ -443,6 +444,7 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'resource.downloadFailed':'文件下载失败，请重试。',
     'resource.result':'组件结果',
     'resource.downloadBundle':'下载资源包',
     'tool.registerResource':'准备资源', 'tool.presentResource':'展示资源',

@@ -32,6 +32,14 @@ async page=>{
     window.location.href='https://resource-isolation.invalid/navigation';
   });
   assert(external.length===0,'Sandbox/CSP blocks external fetch, images, nested frames, forms and navigation');
+  const imageID=await page.evaluate(()=>resourceFixture.messages[0].presentation.resource.id),failedDownload=`**/api/v1/resources/${imageID}/chunk?**`;
+  await page.route(failedDownload,route=>route.fulfill({status:503,json:{code:'fixture_unavailable'}}));
+  await page.getByRole('button',{name:'下载 landscape.png',exact:true}).click();
+  await page.locator('pot-resource').first().getByText('文件下载失败，请重试。',{exact:true}).waitFor();
+  assert(await page.locator('pot-resource').first().getAttribute('data-state')==='ready'&&downloads.length===0,'Download errors neither invalidate the preview nor save an error response');
+  await page.evaluate(()=>{document.documentElement.lang='en';window.dispatchEvent(new Event('pot:locale'));});
+  assert(await page.locator('pot-resource').first().getByText('Could not download this file. Try again.',{exact:true}).isVisible(),'Download failure labels switch language in place');
+  await page.unroute(failedDownload);
   // Reload after the deliberately attempted navigation before capturing examples.
   await page.goto(target);await page.waitForFunction(()=>window.fixtureReady);await page.waitForFunction(()=>[...document.querySelectorAll('pot-resource')].every(element=>element.dataset.state==='ready'));
   await page.frameLocator('iframe.resource-interactive').getByRole('slider').fill('5000');
@@ -81,5 +89,5 @@ async page=>{
   await page.locator('pot-resource[data-kind="html"]').evaluate(element=>{const history=element.closest('[role="log"]');if(history)history.scrollTop+=element.getBoundingClientRect().top-history.getBoundingClientRect().top-20;});
   await page.screenshot({path:directory+'/resources-chat-desktop-after.png'});
   assert(errors.length===0,errors.join('\n'));
-  return {passed:true,resources:7,audio_playback:true,video_playback:true,range:true,html_interaction:true,isolation:true,download_zip:true,streaming_state:true,mobile:true,locale:true,reduced_motion:true,task:true,chat:true,errors};
+  return {passed:true,resources:7,audio_playback:true,video_playback:true,range:true,html_interaction:true,isolation:true,download_zip:true,download_error_isolated:true,streaming_state:true,mobile:true,locale:true,reduced_motion:true,task:true,chat:true,errors};
 }
