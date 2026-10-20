@@ -393,6 +393,11 @@ handled request failures retain their page presentation. The toast offers manual
 refresh and diagnostic copying, hides after eight seconds unless hovered,
 focused or expanded, and merges repeats without resetting the timer.
 
+Browser ResizeObserver loop notifications without an exception are excluded from
+the crash toast and log: they indicate deferred resize delivery. Browser
+diagnostics remain available; thrown exceptions and unhandled rejections still
+report normally.
+
 Up to 20 bounded records remain in memory and same-tab session storage. URL
 queries/fragments and common credential patterns are redacted. Diagnostics do
 not collect request bodies, fields or transcripts, and are never automatically
