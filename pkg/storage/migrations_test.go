@@ -10,7 +10,73 @@ import (
 	"sync"
 	"testing"
 	"testing/fstest"
+
+	"github.com/jjyr/pot/pkg/assistantavatar"
 )
+
+func TestDefaultAvatarImageUpgrade(t *testing.T) {
+	db := migrationDB(t)
+	ctx := context.Background()
+	baseline, err := fs.ReadFile(migrationFiles, "migrations/control/0001_baseline.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := fstest.MapFS{"migrations/control/0001_baseline.sql": &fstest.MapFile{Data: baseline}}
+	if err := migrateDatabase(ctx, db, ControlDatabase, old); err != nil {
+		t.Fatal(err)
+	}
+	execMigrationSQL(t, db, `INSERT INTO assistant_definitions(id,name,revision,request_id,created_name) VALUES
+('missing','Missing',3,'seed-missing','Original'),('empty','Empty',4,'seed-empty','Empty'),('custom','Custom',5,'seed-custom','Custom');
+INSERT INTO assistant_profiles VALUES('empty',''),('custom','custom-image');
+INSERT INTO assistant_profile_requests VALUES
+('reset','reset-hash','{"id":"empty","name":"Before rename","revision":2,"request_id":"seed-empty"}'),
+('custom','custom-hash','{"id":"custom","name":"Custom","revision":4,"request_id":"seed-custom","avatar":"custom-image"}');`)
+	// A bad historical receipt must roll back the profile images and receipt
+	// together. Correcting that input allows the same pending version to retry.
+	execMigrationSQL(t, db, `INSERT INTO assistant_profile_requests VALUES('bad','bad-hash','{"id":"missing"}');`)
+	if err := Migrate(ctx, db, ControlDatabase); err == nil {
+		t.Fatal("invalid historical seed accepted")
+	}
+	var created int
+	if err := db.QueryRow("SELECT COUNT(*) FROM assistant_profiles WHERE assistant_id='missing'").Scan(&created); err != nil || created != 0 || migrationCount(t, db) != 1 {
+		t.Fatal("failed avatar migration did not roll back", err)
+	}
+	execMigrationSQL(t, db, "DELETE FROM assistant_profile_requests WHERE id='bad'")
+	for range 2 {
+		if err := Migrate(ctx, db, ControlDatabase); err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range []string{"missing", "empty", "custom"} {
+			var avatar string
+			if err := db.QueryRow("SELECT avatar FROM assistant_profiles WHERE assistant_id=?", id).Scan(&avatar); err != nil {
+				t.Fatal(err)
+			}
+			want, _ := assistantavatar.Default("seed-" + id)
+			if id == "custom" {
+				want = "custom-image"
+			}
+			if avatar != want {
+				t.Fatal("upgrade changed image", id)
+			}
+		}
+		var avatar, name, hash string
+		var revision int
+		if err := db.QueryRow(`SELECT json_extract(response,'$.avatar'),json_extract(response,'$.name'),json_extract(response,'$.revision'),input_hash FROM assistant_profile_requests WHERE id='reset'`).Scan(&avatar, &name, &revision, &hash); err != nil {
+			t.Fatal(err)
+		}
+		want, _ := assistantavatar.Default("seed-empty")
+		if avatar != want || name != "Before rename" || revision != 2 || hash != "reset-hash" {
+			t.Fatal("upgrade damaged profile receipt")
+		}
+		if err := db.QueryRow(`SELECT json_extract(response,'$.avatar') FROM assistant_profile_requests WHERE id='custom'`).Scan(&avatar); err != nil || avatar != "custom-image" {
+			t.Fatal("upgrade changed custom image receipt", err)
+		}
+		var totalRevision int
+		if err := db.QueryRow("SELECT SUM(revision) FROM assistant_definitions").Scan(&totalRevision); err != nil || totalRevision != 12 {
+			t.Fatal("upgrade changed assistant revisions", err)
+		}
+	}
+}
 
 func migrationDB(t *testing.T) *sql.DB {
 	t.Helper()
