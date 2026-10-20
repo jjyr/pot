@@ -38,7 +38,8 @@ A standalone root starts neutral. An explicitly configured listener enables
 Control; a joined execution Runtime becomes Runner. One root cannot hold both
 roles. A Runtime owning assistants or AI configuration cannot join a Control.
 Fresh registries contain no assistants. First-use Chat explicitly bootstraps Pot
-once a default Provider exists; later assistants use the creation form. Provider
+once a default Provider exists; later assistants are created directly from + with
+random kitchen names and the destination Space's defaults. Provider
 storage itself creates no identity. Use independent roots for independent roles.
 
 CLI owns a private authenticated Unix socket. Remote native clients authenticate
