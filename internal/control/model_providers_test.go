@@ -16,6 +16,7 @@ import (
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/modeldirectory"
+	"github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
@@ -453,5 +454,21 @@ func TestDeclarativeDirectoryReaderUsesLocalFactsWithoutCredentials(t *testing.T
 	result, err := s.Profiles.Check(context.Background(), CheckProvider{ProviderTypeID: "local-facts/openai", Endpoint: "https://never-contacted.invalid/v1", Protocol: "openai_responses"})
 	if err != nil || !result.Supported || result.Catalog == nil || len(result.Catalog.Models) == 0 {
 		t.Fatal(result, err)
+	}
+}
+
+func TestProviderEndpointPreviewOffersCorrectionWithoutPermittingMismatch(t *testing.T) {
+	ctx := context.Background()
+	s, _ := configurationService(t)
+	value, err := s.Profiles.ResolveProviderEndpoint(ctx, CheckProvider{ProviderTypeID: customProviderType, Endpoint: "https://fixture.invalid/v1/responses", Protocol: "openai_chat"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, ok := value.(modelprotocol.EndpointResolution)
+	if !ok || resolved.DetectedProtocol != modelprotocol.OpenAIResponses || resolved.Endpoint != "https://fixture.invalid/v1/responses" {
+		t.Fatal(value)
+	}
+	if _, err = s.Profiles.Save(ctx, SaveProfile{RequestID: "mismatched-format", Name: "Mismatch", Model: "fixture", ProviderTypeID: customProviderType, Endpoint: resolved.Endpoint, Protocol: "openai_chat", APIKey: "isolated-key", ModelSettings: &core.ModelSettings{}}); err == nil {
+		t.Fatal("preview authorized a mismatched request format")
 	}
 }

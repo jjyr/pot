@@ -17,6 +17,7 @@ import (
 	"github.com/jjyr/pot/internal/gateway"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/modeldirectory"
+	"github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/plugin"
 	"github.com/jjyr/pot/pkg/pluginhost"
 )
@@ -482,7 +483,7 @@ func (p *ProfileStore) ResolveProviderEndpoint(ctx context.Context, r CheckProvi
 	if _, err := p.requestProviderType(ctx, r.ProviderTypeID, r.ProfileID, r.Protocol); err != nil {
 		return nil, err
 	}
-	return resolveProviderEndpoint(r.Endpoint, r.Protocol)
+	return modelprotocol.ResolveEndpoint(r.Endpoint, modelprotocol.Protocol(r.Protocol))
 }
 
 func discoveryKey(typ ProviderType, endpoint, protocol string, key []byte) string {
