@@ -1,9 +1,10 @@
 // Package peer provides authenticated, framed TCP sessions for Pot services.
 // It has no knowledge of assistants, machine membership, or execution policy.
-// Ed25519 authenticates identities and frames; it does not encrypt traffic.
+// TLS 1.3 encrypts traffic and proves possession of pinned Ed25519 identities.
 package peer
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
@@ -44,6 +45,11 @@ func (i Identity) Validate() error {
 }
 func validLocal(i Identity, key ed25519.PrivateKey) error {
 	if i.Validate() != nil || len(key) != ed25519.PrivateKeySize || NewIdentity(i.NodeID, key.Public().(ed25519.PublicKey)) != i {
+		return ErrUnauthorized
+	}
+	// An Ed25519 private key includes a cached public suffix. Checking only
+	// Public() would accept another node's pin pasted onto an unrelated seed.
+	if !bytes.Equal(key, ed25519.NewKeyFromSeed(key.Seed())) {
 		return ErrUnauthorized
 	}
 	return nil

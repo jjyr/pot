@@ -2,20 +2,15 @@ package peer
 
 import (
 	"context"
-	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"net"
 	"sync"
 	"time"
 )
 
 type frame struct {
-	Session     string          `json:"session"`
-	Direction   string          `json:"direction"`
-	Sequence    uint64          `json:"sequence"`
 	Kind        string          `json:"kind"`
 	ID          string          `json:"id,omitempty"`
 	Correlation string          `json:"correlation,omitempty"`
@@ -34,31 +29,26 @@ type pendingCall struct {
 }
 
 type Session struct {
-	conn                      net.Conn
-	local                     Identity
-	key                       ed25519.PrivateKey
-	remote                    Identity
-	id, service               string
-	auth                      json.RawMessage
-	handler                   Handler
-	outDirection, inDirection string
-	ctx                       context.Context
-	cancel                    context.CancelFunc
-	done                      chan struct{}
-	closeOnce                 sync.Once
-	writer                    chan struct{}
-	outSeq                    uint64 // protected by writer
-	inSeq                     uint64 // single reader
-	mu                        sync.Mutex
-	pending                   map[string]pendingCall
-	inflight                  map[string]bool
-	handlers                  chan struct{}
-	pongs                     chan struct{}
+	conn      net.Conn
+	remote    Identity
+	service   string
+	auth      json.RawMessage
+	handler   Handler
+	ctx       context.Context
+	cancel    context.CancelFunc
+	done      chan struct{}
+	closeOnce sync.Once
+	writer    chan struct{}
+	mu        sync.Mutex
+	pending   map[string]pendingCall
+	inflight  map[string]bool
+	handlers  chan struct{}
+	pongs     chan struct{}
 }
 
-func newSession(ctx context.Context, c net.Conn, local Identity, key ed25519.PrivateKey, remote Identity, id, service string, auth json.RawMessage, handler Handler, out, in string) *Session {
+func newSession(ctx context.Context, c net.Conn, remote Identity, service string, auth json.RawMessage, handler Handler) *Session {
 	ctx, cancel := context.WithCancel(ctx)
-	return &Session{conn: c, local: local, key: append(ed25519.PrivateKey(nil), key...), remote: remote, id: id, service: service, auth: append(json.RawMessage(nil), auth...), handler: handler, outDirection: out, inDirection: in, ctx: ctx, cancel: cancel, done: make(chan struct{}), writer: make(chan struct{}, 1), pending: map[string]pendingCall{}, inflight: map[string]bool{}, handlers: make(chan struct{}, maxPending), pongs: make(chan struct{}, 1)}
+	return &Session{conn: c, remote: remote, service: service, auth: append(json.RawMessage(nil), auth...), handler: handler, ctx: ctx, cancel: cancel, done: make(chan struct{}), writer: make(chan struct{}, 1), pending: map[string]pendingCall{}, inflight: map[string]bool{}, handlers: make(chan struct{}, maxPending), pongs: make(chan struct{}, 1)}
 }
 func (s *Session) Remote() Identity      { return s.remote }
 func (s *Session) Service() string       { return s.service }
@@ -102,14 +92,7 @@ func (s *Session) send(ctx context.Context, value frame) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if s.outSeq == math.MaxUint64 {
-		return fmt.Errorf("peer sequence exhausted")
-	}
-	s.outSeq++
-	value.Session = s.id
-	value.Direction = s.outDirection
-	value.Sequence = s.outSeq
-	raw, err := seal(s.key, "pot-peer/frame/v2", value)
+	raw, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
@@ -209,10 +192,9 @@ func (s *Session) readLoop() {
 			return
 		}
 		var f frame
-		if open(raw, s.remote, "pot-peer/frame/v2", &f) != nil || f.Session != s.id || f.Direction != s.inDirection || s.inSeq == math.MaxUint64 || f.Sequence != s.inSeq+1 {
+		if decode(raw, &f) != nil {
 			return
 		}
-		s.inSeq = f.Sequence
 		if f.Kind == "ping" || f.Kind == "pong" {
 			if f.ID != "" || f.Correlation != "" || f.Method != "" || len(f.Params) != 0 || f.Error != nil {
 				return

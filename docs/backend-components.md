@@ -17,7 +17,7 @@ points; `internal/` contains product implementation. All packages share one root
 | `pkg/storage` | SQLite transactions, messages, events and context persistence |
 | `pkg/instance`, `pkg/modeldirectory` | Private data-root identity/locking and provider model metadata |
 | `internal/assistant` | Identities, rules, conversation Threads, chat driver and durable mailboxes/sessions |
-| `pkg/peer` | Shared signed TCP sessions, host identity proof, framing and service admission; no business authorization |
+| `pkg/peer` | Shared TLS 1.3 TCP sessions, mutual identity proof, framing and service admission; no business authorization |
 | `pkg/agentlink` | Node-bound authenticated collaboration, assistant directories and durable request recovery |
 | `internal/linkhost` | Agent Link adapters plus one host-owned peer service registry/listener |
 | `internal/gateway`, `internal/secrets` | Node-owned provider HTTP routes and encrypted credential references |

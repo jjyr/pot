@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -139,117 +140,6 @@ func TestAdmissionHasHandshakeDeadline(t *testing.T) {
 		t.Fatal("admission not called")
 	}
 }
-func TestHandshakeReplayRequiresFreshChallenge(t *testing.T) {
-	client, key := testIdentity(t, "client")
-	serverID, serverKey := testIdentity(t, "server")
-	var admissions atomic.Int32
-	server := &Server{Identity: serverID, PrivateKey: serverKey, Authorize: func(ctx context.Context, remote Identity, service string, auth json.RawMessage) (Handler, error) {
-		admissions.Add(1)
-		return nil, nil
-	}}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	var firstHello, firstConfirmation []byte
-	for attempt := 0; attempt < 2; attempt++ {
-		a, b := net.Pipe()
-		done := make(chan error, 1)
-		go func() {
-			s, err := server.Accept(ctx, a)
-			if s != nil {
-				s.Close()
-			}
-			done <- err
-		}()
-		if attempt == 0 {
-			h := hello{2, client, nonce(), &serverID, "mail", json.RawMessage("null")}
-			firstHello, _ = seal(key, "pot-peer/client-hello/v2", h)
-		}
-		if err := writePacket(b, firstHello, maxHandshake); err != nil {
-			t.Fatal(err)
-		}
-		ch, err := readPacket(b, maxHandshake)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if attempt == 0 {
-			firstConfirmation, _ = seal(key, "pot-peer/client-confirm/v2", confirmation{hash(firstHello, ch)})
-		}
-		if err = writePacket(b, firstConfirmation, maxHandshake); err != nil {
-			t.Fatal(err)
-		}
-		if attempt == 0 {
-			if _, err = readPacket(b, maxHandshake); err != nil {
-				t.Fatal(err)
-			}
-		} else if _, err = readPacket(b, maxHandshake); err == nil {
-			t.Fatal("captured handshake replay accepted")
-		}
-		_ = b.Close()
-		err = <-done
-		if attempt == 0 && err != nil {
-			t.Fatal(err)
-		}
-		if attempt == 1 && err == nil {
-			t.Fatal("replayed confirmation authorized")
-		}
-	}
-	if admissions.Load() != 1 {
-		t.Fatalf("admission replayed: %d", admissions.Load())
-	}
-}
-func TestFrameTamperingReflectionAndCrossSessionReplay(t *testing.T) {
-	for _, kind := range []string{"signature", "sequence", "session", "direction", "replay"} {
-		t.Run(kind, func(t *testing.T) {
-			local, localKey := testIdentity(t, "local")
-			remote, remoteKey := testIdentity(t, "remote")
-			a, b := net.Pipe()
-			defer b.Close()
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			delivered := make(chan struct{}, 2)
-			s := newSession(ctx, a, local, localKey, remote, "fresh-session", "mail", nil, func(ctx context.Context, r Request) (json.RawMessage, error) {
-				delivered <- struct{}{}
-				return nil, nil
-			}, "server", "client")
-			s.start()
-			defer s.Close()
-			f := frame{Session: "fresh-session", Direction: "client", Sequence: 1, Kind: "event", ID: "1", Method: "event.changed", Params: json.RawMessage("null")}
-			switch kind {
-			case "sequence":
-				f.Sequence = 2
-			case "session":
-				f.Session = "old-session"
-			case "direction":
-				f.Direction = "server"
-			}
-			raw, _ := seal(remoteKey, "pot-peer/frame/v2", f)
-			if kind == "signature" {
-				raw, _ = seal(localKey, "pot-peer/frame/v2", f)
-			}
-			if err := writePacket(b, raw, MaxFrame); err != nil {
-				t.Fatal(err)
-			}
-			if kind == "replay" {
-				select {
-				case <-delivered:
-				case <-ctx.Done():
-					t.Fatal("initial event not accepted")
-				}
-				_ = writePacket(b, raw, MaxFrame)
-			}
-			select {
-			case <-s.Done():
-			case <-ctx.Done():
-				t.Fatal("invalid frame did not close session")
-			}
-			select {
-			case <-delivered:
-				t.Fatal("invalid/replayed frame reached handler")
-			default:
-			}
-		})
-	}
-}
 func TestUnknownOutcomeIsNotRetried(t *testing.T) {
 	var executions atomic.Int32
 	endpoint, serverID, _ := testServer(t, func(ctx context.Context, remote Identity, service string, auth json.RawMessage) (Handler, error) {
@@ -279,13 +169,12 @@ func TestUnknownOutcomeIsNotRetried(t *testing.T) {
 }
 
 func TestLateResponseCannotCompleteAnotherAttemptWithSameRequestID(t *testing.T) {
-	clientID, clientKey := testIdentity(t, "client")
-	serverID, serverKey := testIdentity(t, "server")
+	serverID, _ := testIdentity(t, "server")
 	a, b := net.Pipe()
 	defer b.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	client := newSession(ctx, a, clientID, clientKey, serverID, "session", "execution", nil, nil, "client", "server")
+	client := newSession(ctx, a, serverID, "execution", nil, nil)
 	client.start()
 	defer client.Close()
 	finished := make(chan error, 1)
@@ -297,7 +186,7 @@ func TestLateResponseCannotCompleteAnotherAttemptWithSameRequestID(t *testing.T)
 				finished <- err
 				return
 			}
-			if err = open(raw, clientID, "pot-peer/frame/v2", &requests[index]); err != nil {
+			if err = decode(raw, &requests[index]); err != nil {
 				finished <- err
 				return
 			}
@@ -307,7 +196,7 @@ func TestLateResponseCannotCompleteAnotherAttemptWithSameRequestID(t *testing.T)
 			if index == 1 {
 				value = json.RawMessage(`"new"`)
 			}
-			raw, _ := seal(serverKey, "pot-peer/frame/v2", frame{Session: "session", Direction: "server", Sequence: uint64(index + 1), Kind: "response", ID: request.ID, Correlation: request.Correlation, Method: request.Method, Params: value})
+			raw, _ := json.Marshal(frame{Kind: "response", ID: request.ID, Correlation: request.Correlation, Method: request.Method, Params: value})
 			if err := writePacket(b, raw, MaxFrame); err != nil {
 				finished <- err
 				return
@@ -388,13 +277,32 @@ func duplexWithQueuedHeartbeats(t *testing.T, pings bool) (error, error) {
 	defer right.Close()
 	left.(*net.TCPConn).SetWriteBuffer(4096)
 	right.(*net.TCPConn).SetWriteBuffer(4096)
-	l := &observedConn{Conn: left, writing: make(chan struct{})}
-	r := &observedConn{Conn: right, writing: make(chan struct{})}
 	a, ak := testIdentity(t, "a")
 	b, bk := testIdentity(t, "b")
+	clientConfig, err := tlsConfig(a, ak, &b, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverConfig, err := tlsConfig(b, bk, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	securedLeft, securedRight := tls.Client(left, clientConfig), tls.Server(right, serverConfig)
+	handshakeCtx, stopHandshake := context.WithTimeout(context.Background(), 3*time.Second)
+	defer stopHandshake()
+	ready := make(chan error, 1)
+	go func() { ready <- securedRight.HandshakeContext(handshakeCtx) }()
+	if err = securedLeft.HandshakeContext(handshakeCtx); err != nil {
+		t.Fatal(err)
+	}
+	if err = <-ready; err != nil {
+		t.Fatal(err)
+	}
+	l := &observedConn{Conn: securedLeft, writing: make(chan struct{})}
+	r := &observedConn{Conn: securedRight, writing: make(chan struct{})}
 	handler := func(context.Context, Request) (json.RawMessage, error) { return json.RawMessage(`{"ok":true}`), nil }
-	sa := newSession(context.Background(), l, a, ak, b, "sid", "svc", nil, handler, "client", "server")
-	sb := newSession(context.Background(), r, b, bk, a, "sid", "svc", nil, handler, "server", "client")
+	sa := newSession(context.Background(), l, b, "svc", nil, handler)
+	sb := newSession(context.Background(), r, a, "svc", nil, handler)
 	defer sa.Close()
 	defer sb.Close()
 	if pings {
@@ -444,7 +352,9 @@ func TestPeerNodeIdentityRejectsOldWireFormat(t *testing.T) {
 	if err = decode([]byte(`{"id":"logical-node","public_key":"`+identity.PublicKey+`"}`), &old); err == nil {
 		t.Fatal("old peer identity accepted")
 	}
-	if validHello(hello{1, identity, nonce(), nil, "message", json.RawMessage("null")}) {
-		t.Fatal("old handshake version accepted")
+	for _, version := range []int{1, 2} {
+		if validHello(hello{version, identity, nil, "message", json.RawMessage("null")}) {
+			t.Fatal("old handshake version accepted", version)
+		}
 	}
 }

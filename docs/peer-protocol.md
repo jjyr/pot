@@ -6,14 +6,14 @@ service admission function and request handlers. It does not depend on Control,
 machine membership, assistant databases or plugin management.
 
 ```text
-Agent Link collaboration          Signed identity probes
+Agent Link collaboration          Authenticated identity probes
  routes / durable ACK               identity proof
           |                              |
           +------------------------------+
                          |
                          pkg/peer Session
            service admission / RPC / events / connection lifetime
-           signed session + direction + sequence / bounded framing
+           TLS 1.3 / mutual Ed25519 proof / pinned public keys
                                 |
                                TCP
                                 |
@@ -36,35 +36,55 @@ proves possession of the discovered key but does not establish trust. Service
 admission must independently validate the invitation or saved binding. A key
 authorizes no assistants, membership, execution methods or owner APIs by itself.
 
-The protocol does not encrypt traffic. Ed25519 authenticates identities and
-protects integrity; Tailscale or another encrypted VPN can provide network
-confidentiality without application certificates. This protocol is not Noise.
+TLS 1.3 encrypts all application traffic, including invitation previews and pair
+claims. Each connection receives an in-memory self-signed certificate for its
+existing Ed25519 identity key, with the node ID in its subject common name.
+Certificates expire after 24 hours; new connections generate fresh certificates.
+Certificates are not persisted, and renewal does not change the public-key pin.
+No public CA, domain certificate or user-managed certificate file is required.
+A VPN can still restrict network access but is not required for confidentiality.
 
 ## Handshake and frames
 
-Protocol version 2 rejects the former identity `id` field and version 1 hello.
-Every packet has a four-byte unsigned big-endian length followed by JSON.
-Signed packets contain an exact JSON payload and base64url signature over a
-domain separator and that payload. The client hello binds protocol version,
-identity, random 32-byte nonce, expected server identity, service name and
-service admission data. The signed server challenge binds a fresh nonce to the
-entire signed hello. The client signs a confirmation of the combined transcript.
-Only after checking that confirmation does the server call the service's
-admission function. A signed acceptance binds its decision to the same transcript.
-Handshake packets are limited to 64 KiB and have a ten-second deadline.
+Protocol version 3 runs exclusively over TLS 1.3 with ALPN `pot-peer/3`.
+Both peers present a self-signed Ed25519 certificate and TLS proves possession of
+both private keys. Session resumption is disabled, so every connection performs a
+fresh full handshake. Verification checks the exact expected node ID and public
+key, certificate validity, digital-signature usage and peer authentication usage.
+Public-key pins survive certificate replacement; a copied certificate or a copied
+public-key suffix on an unrelated private seed cannot authenticate a node.
+There is no plaintext, older TLS or former signed-protocol fallback. Both peers
+must upgrade; existing invitation and connection formats and key bindings remain
+unchanged.
 
-The transcript hash identifies the session. Every application frame signs that
-session ID, its client/server direction, a strictly increasing per-direction
-sequence, message kind, request ID, per-attempt correlation nonce, method and payload. A modified signature,
-wrong direction, skipped/repeated sequence or replay from another connection
-closes the session before dispatch. Each connection admits one service; a host
-can dispatch multiple service names through one `Server` and TCP listener.
+Without an expected identity, `Dial` permits only the `identity` service with null
+admission data and no reverse handler. Such discovery proves key possession, not
+trust, and must never transmit a capability. Pinned callers verify TLS before
+sending any application identity, service admission data or invitation capability.
+
+After TLS completes, the client sends a bounded JSON hello containing protocol
+version, its identity, expected server identity, service name and admission data.
+The client identity must exactly match its authenticated TLS certificate. The
+server then calls service admission and returns its identity and decision, which
+the client also checks against the authenticated certificate. Possessing a key
+does not grant service access: first pairing still needs the single-use invitation,
+and existing connections still check the saved node/key binding and revocation.
+TLS handles transcript authentication, directional keys, integrity and record
+replay protection; application packets carry no separate signatures.
+
+Every application handshake packet and frame has a four-byte unsigned big-endian
+length followed by JSON inside TLS. The application handshake is limited to
+64 KiB, with one ten-second deadline covering TLS and service admission. Frames
+carry kind, request ID, per-attempt correlation nonce, method and payload. Each
+connection admits one service; a host can dispatch multiple service names through
+one `Server` and TCP listener.
 
 Application frames are limited to 32 MiB; RPC JSON payloads to 24 MiB. A session
 admits at most 64 pending calls and 64 simultaneous incoming handlers. Servers
 bound accepted connections, including pending handshakes, to 128. The limits are
 checked before allocating a declared frame or dispatching a handler. TCP handles
-network segmentation; services do not implement another transport fragment format.
+network segmentation and TLS handles encrypted record splitting; services do not
+implement another transport fragment format.
 
 ## Lifecycle and business recovery
 
@@ -73,12 +93,16 @@ network segmentation; services do not implement another transport fragment forma
 `Server.Serve` owns the listener and sessions until cancellation or listener
 failure. `OnSession` registers an authenticated session before its reader starts
 and must return promptly. Hosts may register a narrow `identity` service for
-signed identity probes; management HTTP APIs are not mounted on the peer listener.
+authenticated identity probes; management HTTP APIs are not mounted on the peer
+listener.
 
 Sessions carry requests, responses and lossy `event.*` notifications in either
-direction. Responses preserve the request ID, method and per-attempt correlation nonce, so a late response cannot complete a later call reusing a business ID. A handler may return a
-bounded `RemoteError` with opaque service fault data. Heartbeats run every twenty
-seconds, reads expire after ninety seconds, and writes have bounded deadlines. Readers enqueue bounded heartbeat replies without waiting for writers, so duplex large writes continue draining.
+direction. Responses preserve the request ID, method and per-attempt correlation
+nonce, so a late response cannot complete a later call reusing a business ID. A
+handler may return a bounded `RemoteError` with opaque service fault data. Heartbeats run every twenty
+seconds, reads expire after ninety seconds, and writes have bounded deadlines.
+Readers enqueue bounded heartbeat replies without waiting for writers, so duplex
+large writes continue draining.
 
 The transport never reconnects or replays business requests automatically. A call
 whose delivery or result is uncertain returns `ErrUncertain`. Agent messaging

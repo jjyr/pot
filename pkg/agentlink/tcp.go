@@ -29,7 +29,7 @@ func decodeJSON(data []byte, value any) error {
 }
 
 // Authorize is mounted in the host's shared peer.Server. It runs only after the
-// TCP transport has proved possession of the remote host's Ed25519 key.
+// TLS transport has proved possession of the remote host's Ed25519 key.
 func (s *Service) Authorize(ctx context.Context, remote peer.Identity, service string, raw json.RawMessage) (peer.Handler, error) {
 	if service != ServiceName || remote.Validate() != nil {
 		return nil, ErrUnauthorized
