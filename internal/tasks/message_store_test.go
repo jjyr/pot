@@ -67,6 +67,9 @@ ALTER TABLE assistant_mail_identity RENAME COLUMN node_id TO control_id;
 ALTER TABLE assistant_contacts RENAME COLUMN node TO control;
 DROP TABLE task_input_digest_formats;
 ALTER TABLE plugin_background DROP COLUMN diagnostic;
+DROP INDEX agent_plugin_instance_state;
+ALTER TABLE plugin_background DROP COLUMN plugin_id;
+ALTER TABLE plugin_background DROP COLUMN connection_id;
 DELETE FROM pot_migrations WHERE id >= '0006_';`, legacyHash)
 	if err != nil {
 		t.Fatal(err)

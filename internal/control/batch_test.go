@@ -344,7 +344,7 @@ func TestNotificationsShareOrderedBatchAfterUserInput(t *testing.T) {
 			if i == 2 {
 				owner = "foreign"
 			}
-			event := protocol.Envelope{Kind: "plugin_event", ID: fmt.Sprintf("plugin-%d", i), From: protocol.AgentRef{NodeID: "local", Kind: "runtime", AgentID: "plugin-example"}, To: protocol.AgentRef{NodeID: "local", Kind: "assistant", AgentID: owner}, ConversationID: task.ConversationID, Plugin: &protocol.PluginNotification{Identity: core.PluginIdentity{ID: "example", Version: "1", Digest: "installed"}, Event: core.PluginEvent{ID: fmt.Sprint(i), Title: "External title", Body: text, URL: "https://example.com/issue/1", OccurredAt: "2026-01-01T00:00:00Z"}}}
+			event := protocol.Envelope{Kind: "plugin_event", ID: fmt.Sprintf("plugin-%d", i), From: protocol.AgentRef{NodeID: "local", Kind: "runtime", AgentID: "plugin-example"}, To: protocol.AgentRef{NodeID: "local", Kind: "assistant", AgentID: owner}, ConversationID: task.ConversationID, Plugin: &protocol.PluginNotification{InstanceID: "example", Identity: core.PluginIdentity{ID: "example", Version: "1", Digest: "installed"}, Event: core.PluginEvent{ID: fmt.Sprint(i), Title: "External title", Body: text, URL: "https://example.com/issue/1", OccurredAt: "2026-01-01T00:00:00Z"}}}
 			if err := inbox.EnqueueTx(ctx, tx, event, "in", "queued"); err != nil {
 				return err
 			}

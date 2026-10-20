@@ -215,7 +215,7 @@ arriving while a summary runs follows the existing independent Main-turn path.
 Each exchange commits its checkpoint, next wake and **all** event envelopes in one
 SQLite transaction with the shared `agent_messages` inbox. The next request's
 checkpoint acknowledges durable acceptance, not assistant completion. IDs are
-unique per Control and plugin across account/route changes; include the account
+unique per Control and background instance across account/route changes; include the account
 identity in IDs. Identical retries retain their original recipient and receipt;
 conflicting content for the same ID rejects the whole exchange. Reconfiguring or
 disabling a binding fences an in-flight response. Disabling stops future acceptance;
@@ -227,7 +227,7 @@ Bounds are eight events per exchange, 24,000 UTF-8 bytes per body, 512 title byt
 256 ID bytes, 2,048 URL bytes (HTTPS), 2 MiB checkpoint, 3 MiB response and
 16 KiB config. Serialized event text must also fit the existing 64 KiB inbox
 text bound. Wake delays are 60–86,400 seconds. At most 64 queued events per
-plugin are accepted. Task results and plugin events share one receiver, in inbox
+background instance are accepted. Task results and plugin events share one receiver, in inbox
 receipt order, with at most eight messages and 256 KiB of serialized envelopes
 and summary payload per batch. An individually oversized task outcome is delivered
 alone, preserving the existing task-result progress policy. Plugin events always
@@ -334,3 +334,32 @@ fine-grained PATs. Pot reuses the connected account and never upgrades scopes or
 runs `gh auth login` automatically. A permission status requires checking the
 existing authorization/organization policy; a connected label alone does not
 prove this endpoint is usable.
+
+## Connection allowance monitoring
+
+Connections with the `allowances` capability use an independent background
+instance per connection and source package. The plugin identity, instance routing,
+queue bounds and atomic checkpoint/inbox acceptance rules above apply. Connection
+settings own these monitors; the plugin notification list shows background
+contributions. See [Provider contributions](model-directory.md#provider-contributions)
+for model connections and their shared metadata reader.
+
+Monitoring defaults to enabled at 90 percent. An initially empty target binds to
+the first local assistant when available. Explicit disablement and thresholds
+survive refresh and reconnect; removing a selected assistant never silently
+retargets accepted events or future warnings. Reads without an available assistant
+do not consume a warning episode.
+
+Each known fresh window is compared independently, without adding percentages
+across windows or shared pools. A window at or above the threshold starts one
+connection warning episode; account and plan labels remain reference data, not IDs.
+Further high readings remain quiet across restarts. Recovery requires two complete,
+nonempty low observations at least 60 seconds apart with distinct source timestamps. Unknown values, failed reads, stale or expired windows and empty snapshots
+cannot establish recovery; explicit unlimited windows are skipped.
+
+Both the host read and source `read_at` or `as_of` must be within 15 minutes,
+allowing at most 30 seconds of clock skew. If both source timestamps are present,
+both must be fresh. Reset timestamp drift does not create another episode.
+Connection routes and revisions, package identities and owner binding revisions
+fence acceptance as described above. Allowance permission failures affect that capability alone;
+inference and Pot's own spending policies remain independent.

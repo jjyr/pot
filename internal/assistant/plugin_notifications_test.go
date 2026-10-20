@@ -25,7 +25,7 @@ func TestPluginAcceptanceDurableConcurrentIdempotentAndBound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := BackgroundBinding{ID: "example", Enabled: true, Assistant: "main", Config: []byte(`{}`)}
+	b := BackgroundBinding{ID: "example", PluginID: "example", Enabled: true, Assistant: "main", Config: []byte(`{}`)}
 	if err = m.ConfigureBackground(ctx, b); err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestPluginInterruptedAttemptFencedAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "mail.sqlite")
 	m, _ := OpenMailbox(path, "control")
-	b := BackgroundBinding{ID: "example", Enabled: true, Assistant: "main", Config: []byte(`{}`)}
+	b := BackgroundBinding{ID: "example", PluginID: "example", Enabled: true, Assistant: "main", Config: []byte(`{}`)}
 	m.ConfigureBackground(ctx, b)
 	stored, _ := m.Backgrounds(ctx)
 	b = stored[0]
@@ -175,7 +175,7 @@ func TestPluginCapacityRetryAndImmediateReclaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer m.Close()
-	b := BackgroundBinding{ID: "example", Enabled: true, Assistant: "main", Config: []byte(`{}`)}
+	b := BackgroundBinding{ID: "example", PluginID: "example", Enabled: true, Assistant: "main", Config: []byte(`{}`)}
 	if err = m.ConfigureBackground(ctx, b); err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestPluginCapacityRetryAndImmediateReclaim(t *testing.T) {
 func TestPluginStoredFormatUpgradePreservesBindingAndReceipts(t *testing.T) {
 	ctx := context.Background()
 	m, path := mailbox(t, "local")
-	b := BackgroundBinding{ID: "example", Enabled: true, Assistant: "main", Config: []byte(`{"reasons":["mention"]}`)}
+	b := BackgroundBinding{ID: "example", PluginID: "example", Enabled: true, Assistant: "main", Config: []byte(`{"reasons":["mention"]}`)}
 	if err := m.ConfigureBackground(ctx, b); err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestPluginStoredFormatUpgradePreservesBindingAndReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Recreate only the removed fields/table from the previous PR format.
-	if _, err := m.db.Exec(`ALTER TABLE assistant_mail_identity RENAME COLUMN node_id TO control_id; ALTER TABLE assistant_contacts RENAME COLUMN node TO control; DROP TABLE task_input_digest_formats; DROP TABLE codex_mail_consumers; DROP TABLE pot_migrations; ALTER TABLE plugin_background DROP COLUMN diagnostic; CREATE TABLE plugin_delivery_rates(owner TEXT PRIMARY KEY,next INTEGER NOT NULL); INSERT INTO plugin_delivery_rates VALUES('main',9999999999999);
+	if _, err := m.db.Exec(`ALTER TABLE assistant_mail_identity RENAME COLUMN node_id TO control_id; ALTER TABLE assistant_contacts RENAME COLUMN node TO control; DROP TABLE task_input_digest_formats; DROP TABLE codex_mail_consumers; DROP TABLE pot_migrations; DROP INDEX agent_plugin_instance_state; ALTER TABLE plugin_background DROP COLUMN diagnostic; ALTER TABLE plugin_background DROP COLUMN plugin_id; ALTER TABLE plugin_background DROP COLUMN connection_id; CREATE TABLE plugin_delivery_rates(owner TEXT PRIMARY KEY,next INTEGER NOT NULL); INSERT INTO plugin_delivery_rates VALUES('main',9999999999999);
  UPDATE agent_messages SET envelope=json_set(envelope,'$.plugin.event.group','thread','$.text','old duplicate');
  UPDATE agent_messages SET state=json_extract(envelope,'$.plugin.event.id');`); err != nil {
 		t.Fatal(err)
@@ -281,7 +281,7 @@ func TestPluginStoredFormatUpgradePreservesBindingAndReceipts(t *testing.T) {
 func TestPluginUnstartedReportReleaseCanRetryImmediately(t *testing.T) {
 	ctx := context.Background()
 	m, _ := mailbox(t, "local")
-	event := protocol.Envelope{Kind: "plugin_event", ID: "plugin-notice", From: protocol.AgentRef{NodeID: "local", Kind: "runtime", AgentID: "plugin-example"}, To: address("local", "main"), ConversationID: newConversation(), Plugin: &protocol.PluginNotification{Identity: core.PluginIdentity{ID: "example"}, Event: core.PluginEvent{ID: "one", Title: "Update", Body: "body", OccurredAt: "2026-01-01T00:00:00Z"}}}
+	event := protocol.Envelope{Kind: "plugin_event", ID: "plugin-notice", From: protocol.AgentRef{NodeID: "local", Kind: "runtime", AgentID: "plugin-example"}, To: address("local", "main"), ConversationID: newConversation(), Plugin: &protocol.PluginNotification{InstanceID: "example", Identity: core.PluginIdentity{ID: "example"}, Event: core.PluginEvent{ID: "one", Title: "Update", Body: "body", OccurredAt: "2026-01-01T00:00:00Z"}}}
 	if err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error { return inbox.EnqueueTx(ctx, tx, event, "in", "queued") }); err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +330,7 @@ func TestPluginUnstartedReportReleaseCanRetryImmediately(t *testing.T) {
 func TestPluginNotificationBatchCountsCanonicalPayloadBytes(t *testing.T) {
 	ctx := context.Background()
 	m, _ := mailbox(t, "local")
-	b := BackgroundBinding{ID: "example", Enabled: true, Assistant: "main", Config: []byte(`{}`)}
+	b := BackgroundBinding{ID: "example", PluginID: "example", Enabled: true, Assistant: "main", Config: []byte(`{}`)}
 	if err := m.ConfigureBackground(ctx, b); err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +427,7 @@ func TestPluginDefaultInitializationConcurrent(t *testing.T) {
 		t.Fatal("stale draft accepted")
 	}
 	// An explicit off choice before any assistant exists is initialized intent.
-	if err = m.ConfigureBackground(ctx, BackgroundBinding{ID: "waiting", Enabled: false, Config: json.RawMessage(`{}`)}); err != nil {
+	if err = m.ConfigureBackground(ctx, BackgroundBinding{ID: "waiting", PluginID: "waiting", Enabled: false, Config: json.RawMessage(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 	if err = m.EnsureBackground(ctx, "waiting", "late-assistant"); err != nil {
@@ -451,7 +451,7 @@ func TestPluginBackgroundFailureDiagnosticSurvivesRestartAndClearsOnSuccess(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = m.ConfigureBackground(ctx, BackgroundBinding{ID: "github", Enabled: true, Assistant: "main", Config: []byte(`{}`)}); err != nil {
+	if err = m.ConfigureBackground(ctx, BackgroundBinding{ID: "github", PluginID: "github", Enabled: true, Assistant: "main", Config: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 	bindings, _ := m.Backgrounds(ctx)
@@ -476,5 +476,119 @@ func TestPluginBackgroundFailureDiagnosticSurvivesRestartAndClearsOnSuccess(t *t
 	bindings, _ = m.Backgrounds(ctx)
 	if bindings[0].Diagnostic != "" || bindings[0].Status != "ready" {
 		t.Fatal(bindings)
+	}
+}
+
+func TestPluginInstancesIsolateIdentityQueuesAndRetargetFences(t *testing.T) {
+	ctx := context.Background()
+	m, _ := mailbox(t, "local")
+	defer m.Close()
+	for _, id := range []string{"provider-first", "provider-second"} {
+		if err := m.EnsureBackgroundInstance(ctx, BackgroundBinding{ID: id, PluginID: "gateway", ConnectionID: id, Enabled: true, Assistant: "main", Config: json.RawMessage(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bindings, err := m.Backgrounds(ctx)
+	if err != nil || len(bindings) != 2 {
+		t.Fatal(bindings, err)
+	}
+	response := core.BackgroundResponse{State: json.RawMessage(`{"episode":1}`), DelaySeconds: 60, Status: "ready", Events: []core.PluginEvent{{ID: "same-event", Title: "Allowance", Body: `{"used":95}`, OccurredAt: "2026-10-20T00:00:00Z"}}}
+	identity := core.PluginIdentity{ID: "gateway", Version: "1", Digest: "installed"}
+	for _, b := range bindings {
+		if err = m.CommitBackground(ctx, b, identity, response, 100); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bindings, err = m.Backgrounds(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range bindings {
+		if b.Queued != 1 || b.PluginID != "gateway" {
+			t.Fatal(b)
+		}
+	}
+	messages, err := m.Notifications(ctx, "main")
+	if err != nil || len(messages) != 2 {
+		t.Fatal(messages, err)
+	}
+	for _, msg := range messages {
+		if msg.Plugin.Identity.ID != "gateway" || msg.From.AgentID != "plugin-"+msg.Plugin.InstanceID || msg.Plugin.ConnectionID != msg.Plugin.InstanceID {
+			t.Fatal(msg)
+		}
+		if err = msg.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stale := bindings[0]
+	changed := stale
+	changed.PluginID = "other"
+	if err = m.ConfigureBackground(ctx, changed); err == nil {
+		t.Fatal("package identity rebound")
+	}
+	changed = stale
+	changed.ConnectionID = "different"
+	if err = m.ConfigureBackground(ctx, changed); err == nil {
+		t.Fatal("connection identity rebound")
+	}
+	changed = stale
+	changed.Assistant = "other"
+	if err = m.ConfigureBackground(ctx, changed); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.CommitBackground(ctx, stale, identity, response, 200); err == nil {
+		t.Fatal("stale route accepted")
+	}
+	bindings, _ = m.Backgrounds(ctx)
+	changed = bindings[0]
+	if err = m.CommitBackground(ctx, changed, identity, response, 200); err != nil {
+		t.Fatal("identical retry after retarget failed", err)
+	}
+	other, err := m.Notifications(ctx, "other")
+	if err != nil || len(other) != 0 {
+		t.Fatal("old receipts replayed to new target", other, err)
+	}
+	forged := identity
+	forged.ID = changed.ID
+	if err = m.CommitBackground(ctx, changed, forged, response, 200); err == nil {
+		t.Fatal("instance impersonated package")
+	}
+	changed.Enabled = false
+	if err = m.ConfigureBackground(ctx, changed); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.EnsureBackgroundInstance(ctx, BackgroundBinding{ID: changed.ID, PluginID: "gateway", ConnectionID: changed.ConnectionID, Enabled: true, Assistant: "main", Config: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	bindings, _ = m.Backgrounds(ctx)
+	if bindings[0].Enabled {
+		t.Fatal("explicit off overwritten")
+	}
+}
+
+func TestBackgroundWaitingInstanceCanCommitCheckpointWithoutEvents(t *testing.T) {
+	ctx := context.Background()
+	m, _ := mailbox(t, "local")
+	defer m.Close()
+	if err := m.EnsureBackgroundInstance(ctx, BackgroundBinding{ID: "provider-waiting", PluginID: "gateway", ConnectionID: "waiting", Enabled: true, Config: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	bindings, err := m.Backgrounds(ctx)
+	if err != nil || len(bindings) != 1 {
+		t.Fatal(bindings, err)
+	}
+	b := bindings[0]
+	identity := core.PluginIdentity{ID: "gateway"}
+	response := core.BackgroundResponse{State: json.RawMessage(`{"version":1,"active":false,"episode":0}`), DelaySeconds: 60, Status: "ready"}
+	if err = m.CommitBackground(ctx, b, identity, response, 100); err != nil {
+		t.Fatal(err)
+	}
+	bindings, err = m.Backgrounds(ctx)
+	if err != nil || string(bindings[0].State) != string(response.State) || bindings[0].Next != 60100 {
+		t.Fatal(bindings, err)
+	}
+	response.Events = []core.PluginEvent{{ID: "premature", Title: "Quota", Body: `{"used":90}`, OccurredAt: "2026-10-20T00:00:00Z"}}
+	if err = m.CommitBackground(ctx, b, identity, response, 200); err == nil {
+		t.Fatal("event accepted without target")
 	}
 }

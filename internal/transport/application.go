@@ -327,12 +327,37 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 				usage.Summary
 				MailWaits []usage.Waiting `json:"mail_waits"`
 			}{summary, mailWaits}, nil
+		case "/api/v1/providers/allowances":
+			return s.ConnectionAllowances(ctx, u.Query().Get("profile_id"))
 		case "/api/v1/spaces":
 			return map[string]any{"active_space_id": "local", "items": []any{map[string]any{"id": "local", "kind": "local", "name": a.Name, "control_id": a.RuntimeID, "runtime_id": a.RuntimeID, "connected": true}}}, nil
 		}
 	}
 	if method == "POST" {
 		switch path {
+		case "/api/v1/providers/allowances":
+			var body struct {
+				ProfileID string  `json:"profile_id"`
+				Action    string  `json:"action"`
+				Enabled   bool    `json:"enabled"`
+				Threshold float64 `json:"threshold"`
+				Assistant string  `json:"assistant"`
+				Revision  int64   `json:"revision"`
+			}
+			if err = decode(r.Body, &body); err != nil {
+				return nil, err
+			}
+			switch body.Action {
+			case "refresh":
+				return s.RefreshConnectionAllowances(ctx, body.ProfileID)
+			case "configure":
+				if err = s.ConfigureConnectionAllowance(ctx, body.ProfileID, control.ProviderAllowanceMonitorRequest{Enabled: body.Enabled, Threshold: body.Threshold, Assistant: body.Assistant, Revision: body.Revision}); err != nil {
+					return nil, err
+				}
+				return s.ConnectionAllowances(ctx, body.ProfileID)
+			default:
+				return nil, errors.New("invalid provider allowance action")
+			}
 		case "/api/v1/providers/resolve":
 			var body control.CheckProvider
 			if err = decode(r.Body, &body); err != nil {

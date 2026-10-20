@@ -179,6 +179,11 @@ original join requests while removing old HTTP endpoints and CA settings. Existi
 Runners update their endpoint against the saved Control identity; migration never
 re-enrolls a machine or replays execution. See [Peer protocol](peer-protocol.md).
 
+`tasks/0009_background_instances.sql` separates installed plugin identity from
+background instance identity and adds optional model connection ownership. It
+keeps existing binding IDs and checkpoints, fills instance provenance in stored
+plugin event envelopes, and retains message IDs, delivery states and receipts.
+
 ## Assistant character avatars
 
 Control migration `0015_character_avatars` records each assistant's assigned

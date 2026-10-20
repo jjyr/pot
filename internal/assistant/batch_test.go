@@ -294,7 +294,7 @@ func TestResultBatchConcurrentClaimAndRestartFence(t *testing.T) {
 	ctx := context.Background()
 	m, path := mailbox(t, "local")
 	a := enqueueResult(t, m, "A", "main")
-	b := protocol.Envelope{Kind: "plugin_event", ID: "plugin-B", From: protocol.AgentRef{NodeID: "local", Kind: "runtime", AgentID: "plugin-example"}, To: address("local", "main"), ConversationID: newConversation(), Plugin: &protocol.PluginNotification{Identity: core.PluginIdentity{ID: "example"}, Event: core.PluginEvent{ID: "B", Title: "B", Body: "body", OccurredAt: "2026-01-01T00:00:00Z"}}}
+	b := protocol.Envelope{Kind: "plugin_event", ID: "plugin-B", From: protocol.AgentRef{NodeID: "local", Kind: "runtime", AgentID: "plugin-example"}, To: address("local", "main"), ConversationID: newConversation(), Plugin: &protocol.PluginNotification{InstanceID: "example", Identity: core.PluginIdentity{ID: "example"}, Event: core.PluginEvent{ID: "B", Title: "B", Body: "body", OccurredAt: "2026-01-01T00:00:00Z"}}}
 	if err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error { return inbox.EnqueueTx(ctx, tx, b, "in", "queued") }); err != nil {
 		t.Fatal(err)
 	}
