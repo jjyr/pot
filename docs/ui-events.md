@@ -105,6 +105,17 @@ messages; scrolling down pages the newer interval, and Latest reads a recent
 window directly. References resolve by ID, without traversing intervening pages.
 Returning to cached Chat shows its projection immediately and refreshes it from
 the stream. A reset while reading an older message reloads that message's window.
+All Chat entry paths share a scoped positioning intent: restore the saved reading
+position, locate an explicit message, or follow Latest. Page returns, assistant
+switches and browser history prepare the composer, mount the destination window,
+measure its rows and restore the viewport before exposing the first Chat frame.
+Hidden rows do not overwrite measured heights. Each of the eight cached owners
+can retain its bounded height estimates; width and content changes remeasure the
+mounted rows. Explicit message/Latest actions supersede prior positioning, and
+navigation or deliberate upward reading retires an in-flight locate so its late
+response cannot replace the current history window or move the reader.
+An explicit message destination stays anchored through delayed preview loading;
+pointer, touch, scrolling or keyboard interaction releases that positioning intent.
 Returning to an assistant that was following the latest messages keeps following
 through the cached projection, stream reset and background-task refresh. Visible
 task rows do not turn following into a saved historical reading position. Only

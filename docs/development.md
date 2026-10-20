@@ -133,6 +133,11 @@ root on loopback and open
 `/scripts/tests/fixtures/chat-switching.html?conversation=alpha&locale=en`.
 It uses the shared production DOM with synthetic conversations and independently
 delayed subscriptions and background-task reads.
+The checks sample visible frames during page returns, cached assistant switches,
+reference positioning and delayed lookups, including A → B → A navigation. Run
+at desktop and phone widths; `locale=zh-CN&theme=dark` exercises the other locale
+and theme. Add `capture-navigation=1` to pause at the multiline-draft return
+scenario; `window.navigationCaptureContinue()` resumes the checks.
 
 For the resource tool and component fixture, run
 `POT_RESOURCE_FIXTURE_URL_FILE=/tmp/pot-resource-url mise exec -- go test

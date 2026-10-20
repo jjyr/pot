@@ -3,18 +3,25 @@
 export function createMessageWindow({scroller, host, render, dispose, requestRender, heights = new Map()}) {
   let rows = [], mounted = new Map(), closed = false;
   const spacers = [];
-  const observer = new ResizeObserver(entries => {
+  function measure() {
     let changed = false;
-    for (const entry of entries) {
-      const key = entry.target.dataset.windowKey;
-      const height = entry.target.getBoundingClientRect().height + parseFloat(getComputedStyle(entry.target).marginBottom || 0) + parseFloat(getComputedStyle(entry.target).marginTop || 0);
-      if (height > 0 && Math.abs((heights.get(key) ?? -1) - height) > .5) { heights.set(key, height); changed = true; }
+    for (const [key, record] of mounted) {
+      changed = record.childrenWindow?.measure() || changed;
+      const style = getComputedStyle(record.row), box = record.row.getBoundingClientRect();
+      const height = box.height + parseFloat(style.marginBottom || 0) + parseFloat(style.marginTop || 0);
+      if (box.height > 0 && Math.abs((heights.get(key) ?? -1) - height) > .5) { heights.set(key, height); changed = true; }
     }
+    return changed;
+  }
+  const observer = new ResizeObserver(() => {
+    // display:none has no usable measurement. Margins alone must never replace
+    // the last visible height while a conversation is behind another page.
+    const changed = measure();
     while (heights.size > 1280) heights.delete(heights.keys().next().value);
     if (changed && !closed) requestRender(true);
   });
   const estimate=item=>heights.get(item.viewKey)??(item.role==='user'?120:item.role==='tool'?70:180);
-  function set(next,{anchor}={}) {
+  function set(next,{anchor,target}={}) {
     let shift=0;
     if(anchor){
       const root=rows.find(item=>item.id===anchor||[...(mounted.get(item.viewKey)?.row.querySelectorAll('article.message')||[])].some(row=>row.dataset.messageId===anchor));
@@ -25,7 +32,17 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     }
     rows = next;
     const viewport = scroller.getBoundingClientRect(), box = host.getBoundingClientRect();
-    const start = viewport.top - box.top + shift - 600, end = viewport.bottom - box.top + shift + 600;
+    let start = viewport.top - box.top + shift;
+    if (target) {
+      let offset = 0;
+      for (const item of rows) {
+        if (item.id === target.id || item.viewKey === target.id) { start = offset - (target.offset ?? scroller.clientHeight / 3); break; }
+        offset += estimate(item);
+      }
+      if (target.end) start = Math.max(0, offset - scroller.clientHeight);
+    }
+    const end = start + scroller.clientHeight + 600;
+    start -= 600;
     let offset = 0, gap = 0, spacerIndex = 0;
     const selected = new Set(), layout = [];
     const selection = getSelection();
@@ -59,7 +76,19 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     while (host.children.length > index) host.lastElementChild.remove();
     if(shift)scroller.scrollTop+=shift;
   }
-  return {set, seek(id) {
+  return {set, measure, layout(next,{anchor,target,restore}={}) {
+    // Resolve estimates, mount the destination and measure it in the same paint.
+    // The bound keeps pathological content from monopolising the UI thread;
+    // later media/font resizes still use the ordinary observer/anchor path.
+    let top = scroller.scrollTop;
+    for (let pass = 0; pass < 6; pass++) {
+      set(next,{anchor,target});
+      const changed = measure();
+      restore?.();
+      if (!changed && Math.abs(scroller.scrollTop - top) < .5) break;
+      top = scroller.scrollTop;
+    }
+  }, seek(id) {
     let offset=0;
     for(const item of rows){if(item.id===id||item.viewKey===id){scroller.scrollTop+=host.getBoundingClientRect().top-scroller.getBoundingClientRect().top+offset-scroller.clientHeight/3;requestRender();return true;}offset+=heights.get(item.viewKey)??(item.role==='user'?120:item.role==='tool'?70:180);}
     return false;
