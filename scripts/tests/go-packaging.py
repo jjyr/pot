@@ -65,6 +65,7 @@ class GoPackaging(unittest.TestCase):
                         sorted(
                             {
                                 "plugin.json",
+                                "icon.svg",
                                 *(
                                     name
                                     for capability in manifest["contributes"].values()

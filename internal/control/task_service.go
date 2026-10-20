@@ -375,7 +375,7 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 	if err != nil {
 		return runner.Prepared{}, err
 	}
-	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: l.TaskID, Turn: l.RunID, Generation: l.Generation, DefaultTarget: l.ExecutionTarget, ApprovalOwner: l.AssistantID, Task: l.TaskID, Spec: config, Usage: s.Usage, UsageScope: l.TaskID, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, Credentials: s.Integrations, Product: s.productDispatchBound(l.AssistantID, l.TaskID, l.RunID, l.Generation, true)}
+	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: l.TaskID, Turn: l.RunID, Generation: l.Generation, DefaultTarget: l.ExecutionTarget, ApprovalOwner: l.AssistantID, Task: l.TaskID, Spec: config, Usage: s.Usage, UsageScope: l.TaskID, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, Credentials: s, Product: s.productDispatchBound(l.AssistantID, l.TaskID, l.RunID, l.Generation, true)}
 	feedback := &taskFeedback{s: s, launch: l}
 	model := &ModelSession{Registry: s.Providers, Usage: s.Usage, Spec: config, Scope: l.TaskID, Turn: l.RunID, Generation: l.Generation, Role: "task", Claim: feedback.claimModel}
 	ports := &executionPorts{model: model, compaction: func(ctx context.Context, raw json.RawMessage) error {

@@ -93,7 +93,7 @@ targets. iPad split windows follow the same breakpoints.
 | From 720 px | 56 px feature rail; Chat adds a collapsible 220 px assistant pane |
 | Below 900 px | Compact page spacing and stacked form labels, independently of the navigation layout |
 
-The rail contains Chat (Pot icon), Tasks, Topology, Usage and bottom-aligned
+The rail contains Chat (Pot icon), Tasks, Topology, Extensions, Usage and bottom-aligned
 Settings. Tasks includes Tasks / Schedules. Other destinations and editors hide
 the assistant pane; wide editors retain the rail. A single 44 px titlebar holds
 the destination, Back and contextual actions. Native window controls and draggable
@@ -108,7 +108,7 @@ history and reading position.
 
 Root pages expose a 44 × 44 px menu button. A rightward swipe beginning within
 24 px of the left edge also opens the full-screen menu with Assistants, Tasks,
-Topology, Usage and Settings. A destination, Close, Escape or a leftward swipe
+Topology, Extensions, Usage and Settings. A destination, Close, Escape or a leftward swipe
 anywhere in the menu dismisses it. The menu follows the finger; a quarter-width
 swipe, capped at 100 px, commits, while a short, reversed or cancelled swipe
 settles back. Reduced Motion removes the settling animation.

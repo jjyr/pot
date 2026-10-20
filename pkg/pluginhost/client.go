@@ -158,6 +158,10 @@ func New(config Config) (*Client, error) {
 	if node == "" {
 		node = "node"
 	}
+	node, err = exec.LookPath(node)
+	if err != nil {
+		return nil, err
+	}
 	cmd := exec.Command(node, "--input-type=module", "-e", hostSource, filepath.Join(directory, config.Entrypoint))
 	cmd.Dir = config.Workspace
 	cmd.Env = hostEnvironment(directory)

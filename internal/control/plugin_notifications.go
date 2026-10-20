@@ -40,12 +40,19 @@ func (s *Service) ConfigurePluginNotifications(ctx context.Context, b assistant.
 	})
 }
 func (s *Service) backgroundPackage(id string) (plugin.Package, error) {
-	packages, err := plugin.Discover(s.options.PluginRoot)
+	packages, err := s.installedPlugins()
 	if err != nil {
 		return plugin.Package{}, err
 	}
 	for _, p := range packages {
 		if p.Manifest.ID == id && p.Manifest.Contributes.Background != nil {
+			enabled, err := s.enabled(context.Background(), "plugins", id)
+			if err != nil {
+				return plugin.Package{}, err
+			}
+			if !enabled {
+				return plugin.Package{}, errors.New("plugin disabled")
+			}
 			return p, nil
 		}
 	}
@@ -262,7 +269,7 @@ func (s *Service) PluginNotifications(ctx context.Context) (any, error) {
 	packages := []plugin.Package{}
 	var err error
 	if s.options.PluginRoot != "" {
-		packages, err = plugin.Discover(s.options.PluginRoot)
+		packages, err = s.installedPlugins()
 	}
 	discoveryErr := err
 	stored, err := s.Mailbox.Backgrounds(ctx)
@@ -295,7 +302,11 @@ func (s *Service) PluginNotifications(ctx context.Context) (any, error) {
 				b = old
 			}
 		}
-		if !b.Enabled {
+		enabled, checkErr := s.enabled(ctx, "plugins", id)
+		if checkErr != nil {
+			return nil, checkErr
+		}
+		if !b.Enabled || !enabled {
 			b.Status = "disabled"
 		} else if discoveryErr != nil {
 			b.Status = "unavailable"

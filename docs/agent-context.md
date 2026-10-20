@@ -341,6 +341,8 @@ See [Permissions](permissions.md) and [Executor](executor.md).
 
 Task creation accepts optional `skills: ["name", ...]` selecting global user or builtin bundles only. Omitted or empty lists load no global skills. Project skills are always discovered independently and are not filtered by this list. Selections persist, but each new execution synchronizes current contents before starting the Agent. Contents remain stable for that run; Control does not retain per-task bundle versions. Unavailable selected global skills fail visibly when preparing a turn, even if a project skill has that name.
 
+Space-owned [extension settings](extensions.md) filter disabled bundles before Main discovery and reject disabled explicit global Task selections. Builtin names remain reserved even when disabled.
+
 Catalogs reload each execution and use the classified `skills` history section. Unchanged rendered metadata is not appended again; changes replace the complete section through a new message. Removal appends an explicit revocation. Summary executions add no catalog, and `pkg/agent` does not advertise skills if the final tools lack exec_command. Chat `/skill:name` references explicitly select global Skills for new tasks delegated from that user message; they are also visible to the assistant as user instructions. Main project discovery reflects its actual execution directory; active tasks retain their recorded execution location.
 
 ## Creation, installation and validation

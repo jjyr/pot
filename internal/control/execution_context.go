@@ -105,5 +105,22 @@ func (s *Service) prepareExecutionFor(ctx context.Context, owner, workspaceOwner
 		roots = append(roots, builtin)
 	}
 	result.SkillResources.Roots = roots
+	if !worker {
+		catalog, err := agent.DiscoverSkills(result.SkillResources)
+		if err != nil {
+			return result, err
+		}
+		selection := []string{}
+		for _, skill := range catalog.Skills {
+			enabled, err := s.enabled(ctx, "skills", extensionID(skill.Location))
+			if err != nil {
+				return result, err
+			}
+			if enabled {
+				selection = append(selection, skill.Name)
+			}
+		}
+		result.SkillResources.Selection = &selection
+	}
 	return result, nil
 }

@@ -1,3 +1,4 @@
+import {createExtensions} from './extensions.mjs';
 import {usageCalendar} from './usage-calendar.mjs';
 import {notificationSetting} from './notification-setting.mjs';
 import {usageNumbers,usageRows,usageTooltip,createUsageList} from './usage.mjs';
@@ -39,6 +40,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   const toolMemory=new Map(),usageOffsets=new Map(),usageCache=new Map(),approvalCards=new Map(),taskNames=new Map();
   const chatApprovals=createChatApprovals({host:chatApprovalHost,locale,visible:chatVisible});
   const cached = new Map(),spaceCache = new Map(),machineDrafts=new Map(),machineInvitationDrafts=new Map(),editorParents=[],taskDrafts=new Map(),taskDraftVersions=new Map(),taskWrites=new Map(),scheduleWrites=new Map();
+  let extensionUI=null;const extensionMemory={};
   let pageView=null,currentViewKey='',viewReady=false,shortcutOpen=null,approvalOwner='',topologySelection='',topologyPaused=false,agentOwnerSpace='';
   const tr = (en, zh) => locale() === 'zh-CN' ? zh : en;
   const scope = () => client.scope();
@@ -129,6 +131,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     });
   }
   async function leave({toParent=false}={}) {
+ if(extensionUI&&!await extensionUI.leave())return false;extensionUI?.dispose();extensionUI=null;
     captureView();
     const sessions=[...(editor?[editor]:[]),...(!toParent?[...editorParents,...[...machineDrafts.values()].map(session=>({session}))]:[])];
     if(sessions.some(value=>value.session.pending)) {notify(tr('Please wait for the save result.','请等待保存结果。'));return false;}
@@ -233,6 +236,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       if(!definition){const generated=await request(`/api/v1/assistants/default-avatar?${new URLSearchParams({request_id:creationRequestID})}`,{space:captured.space,owner:''});if(editor?.session===session)preview.replaceWith(avatar(56,generated.avatar));}
     }catch(reason){if(gate.current(token))errorView(reason);}
   }
+  async function extensions(root,token){extensionUI=createExtensions({root,client,locale,memory:extensionMemory,onSettings:()=>{filter.settingsTab='integrations';routeChanged('settings');show('settings');},onPermissions:()=>{routeChanged('machines');show('machines');}});await extensionUI.load();}
   async function settings(root, token) {
     root.classList.add('settings-content');const settingsKeys=['settings.general','settings.providers','integrations.title','settings.tasks'];const tabs=segments(['general','providers','integrations','tasks'].map((key,i)=>[key,translate(locale(),settingsKeys[i])]),filter.settingsTab,value=>{filter.settingsTab=value;show('settings');});[...tabs.children].forEach((node,i)=>{node.dataset.settingsI18n=settingsKeys[i];});root.append(tabs);
     if(filter.settingsTab==='general'){
@@ -702,6 +706,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   }
   async function show(next,{keepUsageOwner=false,force=false}={}) {
     if(editor)return;
+ if(extensionUI&&next==='extensions')return extensionUI.refresh();extensionUI?.dispose();extensionUI=null;
     if(!keepUsageOwner)usageOwner=null;
     if(next==='settings'&&filter.settingsTab!=='general'&&!configurationSpace)configurationSpace=scope().space;
     const viewKey=JSON.stringify([next,next==='tasks'?[filter.taskTab,filter.taskScope,filter.taskQuery,filter.taskOffset,filter.scheduleOffset]:next==='usage'?[filter.usageSpace,usageOwner]:next==='settings'?[filter.settingsTab,configurationSpace]:[]]);
@@ -709,10 +714,10 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     captureView();viewReady=false;pageView?.queue.close();pageView=null;
 
     closeTaskView();taskOrigin=null;closeTaskList();scheduleView=null;detailParent=false;if(!keepUsageOwner)usageOwner=null;
-    route=next;heading(tr({tasks:filter.taskTab==='schedules'?'Schedules':'Tasks',machines:translate(locale(),'topology.title'),usage:'Usage',settings:'Settings'}[next]||next,{tasks:filter.taskTab==='schedules'?'定时计划':'任务',machines:translate(locale(),'topology.title'),usage:'用量',settings:'设置'}[next]||next));
+    route=next;heading(next==='extensions'?translate(locale(),'extensions.title'):tr({tasks:filter.taskTab==='schedules'?'Schedules':'Tasks',machines:translate(locale(),'topology.title'),usage:'Usage',settings:'Settings'}[next]||next,{tasks:filter.taskTab==='schedules'?'定时计划':'任务',machines:translate(locale(),'topology.title'),usage:'用量',settings:'设置'}[next]||next));
     const version=++pageVersion,token=gate.next(),root=body();currentViewKey=viewKey;
     root.append(n('p','hint',tr('Loading…','正在加载…')));
-    try {root.replaceChildren();await ({settings,tasks,machines,usage}[next]||settings)(root,token);if(gate.current(token))restoreView(viewKey,token);}
+    try {root.replaceChildren();await ({settings,tasks,machines,usage,extensions}[next]||settings)(root,token);if(gate.current(token))restoreView(viewKey,token);}
     catch(reason){if(gate.current(token)&&version===pageVersion&&!disposed)errorView(reason,root);}
   }
   function openUsageView(context,record=true){usageOwner={...context};route='usage';if(record)history.pushState({potRoute:'usage',potScope:{space:context.space,owner:context.owner},potUsage:{...usageOwner}},'',location.href);routeChanged('usage');return show('usage',{keepUsageOwner:true});}
@@ -721,11 +726,12 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const current=editor;if(!await back())history.pushState({...history.state,potEditor:current.id},'',location.href);return true;
   };
   const beforeUnload=event=>{if([...(editor?[editor.session]:[]),...editorParents.map(value=>value.session),...machineDrafts.values()].some(session=>session.dirty||session.pending)){event.preventDefault();event.returnValue='';}};
-  const preference=()=>{if(editor){editor.lifecycle.locale?.();for(const status of editor.root.querySelectorAll('[data-error-key]')){const span=status.querySelector(':scope>span');if(span)span.textContent=translate(locale(),status.dataset.errorKey);const summary=status.querySelector('details>summary');if(summary)summary.textContent=translate(locale(),'agentLinks.diagnostics');}return;}if(route==='settings'&&filter.settingsTab==='integrations'&&!editor){heading(translate(locale(),'settings'));for(const node of host.querySelectorAll('[data-settings-i18n]'))node.textContent=translate(locale(),node.dataset.settingsI18n);return;}if(taskView){taskDetail(taskView.task,{recordHistory:false,returnTo:taskView.returnTo});return;}if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner,force:true});};
+  const preference=()=>{if(extensionUI){heading(translate(locale(),'extensions.title'));return;}if(editor){editor.lifecycle.locale?.();for(const status of editor.root.querySelectorAll('[data-error-key]')){const span=status.querySelector(':scope>span');if(span)span.textContent=translate(locale(),status.dataset.errorKey);const summary=status.querySelector('details>summary');if(summary)summary.textContent=translate(locale(),'agentLinks.diagnostics');}return;}if(route==='settings'&&filter.settingsTab==='integrations'&&!editor){heading(translate(locale(),'settings'));for(const node of host.querySelectorAll('[data-settings-i18n]'))node.textContent=translate(locale(),node.dataset.settingsI18n);return;}if(taskView){taskDetail(taskView.task,{recordHistory:false,returnTo:taskView.returnTo});return;}if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner,force:true});};
   window.addEventListener('beforeunload',beforeUnload);window.addEventListener('pot:locale',preference);
   return {get title(){return title;},get editing(){return !!editor;},get approvalSpace(){return approvalScope().space;},get notificationContext(){return taskView?{space:taskView.scope.space,owner:taskView.scope.owner,task:taskView.task.id}:null;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner;},show,assistant,setupAI,leave,back,permissions,syncApprovals:renderApprovals,taskMenu(){taskView?.ui.openMenu();},handleHistory:popstate,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalQueue?.close();approvalQueue=null;approvalQueueKey='';approvalGate.close();approvalOwner='';pendingApprovals=[];approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);},approvalFor,decideApproval,taskNeedsApproval,rememberTasks,renderApprovals,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,options={}){route='tasks';return taskDetail(task,options);},
     showProviders(){filter.settingsTab='providers';return show('settings');},
     refresh(topics=[],source={}){
+ if(extensionUI){if(topics.includes('extensions')||topics.includes('spaces'))extensionUI.refresh();return;}
       if(source.boot&&(resourceBoots.get(source.space)||client.runtime.boot_id)!==source.boot){readTaskPages.clear();if(source.boot)resourceBoots.set(source.space,source.boot);for(const key of taskDetails.keys())if(!source.space||JSON.parse(key)[2]===source.space)taskDetails.delete(key);spaceCache.clear();usageCache.clear();if(taskView&&(!source.space||taskView.scope.space===source.space)){taskView.invalidated=true;taskView.readGeneration=(taskView.readGeneration||0)+1;}}
       if(topics.includes('spaces')){readTaskPages.clear();spaceCache.clear();usageCache.clear();taskDetails.clear();if(taskView){taskView.invalidated=true;taskView.readGeneration=(taskView.readGeneration||0)+1;}}
       if(editor||disposed||!route||!host.offsetParent)return;
@@ -736,6 +742,6 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       if(taskView)return refreshTaskEvents();
 
     },
-    dispose(){machineInvitationDrafts.clear();stopResources?.();notificationSettings?.dispose();for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle?.dispose?.();disposed=true;closeTaskList();closeTaskView();approvalQueue?.close();pageView?.queue.close();gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
+    dispose(){extensionUI?.dispose();machineInvitationDrafts.clear();stopResources?.();notificationSettings?.dispose();for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle?.dispose?.();disposed=true;closeTaskList();closeTaskView();approvalQueue?.close();pageView?.queue.close();gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
   };
 }
