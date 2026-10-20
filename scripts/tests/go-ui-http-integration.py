@@ -428,7 +428,6 @@ def run(binary, base, env, cli_command, profile_only=False):
                 "go-ui-tasks-browser.js",
                 "go-ui-task-refresh-browser.js",
                 "go-ui-machines-browser.js",
-                "go-ui-membership-browser.js",
             ]:
                 print("Browser contracts: " + script, flush=True)
                 code = (

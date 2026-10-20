@@ -1,5 +1,5 @@
-// Generic Agent identities use node_id; Space ownership and Runner enrollment
-// keep their specialized control_id fields. All identities here are synthetic.
+// Node identity remains stable as its assistant directory changes.
+// All identities and invitations here are synthetic.
 async page => {
  const assert=(condition,message)=>{if(!condition)throw Error(message);},errors=[];
  page.on('pageerror',error=>errors.push(error.message));
@@ -21,21 +21,19 @@ async page => {
   await page.evaluate(value=>{topologyFixture.agentPeer=value.peer;topologyFixture.rawConnectionResult=value.raw;topologyFixture.agentLinkID=value.id;},{peer,raw,id});
   await page.getByRole('button',{name:'Add Agent',exact:true}).click();
   await page.getByLabel('Other Agent address',{exact:true}).fill('tcp://fixture.example:8793#synthetic');
-  await page.getByText('Identity verified',{exact:true}).waitFor();
-  await page.locator('.editor-actions .primary').click();
   await page.locator('.topology-inspector').getByRole('heading',{name:peer.name,exact:true}).waitFor();
  }
  const simple={id:'codex',node_id:'simple-codex-node',kind:'codex',name:'Simple Codex'};
  await connect(simple,false,'simple-agent-link');
- assert(await page.locator('.topology-node[aria-pressed=true]').getAttribute('data-node-id')==='peer:'+JSON.stringify([simple.node_id,simple.kind,simple.id]),'The simplified peer.node_id response selects its exact Agent node');
+ assert(await page.locator('.topology-node[aria-pressed=true]').getAttribute('data-node-id')==='peer:'+JSON.stringify([simple.node_id,simple.kind]),'The simplified peer.node_id response selects its exact Agent node');
  const raw={id:'codex',node_id:'raw-codex-node',kind:'codex',name:'Raw Codex'};
  await connect(raw,true,'raw-agent-link');
- assert(await page.locator('.topology-node[aria-pressed=true]').getAttribute('data-node-id')==='peer:'+JSON.stringify([raw.node_id,raw.kind,raw.id]),'A raw AgentRef address.node_id response selects its exact Agent node');
+ assert(await page.locator('.topology-node[aria-pressed=true]').getAttribute('data-node-id')==='peer:'+JSON.stringify([raw.node_id,raw.kind]),'A raw AgentRef address.node_id response selects its exact Agent node');
  assert(await page.locator('.topology-node').filter({hasText:'Codex'}).count()===3,'Repeated assistant IDs on distinct nodes remain distinct');
  await connect({id:'cloud-assistant',node_id:'cloud-id',kind:'pot',name:'Cloud Pot'},true,'managed-pot-link');
- assert(await page.locator('.topology-node[aria-pressed=true]').getAttribute('data-node-id')==='control:cloud','A Pot node maps to the owning managed Space.control_id');
- assert(await page.locator('.topology-node[data-node-id="control:cloud"]').count()===1,'The managed Control is not duplicated');
- assert(await page.locator('.topology-node.machine').count()===4,'Agent node identity never manufactures Runner inventory');
+ assert(await page.locator('.topology-node[aria-pressed=true]').getAttribute('data-node-id')==='peer:'+JSON.stringify(['cloud-id','pot']),'A linked Pot node uses its node identity');
+ assert(await page.locator('.topology-node').filter({hasText:'Cloud Pot'}).count()===1,'A linked Pot is not duplicated by its assistant directory');
+ assert(await page.locator('.topology-node.machine').count()===1,'Agent node identity never manufactures execution inventory');
  assert(await page.evaluate(()=>topologyFixture.client.spaces.every(space=>typeof space.control_id==='string'&&!('node_id' in space))),'Space owner metadata retains control_id');
  assert(!errors.length,'No browser exceptions: '+errors.join('; '));
  return {passed:true,requiredNodeIdentity:true,simplifiedPeerRoute:true,rawAgentRefRoute:true,managedControlMapping:true,spaceControlIdentityPreserved:true};

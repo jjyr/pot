@@ -1,3 +1,5 @@
+import {translate} from '../locales/messages.mjs';
+import {icon} from './icons.mjs';
 import {node as n} from './primitives.mjs';
 
 // Product brand assets, shared by connection previews and standalone hosts.
@@ -8,3 +10,15 @@ export function connectionBrand(kind='pot') {
   }
   return mark;
 }
+
+// Source is descriptive: selecting it never changes task or conversation ownership.
+export function agentSource(source,locale) {
+  if(!source||!['pot','codex'].includes(source.kind))return null;
+  const label=translate(locale,source.kind==='codex'?'agentLinks.sourceCodex':'agentLinks.sourcePot');
+  const mark=n('span','agent-source');mark.title=source.name&&source.name!==label?`${label} · ${source.name}`:label;mark.setAttribute('aria-label',mark.title);
+  mark.append(connectionBrand(source.kind));
+  if(source.kind==='pot')mark.append(icon('cloud'));
+  return mark;
+}
+
+export const taskAgentSource=(task,locale)=>agentSource(task.agent_link||(['codex','pot'].includes(task.executor_icon)?{kind:task.executor_icon}:null),locale);

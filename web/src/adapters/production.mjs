@@ -1,10 +1,12 @@
+import {translate} from '../locales/messages.mjs';
+import {linkedAssistantTarget,linkedChatPath,agentFailureKey} from '../state/agent-links.mjs';
 import {createResourceReads} from '../state/resource-cache.mjs';
 import {createTopicVersions} from '../state/changes.mjs';
 import {createFileImages} from '../state/file-images.mjs';
 import {createDisplayResources} from '../state/display-resources.mjs';
 // Shared product transport. Every operation captures its Space/owner before IO.
 export class APIError extends Error {
-  constructor(status, value) { super(value?.message || (typeof value?.error === 'string' && value.error) || `HTTP ${status}`); this.status = status; this.code = value?.code || 'http_error'; }
+  constructor(status, value) { super(value?.message || (typeof value?.error === 'string' && value.error) || `HTTP ${status}`); this.status = status; this.code = value?.code || 'http_error'; this.uiKey=agentFailureKey(this.code); }
 }
 export function decodeDesktopResponse(raw) {
   const value=typeof raw==='string'?JSON.parse(raw):raw;
@@ -38,7 +40,7 @@ export function mutationTopics(path,body,value) {
   if(path==='/api/v1/attachments'||/\/(resolve|check)$/.test(path))return null;
   if(path==='/api/v1/assistants/bootstrap'&&!value?.assistant)return null;
   if(path==='/api/v1/agent-links/invitation')return null;
-  if(path.startsWith('/api/v1/agent-links'))return ['agent-links'];
+  if(path.startsWith('/api/v1/agent-links'))return ['agent-links','assistants'];
   if(path==='/api/v1/runtime/control'&&body?.action==='invitation_status')return null;
   if(path.startsWith('/api/v1/providers'))return ['providers','settings','assistants','conversation','usage'];
   if(path.startsWith('/api/v1/assistants'))return ['assistants','conversation','schedules'];
@@ -60,9 +62,24 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
   const service = 'github.com/jjyr/pot/internal/desktop.Service';
   const invoke = (method, ...args) => runtimeAPI.Call.ByName(`${service}.${method}`, ...args);
   const context = {owner: '', space: ''};
+  let client;
+  const localized=error=>{if(error.uiKey){error.diagnostic=error.message;error.message=translate(client?.uiLocale?.()||'en',error.uiKey);}return error;};
   async function request(path, options = {}) {
-    const {method = 'GET', body, signal} = options;
+    let {method = 'GET', body, signal} = options;
     const capturedScope={...context,...options};
+    const target=linkedAssistantTarget(capturedScope.owner);
+    if(target&&!path.startsWith('/api/v1/agent-links')){
+      const [route,query='']=path.split('?');
+      if(route==='/api/v1/snapshot'||route==='/api/v1/messages/receipt')path=linkedChatPath(target,Object.fromEntries(new URLSearchParams(query)));
+      else if(route==='/api/v1/messages'){
+        if(body.attachments?.length||body.references?.length)throw new APIError(422,{code:'agent_link_capability_unsupported',message:translate(client.uiLocale?.()||'en','agentLinks.capabilityUnavailable')});
+        path=linkedChatPath(target);body={request_id:body.request_id,text:body.text};
+      }
+      else if(route==='/api/v1/permissions')return {pending:[],policy:{machines:{}}};
+      else if(route==='/api/v1/completions')return {items:[]};
+      else throw new APIError(422,{code:'agent_link_capability_unsupported',message:translate(client.uiLocale?.()||'en','agentLinks.capabilityUnavailable')});
+      capturedScope.owner='';
+    }
     const fullPath = scopedPath(path, capturedScope);
     if (signal?.aborted) throw signal.reason;
     if (desktop) {
@@ -72,14 +89,14 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
       try {
         const raw = await pending;
         if (signal?.aborted) throw signal.reason;
-        const value=decodeDesktopResponse(raw);if(method!=='GET'){const topics=mutationTopics(path,body,value);if(topics)client.resources?.invalidate(topics,capturedScope);}return value;
+        let value;try{value=decodeDesktopResponse(raw);}catch(error){throw localized(error);}if(method!=='GET'){const topics=mutationTopics(path,body,value);if(topics)client.resources?.invalidate(topics,capturedScope);}return value;
       } finally { signal?.removeEventListener('abort', abort); }
     }
     const response = await fetch(`${base}${fullPath}`, {method, signal, credentials: 'same-origin',
       headers: body === undefined ? {} : {'Content-Type': 'application/json'},
       body: body === undefined ? undefined : JSON.stringify(body)});
     const value = response.status === 204 ? null : await response.json().catch(() => null);
-    if (!response.ok) throw new APIError(response.status, value);
+    if (!response.ok) throw localized(new APIError(response.status, value));
     if(method!=='GET'){const topics=mutationTopics(path,body,value);if(topics)client.resources?.invalidate(topics,capturedScope);}
     return value;
   }
@@ -88,7 +105,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
   const readBaselines=desktop?await invoke('AssistantReads'):[];
   const attachmentURLs=new Map(),attachmentLeases=new Map();
   const attachmentKey=(attachment,options)=>{const scope={...context,...options};return JSON.stringify([scope.space,scope.owner,attachment.id]);};
-  const client = {production: true, desktop, runtime, request,readBaselines,
+  client = {production: true, desktop, runtime, request,readBaselines,
     acquireResource:createDisplayResources(request,()=>context,(resource,path,scope,operation='content',token='')=>desktop?`/pot-resource-content?${new URLSearchParams({id:resource.id,path,assistant_id:scope.owner,space_id:scope.space,render:operation==='render'?'1':'0',token})}`:`${base}${scopedPath(`/api/v1/resources/${encodeURIComponent(resource.id)}/${operation}?${new URLSearchParams({path,token})}`,scope)}`),
     async downloadResource(resource,options={}){
       const scope={...context,...options};
@@ -99,8 +116,8 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
     acquireFileImage:createFileImages(request,()=>context),
     scope: () => ({...context}), setScope: value => Object.assign(context, value),
     snapshot: async options => {
-      const scope = {...context};
-      const value = await request('/api/v1/snapshot', {...scope, ...options});
+      const scope = {...context,...options};
+      const value = await request('/api/v1/snapshot', scope);
       return normalizeSnapshot(value, runtime, scope.owner, scope.space);
     },
     history: async (query, options = {}) => {const page=await request(`/api/v1/history?${new URLSearchParams(query)}`,options);return {...page,messages:page.messages.map(({message,...meta})=>({...message,...meta}))};},
@@ -182,6 +199,16 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
         catch (reason) { onStatus('offline', reason); return; }
         onSnapshot(snapshot);
       };
+      if(linkedAssistantTarget(scope.owner)){
+        let timer,controller;
+        const poll=async()=>{
+          controller=new AbortController();
+          try{const value=await request('/api/v1/snapshot',{...scope,signal:controller.signal});if(active){deliver(value);onStatus('connected');}}
+          catch(reason){if(active&&reason.name!=='AbortError')onStatus('offline',reason);}
+          finally{if(active)timer=setTimeout(poll,1500);}
+        };
+        poll();return ()=>{active=false;clearTimeout(timer);controller?.abort();};
+      }
       if (desktop) {
         const stop = runtimeAPI.Events.On('pot:snapshot', event => {
           const value = event.data;
