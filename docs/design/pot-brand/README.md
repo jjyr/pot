@@ -18,6 +18,8 @@ cutouts and a simplified nose/smile without the tight curl. There are no side ha
 export the App ICNS, PNG sizes, README image, Home Screen images, menu-bar PNGs and
 `scripts/make-tray-atlas.swift` exports its light/dark activity
 and badge frames for the Wails menu bar; shared navigation uses the exported PNG.
+The Codex plugin packages the same App icon at
+`integrations/codex/plugin/assets/pot.png` for its listing and composer.
 Run `mise run icons` to regenerate everything.
 
 Home Screen images have an opaque square background and inset artwork for OS masks.
