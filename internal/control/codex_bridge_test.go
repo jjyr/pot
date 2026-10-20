@@ -108,8 +108,8 @@ func TestCodexBridgeToolsSSEBusyInboxAndMCPReceipt(t *testing.T) {
 			}
 			var fields map[string]json.RawMessage
 			_ = json.Unmarshal(raw, &fields)
-			if tools := strings.TrimSpace(string(fields["tools"])); tools != "" && tools != "null" && tools != "[]" {
-				t.Error("summary acquired tools")
+			if tools := string(fields["tools"]); !strings.Contains(tools, "exec_command") || !strings.Contains(tools, "update_agent_profile") {
+				t.Error("notification lost assistant tools")
 			}
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
