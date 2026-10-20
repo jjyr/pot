@@ -3,7 +3,7 @@ import {notificationSetting} from './notification-setting.mjs';
 import {usageNumbers,usageRows,usageTooltip,createUsageList} from './usage.mjs';
 import {createTaskConversation} from './task-conversation.mjs';
 import {connectProviderEditor} from './provider-connection.mjs';
-import {avatar,assistantAvatarKey} from './avatar.mjs';
+import {avatar} from './avatar.mjs';
 import {translate} from '../locales/messages.mjs';
 import {icon} from './icons.mjs';
 import {node as n, action, field, section, table, details} from './primitives.mjs';
@@ -208,10 +208,10 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       },{returnChat:true,submitLabel:definition?tr('Save','保存'):tr('Create and start chatting','创建并开始聊天')});
       const controls=form.controls,session=form.session;
       editor.kind='assistant';
-      // Creation identity also owns the preview color. Keep it even when an
+      // Creation identity also owns the preview image. Keep it even when an
       // edited retry rotates the editor's generic mutation request identity.
       const creationRequestID=session.requestID;
-      const preview=avatar(56,assistantAvatarKey(definition||{request_id:creationRequestID}),definition?.avatar);
+      const preview=avatar(56,definition?.avatar);
       form.form.querySelector('.editor-fields').prepend(preview);
       const set=(name,value)=>{controls.get(name).value=value??'';session.set(name,value);};
       const defaults=()=>{const profile=profiles.find(value=>value.id===session.values.profile_id),catalog=profile?.model_settings?.catalog_provider||'custom',limits=modelDefaults(providers,catalog,session.values.model);const same=profile?.model===session.values.model;controls.get('context_window').placeholder=String(same?(profile?.model_settings?.context_window||limits.context):limits.context);controls.get('max_output_tokens').placeholder=String(same?(profile?.model_settings?.max_output_tokens||limits.output):limits.output);controls.get('reasoning_effort').placeholder=profile?.params?.reasoning_effort||tr('Provider default','提供商默认值');controls.get('model').required=!!profile;form.form.querySelector('.editor-actions .primary').disabled=!profile;};
@@ -226,6 +226,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       form.lifecycle.settled=defaults;
       if(thread?.pending)form.root.prepend(n('p','hint',tr('Saved settings will apply to the next new turn. The current turn keeps its original configuration.','已保存的设置将在下一次新回合生效，当前回合保持原配置。')));
       if(!definition&&controls.has('space_id'))controls.get('space_id').addEventListener('change',async()=>{const next=controls.get('space_id').value;controls.get('profile_id').disabled=true;try{const snapshot=await request('/api/v1/providers',{space:next,owner:''});if(editor?.session!==session||controls.get('space_id').value!==next)return;profiles=snapshot.profiles||[];Object.assign(providers,snapshot);providerHelp.hidden=profiles.length>0;const input=controls.get('profile_id');input.replaceChildren();for(const profile of profiles){const option=n('option','',profile.name);option.value=profile.id;input.append(option);}set('profile_id',snapshot.default_provider_id||'');set('model',profiles.find(value=>value.id===session.values.profile_id)?.model||'');updateModels();}catch(reason){if(editor?.session===session)errorView(reason,form.root);}finally{if(editor?.session===session)controls.get('profile_id').disabled=false;}});
+      if(!definition){const generated=await request(`/api/v1/assistants/default-avatar?${new URLSearchParams({request_id:creationRequestID})}`,{space:captured.space,owner:''});if(editor?.session===session)preview.replaceWith(avatar(56,generated.avatar));}
     }catch(reason){if(gate.current(token))errorView(reason);}
   }
   async function settings(root, token) {

@@ -11,6 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/jjyr/pot/pkg/assistantavatar"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/storage"
 )
@@ -155,6 +156,10 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 			id = r.root
 		}
 		definition = Definition{ID: id, Name: name, Revision: 1, RequestID: request}
+		definition.Avatar, err = assistantavatar.Default(request)
+		if err != nil {
+			return err
+		}
 		var spec *core.ResolvedSpec
 		if resolve != nil {
 			spec, err = resolve()
@@ -182,6 +187,10 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 			return err
 		}
 		_, err = tx.ExecContext(ctx, "INSERT INTO assistant_definitions(id,name,revision,request_id,created_name) VALUES (?,?,?,?,?)", id, name, 1, request, name)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "INSERT INTO assistant_profiles(assistant_id,avatar) VALUES (?,?)", id, definition.Avatar)
 		return err
 	})
 	return definition, err

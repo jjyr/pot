@@ -49,6 +49,9 @@ func TestAvatarNormalizationAndProfilePersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := ValidateAvatar(d.Avatar); err != nil {
+		t.Fatal("creation did not persist a normalized default image", err)
+	}
 	changed, err := r.UpdateProfileOnce(ctx, d.ID, ProfileUpdate{Avatar: &avatar}, "avatar", "input-hash")
 	if err != nil {
 		t.Fatal(err)
@@ -74,5 +77,20 @@ func TestAvatarNormalizationAndProfilePersistence(t *testing.T) {
 	receipt, err := r.ProfileReceipt(ctx, "avatar", "input-hash")
 	if err != nil || *receipt != changed {
 		t.Fatal("receipt lost", err)
+	}
+	empty := ""
+	reset, err := r.UpdateProfileOnce(ctx, d.ID, ProfileUpdate{Avatar: &empty}, "reset", "reset-hash")
+	if err != nil || reset.Avatar != d.Avatar || reset.Name != "Renamed" {
+		t.Fatal("reset did not restore the persisted creation image", err)
+	}
+	r.Close()
+	r, err = OpenRegistry(path, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	definitions, err = r.Definitions(ctx)
+	if err != nil || definitions[0] != reset {
+		t.Fatal("default image did not survive restart", err)
 	}
 }

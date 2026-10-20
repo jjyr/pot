@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/internal/control"
 	product "github.com/jjyr/pot/internal/runtime"
 	"github.com/jjyr/pot/internal/secrets"
@@ -62,8 +63,16 @@ func TestSocketProductCreateEventsAuthAndRestart(t *testing.T) {
 	if code, data := call("GET", "/api/v1/assistants", "", endpoint.Token); code != 200 || strings.TrimSpace(string(data)) != "[]" {
 		t.Fatal(code, string(data))
 	}
+	code, data := call("GET", "/api/v1/assistants/default-avatar?request_id=create", "", endpoint.Token)
+	var preview map[string]string
+	if code != 200 || json.Unmarshal(data, &preview) != nil || assistant.ValidateAvatar(preview["avatar"]) != nil {
+		t.Fatal("invalid creation preview", code)
+	}
+	if code, _ := call("GET", "/api/v1/assistants/default-avatar", "", endpoint.Token); code < 400 {
+		t.Fatal("missing preview seed accepted")
+	}
 	body := `{"request_id":"create","name":"First","text":"Initial rules"}`
-	code, data := call("POST", "/api/v1/assistants", body, endpoint.Token)
+	code, data = call("POST", "/api/v1/assistants", body, endpoint.Token)
 	if code != 200 {
 		t.Fatal(code, string(data))
 	}
@@ -71,12 +80,18 @@ func TestSocketProductCreateEventsAuthAndRestart(t *testing.T) {
 	if err = json.Unmarshal(data, &definition); err != nil {
 		t.Fatal(err)
 	}
+	if definition["avatar"] != preview["avatar"] {
+		t.Fatal("creation did not save the preview image")
+	}
 	assertAppearanceSeed := func() {
 		t.Helper()
 		code, data := call("GET", "/api/v1/assistants", "", endpoint.Token)
 		var items []map[string]any
 		if code != 200 || json.Unmarshal(data, &items) != nil || len(items) != 1 || items[0]["request_id"] != "create" || items[0]["id"] != definition["id"] {
 			t.Fatalf("directory lost persisted appearance seed: %d %s", code, data)
+		}
+		if items[0]["avatar"] != preview["avatar"] {
+			t.Fatal("directory lost saved image")
 		}
 	}
 	if definition["request_id"] != "create" {

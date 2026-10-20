@@ -91,7 +91,6 @@ h1, h2, p { margin: 0; }
 .assistant-location { flex: none; max-width: 45%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; color: var(--muted); }
 .assistant-preview { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 12px; }
 .avatar { display: inline-block; position: relative; flex-shrink: 0; background: #dce8f4; border-radius: 23.2%; }
-.avatar-mark { position: absolute; inset: 4%; background: #3a6590; mask: url('./assets/PotMask.png') center / contain no-repeat; -webkit-mask: url('./assets/PotMask.png') center / contain no-repeat; }
 .workspace { grid-row: 2; grid-column: 3; display: flex; flex-direction: column; min-height: 0; min-width: 0; position: relative; }
 .preview-notice { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .history { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 67px var(--page-inset) 16px; }

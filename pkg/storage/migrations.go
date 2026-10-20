@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"database/sql/driver"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -13,8 +14,22 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jjyr/pot/pkg/assistantavatar"
 	migrate "github.com/rubenv/sql-migrate"
+	"modernc.org/sqlite"
 )
+
+// Migration-only image conversion uses the same pure renderer as creation and
+// reset. Registration precedes every storage connection, including external ones.
+func init() {
+	sqlite.MustRegisterDeterministicScalarFunction("pot_default_avatar", 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+		seed, ok := args[0].(string)
+		if !ok || seed == "" {
+			return nil, fmt.Errorf("default avatar requires a creation seed")
+		}
+		return assistantavatar.Default(seed)
+	})
+}
 
 // Database identifies a physical database schema, independently of its filename.
 // Multiple services sharing a file must select the same Database.

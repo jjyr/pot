@@ -98,7 +98,7 @@ func TestAgentProfilePartialAtomicAndRetrySafe(t *testing.T) {
 		t.Fatal(err)
 	}
 	definitions, _ = s.Registry.Definitions(ctx)
-	if definitions[0].Name != "Later" || definitions[0].Avatar != "" || definitions[0].Revision != 4 {
+	if definitions[0].Name != "Later" || definitions[0].Avatar != a.Avatar || definitions[0].Revision != 4 {
 		t.Fatal("reset modified another field")
 	}
 }

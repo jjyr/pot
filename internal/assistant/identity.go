@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/jjyr/pot/pkg/assistantavatar"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/storage"
 )
@@ -82,6 +83,12 @@ func (r *Registry) UpdateProfileOnce(ctx context.Context, owner string, patch Pr
 		}
 		if patch.Avatar != nil {
 			definition.Avatar = *patch.Avatar
+			if definition.Avatar == "" {
+				definition.Avatar, err = assistantavatar.Default(definition.RequestID)
+				if err != nil {
+					return err
+				}
+			}
 		}
 		definition.Revision++
 		if _, err = tx.ExecContext(ctx, "UPDATE assistant_definitions SET name=?,revision=? WHERE id=?", definition.Name, definition.Revision, owner); err != nil {

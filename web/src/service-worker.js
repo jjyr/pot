@@ -1,7 +1,7 @@
 // Only immutable UI assets are cached. API, token and remote desktop traffic
 // always goes to the network and never enters the offline cache.
 const CACHE='pot-go-ui-v2';
-const ASSETS=['/index.html','/app.js','/styles.css','/assets/PotCompanion.png','/assets/PotMask.png','/assets/IBMPlexSans-Regular.ttf'];
+const ASSETS=['/index.html','/app.js','/styles.css','/assets/PotCompanion.png','/assets/IBMPlexSans-Regular.ttf'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('pot-go-ui-')&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',event=>{
