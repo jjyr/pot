@@ -1,0 +1,8 @@
+{
+  "en": {
+    "assistant.welcome": "Hi, I'm {name}.\n\nYou can change my name and avatar in my settings, or tell me how you'd like me to talk and work so I fit your style.\n\nWhat would you like to work on together?"
+  },
+  "zh-CN": {
+    "assistant.welcome": "你好，我是 {name}。\n\n你可以在我的设置里换个名字、换张头像，也可以写下希望我怎么说话、怎么做事，让我更合你的习惯。\n\n有什么想先一起做的？"
+  }
+}

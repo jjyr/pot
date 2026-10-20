@@ -15,6 +15,79 @@ import (
 	"github.com/jjyr/pot/pkg/assistantavatar"
 )
 
+func TestCharacterAvatarUpgrade(t *testing.T) {
+	db := migrationDB(t)
+	ctx := context.Background()
+	old := fstest.MapFS{}
+	entries, _ := fs.ReadDir(migrationFiles, "migrations/control")
+	for _, entry := range entries {
+		if entry.Name() >= "0015_" {
+			continue
+		}
+		path := "migrations/control/" + entry.Name()
+		data, _ := fs.ReadFile(migrationFiles, path)
+		old[path] = &fstest.MapFile{Data: data}
+	}
+	if err := migrateDatabase(ctx, db, ControlDatabase, old); err != nil {
+		t.Fatal(err)
+	}
+	count := migrationCount(t, db)
+	execMigrationSQL(t, db, `INSERT INTO assistant_definitions(id,name,revision,request_id,created_name,deleted) VALUES
+ ('renamed','My helper',3,'seed-renamed','Mug 2',0),('custom','My custom',4,'seed-custom','Cup',0),
+ ('missing','Missing',2,'seed-missing','Pot',0),('deleted','Deleted',5,'seed-deleted','Glass',1);
+ INSERT INTO assistant_profiles VALUES ('renamed',pot_default_avatar('seed-renamed')),('custom','uploaded-image'),('deleted',pot_default_avatar('seed-deleted'));
+ INSERT INTO assistant_profile_requests VALUES
+ ('default','original-hash',json_object('id','renamed','name','Old name','revision',2,'request_id','seed-renamed','avatar',pot_default_avatar('seed-renamed'))),
+ ('custom','custom-hash','{"id":"custom","name":"My custom","revision":3,"request_id":"seed-custom","avatar":"uploaded-image"}');`)
+	// A failed conversion must roll back both new metadata and rewritten images.
+	execMigrationSQL(t, db, `CREATE TRIGGER fail_character_conversion BEFORE UPDATE ON assistant_profiles BEGIN SELECT RAISE(ABORT,'test interrupted upgrade'); END;`)
+	if err := Migrate(ctx, db, ControlDatabase); err == nil {
+		t.Fatal("failed migration accepted")
+	}
+	if migrationCount(t, db) != count {
+		t.Fatal("failed migration left a receipt")
+	}
+	var fields int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('assistant_profiles') WHERE name='character'`).Scan(&fields); err != nil || fields != 0 {
+		t.Fatal("schema did not roll back", err)
+	}
+	execMigrationSQL(t, db, "DROP TRIGGER fail_character_conversion")
+	for range 2 {
+		if err := Migrate(ctx, db, ControlDatabase); err != nil {
+			t.Fatal(err)
+		}
+		for id, character := range map[string]string{"renamed": "mug", "custom": "cup", "missing": "pot", "deleted": "glass"} {
+			var got, avatar string
+			if err := db.QueryRow("SELECT character,avatar FROM assistant_profiles WHERE assistant_id=?", id).Scan(&got, &avatar); err != nil {
+				t.Fatal(err)
+			}
+			want, _ := assistantavatar.Render(character, "seed-"+id)
+			if id == "custom" {
+				want = "uploaded-image"
+			}
+			if got != character || avatar != want {
+				t.Fatal("incorrect migrated profile", id, got)
+			}
+		}
+		var avatar, name, hash string
+		var revision int
+		if err := db.QueryRow(`SELECT json_extract(response,'$.avatar'),json_extract(response,'$.name'),json_extract(response,'$.revision'),input_hash FROM assistant_profile_requests WHERE id='default'`).Scan(&avatar, &name, &revision, &hash); err != nil {
+			t.Fatal(err)
+		}
+		want, _ := assistantavatar.Render("mug", "seed-renamed")
+		if avatar != want || name != "Old name" || revision != 2 || hash != "original-hash" {
+			t.Fatal("receipt damaged")
+		}
+		if err := db.QueryRow(`SELECT json_extract(response,'$.avatar') FROM assistant_profile_requests WHERE id='custom'`).Scan(&avatar); err != nil || avatar != "uploaded-image" {
+			t.Fatal("custom receipt changed", err)
+		}
+		var total int
+		if err := db.QueryRow("SELECT SUM(revision) FROM assistant_definitions").Scan(&total); err != nil || total != 14 {
+			t.Fatal("identity revisions changed", err)
+		}
+	}
+}
+
 func TestDefaultAvatarImageUpgrade(t *testing.T) {
 	db := migrationDB(t)
 	ctx := context.Background()
@@ -68,7 +141,7 @@ INSERT INTO assistant_profile_requests VALUES
 			if err := db.QueryRow("SELECT avatar FROM assistant_profiles WHERE assistant_id=?", id).Scan(&avatar); err != nil {
 				t.Fatal(err)
 			}
-			want, _ := assistantavatar.Default("seed-" + id)
+			want, _ := assistantavatar.Render(assistantavatar.ForName(map[string]string{"missing": "Original", "empty": "Empty"}[id], "seed-"+id), "seed-"+id)
 			if id == "custom" {
 				want = "custom-image"
 			}
@@ -81,7 +154,7 @@ INSERT INTO assistant_profile_requests VALUES
 		if err := db.QueryRow(`SELECT json_extract(response,'$.avatar'),json_extract(response,'$.name'),json_extract(response,'$.revision'),input_hash FROM assistant_profile_requests WHERE id='reset'`).Scan(&avatar, &name, &revision, &hash); err != nil {
 			t.Fatal(err)
 		}
-		want, _ := assistantavatar.Default("seed-empty")
+		want, _ := assistantavatar.Render(assistantavatar.ForName("Empty", "seed-empty"), "seed-empty")
 		if avatar != want || name != "Before rename" || revision != 2 || hash != "reset-hash" {
 			t.Fatal("upgrade damaged profile receipt")
 		}

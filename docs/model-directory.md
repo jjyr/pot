@@ -45,8 +45,9 @@ or when opening an empty directory with an existing Provider. Control atomically
 creates one default assistant named Pot only if the Space still has no assistants
 and has a default Provider. Concurrent clients return the same identity; existing
 assistants and saved names are preserved. Nested Provider setup in an assistant
-draft resumes that draft without bootstrapping Pot. The Space's default Provider
-initializes new assistant forms; its concrete default model ID is visibly selected. Provider setup is a
+settings draft resumes that draft without bootstrapping Pot. One-click assistant
+creation uses the destination Space's default Provider and its concrete default
+model ID. Missing Provider configuration opens connection setup. Provider setup is a
 separate chooser and connection editor; search and provider selection appear only
 in the chooser. The editor contains name, API URL, credential, default model,
 request format, context/output limits and reasoning effort in that order. It never
@@ -72,12 +73,12 @@ retain the directory's existing brand artwork and colors. Default changes save
 immediately without reordering the list. While a save is pending, star controls
 are disabled and the previous default remains visible until acknowledgement.
 A failed save retains that default and offers an inline retry. Selecting a
-default affects new assistant forms, not existing assistants or Task snapshots.
+default affects newly created assistants, not existing assistants or Task snapshots.
 
 An assistant's Add Provider shortcut retains its draft while opening that same
 connection flow. Saving selects the new connection and its default model in the
-resumed assistant form; it does not create the assistant. Cancelling restores the
-original selection. The creation form requires a configured Provider. Changing
+resumed settings form; it does not create another assistant. Cancelling restores the
+original selection. Changing
 Provider selects its default model. There is no synthetic "Default model" option
 and no separate Space-level default model overriding the Provider default.
 

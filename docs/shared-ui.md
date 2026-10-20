@@ -36,14 +36,16 @@ The shared components use a client interface; they do not call Wails directly.
 breakpoints and control geometry. All hosts use the same assets and layout.
 Width controls navigation. Touch density applies below 720 px or with a coarse
 pointer; the tray keeps its explicit compact layout.
-The canonical Companion assets are shared. Default assistant avatars are generated
-by `pkg/assistantavatar` as 128px PNGs using the creation request's deterministic
-palette. Creation persists the image in the same profile field as imported avatars;
-resetting a profile generates and saves its default again. Existing empty profiles
-and profile receipts are filled by the Control database migration. The creation
-editor reads `/api/v1/assistants/default-avatar?request_id=...` for the same preview.
-Directory, chat title, settings and tray all render the stored PNG through one image
-component, without client hashing, CSS masks or asynchronous color painting.
+Default assistant avatars use the [approved kitchen characters](design/pot-brand/README.md#assistant-characters).
+`pkg/assistantavatar` composites the assigned artwork over one of eight soft pastel
+backgrounds as an opaque 128px PNG. The creation request chooses the background;
+the saved character remains stable through renames, uploads and resets. Creation
+persists the PNG in the same profile field as custom images. Control migration
+`0015_character_avatars` upgrades old generated defaults and receipts while preserving
+custom uploads, names and revisions. The settings editor requests the original
+image from `/api/v1/assistants/default-avatar?assistant_id=...` for reset previews.
+Directory, chat title, settings and tray render the stored PNG through one image
+component. Unloaded identities use a neutral placeholder.
 
 ## Markdown diagrams
 

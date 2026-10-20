@@ -42,8 +42,9 @@ Initial history is not unread. Row content and avatar reactions follow
 Fresh configuration has no registered assistants. AI setup and registration are
 separate operations. First-use Chat requests an atomic bootstrap of Pot in its
 active Space once a default Provider exists, preserving existing assistants.
-Nested connection setup in a manual assistant draft resumes that draft. Creation destinations
-load their own configuration and credentials stay with the owning Control.
+Nested connection setup in assistant settings resumes that draft. One-click
+creation uses the selected assistant's Space, or the local/serving Space without
+a selection. Creation destinations load their own configuration and credentials stay with the owning Control.
 Creating an assistant uses its destination Space's default Provider and that
 Provider's concrete default model, independently of the current assistant;
 existing assistant location is read-only. See

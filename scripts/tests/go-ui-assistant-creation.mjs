@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict';
+import {createAssistantCreation} from '../../web/src/state/assistant-creation.mjs';
+
+let locale='zh-CN',finish,fail,posts=[];
+const creation=createAssistantCreation({locale:()=>locale,request:(path,options)=>{
+  posts.push({path,...structuredClone(options)});
+  return new Promise((resolve,reject)=>{finish=resolve;fail=reject;});
+}});
+const local={id:'local',control_id:'control-a'},remote={id:'remote',control_id:'control-b'};
+let pending=creation.create(local);
+assert.equal(creation.pending,true);
+assert.equal(await creation.create(remote),null,'Repeated clicks cannot create in another Space while busy');
+assert.equal(posts.length,1);
+locale='en';fail(Error('Lost response'));
+await assert.rejects(pending,/Lost response/);
+assert.equal(creation.pending,false);
+pending=creation.create(local);
+assert.deepEqual(posts[1],posts[0],'Retry preserves request and creation language after a language switch');
+finish({id:'one',name:'Cup',avatar:'stored-image'});
+assert.deepEqual(await pending,{id:'one',name:'Cup',avatar:'stored-image',space_id:'local'});
+assert.equal((await creation.create(local)).id,'one','Failed post-create catalogue confirmation can resume the saved result');
+assert.equal(posts.length,2,'Retrying a saved creation never registers a second assistant');
+creation.complete(local);
+pending=creation.create(local);
+assert.notEqual(posts[2].body.request_id,posts[0].body.request_id,'A later creation has a new identity');
+assert.equal(posts[2].body.locale,'en');
+fail(Error('Offline'));await assert.rejects(pending);
+pending=creation.create(remote);finish({id:'two',name:'Cup'});await pending;
+assert.equal(posts[3].space,'remote');assert.equal(posts[3].owner,'');
+pending=creation.create({...local,control_id:'replacement-control'});
+assert.notEqual(posts[4].body.request_id,posts[2].body.request_id,'A replacement Control cannot inherit pending creation');
+assert.deepEqual(Object.keys(posts[4].body).sort(),['locale','request_id'],'Creation uses server defaults and no copied assistant configuration');
+finish({id:'three',name:'Mug'});await pending;
+console.log('Assistant creation duplicate-click, retry, locale and Space contracts passed');

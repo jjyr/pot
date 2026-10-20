@@ -519,6 +519,7 @@ DROP TABLE display_resources;
 DROP TABLE extension_settings;
 DROP TABLE mcp_servers;
 ALTER TABLE assistant_definitions DROP COLUMN deleted;
+ALTER TABLE assistant_profiles DROP COLUMN character;
 DELETE FROM pot_migrations WHERE id >= '0009_';`); err != nil {
 			t.Fatal(err)
 		}

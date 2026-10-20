@@ -178,3 +178,12 @@ their ports cannot be assumed to serve the new TCP protocol.
 original join requests while removing old HTTP endpoints and CA settings. Existing
 Runners update their endpoint against the saved Control identity; migration never
 re-enrolls a machine or replays execution. See [Peer protocol](peer-protocol.md).
+
+## Assistant character avatars
+
+Control migration `0015_character_avatars` records each assistant's assigned
+character from its original creation name, with a deterministic kitchen character
+for other names. It replaces old generated images and default-image receipts with
+character composites while retaining custom uploads, identity revisions and request
+bindings. Renaming does not change this saved role. The frozen `0011` renderer
+remains confined to storage so skipped-version upgrades can recognize old pixels.

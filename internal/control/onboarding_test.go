@@ -3,15 +3,19 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/modelprotocol"
+	webassets "github.com/jjyr/pot/web"
+
+	"github.com/jjyr/pot/pkg/assistantavatar"
 )
 
-func TestBootstrapWaitsForProviderAndCreatesExactlyOnePot(t *testing.T) {
+func TestBootstrapWaitsForProviderAndCreatesExactlyOneRandomAssistant(t *testing.T) {
 	s, profile := configurationService(t)
 	ctx := context.Background()
 	s.Profiles.mu.Lock()
@@ -34,13 +38,13 @@ func TestBootstrapWaitsForProviderAndCreatesExactlyOnePot(t *testing.T) {
 	}
 	wg.Wait()
 	definitions, err := s.Registry.Definitions(ctx)
-	if err != nil || len(definitions) != 1 || definitions[0].Name != "Pot" {
+	if err != nil || len(definitions) != 1 || !slices.Contains(assistantavatar.Names(), definitions[0].Name) {
 		t.Fatal(definitions, err)
 	}
 	a := definitions[0]
 	c, _ := s.Conversation(ctx, a.ID)
 	snapshot, _ := c.Snapshot(ctx)
-	if len(snapshot.Messages) != 1 || !strings.HasPrefix(snapshot.Messages[0].Text, "你好，我是 Pot。") {
+	if len(snapshot.Messages) != 1 || !strings.HasPrefix(snapshot.Messages[0].Text, "你好，我是 "+a.Name+"。") {
 		t.Fatal(snapshot)
 	}
 	config, err := s.AssistantConfiguration(ctx, a.ID)
@@ -54,7 +58,7 @@ func TestBootstrapWaitsForProviderAndCreatesExactlyOnePot(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot, _ = c.Snapshot(ctx)
-	if len(snapshot.Messages) != 1 || !strings.HasPrefix(snapshot.Messages[0].Text, "你好，我是 Pot。") {
+	if len(snapshot.Messages) != 1 || !strings.HasPrefix(snapshot.Messages[0].Text, "你好，我是 "+a.Name+"。") {
 		t.Fatal("locale switch changed history", snapshot)
 	}
 	other, err := s.CreateAssistant(ctx, CreateAssistant{RequestID: "second", Name: "Research", Locale: "en"})
@@ -65,6 +69,43 @@ func TestBootstrapWaitsForProviderAndCreatesExactlyOnePot(t *testing.T) {
 	otherSnapshot, _ := otherChat.Snapshot(ctx)
 	if len(otherSnapshot.Messages) != 1 || !strings.HasPrefix(otherSnapshot.Messages[0].Text, "Hi, I'm Research.") {
 		t.Fatal(otherSnapshot)
+	}
+}
+
+func TestQuickCreationUsesDefaultsAndLocalizedWelcomeOnce(t *testing.T) {
+	s, profile := configurationService(t)
+	ctx := context.Background()
+	if _, err := s.BootstrapAssistant(ctx, "zh-CN"); err != nil {
+		t.Fatal(err)
+	}
+	for _, locale := range []string{"en", "zh-CN"} {
+		request := CreateAssistant{RequestID: "quick-" + locale, Locale: locale}
+		d, err := s.CreateAssistant(ctx, request)
+		if err != nil || d.Name == "Pot" || d.Name == "" {
+			t.Fatal(d, err)
+		}
+		config, err := s.AssistantConfiguration(ctx, d.ID)
+		if err != nil || config.Config.SourceProfileID != profile.ID || config.Config.Model != profile.Model {
+			t.Fatal("quick creation did not use Space defaults", config, err)
+		}
+		c, _ := s.Conversation(ctx, d.ID)
+		rules, _ := c.Instructions(ctx)
+		if rules.Text != "" {
+			t.Fatal("quick creation inherited instructions", rules)
+		}
+		snapshot, _ := c.Snapshot(ctx)
+		want := strings.ReplaceAll(webassets.Translate(locale, "assistant.welcome"), "{name}", d.Name)
+		if len(snapshot.Messages) != 1 || snapshot.Messages[0].Text != want {
+			t.Fatal("welcome did not introduce allocated name and settings", snapshot.Messages)
+		}
+		retry, err := s.CreateAssistant(ctx, request)
+		if err != nil || retry != d {
+			t.Fatal("quick creation retry changed name/avatar", retry, err)
+		}
+		snapshot, _ = c.Snapshot(ctx)
+		if len(snapshot.Messages) != 1 {
+			t.Fatal("retry repeated welcome", snapshot.Messages)
+		}
 	}
 }
 

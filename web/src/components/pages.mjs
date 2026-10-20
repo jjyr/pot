@@ -5,7 +5,7 @@ import {notificationSetting} from './notification-setting.mjs';
 import {usageNumbers,usageRows,usageTooltip,createUsageList} from './usage.mjs';
 import {createTaskConversation} from './task-conversation.mjs';
 import {connectProviderEditor} from './provider-connection.mjs';
-import {avatar} from './avatar.mjs';
+import {avatar,avatarFromFile} from './avatar.mjs';
 import {translate} from '../locales/messages.mjs';
 import {icon} from './icons.mjs';
 import {node as n, action, field, section, table, details} from './primitives.mjs';
@@ -201,15 +201,14 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     if(!await leave())return;
     const token=gate.next(),captured=scope(),loading=body();loading.append(n('p','hint',tr('Loading…','正在加载…')));
     try{
-      const [providers,thread,rules]=await Promise.all([read('/api/v1/providers',captured),definition?request('/api/v1/agent',captured):null,definition?request('/api/v1/instructions',captured):null]);
+      const [providers,thread,rules]=await Promise.all([read('/api/v1/providers',captured),request('/api/v1/agent',captured),request('/api/v1/instructions',captured)]);
       if(!gate.current(token)||disposed)return;
       let profiles=providers.profiles||[],revision=definition?.revision,generation=thread?.generation||0,configurationRevision=thread?.revision||0,rulesRevision=rules?.revision||'';
       const selection=thread?.selection||{},profileID=selection.profile_id||thread?.config?.source_profile_id||providers.default_provider_id||'',profile=profiles.find(value=>value.id===profileID);
-      const initial={space_id:captured.space,name:definition?.name||'Pot',profile_id:profileID,model:selection.model||thread?.config?.model||profile?.model||'',model_selection:'',context_window:selection.context_window??null,max_output_tokens:selection.max_output_tokens??null,reasoning_effort:selection.reasoning_effort||'',text:rules?.text||''};
+      const initial={space_id:captured.space,name:definition.name,avatar:definition.avatar||'',profile_id:profileID,model:selection.model||thread?.config?.model||profile?.model||'',model_selection:'',context_window:selection.context_window??null,max_output_tokens:selection.max_output_tokens??null,reasoning_effort:selection.reasoning_effort||'',text:rules?.text||''};
       const selectValue=values=>{const profile=profiles.find(value=>value.id===values.profile_id);return profile?{profile_id:profile.id,profile_revision:profile.revision,model:values.model,context_window:values.context_window||null,max_output_tokens:values.max_output_tokens||null,reasoning_effort:values.reasoning_effort.trim()||null}:null;};
       let initialSelection=JSON.stringify({...selectValue(initial),profile_revision:selection.profile_revision||profile?.revision});
-      const form=renderEditor(definition?tr('Assistant settings','助手设置'):tr('New assistant','新建助手'),initial,[
-        ...(!definition&&client.desktop?[{name:'space_id',label:tr('Location','位置'),choices:(client.spaces||[]).map(space=>[space.id,space.name])}]:[]),
+      const form=renderEditor(tr('Assistant settings','助手设置'),initial,[
         {name:'name',label:tr('Name','名称'),required:true},
         {name:'profile_id',label:tr('Provider','提供商'),required:true,choices:[['',tr('Select a Provider','选择提供商')],...profiles.map(value=>[value.id,value.name])]},
         {name:'model_selection',label:tr('Model','模型'),choices:[['',tr('Enter model ID','输入模型 ID')]]},
@@ -217,16 +216,15 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
         {name:'context_window',label:tr('Context window','上下文窗口'),kind:'number',parse:value=>value?Number(value):null,min:1,presets:[32000,64000,128000,200000,1000000]},
         {name:'max_output_tokens',label:tr('Maximum output tokens','最大输出 token'),kind:'number',parse:value=>value?Number(value):null,min:1,presets:[4000,8000,16000,32000]},
         {name:'reasoning_effort',label:tr('Reasoning effort','推理强度')},
-        {name:'text',label:tr('Instructions','指令'),kind:'textarea',help:tr('Rules are saved for this assistant.','指令仅保存到此助手。')},
+        {name:'text',label:translate(locale(),'assistant.personality'),kind:'textarea',help:translate(locale(),'assistant.personalityHelp')},
       ],async(values,context,session)=>{
         const options={owner:captured.owner,space:captured.space,method:'POST'},selection=selectValue(values);
         if(!selection)throw Error(tr('Connect and select a Provider first.','请先连接并选择提供商。'));
-        if(!definition){const saved=await request('/api/v1/assistants',{...options,space:values.space_id,owner:'',body:{request_id:creationRequestID,name:values.name,text:values.text,locale:locale(),...(selection?{selection}:{})}});return {assistant:{...saved,space_id:values.space_id}};}
-        if(values.name!==initial.name){const saved=await request(`/api/v1/assistants/${encodeURIComponent(definition.id)}`,{...options,body:{name:values.name,revision}});revision=saved.revision;initial.name=values.name;session.acknowledge({name:values.name});}
+        if(values.name!==initial.name||values.avatar!==initial.avatar){const saved=await request(`/api/v1/assistants/${encodeURIComponent(definition.id)}`,{...options,body:{name:values.name,...(values.avatar!==initial.avatar?{avatar:values.avatar}:{}),revision}});revision=saved.revision;initial.name=values.name;initial.avatar=values.avatar;session.acknowledge({name:values.name,avatar:values.avatar});}
         const signature=JSON.stringify(selection);
         if(selection&&signature!==initialSelection){const saved=await request('/api/v1/agent',{...options,body:{request_id:context.request_id,expected_generation:generation,expected_revision:configurationRevision,selection}});generation=saved.generation;configurationRevision=saved.revision;initialSelection=signature;session.acknowledge(Object.fromEntries(['profile_id','model','model_selection','context_window','max_output_tokens','reasoning_effort'].map(key=>[key,values[key]])));}
         if(values.text!==initial.text){const saved=await request('/api/v1/instructions',{...options,body:{text:values.text,revision:rulesRevision}});rulesRevision=saved.revision;initial.text=values.text;session.acknowledge({text:values.text});}
-      },{returnChat:true,submitLabel:definition?tr('Save','保存'):tr('Create and start chatting','创建并开始聊天')});
+      },{returnChat:true});
       const controls=form.controls,session=form.session;
       if(definition){
         const t=key=>translate(locale(),key),more=n('details','editor-disclosure assistant-delete');more.dataset.section='delete';
@@ -248,30 +246,45 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
         },{danger:true});
         const status=n('p','inline-error');status.setAttribute('role','alert');let deleteError='';
         const refreshDelete=()=>{summary.textContent=t('assistant.moreActions');remove.textContent=t('assistant.delete');status.textContent=deleteError?t(deleteError):'';status.hidden=!deleteError;};
-        more.append(summary,remove,status);form.form.append(more);refreshDelete();
+        more.append(summary,remove,status);form.form.querySelector('.editor-fields').append(more);refreshDelete();
         window.addEventListener('pot:locale',refreshDelete);form.lifecycle.dispose=()=>window.removeEventListener('pot:locale',refreshDelete);
       }
 
       editor.kind='assistant';
-      // Creation identity also owns the preview image. Keep it even when an
-      // edited retry rotates the editor's generic mutation request identity.
-      const creationRequestID=session.requestID;
-      const preview=avatar(56,definition?.avatar);
+      const preview=avatar(56,definition.avatar);
       form.form.querySelector('.editor-fields').prepend(preview);
+      const editAvatar=async work=>{
+        if(!session.begin())return;
+        const disabled=new Map([...form.form.querySelectorAll('input,select,textarea,button')].map(node=>[node,node.disabled]));
+        for(const node of disabled.keys())node.disabled=true;
+        avatarError.hidden=true;
+        try{const {value,image}=await work();session.settle(false);session.set('avatar',value);preview.replaceChildren(...avatar(56,image).childNodes);}
+        catch{session.settle(false);avatarError.hidden=false;avatarError.textContent=translate(locale(),'assistant.avatarFailed');}
+        finally{for(const [node,value]of disabled)node.disabled=value;}
+      };
+      const avatarActions=toolbar(),upload=n('input');upload.type='file';upload.accept='image/png,image/jpeg,image/webp';upload.hidden=true;
+      const changeAvatar=action('',()=>upload.click()),resetAvatar=action('',()=>editAvatar(async()=>{
+        const generated=await request('/api/v1/assistants/default-avatar',captured);return {value:'',image:generated.avatar};
+      }));
+      const avatarHelp=n('p','hint'),avatarError=n('p','inline-error');avatarError.setAttribute('role','alert');avatarError.hidden=true;
+      avatarActions.append(changeAvatar,resetAvatar,upload);preview.after(avatarActions,avatarHelp,avatarError);
+      upload.onchange=async()=>{
+        const file=upload.files?.[0];upload.value='';if(!file)return;
+        await editAvatar(async()=>{const image=await avatarFromFile(file);return {value:image,image};});
+      };
       const set=(name,value)=>{controls.get(name).value=value??'';session.set(name,value);};
       const defaults=()=>{const profile=profiles.find(value=>value.id===session.values.profile_id),catalog=profile?.model_settings?.catalog_provider||'custom',limits=modelDefaults(providers,catalog,session.values.model);const same=profile?.model===session.values.model;controls.get('context_window').placeholder=String(same?(profile?.model_settings?.context_window||limits.context):limits.context);controls.get('max_output_tokens').placeholder=String(same?(profile?.model_settings?.max_output_tokens||limits.output):limits.output);controls.get('reasoning_effort').placeholder=profile?.params?.reasoning_effort||tr('Provider default','提供商默认值');controls.get('model').required=!!profile;form.form.querySelector('.editor-actions .primary').disabled=!profile;};
       const updateModels=()=>{const profile=profiles.find(value=>value.id===session.values.profile_id),catalog=(providers.directory||[]).find(value=>value.id===profile?.model_settings?.catalog_provider);const options=new Map();if(profile?.model)options.set(profile.model,profile.model);for(const model of catalog?.models||[])options.set(model.id,model.name||model.id);for(const model of providers.configured_models?.[profile?.id]||profile?.models||[])options.set(typeof model==='string'?model:model.id,typeof model==='string'?model:model.name||model.id);const input=controls.get('model_selection');input.replaceChildren();for(const [value,label]of [['',tr('Enter model ID','输入模型 ID')],...options]){const option=n('option','',label);option.value=value;input.append(option);}set('model_selection',options.has(session.values.model)?session.values.model:'');session.acknowledge({model_selection:session.values.model_selection});controls.get('model').closest('.form-row').hidden=!!input.value;defaults();};
       controls.get('profile_id').addEventListener('change',()=>{const selected=profiles.find(value=>value.id===session.values.profile_id);set('model',selected?.model||'');updateModels();});
       controls.get('model_selection').addEventListener('change',()=>{if(controls.get('model_selection').value)set('model',controls.get('model_selection').value);controls.get('model').closest('.form-row').hidden=!!controls.get('model_selection').value;defaults();});controls.get('model').addEventListener('input',defaults);updateModels();
       const instructionsRow=controls.get('text').closest('.form-row'),parameters=n('details','editor-disclosure');parameters.dataset.section='parameters';parameters.append(n('summary','',tr('Model parameters','模型参数')));for(const name of ['context_window','max_output_tokens','reasoning_effort'])parameters.append(controls.get(name).closest('.form-row'));instructionsRow.before(parameters);
-      const instructions=n('details','editor-disclosure');instructions.dataset.section='instructions';instructions.append(n('summary','',tr('Instructions','指令')));instructionsRow.before(instructions);instructions.append(instructionsRow);instructionsRow.querySelector('.form-label').textContent='AGENTS.md';
+      const instructions=n('details','editor-disclosure');instructions.dataset.section='instructions';instructions.append(n('summary'));instructionsRow.before(instructions);instructions.append(instructionsRow);
+      form.lifecycle.locale=()=>{const t=key=>translate(locale(),key),label=t('assistant.personality');instructions.querySelector('summary').textContent=label;instructionsRow.querySelector('.form-label').textContent=label;controls.get('text').setAttribute('aria-label',label);instructionsRow.querySelector('small').textContent=t('assistant.personalityHelp');changeAvatar.textContent=t('assistant.changeAvatar');resetAvatar.textContent=t('assistant.resetAvatar');avatarHelp.textContent=t('assistant.avatarHelp');if(!avatarError.hidden)avatarError.textContent=t('assistant.avatarFailed');};form.lifecycle.locale();
       const providerHelp=n('p','hint',tr('Connect a Provider before creating an assistant.','请先连接提供商，再创建助手。'));form.form.querySelector('.editor-fields').prepend(providerHelp);providerHelp.hidden=profiles.length>0;
       const addProvider=action(tr('+ Add Provider','＋ 添加提供商'),()=>providerPicker(providers,{space:session.values.space_id||captured.space,owner:''}));controls.get('profile_id').closest('.field-body').append(addProvider);
       form.lifecycle.providersChanged=async saved=>{const value=await request('/api/v1/providers',{space:session.values.space_id||captured.space,owner:''});if(editor?.session!==session)return;profiles=value.profiles||[];Object.assign(providers,value);providerHelp.hidden=profiles.length>0;const input=controls.get('profile_id');input.replaceChildren();for(const profile of profiles){const option=n('option','',profile.name);option.value=profile.id;input.append(option);}const selected=profiles.find(profile=>profile.id===saved?.id)||profiles.find(profile=>profile.id===session.values.profile_id)||profiles[0];const changedProvider=selected?.id!==session.values.profile_id;set('profile_id',selected?.id||'');if(changedProvider||!session.values.model)set('model',selected?.model||'');updateModels();};
       form.lifecycle.settled=defaults;
       if(thread?.pending)form.root.prepend(n('p','hint',tr('Saved settings will apply to the next new turn. The current turn keeps its original configuration.','已保存的设置将在下一次新回合生效，当前回合保持原配置。')));
-      if(!definition&&controls.has('space_id'))controls.get('space_id').addEventListener('change',async()=>{const next=controls.get('space_id').value;controls.get('profile_id').disabled=true;try{const snapshot=await request('/api/v1/providers',{space:next,owner:''});if(editor?.session!==session||controls.get('space_id').value!==next)return;profiles=snapshot.profiles||[];Object.assign(providers,snapshot);providerHelp.hidden=profiles.length>0;const input=controls.get('profile_id');input.replaceChildren();for(const profile of profiles){const option=n('option','',profile.name);option.value=profile.id;input.append(option);}set('profile_id',snapshot.default_provider_id||'');set('model',profiles.find(value=>value.id===session.values.profile_id)?.model||'');updateModels();}catch(reason){if(editor?.session===session)errorView(reason,form.root);}finally{if(editor?.session===session)controls.get('profile_id').disabled=false;}});
-      if(!definition){const generated=await request(`/api/v1/assistants/default-avatar?${new URLSearchParams({request_id:creationRequestID})}`,{space:captured.space,owner:''});if(editor?.session===session)preview.replaceWith(avatar(56,generated.avatar));}
     }catch(reason){if(gate.current(token))errorView(reason);}
   }
   async function extensions(root,token){extensionUI=createExtensions({root,client,locale,memory:extensionMemory,onSettings:()=>{filter.settingsTab='integrations';routeChanged('settings');show('settings');},onPermissions:()=>{routeChanged('machines');show('machines');}});await extensionUI.load();}
@@ -319,8 +332,8 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       {name:'provider_limit',label:tr('Provider concurrency','提供商并发数'),kind:'number',parse:value=>value?Number(value):null,min:1,max:1000},
     ],(values,context)=>{const next=structuredClone(policy);next.profile_limits||={};next.provider_limits||={};for(const [key,id,value]of [['profile_limits',profile.id,values.profile_limit],['provider_limits',profile.provider,values.provider_limit]]){if(value)next[key][id]=value;else delete next[key][id];}return request('/api/v1/agent/routing',{...context,method:'POST',body:next});},{capturedScope:owner});
   }
-  async function setupAI() {
-    const captured={...scope(),owner:''};
+  async function setupAI(target=scope()) {
+    const captured={...target,owner:''};
     const snapshot=await read('/api/v1/providers',captured);
     await providerPicker(snapshot,captured);
     if(editor?.kind==='picker')editor.onboarding=true;

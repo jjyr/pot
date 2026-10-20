@@ -10,7 +10,40 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jjyr/pot/pkg/assistantavatar"
 )
+
+func TestSettingsProfileEditSharesRevisionAndCanRestoreDefault(t *testing.T) {
+	r, err := OpenRegistry(filepath.Join(t.TempDir(), "control.sqlite"), "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	ctx := context.Background()
+	d, err := r.Create(ctx, "create", "Cup 2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	custom, _ := assistantavatar.Render("glass", "custom-image")
+	name := "My helper"
+	changed, err := r.UpdateProfile(ctx, d.ID, ProfileUpdate{Name: &name, Avatar: &custom}, d.Revision)
+	if err != nil || changed.Name != name || changed.Avatar != custom || changed.Revision != d.Revision+1 {
+		t.Fatal("settings edit was not atomic", changed, err)
+	}
+	if _, err = r.UpdateProfile(ctx, d.ID, ProfileUpdate{Avatar: &d.Avatar}, d.Revision); err == nil {
+		t.Fatal("stale settings overwrote newer profile")
+	}
+	bad := "data:image/png;base64,invalid"
+	if _, err = r.UpdateProfile(ctx, d.ID, ProfileUpdate{Name: &d.Name, Avatar: &bad}, changed.Revision); err == nil {
+		t.Fatal("invalid image accepted")
+	}
+	empty := ""
+	reset, err := r.UpdateProfile(ctx, d.ID, ProfileUpdate{Avatar: &empty}, changed.Revision)
+	if err != nil || reset.Name != name || reset.Avatar != d.Avatar {
+		t.Fatal("reset lost name or original colors", reset, err)
+	}
+}
 
 func TestAvatarNormalizationAndProfilePersistence(t *testing.T) {
 	source := image.NewNRGBA(image.Rect(0, 0, 300, 100))
@@ -45,7 +78,7 @@ func TestAvatarNormalizationAndProfilePersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	d, err := r.Create(ctx, "create", "Pot")
+	d, err := r.Create(ctx, "create", "Cup 2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +103,7 @@ func TestAvatarNormalizationAndProfilePersistence(t *testing.T) {
 	if err != nil || renamed.Avatar != avatar {
 		t.Fatal("settings rename lost avatar", err)
 	}
-	replay, err := r.Create(ctx, "create", "Pot")
+	replay, err := r.Create(ctx, "create", "Cup 2")
 	if err != nil || replay.Avatar != avatar {
 		t.Fatal("creation retry lost avatar", err)
 	}

@@ -1,5 +1,16 @@
+import serverMessages from './server.json' with {type:'json'};
+
 export const messages = {
   en: {
+    ...serverMessages.en,
+    'assistant.creating':'Creating assistant…',
+    'assistant.createFailed':'Could not create the assistant. Try again.',
+    'assistant.personality':'Personality and preferences',
+    'assistant.personalityHelp':'Write how you would like me to talk, work and handle things that matter to you.',
+    'assistant.changeAvatar':'Change avatar',
+    'assistant.resetAvatar':'Restore default avatar',
+    'assistant.avatarHelp':'Choose a PNG, JPEG or WebP image up to 8 MiB.',
+    'assistant.avatarFailed':'Could not use this image. Choose a PNG, JPEG or WebP image up to 8 MiB.',
     'resource.downloadFailed':'Could not download this file. Try again.',
     'resource.result':'Component result',
     'resource.downloadBundle':'Download ZIP',
@@ -606,6 +617,15 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    ...serverMessages['zh-CN'],
+    'assistant.creating':'正在创建助手…',
+    'assistant.createFailed':'无法创建助手，请重试。',
+    'assistant.personality':'个性与偏好',
+    'assistant.personalityHelp':'希望我是什么性格、怎样回答、做事时注意什么，都可以写在这里。',
+    'assistant.changeAvatar':'更换头像',
+    'assistant.resetAvatar':'恢复默认头像',
+    'assistant.avatarHelp':'选择不超过 8 MiB 的 PNG、JPEG 或 WebP 图片。',
+    'assistant.avatarFailed':'无法使用这张图片，请选择不超过 8 MiB 的 PNG、JPEG 或 WebP 图片。',
     'resource.downloadFailed':'文件下载失败，请重试。',
     'resource.result':'组件结果',
     'resource.downloadBundle':'下载资源包',

@@ -11,6 +11,7 @@ import hashlib
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import re
 import os
 from pathlib import Path
 import secrets
@@ -310,10 +311,17 @@ def run(binary, base, env, cli_command, profile_only=False):
             (ROOT / "output/pr-images").mkdir(parents=True, exist_ok=True)
             code = (ROOT / "scripts/tests/go-ui-onboarding-browser.js").read_text()
             browser_cli("run-code", code.replace("STATE", json.dumps(onboarding)))
-            welcome = "你好，我是 Pot。\n\n你可以给我起个名字，或者告诉我你希望我如何帮你。"
+            welcome = json.loads((ROOT / "web/src/locales/server.json").read_text())["zh-CN"][
+                "assistant.welcome"
+            ]
             assert any(
                 any(
-                    m.get("role") == "assistant" and message_text(m) == welcome
+                    m.get("role") == "assistant"
+                    and re.fullmatch(
+                        re.escape(welcome).replace(re.escape("{name}"), "[A-Za-z]+"),
+                        message_text(m),
+                    )
+                    is not None
                     for m in body.get("messages", [])
                 )
                 for body in model_requests

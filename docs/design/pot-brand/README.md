@@ -46,3 +46,28 @@ retain the ochre open vessel, one eye, continuous nose/smile and two feet; use a
 macOS tile for the App and a simplified monochrome alpha silhouette for the menu bar;
 show light/dark treatments and small-size previews. Production geometry is drawn in
 Swift rather than extracted from the raster board.
+
+## Assistant characters
+
+The [approved character board](kitchen-characters-approved.png) extends the
+Klee-inspired visual language to Pot and sixteen kitchen companions: Cup, Mug,
+Bowl, Pan, Wok, Spoon, Fork, Tray, Whisk, Kettle, Lid, Jar, Jug, Plate, Dish and Glass.
+Each has its own silhouette, palette and expression; Pot's eye, feet and ochre
+body are specific to Pot. These English identity names do not use UI translation.
+First-use and subsequent creation draw from the same sixteen-name pool, preferring
+unused names and then adding the smallest available suffix starting at 2.
+
+Production artwork is the embedded transparent
+[`kitchen-atlas.png`](../../../pkg/assistantavatar/assets/kitchen-atlas.png).
+`pkg/assistantavatar/avatar.go` owns source regions and fits each character into
+128px tiles, preserving its colors over soft mint, peach, lilac, blue, cream,
+rose, sage or gray backgrounds. A creation request fixes its background; renaming
+or restoring a default retains the saved role. Existing assistants named Pot keep
+the Pot character. Custom uploaded images remain supported.
+
+The built-in image generation tool extracted the approved board with this prompt:
+extract the seventeen illustrations into a transparent RGBA atlas without redesign;
+remove text and pastel tiles; preserve individual colors, poses, faces and textures;
+use five columns ordered Pot–Pan, Wok–Whisk, Kettle–Plate, Dish–Glass, with the
+remaining cells empty. Runtime compositing adds the background independently.
+The App and menu-bar brand exports above continue to use the native Pot geometry.

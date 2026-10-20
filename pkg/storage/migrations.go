@@ -19,15 +19,25 @@ import (
 	"modernc.org/sqlite"
 )
 
-// Migration-only image conversion uses the same pure renderer as creation and
-// reset. Registration precedes every storage connection, including external ones.
+// Historical migrations retain their exact renderer. New conversions use the
+// current character catalog. Registration precedes every storage connection.
 func init() {
 	sqlite.MustRegisterDeterministicScalarFunction("pot_default_avatar", 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
 		seed, ok := args[0].(string)
 		if !ok || seed == "" {
 			return nil, fmt.Errorf("default avatar requires a creation seed")
 		}
-		return assistantavatar.Default(seed)
+		return legacyDefaultAvatar(seed)
+	})
+	sqlite.MustRegisterDeterministicScalarFunction("pot_avatar_character", 2, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+		name, _ := args[0].(string)
+		seed, _ := args[1].(string)
+		return assistantavatar.ForName(name, seed), nil
+	})
+	sqlite.MustRegisterDeterministicScalarFunction("pot_character_avatar", 2, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+		character, _ := args[0].(string)
+		seed, _ := args[1].(string)
+		return assistantavatar.Render(character, seed)
 	})
 }
 

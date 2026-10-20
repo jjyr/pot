@@ -10,7 +10,6 @@ import (
 	"github.com/jjyr/pot/internal/buildinfo"
 	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/usage"
-	"github.com/jjyr/pot/pkg/assistantavatar"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -179,11 +178,7 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 		case "/api/v1/control":
 			return map[string]any{"id": a.RuntimeID, "name": a.Name, "runtime_id": a.RuntimeID, "connected": true, "role": s.ControlRole()}, nil
 		case "/api/v1/assistants/default-avatar":
-			seed := u.Query().Get("request_id")
-			if seed == "" || len(seed) > 128 {
-				return nil, errors.New("invalid assistant creation request")
-			}
-			avatar, err := assistantavatar.Default(seed)
+			avatar, err := s.Registry.DefaultAvatar(ctx, owner)
 			return map[string]any{"avatar": avatar}, err
 		case "/api/v1/assistants":
 			definitions, err := s.Registry.Definitions(ctx)
@@ -529,13 +524,14 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 				return nil, errors.New("invalid assistant path")
 			}
 			var body struct {
-				Name     string `json:"name" required:"true"`
-				Revision uint64 `json:"revision" required:"true"`
+				Name     *string `json:"name,omitempty"`
+				Avatar   *string `json:"avatar,omitempty"`
+				Revision uint64  `json:"revision" required:"true"`
 			}
 			if err = decode(r.Body, &body); err != nil {
 				return nil, err
 			}
-			definition, err := s.Registry.Rename(ctx, id, body.Name, body.Revision)
+			definition, err := s.Registry.UpdateProfile(ctx, id, assistant.ProfileUpdate{Name: body.Name, Avatar: body.Avatar}, body.Revision)
 			if err == nil {
 				s.Changes.Notify("assistants")
 			}

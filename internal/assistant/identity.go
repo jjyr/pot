@@ -6,13 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/jjyr/pot/pkg/assistantavatar"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/storage"
 )
 
 // ProfileUpdate changes only supplied fields. Avatar is a normalized PNG data URL;
-// an empty value restores the default Companion.
+// an empty value restores the assigned kitchen character.
 type ProfileUpdate struct {
 	Name   *string `json:"name,omitempty"`
 	Avatar *string `json:"avatar,omitempty"`
@@ -84,7 +83,7 @@ func (r *Registry) UpdateProfileOnce(ctx context.Context, owner string, patch Pr
 		if patch.Avatar != nil {
 			definition.Avatar = *patch.Avatar
 			if definition.Avatar == "" {
-				definition.Avatar, err = assistantavatar.Default(definition.RequestID)
+				definition.Avatar, err = defaultAvatar(ctx, tx, owner)
 				if err != nil {
 					return err
 				}
@@ -94,7 +93,7 @@ func (r *Registry) UpdateProfileOnce(ctx context.Context, owner string, patch Pr
 		if _, err = tx.ExecContext(ctx, "UPDATE assistant_definitions SET name=?,revision=? WHERE id=?", definition.Name, definition.Revision, owner); err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO assistant_profiles VALUES (?,?) ON CONFLICT(assistant_id) DO UPDATE SET avatar=excluded.avatar", owner, definition.Avatar); err != nil {
+		if _, err = tx.ExecContext(ctx, "UPDATE assistant_profiles SET avatar=? WHERE assistant_id=?", definition.Avatar, owner); err != nil {
 			return err
 		}
 		body, err := json.Marshal(definition)
