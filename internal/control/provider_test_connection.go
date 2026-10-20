@@ -13,6 +13,7 @@ import (
 )
 
 type TestProvider struct {
+	ProviderTypeID  string  `json:"provider_type_id"`
 	Endpoint        string  `json:"endpoint"`
 	Protocol        string  `json:"protocol"`
 	APIKey          string  `json:"api_key"`
@@ -32,7 +33,7 @@ func (p *ProfileStore) Test(ctx context.Context, r TestProvider) (map[string]boo
 		return nil, errors.New("model ID required")
 	}
 	r.Endpoint = resolved.Endpoint
-	key, err := p.checkCredential(ctx, CheckProvider{Endpoint: r.Endpoint, Protocol: r.Protocol, APIKey: r.APIKey, ProfileID: r.ProfileID})
+	key, err := p.checkCredential(ctx, CheckProvider{ProviderTypeID: r.ProviderTypeID, Endpoint: r.Endpoint, Protocol: r.Protocol, APIKey: r.APIKey, ProfileID: r.ProfileID})
 	if err != nil {
 		return nil, err
 	}

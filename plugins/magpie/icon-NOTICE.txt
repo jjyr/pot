@@ -1,0 +1,3 @@
+Magpie official application icon
+Source: https://github.com/yetone/magpie/blob/main/site/public/img/icon-256.png
+Copyright (c) 2026 yetone. Distributed under the MIT License; see icon-LICENSE.txt.

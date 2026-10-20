@@ -67,6 +67,9 @@ func (s *Service) selectTask(ctx context.Context, owner string, r protocol.Creat
 			return tasks.Selection{}, err
 		}
 	}
+	if err := s.Profiles.sourceAvailable(ctx, spec.Provider); err != nil {
+		return tasks.Selection{}, err
+	}
 	settings, err := s.Profiles.defaultAgentSettings()
 	if err != nil {
 		return tasks.Selection{}, err
@@ -101,6 +104,9 @@ func (s *Service) currentTaskResource(ctx context.Context, l runner.Launch) (tas
 	}
 	if profile == nil {
 		return taskResource{}, errors.New("Task source Provider is unavailable for resource synchronization")
+	}
+	if err := s.Profiles.sourceAvailable(ctx, spec.Provider); err != nil {
+		return taskResource{}, err
 	}
 	settings, err := s.Profiles.defaultAgentSettings()
 	if err != nil {
@@ -384,6 +390,11 @@ func (s *Service) prepareTaskResources(ctx context.Context, l runner.Launch, fet
 		raw, err = json.Marshal(resources)
 		if err != nil {
 			return taskResource{}, "", err
+		}
+		if l.ControlID == s.options.RuntimeID {
+			if err = s.Profiles.sourceAvailable(ctx, l.Config.Provider); err != nil {
+				return taskResource{}, "", err
+			}
 		}
 		if _, _, err = s.RunnerJournal.PinResources(ctx, l.ControlID, l.TaskID, l.RunID, raw); err != nil {
 			return taskResource{}, "", err

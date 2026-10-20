@@ -27,7 +27,7 @@ func TestExtensionDefaultsDisableFilteringAndRevisionFences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 2 {
+	if len(entries) != 3 {
 		t.Fatal(entries)
 	}
 	for _, item := range entries {
@@ -68,10 +68,10 @@ func TestUserSkillCreateEditConflictAndRecoverableRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries, _, err := s.extensionCatalog(ctx, "main")
-	if err != nil || len(entries) != 1 {
+	if err != nil || len(entries) != 2 {
 		t.Fatal(entries, err)
 	}
-	item := entries[0]
+	item := entries[1]
 	command := ExtensionCommand{Action: "save", Kind: "skills", ID: item.ID, Revision: item.Revision, Digest: extensionID(text), Content: strings.ReplaceAll(text, "Original", "Revised")}
 	if _, err = s.ManageExtension(ctx, "main", command); err != nil {
 		t.Fatal(err)
@@ -234,10 +234,10 @@ func TestLocalImportRejectsLinksAndPreservesUpdateIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries, _, err := s.extensionCatalog(ctx, "main")
-	if err != nil || len(entries) != 1 {
+	if err != nil || len(entries) != 2 {
 		t.Fatal(entries, err)
 	}
-	item := entries[0]
+	item := entries[1]
 	writeTaskFixture(t, filepath.Join(bundle, "SKILL.md"), "---\nname: notes\ndescription: Notes\n---\nUpdated")
 	if _, err = s.ManageExtension(ctx, "main", ExtensionCommand{Action: "update", Kind: "skills", ID: item.ID, Revision: item.Revision}); err != nil {
 		t.Fatal(err)

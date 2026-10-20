@@ -13,20 +13,28 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/jjyr/pot/internal/buildinfo"
+	"github.com/jjyr/pot/pkg/core"
 )
 
 var ErrConnection = errors.New("model provider connection failed")
 
 type Provider struct {
-	ID           string   `json:"id"`
-	APIProvider  string   `json:"api_provider,omitempty"`
-	Endpoint     string   `json:"endpoint"`
-	AllowedHosts []string `json:"allowed_hosts"`
-	Protocol     string   `json:"protocol"`
-	SecretRef    string   `json:"secret_ref"`
+	TypeID       string               `json:"type_id,omitempty"`
+	Source       *core.PluginIdentity `json:"source,omitempty"`
+	ID           string               `json:"id"`
+	APIProvider  string               `json:"api_provider,omitempty"`
+	Endpoint     string               `json:"endpoint"`
+	AllowedHosts []string             `json:"allowed_hosts"`
+	Protocol     string               `json:"protocol"`
+	SecretRef    string               `json:"secret_ref"`
 }
 
 func (p Provider) Validate() error {
+	if len(p.TypeID) > 256 || strings.ContainsAny(p.TypeID, "\r\n") || p.Source != nil && (p.Source.ID == "" || p.Source.Digest == "") {
+		return errors.New("invalid provider source")
+	}
 	if p.ID == "" || p.SecretRef == "" || len(p.APIProvider) > 128 || strings.ContainsAny(p.APIProvider, "\r\n") {
 		return errors.New("provider identity and secret reference are required")
 	}
@@ -90,6 +98,7 @@ func Forward(ctx context.Context, p Provider, key []byte, body json.RawMessage, 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("User-Agent", "Pot/"+buildinfo.Version)
 	switch p.Protocol {
 	case "anthropic_messages":
 		req.Header.Set("x-api-key", string(key))

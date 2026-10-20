@@ -13,19 +13,28 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Connection struct {
-	ProfileID  string `json:"profile_id"`
-	ProviderID string `json:"provider_id"`
-	Endpoint   string `json:"endpoint"`
-	Protocol   string `json:"protocol"`
-	HasKey     bool   `json:"has_key"`
+	Catalog      *core.ProviderModelCatalog      `json:"catalog,omitempty"`
+	TypeID       string                          `json:"type_id,omitempty"`
+	PluginID     string                          `json:"plugin_id,omitempty"`
+	Capabilities *core.ModelProviderCapabilities `json:"capabilities,omitempty"`
+	Available    *bool                           `json:"available,omitempty"`
+	Icon         string                          `json:"icon,omitempty"`
+	ProfileID    string                          `json:"profile_id"`
+	ProviderID   string                          `json:"provider_id"`
+	Endpoint     string                          `json:"endpoint"`
+	Protocol     string                          `json:"protocol"`
+	HasKey       bool                            `json:"has_key"`
 }
 type ProfileSnapshot struct {
+	ProviderTypes     []ProviderType                   `json:"provider_types,omitempty"`
 	Profiles          []core.Profile                   `json:"profiles"`
 	Connections       []Connection                     `json:"connections"`
 	ConfiguredModels  map[string][]string              `json:"configured_models"`
@@ -43,6 +52,7 @@ type profileFile struct {
 	Requests        map[string]profileReceipt `json:"requests"`
 }
 type ProfileStore struct {
+	metadataWake     chan struct{}
 	mu               sync.Mutex
 	path, pluginRoot string
 	registry         *gateway.Registry
@@ -50,10 +60,13 @@ type ProfileStore struct {
 	state            profileFile
 	ownerAction      func(func() error) error
 	extensions       *Service
+	discoveryMu      sync.Mutex
+	discoveries      map[string]core.ModelProviderResponse
+	metadataFlights  map[string]*providerMetadataFlight
 }
 
 func OpenProfiles(path, pluginRoot string, registry *gateway.Registry) (*ProfileStore, error) {
-	p := &ProfileStore{path: path, pluginRoot: pluginRoot, registry: registry, state: profileFile{Version: 1, ProfileSnapshot: ProfileSnapshot{Profiles: []core.Profile{}, Connections: []Connection{}, ConfiguredModels: map[string][]string{}}, Requests: map[string]profileReceipt{}}}
+	p := &ProfileStore{metadataWake: make(chan struct{}, 1), path: path, pluginRoot: pluginRoot, registry: registry, state: profileFile{Version: 1, ProfileSnapshot: ProfileSnapshot{Profiles: []core.Profile{}, Connections: []Connection{}, ConfiguredModels: map[string][]string{}}, Requests: map[string]profileReceipt{}}}
 	directory, err := modeldirectory.Open(filepath.Join(filepath.Dir(path), "models-dev"))
 	if err != nil {
 		return nil, err
@@ -152,7 +165,58 @@ func (p *ProfileStore) Snapshot() ProfileSnapshot {
 	body, _ := json.Marshal(p.state.ProfileSnapshot)
 	var result ProfileSnapshot
 	json.Unmarshal(body, &result)
-	result.Directory = p.directory.Options()
+	types, err := p.providerTypes(context.Background())
+	if err == nil {
+		result.ProviderTypes = types
+		result.Directory = p.registeredDirectory(types)
+		byID := map[string]ProviderType{}
+		for _, typ := range types {
+			byID[typ.ID] = typ
+		}
+		for i := range result.Connections {
+			c := &result.Connections[i]
+			available := false
+			c.Available = &available
+			provider, getErr := p.registry.Get(context.Background(), c.ProviderID)
+			if getErr != nil {
+				continue
+			}
+			c.TypeID = provider.TypeID
+			if c.TypeID == "" {
+				c.TypeID = customProviderType
+			}
+			if typ, ok := byID[c.TypeID]; ok {
+				c.PluginID = typ.PluginID
+				c.Icon = typ.Icon
+				capabilities := typ.Capabilities
+				c.Capabilities = &capabilities
+				available = typ.Available
+				if available {
+					raw, readErr := p.registry.ReadMetadata(context.Background(), provider.ID, "list_models", typ.Identity.Digest)
+					var cached core.ModelProviderResponse
+					if readErr == nil && len(raw) > 0 && core.DecodeJSON(raw, &cached) == nil && cached.Validate("list_models") == nil {
+						c.Catalog = cached.Catalog
+						models := []string{}
+						for _, model := range cached.Catalog.Models {
+							models = append(models, model.ID)
+						}
+						for _, profile := range result.Profiles {
+							if profile.ID == c.ProfileID {
+								models = append(models, profile.Model)
+								break
+							}
+						}
+						slices.Sort(models)
+						models = slices.Compact(models)
+						if result.ConfiguredModels == nil {
+							result.ConfiguredModels = map[string][]string{}
+						}
+						result.ConfiguredModels[c.ProfileID] = models
+					}
+				}
+			}
+		}
+	}
 	result.ModelDefaults = p.directory.Defaults()
 	return result
 }
@@ -164,7 +228,7 @@ func (p *ProfileStore) Resolve(id string) (core.ResolvedSpec, error) {
 	}
 	for _, profile := range p.state.Profiles {
 		if profile.ID == id {
-			resolved, err := p.directory.Apply(profile)
+			resolved, err := p.applyModelMetadata(profile)
 			if err != nil {
 				return core.ResolvedSpec{}, err
 			}
@@ -185,6 +249,7 @@ func (p *ProfileStore) Resolve(id string) (core.ResolvedSpec, error) {
 }
 
 type SaveProfile struct {
+	ProviderTypeID   string              `json:"provider_type_id"`
 	RequestID        string              `json:"request_id"`
 	ProfileID        string              `json:"profile_id"`
 	ExpectedRevision uint64              `json:"expected_revision"`
@@ -208,7 +273,7 @@ func (p *ProfileStore) Save(ctx context.Context, r SaveProfile) (core.Profile, e
 	return p.save(ctx, r)
 }
 func (p *ProfileStore) save(ctx context.Context, r SaveProfile) (core.Profile, error) {
-	if !core.Identifier(r.RequestID) || r.Name == "" || r.Model == "" {
+	if !core.Identifier(r.RequestID) || strings.TrimSpace(r.Name) == "" || len(r.Name) > 512 || r.Model == "" {
 		return core.Profile{}, errors.New("profile request, name and model are required")
 	}
 	if len(r.Models) > 10000 {
@@ -293,10 +358,20 @@ func (p *ProfileStore) save(ctx context.Context, r SaveProfile) (core.Profile, e
 	}
 	routeID := storage.ID()
 	profile := core.Profile{ID: r.ProfileID, Revision: revision, Name: r.Name, Provider: routeID, Model: r.Model, AuthRef: "provider:" + routeID, ModelSettings: r.ModelSettings, Params: core.Parameters{MaxOutputTokens: output, ReasoningEffort: r.ReasoningEffort, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "runtime"}}
-	if _, err := p.directory.Apply(profile); err != nil {
-		return core.Profile{}, err
+	typeID := r.ProviderTypeID
+	if typeID == "" && index >= 0 {
+		old, lookupErr := p.registry.Get(ctx, previous.Provider)
+		if lookupErr != nil {
+			return core.Profile{}, lookupErr
+		}
+		typeID = old.TypeID
 	}
-	provider := gateway.Provider{ID: routeID, Endpoint: r.Endpoint, Protocol: r.Protocol, SecretRef: "provider/" + routeID}
+	typ, typeErr := p.providerType(ctx, typeID, r.Protocol)
+	if typeErr != nil {
+		return core.Profile{}, typeErr
+	}
+	identity := typ.Identity
+	provider := gateway.Provider{ID: routeID, Endpoint: r.Endpoint, Protocol: r.Protocol, SecretRef: "provider/" + routeID, TypeID: typ.ID, Source: &identity}
 	parsed, err := parseProviderHost(r.Endpoint)
 	if err != nil {
 		return core.Profile{}, err
@@ -309,6 +384,9 @@ func (p *ProfileStore) save(ctx context.Context, r SaveProfile) (core.Profile, e
 			provider.APIProvider = "deepseek"
 		}
 	}
+	if provider.APIProvider == "" && typ.DirectoryProvider != "" {
+		provider.APIProvider = typ.DirectoryProvider
+	}
 	provider.AllowedHosts = []string{parsed}
 	key := []byte(r.APIKey)
 	defer clear(key)
@@ -317,13 +395,33 @@ func (p *ProfileStore) save(ctx context.Context, r SaveProfile) (core.Profile, e
 		if err != nil {
 			return core.Profile{}, err
 		}
+		oldType := old.TypeID
+		if oldType == "" {
+			oldType = customProviderType
+		}
+		if oldType != typ.ID {
+			return core.Profile{}, errors.New("enter a credential when changing the provider type")
+		}
 		key, err = p.registry.Credential(ctx, old)
 		if err != nil {
 			return core.Profile{}, err
 		}
 		defer clear(key)
 	}
+	if len(key) == 0 {
+		key = []byte(typ.definition.DefaultCredential)
+		defer clear(key)
+	}
 	if err = p.registry.Save(ctx, provider, key); err != nil {
+		return core.Profile{}, err
+	}
+	if cached := p.discoveredCatalog(typ, r.Endpoint, r.Protocol, key); cached != nil {
+		payload, _ := json.Marshal(cached)
+		if err = p.registry.SaveMetadata(ctx, provider.ID, "list_models", typ.Identity.Digest, payload); err != nil {
+			return core.Profile{}, err
+		}
+	}
+	if _, err = p.applyModelMetadata(profile); err != nil {
 		return core.Profile{}, err
 	}
 	body, _ := json.Marshal(p.state)
@@ -361,7 +459,7 @@ func (p *ProfileStore) save(ctx context.Context, r SaveProfile) (core.Profile, e
 	}
 	sort.Strings(normalizedModels)
 	next.ConfiguredModels[profile.ID] = normalizedModels
-	connection := Connection{profile.ID, routeID, r.Endpoint, r.Protocol, true}
+	connection := Connection{ProfileID: profile.ID, ProviderID: routeID, Endpoint: r.Endpoint, Protocol: r.Protocol, HasKey: true}
 	found := false
 	for i, c := range next.Connections {
 		if c.ProfileID == profile.ID {
@@ -382,6 +480,10 @@ func (p *ProfileStore) save(ctx context.Context, r SaveProfile) (core.Profile, e
 	saved, _ := json.Marshal(next)
 	if err = json.Unmarshal(saved, &p.state); err != nil {
 		return core.Profile{}, err
+	}
+	select {
+	case p.metadataWake <- struct{}{}:
+	default:
 	}
 	return cloneProfile(profile)
 }
@@ -422,4 +524,26 @@ func (p *ProfileStore) SetDefault(id string) error {
 	return nil
 }
 
-func (p *ProfileStore) RunMetadata(ctx context.Context) { p.directory.Run(ctx) }
+// RunMetadata owns both public-directory refresh and optional connection catalogs.
+// Neither reader sends inference requests. Cancellation drains all child readers.
+func (p *ProfileStore) RunMetadata(ctx context.Context) {
+	var lifecycle sync.WaitGroup
+	lifecycle.Go(func() { p.directory.Run(ctx) })
+	defer lifecycle.Wait()
+	for {
+		select {
+		case <-p.metadataWake:
+		default:
+		}
+		p.refreshPluginCatalogs(ctx)
+		timer := time.NewTimer(5 * time.Minute)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-p.metadataWake:
+			timer.Stop()
+		case <-timer.C:
+		}
+	}
+}
