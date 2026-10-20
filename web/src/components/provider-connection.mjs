@@ -1,5 +1,6 @@
 import {node as n, action, details} from './primitives.mjs';
 import {translate} from '../locales/messages.mjs';
+import {catalogInputModalities} from '../state/models.mjs';
 
 // Discovery and tests are scoped to the current connection signature. They never
 // set the user's chosen model or participate in the save/dirty lifecycle.
@@ -24,7 +25,7 @@ export function connectProviderEditor({form,request,scope,profile,connection,typ
  async function discover(captured,signal){
   if(type?.capabilities?.catalog==='none'){modelKey='manualModel';modelStatus.textContent=t(modelKey);return;}
   if(!session.values.api_key&&!connection?.has_key&&!type?.default_credential)return;modelKey='loadingModels';modelStatus.className='provider-model-status hint';modelStatus.textContent=t(modelKey);
-  try{const result=await request('/api/v1/providers/check',{...scope,method:'POST',signal,body:inputs()});if(!active()||version!==captured)return;if(result.supported===false){modelKey='manualModel';modelStatus.textContent=t(modelKey);return;}models(result.catalog?.models||result.models||[],result.input_modalities||{});modelKey='';modelStatus.textContent='';}
+  try{const result=await request('/api/v1/providers/check',{...scope,method:'POST',signal,body:inputs()});if(!active()||version!==captured)return;if(result.supported===false){modelKey='manualModel';modelStatus.textContent=t(modelKey);return;}const entries=result.catalog?.models||[];models(entries,catalogInputModalities(entries));modelKey='';modelStatus.textContent='';}
   catch(reason){if(!active()||version!==captured||reason.name==='AbortError')return;modelKey='modelsFailed';failure(modelStatus,reason,modelKey);const retry=action(t('retry'),()=>schedule());retry.dataset.providerI18n='retry';modelStatus.append(retry);}
  }
  function schedule(){

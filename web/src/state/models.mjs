@@ -25,3 +25,9 @@ export function providerConversationModels(entries,selected='') {
     ((!model.input_modalities?.length||model.input_modalities.includes('text'))&&
      (!model.output_modalities?.length||model.output_modalities.includes('text'))));
 }
+
+// Persist only implemented input kinds from the shared typed catalogue.
+export function catalogInputModalities(models) {
+  return Object.fromEntries(models.filter(model=>model.input_modalities?.length)
+    .map(model=>[model.id,model.input_modalities.filter(value=>['text','image','audio','pdf'].includes(value))]));
+}

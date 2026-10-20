@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {createProviderSave,saveAllowanceConfiguration} from '../../web/src/state/provider-save.mjs';
 import {createProviderAllowances,allowanceFreshness} from '../../web/src/components/provider-allowances.mjs';
-import {providerConversationModels} from '../../web/src/state/models.mjs';
+import {providerConversationModels,catalogInputModalities} from '../../web/src/state/models.mjs';
 import {translate} from '../../web/src/locales/messages.mjs';
 
 const calls=[];let failMonitor=true;
@@ -65,6 +65,7 @@ console.log('Provider reminders: acknowledgement recovery, captured revision con
 
 assert.deepEqual(providerConversationModels([{id:'chat',input_modalities:['text'],output_modalities:['text']},{id:'image',input_modalities:['text'],output_modalities:['image']},{id:'speech',input_modalities:['audio'],output_modalities:['text']},'manual']),[{id:'chat',input_modalities:['text'],output_modalities:['text']},'manual']);
 assert.equal(providerConversationModels([{id:'current',output_modalities:['image']}],'current').length,1,'Refreshing catalog suggestions cannot overwrite the user-selected model');
+assert.deepEqual(catalogInputModalities([{id:'known',input_modalities:['text','image','video']},{id:'audio',input_modalities:['audio','pdf']},{id:'unknown'},{id:'unsupported',input_modalities:['video']}]),{known:['text','image'],audio:['audio','pdf'],unsupported:[]},'Discovery saves implemented modality facts directly from the shared typed catalogue; missing facts remain unknown');
 
 
 // A profile keeps its row identity when credentials/route change. Quota data
