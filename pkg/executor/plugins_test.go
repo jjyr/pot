@@ -15,10 +15,19 @@ import (
 )
 
 func TestGitHubCLIReceivesCredentialAndArgumentVector(t *testing.T) {
-	if _, err := exec.LookPath("node"); err != nil {
+	node, err := exec.LookPath("node")
+	if err != nil {
 		t.Skip("node unavailable")
 	}
 	bin := t.TempDir()
+	// The plugin host puts its configured Node directory first in PATH. A Node
+	// found beside a real gh (for example Homebrew) must not override this test's
+	// stub. This private wrapper also closes PATH to all non-fixture programs.
+	nodeWrapper := filepath.Join(bin, "node")
+	wrapper := "#!/bin/sh\nPATH=" + shellQuote(bin) + "\nexport PATH\nexec " + shellQuote(node) + " \"$@\"\n"
+	if err = os.WriteFile(nodeWrapper, []byte(wrapper), 0700); err != nil {
+		t.Fatal(err)
+	}
 	// The fixture checks argv literally and reports only whether authentication
 	// was supplied. No external account or network is involved.
 	program := "#!/bin/sh\n[ -n \"$GH_TOKEN\" ] || exit 4\n[ \"$1\" = 'api' ] || exit 5\n[ \"$2\" = 'literal; no shell expansion' ] || exit 6\nprintf authenticated\n"
@@ -31,6 +40,7 @@ func TestGitHubCLIReceivesCredentialAndArgumentVector(t *testing.T) {
 		t.Fatal(err)
 	}
 	e, r := fixture(t)
+	e.options.Node = nodeWrapper
 	r.Operation = "plugin_call"
 	r.Environment = map[string]string{"GH_TOKEN": "fixture-private-token"}
 	r.Args = map[string]any{"plugin": bundle, "tool": "github", "mode": "text", "input": map[string]any{"args": []any{"api", "literal; no shell expansion"}}}
