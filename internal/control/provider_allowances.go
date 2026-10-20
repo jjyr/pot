@@ -75,6 +75,58 @@ func decodeAllowanceConfig(raw json.RawMessage) (allowanceMonitorConfig, error) 
 // Owner choices survive refresh, reconnect, and a late first assistant.
 func (s *Service) ensureProviderAllowanceBindings(ctx context.Context) error {
 	return s.Machines.OwnerAction(func() error {
+		// The scheduler needs package declarations and saved route IDs, not the
+		// complete UI model-directory projection. Native-only hosts take this
+		// path every second without expanding thousands of public model facts.
+		s.Profiles.mu.Lock()
+		profiles := append([]core.Profile{}, s.Profiles.state.Profiles...)
+		s.Profiles.mu.Unlock()
+		if len(profiles) == 0 {
+			return nil
+		}
+		packages, err := s.installedPlugins()
+		if err != nil {
+			return err
+		}
+		types := map[string]string{}
+		wildcard := false
+		for _, installed := range packages {
+			contribution := installed.Manifest.Contributes.ModelProviders
+			if contribution == nil {
+				continue
+			}
+			for _, definition := range contribution.Providers {
+				if !definition.Capabilities.Allowances {
+					continue
+				}
+				enabled, err := s.enabled(ctx, "plugins", installed.Manifest.ID)
+				if err != nil {
+					return err
+				}
+				if !enabled {
+					continue
+				}
+				if definition.DirectoryProvider == "*" {
+					wildcard = true
+					continue
+				}
+				types[installed.Manifest.ID+"/"+definition.ID] = installed.Manifest.ID
+			}
+		}
+		if wildcard {
+			expanded, err := s.Profiles.providerTypes(ctx)
+			if err != nil {
+				return err
+			}
+			for _, typ := range expanded {
+				if typ.Available && typ.Capabilities.Allowances {
+					types[typ.ID] = typ.PluginID
+				}
+			}
+		}
+		if len(types) == 0 {
+			return nil
+		}
 		definitions, err := s.Registry.Definitions(ctx)
 		if err != nil {
 			return err
@@ -83,12 +135,16 @@ func (s *Service) ensureProviderAllowanceBindings(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		for _, profile := range s.Profiles.Snapshot().Profiles {
-			_, _, typ, err := s.Profiles.ProviderConnection(ctx, profile.ID)
-			if err != nil || !typ.Capabilities.Allowances {
+		for _, profile := range profiles {
+			route, err := s.Profiles.registry.Get(ctx, profile.Provider)
+			if err != nil {
 				continue
 			}
-			id := allowanceInstanceID(profile.ID, typ.PluginID)
+			pluginID := types[route.TypeID]
+			if pluginID == "" {
+				continue
+			}
+			id := allowanceInstanceID(profile.ID, pluginID)
 			found := false
 			for _, b := range stored {
 				if b.ID != id {
@@ -110,7 +166,7 @@ func (s *Service) ensureProviderAllowanceBindings(ctx context.Context) error {
 				target = definitions[0].ID
 			}
 			config, _ := json.Marshal(allowanceMonitorConfig{Threshold: 90})
-			if err = s.Mailbox.EnsureBackgroundInstance(ctx, assistant.BackgroundBinding{ID: id, PluginID: typ.PluginID, ConnectionID: profile.ID, Enabled: true, Assistant: target, Config: config}); err != nil {
+			if err = s.Mailbox.EnsureBackgroundInstance(ctx, assistant.BackgroundBinding{ID: id, PluginID: pluginID, ConnectionID: profile.ID, Enabled: true, Assistant: target, Config: config}); err != nil {
 				return err
 			}
 		}
