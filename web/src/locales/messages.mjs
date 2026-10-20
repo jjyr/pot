@@ -1,5 +1,8 @@
 export const messages = {
   en: {
+    "assistant.cooking": "Cooking · Work in progress",
+    "assistant.ready": "Ready · Unread reply",
+    "assistant.unreadReplies": "{count} unread replies",
     "machineJoin.addTitle": "Add an execution machine",
     "machineJoin.inviteHint": "Copy join information to the target machine.",
     "machineJoin.continueTitle": "Continue on the target machine",
@@ -434,6 +437,9 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    "assistant.cooking": "正在煮 · 任务执行中",
+    "assistant.ready": "煮好了 · 回复未读",
+    "assistant.unreadReplies": "{count} 条未读回复",
     "machineJoin.addTitle": "添加一台执行机器",
     "machineJoin.inviteHint": "把加入信息交给目标机器。",
     "machineJoin.continueTitle": "在目标机器上继续",

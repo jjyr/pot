@@ -209,6 +209,11 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 					return nil, err
 				}
 				item["working"] = page.Counts.Active
+				executing, err := s.Tasks.Executing(ctx, d.ID)
+				if err != nil {
+					return nil, err
+				}
+				item["executing"] = state.Executing || executing
 				item["pending_approvals"] = len(s.Permissions.Pending(d.ID))
 				items = append(items, item)
 			}
