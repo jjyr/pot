@@ -671,17 +671,21 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const connections=createAgentLinks({root:connectionRoot,request,locale,notify,assistants:availableAssistants,currentAssistant:()=>scope().space===agentOwnerSpace?scope().owner:'',scope:selectedScope,edit,signal:token.signal,onConnected:async result=>{const id=result?.id||result?.link?.id;if(id){const peer=result.peer||result.link?.peer;const identity=peer?.address?{id:peer.address.agent_id,node_id:peer.address.node_id,kind:peer.adapter}:peer;const owned=identity?.kind==='pot'&&client.spaces.find(space=>space.control_id===identity.node_id);topologySelection=owned?'control:'+owned.id:agentNodeID(identity);}client.resources?.invalidate(['agent-links'],selectedScope());changed(result);}});
     const add=action(t('topology.addMachine'),()=>addMachine({client,locale,edit,back,notify,drafts:machineInvitationDrafts,onJoined:async result=>{topologySelection='machine:'+JSON.stringify([result.space,result.runtime_id]);client.resources?.invalidate(['machines'],{space:result.space});}}));toolbar.append(add);
     function related(node){const section=n('div','topology-related');section.append(n('p','hint',t('topology.related')));for(const edge of model.edges.filter(item=>item.from===node.id||item.to===node.id)){const a=model.nodes.find(item=>item.id===edge.from),b=model.nodes.find(item=>item.id===edge.to);section.append(action(a.name+(edge.kind==='agent'?' ↔ ':' → ')+b.name,()=>showEdge(edge)));}return section;}
+    function preserveInspectorFocus(){
+      const focused=view.inspector.contains(document.activeElement)?document.activeElement:null;
+      return ()=>{if(focused?.isConnected&&view.inspector.contains(focused)&&document.activeElement!==focused)focused.focus({preventScroll:true});};
+    }
     function keepMachine(){for(const card of view.inspector.querySelectorAll('.machine-card'))rows.append(card);for(const card of view.inspector.querySelectorAll('[data-membership-space]'))membership.append(card);}
-    function showNode(node){if(!node)return;currentNode=node;topologySelection=node.id;keepMachine();view.inspector.replaceChildren();
+    function showNode(node){if(!node)return;const restore=currentNode?.id===node.id?preserveInspectorFocus():()=>{};currentNode=node;topologySelection=node.id;keepMachine();view.inspector.replaceChildren();
       if(node.kind==='machine'){const entry=entries.get(JSON.stringify([node.space,node.identity]));if(entry){entry.renderPermissions?.();view.inspector.append(entry.element);}const member=[...membership.children].find(card=>card.dataset.membershipSpace===node.space&&card.dataset.membershipRole!=='control');if(member)view.inspector.append(member);}
       else {view.inspector.append(view.brand(node),n('p','hint',t('topology.kind.'+node.kind)),n('h2','',node.name),n('p',node.status==='connected'?'success-text':'hint',t(node.status==='stale'?'topology.status.stale':'agentLinks.status.'+(node.status==='connected'?'connected':node.status==='connecting'?'connecting':'offline'))),n('p','topology-identity',node.identity),n('p','hint',t('topology.messageScope')));if(node.link){if(node.link.last_error==='agent_link_reconnect_required')view.inspector.append(n('p','hint',t('agentLinks.reconnectRequired')));const assistant=(client.assistants||[]).find(item=>item.space_id===node.space&&item.id===node.link.local_assistant_id);if(assistant)view.inspector.append(n('p','hint',t('agentLinks.boundAssistant').replace('{name}',assistant.name)));view.inspector.append(action(t('agentLinks.disconnect'),()=>connections.disconnect({...node.link,_space:node.space})));}}
-      view.inspector.append(related(node));
+      view.inspector.append(related(node));restore();
     }
     function showEdge(edge){keepMachine();view.inspector.replaceChildren();const a=model.nodes.find(node=>node.id===edge.from),b=model.nodes.find(node=>node.id===edge.to);view.inspector.append(n('p','hint',t(edge.kind==='agent'?'topology.agentLegend':'topology.machineLegend')),n('h2','',a.name+(edge.kind==='agent'?' ↔ ':' → ')+b.name),n('p','hint',t(edge.kind==='agent'?'topology.messageScope':'topology.executionScope')),action(t('topology.viewSource'),()=>view.select(a.id)),action(t('topology.viewTarget'),()=>view.select(b.id)));}
     view=createTopology({root,locale,initialSelection:topologySelection,paused:topologyPaused,onPause:value=>{topologyPaused=value;},onSelect:showNode,onEdge:showEdge,signal:token.signal});
     const update=async({inventory,permissionPages,permissionsPending,linkPages})=>{
       if(!gate.current(token)||disposed)return;
-      const items=inventory.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner));
+      const restore=preserveInspectorFocus(),items=inventory.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner));
       keyedRows(rows,entries,items,{key:machine=>JSON.stringify([machine._space_id,machine.runtime_id||machine.id]),create:()=>{
         const element=n('section','page-card machine-card'),header=n('div','machine-header'),mark=n('span','machine-icon'),name=n('span','machine-name'),status=n('span'),tags=n('p','hint machine-tags'),location=n('p','hint machine-location'),permissions=n('div','machine-permissions');mark.append(icon('machines'));header.append(mark,name,status);element.append(location,header,tags,permissions);return {element,name,status,tags,location,permissions};
       },update:(entry,machine)=>{
@@ -698,7 +702,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
         };
         if(currentNode?.kind==='machine'&&currentNode.space===machine._space_id&&currentNode.identity===id)entry.renderPermissions();
       }});
-      model=projectTopology(client.spaces,items,linkPages);view.update(model);
+      model=projectTopology(client.spaces,items,linkPages);view.update(model);restore();
       await renderMachineMembership({client,root,membershipRoot:membership,machines:items,locale,notify,back,refresh:()=>pageView?.queue.run(),edit,signal:token.signal});
       if(currentNode?.kind==='machine')showNode(currentNode);
     };
