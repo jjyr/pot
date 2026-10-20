@@ -571,6 +571,7 @@ func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoin
 	}()
 	var native bytes.Buffer
 	var usageFrames []m.UsageReport
+	var firstTextMS *int64
 	sampleStarted := time.Now()
 	if compactionID != nil {
 		evidence := func(value any) error {
@@ -586,7 +587,7 @@ func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoin
 			if result != nil {
 				detail = result.Error()
 			}
-			if err := evidence(map[string]any{"request_id": requestID, "native_response_sse": native.String(), "usage_frames": usageFrames, "duration_ms": time.Since(sampleStarted).Milliseconds(), "error": detail}); err != nil {
+			if err := evidence(map[string]any{"request_id": requestID, "native_response_sse": native.String(), "usage_frames": usageFrames, "first_text_ms": firstTextMS, "duration_ms": time.Since(sampleStarted).Milliseconds(), "error": detail}); err != nil {
 				result = errors.Join(result, err)
 			}
 		}()
@@ -658,6 +659,10 @@ func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoin
 				if err := a.Feedback.Observe(ctx, Observation{Kind: "usage_observed", ID: requestID, Stage: stage, Usage: update.Usage}); err != nil {
 					return response, err
 				}
+			}
+			if compactionID != nil && update.TextDelta != "" && firstTextMS == nil {
+				elapsed := time.Since(sampleStarted).Milliseconds()
+				firstTextMS = &elapsed
 			}
 			if update.TextDelta != "" && compactionID == nil {
 				if err := emit(core.Update{Type: "text_delta", Text: update.TextDelta}); err != nil {

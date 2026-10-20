@@ -172,6 +172,16 @@ func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (stream i
 		s.Usage.Rejected(ctx, r.ID)
 		return nil, err
 	}
+	// Capture the final body after output allowance clamping/provider adaptation.
+	// Credentials and headers never enter the diagnostic record.
+	if r.CompactionID != nil && *r.CompactionID != "conversation" {
+		evidence, _ := json.Marshal(map[string]any{"request_id": r.ID, "wire_request_body": json.RawMessage(body), "protocol": provider.Protocol, "prepared_at_ms": time.Now().UnixMilli()})
+		report, _ := json.Marshal(core.CompactionReport{ID: *r.CompactionID, Action: "evidence", Evidence: evidence})
+		if err = s.Usage.RecordCompaction(ctx, s.Scope, s.Turn, *r.CompactionID, report); err != nil {
+			s.Usage.Rejected(ctx, r.ID)
+			return nil, err
+		}
+	}
 	claimed, err := s.Usage.Claim(ctx, r.ID)
 	if err != nil {
 		knownUnsent = false
