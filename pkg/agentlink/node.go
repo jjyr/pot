@@ -20,11 +20,14 @@ type Directory struct {
 // TaskRequest is an immutable, idempotent delegation. From is authenticated by
 // Agent Link; the receiving adapter owns permissions, workspace and execution.
 type TaskRequest struct {
-	RequestID   string            `json:"request_id"`
-	From        protocol.AgentRef `json:"from"`
-	AssistantID string            `json:"assistant_id,omitempty"`
-	Text        string            `json:"text"`
-	Workspace   string            `json:"workspace,omitempty"`
+	// Native is receiver-owned configuration passed only by the in-process port.
+	// It is never serialized or admitted from a remote node.
+	Native      *protocol.CreateTask `json:"-"`
+	RequestID   string               `json:"request_id"`
+	From        protocol.AgentRef    `json:"from"`
+	AssistantID string               `json:"assistant_id,omitempty"`
+	Text        string               `json:"text"`
+	Workspace   string               `json:"workspace,omitempty"`
 }
 type Task struct {
 	ID        string    `json:"id"`
