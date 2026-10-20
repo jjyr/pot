@@ -157,7 +157,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   const updates=client.production?createUpdates({client,locale:()=>locale,changed:()=>{if(!disposed)renderShell();},notify:message=>{error=message;updateControls();}}):null;
  if(updates)root.append(updates.dialog);
- const pages = client.production ? createPages({chatVisible:()=>route==='chat'&&!root.classList.contains('show-directory'),onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, chatApprovalHost:chatApprovals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: value => {if(value?.assistant)pendingSelection=value.assistant;loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();}, openChat:async target=>{if(target&&(!selectedAssistant||selectedAssistant.id!==target.owner||selectedAssistant.space_id!==target.space)){const assistant=assistants.find(item=>item.id===target.owner&&item.space_id===target.space);if(assistant)await selectAssistant(assistant,false,false);}route='chat';directoryOpen=false;renderShell();renderMessages();pages.permissions();if(!selectedAssistant)loadDirectory();}}) : null;
+ const pages = client.production ? createPages({chatVisible:()=>route==='chat'&&!root.classList.contains('show-directory'),onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, chatApprovalHost:chatApprovals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: async value => {if(value?.assistant)pendingSelection=value.assistant;const removed=value?.deletedAssistant;if(removed&&selectedAssistant?.id===removed.owner&&selectedAssistant?.space_id===removed.space)clearSelectedAssistant();await loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();}, openChat:async target=>{if(target&&(!selectedAssistant||selectedAssistant.id!==target.owner||selectedAssistant.space_id!==target.space)){const assistant=assistants.find(item=>item.id===target.owner&&item.space_id===target.space);if(assistant)await selectAssistant(assistant,false,false);}route='chat';directoryOpen=false;renderShell();renderMessages();pages.permissions();if(!selectedAssistant)loadDirectory();}}) : null;
   const media = matchMedia('(max-width: 719px)');
   const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
   const saveReads=()=>{if(!client.desktop)persist('pot-ui-read-v1',JSON.stringify(replies.records()));};
@@ -796,6 +796,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(client.production&&record)saveNavigation('chat',initial);
     renderShell();attach();pages?.permissions();refreshBackgroundTasks();
   }
+  function clearSelectedAssistant() {
+    const space=selectedAssistant?.space_id||client.scope().space;
+    unsubscribe();epoch=beginSubscription(state);selectedAssistant=null;editorOwner=null;pendingSelection=null;
+    client.setScope({space,owner:''});pages.clearApprovals();completions?.reset();
+    messageWindow.set([]);messageNodes.clear();windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);
+    input.value='';directoryOpen=true;error='';
+  }
   const stopResources=client.resources?.subscribe((meta,reason)=>{if(disposed||!['/api/v1/spaces','/api/v1/assistants'].includes(meta.path))return;if(reason){error=translate(locale,'loading.stale');updateControls();return;}if(error===translate(locale,'loading.stale'))error='';loadDirectory();});
   const directoryQueue=createRefreshQueue(()=>readDirectory(),{active:()=>!disposed});
   function loadDirectory(){return directoryQueue.run();}
@@ -820,21 +827,27 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       const changed=[];if(previousSpaces!==JSON.stringify(spaces))changed.push('spaces');if(previousOwners!==JSON.stringify(assistants.map(item=>[item.space_id,item.id,item.name,item.offline])))changed.push('assistants');if(changed.length)pages.refresh(changed);
       for(const item of assistants){const arrival=replies.observe(controlOf(item),item.id,item.reply_id||'',item.reply_count||0,!item.offline);if(arrival.arrived&&route==='chat'&&document.visibilityState!=='hidden'&&!reducedMotion.matches){reactions.set(replyKey(controlOf(item),item.id),performance.now());setTimeout(()=>{if(!disposed){directorySignature='';renderShell();}},650);}}saveReads();
       if (results.some(result => result.status === 'rejected')) error = t('partialOffline');else if(error===t('partialOffline'))error='';
+      if(selectedAssistant&&!pages.editing&&!assistants.some(item=>item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id)){
+        const source=spaces.findIndex(space=>space.id===selectedAssistant.space_id);
+        if(source>=0&&results[source].status==='fulfilled'&&spaces[source].connected!==false)clearSelectedAssistant();
+      }
       if (selectedAssistant){selectedAssistant = assistants.find(item => item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id) || selectedAssistant;if(selectedAssistant.offline)connection='offline';}
       renderShell();
       if(!assistants.length){
+        let initialized=false;
         const space=spaces.find(value=>value.id===client.scope().space)||spaces[0];
         const available=results.every(result=>result.status==='fulfilled')&&space.connected!==false;
         if(available&&!pages.editing){
           const result=await client.request('/api/v1/assistants/bootstrap',{owner:'',space:space.id,method:'POST',body:{locale}});
           if(ticket!==directoryEpoch||disposed)return;
+          initialized=!!result.initialized;
           if(result.assistant){
             const items=await client.request('/api/v1/assistants',{owner:'',space:space.id});
             if(ticket!==directoryEpoch||disposed)return;
             assistants=projectAssistants(items,space,false);client.assistants=assistants;directoryOpen=false;renderShell();
           }
         }
-        if(!assistants.length){directoryOpen=false;renderShell();const empty=el('div','empty-chat');empty.append(el('h2','',t('welcomeTitle')),el('p','hint',available?t('welcomeSetup'):t('partialOffline')));const setup=el('button','control primary',t(available?'setupAI':'retry'));setup.onclick=async()=>{if(!available){loadDirectory();return;}setup.disabled=true;try{await navigate('settings');await pages.setupAI();}catch(reason){error=reason.message;updateControls();}finally{setup.disabled=false;}};empty.append(setup);messageColumn.replaceChildren(empty);}
+        if(!assistants.length){directoryOpen=false;renderShell();const empty=el('div','empty-chat');empty.append(el('h2','',t('welcomeTitle')),el('p','hint',available?(initialized?translate(locale,'assistant.emptyDeleted'):t('welcomeSetup')):t('partialOffline')));const setup=el('button','control primary',t(available?(initialized?'newAssistant':'setupAI'):'retry'));setup.onclick=async()=>{if(!available){loadDirectory();return;}setup.disabled=true;try{if(initialized){route='settings';await pages.assistant();renderShell();}else{await navigate('settings');await pages.setupAI();}}catch(reason){error=reason.message;updateControls();}finally{setup.disabled=false;}};empty.append(setup);messageColumn.replaceChildren(empty);}
       }
       mainReady();
       if(pendingSelection){const chosen=assistants.find(item=>item.id===pendingSelection.id&&item.space_id===pendingSelection.space_id);pendingSelection=null;if(chosen){await selectAssistant(chosen);notifications?.directory({epoch:notificationEpoch});return;}}
