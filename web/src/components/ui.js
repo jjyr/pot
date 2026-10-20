@@ -29,6 +29,7 @@ import {createBackgroundTasks} from './background-tasks.mjs';
 import {captureReadingPosition,restoreReadingPosition} from './reading-position.mjs';
 import {bindResumeRecovery} from '../state/resume.mjs';
 import {bindViewport} from './viewport.mjs';
+import {createAssistantCreation} from '../state/assistant-creation.mjs';
 import {settleMotion,copyFeedback} from './motion.mjs';
 
 function el(tag, className = '', text) {
@@ -77,6 +78,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let assistants = [], spaces = [], selectedAssistant = null, pendingSelection = null;
   let unsubscribe = () => {}, stopChanges = () => {};
   let directoryEpoch = 0, directorySignature = '';
+  let creationStarting=false;
+  const assistantCreation=createAssistantCreation({request:(...args)=>client.request(...args),locale:()=>locale,changed:()=>{if(!disposed)renderShell();}});
   const positions = new Map(), cachedSnapshots = new Map(), readingPositions = new Map();
   let chatShown=false,pendingReadingPosition=null,pendingTaskToggle=null,lastTaskReadingPosition=null,pendingFollow=false,followFrame=0;
   let restoredSnapshot=false,awaitingSnapshot=false;
@@ -529,7 +532,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     unavailable.hidden = route === 'chat';
     if (!client.production) unavailable.textContent = t('unavailable');
     // Search is window state and survives narrow conversation navigation/resizes.
-    const nextDirectorySignature = JSON.stringify([locale,narrow,surface,selectedAssistant?.space_id,selectedAssistant?.id,spaces,assistants,state.snapshot?.assistants,replies.records()]);
+    const nextDirectorySignature = JSON.stringify([locale,narrow,surface,selectedAssistant?.space_id,selectedAssistant?.id,spaces,assistants,state.snapshot?.assistants,replies.records(),creationStarting,assistantCreation.pending]);
     if (nextDirectorySignature !== directorySignature || !directory.childElementCount) {
     directorySignature=nextDirectorySignature;
     const searchValue = directory.querySelector('input')?.value || '';
@@ -542,9 +545,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       collapse.setAttribute('aria-controls', directory.id); collapse.setAttribute('aria-expanded', 'true');
       collapse.onclick = toggleDirectory; heading.append(collapse);
     }
-    const add = button('plus', t(client.production ? 'newAssistant' : 'preview'));
-    add.disabled = !client.production;
-    add.onclick = () => { route = 'settings'; pages.assistant(null); renderShell(); };
+    const creating=creationStarting||assistantCreation.pending;
+    const add = button('plus', t(client.production ? (creating?'assistant.creating':'newAssistant') : 'preview'));
+    add.disabled = !client.production||creating||!creationSpace()||creationSpace()?.connected===false;
+    add.setAttribute('aria-busy',String(creating));
+    add.onclick = createAssistant;
     heading.append(add);
     const search = el('input', 'assistant-search');
     search.type = 'search'; search.placeholder = t('search'); search.setAttribute('aria-label', t('search')); search.value = searchValue;
@@ -877,6 +882,36 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(client.production&&record)saveNavigation('chat',initial);
     renderShell();attach();pages?.permissions();refreshBackgroundTasks();
   }
+  function creationSpace(){return selectedAssistant?spaces.find(space=>space.id===selectedAssistant.space_id):spaces.find(space=>space.kind==='local')||spaces[0];}
+  async function createAssistant() {
+    if(creationStarting||assistantCreation.pending)return;
+    const target=creationSpace();if(!target||target.connected===false)return;
+    const origin={route,owner:selectedAssistant?.id,space:selectedAssistant?.space_id};
+    creationStarting=true;renderShell();
+    try{
+      if(!await pages.leave()||disposed)return;
+      const providers=await (client.read||client.request)('/api/v1/providers',{space:target.id,owner:''});
+      if(disposed)return;
+      if(!providers.default_provider_id){route='settings';await pages.setupAI({space:target.id,owner:''});renderShell();return;}
+      const assistant=await assistantCreation.create(target);
+      if(disposed||!assistant)return;
+      // Confirm the post-create catalogue before selecting: a stale cached list
+      // would otherwise treat the newly created assistant as externally deleted.
+      await (client.read||client.request)('/api/v1/assistants',{space:target.id,owner:'',authoritative:true});
+      if(disposed)return;
+      const current=spaces.find(space=>space.id===target.id);
+      if(!current||(current.control_id||current.id)!==(target.control_id||target.id))throw Error('Space identity changed');
+      const item={...assistant,control_id:current.control_id||current.id,space_name:current.name,space_kind:current.kind};
+      directoryEpoch++;
+      if(!assistants.some(value=>value.id===item.id&&value.space_id===item.space_id))assistants=[...assistants,item];
+      client.assistants=assistants;
+      if(route===origin.route&&selectedAssistant?.id===origin.owner&&selectedAssistant?.space_id===origin.space)await selectAssistant(item);
+      assistantCreation.complete(target);
+      await loadDirectory();
+    }catch{
+      if(!disposed){error=t('assistant.createFailed');updateControls();}
+    }finally{creationStarting=false;if(!disposed)renderShell();}
+  }
   function clearSelectedAssistant() {
     const space=selectedAssistant?.space_id||client.scope().space;
     unsubscribe();epoch=beginSubscription(state);selectedAssistant=null;editorOwner=null;pendingSelection=null;
@@ -928,7 +963,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
             assistants=projectAssistants(items,space,false);client.assistants=assistants;directoryOpen=false;renderShell();
           }
         }
-        if(!assistants.length){directoryOpen=false;renderShell();const empty=el('div','empty-chat');empty.append(el('h2','',t('welcomeTitle')),el('p','hint',available?(initialized?translate(locale,'assistant.emptyDeleted'):t('welcomeSetup')):t('partialOffline')));const setup=el('button','control primary',t(available?(initialized?'newAssistant':'setupAI'):'retry'));setup.onclick=async()=>{if(!available){loadDirectory();return;}setup.disabled=true;try{if(initialized){route='settings';await pages.assistant();renderShell();}else{await navigate('settings');await pages.setupAI();}}catch(reason){error=reason.message;updateControls();}finally{setup.disabled=false;}};empty.append(setup);messageColumn.replaceChildren(empty);}
+        if(!assistants.length){directoryOpen=false;renderShell();const empty=el('div','empty-chat');empty.append(el('h2','',t('welcomeTitle')),el('p','hint',available?(initialized?translate(locale,'assistant.emptyDeleted'):t('welcomeSetup')):t('partialOffline')));const setup=el('button','control primary',t(available?(initialized?'newAssistant':'setupAI'):'retry'));setup.disabled=creationStarting||assistantCreation.pending;setup.onclick=async()=>{if(!available){loadDirectory();return;}if(initialized){await createAssistant();return;}setup.disabled=true;try{await navigate('settings');await pages.setupAI();}catch(reason){error=reason.message;updateControls();}finally{setup.disabled=false;}};empty.append(setup);messageColumn.replaceChildren(empty);}
       }
       mainReady();
       if(pendingSelection){const chosen=assistants.find(item=>item.id===pendingSelection.id&&item.space_id===pendingSelection.space_id);pendingSelection=null;if(chosen){await selectAssistant(chosen);notifications?.directory({epoch:notificationEpoch});return;}}

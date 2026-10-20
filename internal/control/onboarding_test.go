@@ -9,6 +9,7 @@ import (
 
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/modelprotocol"
+	webassets "github.com/jjyr/pot/web"
 )
 
 func TestBootstrapWaitsForProviderAndCreatesExactlyOnePot(t *testing.T) {
@@ -65,6 +66,43 @@ func TestBootstrapWaitsForProviderAndCreatesExactlyOnePot(t *testing.T) {
 	otherSnapshot, _ := otherChat.Snapshot(ctx)
 	if len(otherSnapshot.Messages) != 1 || !strings.HasPrefix(otherSnapshot.Messages[0].Text, "Hi, I'm Research.") {
 		t.Fatal(otherSnapshot)
+	}
+}
+
+func TestQuickCreationUsesDefaultsAndLocalizedWelcomeOnce(t *testing.T) {
+	s, profile := configurationService(t)
+	ctx := context.Background()
+	if _, err := s.BootstrapAssistant(ctx, "zh-CN"); err != nil {
+		t.Fatal(err)
+	}
+	for _, locale := range []string{"en", "zh-CN"} {
+		request := CreateAssistant{RequestID: "quick-" + locale, Locale: locale}
+		d, err := s.CreateAssistant(ctx, request)
+		if err != nil || d.Name == "Pot" || d.Name == "" {
+			t.Fatal(d, err)
+		}
+		config, err := s.AssistantConfiguration(ctx, d.ID)
+		if err != nil || config.Config.SourceProfileID != profile.ID || config.Config.Model != profile.Model {
+			t.Fatal("quick creation did not use Space defaults", config, err)
+		}
+		c, _ := s.Conversation(ctx, d.ID)
+		rules, _ := c.Instructions(ctx)
+		if rules.Text != "" {
+			t.Fatal("quick creation inherited instructions", rules)
+		}
+		snapshot, _ := c.Snapshot(ctx)
+		want := strings.ReplaceAll(webassets.Translate(locale, "assistant.welcome"), "{name}", d.Name)
+		if len(snapshot.Messages) != 1 || snapshot.Messages[0].Text != want {
+			t.Fatal("welcome did not introduce allocated name and settings", snapshot.Messages)
+		}
+		retry, err := s.CreateAssistant(ctx, request)
+		if err != nil || retry != d {
+			t.Fatal("quick creation retry changed name/avatar", retry, err)
+		}
+		snapshot, _ = c.Snapshot(ctx)
+		if len(snapshot.Messages) != 1 {
+			t.Fatal("retry repeated welcome", snapshot.Messages)
+		}
 	}
 }
 

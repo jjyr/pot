@@ -8,6 +8,7 @@ import (
 
 	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/pkg/core"
+	webassets "github.com/jjyr/pot/web"
 )
 
 // AssistantSelection is editable intent belonging to one assistant. It never
@@ -255,7 +256,7 @@ func (s *Service) refreshAssistantConfiguration(ctx context.Context, current cor
 // Retrying creation never re-resolves defaults or rewrites an existing assistant.
 type CreateAssistant struct {
 	RequestID string              `json:"request_id" required:"true"`
-	Name      string              `json:"name" required:"true"`
+	Name      string              `json:"name,omitempty"`
 	Selection *AssistantSelection `json:"selection,omitempty"`
 	Text      string              `json:"text,omitempty"`
 	Locale    string              `json:"locale,omitempty"`
@@ -287,12 +288,10 @@ func (s *Service) BootstrapAssistant(ctx context.Context, locale string) (map[st
 }
 
 func (s *Service) createAssistant(ctx context.Context, request CreateAssistant, onlyFirst bool) (assistant.Definition, error) {
-	welcome := "Hi, I'm " + request.Name + ".\n\nYou can give me a name, or tell me how you'd like me to help."
-	if request.Locale == "zh-CN" {
-		welcome = "你好，我是 " + request.Name + "。\n\n你可以给我起个名字，或者告诉我你希望我如何帮你。"
-	} else if request.Locale != "" && request.Locale != "en" {
+	if request.Locale != "" && request.Locale != "en" && request.Locale != "zh-CN" {
 		return assistant.Definition{}, errors.New("unsupported assistant locale")
 	}
+	welcome := webassets.Translate(request.Locale, "assistant.welcome")
 	var intent json.RawMessage
 	var err error
 	if request.Selection != nil {

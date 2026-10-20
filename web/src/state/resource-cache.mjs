@@ -98,7 +98,7 @@ export function createResourceReads(client) {
   };
   const cachedRead=(meta,options,load)=>{
     const ttl=meta.topics.some(topic=>['usage','tasks','schedules','conversation','machines','skills'].includes(topic))?5000:30000;
-    return cache.read(JSON.stringify(meta),load,{ttl,signal:options.signal});
+    return cache.read(JSON.stringify(meta),load,{ttl,signal:options.signal,authoritative:options.authoritative});
   };
   return {
     // A complete merged source collection is one entry, even when it required

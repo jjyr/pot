@@ -241,8 +241,8 @@ path. Offline or failed directory loads offer recovery rather than connection se
 The empty directory caption is No assistants yet.
 
 Every newly created assistant starts with a fixed welcome message in the creation
-UI's language, introducing its saved name and inviting the user to name it or
-describe how it can help. The welcome is committed to both the durable transcript
+UI's language, introducing its saved name and naturally pointing to settings for
+its name, avatar, speaking style and working preferences. The welcome is committed to both the durable transcript
 and the model checkpoint, so the first model request includes it as an assistant
 message. It makes no inference call, generates no unread notification and is never
 reinserted or translated on reopening. Existing conversations are not backfilled.
@@ -250,20 +250,33 @@ The assistant saves user-requested names and avatars through `update_agent_profi
 directory, title and settings use that same identity. Optional fields preserve
 omitted values. Workers and peer conversations cannot edit the assistant profile.
 
-The + action opens creation with name, destination Space, Provider and model
-visible. The destination Space's default Provider is preselected, and the model
-field contains that Provider's concrete default model ID, never a synthetic
-"Default model" choice. Changing Provider selects its default model. Changing
-Space loads that Space's Providers and defaults. Saving a Provider within this
-form resumes the draft without creating or selecting an assistant; registration
-occurs on Create and start chatting, and retries reuse its request identity.
+The + action creates an assistant immediately and opens its conversation. The
+current assistant determines the destination Space; without a selected assistant,
+App uses its local Space and Web uses its serving Space. An unavailable Space does
+not fall back to another destination. Creation uses that Space's default Provider
+and concrete default model, with empty assistant instructions. Missing Provider
+configuration opens AI connection setup. First-use bootstrap still creates Pot.
 
-Creation and assistant editing share the same configuration controls. Existing
-assistant location is read-only. Provider/model changes are saved on the assistant
+Manual creations randomly choose from Cup, Mug, Bowl, Pan, Wok, Spoon, Fork, Tray,
+Whisk, Kettle, Lid, Jar, Jug, Plate, Dish and Glass. These English identity values
+are not translated. Unused base names take priority within the destination Space,
+including names set manually (case-insensitive, ignoring surrounding whitespace).
+Once all bases are occupied, a random base gets its smallest available suffix
+starting at 2, for example Cup 2. Name allocation and registration share one
+transaction across windows; request retries retain the saved identity and avatar.
+The creation action stays busy until the operation finishes. Before selecting the
+new conversation, an authoritative catalogue read replaces any older cached list;
+a failed confirmation retries the saved creation rather than registering another.
+
+Assistant settings edit the name, avatar and configuration. Custom avatar uploads
+accept PNG, JPEG and WebP up to 8 MiB, center-cropped to a 128 px PNG; restoring the
+default retains the original Companion colors. Edits use the profile revision so
+stale settings cannot overwrite a newer chat profile change. **Personality and
+preferences** edits the assistant's AGENTS.md without requiring users to know that
+filename. Existing assistant location is read-only. Provider/model changes are saved on the assistant
 without changing the shared Provider or other assistants. Model parameters and
-assistant instructions start collapsed; expanding instructions reveals AGENTS.md.
+assistant preferences start collapsed.
 Nested Provider setup preserves the assistant draft and returns to its caller.
-Create and start chatting saves the assistant and opens its conversation.
 Existing assistant settings end with a collapsed **More actions** disclosure
 containing a red **Delete assistant** button. A confirmation names the assistant
 and explains that deletion removes it from the directory, stops its schedules

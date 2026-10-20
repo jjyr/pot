@@ -104,6 +104,8 @@ func (r *Registry) CreateConfigured(ctx context.Context, request, name, profile,
 }
 
 // CreateWithIntent binds creation intent before publishing the assistant identity.
+// An empty name allocates an unused kitchen name inside the creation transaction.
+// The welcome template's {name} marker is filled once with the allocated name.
 func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingInput, rules string, intent json.RawMessage, welcome string, onlyFirst bool, resolve func() (*core.ResolvedSpec, error)) (Definition, error) {
 	binding, err := core.HashJSON([]any{name, bindingInput, rules, intent, welcome})
 	if err != nil {
@@ -116,8 +118,10 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 	if request == "" || len(request) > 128 {
 		return Definition{}, errors.New("invalid assistant creation request")
 	}
-	if err := ValidateName(name); err != nil {
-		return Definition{}, err
+	if name != "" {
+		if err := ValidateName(name); err != nil {
+			return Definition{}, err
+		}
 	}
 	var definition Definition
 	err = storage.Transaction(ctx, r.db, func(tx *sql.Tx) error {
@@ -141,7 +145,7 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 			if err := tx.QueryRowContext(ctx, "SELECT binding FROM assistant_initial WHERE id=?", definition.ID).Scan(&stored); err != nil {
 				return err
 			}
-			if createdName != name || stored != binding {
+			if (name != "" && createdName != name) || stored != binding {
 				return errors.New("conflicting assistant creation request")
 			}
 			return validateDefinition(definition)
@@ -155,6 +159,27 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 		}
 		if count >= 64 {
 			return errors.New("assistant limit reached")
+		}
+		if name == "" {
+			rows, err := tx.QueryContext(ctx, "SELECT name FROM assistant_definitions WHERE deleted=0")
+			if err != nil {
+				return err
+			}
+			var used []string
+			for rows.Next() {
+				var value string
+				if err := rows.Scan(&value); err != nil {
+					rows.Close()
+					return err
+				}
+				used = append(used, value)
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return err
+			}
+			name = randomAssistantName(used)
 		}
 		id := storage.ID()
 		var historical int
@@ -192,7 +217,7 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 		if _, err = tx.ExecContext(ctx, "INSERT INTO assistant_initial_intent VALUES (?,?)", id, intentBody); err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO assistant_welcome VALUES (?,?)", id, welcome); err != nil {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO assistant_welcome VALUES (?,?)", id, strings.ReplaceAll(welcome, "{name}", name)); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, "INSERT INTO assistant_definitions(id,name,revision,request_id,created_name) VALUES (?,?,?,?,?)", id, name, 1, request, name)
@@ -214,7 +239,13 @@ func (r *Registry) Welcome(ctx context.Context, id string) (string, error) {
 }
 
 func (r *Registry) Rename(ctx context.Context, id, name string, revision uint64) (Definition, error) {
-	if err := ValidateName(name); err != nil {
+	return r.UpdateProfile(ctx, id, ProfileUpdate{Name: &name}, revision)
+}
+
+// UpdateProfile applies a settings edit under the same identity revision as chat
+// profile changes, so an outdated settings page cannot overwrite a newer edit.
+func (r *Registry) UpdateProfile(ctx context.Context, id string, patch ProfileUpdate, revision uint64) (Definition, error) {
+	if err := patch.Validate(); err != nil {
 		return Definition{}, err
 	}
 	if revision == 0 || revision >= core.MaxSafeInteger {
@@ -222,18 +253,31 @@ func (r *Registry) Rename(ctx context.Context, id, name string, revision uint64)
 	}
 	var definition Definition
 	err := storage.Transaction(ctx, r.db, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE assistant_definitions SET name=?,revision=revision+1 WHERE id=? AND revision=? AND deleted=0", name, id, revision)
-		if err != nil {
-			return err
-		}
-		n, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n != 1 {
+		err := tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id,COALESCE((SELECT avatar FROM assistant_profiles WHERE assistant_id=assistant_definitions.id),'') FROM assistant_definitions WHERE id=? AND revision=? AND deleted=0", id, revision).Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID, &definition.Avatar)
+		if errors.Is(err, sql.ErrNoRows) {
 			return errors.New("assistant missing or changed; reload before saving")
 		}
-		return tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id,COALESCE((SELECT avatar FROM assistant_profiles WHERE assistant_id=assistant_definitions.id),'') FROM assistant_definitions WHERE id=?", id).Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID, &definition.Avatar)
+		if err != nil {
+			return err
+		}
+		if patch.Name != nil {
+			definition.Name = *patch.Name
+		}
+		if patch.Avatar != nil {
+			definition.Avatar = *patch.Avatar
+			if definition.Avatar == "" {
+				definition.Avatar, err = assistantavatar.Default(definition.RequestID)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		definition.Revision++
+		if _, err = tx.ExecContext(ctx, "UPDATE assistant_definitions SET name=?,revision=? WHERE id=?", definition.Name, definition.Revision, id); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "INSERT INTO assistant_profiles VALUES (?,?) ON CONFLICT(assistant_id) DO UPDATE SET avatar=excluded.avatar", id, definition.Avatar)
+		return err
 	})
 	return definition, err
 }

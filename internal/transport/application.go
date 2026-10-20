@@ -529,13 +529,14 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 				return nil, errors.New("invalid assistant path")
 			}
 			var body struct {
-				Name     string `json:"name" required:"true"`
-				Revision uint64 `json:"revision" required:"true"`
+				Name     *string `json:"name,omitempty"`
+				Avatar   *string `json:"avatar,omitempty"`
+				Revision uint64  `json:"revision" required:"true"`
 			}
 			if err = decode(r.Body, &body); err != nil {
 				return nil, err
 			}
-			definition, err := s.Registry.Rename(ctx, id, body.Name, body.Revision)
+			definition, err := s.Registry.UpdateProfile(ctx, id, assistant.ProfileUpdate{Name: body.Name, Avatar: body.Avatar}, body.Revision)
 			if err == nil {
 				s.Changes.Notify("assistants")
 			}

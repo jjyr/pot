@@ -38,6 +38,15 @@ await Promise.all([scopedReads.collection(collectionPath,{},collection),scopedRe
 await scopedReads.collection(collectionPath,{},collection);assert.equal(collections,1,'Paginated sources share one complete collection independently of backend page count');
 console.log('Resource cache: sharing, isolation, stale reads, invalidation races, consumer release, writes, failures and boot/reset passed');
 
+let catalogVersion=1;const catalogRead=deferred();
+const postCreateReads=createResourceReads({...client,request:()=>catalogVersion===1?Promise.resolve({version:1}):catalogRead.promise});
+await postCreateReads.read('/api/v1/assistants');catalogVersion=2;
+let confirmed=false;
+const confirmedRead=postCreateReads.read('/api/v1/assistants',{authoritative:true}).then(value=>{confirmed=true;return value;});
+await tick();assert.equal(confirmed,false,'Creation confirmation waits for the current server catalogue even with a fresh cached list');
+catalogRead.resolve({version:2});assert.equal((await confirmedRead).version,2);
+assert.equal((await postCreateReads.read('/api/v1/assistants')).version,2,'Subsequent directory reads cannot erase a just-created assistant with an old cached catalogue');
+
 for(const topic of ['tasks','runner']){
   const before=calls.filter(call=>call.path==='/api/v1/assistants').length;
   await resources.read('/api/v1/assistants');
