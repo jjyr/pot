@@ -1,20 +1,18 @@
-# Tool plugin packages
+# Plugin packages
 
 A plugin is a trusted locally installed directory with a schema-2 `plugin.json`
 manifest. `pkg/plugin` validates identity and confined file access without
-starting processes. `contributes.tools` and owner-enabled `contributes.background` are supported;
-removed execution Provider/resource capabilities and unknown fields fail explicitly.
+starting processes. Packages can contribute tools, owner-enabled background
+services and Control-local model connection types. Unknown manifest fields fail explicitly.
 
 ```text
-Resources/plugins/<package>/plugin.json + declared files
-                        |
-                pkg/plugin loader
-                        |
-              digest-pinned tool bundle
-                        |
-          Control machine / command authorization
-                        |
-        destination Go executor -> Node tool process (sandboxed on protected machines)
+Package manifest + declared files
+           |
+     validated loader
+           |
+           +-- tools ----------> digest-pinned Task bundle -> executor
+           +-- background -----> Control service -> assistant inbox
+           `-- model_providers -> Control connection registry / metadata reader
 ```
 
 ## Manifest and execution
@@ -56,6 +54,72 @@ Packages contain no VM engines, images or guest bootstrap. Stop Runtime before
 replacing a complete package. The Extensions page imports and updates user packages separately from packaged resources. Managed independent MCP servers use the same tool execution boundary; see [Extensions](extensions.md). A plugin marketplace and automatic package updates remain outside this contract. The
 [Codex Bridge](../integrations/codex/README.md) package owns its paired remote MCP
 connection and durable SSE consumer.
+
+## Model connection contributions
+
+`contributes.model_providers.providers` declares connection types in the manifest.
+A package may declare several types. Types are static; adapters have no discovery
+or `describe` RPC. [Model directory](model-directory.md) defines connection
+configuration, catalogue refresh and model metadata precedence. Model inference
+always uses Pot's Gateway and existing HTTP/SSE codecs.
+
+```json
+{
+  "providers": [{
+    "id": "example",
+    "name": "Example",
+    "endpoint": "https://api.example.com/v1",
+    "protocol": "openai_responses",
+    "protocols": ["openai_responses", "openai_chat"],
+    "directory_provider": "example",
+    "capabilities": {"catalog": "plugin", "allowances": true}
+  }],
+  "adapter": {
+    "runtime": "node", "execution": "control",
+    "entrypoint": "provider.mjs", "files": ["provider.mjs"],
+    "credential_env": "EXAMPLE_API_KEY"
+  }
+}
+```
+
+`protocol` selects a Pot codec; optional `protocols` lists supported choices and
+must include the default. `catalog` selects `none`, `models_dev`, `http` or
+`plugin`. A `models_dev` reader requires `directory_provider`; a binding can also
+supply model facts alongside HTTP/plugin discovery. `directory_provider: "*"`
+expands supported directory entries. Only `catalog: "plugin"` or
+`allowances: true` requires an adapter. Optional `default_credential` is a public
+application identity, up to 4,096 bytes without control characters. Private keys
+belong in Secrets.
+
+A Node adapter exports `async read(input)`. The only RPC methods are
+`list_models` and `read_allowances`, enabled by the matching type's capabilities:
+
+```text
+Request: {version: 1, method, connection: {id, type, revision, endpoint, protocol}}
+Result:  {catalog: {read_at, models}} OR {allowances: {read_at, accounts}}
+Failure: {error: {code}}
+```
+
+Failure codes are `authorization`, `permission`, `rate_limited`, `unavailable`,
+`overflow` and `invalid_response`; failures cannot include a result or arbitrary
+message. Models contain an ID, optional display name, input/output modalities and
+independent context/input/output token limits. Allowance accounts contain plan,
+user, observation/renewal data and independent windows. Windows preserve unknown
+`used` separately from zero, percentages above 100, `unlimited`, reset times and
+shared pools. Pool percentages must not be summed. Account/window identity is
+`stable` with an ID, or `ambiguous`; mutable labels are not stable IDs. Times use
+RFC3339. The complete DTO and validation bounds are in
+[`pkg/core/model_providers.go`](../pkg/core/model_providers.go).
+
+The host runs one supervised Control-local process per exchange, with a 30-second
+lifetime, 3 MiB output bound, cancellation and descendant cleanup. Adapter files
+are confined UTF-8 text, up to 32 files / 512 KiB. Credentials enter only through
+`credential_env`; unrelated service tokens and Node loader variables are not
+inherited. Stdout is the response protocol, and stderr/exception text is discarded.
+The host rejects credential echoes, unknown fields and invalid results. Connection
+revisions, package digests and enablement fence acceptance. These capabilities
+and files never enter Task tool bundles. Quota API failures are independent of
+inference availability; host policy owns monitoring and assistant delivery.
 
 ## Background services and assistant notifications
 
@@ -189,13 +253,8 @@ there is no false success receipt. Owner management uses authenticated
 `{enabled, assistant, config, revision}`. Revisions fence stale configuration.
 These are configuration ports, not public event ingestion or token-read APIs.
 
-The event payload is the sole source of plugin title/body/URL data; its inbox
-`text` field is empty. On opening an existing PR database, initialization removes
-the unused persisted event `group`, clears the duplicate inbox `text` and drops
-the obsolete host delivery-rate table/index. It preserves binding configuration,
-revisions, opaque checkpoints (including account baselines, cursors and pending
-aggregation), event IDs, original recipients and delivery states. No rebaseline
-or replay is triggered by this format cleanup.
+The event payload is the sole source of plugin title/body/URL data; the inbox
+`text` field is empty.
 
 Queued events survive restart. Claiming a summary journals its membership before
 model invocation; acknowledgment follows a durable reply. Started or uncertain
@@ -262,14 +321,6 @@ continuously updated threads. At most eight ready groups are emitted per five
 minutes; pacing survives restart. Notification snapshots are not an event log:
 deleted, transient or otherwise absent updates cannot be reconstructed. Open the
 source link for complete context when an update is truncated.
-
-`tasks/0007_github_notification_progress.sql` removes the retired `existing` and
-`existing_account` configuration fields and `manual` checkpoint receipt. Pending
-history imports are cancelled and made immediately eligible for normal polling.
-The migration preserves baseline/cursor data, pending groups, accepted event IDs,
-original recipients and delivery receipts, and fences old settings drafts by
-incrementing the GitHub binding revision. It does not replay or reset accepted
-notifications. Removed history settings are rejected on new configuration saves.
 
 UI windows may close while Control continues polling. Control/computer shutdown
 stops polling and summaries; resume uses the stored cursor and scan progress.

@@ -178,3 +178,34 @@ func (p Package) BackgroundIdentity() (core.PluginIdentity, error) {
 	identity.Digest, err = core.HashJSON([]any{p.Manifest, files})
 	return identity, err
 }
+
+// ModelProviderIdentity pins the Control-local definitions and adapter files.
+// It does not authorize execution or add these assets to a Task bundle.
+func (p Package) ModelProviderIdentity() (core.PluginIdentity, error) {
+	identity := core.PluginIdentity{ID: p.Manifest.ID, Version: p.Manifest.Version}
+	if err := p.Manifest.Validate(); err != nil {
+		return identity, err
+	}
+	c := p.Manifest.Contributes.ModelProviders
+	if c == nil {
+		return identity, errors.New("model provider capability unavailable")
+	}
+	files := map[string]string{}
+	size := 0
+	if c.Adapter != nil {
+		for _, name := range c.Adapter.Files {
+			data, err := p.ReadFile(name, 512*1024)
+			if err != nil {
+				return identity, err
+			}
+			size += len(data)
+			if size > 512*1024 || !utf8.Valid(data) {
+				return identity, errors.New("invalid model provider adapter files")
+			}
+			files[name] = string(data)
+		}
+	}
+	var err error
+	identity.Digest, err = core.HashJSON([]any{p.Manifest, files})
+	return identity, err
+}

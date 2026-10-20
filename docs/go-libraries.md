@@ -131,10 +131,10 @@ handler := host.Handler(operatorToken)
 
 Use the import `github.com/jjyr/pot/pkg/runtime`. Root and resource directory are
 required; the facade does not discover assets in the caller's checkout. Supply
-the retained tool plugins, Skills and Node needed by the selected features.
+the retained plugin packages, Skills and Node needed by the selected features.
 Assets load without starting execution processes or downloading images. See
 [Plugin packages](plugins.md). The facade exposes execution capacity and owner
-resource APIs; child environment Providers and image managers are absent.
+resource APIs.
 
 The host exclusively locks its root and owns its managers. Stop HTTP serving and
 all use of borrowed managers before closing it. `Info()` returns a copy of its

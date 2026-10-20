@@ -40,7 +40,8 @@ Both modes use the same CLI:
 
 Go hosts the product logic. The macOS App uses Wails v3 and the system WebView;
 main window, tray and the independent browser service share HTML/CSS/JavaScript.
-Tools use trusted [Plugin packages](docs/plugins.md). The Runtime supplies Node;
+Trusted [Plugin packages](docs/plugins.md) contribute tools, background services
+and model connections. The Runtime supplies Node for JavaScript adapters;
 browser tools use Chrome/Chromium installed on the execution machine.
 
 ## Features

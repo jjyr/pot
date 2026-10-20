@@ -37,8 +37,8 @@ func mixedPackage(t *testing.T, root string) Package {
 
 func TestMixedPackageToolProjectionCannotCarryLocalCapabilities(t *testing.T) {
 	p := mixedPackage(t, t.TempDir())
-	// Provider and catalog files deliberately do not exist: selecting the tool
-	// must neither read those files nor execute the local Provider capability.
+	// Background files deliberately do not exist: selecting the tool must read
+	// only its declared tool files.
 	b, err := p.ToolBundle()
 	if err != nil {
 		t.Fatal(err)

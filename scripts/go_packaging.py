@@ -272,7 +272,7 @@ def prepare_resources(destination, platform):
 
 
 def prepare_plugins(destination, platform):
-    """Package the exact selected tool files, without platform engines or images."""
+    """Package declared tool and Control-local capability files and brand assets."""
     destination.mkdir(parents=True, exist_ok=True)
     # These are generated package outputs, never instance disks or user data.
     for name in ("podman", "apple-vm"):
@@ -285,19 +285,31 @@ def prepare_plugins(destination, platform):
             continue
         manifest = json.loads(manifest_path.read_text())
         contributions = manifest["contributes"]
-        if not contributions or set(contributions) - {"tools", "background"}:
+        if not contributions or set(contributions) - {"tools", "background", "model_providers"}:
             raise ValueError("unsupported plugin capability")
         targets = {"tools": "runtime", "background": "control"}
+        declarations = []
         for capability, declaration in contributions.items():
-            if declaration["runtime"] != "node" or declaration["execution"] != targets[capability]:
+            if capability == "model_providers":
+                if not declaration.get("providers"):
+                    raise ValueError("missing model provider definitions")
+                adapter = declaration.get("adapter")
+                if adapter is None:
+                    continue
+                declaration = adapter
+                target = "control"
+            else:
+                target = targets[capability]
+            if declaration["runtime"] != "node" or declaration["execution"] != target:
                 raise ValueError("unsupported plugin execution target")
+            declarations.append(declaration)
         package = destination / source.name
         if package.exists():
             shutil.rmtree(package)
         package.mkdir(parents=True)
         shutil.copy2(manifest_path, package / "plugin.json")
         for name in sorted(
-            {name for capability in contributions.values() for name in capability["files"]}
+            {name for declaration in declarations for name in declaration["files"]}
             | {
                 name
                 for name in ("icon.svg", "icon.png", "icon-NOTICE.txt", "icon-LICENSE.txt")

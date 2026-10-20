@@ -3,7 +3,7 @@
 Pot uses Go for product logic, Wails v3 with the system WebView for the macOS
 App, and a shared HTML/CSS/JS frontend. The main window, tray panel and browser
 use the same components, styles and state contracts. Go executes local commands
-and Node tool plugins. Runtime manages no VMs, containers or guest brokers.
+and Node plugin adapters. Runtime manages no VMs, containers or guest brokers.
 See [component boundaries](backend-components.md).
 Reusable Go libraries live in `pkg/`, command entry points in `cmd/`, and product
 implementation in `internal/`. [Go libraries](go-libraries.md) describes the
@@ -165,11 +165,12 @@ and the last real user message before continuing. Provider cache lifetime does
 not reset section comparison. Raw HTTP/token observations, estimates and budget
 reservations remain distinct.
 
-Tool plugins use the package format in `pkg/plugin` and bounded Node sessions in
-`pkg/pluginhost`. Packages contain schema-2 `contributes.tools` with
-`execution: "runtime"`. Provider/resource capabilities are unsupported. Runtime
-locates tool/Skill assets independently of execution preparation. See
-[Plugin packages](plugins.md).
+Schema-2 [Plugin packages](plugins.md) declare tools for the execution Runtime,
+and background services or model connection types for the owning Control.
+`pkg/plugin` validates packages; `pkg/pluginhost` supervises Node adapters.
+Only tool capabilities and their declared files enter Task bundles. Model
+credentials and Control adapters stay on Control. Runtime locates plugin/Skill
+assets independently of execution preparation.
 
 Execution uses the destination Runtime service account. Protected machines run
 commands, patches and plugins under the pinned SRT SDK. Trusted machines execute
