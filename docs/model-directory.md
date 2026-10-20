@@ -3,7 +3,6 @@
 Control owns Space-wide model connections and metadata. Builtin providers,
 Custom API and optional providers such as Magpie all register through the same
 [`contributes.model_providers` contract](plugins.md#model-connection-contributions).
-There is no separate native provider registry or Magpie-specific execution path.
 A package contributes connection types; owners create named connections with
 credentials, protocol, endpoint, available models and a default model.
 
@@ -17,8 +16,7 @@ metadata on Control; all inference goes directly through Pot's Gateway.
 ## Provider contributions
 
 `GET /api/v1/providers` returns registered `provider_types`, configured connections,
-their typed cached catalogs, and public model facts. Save, discovery, endpoint
-preview and inference-test requests identify the connection type with
+their typed cached catalogs, and public model facts. Save, discovery and inference-test requests identify the connection type with
 `provider_type_id`. Directory entries supply model facts and artwork, rather than
 an independent list of connection implementations. UI features and request formats
 follow registered capabilities and supported protocols.
