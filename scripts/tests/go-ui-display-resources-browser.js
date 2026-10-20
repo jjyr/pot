@@ -19,6 +19,9 @@ async page=>{
   assert(range.status()===206&&(await range.body()).length===8,'Browser proxy preserves Range requests and partial responses');
   const html=page.frameLocator('iframe.resource-interactive');
   assert(await html.locator('body').getAttribute('data-isolated')==='yes','Sandbox prevents parent DOM access');
+  const htmlCard=page.locator('pot-resource[data-kind="html"]'),baseHeight=await htmlCard.locator('iframe').evaluate(frame=>frame.getBoundingClientRect().height);
+  await htmlCard.getByRole('button',{name:'展开',exact:true}).click();assert(await htmlCard.locator('iframe').evaluate(frame=>frame.getBoundingClientRect().height)>baseHeight,'Expand overrides the component-requested height');
+  await htmlCard.getByRole('button',{name:'收起',exact:true}).click();assert(await htmlCard.locator('iframe').evaluate(frame=>frame.getBoundingClientRect().height)===baseHeight,'Collapse restores the component height without remounting');
   await html.getByRole('slider').fill('5000');assert(await html.locator('#total').textContent()==='¥60,000','Slider updates the actual HTML component');
   await html.getByRole('button',{name:'采用这个计划'}).click();
   await page.locator('.resource-interaction-result').filter({hasText:'60000'}).waitFor();
