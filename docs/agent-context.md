@@ -54,7 +54,7 @@ Runtime reloads sources when preparing each execution context. The resulting sna
 
 `pkg/agent` records instructions as classified, append-only context sections for Main
 and Worker, including custom system prompts and configurations with no execution
-reader tool. Summary contexts skip discovery and new injection; they preserve the latest retained sections instead of revoking unloaded resources. See the message
+reader tool. Notification contexts refresh the same instructions, plugins, Skills and reference sections as user chat. See the message
 and compaction contract below.
 
 ## Classified messages and append-only context
@@ -193,7 +193,7 @@ with `go:embed`; Control supplies it when preparing Main execution context.
 Editing the text requires rebuilding the binary; there is no runtime file read. It is not global `AGENTS.md` or a routine scheduler. A custom
 `system_prompt` replaces the default `pkg/agent` prompt.
 
-Tests cover repository/worktree markers, nested repositories, absent roots, ignored overrides, file changes/removal, empty and invalid UTF-8 files, files larger than 32 KiB, global failure/recovery/cache clearing, Main Host project context and fixed task assignment. Runtime context tests cover Main/Worker roles plus Summary exclusion; `pkg/agent` request tests cover all four supported model protocols, custom prompts, append-only history, cold-cache prefix replay and compaction reconstruction. Run `mise run test` and `mise run check:go`.
+Tests cover repository/worktree markers, nested repositories, absent roots, ignored overrides, file changes/removal, empty and invalid UTF-8 files, files larger than 32 KiB, global failure/recovery/cache clearing, Main Host project context and fixed task assignment. Runtime context tests cover Main/Worker roles plus notification context refresh; `pkg/agent` request tests cover all four supported model protocols, custom prompts, append-only history, cold-cache prefix replay and compaction reconstruction. Run `mise run test` and `mise run check:go`.
 
 
 ## Global ownership
@@ -343,7 +343,7 @@ Task creation accepts optional `skills: ["name", ...]` selecting global user or 
 
 Space-owned [extension settings](extensions.md) filter disabled bundles before Main discovery and reject disabled explicit global Task selections. Builtin names remain reserved even when disabled.
 
-Catalogs reload each execution and use the classified `skills` history section. Unchanged rendered metadata is not appended again; changes replace the complete section through a new message. Removal appends an explicit revocation. Summary executions add no catalog, and `pkg/agent` does not advertise skills if the final tools lack exec_command. Chat `/skill:name` references explicitly select global Skills for new tasks delegated from that user message; they are also visible to the assistant as user instructions. Main project discovery reflects its actual execution directory; active tasks retain their recorded execution location.
+Catalogs reload each execution and use the classified `skills` history section. Unchanged rendered metadata is not appended again; changes replace the complete section through a new message. Removal appends an explicit revocation. Notification executions load the same catalog as user chat; `pkg/agent` does not advertise skills if the final tools lack exec_command. Chat `/skill:name` references explicitly select global Skills for new tasks delegated from that user message; they are also visible to the assistant as user instructions. Main project discovery reflects its actual execution directory; active tasks retain their recorded execution location.
 
 ## Creation, installation and validation
 
@@ -388,7 +388,7 @@ After a crash or uncertain termination, Main retains the original stopped turn
 until its execution records are reconciled. Chat exposes **Continue task** for
 the latest failed, cancelled or recovery-required turn, including after restart.
 Interrupted task-result summaries expose **Restore conversation**, using their
-original read-only Summary execution instead of rerunning completed background
+original notification execution with its configured assistant tools instead of rerunning completed background
 tasks. The `summary` flag distinguishes this presentation.
 The snapshot's `continuation` carries the original `user_message_id`, exact
 `attempt_id`, and `recovery_required`. `POST /api/v1/turn/continue` accepts these

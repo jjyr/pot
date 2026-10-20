@@ -212,6 +212,11 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 					return nil, err
 				}
 				item["working"] = page.Counts.Active
+				executing, err := s.Tasks.Executing(ctx, d.ID)
+				if err != nil {
+					return nil, err
+				}
+				item["executing"] = state.Executing || executing
 				item["pending_approvals"] = len(s.Permissions.Pending(d.ID))
 				items = append(items, item)
 			}
@@ -503,6 +508,20 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 		}
 		if strings.HasPrefix(path, "/api/v1/assistants/") {
 			id := strings.TrimPrefix(path, "/api/v1/assistants/")
+			if strings.HasSuffix(id, "/delete") {
+				id = strings.TrimSuffix(id, "/delete")
+				if !core.Identifier(id) {
+					return nil, errors.New("invalid assistant path")
+				}
+				var body struct {
+					Revision uint64 `json:"revision" required:"true"`
+				}
+				if err := decode(r.Body, &body); err != nil {
+					return nil, err
+				}
+				err := s.DeleteAssistant(ctx, id, body.Revision)
+				return map[string]bool{"deleted": err == nil}, err
+			}
 			if !core.Identifier(id) {
 				return nil, errors.New("invalid assistant path")
 			}

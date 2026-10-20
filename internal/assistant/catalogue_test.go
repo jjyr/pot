@@ -66,3 +66,23 @@ func TestCatalogueKeepsLastCompletedReplyAcrossActiveTurnAndRestart(t *testing.T
 		t.Fatal(last, err)
 	}
 }
+
+func TestCatalogueDistinguishesExecutionFromPendingTurns(t *testing.T) {
+	var cleanup atomic.Int64
+	c := conversationFixture(t, filepath.Join(t.TempDir(), "conversation.sqlite"), "boot", func(context.Context, core.ModelRequest) (io.ReadCloser, error) {
+		return replySSE("unused"), nil
+	}, &cleanup)
+	defer func() { c.mu.Lock(); c.turn = nil; c.mu.Unlock() }()
+	for _, test := range []struct {
+		state             string
+		paused, executing bool
+	}{{"queued", false, false}, {"waiting", false, false}, {"running", false, true}, {"running", true, false}} {
+		c.mu.Lock()
+		c.turn = &savedTurn{State: test.state, Paused: test.paused}
+		c.mu.Unlock()
+		state, err := c.Catalogue(context.Background())
+		if err != nil || !state.Running || state.Executing != test.executing {
+			t.Fatalf("%+v: %+v %v", test, state, err)
+		}
+	}
+}

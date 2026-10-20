@@ -8,6 +8,14 @@ import {projectChatReplies,replyFailureKind} from '../../web/src/state/chat-repl
 import {taskElapsed} from '../../web/src/components/task-time.mjs';
 import {bindResumeRecovery} from '../../web/src/state/resume.mjs';
 import {bindViewport} from '../../web/src/components/viewport.mjs';
+import {assistantActivity} from '../../web/src/components/assistant-activity.mjs';
+
+assert.equal(assistantActivity({executing:true},0),'cooking');
+assert.equal(assistantActivity({executing:true},3),'cooking','Work takes priority over an older unread reply');
+assert.equal(assistantActivity({executing:false},3),'ready');
+assert.equal(assistantActivity({executing:false},0),'');
+assert.equal(assistantActivity({executing:true,offline:true},0),'','Offline caches cannot claim execution');
+assert.equal(assistantActivity({executing:true,offline:true},1),'ready','Unread receipts survive an offline cache');
 
 const viewportHost=new EventTarget(),visualViewport=new EventTarget(),viewportStyles=new Map();
 viewportHost.innerWidth=393;viewportHost.innerHeight=852;viewportHost.visualViewport=visualViewport;

@@ -75,26 +75,6 @@ func SynchronizeSections(messages []m.Message, sections []core.ContextSection) (
 	}
 	return result, nil
 }
-func retainedSections(messages []m.Message) []m.Message {
-	latest := map[string]m.Message{}
-	for _, message := range messages {
-		if message.Kind.Type == "context" {
-			latest[message.Kind.Key] = message
-		}
-	}
-	keys := []string{}
-	for key := range latest {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	result := []m.Message{}
-	for _, key := range keys {
-		if latest[key].Kind.Active {
-			result = append(result, latest[key])
-		}
-	}
-	return result
-}
 func route(spec core.ResolvedSpec) string {
 	return spec.Provider + ":" + spec.Model + ":" + spec.GatewayProtocol
 }

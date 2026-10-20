@@ -16,7 +16,7 @@ import (
 func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, owner string, r Request) (any, error, bool) {
 	s := a.Control
 	path := u.Path
-	if path != "/api/v1/tasks" && !strings.HasPrefix(path, "/api/v1/tasks/") && path != "/api/v1/schedules" && path != protocol.AssistantMailAPI {
+	if path != "/api/v1/tasks" && !strings.HasPrefix(path, "/api/v1/tasks/") && path != "/api/v1/schedules" && path != "/api/v1/schedules/preview" && path != protocol.AssistantMailAPI {
 		return nil, nil, false
 	}
 	if s.Machines.Role() == "runner" {
@@ -81,6 +81,11 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 		if err = decode(r.Body, &request); err == nil {
 			record, e := s.Tasks.Create(ctx, owner, request)
 			result, err = record.Info, e
+		}
+	case path == "/api/v1/schedules/preview" && method == "POST":
+		var request schedule.PreviewRequest
+		if err = decode(r.Body, &request); err == nil {
+			result = schedule.Preview(request, storage.Now())
 		}
 	case path == "/api/v1/schedules" && method == "GET":
 		var q schedule.Query

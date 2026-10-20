@@ -6,7 +6,7 @@ Control owns schedules in both local and remote modes. Schedules are persistent 
 Chat / tasks -> schedules
              | Create, edit, pause, run now, delete
              ▼
-Runtime scheduler -> SQLite tasks.sqlite (schedules + triggers + task queue)
+Control scheduler -> SQLite tasks.sqlite (schedules + triggers + task queue)
              | Due: create one run transactionally
              ▼
 Shared task queue (default concurrency 8) -> independent Task / current machine execution policy
@@ -20,7 +20,7 @@ Shared Agent inbox -> eligible outcomes -> shared main chat summary
 
 ## Usage
 
-Describe goal, time, time zone, and frequency in main chat; main Agent creates the schedule. Tasks -> Schedules only views/manages existing definitions without manual creation. Tools: `list_schedules`, `get_schedule`, `manage_schedule`. Lists return summaries; details/history are loaded on demand.
+Describe the goal and timing in main chat; the assistant can write a Cron rule and create the schedule. Tasks -> Schedules also creates, views and directly edits definitions. The editor shows the Cron expression, an editable IANA time zone and up to five upcoming executions from the backend before saving. Preview errors identify the relevant field; stale responses cannot replace newer input. Tools: `list_schedules`, `get_schedule`, `manage_schedule`. Lists return summaries; details/history are loaded on demand.
 
 The shared UI shows a bounded, independently scrolling schedule list with a
 visible count and page controls. Cards retain the owning assistant and Space
@@ -32,17 +32,57 @@ retry.
 
 - Once: local date/time `YYYY-MM-DD HH:MM`.
 - Interval: positive integer minutes, measured from creation/resume.
-- Daily: local time `HH:MM`.
-- Weekly: local time and weekday, 1 = Monday, 7 = Sunday.
-- Time zone: IANA name, default `Asia/Shanghai`; saved zones do not change when the machine travels.
+- Cron: five fields, `minute hour day-of-month month day-of-week`, with no seconds.
+  `0 8-20 * * *` runs at each local hour from 08:00 through 20:00 inclusive
+  (13 executions per day). After 20:00 its next execution is 08:00 the next day.
+- Time zone: saved IANA identifier. UI creation initializes it once from the
+  browser/WebView system zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`).
+  Assistant tool creation without `timezone` resolves the **owning Control's** OS
+  system zone, regardless of destination Runtime or client zone. Explicit zones
+  override either default; omission on tool updates preserves the saved zone.
+  The default follows the system **at creation**; saved plans never drift when
+  the system zone changes or the device travels. Editing and locale refreshes
+  preserve the selected zone. The Control checks `TZ`, the `/etc/localtime`
+  zoneinfo link, `/etc/timezone`, then a resolvable Go local zone name. It embeds
+  IANA tzdata. An unresolvable zone (including offset-only/POSIX `TZ` or `Local`)
+  requires an explicit IANA zone; there is no silent Shanghai/UTC fallback.
+  Linux and macOS zoneinfo layouts are supported; other OS layouts may require
+  explicit zones.
 - Notifications: changes/failures by default; optionally every run or failures only. First successful observation counts as changed. Failures include execution interruption; cancellation is reported only with every-run notifications. Skipped triggers only enter history.
 - Missed triggers: coalesce into one catch-up by default; with skip, triggers at least 60 seconds late only enter history.
 
 Pause/delete stops future triggers; queued/running tasks continue and can be interrupted on the task page. Paused schedules can run now. Skip a trigger while its previous run is queued/running to prevent backlog. Delete preserves history; APIs hide deleted definitions by default.
 
-Schedules require their owning Runtime to remain running. Local App Quit/sleep/shutdown stops its Runtime; closing a remote client does not stop Control. Runtime resume applies catch-up policy without waking the execution machine. Interrupted model execution is not replayed automatically. Scheduling waits while the model is unready or budget exhausted.
+Schedules require their owning Control to remain running. Local App Quit/sleep/shutdown stops its Control; closing a remote client does not stop Control. Control resume applies catch-up policy without waking the execution machine. Interrupted model execution is not replayed automatically. Scheduling waits while the model is unready or budget exhausted.
 
-DST: choose the earlier occurrence of repeated hours and trigger once; skip nonexistent daily/weekly times for that day; reject nonexistent one-off times on save.
+Cron uses `robfig/cron/v3` with only the five standard fields enabled. Lists,
+ranges, positive steps, `*`, and English month/weekday names are supported.
+Sunday is `0`, Monday `1`, through Saturday `6`. When both day-of-month and
+day-of-week are restricted, either matches (traditional Cron OR semantics);
+an unrestricted field leaves the other in control. Seconds, macros (`@daily`),
+inline timezone directives, `?`, `L`, `W`, and `#` are rejected. Expressions are
+bounded to 256 bytes; a rule with no occurrence within the bounded eight-year
+search horizon (including leap-day gaps across non-leap centuries) fails
+validation, including when saving a paused definition.
+This also bounds impossible dates such as `0 0 31 FEB *`.
+
+DST: choose the earlier occurrence of repeated wall times and trigger once;
+skip nonexistent Cron wall times; reject nonexistent one-off times on save.
+Elapsed intervals retain their anchor and actual duration across DST changes.
+Preview and dispatch both call the same backend `Next` implementation. The
+read-only `POST /api/v1/schedules/preview` accepts `kind`, `cron`, `timezone`,
+`at`, `every_minutes` and returns `timezone`, `times` (epoch milliseconds), or
+stable `field`/`code` identifiers and diagnostic details. It does not resolve
+models, create Tasks or persist plans. The shared Web/Wails/remote-Space
+transport carries this same endpoint.
+
+The tasks database migration converts persisted daily/weekly definitions and
+management response snapshots to Cron, removing the old clock/weekday fields.
+It preserves explicit time zones, next due instants, generation, baseline,
+policies, model/Runtime selections, run history and write receipt digests.
+Once and elapsed interval definitions remain intact (90 minutes remains an
+elapsed 90-minute interval). All definition updates fence old in-flight results
+from updating the new generation's comparison baseline.
 
 Model selection uses optional `spec.profile` (configured Provider connection ID)
 and `spec.model`. Selection is autonomous and requires no routing approval or

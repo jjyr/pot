@@ -16,7 +16,7 @@ func TestExtensionsUpgradePreservesExistingControlAndRepeatedStartup(t *testing.
 		t.Fatal(err)
 	}
 	for _, path := range paths {
-		if path == "migrations/control/0012_extensions.sql" {
+		if path >= "migrations/control/0013_" {
 			continue
 		}
 		data, err := migrationFiles.ReadFile(path)

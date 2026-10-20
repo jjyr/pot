@@ -79,13 +79,12 @@ type TurnRequest struct {
 type ExecutionRole string
 
 const (
-	Main     ExecutionRole = "main"
-	Worker   ExecutionRole = "worker"
-	Summary  ExecutionRole = "summary"
-	Recovery ExecutionRole = "recovery"
+	Main    ExecutionRole = "main"
+	Worker  ExecutionRole = "worker"
+	Summary ExecutionRole = "summary"
 )
 
-func (r ExecutionRole) IsNotification() bool { return r == Summary || r == Recovery }
+func (r ExecutionRole) IsNotification() bool { return r == Summary }
 
 type SkillRoot struct {
 	Path     string

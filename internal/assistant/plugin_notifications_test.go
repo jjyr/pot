@@ -220,7 +220,7 @@ func TestPluginCapacityRetryAndImmediateReclaim(t *testing.T) {
 func TestPluginStoredFormatUpgradePreservesBindingAndReceipts(t *testing.T) {
 	ctx := context.Background()
 	m, path := mailbox(t, "local")
-	b := BackgroundBinding{ID: "github", Enabled: true, Assistant: "main", Config: []byte(`{"reasons":["mention"]}`)}
+	b := BackgroundBinding{ID: "example", Enabled: true, Assistant: "main", Config: []byte(`{"reasons":["mention"]}`)}
 	if err := m.ConfigureBackground(ctx, b); err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestPluginStoredFormatUpgradePreservesBindingAndReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Recreate only the removed fields/table from the previous PR format.
-	if _, err := m.db.Exec(`ALTER TABLE assistant_mail_identity RENAME COLUMN node_id TO control_id; ALTER TABLE assistant_contacts RENAME COLUMN node TO control; DROP TABLE task_input_digest_formats; DROP TABLE codex_mail_consumers; DROP TABLE pot_migrations; CREATE TABLE plugin_delivery_rates(owner TEXT PRIMARY KEY,next INTEGER NOT NULL); INSERT INTO plugin_delivery_rates VALUES('main',9999999999999);
+	if _, err := m.db.Exec(`ALTER TABLE assistant_mail_identity RENAME COLUMN node_id TO control_id; ALTER TABLE assistant_contacts RENAME COLUMN node TO control; DROP TABLE task_input_digest_formats; DROP TABLE codex_mail_consumers; DROP TABLE pot_migrations; ALTER TABLE plugin_background DROP COLUMN diagnostic; CREATE TABLE plugin_delivery_rates(owner TEXT PRIMARY KEY,next INTEGER NOT NULL); INSERT INTO plugin_delivery_rates VALUES('main',9999999999999);
  UPDATE agent_messages SET envelope=json_set(envelope,'$.plugin.event.group','thread','$.text','old duplicate');
  UPDATE agent_messages SET state=json_extract(envelope,'$.plugin.event.id');`); err != nil {
 		t.Fatal(err)
@@ -441,5 +441,40 @@ func TestPluginDefaultInitializationConcurrent(t *testing.T) {
 		if next.ID == "waiting" && (next.Enabled || next.Assistant != "" || next.Revision != 1) {
 			t.Fatal(next)
 		}
+	}
+}
+
+func TestPluginBackgroundFailureDiagnosticSurvivesRestartAndClearsOnSuccess(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "mail.sqlite")
+	m, err := OpenMailbox(path, "control")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = m.ConfigureBackground(ctx, BackgroundBinding{ID: "github", Enabled: true, Assistant: "main", Config: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	bindings, _ := m.Backgrounds(ctx)
+	b := bindings[0]
+	if err = m.BackgroundError(ctx, b, "unavailable", "background exchange timed out", 1000); err != nil {
+		t.Fatal(err)
+	}
+	m.Close()
+	m, err = OpenMailbox(path, "control")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	bindings, _ = m.Backgrounds(ctx)
+	if bindings[0].Diagnostic != "background exchange timed out" || bindings[0].Next != 301000 {
+		t.Fatal(bindings)
+	}
+	r := core.BackgroundResponse{State: []byte(`{"cursor":"preserved"}`), DelaySeconds: 60, Status: "ready"}
+	if err = m.CommitBackground(ctx, b, core.PluginIdentity{ID: "github", Version: "1", Digest: "fixture"}, r, 2000); err != nil {
+		t.Fatal(err)
+	}
+	bindings, _ = m.Backgrounds(ctx)
+	if bindings[0].Diagnostic != "" || bindings[0].Status != "ready" {
+		t.Fatal(bindings)
 	}
 }

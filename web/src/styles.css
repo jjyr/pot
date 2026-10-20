@@ -2,6 +2,7 @@
 @import url("./styles/machine-connection.css");
 @import url("./styles/agent-links.css");
 @import url("./styles/topology.css");
+@import url("./styles/assistant-activity.css");
 /* Shared semantic values and geometry preserve the established Pot design.
    System appearance follows the OS live, without recreating the text editor. */
 @font-face { font-family: 'Pot Web Sans'; src: url('./assets/IBMPlexSans-Regular.ttf') format('truetype'); font-style: normal; font-weight: 400; font-display: swap; }
@@ -91,7 +92,7 @@ h1, h2, p { margin: 0; }
 .assistant-row:hover { background: var(--button-hover); }
 .assistant-row.is-selected:hover { background: var(--assistant-selection); }
 .assistant-labels { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
-.assistant-name { display: flex; align-items: center; gap: 6px; }
+.assistant-name { display: flex; align-items: center; gap: 6px; min-height:24px; }
 .assistant-location { flex: none; max-width: 45%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; color: var(--muted); }
 .assistant-preview { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 12px; }
 .avatar { display: inline-block; position: relative; flex-shrink: 0; background: #dce8f4; border-radius: 23.2%; }
@@ -664,3 +665,10 @@ pot-file-image[data-state="error"] .file-image-status { color: var(--danger); }
 .update-confirmation { max-width: 440px; }
 .update-confirmation p { line-height: 1.6; color: var(--muted); }
 .update-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+
+.schedule-rule{overflow-wrap:anywhere;font-size:13px}
+.schedule-preview{border:1px solid var(--divider);border-radius:8px;padding:12px;overflow-wrap:anywhere}
+.schedule-preview ol{padding-inline-start:24px}
+
+.assistant-delete { margin-top: 28px; border-top: 1px solid var(--divider); padding-top: 16px; }
+.assistant-delete > .control { margin-top: 12px; }

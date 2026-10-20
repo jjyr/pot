@@ -33,13 +33,14 @@ export function normalizeSnapshot(frame, runtime, owner, space = '') {
 // Commands invalidate their display dependencies, never every cached resource
 // for upload chunks, login polling, model checks or other read-like commands.
 export function mutationTopics(path,body,value) {
+  if(path==='/api/v1/schedules/preview')return null;
   if(path==='/api/v1/attachments'||/\/(resolve|check)$/.test(path))return null;
   if(path==='/api/v1/assistants/bootstrap'&&!value?.assistant)return null;
   if(path==='/api/v1/agent-links/invitation')return null;
   if(path.startsWith('/api/v1/agent-links'))return ['agent-links'];
   if(path==='/api/v1/runtime/control'&&body?.action==='invitation_status')return null;
   if(path.startsWith('/api/v1/providers'))return ['providers','settings','assistants','conversation','usage'];
-  if(path.startsWith('/api/v1/assistants'))return ['assistants','conversation'];
+  if(path.startsWith('/api/v1/assistants'))return ['assistants','conversation','schedules'];
   if(path.startsWith('/api/v1/extensions'))return ['extensions','skills','assistants','conversation'];
   if(path.startsWith('/api/v1/integrations'))return ['integrations'];
   if(path.startsWith('/api/v1/permissions'))return ['permissions','machines','assistants','tasks'];

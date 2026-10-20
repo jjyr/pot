@@ -832,7 +832,7 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 	if options.Execution.Owner != thread.Owner || options.Services == nil || options.Cleanup == nil {
 		return execution.Result{Phase: execution.Failed, Err: errors.New("invalid fixed assistant execution ports")}
 	}
-	if strings.HasPrefix(request.RequestID, "pot-result-") && options.Execution.Role != core.Recovery {
+	if strings.HasPrefix(request.RequestID, "pot-result-") {
 		options.Execution.Role = core.Summary
 	}
 	binding := &turnFeedback{conversation: c, thread: thread, request: request, options: options, gate: core.NewEventGate(thread.Generation, request.RequestID), toolMessages: map[string]string{}}
@@ -963,4 +963,19 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 		return err
 	}
 	return c.startNextUserLocked(ctx)
+}
+
+// Retire fences new inputs atomically with an idle owner's deletion commit.
+func (c *Conversation) Retire(commit func() error) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.turn != nil || c.finalizing {
+		return protocol.APIError{Code: "assistant_busy"}
+	}
+	if err := commit(); err != nil {
+		return err
+	}
+	c.closed = true
+	c.stop()
+	return nil
 }

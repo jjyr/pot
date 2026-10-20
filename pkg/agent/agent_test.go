@@ -602,3 +602,61 @@ func TestCompactionPersistsReducedClassifiedHistory(t *testing.T) {
 		t.Fatal(result)
 	}
 }
+
+func TestNotificationRetainsConfiguredToolsAndRefreshesContext(t *testing.T) {
+	a, _, service, thread, execution := setup(t)
+	execution.Role = core.Summary
+	execution.Instructions = "fresh-notification-instructions"
+	a.Tools = []m.ToolDefinition{
+		{Name: "exec_command", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		{Name: "update_agent_profile", InputSchema: json.RawMessage(`{"type":"object"}`)},
+	}
+	thread.Config.Params.Agent.BuiltinTools = []string{"exec_command", "exec", "wait"}
+	if err := thread.Config.Rehash(); err != nil {
+		t.Fatal(err)
+	}
+	for _, allowed := range []*[]string{nil, {"update_agent_profile"}} {
+		settings := thread.Config.Params.Agent
+		settings.AllowedTools = allowed
+		main, err := a.available(core.Main, settings, core.DefaultModelDescriptor())
+		if err != nil {
+			t.Fatal(err)
+		}
+		notification, err := a.available(core.Summary, settings, core.DefaultModelDescriptor())
+		if err != nil {
+			t.Fatal(err)
+		}
+		left, _ := json.Marshal(main)
+		right, _ := json.Marshal(notification)
+		if string(left) != string(right) {
+			t.Fatal("notification changed configured tools")
+		}
+	}
+	var skills, effects int
+	a.Skills = func(context.Context, core.ExecutionContext) (SkillCatalog, error) {
+		skills++
+		return SkillCatalog{}, nil
+	}
+	a.Dispatch = func(_ context.Context, ctx core.ExecutionContext, call m.ToolCall, _ func(core.Update) error) (json.RawMessage, error) {
+		if ctx.Role != core.Summary || call.Name != "update_agent_profile" {
+			t.Fatal("notification lost its execution binding")
+		}
+		effects++
+		return json.RawMessage(`{"has_avatar":true}`), nil
+	}
+	service.model = func(request core.ModelRequest, call int) (string, error) {
+		if !strings.Contains(string(request.Body), "fresh-notification-instructions") {
+			t.Error("notification retained stale instructions")
+		}
+		if call == 0 {
+			return response("", m.ToolCall{ID: "profile", Name: "update_agent_profile", Arguments: json.RawMessage(`{}`)}), nil
+		}
+		return response("done"), nil
+	}
+	if err := a.Execute(context.Background(), execution, thread, core.TurnRequest{RequestID: "pot-result-1", Text: "Task completed"}, false, func(core.AgentEvent) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if skills != 1 || effects != 1 {
+		t.Fatal("notification skipped skills or follow-up operation", skills, effects)
+	}
+}

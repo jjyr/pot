@@ -275,8 +275,12 @@ func (s *Service) BootstrapAssistant(ctx context.Context, locale string) (map[st
 	if len(definitions) > 0 {
 		return map[string]any{"assistant": definitions[0]}, nil
 	}
-	if s.Profiles.Snapshot().DefaultProviderID == "" {
-		return map[string]any{"assistant": nil}, nil
+	history, err := s.Registry.HasHistory(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if history || s.Profiles.Snapshot().DefaultProviderID == "" {
+		return map[string]any{"assistant": nil, "initialized": history}, nil
 	}
 	definition, err := s.createAssistant(ctx, CreateAssistant{RequestID: "pot-onboarding", Name: "Pot", Locale: locale}, true)
 	return map[string]any{"assistant": definition}, err

@@ -27,7 +27,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -185,15 +184,15 @@ func (s *Service) Conversation(ctx context.Context, id string) (*assistant.Conve
 	if s.closed {
 		return nil, errors.New("Control stopped")
 	}
-	if c := s.conversations[id]; c != nil {
-		return c, nil
+	deleted, err := s.Registry.Deleted(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) || deleted {
+		return nil, errors.New("assistant unavailable")
 	}
-	identities, err := s.Registry.Definitions(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if !slices.ContainsFunc(identities, func(d assistant.Definition) bool { return d.ID == id }) {
-		return nil, errors.New("assistant unavailable")
+	if c := s.conversations[id]; c != nil {
+		return c, nil
 	}
 	initial, rules, err := s.Registry.Initial(ctx, id)
 	if err != nil {
@@ -354,13 +353,11 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 	}
 	definitions = append(definitions, s.productTools(false)...)
 	if strings.HasPrefix(request.RequestID, "pot-result-") {
-		definitions, err = s.resultTools(ctx, principal, request.RequestID)
+		retryTools, err := s.resultRetryTools(ctx, principal, request.RequestID)
 		if err != nil {
 			return assistant.RunOptions{}, err
 		}
-		if len(definitions) > 0 {
-			executionContext.Role = core.Recovery
-		}
+		definitions = append(definitions, retryTools...)
 	}
 	return assistant.RunOptions{ResolveAttachments: s.resolveAttachments(principal, request.RequestID), Composer: s.options.Composer, Execution: executionContext, Services: ports, Dispatch: dispatch.Dispatch, Tools: definitions, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
 		s.Integrations.Forget(credentialScope(thread.Owner, request.RequestID, thread.Generation))

@@ -517,7 +517,8 @@ DROP TABLE node_identity_secret_migration;
 DROP TABLE agent_link_claim_digest_formats;
 DROP TABLE extension_settings;
 DROP TABLE mcp_servers;
-DELETE FROM pot_migrations WHERE substr(id,1,4)>='0009';`); err != nil {
+ALTER TABLE assistant_definitions DROP COLUMN deleted;
+DELETE FROM pot_migrations WHERE id >= '0009_';`); err != nil {
 			t.Fatal(err)
 		}
 	}
