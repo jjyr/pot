@@ -21,6 +21,7 @@ type ModelProviderDefinition struct {
 	ID                string                    `json:"id"`
 	Name              string                    `json:"name"`
 	Endpoint          string                    `json:"endpoint,omitempty"`
+	DefaultCredential string                    `json:"default_credential,omitempty"`
 	Protocol          string                    `json:"protocol"`
 	Protocols         []string                  `json:"protocols,omitempty"`
 	DirectoryProvider string                    `json:"directory_provider,omitempty"`
@@ -61,6 +62,9 @@ func (p PluginModelProviders) Validate() error {
 		}
 		if len(d.Protocols) > 0 && !protocols[d.Protocol] {
 			return errors.New("model provider default protocol unavailable")
+		}
+		if len(d.DefaultCredential) > 4096 || strings.ContainsFunc(d.DefaultCredential, unicode.IsControl) {
+			return errors.New("invalid model provider public default credential")
 		}
 		if d.Endpoint != "" && !modelProviderEndpoint(d.Endpoint) {
 			return errors.New("invalid model provider endpoint")

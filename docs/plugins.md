@@ -89,6 +89,10 @@ proxy inference, carry credentials in JSON, or enter Task tool bundles.
 `protocol` is the default; `protocols`, when present, lists supported protocol
 choices and must include the default. Protocols refer to Pot's existing codecs:
 `openai_chat`, `openai_responses`, `anthropic_messages` or `gemini`.
+Optional `default_credential` is a public application identity, never a private
+API key. Hosts may use it when the owner supplied no credential; private keys
+remain in Secrets. Public defaults are bounded to 4,096 bytes without control
+characters and must not be used to distribute confidential credentials.
 `catalog` is `none`, `models_dev`, `http` or `plugin`. `models_dev` requires a
 `directory_provider` binding; the wildcard `*` lets the host expand supported
 directory entries. A directory binding can also accompany `http` discovery.

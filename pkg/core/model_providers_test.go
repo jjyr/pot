@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -101,5 +102,18 @@ func TestProviderModelMetadataBoundsAndErrorCodes(t *testing.T) {
 	}
 	if (ModelProviderResponse{Error: &ModelProviderError{Code: "permission"}, Catalog: &catalog}).Validate("list_models") == nil {
 		t.Fatal("error and catalog accepted together")
+	}
+}
+
+func TestProviderPublicDefaultCredentialIsBoundedHeaderSafeData(t *testing.T) {
+	p := PluginModelProviders{Providers: []ModelProviderDefinition{{ID: "test", Name: "Test", Protocol: "openai_responses", DefaultCredential: "public-app-id", Capabilities: ModelProviderCapabilities{Catalog: "http"}}}}
+	if err := p.Validate(); err != nil {
+		t.Fatal("public default rejected", err)
+	}
+	for _, credential := range []string{"public\r\nAuthorization: injected", "public\x00value", strings.Repeat("x", 4097)} {
+		p.Providers[0].DefaultCredential = credential
+		if p.Validate() == nil {
+			t.Fatal("invalid public default accepted")
+		}
 	}
 }
