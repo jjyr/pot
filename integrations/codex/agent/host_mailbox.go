@@ -43,7 +43,7 @@ func (m *hostMailbox) PendingNode(ctx context.Context, local, peer string) ([]pr
 	return out, rows.Err()
 }
 func (m *hostMailbox) Deliver(ctx context.Context, e protocol.Envelope) (protocol.Receipt, error) {
-	if e.Kind != "message" || e.To.NodeID != m.local.NodeID {
+	if e.Kind != "message" || e.To.Kind != "assistant" || e.To.NodeID != m.local.NodeID {
 		return protocol.Receipt{}, errors.New("agent_link_target_mismatch")
 	}
 	if m.backend != nil {
@@ -67,9 +67,9 @@ func (m *hostMailbox) Acknowledge(ctx context.Context, r protocol.Receipt) error
 	return nil
 }
 func (m *hostMailbox) send(ctx context.Context, peer protocol.AgentRef, requestID, text string) (protocol.Envelope, error) {
-	return m.sendFrom(ctx, m.local, peer, requestID, text, false)
+	return m.sendFrom(ctx, m.local, peer, requestID, text)
 }
-func (m *hostMailbox) sendFrom(ctx context.Context, from, peer protocol.AgentRef, requestID, text string, defaultRoute bool) (protocol.Envelope, error) {
+func (m *hostMailbox) sendFrom(ctx context.Context, from, peer protocol.AgentRef, requestID, text string) (protocol.Envelope, error) {
 	if !validID(requestID) {
 		return protocol.Envelope{}, errors.New("invalid_request_id")
 	}
@@ -88,7 +88,7 @@ func (m *hostMailbox) sendFrom(ctx context.Context, from, peer protocol.AgentRef
 			if err = json.Unmarshal([]byte(previous), &old); err != nil {
 				return err
 			}
-			if old.From != from || old.Text != text || old.To.NodeID != peer.NodeID || !defaultRoute && old.To != peer {
+			if old.From != from || old.Text != text || old.To.NodeID != peer.NodeID || old.To != peer {
 				return errors.New("message identity has different content")
 			}
 			e = old

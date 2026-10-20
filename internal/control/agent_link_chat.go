@@ -51,7 +51,7 @@ func (s *Service) SendLinkChat(ctx context.Context, link, assistant, request, te
 	s.linkMu.Lock()
 	defer s.linkMu.Unlock()
 	var old string
-	e = s.integrationDB.QueryRowContext(ctx, "SELECT text,sender FROM agent_link_chat WHERE id=?", id).Scan(&old, &from.AgentID)
+	e = s.integrationDB.QueryRowContext(ctx, "SELECT text,sender,sender_kind FROM agent_link_chat WHERE id=?", id).Scan(&old, &from.AgentID, &from.Kind)
 	duplicate := e == nil
 	if duplicate && old != text {
 		return nil, agentLinkError(agentlink.ErrConflict)
@@ -60,20 +60,22 @@ func (s *Service) SendLinkChat(ctx context.Context, link, assistant, request, te
 		return nil, e
 	}
 	if !duplicate {
-		d, err := (potLinkBackend{s}).Directory(ctx)
-		if err != nil {
-			return nil, err
+		sessionID := linkChatID(link, assistant)
+		_, e = s.integrationDB.ExecContext(ctx, "INSERT INTO agent_link_chat_sessions(link_id,assistant_id,id) VALUES(?,?,?) ON CONFLICT DO NOTHING", link, assistant, sessionID)
+		if e != nil {
+			return nil, e
 		}
-		if d.DefaultAssistantID == "" {
-			return nil, agentlink.ErrNotFound
+		e = s.integrationDB.QueryRowContext(ctx, "SELECT id FROM agent_link_chat_sessions WHERE link_id=? AND assistant_id=?", link, assistant).Scan(&from.AgentID)
+		if e != nil {
+			return nil, e
 		}
-		from.AgentID = d.DefaultAssistantID
-		_, e = s.integrationDB.ExecContext(ctx, "INSERT INTO agent_link_chat(id,link_id,assistant_id,request_id,role,text,created_at,sender) VALUES(?,?,?,?,?,?,?,?)", id, link, assistant, request, "user", text, time.Now().UnixMilli(), from.AgentID)
+		from.Kind = "user"
+		_, e = s.integrationDB.ExecContext(ctx, "INSERT INTO agent_link_chat(id,link_id,assistant_id,request_id,role,text,created_at,sender,sender_kind) VALUES(?,?,?,?,?,?,?,?,?)", id, link, assistant, request, "user", text, time.Now().UnixMilli(), from.AgentID, from.Kind)
 		if e != nil {
 			return nil, e
 		}
 	}
-	_, e = s.Mailbox.Send(ctx, id, protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "assistant", AgentID: from.AgentID}, protocol.SendMail{To: to.Address, Text: text}, nil)
+	_, e = s.Mailbox.Send(ctx, id, protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: from.Kind, AgentID: from.AgentID}, protocol.SendMail{To: to.Address, Text: text}, nil)
 	if e != nil {
 		return nil, e
 	}
@@ -159,8 +161,8 @@ func (s *Service) isLinkChatReply(ctx context.Context, m protocol.Envelope) (boo
 	if m.ReplyTo == nil {
 		return false, nil
 	}
-	var link, assistant string
-	e := s.integrationDB.QueryRowContext(ctx, "SELECT link_id,assistant_id FROM agent_link_chat WHERE id=? AND role='user'", *m.ReplyTo).Scan(&link, &assistant)
+	var link, assistant, sender, senderKind string
+	e := s.integrationDB.QueryRowContext(ctx, "SELECT link_id,assistant_id,sender,sender_kind FROM agent_link_chat WHERE id=? AND role='user'", *m.ReplyTo).Scan(&link, &assistant, &sender, &senderKind)
 	if errors.Is(e, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -171,7 +173,7 @@ func (s *Service) isLinkChatReply(ctx context.Context, m protocol.Envelope) (boo
 	if e != nil {
 		return false, e
 	}
-	if m.From.NodeID != c.PeerHost.NodeID || m.From.AgentID != assistant {
+	if m.From.NodeID != c.PeerHost.NodeID || m.From.Kind != "assistant" || m.From.AgentID != assistant || m.To != (protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: senderKind, AgentID: sender}) {
 		return false, agentlink.ErrConflict
 	}
 	return true, nil

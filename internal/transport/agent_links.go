@@ -7,7 +7,7 @@ import (
 	"net/url"
 )
 
-func (a *Application) agentLinkCall(ctx context.Context, method, path, owner string, r Request) (any, error, bool) {
+func (a *Application) agentLinkCall(ctx context.Context, method, path string, r Request) (any, error, bool) {
 	u, _ := url.ParseRequestURI(r.Path)
 	if path == "/api/v1/agent-links/chat" {
 		link, assistant := u.Query().Get("link_id"), u.Query().Get("assistant_id")
@@ -32,7 +32,7 @@ func (a *Application) agentLinkCall(ctx context.Context, method, path, owner str
 		return nil, nil, false
 	}
 	if method == "GET" && path == "/api/v1/agent-links" {
-		result, err := a.Control.AgentLinks(ctx, owner)
+		result, err := a.Control.AgentLinks(ctx)
 		return result, err, true
 	}
 	if method != "POST" {

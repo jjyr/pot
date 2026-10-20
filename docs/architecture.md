@@ -26,9 +26,11 @@ socket; App uses native bindings. An independent browser service publishes
 session-authenticated access to one local node. Peer connections grant
 collaboration capabilities, never remote operator access or credentials.
 
-Fresh roots contain no assistants. First-use Chat creates a kitchen-named
-assistant once a default Provider exists; + creates later assistants with the same
-local defaults. Provider storage alone creates no assistant. Each root retains
+Fresh roots contain no assistants. First-use Chat and the directory + action
+open the same Add assistant page, ordered API, another Pot, then Codex. Only an
+explicit API creation action creates a kitchen-named local assistant. Linked
+assistants need neither a local Provider nor a local assistant. Provider storage
+alone creates no assistant. Each root retains
 its stable signing identity and secret master key. App and standalone Runtime
 cannot open the same root concurrently. Closing an App window keeps background
 work running; quitting stops local executions. See [Deployment](deployment.md)

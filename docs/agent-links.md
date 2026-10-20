@@ -49,7 +49,10 @@ required. The topology graph, regions, edges and responsive inspector remain.
 The inspector shows provided assistants, opens their existing chat UI, and offers
 disconnect, reconnect and confirmed deletion.
 
-Invitation version 4 carries the pinned node key, reachable TCP endpoint,
+Invitations identify the node, independently of its available assistants. A node
+with an empty directory can both publish and consume invitations.
+
+Invitation version 5 carries the pinned node key, reachable TCP endpoint,
 public display anchor and a single-use capability in its URL fragment. Never
 log this capability, expose it through model tools or send it in chat. Preview
 proves the server key before revealing the capability and cannot claim it or
@@ -83,6 +86,18 @@ execution. A disconnected or uncertain request remains unresolved. Definitive
 admission failures surface in the original task list and notification route.
 Cancellation never fabricates completion; before the remote reference arrives,
 a durable cancellation intent waits for acceptance and then targets that task.
+
+Direct user chats use a persisted user session address per connection and target
+assistant, rather than the local default assistant. User requests address an
+assistant; assistant replies to user addresses require the original request,
+conversation and full sender/recipient binding. They enter the durable user
+projection without autonomous local processing. Session addresses survive default
+changes, local assistant deletion and restart. Peer text retains its existing
+receiver-owned execution policy; a user session address grants no remote owner
+API access. Proactive messages still address a real assistant explicitly. A
+Codex sender discovers the current directory and supplies assistant_id; omission
+or a removed target fails without selecting another recipient. Task delegation
+retains its separate receiver-default contract.
 
 The existing mailbox owns messages and immutable delivery receipts. Pending
 selection filters both node IDs before applying the page bound, preserving
@@ -121,3 +136,12 @@ The old Bridge pairing, independent HTTP/MCP/SSE delegation channel and Pot-side
 `codex_*` plugin are removed. See the [Codex adapter](../integrations/codex/README.md)
 for installation, virtual assistant configuration and conservative restart fences.
 See [database migrations](database-migrations.md) for upgrade and backup rules.
+
+Control migration `0020_agent_link_direct_chat` upgrades established version-4
+connection presentation anchors to version-5 node identities, preserving node
+pins, connection IDs, histories and receipts. Unfinished admissions remain fenced
+and need a fresh invitation; old invitations expire. Historical chat sender
+bindings remain unchanged. New chats persist their own user session identity.
+Tasks migration `0012_agent_link_direct_chat` records the typed user message
+contract and indexes delivery routes without rewriting old immutable envelopes.
+Upgrade Pot and its Codex plugin together; old wire versions are not accepted.

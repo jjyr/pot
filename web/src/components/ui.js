@@ -172,7 +172,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   const updates=client.production?createUpdates({client,locale:()=>locale,changed:()=>{if(!disposed)renderShell();},notify:message=>{error=message;updateControls();}}):null;
  if(updates)root.append(updates.dialog);
- const pages = client.production ? createPages({chatVisible:()=>route==='chat'&&!root.classList.contains('show-directory'),onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, chatApprovalHost:chatApprovals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: async value => {if(value?.assistant)pendingSelection=value.assistant;const removed=value?.deletedAssistant;if(removed&&selectedAssistant?.id===removed.owner&&selectedAssistant?.space_id===removed.space)clearSelectedAssistant();await loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();}, openChat:async target=>{if(target&&(!selectedAssistant||selectedAssistant.id!==target.owner||selectedAssistant.space_id!==target.space)){const assistant=assistants.find(item=>item.id===target.owner&&item.space_id===target.space);if(assistant)await selectAssistant(assistant,false,false);}route='chat';directoryOpen=false;renderShell();renderMessages();pages.permissions();if(!selectedAssistant)loadDirectory();}}) : null;
+ const pages = client.production ? createPages({createLocalAssistant:createAssistant,chatVisible:()=>route==='chat'&&!root.classList.contains('show-directory'),onApprovalsChanged:()=>renderMessages(),client, host: unavailable, approvalHost: approvals, chatApprovalHost:chatApprovals, locale: () => locale, notify: value => {error = value; updateControls();}, changed: async value => {if(value?.assistant)pendingSelection=value.assistant;const removed=value?.deletedAssistant;if(removed&&selectedAssistant?.id===removed.owner&&selectedAssistant?.space_id===removed.space)clearSelectedAssistant();await loadDirectory();}, titleChanged: () => renderShell(),routeChanged:value=>{route=value;renderShell();}, openChat:async target=>{if(target?.owner&&(!selectedAssistant||selectedAssistant.id!==target.owner||selectedAssistant.space_id!==target.space)){const assistant=assistants.find(item=>item.id===target.owner&&item.space_id===target.space);if(assistant)await selectAssistant(assistant,false,false);}route='chat';directoryOpen=!!target?.directory&&!selectedAssistant;renderShell();renderMessages();pages.permissions();if(!selectedAssistant&&!target?.directory)loadDirectory();}}) : null;
   const media = matchMedia('(max-width: 719px)');
   const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
   const saveReads=()=>{if(!client.desktop)persist('pot-ui-read-v1',JSON.stringify(replies.records()));};
@@ -469,7 +469,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       };
       titlebar.append(leading);
     }
-    if (!narrow && surface !== 'tray' && route === 'chat' && directoryCollapsed) {
+    if (!narrow && surface !== 'tray' && ['chat','add-assistant'].includes(route) && directoryCollapsed) {
       const expand = button('panel-open', t('chat.expandAssistants'), 'icon-button directory-toggle');
       expand.setAttribute('aria-controls', directory.id); expand.setAttribute('aria-expanded', 'false');
       expand.onclick = toggleDirectory; titlebar.append(expand);
@@ -546,10 +546,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       collapse.onclick = toggleDirectory; heading.append(collapse);
     }
     const creating=creationStarting||assistantCreation.pending;
-    const add = button('plus', t(client.production ? (creating?'assistant.creating':'newAssistant') : 'preview'));
+    const add = button('plus', t(client.production ? (creating?'assistant.creating':'assistantStart.title') : 'preview'));
     add.disabled = !client.production||creating||!creationSpace()||creationSpace()?.connected===false;
     add.setAttribute('aria-busy',String(creating));
-    add.onclick = createAssistant;
+    add.onclick = () => {directoryOpen=false;navigate('add-assistant');};
     heading.append(add);
     const creationFailure=el('p','inline-error assistant-creation-error',t('assistant.createFailed'));
     creationFailure.hidden=!creationFailed;creationFailure.setAttribute('role','alert');
@@ -937,9 +937,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     creationStarting=true;creationFailed=false;error='';renderShell();
     try{
       if(!await pages.leave()||disposed)return;
-      const providers=await (client.read||client.request)('/api/v1/providers',{space:target.id,owner:''});
+      const providers=await client.request('/api/v1/providers',{space:target.id,owner:'',authoritative:true});
       if(disposed)return;
-      if(!providers.default_provider_id){route='settings';await pages.setupAI({space:target.id,owner:''});renderShell();return;}
+      if(!providers.default_provider_id){await pages.setupAI({space:target.id,owner:''});renderShell();return;}
       const assistant=await assistantCreation.create(target);
       if(disposed||!assistant)return;
       // Confirm the post-create catalogue before selecting: a stale cached list
@@ -980,43 +980,32 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if (!spaces.length) throw Error('No serving Space');
       if(!selectedAssistant){client.setScope({space:catalog.active_space_id||spaces[0].id,owner:''});updates?.refresh(client.scope());}
       const projectAssistants=(value,space,offline)=>{let items=value;if(typeof items==='string'){try{items=JSON.parse(items);}catch{items=[];}}return (items?.items||items||[]).map(item=>({...item,control_id:space.control_id||space.id,space_id:space.id,space_name:space.name,space_kind:space.kind,offline}));};
+      const linkFailures=[];
       const results = await Promise.allSettled(spaces.map(async space => {
         const items = await (client.read||client.request)('/api/v1/assistants', {owner:'', space:space.id,signal:abort.signal});
         const local=projectAssistants(items,space,space.connected===false);
         try{const links=await (client.read||client.request)('/api/v1/agent-links',{owner:'',space:space.id,signal:abort.signal});return [...local,...projectLinkedAssistants(links,space)];}
-        catch{return [...local,...assistants.filter(item=>item.origin&&item.space_id===space.id).map(item=>({...item,offline:true}))];}
+        catch{linkFailures.push(space.id);return [...local,...assistants.filter(item=>item.origin&&item.space_id===space.id).map(item=>({...item,offline:true}))];}
       }));
       if (ticket !== directoryEpoch || disposed) return;
       assistants = results.flatMap((result, index) => result.status === 'fulfilled' ? result.value : (()=>{const space=spaces[index],previous=assistants.filter(item=>item.space_id===space.id);return previous.length?previous.map(item=>({...item,offline:true})):projectAssistants(space.assistants||[],space,true);})());
       client.assistants=assistants;
       const changed=[];if(previousSpaces!==JSON.stringify(spaces))changed.push('spaces');if(previousOwners!==JSON.stringify(assistants.map(item=>[item.space_id,item.id,item.name,item.offline])))changed.push('assistants');if(changed.length)pages.refresh(changed);
       for(const item of assistants){const arrival=replies.observe(controlOf(item),item.id,item.reply_id||'',item.reply_count||0,!item.offline);if(arrival.arrived&&route==='chat'&&document.visibilityState!=='hidden'&&!reducedMotion.matches){reactions.set(replyKey(controlOf(item),item.id),performance.now());setTimeout(()=>{if(!disposed){directorySignature='';renderShell();}},650);}}saveReads();
-      if (results.some(result => result.status === 'rejected')) error = t('partialOffline');else if(error===t('partialOffline'))error='';
+      if (linkFailures.length||results.some(result => result.status === 'rejected')) error = t('partialOffline');else if(error===t('partialOffline'))error='';
       if(selectedAssistant&&!pages.editing&&!assistants.some(item=>item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id)){
         const source=spaces.findIndex(space=>space.id===selectedAssistant.space_id);
         if(source>=0&&results[source].status==='fulfilled'&&spaces[source].connected!==false)clearSelectedAssistant();
       }
       if (selectedAssistant){selectedAssistant = assistants.find(item => item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id) || selectedAssistant;if(selectedAssistant.offline)connection='offline';}
       renderShell();
-      if(!assistants.length){
-        let initialized=false;
-        const space=spaces.find(value=>value.id===client.scope().space)||spaces[0];
-        const available=results.every(result=>result.status==='fulfilled')&&space.connected!==false;
-        if(available&&!pages.editing){
-          const result=await client.request('/api/v1/assistants/bootstrap',{owner:'',space:space.id,method:'POST',body:{locale}});
-          if(ticket!==directoryEpoch||disposed)return;
-          initialized=!!result.initialized;
-          if(result.assistant){
-            const items=await client.request('/api/v1/assistants',{owner:'',space:space.id});
-            if(ticket!==directoryEpoch||disposed)return;
-            assistants=projectAssistants(items,space,false);client.assistants=assistants;directoryOpen=false;renderShell();
-          }
-        }
-        if(!assistants.length){directoryOpen=false;renderShell();const empty=el('div','empty-chat');empty.append(el('h2','',t('welcomeTitle')),el('p','hint',available?(initialized?translate(locale,'assistant.emptyDeleted'):t('welcomeSetup')):t('partialOffline')));const setup=el('button','control primary',t(available?(initialized?'newAssistant':'setupAI'):'retry'));setup.disabled=creationStarting||assistantCreation.pending;setup.onclick=async()=>{if(!available){loadDirectory();return;}if(initialized){await createAssistant();return;}setup.disabled=true;try{await navigate('settings');await pages.setupAI();}catch(reason){error=reason.message;updateControls();}finally{setup.disabled=false;}};empty.append(setup);messageColumn.replaceChildren(empty);}
+      if(!assistants.length&&route==='chat'&&!pages.editing){
+        const available=!linkFailures.length&&results.every(result=>result.status==='fulfilled')&&spaces.some(space=>space.connected!==false);
+        if(available){directoryOpen=false;route='add-assistant';renderShell();await pages.show('add-assistant');}else{directoryOpen=false;renderShell();const empty=el('div','empty-chat');empty.append(el('p','hint',t('partialOffline')));const retry=el('button','control',t('retry'));retry.onclick=()=>loadDirectory();empty.append(retry);messageColumn.replaceChildren(empty);}
       }
       mainReady();
       if(pendingSelection){const chosen=assistants.find(item=>item.id===pendingSelection.id&&item.space_id===pendingSelection.space_id);pendingSelection=null;if(chosen){await selectAssistant(chosen);notifications?.directory({epoch:notificationEpoch});return;}}
-      if (!selectedAssistant && assistants.length && !pages.editing) {
+      if (route==='chat' && !selectedAssistant && assistants.length && !pages.editing) {
         const requested=params.get('assistant_id');const requestedSpace=params.get('space_id');
         const selected=requested?assistants.find(item=>item.id===requested&&(!requestedSpace||item.space_id===requestedSpace)):assistants[0];
         if(!selected){error=t('missingAssistant');connection='offline';updateControls();notifications?.directory({epoch:notificationEpoch});return;}

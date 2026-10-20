@@ -24,7 +24,7 @@ type revokeRequest struct {
 }
 
 func validateMessage(value protocol.Envelope, from, to protocol.AgentRef) error {
-	if value.Validate() != nil || value.Kind != "message" || value.From.NodeID != from.NodeID || value.To.NodeID != to.NodeID || value.From.Kind != "assistant" || value.To.Kind != "assistant" {
+	if value.Validate() != nil || value.Kind != "message" || value.From.NodeID != from.NodeID || value.To.NodeID != to.NodeID {
 		return ErrConflict
 	}
 	return nil

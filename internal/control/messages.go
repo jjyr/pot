@@ -53,6 +53,16 @@ func (s *Service) sendAgentMessage(ctx context.Context, id, owner string, sender
 		s.wakeTasks()
 		messageID, _ := core.HashJSON([]string{send.To.AgentID, id})
 		return map[string]any{"accepted": true, "message_id": messageID}, nil
+	case "user":
+		parent, ok := ctx.Value(mailParentKey{}).(protocol.Envelope)
+		if !ok || parent.From != send.To || parent.To != sender || parent.From.Kind != "user" {
+			return nil, errors.New("direct chat reply requires its original processing parent")
+		}
+		result, err := s.Mailbox.Send(ctx, id, sender, send, &parent)
+		if err == nil {
+			s.wakeTasks()
+		}
+		return result, err
 	case "assistant":
 		if send.To.NodeID != s.options.RuntimeID && !s.linkedPeer(ctx, sender, send.To) {
 			return nil, errors.New("agent_link_target_not_connected")

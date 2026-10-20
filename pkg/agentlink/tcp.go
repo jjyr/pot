@@ -39,7 +39,7 @@ func (s *Service) Authorize(ctx context.Context, remote peer.Identity, service s
 		return nil, ErrInvalid
 	}
 	if auth.Preview != nil {
-		if auth.ID != "" || auth.Pair != nil || auth.Preview.Code != "" || !validID(auth.Preview.Invitation) || !validIdentity(auth.Preview.Target) || auth.Preview.Target.Address.NodeID != s.options.HostIdentity.NodeID {
+		if auth.ID != "" || auth.Pair != nil || auth.Preview.Code != "" || !validID(auth.Preview.Invitation) || !validNodeIdentity(auth.Preview.Target) || auth.Preview.Target.Address.NodeID != s.options.HostIdentity.NodeID {
 			return nil, ErrInvalid
 		}
 		return s.previewHandler(*auth.Preview), nil
@@ -48,7 +48,7 @@ func (s *Service) Authorize(ctx context.Context, remote peer.Identity, service s
 		return nil, ErrInvalid
 	}
 	if auth.Pair != nil {
-		if auth.Pair.ID != auth.ID || auth.Pair.Code != "" || !validID(auth.Pair.Invitation) || !validIdentity(auth.Pair.Local) || !validIdentity(auth.Pair.Peer) || auth.Pair.Local.Address.NodeID != remote.NodeID || auth.Pair.Peer.Address.NodeID != s.options.HostIdentity.NodeID {
+		if auth.Pair.ID != auth.ID || auth.Pair.Code != "" || !validID(auth.Pair.Invitation) || !validNodeIdentity(auth.Pair.Local) || !validNodeIdentity(auth.Pair.Peer) || auth.Pair.Local.Address.NodeID != remote.NodeID || auth.Pair.Peer.Address.NodeID != s.options.HostIdentity.NodeID {
 			return nil, ErrConflict
 		}
 		return s.pairHandler(*auth.Pair, remote), nil
@@ -64,7 +64,7 @@ func (s *Service) authenticate(ctx context.Context, id string, remote peer.Ident
 	if err != nil {
 		return Connection{}, ErrUnauthorized
 	}
-	if connection.SchemaVersion != 4 || connection.PeerHost.Validate() != nil {
+	if connection.SchemaVersion != 5 || connection.PeerHost.Validate() != nil {
 		return connection, ErrReconnectRequired
 	}
 	if connection.PeerHost != remote || connection.Peer.Address.NodeID != remote.NodeID {
@@ -188,7 +188,7 @@ func (s *Service) ensureSession(ctx context.Context, connection Connection) (*pe
 	if session := s.session(connection.ID); session != nil {
 		return session, nil
 	}
-	if connection.SchemaVersion != 4 || connection.PeerHost.Validate() != nil {
+	if connection.SchemaVersion != 5 || connection.PeerHost.Validate() != nil {
 		return nil, ErrReconnectRequired
 	}
 	if connection.Endpoint == "" {

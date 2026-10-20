@@ -209,3 +209,9 @@ metadata without changing existing task/run identities or effect receipts.
 enabled by copying a discovered address. It preserves the existing configured
 endpoint, host identity, encrypted secret references and connection history.
 Listener restoration happens after migration and never replays model work.
+
+`control/0020_agent_link_direct_chat` separates node connection identities from
+assistant directories and persists independent user-chat sessions. It retains
+established connection IDs, pins and historical sender bindings, expires old
+invitations and fences unfinished admissions. `tasks/0012_agent_link_direct_chat`
+adds a typed user-chat route index while preserving existing immutable envelopes.

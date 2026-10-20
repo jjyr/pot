@@ -81,6 +81,9 @@ func (f *fixture) open() {
 	}
 	f.mail = sqlMailbox{mail, db}
 	f.service, err = New(Options{DB: f.db, Secrets: f.secret, Mailbox: f.mail, HostIdentity: peer.NewIdentity(f.id, f.key.Public().(ed25519.PublicKey)), HostKey: f.key, Identity: func(_ context.Context, id string) (Identity, error) {
+		if id == "" {
+			return Identity{Address: protocol.AgentRef{NodeID: f.id, Kind: "node", AgentID: f.id}, Name: f.id, Adapter: "pot"}, nil
+		}
 		if id != "assistant" && id != "other" {
 			return Identity{}, ErrNotFound
 		}
@@ -140,11 +143,11 @@ func (f *fixture) identity() Identity {
 }
 func connect(t *testing.T, a, b *fixture) Connection {
 	t.Helper()
-	inv, err := b.service.Invite(context.Background(), "assistant", b.endpoint)
+	inv, err := b.service.Invite(context.Background(), b.endpoint)
 	if err != nil {
 		t.Fatal(err)
 	}
-	value, err := a.service.Connect(context.Background(), "assistant", inv.Address)
+	value, err := a.service.Connect(context.Background(), inv.Address)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +173,7 @@ func TestTCPConnectionUsesOneSignedSessionForBothDirectionsAndRestart(t *testing
 	ctx := context.Background()
 	a, b := newFixture(t, "control-a"), newFixture(t, "control-b")
 	c := connect(t, a, b)
-	if c.SchemaVersion != 4 || c.PeerHost != b.service.options.HostIdentity || c.State != "ready" || c.LastSeen == nil {
+	if c.SchemaVersion != 5 || c.PeerHost != b.service.options.HostIdentity || c.State != "ready" || c.LastSeen == nil {
 		t.Fatal(c)
 	}
 	remote, err := b.service.Get(ctx, c.ID)
@@ -213,15 +216,15 @@ func TestTCPConnectionUsesOneSignedSessionForBothDirectionsAndRestart(t *testing
 func TestTCPPairAndDeliveryResponseLossRecoverOriginalReceipts(t *testing.T) {
 	ctx := context.Background()
 	a, b := newFixture(t, "control-a"), newFixture(t, "control-b")
-	inv, _ := b.service.Invite(ctx, "assistant", b.endpoint)
+	inv, _ := b.service.Invite(ctx, b.endpoint)
 	b.dropPair.Store(true)
-	c, err := a.service.Connect(ctx, "assistant", inv.Address)
+	c, err := a.service.Connect(ctx, inv.Address)
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatal(err)
 	}
 	a.restart()
 	b.restart()
-	recovered, err := a.service.Connect(ctx, "assistant", inv.Address)
+	recovered, err := a.service.Connect(ctx, inv.Address)
 	if err != nil || recovered.ID != c.ID {
 		t.Fatal(recovered, err)
 	}
@@ -242,17 +245,17 @@ func TestTCPPairAndDeliveryResponseLossRecoverOriginalReceipts(t *testing.T) {
 func TestTCPInvitationClaimBindsSignedHostAndNodeRoute(t *testing.T) {
 	ctx := context.Background()
 	a, b, c := newFixture(t, "control-a"), newFixture(t, "control-b"), newFixture(t, "control-c")
-	inv, _ := b.service.Invite(ctx, "assistant", b.endpoint)
-	again, _ := b.service.Invite(ctx, "assistant", b.endpoint)
+	inv, _ := b.service.Invite(ctx, b.endpoint)
+	again, _ := b.service.Invite(ctx, b.endpoint)
 	if inv.Address != again.Address {
 		t.Fatal("unclaimed invitation was not reused")
 	}
 	parsed, _ := parseAddress(ctx, inv.Address)
-	connection, err := a.service.Connect(ctx, "assistant", inv.Address)
+	connection, err := a.service.Connect(ctx, inv.Address)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = c.service.Connect(ctx, "assistant", inv.Address); !errors.Is(err, ErrConflict) {
+	if _, err = c.service.Connect(ctx, inv.Address); !errors.Is(err, ErrConflict) {
 		t.Fatal(err)
 	}
 	for _, f := range []*fixture{a, b} {
@@ -269,7 +272,7 @@ func TestTCPInvitationClaimBindsSignedHostAndNodeRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	message := send(t, a, b, "bound-message", "peer reference")
-	for _, change := range []func(*protocol.Envelope){func(e *protocol.Envelope) { e.From.NodeID = "other-node" }, func(e *protocol.Envelope) { e.To.NodeID = "other-node" }, func(e *protocol.Envelope) { e.From.Kind = "user" }, func(e *protocol.Envelope) { e.Kind = "plugin_event" }} {
+	for _, change := range []func(*protocol.Envelope){func(e *protocol.Envelope) { e.From.NodeID = "other-node" }, func(e *protocol.Envelope) { e.To.NodeID = "other-node" }, func(e *protocol.Envelope) { e.From.Kind = "runtime" }, func(e *protocol.Envelope) { e.Kind = "plugin_event" }} {
 		forged := message
 		change(&forged)
 		var response exchangeResponse
@@ -299,12 +302,12 @@ func TestTCPRejectsAnotherHostKeyEvenWhenNodeIDIsSame(t *testing.T) {
 		session.Close()
 		t.Fatal("another signing key claimed established control identity")
 	}
-	inv, _ := b.service.Invite(ctx, "other", b.endpoint)
+	inv, _ := b.service.Invite(ctx, b.endpoint)
 	parsed, _ := parseAddress(ctx, inv.Address)
 	parsed.Host = peer.NewIdentity(b.id, wrongKey.Public().(ed25519.PublicKey))
 	raw, _ := json.Marshal(parsed)
 	address := b.endpoint + "#" + base64.RawURLEncoding.EncodeToString(raw)
-	if _, err = a.service.Connect(ctx, "other", address); err == nil {
+	if _, err = a.service.Connect(ctx, address); err == nil {
 		t.Fatal("invitation public-key pin was ignored")
 	}
 }
@@ -378,20 +381,20 @@ func TestTCPListenerRevocationAndPendingBacklogIsolation(t *testing.T) {
 func TestTCPInvitationExpiryRepairAndNoHTTPCompatibility(t *testing.T) {
 	ctx := context.Background()
 	a, b := newFixture(t, "control-a"), newFixture(t, "control-b")
-	inv, _ := b.service.Invite(ctx, "assistant", b.endpoint)
+	inv, _ := b.service.Invite(ctx, b.endpoint)
 	parsed, _ := parseAddress(ctx, inv.Address)
 	if _, err := b.db.Exec(`UPDATE agent_link_invitations SET expires_at=? WHERE id=?`, time.Now().Add(-time.Minute).UnixMilli(), parsed.Invitation); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.service.Connect(ctx, "assistant", inv.Address); !errors.Is(err, ErrExpired) {
+	if _, err := a.service.Connect(ctx, inv.Address); !errors.Is(err, ErrExpired) {
 		t.Fatal(err)
 	}
-	fresh, _ := b.service.Invite(ctx, "assistant", b.endpoint)
-	if _, err := a.service.Connect(ctx, "assistant", fresh.Address); err != nil {
+	fresh, _ := b.service.Invite(ctx, b.endpoint)
+	if _, err := a.service.Connect(ctx, fresh.Address); err != nil {
 		t.Fatal(err)
 	}
 	for _, raw := range []string{"https://example.test", "http://127.0.0.1:8792", "tcp://127.0.0.1:9999/other", "tcp://user@127.0.0.1:9999", "tcp://127.0.0.1:9999?x=1"} {
-		if _, err := b.service.Invite(ctx, "assistant", raw); err == nil {
+		if _, err := b.service.Invite(ctx, raw); err == nil {
 			t.Fatal("obsolete or expanded endpoint accepted", raw)
 		}
 	}
@@ -437,11 +440,11 @@ func TestTCPListenerPushesWithoutDialerPollingAndIdleHasNoBusinessRPC(t *testing
 func TestNodeIdentityUpgradeReopensOriginalSignedPairAndReceipts(t *testing.T) {
 	ctx := context.Background()
 	a, b := newFixture(t, "upgrade-a"), newFixture(t, "upgrade-b")
-	invitation, err := b.service.Invite(ctx, "assistant", b.endpoint)
+	invitation, err := b.service.Invite(ctx, b.endpoint)
 	if err != nil {
 		t.Fatal(err)
 	}
-	connection, err := a.service.Connect(ctx, "assistant", invitation.Address)
+	connection, err := a.service.Connect(ctx, invitation.Address)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -476,7 +479,7 @@ func TestNodeIdentityUpgradeReopensOriginalSignedPairAndReceipts(t *testing.T) {
 			raw, _ := json.Marshal(link)
 			legacy := strings.ReplaceAll(string(raw), `"node_id":`, `"control_id":`)
 			legacy = strings.Replace(legacy, `"peer_host":{"control_id":`, `"peer_host":{"id":`, 1)
-			legacy = strings.Replace(legacy, `"schema_version":4`, `"schema_version":2`, 1)
+			legacy = strings.Replace(legacy, `"schema_version":5`, `"schema_version":2`, 1)
 			routeRaw, _ := json.Marshal([]protocol.AgentRef{link.Local.Address, link.Peer.Address})
 			oldRoute := digest([]byte(strings.ReplaceAll(string(routeRaw), `"node_id":`, `"control_id":`)))
 			if _, err = fixture.db.Exec("UPDATE agent_link_connections SET metadata=?,route=? WHERE id=?", legacy, oldRoute, link.ID); err != nil {
@@ -502,6 +505,7 @@ DROP TABLE agent_link_node_settings;
 DROP TABLE agent_link_delegations;
 DROP TABLE agent_link_received_tasks;
 DROP TABLE agent_link_chat;
+DROP TABLE agent_link_chat_sessions;
 DROP TABLE codex_agent_endpoints;
 DROP TABLE display_resources;
 DROP TABLE provider_metadata;
@@ -530,15 +534,15 @@ DELETE FROM pot_migrations WHERE id >= '0009_';`); err != nil {
 		t.Fatal(current, err)
 	}
 	// Freshly copied node invitations establish a new connection, preserving history.
-	invitation, err = b.service.Invite(ctx, "assistant", b.endpoint)
+	invitation, err = b.service.Invite(ctx, b.endpoint)
 	if err != nil {
 		t.Fatal(err)
 	}
-	replacement, err := a.service.Connect(ctx, "assistant", invitation.Address)
+	replacement, err := a.service.Connect(ctx, invitation.Address)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if replacement.ID == connection.ID || replacement.SchemaVersion != 4 {
+	if replacement.ID == connection.ID || replacement.SchemaVersion != 5 {
 		t.Fatal(replacement)
 	}
 
@@ -568,11 +572,11 @@ func TestFreshCustomSecretStoreCanReopenAfterConnecting(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.service = service
-	invite, err := b.service.Invite(ctx, "assistant", b.endpoint)
+	invite, err := b.service.Invite(ctx, b.endpoint)
 	if err != nil {
 		t.Fatal(err)
 	}
-	connection, err := a.service.Connect(ctx, "assistant", invite.Address)
+	connection, err := a.service.Connect(ctx, invite.Address)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -583,5 +587,59 @@ func TestFreshCustomSecretStoreCanReopenAfterConnecting(t *testing.T) {
 	}
 	if _, err = a.service.Get(ctx, connection.ID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestEstablishedAssistantAnchorUpgradeRetainsSignedConnection(t *testing.T) {
+	ctx := context.Background()
+	a, b := newFixture(t, "anchor-a"), newFixture(t, "anchor-b")
+	c := connect(t, a, b)
+	message := send(t, a, b, "before-node-anchor-upgrade", "preserve original receipt")
+	if err := a.service.Sync(ctx, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.stop()
+	b.stop()
+	endpoints := []string{a.endpoint, b.endpoint}
+	for _, side := range []*fixture{a, b} {
+		connection, err := side.service.Get(ctx, c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		connection.SchemaVersion = 4
+		connection.Local.Address.Kind = "assistant"
+		connection.Local.Address.AgentID = "deleted-local-anchor"
+		connection.Peer.Address.Kind = "assistant"
+		connection.Peer.Address.AgentID = "deleted-peer-anchor"
+		if err = side.service.update(ctx, connection); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = side.db.Exec(`DROP TABLE agent_link_chat_sessions; ALTER TABLE agent_link_chat DROP COLUMN sender_kind; DELETE FROM pot_migrations WHERE id LIKE '0020_%'`); err != nil {
+			t.Fatal(err)
+		}
+		side.close()
+	}
+	for index, side := range []*fixture{a, b} {
+		side.open()
+		side.start(strings.TrimPrefix(endpoints[index], "tcp://"))
+	}
+	if err := a.service.Sync(ctx, c.ID); err != nil {
+		t.Fatal("established node pins no longer reconnect", err)
+	}
+	for _, side := range []*fixture{a, b} {
+		current, err := side.service.Get(ctx, c.ID)
+		if err != nil || current.ID != c.ID || current.SchemaVersion != 5 || current.Local.Address.Kind != "node" || current.Peer.Address.Kind != "node" {
+			t.Fatal(current, err)
+		}
+	}
+	if mailCount(t, b, message.ID) != 1 {
+		t.Fatal("upgrade replayed or removed accepted message")
+	}
+	next := send(t, a, b, "after-node-anchor-upgrade", "same signed connection")
+	if err := a.service.Sync(ctx, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if mailCount(t, b, next.ID) != 1 {
+		t.Fatal("upgraded connection could not deliver")
 	}
 }

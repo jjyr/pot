@@ -148,7 +148,7 @@ func (b *backend) Submit(ctx context.Context, r agentlink.TaskRequest) (agentlin
 	return b.submit(ctx, r, nil)
 }
 func (b *backend) submit(ctx context.Context, r agentlink.TaskRequest, message *protocol.Envelope) (agentlink.Task, error) {
-	if !validID(r.RequestID) || r.From.NodeID == "" || r.From.Kind != "assistant" || r.From.AgentID == "" || r.Text == "" || len(r.Text) > 65536 || message == nil && len(r.Text) > 24000 {
+	if !validID(r.RequestID) || r.From.NodeID == "" || (r.From.Kind != "assistant" && !(message != nil && r.From.Kind == "user")) || r.From.AgentID == "" || r.Text == "" || len(r.Text) > 65536 || message == nil && len(r.Text) > 24000 {
 		return agentlink.Task{}, agentlink.ErrInvalid
 	}
 	payload := encoded(r)

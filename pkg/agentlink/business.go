@@ -21,7 +21,7 @@ func validateDirectory(d Directory, node string) error {
 	}
 	seen := map[string]bool{}
 	for _, a := range d.Assistants {
-		if !validIdentity(a) || a.Address.NodeID != node || a.Adapter != d.Adapter || seen[a.Address.AgentID] {
+		if !validIdentity(a) || a.Address.Kind != "assistant" || a.Address.NodeID != node || a.Adapter != d.Adapter || seen[a.Address.AgentID] {
 			return ErrConflict
 		}
 		seen[a.Address.AgentID] = true
@@ -240,7 +240,7 @@ func (s *Service) Reconnect(ctx context.Context, id string) error {
 func (s *Service) Delete(ctx context.Context, id string) error { return s.Revoke(ctx, id) }
 
 func validateTask(t Task, node, id, request string) error {
-	if t.ID == "" || len(t.ID) > 256 || !validIdentity(t.Assistant) || t.Assistant.Address.NodeID != node || id != "" && t.ID != id || request != "" && t.RequestID != request || len(t.Result) > 1024*1024 || len(t.Error) > 65536 {
+	if t.ID == "" || len(t.ID) > 256 || !validIdentity(t.Assistant) || t.Assistant.Address.Kind != "assistant" || t.Assistant.Address.NodeID != node || id != "" && t.ID != id || request != "" && t.RequestID != request || len(t.Result) > 1024*1024 || len(t.Error) > 65536 {
 		return ErrConflict
 	}
 	switch t.State {

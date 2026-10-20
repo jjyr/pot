@@ -74,7 +74,7 @@ func TestTLSPreviewPairAndMessagesDoNotExposeCapabilitiesOnWire(t *testing.T) {
 		mu.Unlock()
 		workers.Wait()
 	})
-	invitation, err := b.service.Invite(ctx, "assistant", "tcp://"+listener.Addr().String())
+	invitation, err := b.service.Invite(ctx, "tcp://"+listener.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestTLSPreviewPairAndMessagesDoNotExposeCapabilitiesOnWire(t *testing.T) {
 	if leaked {
 		t.Fatal("preview exposed the still-unused capability to the TCP relay")
 	}
-	connection, err := a.service.Connect(ctx, "assistant", invitation.Address)
+	connection, err := a.service.Connect(ctx, invitation.Address)
 	if err != nil || connection.State != "ready" {
 		t.Fatal(connection, err)
 	}

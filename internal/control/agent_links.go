@@ -38,12 +38,17 @@ func (m controlLinkMailbox) PendingNode(ctx context.Context, local, peer string)
 	return m.s.Mailbox.PendingNode(ctx, local, peer)
 }
 func (m controlLinkMailbox) Deliver(ctx context.Context, value protocol.Envelope) (protocol.Receipt, error) {
-	if _, err := m.s.agentLinkIdentity(ctx, value.To.AgentID); err != nil {
-		return protocol.Receipt{}, err
-	}
 	direct, err := m.s.isLinkChatReply(ctx, value)
 	if err != nil {
 		return protocol.Receipt{}, err
+	}
+	if !direct {
+		if value.To.Kind != "assistant" {
+			return protocol.Receipt{}, agentlink.ErrNotFound
+		}
+		if _, err := m.s.agentLinkIdentity(ctx, value.To.AgentID); err != nil {
+			return protocol.Receipt{}, err
+		}
 	}
 	var receipt protocol.Receipt
 	if direct {
@@ -65,6 +70,9 @@ func (m controlLinkMailbox) Acknowledge(ctx context.Context, value protocol.Rece
 }
 
 func (s *Service) agentLinkIdentity(ctx context.Context, id string) (agentlink.Identity, error) {
+	if id == "" {
+		return agentlink.Identity{Address: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "node", AgentID: s.options.RuntimeID}, Name: "Pot", Adapter: "pot"}, nil
+	}
 	definitions, err := s.Registry.Definitions(ctx)
 	if err != nil {
 		return agentlink.Identity{}, err
@@ -193,20 +201,11 @@ func (s *Service) closeAgentLinks() error {
 	return nil
 }
 
-func (s *Service) AgentLinks(ctx context.Context, assistantID string) (any, error) {
+func (s *Service) AgentLinks(ctx context.Context) (any, error) {
 	if s.agentLinks == nil {
 		return nil, protocol.APIError{Code: "agent_link_unavailable"}
 	}
-	identity, err := s.agentLinkIdentity(ctx, assistantID)
-	if err != nil {
-		definitions, e := s.Registry.Definitions(ctx)
-		if e != nil {
-			return nil, e
-		}
-		if len(definitions) > 0 {
-			identity, err = s.agentLinkIdentity(ctx, definitions[0].ID)
-		}
-	}
+	identity, _ := s.agentLinkIdentity(ctx, "")
 	h := s.agentLinks
 	h.mu.Lock()
 	config := h.config
@@ -218,9 +217,6 @@ func (s *Service) AgentLinks(ctx context.Context, assistantID string) (any, erro
 	}
 	if networkError != "" {
 		status, reason = "needs_access", networkError
-	}
-	if err != nil {
-		status, reason = "needs_access", "agent_link_assistant_unavailable"
 	}
 	self := map[string]any{"id": identity.Address.AgentID, "node_id": s.options.RuntimeID, "kind": "pot", "name": identity.Name, "address": config.Endpoint, "endpoint": config.Endpoint, "status": status, "reason_code": reason}
 	localDirectory, _ := (potLinkBackend{s}).Directory(ctx)
@@ -262,15 +258,14 @@ func (s *Service) AgentLinks(ctx context.Context, assistantID string) (any, erro
 }
 
 type AgentLinkCommand struct {
-	Action      string `json:"action"`
-	AssistantID string `json:"assistant_id"`
-	Address     string `json:"address"`
-	ID          string `json:"id"`
-	Revision    int64  `json:"revision"`
-	RequestID   string `json:"request_id"`
-	Listen      string `json:"listen"`
-	Endpoint    string `json:"endpoint"`
-	Mode        string `json:"mode"`
+	Action    string `json:"action"`
+	Address   string `json:"address"`
+	ID        string `json:"id"`
+	Revision  int64  `json:"revision"`
+	RequestID string `json:"request_id"`
+	Listen    string `json:"listen"`
+	Endpoint  string `json:"endpoint"`
+	Mode      string `json:"mode"`
 }
 
 func agentLinkError(err error) error {
@@ -303,7 +298,7 @@ func (s *Service) ManageAgentLink(ctx context.Context, command AgentLinkCommand)
 		if endpoint == "" {
 			return nil, protocol.APIError{Code: "agent_link_access_required"}
 		}
-		invite, e := s.agentLinks.service.Invite(ctx, command.AssistantID, endpoint)
+		invite, e := s.agentLinks.service.Invite(ctx, endpoint)
 		err = e
 		result = map[string]any{"address": invite.Address, "expires_at_ms": invite.ExpiresAt.UnixMilli()}
 	case "preview":
@@ -316,7 +311,7 @@ func (s *Service) ManageAgentLink(ctx context.Context, command AgentLinkCommand)
 			"endpoint": preview.Endpoint, "fingerprint": preview.Fingerprint, "expires_at_ms": preview.ExpiresAt.UnixMilli(),
 		}, nil
 	case "connect":
-		result, err = s.agentLinks.service.Connect(ctx, command.AssistantID, command.Address)
+		result, err = s.agentLinks.service.Connect(ctx, command.Address)
 	case "disconnect":
 		var current agentlink.Connection
 		current, err = s.agentLinks.service.Get(ctx, command.ID)
@@ -411,7 +406,7 @@ func (s *Service) configureAgentAccess(ctx context.Context, command AgentLinkCom
 		h.networkError = ""
 		h.mu.Unlock()
 	}
-	return s.AgentLinks(ctx, command.AssistantID)
+	return s.AgentLinks(ctx)
 }
 
 func (s *Service) probeAgentEndpoint(ctx context.Context, endpoint string) error {

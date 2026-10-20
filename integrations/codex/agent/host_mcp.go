@@ -28,6 +28,9 @@ func (h *agentHost) tool(ctx context.Context, in hostToolInput) (any, error) {
 	case "assistants":
 		return h.backend.Directory(ctx)
 	case "send":
+		if in.AssistantID == "" {
+			return nil, errors.New("agent_link_target_required")
+		}
 		connections, err := h.links.List(ctx)
 		if err != nil {
 			return nil, err
@@ -43,12 +46,9 @@ func (h *agentHost) tool(ctx context.Context, in hostToolInput) (any, error) {
 					return nil, err
 				}
 				target := in.AssistantID
-				if target == "" {
-					target = directory.DefaultAssistantID
-				}
 				for _, a := range directory.Assistants {
 					if a.Address.AgentID == target {
-						return h.mailbox.sendFrom(ctx, h.backend.identity(from).Address, a.Address, in.RequestID, in.Text, in.AssistantID == "")
+						return h.mailbox.sendFrom(ctx, h.backend.identity(from).Address, a.Address, in.RequestID, in.Text)
 					}
 				}
 				return nil, errors.New("agent_link_not_found")
@@ -88,7 +88,7 @@ func hostMCPServer(client hostClient) *mcp.Server {
 		{Name: "pot_open_connections", Description: "Prepare the local Pot connections page. Open the returned temporary URL in the Codex in-app browser using open_in_codex (target type browser). Do not print or share the URL. It grants short-lived connection-page access, never the durable owner credential. Invitations stay in the page clipboard and are never returned to this tool.", InputSchema: toolSchema(map[string]any{})},
 		{Name: "pot_connections", Description: "List established Agent Link nodes and their available assistants and capabilities. Receiver-owned task execution uses the same authenticated connection; owner administration remains local.", InputSchema: toolSchema(map[string]any{})},
 		{Name: "pot_assistants", Description: "List this node's persistent virtual assistants and its default. Each assistant owns one serialized chat/task session.", InputSchema: toolSchema(map[string]any{})},
-		{Name: "pot_send", Description: "Send an explicitly authorized peer message to an established connection. The host binds the processing parent from this virtual assistant's active message, preserving its conversation and causal bound. Reuse request_id only for an identical retry. Durable acceptance is not remote assistant completion.", InputSchema: toolSchema(map[string]any{"connection_id": idSchema(), "assistant_id": idSchema(), "request_id": idSchema(), "text": textSchema(65536)}, "connection_id", "request_id", "text")},
+		{Name: "pot_send", Description: "Send an explicitly authorized peer message to an explicit assistant_id from the connection directory. No default recipient is selected. The host binds the processing parent from this virtual assistant's active message, preserving its conversation and causal bound. Reuse request_id only for an identical retry. Durable acceptance is not remote assistant completion.", InputSchema: toolSchema(map[string]any{"connection_id": idSchema(), "assistant_id": idSchema(), "request_id": idSchema(), "text": textSchema(65536)}, "connection_id", "assistant_id", "request_id", "text")},
 		{Name: "pot_message_receipt", Description: "Inspect an outgoing message's transport receipt. Received means durable remote inbox acceptance, not remote processing or task execution.", InputSchema: toolSchema(map[string]any{"message_id": idSchema()}, "message_id")},
 	}
 	for _, tool := range tools {

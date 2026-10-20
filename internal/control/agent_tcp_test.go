@@ -20,7 +20,7 @@ func TestDirectTCPAgentListenerPersistsAndKeepsOwnerAPIsPrivate(t *testing.T) {
 	}
 	endpoint := "tcp://" + available.Addr().String()
 	available.Close()
-	value, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", AssistantID: "main", Mode: "address", Endpoint: endpoint})
+	value, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", Mode: "address", Endpoint: endpoint})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,11 +28,11 @@ func TestDirectTCPAgentListenerPersistsAndKeepsOwnerAPIsPrivate(t *testing.T) {
 	if self["endpoint"] != endpoint || self["status"] != "ready" {
 		t.Fatal(self)
 	}
-	invitation, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "invite", AssistantID: "main"})
+	invitation, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "invite"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	link, err := a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "connect", AssistantID: "main", Address: invitation.(map[string]any)["address"].(string)})
+	link, err := a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "connect", Address: invitation.(map[string]any)["address"].(string)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestMissingVPNInterfaceKeepsControlAndAccessSetupAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatal("missing VPN interface prevented Control startup", err)
 	}
-	value, err := f.service.AgentLinks(ctx, "main")
+	value, err := f.service.AgentLinks(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
