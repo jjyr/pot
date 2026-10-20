@@ -24,6 +24,7 @@ type Selection struct {
 type ResolveModel func(context.Context, string, protocol.CreateTask) (Selection, error)
 type ResolveTarget func(context.Context, string) (core.ExecutionTarget, error)
 type Options struct {
+	OwnerAvailable   func(context.Context, string) error
 	ControlID        string
 	RuntimeID        string
 	Port             runner.Port

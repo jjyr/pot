@@ -455,3 +455,38 @@ INSERT INTO task_runs VALUES('control','task','run','digest','complete','boot','
 		t.Fatal(version, run, digest, checkpoint)
 	}
 }
+
+func TestAssistantDeletionUpgradePreservesExistingIdentity(t *testing.T) {
+	ctx := context.Background()
+	db := migrationDB(t)
+	data, err := fs.ReadFile(migrationFiles, "migrations/control/0001_baseline.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := fstest.MapFS{"migrations/control/0001_baseline.sql": &fstest.MapFile{Data: data}}
+	if err = migrateDatabase(ctx, db, ControlDatabase, prior); err != nil {
+		t.Fatal(err)
+	}
+	execMigrationSQL(t, db, "INSERT INTO assistant_definitions(id,name,revision,request_id,created_name) VALUES('main','Keep',7,'original','Keep')")
+	for range 2 {
+		if err = Migrate(ctx, db, ControlDatabase); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var name, request string
+	var revision int
+	var deleted bool
+	if err = db.QueryRow("SELECT name,revision,request_id,deleted FROM assistant_definitions WHERE id='main'").Scan(&name, &revision, &request, &deleted); err != nil {
+		t.Fatal(err)
+	}
+	if name != "Keep" || revision != 7 || request != "original" || deleted {
+		t.Fatal(name, revision, request, deleted)
+	}
+	execMigrationSQL(t, db, "UPDATE assistant_definitions SET deleted=1 WHERE id='main'")
+	if err = Migrate(ctx, db, ControlDatabase); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.QueryRow("SELECT deleted FROM assistant_definitions WHERE id='main'").Scan(&deleted); err != nil || !deleted {
+		t.Fatal(deleted, err)
+	}
+}

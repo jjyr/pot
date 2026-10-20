@@ -663,3 +663,6 @@ pot-file-image[data-state="error"] .file-image-status { color: var(--danger); }
 .update-confirmation { max-width: 440px; }
 .update-confirmation p { line-height: 1.6; color: var(--muted); }
 .update-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+
+.assistant-delete { margin-top: 28px; border-top: 1px solid var(--divider); padding-top: 16px; }
+.assistant-delete > .control { margin-top: 12px; }
