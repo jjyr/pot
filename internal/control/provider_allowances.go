@@ -174,6 +174,9 @@ func (s *Service) connectionAllowances(ctx context.Context, profileID string, re
 		view.Snapshot = &snapshot
 	}
 	status := b.Status
+	if b.Enabled && status == "disabled" {
+		status = "pending"
+	}
 	if !b.Enabled {
 		status = "disabled"
 	} else if b.Assistant == "" {

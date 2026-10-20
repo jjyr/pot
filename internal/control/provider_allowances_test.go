@@ -282,3 +282,37 @@ func TestProviderAllowanceRestartKeepsEpisodesAndOwnerSettings(t *testing.T) {
 		t.Fatal("restart replayed warning", events, err)
 	}
 }
+
+func TestProviderAllowanceReenableProjectsPendingUntilNextPoll(t *testing.T) {
+	ctx := context.Background()
+	s, server := allowanceFixture(t, func(w http.ResponseWriter, r *http.Request) { fixtureQuota(w, 50) })
+	profile := saveAllowanceProfile(t, s, "toggle", server.URL, "toggle-key")
+	owner, err := s.Registry.Create(ctx, "owner", "Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, _ := json.Marshal(allowanceMonitorConfig{Threshold: 90})
+	// A persisted disabled instance can precede host default initialization.
+	// Enabling changes owner intent without rewriting its producer checkpoint.
+	if err = s.Mailbox.ConfigureBackground(ctx, assistant.BackgroundBinding{ID: allowanceInstanceID(profile.ID, "quota-fixture"), PluginID: "quota-fixture", ConnectionID: profile.ID, Enabled: false, Assistant: owner.ID, Config: config}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.ConnectionAllowances(ctx, profile.ID)
+	if err != nil || before.Monitor.Enabled || before.Monitor.Status != "disabled" {
+		t.Fatal(before, err)
+	}
+	if err = s.ConfigureConnectionAllowance(ctx, profile.ID, ProviderAllowanceMonitorRequest{Enabled: true, Threshold: 90, Assistant: owner.ID, Revision: before.Monitor.Revision}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.ConnectionAllowances(ctx, profile.ID)
+	if err != nil || !after.Monitor.Enabled || after.Monitor.Status != "pending" || after.Monitor.Revision != before.Monitor.Revision+1 {
+		t.Fatal(after, err)
+	}
+	if err = s.ConfigureConnectionAllowance(ctx, profile.ID, ProviderAllowanceMonitorRequest{Enabled: false, Threshold: 90, Assistant: owner.ID, Revision: after.Monitor.Revision}); err != nil {
+		t.Fatal(err)
+	}
+	off, err := s.ConnectionAllowances(ctx, profile.ID)
+	if err != nil || off.Monitor.Status != "disabled" {
+		t.Fatal(off, err)
+	}
+}
