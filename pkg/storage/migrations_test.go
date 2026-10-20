@@ -22,9 +22,25 @@ func TestDefaultAvatarImageUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	old := fstest.MapFS{"migrations/control/0001_baseline.sql": &fstest.MapFile{Data: baseline}}
+	entries, err := fs.ReadDir(migrationFiles, "migrations/control")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name()[:4] > "0010" {
+			continue
+		}
+		path := "migrations/control/" + entry.Name()
+		data, err := fs.ReadFile(migrationFiles, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		old[path] = &fstest.MapFile{Data: data}
+	}
 	if err := migrateDatabase(ctx, db, ControlDatabase, old); err != nil {
 		t.Fatal(err)
 	}
+	priorCount := migrationCount(t, db)
 	execMigrationSQL(t, db, `INSERT INTO assistant_definitions(id,name,revision,request_id,created_name) VALUES
 ('missing','Missing',3,'seed-missing','Original'),('empty','Empty',4,'seed-empty','Empty'),('custom','Custom',5,'seed-custom','Custom');
 INSERT INTO assistant_profiles VALUES('empty',''),('custom','custom-image');
@@ -38,7 +54,7 @@ INSERT INTO assistant_profile_requests VALUES
 		t.Fatal("invalid historical seed accepted")
 	}
 	var created int
-	if err := db.QueryRow("SELECT COUNT(*) FROM assistant_profiles WHERE assistant_id='missing'").Scan(&created); err != nil || created != 0 || migrationCount(t, db) != 1 {
+	if err := db.QueryRow("SELECT COUNT(*) FROM assistant_profiles WHERE assistant_id='missing'").Scan(&created); err != nil || created != 0 || migrationCount(t, db) != priorCount {
 		t.Fatal("failed avatar migration did not roll back", err)
 	}
 	execMigrationSQL(t, db, "DELETE FROM assistant_profile_requests WHERE id='bad'")
@@ -457,36 +473,51 @@ INSERT INTO task_runs VALUES('control','task','run','digest','complete','boot','
 }
 
 func TestAssistantDeletionUpgradePreservesExistingIdentity(t *testing.T) {
-	ctx := context.Background()
-	db := migrationDB(t)
-	data, err := fs.ReadFile(migrationFiles, "migrations/control/0001_baseline.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	prior := fstest.MapFS{"migrations/control/0001_baseline.sql": &fstest.MapFile{Data: data}}
-	if err = migrateDatabase(ctx, db, ControlDatabase, prior); err != nil {
-		t.Fatal(err)
-	}
-	execMigrationSQL(t, db, "INSERT INTO assistant_definitions(id,name,revision,request_id,created_name) VALUES('main','Keep',7,'original','Keep')")
-	for range 2 {
-		if err = Migrate(ctx, db, ControlDatabase); err != nil {
-			t.Fatal(err)
-		}
-	}
-	var name, request string
-	var revision int
-	var deleted bool
-	if err = db.QueryRow("SELECT name,revision,request_id,deleted FROM assistant_definitions WHERE id='main'").Scan(&name, &revision, &request, &deleted); err != nil {
-		t.Fatal(err)
-	}
-	if name != "Keep" || revision != 7 || request != "original" || deleted {
-		t.Fatal(name, revision, request, deleted)
-	}
-	execMigrationSQL(t, db, "UPDATE assistant_definitions SET deleted=1 WHERE id='main'")
-	if err = Migrate(ctx, db, ControlDatabase); err != nil {
-		t.Fatal(err)
-	}
-	if err = db.QueryRow("SELECT deleted FROM assistant_definitions WHERE id='main'").Scan(&deleted); err != nil || !deleted {
-		t.Fatal(deleted, err)
+	for _, predecessor := range []string{"0001", "0011"} {
+		t.Run(predecessor, func(t *testing.T) {
+			ctx := context.Background()
+			db := migrationDB(t)
+			entries, err := fs.ReadDir(migrationFiles, "migrations/control")
+			if err != nil {
+				t.Fatal(err)
+			}
+			prior := fstest.MapFS{}
+			for _, entry := range entries {
+				if entry.Name()[:4] > predecessor {
+					continue
+				}
+				path := "migrations/control/" + entry.Name()
+				data, err := fs.ReadFile(migrationFiles, path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				prior[path] = &fstest.MapFile{Data: data}
+			}
+			if err = migrateDatabase(ctx, db, ControlDatabase, prior); err != nil {
+				t.Fatal(err)
+			}
+			execMigrationSQL(t, db, "INSERT INTO assistant_definitions(id,name,revision,request_id,created_name) VALUES('main','Keep',7,'original','Keep')")
+			for range 2 {
+				if err = Migrate(ctx, db, ControlDatabase); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var name, request string
+			var revision int
+			var deleted bool
+			if err = db.QueryRow("SELECT name,revision,request_id,deleted FROM assistant_definitions WHERE id='main'").Scan(&name, &revision, &request, &deleted); err != nil {
+				t.Fatal(err)
+			}
+			if name != "Keep" || revision != 7 || request != "original" || deleted {
+				t.Fatal(name, revision, request, deleted)
+			}
+			execMigrationSQL(t, db, "UPDATE assistant_definitions SET deleted=1 WHERE id='main'")
+			if err = Migrate(ctx, db, ControlDatabase); err != nil {
+				t.Fatal(err)
+			}
+			if err = db.QueryRow("SELECT deleted FROM assistant_definitions WHERE id='main'").Scan(&deleted); err != nil || !deleted {
+				t.Fatal(deleted, err)
+			}
+		})
 	}
 }
