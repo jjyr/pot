@@ -1,6 +1,6 @@
 # Model connections and metadata
 
-The node owns Space-wide model connections and metadata. Builtin providers,
+The node owns node-wide model connections and metadata. Builtin providers,
 Custom API and optional providers such as Magpie all register through the same
 [`contributes.model_providers` contract](plugins.md#model-connection-contributions).
 A package contributes connection types; owners create named connections with
@@ -22,7 +22,7 @@ an independent list of connection implementations. UI features and request forma
 follow registered capabilities and supported protocols.
 
 Gateway routes retain the namespaced type and package identity separately from
-public-directory identity. node migration 0016 assigns existing routes to
+public-directory identity. Migration 0016 assigns existing routes to
 Custom API while preserving endpoint, protocol, allowed hosts, credential
 references, route IDs and directory bindings. Package identity records provenance;
 a package update can supply the current adapter for a future metadata read.
@@ -86,12 +86,12 @@ changing that default initializes newly created assistants without altering exis
 assistants, connection order or Task snapshots. An assistant's Add Provider flow
 retains its settings draft, selects the newly saved connection when returning, and
 restores the prior selection on cancellation. One-click assistant creation uses the
-The node default connection and its concrete default model; missing configuration
+local node default connection and its concrete default model; missing configuration
 opens connection setup.
 
 First-use Chat explicitly calls `POST /api/v1/assistants/bootstrap` with its locale.
-The node creates a kitchen-named assistant only if the node has a default connection and no assistant
-history. Concurrent clients reuse that identity. Nested setup in an assistant draft
+The node creates a kitchen-named assistant only if a default connection exists and
+there is no assistant history. Concurrent clients reuse that identity. Nested setup in an assistant draft
 does not bootstrap another assistant.
 
 Provider setup uses the shared chooser and editor. Names and marks come from the
@@ -102,7 +102,7 @@ controls remain within the connection; their contract is described in
 [Plugins](plugins.md#connection-allowance-monitoring).
 
 API URLs accept HTTP/HTTPS origins, recognized version bases such as `/proxy/v1`,
-or complete inference endpoints. node shares one resolver across save,
+or complete inference endpoints. The node shares one resolver across save,
 discovery and tests. Origins default to `/v1` (`/v1beta` for Gemini); recognized
 bases receive the selected protocol's suffix. Complete custom paths are retained.
 A recognized endpoint for a different protocol is rejected, and the editor offers
