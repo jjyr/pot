@@ -64,7 +64,7 @@ func (e Envelope) Validate() error {
 		return fmt.Errorf("invalid Runtime task event")
 	}
 	if e.Kind == "plugin_event" {
-		if e.Plugin == nil || e.From.Kind != "runtime" || e.From.NodeID != e.To.NodeID || e.To.Kind != "assistant" || e.From.AgentID != "plugin-"+e.Plugin.Identity.ID || e.Result != nil || e.Owner != "" || e.RequestID != "" || e.Digest != "" || e.Hops != 0 || e.ReplyTo != nil {
+		if e.Plugin == nil || e.From.Kind != "runtime" || e.From.NodeID != e.To.NodeID || e.To.Kind != "assistant" || !core.Identifier(e.Plugin.Identity.ID) || !mailID(e.Plugin.InstanceID) || (e.Plugin.ConnectionID != "" && !core.Identifier(e.Plugin.ConnectionID)) || e.From.AgentID != "plugin-"+e.Plugin.InstanceID || e.Result != nil || e.Owner != "" || e.RequestID != "" || e.Digest != "" || e.Hops != 0 || e.ReplyTo != nil {
 			return fmt.Errorf("invalid plugin provenance")
 		}
 		if err := e.Plugin.Event.Validate(); err != nil {
@@ -197,6 +197,8 @@ func (r *RelayRequest) UnmarshalJSON(data []byte) error {
 
 // PluginNotification provenance is bound by the local background host.
 type PluginNotification struct {
-	Identity core.PluginIdentity `json:"identity"`
-	Event    core.PluginEvent    `json:"event"`
+	InstanceID   string              `json:"instance_id"`
+	ConnectionID string              `json:"connection_id,omitempty"`
+	Identity     core.PluginIdentity `json:"identity"`
+	Event        core.PluginEvent    `json:"event"`
 }

@@ -17,12 +17,16 @@ import (
 
 func (s *Service) ConfigurePluginNotifications(ctx context.Context, b assistant.BackgroundBinding) error {
 	return s.Machines.OwnerAction(func() error {
+		if b.ConnectionID != "" || b.PluginID != "" && b.PluginID != b.ID {
+			return errors.New("invalid plugin background identity")
+		}
+		b.PluginID = b.ID
 		if b.ID == "github" {
 			if err := validateGitHubNotificationConfig(b.Config); err != nil {
 				return err
 			}
 		}
-		_, err := s.backgroundPackage(b.ID)
+		_, err := s.backgroundPackage(b.PluginID)
 		if err != nil && b.ID != "github" {
 			return err
 		}
@@ -79,6 +83,7 @@ func (s *Service) pluginLoop() {
 }
 
 type backgroundStream struct {
+	pluginID string
 	revision int64
 	accounts string
 	digest   string
@@ -92,6 +97,9 @@ func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 		return
 	}
 	if err := s.ensureGitHubNotifications(ctx); err != nil {
+		return
+	}
+	if err := s.ensureProviderAllowanceBindings(ctx); err != nil {
 		return
 	}
 	bindings, err := s.Mailbox.Backgrounds(ctx)
@@ -110,7 +118,7 @@ func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 				valid = true
 			}
 		}
-		p, e := s.backgroundPackage(id)
+		p, e := s.backgroundPackage(active.pluginID)
 		identity, identityErr := p.BackgroundIdentity()
 		if !valid || catalogErr != nil || string(catalogJSON) != active.accounts || e != nil || identityErr != nil || identity.Digest != active.digest {
 			active.cancel()
@@ -123,7 +131,11 @@ func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 		if !b.Enabled || b.Next > now {
 			continue
 		}
-		p, err := s.backgroundPackage(b.ID)
+		if b.ConnectionID != "" {
+			s.runProviderAllowance(ctx, b, now)
+			continue
+		}
+		p, err := s.backgroundPackage(b.PluginID)
 		status := "unavailable"
 		if err == nil {
 			err = s.validateNotificationTarget(ctx, b.Assistant)
@@ -173,7 +185,7 @@ func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 						continue
 					}
 					catalogBytes, _ := json.Marshal(catalog)
-					s.pluginStreams[b.ID] = backgroundStream{revision: b.Revision, cancel: cancel, accounts: string(catalogBytes), digest: identity.Digest}
+					s.pluginStreams[b.ID] = backgroundStream{pluginID: b.PluginID, revision: b.Revision, cancel: cancel, accounts: string(catalogBytes), digest: identity.Digest}
 					s.pluginWG.Add(1)
 					go func() {
 						defer s.pluginWG.Done()
@@ -302,7 +314,7 @@ func (s *Service) PluginNotifications(ctx context.Context) (any, error) {
 	}
 	bindings := []assistant.BackgroundBinding{}
 	for _, id := range ids {
-		b := assistant.BackgroundBinding{ID: id, Enabled: id == "github", Config: json.RawMessage(`{}`), Status: "pending"}
+		b := assistant.BackgroundBinding{ID: id, PluginID: id, Enabled: id == "github", Config: json.RawMessage(`{}`), Status: "pending"}
 		for _, old := range stored {
 			if old.ID == id {
 				b = old

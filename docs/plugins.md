@@ -215,7 +215,7 @@ arriving while a summary runs follows the existing independent Main-turn path.
 Each exchange commits its checkpoint, next wake and **all** event envelopes in one
 SQLite transaction with the shared `agent_messages` inbox. The next request's
 checkpoint acknowledges durable acceptance, not assistant completion. IDs are
-unique per Control and plugin across account/route changes; include the account
+unique per Control and background instance across account/route changes; include the account
 identity in IDs. Identical retries retain their original recipient and receipt;
 conflicting content for the same ID rejects the whole exchange. Reconfiguring or
 disabling a binding fences an in-flight response. Disabling stops future acceptance;
@@ -227,7 +227,7 @@ Bounds are eight events per exchange, 24,000 UTF-8 bytes per body, 512 title byt
 256 ID bytes, 2,048 URL bytes (HTTPS), 2 MiB checkpoint, 3 MiB response and
 16 KiB config. Serialized event text must also fit the existing 64 KiB inbox
 text bound. Wake delays are 60–86,400 seconds. At most 64 queued events per
-plugin are accepted. Task results and plugin events share one receiver, in inbox
+background instance are accepted. Task results and plugin events share one receiver, in inbox
 receipt order, with at most eight messages and 256 KiB of serialized envelopes
 and summary payload per batch. An individually oversized task outcome is delivered
 alone, preserving the existing task-result progress policy. Plugin events always
@@ -334,3 +334,44 @@ fine-grained PATs. Pot reuses the connected account and never upgrades scopes or
 runs `gh auth login` automatically. A permission status requires checking the
 existing authorization/organization policy; a connected label alone does not
 prove this endpoint is usable.
+
+## Connection allowance monitoring
+
+Provider contributions with the `allowances` capability use the same durable
+background and inbox machinery. The host creates one instance per connection
+and source package. `plugin_id` identifies installed code; the binding's `id`
+identifies the independently configured instance, and `connection_id` identifies
+the saved model connection. Plugin event provenance carries both identities.
+Queue capacity, checkpoint acceptance, retry identity and routing are scoped to
+the instance. Existing GitHub and Codex instances keep their original IDs and
+accepted delivery receipts through migration.
+
+Allowance monitoring defaults to enabled at 90 percent. The first local assistant
+is selected when available; an empty target waits for the first assistant.
+An explicitly disabled monitor and its configured threshold survive refresh and
+reconnect. Removing an existing target does not silently select another assistant.
+The plugin notification settings list background contributions; connection
+monitors are configured within the connection's allowance details.
+
+Control reads the contribution's shared metadata cache using the current
+connection credential. Each quota window is compared independently, without
+adding percentages across windows or shared pools. One fresh known window at
+or above the threshold starts one connection-level warning episode. Labels,
+plan names, and ambiguous account/window identifiers remain reference data;
+they are not synthesized into identities or event deduplication keys.
+
+The episode checkpoint and its ordinary `plugin_event` are committed atomically.
+Further high observations remain quiet across process restarts. Recovery requires
+a complete, nonempty observation of known constrained windows below the threshold,
+followed by another distinct source observation at least 60 seconds later.
+Stale data, read failures, unknown values and empty snapshots cannot establish
+recovery. Explicit unlimited windows are ignored. Reset timestamp drift does not
+start another warning episode. The next high observation after confirmed recovery
+can emit a new warning. Without an available assistant, reads can update the
+cache but do not consume a warning episode.
+
+The host accepts only current connection routes, profile revisions, package
+digests and owner binding revisions. Credential/endpoint replacement, package
+disablement, retargeting or monitor edits fence an in-flight exchange. Permission
+failure for an allowance API is local to that metadata capability; it does not
+change the connection's inference availability or Pot's own spending policies.
