@@ -360,8 +360,12 @@ useful, explicit status and elapsed time. Routine task coordination uses localiz
 operation labels and keeps task IDs in expanded details. Ordinary closed rows use compact
 spacing and no visible border; consecutive tool rows have reduced spacing.
 Active operations also show their resolved machine and workdir.
-Failures keep a concise reason visible while collapsed. Expanded details show
-arguments, ordered output, final results and a secondary raw call/result disclosure.
+Collapsed failed and denied calls show a neutral Ended label without error diagnostics
+or a failure border. Opening a call reveals its precise failure or denial status,
+diagnostic, arguments, ordered output, final results and a secondary raw call/result disclosure.
+Waiting for approval, reconnecting and unconfirmed results keep their explicit
+statuses. Tool failures alone do not request user attention; task outcomes and
+approval or recovery controls communicate impact and required action.
 Commands, scripts and patches retain monospace formatting; supported image results
 render inline. No tool action implicitly repeats an operation.
 
@@ -392,9 +396,12 @@ shows Running, and an unresolved session after its turn ends is unconfirmed.
 Original calls and receipts stay in raw details.
 A yielded script stays active until its final receipt; an unresolved receipt after
 the turn ends is unconfirmed. Group duration spans its earliest execution through
-its latest finish rather than summing parallel durations. Failures remain visible
-in the group summary while later executions continue; selecting the diagnostic
-reveals the affected operation. Expanded history and output reading positions
+its latest finish rather than summing parallel durations. Group summaries show
+progress and a neutral Ended label for completed, failed or denied execution
+histories, without repeating child diagnostics or highlighting child failures.
+Original failure phases and receipts remain intact; expanded individual calls
+expose diagnostics, and a script diagnostic can reveal its affected child.
+Expanded history and output reading positions
 survive updates, and pending Task approvals open their group ancestors.
 
 Live output has bounded height and follows only while its reader stays near the

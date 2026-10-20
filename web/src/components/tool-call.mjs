@@ -14,11 +14,11 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',onDecis
   const t=name=>translate(locale(),`tool.${name}`),root=n('details','tool-call'),summary=n('summary','tool-summary');
   root.dataset.cacheKey=`tool:${key}`;
   const title=n('span','tool-title'),excerpt=n('span','tool-excerpt'),status=n('span','tool-status'),duration=n('span','tool-duration');summary.append(title,excerpt,status,duration);
-  const context=n('div','tool-context'),failure=n('p','tool-failure'),body=n('div','tool-body'),metadata=n('dl','tool-metadata'),approval=n('div','tool-approval'),children=n('div','tool-children'),sections=n('div'),raw=n('details','tool-raw'),rawTitle=n('summary'),rawBody=n('div');raw.append(rawTitle,rawBody);body.append(metadata,approval,children,sections,raw);summary.append(context,failure);root.append(summary,body);
-  let current,options={},signature='',approvalID='',approvalCard=null,rawSignature='',autoOpened=false,building=false;
+  const context=n('div','tool-context'),failure=n('p','tool-failure'),body=n('div','tool-body'),metadata=n('dl','tool-metadata'),approval=n('div','tool-approval'),children=n('div','tool-children'),sections=n('div'),raw=n('details','tool-raw'),rawTitle=n('summary'),rawBody=n('div');raw.append(rawTitle,rawBody);body.append(failure,metadata,approval,children,sections,raw);summary.append(context);root.append(summary,body);
+  let current,options={},signature='',approvalID='',approvalCard=null,rawSignature='',autoOpened=false,building=false,refreshStatus=()=>{};
   const sectionsByKey=new Map();
   root.open=memory.get(key)?.open||false;raw.open=memory.get(key)?.raw||false;
-  const remember=()=>{if(!building)memory.set(key,{...memory.get(key),open:root.open,raw:raw.open});};root.addEventListener('toggle',remember);raw.addEventListener('toggle',remember);
+  const remember=()=>{if(!building)memory.set(key,{...memory.get(key),open:root.open,raw:raw.open});};root.addEventListener('toggle',()=>{remember();refreshStatus();});raw.addEventListener('toggle',remember);
   function copyButton(label,get){const button=n('button','tool-action',label);button.type='button';button.onclick=async()=>{try{await navigator.clipboard.writeText(get());button.textContent=t('copied');}catch{button.textContent=t('copyFailed');}};return button;}
   function section(id,label,value,{output=false,markdown=false}={}){
     let item=sectionsByKey.get(id);
@@ -47,16 +47,21 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',onDecis
     title.textContent=names[tool.name]?t(names[tool.name]):tool.name;
     const preview=toolSummary(tool);
     excerpt.textContent=preview===tool.name||preview===title.textContent?'':preview;excerpt.title=excerpt.textContent;excerpt.hidden=!excerpt.textContent;
-    let shown=phase;
-    if(phase==='completed'&&result?.completed===false&&result?.exec_id&&!script)shown='scriptYielded';
     const childTools=(next.children||[]).map(child=>child.tool);
-    status.textContent=t(next.offline&&activeTool(tool)?'reconnecting':shown);
-    if(childTools.length&&!script&&!tool.process){const complete=childTools.filter(child=>!activeTool(child)).length;if(complete<childTools.length&&!next.offline)status.textContent=t(childTools.filter(activeTool).every(child=>child.phase==='waiting_approval')?'waiting_approval':'scriptRunning');status.textContent+=` · ${complete}/${childTools.length}`;}
+    // A tool failure is execution detail, not a request for the user's attention.
+    // Keep the original phase and reveal its precise label when the call is open.
+    refreshStatus=()=>{
+      let shown=phase;
+      if((isGroup&&['completed','failed','denied'].includes(phase))||(!root.open&&['failed','denied'].includes(phase)))shown='ended';
+      if(phase==='completed'&&result?.completed===false&&result?.exec_id&&!script)shown='scriptYielded';
+      status.textContent=t(next.offline&&activeTool(tool)?'reconnecting':shown);
+      if(childTools.length&&!script&&!tool.process){const complete=childTools.filter(child=>!activeTool(child)).length;if(complete<childTools.length&&!next.offline)status.textContent=t(childTools.filter(activeTool).every(child=>child.phase==='waiting_approval')?'waiting_approval':'scriptRunning');status.textContent+=` · ${complete}/${childTools.length}`;}
+    };
+    refreshStatus();
     if(script){
       const focus=script.focus,label=focus?.name==='exec_command'?focus.args?.cmd?.trim().split('\n')[0]:focus?(names[focus.name]?t(names[focus.name]):focus.name):'';
       title.textContent=isGroup?t('executionHistory'):label||t('script');
       excerpt.hidden=true;excerpt.textContent='';title.title=title.textContent;
-      if(isGroup&&tool.failurePhase&&['failed','denied'].includes(tool.failurePhase)&&!activeTool(tool))status.textContent=t('hasFailures');
     }
     root.dataset.phase=phase;root.dataset.callId=tool.id;root.dataset.turnId=tool.turn_id||'';
     const start=script?tool.started_at_ms:phase==='waiting_approval'?(tool.waiting_at_ms||tool.started_at_ms):(tool.running_at_ms||tool.started_at_ms);
@@ -64,7 +69,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',onDecis
     const elapsed=start?Math.max(0,((tool.finished_at_ms||Date.now())-start)/1000):null;
     duration.textContent=elapsed===null?'':`${phase==='waiting_approval'&&!script?t('waited')+' ':''}${elapsed<1?elapsed.toFixed(1):Math.floor(elapsed)}s`;
     context.textContent=[tool.target?.runtime_id,tool.workdir,tool.execution_mode==='host'?t('hostExecution'):tool.execution_mode==='sandbox'?t('sandboxExecution'):''].filter(Boolean).join(' · ');context.hidden=!activeTool(tool)||!context.textContent;
-    const error=tool.diagnostic||(tool.failurePhase?t(tool.failurePhase):['failed','denied','unknown'].includes(phase)?String(toolFailure(tool)||t(phase)).split('\n')[0]:'');failure.textContent=String(error).split('\n')[0];failure.hidden=!error;
+    const error=isGroup?'':tool.diagnostic||(tool.failurePhase?t(tool.failurePhase):['failed','denied','unknown'].includes(phase)?String(toolFailure(tool)||t(phase)).split('\n')[0]:'');failure.textContent=String(error).split('\n')[0];failure.hidden=!error;
     failure.onclick=script?event=>{event.preventDefault();root.open=true;queueMicrotask(()=>{const target=[...root.querySelectorAll('.tool-call')].find(node=>node.dataset.callId===(tool.failureID||script.failureID));if(target){for(let parent=target;parent&&parent!==root;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;target.scrollIntoView({block:'nearest'});}});}:null;
     if(script&&error){failure.tabIndex=0;failure.setAttribute('role','button');failure.onkeydown=event=>{if(['Enter',' '].includes(event.key)){event.preventDefault();failure.click();}};}else{failure.removeAttribute('tabindex');failure.removeAttribute('role');failure.onkeydown=null;}
     const nextSignature=JSON.stringify([tool.name,tool.target,tool.workdir,tool.execution_mode,locale()]);

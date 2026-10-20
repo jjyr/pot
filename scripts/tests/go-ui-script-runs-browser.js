@@ -1,5 +1,6 @@
 // Run through Playwright CLI against the disposable loopback preview.
-async page => {
+async parentPage => {
+ const context=await parentPage.context().browser().newContext({serviceWorkers:'block'}),page=await context.newPage();
  const assert=(value,message)=>{if(!value)throw Error(message);};
  const errors=[],onError=error=>errors.push(error.message);page.on('pageerror',onError);
  const at=Date.now()-24000;
@@ -10,15 +11,16 @@ async page => {
  let messages=[{id:'u',request_id:'request-u',role:'user',text:'检查项目配置并验证构建结果。',status:'complete'}, {id:'a',role:'assistant',text:'我会检查项目配置，然后验证构建结果。',reply_to:'u',status:'complete'},script('read','cat package.json'),child('read','cat package.json'),wait('read'),script('check','npm run check'),child('check','npm run check'),wait('check'),script('build','npm run build'),child('build','npm run build'),wait('build')];
  let cursor=0,running=false;
  const snapshot=()=>({api_version:3,cursor:++cursor,boot_id:'boot',conversation_id:'alpha',messages,turn:running?{user_message_id:'u',state:'running'}:null,agent:{phase:'ready',model:'test'}});
- await page.addInitScript(()=>{const toUIFrame=value=>({kind:'reset',base_cursor:0,view:{state:{...value,messages:[]},messages:value.messages.map((message,index)=>({message,sequence:String(index+1),version:value.cursor})),history:{before:'1',after:String(value.messages.length),has_more:false,has_newer:false}}});const sources=[];window.EventSource=class extends EventTarget{constructor(url){super();this.url=String(url);sources.push(this);queueMicrotask(()=>this.onopen?.({}));}close(){}};window.__scriptSnapshot=value=>{for(const source of sources)if(source.url.includes('/events'))source.dispatchEvent(new MessageEvent('conversation',{data:JSON.stringify(toUIFrame(value))}));};});
+ const frame=value=>({kind:'reset',base_cursor:0,view:{state:{...value,messages:[]},messages:value.messages.map((message,index)=>({message,sequence:String(index+1),version:value.cursor})),history:{before:'1',after:String(value.messages.length),has_more:false,has_newer:false}}});
+ await page.addInitScript(()=>{const toUIFrame=value=>({kind:'reset',base_cursor:0,view:{state:{...value,messages:[]},messages:value.messages.map((message,index)=>({message,sequence:String(index+1),version:value.cursor})),history:{before:'1',after:String(value.messages.length),has_more:false,has_newer:false}}});const sources=[];window.EventSource=class extends EventTarget{constructor(url){super();this.url=String(url);sources.push(this);queueMicrotask(async()=>{this.onopen?.({});if(this.url.includes('/events'))this.dispatchEvent(new MessageEvent('conversation',{data:JSON.stringify(await (await fetch('/api/v1/snapshot')).json())}));});}close(){}};window.__scriptSnapshot=value=>{for(const source of sources)if(source.url.includes('/events'))source.dispatchEvent(new MessageEvent('conversation',{data:JSON.stringify(toUIFrame(value))}));};});
  const access=route=>route.fulfill({json:{authenticated:true,push_available:false}});
- const handler=route=>{const path=new URL(route.request().url()).pathname;return route.fulfill({json:path==='/api/v1/runtime'?{runtime_id:'test',boot_id:'boot'}:path==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Local',kind:'local',connected:true}]}:path==='/api/v1/assistants'?[{id:'alpha',name:'Pot',revision:1}]:path==='/api/v1/snapshot'?snapshot():path==='/api/v1/permissions'?{pending:[],policy:{machines:{}}}:path==='/api/v1/usage/summary'?{total:{},quota:{active:false,policy:{period:'none'}}}:{items:[]}});};
+ const handler=route=>{const path=new URL(route.request().url()).pathname;return route.fulfill({json:path==='/api/v1/runtime'?{runtime_id:'test',boot_id:'boot'}:path==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Local',kind:'local',connected:true}]}:path==='/api/v1/assistants'?[{id:'alpha',name:'Pot',revision:1}]:path==='/api/v1/snapshot'?frame(snapshot()):path==='/api/v1/permissions'?{pending:[],policy:{machines:{}}}:path==='/api/v1/usage/summary'?{total:{},quota:{active:false,policy:{period:'none'}}}:{items:[]}});};
  await page.route('**/access/status',access);await page.route('**/api/v1/**',handler);
  try{
  await page.setViewportSize({width:1200,height:850});await page.goto('http://127.0.0.1:17702/?theme=light&locale=zh-CN&conversation=alpha');
- await page.locator('[data-call-id="read"]').waitFor({state:'attached'});
+ await page.locator('.script-group').waitFor({state:'attached'});
  const group=page.locator('.script-group').first(),implemented=await group.count()>0;
- const capture=async suffix=>{for(const [size,width]of [['desktop',1200],['mobile',390]]){await page.setViewportSize({width,height:850});await page.screenshot({path:`docs/pr-images/codex-group-script-executions/scripts-${size}-${suffix}.png`});}};
+ const capture=async suffix=>{for(const [size,width]of [['desktop',1200],['mobile',390]]){await page.setViewportSize({width,height:850});await page.screenshot({path:`output/pr-images/group-script-executions/scripts-${size}-${suffix}.png`});}};
  assert(implemented,'Script history is available');
  assert(await page.locator('.script-group').count()===1,'Consecutive runs share one group');
  assert(!await group.evaluate(node=>node.open),'Execution history starts collapsed');
@@ -26,7 +28,7 @@ async page => {
  assert(await page.locator('[data-call-id^="wait-"]').count()===0,'Waits update their original execution');
  await capture('after');await page.setViewportSize({width:1200,height:850});
  await group.locator(':scope > summary').click();
- await page.screenshot({path:'docs/pr-images/codex-group-script-executions/script-history-desktop-after.png'});
+ await page.screenshot({path:'output/pr-images/group-script-executions/script-history-desktop-after.png'});
  const read=page.locator('[data-call-id="read"]');await read.locator(':scope > summary').click();
  await read.locator(':scope > .tool-body > .tool-raw > summary').click();
  assert(await read.locator(':scope > .tool-body > .tool-raw').textContent().then(text=>text.includes('wait-read')&&text.includes('job-read')),'Raw wait receipts remain inspectable');
@@ -44,12 +46,21 @@ async page => {
  assert(await group.getAttribute('data-phase')==='running','Yielded scripts follow the request ID even when the user message has a different ID');
  messages.at(-1).tool.phase='failed';messages.at(-1).tool.result={exit_code:1,stderr:'Verification failed'};messages.at(-1).tool.finished_at_ms=Date.now();
  messages.push(wait('verify'));running=false;await page.evaluate(value=>window.__scriptSnapshot(value),snapshot());
- await group.locator(':scope > summary').getByText('执行中有失败项',{exact:true}).waitFor();
+ await group.locator(':scope > summary').getByText('已结束',{exact:true}).waitFor();
  await group.locator(':scope > summary').click();
- assert(await group.locator(':scope > summary .tool-failure').textContent()==='Verification failed','A collapsed group retains child failure details');
+ assert(await group.locator(':scope > summary .tool-failure').count()===0,'A collapsed group does not promote child diagnostics');
+ assert(await group.getAttribute('data-phase')==='failed','Quiet presentation retains the original failure phase');
+ assert(await group.evaluate(node=>getComputedStyle(node).borderLeftColor)==='rgba(0, 0, 0, 0)','A collapsed history has no failure border');
  await page.setViewportSize({width:390,height:850});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile groups do not overflow');
- await group.locator(':scope > summary .tool-failure').click();
+ await group.locator(':scope > summary').click();
+ const verify=page.locator('[data-call-id="verify"]');
+ await verify.locator(':scope > summary').getByText('已结束',{exact:true}).waitFor();
+ assert(!await verify.locator(':scope > .tool-body > .tool-failure').isVisible(),'A collapsed call keeps its diagnostic in details');
+ await verify.locator(':scope > summary').click();
+ await verify.locator(':scope > summary').getByText('失败',{exact:true}).waitFor();
+ await verify.locator(':scope > .tool-body > .tool-failure').click();
  assert(await page.locator('[data-call-id="child-verify"]').evaluate(node=>node.open),'Selecting a failure reveals its specific operation');
+ await page.locator('[data-call-id="child-verify"]').getByText('退出码 1',{exact:true}).waitFor();
  // Exercise the real Task component with ordered events and inline approval.
  await page.evaluate(async()=>{
   const {createTaskConversation}=await import('/components/task-conversation.mjs');
@@ -78,6 +89,6 @@ async page => {
   }finally{view.dispose();root.remove();}
  });
  assert(errors.length===0,errors.join('\n'));
- return 'Chat/Task grouping, merged waits, raw receipts, stable disclosure, failure locator, Task approvals and mobile layout passed';
- }finally{await page.unroute('**/api/v1/**',handler);await page.unroute('**/access/status',access);page.off('pageerror',onError);}
+ return 'Chat/Task grouping, merged waits, raw receipts, stable disclosure, quiet failures, expanded diagnostics, Task approvals and mobile layout passed';
+ }finally{await page.unroute('**/api/v1/**',handler);await page.unroute('**/access/status',access);page.off('pageerror',onError);await context.close();}
 }
