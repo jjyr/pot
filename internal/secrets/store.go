@@ -50,6 +50,10 @@ func Open(path string, keys KeySource) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err = storage.FinalizeNodeIdentity(context.Background(), db, keys); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db, keys}, nil
 }
 func (s *Store) Close() error { return s.db.Close() }

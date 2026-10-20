@@ -1,6 +1,7 @@
 import {reconcile} from './reconcile.mjs';
 import {node as n,action,field} from './primitives.mjs';
 import {icon} from './icons.mjs';
+import {translate} from '../locales/messages.mjs';
 
 export function renderMachinePermissions({root:target,machine,policy,request,scope,locale,refresh,edit,draft,isCurrent,stale=false}) {
   const root=n('div','machine-permissions');
@@ -15,7 +16,7 @@ export function renderMachinePermissions({root:target,machine,policy,request,sco
     if(blocked()||!draft.begin())return;
     draft.error='';update();
     try {
-      if(!isCurrent())throw Error(tr('Control identity changed. Reopen Machines.','Control 身份已变化，请重新打开机器页。'));
+      if(!isCurrent())throw Error(translate(locale(),'topology.controlChanged'));
       await request('/api/v1/permissions',{...scope,method:'POST',body});
       draft.settle(configure);await refresh();
     }catch(error){draft.settle(false);draft.error=error.message;if(target.isConnected)update();else await refresh();}
@@ -33,7 +34,7 @@ export function renderMachinePermissions({root:target,machine,policy,request,sco
       {name:'interactive',label:tr('Interactive host session','交互式宿主会话'),kind:'checkbox',help:tr('An interactive session may accept further commands.','交互式会话可以通过后续输入执行其他代码。')},
       {name:'tty',label:tr('Allocate terminal (TTY)','分配终端（TTY）'),kind:'checkbox'},
       {name:'credentials',label:tr('Credential bindings (JSON references)','凭据绑定（JSON 引用）'),kind:'textarea',help:'{"GH_TOKEN":{"service":"github"}}'},
-    ],save:values=>{if(!isCurrent())throw Error(tr('Control identity changed. Reopen Machines.','Control 身份已变化，请重新打开机器页。'));const {policy:effect,credentials,...command}=values;return request('/api/v1/permissions',{...scope,method:'POST',body:{action:'save_rule',old_id:existing?.id||'',expected_revision:current.revision,rule:{machine_id:id,context:{...command,...(credentials.trim()?{credentials:JSON.parse(credentials)}:{})},policy:effect}}});}});
+    ],save:values=>{if(!isCurrent())throw Error(translate(locale(),'topology.controlChanged'));const {policy:effect,credentials,...command}=values;return request('/api/v1/permissions',{...scope,method:'POST',body:{action:'save_rule',old_id:existing?.id||'',expected_revision:current.revision,rule:{machine_id:id,context:{...command,...(credentials.trim()?{credentials:JSON.parse(credentials)}:{})},policy:effect}}});}});
     form.form.querySelector('.editor-actions').before(n('p','hint permission-warning',warning));
   };
   const mode=field(tr('Default execution','默认执行方式'),draft.values.execution_access,{choices:Object.entries(labels)});

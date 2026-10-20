@@ -127,7 +127,7 @@ func TestConfiguredModelBackgroundUpdatesLive(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			notice := protocol.Envelope{Kind: "plugin_event", ID: "live-" + scenario.name, From: protocol.AgentRef{ControlID: "background-live", Kind: "runtime", AgentID: "plugin-example"}, To: protocol.AgentRef{ControlID: "background-live", Kind: "assistant", AgentID: "main"}, ConversationID: "00000000-0000-4000-8000-000000000001", Plugin: &protocol.PluginNotification{Identity: core.PluginIdentity{ID: "example", Version: "1", Digest: "installed"}, Event: core.PluginEvent{ID: scenario.name, Title: "项目状态", Body: scenario.body, URL: "https://example.com/releases/23", OccurredAt: "2026-10-19T00:00:00Z"}}}
+			notice := protocol.Envelope{Kind: "plugin_event", ID: "live-" + scenario.name, From: protocol.AgentRef{NodeID: "background-live", Kind: "runtime", AgentID: "plugin-example"}, To: protocol.AgentRef{NodeID: "background-live", Kind: "assistant", AgentID: "main"}, ConversationID: "00000000-0000-4000-8000-000000000001", Plugin: &protocol.PluginNotification{Identity: core.PluginIdentity{ID: "example", Version: "1", Digest: "installed"}, Event: core.PluginEvent{ID: scenario.name, Title: "项目状态", Body: scenario.body, URL: "https://example.com/releases/23", OccurredAt: "2026-10-19T00:00:00Z"}}}
 			if strings.HasSuffix(scenario.name, "-task") {
 				notice.Kind = "task_result"
 				notice.Plugin = nil

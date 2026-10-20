@@ -32,6 +32,7 @@ func productCommand(ctx context.Context, args []string, out io.Writer) (result e
 	workspace := flags.String("workspace", "", "Host Agent workspace")
 	ui := flags.String("ui", "", "explicit loopback browser address, for example 127.0.0.1:17703")
 	method := flags.String("method", "GET", "API method")
+	peerListen := flags.String("peer-listen", "", "authenticated TCP Agent and Runner listener, separate from owner HTTP")
 	listen := flags.String("listen", "", "explicit standalone Control listener")
 	cert := flags.String("tls-cert", "", "Control TLS certificate PEM")
 	key := flags.String("tls-key", "", "Control TLS private key PEM")
@@ -74,7 +75,7 @@ func productCommand(ctx context.Context, args []string, out io.Writer) (result e
 		if flags.NArg() != 0 {
 			return errors.New("unexpected positional arguments")
 		}
-		runtime, err := product.Open(ctx, product.Options{Root: *root, ResourceDirectory: *resources, Control: control.Options{Workspace: *workspace}})
+		runtime, err := product.Open(ctx, product.Options{Root: *root, ResourceDirectory: *resources, Control: control.Options{Workspace: *workspace, PeerListen: *peerListen}})
 		if err != nil {
 			return err
 		}
@@ -96,6 +97,12 @@ func productCommand(ctx context.Context, args []string, out io.Writer) (result e
 			defer cancel()
 			_ = socket.Close(shutdown)
 		}()
+		if *peerListen != "" {
+			if err = runtime.Control.Machines.EnableControl(); err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "Peer listener: %s\n", runtime.Control.PeerListenAddress())
+		}
 		failures := make(chan error, 1)
 		if *listen != "" {
 			if (*cert == "") != (*key == "") {

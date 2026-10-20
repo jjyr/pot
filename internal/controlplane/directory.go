@@ -78,7 +78,7 @@ func Open(path string, options Options) (*Directory, error) {
 			if e != nil {
 				return e
 			}
-			d.state = book{Version: 1, RuntimeID: options.RuntimeID, Key: base64.RawURLEncoding.EncodeToString(key), Owner: secret(), Role: "neutral", Members: map[string]member{}, Invites: map[string]invitation{}, LocalLabels: []string{"local", runtime.GOOS}}
+			d.state = book{Version: 2, RuntimeID: options.RuntimeID, Key: base64.RawURLEncoding.EncodeToString(key), Owner: secret(), Role: "neutral", Members: map[string]member{}, Invites: map[string]invitation{}, LocalLabels: []string{"local", runtime.GOOS}}
 			raw, err = json.Marshal(d.state)
 			if err != nil {
 				return err
@@ -94,7 +94,7 @@ func Open(path string, options Options) (*Directory, error) {
 	if err != nil {
 		return fail(err)
 	}
-	if d.state.Version != 1 || d.state.RuntimeID != options.RuntimeID || (d.state.Role != "neutral" && d.state.Role != "control" && d.state.Role != "runner") || (options.Embedded && d.state.Role != "neutral") || d.state.Members == nil || d.state.Invites == nil || len(d.state.Owner) != 43 {
+	if d.state.Version != 2 || d.state.RuntimeID != options.RuntimeID || (d.state.Role != "neutral" && d.state.Role != "control" && d.state.Role != "runner") || (options.Embedded && d.state.Role != "neutral") || d.state.Members == nil || d.state.Invites == nil || len(d.state.Owner) != 43 {
 		return fail(fmt.Errorf("invalid Control directory schema/role/owner"))
 	}
 	key, err := base64.RawURLEncoding.DecodeString(d.state.Key)
@@ -330,11 +330,10 @@ func (d *Directory) Remove(ctx context.Context, id string) error {
 	return err
 }
 func validateMembership(m Membership, runtimeID string) error {
-	if _, err := ClientForCA(nil, m.CAPEM); err != nil {
-		return err
-	}
-	if err := ValidOrigin(m.Origin); err != nil {
-		return err
+	if m.Origin != "" {
+		if err := ValidOrigin(m.Origin); err != nil {
+			return err
+		}
 	}
 	e := m.Enrollment
 	if e.Version != 1 || e.RuntimeID != runtimeID || e.Control.RuntimeID == runtimeID || e.Epoch == 0 || e.Epoch > core.MaxSafeInteger || len(e.Token) != 43 {
@@ -410,9 +409,10 @@ func (d *Directory) prepareJoin(origin string, control Identity, code string, id
 		}
 		if b.Pending != nil {
 			p := b.Pending
-			if p.Origin != origin || p.Control != control || p.Request.Invitation != code || (len(ids) == 1 && p.Request.RequestID != requestID) {
+			if (p.Origin != "" && p.Origin != origin) || p.Control != control || p.Request.Invitation != code || (len(ids) == 1 && p.Request.RequestID != requestID) {
 				return fmt.Errorf("enrollment already pending; retry original identity")
 			}
+			p.Origin = origin
 			request = p.Request
 			return nil
 		}
@@ -459,4 +459,41 @@ func (d *Directory) Leave(ctx context.Context, settle func(context.Context) erro
 
 		return nil
 	})
+}
+
+// SetEndpoint repairs only the transport location of the originally pinned
+// Control. It retains epochs, credentials, join intent and execution receipts.
+func (d *Directory) SetEndpoint(ctx context.Context, endpoint string, pinned Identity) error {
+	if err := ValidOrigin(endpoint); err != nil {
+		return err
+	}
+	if err := pinned.Validate(); err != nil {
+		return err
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	err := d.update(func(b *book) error {
+		if b.Membership != nil {
+			if b.Membership.Enrollment.Control != pinned {
+				return ErrUnauthorized
+			}
+			b.Membership.Origin = endpoint
+			return nil
+		}
+		if b.Pending != nil {
+			if b.Pending.Control != pinned {
+				return ErrUnauthorized
+			}
+			b.Pending.Origin = endpoint
+			return nil
+		}
+		return ErrUnauthorized
+	})
+	if err == nil {
+		for id, p := range d.peers {
+			p.Close()
+			delete(d.peers, id)
+		}
+	}
+	return err
 }

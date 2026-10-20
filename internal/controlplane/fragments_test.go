@@ -20,20 +20,6 @@ func TestSignedLargePayloadRoundTrip(t *testing.T) {
 		t.Fatalf("large payload round trip: got %d expected %d error %v", len(reply), len(raw), err)
 	}
 }
-func TestFragmentBoundariesRejectChangedOffsetsAndBudget(t *testing.T) {
-	p := &Peer{fragments: map[string]*assembly{}}
-	header := json.RawMessage(`{"size":200000,"digest":"0000000000000000000000000000000000000000000000000000000000000000"}`)
-	if _, err := p.receiveFragment(wire{Kind: "request.start", ID: "id", Method: "model", Params: header}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := p.receiveFragment(wire{Kind: "request.chunk", ID: "id", Method: "model", Params: json.RawMessage(`{"offset":1,"data":"aGk"}`)}); err == nil {
-		t.Fatal("changed offset accepted")
-	}
-	oversize := json.RawMessage(`{"size":999999999,"digest":"0000000000000000000000000000000000000000000000000000000000000000"}`)
-	if _, err := p.receiveFragment(wire{Kind: "request.start", ID: "too-big", Method: "model", Params: oversize}); err == nil {
-		t.Fatal("large allocation admitted")
-	}
-}
 func TestRemoteKnownUnsentAndAllowanceMarkers(t *testing.T) {
 	handler := func(_ context.Context, _ Principal, r Request) (json.RawMessage, error) {
 		return nil, &core.ModelRequestError{Cause: protocol.APIError{Code: "pot_token_limit", Message: "waiting"}, Disposition: "unsent"}

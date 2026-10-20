@@ -14,7 +14,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jjyr/pot/pkg/core"
+	"net"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -86,8 +88,16 @@ func secureToken(a, b string) bool {
 }
 func ValidOrigin(raw string) error {
 	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
-		return fmt.Errorf("Control URL must be an HTTP(S) origin")
+	if err != nil || u.Scheme != "tcp" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
+		return fmt.Errorf("Control endpoint must be tcp://host:port")
+	}
+	_, port, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		return err
+	}
+	number, err := strconv.Atoi(port)
+	if err != nil || number < 1 || number > 65535 {
+		return fmt.Errorf("Control TCP port required")
 	}
 	return nil
 }
@@ -149,7 +159,6 @@ type Enrollment struct {
 type Membership struct {
 	Origin     string     `json:"origin"`
 	Enrollment Enrollment `json:"enrollment"`
-	CAPEM      string     `json:"ca_pem,omitempty"`
 }
 type Principal struct {
 	RuntimeID string

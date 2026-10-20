@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/peer"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -29,7 +31,7 @@ func pair(t *testing.T, controlHandler, runnerHandler Handler) (*Directory, *Dir
 	if err := control.EnableControl(); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(&Server{Directory: control, Handler: controlHandler})
+	server := peerServer(t, &Server{Directory: control, Handler: controlHandler})
 	t.Cleanup(server.Close)
 	connector := &Connector{Directory: worker, Handler: runnerHandler}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -126,7 +128,7 @@ func TestInvitationRetryAndDurableIdentity(t *testing.T) {
 	worker := directory(t, "worker")
 	control.EnableControl()
 	inv, _ := control.Invitation(ctx, time.Hour)
-	signed, err := worker.prepareJoin("http://localhost:12345", control.Identity(), inv.Code)
+	signed, err := worker.prepareJoin("tcp://localhost:12345", control.Identity(), inv.Code)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +160,7 @@ func TestInvitationRetryAndDurableIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := d.Identity()
-	if err = d.SaveMembership(ctx, Membership{Origin: "http://localhost:12345", Enrollment: e}); err != nil {
+	if err = d.SaveMembership(ctx, Membership{Origin: "tcp://localhost:12345", Enrollment: e}); err != nil {
 		t.Fatal(err)
 	}
 	d.Close()
@@ -181,15 +183,17 @@ func TestPinnedJoinAndOwnerMemberSeparation(t *testing.T) {
 	var ownerCalls atomic.Int32
 	server := httptest.NewServer(&Server{Directory: control, OwnerHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { ownerCalls.Add(1); w.WriteHeader(200) })})
 	defer server.Close()
+	endpoint := peerServer(t, &Server{Directory: control})
+	defer endpoint.Close()
 	ctx := context.Background()
 	inv, _ := control.Invitation(ctx, time.Hour)
 	connector := Connector{Directory: worker}
 	wrong := control.Identity()
 	wrong.Fingerprint = "wrong"
-	if _, err := connector.Enroll(ctx, server.URL, wrong, inv.Code); err == nil {
+	if _, err := connector.Enroll(ctx, endpoint.URL, wrong, inv.Code); err == nil {
 		t.Fatal("invalid fingerprint accepted")
 	}
-	member, err := connector.Enroll(ctx, server.URL, control.Identity(), inv.Code)
+	member, err := connector.Enroll(ctx, endpoint.URL, control.Identity(), inv.Code)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,19 +248,24 @@ func TestDroppedReplyDoesNotResend(t *testing.T) {
 		t.Fatal("effect resubmitted")
 	}
 }
-func TestSignedAudienceAndEpoch(t *testing.T) {
-	control, worker, peer := pair(t, nil, nil)
-	remote := waitPeer(t, control, "worker")
-	message := wire{Version: 1, Sender: worker.Identity().RuntimeID, Audience: control.Identity().RuntimeID, Epoch: 2, Kind: "request", ID: "bad", Method: "test.bad", Params: json.RawMessage(`{}`)}
-	signed, _ := sign(worker.key, message)
-	raw, _ := json.Marshal(signed)
-	if err := peer.conn.Write(context.Background(), 1, raw); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-remote.Done():
-	case <-time.After(time.Second):
+func TestExecutionSessionRejectsWrongMembershipEpochAndNodeKey(t *testing.T) {
+	control, worker, _ := pair(t, nil, nil)
+	server := peerServer(t, &Server{Directory: control})
+	defer server.Close()
+	identity, key := worker.TransportIdentity()
+	expected := control.Identity().TransportIdentity()
+	member := worker.Membership()
+	auth, _ := json.Marshal(executionAuth{Epoch: member.Enrollment.Epoch + 1, Token: member.Enrollment.Token})
+	if session, err := peer.Dial(context.Background(), server.URL, peer.DialOptions{Identity: identity, PrivateKey: key, Expected: &expected, Service: ExecutionService, Auth: auth}); err == nil {
+		session.Close()
 		t.Fatal("wrong membership epoch accepted")
+	}
+	impostor := directory(t, "worker")
+	identity, key = impostor.TransportIdentity()
+	auth, _ = json.Marshal(executionAuth{Epoch: member.Enrollment.Epoch, Token: member.Enrollment.Token})
+	if session, err := peer.Dial(context.Background(), server.URL, peer.DialOptions{Identity: identity, PrivateKey: key, Expected: &expected, Service: ExecutionService, Auth: auth}); err == nil {
+		session.Close()
+		t.Fatal("member token accepted under another node key")
 	}
 }
 func TestEmbeddedCannotServeOrJoin(t *testing.T) {
@@ -275,3 +284,23 @@ func TestEmbeddedCannotServeOrJoin(t *testing.T) {
 		t.Fatal("embedded listener exposed")
 	}
 }
+
+type peerFixture struct {
+	URL      string
+	cancel   context.CancelFunc
+	listener net.Listener
+	done     chan struct{}
+}
+
+func peerServer(t *testing.T, server *Server) *peerFixture {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	fixture := &peerFixture{URL: "tcp://" + listener.Addr().String(), cancel: cancel, listener: listener, done: make(chan struct{})}
+	go func() { defer close(fixture.done); _ = server.PeerServer().Serve(ctx, listener) }()
+	return fixture
+}
+func (p *peerFixture) Close() { p.cancel(); _ = p.listener.Close(); <-p.done }

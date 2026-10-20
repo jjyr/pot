@@ -55,10 +55,10 @@ type Options struct {
 	Composer agent.Composer
 	// Embedded fixes this host's control role and disables joining another host.
 	Embedded bool
+	// PeerListen optionally binds the authenticated TCP Agent/Runner listener.
+	PeerListen string
 	// DisableMetadataRefresh prevents background provider metadata refresh.
 	DisableMetadataRefresh bool
-	// ControlHTTPClient customizes calls to other hosts.
-	ControlHTTPClient *http.Client
 	// Name is the host name returned by the operator API; it defaults to Pot.
 	Name string
 }
@@ -100,9 +100,8 @@ func Open(ctx context.Context, options Options) (*Runtime, error) {
 		Control: control.Options{
 			Workspace: options.Workspace, AgentHome: options.AgentHome,
 			BuiltinSkills: options.BuiltinSkills, PluginRoot: options.PluginRoot,
-			Node: options.Node, Keys: options.Keys, Embedded: options.Embedded,
-			Composer:          composer,
-			ControlHTTPClient: options.ControlHTTPClient,
+			Node: options.Node, Keys: options.Keys, Embedded: options.Embedded, PeerListen: options.PeerListen,
+			Composer: composer,
 		},
 	})
 	if err != nil {

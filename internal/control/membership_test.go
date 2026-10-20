@@ -4,7 +4,6 @@ import (
 	"context"
 	"github.com/jjyr/pot/internal/controlplane"
 	"github.com/jjyr/pot/pkg/core"
-	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -34,8 +33,7 @@ func TestConfiguredProviderOrAssistantCannotBecomeRunnerAndRunnerCannotSaveProvi
 	if err := control.Machines.EnableControl(); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(control.ControlServer(nil))
-	defer server.Close()
+	server := controlPeerEndpoint(control)
 	enroll := func(s *Service) error {
 		t.Helper()
 		invitation, err := control.Machines.Invitation(ctx, time.Hour)
@@ -43,11 +41,11 @@ func TestConfiguredProviderOrAssistantCannotBecomeRunnerAndRunnerCannotSaveProvi
 			t.Fatal(err)
 		}
 		connector := controlplane.Connector{Directory: s.Machines}
-		preview, err := connector.Preview(ctx, server.URL)
+		preview, err := connector.Preview(ctx, server)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = connector.Enroll(ctx, server.URL, preview, invitation.Code, "join-"+s.options.RuntimeID)
+		_, err = connector.Enroll(ctx, server, preview, invitation.Code, "join-"+s.options.RuntimeID)
 		return err
 	}
 	save := func(s *Service) (core.Profile, error) {
@@ -94,14 +92,13 @@ func TestRemovingRemoteRunnerClearsPermissionsAndRetainsLocalDefault(t *testing.
 	if err := control.Machines.EnableControl(); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(control.ControlServer(nil))
-	defer server.Close()
+	server := controlPeerEndpoint(control)
 	invitation, err := control.Machines.Invitation(ctx, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	connector := controlplane.Connector{Directory: worker.Machines}
-	if _, err = connector.Enroll(ctx, server.URL, control.Machines.Identity(), invitation.Code); err != nil {
+	if _, err = connector.Enroll(ctx, server, control.Machines.Identity(), invitation.Code); err != nil {
 		t.Fatal(err)
 	}
 	if err = control.Permissions.Enroll("worker", "fixture-epoch"); err != nil {
@@ -128,5 +125,33 @@ func TestRemovingRemoteRunnerClearsPermissionsAndRetainsLocalDefault(t *testing.
 	machine, err := control.selectTaskMachine(ctx, "")
 	if err != nil || machine != "control" {
 		t.Fatal("removing remote member changed local default", machine, err)
+	}
+}
+
+func controlPeerEndpoint(s *Service) string { return "tcp://" + s.agentLinks.server.Addr() }
+
+func TestRunnerEndpointRepairRequiresExplicitOriginalIdentity(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	owner := taskControl(t, "repair-owner", "")
+	owner.Machines.EnableControl()
+	worker := taskControl(t, "repair-worker", "")
+	invitation, _ := owner.Machines.Invitation(ctx, time.Hour)
+	endpoint := controlPeerEndpoint(owner)
+	connector := controlplane.Connector{Directory: worker.Machines}
+	member, err := connector.Enroll(ctx, endpoint, owner.Machines.Identity(), invitation.Code, "original-join")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, identity := range []struct{ id, fingerprint string }{{"", ""}, {"wrong", member.Enrollment.Control.Fingerprint}, {member.Enrollment.Control.RuntimeID, "wrong"}} {
+		if _, err = worker.ManageMembership(ctx, MembershipCommand{Action: "set_endpoint", URL: endpoint, ExpectedRuntimeID: identity.id, ExpectedFingerprint: identity.fingerprint}); err == nil {
+			t.Fatal("endpoint repair omitted original identity confirmation")
+		}
+	}
+	if _, err = worker.ManageMembership(ctx, MembershipCommand{Action: "set_endpoint", URL: endpoint, ExpectedRuntimeID: member.Enrollment.Control.RuntimeID, ExpectedFingerprint: member.Enrollment.Control.Fingerprint}); err != nil {
+		t.Fatal(err)
+	}
+	if worker.Machines.Membership().Enrollment != member.Enrollment {
+		t.Fatal("endpoint repair replaced membership")
 	}
 }

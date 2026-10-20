@@ -75,7 +75,8 @@ func (s *Service) remote() *remoteState {
 	}
 	return s.taskLife.remote
 }
-func (s *Service) ControlServer(owner http.Handler) http.Handler {
+func (s *Service) ControlServer(owner http.Handler) http.Handler { return s.machinePeerServer(owner) }
+func (s *Service) machinePeerServer(owner http.Handler) *controlplane.Server {
 	return &controlplane.Server{Directory: s.Machines, Handler: s.controlRPC, OwnerHandler: owner, OnEnroll: s.enrollRemotePolicy, OnPresence: func(string, bool) { s.Changes.Notify("machines"); s.wakeTasks() }}
 }
 func (s *Service) enrollRemotePolicy(ctx context.Context, m controlplane.Machine) error {
@@ -87,8 +88,14 @@ func (s *Service) enrollRemotePolicy(ctx context.Context, m controlplane.Machine
 	return s.Permissions.Enroll(m.Identity.RuntimeID, epoch)
 }
 func (s *Service) RunnerConnect(ctx context.Context) (*controlplane.Peer, error) {
-	connector := controlplane.Connector{Directory: s.Machines, HTTPClient: s.options.ControlHTTPClient, Handler: controlplane.RunnerHandler(s.Machines, remoteRunnerPort{s}, s.runnerRPC)}
-	return connector.Connect(ctx)
+	if s.linkPlugins == nil {
+		return nil, errors.New("execution plugin unavailable")
+	}
+	plugin, err := s.linkPlugins.Execution("runner")
+	if err != nil {
+		return nil, err
+	}
+	return plugin.Connect(ctx)
 }
 
 // RunnerServe reconnects the outward session only. Agent/command/model requests
@@ -846,7 +853,7 @@ func (s *Service) prepareRemoteTask(ctx context.Context, r runner.Run) (runner.P
 	}
 	execution.ContextSections = append(execution.ContextSections, core.ContextSection{Key: "environment", Text: "cwd: " + execution.Workspace})
 	execution.Role = core.Worker
-	addresses, _ := json.Marshal(map[string]protocol.AgentRef{"self": {ControlID: l.ControlID, Kind: "task", AgentID: l.TaskID}, "owner_assistant": {ControlID: l.ControlID, Kind: "assistant", AgentID: l.AssistantID}})
+	addresses, _ := json.Marshal(map[string]protocol.AgentRef{"self": {NodeID: l.ControlID, Kind: "task", AgentID: l.TaskID}, "owner_assistant": {NodeID: l.ControlID, Kind: "assistant", AgentID: l.AssistantID}})
 	execution.ContextSections = append(execution.ContextSections, core.ContextSection{Key: "agent-addresses", Text: string(addresses)})
 	execution.SkillResources.Roots = append(execution.SkillResources.Roots, roots...)
 	execution.SkillResources.Selection = nil

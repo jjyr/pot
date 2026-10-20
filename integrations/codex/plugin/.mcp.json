@@ -2,7 +2,7 @@
   "mcpServers": {
     "pot": {
       "command": "__POT_BRIDGE_EXECUTABLE__",
-      "args": ["mcp", "--config", "__POT_LOCAL_PAIR_FILE__"]
+      "args": ["host", "--root", "__POT_AGENT_HOST_ROOT__"]
     }
   }
 }

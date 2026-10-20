@@ -20,6 +20,15 @@ complete-host facade and may compose `internal/` services behind private fields.
 Internal implementation types do not appear in its public signatures. See
 [component boundaries](backend-components.md) for package responsibilities.
 
+## Native peer transport
+
+`pkg/peer` provides framed TCP sessions with Ed25519 identity verification,
+session-bound signed frames, service admission and bidirectional RPC. Hosts inject
+keys and handlers; the package has no product or third-party dependencies.
+Use `Server` with a caller-created listener and `Dial` with a trusted expected
+identity. Business permissions and durable recovery remain in the service;
+uncertain calls are never automatically replayed. See [Peer protocol](peer-protocol.md).
+
 ## Third-party integrations
 
 `pkg/integrations` provides account and OAuth session lifecycle behind injected
@@ -132,6 +141,10 @@ all use of borrowed managers before closing it. `Info()` returns a copy of its
 identity. `Handler(token)` provides the authenticated operator API, including
 streams; the caller owns the listener, transport and token distribution. An empty
 token denies all requests. The facade does not publish the shared browser UI.
+Its separate Agent/Runner peer host runs under the same lifecycle. `PeerListen`
+optionally overrides the TCP bind address; owner HTTP listeners and TLS settings
+are independent. Peer connections use the shared [TCP protocol](peer-protocol.md)
+and do not accept an HTTP client or private CA.
 
 Provider credentials use the system key store by default. Applications can
 provide a `runtime.KeySource` with a persistent 32-byte key. Preserve that key

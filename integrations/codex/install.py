@@ -77,9 +77,9 @@ def install(home, binary, build=True, codex=None):
     mcp = json.loads(desired[".mcp.json"])
     mcp["mcpServers"]["pot"]["command"] = str(destination / "bin/pot-codex-bridge")
     mcp["mcpServers"]["pot"]["args"] = [
-        "mcp",
-        "--config",
-        str(home / ".config/pot-codex/local-pair.json"),
+        "host",
+        "--root",
+        str(home / ".config/pot-codex/agent"),
     ]
     desired[".mcp.json"] = (json.dumps(mcp, indent=2) + "\n").encode()
     # Protect edits and unmanaged packages; local-pair.json belongs to the owner.
@@ -149,7 +149,7 @@ def install(home, binary, build=True, codex=None):
     print(f"Installed local plugin source: {destination}")
     print("Local source registered; enable Pot with a supported Codex CLI or plugin directory.")
     print(
-        "Pairing and a running Bridge are still required; no network/system configuration was changed."
+        "The message Bridge starts automatically when Codex enables the plugin. Open its connections page with pot_open_connections; no network/system configuration was changed."
     )
     return destination
 

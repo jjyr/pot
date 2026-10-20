@@ -55,7 +55,11 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "pot")
         mcp = json.loads((destination / manifest["mcpServers"]).read_text())["mcpServers"]["pot"]
         self.assertEqual(mcp["command"], str(destination / "bin/pot-codex-bridge"))
-        self.assertTrue((destination / manifest["skills"] / "pot/SKILL.md").is_file())
+        self.assertEqual(
+            mcp["args"], ["host", "--root", str(self.home / ".config/pot-codex/agent")]
+        )
+        self.assertNotIn("skills", manifest)
+        self.assertTrue((destination / "skills/pot/SKILL.md").is_file())
 
     def test_local_edits_are_retained(self):
         destination = self.install()
@@ -85,7 +89,7 @@ class InstallTests(unittest.TestCase):
                     self.home, self.home / ".codex", os.environ["POT_CODEX_CLI_TEST"]
                 )
             )
-        cache = self.home / ".codex/plugins/cache/personal/pot/0.1.0"
+        cache = self.home / ".codex/plugins/cache/personal/pot/0.4.0"
         self.assertTrue((cache / ".codex-plugin/plugin.json").is_file())
         self.assertFalse((cache / "local-pair.json").exists())
         self.assertFalse((cache / "bridge.json").exists())

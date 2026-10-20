@@ -26,7 +26,7 @@ func CorrespondenceKey(message protocol.Envelope) string {
 }
 
 const sameMailGroup = `b.direction='in' AND json_extract(b.envelope,'$.kind')='message' AND b.recipient=m.recipient
- AND json_extract(b.envelope,'$.from.control_id')=json_extract(m.envelope,'$.from.control_id')
+ AND json_extract(b.envelope,'$.from.node_id')=json_extract(m.envelope,'$.from.node_id')
  AND json_extract(b.envelope,'$.from.kind')=json_extract(m.envelope,'$.from.kind')
  AND json_extract(b.envelope,'$.from.agent_id')=json_extract(m.envelope,'$.from.agent_id')`
 
@@ -67,7 +67,7 @@ func (m *Mailbox) ClaimMailBatch(ctx context.Context, seed protocol.Envelope) (M
 				return errors.New("waiting batch membership is incomplete")
 			}
 		} else {
-			rows, err := tx.QueryContext(ctx, `SELECT envelope FROM agent_messages WHERE direction='in' AND state='queued' AND recipient=? AND json_extract(envelope,'$.kind')='message' AND json_extract(envelope,'$.from.control_id')=? AND json_extract(envelope,'$.from.kind')=? AND json_extract(envelope,'$.from.agent_id')=? ORDER BY sequence LIMIT ?`, seed.To.AgentID, seed.From.ControlID, seed.From.Kind, seed.From.AgentID, inbox.MaxBatchMessages)
+			rows, err := tx.QueryContext(ctx, `SELECT envelope FROM agent_messages WHERE direction='in' AND state='queued' AND recipient=? AND json_extract(envelope,'$.kind')='message' AND json_extract(envelope,'$.from.node_id')=? AND json_extract(envelope,'$.from.kind')=? AND json_extract(envelope,'$.from.agent_id')=? ORDER BY sequence LIMIT ?`, seed.To.AgentID, seed.From.NodeID, seed.From.Kind, seed.From.AgentID, inbox.MaxBatchMessages)
 			if err != nil {
 				return err
 			}

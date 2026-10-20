@@ -9,7 +9,7 @@ import (
 )
 
 func address(control, assistant string) protocol.AgentRef {
-	return protocol.AgentRef{ControlID: control, Kind: "assistant", AgentID: assistant}
+	return protocol.AgentRef{NodeID: control, Kind: "assistant", AgentID: assistant}
 }
 func mailbox(t *testing.T, control string) (*Mailbox, string) {
 	t.Helper()
@@ -173,7 +173,7 @@ func TestLocalMailReplyParticipantsAndAutomaticHopBound(t *testing.T) {
 func TestPeerDirectoryValidatesIdentityAndNames(t *testing.T) {
 	ctx := context.Background()
 	m, _ := mailbox(t, "local")
-	directory := protocol.Directory{ControlID: "remote", Assistants: []protocol.MailAssistant{{Address: address("remote", "alice"), Name: "研究"}}}
+	directory := protocol.Directory{NodeID: "remote", Assistants: []protocol.MailAssistant{{Address: address("remote", "alice"), Name: "研究"}}}
 	if err := m.Register(ctx, directory); err != nil {
 		t.Fatal(err)
 	}

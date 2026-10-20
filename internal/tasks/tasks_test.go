@@ -200,13 +200,13 @@ func TestIdempotencyOwnershipGuidanceReferencesAndStop(t *testing.T) {
 	if other, err := s.Get(ctx, "other", record.Info.ID); err != nil || other != nil {
 		t.Fatal("owner leaked", other, err)
 	}
-	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "guidance", protocol.AgentRef{ControlID: s.ControlID(), Kind: "assistant", AgentID: "assistant"}, "new work"); err != nil {
+	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "guidance", protocol.AgentRef{NodeID: s.ControlID(), Kind: "assistant", AgentID: "assistant"}, "new work"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "operator-guidance", protocol.AgentRef{ControlID: s.ControlID(), Kind: "user", AgentID: "assistant"}, "operator direction"); err != nil {
+	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "operator-guidance", protocol.AgentRef{NodeID: s.ControlID(), Kind: "user", AgentID: "assistant"}, "operator direction"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "operator-guidance", protocol.AgentRef{ControlID: s.ControlID(), Kind: "assistant", AgentID: "assistant"}, "operator direction"); err == nil {
+	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "operator-guidance", protocol.AgentRef{NodeID: s.ControlID(), Kind: "assistant", AgentID: "assistant"}, "operator direction"); err == nil {
 		t.Fatal("assistant retry changed operator provenance")
 	}
 	inputsBefore, err := s.Inputs(ctx, "assistant", record.Info.ID)
@@ -230,7 +230,7 @@ func TestIdempotencyOwnershipGuidanceReferencesAndStop(t *testing.T) {
 	if err := s.Stop(ctx, "assistant", record.Info.ID, "interrupt"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "late", protocol.AgentRef{ControlID: s.ControlID(), Kind: "assistant", AgentID: "assistant"}, "unsafe"); err == nil {
+	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "late", protocol.AgentRef{NodeID: s.ControlID(), Kind: "assistant", AgentID: "assistant"}, "unsafe"); err == nil {
 		t.Fatal("guidance during stop accepted")
 	}
 	if err := s.Tick(ctx); err != nil {
@@ -240,7 +240,7 @@ func TestIdempotencyOwnershipGuidanceReferencesAndStop(t *testing.T) {
 	if current.Info.Phase != protocol.TaskInterrupted || p.stops != 1 {
 		t.Fatal(current, p.stops)
 	}
-	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "reference", protocol.AgentRef{ControlID: s.ControlID(), Kind: "assistant", AgentID: "trusted-sender"}, "data only"); err != nil {
+	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "reference", protocol.AgentRef{NodeID: s.ControlID(), Kind: "assistant", AgentID: "trusted-sender"}, "data only"); err != nil {
 		t.Fatal(err)
 	}
 	inputs, err := s.Inputs(ctx, "assistant", record.Info.ID)

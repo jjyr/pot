@@ -1,5 +1,154 @@
 # Pot ↔ Codex Bridge
 
+## Message connections
+
+The Codex plugin now starts a message-only Agent host automatically. Its stable
+Codex Agent identity and durable messages survive chat windows and host restarts.
+It shares the same typed Agent Link plugin host as Pot; connecting grants only
+peer messaging, not file access, execution permission or Control administration.
+The host and message addresses use `node_id` for this generic communication
+identity. Execution Control authorization remains a separate responsibility.
+
+Install using `mise exec -- python3 integrations/codex/install.py`, then enable
+Pot in Codex. The MCP command is `pot-codex-bridge host --root
+/absolute/home/.config/pot-codex/agent`. No pairing file, workspace choice or
+App Server model run is needed to open connections. `pot_open_connections` opens
+the local page; alternatively run:
+
+```sh
+~/.codex/plugins/pot/bin/pot-codex-bridge connections \
+  --root ~/.config/pot-codex/agent
+```
+
+The page shows this Agent's public service endpoint, **Copy address**, and **Add
+Agent**. Copy creates a short-lived invitation only in the local clipboard flow.
+Paste the other side's address to connect in either direction. One reachable
+endpoint is sufficient for authenticated bidirectional messages. The page checks
+the pasted address automatically and shows the verified Agent before **Add
+Agent** becomes available. Checking does not create a connection or consume the
+invitation. Connection address and identity fingerprint remain in collapsed
+details; adding uses one final action and shows a brief success confirmation.
+No separate messaging permission step is required. Invites
+contain message-only capabilities: keep them out of chat, prompts and logs.
+
+Owner management stays on `127.0.0.1:8792` using the local HTTP API. The
+separate message listener on `127.0.0.1:8793` uses the shared TCP Peer protocol.
+Configure a reachable `tcp://host:port` address over Tailscale or another trusted
+private network. No TLS certificate is needed. The host verifies Ed25519 nonce
+challenges and signs session traffic; invitations pin the remote host's public
+key. TCP endpoints must resolve entirely to private or tailnet addresses, and
+connections recheck DNS and pin the selected address. There is no HTTP peer
+fallback, anonymous readiness route, or owner management service on this socket.
+
+Select Tailscale only after installing and logging in locally. Its explicit
+configure action inspects actual Serve settings and reuses a matching TCP
+forwarder, or creates one when the selected port is unused. It refuses to
+replace unrelated settings and never enables Funnel or changes ACLs. Manual
+setup, after checking `tailscale serve status`, is
+`tailscale serve --bg --tcp=8793 tcp://127.0.0.1:8793`; copy the actual TCP address.
+The forwarding target is the message socket, never the owner HTTP listener.
+
+For a direct private address the host opens a message-only listener on the
+corresponding local interface. Before saving an address it proves that the
+endpoint holds this stable Codex host's private key. A different key, invalid
+address or failed handshake closes the candidate and keeps the prior listener.
+Restart restores the saved listener or reuses a working TCP forwarder. If the VPN
+is unavailable, local management remains usable with a network repair state.
+
+The Ed25519 private key is stored in encrypted Secrets; metadata contains only
+its public key and secret reference. Restore the original database and master
+key if identity material is lost; startup never silently replaces an existing
+host key. Upgrading from the earlier HTTP design invalidates its connection
+address and requires a new TCP invitation. Owner credentials, stable Agent IDs,
+mailbox messages, processing claims and receipts are preserved without launching
+or replaying work.
+
+The first plugin process ensures and verifies a detached user-level daemon;
+subsequent chats reuse it after an authenticated version check. A foreign service
+on that port is an error, never assumed to be the Bridge. The daemon continues
+after the MCP chat closes and receives no model-start instruction from startup.
+Private identity, encrypted credentials and logs live under the supplied root;
+the directory must be owner-only. Stop the owning daemon process to stop service;
+starting the plugin again resumes its persisted inbox and transport.
+Plugin version 0.4.0 requires message host version 3 and does not reuse an older
+daemon. Stop the old daemon before starting the updated plugin. The Node ID,
+encrypted keys, message IDs and consumer claims survive the database upgrade;
+old wire field names are not accepted by the new Peer protocol.
+When a daemon holds its ownership lock, startup reads only its existing owner
+credential and checks its authenticated version. It does not migrate that
+daemon's databases. Initialization and upgrades require the exclusive daemon
+lock; concurrent plugin starts share one start lock until the new host is ready.
+
+`pot_connections` lists established peers. `pot_send` queues an explicitly
+authorized message, with exact-retry idempotency. `pot_messages` reads this stable
+Agent's durable inbox, and `pot_message_ack` marks an actually handled message
+processed. Unread messages remain queued until a Codex chat explicitly invokes
+the reader. This does not inject messages into an existing Codex App chat or
+silently start an independent App Server task. Transport receipt means remote
+durable inbox acceptance, distinct from reading, processing or execution.
+
+Each MCP process has a private reader identity. Inbox batches are claimed
+atomically, so two Codex chats cannot handle the same batch concurrently.
+Retries by that reader resume its original batch. The host binds the deepest
+claimed processing parent to subsequent sends, including forwards to another
+peer; acknowledging a message does not reset the causal limit. A daemon restart
+keeps reader claims. If the original chat is lost, stop it and explicitly use
+**Recover unconfirmed messages** on the local connection page. This invalidates
+old readers and reopens only unconfirmed messages with their original causal
+facts. Previously performed actions can remain uncertain; recovery does not
+execute a model or mark a message processed.
+
+The default message plugin does not load the old delegation-only skill. Its
+unchanged text remains available for an explicitly configured legacy integration;
+the message tools supply their own narrow schemas without a new system prompt.
+
+### Opt-in real Codex CLI qualification
+
+`TestConfiguredCodexCLIAgentMessagesLive` runs an installed Codex CLI against an
+existing configured Responses model. It creates a private temporary Control,
+Codex host, CLI home and workspace. The real signed TCP preview and connection
+carry a synthetic Control message to Codex; the CLI chooses and calls the
+production MCP tools to read, reply, acknowledge and inspect the receipt. The
+test checks both durable inboxes and the reply's conversation and causal parent.
+The initial challenge is seeded by the harness; a real Pot model receiver
+processes the CLI's reply through the normal background mailbox lifecycle, with
+no manual processing acknowledgment or execution tools enabled.
+It does not inject messages into an existing Codex App chat.
+
+Run on the machine that owns the existing model configuration and master key:
+
+```sh
+POT_LIVE=1 \
+POT_CONFIGURED_LIVE_ROOT=/absolute/existing/control-root \
+POT_SECRET_KEY_FILE=/absolute/existing/master.key \
+POT_CODEX_LIVE_CLI=/absolute/installed/codex \
+mise exec -- go test ./integrations/codex/bridge \
+  -run '^TestConfiguredCodexCLIAgentMessagesLive$' -count=1 -v
+```
+
+The existing profile, provider and credential are read without migrations or
+writes. A local in-memory proxy keeps the provider credential out of the CLI
+environment and temporary files. The CLI receives only a placeholder proxy
+credential, uses a separate `CODEX_HOME`, disables shell tools and has a read-only
+workspace. Both clients retain the configured model and reasoning effort. Each
+run allows at most 24 provider requests in total, 2048 output tokens per request
+and five minutes. Default test runs skip this qualification.
+
+For a standalone cross-compiled test binary, set
+`POT_CODEX_LIVE_STANDALONE=1` and select exactly
+`-test.run=^TestConfiguredCodexCLIAgentMessagesLive$`; this bypasses the unrelated
+legacy fake App Server build. `POT_CODEX_LIVE_OUTPUT` optionally selects a private
+directory for concise JSON evidence. On CLI failure, bounded diagnostic files
+contain only the isolated CLI's synthetic test session; they never contain the
+production provider credential or configuration.
+
+## Independent task delegation
+
+The following older, separately authorized delegation API remains independent of
+message connections. A message invitation cannot call its task tools or relax
+its workspace and mode policy. Existing task records and uncertain outcomes are
+preserved; this API still uses its explicit daemon and pairing configuration.
+
 Delegate an independent task from Pot on machine A to Codex on machine B. Both
 machines can be on the same Tailscale network. Pot connects outward to B over
 HTTPS; A needs no inbound listener. Durable SSE delivers progress and results
@@ -12,7 +161,7 @@ A: Pot tools ── HTTPS MCP ──> B: Bridge daemon ── JSONL stdio ──
       │                             ▲
       └─ checkpoint + inbox ACK ────┘
                                     ▲
-                         local stdio MCP proxy (pot plugin)
+                         local stdio MCP proxy (optional legacy registration)
                                     │
                          user's Codex App / CLI chat
 ```
@@ -54,8 +203,11 @@ See [App Server](https://developers.openai.com/codex/app-server),
 WebSocket is exposed. Tools use MCP Streamable HTTP at `/mcp`; durable
 notification recovery uses the Bridge's version 1 HTTP/SSE protocol.
 
-## Install the Codex-side package on B
+## Legacy delegation: optional local MCP registration
 
+The installer enables the message host by default. The following installation
+details and manual registration are relevant only when also choosing the
+independent delegation API. They do not replace the message connection flow.
 From this checkout:
 
 ```sh
@@ -78,20 +230,21 @@ status through `codex plugin list --json` (it uses your existing marketplace nam
 if different). Restart Codex and start a new chat. With an older CLI or
 `--source-only`, select **Pot** in the personal plugin directory to install and
 enable it manually. Registered local source is not the same as
-installed/enabled in Codex. The MCP tools will report a missing pairing until the
-next step. If your Codex surface has no plugin marketplace, use its officially
+installed/enabled in Codex. The default plugin now exposes message connections;
+the following manual MCP registration is specifically for the independent
+delegation API. If your Codex surface has no plugin marketplace, use its officially
 supported local MCP configuration instead:
 
 ```toml
-# Add this table to your own Codex config.toml, preserving existing tables.
-[mcp_servers.pot]
+# Optional independent delegation only. Keep the default message host entry.
+[mcp_servers.pot_delegation]
 command = "/absolute/home/.codex/plugins/pot/bin/pot-codex-bridge"
 args = ["mcp", "--config", "/absolute/home/.config/pot-codex/local-pair.json"]
 ```
 
-That fallback installs the same MCP tools; the plugin's skill must also be read or
-installed using your surface's supported Skills workflow. Do not register both
-methods in the same chat. Never put a bearer token in MCP arguments or config.
+This explicit legacy entry exposes the older paired tools; use the unchanged
+legacy skill only with this separately configured integration. Do not register
+duplicate legacy proxies. Never put a bearer token in MCP arguments or config.
 
 ## Configure B and pair the devices
 

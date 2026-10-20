@@ -9,6 +9,7 @@ import (
 	"github.com/jjyr/pot/internal/attachments"
 	"github.com/jjyr/pot/internal/controlplane"
 	"github.com/jjyr/pot/internal/gateway"
+	"github.com/jjyr/pot/internal/linkhost"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/internal/secrets"
@@ -24,7 +25,6 @@ import (
 	"github.com/jjyr/pot/pkg/storage"
 	"github.com/jjyr/pot/pkg/terminal"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -44,13 +44,15 @@ type Options struct {
 	CleanupTarget                                                            func(context.Context, string, bool) error
 
 	WorkspaceHome       string // Optional destination home override for embedded/test hosts.
+	PeerListen          string // Explicit TCP peer bind address; owner HTTP remains separate.
 	Embedded            bool
 	SandboxDirectory    string
 	Node                string
-	ControlHTTPClient   *http.Client
 	IntegrationAdapters []integrations.Adapter
 }
 type Service struct {
+	agentLinks          *agentLinkHost
+	linkPlugins         *linkhost.Host
 	pluginWG            sync.WaitGroup
 	pluginMu            sync.Mutex
 	pluginStreams       map[string]backgroundStream
@@ -106,7 +108,7 @@ func Open(options Options) (*Service, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(options.Context)
-	s := &Service{options: options, ctx: ctx, cancel: cancel, conversations: map[string]*assistant.Conversation{}, hosts: map[string]*executor.Engine{}}
+	s := &Service{options: options, ctx: ctx, cancel: cancel, conversations: map[string]*assistant.Conversation{}, hosts: map[string]*executor.Engine{}, linkPlugins: linkhost.New()}
 	s.Terminals = terminal.New()
 	success := false
 	defer func() {
@@ -161,6 +163,11 @@ func Open(options Options) (*Service, error) {
 	if err = s.openTasks(); err != nil {
 		return nil, err
 	}
+	if err = s.openAgentLinks(); err != nil {
+		return nil, err
+	}
+	s.taskLife.wg.Add(1)
+	go s.taskLoop()
 	s.pluginWG.Add(1)
 	go s.pluginLoop()
 	success = true
@@ -284,7 +291,7 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 	}
 	for _, definition := range identities {
 		if definition.ID == principal {
-			identity, _ := json.Marshal(map[string]any{"name": definition.Name, "has_avatar": definition.Avatar != "", "address": protocol.AgentRef{ControlID: s.options.RuntimeID, Kind: "assistant", AgentID: principal}})
+			identity, _ := json.Marshal(map[string]any{"name": definition.Name, "has_avatar": definition.Avatar != "", "address": protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "assistant", AgentID: principal}})
 			executionContext.MainPrompt += "\nCurrent assistant identity (data): " + string(identity) + ". When the user asks to change your name or avatar, use update_agent_profile to save it."
 			break
 		}
@@ -409,8 +416,9 @@ func (s *Service) Close() error {
 		engines = append(engines, e)
 	}
 	s.mu.Unlock()
+	linkErr := s.closeAgentLinks()
 	s.pluginWG.Wait()
-	var result error
+	var result error = linkErr
 	if s.Terminals != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		result = errors.Join(result, s.Terminals.Close(ctx))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jjyr/pot/pkg/protocol"
 	"io"
 	"strings"
 	"testing"
@@ -131,5 +132,12 @@ func TestAgentFromExternalModule(t *testing.T) {
 				t.Fatal("completed turn was sampled again")
 			}
 		})
+	}
+}
+
+func TestPublicMessageAddressUsesLogicalNode(t *testing.T) {
+	address := protocol.AgentRef{NodeID: "external-node", Kind: "assistant", AgentID: "main"}
+	if !address.Valid() {
+		t.Fatal(address)
 	}
 }

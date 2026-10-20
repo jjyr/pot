@@ -30,7 +30,7 @@ belongs to the complete database, including tables used by other components:
 
 | Kind | Product location | Contents |
 |---|---|---|
-| `control` | `control.sqlite` | Assistant registry, providers, encrypted secrets, integration accounts |
+| `control` | `control.sqlite` | Assistant registry, providers, encrypted secrets, integration accounts, Agent Link connections and host access configuration |
 | `tasks` | `tasks.sqlite` | Tasks, schedules, inbox, mailbox, plugin checkpoints, routing and resource receipts |
 | `runner` | `runner.sqlite` | Runs, execution receipts, events, resources and workspaces |
 | `conversation` | Each conversation database | Messages, context, configuration, steering and instruction updates |
@@ -132,3 +132,45 @@ command is required. For rollback, restore the complete pre-upgrade backup and
 matching binary together. Do not erase migration records, change checksums or
 force an older binary to accept upgraded data. Failure diagnostics identify the
 database and migration; resolve the cause and restart with the same migration.
+
+## Key-dependent Agent identity conversion
+
+Control migration `0009_message_node_identity` performs typed JSON and route
+conversion and writes a pending receipt only when historical credentials or
+invitation claims need the existing master key. `secrets.Open` calls
+`storage.FinalizeNodeIdentity` before returning. The finalizer transforms only
+Agent Link pair intents, preserves the versioned invitation claim binding, reseals
+under the same key/reference, and removes the receipt in one transaction. A
+missing key or interrupted conversion leaves the receipt for a safe restart.
+Normally deleted credentials of fully revoked links remain deleted. A custom
+Agent Link SecretStore must complete its own conversion before starting the
+host; `agentlink.New` fences an incomplete pending stage.
+
+Tasks migration `0006_message_node_identity` preserves historical input digest
+bindings with an explicit per-message format receipt when the original full
+parent is not reconstructable. The frozen hash codec still checks every input
+field. This is an internal storage hash format, not legacy protocol acceptance.
+Typed mailbox and Task address conversions retain message IDs, delivery states,
+consumer membership and peer context. Historical model messages, plugin data,
+provider replay and arbitrary tool output remain untouched.
+
+Historical Agent Link claim hashes also retain their exact format through
+`agent_link_claim_digest_formats`. A Pair request binds its original display
+names, while the receiver may save a later registry name. Migration therefore
+cannot reconstruct every original claim preimage. The frozen claim codec checks
+the original capability, identities, names and host key exactly; new claims use
+the current NodeID hash format.
+
+`control/0002_agent_links.sql` adds connection and invitation metadata with
+references into the encrypted secret store. `control/0003_agent_link_tcp.sql`
+retires HTTP invitations and credentials, and marks existing connections as
+requiring a new TCP invitation without deleting mailbox messages or receipts.
+`control/0004_agent_link_host.sql` records the peer listener and verified endpoint;
+`control/0005_agent_network.sql` converts the access mode to `address`.
+`control/0006_peer_network.sql` clears old HTTP publication addresses, because
+their ports cannot be assumed to serve the new TCP protocol.
+
+`machines/0002_peer_tcp.sql` preserves signing identities, membership epochs and
+original join requests while removing old HTTP endpoints and CA settings. Existing
+Runners update their endpoint against the saved Control identity; migration never
+re-enrolls a machine or replays execution. See [Peer protocol](peer-protocol.md).

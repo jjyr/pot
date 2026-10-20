@@ -342,7 +342,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const fragment = document.createDocumentFragment();
     for (const name of ['chat', 'tasks', 'machines', 'usage', 'settings']) {
       const update=name==='settings'?updates?.button(inMenu):null;if(update)fragment.append(update);
- const item = button(name, t(name), inMenu ? 'menu-destination' : `rail-button${name === 'settings'&&!update ? ' rail-bottom' : ''}`);
+ const item = button(name==='machines'?'topology':name, t(name), inMenu ? 'menu-destination' : `rail-button${name === 'settings'&&!update ? ' rail-bottom' : ''}`);
       if (name === 'chat') { item.replaceChildren(); const image = el('img', 'pot-icon'); image.src = new URL('../assets/PotCompanion.png', import.meta.url).href; image.alt = ''; item.append(image); }
       if (inMenu) item.append(el('span', '', t(name === 'chat' ? 'assistants' : name)));
       item.classList.toggle('is-selected', route === name);

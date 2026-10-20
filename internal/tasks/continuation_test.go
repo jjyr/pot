@@ -49,7 +49,7 @@ func TestOwnerBatchArchiveAndContinuationPreserveTaskAndReceipts(t *testing.T) {
 		t.Fatal(page, err)
 	}
 	original := records[0]
-	user := protocol.AgentRef{ControlID: s.ControlID(), Kind: "user", AgentID: "assistant"}
+	user := protocol.AgentRef{NodeID: s.ControlID(), Kind: "user", AgentID: "assistant"}
 	// A new input survives restart and immediately removes the archive flag.
 	for range 2 {
 		if err = s.SendMessage(ctx, "assistant", original.Info.ID, "followup", user, "modify the existing result"); err != nil {
@@ -109,7 +109,7 @@ func TestStopEndedTaskDiscardsQueuedFollowupWithoutChangingResult(t *testing.T) 
 				t.Fatal(err)
 			}
 			completeRun(t, s, p, r)
-			if err = s.SendMessage(ctx, "assistant", r.Info.ID, "followup", protocol.AgentRef{ControlID: s.ControlID(), Kind: "user", AgentID: "assistant"}, "additional work"); err != nil {
+			if err = s.SendMessage(ctx, "assistant", r.Info.ID, "followup", protocol.AgentRef{NodeID: s.ControlID(), Kind: "user", AgentID: "assistant"}, "additional work"); err != nil {
 				t.Fatal(err)
 			}
 			if err = s.Stop(ctx, "assistant", r.Info.ID, mode); err != nil {
@@ -139,7 +139,7 @@ func TestFinalizingGuidanceStartsNextRunButReferencesDoNot(t *testing.T) {
 	if _, err = s.Steering(ctx, "assistant", r.Info.ID, r.RunID, true); err != nil {
 		t.Fatal(err)
 	}
-	owner := protocol.AgentRef{ControlID: s.ControlID(), Kind: "assistant", AgentID: "assistant"}
+	owner := protocol.AgentRef{NodeID: s.ControlID(), Kind: "assistant", AgentID: "assistant"}
 	if err = s.SendMessage(ctx, "assistant", r.Info.ID, "late", owner, "new work"); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestFinalizingGuidanceStartsNextRunButReferencesDoNot(t *testing.T) {
 		t.Fatal(next)
 	}
 	completeRun(t, s, p, *next)
-	peer := protocol.AgentRef{ControlID: s.ControlID(), Kind: "assistant", AgentID: "peer"}
+	peer := protocol.AgentRef{NodeID: s.ControlID(), Kind: "assistant", AgentID: "peer"}
 	if err = s.SendMessage(ctx, "assistant", r.Info.ID, "reference", peer, "reference"); err != nil {
 		t.Fatal(err)
 	}

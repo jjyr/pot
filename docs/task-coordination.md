@@ -24,7 +24,7 @@ model selection.
 
 ## Messages and completion
 
-`send_message({to: {control_id, kind: "task", agent_id}, text})` sends an input
+`send_message({to: {node_id, kind: "task", agent_id}, text})` sends an input
 to an existing Task through its owning Control. Runtime records the sender from
 the authenticated execution and binds any processing parent automatically; the
 model supplies only the recipient and text. User inputs and owner-assistant

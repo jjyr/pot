@@ -23,7 +23,7 @@ func (s *Service) SendMessageWithParent(ctx context.Context, assistant, task, re
 		return fmt.Errorf("invalid message sender")
 	}
 	kind := "reference"
-	if sender.ControlID == s.options.ControlID && sender.AgentID == assistant && (sender.Kind == "user" || sender.Kind == "assistant") {
+	if sender.NodeID == s.options.ControlID && sender.AgentID == assistant && (sender.Kind == "user" || sender.Kind == "assistant") {
 		if sender.Kind == "user" {
 			kind = "user_guidance"
 		} else {
@@ -42,15 +42,20 @@ func (s *Service) input(ctx context.Context, assistant, task, requestID, text, k
 	if err := validateInput(requestID, text); err != nil {
 		return err
 	}
-	hash, err := core.HashJSON([]any{text, kind, sender, parent})
+	hash, err := inputDigest(currentInputDigestFormat, text, kind, sender, parent)
 	if err != nil {
 		return err
 	}
 	return s.change(ctx, assistant, task, func(tx *sql.Tx, record *Record) error {
 		var old string
-		err := tx.QueryRowContext(ctx, "SELECT digest FROM task_inputs WHERE assistant_id=? AND task_id=? AND request_id=?", assistant, task, requestID).Scan(&old)
+		var format int
+		err := tx.QueryRowContext(ctx, `SELECT json_extract(envelope,'$.digest'),COALESCE(f.format,2) FROM agent_messages m LEFT JOIN task_input_digest_formats f ON f.message=m.id WHERE json_extract(envelope,'$.owner')=? AND m.recipient=? AND json_extract(envelope,'$.request_id')=? AND json_extract(envelope,'$.to.kind')='task'`, assistant, task, requestID).Scan(&old, &format)
 		if err == nil {
-			if old != hash {
+			expected, err := inputDigest(format, text, kind, sender, parent)
+			if err != nil {
+				return err
+			}
+			if old != expected {
 				return fmt.Errorf("Task input request content conflict")
 			}
 			return nil
@@ -72,7 +77,7 @@ func (s *Service) input(ctx context.Context, assistant, task, requestID, text, k
 			state = "retained"
 		}
 		messageID, _ := core.HashJSON([]string{task, requestID})
-		message := protocol.Envelope{ID: messageID, Kind: kind, Owner: assistant, RequestID: requestID, Digest: hash, From: sender, To: protocol.AgentRef{ControlID: s.options.ControlID, Kind: "task", AgentID: task}, ConversationID: record.RunID, Text: text}
+		message := protocol.Envelope{ID: messageID, Kind: kind, Owner: assistant, RequestID: requestID, Digest: hash, From: sender, To: protocol.AgentRef{NodeID: s.options.ControlID, Kind: "task", AgentID: task}, ConversationID: record.RunID, Text: text}
 		if parent != nil {
 			message.Hops = parent.Hops + 1
 			reply := parent.ID

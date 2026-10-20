@@ -72,7 +72,7 @@ func (s *Service) productDispatchBound(owner, executionOwner, turn string, gener
 				if err := core.DecodeJSON(call.Arguments, &send); err != nil {
 					return nil, err
 				}
-				sender := protocol.AgentRef{ControlID: s.options.RuntimeID, Kind: "assistant", AgentID: owner}
+				sender := protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "assistant", AgentID: owner}
 				if worker {
 					sender.Kind = "task"
 					sender.AgentID = executionOwner
@@ -221,6 +221,13 @@ func (s *Service) productCall(ctx context.Context, owner, id, name string, args 
 		return map[string]any{"local": map[string]any{"runtime_id": s.options.RuntimeID, "policy": policy}, "machines": machines}, nil
 	case "list_assistants":
 		directory, err := s.MailDirectory(ctx)
+		if err == nil {
+			peers, e := s.agentLinkPeers(ctx, owner)
+			if e != nil {
+				return nil, e
+			}
+			directory.Assistants = append(directory.Assistants, peers...)
+		}
 		return map[string]any{"assistants": directory.Assistants}, err
 	case "get_model_catalog":
 		var query ModelCatalogQuery
@@ -233,12 +240,12 @@ func (s *Service) productCall(ctx context.Context, owner, id, name string, args 
 }
 func (s *Service) MailDirectory(ctx context.Context) (protocol.Directory, error) {
 	definitions, err := s.Registry.Definitions(ctx)
-	d := protocol.Directory{ControlID: s.options.RuntimeID, Assistants: []protocol.MailAssistant{}}
+	d := protocol.Directory{NodeID: s.options.RuntimeID, Assistants: []protocol.MailAssistant{}}
 	if err != nil {
 		return d, err
 	}
 	for _, v := range definitions {
-		d.Assistants = append(d.Assistants, protocol.MailAssistant{Address: protocol.AgentRef{ControlID: s.options.RuntimeID, Kind: "assistant", AgentID: v.ID}, Name: v.Name})
+		d.Assistants = append(d.Assistants, protocol.MailAssistant{Address: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "assistant", AgentID: v.ID}, Name: v.Name})
 	}
 	return d, nil
 }

@@ -19,7 +19,7 @@ macOS App: Wails windows/tray + embedded Runtime + shared frontend
                           provider keys, approvals, accounting
                               ^                 ^
                       outward signed     outward signed
-                      WebSocket RPC      WebSocket RPC
+                      TCP peer RPC       TCP peer RPC
                          Runner A           Runner B
                          local tools        local tools
 
@@ -30,8 +30,8 @@ independent web-ui-server -> one explicitly selected Control -> browser frontend
 
 `pot serve` hosts standalone Runtime; App composes its local Runtime in process.
 App's local UI dispatches directly through Wails bindings, without a loopback UI
-listener. Embedded Runtime cannot enable a remote Control listener or join a
-Control. Closing a window hides it while background work continues. Quitting App shuts
+listener. Embedded Runtime cannot enable an owner/membership listener or join a
+Control; its separate authenticated peer listener may serve Agent messages. Closing a window hides it while background work continues. Quitting App shuts
 down its local executions.
 
 A standalone root starts neutral. An explicitly configured listener enables
@@ -43,8 +43,10 @@ storage itself creates no identity. Use independent roots for independent roles.
 
 CLI owns a private authenticated Unix socket. Remote native clients authenticate
 with a separate Control owner credential. Runner enrollment credentials are not
-owner credentials. Only standalone Control opens a membership/owner listener;
-Runners connect outward and need no inbound execution port.
+owner credentials. Only standalone Control serves membership and owner
+management. Its peer TCP listener serves scoped Agent messages, membership and
+execution; owner HTTP remains a separate listener. Runners connect outward and
+need no inbound execution port.
 
 The browser service is an independent process. Its destination, browser root,
 public origin and transport must be explicit. It verifies the selected Control
@@ -91,9 +93,11 @@ results remain reference data rather than new user authority. See
 
 Assistant communication uses separate durable model contexts and transcripts.
 An inbound peer message is untrusted reference data. Replies require an explicit
-send tool; final model text is not automatically forwarded. Native App composes
-cross-Space relay endpoints from existing owner connections. Control, CLI and
-browser do not independently relay between Controls. See
+send tool; final model text is not automatically forwarded. The owning Control hosts authenticated
+Agent Link message exchange through typed connectivity plugins; App owner
+connections are not message relays. Pot and Codex share this protocol. A common TCP host dispatches message and
+execution services; Execution Links preserve the original Runner membership and
+RPC authority boundary. See
 [assistant messages](assistant-messages.md).
 
 ## Membership and remote execution
@@ -104,12 +108,16 @@ retries keep the original request identity. Per-machine epochs fence removed or
 re-enrolled sessions. Removing a machine closes its active connection; leaving
 persists a reconnect fence until outstanding execution cleanup is confirmed.
 
-Outward WebSocket RPC signs every request/reply with sender, audience and epoch.
-Bounded signed fragments carry larger payloads. Receivers validate order, size,
-checksum and assembly lifetime before dispatch. HTTP/HTTPS selection does not
-replace these business identities. HTTPS uses ordinary certificate/hostname
-verification; a configured private CA augments system trust and persists with
-membership. Redirects are disabled.
+A shared [peer transport](peer-protocol.md) carries outward, bidirectional TCP
+sessions authenticated by stable Ed25519 host keys. Each service separately
+validates its assistant binding or machine membership and epoch; a valid host
+key grants no owner, message or execution authority. Transport framing, bounds,
+heartbeat and replay checks belong to `pkg/peer`, while original run receipts
+remain execution facts. Owner HTTP/TLS never becomes a peer service. Endpoints
+use explicit private `tcp://host:port` addresses; the transport does not encrypt
+content and can run over an encrypted VPN without application certificates.
+Upgrades preserve identities, epochs and original work, clear obsolete HTTP
+peer endpoints, and require a verified replacement endpoint without reenrollment.
 
 Control persists Task launch intent before sending it. Runner persists immutable
 acceptance, original run identity, tool-command admission and terminal results.

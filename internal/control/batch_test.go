@@ -204,7 +204,7 @@ func TestAgentCommunicationBatchesBySenderNotWireConversation(t *testing.T) {
 			if i == 1 {
 				peer = "beta"
 			}
-			e := protocol.Envelope{Kind: "message", ID: fmt.Sprintf("peer-%d", i), From: protocol.AgentRef{ControlID: "local", Kind: "assistant", AgentID: peer}, To: protocol.AgentRef{ControlID: "local", Kind: "assistant", AgentID: "main"}, ConversationID: fmt.Sprintf("00000000-0000-4000-8000-%012d", i+1), Text: text}
+			e := protocol.Envelope{Kind: "message", ID: fmt.Sprintf("peer-%d", i), From: protocol.AgentRef{NodeID: "local", Kind: "assistant", AgentID: peer}, To: protocol.AgentRef{NodeID: "local", Kind: "assistant", AgentID: "main"}, ConversationID: fmt.Sprintf("00000000-0000-4000-8000-%012d", i+1), Text: text}
 			if err := inbox.EnqueueTx(ctx, tx, e, "in", "queued"); err != nil {
 				return err
 			}
@@ -335,7 +335,7 @@ func TestNotificationsShareOrderedBatchAfterUserInput(t *testing.T) {
 	}()
 	// One transaction makes task and plugin notices available at the same boundary.
 	err := storage.Transaction(ctx, s.Tasks.DB(), func(tx *sql.Tx) error {
-		task := protocol.Envelope{Kind: "task_result", ID: "task-notice", From: protocol.AgentRef{ControlID: "local", Kind: "runtime", AgentID: "local"}, To: protocol.AgentRef{ControlID: "local", Kind: "assistant", AgentID: "main"}, ConversationID: "00000000-0000-4000-8000-000000000001", Text: "task output", Result: &protocol.TaskResultEvent{TaskID: "task-one", RunID: "00000000-0000-4000-8000-000000000002", Title: "Task title", Phase: protocol.TaskFailed, Text: "task output", Error: "task error", Origin: protocol.TaskOrigin{Kind: "manual"}, Artifacts: []string{"pot-file://task-one/output"}}}
+		task := protocol.Envelope{Kind: "task_result", ID: "task-notice", From: protocol.AgentRef{NodeID: "local", Kind: "runtime", AgentID: "local"}, To: protocol.AgentRef{NodeID: "local", Kind: "assistant", AgentID: "main"}, ConversationID: "00000000-0000-4000-8000-000000000001", Text: "task output", Result: &protocol.TaskResultEvent{TaskID: "task-one", RunID: "00000000-0000-4000-8000-000000000002", Title: "Task title", Phase: protocol.TaskFailed, Text: "task output", Error: "task error", Origin: protocol.TaskOrigin{Kind: "manual"}, Artifacts: []string{"pot-file://task-one/output"}}}
 		if err := inbox.EnqueueTx(ctx, tx, task, "in", "queued"); err != nil {
 			return err
 		}
@@ -344,7 +344,7 @@ func TestNotificationsShareOrderedBatchAfterUserInput(t *testing.T) {
 			if i == 2 {
 				owner = "foreign"
 			}
-			event := protocol.Envelope{Kind: "plugin_event", ID: fmt.Sprintf("plugin-%d", i), From: protocol.AgentRef{ControlID: "local", Kind: "runtime", AgentID: "plugin-example"}, To: protocol.AgentRef{ControlID: "local", Kind: "assistant", AgentID: owner}, ConversationID: task.ConversationID, Plugin: &protocol.PluginNotification{Identity: core.PluginIdentity{ID: "example", Version: "1", Digest: "installed"}, Event: core.PluginEvent{ID: fmt.Sprint(i), Title: "External title", Body: text, URL: "https://example.com/issue/1", OccurredAt: "2026-01-01T00:00:00Z"}}}
+			event := protocol.Envelope{Kind: "plugin_event", ID: fmt.Sprintf("plugin-%d", i), From: protocol.AgentRef{NodeID: "local", Kind: "runtime", AgentID: "plugin-example"}, To: protocol.AgentRef{NodeID: "local", Kind: "assistant", AgentID: owner}, ConversationID: task.ConversationID, Plugin: &protocol.PluginNotification{Identity: core.PluginIdentity{ID: "example", Version: "1", Digest: "installed"}, Event: core.PluginEvent{ID: fmt.Sprint(i), Title: "External title", Body: text, URL: "https://example.com/issue/1", OccurredAt: "2026-01-01T00:00:00Z"}}}
 			if err := inbox.EnqueueTx(ctx, tx, event, "in", "queued"); err != nil {
 				return err
 			}

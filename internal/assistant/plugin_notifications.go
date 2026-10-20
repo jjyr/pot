@@ -114,8 +114,8 @@ func (m *Mailbox) CommitBackground(ctx context.Context, b BackgroundBinding, ide
 			return err
 		}
 		for _, event := range r.Events {
-			id, _ := core.HashJSON([]string{m.controlID, b.ID, event.ID})
-			message := protocol.Envelope{Kind: "plugin_event", ID: id, From: protocol.AgentRef{ControlID: m.controlID, Kind: "runtime", AgentID: "plugin-" + b.ID}, To: protocol.AgentRef{ControlID: m.controlID, Kind: "assistant", AgentID: owner}, ConversationID: conversation, Plugin: &protocol.PluginNotification{Identity: identity, Event: event}}
+			id, _ := core.HashJSON([]string{m.nodeID, b.ID, event.ID})
+			message := protocol.Envelope{Kind: "plugin_event", ID: id, From: protocol.AgentRef{NodeID: m.nodeID, Kind: "runtime", AgentID: "plugin-" + b.ID}, To: protocol.AgentRef{NodeID: m.nodeID, Kind: "assistant", AgentID: owner}, ConversationID: conversation, Plugin: &protocol.PluginNotification{Identity: identity, Event: event}}
 			// Identity/version and owner are bound at first acceptance and kept on retries.
 			old, err := findMail(ctx, tx, id)
 			if err != nil {

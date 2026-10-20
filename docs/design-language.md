@@ -93,7 +93,7 @@ targets. iPad split windows follow the same breakpoints.
 | From 720 px | 56 px feature rail; Chat adds a collapsible 220 px assistant pane |
 | Below 900 px | Compact page spacing and stacked form labels, independently of the navigation layout |
 
-The rail contains Chat (Pot icon), Tasks, Machines, Usage and bottom-aligned
+The rail contains Chat (Pot icon), Tasks, Topology, Usage and bottom-aligned
 Settings. Tasks includes Tasks / Schedules. Other destinations and editors hide
 the assistant pane; wide editors retain the rail. A single 44 px titlebar holds
 the destination, Back and contextual actions. Native window controls and draggable
@@ -108,7 +108,7 @@ history and reading position.
 
 Root pages expose a 44 × 44 px menu button. A rightward swipe beginning within
 24 px of the left edge also opens the full-screen menu with Assistants, Tasks,
-Machines, Usage and Settings. A destination, Close, Escape or a leftward swipe
+Topology, Usage and Settings. A destination, Close, Escape or a leftward swipe
 anywhere in the menu dismisses it. The menu follows the finger; a quarter-width
 swipe, capped at 100 px, commits, while a short, reversed or cancelled swipe
 settles back. Reduced Motion removes the settling animation.
@@ -137,7 +137,7 @@ only content changes or available-width changes resize it.
 
 Back and ⌘[ follow page hierarchy: schedule → Schedules,
 conversation Usage → conversation, allowance editor → overall Usage. Narrow Chat
-returns to Assistants; wide Chat hides Back. Root lists, Machines, Usage and
+returns to Assistants; wide Chat hides Back. Root lists, Topology, Usage and
 Settings have no parent button. There is no forward button or ⌘] binding.
 Editors instead restore their captured caller as described below.
 
@@ -437,7 +437,7 @@ Task snapshots. There is no global Main Agent selection. Task Configuration
 contains execution capacity and Provider allowances, not model-routing defaults,
 Follow Chat switches, independent worker profiles or model-selection allowlists.
 
-### Usage and Machines
+### Usage and Topology
 
 Usage offers 7 / 30 / 90 days / year, totals, trends, Agent/model and tool rankings,
 and configured allowances. Conversation Usage is scoped to that conversation.
@@ -445,19 +445,68 @@ Loading preserves navigation and the chart region; failures retain inline recove
 Unknown or incomplete data is distinct from zero. Accounting and aggregation
 belong in [Token usage](token-usage.md).
 
-Machines groups inventory by Space. Each card keeps machine identity, connection
-status, labels and the Protected / Trusted / Blocked default visible. Permanent
-command permissions start collapsed with a count and expand in place; returning
-from their editor restores the disclosure. Active task grants appear only when
-present. Changed defaults expose Save / Cancel and an execution-interruption
-warning. Drafts survive refresh and preference changes, and navigation uses the
-dirty-exit guard. Pending application and recovery errors remain visible.
-Native label and membership actions use a visible More disclosure beside the
-machine identity. Tasks stays in its own destination, and Settings has no duplicate
-permissions tab. Cached offline data remains visible and read-only when its owner
-is unavailable; a disconnected execution machine can still be configured through
-its online Control. Viewing a machine changes neither routing nor authorization.
-See [Multi-Space UI](multi-space-ui.md).
+Topology replaces the Machines destination, retains its navigation shortcut, and
+projects authorized Controls, Agent message links and execution inventory. Controls
+form quiet ownership regions. Pot and Codex use their real brand marks; machines
+use device glyphs. The graph keeps short names and status dots, with full identity,
+relationship and operations available by clicking a node or connection. Wide
+windows put details on the right; narrow windows place them below the graph.
+Hover never opens information or changes selection. An independent Codex endpoint
+has no inferred machine wrapper and never contributes to machine counts.
+
+Thin Agent edges have slow bidirectional particles only while communication is
+ready. This indicates availability, not message traffic or task execution. Machine
+execution edges use a distinct dashed line; unavailable edges stay static and
+faint. Pause animation is explicit, and Reduced Motion hides particles. Selection
+and pause state survive configuration navigation and locale changes.
+
+The address region displays a nonsecret service endpoint. Copy connection address
+explicitly obtains a short-lived invitation and copies it without putting it in
+history or cached view data. Add Agent opens a single editing page with the other
+Agent's address with a clipboard action and, when needed, a local assistant picker.
+A bounded, read-only preview verifies the endpoint and invitation before showing
+the real Agent identity; it neither consumes the invitation nor creates a link.
+Editing the address immediately invalidates that preview. One Add action creates
+the connection, with concise retry or replacement guidance on failure. Successful connection
+returns to the topology and selects that endpoint. Access defaults to an existing
+private `tcp://host:port` address without a certificate field. Tailscale setup
+reuses or creates TCP forwarding, reports the actual address and keeps unrelated
+Serve configuration. An encrypted VPN supplies content confidentiality. The peer
+listener routes Agent and Runner services through separate admission checks;
+owner management remains on its own interface. Updating an enrolled Runner's
+Control address verifies the saved identity and preserves its original receipts.
+
+The connection permits messages;
+the receiving assistant retains its existing tool and approval rules. Account
+services such as GitHub stay in Third-party accounts settings.
+
+Add machine is a separate membership editor. It reuses existing native owner
+access, allows only a standalone Control to issue invitations, and keeps embedded
+or unavailable Controls visibly unavailable. One Copy join information action
+creates and copies a complete invitation; the payload stays out of the visible
+page. Installation help and nonsecret connection details start collapsed. Missing
+access addresses direct users to access setup. Returning to Topology keeps the
+invitation valid, and reopening resumes it within the current window session.
+Revocation requires a separate confirmation and never removes an enrolled machine.
+Waiting and completion use the exact invitation's server-side state; enrollment
+and online status remain distinct facts.
+
+Target machines paste bounded join information and automatically compare the
+reachable Control's ID and fingerprint with it. A match enables one Join action;
+a bare address requires a separately entered invitation and explicit identity
+confirmation. Changing the source invalidates the preview. Successful enrollment
+returns to Topology, where inventory supplies actual connectivity. Clipboard
+failures retain the same invitation for retry, and expired invitations offer one
+regenerate-and-copy action. Credentials remain in memory and out of history.
+
+Clicking an execution machine preserves its existing policy, command rules, labels
+and member operations. Permanent command permissions start collapsed and retain
+their disclosure on return. Changed defaults expose Save / Cancel and the existing
+execution-interruption warning. Drafts survive refresh and preference changes,
+and navigation uses the dirty-exit guard. Cached offline data remains visible and
+read-only when its owner is unavailable. A disconnected execution machine can
+still be configured through its online Control. Viewing a machine changes neither
+routing nor authorization. See [Multi-Space UI](multi-space-ui.md).
 
 ### Approvals and About
 

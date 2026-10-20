@@ -1,7 +1,6 @@
 {
   "name": "pot",
-  "version": "0.1.0",
-  "description": "Send messages and requests to your paired Pot assistant and query durable receipts.",
-  "skills": "./skills/",
+  "version": "0.4.0",
+  "description": "Connect Pot and Codex Agents through a local connection page and exchange durable peer messages.",
   "mcpServers": "./.mcp.json"
 }

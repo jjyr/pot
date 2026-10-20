@@ -38,7 +38,7 @@ func TestRetryPreservesScopeAndHasOneDurableReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SendMessage(ctx, "assistant", original.Info.ID, "guidance", protocol.AgentRef{ControlID: "control", Kind: "assistant", AgentID: "assistant"}, "Preserve this additional constraint."); err != nil {
+	if err := s.SendMessage(ctx, "assistant", original.Info.ID, "guidance", protocol.AgentRef{NodeID: "control", Kind: "assistant", AgentID: "assistant"}, "Preserve this additional constraint."); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Tick(ctx); err != nil {

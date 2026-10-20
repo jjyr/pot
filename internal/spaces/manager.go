@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jjyr/pot/internal/relay"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/instance"
 )
@@ -53,15 +52,14 @@ type config struct {
 	Enabled   bool   `json:"enabled"`
 }
 type Options struct {
-	Path                           string
-	Local                          Caller
-	LocalID, LocalName             string
-	RefreshInterval, RelayInterval time.Duration
-	OnChange                       func(space string, topics json.RawMessage)
+	Path               string
+	Local              Caller
+	LocalID, LocalName string
+	RefreshInterval    time.Duration
+	OnChange           func(space string, topics json.RawMessage)
 	// OnStreamReset runs before the first changed frame on each connection.
 	// Consumers must baseline projections rather than notify reconnect history.
 	OnStreamReset func(space string)
-	OnRelayError  func(error)
 }
 type entry struct {
 	space      Space
@@ -82,7 +80,6 @@ type Manager struct {
 	active        string
 	generation    uint64
 	closed        bool
-	relayWake     chan struct{}
 	wg            sync.WaitGroup
 	Changes       core.Changes
 }
@@ -97,11 +94,8 @@ func Open(ctx context.Context, options Options) (*Manager, error) {
 	if options.RefreshInterval <= 0 {
 		options.RefreshInterval = 10 * time.Second
 	}
-	if options.RelayInterval <= 0 {
-		options.RelayInterval = 2 * time.Second
-	}
 	ctx, cancel := context.WithCancel(ctx)
-	m := &Manager{options: options, ctx: ctx, cancel: cancel, active: options.LocalID, generation: 1, relayWake: make(chan struct{}, 1)}
+	m := &Manager{options: options, ctx: ctx, cancel: cancel, active: options.LocalID, generation: 1}
 	localCtx, localCancel := context.WithCancel(ctx)
 	m.local = &entry{space: Space{ID: options.LocalID, ControlID: options.LocalID, RuntimeID: options.LocalID, Name: options.LocalName, Kind: "local"}, caller: options.Local, generation: 1, ctx: localCtx, cancel: localCancel, enabled: true}
 	saved, err := readConfig(options.Path)
@@ -121,9 +115,8 @@ func Open(ctx context.Context, options Options) (*Manager, error) {
 		m.remote = &entry{space: Space{ID: saved.ControlID, ControlID: saved.ControlID, RuntimeID: saved.ControlID, Name: saved.Name, Kind: "remote", Error: ErrDisconnected.Error()}, caller: client, generation: m.generation, ctx: remoteCtx, cancel: remoteCancel, enabled: saved.Enabled}
 	}
 	m.Refresh(ctx)
-	m.wg.Add(2)
+	m.wg.Add(1)
 	go m.refreshLoop()
-	go m.relayLoop()
 	m.startWatch(m.local)
 	if m.remote != nil && m.remote.enabled {
 		m.startWatch(m.remote)
@@ -460,9 +453,6 @@ func (m *Manager) refreshEntry(ctx context.Context, value *entry) {
 	m.mu.Unlock()
 	if !bytes.Equal(previous, next) {
 		m.Changes.Notify("spaces/" + id)
-		if err == nil {
-			m.wakeRelay()
-		}
 	}
 }
 func (m *Manager) refreshLoop() {
@@ -521,9 +511,6 @@ func (m *Manager) startWatch(value *entry) {
 				event = changed
 				if catalogDirty(event) {
 					m.refreshEntry(value.ctx, value)
-				}
-				if relayDirty(event) {
-					m.wakeRelay()
 				}
 				if m.options.OnChange != nil {
 					m.options.OnChange(value.space.ID, bytes.Clone(event.Data))
@@ -600,72 +587,6 @@ func catalogDirty(event Event) bool {
 		}
 	}
 	return false
-}
-func relayDirty(event Event) bool {
-	var topics map[string]json.RawMessage
-	if json.Unmarshal(event.Data, &topics) != nil {
-		return true
-	}
-	if nested := topics["versions"]; nested != nil {
-		if json.Unmarshal(nested, &topics) != nil {
-			return true
-		}
-	}
-	if len(topics) == 0 {
-		return true
-	}
-	for topic := range topics {
-		if strings.HasPrefix(topic, "assistant") || strings.HasPrefix(topic, "mail") {
-			return true
-		}
-	}
-	return false
-}
-func (m *Manager) wakeRelay() {
-	select {
-	case m.relayWake <- struct{}{}:
-	default:
-	}
-}
-func (m *Manager) relayLoop() {
-	defer m.wg.Done()
-	var retry <-chan time.Time
-	lastError := ""
-	for {
-		select {
-		case <-m.ctx.Done():
-			return
-		case <-m.relayWake:
-		case <-retry:
-		}
-		more, err := m.exchange(m.ctx)
-		retry = nil
-		if err != nil {
-			retry = time.After(m.options.RelayInterval)
-			if m.options.OnRelayError != nil && err.Error() != lastError {
-				m.options.OnRelayError(err)
-			}
-			lastError = err.Error()
-		} else {
-			lastError = ""
-			if more {
-				m.wakeRelay()
-			}
-		}
-	}
-}
-func (m *Manager) Exchange(ctx context.Context) error { _, err := m.exchange(ctx); return err }
-func (m *Manager) exchange(ctx context.Context) (bool, error) {
-	m.mu.Lock()
-	local, remote := m.local, m.remote
-	ready := remote != nil && remote.enabled && remote.space.Connected && local.space.Connected
-	m.mu.Unlock()
-	if !ready {
-		return false, nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	return relay.Pass(ctx, mailEndpoint{m, local.space.ID}, mailEndpoint{m, remote.space.ID})
 }
 func (m *Manager) Space(id string) (Space, error) {
 	m.mu.Lock()

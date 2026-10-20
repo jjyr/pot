@@ -17,12 +17,14 @@ points; `internal/` contains product implementation. All packages share one root
 | `pkg/storage` | SQLite transactions, messages, events and context persistence |
 | `pkg/instance`, `pkg/modeldirectory` | Private data-root identity/locking and provider model metadata |
 | `internal/assistant` | Identities, rules, conversation Threads, chat driver and durable mailboxes/sessions |
-| `internal/relay` | Transport-independent assistant-message delivery; composed only by native App |
+| `pkg/peer` | Shared signed TCP sessions, host identity proof, framing and service admission; no business authorization |
+| `pkg/agentlink` | Assistant-bound authenticated message exchange, encrypted connection references and durable recovery |
+| `internal/linkhost` | Typed Agent message and Runner execution adapters plus one host-owned peer service registry/listener |
 | `internal/gateway`, `internal/secrets` | Control-owned provider HTTP routes and encrypted credential references |
 | `pkg/integrations`, `pkg/integrations/github` | Independent service login, single-account connections and credential caching through injected account/Secrets stores; GitHub device authorization adapter |
 | `internal/usage` | Durable reservations, allowances, usage settlement, tools and compaction accounting |
 | `internal/control`, `internal/tasks`, `internal/schedule` | Product coordination, model selection, permissions, durable Tasks and schedules |
-| `internal/controlplane` | Stable signing identities, invitations, membership, outward signed WebSocket RPC |
+| `internal/controlplane` | Stable signing identities, invitations, Runner membership and execution services over shared signed TCP sessions |
 | `internal/runner` | Destination-local immutable Task launches, checkpoints, original command inputs/receipts and event logs |
 | `pkg/execution` | Shared destination Agent queue, concurrency, cancellation and uncertainty fences |
 | `pkg/terminal` | Ephemeral user-operated PTYs, bounded replay and explicit process cleanup |

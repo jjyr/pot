@@ -1,3 +1,6 @@
+@import url("./styles/machine-connection.css");
+@import url("./styles/agent-links.css");
+@import url("./styles/topology.css");
 /* Shared semantic values and geometry preserve the established Pot design.
    System appearance follows the OS live, without recreating the text editor. */
 @font-face { font-family: 'Pot Web Sans'; src: url('./assets/IBMPlexSans-Regular.ttf') format('truetype'); font-style: normal; font-weight: 400; font-display: swap; }
