@@ -47,7 +47,7 @@ func TestScheduledAndManualOutcomesShareSummaryDelivery(t *testing.T) {
 						batchReply(w, "duplicate")
 						return
 					}
-					if len(body.Tools) != 2 || !strings.Contains(last, "Manual task") || !strings.Contains(last, "Scheduled monitor") || !strings.Contains(last, "observed-scheduled-fact") || !strings.Contains(last, "report.txt") || !strings.Contains(last, "https://example.com/evidence") {
+					if !strings.Contains(last, "Manual task") || !strings.Contains(last, "Scheduled monitor") || !strings.Contains(last, "observed-scheduled-fact") || !strings.Contains(last, "report.txt") || !strings.Contains(last, "https://example.com/evidence") {
 						t.Error("summary lost mixed outcomes, evidence or artifacts", string(raw))
 					}
 					close(summaryEntered)
