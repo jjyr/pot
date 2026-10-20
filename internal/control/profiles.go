@@ -169,7 +169,24 @@ func (p *ProfileStore) defaultAgentSettings() (core.AgentSettings, error) {
 	return settings, nil
 }
 
-func (p *ProfileStore) Snapshot() ProfileSnapshot {
+// savedSnapshot copies saved connection intent without building UI directory
+// metadata. Execution paths must not enumerate every known model to read IDs.
+func (p *ProfileStore) savedSnapshot() ProfileSnapshot {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	body, _ := json.Marshal(p.state.ProfileSnapshot)
+	var result ProfileSnapshot
+	_ = json.Unmarshal(body, &result)
+	return result
+}
+
+func (p *ProfileStore) Snapshot() ProfileSnapshot { return p.connectionSnapshot(true) }
+
+// routingSnapshot retains cached provider discovery without expanding the
+// public model directory and all of its default limits on every model turn.
+func (p *ProfileStore) routingSnapshot() ProfileSnapshot { return p.connectionSnapshot(false) }
+
+func (p *ProfileStore) connectionSnapshot(includeDirectory bool) ProfileSnapshot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	body, _ := json.Marshal(p.state.ProfileSnapshot)
@@ -178,7 +195,9 @@ func (p *ProfileStore) Snapshot() ProfileSnapshot {
 	types, err := p.providerTypes(context.Background())
 	if err == nil {
 		result.ProviderTypes = types
-		result.Directory = p.registeredDirectory(types)
+		if includeDirectory {
+			result.Directory = p.registeredDirectory(types)
+		}
 		byID := map[string]ProviderType{}
 		for _, typ := range types {
 			byID[typ.ID] = typ
@@ -227,7 +246,9 @@ func (p *ProfileStore) Snapshot() ProfileSnapshot {
 			}
 		}
 	}
-	result.ModelDefaults = p.directory.Defaults()
+	if includeDirectory {
+		result.ModelDefaults = p.directory.Defaults()
+	}
 	return result
 }
 func (p *ProfileStore) Resolve(id string) (core.ResolvedSpec, error) {

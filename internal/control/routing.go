@@ -176,7 +176,7 @@ func pageModels[T any](items []T, offset, limit uint64) []T {
 	return append([]T{}, items[start:end]...)
 }
 func (s *Service) modelContext() string {
-	snapshot := s.Profiles.Snapshot()
+	snapshot := s.Profiles.routingSnapshot()
 	sort.Slice(snapshot.Profiles, func(i, j int) bool { return snapshot.Profiles[i].ID < snapshot.Profiles[j].ID })
 	rows := []any{}
 	for _, p := range snapshot.Profiles {
