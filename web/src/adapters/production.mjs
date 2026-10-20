@@ -41,7 +41,6 @@ export function mutationTopics(path,body,value) {
   if(path==='/api/v1/assistants/bootstrap'&&!value?.assistant)return null;
   if(path==='/api/v1/agent-links/invitation')return null;
   if(path.startsWith('/api/v1/agent-links'))return ['agent-links','assistants'];
-  if(path==='/api/v1/runtime/control'&&body?.action==='invitation_status')return null;
   if(path.startsWith('/api/v1/providers'))return ['providers','settings','assistants','conversation','usage'];
   if(path.startsWith('/api/v1/assistants'))return ['assistants','conversation','schedules'];
   if(path.startsWith('/api/v1/extensions'))return ['extensions','skills','assistants','conversation'];
@@ -53,7 +52,7 @@ export function mutationTopics(path,body,value) {
   if(path.startsWith('/api/v1/agent')||path==='/api/v1/instructions')return ['settings','assistants','conversation'];
   if(path==='/api/v1/messages'||path.startsWith('/api/v1/turn/'))return ['conversation','assistants'];
   if(path.startsWith('/api/v1/machines'))return ['machines','permissions'];
-  if(path.startsWith('/api/v1/spaces')||path==='/api/v1/runtime/control')return ['spaces','machines'];
+  if(path.startsWith('/api/v1/spaces'))return ['spaces','machines'];
   return [];
 }
 export async function createProductionClient({desktop = false, base = ''} = {}) {

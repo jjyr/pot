@@ -68,7 +68,7 @@ export function createResourceCache({now=Date.now,limit=256,onChange=()=>{}}={})
 }
 
 // Explicit allowlist. Editor versions, credentials, approvals and snapshot streams
-// bypass this cache. Membership GET contains no invitations or private keys.
+// bypass this cache. Agent Link invitations are command-only and never cached.
 const resources={
   '/api/v1/spaces':['spaces'],
   '/api/v1/assistants':['assistants','conversation','assistant-mail','permissions','tasks','runner'],
@@ -78,7 +78,6 @@ const resources={
   '/api/v1/integrations':['integrations'],
   '/api/v1/machines':['machines'],
   '/api/v1/agent-links':['agent-links'],
-  '/api/v1/runtime/control':['machines','spaces'],
   '/api/v1/about':['runtime'],
   '/api/v1/completions':['machines','skills','assistants','settings','permissions'],
 };

@@ -683,7 +683,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   }
   async function machines(root,token) {
     const t=key=>translate(locale(),key);root.classList.add('topology-page');
-    const toolbar=n('div','topology-toolbar'),connectionRoot=n('div','topology-connection'),storage=n('div','topology-machine-storage'),membership=n('div'),rows=n('div'),entries=new Map(),linkNotice=n('p','inline-error');storage.hidden=true;storage.append(rows,membership);connectionRoot.className='agent-links-container';toolbar.append(connectionRoot);root.append(toolbar,linkNotice,storage);
+    const toolbar=n('div','topology-toolbar'),connectionRoot=n('div','topology-connection'),storage=n('div','topology-machine-storage'),rows=n('div'),entries=new Map(),linkNotice=n('p','inline-error');storage.hidden=true;storage.append(rows);connectionRoot.className='agent-links-container';toolbar.append(connectionRoot);root.append(toolbar,linkNotice,storage);
     let model,view,currentNode=null;
     const data={inventory:[],permissionPages:[],permissionsPending:true,linkPages:[]};
     agentOwnerSpace=client.spaces.some(space=>space.id===agentOwnerSpace)?agentOwnerSpace:scope().space||client.spaces[0]?.id;
@@ -696,9 +696,9 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       const focused=view.inspector.contains(document.activeElement)?document.activeElement:null;
       return ()=>{if(focused?.isConnected&&view.inspector.contains(focused)&&document.activeElement!==focused)focused.focus({preventScroll:true});};
     }
-    function keepMachine(){for(const card of view.inspector.querySelectorAll('.machine-card'))rows.append(card);for(const card of view.inspector.querySelectorAll('[data-membership-space]'))membership.append(card);}
+    function keepMachine(){for(const card of view.inspector.querySelectorAll('.machine-card'))rows.append(card);}
     function showNode(node){if(!node)return;const restore=currentNode?.id===node.id?preserveInspectorFocus():()=>{};currentNode=node;topologySelection=node.id;keepMachine();view.inspector.replaceChildren();
-      if(node.kind==='machine'){const entry=entries.get(JSON.stringify([node.space,node.identity]));if(entry){entry.renderPermissions?.();view.inspector.append(entry.element);}const member=[...membership.children].find(card=>card.dataset.membershipSpace===node.space&&card.dataset.membershipRole!=='control');if(member)view.inspector.append(member);}
+      if(node.kind==='machine'){const entry=entries.get(JSON.stringify([node.space,node.identity]));if(entry){entry.renderPermissions?.();view.inspector.append(entry.element);}}
       else {
         const paused=node.link?.state==='disconnected'||node.link?.status==='disconnected';
         view.inspector.append(view.brand(node),n('p','hint',t('topology.kind.'+node.kind)),n('h2','',node.name),n('p',node.status==='connected'?'success-text':'hint',t(paused?'agentLinks.disconnected':node.status==='stale'?'topology.status.stale':'agentLinks.status.'+(node.status==='connected'?'connected':node.status==='connecting'?'connecting':'offline'))),n('p','topology-identity',node.identity),n('p','hint',t(paused?'agentLinks.disconnectedDescription':'topology.messageScope')));
