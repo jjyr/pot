@@ -170,6 +170,9 @@
   };
   window.potReportPanic = message => window.potErrors.reportPanic(message);
   window.addEventListener('error', event => {
+    // Browsers defer undelivered resize observations to another frame. These
+    // notifications carry no exception; leave browser diagnostics intact.
+    if (!event.error && (event.message === 'ResizeObserver loop completed with undelivered notifications.' || event.message === 'ResizeObserver loop limit exceeded')) return;
     if (event.message) report('error', event.error, event.message, `${event.filename || ''}:${event.lineno || 0}:${event.colno || 0}`);
   });
   window.addEventListener('unhandledrejection', event => report('unhandledrejection', event.reason));

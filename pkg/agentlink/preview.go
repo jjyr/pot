@@ -29,8 +29,8 @@ func (s *Service) Preview(ctx context.Context, raw string) (Preview, error) {
 	if address.Host.NodeID == s.options.HostIdentity.NodeID {
 		return Preview{}, ErrInvalid
 	}
-	// The hello is sent before the server's key can be checked. Keep its auth
-	// metadata capability-free; reveal the code only after the pinned handshake.
+	// Preview admission carries no capability. Reveal the code only through
+	// the encrypted session after TLS has verified the pinned server key.
 	auth := sessionAuth{Preview: &previewRequest{Invitation: address.Invitation, Target: address.Identity}}
 	data, _ := json.Marshal(auth)
 	session, err := peer.Dial(ctx, address.Endpoint, peer.DialOptions{Identity: s.options.HostIdentity, PrivateKey: s.options.HostKey, Expected: &address.Host, Service: ServiceName, Auth: data, Context: ctx})

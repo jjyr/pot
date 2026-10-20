@@ -1,19 +1,22 @@
 # Peer protocol
 
-`pkg/peer` is Pot's shared native cross-machine transport. It depends only on the
-Go standard library. A host supplies its stable Ed25519 identity, private key,
+`pkg/peer` is Pot's shared native cross-machine transport. TLS uses Go's standard
+library; CBOR, Yamux and Zstd use dedicated libraries. A host supplies its stable
+Ed25519 identity, private key,
 service admission function and request handlers. It does not depend on Control,
 machine membership, assistant databases or plugin management.
 
 ```text
-Agent Link collaboration          Signed identity probes
+Agent Link collaboration          Authenticated identity probes
  routes / durable ACK               identity proof
           |                              |
           +------------------------------+
                          |
                          pkg/peer Session
            service admission / RPC / events / connection lifetime
-           signed session + direction + sequence / bounded framing
+           CBOR metadata + opaque body / optional per-message Zstd
+           Yamux streams / flow control / bounded receive windows
+           TLS 1.3 / mutual Ed25519 proof / pinned public keys
                                 |
                                TCP
                                 |
@@ -37,35 +40,112 @@ proves possession of the discovered key but does not establish trust. Service
 admission must independently validate the invitation or saved binding. A key
 authorizes no assistants, membership, execution methods or owner APIs by itself.
 
-The protocol does not encrypt traffic. Ed25519 authenticates identities and
-protects integrity; Tailscale or another encrypted VPN can provide network
-confidentiality without application certificates. This protocol is not Noise.
+TLS 1.3 encrypts all application traffic, including invitation previews and pair
+claims. Each connection receives an in-memory self-signed certificate for its
+existing Ed25519 identity key, with the node ID in its subject common name.
+Certificates expire after 24 hours; new connections generate fresh certificates.
+Certificates are not persisted, and renewal does not change the public-key pin.
+No public CA, domain certificate or user-managed certificate file is required.
+A VPN can still restrict network access but is not required for confidentiality.
 
 ## Handshake and frames
 
-Protocol version 2 rejects the former identity `id` field and version 1 hello.
-Every packet has a four-byte unsigned big-endian length followed by JSON.
-Signed packets contain an exact JSON payload and base64url signature over a
-domain separator and that payload. The client hello binds protocol version,
-identity, random 32-byte nonce, expected server identity, service name and
-service admission data. The signed server challenge binds a fresh nonce to the
-entire signed hello. The client signs a confirmation of the combined transcript.
-Only after checking that confirmation does the server call the service's
-admission function. A signed acceptance binds its decision to the same transcript.
-Handshake packets are limited to 64 KiB and have a ten-second deadline.
+Protocol version 4 runs exclusively over TLS 1.3 with ALPN `pot-peer/4`.
+Both peers present a self-signed Ed25519 certificate and TLS proves possession of
+both private keys. Session resumption is disabled, so every connection performs a
+fresh full handshake. Verification checks the exact expected node ID and public
+key, certificate validity, digital-signature usage and peer authentication usage.
+Public-key pins survive certificate replacement; a copied certificate or a copied
+public-key suffix on an unrelated private seed cannot authenticate a node.
+There is no plaintext, older TLS or former signed-protocol fallback. Both peers
+must upgrade; existing invitation and connection formats and key bindings remain
+unchanged.
 
-The transcript hash identifies the session. Every application frame signs that
-session ID, its client/server direction, a strictly increasing per-direction
-sequence, message kind, request ID, per-attempt correlation nonce, method and payload. A modified signature,
-wrong direction, skipped/repeated sequence or replay from another connection
-closes the session before dispatch. Each connection admits one service; a host
-can dispatch multiple service names through one `Server` and TCP listener.
+Without an expected identity, `Dial` permits only the `identity` service with null
+admission data and no reverse handler. Such discovery proves key possession, not
+trust, and must never transmit a capability. Pinned callers verify TLS before
+sending any application identity, service admission data or invitation capability.
 
-Application frames are limited to 32 MiB; RPC JSON payloads to 24 MiB. A session
-admits at most 64 pending calls and 64 simultaneous incoming handlers. Servers
-bound accepted connections, including pending handshakes, to 128. The limits are
-checked before allocating a declared frame or dispatching a handler. TCP handles
-network segmentation; services do not implement another transport fragment format.
+After TLS completes, the client sends a bounded CBOR hello containing protocol
+version, its identity, expected server identity, service name and admission data.
+The client identity must exactly match its authenticated TLS certificate. The
+server then calls service admission and returns its identity and decision, which
+the client also checks against the authenticated certificate. Possessing a key
+does not grant service access: first pairing still needs the single-use invitation,
+and existing connections still check the saved node/key binding and revocation.
+TLS handles transcript authentication, directional keys, integrity and record
+replay protection; application packets carry no separate signatures.
+
+The hello and acceptance each have a four-byte unsigned big-endian length
+followed by CBOR inside TLS, limited to 64 KiB. One ten-second deadline covers TLS
+and service admission. Admission data remains the service's JSON, encoded as a
+CBOR byte string. Each connection admits one service; a host can dispatch multiple
+service names through one `Server` and TCP listener.
+
+After acceptance both peers start Yamux over the established TLS connection.
+Each RPC attempt opens one bidirectional stream. One request travels forward and
+one response travels back on that same stream. Events use separate streams with
+no response. The sender half-closes after its message; a receiver requires FIN
+immediately after the declared body before accepting the message.
+
+```text
+TCP connection
+  TLS 1.3: full mutual identity proof, expected-key pin, service admission
+    Yamux
+      stream 1: request -----------------> response <-----------------
+      stream 3: request -----------------> response <-----------------
+      stream 2: <---------------- request -----------------> response
+      stream 5: event -------------------> FIN
+
+Each stream direction carries exactly one message:
++-----------------------+----------------------+---------------------+-----+
+| CBOR length: 4B, BE    | CBOR metadata        | body: size bytes    | FIN |
++-----------------------+----------------------+---------------------+-----+
+                         kind, id, method,      opaque service bytes
+                         size, raw_size,
+                         encoding?, error?
+```
+
+CBOR describes routing and body encoding; it does not re-serialize the body.
+The current `Request`/`Handler` API still accepts and returns JSON documents,
+which travel as their original bytes. Response metadata repeats the request ID
+and method. The stream identifies the attempt, while a business ID may be reused
+for durable receipt reconciliation. There is no extra correlation nonce.
+
+Metadata uses canonical CBOR maps with text keys. Decoding rejects duplicate or
+unknown fields, tags, indefinite lengths, trailing CBOR items and excessive
+nesting or container counts. Metadata is limited to 32 KiB, nesting to eight,
+and maps/arrays to sixteen entries. Invalid body encodings, truncated bodies,
+trailing stream bytes and mismatched responses are rejected.
+
+Encoding 0 (the default) sends the body unchanged. Encoding 1 sends an independent
+Zstd frame using the fastest compression level and a 1 MiB window. Bodies below
+4 KiB are never compressed; larger bodies use Zstd only when it saves at least
+10%. The hello, admission credentials and metadata are never compressed, and
+compression shares no history or dictionaries across messages. Compression can
+still reveal information through the length of a single mixed secret/attacker
+controlled body; services must not expose such bodies as a compression oracle.
+Compressed wire bytes and declared raw bytes are each limited to 24 MiB. The
+decoder also bounds its window, memory and output capacity, and requires the exact
+declared raw size. These limits are checked before allocating body buffers.
+
+A session admits at most 64 pending outgoing calls/events and 64 simultaneous
+incoming handlers. Concurrent outgoing IDs must be unique. Resetting a stream
+does not free a running business handler's admission slot. Yamux allows at most
+64 incoming streams, starts with 256 KiB receive windows and grows them up to
+4 MiB when RTT and memory reservations permit. It sends data in chunks of at
+most 64 KiB. An unread bulk stream therefore does not block unrelated
+control streams at the application layer; all streams still share TCP's ordering
+and congestion control.
+
+Receive windows and transport-owned body/compression-output buffers share a
+96 MiB per-session and 256 MiB process-wide reservation budget. Reservations fail
+before allocation and never wait for other streams to free memory. These are
+transport buffer budgets, not process heap limits: caller-owned payloads/results,
+handler memory, bounded headers, TLS/Yamux overhead and shared codec workspaces
+are separate. Resource exhaustion can reject a stream or close its session.
+Servers also bound accepted connections, including pending handshakes, to 128.
+TCP, TLS and Yamux handle segmentation; services implement no fragment protocol.
 
 ## Lifecycle and business recovery
 
@@ -74,12 +154,21 @@ network segmentation; services do not implement another transport fragment forma
 `Server.Serve` owns the listener and sessions until cancellation or listener
 failure. `OnSession` registers an authenticated session before its reader starts
 and must return promptly. Hosts may register a narrow `identity` service for
-signed identity probes; management HTTP APIs are not mounted on the peer listener.
+authenticated identity probes; management HTTP APIs are not mounted on the peer
+listener.
 
 Sessions carry requests, responses and lossy `event.*` notifications in either
-direction. Responses preserve the request ID, method and per-attempt correlation nonce, so a late response cannot complete a later call reusing a business ID. A handler may return a
-bounded `RemoteError` with opaque service fault data. Heartbeats run every twenty
-seconds, reads expire after ninety seconds, and writes have bounded deadlines. Readers enqueue bounded heartbeat replies without waiting for writers, so duplex large writes continue draining.
+direction. A late response belongs only to its original stream, even when the
+next attempt reuses the same business ID. A handler may return a bounded
+`RemoteError` with opaque service fault data.
+
+Yamux keepalives and RTT measurements run every twenty seconds. Message reads
+expire after ninety seconds and writes after thirty seconds, with earlier caller
+deadlines taking precedence. Cancelling a caller's wait resets only its stream;
+it does not cancel an already dispatched business operation. Handlers receive the
+session context and own durable cancellation through their service API. Malformed
+application messages and handler overload reset their stream. TLS authentication
+failures, invalid Yamux traffic and connection failures close the session.
 
 The transport never reconnects or replays business requests automatically. A call
 whose delivery or result is uncertain returns `ErrUncertain`. Agent messaging

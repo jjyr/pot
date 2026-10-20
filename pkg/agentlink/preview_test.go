@@ -159,17 +159,17 @@ func TestPreviewAndConnectDoNotRevealCodesBeforeServerKeyProof(t *testing.T) {
 				}
 				defer connection.Close()
 				connection.SetDeadline(time.Now().Add(time.Second))
-				var header [4]byte
+				var header [5]byte
 				if _, err = io.ReadFull(connection, header[:]); err != nil {
 					return
 				}
-				size := binary.BigEndian.Uint32(header[:])
+				size := int(binary.BigEndian.Uint16(header[3:]))
 				if size > 65536 {
 					return
 				}
 				raw := make([]byte, size)
 				if _, err = io.ReadFull(connection, raw); err == nil {
-					captured <- raw
+					captured <- append(header[:], raw...)
 				}
 			}()
 			value := original
