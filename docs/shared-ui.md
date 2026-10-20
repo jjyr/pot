@@ -13,7 +13,7 @@ web/src: shell, pages, composer, drafts, configuration, navigation
                |                               |
          Wails bindings                  same-origin HTTP/SSE
        Go desktop service                 browser server
-      local + remote Spaces               one serving Control
+      local node + Agent Link peers       one local node
 ```
 
 ## Presentation and platform boundary
@@ -172,7 +172,7 @@ only its submitted draft. Selecting another assistant does not change ownership
 of a request already in flight. Task Usage uses the Task ID for accounting while
 requests retain the owning assistant; its Back/history path preserves the
 independently selected Chat. Task approvals follow the Task owner and exact Task,
-including when a different assistant remains selected in Chat. See [Multi-Space UI](multi-space-ui.md).
+including when a different assistant remains selected in Chat. See [node UI](multi-space-ui.md).
 
 Pending approvals appear in one transient region immediately after the latest
 assistant message. New messages move this region to the new anchor, preserving

@@ -59,7 +59,7 @@ func (a *Application) terminalSocket(w http.ResponseWriter, r *http.Request) boo
 	if !terminalPath(r.URL.Path) {
 		return false
 	}
-	if len(r.Header.Values("Origin")) > 0 || a.Control.Machines.Role() == "runner" {
+	if len(r.Header.Values("Origin")) > 0 {
 		writeError(w, http.StatusForbidden, protocol.APIError{Code: "terminal_origin", Message: "use the native owner terminal bridge"})
 		return true
 	}

@@ -4,7 +4,7 @@ Pot has one Go backend with two hosts: `pot serve` runs standalone Runtime; the
 macOS Wails App composes its local Runtime in process. The App's main window and
 tray use direct bindings and the shared frontend. An independent
 `web-ui-server` process publishes browser access to one explicitly selected
-Control. See [Architecture](architecture.md) for ownership and failure rules.
+local node. See [Architecture](architecture.md) for ownership and failure rules.
 
 ## Install and data roots
 
@@ -21,7 +21,7 @@ Linux Node requires a glibc-based host. Install any tools required by your selec
 plugins, including Chrome/Chromium for browser execution. Runtime creates no VMs
 or containers. Keep private data roots on a local filesystem supporting Unix
 sockets and file locks. See [Development](development.md) for packaging.
-Upgrade Control, Runners and App from the same revision. Manual upgrades can
+Upgrade each node independently from a compatible protocol revision. Manual upgrades can
 apply pending [database migrations](database-migrations.md); stop the old
 processes and back up the complete data root before schema-changing upgrades.
 The chat UI can update one local installation and its running hosts; see
@@ -36,167 +36,68 @@ restarts. See [Secrets](secrets.md).
 
 Tool packages live under `Resources/plugins/`, with a `plugin.json` manifest and
 explicit declared files. Stop Runtime before replacing complete packages. See
-[Plugin packages](plugins.md). Main and default Tasks use the owning Control's
-local filesystem; explicit remote Tasks use their destination Runtime.
+[Plugin packages](plugins.md). Main and Tasks use their owning node's local filesystem. Remote work is delegated
+through Agent Link to an autonomous node.
 
-## Standalone Control
+## Standalone node
 
-Initialize a dedicated root, then start a foreground listener:
-
-```sh
-pot init -root "$HOME/.pot-control"
-pot serve -root "$HOME/.pot-control" -listen 127.0.0.1:19443 \
-  -peer-listen 100.64.0.10:19444
-```
-
-For HTTPS, supply both `-tls-cert /absolute/control.crt` and
-`-tls-key /absolute/control.key`. The listener address is explicit; choose the
-intended LAN/VPN/Tailscale interface when clients run elsewhere. HTTP does not
-encrypt credentials or content. Deployment network protection and TLS are
-operator choices.
-
-`-listen` exposes the existing owner HTTP API; `-peer-listen` binds a separate
-TCP listener for Agent messages, Runner membership and execution. Both use the
-same stable Runtime identity, while each service validates its own authority.
-Peer endpoints use `tcp://host:port` on a private LAN, VPN or Tailscale network.
-Ed25519 signatures authenticate sessions and frames; the TCP transport does not
-encrypt content. Tailscale/VPN supplies network confidentiality when needed.
-Neither listener creates an assistant. Configure a
-Provider through App; first-use Chat then bootstraps Pot automatically. API callers may use
-`POST /api/v1/assistants`; it requires a stable `request_id` and a `name`, and
-optionally an explicit assistant model selection and `locale` (`en` or `zh-CN`,
-default English) for its persisted welcome. `POST /api/v1/assistants/bootstrap`
-accepts `locale` and returns `assistant: null` without a default Provider, otherwise
-the first existing assistant or a newly created Pot. Saving Providers alone never
-creates conversational identities; Chat initiates the separate bootstrap request.
-`POST /api/v1/assistants/{id}/delete` accepts the current `revision`, retires an
-idle assistant and returns `deleted: true`. The same revision may retry safely.
-Changed revisions and ongoing replies/Tasks return `assistant_changed` or
-`assistant_busy`. Retired identities are absent from the catalogue and reject
-conversation access and new Task admission. Their history remains on disk and
-their schedules no longer launch. Bootstrap returns `assistant: null` with
-`initialized: true` after explicit deletion leaves no assistants; create a new
-assistant explicitly to resume chatting.
-
-The private CLI socket authenticates operator requests without exposing its
-internal token:
+Initialize a private root and run the node:
 
 ```sh
-pot status -root "$HOME/.pot-control"
-pot api -root "$HOME/.pot-control" /api/v1/runtime/control
-pot api -root "$HOME/.pot-control" -method POST \
-  -body '{"action":"owner_credential"}' /api/v1/runtime/control
+pot init -root "$HOME/.pot-node"
+pot serve -root "$HOME/.pot-node" -peer-listen 100.64.0.10:19444
 ```
 
-The last command exports the standalone Control's owner credential for a native
-remote Space or browser upstream. Store the credential string in an owner-only
-file when using `-control-token-file`; this credential is separate from Runner
-invitations and browser access tokens.
+`-peer-listen` binds authenticated Agent Link TCP. Use a private LAN, VPN or
+Tailscale endpoint. Ed25519 signatures authenticate sessions and frames; VPN or
+Tailscale supplies confidentiality. The listener grants no remote owner,
+membership, model proxy or raw execution access.
 
-Listener and resource paths can be persisted without changing the running process:
+The private local socket serves CLI operator requests:
+
+```sh
+pot status -root "$HOME/.pot-node"
+pot api -root "$HOME/.pot-node" /api/v1/runtime
+```
+
+Each node owns its Providers, credentials, assistants, permissions and workspaces.
+Configure Providers through App or the local API. First-use Chat bootstraps Pot
+once a default Provider exists. Assistant creation uses a stable `request_id` and
+`name`; deleting an idle assistant retains its history and retires its schedules.
+An explicit missing assistant never falls back to another identity.
+
+Local workspace and installed resource paths can be persisted:
 
 ```json
 {
-  "listen": "127.0.0.1:19443",
-  "tls_cert": "",
-  "tls_key": "",
+  "version": 1,
   "workspace": "/absolute/agent-workspace",
   "resources": "/absolute/Resources"
 }
 ```
 
 ```sh
-pot config server /absolute/server-settings.json -root "$HOME/.pot-control"
+pot config server /absolute/server-settings.json -root "$HOME/.pot-node"
 ```
 
-Initialize the Go root first. Settings are private and typed; file/directory paths
-must be absolute, and TLS paths must be configured together. Explicit startup
-flags override saved values. Restart to apply changes.
+Settings stay private and use absolute paths. Restart to apply changes. Startup
+migrates old owner-listener/TLS settings out of `server.json`; those retired
+listeners are not started. Configure browser TLS on the browser service itself.
 
-## Runner membership
+Machine permission policy controls this local node. `execution_access: "ask"`
+runs ordinary work in SRT and reviews explicit host requests; `allow` trusts the
+machine. See [Permissions](permissions.md). A peer's policy is managed on that
+peer, rather than sent from this node.
 
-Run the same CLI on the execution machine with a separate root:
+## Existing distributed installations
 
-```sh
-pot init -root "$HOME/.pot-runner"
-pot serve -root "$HOME/.pot-runner"
-```
-
-Create a one-use invitation on Control:
-
-```sh
-pot api -root "$HOME/.pot-control" -method POST \
-  -body '{"action":"create_invitation"}' /api/v1/runtime/control
-```
-
-On Runner, preview the destination:
-
-```sh
-pot api -root "$HOME/.pot-runner" -method POST \
-  -body '{"action":"preview","url":"tcp://100.64.0.10:19444"}' \
-  /api/v1/runtime/control
-```
-
-Verify the returned Runtime ID and fingerprint. Submit a join request using those
-exact values and the invitation:
-
-```json
-{
-  "action": "join",
-  "request": {
-    "request_id": "runner-join-1",
-    "url": "tcp://100.64.0.10:19444",
-    "invitation": "INVITATION",
-    "expected_runtime_id": "CONTROL-ID",
-    "expected_fingerprint": "CONFIRMED-FINGERPRINT"
-  }
-}
-```
-
-```sh
-pot api -root "$HOME/.pot-runner" -method POST -body - \
-  /api/v1/runtime/control < /absolute/join.json
-```
-
-Runner joins and reconnects outward through the same signed TCP service host;
-no certificate, private CA, WebSocket or inbound execution listener is needed.
-Owner HTTP/TLS settings remain independent and never become execution endpoints.
-Upgrades preserve Runtime keys, pinned Control identity, membership epoch,
-credentials and execution journals. An obsolete HTTP membership endpoint is
-cleared and shown as `needs_endpoint`. Repair its location without re-enrolling:
-
-```json
-{
-  "action": "set_endpoint",
-  "url": "tcp://100.64.0.10:19444",
-  "expected_runtime_id": "CONTROL-ID",
-  "expected_fingerprint": "CONFIRMED-FINGERPRINT"
-}
-```
-
-The peer at that address must prove the original Control identity. Repairing an
-endpoint cannot replace a Control, rotate membership or replay original work.
- A Runtime already owning
-assistants/AI configuration cannot join. Keep its root to retain identity and
-membership; re-enrollment creates a new epoch. `remove_member` on Control uses
-`runtime_id`; `leave` on Runner fences reconnect and confirms original cleanup
-before removing membership. Unknown execution outcomes are not replayed.
-
-Control runs unspecified Tasks on its own Runtime. Select an enrolled Runner
-explicitly with `machine_id`; labels describe machines and support explicit
-filtering. Set labels through the owner API:
-
-```sh
-pot api -root "$HOME/.pot-control" -method POST \
-  -body '{"action":"set_tags","runtime_id":"RUNNER-ID","tags":["build","linux"]}' \
-  /api/v1/runtime/control
-```
-
-Labels never grant capability or change default placement. Configure execution authorization through
-Settings → Execution permissions or `POST /api/v1/permissions` with the current
-policy revision. `execution_access: "ask"` runs ordinary work in SRT and reviews
-explicit host requests; `allow` trusts this machine and bypasses SRT. See
-[Permissions](permissions.md) for exact command rules and application state.
+Upgrade each installation with its original data root and signing key. Migrations
+archive retired membership state and retain execution journals, task identities,
+receipts and cached transcript pages. Existing remote tasks keep their original
+target. Unknown results and unconfirmed cleanup remain fenced; upgrading never
+replays them or creates new delegations. Historical original evidence is required
+for recovery. Reconnect autonomous installations through Agent Link for new work.
+Old native remote Space credentials are no longer read or used for connections.
 
 ## Advanced local resources
 
@@ -217,11 +118,9 @@ pot web-ui-server -root "$HOME/.pot-web" -control local \
   -origin http://127.0.0.1:17703
 ```
 
-The local target must be a running standalone Control. Remote serving uses
-`-control tcp://100.64.0.10:19444 -control-token-file /absolute/owner-token`
-and optionally `-control-ca /absolute/ca.pem`. Upstream authentication and identity
-are checked before serving. The browser's public origin, listener TLS and upstream
-Control transport are independent. Browser TLS uses `-tls-cert` and `-tls-key`.
+The target must be a running local node. Its private socket credential and stable
+identity are checked before serving. Remote node access uses Agent Link within
+that node. Browser listener TLS uses `-tls-cert` and `-tls-key`.
 
 Manage access through the browser service's private operator socket:
 
@@ -251,7 +150,7 @@ replays at most 64 KiB. Explicit `POST /api/v1/terminals/ID/close` ends the shel
 The owning assistant's Host workspace is the starting directory. There are at
 most eight sessions per assistant. Runtime shutdown closes them; restart does
 not recover terminal IDs or bytes. Browser origins, published browser clients
-and execution-only Runners cannot use this interface. No model command is
+cannot use this interface. No model command is
 accepted at creation, and terminal bytes are never stored in product databases,
 transcripts or usage records.
 
@@ -277,34 +176,19 @@ existing one. Start/stop act on that definition, and the recorded root must matc
 Use the same account/root when restarting after upgrades. Neither building nor
 installing an archive starts a VM or installs a user service.
 
-## Agent message access
+## Agent Link access
 
-The topology page manages Agent Links separately from third-party accounts and
-Runner enrollment. Each Control starts a dedicated loopback TCP peer listener;
-the page shows its actual bind address. Access setup verifies a reachable
+The topology page manages Agent Links. Each node starts a loopback TCP peer
+listener and shows its actual bind address. Access setup verifies a reachable
 `tcp://host:port` on a private interface or explicitly creates a Tailscale TCP
-Serve mapping. Direct private endpoints on local interfaces can start the peer
-listener automatically. Agent messages and Runner services share the listener
-and stable host identity while retaining independent service authorization;
-owner HTTP management remains separate. Setup authenticates the configured host
-identity before saving an endpoint. Merely opening the page does not change
-network configuration. Existing unrelated Serve mappings are never overwritten.
-Tailscale/VPN can encrypt traffic; peer TCP itself authenticates content without
-encryption and requires no application certificate. See [Peer protocol](peer-protocol.md).
+Serve mapping. Opening the page does not change network settings or overwrite
+unrelated mappings. Setup verifies the node's signing identity before saving an
+endpoint. See [Peer protocol](peer-protocol.md).
 
-Copying an Agent address creates a short-lived, single-use invitation. Treat the
-complete address as a credential and paste it only into the other Agent's
-connection page. Ordinary status displays the nonsecret endpoint. The receiving
-side verifies the invitation and real endpoint through a read-only identity
-preview before Add binds it to the selected assistant. Preview does not consume
-the invitation or establish a connection. A
-connection grants mutual messaging only; assistant execution keeps its existing
-permissions. See [Agent Links](agent-links.md).
-
-Adding a machine uses the Control's same TCP endpoint with the independent
-membership service and pinned identity. Use the access setup if the endpoint is
-missing; do not reuse an owner HTTP port. Copy join information creates and copies
-a complete invitation in one action. The target Runner automatically checks its
-Control identity before enabling Join. Returning from the invitation page keeps
-the code valid; explicitly revoking it requires confirmation. Revocation after
-successful enrollment keeps the joined machine.
+Copy connection information from one node and paste the complete segment into
+Add Agent on the other. It carries a short-lived, single-use invitation, so treat
+it as a credential. The connection opens the peer's advertised assistant directory
+and supported collaboration operations; it grants no node administration access.
+Use the existing assistant chat and task delegation interactions. Disconnect
+pauses the link; delete removes the saved connection while retaining history.
+Neither action silently stops accepted work. See [Agent Links](agent-links.md).

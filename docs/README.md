@@ -5,7 +5,7 @@ implementation. Code defines actual behavior.
 
 | Topic | Read |
 |---|---|
-| Deployment, resource APIs, Control membership and web-ui-server | [Deployment](deployment.md) |
+| Deployment, resource APIs and web-ui-server | [Deployment](deployment.md) |
 | Local updates, interruption confirmation and release signing | [Updates](updates.md) |
 | Database schemas, version history and automatic upgrades | [Database migrations](database-migrations.md) |
 | Build, test and release | [Development](development.md) |
@@ -13,7 +13,7 @@ implementation. Code defines actual behavior.
 | Current product scope and deferred platform work | [Development plan](development-plan.md) |
 | Assistant rules, project AGENTS.md, routing and Skills | [Agent context](agent-context.md) |
 | Visual language, responsive navigation and editing-page interactions | [Design language](design-language.md) |
-| Native Space ownership, combined views and offline behavior | [Multi-Space UI](multi-space-ui.md) |
+| Node and assistant UI identity, views and offline behavior | [Multi-Space UI](multi-space-ui.md) |
 | Encrypted credentials and master keys | [Secrets](secrets.md) |
 | Third-party login, integration components and credentials | [Credentials](credentials.md) |
 | Local execution and process lifetime | [Executor](executor.md), [Task workspace selection](task-workspaces.md) |

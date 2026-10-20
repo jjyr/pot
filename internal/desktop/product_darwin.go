@@ -14,10 +14,10 @@ import (
 	"github.com/jjyr/pot/internal/attention"
 	"github.com/jjyr/pot/internal/buildinfo"
 	"github.com/jjyr/pot/internal/control"
+	"github.com/jjyr/pot/internal/localui"
 	"github.com/jjyr/pot/internal/productinfo"
 	product "github.com/jjyr/pot/internal/runtime"
 	"github.com/jjyr/pot/internal/selfupdate"
-	"github.com/jjyr/pot/internal/spaces"
 	"github.com/jjyr/pot/internal/systemnotifications"
 	"github.com/jjyr/pot/internal/transport"
 	"github.com/jjyr/pot/pkg/core"
@@ -34,7 +34,7 @@ type Service struct {
 	ctx    context.Context
 	app    *application.App
 	api    *transport.Application
-	spaces *spaces.Manager
+	spaces *localui.Manager
 
 	main, tray                *application.WebviewWindow
 	mu                        sync.Mutex
@@ -142,7 +142,7 @@ func runProduct(parent context.Context, root string) (result error) {
 	}
 	localClient := socket.Endpoint.Client()
 	localClient.Timeout = 0
-	manager, err := spaces.Open(ctx, spaces.Options{Path: filepath.Join(runtime.Root.Path, "app-spaces.json"), Local: spaces.NewLocalHTTPClient(localClient, socket.Endpoint.Token, api.RuntimeID), LocalID: api.RuntimeID, LocalName: "This Mac", OnStreamReset: func(space string) {
+	manager, err := localui.Open(ctx, localui.Options{Local: localui.NewLocalHTTPClient(localClient, socket.Endpoint.Token, api.RuntimeID), LocalID: api.RuntimeID, LocalName: "This Mac", OnStreamReset: func(space string) {
 		service.mu.Lock()
 		app := service.app
 		service.mu.Unlock()

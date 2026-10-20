@@ -5,9 +5,9 @@ Multiple chat assistants own their conversations, rules, Tasks and schedules.
 Task Agents execute a concrete brief on one fixed Runtime; they have no
 independent assistant persona or assistant AGENTS.md.
 
-The App starts/exits with its own Runtime and supports local use alongside
-one configured remote Control. Control coordinates the user's machines, model configuration,
-global resources and approvals. [Architecture](architecture.md) defines ownership;
+The App starts/exits with its own autonomous node. Agent Link connects other Pot,
+Codex and compatible agents for conversation and task delegation. Each node owns
+its model configuration, workspaces, credentials, execution and approvals. [Architecture](architecture.md) defines ownership;
 [Design language and interactions](design-language.md) defines the Chat/Tasks/Machines flows.
 
 Simple searches, focused research and design discussions are completed directly

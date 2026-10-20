@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"io/fs"
-	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -17,7 +16,7 @@ func TestBackgroundInstanceUpgradePreservesAcceptedReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "0009_") {
+		if e.Name() >= "0009_" {
 			continue
 		}
 		path := "migrations/tasks/" + e.Name()

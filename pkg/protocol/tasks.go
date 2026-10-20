@@ -31,7 +31,16 @@ func (p TaskPhase) Scope() string {
 	return ""
 }
 
+type AgentLinkOrigin struct {
+	LinkID      string `json:"link_id"`
+	NodeID      string `json:"node_id"`
+	AssistantID string `json:"assistant_id"`
+	Kind        string `json:"kind"`
+	Name        string `json:"name"`
+}
+
 type TaskInfo struct {
+	AgentLink       *AgentLinkOrigin      `json:"agent_link,omitempty"`
 	Address         *AgentRef             `json:"address,omitempty"`
 	MachineID       string                `json:"machine_id"`
 	RemoteWaiting   bool                  `json:"remote_waiting"`
@@ -127,6 +136,8 @@ func (w TaskWorkspace) Validate() error {
 }
 
 type CreateTask struct {
+	LinkID    string        `json:"link_id,omitempty"`
+	Target    *AgentRef     `json:"target,omitempty"`
 	Workspace TaskWorkspace `json:"workspace"`
 
 	MachineID       string           `json:"machine_id"`
@@ -140,6 +151,9 @@ type CreateTask struct {
 }
 
 func (t CreateTask) Validate() error {
+	if t.LinkID != "" && !core.Identifier(t.LinkID) || t.Target != nil && (!t.Target.Valid() || t.Target.Kind != "assistant") {
+		return fmt.Errorf("invalid agent link target")
+	}
 	if err := t.Workspace.Validate(); err != nil {
 		return err
 	}

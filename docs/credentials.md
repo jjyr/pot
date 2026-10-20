@@ -52,7 +52,7 @@ The GitHub adapter requests a fixed set of development scopes, obtains a device
 challenge, and opens `https://github.com/login/device` in the user's browser. Pot
 displays the one-time user code. The adapter respects GitHub's polling interval
 and slowdown responses, then fetches the authenticated user's stable ID and
-username before saving the account. This works with local or remote Controls
+username before saving the account. This works on each autonomous node
 without a public callback endpoint. Device codes and OAuth tokens never reach
 the management API.
 

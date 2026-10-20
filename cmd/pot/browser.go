@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -46,10 +45,8 @@ func browserCommand(ctx context.Context, args []string, out io.Writer) error {
 	flags := flag.NewFlagSet("web-ui-server", flag.ContinueOnError)
 	flags.SetOutput(out)
 	root := flags.String("root", "", "private browser service root")
-	control := flags.String("control", "", "explicit Control origin or local")
-	controlRoot := flags.String("control-root", "", "local Runtime root when -control local")
-	tokenFile := flags.String("control-token-file", "", "private remote Control owner credential file")
-	ca := flags.String("control-ca", "", "additional remote Control CA PEM")
+	control := flags.String("control", "local", "local autonomous node")
+	controlRoot := flags.String("control-root", "", "local Runtime root")
 	listen := flags.String("listen", "127.0.0.1:17703", "browser listener")
 	origin := flags.String("origin", "", "exact browser public origin")
 	cert := flags.String("tls-cert", "", "browser TLS certificate")
@@ -57,8 +54,8 @@ func browserCommand(ctx context.Context, args []string, out io.Writer) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if flags.NArg() != 0 || *control == "" || *root == "" || *origin == "" {
-		return errors.New("usage: pot web-ui-server -root PATH -control local|ORIGIN -origin PUBLIC_ORIGIN [-control-root PATH | -control-token-file PATH]")
+	if flags.NArg() != 0 || *control != "local" || *root == "" || *origin == "" {
+		return errors.New("usage: pot web-ui-server -root PATH -origin PUBLIC_ORIGIN [-control-root PATH]")
 	}
 	if (*cert == "") != (*key == "") {
 		return errors.New("both TLS certificate and key required")
@@ -110,9 +107,6 @@ func browserCommand(ctx context.Context, args []string, out io.Writer) error {
 	}
 	upstream := webui.Upstream{}
 	if *control == "local" {
-		if *tokenFile != "" || *ca != "" {
-			return errors.New("remote credential/CA cannot accompany explicit local Control")
-		}
 		if *controlRoot == "" {
 			*controlRoot, err = instance.DefaultPath()
 			if err != nil {
@@ -151,31 +145,6 @@ func browserCommand(ctx context.Context, args []string, out io.Writer) error {
 			return err
 		}
 		upstream = webui.Upstream{URL: "http://runtime", Credential: endpoint.Token, Client: endpoint.Client()}
-	} else {
-		if *tokenFile == "" || *controlRoot != "" {
-			return errors.New("remote Control requires explicit private credential file")
-		}
-		token, err := privateText(*tokenFile)
-		if err != nil {
-			return err
-		}
-		tr := http.DefaultTransport.(*http.Transport).Clone()
-		tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-		if *ca != "" {
-			data, err := os.ReadFile(*ca)
-			if err != nil {
-				return err
-			}
-			roots, err := x509.SystemCertPool()
-			if err != nil || roots == nil {
-				roots = x509.NewCertPool()
-			}
-			if !roots.AppendCertsFromPEM(data) {
-				return errors.New("invalid Control CA")
-			}
-			tr.TLSClientConfig.RootCAs = roots
-		}
-		upstream = webui.Upstream{URL: strings.TrimSuffix(*control, "/") + "/control/v1/owner", Credential: token, Client: &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	}
 	upstream.Client.Timeout = 0
 	requestctx, cancel := context.WithTimeout(ctx, 12*time.Second)
@@ -200,8 +169,8 @@ func browserCommand(ctx context.Context, args []string, out io.Writer) error {
 	identity.ID, _ = value["id"].(string)
 	identity.RuntimeID, _ = value["runtime_id"].(string)
 	identity.Role, _ = value["role"].(string)
-	if identity.ID == "" || identity.ID != identity.RuntimeID || *control != "local" && identity.Role != "control" {
-		return errors.New("configured upstream is not the selected standalone Control")
+	if identity.ID == "" || identity.ID != identity.RuntimeID {
+		return errors.New("configured upstream is not the selected local node")
 	}
 	upstream.ControlID = identity.ID
 	if err = pinBrowserControl(directory, identity.ID); err != nil {

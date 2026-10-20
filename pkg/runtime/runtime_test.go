@@ -91,7 +91,7 @@ func TestAuthenticatedHostAPI(t *testing.T) {
 	if recorder.Code != http.StatusOK || json.Unmarshal(recorder.Body.Bytes(), &control) != nil {
 		t.Fatalf("control API: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	if control.ID != host.Info().RuntimeID || control.Name != "Embedded fixture" || control.Role != "embedded" {
+	if control.ID != host.Info().RuntimeID || control.Name != "Embedded fixture" || control.Role != "node" {
 		t.Fatalf("operator API lost embedding options: %+v", control)
 	}
 	request.Header.Set("X-Pot-Control-ID", "another-runtime")

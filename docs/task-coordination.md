@@ -7,6 +7,22 @@ for other Tasks. Task-result and plugin-notification handling retain the
 assistant's configured tools and current machine permissions. A batch with
 eligible failed work additionally exposes the bounded retry tool described below.
 
+## Linked execution
+
+`create_task` accepts `link_id` and an optional assistant `target` address.
+Explicit targets select that assistant; otherwise the receiving node resolves its
+persisted default once. The receiver owns execution, model selection and local
+permissions. Local provider credentials and model snapshots are never forwarded.
+The directing node stores an idempotent delegation and remote reference rather
+than launching a local worker copy. Results notify the original directing
+assistant through the existing inbox and task-outcome projection.
+
+Linked tasks use the same lists and detail view, with a Codex or Pot source icon.
+Cancellation targets the original accepted task; local archive state is supported.
+Steering, pause, local allowance controls, remote file reads and execution
+transcripts require additional adapter capabilities and are currently unavailable.
+Disconnected nodes retain the last accepted state without replaying work.
+
 ## Autonomous model routing
 
 The invoking assistant selects a configured Provider and model using the task,
@@ -229,8 +245,7 @@ wake the client notification reader. See [System notifications](shared-ui.md#sys
 `GET /api/v1/tasks/{id}/events?after=CURSOR&limit=100` reads a bounded,
 append-only page from the original Runner across all of the Task's Runs. Each item carries a durable
 `sequence` plus its generation/turn-bound Agent event. The page returns `cursor`
-and `has_more`; clients advance only through contiguous sequences. Control
-persists fetched remote pages, so an unavailable original Runner returns cached
-content with `unavailable: true`. A disconnected target never causes execution
-or transcript reads to move to a replacement machine. Terminal runs remain
-readable. Changes wake the existing `tasks` invalidation stream.
+and `has_more`; clients advance only through contiguous sequences. Historical remote pages remain cached with `unavailable: true`; retired
+Control/Runner destinations cannot execute or fetch new output. Agent Link task
+details expose their canonical result and return an empty transcript until the
+adapter advertises transcript support. Changes wake the existing `tasks` invalidation stream.

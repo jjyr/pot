@@ -5,13 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jjyr/pot/pkg/protocol"
 
-	"github.com/jjyr/pot/internal/controlplane"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
-	"github.com/jjyr/pot/pkg/storage"
 )
 
 // RecoveryCommand contains identity and intent only. Clients cannot supply a
@@ -61,19 +60,7 @@ func (s *Service) TaskRecovery(ctx context.Context, owner, task, run, action str
 	if l.RuntimeID == s.options.RuntimeID {
 		return s.RecoverRuntimeRun(ctx, RecoveryCommand{action, l.ControlID, l.TaskID, l.RunID})
 	}
-	peer, err := s.Machines.Peer(l.RuntimeID)
-	if err != nil {
-		return RecoverySnapshot{}, err
-	}
-	var snapshot RecoverySnapshot
-	err = s.remoteCall(ctx, peer, binding(l), "task.recovery", "recovery:"+storage.ID(), struct {
-		Action string `json:"action"`
-	}{action}, &snapshot)
-	if err == nil {
-		s.wakeTasks()
-		s.Changes.Notify("tasks")
-	}
-	return snapshot, err
+	return RecoverySnapshot{}, protocol.APIError{Code: "original_execution_unavailable"}
 }
 
 // RecoverRuntimeRun is a native/private owner port; browser forwarding excludes
@@ -99,17 +86,7 @@ func (s *Service) recoveryOperations(ctx context.Context, l runner.Launch) ([]Op
 	if l.ControlID == s.options.RuntimeID {
 		return s.Operations.RecoveryRecords(ctx, l.TaskID, l.RunID)
 	}
-	membership := s.Machines.Membership()
-	if membership == nil || membership.Enrollment.Control.RuntimeID != l.ControlID {
-		return nil, errors.New("original Control membership unavailable")
-	}
-	peer, err := s.Machines.ControlPeer()
-	if err != nil {
-		return nil, err
-	}
-	var records []OperationRecord
-	err = s.remoteCall(ctx, peer, binding(l), "task.recovery.operations", "recovery-operations:"+storage.ID(), struct{}{}, &records)
-	return records, err
+	return nil, protocol.APIError{Code: "original_execution_unavailable"}
 }
 func validateRecoveryOperation(l runner.Launch, r OperationRecord) error {
 	op := r.Operation
@@ -128,11 +105,7 @@ func validateRecoveryOperation(l runner.Launch, r OperationRecord) error {
 }
 func (s *Service) settleRecoveryOperations(ctx context.Context, l runner.Launch, records []OperationRecord) error {
 	if l.ControlID != s.options.RuntimeID {
-		peer, err := s.Machines.ControlPeer()
-		if err != nil {
-			return err
-		}
-		return s.remoteCall(ctx, peer, binding(l), "task.recovery.settle", "recovery-settle:"+storage.ID(), records, nil)
+		return protocol.APIError{Code: "original_execution_unavailable"}
 	}
 	originals, err := s.Operations.RecoveryRecords(ctx, l.TaskID, l.RunID)
 	if err != nil {
@@ -304,9 +277,6 @@ func (s *Service) recoverRun(ctx context.Context, record runner.Run, action stri
 	out.Reconciled = true
 	s.wakeTasks()
 	s.Changes.Notify("tasks")
-	if peer, e := s.Machines.ControlPeer(); e == nil {
-		_ = peer.Notify(ctx, controlplane.Request{ID: "recovered:" + storage.ID(), Method: "event.runner.changed", Params: json.RawMessage(`{}`)})
-	}
 	return out, nil
 }
 func (s *Service) proveRecoveryCleanup(ctx context.Context, record runner.Run, issued bool) error {

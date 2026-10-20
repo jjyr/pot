@@ -10,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jjyr/pot/internal/controlplane"
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/execution"
@@ -126,19 +124,8 @@ func TestAgentLinkControlsExchangeWithoutAppAndDoNotGrantExecution(t *testing.T)
 		}
 	}
 	for _, item := range []struct{ local, remote *Service }{{a.service, b.service}, {b.service, a.service}} {
-		machines, err := item.local.Machines.Machines(ctx)
-		if err != nil || len(machines) != 0 {
-			t.Fatal("Agent Link created Runner membership", machines, err)
-		}
-		if item.local.Machines.Membership() != nil {
-			t.Fatal("Agent Link changed Runtime ownership")
-		}
 		if _, _, err = item.local.Permissions.Policy(item.remote.options.RuntimeID); err == nil {
 			t.Fatal("Agent Link granted execution policy")
-		}
-		port := controlplane.RemotePort{Directory: item.local.Machines, RuntimeID: item.remote.options.RuntimeID}
-		if _, err = port.Launch(ctx, runner.Launch{}); err == nil {
-			t.Fatal("Agent Link exposed remote execution")
 		}
 		peers, err := item.local.agentLinkPeers(ctx, "main")
 		if err != nil || len(peers) != 1 || peers[0].Address.NodeID != item.remote.options.RuntimeID {
@@ -168,8 +155,8 @@ func TestAgentLinkControlBindingRevocationAndNarrowListener(t *testing.T) {
 		t.Fatal(err)
 	}
 	peer := protocol.AgentRef{NodeID: "binding-b", Kind: "assistant", AgentID: "main"}
-	if _, err = a.service.sendAssistantMail(ctx, "wrong-local", other.ID, protocol.SendMail{To: peer, Text: "wrong local assistant"}); err == nil {
-		t.Fatal("another local assistant used the binding")
+	if _, err = a.service.sendAssistantMail(ctx, "another-local", other.ID, protocol.SendMail{To: peer, Text: "another local assistant"}); err != nil {
+		t.Fatal("node link excluded another local assistant", err)
 	}
 	wrongPeer := peer
 	wrongPeer.AgentID = "other"
@@ -181,14 +168,14 @@ func TestAgentLinkControlBindingRevocationAndNarrowListener(t *testing.T) {
 	identity, key := a.service.Machines.TransportIdentity()
 	expected, _ := b.service.Machines.TransportIdentity()
 	auth, _ := json.Marshal(map[string]string{"id": connection.ID})
-	for _, service := range []string{controlplane.ExecutionService, "owner", "unknown"} {
+	for _, service := range []string{"execution", "owner", "unknown"} {
 		session, e := peertransport.Dial(ctx, b.endpoint, peertransport.DialOptions{Identity: identity, PrivateKey: key, Expected: &expected, Service: service, Auth: auth})
 		if e == nil {
 			session.Close()
 			t.Fatal("message binding granted service authority", service)
 		}
 	}
-	if _, err = a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "disconnect", ID: connection.ID}); err != nil {
+	if _, err = a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "delete", ID: connection.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = a.service.sendAssistantMail(ctx, "after-revoke", "main", protocol.SendMail{To: peer, Text: "must stay local"}); err == nil {
@@ -205,42 +192,10 @@ func TestAgentLinkControlBindingRevocationAndNarrowListener(t *testing.T) {
 	}
 }
 
-func TestAgentLinkRunnerAndMissingAssistantCannotPublishIdentity(t *testing.T) {
-	ctx := context.Background()
-	owner := taskControl(t, "membership-owner", "")
-	executionRuntime := taskControl(t, "execution-runtime", "")
-	if _, err := executionRuntime.agentLinkIdentity(ctx, "main"); err == nil {
-		t.Fatal("unconfigured assistant acquired a link identity")
-	}
-	if err := owner.Machines.EnableControl(); err != nil {
-		t.Fatal(err)
-	}
-	server := controlPeerEndpoint(owner)
-	invitation, err := owner.Machines.Invitation(ctx, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	connector := controlplane.Connector{Directory: executionRuntime.Machines}
-	identity, err := connector.Preview(ctx, server)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = connector.Enroll(ctx, server, identity, invitation.Code, "join-runner"); err != nil {
-		t.Fatal(err)
-	}
-	if executionRuntime.Machines.Role() != "runner" {
-		t.Fatal("fixture did not establish real Runner membership")
-	}
-	for _, action := range []string{"invite", "preview", "connect", "configure", "disconnect"} {
-		if _, err = executionRuntime.ManageAgentLink(ctx, AgentLinkCommand{Action: action, AssistantID: "main"}); err == nil {
-			t.Fatal("Runner admitted Agent management", action)
-		}
-	}
-	hostIdentity, key := owner.Machines.TransportIdentity()
-	expected, _ := executionRuntime.Machines.TransportIdentity()
-	if session, e := peertransport.Dial(ctx, controlPeerEndpoint(executionRuntime), peertransport.DialOptions{Identity: hostIdentity, PrivateKey: key, Expected: &expected, Service: agentlink.ServiceName, Auth: json.RawMessage(`{}`)}); e == nil {
-		session.Close()
-		t.Fatal("Runner exposed message service")
+func TestMissingAssistantCannotPublishIdentity(t *testing.T) {
+	s := taskControl(t, "empty-node", "")
+	if _, err := s.agentLinkIdentity(context.Background(), "main"); err == nil {
+		t.Fatal("missing assistant published identity")
 	}
 }
 

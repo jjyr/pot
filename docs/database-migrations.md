@@ -34,7 +34,7 @@ belongs to the complete database, including tables used by other components:
 | `tasks` | `tasks.sqlite` | Tasks, schedules, inbox, mailbox, plugin checkpoints, routing and resource receipts |
 | `runner` | `runner.sqlite` | Runs, execution receipts, events, resources and workspaces |
 | `conversation` | Each conversation database | Messages, context, configuration, steering and instruction updates |
-| `machines` | `machines.sqlite` | Control directory and membership |
+| `machines` | `machines.sqlite` | Autonomous signing identity, local labels and archived membership records |
 | `usage` | `usage.sqlite` | Requests, routing, allowances, tools and compactions |
 | `operations` | `operations.sqlite` | Operation receipts and scope/input bindings |
 
@@ -192,3 +192,15 @@ for other names. It replaces old generated images and default-image receipts wit
 character composites while retaining custom uploads, identity revisions and request
 bindings. Renaming does not change this saved role. The frozen `0011` renderer
 remains confined to storage so skipped-version upgrades can recognize old pixels.
+
+## Autonomous collaboration upgrade
+
+`machines/0003_autonomous_node_identity` preserves the stable signing identity
+and labels and archives former distributed membership facts. Local recovery keeps
+its original receipts; retired remote launches remain fenced.
+`control/0017_agent_link_nodes` expires assistant-scoped invitations and requires
+fresh node-wide admission, preserving mailbox history and keys.
+`control/0018_agent_link_delegation_stop` retains cancellation intent and chat
+sender bindings. `tasks/0010_codex_link` stores persistent Codex assistant sessions
+and accepted jobs. `tasks/0011_agent_link_task_targets` adds optional target/source
+metadata without changing existing task/run identities or effect receipts.

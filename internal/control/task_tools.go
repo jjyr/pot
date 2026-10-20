@@ -144,18 +144,21 @@ func (s *Service) productCall(ctx context.Context, owner, id, name string, args 
 		if len(brief) != 2 || strings.TrimSpace(brief[1]) == "" {
 			return nil, errors.New("Task brief must include a concise title on the first line and complete execution instructions on following lines; the worker cannot see this chat. Include the user's exact commands and constraints.")
 		}
-		r, err := s.Tasks.Create(ctx, owner, request)
+		info, err := s.CreateTask(ctx, owner, request)
 		if err == nil {
 			s.wakeTasks()
 		}
-		return r.Info, err
+		return info, err
 	case "list_tasks":
 		var q protocol.TaskQuery
 		if err := core.DecodeJSON(args, &q); err != nil {
 			return nil, err
 		}
-		return s.Tasks.Page(ctx, owner, q)
+		return s.TaskPage(ctx, owner, q)
 	case "get_task":
+		if d, e := s.linkDelegation(ctx, owner, field("task_id")); e == nil {
+			return map[string]any{"task": d.Info, "error": d.Remote.Error, "result": d.Remote.Result}, nil
+		}
 		r, err := s.Tasks.Get(ctx, owner, field("task_id"))
 		if err != nil || r == nil {
 			return nil, errors.New("Task missing")
@@ -166,14 +169,14 @@ func (s *Service) productCall(ctx context.Context, owner, id, name string, args 
 		if err := core.DecodeJSON(args, &request); err != nil {
 			return nil, err
 		}
-		items, err := s.Tasks.SetDispositions(ctx, owner, request.Decisions)
+		items, err := s.SetTaskDispositions(ctx, owner, request.Decisions)
 		return map[string]any{"items": items}, err
 	case "interrupt", "cancel_task":
 		mode := "cancel"
 		if name == "interrupt" {
 			mode = "interrupt"
 		}
-		err := s.Tasks.Stop(ctx, owner, field("task_id"), mode)
+		err := s.StopTask(ctx, owner, field("task_id"), mode)
 		s.wakeTasks()
 		return map[string]bool{"accepted": err == nil}, err
 	case "list_schedules":
@@ -208,15 +211,12 @@ func (s *Service) productCall(ctx context.Context, owner, id, name string, args 
 		}
 		return result, err
 	case "list_execution_targets":
-		machines, err := s.Machines.Machines(ctx)
-		if err != nil {
-			return nil, err
-		}
 		policy, _, err := s.Permissions.Policy(s.options.RuntimeID)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"local": map[string]any{"runtime_id": s.options.RuntimeID, "policy": policy}, "machines": machines}, nil
+		links, err := s.AgentLinks(ctx, owner)
+		return map[string]any{"local": map[string]any{"runtime_id": s.options.RuntimeID, "policy": policy}, "agent_links": links}, err
 	case "list_assistants":
 		directory, err := s.MailDirectory(ctx)
 		if err == nil {

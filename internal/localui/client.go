@@ -1,13 +1,9 @@
-// Package spaces composes the native App's embedded and explicitly configured
-// remote Controls. Browser and CLI hosts must not construct this App lifecycle.
-package spaces
+package localui
 
 import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,13 +36,13 @@ type Functions struct {
 
 func (f Functions) Call(ctx context.Context, method, path string, body json.RawMessage) (json.RawMessage, error) {
 	if f.Request == nil {
-		return nil, errors.New("Space request adapter unavailable")
+		return nil, errors.New("local UI request adapter unavailable")
 	}
 	return f.Request(ctx, method, path, body)
 }
 func (f Functions) Stream(ctx context.Context, path string, receive func(Event) error) error {
 	if f.Events == nil {
-		return errors.New("Space event adapter unavailable")
+		return errors.New("local UI event adapter unavailable")
 	}
 	return f.Events(ctx, path, receive)
 }
@@ -56,33 +52,6 @@ type HTTPClient struct {
 	prefix                    string
 	client                    *http.Client
 	transport                 *http.Transport
-}
-
-func NewHTTPClient(origin, token, caPEM, expectedID string) (*HTTPClient, error) {
-	u, err := url.Parse(origin)
-	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
-		return nil, errors.New("Control endpoint must be an explicit HTTP(S) origin")
-	}
-	if token == "" || len(token) > 8192 || strings.ContainsAny(token, "\r\n") {
-		return nil, errors.New("Control client credential is required")
-	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-	if caPEM != "" {
-		if u.Scheme != "https" {
-			return nil, errors.New("a Control CA requires HTTPS")
-		}
-		roots, err := x509.SystemCertPool()
-		if err != nil || roots == nil {
-			roots = x509.NewCertPool()
-		}
-		if !roots.AppendCertsFromPEM([]byte(caPEM)) {
-			return nil, errors.New("invalid Control CA PEM")
-		}
-		transport.TLSClientConfig.RootCAs = roots
-	}
-	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	return &HTTPClient{origin: strings.TrimSuffix(origin, "/"), token: token, expectedID: expectedID, prefix: "/control/v1/owner", client: client, transport: transport}, nil
 }
 
 // NewLocalHTTPClient uses an injected private Unix-socket HTTP transport. The
@@ -101,11 +70,11 @@ func NewLocalHTTPClient(client *http.Client, credential, expectedID string) *HTT
 func operatorPath(path string) (string, error) {
 	u, err := url.ParseRequestURI(path)
 	if err != nil || u.IsAbs() || u.Host != "" || !strings.HasPrefix(u.Path, "/api/v1/") || strings.Contains(u.Path, "\\") || strings.Contains(u.Path, "//") {
-		return "", errors.New("invalid Space API path")
+		return "", errors.New("invalid local UI API path")
 	}
 	for _, part := range strings.Split(u.Path, "/") {
 		if part == ".." || part == "." {
-			return "", errors.New("invalid Space API path")
+			return "", errors.New("invalid local UI API path")
 		}
 	}
 	query := u.Query()
@@ -115,10 +84,10 @@ func operatorPath(path string) (string, error) {
 }
 func (c *HTTPClient) request(ctx context.Context, method, path string, body json.RawMessage) (*http.Response, error) {
 	if c.client == nil || c.token == "" {
-		return nil, errors.New("native Space transport unavailable")
+		return nil, errors.New("native local UI transport unavailable")
 	}
 	if method != "GET" && method != "POST" {
-		return nil, errors.New("Space request method must be GET or POST")
+		return nil, errors.New("local UI request method must be GET or POST")
 	}
 	path, err := operatorPath(path)
 	if err != nil {
@@ -163,10 +132,10 @@ func (c *HTTPClient) Call(ctx context.Context, method, path string, body json.Ra
 		return nil, err
 	}
 	if len(data) > responseLimit {
-		return nil, errors.New("Space response exceeds limit")
+		return nil, errors.New("local UI response exceeds limit")
 	}
 	if !json.Valid(data) {
-		return nil, errors.New("Space response is not JSON")
+		return nil, errors.New("local UI response is not JSON")
 	}
 	return data, nil
 }
@@ -177,7 +146,7 @@ func (c *HTTPClient) Stream(ctx context.Context, path string, receive func(Event
 	}
 	defer response.Body.Close()
 	if !strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
-		return errors.New("Space stream has invalid content type")
+		return errors.New("local UI stream has invalid content type")
 	}
 	scanner := bufio.NewScanner(response.Body)
 	scanner.Buffer(make([]byte, 4096), responseLimit)
@@ -226,7 +195,7 @@ func (c *HTTPClient) Stream(ctx context.Context, path string, receive func(Event
 			}
 			data = append(data, value...)
 			if len(data) > responseLimit {
-				return errors.New("Space event exceeds limit")
+				return errors.New("local UI event exceeds limit")
 			}
 		}
 	}

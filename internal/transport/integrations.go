@@ -30,8 +30,6 @@ func (a *Application) integrationCall(ctx context.Context, method, path string, 
 	var result any
 	var err error
 	switch {
-	case service == "codex" && len(parts) == 2 && parts[1] == "connection" && method == "POST":
-		result, err = a.Control.PairCodex(ctx, r.Body)
 	case len(parts) == 2 && parts[1] == "login" && method == "POST":
 		var command struct{}
 		err = decode(r.Body, &command)

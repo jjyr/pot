@@ -6,7 +6,7 @@ service admission function and request handlers. It does not depend on Control,
 machine membership, assistant databases or plugin management.
 
 ```text
-Agent messages          Runner execution          Other native services
+Agent Link collaboration                    Other native services
 routes / durable ACK    membership / run receipts  service-specific authority
        |                        |                           |
        +------------------------+---------------------------+
@@ -82,7 +82,7 @@ seconds, reads expire after ninety seconds, and writes have bounded deadlines. R
 
 The transport never reconnects or replays business requests automatically. A call
 whose delivery or result is uncertain returns `ErrUncertain`. Agent messaging
-may retry immutable messages against durable deduplication and receipts. Runner
+may retry immutable messages against durable deduplication and receipts. Local task
 execution must reconcile the original run/request receipt before recovery. An
 event is only a resynchronizable hint, never an execution receipt or durable ACK.
 

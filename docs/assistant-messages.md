@@ -131,24 +131,24 @@ query turn leaves it eligible for automatic delivery. Repeated hooks cannot
 reset a processed event. Failed/interrupted delivery remains recorded for
 inspection rather than automatically replaying uncertain model requests.
 
-## Cross-Space delivery
+## Cross-node delivery
 
-A Space is a Control identity. Local messages enter the shared inbox directly;
-remote assistant correspondence enters the source Outbox. The owning Control
-hosts [Agent Links](agent-links.md), independently of App windows and owner
-connections. Pot and Codex use the same authenticated TCP message service on
-the shared [peer host](peer-protocol.md), bound to
-one assistant identity on each side. One side adding an invitation address
-establishes both directions through one long-lived session. At least one private
-`tcp://host:port` endpoint must remain reachable. The host verifies the original
-remote Ed25519 identity on every reconnect; a different service requires its own
-admission and cannot inherit the message binding.
+Local and remote collaboration use [Agent Link](agent-links.md). Connections bind
+nodes and expose their assistant directories, independently of App windows.
+Authenticated peer messages use the existing durable outbox and inbox, retaining
+full sender/recipient identities and immutable receipts. One private TCP endpoint
+establishes both directions. A connection cannot grant owner APIs, model proxying,
+credentials or raw execution access. Task delegation goes through the same link's
+receiver-owned business port; it is distinct from ordinary peer text.
 
-The connection carries text messages and immutable receipts. It does not expose
-owner APIs, Task creation, files or Runner execution. An established offline
-connection retains queued messages until transport recovers. Disconnect fences
-new exchanges immediately and propagates revocation when the peer is reachable.
-Remote Task inputs continue through their original Control/Runner binding.
+Direct user chat uses the existing assistant conversation UI with a source icon.
+Replies to those requests enter a user projection atomically without becoming
+eligible for the local assistant's autonomous peer-message processing. Existing
+unread and notification paths observe the projected reply metadata.
+
+Disconnect pauses communication and retains config/history; reconnect reuses it.
+Deletion removes the active directory entry and fences the old connection.
+Neither silently cancels receiver-owned tasks or deletes delivery receipts.
 
 Messages are bounded to 64 KiB. Files and permissions are not transferred by
 sending text or a path. Automatic peer chains retain a 16-hop bound, including

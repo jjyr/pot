@@ -2,8 +2,6 @@ package transport
 
 import (
 	"encoding/json"
-	"github.com/jjyr/pot/internal/spaces"
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -31,17 +29,6 @@ func TestSchedulePreviewHTTP(t *testing.T) {
 		if test.field == "" && len(result.Times) != 5 {
 			t.Fatal(result)
 		}
-	}
-	remoteServer := httptest.NewServer(http.StripPrefix("/control/v1/owner", handler))
-	defer remoteServer.Close()
-	remote, err := spaces.NewHTTPClient(remoteServer.URL, "private", "", "history-fixture")
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := remote.Call(t.Context(), "POST", "/api/v1/schedules/preview?assistant_id=main&space_id=remote", json.RawMessage(`{"kind":"cron","cron":"0 8-20 * * *","timezone":"Pacific/Auckland"}`))
-	var preview schedule.PreviewResult
-	if err != nil || json.Unmarshal(raw, &preview) != nil || preview.Timezone != "Pacific/Auckland" || len(preview.Times) != 5 {
-		t.Fatal(string(raw), err)
 	}
 	page, err := app.Control.Schedules.Page(t.Context(), "main", schedule.Query{})
 	if err != nil || page.Total != 0 {

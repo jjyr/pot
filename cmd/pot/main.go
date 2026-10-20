@@ -80,7 +80,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		switch args[0] {
 		case "access":
 			return accessCommand(ctx, args[1:], output)
-		case "codex-pair", "chat", "tasks", "config", "doctor", "open", "service":
+		case "chat", "tasks", "config", "doctor", "open", "service":
 			return userCommand(ctx, args, output)
 		}
 	}

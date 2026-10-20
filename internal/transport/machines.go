@@ -3,34 +3,16 @@ package transport
 import (
 	"context"
 	"errors"
-	"github.com/jjyr/pot/internal/control"
 	"net/url"
 )
 
 func (a *Application) machineCall(ctx context.Context, method string, u *url.URL, r Request) (any, error, bool) {
-	switch u.Path {
-	case "/api/v1/machines":
-		if method == "GET" {
-			value, err := a.Control.MachineList(ctx)
-			return value, err, true
-		}
-		return nil, errors.New("machines inventory requires GET"), true
-	case "/api/v1/runtime/control":
-		if method == "GET" {
-			return map[string]any{"identity": a.Control.Machines.Identity(), "url": a.Control.ControlOrigin(), "role": a.Control.ControlRole(), "membership": func() any {
-				member := a.Control.Machines.Membership()
-				if member == nil {
-					return nil
-				}
-				return map[string]any{"control": member.Enrollment.Control, "url": member.Origin, "epoch": member.Enrollment.Epoch, "needs_endpoint": member.Origin == ""}
-			}()}, nil, true
-		}
-		var request control.MembershipCommand
-		if err := decode(r.Body, &request); err != nil {
-			return nil, err, true
-		}
-		value, err := a.Control.ManageMembership(ctx, request)
-		return value, err, true
+	if u.Path != "/api/v1/machines" {
+		return nil, nil, false
 	}
-	return nil, nil, false
+	if method != "GET" {
+		return nil, errors.New("machines inventory requires GET"), true
+	}
+	value, err := a.Control.MachineList(ctx)
+	return value, err, true
 }

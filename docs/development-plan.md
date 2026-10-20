@@ -4,15 +4,14 @@
 
 Pot uses Go for product logic and Wails v3 for its macOS App. App, tray and browser
 share HTML/CSS/JavaScript components. `pot serve` runs standalone Runtime on macOS
-or Linux. An independent `web-ui-server` publishes one explicitly selected Control.
-Native App combines local and remote Spaces.
+or Linux. An independent `web-ui-server` publishes its local node. Native App
+presents local assistants and Agent Link peers through existing chat and task UI.
 
-The default working system is one Control with local execution. Main tools and
-Tasks without an explicit machine run there. Existing enrolled Runners support
-explicit remote Tasks with signed transport, resource synchronization and original
-execution receipts. Runtime supplies no VM/container management or guest desktop.
-Tool plugins and browser execution use the selected machine's installed software.
-Existing user data, disks and workspaces are never implicitly deleted or adopted.
+Each node owns models, credentials, workspaces and local execution. Cross-node
+work uses Agent Link delegation to an autonomous recipient. The internal local
+task executor retains original receipts and cleanup fences. Runtime supplies no
+VM/container management or guest desktop. Existing user data and unknown work
+are never implicitly deleted, adopted or replayed.
 
 ## Deferred execution and platform work
 

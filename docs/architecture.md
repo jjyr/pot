@@ -3,143 +3,104 @@
 Pot uses Go for product logic, Wails v3 with the system WebView for the macOS
 App, and a shared HTML/CSS/JS frontend. The main window, tray panel and browser
 use the same components, styles and state contracts. Go executes local commands
-and Node plugin adapters. Runtime manages no VMs, containers or guest brokers.
+and Node tool plugins. Runtime manages no VMs, containers or guest brokers.
 See [component boundaries](backend-components.md).
 Reusable Go libraries live in `pkg/`, command entry points in `cmd/`, and product
 implementation in `internal/`. [Go libraries](go-libraries.md) describes the
 independent Agent loop and complete-host embedding APIs.
 
 ```text
-macOS App: Wails windows/tray + embedded Runtime + shared frontend
-                      |
-              owner-scoped Spaces
-               /             \
-       local Control      remote Control
-                          assistants, rules, Tasks, schedules,
-                          provider keys, approvals, accounting
-                              ^                 ^
-                      outward signed     outward signed
-                      TCP peer RPC       TCP peer RPC
-                         Runner A           Runner B
-                         local tools        local tools
-
-independent web-ui-server -> one explicitly selected Control -> browser frontend
+UI / assistant / task
+         |
+ Agent Link collaboration contract
+         |
+ +-------+-------------------------+
+ |                                 |
+local adapter                 authenticated peer TCP
+ |                                 |
+local Pot assistants       autonomous Pot / Codex node
+ |                         own assistants and execution
+local task executor
 ```
 
-## Hosts and roles
+## Autonomous nodes
 
-`pot serve` hosts standalone Runtime; App composes its local Runtime in process.
-App's local UI dispatches directly through Wails bindings, without a loopback UI
-listener. Embedded Runtime cannot enable an owner/membership listener or join a
-Control; its separate authenticated peer listener may serve Agent messages. Closing a window hides it while background work continues. Quitting App shuts
-down its local executions.
+`pot serve` hosts a standalone node; App composes its local Runtime in process.
+Both own their assistants, models, credentials, workspaces, permission policy,
+usage accounting and task execution. The local operator API uses a private Unix
+socket; App uses native bindings. The independent browser service connects to a
+local node and publishes authenticated browser access. No remote owner API,
+Control enrollment, Runner membership or model proxy is provided.
 
-A standalone root starts neutral. An explicitly configured listener enables
-Control; a joined execution Runtime becomes Runner. One root cannot hold both
-roles. A Runtime owning assistants or AI configuration cannot join a Control.
-Fresh registries contain no assistants. First-use Chat explicitly bootstraps Pot
-once a default Provider exists; later assistants are created directly from + with
-random kitchen names and the destination Space's defaults. Provider
-storage itself creates no identity. Use independent roots for independent roles.
+Fresh roots contain no assistants. First-use Chat explicitly bootstraps Pot once
+a default Provider exists; later assistants are created from + with random kitchen names and local defaults. Provider
+storage alone creates no identity. Each private root retains its stable signing
+key. App and standalone Runtime cannot open the same root concurrently.
 
-CLI owns a private authenticated Unix socket. Remote native clients authenticate
-with a separate Control owner credential. Runner enrollment credentials are not
-owner credentials. Only standalone Control serves membership and owner
-management. Its peer TCP listener serves scoped Agent messages, membership and
-execution; owner HTTP remains a separate listener. Runners connect outward and
-need no inbound execution port.
+Closing a window hides it while background work continues. Quitting App stops
+local executions. A linked peer remains an autonomous node rather than an
+execution machine controlled by this installation.
 
-The browser service is an independent process. Its destination, browser root,
-public origin and transport must be explicit. It verifies the selected Control
-identity, keeps upstream owner credentials server-side and never falls back to
-another backend. Browser access credentials, local operator credentials and
-Control membership credentials have separate responsibilities. App does not
-publish a browser endpoint. See [Deployment](deployment.md).
+## Collaboration and ownership
 
-## Product ownership
+Agent Link connections identify nodes. Each node advertises its assistant
+directory, persisted default assistant and actual capabilities. Pot exposes real
+assistants; the Codex adapter exposes virtual assistants bound to persistent
+Codex sessions. An explicit assistant wins; omission resolves the receiver's
+saved default. Accepted work keeps its original assistant even when the default
+or directory ordering changes.
 
-Control owns assistant identities, rules, conversations, Tasks, schedules, model
-configuration, provider keys, external-service accounts, accounting, approvals and
-global resources. The independent Integrations component manages third-party
-login and credentials through injected account and Secrets stores. Control
-provides authentication, routing and composition. [Integrations](credentials.md)
-defines browser authorization, run-bound credential injection and direct GitHub
-CLI access. An
-assistant remains on its owning Control. Main tools run there; new Tasks default
-to the same Runtime. An explicit machine selects an enrolled Runner. The actual
-Runtime remains fixed for the run, including receipts and file delivery. Missing
-or disconnected targets are never replaced. Labels describe machines but do not
-implicitly select a default destination or grant capabilities.
+Local and remote collaboration use the same business parameters and lifecycle.
+Local calls use an in-process adapter; remote calls use authenticated Agent Link
+transport. A transport identity alone grants no node administration, provider
+credentials or filesystem access. Task Agents retain their restricted tool set.
 
-Model selection is independent: an explicit configured
-Provider/model takes precedence; omission snapshots the invoking assistant's
-active configuration. Saved capacity rules admit or queue that route without
-choosing another model. Existing Tasks keep their resolved specification.
+The receiving node owns accepted tasks and their execution facts. The sender
+stores a delegation and original remote reference. Status, results and supported
+cancellation address that original task. An accepted cancellation does not prove
+execution stopped. Capability declarations gate optional operations; unsupported
+operations fail explicitly. Notifications return to the original sender rather
+than the current default assistant.
 
-Agent messages use one sender-bound `send_message` primitive and a shared
-`agent_messages` inbox for Task inputs, assistant correspondence and Runtime
-completion events. User chat has a separate priority queue. Main releases its
-turn after dispatch; terminal hooks report outcomes independently, with durable
-report deduplication. Approval hooks update UI and user reminders without waking
-an assistant model. See [Hooks](hooks.md) and [Agent messages](assistant-messages.md).
+Assistant conversations use durable independent contexts. Incoming peer text is
+reference data, not new user authority. Explicit communication tools send replies;
+final model text is not automatically forwarded. Task results and notifications
+resume the owning assistant through existing notification processing. See
+[Agent Links](agent-links.md), [assistant messages](assistant-messages.md) and
+[tasks](task-coordination.md).
 
-Main and Worker invocations share the destination Runtime execution manager.
-Workers cannot coordinate other Tasks. Task results and plugin notifications
-resume the owning assistant with its configured tools and current machine
-permissions. Eligible failures additionally allow one durable replacement through
-the batch-bound retry tool. Accepted recovery is silent. Notification turns
-produce owner-chat reports only when useful. Synthetic
-results remain reference data rather than new user authority. See
-[Tasks](task-coordination.md), [schedules](scheduled-tasks.md) and
-[usage](token-usage.md).
+## Transport and recovery
 
-Assistant communication uses separate durable model contexts and transcripts.
-An inbound peer message is untrusted reference data. Replies require an explicit
-send tool; final model text is not automatically forwarded. The owning Control hosts authenticated
-Agent Link message exchange through typed connectivity plugins; App owner
-connections are not message relays. Pot and Codex share this protocol. A common TCP host dispatches message and
-execution services; Execution Links preserve the original Runner membership and
-RPC authority boundary. See
-[assistant messages](assistant-messages.md).
+A shared [peer transport](peer-protocol.md) carries signed TCP sessions with
+stable Ed25519 host identities. Service admission separately checks the saved
+Agent Link connection. Explicit private `tcp://host:port` endpoints authenticate
+frames but do not encrypt content; VPN or Tailscale can supply confidentiality.
+No membership or distributed execution service is registered on this listener.
 
-## Membership and remote execution
+A request identity binds immutable contents. Exact retries return original
+receipts, and conflicting contents fail. Lost acknowledgements, restart and
+reconnection never create replacement work. Disconnect pauses a connection while
+retaining configuration and history; deletion removes its saved directory entry.
+Neither action silently cancels accepted work.
 
-Control and Runner retain stable Ed25519 identities. Enrollment uses a short-lived
-single-use invitation and a pinned Control Runtime ID/fingerprint. Exact join
-retries keep the original request identity. Per-machine epochs fence removed or
-re-enrolled sessions. Removing a machine closes its active connection; leaving
-persists a reconnect fence until outstanding execution cleanup is confirmed.
+The local task journal, operation receipts, process supervision, permissions and
+uncertainty fences remain authoritative. Upgrades retain stable node keys and
+archive retired membership facts. Historical remote launches remain at their
+original destination; they are never converted to new delegations or replayed
+locally. Cached transcript pages remain readable. Missing original execution or
+owner evidence leaves recovery fenced, including unconfirmed process cleanup.
 
-A shared [peer transport](peer-protocol.md) carries outward, bidirectional TCP
-sessions authenticated by stable Ed25519 host keys. Each service separately
-validates its assistant binding or machine membership and epoch; a valid host
-key grants no owner, message or execution authority. Transport framing, bounds,
-heartbeat and replay checks belong to `pkg/peer`, while original run receipts
-remain execution facts. Owner HTTP/TLS never becomes a peer service. Endpoints
-use explicit private `tcp://host:port` addresses; the transport does not encrypt
-content and can run over an encrypted VPN without application certificates.
-Upgrades preserve identities, epochs and original work, clear obsolete HTTP
-peer endpoints, and require a verified replacement endpoint without reenrollment.
+## Local execution
 
-Control persists Task launch intent before sending it. Runner persists immutable
-acceptance, original run identity, tool-command admission and terminal results.
-Duplicate launches return the original receipt. Lost acknowledgements, transport
-timeouts and restart never trigger a second launch, model sample, tool effect or
-replacement target. Control inspects the original run and reconciles its receipts.
-Uncertain effects and unconfirmed cleanup retain admission/capacity fences.
+Local model selection, allowance accounting, approvals and task resource
+preparation stay on the owning node. Explicit task execution targets must be
+local; remote work uses Agent Link delegation. No implicit model, credential,
+workspace or plugin transfer occurs between nodes.
 
-Models execute through Control's Gateway and usage ledger. Provider credentials
-never cross to Runner or guest tools. Remote model streams are bounded signed
-chunks with strict sequence; losing a stream read does not resample the model.
-Execution approvals bind the original assistant/Task, generation, call, exact operation
-and target. Runner independently validates the signed approved operation against
-its run before execution. See [permissions](permissions.md).
-
-Task events persist on the original Runner. Control reads bounded pages and
-caches fetched remote pages for disconnected views. Files resolve beneath the
-same original task workspace, including ended Tasks. Downloads use revision-bound
-192 KiB chunks, a 1 GiB limit and confined filesystem roots; revisions include
-file identity and mutation metadata. No whole-file hash is repeated per chunk.
+Every product Agent invocation, including mail and summaries, passes through the
+node's shared execution manager. The internal local executor retains immutable
+launch identity, checkpoints, commands and cleanup receipts. Its implementation
+package is named `internal/runner`; it is no longer a distributed node role.
 
 ## Context and resources
 
@@ -150,14 +111,12 @@ instruction inheritance. Deeper project skills take priority; selecting global
 skills never filters destination project skills. Omitted/empty selections load
 no globals. See [Agent context](agent-context.md).
 
-Control fixes model configuration and selected plugin/Skill names at Task creation.
-Immediately before the original Runner prepares execution, it synchronizes current
-Control global Skills and the source Profile's current selected plugin directories
-through a run-bound authenticated request. Queued Tasks observe source updates.
-The destination Runner persists the prepared content and digest once for that
-original run, reusing it for allowance resumes and authorization checks. Control
-keeps no per-Task resource archive. Project Skills and AGENTS.md are discovered at
-the fixed execution workspace; Main instructions do not cross this boundary.
+The node fixes model configuration and selected plugin/Skill names at Task
+creation. Immediately before local execution, it prepares the source Profile's
+current selected plugin directories and global Skills. Prepared content and
+digests remain bound to the original run and are reused for allowance resumes.
+Project Skills and AGENTS.md are discovered at the fixed execution workspace.
+Main instructions do not cross the Task boundary.
 
 Model context uses classified append-only sections. State refreshes do not rewrite
 user input. Compaction durably installs current sections, continuation summary
@@ -165,12 +124,11 @@ and the last real user message before continuing. Provider cache lifetime does
 not reset section comparison. Raw HTTP/token observations, estimates and budget
 reservations remain distinct.
 
-Schema-2 [Plugin packages](plugins.md) declare tools for the execution Runtime,
-and background services or model connection types for the owning Control.
-`pkg/plugin` validates packages; `pkg/pluginhost` supervises Node adapters.
-Only tool capabilities and their declared files enter Task bundles. Model
-credentials and Control adapters stay on Control. Runtime locates plugin/Skill
-assets independently of execution preparation.
+Tool plugins use the package format in `pkg/plugin` and bounded Node sessions in
+`pkg/pluginhost`. Packages contain schema-2 `contributes.tools` with
+`execution: "runtime"`. Provider/resource capabilities are unsupported. Runtime
+locates tool/Skill assets independently of execution preparation. See
+[Plugin packages](plugins.md).
 
 Execution uses the destination Runtime service account. Protected machines run
 commands, patches and plugins under the pinned SRT SDK. Trusted machines execute
@@ -202,9 +160,9 @@ A repeated request returns its original response, including after later policy
 edits. A pending command after process failure blocks conflicting replacement;
 inspection never silently replays it.
 
-UI state is owner-scoped by Space and assistant. Navigation generations reject
+UI state is scoped by node, assistant and conversation. Navigation generations reject
 late replies; drafts and selections retain their owner. Healthy clients subscribe
 to changes and stream conversation/Task output. Reconnect uses snapshots and
 contiguous durable cursors. There is no healthy-state UI data polling loop.
-See [shared UI](shared-ui.md), [multi-Space UI](multi-space-ui.md) and
+See [shared UI](shared-ui.md), [node UI](multi-space-ui.md) and
 [UI events](ui-events.md).
