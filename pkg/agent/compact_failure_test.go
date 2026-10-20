@@ -71,3 +71,35 @@ func TestCompactFailurePreservesOriginalAndNeverDispatches(t *testing.T) {
 		})
 	}
 }
+
+func TestWindowCompactsBeforeLargeOrdinaryOutputBudgetWouldFail(t *testing.T) {
+	a, f, s, thread, execution := setup(t)
+	thread.Config.Params.MaxOutputTokens = 20000
+	thread.Config.Params.Agent.UseProviderUsage = false
+	if err := thread.Config.Rehash(); err != nil {
+		t.Fatal(err)
+	}
+	state := Checkpoint{Type: "context", Version: 2, Messages: []m.Message{}, Pending: []m.ToolCall{}, Receipts: []ToolReceipt{}, SteeringIDs: []string{}}
+	for range 4 {
+		state.Messages = append(state.Messages, m.TextMessage("user", strings.Repeat("goal ", 1000)), m.TextMessage("assistant", strings.Repeat("observed ", 1000)))
+	}
+	f.body, _ = json.Marshal(state)
+	s.model = func(r core.ModelRequest, index int) (string, error) {
+		if index == 0 {
+			if r.CompactionID == nil {
+				t.Fatal("normal request exceeded its budget before compact")
+			}
+			return response("Goal and verified work retained."), nil
+		}
+		if r.CompactionID != nil {
+			t.Fatal("compact looped")
+		}
+		return response("continued"), nil
+	}
+	if err := a.Execute(context.Background(), execution, thread, core.TurnRequest{RequestID: "next", Text: "next question"}, false, func(core.AgentEvent) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if s.calls != 2 {
+		t.Fatal("window protection did not compact before continuation", s.calls)
+	}
+}

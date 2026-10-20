@@ -31,7 +31,9 @@ func (a *Agent) compact(ctx context.Context, execution core.ExecutionContext, th
 		return err
 	}
 	tailReserve := uint64(len(compactRequest)) + 1024
-	reserve := min(input.MaxOutputTokens, uint64(8192)) + settings.ContextReserve + tailReserve
+	// Trigger before either the ordinary output budget or the appended summary
+	// would exceed the window. Large normal output caps must not bypass compact.
+	reserve := input.MaxOutputTokens + settings.ContextReserve + tailReserve
 	threshold := uint64(1)
 	if thread.Config.ContextWindow > reserve {
 		threshold = thread.Config.ContextWindow - reserve
