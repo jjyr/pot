@@ -202,7 +202,7 @@ func TestCancelledModelCanContinueAfterRestartWithExactAttempt(t *testing.T) {
 	}
 }
 
-func TestFailedSummaryOffersItsOwnReadOnlyContinuation(t *testing.T) {
+func TestFailedSummaryOffersItsOwnContinuation(t *testing.T) {
 	ctx := context.Background()
 	var cleanup, calls atomic.Int64
 	c := conversationFixture(t, filepath.Join(t.TempDir(), "conversation.sqlite"), "boot", func(_ context.Context, request core.ModelRequest) (io.ReadCloser, error) {
@@ -216,7 +216,7 @@ func TestFailedSummaryOffersItsOwnReadOnlyContinuation(t *testing.T) {
 				Tools []json.RawMessage `json:"tools"`
 			}
 			if err := json.Unmarshal(request.Body, &body); err != nil || len(body.Tools) != 0 {
-				t.Error("summary continuation gained tools", err)
+				t.Error("tool-free fixture gained tools during continuation", err)
 			}
 			return replySSE("saved results summarized"), nil
 		}

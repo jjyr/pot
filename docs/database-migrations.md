@@ -123,6 +123,10 @@ marker. Legacy inbox queue tables are also rejected rather than overwritten.
 into a recorded one-time migration, preserving bindings, checkpoints and receipt
 states. It no longer runs on every mailbox open.
 
+`tasks/0007_github_notification_progress.sql` retires GitHub history-import
+requests while preserving notification cursors, pending groups and inbox receipts.
+It also adds persistent background failure diagnostics.
+
 Before an upgrade that can change migration history, stop all processes using
 the root and take a consistent backup of the complete root, preserving identity
 and the secret master key. The [local self-update path](updates.md) requires an

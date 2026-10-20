@@ -107,8 +107,8 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 			}
 			var fields map[string]json.RawMessage
 			json.Unmarshal(raw, &fields)
-			if value := strings.TrimSpace(string(fields["tools"])); value != "" && value != "[]" && value != "null" {
-				t.Error("summary has tools", value)
+			if value := string(fields["tools"]); !strings.Contains(value, "exec_command") || !strings.Contains(value, "update_agent_profile") {
+				t.Error("notification lost assistant tools")
 			}
 		}
 		w.Header().Set("Content-Type", "text/event-stream")

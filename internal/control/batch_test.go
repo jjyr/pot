@@ -281,8 +281,8 @@ func TestNotificationsShareOrderedBatchAfterUserInput(t *testing.T) {
 		last := request.Messages[len(request.Messages)-1].Content
 		if strings.Contains(last, "Process the following background updates") {
 			summaries.Add(1)
-			if users.Load() != 2 || len(request.Tools) != 0 {
-				t.Error("summary bypassed user input or acquired tools", users.Load(), request.Tools)
+			if users.Load() != 2 || len(request.Tools) == 0 {
+				t.Error("notification bypassed user input or lost assistant tools", users.Load(), len(request.Tools))
 			}
 			var payload []map[string]json.RawMessage
 			data := last[strings.Index(last, "\n")+1:]

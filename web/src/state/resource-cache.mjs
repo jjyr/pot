@@ -71,7 +71,7 @@ export function createResourceCache({now=Date.now,limit=256,onChange=()=>{}}={})
 // bypass this cache. Membership GET contains no invitations or private keys.
 const resources={
   '/api/v1/spaces':['spaces'],
-  '/api/v1/assistants':['assistants','conversation','assistant-mail','permissions'],
+  '/api/v1/assistants':['assistants','conversation','assistant-mail','permissions','tasks','runner'],
   '/api/v1/providers':['providers'],
   '/api/v1/agent/routing':['settings','providers'],
   '/api/v1/usage/providers':['usage','providers'],

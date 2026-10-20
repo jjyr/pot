@@ -15,7 +15,7 @@ user agreement; see the repository `AGENTS.md`.
 | Agent messages | `send_message`; `list_assistants` discovers assistants | Main; Worker may message its owner |
 | Schedules | `list_schedules`, `get_schedule`, `manage_schedule` | Main |
 | Assistant rules | `read_agent_instructions`, `update_agent_instructions` (always reviewed) | Main |
-| Assistant profile | `update_agent_profile` | Main, user chat only |
+| Assistant profile | `update_agent_profile` | Main, including result handling |
 | Execution targets | `list_execution_targets` | Main |
 
 `list_execution_targets` lists enrolled Runtime destinations. `create_task` and
@@ -34,7 +34,9 @@ or approved commands. Task semantics are in [Task coordination](task-coordinatio
 `update_agent_profile` replaces the former name-only tool. Its optional `name`
 and `avatar` fields update one identity atomically; omitted fields stay unchanged
 and an empty update fails. It does not change model configuration or agent rules.
-Workers, peer conversations and background summaries cannot update the profile.
+Workers and peer conversations cannot update the profile. Main retains its
+configured tools when processing task results and plugin notifications, including
+profile updates that complete an existing user request.
 
 ```javascript
 await tools.update_agent_profile({name: "Research"});

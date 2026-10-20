@@ -218,6 +218,9 @@ func TestAttachmentPublicationAllowlist(t *testing.T) {
 		method, path string
 		allowed      bool
 	}{
+		{"POST", "/api/v1/assistants/main/delete", true},
+		{"GET", "/api/v1/assistants/main/delete", false},
+		{"POST", "/api/v1/assistants/main/delete/extra", false},
 		{"POST", "/api/v1/attachments", true},
 		{"GET", "/api/v1/attachments/file-id", true},
 		{"POST", "/api/v1/turn/retry", true},

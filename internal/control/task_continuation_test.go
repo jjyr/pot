@@ -178,16 +178,17 @@ func TestTaskArchiveBatchAndContinuedWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	turn := "pot-result-" + notices[0].ID
-	dispatch := s.productDispatch("main", turn, 1, false)["set_task_dispositions"]
-	args, _ := json.Marshal(protocol.TaskDispositions{Decisions: []protocol.TaskDisposition{{TaskID: a.Info.ID, RunID: a.RunID, Archived: true, Reason: "delivered"}, {TaskID: b.Info.ID, RunID: b.RunID, Archived: true, Reason: "delivered"}}})
-	if _, err = dispatch(ctx, core.ExecutionContext{Owner: "main"}, modelprotocol.ToolCall{ID: "outside-batch", Name: "set_task_dispositions", Arguments: args}, func(core.Update) error { return nil }); err == nil {
-		t.Fatal("archive tool accepted an undelivered task")
-	}
+	dispatch := s.productDispatch("main", turn, 1, false)["get_task"]
 	for _, id := range []string{a.Info.ID, b.Info.ID} {
-		r, _ := s.Tasks.Get(ctx, "main", id)
-		if r.Info.Archived {
-			t.Fatal("rejected batch partially archived", id)
+		args, _ := json.Marshal(map[string]string{"task_id": id})
+		if _, err = dispatch(ctx, core.ExecutionContext{Owner: "main"}, modelprotocol.ToolCall{ID: "inspect-" + id, Name: "get_task", Arguments: args}, func(core.Update) error { return nil }); err != nil {
+			t.Fatal("result handler could not inspect another owned task", err)
 		}
+	}
+	dispatch = s.productDispatch("main", turn, 1, false)["set_task_dispositions"]
+	args, _ := json.Marshal(protocol.TaskDispositions{Decisions: []protocol.TaskDisposition{{TaskID: a.Info.ID, RunID: a.RunID, Archived: true, Reason: "delivered"}, {TaskID: b.Info.ID, RunID: b.RunID, Archived: true, Reason: "delivered"}}})
+	if _, err = dispatch(ctx, core.ExecutionContext{Owner: "main"}, modelprotocol.ToolCall{ID: "archive-owned-tasks", Name: "set_task_dispositions", Arguments: args}, func(core.Update) error { return nil }); err != nil {
+		t.Fatal("result handler could not archive another owned task", err)
 	}
 	if err = s.Mailbox.ReleaseEvent(ctx, notices[0].ID); err != nil {
 		t.Fatal(err)

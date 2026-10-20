@@ -228,6 +228,11 @@ func (s *Service) Create(ctx context.Context, assistant string, request protocol
 // EnqueueTx atomically joins a schedule occurrence with its Task and request
 // receipt. Selection must be resolved by the owning Control before opening tx.
 func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, request protocol.CreateTask, selection Selection, origin protocol.TaskOrigin, at int64) (Record, error) {
+	if s.options.OwnerAvailable != nil {
+		if err := s.options.OwnerAvailable(ctx, assistant); err != nil {
+			return Record{}, err
+		}
+	}
 	if !core.Identifier(assistant) {
 		return Record{}, fmt.Errorf("invalid assistant")
 	}
@@ -385,4 +390,19 @@ func (s *Service) ResolveMachine(ctx context.Context, machine string) (string, e
 		machine = s.options.RuntimeID
 	}
 	return machine, nil
+}
+
+// RetireOwner serializes identity retirement with Task admission, including a
+// schedule whose model selection completed before the owner was deleted.
+func (s *Service) RetireOwner(ctx context.Context, owner string, commit func() error) error {
+	return storage.Transaction(ctx, s.db, func(tx *sql.Tx) error {
+		var busy bool
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM tasks WHERE assistant_id=? AND phase IN ('queued','waiting','running','waiting_approval'))", owner).Scan(&busy); err != nil {
+			return err
+		}
+		if busy {
+			return protocol.APIError{Code: "assistant_busy"}
+		}
+		return commit()
+	})
 }

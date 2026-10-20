@@ -128,14 +128,9 @@ func (a *Agent) compact(ctx context.Context, execution core.ExecutionContext, th
 	if len(summary.Calls) > 0 || strings.TrimSpace(summary.Text) == "" {
 		return fmt.Errorf("compaction returned tools or empty summary")
 	}
-	replacement := []m.Message{}
-	if execution.Role.IsNotification() {
-		replacement = retainedSections(state.Messages)
-	} else {
-		replacement, err = SynchronizeSections(nil, sections)
-		if err != nil {
-			return err
-		}
+	replacement, err := SynchronizeSections(nil, sections)
+	if err != nil {
+		return err
 	}
 	replacement = append(replacement, summaryMessage(summary.Text))
 	// Retain all original members of the newest accepted user batch. A batch's

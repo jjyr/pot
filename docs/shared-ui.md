@@ -258,6 +258,19 @@ focused Chat. Browsers keep baselines in local storage and synchronize same-orig
 tabs. Keys include the Control identity so a rebuilt database cannot inherit an
 unrelated baseline. Reduced Motion disables reactions and native tray animation.
 
+Each sidebar assistant name has a monochrome cooking Pot while its main turn or
+one of its background Tasks is executing. The compact assistant catalogue's
+`executing` projection combines those sources without loading message histories;
+queued, allowance-waiting, approval-waiting Tasks and paused work do not cook.
+Task and Runner invalidations refresh that catalogue in every Space, including
+assistants whose Chat is not selected. Offline cached entries never animate work.
+Execution takes priority over older unread replies. When execution stops, an
+unread reply shows the settled lid, a success check and occasional gentle steam;
+the existing reply read receipt removes the Pot. Counts and approval controls
+remain independent. Reduced Motion keeps distinct static states, and a hidden
+document pauses these animations. Refreshing projections retains the indicator's
+DOM and does not replay completion motion.
+
 ## System notifications
 
 General settings has one **System notifications** preference, enabled by default.

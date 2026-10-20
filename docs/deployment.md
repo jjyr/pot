@@ -69,6 +69,14 @@ default English) for its persisted welcome. `POST /api/v1/assistants/bootstrap`
 accepts `locale` and returns `assistant: null` without a default Provider, otherwise
 the first existing assistant or a newly created Pot. Saving Providers alone never
 creates conversational identities; Chat initiates the separate bootstrap request.
+`POST /api/v1/assistants/{id}/delete` accepts the current `revision`, retires an
+idle assistant and returns `deleted: true`. The same revision may retry safely.
+Changed revisions and ongoing replies/Tasks return `assistant_changed` or
+`assistant_busy`. Retired identities are absent from the catalogue and reject
+conversation access and new Task admission. Their history remains on disk and
+their schedules no longer launch. Bootstrap returns `assistant: null` with
+`initialized: true` after explicit deletion leaves no assistants; create a new
+assistant explicitly to resume chatting.
 
 The private CLI socket authenticates operator requests without exposing its
 internal token:

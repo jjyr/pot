@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"regexp"
 	"time"
 
 	"github.com/jjyr/pot/internal/assistant"
@@ -16,6 +17,11 @@ import (
 
 func (s *Service) ConfigurePluginNotifications(ctx context.Context, b assistant.BackgroundBinding) error {
 	return s.Machines.OwnerAction(func() error {
+		if b.ID == "github" {
+			if err := validateGitHubNotificationConfig(b.Config); err != nil {
+				return err
+			}
+		}
 		_, err := s.backgroundPackage(b.ID)
 		if err != nil && b.ID != "github" {
 			return err
@@ -186,7 +192,7 @@ func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 						defer s.pluginMu.Unlock()
 						delete(s.pluginStreams, b.ID)
 						if streamErr != nil && s.ctx.Err() == nil {
-							_ = s.Mailbox.BackgroundError(ctx, b, "unavailable", storage.Now())
+							_ = s.Mailbox.BackgroundError(ctx, b, "unavailable", streamErr.Error(), storage.Now())
 						}
 						s.Changes.Notify("plugin-notifications")
 					}()
@@ -215,7 +221,7 @@ func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 			cancel()
 		}
 		if err != nil {
-			_ = s.Mailbox.BackgroundError(ctx, b, status, now)
+			_ = s.Mailbox.BackgroundError(ctx, b, status, err.Error(), now)
 		}
 		s.Changes.Notify("plugin-notifications")
 	}
@@ -332,4 +338,34 @@ func (s *Service) validateNotificationTarget(ctx context.Context, id string) err
 		}
 	}
 	return errors.New("notification assistant unavailable")
+}
+
+// Reject removed/unknown settings before committing a configuration that cannot poll.
+func validateGitHubNotificationConfig(raw json.RawMessage) error {
+	var config struct {
+		Repositories []string `json:"repositories"`
+		Reasons      []string `json:"reasons"`
+	}
+	if string(raw) == "null" {
+		return errors.New("invalid GitHub notification configuration")
+	}
+	if err := core.DecodeJSON(raw, &config); err != nil {
+		return err
+	}
+	repository := regexp.MustCompile(`^[-\w.]+/[-\w.]+$`)
+	reason := regexp.MustCompile(`^[-a-zA-Z0-9_]+$`)
+	if len(config.Repositories) > 100 || len(config.Reasons) > 100 {
+		return errors.New("too many GitHub notification filters")
+	}
+	for _, value := range config.Repositories {
+		if len(value) > 200 || !repository.MatchString(value) {
+			return errors.New("invalid GitHub notification repository")
+		}
+	}
+	for _, value := range config.Reasons {
+		if len(value) > 200 || !reason.MatchString(value) {
+			return errors.New("invalid GitHub notification reason")
+		}
+	}
+	return nil
 }

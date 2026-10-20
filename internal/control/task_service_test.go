@@ -32,8 +32,8 @@ func TestLocalTaskUsesRunnerSharedCapacityControlModelAndSummary(t *testing.T) {
 		var event any
 		if isSummary {
 			summaryCalls.Add(1)
-			if strings.Contains(string(fields["tools"]), "exec_command") {
-				t.Error("summary exposed effect tools")
+			if !strings.Contains(string(fields["tools"]), "exec_command") || !strings.Contains(string(fields["tools"]), "update_agent_profile") {
+				t.Error("result handling lost assistant tools")
 			}
 			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "Task result summarized"}, "finish_reason": "stop"}}}
 		} else if calls.Add(1) == 1 {

@@ -31,8 +31,8 @@ func TestUserSteeringDuringSummaryQueuesIndependentMainTurn(t *testing.T) {
 		}
 		system := body.Messages[0].Content
 		if calls.Add(1) == 1 {
-			if !strings.Contains(system, "Process background updates") || len(body.Tools) != 0 {
-				t.Error("summary must have its own read-only role")
+			if !strings.Contains(system, "Process background updates") {
+				t.Error("notification must retain its processing instructions")
 			}
 			close(entered)
 			select {

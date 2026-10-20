@@ -36,9 +36,13 @@ func TestFailedTaskRecoveryIsSilentAndReplacementReportsOnce(t *testing.T) {
 						hasRetry = hasRetry || tool.Function.Name == "retry_task"
 					}
 					if hasRetry {
+						names := map[string]bool{}
 						for _, tool := range body.Tools {
-							if tool.Function.Name != "retry_task" && tool.Function.Name != "get_task" && tool.Function.Name != "set_task_dispositions" {
-								t.Error("unbounded recovery tool", tool)
+							names[tool.Function.Name] = true
+						}
+						for _, name := range []string{"exec_command", "create_task", "send_message", "update_agent_profile"} {
+							if !names[name] {
+								t.Error("result handling lost assistant tool", name)
 							}
 						}
 						if recoveryRounds.Add(1) == 1 {

@@ -43,3 +43,39 @@ func TestCreationBindsAllInputsAndDoesNotResolveRetry(t *testing.T) {
 		t.Fatal(rules, err)
 	}
 }
+
+func TestDeletedAssistantSurvivesReopen(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "control.sqlite")
+	r, err := OpenRegistry(path, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := r.Create(ctx, "original", "Original")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = r.Delete(ctx, a.ID, a.Revision); err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	r, err = OpenRegistry(path, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	definitions, err := r.Definitions(ctx)
+	if err != nil || len(definitions) != 0 {
+		t.Fatal(definitions, err)
+	}
+	if _, err = r.Rename(ctx, a.ID, "Renamed", a.Revision); err == nil {
+		t.Fatal("renamed deleted assistant")
+	}
+	if _, err = r.Create(ctx, "original", "Original"); err == nil {
+		t.Fatal("replayed deleted creation")
+	}
+	b, err := r.Create(ctx, "new", "New")
+	if err != nil || b.ID == a.ID {
+		t.Fatal(b, err)
+	}
+}
