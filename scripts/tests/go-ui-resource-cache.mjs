@@ -38,6 +38,14 @@ await Promise.all([scopedReads.collection(collectionPath,{},collection),scopedRe
 await scopedReads.collection(collectionPath,{},collection);assert.equal(collections,1,'Paginated sources share one complete collection independently of backend page count');
 console.log('Resource cache: sharing, isolation, stale reads, invalidation races, consumer release, writes, failures and boot/reset passed');
 
+for(const topic of ['tasks','runner']){
+  const before=calls.filter(call=>call.path==='/api/v1/assistants').length;
+  await resources.read('/api/v1/assistants');
+  resources.invalidate([topic],{space:'b'});
+  await resources.read('/api/v1/assistants');await tick();
+  assert.equal(calls.filter(call=>call.path==='/api/v1/assistants').length,before+(topic==='tasks'?2:1),'Background execution invalidates the assistant catalogue');
+}
+
 // Exercise the real shared transport's command hook, including a scope switch
 // while a save is pending. Commands invalidate their captured Space, not the UI's
 // newly selected Space, and never place request credentials into a read cache.

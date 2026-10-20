@@ -12,7 +12,7 @@ async page=>{
    const writes=[];
    const account={identity:{id:'fixture-user',username:'octocat'},revision:1};
    const integration={id:'github',name:'GitHub',status:'connected',login_available:true,account};
-   const binding={id:'github',enabled:true,assistant:'first',revision:1,status:'baseline',config:{repositories:[],reasons:['mention','custom_reason'],existing:''}};
+   const binding={id:'github',enabled:true,assistant:'first',revision:1,status:'baseline',config:{repositories:[],reasons:['mention','custom_reason']}};
    const data={items:[integration],notifications:{items:[binding],assistants:[{id:'first',name:'Pot'},{id:'second',name:'Second'}]}};
    const update=createIntegrations({root,signal:controller.signal,locale:()=>locale,scope:{space:'fixture-control'},refresh:async()=>update(data),request:async(path,options)=>{
     assert(options.space==='fixture-control','Requests stay in this Control');writes.push({path,...options});
@@ -31,8 +31,8 @@ async page=>{
    assert(toggle().textContent.includes('Notifications → Pot'),'Healthy summary');
    toggle().click();
    assert(toggle().getAttribute('aria-expanded')==='true'&&!root.querySelector('#github-account-settings').hidden,'One click expands all settings');
-   assert(!root.querySelector('details')&&input('Process existing notifications on the next check'),'No nested disclosure');
-   assert(input('Other reasons (API values, comma separated)').value==='custom_reason','Custom API values survive');
+   assert(!root.querySelector('details')&&!input('Process existing notifications on the next check')&&!input('Other reasons (API values, comma separated)'),'Removed history and API-value controls');
+   assert(input('custom_reason').checked,'Existing reason selections survive');
    const repo=input('Repositories (owner/repo, comma separated; blank for all)');repo.focus();change(repo,'jjyr/pot');
    binding.config.repositories=['background/change'];update(data);
    assert(repo===document.activeElement&&repo.value==='jjyr/pot','Background data preserves dirty input and focus');
@@ -44,17 +44,20 @@ async page=>{
    assert(root.querySelector('[role=alert]').textContent.includes('Could not save')&&repo.value==='jjyr/pot','Failure uses current locale and retains draft');
    rejectSave=false;save().click();release();await tick();
    assert(!root.querySelector('[role=alert]')&&toggle().getAttribute('aria-expanded')==='true','Save succeeds without collapsing');
-   // Reason checkboxes retain custom values across reconciliation.
    input('Mentioned my team').click();
-   assert(input('Other reasons (API values, comma separated)').value==='custom_reason','Labeled filters preserve custom reasons');
+   assert(input('custom_reason').checked,'Labeled filters preserve existing reasons');
    save().click();release();await tick();
    assert(writes.at(-1).body.config.reasons.includes('team_mention'),'Labels save the actual GitHub API value');
-   assert(writes.at(-1).body.config.reasons.includes('custom_reason')&&!writes.at(-1).body.config.existing,'Save preserves reasons; history is opt-in');
-   input('Process existing notifications on the next check').click();save().click();release();await tick();
-   const historyToken=writes.at(-1).body.config.existing;
-   assert(historyToken&&writes.at(-1).body.config.existing_account==='fixture-user','Explicit history request is scoped to the actual account');
-   assert(!input('Process existing notifications on the next check').checked,'History request resets after saving');
-   save().click();release();await tick();assert(writes.at(-1).body.config.existing===historyToken,'Saving other settings does not request history again');
+   assert(writes.at(-1).body.config.reasons.includes('custom_reason'),'Existing selections remain intact');
+   change(input('Notification scope'),'all','change');
+   assert(!root.querySelector('.notification-reasons'),'All notifications needs no reason checklist');
+   save().click();release();await tick();
+   assert(writes.at(-1).body.config.reasons.length===0,'All notifications has no reason exclusions');
+   assert(Object.keys(writes.at(-1).body.config).sort().join(',')==='reasons,repositories','Removed history configuration cannot be resaved');
+   change(input('Notification scope'),'selected','change');
+   for(const option of root.querySelectorAll('.notification-reasons input'))if(option.checked)option.click();
+   assert(save().disabled,'Empty selected scope cannot silently become all notifications');
+   input('Mentioned me').click();save().click();release();await tick();
    binding.status='permission';update(data);toggle().click();
    assert(toggle().textContent.includes('Notification issue'),'Collapsed summary exposes permission failure');toggle().click();
    assert(root.textContent.includes('GitHub denied notification access'),'Actionable permission status');

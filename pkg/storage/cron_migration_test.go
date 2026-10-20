@@ -22,7 +22,7 @@ func TestCronSchedulesUpgrade(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, entry := range entries {
-				if strings.HasPrefix(entry.Name(), "0007_") || (skip && !strings.HasPrefix(entry.Name(), "0001_")) {
+				if entry.Name() >= "0008_" || (skip && !strings.HasPrefix(entry.Name(), "0001_")) {
 					continue
 				}
 				path := "migrations/tasks/" + entry.Name()

@@ -129,6 +129,19 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       dialog.addEventListener('cancel',event=>{event.preventDefault();dialog.close();resolve(false);},{once:true});dialog.addEventListener('close',()=>dialog.remove(),{once:true});dialog.showModal();
     });
   }
+  async function confirmAssistantDelete(name) {
+    return new Promise(resolve=>{
+      const dialog=n('dialog','preferences'),title=n('h2'),description=n('p','hint');
+      const finish=value=>{dialog.close();resolve(value);};
+      const cancel=action('',()=>finish(false)),confirm=action('',()=>finish(true),{danger:true});
+      const refresh=()=>{title.textContent=translate(locale(),'assistant.deleteTitle').replace('{name}',name);description.textContent=translate(locale(),'assistant.deleteBody');cancel.textContent=translate(locale(),'assistant.deleteCancel');confirm.textContent=translate(locale(),'assistant.delete');};
+      title.id='assistant-delete-title';dialog.setAttribute('aria-labelledby',title.id);description.id='assistant-delete-description';dialog.setAttribute('aria-describedby',description.id);
+      dialog.append(title,description,toolbar(cancel,confirm));document.body.append(dialog);refresh();
+      window.addEventListener('pot:locale',refresh);
+      dialog.addEventListener('cancel',event=>{event.preventDefault();finish(false);});
+      dialog.addEventListener('close',()=>{window.removeEventListener('pot:locale',refresh);dialog.remove();},{once:true});dialog.showModal();cancel.focus();
+    });
+  }
   async function leave({toParent=false}={}) {
     captureView();
     const sessions=[...(editor?[editor]:[]),...(!toParent?[...editorParents,...[...machineDrafts.values()].map(session=>({session}))]:[])];
@@ -212,6 +225,30 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
         if(values.text!==initial.text){const saved=await request('/api/v1/instructions',{...options,body:{text:values.text,revision:rulesRevision}});rulesRevision=saved.revision;initial.text=values.text;session.acknowledge({text:values.text});}
       },{returnChat:true,submitLabel:definition?tr('Save','保存'):tr('Create and start chatting','创建并开始聊天')});
       const controls=form.controls,session=form.session;
+      if(definition){
+        const t=key=>translate(locale(),key),more=n('details','editor-disclosure assistant-delete');more.dataset.section='delete';
+        const summary=n('summary'),remove=action('',async()=>{
+          if(!session.begin())return;
+          const disabled=new Map([...form.form.querySelectorAll('input,select,textarea,button')].map(node=>[node,node.disabled]));
+          for(const node of disabled.keys())node.disabled=true;
+          deleteError='';refreshDelete();
+          try{
+            if(!await confirmAssistantDelete(definition.name))return;
+            if(editor?.session!==session||disposed)return;
+            if(client.runtime.boot_id!==session.context.boot){deleteError='assistant.deleteRuntimeChanged';return;}
+            await request(`/api/v1/assistants/${encodeURIComponent(definition.id)}/delete`,{...captured,method:'POST',body:{revision}});
+            session.settle(true);await leave();route='chat';
+            history.replaceState({potRoute:'chat',potScope:{space:captured.space,owner:''},potDirectory:true},'',location.href);
+            routeChanged('chat');await changed({deletedAssistant:{space:captured.space,owner:definition.id}});
+          }catch(reason){deleteError=reason.code==='assistant_busy'?'assistant.deleteBusy':reason.code==='assistant_changed'?'assistant.deleteChanged':'assistant.deleteFailed';}
+          finally{if(session.pending)session.settle(false);for(const [node,value]of disabled)node.disabled=value;refreshDelete();}
+        },{danger:true});
+        const status=n('p','inline-error');status.setAttribute('role','alert');let deleteError='';
+        const refreshDelete=()=>{summary.textContent=t('assistant.moreActions');remove.textContent=t('assistant.delete');status.textContent=deleteError?t(deleteError):'';status.hidden=!deleteError;};
+        more.append(summary,remove,status);form.form.append(more);refreshDelete();
+        window.addEventListener('pot:locale',refreshDelete);form.lifecycle.dispose=()=>window.removeEventListener('pot:locale',refreshDelete);
+      }
+
       editor.kind='assistant';
       // Creation identity also owns the preview image. Keep it even when an
       // edited retry rotates the editor's generic mutation request identity.

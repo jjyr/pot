@@ -513,3 +513,33 @@ func TestTurnControlPausesAtBoundaryAndSteeringBindsOriginalReceipt(t *testing.T
 		t.Fatal(calls.Load())
 	}
 }
+
+func TestRetireConversationRejectsActiveReplyAndFencesNewInputs(t *testing.T) {
+	ctx := context.Background()
+	var cleanup atomic.Int64
+	gate := make(chan struct{})
+	c := conversationFixture(t, filepath.Join(t.TempDir(), "retire.sqlite"), "boot", func(ctx context.Context, _ core.ModelRequest) (io.ReadCloser, error) {
+		select {
+		case <-gate:
+			return replySSE("Finished"), nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}, &cleanup)
+	if _, err := c.Send(ctx, protocol.SendMessage{RequestID: "first", ConversationID: "main", Text: "First"}); err != nil {
+		t.Fatal(err)
+	}
+	committed := false
+	commit := func() error { committed = true; return nil }
+	if err := c.Retire(commit); err == nil || committed {
+		t.Fatal("retired an active reply", err, committed)
+	}
+	close(gate)
+	waitSnapshot(t, c, func(value protocol.Snapshot) bool { return value.Turn == nil })
+	if err := c.Retire(commit); err != nil || !committed {
+		t.Fatal(err, committed)
+	}
+	if _, err := c.Send(ctx, protocol.SendMessage{RequestID: "late", ConversationID: "main", Text: "Late"}); err == nil {
+		t.Fatal("retired conversation accepted input")
+	}
+}

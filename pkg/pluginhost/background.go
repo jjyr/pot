@@ -180,6 +180,9 @@ func runBackground(ctx context.Context, node string, p plugin.Package, input cor
 		return result, errors.New("background cleanup unconfirmed")
 	}
 	if readErr != nil || waitErr != nil || len(raw) > 3*1024*1024 {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return result, errors.New("background exchange timed out")
+		}
 		return result, errors.New("background exchange failed")
 	}
 	if err = core.DecodeJSON(raw, &result); err != nil {

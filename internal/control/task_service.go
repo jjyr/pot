@@ -62,7 +62,16 @@ func (s *Service) openTasks() error {
 		return err
 	}
 	s.Runner = &runner.Executor{Journal: s.RunnerJournal, Executions: s.options.Manager, Context: s.ctx, Prepare: s.prepareTask}
-	s.Tasks, err = tasks.Open(filepath.Join(s.options.Root, "tasks.sqlite"), tasks.Options{ControlID: s.options.RuntimeID, RuntimeID: s.options.RuntimeID, Port: taskRouter{s}, ResolveModel: s.selectTask, ResolveTarget: s.taskTarget, ResolveMachine: s.selectTaskMachine, ValidateTarget: s.validateTaskTarget, AdmitModel: s.admitTaskModel, AwaitingApproval: s.taskAwaitingApproval, PublishHook: s.publishHook, OutcomesChanged: func() { s.Changes.Notify("task-outcomes") }, PrepareOutcome: func(ctx context.Context, record tasks.Record, event protocol.TaskResultEvent) (tasks.OutcomeCommit, error) {
+	s.Tasks, err = tasks.Open(filepath.Join(s.options.Root, "tasks.sqlite"), tasks.Options{OwnerAvailable: func(ctx context.Context, owner string) error {
+		deleted, err := s.Registry.Deleted(ctx, owner)
+		if err != nil {
+			return err
+		}
+		if deleted {
+			return protocol.APIError{Code: "assistant_unavailable"}
+		}
+		return nil
+	}, ControlID: s.options.RuntimeID, RuntimeID: s.options.RuntimeID, Port: taskRouter{s}, ResolveModel: s.selectTask, ResolveTarget: s.taskTarget, ResolveMachine: s.selectTaskMachine, ValidateTarget: s.validateTaskTarget, AdmitModel: s.admitTaskModel, AwaitingApproval: s.taskAwaitingApproval, PublishHook: s.publishHook, OutcomesChanged: func() { s.Changes.Notify("task-outcomes") }, PrepareOutcome: func(ctx context.Context, record tasks.Record, event protocol.TaskResultEvent) (tasks.OutcomeCommit, error) {
 		return s.Schedules.PrepareOutcome(ctx, record, event)
 	}})
 	if err != nil {
@@ -131,6 +140,9 @@ func (s *Service) watchTaskOwner(owner string, c *assistant.Conversation) {
 	}()
 }
 func (s *Service) taskReady(ctx context.Context, owner string) (bool, error) {
+	if deleted, err := s.Registry.Deleted(ctx, owner); err != nil || deleted {
+		return false, err
+	}
 	c, err := s.Conversation(ctx, owner)
 	if err != nil {
 		return false, err

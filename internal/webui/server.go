@@ -354,7 +354,7 @@ func Allowed(method, path string) bool {
 				return true
 			}
 			id := strings.TrimPrefix(path, "/api/v1/assistants/")
-			return core.Identifier(id)
+			return core.Identifier(strings.TrimSuffix(id, "/delete"))
 		}
 
 	}
