@@ -47,6 +47,9 @@ OAuth account or a separate Bridge service. See the
 `agent.Agent` runs the model/tool loop. The caller supplies:
 
 - `agent.Services`: model response streams and compaction observations.
+  `Compaction` receives JSON `core.CompactionReport` values: `start`, `complete`,
+  `failed`, and private `evidence` records share one operation ID. Hosts persist
+  evidence separately from usage totals; it is never a second metering source.
 - `agent.Feedback`: checkpoint persistence, steering and turn settlement.
 - `agent.Dispatch`: authorized tool calls, when tools are enabled.
 - `agent.Cleanup` and an event sink: execution cleanup and ordered turn output.
