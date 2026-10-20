@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify tool-only packaging, pinned runtime assets and service artifacts."""
+"""Verify capability packaging, pinned runtime assets and service artifacts."""
 
 import hashlib
 import io
@@ -54,12 +54,14 @@ class GoPackaging(unittest.TestCase):
                 ):
                     go_packaging.prepare_plugins(installed, platform)
                 self.assertEqual(
-                    sorted(p.name for p in installed.iterdir()), ["codex", "computer-use", "github"]
+                    sorted(p.name for p in installed.iterdir()),
+                    sorted(p.parent.name for p in (ROOT / "plugins").glob("*/plugin.json")),
                 )
                 for package in installed.iterdir():
                     manifest = json.loads((package / "plugin.json").read_text())
-                    tools = manifest["contributes"]["tools"]
-                    self.assertEqual(tools["execution"], "runtime")
+                    tools = manifest["contributes"].get("tools")
+                    if tools is not None:
+                        self.assertEqual(tools["execution"], "runtime")
                     self.assertEqual(
                         sorted(p.name for p in package.iterdir()),
                         sorted(
@@ -77,12 +79,59 @@ class GoPackaging(unittest.TestCase):
                                 ),
                                 *(
                                     name
-                                    for capability in manifest["contributes"].values()
-                                    for name in capability["files"]
+                                    for key, capability in manifest["contributes"].items()
+                                    for name in (
+                                        capability.get("adapter", {}).get("files", [])
+                                        if key == "model_providers"
+                                        else capability["files"]
+                                    )
                                 ),
                             }
                         ),
                     )
+
+    def test_model_provider_packages_preserve_only_adapter_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plugins = root / "plugins"
+            definition = {
+                "id": "example",
+                "name": "Example",
+                "protocol": "openai_responses",
+                "capabilities": {"catalog": "http"},
+            }
+            for name in ("declarative", "adapter"):
+                source = plugins / name
+                source.mkdir(parents=True)
+                contribution = {"providers": [definition]}
+                if name == "adapter":
+                    contribution["adapter"] = {
+                        "runtime": "node",
+                        "execution": "control",
+                        "entrypoint": "reader.mjs",
+                        "files": ["reader.mjs"],
+                    }
+                    (source / "reader.mjs").write_text("export async function read() {}")
+                (source / "private.txt").write_text("undeclared")
+                (source / "plugin.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 2,
+                            "id": name,
+                            "version": "1",
+                            "contributes": {"model_providers": contribution},
+                        }
+                    )
+                )
+            with mock.patch.object(go_packaging, "ROOT", root):
+                go_packaging.prepare_plugins(root / "installed", "linux-amd64")
+            self.assertEqual(
+                sorted(p.name for p in (root / "installed/declarative").iterdir()), ["plugin.json"]
+            )
+            self.assertEqual(
+                sorted(p.name for p in (root / "installed/adapter").iterdir()),
+                ["plugin.json", "reader.mjs"],
+            )
 
     def test_node_distribution_preserves_relocatable_npm_links(self):
         with tempfile.TemporaryDirectory() as temporary:

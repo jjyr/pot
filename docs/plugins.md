@@ -1,9 +1,10 @@
-# Tool plugin packages
+# Plugin packages
 
 A plugin is a trusted locally installed directory with a schema-2 `plugin.json`
 manifest. `pkg/plugin` validates identity and confined file access without
-starting processes. `contributes.tools` and owner-enabled `contributes.background` are supported;
-removed execution Provider/resource capabilities and unknown fields fail explicitly.
+starting processes. Packages can contribute tools, owner-enabled background
+services and Control-local model connection types. Unknown fields and retired
+execution Provider/resource capabilities fail explicitly.
 
 ```text
 Resources/plugins/<package>/plugin.json + declared files
@@ -56,6 +57,94 @@ Packages contain no VM engines, images or guest bootstrap. Stop Runtime before
 replacing a complete package. The Extensions page imports and updates user packages separately from packaged resources. Managed independent MCP servers use the same tool execution boundary; see [Extensions](extensions.md). A plugin marketplace and automatic package updates remain outside this contract. The
 [Codex Bridge](../integrations/codex/README.md) package owns its paired remote MCP
 connection and durable SSE consumer.
+
+## Model connection contributions
+
+`contributes.model_providers` registers connection types with a shared host
+contract. A package can provide multiple types. Definitions contain presentation
+and protocol defaults; optional Node adapters only read metadata. They never
+proxy inference, carry credentials in JSON, or enter Task tool bundles.
+
+```json
+{
+  "providers": [{
+    "id": "example",
+    "name": "Example",
+    "endpoint": "https://api.example.com/v1",
+    "protocol": "openai_responses",
+    "protocols": ["openai_responses", "openai_chat"],
+    "directory_provider": "example",
+    "capabilities": {"catalog": "plugin", "allowances": true}
+  }],
+  "adapter": {
+    "runtime": "node",
+    "execution": "control",
+    "entrypoint": "provider.mjs",
+    "files": ["provider.mjs"],
+    "credential_env": "EXAMPLE_API_KEY"
+  }
+}
+```
+
+`protocol` is the default; `protocols`, when present, lists supported protocol
+choices and must include the default. Protocols refer to Pot's existing codecs:
+`openai_chat`, `openai_responses`, `anthropic_messages` or `gemini`.
+`catalog` is `none`, `models_dev`, `http` or `plugin`. `models_dev` requires a
+`directory_provider` binding; the wildcard `*` lets the host expand supported
+directory entries. A directory binding can also accompany `http` discovery.
+Declarative types using shared readers do not need an adapter or process.
+`allowances: true` and `catalog: "plugin"` require an adapter.
+
+```text
+Installed package -> validated model-provider identity -> Control registry
+                                                    |
+                                        saved connection + revision
+                                                    |
+                             shared reader OR supervised local Node RPC
+                                                    |
+                                  normalized catalog / allowance snapshot
+
+Saved connection -> Pot Gateway -> existing model protocol -> HTTP / SSE
+```
+
+`pkg/pluginhost.RunModelProvider` performs a fresh supervised unary exchange,
+with a maximum 30-second lifetime, 3 MiB response, 16 KiB object config, confined
+UTF-8 adapter files (32 files / 512 KiB), cancellation and descendant cleanup.
+It calls the entrypoint's `export async function read(input)` once. The version-1
+input is `{version, method, connection}`; connection contains `id`, `type`,
+`revision`, `endpoint`, `protocol` and optional nonsecret `config`. Only the
+matching definition's declared `list_models` or `read_allowances` method can run.
+The owner supplies the saved connection credential only in the adapter's declared
+`credential_env`; unrelated host credentials and Node loader variables are not
+inherited. Stdout is the response protocol; stderr/exception text is discarded.
+The host rejects echoed credentials (including JSON-escaped strings), unknown
+fields, malformed snapshots, undeclared methods and mismatched response kinds.
+Control separately fences results against connection revisions, enabled state and
+current package identity before caching or accepting them. Expected API failures
+return only `{error: {code}}`, with code `authorization`, `permission`,
+`rate_limited`, `unavailable`, `overflow` or `invalid_response`; an error cannot
+accompany a snapshot. The host returns a typed `core.ModelProviderError` without
+plugin-supplied text, allowing quota permission failures to degrade independently
+of inference or catalog access. Unexpected exceptions remain generic host errors.
+
+A `list_models` result is `{catalog: {read_at, models}}`; each model has `id` and
+optional `name`, `input_modalities`, `output_modalities`, `context_window`,
+`max_input` and `max_output`. Limits remain independent. At most 8,192 unique model
+IDs (up to 256 bytes, without control characters) are accepted; token limits
+fit JavaScript safe integers. A `read_allowances` result is `{allowances: {read_at, accounts}}`.
+Each account describes its provider, name, kind, plan, user, shared pool and
+independent windows; each window has optional percentage `used`, `unlimited`,
+`resets_at` and pool identity. Missing usage stays unknown rather than zero;
+percentages can exceed 100 for overage. Account `read_at`, `as_of`, `until` and
+`renew` preserve observation and renewal semantics. Times are RFC3339.
+
+Accounts and windows declare `identity_quality: "stable"` or `"ambiguous"`.
+Stable identities require a nonempty `id`; adapters must not invent IDs from
+mutable labels. Connection-level alert episodes can inspect fresh ambiguous data
+without treating those labels as durable per-window identities. The host owns
+threshold policy, freshness checks, deduplication and notifications. Pool values
+identify shared resources, never amounts that can be summed across accounts.
+Snapshot data is typed metadata, separate from background opaque checkpoints.
 
 ## Background services and assistant notifications
 
