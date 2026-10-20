@@ -13,6 +13,7 @@ import (
 
 	"github.com/jjyr/pot/pkg/assistantavatar"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 )
 
@@ -68,7 +69,7 @@ func ValidateName(name string) error {
 	return nil
 }
 func (r *Registry) Definitions(ctx context.Context) ([]Definition, error) {
-	rows, err := r.db.QueryContext(ctx, "SELECT id,name,revision,request_id,COALESCE((SELECT avatar FROM assistant_profiles WHERE assistant_id=assistant_definitions.id),'') FROM assistant_definitions ORDER BY sequence")
+	rows, err := r.db.QueryContext(ctx, "SELECT id,name,revision,request_id,COALESCE((SELECT avatar FROM assistant_profiles WHERE assistant_id=assistant_definitions.id),'') FROM assistant_definitions WHERE deleted=0 ORDER BY sequence")
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +122,7 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 	var definition Definition
 	err = storage.Transaction(ctx, r.db, func(tx *sql.Tx) error {
 		if onlyFirst {
-			err := tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id,COALESCE((SELECT avatar FROM assistant_profiles WHERE assistant_id=assistant_definitions.id),'') FROM assistant_definitions ORDER BY sequence LIMIT 1").Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID, &definition.Avatar)
+			err := tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id,COALESCE((SELECT avatar FROM assistant_profiles WHERE assistant_id=assistant_definitions.id),'') FROM assistant_definitions WHERE deleted=0 ORDER BY sequence LIMIT 1").Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID, &definition.Avatar)
 			if err == nil {
 				return validateDefinition(definition)
 			}
@@ -130,8 +131,12 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 			}
 		}
 		var createdName string
-		err := tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id,created_name,COALESCE((SELECT avatar FROM assistant_profiles WHERE assistant_id=assistant_definitions.id),'') FROM assistant_definitions WHERE request_id=?", request).Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID, &createdName, &definition.Avatar)
+		var deleted bool
+		err := tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id,created_name,COALESCE((SELECT avatar FROM assistant_profiles WHERE assistant_id=assistant_definitions.id),''),deleted FROM assistant_definitions WHERE request_id=?", request).Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID, &createdName, &definition.Avatar, &deleted)
 		if err == nil {
+			if deleted {
+				return errors.New("assistant creation request belongs to a deleted assistant")
+			}
 			var stored string
 			if err := tx.QueryRowContext(ctx, "SELECT binding FROM assistant_initial WHERE id=?", definition.ID).Scan(&stored); err != nil {
 				return err
@@ -145,14 +150,18 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 			return err
 		}
 		var count int
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM assistant_definitions").Scan(&count); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM assistant_definitions WHERE deleted=0").Scan(&count); err != nil {
 			return err
 		}
 		if count >= 64 {
 			return errors.New("assistant limit reached")
 		}
 		id := storage.ID()
-		if count == 0 {
+		var historical int
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM assistant_definitions").Scan(&historical); err != nil {
+			return err
+		}
+		if historical == 0 {
 			id = r.root
 		}
 		definition = Definition{ID: id, Name: name, Revision: 1, RequestID: request}
@@ -213,7 +222,7 @@ func (r *Registry) Rename(ctx context.Context, id, name string, revision uint64)
 	}
 	var definition Definition
 	err := storage.Transaction(ctx, r.db, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE assistant_definitions SET name=?,revision=revision+1 WHERE id=? AND revision=?", name, id, revision)
+		result, err := tx.ExecContext(ctx, "UPDATE assistant_definitions SET name=?,revision=revision+1 WHERE id=? AND revision=? AND deleted=0", name, id, revision)
 		if err != nil {
 			return err
 		}
@@ -253,4 +262,39 @@ func (r *Registry) InitialIntent(ctx context.Context, id string) (json.RawMessag
 		return nil, nil
 	}
 	return json.RawMessage(value), err
+}
+
+// HasHistory keeps explicit deletion from triggering first-use bootstrap again.
+func (r *Registry) HasHistory(ctx context.Context) (bool, error) {
+	var exists bool
+	err := r.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM assistant_definitions)").Scan(&exists)
+	return exists, err
+}
+
+func (r *Registry) Deleted(ctx context.Context, id string) (bool, error) {
+	var deleted bool
+	err := r.db.QueryRowContext(ctx, "SELECT deleted FROM assistant_definitions WHERE id=?", id).Scan(&deleted)
+	return deleted, err
+}
+
+// Delete retains the identity and creation receipt so retries cannot resurrect it.
+func (r *Registry) Delete(ctx context.Context, id string, revision uint64) error {
+	if !core.Identifier(id) || revision == 0 || revision > core.MaxSafeInteger {
+		return errors.New("invalid assistant deletion")
+	}
+	return storage.Transaction(ctx, r.db, func(tx *sql.Tx) error {
+		var current uint64
+		var deleted bool
+		if err := tx.QueryRowContext(ctx, "SELECT revision,deleted FROM assistant_definitions WHERE id=?", id).Scan(&current, &deleted); err != nil {
+			return err
+		}
+		if current != revision {
+			return protocol.APIError{Code: "assistant_changed"}
+		}
+		if deleted {
+			return nil
+		}
+		_, err := tx.ExecContext(ctx, "UPDATE assistant_definitions SET deleted=1 WHERE id=?", id)
+		return err
+	})
 }

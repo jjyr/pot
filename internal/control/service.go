@@ -27,7 +27,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -182,15 +181,15 @@ func (s *Service) Conversation(ctx context.Context, id string) (*assistant.Conve
 	if s.closed {
 		return nil, errors.New("Control stopped")
 	}
-	if c := s.conversations[id]; c != nil {
-		return c, nil
+	deleted, err := s.Registry.Deleted(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) || deleted {
+		return nil, errors.New("assistant unavailable")
 	}
-	identities, err := s.Registry.Definitions(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if !slices.ContainsFunc(identities, func(d assistant.Definition) bool { return d.ID == id }) {
-		return nil, errors.New("assistant unavailable")
+	if c := s.conversations[id]; c != nil {
+		return c, nil
 	}
 	initial, rules, err := s.Registry.Initial(ctx, id)
 	if err != nil {

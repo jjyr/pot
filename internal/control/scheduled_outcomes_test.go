@@ -92,7 +92,7 @@ func TestScheduledAndManualOutcomesShareSummaryDelivery(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())
 			}
-			spec := protocol.ScheduleSpec{Title: "Scheduled monitor", Goal: "Check the scheduled observation", Timezone: "Asia/Shanghai", Kind: "interval", EveryMinutes: 60, Weekdays: []uint32{}, Misfire: "coalesce", Notify: "changes", Enabled: false}
+			spec := protocol.ScheduleSpec{Title: "Scheduled monitor", Goal: "Check the scheduled observation", Timezone: "Asia/Shanghai", Kind: "interval", EveryMinutes: 60, Misfire: "coalesce", Notify: "changes", Enabled: false}
 			raw, err := s.Schedules.Manage(ctx, "main", schedule.Request{RequestID: "create-monitor", Action: "create", Spec: &spec}, storage.Now())
 			if err != nil {
 				t.Fatal(err)

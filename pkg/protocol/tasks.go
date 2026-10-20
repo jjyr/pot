@@ -3,6 +3,7 @@ package protocol
 import (
 	"fmt"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/cronexpr"
 	"strings"
 	"time"
 )
@@ -205,8 +206,7 @@ type ScheduleSpec struct {
 	Kind         string           `json:"kind" required:"true"`
 	At           string           `json:"at"`
 	EveryMinutes uint64           `json:"every_minutes"`
-	Time         string           `json:"time"`
-	Weekdays     []uint32         `json:"weekdays"`
+	Cron         string           `json:"cron"`
 	Misfire      string           `json:"misfire"`
 	Notify       string           `json:"notify"`
 	Enabled      bool             `json:"enabled"`
@@ -217,7 +217,7 @@ type ScheduleSpec struct {
 
 func (s *ScheduleSpec) UnmarshalJSON(data []byte) error {
 	type plain ScheduleSpec
-	value := plain{Timezone: "Asia/Shanghai", Misfire: "coalesce", Notify: "changes", Enabled: true, Weekdays: []uint32{}}
+	value := plain{Misfire: "coalesce", Notify: "changes", Enabled: true}
 	if err := core.DecodeJSON(data, &value); err != nil {
 		return err
 	}
@@ -228,9 +228,15 @@ func (s ScheduleSpec) Validate() error {
 	if s.Title == "" || s.Goal == "" || s.MachineID != "" && !core.Identifier(s.MachineID) {
 		return fmt.Errorf("invalid schedule")
 	}
-	zone, err := time.LoadLocation(s.Timezone)
-	if err != nil {
-		return err
+	// An omitted zone is intent, resolved by the owning Control before save.
+	// UTC only validates the wall-clock syntax here; it is not a default zone.
+	zone := time.UTC
+	if s.Timezone != "" {
+		var err error
+		zone, err = cronexpr.Location(s.Timezone)
+		if err != nil {
+			return err
+		}
 	}
 	if s.Misfire != "coalesce" && s.Misfire != "skip" {
 		return fmt.Errorf("invalid misfire policy")
@@ -248,17 +254,9 @@ func (s ScheduleSpec) Validate() error {
 		if s.EveryMinutes == 0 || s.EveryMinutes > 525600 {
 			return fmt.Errorf("invalid interval")
 		}
-	case "daily", "weekly":
-		if _, err := time.Parse("15:04", s.Time); err != nil {
+	case "cron":
+		if _, err := cronexpr.Parse(s.Cron); err != nil {
 			return err
-		}
-		if s.Kind == "weekly" && len(s.Weekdays) == 0 {
-			return fmt.Errorf("weekly schedule requires weekdays")
-		}
-		for _, day := range s.Weekdays {
-			if day < 1 || day > 7 {
-				return fmt.Errorf("invalid weekday")
-			}
 		}
 	default:
 		return fmt.Errorf("unknown schedule kind")

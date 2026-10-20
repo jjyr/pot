@@ -32,7 +32,7 @@ async function mountFixture(){
       }
       if(url.pathname==='/api/v1/tasks/outcomes')return {items:[],cursor:0,has_more:false};
       if(url.pathname==='/api/v1/schedules'){
-        const plan={id:'plan',spec:{title:'Fixture schedule '+space,goal:'Fixture goal',enabled:true,kind:'daily',timezone:'UTC',time:'09:00'}};
+        const plan={id:'plan',spec:{title:'Fixture schedule '+space,goal:'Fixture goal',enabled:true,kind:'cron',timezone:'UTC',cron:'0 9 * * *'}};
         return {items:[plan],selected:url.searchParams.get('selected')?plan:null,runs:[{id:'run',task_id:'task-0',summary:'Fixture scheduled task',state:'complete',scheduled_label:'Yesterday'}],runs_next_offset:null};
       }
       const task=items.find(item=>url.pathname==='/api/v1/tasks/'+item.id);

@@ -249,6 +249,15 @@ without changing the shared Provider or other assistants. Model parameters and
 assistant instructions start collapsed; expanding instructions reveals AGENTS.md.
 Nested Provider setup preserves the assistant draft and returns to its caller.
 Create and start chatting saves the assistant and opens its conversation.
+Existing assistant settings end with a collapsed **More actions** disclosure
+containing a red **Delete assistant** button. A confirmation names the assistant
+and explains that deletion removes it from the directory, stops its schedules
+and prevents reopening its conversations. Cancel and Escape preserve the editor
+draft. Ongoing replies or Tasks must end before deletion. Successful deletion
+returns to Chat; deleting the last assistant offers explicit creation and never
+restarts first-use bootstrap. Historical records remain private on disk and
+assistant identities and creation receipts are never reused.
+
 Assistant settings contain no task routing controls: the assistant chooses task
 models autonomously, guided by its instructions.
 
@@ -534,3 +543,9 @@ Native menu-bar steam also cycles while executing. Reduce Motion uses static
 activity/avatar states and immediate navigation-menu updates. Do not animate
 every streamed token or replay completion reactions on refresh. Brand assets and
 generation instructions belong in [Pot brand](design/pot-brand/README.md).
+
+Sidebar name-line activity uses a 24px monochrome Pot: a 1.5s rocking cycle,
+360ms lid rattle and staggered 1.45s steam while executing. Completed unread
+replies keep a settled tilted lid, success check and gentle 3.6s steam until read.
+The indicator stays inside stable row geometry; long names truncate before it.
+Reduce Motion replaces both loops with distinct static poses.

@@ -27,7 +27,7 @@ func TestPluginNotificationConfigurationOwnerRoutes(t *testing.T) {
 	if _, err = app.Call(ctx, Request{Method: "GET", Path: "/api/v1/plugin-notifications"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, body := range []string{`{"enabled":true,"assistant":"foreign","config":{},"revision":0}`, `{"enabled":false,"assistant":"main","config":{},"revision":0,"from":"user"}`} {
+	for _, body := range []string{`{"enabled":true,"assistant":"foreign","config":{},"revision":0}`, `{"enabled":false,"assistant":"main","config":{},"revision":0,"from":"user"}`, `{"enabled":false,"assistant":"main","config":{"existing":"removed"},"revision":0}`, `{"enabled":false,"assistant":"main","config":{"reasons":["invalid reason"]},"revision":0}`} {
 		if _, err = app.Call(ctx, Request{Method: "POST", Path: "/api/v1/plugin-notifications/github", Body: json.RawMessage(body)}); err == nil {
 			t.Fatal("invalid owner route accepted", body)
 		}

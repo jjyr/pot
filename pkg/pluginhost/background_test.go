@@ -63,8 +63,8 @@ func TestBackgroundCancellationUsesSupervisorForDetachedDescendants(t *testing.T
 	worker, _ := os.Executable()
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	if _, err := RunBackground(ctx, "", p, core.BackgroundRequest{Version: 1}, nil, []string{worker}); err == nil {
-		t.Fatal("cancelled exchange accepted")
+	if _, err := RunBackground(ctx, "", p, core.BackgroundRequest{Version: 1}, nil, []string{worker}); err == nil || err.Error() != "background exchange timed out" {
+		t.Fatal("deadline diagnostic missing", err)
 	}
 	data, err := os.ReadFile(filepath.Join(root, "child.pid"))
 	if err != nil {

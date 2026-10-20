@@ -29,7 +29,7 @@ type BackgroundBinding struct {
 }
 
 func (m *Mailbox) Backgrounds(ctx context.Context) ([]BackgroundBinding, error) {
-	rows, err := m.db.QueryContext(ctx, `SELECT id,enabled,assistant,config,revision,state,next,status,
+	rows, err := m.db.QueryContext(ctx, `SELECT id,enabled,assistant,config,revision,state,next,status,diagnostic,
  (SELECT COUNT(*) FROM agent_messages WHERE json_extract(envelope,'$.plugin.identity.id')=p.id AND state='queued'),
  (SELECT COUNT(*) FROM agent_messages WHERE json_extract(envelope,'$.plugin.identity.id')=p.id AND state IN ('failed','interrupted')) FROM plugin_background p ORDER BY id`)
 	if err != nil {
@@ -40,7 +40,7 @@ func (m *Mailbox) Backgrounds(ctx context.Context) ([]BackgroundBinding, error) 
 	for rows.Next() {
 		var b BackgroundBinding
 		var config, state []byte
-		if err = rows.Scan(&b.ID, &b.Enabled, &b.Assistant, &config, &b.Revision, &state, &b.Next, &b.Status, &b.Queued, &b.Attention); err != nil {
+		if err = rows.Scan(&b.ID, &b.Enabled, &b.Assistant, &config, &b.Revision, &state, &b.Next, &b.Status, &b.Diagnostic, &b.Queued, &b.Attention); err != nil {
 			return nil, err
 		}
 		b.Config = config
@@ -56,7 +56,7 @@ func (m *Mailbox) EnsureBackground(ctx context.Context, id, target string) error
 	if !core.Identifier(id) || !core.Identifier(target) {
 		return errors.New("invalid background defaults")
 	}
-	_, err := m.db.ExecContext(ctx, "INSERT INTO plugin_background VALUES(?,1,?,'{}',1,'null',0,'pending',?) ON CONFLICT(id) DO NOTHING", id, target, newConversation())
+	_, err := m.db.ExecContext(ctx, "INSERT INTO plugin_background(id,enabled,assistant,config,revision,state,next,status,conversation) VALUES(?,1,?,'{}',1,'null',0,'pending',?) ON CONFLICT(id) DO NOTHING", id, target, newConversation())
 	return err
 }
 
@@ -71,7 +71,7 @@ func (m *Mailbox) ConfigureBackground(ctx context.Context, b BackgroundBinding) 
 			if b.Revision != 0 {
 				return errors.New("stale plugin configuration")
 			}
-			_, err = tx.ExecContext(ctx, "INSERT INTO plugin_background VALUES(?,?,?,?,1,'null',0,'disabled',?)", b.ID, b.Enabled, b.Assistant, string(b.Config), newConversation())
+			_, err = tx.ExecContext(ctx, "INSERT INTO plugin_background(id,enabled,assistant,config,revision,state,next,status,conversation) VALUES(?,?,?,?,1,'null',0,'disabled',?)", b.ID, b.Enabled, b.Assistant, string(b.Config), newConversation())
 			return err
 		}
 		if err != nil {
@@ -135,7 +135,7 @@ func (m *Mailbox) CommitBackground(ctx context.Context, b BackgroundBinding, ide
 				return err
 			}
 		}
-		_, err := tx.ExecContext(ctx, "UPDATE plugin_background SET state=?,next=?,status=? WHERE id=?", string(r.State), now+int64(r.DelaySeconds)*1000, r.Status, b.ID)
+		_, err := tx.ExecContext(ctx, "UPDATE plugin_background SET state=?,next=?,status=?,diagnostic='' WHERE id=?", string(r.State), now+int64(r.DelaySeconds)*1000, r.Status, b.ID)
 		return err
 	})
 	if err == nil {
@@ -143,7 +143,7 @@ func (m *Mailbox) CommitBackground(ctx context.Context, b BackgroundBinding, ide
 	}
 	return err
 }
-func (m *Mailbox) BackgroundError(ctx context.Context, b BackgroundBinding, status string, now int64) error {
-	_, err := m.db.ExecContext(ctx, "UPDATE plugin_background SET next=?,status=? WHERE id=? AND revision=?", now+300000, status, b.ID, b.Revision)
+func (m *Mailbox) BackgroundError(ctx context.Context, b BackgroundBinding, status, diagnostic string, now int64) error {
+	_, err := m.db.ExecContext(ctx, "UPDATE plugin_background SET next=?,status=?,diagnostic=? WHERE id=? AND revision=?", now+300000, status, diagnostic, b.ID, b.Revision)
 	return err
 }
