@@ -150,7 +150,9 @@ edits recalculate from that anchor; routing changes discard the old timer until 
 new request completes. No new conversation work means no self-compaction, and an
 unchanged history gets only one idle attempt. Restart abandons interrupted idle
 sampling without replaying tools; failed maintenance retains the original history
-and releases queued input. Idle summaries must save at least 1,024 estimated tokens.
+and releases queued input. Idle allowance refusal leaves no resumable foreground
+wait; the next real user turn is checked independently. Idle summaries must save
+at least 1,024 estimated tokens.
 
 The next request has this exact logical layout:
 

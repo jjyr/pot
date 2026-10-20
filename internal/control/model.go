@@ -24,17 +24,20 @@ const MaxModelBody = 96 * 1024 * 1024
 // cancelled/replaced turns and enforce lifetime/per-turn request counts. Returning
 // an error means no network attempt occurred. It must not recursively call Model.
 type ModelSession struct {
-	Registry     *gateway.Registry
-	Usage        *usage.Ledger
-	Spec         core.ResolvedSpec
-	Scope, Turn  string
-	WaitScope    string
-	Generation   uint64
-	Role         string
-	Claim        func(context.Context, string) error
-	Clock        func() time.Time
-	mu           sync.Mutex
-	requestTimes map[string]int64
+	// Idle maintenance has no resumable foreground turn. Respect allowance limits
+	// without leaving an orphan wait that would block the next real user turn.
+	IdleMaintenance bool
+	Registry        *gateway.Registry
+	Usage           *usage.Ledger
+	Spec            core.ResolvedSpec
+	Scope, Turn     string
+	WaitScope       string
+	Generation      uint64
+	Role            string
+	Claim           func(context.Context, string) error
+	Clock           func() time.Time
+	mu              sync.Mutex
+	requestTimes    map[string]int64
 }
 
 func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (stream io.ReadCloser, modelErr error) {
@@ -136,8 +139,10 @@ func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (stream i
 		return nil, err
 	}
 	if reservation == nil {
-		if err = s.Usage.Wait(ctx, usage.WaitRequest{Scope: waitScope, Turn: s.Turn, Provider: provider.ID, AtMS: atMS, Required: request.InputEstimate + 1}); err != nil {
-			return nil, err
+		if !s.IdleMaintenance {
+			if err = s.Usage.Wait(ctx, usage.WaitRequest{Scope: waitScope, Turn: s.Turn, Provider: provider.ID, AtMS: atMS, Required: request.InputEstimate + 1}); err != nil {
+				return nil, err
+			}
 		}
 		return nil, protocol.APIError{Code: "pot_token_limit", Message: "Pot token allowance is unavailable; this turn is paused before sending the model request"}
 	}

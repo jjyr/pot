@@ -328,7 +328,7 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 	if thread.Owner != principal {
 		waitScope = thread.Owner
 	}
-	model := &ModelSession{WaitScope: waitScope, Registry: s.Providers, Usage: s.Usage, Spec: thread.Config, Scope: principal, Turn: request.RequestID, Generation: thread.Generation, Role: modelRole(request.RequestID), Claim: func(ctx context.Context, id string) error {
+	model := &ModelSession{IdleMaintenance: strings.HasPrefix(request.RequestID, "pot-compact-"), WaitScope: waitScope, Registry: s.Providers, Usage: s.Usage, Spec: thread.Config, Scope: principal, Turn: request.RequestID, Generation: thread.Generation, Role: modelRole(request.RequestID), Claim: func(ctx context.Context, id string) error {
 		return c.ClaimModel(ctx, request.RequestID, thread.Generation, id)
 	}}
 	ports := &executionPorts{model: model, compaction: func(ctx context.Context, raw json.RawMessage) error {

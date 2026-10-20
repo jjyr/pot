@@ -281,3 +281,31 @@ func TestCompactionEvidenceCapturesFinalWireBodyWithoutCredential(t *testing.T) 
 		t.Fatal("missing clamped wire request", string(sent))
 	}
 }
+
+func TestIdleCompactionAllowanceDoesNotLeaveOrphanForegroundWait(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "data: [DONE]\n\n") }))
+	defer server.Close()
+	s := modelSession(t, server.URL)
+	ctx := context.Background()
+	s.IdleMaintenance = true
+	if err := s.Usage.SetPolicy(ctx, usage.Policy{Period: "day", Limit: 10, Timezone: "UTC", AutoResume: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Model(ctx, request("idle-budget")); err == nil {
+		t.Fatal("maintenance bypassed allowance")
+	}
+	if waiting, err := s.Usage.Waiting(ctx, "main"); err != nil || waiting != nil {
+		t.Fatal("maintenance left an orphan foreground wait", waiting, err)
+	}
+	if err := s.Usage.SetPolicy(ctx, usage.Policy{Period: "day", Limit: 10000, Timezone: "UTC", AutoResume: true}); err != nil {
+		t.Fatal(err)
+	}
+	s.IdleMaintenance = false
+	s.Turn = "next-user"
+	stream, err := s.Model(ctx, request("next-model"))
+	if err != nil {
+		t.Fatal("next user inherited maintenance wait", err)
+	}
+	io.ReadAll(stream)
+	stream.Close()
+}
