@@ -8,6 +8,9 @@ const navigationGlyphs = {"tasks":[["polyline",{"points":"22 12 16 12 14 15 10 1
 navigationGlyphs.cloud=[['path',{d:'M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z'}]];
 const paths = {
  extensions:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',
+  sliders: 'M3 5h18M3 12h18M3 19h18M7 2v6M16 9v6M10 16v6',
+  'panel-close': 'M9 3v18M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1m12 6-3 3 3 3',
+  'panel-open': 'M9 3v18M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1m10 6 3 3-3 3',
   topology:'M7 6h10M5 8v8m14-8v8M7 18h10M3 2h4v6H3zM17 2h4v6h-4zM3 16h4v6H3zM17 16h4v6h-4z',
   server:'M3 3h18v7H3zM3 14h18v7H3zM7 6h.01M7 17h.01',
   laptop:'M4 4h16v12H4zM2 20h20l-2-4H4z',

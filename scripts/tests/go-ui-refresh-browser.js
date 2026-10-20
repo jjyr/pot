@@ -132,7 +132,7 @@ async page=>{
   assert(await page.evaluate(()=>refreshFixture.assistantRow===document.querySelector('.assistant-row')&&refreshFixture.search.value==='Assist'),'Removing a Space hides labels without replacing the assistant row or search');
   await page.evaluate(()=>{const f=refreshFixture;f.snapshot.cursor='2';f.receive(structuredClone(f.snapshot));f.changes(['tasks'],{space:'local'});});
   assert(await page.evaluate(()=>refreshFixture.chatTask===document.querySelector('.background-task')),'Chat updates retain the executing task action');
-  await page.getByRole('button',{name:'Preferences',exact:true}).click();
+  await page.getByRole('button',{name:'Conversation actions',exact:true}).click();
   await page.evaluate(()=>{const f=refreshFixture;f.menuAction=document.querySelector('.preferences .menu-destination');f.menuAction.focus();f.client.assistants[0].preview='New preview';f.changes(['assistants'],{space:'local'});});
   await page.getByText('New preview',{exact:true}).waitFor();
   assert(await page.evaluate(()=>refreshFixture.menuAction===document.querySelector('.preferences .menu-destination')&&document.activeElement===refreshFixture.menuAction),'Open menu actions retain keyboard focus during directory updates');

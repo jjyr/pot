@@ -452,6 +452,10 @@ def run(binary, base, env, cli_command, profile_only=False):
             refresh = browser_cli("run-code", code.replace("STATE", json.dumps({"origin": origin})))
             if '"passed":true' not in refresh:
                 raise RuntimeError("Background refresh browser contracts did not pass")
+            code = (ROOT / "scripts/tests/go-ui-shell-browser.js").read_text()
+            shell = browser_cli("run-code", code.replace("STATE", json.dumps({"origin": origin})))
+            if '"errors":[]' not in shell:
+                raise RuntimeError("Application shell browser contracts did not pass")
             code = (ROOT / "scripts/tests/go-ui-production-browser.js").read_text()
             code = code.replace("http://127.0.0.1:17702", origin).replace(
                 "docs/pr-images/", str(ROOT / "output/pr-images/regression") + "/"
