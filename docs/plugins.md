@@ -364,8 +364,9 @@ The episode checkpoint and its ordinary `plugin_event` are committed atomically.
 Further high observations remain quiet across process restarts. Recovery requires
 a complete, nonempty observation of known constrained windows below the threshold,
 followed by another distinct source observation at least 60 seconds later.
-Stale data, read failures, unknown values and empty snapshots cannot establish
-recovery. Explicit unlimited windows are ignored. Reset timestamp drift does not
+Stale data, read failures, unknown values, expired windows and empty snapshots
+cannot establish recovery. Snapshots require a fresh host read and source
+`read_at` or `as_of` within 15 minutes, with at most 30 seconds of clock skew. Explicit unlimited windows are ignored. Reset timestamp drift does not
 start another warning episode. The next high observation after confirmed recovery
 can emit a new warning. Without an available assistant, reads can update the
 cache but do not consume a warning episode.

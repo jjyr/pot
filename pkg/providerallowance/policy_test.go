@@ -131,3 +131,19 @@ func TestCachedSourcesAndUnlimitedWindowsDoNotProveRecovery(t *testing.T) {
 		t.Fatal(unavailable)
 	}
 }
+
+func TestExpiredWindowCannotAlertOrProveRecovery(t *testing.T) {
+	at := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	s := snapshot(at, percent(99))
+	s.Accounts[0].Windows[0].ResetsAt = at.Add(-time.Second).Format(time.RFC3339)
+	got := evaluate(t, s, State{}, at)
+	if len(got.Alerts) != 0 {
+		t.Fatal("expired window warned", got)
+	}
+	s.Accounts[0].Windows[0].Used = percent(10)
+	active := State{Version: 1, Active: true, Episode: 1, RecoveryAt: at.Add(-time.Minute).Format(time.RFC3339), RecoveryObservation: "previous"}
+	got = evaluate(t, s, active, at)
+	if !got.State.Active || got.State.RecoveryAt != "" {
+		t.Fatal("expired window recovered", got)
+	}
+}

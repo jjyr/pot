@@ -108,7 +108,12 @@ func Evaluate(snapshot core.AllowanceSnapshot, previous State, o Options) (Trans
 				continue
 			}
 			constrained++
-			if !accountFresh || w.Used == nil {
+			expired := false
+			if w.ResetsAt != "" {
+				reset, err := time.Parse(time.RFC3339, w.ResetsAt)
+				expired = err != nil || !reset.After(o.Now)
+			}
+			if !accountFresh || w.Used == nil || expired {
 				complete = false
 				continue
 			}
