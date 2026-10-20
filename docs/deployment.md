@@ -61,7 +61,7 @@ pot api -root "$HOME/.pot-node" /api/v1/runtime
 ```
 
 Each node owns its Providers, credentials, assistants, permissions and workspaces.
-Configure Providers through App or the local API. First-use Chat bootstraps Pot
+Configure Providers through App or the local API. First-use Chat creates a kitchen-named assistant
 once a default Provider exists. Assistant creation uses a stable `request_id` and
 `name`; deleting an idle assistant retains its history and retires its schedules.
 An explicit missing assistant never falls back to another identity.

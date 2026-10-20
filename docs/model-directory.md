@@ -90,7 +90,7 @@ The node default connection and its concrete default model; missing configuratio
 opens connection setup.
 
 First-use Chat explicitly calls `POST /api/v1/assistants/bootstrap` with its locale.
-The node creates Pot only if the node has a default connection and no assistant
+The node creates a kitchen-named assistant only if the node has a default connection and no assistant
 history. Concurrent clients reuse that identity. Nested setup in an assistant draft
 does not bootstrap another assistant.
 
