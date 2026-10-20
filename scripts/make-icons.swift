@@ -70,7 +70,11 @@ func color(_ value: UInt32, alpha: CGFloat = 1) -> NSColor {
             exit(0)
         }
 
-        try render(size: 1024).write(to: assets.appendingPathComponent("Pot.png"))
+        let appIcon = render(size: 1024)
+        try appIcon.write(to: assets.appendingPathComponent("Pot.png"))
+        let codexAssets = root.appendingPathComponent("integrations/codex/plugin/assets")
+        try FileManager.default.createDirectory(at: codexAssets, withIntermediateDirectories: true)
+        try appIcon.write(to: codexAssets.appendingPathComponent("pot.png"))
         try render(size: 128).write(to: assets.appendingPathComponent("Pot128.png"))
         try render(size: 1024, homeScreen: true).write(to: assets.appendingPathComponent("PotHomeScreen.png"))
         for size in [192, 512] {
