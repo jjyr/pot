@@ -401,9 +401,16 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   preferences.addEventListener('close', () => { preferencesOpen = false;notifications?.report(); });
   const shellRoots={rail,titlebar,menu};
+  function rememberChatPosition(){
+    if(!state.snapshot)return;
+    positions.set(ownerKey(state.snapshot),{top:history.scrollTop,anchor:readingAnchor(history),following});
+    // A visible task row at the bottom is not a paused reading position.
+    if(following)readingPositions.delete(snapshotKey());
+    else readingPositions.set(snapshotKey(),captureReadingPosition(history));
+  }
   function renderShell() {
     const showingChat=route==='chat'&&!(media.matches&&directoryOpen);
-    if(chatShown&&!showingChat)readingPositions.set(snapshotKey(),captureReadingPosition(history));
+    if(chatShown&&!showingChat)rememberChatPosition();
     if(!chatShown&&showingChat)pendingReadingPosition=readingPositions.get(snapshotKey())||pendingReadingPosition;
     chatShown=showingChat;
     queueMicrotask(()=>{if(!disposed)notifications?.report();});
@@ -545,7 +552,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(['ArrowUp','PageUp','Home'].includes(event.key)||event.key===' '&&event.shiftKey)scrollUpIntent(event);
   });
   history.addEventListener('scroll', () => {
-    if(chatShown)lastTaskReadingPosition=captureReadingPosition(history);
+    if(!chatShown)return;
+    lastTaskReadingPosition=captureReadingPosition(history);
     if(history.scrollTop<lastScrollTop-.5)pauseFollowing();
     else if(atBottom()){following=true;upwardIntent=false;}
     lastScrollTop=history.scrollTop;latest.hidden=following;
@@ -684,7 +692,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       const retained=new Set([...backgroundTaskView.element.querySelectorAll('[data-scroll-anchor]')].map(node=>node.dataset.scrollAnchor));
       if(!retained.has(taskReading.anchors[0].key))taskReading.anchors=[{key:'background-tasks-heading',offset:0}];
     }
-    const restoreTasks=pendingReadingPosition||(tasksChanged||resized&&taskReading.anchors.some(item=>item.key.startsWith('task:'))?taskReading:null);
+    const restoreTasks=pendingReadingPosition||(!follow&&(tasksChanged||resized&&taskReading.anchors.some(item=>item.key.startsWith('task:')))?taskReading:null);
     pendingTaskToggle=null;
     taskClock.refresh();
     if (snapshot && !visibleMessages.length) {
@@ -706,10 +714,17 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function cacheSnapshot(snapshot){const key=snapshotKey();cachedSnapshots.delete(key);cachedSnapshots.set(key,{...snapshot,kind:'reset',base_cursor:0});while(cachedSnapshots.size>8)cachedSnapshots.delete(cachedSnapshots.keys().next().value);while(positions.size>32)positions.delete(positions.keys().next().value);while(toolMemory.size>1280)toolMemory.delete(toolMemory.keys().next().value);}
   function restoreSavedPosition(position){
     const saved=readingPositions.get(snapshotKey());
-    if(saved?.anchors.some(item=>item.key.startsWith('task:')||item.key.startsWith('background-tasks'))){following=false;renderMessagesNow();restoreReadingPosition(history,saved);lastAnchor=readingAnchor(history);latest.hidden=nearBottom();return;}
     following=position.following;state.uiAnchor=position.anchor?.sequence||null;
-    renderMessagesNow();
-    if(following)scrollBottom();else if(position.anchor){messageWindow.seek(position.anchor.id);renderMessagesNow();restoreReadingAnchor(history,position.anchor);lastAnchor=readingAnchor(history);}else history.scrollTop=position.top;
+    if(!following&&saved?.anchors.some(item=>item.key.startsWith('task:')||item.key.startsWith('background-tasks'))){
+      renderMessagesNow();restoreReadingPosition(history,saved);
+    }else{
+      renderMessagesNow();
+      if(following)scrollBottom();else if(position.anchor){messageWindow.seek(position.anchor.id);renderMessagesNow();restoreReadingAnchor(history,position.anchor);}else history.scrollTop=position.top;
+    }
+    // Resize and delayed task reads must use the restored viewport, not the
+    // intermediate window used to mount the saved message.
+    lastAnchor=readingAnchor(history);lastScrollTop=history.scrollTop;
+    lastTaskReadingPosition=captureReadingPosition(history);
     latest.hidden=following;
   }
   function pendingSend(){return state.snapshot&&state.pending.has(ownerKey(state.snapshot));}
@@ -741,7 +756,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     syncEditor();
     restoreFailedAttachments();
     if(markVisibleRead())renderShell();
-    renderMessages(); if (restorePosition !== undefined) {const key=ownerKey(snapshot);requestAnimationFrame(()=>{if(!disposed&&editorOwner===key)restoreSavedPosition(restorePosition);});} updateControls();
+    renderMessages(); if (restorePosition !== undefined) {const key=ownerKey(snapshot);requestAnimationFrame(()=>{if(!disposed&&receivedEpoch===epoch&&editorOwner===key)restoreSavedPosition(restorePosition);});} updateControls();
     if(client.production)pages.syncApprovals();
     if(readingBeforeReset&&!snapshot.messages.some(message=>message.id===readingBeforeReset.id&&!message.context_only)){
       readHistory({around:readingBeforeReset.id},{around:true});
@@ -781,14 +796,14 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     completions?.reset();
     if (editor.composing) { input.blur(); if (editor.composing) return; }
     if (pages && !await pages.leave()) return;
-    if (state.snapshot) {positions.set(ownerKey(state.snapshot),{top:history.scrollTop,anchor:readingAnchor(history),following});if(chatShown)readingPositions.set(snapshotKey(),captureReadingPosition(history));}
+    if(chatShown)rememberChatPosition();
     pages?.clearApprovals();locateApprovals=item.pending_approvals?JSON.stringify({owner:item.id,space:item.space_id||''}):'';selectedAssistant = item; client.setScope({owner:item.id, space:item.space_id || ''});updates?.refresh(client.scope());
     epoch = beginSubscription(state); editorOwner = null; route = 'chat'; if(!initial)directoryOpen = false;
-    pendingReadingPosition=readingPositions.get(snapshotKey())||null;pendingFollow=false;
+    pendingReadingPosition=readingPositions.get(snapshotKey())||null;pendingTaskToggle=null;lastTaskReadingPosition=null;resizeAnchor=false;pendingFollow=false;
     messageWindow.set([]);windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);messageNodes.clear();windowHeights.clear();following=true;upwardIntent=false;lastScrollTop=0;lastAnchor=null;historyGeneration++;historyLoading=false;historyFailure='';state.uiAnchor=null;error = ''; connectionError = ''; disconnected = false;
     const cached=cachedSnapshots.get(snapshotKey(item.space_id||'',item.id));
     restoredSnapshot=!!cached;connection='connecting';
-    if(cached){acceptSnapshot(state,cached,epoch);syncEditor();renderMessages();const top=positions.get(ownerKey(cached));if(top!==undefined)requestAnimationFrame(()=>{if(!disposed&&editorOwner===ownerKey(cached)){restoreSavedPosition(top);}});}
+    if(cached){acceptSnapshot(state,cached,epoch);syncEditor();renderMessages();const top=positions.get(ownerKey(cached)),receivedEpoch=epoch;if(top!==undefined)requestAnimationFrame(()=>{if(!disposed&&receivedEpoch===epoch&&editorOwner===ownerKey(cached)){restoreSavedPosition(top);}});}
     if(client.production&&record)saveNavigation('chat',initial);
     renderShell();attach();pages?.permissions();refreshBackgroundTasks();
   }

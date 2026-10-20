@@ -103,6 +103,11 @@ messages; scrolling down pages the newer interval, and Latest reads a recent
 window directly. References resolve by ID, without traversing intervening pages.
 Returning to cached Chat shows its projection immediately and refreshes it from
 the stream. A reset while reading an older message reloads that message's window.
+Returning to an assistant that was following the latest messages keeps following
+through the cached projection, stream reset and background-task refresh. Visible
+task rows do not turn following into a saved historical reading position. Only
+paused reading restores a message or task anchor; restoration callbacks are
+scoped to the originating navigation generation.
 
 Main Chat mounts measured windows around the viewport with pixel overscan.
 Expanded tool children have their own windows sharing the chat scroller. Resize
