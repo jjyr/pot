@@ -187,7 +187,7 @@ func TestTCPConnectionUsesOneSignedSessionForBothDirectionsAndRestart(t *testing
 	ctx := context.Background()
 	a, b := newFixture(t, "control-a"), newFixture(t, "control-b")
 	c := connect(t, a, b)
-	if c.SchemaVersion != 3 || c.PeerHost != b.service.options.HostIdentity || c.State != "ready" || c.LastSeen == nil {
+	if c.SchemaVersion != 4 || c.PeerHost != b.service.options.HostIdentity || c.State != "ready" || c.LastSeen == nil {
 		t.Fatal(c)
 	}
 	remote, err := b.service.Get(ctx, c.ID)
@@ -256,7 +256,7 @@ func TestTCPPairAndDeliveryResponseLossRecoverOriginalReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-func TestTCPInvitationClaimBindsSignedHostAndExactAssistantRoute(t *testing.T) {
+func TestTCPInvitationClaimBindsSignedHostAndNodeRoute(t *testing.T) {
 	ctx := context.Background()
 	a, b, c := newFixture(t, "control-a"), newFixture(t, "control-b"), newFixture(t, "control-c")
 	inv, _ := b.service.Invite(ctx, "assistant", b.endpoint)
@@ -286,7 +286,7 @@ func TestTCPInvitationClaimBindsSignedHostAndExactAssistantRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	message := send(t, a, b, "bound-message", "peer reference")
-	for _, change := range []func(*protocol.Envelope){func(e *protocol.Envelope) { e.From.AgentID = "other" }, func(e *protocol.Envelope) { e.To.AgentID = "other" }, func(e *protocol.Envelope) { e.From.Kind = "user" }, func(e *protocol.Envelope) { e.Kind = "plugin_event" }} {
+	for _, change := range []func(*protocol.Envelope){func(e *protocol.Envelope) { e.From.NodeID = "other-node" }, func(e *protocol.Envelope) { e.To.NodeID = "other-node" }, func(e *protocol.Envelope) { e.From.Kind = "user" }, func(e *protocol.Envelope) { e.Kind = "plugin_event" }} {
 		forged := message
 		change(&forged)
 		var response exchangeResponse
@@ -493,7 +493,7 @@ func TestNodeIdentityUpgradeReopensOriginalSignedPairAndReceipts(t *testing.T) {
 			raw, _ := json.Marshal(link)
 			legacy := strings.ReplaceAll(string(raw), `"node_id":`, `"control_id":`)
 			legacy = strings.Replace(legacy, `"peer_host":{"control_id":`, `"peer_host":{"id":`, 1)
-			legacy = strings.Replace(legacy, `"schema_version":3`, `"schema_version":2`, 1)
+			legacy = strings.Replace(legacy, `"schema_version":4`, `"schema_version":2`, 1)
 			routeRaw, _ := json.Marshal([]protocol.AgentRef{link.Local.Address, link.Peer.Address})
 			oldRoute := digest([]byte(strings.ReplaceAll(string(routeRaw), `"node_id":`, `"control_id":`)))
 			if _, err = fixture.db.Exec("UPDATE agent_link_connections SET metadata=?,route=? WHERE id=?", legacy, oldRoute, link.ID); err != nil {
@@ -515,6 +515,10 @@ func TestNodeIdentityUpgradeReopensOriginalSignedPairAndReceipts(t *testing.T) {
 ALTER TABLE codex_agent_host RENAME COLUMN node_id TO control_id;
 DROP TABLE node_identity_secret_migration;
 DROP TABLE agent_link_claim_digest_formats;
+DROP TABLE agent_link_node_settings;
+DROP TABLE agent_link_delegations;
+DROP TABLE agent_link_received_tasks;
+DROP TABLE agent_link_chat;
 DROP TABLE display_resources;
 DROP TABLE provider_metadata;
 DROP TABLE extension_settings;
@@ -534,25 +538,26 @@ DELETE FROM pot_migrations WHERE id >= '0009_';`); err != nil {
 	b.open()
 	a.start(strings.TrimPrefix(endpointA, "tcp://"))
 	b.start(strings.TrimPrefix(endpointB, "tcp://"))
-	if err = a.service.Sync(ctx, connection.ID); err != nil {
-		t.Fatal("original pair failed after upgrade", err)
+	if err = a.service.Sync(ctx, connection.ID); !errors.Is(err, ErrReconnectRequired) {
+		t.Fatal("assistant-scoped link gained node authority", err)
 	}
 	current, err := a.service.Get(ctx, connection.ID)
-	if err != nil || current.ID != connection.ID || current.PeerHost != connection.PeerHost || current.State != "ready" || current.SchemaVersion != 3 {
+	if err != nil || current.ID != connection.ID || current.PeerHost != connection.PeerHost || current.State != "offline" {
 		t.Fatal(current, err)
 	}
-	sender := current.Local.Address
-	message, err := a.mail.Send(ctx, "migration-receipt", sender, protocol.SendMail{To: current.Peer.Address, Text: "original route after upgrade"}, nil)
+	// Freshly copied node invitations establish a new connection, preserving history.
+	invitation, err = b.service.Invite(ctx, "assistant", b.endpoint)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = a.service.Sync(ctx, connection.ID); err != nil {
+	replacement, err := a.service.Connect(ctx, "assistant", invitation.Address)
+	if err != nil {
 		t.Fatal(err)
 	}
-	records, err := b.mail.History(ctx, "assistant", 0)
-	if err != nil || len(records) != 1 || records[0].Message != message {
-		t.Fatal(records, err)
+	if replacement.ID == connection.ID || replacement.SchemaVersion != 4 {
+		t.Fatal(replacement)
 	}
+
 }
 
 type memoryNodeSecrets map[string][]byte

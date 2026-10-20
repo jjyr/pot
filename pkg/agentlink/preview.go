@@ -90,7 +90,7 @@ func (s *Service) previewInvitation(ctx context.Context, request previewRequest)
 		return Preview{}, ErrExpired
 	}
 	current, err := s.options.Identity(ctx, identity.Address.AgentID)
-	if err != nil || !equalIdentity(current, identity) {
+	if err != nil || current.Address.NodeID != s.options.HostIdentity.NodeID {
 		return Preview{}, ErrConflict
 	}
 	return Preview{Identity: current, Host: s.options.HostIdentity, Endpoint: endpoint, Fingerprint: hostFingerprint(s.options.HostIdentity), ExpiresAt: time.UnixMilli(expiry).UTC()}, nil

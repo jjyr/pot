@@ -64,7 +64,7 @@ func (s *Service) authenticate(ctx context.Context, id string, remote peer.Ident
 	if err != nil {
 		return Connection{}, ErrUnauthorized
 	}
-	if connection.SchemaVersion != 3 || connection.PeerHost.Validate() != nil {
+	if connection.SchemaVersion != 4 || connection.PeerHost.Validate() != nil {
 		return connection, ErrReconnectRequired
 	}
 	if connection.PeerHost != remote || connection.Peer.Address.NodeID != remote.NodeID {
@@ -73,9 +73,8 @@ func (s *Service) authenticate(ctx context.Context, id string, remote peer.Ident
 	if connection.State == "revoked" {
 		return connection, ErrRevoked
 	}
-	identity, err := s.options.Identity(ctx, connection.Local.Address.AgentID)
-	if err != nil || !equalIdentity(identity, connection.Local) || identity.Address.NodeID != s.options.HostIdentity.NodeID {
-		return connection, ErrConflict
+	if connection.State == "disconnected" {
+		return connection, ErrDisconnected
 	}
 	return connection, nil
 }
@@ -94,6 +93,8 @@ func (s *Service) handler(id string, remote peer.Identity) peer.Handler {
 				return nil, ErrInvalid
 			}
 			result = connection
+		case "directory", "task.submit", "task.status", "task.cancel":
+			return s.business(ctx, connection, remote, request)
 		case "exchange":
 			var input exchangeRequest
 			if decodeJSON(request.Params, &input) != nil || input.ID != id {
@@ -175,7 +176,7 @@ func (s *Service) Attach(session *peer.Session) {
 		}
 		delete(s.sessions, auth.ID)
 		current, err := s.Get(ctx, auth.ID)
-		if err == nil && current.State != "revoked" {
+		if err == nil && current.State != "revoked" && current.State != "disconnected" {
 			current.State = "offline"
 			current.LastError = ErrUnavailable.Error()
 			_ = s.update(ctx, current)
@@ -187,7 +188,7 @@ func (s *Service) ensureSession(ctx context.Context, connection Connection) (*pe
 	if session := s.session(connection.ID); session != nil {
 		return session, nil
 	}
-	if connection.SchemaVersion != 3 || connection.PeerHost.Validate() != nil {
+	if connection.SchemaVersion != 4 || connection.PeerHost.Validate() != nil {
 		return nil, ErrReconnectRequired
 	}
 	if connection.Endpoint == "" {
@@ -252,7 +253,7 @@ func transportError(err error) error {
 	if errors.Is(err, peer.ErrUnauthorized) {
 		return ErrUnauthorized
 	}
-	for _, known := range []error{ErrInvalid, ErrNotFound, ErrUnauthorized, ErrExpired, ErrUsed, ErrConflict, ErrRevoked, ErrReconnectRequired} {
+	for _, known := range []error{ErrInvalid, ErrNotFound, ErrUnauthorized, ErrExpired, ErrUsed, ErrConflict, ErrRevoked, ErrReconnectRequired, ErrDisconnected, ErrUnsupported} {
 		if errors.Is(err, known) || strings.Contains(err.Error(), known.Error()) {
 			return known
 		}

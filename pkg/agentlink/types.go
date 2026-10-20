@@ -1,5 +1,4 @@
-// Package agentlink connects explicitly bound assistant identities over a narrow
-// message-only transport. It grants neither execution nor owner administration.
+// Package agentlink connects autonomous nodes through a shared collaboration port.
 package agentlink
 
 import (
@@ -45,6 +44,7 @@ type Connection struct {
 	UpdatedAt         time.Time     `json:"updated_at"`
 	LastSeen          *time.Time    `json:"last_seen,omitempty"`
 	LastError         string        `json:"last_error,omitempty"`
+	Directory         *Directory    `json:"directory,omitempty"`
 	RevocationPending bool          `json:"revocation_pending,omitempty"`
 }
 
@@ -82,6 +82,7 @@ type SecretStore interface {
 
 type Options struct {
 	// DB is a caller-owned, migrated storage.ControlDatabase. Service never closes it.
+	Backend      Backend
 	DB           *sql.DB
 	Secrets      SecretStore
 	Identity     func(context.Context, string) (Identity, error)
