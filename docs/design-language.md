@@ -90,14 +90,29 @@ targets. iPad split windows follow the same breakpoints.
 | Available width | Layout |
 | --- | --- |
 | Below 720 px | Full-width assistant directory or conversation; global navigation opens as a full-screen menu |
-| From 720 px | 56 px feature rail; Chat adds a collapsible 220 px assistant pane |
+| From 720 px | 56 px feature rail; Chat adds a collapsible 236 px assistant pane |
 | Below 900 px | Compact page spacing and stacked form labels, independently of the navigation layout |
 
 The rail contains Chat (Pot icon), Tasks, Topology, Extensions, Usage and bottom-aligned
 Settings. Tasks includes Tasks / Schedules. Other destinations and editors hide
-the assistant pane; wide editors retain the rail. A single 44 px titlebar holds
-the destination, Back and contextual actions. Native window controls and draggable
-space share this row; avoid duplicate title rows.
+the assistant pane; wide editors retain the rail. All three columns extend to the
+top of the window, without a shared horizontal titlebar. Wide columns have 66 px
+headers: the assistant pane owns its heading, fold control and creation action;
+the conversation header uses the conversation canvas and owns the assistant avatar,
+name, Space, slider-shaped settings action and ellipsis menu. Usage stays in the
+conversation menu. Narrow windows and the tray retain a 44 px header. Native
+window controls and draggable space share these headers; controls avoid the first
+80 px occupied by macOS window buttons.
+
+The wide assistant list folds in place, leaving an expand control at the start of
+the conversation header. This is window-local presentation state retained across
+editor navigation and narrow/wide resizing. Folding preserves the composer,
+draft, directory search/scroll and visible conversation anchor; it performs no
+backend reads and moves keyboard focus to the corresponding fold/expand control.
+Narrow windows continue to use the full-width directory and Back navigation.
+Clicking the conversation avatar/name opens assistant information with its Space
+and settings action; outside clicks and Escape dismiss it. Assistant settings still
+open the existing editor with its return context and dirty-exit guard.
 
 ### Narrow surfaces
 
@@ -121,7 +136,7 @@ The shell follows the visible viewport as browser chrome or the keyboard changes
 editor input reveal keeps the focused supported input in view.
 
 Web uses `viewport-fit=cover`. The shell reserves the top, right, bottom and left
-safe-area insets once, keeping the 44 px titlebar below the status area and
+safe-area insets once, keeping the column headers below the status area and
 landscape controls clear of display cutouts. Chat and Task composers use ordinary
 inner spacing; they do not reserve the bottom inset again. The full-screen menu,
 access form and top-layer dialogs also keep controls within the safe area, with

@@ -69,6 +69,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let error = '';
   let connectionError = '';
   let directoryOpen = !params.has('conversation');
+  let directoryCollapsed = false;
   let cancelPending = false;
   let editorOwner = null;
   let menuOpen = false;
@@ -86,6 +87,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const rail = el('nav', 'feature-rail');
   const titlebar = el('header', 'titlebar');
   const directory = el('aside', 'assistant-directory');
+  directory.id = 'assistant-directory';
   const workspace = el('main', 'workspace');
   const notice = el('p', 'preview-notice');
   const notificationError=el('div','notification-route-error inline-error');notificationError.hidden=true;notificationError.setAttribute('role','alert');
@@ -122,7 +124,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const menu = el('nav', 'mobile-menu');
   menu.hidden = true;
   const preferences = el('dialog', 'preferences');
-  root.append(rail, titlebar, directory, workspace, menu, preferences);
+  const assistantProfile = el('div', 'assistant-profile');
+  assistantProfile.id = 'assistant-profile';
+  assistantProfile.setAttribute('popover', 'auto');
+  assistantProfile.setAttribute('role', 'dialog');
+  root.append(rail, titlebar, directory, workspace, menu, preferences, assistantProfile);
   const notifications=client.production?createSystemNotifications({client,surface,locale:()=>locale,
     view:()=>({...((route==='tasks'&&pages?.notificationContext)||{space:selectedAssistant?.space_id||'',owner:selectedAssistant?.id||''}),route:menuOpen||preferencesOpen||root.classList.contains('show-directory')?'navigation':route}),
     open:openNotification}):null;
@@ -409,6 +415,25 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(following)readingPositions.delete(snapshotKey());
     else readingPositions.set(snapshotKey(),captureReadingPosition(history));
   }
+  const closeAssistantProfile = () => assistantProfile.hidePopover();
+  window.addEventListener('resize', closeAssistantProfile);
+  function toggleDirectory() {
+    const position = captureReadingPosition(history);
+    directoryCollapsed = !directoryCollapsed;
+    renderShell();
+    requestAnimationFrame(() => {
+      if (disposed) return;
+      restoreReadingPosition(history, position);
+      root.querySelector('.directory-toggle')?.focus({preventScroll: true});
+    });
+  }
+  function openAssistantSettings() {
+    assistantProfile.hidePopover();
+    route = 'settings'; pages.assistant(selectedAssistant); renderShell();
+  }
+  assistantProfile.addEventListener('toggle', event => {
+    root.querySelector('.assistant-profile-trigger')?.setAttribute('aria-expanded', String(event.newState === 'open'));
+  });
   function renderShell() {
     root.classList.toggle('is-background',document.visibilityState==='hidden');
     const showingChat=route==='chat'&&!(media.matches&&directoryOpen);
@@ -425,6 +450,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const narrow = media.matches && surface !== 'tray';
     root.dataset.route = route;
     root.classList.toggle('show-directory', route === 'chat' && narrow && directoryOpen);
+    root.classList.toggle('directory-collapsed', directoryCollapsed);
+    if (route !== 'chat' || narrow && directoryOpen) assistantProfile.hidePopover();
     pages?.renderApprovals();
     rail.replaceChildren(navigation(false));
     rail.setAttribute('aria-label', t('menu'));
@@ -438,12 +465,46 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         else { menuOpen = true; renderShell(); }
       };
       titlebar.append(leading);
-      if(!narrow&&route==='chat'&&!client.production){const back=button('back',t('back'));back.onclick=()=>{directoryOpen=true;renderShell()};titlebar.append(back);}
+    }
+    if (!narrow && surface !== 'tray' && route === 'chat' && directoryCollapsed) {
+      const expand = button('panel-open', t('chat.expandAssistants'), 'icon-button directory-toggle');
+      expand.setAttribute('aria-controls', directory.id); expand.setAttribute('aria-expanded', 'false');
+      expand.onclick = toggleDirectory; titlebar.append(expand);
     }
     const title = el('div', 'window-title');
-    if (route === 'chat' && !(narrow && directoryOpen)) title.append(assistantAvatar(selectedAssistant,24));
     const titleText=route === 'chat' ? (narrow && directoryOpen ? t('assistants') : selectedAssistant?.name || 'Pot') : pages?.title || t(route);title.title=titleText;
-    title.append(el('span', '', titleText));
+    if (route === 'chat' && !(narrow && directoryOpen)) {
+      const identity = el(client.production && selectedAssistant ? 'button' : 'div', 'assistant-profile-trigger');
+      const labels = el('span', 'assistant-identity-labels');
+      labels.append(el('span', 'assistant-identity-name', titleText));
+      const spaceName = selectedAssistant?.space_name || '';
+      if (spaceName) labels.append(el('span', 'assistant-identity-space', spaceName));
+      identity.append(assistantAvatar(selectedAssistant, narrow || surface === 'tray' ? 24 : 34), labels);
+      if (client.production && selectedAssistant) {
+        identity.type = 'button'; identity.append(icon('down'));
+        identity.setAttribute('aria-label', t('chat.assistantInfo'));
+        identity.setAttribute('aria-haspopup', 'dialog'); identity.setAttribute('aria-controls', assistantProfile.id);
+        identity.setAttribute('aria-expanded', String(assistantProfile.matches(':popover-open')));
+        identity.onclick = event => {
+          const trigger = event.currentTarget;
+          const bounds = trigger.getBoundingClientRect();
+          assistantProfile.style.left = `${Math.max(8, Math.min(bounds.left, innerWidth - 288))}px`;
+          assistantProfile.style.top = `${bounds.bottom + 6}px`;
+          assistantProfile.togglePopover({source: trigger});
+        };
+        const projection = assistantProfile.cloneNode(false);
+        projection.setAttribute('aria-label', t('chat.assistantInfo'));
+        const heading = el('div', 'assistant-profile-heading');
+        const info = el('div', 'assistant-identity-labels');
+        info.append(el('strong', '', titleText));
+        if (spaceName) info.append(el('span', 'assistant-identity-space', spaceName));
+        heading.append(assistantAvatar(selectedAssistant, 40), info);
+        const settings = button('sliders', t('assistantSettings'), 'assistant-profile-settings');
+        settings.append(el('span', '', t('assistantSettings'))); settings.onclick = openAssistantSettings;
+        projection.append(heading, settings); reconcile(assistantProfile, projection);
+      }
+      title.append(identity);
+    } else title.append(el('span', '', titleText));
     titlebar.append(title);
  if(narrow){const update=updates?.button();if(update){update.className="update-button icon-button";titlebar.append(update);}}
     if (surface === 'tray' && client.openMain) {
@@ -451,15 +512,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       open.onclick = async () => { try { await client.openMain(); } catch (reason) { error = reason.message; updateControls(); } };
       titlebar.append(open);
     }
-    if (client.production && route === 'chat' && selectedAssistant) { const settings = button('settings', t('assistantSettings')); settings.onclick = () => {route = 'settings'; pages.assistant(selectedAssistant); renderShell();}; titlebar.append(settings); }
+    if (client.production && route === 'chat' && selectedAssistant) { const settings = button('sliders', t('assistantSettings')); settings.onclick = openAssistantSettings; titlebar.append(settings); }
     if(!client.production){const cloud=el('span','icon-button');cloud.title=t('remote');cloud.append(icon('cloud'));titlebar.append(cloud);}
-    if (route==='chat'&&state.snapshot?.usage) {const value=state.snapshot.usage,format=new Intl.NumberFormat(locale,{notation:'compact',maximumFractionDigits:1}),usage=el('span','title-meta token-meta'),cached=locale==='zh-CN'?'缓存输入':'Cached input';usage.append(icon('clock'),el('span','',`${format.format(value.input+value.output)} tokens${value.cache==null?'':` · ${cached} ${format.format(value.cache)}`}`));usage.title=`${locale==='zh-CN'?'输入（含缓存）':'Input (includes cache)'}: ${value.input} · ${locale==='zh-CN'?'输出':'Output'}: ${value.output}${value.cache==null?'':` · ${cached}: ${value.cache}`}`;titlebar.append(usage);}
-    const more = button(client.production?'more':'settings', t(client.production ? 'preferences' : 'more'));
+    const more = button('more', t(client.production ? 'chat.actions' : 'more'));
     more.setAttribute('aria-haspopup', 'dialog');
     more.onclick = () => { preferencesOpen = true; renderPreferences(); preferences.showModal(); };
     if(!client.production||route==='chat')titlebar.append(more);
     if(route==='tasks'&&pages?.taskOwner){const actions=button('more',locale==='zh-CN'?'任务操作':'Task actions');actions.setAttribute('aria-haspopup','dialog');actions.onclick=()=>pages.taskMenu();titlebar.append(actions);}
-    if(!client.production&&titlebar.querySelector('.title-meta'))titlebar.insertBefore(more,titlebar.querySelector('.title-meta'));
     notice.textContent = client.production ? '' : t('notice');
     input.placeholder = t('composer');
     input.setAttribute('aria-label', t('composer'));
@@ -470,7 +529,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     unavailable.hidden = route === 'chat';
     if (!client.production) unavailable.textContent = t('unavailable');
     // Search is window state and survives narrow conversation navigation/resizes.
-    const nextDirectorySignature = JSON.stringify([locale,selectedAssistant?.space_id,selectedAssistant?.id,spaces,assistants,state.snapshot?.assistants,replies.records()]);
+    const nextDirectorySignature = JSON.stringify([locale,narrow,surface,selectedAssistant?.space_id,selectedAssistant?.id,spaces,assistants,state.snapshot?.assistants,replies.records()]);
     if (nextDirectorySignature !== directorySignature || !directory.childElementCount) {
     directorySignature=nextDirectorySignature;
     const searchValue = directory.querySelector('input')?.value || '';
@@ -478,6 +537,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const nextDirectory=directory.cloneNode(false);
     const heading = el('div', 'directory-heading');
     heading.append(el('span', '', t('assistants')));
+    if (!narrow && surface !== 'tray') {
+      const collapse = button('panel-close', t('chat.collapseAssistants'), 'icon-button directory-toggle');
+      collapse.setAttribute('aria-controls', directory.id); collapse.setAttribute('aria-expanded', 'true');
+      collapse.onclick = toggleDirectory; heading.append(collapse);
+    }
     const add = button('plus', t(client.production ? 'newAssistant' : 'preview'));
     add.disabled = !client.production;
     add.onclick = () => { route = 'settings'; pages.assistant(null); renderShell(); };
@@ -945,7 +1009,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const pointerUp=event=>{finishSwipe(event).catch(reason=>{clearSwipe();settling=false;error=reason.message;updateControls();});};
   const pointerCancel=event=>{finishSwipe(event,true).catch(()=>{clearSwipe();settling=false;});};
   root.addEventListener('pointerdown',pointerDown,{passive:true});root.addEventListener('pointermove',pointerMove,{passive:false});root.addEventListener('pointerup',pointerUp);root.addEventListener('pointercancel',pointerCancel);
-  const mediaChanged = () => { menuOpen = false; renderShell(); };
+  const mediaChanged = () => { menuOpen = false; closeAssistantProfile(); renderShell(); };
   document.addEventListener('keydown', keydown);
   media.addEventListener('change', mediaChanged);
   renderShell();editor.resize();
@@ -977,6 +1041,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     window.removeEventListener('pot:preference',preferencesChanged);
     document.removeEventListener('keydown', keydown);window.removeEventListener('popstate',popNavigation);
     media.removeEventListener('change', mediaChanged);
+    window.removeEventListener('resize', closeAssistantProfile);
     stopViewport();
     root.replaceChildren();
   };

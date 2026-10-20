@@ -41,10 +41,10 @@ async page => {
           inset: getComputedStyle(document.documentElement).getPropertyValue('--page-inset').trim()};
       });
       assert(!geometry.overflow && !geometry.historyOverflow, `No horizontal overflow at ${width}/${surface}`);
-      assert(geometry.titlebar.height === 44, 'Shared titlebar remains 44px');
+      assert(geometry.titlebar.height === (width >= 720 && surface === 'main' ? 66 : 44), 'Wide columns own a66px header; compact headers retain44px');
       assert(geometry.composer.x >= 0 && geometry.composer.x + geometry.composer.width <= width, 'Composer fits viewport');
       if (surface === 'main' && width >= 720) {
-        assert(geometry.rail.width === 56 && geometry.pane.width === 220, 'Preserve rail and assistant pane geometry');
+        assert(geometry.rail.width === 56 && geometry.pane.width === 236, 'Preserve rail and assistant pane geometry');
       } else assert(geometry.rail.display === 'none' && geometry.pane.display === 'none', 'Compact conversation hides navigation columns');
       assert(geometry.inset === (width < 900 ? '16px' : '32px') || surface === 'tray', 'Page spacing switches at 900px');
       await page.screenshot({path: `/private/tmp/pot-go-ui-${width}-${theme}-${locale}-${surface}.png`});
@@ -65,7 +65,7 @@ async page => {
         const rect=selector=>document.querySelector(selector).getBoundingClientRect().toJSON();
         return {titlebar:rect('.titlebar'),composer:rect('.composer-area'),rail:rect('.feature-rail'),padding:getComputedStyle(document.querySelector('.composer-area')).paddingBottom};
       });
-      assert(geometry.titlebar.y===insets.top&&geometry.titlebar.height===44,'Titlebar sits below the top safe area without changing control height');
+      assert(geometry.titlebar.y===insets.top&&geometry.titlebar.height===(width>=720?66:44),'Titlebar sits below the top safe area');
       assert(geometry.titlebar.x>=insets.left&&geometry.titlebar.right<=width-insets.right,'Titlebar avoids landscape cutouts');
       assert(geometry.composer.bottom===height-insets.bottom,'Shell reserves the bottom safe area once');
       assert(geometry.composer.x>=insets.left&&geometry.composer.right<=width-insets.right,'Composer avoids side cutouts');
