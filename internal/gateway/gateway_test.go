@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jjyr/pot/internal/buildinfo"
 	"github.com/jjyr/pot/internal/secrets"
 )
 
@@ -36,6 +37,9 @@ func TestForwardProtocolsNoRedirectNoRetry(t *testing.T) {
 				body, _ := io.ReadAll(r.Body)
 				if string(body) != `{"test":1}` {
 					t.Error(string(body))
+				}
+				if r.Header.Get("User-Agent") != "Pot/"+buildinfo.Version {
+					t.Error("missing application identity")
 				}
 				switch protocol {
 				case "anthropic_messages":

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jjyr/pot/internal/buildinfo"
 	"github.com/jjyr/pot/pkg/core"
 )
 
@@ -97,6 +98,7 @@ func Forward(ctx context.Context, p Provider, key []byte, body json.RawMessage, 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("User-Agent", "Pot/"+buildinfo.Version)
 	switch p.Protocol {
 	case "anthropic_messages":
 		req.Header.Set("x-api-key", string(key))

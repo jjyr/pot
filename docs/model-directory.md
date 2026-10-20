@@ -246,3 +246,12 @@ connection types unavailable for fresh selections, tests and metadata reads.
 Already issued Gateway requests and prepared immutable execution snapshots retain
 their original route and lifecycle. Quota reads remain an optional independent
 capability; a quota permission error does not disable model inference.
+
+Enabled plugin catalog connections are read at Control startup, after a connection
+save, and every five minutes through at most four supervised exchanges at once.
+This refresh is independent of allowance monitoring and never invokes inference.
+The metadata lifecycle waits for its children on shutdown. Settings and picker
+snapshots only read local cached data: each connection projects its typed catalog
+and current model IDs, retaining its saved default as owner intent even when that
+model disappears from the latest catalog. Removed discovered IDs do not remain
+in the picker solely because an older profile save included them.

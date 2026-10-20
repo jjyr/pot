@@ -18,7 +18,7 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/plugin"
 	"github.com/jjyr/pot/pkg/storage"
-	standardproviders "github.com/jjyr/pot/plugins/standard-model-providers"
+	"github.com/jjyr/pot/plugins"
 )
 
 type Extension struct {
@@ -87,7 +87,7 @@ func discoverPlugins(roots ...string) ([]plugin.Package, error) {
 	}
 	if !seen["standard-model-providers"] {
 		var manifest core.PluginManifest
-		if err := core.DecodeJSON(standardproviders.Manifest, &manifest); err != nil {
+		if err := core.DecodeJSON(pluginassets.StandardModelProviders, &manifest); err != nil {
 			return nil, err
 		}
 		if err := manifest.Validate(); err != nil {

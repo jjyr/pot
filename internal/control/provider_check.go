@@ -36,6 +36,14 @@ func (p *ProfileStore) Check(ctx context.Context, r CheckProvider) (ProviderChec
 		return result, err
 	}
 	r.Endpoint = resolved.Endpoint
+	var startingProfile *core.Profile
+	if r.ProfileID != "" {
+		profile, _, lookupErr := p.savedProvider(ctx, r.ProfileID)
+		if lookupErr != nil {
+			return result, lookupErr
+		}
+		startingProfile = &profile
+	}
 	u, _ := url.Parse(r.Endpoint)
 	if u.RawQuery != "" {
 		return result, errors.New("model-list checks do not support query parameters")
@@ -43,6 +51,9 @@ func (p *ProfileStore) Check(ctx context.Context, r CheckProvider) (ProviderChec
 	typ, err := p.requestProviderType(ctx, r.ProviderTypeID, r.ProfileID, r.Protocol)
 	if err != nil {
 		return result, err
+	}
+	if typ.Capabilities.Catalog == "models_dev" {
+		return p.directoryCatalog(typ)
 	}
 	key, err := p.checkCredential(ctx, r)
 	if err != nil {
@@ -66,10 +77,15 @@ func (p *ProfileStore) Check(ctx context.Context, r CheckProvider) (ProviderChec
 			}
 		}
 		slices.Sort(result.Models)
-		p.rememberCatalog(typ, r.Endpoint, r.Protocol, key, response)
-		if r.ProfileID != "" {
-			p.cacheCheckedCatalog(ctx, r, typ, response)
+		if err = p.checkedCatalogFence(ctx, r, typ, startingProfile); err != nil {
+			return ProviderCheck{}, err
 		}
+		if r.ProfileID != "" {
+			if err = p.cacheCheckedCatalog(ctx, r, typ, response, key, startingProfile); err != nil {
+				return ProviderCheck{}, err
+			}
+		}
+		p.rememberCatalog(typ, r.Endpoint, r.Protocol, key, response)
 		return result, nil
 	}
 	result, err = p.checkHTTP(ctx, r, key)
@@ -84,10 +100,15 @@ func (p *ProfileStore) Check(ctx context.Context, r CheckProvider) (ProviderChec
 		}
 		response := core.ModelProviderResponse{Catalog: catalog}
 		result.Catalog = response.Catalog
-		p.rememberCatalog(typ, r.Endpoint, r.Protocol, key, response)
-		if r.ProfileID != "" {
-			p.cacheCheckedCatalog(ctx, r, typ, response)
+		if err = p.checkedCatalogFence(ctx, r, typ, startingProfile); err != nil {
+			return ProviderCheck{}, err
 		}
+		if r.ProfileID != "" {
+			if err = p.cacheCheckedCatalog(ctx, r, typ, response, key, startingProfile); err != nil {
+				return ProviderCheck{}, err
+			}
+		}
+		p.rememberCatalog(typ, r.Endpoint, r.Protocol, key, response)
 	}
 	return result, err
 }

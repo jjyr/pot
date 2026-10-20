@@ -13,12 +13,15 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Connection struct {
+	Catalog      *core.ProviderModelCatalog      `json:"catalog,omitempty"`
 	TypeID       string                          `json:"type_id,omitempty"`
 	PluginID     string                          `json:"plugin_id,omitempty"`
 	Capabilities *core.ModelProviderCapabilities `json:"capabilities,omitempty"`
@@ -49,6 +52,7 @@ type profileFile struct {
 	Requests        map[string]profileReceipt `json:"requests"`
 }
 type ProfileStore struct {
+	metadataWake     chan struct{}
 	mu               sync.Mutex
 	path, pluginRoot string
 	registry         *gateway.Registry
@@ -62,7 +66,7 @@ type ProfileStore struct {
 }
 
 func OpenProfiles(path, pluginRoot string, registry *gateway.Registry) (*ProfileStore, error) {
-	p := &ProfileStore{path: path, pluginRoot: pluginRoot, registry: registry, state: profileFile{Version: 1, ProfileSnapshot: ProfileSnapshot{Profiles: []core.Profile{}, Connections: []Connection{}, ConfiguredModels: map[string][]string{}}, Requests: map[string]profileReceipt{}}}
+	p := &ProfileStore{metadataWake: make(chan struct{}, 1), path: path, pluginRoot: pluginRoot, registry: registry, state: profileFile{Version: 1, ProfileSnapshot: ProfileSnapshot{Profiles: []core.Profile{}, Connections: []Connection{}, ConfiguredModels: map[string][]string{}}, Requests: map[string]profileReceipt{}}}
 	directory, err := modeldirectory.Open(filepath.Join(filepath.Dir(path), "models-dev"))
 	if err != nil {
 		return nil, err
@@ -187,6 +191,29 @@ func (p *ProfileStore) Snapshot() ProfileSnapshot {
 				capabilities := typ.Capabilities
 				c.Capabilities = &capabilities
 				available = typ.Available
+				if available {
+					raw, readErr := p.registry.ReadMetadata(context.Background(), provider.ID, "list_models", typ.Identity.Digest)
+					var cached core.ModelProviderResponse
+					if readErr == nil && len(raw) > 0 && core.DecodeJSON(raw, &cached) == nil && cached.Validate("list_models") == nil {
+						c.Catalog = cached.Catalog
+						models := []string{}
+						for _, model := range cached.Catalog.Models {
+							models = append(models, model.ID)
+						}
+						for _, profile := range result.Profiles {
+							if profile.ID == c.ProfileID {
+								models = append(models, profile.Model)
+								break
+							}
+						}
+						slices.Sort(models)
+						models = slices.Compact(models)
+						if result.ConfiguredModels == nil {
+							result.ConfiguredModels = map[string][]string{}
+						}
+						result.ConfiguredModels[c.ProfileID] = models
+					}
+				}
 			}
 		}
 	}
@@ -331,9 +358,6 @@ func (p *ProfileStore) save(ctx context.Context, r SaveProfile) (core.Profile, e
 	}
 	routeID := storage.ID()
 	profile := core.Profile{ID: r.ProfileID, Revision: revision, Name: r.Name, Provider: routeID, Model: r.Model, AuthRef: "provider:" + routeID, ModelSettings: r.ModelSettings, Params: core.Parameters{MaxOutputTokens: output, ReasoningEffort: r.ReasoningEffort, Agent: settings}, ToolPolicy: core.ToolPolicy{SummaryReadOnly: true, Unattended: "runtime"}}
-	if _, err := p.directory.Apply(profile); err != nil {
-		return core.Profile{}, err
-	}
 	typeID := r.ProviderTypeID
 	if typeID == "" && index >= 0 {
 		old, lookupErr := p.registry.Get(ctx, previous.Provider)
@@ -457,6 +481,10 @@ func (p *ProfileStore) save(ctx context.Context, r SaveProfile) (core.Profile, e
 	if err = json.Unmarshal(saved, &p.state); err != nil {
 		return core.Profile{}, err
 	}
+	select {
+	case p.metadataWake <- struct{}{}:
+	default:
+	}
 	return cloneProfile(profile)
 }
 func cloneProfile(p core.Profile) (core.Profile, error) {
@@ -496,4 +524,26 @@ func (p *ProfileStore) SetDefault(id string) error {
 	return nil
 }
 
-func (p *ProfileStore) RunMetadata(ctx context.Context) { p.directory.Run(ctx) }
+// RunMetadata owns both public-directory refresh and optional connection catalogs.
+// Neither reader sends inference requests. Cancellation drains all child readers.
+func (p *ProfileStore) RunMetadata(ctx context.Context) {
+	var lifecycle sync.WaitGroup
+	lifecycle.Go(func() { p.directory.Run(ctx) })
+	defer lifecycle.Wait()
+	for {
+		select {
+		case <-p.metadataWake:
+		default:
+		}
+		p.refreshPluginCatalogs(ctx)
+		timer := time.NewTimer(5 * time.Minute)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-p.metadataWake:
+			timer.Stop()
+		case <-timer.C:
+		}
+	}
+}

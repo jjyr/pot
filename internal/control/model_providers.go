@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jjyr/pot/internal/gateway"
@@ -56,16 +59,16 @@ func (p *ProfileStore) providerTypes(ctx context.Context) ([]ProviderType, error
 		if contribution == nil {
 			continue
 		}
-		identity, err := installed.ModelProviderIdentity()
-		if err != nil {
-			return nil, err
-		}
+		identity, capabilityErr := installed.ModelProviderIdentity()
 		enabled := true
 		if p.extensions != nil {
 			enabled, err = p.extensions.enabled(ctx, "plugins", installed.Manifest.ID)
 			if err != nil {
 				return nil, err
 			}
+		}
+		if capabilityErr != nil {
+			enabled = false
 		}
 		icon, _ := installed.Icon()
 		definitions := []core.ModelProviderDefinition{}
@@ -127,7 +130,7 @@ func (p *ProfileStore) providerType(ctx context.Context, id, protocol string) (P
 	for _, t := range types {
 		if t.ID == id {
 			if !t.Available {
-				return t, errors.New("model provider plugin disabled")
+				return t, errors.New("model provider plugin unavailable or disabled")
 			}
 			if protocol != "" && !slices.Contains(t.Protocols, protocol) {
 				return t, errors.New("model provider request format unavailable")
@@ -315,7 +318,13 @@ func (p *ProfileStore) readSavedMetadataFresh(ctx context.Context, id, method st
 	defer clear(key)
 	connection := core.ModelProviderConnection{ID: profile.ID, Type: typ.definition.ID, Revision: profile.Revision, Endpoint: provider.Endpoint, Protocol: provider.Protocol}
 	var response core.ModelProviderResponse
-	if method == "list_models" && typ.Capabilities.Catalog != "plugin" {
+	if method == "list_models" && typ.Capabilities.Catalog == "models_dev" {
+		checked, err := p.directoryCatalog(typ)
+		if err != nil {
+			return response, err
+		}
+		response.Catalog = checked.Catalog
+	} else if method == "list_models" && typ.Capabilities.Catalog != "plugin" {
 		checked, err := p.checkHTTP(ctx, CheckProvider{Endpoint: provider.Endpoint, Protocol: provider.Protocol}, key)
 		if err != nil {
 			return response, err
@@ -386,55 +395,65 @@ func (s *Service) ReadProviderAllowances(ctx context.Context, id string, refresh
 // applyModelMetadata only uses the exact ID from a current contribution's cache.
 // User token overrides remain intent, but must fit the discovered model limits.
 func (p *ProfileStore) applyModelMetadata(profile core.Profile) (core.Profile, error) {
-	result, err := p.directory.Apply(profile)
-	if err != nil {
-		return result, err
-	}
 	provider, err := p.registry.Get(context.Background(), profile.Provider)
 	if err != nil {
-		return result, err
+		return profile, err
 	}
 	typ, err := p.providerType(context.Background(), provider.TypeID, provider.Protocol)
 	if err != nil {
-		return result, err
+		return profile, err
 	}
 	raw, err := p.registry.ReadMetadata(context.Background(), provider.ID, "list_models", typ.Identity.Digest)
 	if err != nil {
-		return result, err
+		return profile, err
+	}
+	if len(raw) == 0 {
+		return p.directory.Apply(profile)
 	}
 	var response core.ModelProviderResponse
-	if len(raw) == 0 {
-		return result, nil
-	}
 	if core.DecodeJSON(raw, &response) != nil || response.Validate("list_models") != nil {
-		return result, errors.New("invalid cached model metadata")
+		return profile, errors.New("invalid cached model metadata")
 	}
 	for _, model := range response.Catalog.Models {
 		if model.ID != profile.Model {
 			continue
 		}
 		if len(model.InputModalities) > 0 && !slices.Contains(model.InputModalities, "text") || len(model.OutputModalities) > 0 && !slices.Contains(model.OutputModalities, "text") {
-			return result, errors.New("model does not support text conversations")
+			return profile, errors.New("model does not support text conversations")
 		}
 		var contextOverride, outputOverride *uint64
+		settings := core.ModelSettings{}
 		if profile.ModelSettings != nil {
-			contextOverride = profile.ModelSettings.ContextWindow
-			outputOverride = profile.ModelSettings.MaxOutputTokens
+			settings = *profile.ModelSettings
+			contextOverride = settings.ContextWindow
+			outputOverride = settings.MaxOutputTokens
 		}
-		if model.ContextWindow > 0 && contextOverride == nil {
-			result.Params.Agent.ContextWindow = uint64(model.ContextWindow)
+		// Resolve fallback facts with the actual connection's known context. A public
+		// suffix alias must not reject an override before exact gateway limits apply.
+		if contextOverride == nil && model.ContextWindow > 0 {
+			v := uint64(model.ContextWindow)
+			settings.ContextWindow = &v
 		}
+		if model.MaxOutput > 0 {
+			settings.MaxOutputTokens = nil
+		}
+		temporary := profile
+		temporary.ModelSettings = &settings
+		result, err := p.directory.Apply(temporary)
+		if err != nil {
+			return result, err
+		}
+		result.ModelSettings = profile.ModelSettings
 		window := result.Params.Agent.ContextWindow
-		if window < 2 {
-			return result, errors.New("invalid model context window")
-		}
-		if model.ContextWindow > 0 && window > uint64(model.ContextWindow) {
+		if window < 2 || model.ContextWindow > 0 && window > uint64(model.ContextWindow) {
 			return result, errors.New("context window exceeds model maximum")
 		}
-		if model.MaxOutput > 0 && outputOverride == nil {
+		if model.MaxOutput > 0 {
 			result.Params.MaxOutputTokens = uint64(model.MaxOutput)
 		}
-		if outputOverride == nil {
+		if outputOverride != nil {
+			result.Params.MaxOutputTokens = *outputOverride
+		} else {
 			result.Params.MaxOutputTokens = min(result.Params.MaxOutputTokens, window-1)
 		}
 		if result.Params.MaxOutputTokens == 0 || result.Params.MaxOutputTokens >= window || model.MaxOutput > 0 && result.Params.MaxOutputTokens > uint64(model.MaxOutput) {
@@ -450,17 +469,19 @@ func (p *ProfileStore) applyModelMetadata(profile core.Profile) (core.Profile, e
 			if catalog == nil {
 				catalog = &core.ModelCatalog{SchemaVersion: 1, Default: json.RawMessage(`{}`), Models: map[string]map[string]json.RawMessage{}}
 			}
-			var defaults map[string]any
-			if err = json.Unmarshal(catalog.Default, &defaults); err != nil {
-				return result, err
+			defaults := map[string]any{"input_modalities": conversationModalities(model.InputModalities)}
+			var overrides any
+			if profile.Params.Agent.ModelCatalog != nil {
+				if err = json.Unmarshal(profile.Params.Agent.ModelCatalog.Default, &overrides); err != nil {
+					return result, err
+				}
 			}
-			defaults["input_modalities"] = conversationModalities(model.InputModalities)
-			catalog.Default, _ = json.Marshal(defaults)
+			catalog.Default, _ = json.Marshal(core.MergeJSON(defaults, overrides))
 			result.Params.Agent.ModelCatalog = catalog
 		}
 		return result, result.Validate()
 	}
-	return result, nil
+	return p.directory.Apply(profile)
 }
 
 // ResolveProviderEndpoint validates source availability without performing IO.
@@ -501,34 +522,63 @@ func (p *ProfileStore) discoveredCatalog(typ ProviderType, endpoint, protocol st
 	}
 	return &response
 }
-func (p *ProfileStore) cacheCheckedCatalog(ctx context.Context, r CheckProvider, typ ProviderType, response core.ModelProviderResponse) {
+func (p *ProfileStore) checkedCatalogFence(ctx context.Context, r CheckProvider, typ ProviderType, starting *core.Profile) error {
+	if starting != nil {
+		current, _, err := p.savedProvider(ctx, starting.ID)
+		if err != nil {
+			return err
+		}
+		if current.Provider != starting.Provider || current.Revision != starting.Revision {
+			return errors.New("model provider connection changed")
+		}
+	}
+	current, err := p.providerType(ctx, typ.ID, r.Protocol)
+	if err != nil {
+		return err
+	}
+	if current.Identity != typ.Identity {
+		return errors.New("model provider package changed")
+	}
+	return nil
+}
+func (p *ProfileStore) cacheCheckedCatalog(ctx context.Context, r CheckProvider, typ ProviderType, response core.ModelProviderResponse, key []byte, starting *core.Profile) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, profile := range p.state.Profiles {
 		if profile.ID == r.ProfileID {
+			if starting == nil || profile.Provider != starting.Provider || profile.Revision != starting.Revision {
+				return errors.New("model provider connection changed")
+			}
 			provider, err := p.registry.Get(ctx, profile.Provider)
-			if err != nil || provider.Endpoint != r.Endpoint || provider.Protocol != r.Protocol || provider.TypeID != "" && provider.TypeID != typ.ID {
-				return
+			if err != nil {
+				return err
+			}
+			if provider.Endpoint != r.Endpoint || provider.Protocol != r.Protocol || provider.TypeID != "" && provider.TypeID != typ.ID {
+				return nil
 			}
 			current, err := p.providerType(ctx, typ.ID, r.Protocol)
-			if err != nil || current.Identity != typ.Identity {
-				return
+			if err != nil {
+				return err
 			}
-			// An explicit draft credential may describe a different authorization scope.
-			// Cache only when it equals the saved route's current credential.
+			if current.Identity != typ.Identity {
+				return errors.New("model provider package changed")
+			}
 			savedKey, err := p.registry.Credential(ctx, provider)
 			if err != nil {
-				return
+				return err
 			}
 			defer clear(savedKey)
-			if r.APIKey != "" && r.APIKey != string(savedKey) {
-				return
+			// A draft can check another key, but those models never become facts for
+			// the saved route. Always compare the actual resolved key, even when omitted
+			// from the public request and obtained from a previous saved revision.
+			if subtle.ConstantTimeCompare(savedKey, key) != 1 {
+				return nil
 			}
 			payload, _ := json.Marshal(response)
-			_ = p.registry.SaveMetadata(ctx, provider.ID, "list_models", typ.Identity.Digest, payload)
-			return
+			return p.registry.SaveMetadata(ctx, provider.ID, "list_models", typ.Identity.Digest, payload)
 		}
 	}
+	return errors.New("model provider connection changed")
 }
 
 func (p *ProfileStore) metadataFence(ctx context.Context, profile core.Profile, provider gateway.Provider, typ ProviderType) error {
@@ -550,4 +600,77 @@ func conversationModalities(values []string) []string {
 		}
 	}
 	return result
+}
+
+// refreshPluginCatalogs is independent of quota monitoring and UI reads. Four
+// workers bound concurrency across connections; the host bounds every exchange.
+func (p *ProfileStore) refreshPluginCatalogs(ctx context.Context) {
+	p.mu.Lock()
+	profiles := append([]core.Profile{}, p.state.Profiles...)
+	p.mu.Unlock()
+	jobs := make(chan string)
+	var workers sync.WaitGroup
+	var changed atomic.Bool
+	for range 4 {
+		workers.Go(func() {
+			for id := range jobs {
+				_, provider, typ, err := p.ProviderConnection(ctx, id)
+				if err != nil || typ.Capabilities.Catalog != "plugin" {
+					continue
+				}
+				previous, _ := p.registry.ReadMetadata(ctx, provider.ID, "list_models", typ.Identity.Digest)
+				var old core.ModelProviderResponse
+				_ = core.DecodeJSON(previous, &old)
+				response, err := p.readSavedMetadata(ctx, id, "list_models", true)
+				if err != nil {
+					continue
+				}
+				oldHash, _ := core.HashJSON(old.Catalog)
+				if old.Catalog != nil {
+					oldHash, _ = core.HashJSON(old.Catalog.Models)
+				}
+				newHash, _ := core.HashJSON(response.Catalog.Models)
+				if oldHash != newHash {
+					changed.Store(true)
+				}
+			}
+		})
+	}
+dispatch:
+	for _, profile := range profiles {
+		select {
+		case <-ctx.Done():
+			break dispatch
+		case jobs <- profile.ID:
+		}
+	}
+	close(jobs)
+	workers.Wait()
+	if changed.Load() && p.extensions != nil {
+		p.extensions.Changes.Notify("providers")
+	}
+}
+
+func (p *ProfileStore) directoryCatalog(typ ProviderType) (ProviderCheck, error) {
+	result := ProviderCheck{Models: []string{}, InputModalities: map[string][]string{}, Catalog: &core.ProviderModelCatalog{Models: []core.ProviderModel{}, ReadAt: time.Now().UTC().Format(time.RFC3339Nano)}}
+	for _, option := range p.directory.Options() {
+		if option.ID != typ.DirectoryProvider {
+			continue
+		}
+		for _, model := range option.Models {
+			inputs := []string{"text"}
+			if model.Image {
+				inputs = append(inputs, "image")
+			}
+			if model.PDF {
+				inputs = append(inputs, "pdf")
+			}
+			result.Models = append(result.Models, model.ID)
+			result.InputModalities[model.ID] = inputs
+			result.Catalog.Models = append(result.Catalog.Models, core.ProviderModel{ID: model.ID, Name: model.Name, InputModalities: inputs, OutputModalities: []string{"text"}, ContextWindow: int64(model.Context), MaxInput: int64(model.Input), MaxOutput: int64(model.Output)})
+		}
+		result.Supported = true
+		return result, nil
+	}
+	return result, errors.New("model directory source unavailable")
 }

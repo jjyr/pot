@@ -3,12 +3,20 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/modeldirectory"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 func installMetadataFixture(t *testing.T, s *Service) string {
@@ -127,5 +135,323 @@ func TestBuiltinProvidersUseTheSameEnabledContributionRegistry(t *testing.T) {
 	data, _ := json.Marshal(s.Profiles.Snapshot())
 	if strings.Contains(string(data), "isolated-key") {
 		t.Fatal("credential exposed")
+	}
+}
+
+func TestAutomaticPluginCatalogProjectionTracksCurrentModels(t *testing.T) {
+	ctx := context.Background()
+	s, _ := configurationService(t)
+	target := installMetadataFixture(t, s)
+	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "automatic-catalog", Name: "Aggregate", Model: "acme/text", Models: []string{"removed-model"}, ProviderTypeID: "acme/aggregate", Endpoint: "https://aggregate.invalid/v1", Protocol: "openai_chat", APIKey: "isolated-token", ModelSettings: &core.ModelSettings{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Profiles.refreshPluginCatalogs(ctx)
+	assertCatalog := func(expected []string) {
+		snapshot := s.Profiles.Snapshot()
+		if !reflect.DeepEqual(snapshot.ConfiguredModels[profile.ID], expected) {
+			t.Fatal(snapshot.ConfiguredModels[profile.ID], expected)
+		}
+		found := false
+		for _, connection := range snapshot.Connections {
+			if connection.ProfileID == profile.ID {
+				found = connection.Catalog != nil && len(connection.Catalog.Models) > 0 && connection.Catalog.Models[0].ContextWindow == 128000
+			}
+		}
+		if !found {
+			t.Fatal("typed catalog was not projected")
+		}
+	}
+	assertCatalog([]string{"acme/text"})
+	// A changed package is read afresh. Current models replace stale discovered
+	// rows, while the owner's configured default remains visible as intent.
+	file := filepath.Join(target, "reader.mjs")
+	raw, _ := os.ReadFile(file)
+	raw = []byte(strings.ReplaceAll(string(raw), "id:'acme/text'", "id:'acme/new'"))
+	if err = os.WriteFile(file, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	s.Profiles.refreshPluginCatalogs(ctx)
+	assertCatalog([]string{"acme/new", "acme/text"})
+}
+
+func TestExactConnectionLimitsPrecedePublicSuffixFactsBeforeSaving(t *testing.T) {
+	ctx := context.Background()
+	s, _ := configurationService(t)
+	target := installMetadataFixture(t, s)
+	file := filepath.Join(target, "reader.mjs")
+	raw, _ := os.ReadFile(file)
+	raw = []byte(strings.ReplaceAll(string(raw), "id:'acme/text'", "id:'proxy/first'"))
+	if err := os.WriteFile(file, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// The public suffix 'first' has output 4000. This exact connection reports
+	// 16000, so an explicit 8000 override is valid and must not be rejected early.
+	checked, err := s.Profiles.Check(ctx, CheckProvider{ProviderTypeID: "acme/aggregate", Endpoint: "https://aggregate.invalid/v1", Protocol: "openai_chat", APIKey: "isolated-token"})
+	if err != nil || checked.Catalog == nil {
+		t.Fatal(checked, err)
+	}
+	output := uint64(8000)
+	request := SaveProfile{RequestID: "exact-limits", Name: "Exact", Model: "proxy/first", ProviderTypeID: "acme/aggregate", Endpoint: "https://aggregate.invalid/v1", Protocol: "openai_chat", APIKey: "isolated-token", ModelSettings: &core.ModelSettings{MaxOutputTokens: &output}}
+	profile, err := s.Profiles.Save(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := s.Profiles.Resolve(profile.ID)
+	if err != nil || spec.Params.MaxOutputTokens != 8000 || spec.Params.Agent.ContextWindow != 128000 {
+		t.Fatal(spec.Params, err)
+	}
+	before := len(s.Profiles.Snapshot().Profiles)
+	badOutput := uint64(20000)
+	request.RequestID = "invalid-exact-limits"
+	request.ModelSettings = &core.ModelSettings{MaxOutputTokens: &badOutput}
+	if _, err = s.Profiles.Save(ctx, request); err == nil {
+		t.Fatal("published override above exact model maximum")
+	}
+	if len(s.Profiles.Snapshot().Profiles) != before {
+		t.Fatal("invalid profile became visible")
+	}
+}
+
+func TestPluginCatalogRefreshCancelsWithItsOwner(t *testing.T) {
+	s, _ := configurationService(t)
+	target := installMetadataFixture(t, s)
+	if _, err := s.Profiles.Save(context.Background(), SaveProfile{RequestID: "cancel-catalog", Name: "Slow", Model: "acme/text", ProviderTypeID: "acme/aggregate", Endpoint: "https://aggregate.invalid/v1", Protocol: "openai_chat", APIKey: "isolated-token"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "reader.mjs"), []byte(`export async function read(){ await new Promise(resolve=>setTimeout(resolve,60000)); }`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	s.Profiles.refreshPluginCatalogs(ctx)
+	if time.Since(started) > 5*time.Second {
+		t.Fatal("catalog child outlived cancellation")
+	}
+}
+
+func TestDisabledProviderBlocksFreshDefaultTasksAndUnpreparedResources(t *testing.T) {
+	ctx := context.Background()
+	s, profile := configurationService(t)
+	if _, err := s.Registry.Create(ctx, "task-owner", "Pot"); err != nil {
+		t.Fatal(err)
+	}
+	spec, err := s.Profiles.Resolve(profile.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.Conversation(ctx, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Configure(ctx, spec, 0); err != nil {
+		t.Fatal(err)
+	}
+	selection, err := s.selectTask(ctx, "main", protocol.CreateTask{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	launch := runner.Launch{ControlID: s.options.RuntimeID, RuntimeID: s.options.RuntimeID, AssistantID: "main", TaskID: "prepared-source", RunID: "run", Generation: 1, ExecutionTarget: core.RuntimeTarget(s.options.RuntimeID), Config: selection.Config, Plugins: selection.Plugins, Workspace: protocol.TaskWorkspace{Kind: "directory", ProjectDir: t.TempDir()}, Text: "work"}
+	if _, err = s.RunnerJournal.Accept(ctx, launch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.RunnerJournal.Claim(ctx, launch.ControlID, launch.TaskID, launch.RunID); err != nil {
+		t.Fatal(err)
+	}
+	resources, revision, err := s.prepareTaskResources(ctx, launch, func() (taskResource, error) { return s.currentTaskResource(ctx, launch) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued := launch
+	queued.TaskID = "unprepared-source"
+	queued.RunID = "queued-run"
+	if _, err = s.RunnerJournal.Accept(ctx, queued); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.RunnerJournal.Claim(ctx, queued.ControlID, queued.TaskID, queued.RunID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ManageExtension(ctx, "", ExtensionCommand{Action: "toggle", Kind: "plugins", ID: "standard-model-providers", Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.selectTask(ctx, "main", protocol.CreateTask{}); err == nil {
+		t.Fatal("disabled source accepted default task")
+	}
+	if _, err = s.currentTaskResource(ctx, queued); err == nil {
+		t.Fatal("disabled source prepared queued task")
+	}
+	if _, _, err = s.prepareTaskResources(ctx, queued, func() (taskResource, error) { return s.currentTaskResource(ctx, queued) }); err == nil {
+		t.Fatal("disabled source pinned first resources")
+	}
+	reused, sameRevision, err := s.prepareTaskResources(ctx, launch, func() (taskResource, error) { t.Fatal("prepared resources fetched again"); return taskResource{}, nil })
+	if err != nil || sameRevision != revision || reused.Config.SpecHash != resources.Config.SpecHash {
+		t.Fatal("prepared immutable route changed", err)
+	}
+}
+
+func TestRemoteRunnerPinsFetchedResourcesWithoutProviderSecrets(t *testing.T) {
+	ctx := context.Background()
+	control, profile := configurationService(t)
+	spec, err := control.Profiles.Resolve(profile.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := taskResourceService(t)
+	if _, err = worker.Providers.Get(ctx, spec.Provider); err == nil {
+		t.Fatal("fixture Runner unexpectedly owns Control's provider")
+	}
+	launch := runner.Launch{ControlID: "remote-control", RuntimeID: worker.options.RuntimeID, AssistantID: "main", TaskID: "remote-resource", Plugins: []string{}, RunID: "run", Generation: 1, ExecutionTarget: core.RuntimeTarget(worker.options.RuntimeID), Config: spec, Workspace: protocol.TaskWorkspace{Kind: "directory", ProjectDir: t.TempDir()}, Text: "work"}
+	if _, err = worker.RunnerJournal.Accept(ctx, launch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = worker.RunnerJournal.Claim(ctx, launch.ControlID, launch.TaskID, launch.RunID); err != nil {
+		t.Fatal(err)
+	}
+	fixed := taskResource{Config: spec, Roots: []taskSkillRoot{}, ReservedNames: []string{}}
+	if _, _, err = worker.prepareTaskResources(ctx, launch, func() (taskResource, error) { return fixed, nil }); err != nil {
+		t.Fatal("Runner queried Control's private registry", err)
+	}
+}
+
+func TestSavedCredentialRotationFencesBothDiscoveryReaders(t *testing.T) {
+	for _, pluginReader := range []bool{false, true} {
+		name := "http"
+		if pluginReader {
+			name = "plugin"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			s, _ := configurationService(t)
+			entered := make(chan string, 1)
+			release := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				entered <- r.Header.Get("Authorization")
+				<-release
+				if pluginReader {
+					fmt.Fprintf(w, `{"catalog":{"read_at":%q,"models":[{"id":"visible-to-a"}]}}`, time.Now().UTC().Format(time.RFC3339Nano))
+				} else {
+					fmt.Fprint(w, `{"data":[{"id":"visible-to-a"}]}`)
+				}
+			}))
+			defer server.Close()
+			defer func() {
+				select {
+				case <-release:
+				default:
+					close(release)
+				}
+			}()
+			typeID := customProviderType
+			if pluginReader {
+				target := installMetadataFixture(t, s)
+				body := fmt.Sprintf(`export async function read(){const response=await fetch(%q,{headers:{Authorization:'Bearer '+process.env.ACME_KEY}});return await response.json();}`, server.URL+"/catalog")
+				if err := os.WriteFile(filepath.Join(target, "reader.mjs"), []byte(body), 0600); err != nil {
+					t.Fatal(err)
+				}
+				typeID = "acme/aggregate"
+			}
+			request := SaveProfile{RequestID: "scope-a", Name: "Scoped", Model: "manual", ProviderTypeID: typeID, Endpoint: server.URL + "/v1", Protocol: "openai_chat", APIKey: "token-for-a", ModelSettings: &core.ModelSettings{}}
+			profile, err := s.Profiles.Save(ctx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			finished := make(chan error, 1)
+			go func() {
+				_, err := s.Profiles.Check(ctx, CheckProvider{ProfileID: profile.ID, Endpoint: request.Endpoint, Protocol: request.Protocol})
+				finished <- err
+			}()
+			select {
+			case auth := <-entered:
+				if auth != "Bearer token-for-a" {
+					t.Fatal(auth)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("reader did not start")
+			}
+			request.RequestID = "scope-b"
+			request.ProfileID = profile.ID
+			request.ExpectedRevision = profile.Revision
+			request.APIKey = "token-for-b"
+			rotated, err := s.Profiles.Save(ctx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			close(release)
+			select {
+			case err := <-finished:
+				if err == nil {
+					t.Fatal("old-scope discovery accepted after rotation")
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("reader did not finish")
+			}
+			_, route, typ, err := s.Profiles.ProviderConnection(ctx, rotated.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := s.Providers.ReadMetadata(ctx, route.ID, "list_models", typ.Identity.Digest)
+			if err != nil || len(raw) != 0 {
+				t.Fatal("A models cached under B route", string(raw), err)
+			}
+		})
+	}
+}
+
+func TestMissingAdapterDoesNotDisableUnrelatedProviderTypes(t *testing.T) {
+	ctx := context.Background()
+	s, standard := configurationService(t)
+	target := installMetadataFixture(t, s)
+	pluginProfile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "broken-package", Name: "Plugin", Model: "acme/text", ProviderTypeID: "acme/aggregate", Endpoint: "https://aggregate.invalid/v1", Protocol: "openai_chat", APIKey: "isolated-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Remove(filepath.Join(target, "reader.mjs")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Profiles.Resolve(standard.ID); err != nil {
+		t.Fatal("missing optional adapter blocked standard connection", err)
+	}
+	if _, err = s.Profiles.Resolve(pluginProfile.ID); err == nil {
+		t.Fatal("broken adapter connection resolved")
+	}
+	snapshot := s.Profiles.Snapshot()
+	found := false
+	for _, typ := range snapshot.ProviderTypes {
+		if typ.ID == "acme/aggregate" {
+			found = true
+			if typ.Available {
+				t.Fatal("broken adapter available")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("unavailable source disappeared instead of showing its status")
+	}
+	if _, err = s.ManageExtension(ctx, "", ExtensionCommand{Action: "toggle", Kind: "plugins", ID: "acme", Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Profiles.Resolve(standard.ID); err != nil {
+		t.Fatal("disabled missing adapter blocked standard connection", err)
+	}
+}
+
+func TestDeclarativeDirectoryReaderUsesLocalFactsWithoutCredentials(t *testing.T) {
+	s, _ := configurationService(t)
+	// Use the bundled, ready-connection directory rather than the limits-only
+	// fixture that deliberately excludes inference-ready model declarations.
+	directory, err := modeldirectory.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Profiles.directory = directory
+	root := t.TempDir()
+	s.options.PluginRoot = root
+	s.Profiles.pluginRoot = root
+	manifest := `{"schema_version":2,"id":"local-facts","version":"1","contributes":{"model_providers":{"providers":[{"id":"openai","name":"Local facts","protocol":"openai_responses","directory_provider":"openai","capabilities":{"catalog":"models_dev"}}]}}}`
+	writeTaskFixture(t, filepath.Join(root, "local-facts", "plugin.json"), manifest)
+	result, err := s.Profiles.Check(context.Background(), CheckProvider{ProviderTypeID: "local-facts/openai", Endpoint: "https://never-contacted.invalid/v1", Protocol: "openai_responses"})
+	if err != nil || !result.Supported || result.Catalog == nil || len(result.Models) == 0 {
+		t.Fatal(result, err)
 	}
 }
