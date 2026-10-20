@@ -21,11 +21,11 @@ func TestSettingsProfileEditSharesRevisionAndCanRestoreDefault(t *testing.T) {
 	}
 	defer r.Close()
 	ctx := context.Background()
-	d, err := r.Create(ctx, "create", "Pot")
+	d, err := r.Create(ctx, "create", "Cup 2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	custom, _ := assistantavatar.Default("custom-image")
+	custom, _ := assistantavatar.Render("glass", "custom-image")
 	name := "My helper"
 	changed, err := r.UpdateProfile(ctx, d.ID, ProfileUpdate{Name: &name, Avatar: &custom}, d.Revision)
 	if err != nil || changed.Name != name || changed.Avatar != custom || changed.Revision != d.Revision+1 {
@@ -78,7 +78,7 @@ func TestAvatarNormalizationAndProfilePersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	d, err := r.Create(ctx, "create", "Pot")
+	d, err := r.Create(ctx, "create", "Cup 2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestAvatarNormalizationAndProfilePersistence(t *testing.T) {
 	if err != nil || renamed.Avatar != avatar {
 		t.Fatal("settings rename lost avatar", err)
 	}
-	replay, err := r.Create(ctx, "create", "Pot")
+	replay, err := r.Create(ctx, "create", "Cup 2")
 	if err != nil || replay.Avatar != avatar {
 		t.Fatal("creation retry lost avatar", err)
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/storage"
 	webassets "github.com/jjyr/pot/web"
 )
 
@@ -283,7 +284,7 @@ func (s *Service) BootstrapAssistant(ctx context.Context, locale string) (map[st
 	if history || s.Profiles.Snapshot().DefaultProviderID == "" {
 		return map[string]any{"assistant": nil, "initialized": history}, nil
 	}
-	definition, err := s.createAssistant(ctx, CreateAssistant{RequestID: "pot-onboarding", Name: "Pot", Locale: locale}, true)
+	definition, err := s.createAssistant(ctx, CreateAssistant{RequestID: storage.ID(), Locale: locale}, true)
 	return map[string]any{"assistant": definition}, err
 }
 

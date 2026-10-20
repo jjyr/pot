@@ -234,19 +234,19 @@ the Space name. Initial history does not count as unread. Opening the conversati
 clears its indicator. Offline, approval, configuration and activity previews
 reflect their own states rather than changing the avatar.
 
-Default avatars compose the canonical Pot Companion with eight foreground and
-eight background colors. A stable hash of the creation request identity selects
-one of 64 combinations, unchanged by theme or rename. Creation previews, rows
-and titles share the image. A new completed live reply triggers one 650 ms whole
+Default avatars pair each kitchen character with one of eight soft pastel
+backgrounds. A stable hash of the creation request selects the background; the
+character keeps its own colors. The saved role and image remain unchanged by
+theme or rename. Rows, titles and settings share the image. A new completed live reply triggers one 650 ms whole
 image scale-and-tilt rebound. Initial history, duplicate updates and reconnect
 catch-up do not replay it; hidden pages do not queue reactions.
 Custom avatars use the same shape and animation. They display the assistant's
 persisted square PNG in the directory, chat title and settings preview; restoring
-the default uses the original deterministic Companion colors.
+the default uses the originally assigned kitchen character and pastel background.
 
 First-use Chat offers Connect AI provider when no connection exists. Saving that
-connection returns to Chat and automatically creates Pot using the Space's default
-Provider/model. An empty Chat with an existing Provider follows the same bootstrap
+connection returns to Chat and automatically creates a randomly named kitchen assistant using the Space's
+default Provider/model. An empty Chat with an existing Provider follows the same bootstrap
 path. Offline or failed directory loads offer recovery rather than connection setup.
 The empty directory caption is No assistants yet.
 
@@ -265,9 +265,9 @@ current assistant determines the destination Space; without a selected assistant
 App uses its local Space and Web uses its serving Space. An unavailable Space does
 not fall back to another destination. Creation uses that Space's default Provider
 and concrete default model, with empty assistant instructions. Missing Provider
-configuration opens AI connection setup. First-use bootstrap still creates Pot.
+configuration opens AI connection setup. First-use bootstrap uses the same random kitchen identities.
 
-Manual creations randomly choose from Cup, Mug, Bowl, Pan, Wok, Spoon, Fork, Tray,
+All new assistants randomly choose from Cup, Mug, Bowl, Pan, Wok, Spoon, Fork, Tray,
 Whisk, Kettle, Lid, Jar, Jug, Plate, Dish and Glass. These English identity values
 are not translated. Unused base names take priority within the destination Space,
 including names set manually (case-insensitive, ignoring surrounding whitespace).
@@ -280,7 +280,7 @@ a failed confirmation retries the saved creation rather than registering another
 
 Assistant settings edit the name, avatar and configuration. Custom avatar uploads
 accept PNG, JPEG and WebP up to 8 MiB, center-cropped to a 128 px PNG; restoring the
-default retains the original Companion colors. Edits use the profile revision so
+default retains the original character and background. Edits use the profile revision so
 stale settings cannot overwrite a newer chat profile change. **Personality and
 preferences** edits the assistant's AGENTS.md without requiring users to know that
 filename. Existing assistant location is read-only. Provider/model changes are saved on the assistant

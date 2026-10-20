@@ -190,7 +190,8 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 			id = r.root
 		}
 		definition = Definition{ID: id, Name: name, Revision: 1, RequestID: request}
-		definition.Avatar, err = assistantavatar.Default(request)
+		character := assistantavatar.ForName(name, request)
+		definition.Avatar, err = assistantavatar.Render(character, request)
 		if err != nil {
 			return err
 		}
@@ -224,7 +225,7 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO assistant_profiles(assistant_id,avatar) VALUES (?,?)", id, definition.Avatar)
+		_, err = tx.ExecContext(ctx, "INSERT INTO assistant_profiles(assistant_id,avatar,character) VALUES (?,?,?)", id, definition.Avatar, character)
 		return err
 	})
 	return definition, err
@@ -266,7 +267,7 @@ func (r *Registry) UpdateProfile(ctx context.Context, id string, patch ProfileUp
 		if patch.Avatar != nil {
 			definition.Avatar = *patch.Avatar
 			if definition.Avatar == "" {
-				definition.Avatar, err = assistantavatar.Default(definition.RequestID)
+				definition.Avatar, err = defaultAvatar(ctx, tx, id)
 				if err != nil {
 					return err
 				}
@@ -276,7 +277,7 @@ func (r *Registry) UpdateProfile(ctx context.Context, id string, patch ProfileUp
 		if _, err = tx.ExecContext(ctx, "UPDATE assistant_definitions SET name=?,revision=? WHERE id=?", definition.Name, definition.Revision, id); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO assistant_profiles VALUES (?,?) ON CONFLICT(assistant_id) DO UPDATE SET avatar=excluded.avatar", id, definition.Avatar)
+		_, err = tx.ExecContext(ctx, "UPDATE assistant_profiles SET avatar=? WHERE assistant_id=?", definition.Avatar, id)
 		return err
 	})
 	return definition, err
@@ -341,4 +342,20 @@ func (r *Registry) Delete(ctx context.Context, id string, revision uint64) error
 		_, err := tx.ExecContext(ctx, "UPDATE assistant_definitions SET deleted=1 WHERE id=?", id)
 		return err
 	})
+}
+
+// DefaultAvatar returns the originally assigned character and background, even
+// after renaming or uploading a custom profile image.
+func (r *Registry) DefaultAvatar(ctx context.Context, id string) (string, error) {
+	return defaultAvatar(ctx, r.db, id)
+}
+func defaultAvatar(ctx context.Context, query interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, id string) (string, error) {
+	var character, seed string
+	err := query.QueryRowContext(ctx, "SELECT p.character,d.request_id FROM assistant_profiles p JOIN assistant_definitions d ON d.id=p.assistant_id WHERE d.id=? AND d.deleted=0", id).Scan(&character, &seed)
+	if err != nil {
+		return "", err
+	}
+	return assistantavatar.Render(character, seed)
 }

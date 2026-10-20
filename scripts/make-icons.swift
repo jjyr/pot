@@ -52,9 +52,6 @@ func color(_ value: UInt32, alpha: CGFloat = 1) -> NSColor {
 
 @main struct IconGenerator {
     @MainActor static func main() throws {
-        let avatarAssets = root.appendingPathComponent("pkg/assistantavatar")
-        try FileManager.default.createDirectory(at: avatarAssets, withIntermediateDirectories: true)
-        try renderMark(size: 256).write(to: avatarAssets.appendingPathComponent("mask.png"))
         let uiAssets = root.appendingPathComponent("web/src/assets")
         try FileManager.default.createDirectory(at: uiAssets, withIntermediateDirectories: true)
         for cooking in [false, true] {

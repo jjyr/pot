@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -10,9 +11,11 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/modelprotocol"
 	webassets "github.com/jjyr/pot/web"
+
+	"github.com/jjyr/pot/pkg/assistantavatar"
 )
 
-func TestBootstrapWaitsForProviderAndCreatesExactlyOnePot(t *testing.T) {
+func TestBootstrapWaitsForProviderAndCreatesExactlyOneRandomAssistant(t *testing.T) {
 	s, profile := configurationService(t)
 	ctx := context.Background()
 	s.Profiles.mu.Lock()
@@ -35,13 +38,13 @@ func TestBootstrapWaitsForProviderAndCreatesExactlyOnePot(t *testing.T) {
 	}
 	wg.Wait()
 	definitions, err := s.Registry.Definitions(ctx)
-	if err != nil || len(definitions) != 1 || definitions[0].Name != "Pot" {
+	if err != nil || len(definitions) != 1 || !slices.Contains(assistantavatar.Names(), definitions[0].Name) {
 		t.Fatal(definitions, err)
 	}
 	a := definitions[0]
 	c, _ := s.Conversation(ctx, a.ID)
 	snapshot, _ := c.Snapshot(ctx)
-	if len(snapshot.Messages) != 1 || !strings.HasPrefix(snapshot.Messages[0].Text, "你好，我是 Pot。") {
+	if len(snapshot.Messages) != 1 || !strings.HasPrefix(snapshot.Messages[0].Text, "你好，我是 "+a.Name+"。") {
 		t.Fatal(snapshot)
 	}
 	config, err := s.AssistantConfiguration(ctx, a.ID)
@@ -55,7 +58,7 @@ func TestBootstrapWaitsForProviderAndCreatesExactlyOnePot(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot, _ = c.Snapshot(ctx)
-	if len(snapshot.Messages) != 1 || !strings.HasPrefix(snapshot.Messages[0].Text, "你好，我是 Pot。") {
+	if len(snapshot.Messages) != 1 || !strings.HasPrefix(snapshot.Messages[0].Text, "你好，我是 "+a.Name+"。") {
 		t.Fatal("locale switch changed history", snapshot)
 	}
 	other, err := s.CreateAssistant(ctx, CreateAssistant{RequestID: "second", Name: "Research", Locale: "en"})

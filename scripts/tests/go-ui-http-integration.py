@@ -11,6 +11,7 @@ import hashlib
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import re
 import os
 from pathlib import Path
 import secrets
@@ -312,10 +313,15 @@ def run(binary, base, env, cli_command, profile_only=False):
             browser_cli("run-code", code.replace("STATE", json.dumps(onboarding)))
             welcome = json.loads((ROOT / "web/src/locales/server.json").read_text())["zh-CN"][
                 "assistant.welcome"
-            ].replace("{name}", "Pot")
+            ]
             assert any(
                 any(
-                    m.get("role") == "assistant" and message_text(m) == welcome
+                    m.get("role") == "assistant"
+                    and re.fullmatch(
+                        re.escape(welcome).replace(re.escape("{name}"), "[A-Za-z]+"),
+                        message_text(m),
+                    )
+                    is not None
                     for m in body.get("messages", [])
                 )
                 for body in model_requests

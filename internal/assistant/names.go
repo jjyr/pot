@@ -4,11 +4,12 @@ import (
 	"math/rand/v2"
 	"strconv"
 	"strings"
+
+	"github.com/jjyr/pot/pkg/assistantavatar"
 )
 
-// These are identity values, deliberately English in every UI language. Pot is
-// reserved for first-use bootstrap rather than the manual creation pool.
-var kitchenNames = [...]string{"Cup", "Mug", "Bowl", "Pan", "Wok", "Spoon", "Fork", "Tray", "Whisk", "Kettle", "Lid", "Jar", "Jug", "Plate", "Dish", "Glass"}
+// Kitchen identities stay English in every UI language.
+var kitchenNames = assistantavatar.Names()
 
 func randomAssistantName(used []string) string {
 	return pickAssistantName(used, rand.IntN)

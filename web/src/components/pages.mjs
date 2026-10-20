@@ -264,7 +264,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       };
       const avatarActions=toolbar(),upload=n('input');upload.type='file';upload.accept='image/png,image/jpeg,image/webp';upload.hidden=true;
       const changeAvatar=action('',()=>upload.click()),resetAvatar=action('',()=>editAvatar(async()=>{
-        const generated=await request(`/api/v1/assistants/default-avatar?${new URLSearchParams({request_id:definition.request_id})}`,captured);return {value:'',image:generated.avatar};
+        const generated=await request('/api/v1/assistants/default-avatar',captured);return {value:'',image:generated.avatar};
       }));
       const avatarHelp=n('p','hint'),avatarError=n('p','inline-error');avatarError.setAttribute('role','alert');avatarError.hidden=true;
       avatarActions.append(changeAvatar,resetAvatar,upload);preview.after(avatarActions,avatarHelp,avatarError);
