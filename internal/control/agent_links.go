@@ -427,3 +427,7 @@ func (s *Service) PeerListenAddress() string {
 	defer s.agentLinks.mu.Unlock()
 	return s.agentLinks.server.Addr()
 }
+
+func (m controlLinkMailbox) PendingNode(ctx context.Context, local, peer string) ([]protocol.Envelope, error) {
+	return m.s.Mailbox.PendingNode(ctx, local, peer)
+}
