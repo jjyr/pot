@@ -534,3 +534,9 @@ Native menu-bar steam also cycles while executing. Reduce Motion uses static
 activity/avatar states and immediate navigation-menu updates. Do not animate
 every streamed token or replay completion reactions on refresh. Brand assets and
 generation instructions belong in [Pot brand](design/pot-brand/README.md).
+
+Sidebar name-line activity uses a 24px monochrome Pot: a 1.5s rocking cycle,
+360ms lid rattle and staggered 1.45s steam while executing. Completed unread
+replies keep a settled tilted lid, success check and gentle 3.6s steam until read.
+The indicator stays inside stable row geometry; long names truncate before it.
+Reduce Motion replaces both loops with distinct static poses.
