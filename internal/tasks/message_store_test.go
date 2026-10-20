@@ -66,7 +66,8 @@ UPDATE tasks SET body=replace(json_set(body,'$.schema_version',9),'"node_id":','
 ALTER TABLE assistant_mail_identity RENAME COLUMN node_id TO control_id;
 ALTER TABLE assistant_contacts RENAME COLUMN node TO control;
 DROP TABLE task_input_digest_formats;
-DELETE FROM pot_migrations WHERE id LIKE '0006_%';`, legacyHash)
+ALTER TABLE plugin_background DROP COLUMN diagnostic;
+DELETE FROM pot_migrations WHERE id >= '0006_';`, legacyHash)
 	if err != nil {
 		t.Fatal(err)
 	}

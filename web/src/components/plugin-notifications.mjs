@@ -1,8 +1,7 @@
 import {node as n,action,field} from './primitives.mjs';
 import {translate} from '../locales/messages.mjs';
 
-const defaults=['mention','team_mention','review_requested','author','comment','subscribed','participating'];
-const known=['mention','team_mention','review_requested','author','comment','subscribed','assign','ci_activity','invitation','manual','security_alert','state_change'];
+const known=['mention','team_mention','review_requested','author','comment','subscribed','participating','assign','ci_activity','invitation','manual','security_alert','state_change'];
 const split=value=>value.split(',').map(v=>v.trim()).filter(Boolean);
 const healthy=new Set(['ready','baseline']);
 
@@ -12,7 +11,7 @@ export function createPluginNotifications({request,scope,signal,locale,refresh,r
  const t=key=>translate(locale(),key);
  let current=null,draft=null,busy=false,error=false,identity=null,showDetails=false,diagnosticError='';
  const item=()=>current?.items?.find(i=>i.id==='github');
- const from=value=>({enabled:value.enabled,assistant:value.assistant,repositories:(value.config.repositories||[]).join(', '),reasons:[...(value.config.reasons||[])],existing:false,revision:value.revision,existingToken:value.config.existing||'',existingAccount:value.config.existing_account||''});
+ const from=value=>({enabled:value.enabled,assistant:value.assistant,repositories:(value.config.repositories||[]).join(', '),reasons:[...(value.config.reasons||[])],reasonMode:value.config.reasons?.length?'selected':'all',revision:value.revision});
  let dirty=false;
  const edit=change=>{if(busy)return;change();dirty=true;};
  return {
@@ -49,25 +48,26 @@ export function createPluginNotifications({request,scope,signal,locale,refresh,r
    if(!choices.some(([id])=>id===draft.assistant))choices.unshift([draft.assistant,t(draft.assistant?'pluginNotifications.status.assistant_missing':choices.length?'pluginNotifications.chooseAssistant':'pluginNotifications.noAssistants')]);
    const target=field(t('pluginNotifications.assistant'),draft.assistant,{choices});target.input.onchange=event=>{edit(()=>{draft.assistant=event.currentTarget.value;});render();};
    const repositories=field(t('pluginNotifications.repositories'),draft.repositories);repositories.input.oninput=event=>edit(()=>{draft.repositories=event.currentTarget.value;});
-   const reasons=n('fieldset','notification-reasons');reasons.append(n('legend','form-label',t('pluginNotifications.reasons')),n('p','hint',t('pluginNotifications.reasonHelp')));
-   const selected=draft.reasons.length?draft.reasons:defaults;
-   const options=n('div','notification-reason-options');
-   for(const reason of known){
-    const option=field(t('pluginNotifications.reason.'+reason),selected.includes(reason),{kind:'checkbox'});option.row.dataset.viewKey=reason;
-    option.input.onchange=event=>{edit(()=>{const values=new Set(draft.reasons.length?draft.reasons:defaults);if(event.currentTarget.checked)values.add(reason);else values.delete(reason);draft.reasons=[...values];});render();};options.append(option.row);
+   const reasonMode=field(t('pluginNotifications.scope'),draft.reasonMode,{choices:[['all',t('pluginNotifications.all')],['selected',t('pluginNotifications.selected')]]});
+   reasonMode.input.onchange=event=>{edit(()=>{draft.reasonMode=event.currentTarget.value;if(draft.reasonMode==='selected'&&!draft.reasons.length)draft.reasons=[...known];});render();};
+   projection.append(enabled.row,target.row,repositories.row,reasonMode.row);
+   if(draft.reasonMode==='selected'){
+    const reasons=n('fieldset','notification-reasons');reasons.append(n('legend','form-label',t('pluginNotifications.reasons')),n('p','hint',t('pluginNotifications.reasonHelp')));
+    const options=n('div','notification-reason-options');
+    for(const reason of [...new Set([...known,...draft.reasons])]){
+     const option=field(known.includes(reason)?t('pluginNotifications.reason.'+reason):reason,draft.reasons.includes(reason),{kind:'checkbox'});option.row.dataset.viewKey=reason;
+     option.input.onchange=event=>{edit(()=>{const values=new Set(draft.reasons);if(event.currentTarget.checked)values.add(reason);else values.delete(reason);draft.reasons=[...values];});render();};options.append(option.row);
+    }
+    reasons.append(options);projection.append(reasons);
    }
-   const custom=field(t('pluginNotifications.customReasons'),draft.reasons.filter(r=>!known.includes(r)).join(', '));custom.input.oninput=event=>edit(()=>{draft.reasons=[...draft.reasons.filter(r=>known.includes(r)),...split(event.currentTarget.value)];});
-   reasons.append(options,custom.row);
-   const existing=field(t('pluginNotifications.existing'),draft.existing,{kind:'checkbox'});existing.input.onchange=event=>edit(()=>{draft.existing=event.currentTarget.checked;});
-   projection.append(enabled.row,target.row,repositories.row,reasons,existing.row);
    const save=action(t('pluginNotifications.save'),async()=>{
     if(busy)return;const savingIdentity=identity,submitted=draft;busy=true;error=false;render();
-    const config={repositories:split(draft.repositories),reasons:draft.reasons,existing:draft.existing?crypto.randomUUID():draft.existingToken,existing_account:draft.existing?identity:draft.existingAccount};
+    const config={repositories:split(draft.repositories),reasons:draft.reasonMode==='all'?[]:draft.reasons};
     try{
      await request('/api/v1/plugin-notifications/github',{...scope,signal,method:'POST',body:{enabled:draft.enabled,assistant:draft.assistant,revision:draft.revision,config}});
-     if(!signal.aborted&&identity===savingIdentity&&draft===submitted){draft={...submitted,revision:submitted.revision+1,existing:false,existingToken:config.existing,existingAccount:config.existing_account};dirty=false;await refresh();}
+     if(!signal.aborted&&identity===savingIdentity&&draft===submitted){draft={...submitted,revision:submitted.revision+1};dirty=false;await refresh();}
     }catch(cause){if(identity===savingIdentity){error=true;diagnosticError=cause.message||String(cause);}}finally{busy=false;if(!signal.aborted)render();}
-   });save.disabled=busy||(draft.enabled&&!draft.assistant);projection.append(save);
+   });save.disabled=busy||(draft.enabled&&!draft.assistant)||(draft.reasonMode==='selected'&&!draft.reasons.length);projection.append(save);
    if(error){const message=n('p','inline-error',t('pluginNotifications.error'));message.dataset.viewKey='save-error';message.setAttribute('role','alert');projection.append(message);if(diagnosticError){const raw=n('pre','notification-diagnostics',diagnosticError);projection.append(raw);}}
    for(const control of projection.querySelectorAll('input,select,button'))control.disabled=busy||control.disabled;
    return projection;

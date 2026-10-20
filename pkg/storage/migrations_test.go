@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"path/filepath"
@@ -17,11 +18,22 @@ import (
 func TestDefaultAvatarImageUpgrade(t *testing.T) {
 	db := migrationDB(t)
 	ctx := context.Background()
-	baseline, err := fs.ReadFile(migrationFiles, "migrations/control/0001_baseline.sql")
+	old := fstest.MapFS{}
+	entries, err := fs.ReadDir(migrationFiles, "migrations/control")
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := fstest.MapFS{"migrations/control/0001_baseline.sql": &fstest.MapFile{Data: baseline}}
+	for _, entry := range entries {
+		if entry.Name() >= "0011_" {
+			break
+		}
+		name := "migrations/control/" + entry.Name()
+		data, e := fs.ReadFile(migrationFiles, name)
+		if e != nil {
+			t.Fatal(e)
+		}
+		old[name] = &fstest.MapFile{Data: data}
+	}
 	if err := migrateDatabase(ctx, db, ControlDatabase, old); err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +50,7 @@ INSERT INTO assistant_profile_requests VALUES
 		t.Fatal("invalid historical seed accepted")
 	}
 	var created int
-	if err := db.QueryRow("SELECT COUNT(*) FROM assistant_profiles WHERE assistant_id='missing'").Scan(&created); err != nil || created != 0 || migrationCount(t, db) != 1 {
+	if err := db.QueryRow("SELECT COUNT(*) FROM assistant_profiles WHERE assistant_id='missing'").Scan(&created); err != nil || created != 0 || migrationCount(t, db) != len(old) {
 		t.Fatal("failed avatar migration did not roll back", err)
 	}
 	execMigrationSQL(t, db, "DELETE FROM assistant_profile_requests WHERE id='bad'")
@@ -454,4 +466,111 @@ INSERT INTO task_runs VALUES('control','task','run','digest','complete','boot','
 	if version != 7 || run != "run" || digest != "digest" || checkpoint != "retained" {
 		t.Fatal(version, run, digest, checkpoint)
 	}
+}
+
+func TestGitHubNotificationMigrationCancelsHistoryAndPreservesDelivery(t *testing.T) {
+	ctx := context.Background()
+	for _, consumed := range []bool{false, true} {
+		t.Run(fmt.Sprint(consumed), func(t *testing.T) {
+			db := migrationDB(t)
+			files := githubNotificationPreviousMigrations(t)
+			var err error
+			if err = migrateDatabase(ctx, db, TasksDatabase, files); err != nil {
+				t.Fatal(err)
+			}
+			receipt := "older"
+			if consumed {
+				receipt = "history"
+			}
+			state := fmt.Sprintf(`{"account":"123","manual":%q,"scan":null,"since":"2026-01-01T00:00:00Z","baseline":true,"nextPollAt":9000,"pending":{"thread":{"body":"preserve"}},"threads":{"id":{"marker":"keep"}}}`, receipt)
+			_, err = db.Exec(`INSERT INTO plugin_background VALUES('github',1,'main','{"repositories":["me/repo"],"reasons":["mention"],"existing":"history","existing_account":"123"}',9,?,8000,'unavailable','conversation')`, state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			execMigrationSQL(t, db, `INSERT INTO plugin_background VALUES('codex',0,'','{}',2,'{"cursor":"keep"}',7000,'disabled','codex-conversation');`)
+			for range 2 {
+				if err = Migrate(ctx, db, TasksDatabase); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var config, raw, status, diagnostic, conversation string
+			var revision, next int
+			if err = db.QueryRow(`SELECT config,state,revision,next,status,diagnostic,conversation FROM plugin_background WHERE id='github'`).Scan(&config, &raw, &revision, &next, &status, &diagnostic, &conversation); err != nil {
+				t.Fatal(err)
+			}
+			var c, s map[string]any
+			if err = json.Unmarshal([]byte(config), &c); err != nil {
+				t.Fatal(err)
+			}
+			if err = json.Unmarshal([]byte(raw), &s); err != nil {
+				t.Fatal(err)
+			}
+			if c["existing"] != nil || c["existing_account"] != nil || s["manual"] != nil || s["scan"] != nil || s["since"] != "2026-01-01T00:00:00Z" || s["pending"] == nil || s["threads"] == nil || revision != 10 || diagnostic != "" || conversation != "conversation" {
+				t.Fatal(config, raw, revision, diagnostic, conversation)
+			}
+			if !consumed && (next != 0 || status != "pending" || s["nextPollAt"] != float64(0)) {
+				t.Fatal(next, status, raw)
+			}
+			if consumed && (next != 8000 || status != "unavailable" || s["nextPollAt"] != float64(9000)) {
+				t.Fatal(next, status, raw)
+			}
+			if err = db.QueryRow(`SELECT state,revision FROM plugin_background WHERE id='codex'`).Scan(&raw, &revision); err != nil || raw != `{"cursor":"keep"}` || revision != 2 {
+				t.Fatal(raw, revision, err)
+			}
+		})
+	}
+}
+
+func TestGitHubNotificationMigrationHandlesUninitializedAndFailedBaseline(t *testing.T) {
+	for _, state := range []string{`null`, `{"account":"123","baseline":false,"since":null,"failures":6,"manual":false,"nextPollAt":999999,"pending":{},"threads":{}}`} {
+		db := migrationDB(t)
+		if err := migrateDatabase(context.Background(), db, TasksDatabase, githubNotificationPreviousMigrations(t)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`INSERT INTO plugin_background VALUES('github',1,'main','{"existing":"unfinished"}',9,?,999999,'unavailable','same-conversation')`, state); err != nil {
+			t.Fatal(err)
+		}
+		if err := Migrate(context.Background(), db, TasksDatabase); err != nil {
+			t.Fatal(err)
+		}
+		var raw, config, status string
+		var next int
+		if err := db.QueryRow(`SELECT state,config,next,status FROM plugin_background`).Scan(&raw, &config, &next, &status); err != nil {
+			t.Fatal(err)
+		}
+		if config != "{}" || next != 0 || status != "pending" {
+			t.Fatal(raw, config, next, status)
+		}
+		if state == "null" && raw != "null" {
+			t.Fatal(raw)
+		}
+		if state != "null" {
+			var s map[string]any
+			json.Unmarshal([]byte(raw), &s)
+			if s["baseline"] != false || s["since"] != nil || s["failures"] != float64(6) || s["nextPollAt"] != float64(0) {
+				t.Fatal(raw)
+			}
+		}
+	}
+}
+
+func githubNotificationPreviousMigrations(t *testing.T) fstest.MapFS {
+	t.Helper()
+	files := fstest.MapFS{}
+	entries, err := fs.ReadDir(migrationFiles, "migrations/tasks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() >= "0007_" {
+			break
+		}
+		name := "migrations/tasks/" + entry.Name()
+		data, e := fs.ReadFile(migrationFiles, name)
+		if e != nil {
+			t.Fatal(e)
+		}
+		files[name] = &fstest.MapFile{Data: data}
+	}
+	return files
 }
