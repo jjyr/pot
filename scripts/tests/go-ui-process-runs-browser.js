@@ -49,8 +49,11 @@ async parentPage => {
   await node('send-input').locator(':scope > summary').click();await node('send-input').getByText('发送输入\nyes',{exact:false}).waitFor();
   assert(!await node('send-input').locator(':scope > summary').textContent().then(text=>text.includes('private-process-one')),'Action summary hides session ID');
   const failed=poll('failed-poll','private-process-one',{stderr:'Checks failed',exit_code:2});messages.push(failed,secondDone);running=false;await push();
-  await group.locator(':scope > summary .tool-failure').getByText('Checks failed',{exact:true}).waitFor();
-  await group.locator(':scope > summary').click();await group.locator(':scope > summary .tool-failure').click();assert(await node('check').evaluate(element=>element.open),'Folded poll failure reveals the command');
+  assert(await group.locator(':scope > summary .tool-failure').count()===0,'Group summaries keep intermediate process failures quiet');
+  await node('check').locator('.tool-section').filter({has:page.getByText('输出',{exact:true})}).getByText('Checks failed',{exact:false}).waitFor();
+  await node('check').locator(':scope > summary').click();assert(!await node('check').evaluate(element=>element.open),'Completed process failure can be collapsed');await node('check').locator(':scope > summary').getByText('已结束',{exact:true}).waitFor();
+  assert(!await node('check').locator(':scope > summary').textContent().then(text=>text.includes('Checks failed')),'Collapsed command summary hides the diagnostic');
+  await node('check').locator(':scope > summary').click();await node('check').getByText('Checks failed',{exact:false}).first().waitFor();await node('check').locator(':scope > summary').getByText('失败',{exact:true}).waitFor();
   await page.setViewportSize({width:390,height:850});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Expanded history fits mobile');
   // Ordered Task events exercise command completion and exact approval ancestry.
   await page.evaluate(async()=>{
@@ -74,6 +77,6 @@ async parentPage => {
    const message={tool:{id:'locale-action',name:'write_stdin',phase:'completed',args:{session_id:'hidden-session',chars:'yes\n',interrupt:true,terminate:true,close_stdin:true,rows:40,cols:100},result:{stdout:'ready',session_id:'hidden-session'}}};
    try{for(const [locale,input,resize]of [['en','Send input','40 rows × 100 columns'],['zh-CN','发送输入','40 行 × 100 列']]){language=locale;view.update(message);const text=[...view.element.querySelectorAll('.tool-section')].map(node=>node.textContent).join('\n');if(!text.includes(input)||!text.includes(resize)||text.includes('hidden-session'))throw Error('Process interactions switch locale and hide IDs');}}finally{view.element.remove();}
   });
-  assert(errors.length===0,errors.join('\n'));return {passed:true,errors,checks:'Chat/Task grouping, receipts, input, approvals, live output, failure locator and mobile layout'};
+  assert(errors.length===0,errors.join('\n'));return {passed:true,errors,checks:'Chat/Task grouping, receipts, input, approvals, live output, quiet failures, expanded diagnostics and mobile layout'};
  }finally{await page.unroute('**/access/status',access);await page.unroute('**/api/v1/**',handler);page.off('pageerror',onError);await context.close();}
 }

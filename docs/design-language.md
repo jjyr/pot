@@ -95,8 +95,18 @@ targets. iPad split windows follow the same breakpoints.
 
 The rail contains Chat (Pot icon), Tasks, Topology, Extensions, Usage and bottom-aligned
 Settings. Tasks includes Tasks / Schedules. Other destinations and editors hide
-the assistant pane; wide editors retain the rail. All three columns extend to the
-top of the window, without a shared horizontal titlebar. Wide columns have 66 px
+the assistant pane; wide editors retain the rail.
+
+Chat uses the canonical Pot Companion brand logo at 25 px, retaining its colors
+across themes. The other destinations use matching 20 px SVG glyphs on a 24 px
+canvas, with rounded 1.65 px strokes and quiet surface fills: Tasks a checklist,
+Topology connected nodes, Extensions a puzzle piece, Usage a bar chart and
+Settings sliders. The wide rail marks the current destination with an inset
+surface and a short blue edge marker; selected SVG glyphs also turn blue. The
+narrow menu reuses the same logo and glyphs alongside labels.
+
+All three columns extend to the top of the window, without a shared horizontal
+titlebar. Wide columns have 66 px
 headers: the assistant pane owns its heading, fold control and creation action;
 the conversation header uses the conversation canvas and owns the assistant avatar,
 name, Space, slider-shaped settings action and ellipsis menu. Usage stays in the

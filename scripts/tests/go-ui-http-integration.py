@@ -80,10 +80,7 @@ def run(binary, base, env, cli_command, profile_only=False):
             # Never print the code section or put credentials in diagnostics.
             output = result.stdout.split("### Ran Playwright code", 1)[0]
             if result.returncode or "### Error" in output:
-                raise RuntimeError(
-                    "Playwright failed; cached CLI and installed browser are required.\n"
-                    + output[:2500]
-                )
+                raise RuntimeError("Playwright browser check failed.\n" + output[:2500])
             return output
 
         def api(method, path, body=None):
@@ -427,6 +424,7 @@ def run(binary, base, env, cli_command, profile_only=False):
                 "go-ui-machines-browser.js",
                 "go-ui-membership-browser.js",
             ]:
+                print("Browser contracts: " + script, flush=True)
                 code = (
                     (ROOT / "scripts/tests" / script)
                     .read_text()
@@ -455,7 +453,13 @@ def run(binary, base, env, cli_command, profile_only=False):
             if '"passed":true' not in refresh:
                 raise RuntimeError("Background refresh browser contracts did not pass")
             code = (ROOT / "scripts/tests/go-ui-shell-browser.js").read_text()
-            shell = browser_cli("run-code", code.replace("STATE", json.dumps({"origin": origin})))
+            shell = browser_cli(
+                "run-code",
+                "async page => { const context = await page.context().browser().newContext({serviceWorkers:'block'}); "
+                "try { return await ("
+                + code.replace("STATE", json.dumps({"origin": origin}))
+                + ")(await context.newPage()); } finally { await context.close(); } }",
+            )
             if '"errors":[]' not in shell:
                 raise RuntimeError("Application shell browser contracts did not pass")
             code = (ROOT / "scripts/tests/go-ui-production-browser.js").read_text()
