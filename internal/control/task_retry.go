@@ -62,7 +62,7 @@ func (s *Service) resultTools(ctx context.Context, owner, turn string) ([]modelp
 	}
 	if hasTasks {
 		for _, tool := range s.productTools(false) {
-			if tool.Name == "get_task" || tool.Name == "set_task_dispositions" {
+			if tool.Name == "get_task" || tool.Name == "set_task_dispositions" || tool.Name == "register_resource" || tool.Name == "present_resource" {
 				tools = append(tools, tool)
 			}
 		}

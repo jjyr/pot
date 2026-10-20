@@ -38,7 +38,7 @@ INSERT INTO assistant_profile_requests VALUES
 		t.Fatal("invalid historical seed accepted")
 	}
 	var created int
-	if err := db.QueryRow("SELECT COUNT(*) FROM assistant_profiles WHERE assistant_id='missing'").Scan(&created); err != nil || created != 0 || migrationCount(t, db) != 1 {
+	if err := db.QueryRow("SELECT COUNT(*) FROM assistant_profiles WHERE assistant_id='missing'").Scan(&created); err != nil || created != 0 || migrationCount(t, db) != 10 {
 		t.Fatal("failed avatar migration did not roll back", err)
 	}
 	execMigrationSQL(t, db, "DELETE FROM assistant_profile_requests WHERE id='bad'")
@@ -75,6 +75,42 @@ INSERT INTO assistant_profile_requests VALUES
 		if err := db.QueryRow("SELECT SUM(revision) FROM assistant_definitions").Scan(&totalRevision); err != nil || totalRevision != 12 {
 			t.Fatal("upgrade changed assistant revisions", err)
 		}
+	}
+}
+
+func TestDisplayResourcesUpgradePreservesExistingControl(t *testing.T) {
+	db := migrationDB(t)
+	ctx := context.Background()
+	old := fstest.MapFS{}
+	entries, err := fs.ReadDir(migrationFiles, "migrations/control")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "0012_") {
+			continue
+		}
+		name := "migrations/control/" + entry.Name()
+		data, _ := fs.ReadFile(migrationFiles, name)
+		old[name] = &fstest.MapFile{Data: data}
+	}
+	if err := migrateDatabase(ctx, db, ControlDatabase, old); err != nil {
+		t.Fatal(err)
+	}
+	execMigrationSQL(t, db, `INSERT INTO assistant_definitions(id,name,revision,request_id,created_name) VALUES('kept','Kept',7,'kept-request','Kept')`)
+	for range 2 {
+		if err := Migrate(ctx, db, ControlDatabase); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var name string
+	var revision int
+	if err := db.QueryRow("SELECT name,revision FROM assistant_definitions WHERE id='kept'").Scan(&name, &revision); err != nil || name != "Kept" || revision != 7 {
+		t.Fatal("upgrade changed existing assistant", err)
+	}
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM display_resources").Scan(&count); err != nil || count != 0 {
+		t.Fatal("resource table upgrade", err)
 	}
 }
 

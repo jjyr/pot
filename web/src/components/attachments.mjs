@@ -1,5 +1,6 @@
 import {icon} from './icons.mjs';
 import {translate} from '../locales/messages.mjs';
+import {createResourceView} from './resource-view.mjs';
 
 export const attachmentLimit = 8 * 1024 * 1024;
 export const attachmentTypes = {image:['image/png','image/jpeg','image/webp'],pdf:['application/pdf']};
@@ -136,22 +137,14 @@ export function createAttachmentComposer({client,form,input,getKey,getCaps,canAd
 }
 
 export function renderMessageAttachments(refs,{client,scope,locale,onError,caps}) {
-  const host=node('div','message-attachments'),releases=[];host.dispose=()=>{for(const release of releases.splice(0))release();};
+  const host=node('div','message-attachments');host.dispose=()=>host.replaceChildren();
   for(const attachment of refs||[]){
-    const release=client.retainAttachment?.(attachment,scope);if(release)releases.push(release);
-    const image=attachmentKind(attachment.mime_type)==='image',card=node('div',image?'sent-image':'sent-document');
-    const open=action('',async()=>{
-      const dialog=node('dialog','attachment-viewer'),title=node('span','attachment-name',attachment.name),close=action('×',()=>dialog.close());
-      close.setAttribute('aria-label',locale()==='zh-CN'?'关闭':'Close');
-      const header=node('div','attachment-viewer-toolbar');header.append(title,action(locale()==='zh-CN'?'下载':'Download',()=>client.downloadAttachment(attachment,scope).catch(onError)),close);dialog.append(header);document.body.append(dialog);const releaseDialog=client.retainAttachment?.(attachment,scope);dialog.addEventListener('close',()=>{releaseDialog?.();dialog.remove();},{once:true});dialog.showModal();
-      try{const url=await client.attachmentURL(attachment,scope);if(!dialog.isConnected)return;const content=node(image?'img':'iframe');if(image)content.alt=attachment.name;else content.title=attachment.name;content.src=url;dialog.append(content);}catch(reason){dialog.append(node('p','attachment-error',reason.message));}
+    const resource={...attachment,entry:attachment.name,files:[],download:{path:attachment.name}};
+    const card=createResourceView({resource,mode:'preview'},{
+      acquireResource:()=>{const release=client.retainAttachment?.(attachment,scope);return {url:()=>client.attachmentURL(attachment,scope),release:()=>release?.()};},
+      downloadResource:()=>client.downloadAttachment(attachment,scope),
+      noticeKey:caps&&!attachmentAllowed(caps,attachment.mime_type)?'attachments.historyUnavailable':null,
     });
-    open.className='attachment-preview control';open.setAttribute('aria-label',attachment.name);
-    if(image){const img=node('img');img.alt=attachment.name;img.loading='lazy';open.append(img);client.attachmentURL(attachment,scope).then(url=>{if(img.isConnected)img.src=url;}).catch(reason=>{card.append(node('span','attachment-error',reason.message));});}
-    else open.textContent=attachment.name;
-    const download=action(locale()==='zh-CN'?'下载':'Download',()=>client.downloadAttachment(attachment,scope).catch(onError));
-    card.append(open,node('span','attachment-size',formatAttachmentSize(attachment.size)),download);
-    if(caps&&!attachmentAllowed(caps,attachment.mime_type))card.append(node('span','attachment-error',locale()==='zh-CN'?'当前模型无法读取此历史附件':'Current model cannot read this earlier attachment'));
     host.append(card);
   }
   return host;

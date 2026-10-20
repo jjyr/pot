@@ -33,7 +33,7 @@ func TestUnifiedMessageToolBindsSenderAndRemovesWaitAndGuide(t *testing.T) {
 		if !names["send_message"] || names["guide_task"] || names["wait_task"] || names["send_assistant_message"] || names["read_chat_messages"] {
 			t.Fatal("obsolete or missing tool", names)
 		}
-		if worker && len(names) != 1 {
+		if worker && (len(names) != 3 || !names["register_resource"] || !names["present_resource"]) {
 			t.Fatal("worker acquired task management authority", names)
 		}
 	}

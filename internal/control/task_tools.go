@@ -22,6 +22,7 @@ func (s *Service) productTools(worker bool) []modelprotocol.ToolDefinition {
 			out = append(out, d)
 		}
 	}
+	out = append(out, resourceTools()...)
 	if worker {
 		return out
 	}
@@ -50,6 +51,25 @@ func (s *Service) productDispatchBound(owner, executionOwner, turn string, gener
 				return s.instructionCall(ctx, owner, turn, generation, call, emit)
 			}
 			id, _ := core.HashJSON([]any{owner, turn, generation, call.ID})
+			if !worker && (call.Name == "register_resource" || call.Name == "present_resource") {
+				conversation, err := s.Conversation(ctx, owner)
+				if err != nil {
+					return nil, err
+				}
+				thread, err := conversation.Thread(ctx)
+				if err != nil {
+					return nil, err
+				}
+				if thread == nil || thread.Generation != generation {
+					return nil, errors.New("resource tool generation expired")
+				}
+			}
+			if call.Name == "register_resource" {
+				return s.registerResource(ctx, owner, executionOwner, id, worker, call.Arguments)
+			}
+			if call.Name == "present_resource" {
+				return s.presentResource(ctx, owner, call.Arguments)
+			}
 			if call.Name == "update_agent_profile" {
 				if owner != executionOwner || modelRole(turn) != "pot" {
 					return nil, errors.New("profile updates require the user's assistant chat")

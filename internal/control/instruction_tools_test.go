@@ -26,7 +26,7 @@ func TestInstructionToolsAlwaysRequireExactOwnerReview(t *testing.T) {
 			if err = s.Permissions.Configure("runtime", MachinePolicy{ExecutionAccess: policy}); err != nil {
 				t.Fatal(err)
 			}
-			if len(s.productTools(true)) != 1 {
+			if len(s.productTools(true)) != 3 {
 				t.Fatal("Worker inherited owner instruction tools")
 			}
 			sub := s.Permissions.Changes.Subscribe()

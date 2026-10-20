@@ -391,22 +391,27 @@ func (c *Conversation) Events(ctx context.Context, after int64) ([]protocol.Even
 	return c.store.Events(ctx, after)
 }
 func (c *Conversation) putMessageLocked(ctx context.Context, m protocol.Message, metadata map[string]string) error {
-	event, err := c.store.SaveWithMetadata(ctx, m, metadata)
+	return c.putMessagesLocked(ctx, []protocol.Message{m}, metadata)
+}
+func (c *Conversation) putMessagesLocked(ctx context.Context, messages []protocol.Message, metadata map[string]string) error {
+	events, err := c.store.SaveMessagesWithMetadataMutation(ctx, messages, metadata, nil)
 	if err != nil {
 		return err
 	}
-	found := false
-	for i := range c.messages {
-		if c.messages[i].ID == m.ID {
-			c.messages[i] = m
-			found = true
-			break
+	for _, m := range messages {
+		found := false
+		for i := range c.messages {
+			if c.messages[i].ID == m.ID {
+				c.messages[i] = m
+				found = true
+				break
+			}
+		}
+		if !found {
+			c.messages = append(c.messages, m)
 		}
 	}
-	if !found {
-		c.messages = append(c.messages, m)
-	}
-	c.cursor = *event.Cursor
+	c.cursor = *events[len(events)-1].Cursor
 	c.changedLocked()
 	return nil
 }

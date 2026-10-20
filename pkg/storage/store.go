@@ -108,7 +108,7 @@ func (s *Store) Duplicate(ctx context.Context, request string) (*Message, error)
 	return s.one(ctx, "SELECT body FROM messages WHERE request_id=?", request)
 }
 func (s *Store) LastCompletedReply(ctx context.Context) (*Message, error) {
-	return s.one(ctx, "SELECT body FROM messages WHERE json_extract(body,'$.role')='assistant' AND json_extract(body,'$.status')='complete' AND trim(json_extract(body,'$.text'))<>'' ORDER BY rowid DESC LIMIT 1")
+	return s.one(ctx, "SELECT body FROM messages WHERE json_extract(body,'$.role')='assistant' AND json_extract(body,'$.status')='complete' AND (trim(json_extract(body,'$.text'))<>'' OR json_extract(body,'$.presentation.resource.id') IS NOT NULL) ORDER BY rowid DESC LIMIT 1")
 }
 func (s *Store) Cursor(ctx context.Context) (int64, error) {
 	var n int64
@@ -246,7 +246,7 @@ func (s *Store) saveMessages(ctx context.Context, messages []Message, metadata m
 			if _, err := tx.ExecContext(ctx, "INSERT INTO messages VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body", m.ID, m.RequestID, string(body)); err != nil {
 				return err
 			}
-			if notify && m.Role == "assistant" && m.Status == "complete" && strings.TrimSpace(m.Text) != "" && !strings.HasPrefix(m.ID, "task-report-") {
+			if notify && m.Role == "assistant" && m.Status == "complete" && (strings.TrimSpace(m.Text) != "" || m.Presentation != nil) && !strings.HasPrefix(m.ID, "task-report-") {
 				if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO main_message_outbox(message_id,body) VALUES (?,?)", m.ID, string(body)); err != nil {
 					return err
 				}

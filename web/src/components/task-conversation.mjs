@@ -14,6 +14,7 @@ import {copyFeedback} from './motion.mjs';
 
 export function createTaskConversation({root,task,record:initial,locale,client,scope,draft,onDraft,downloadFile,toolMemory,approvalFor,onDecision,onSend,onStop,onPause,onCancel,onArchive,onUsage,onRefresh,onSettings,assistantName}){
   const acquireFileImage=client.acquireFileImage?({task,path})=>client.acquireFileImage(task,path,scope):undefined;
+  const resourceOptions={acquireResource:client.acquireResource?resource=>client.acquireResource(resource,scope):undefined,downloadResource:client.downloadResource?resource=>client.downloadResource(resource,scope):undefined};
   const tr=(en,zh)=>locale()==='zh-CN'?zh:en,t=key=>translate(locale(),key);
   const label=(button,text)=>{button.title=text;button.setAttribute('aria-label',text);};
   const iconButton=(name,text,className='icon-button')=>{const button=action('',()=>{},{});button.className=className;button.append(icon(name));label(button,text);return button;};
@@ -97,7 +98,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
         entry.childrenWindow.set(entry.tool.element.open?children.map(child=>({...child.message,viewKey:child.message.id})):[]);
       }else{
         if(!entry.body){entry.body=n('div','message-body');entry.element.append(entry.body);if(message.role==='assistant')entry.reply=createReplyBubble(entry.body);}
-        if(message.role==='assistant')entry.reply.update(message,{t,downloadFile,acquireFileImage,onReconnect:()=>run(onRefresh),onSettings});
+        if(message.role==='assistant')entry.reply.update(message,{t,downloadFile,acquireFileImage,...resourceOptions,onReconnect:()=>run(onRefresh),onSettings});
         else{
           if(!entry.source){entry.source=n('div','task-message-source');entry.element.prepend(entry.source);}
           const sender=message.input?.sender,name=sender===task.assistant_id?assistantName:(client.assistants||[]).find(item=>item.id===sender&&item.space_id===scope.space)?.name||sender;

@@ -127,6 +127,17 @@ that private origin. This opt-in fixture adds no product data or native notifica
 local HTTP/SSE and downloads with a deterministic loopback model fixture; it needs
 cached Playwright CLI and an installed browser.
 
+For the resource tool and component fixture, run
+`POT_RESOURCE_FIXTURE_URL_FILE=/tmp/pot-resource-url mise exec -- go test
+./internal/transport -run '^TestResourceBrowserFixture$' -v -count=1 -timeout=35m`.
+Open the written origin in the browser, or its
+`/scripts/tests/fixtures/display-resources.html` shared-component showcase. The
+fixture uses a disposable Control, authenticated browser proxy, synthetic media
+and a deterministic local provider that invokes the real resource tools.
+`scripts/tests/go-ui-display-resources-browser.js` can be run with the cached
+Playwright CLI's `run-code --filename` option against that origin. Stop the
+fixture with `POST /fixture/stop`. No product data or paid model calls are used.
+
 Use private temporary data roots for service integration tests. Never open the
 same root in App and standalone Runtime concurrently. Report checks and limitations
 in the task/PR, not repository validation reports. Store only reviewed UI comparison

@@ -65,8 +65,10 @@ original continuation boundary. Continuation survives bounded reset/delta reads
 even when its original input is outside the loaded message window.
 `view.messages` contains message envelopes (`message`, decimal-string `sequence`,
 `version`, optional `context_only`); `view.history` describes the loaded interval.
-`GET /api/v1/snapshot` returns the same bounded reset frame. Protocol version 4
+`GET /api/v1/snapshot` returns the same bounded reset frame. Protocol version 5
 uses this contract for browser, Wails and remote Space streams.
+Completed assistant messages may include a typed resource `presentation` without
+Markdown text; it has its own durable message identity and unread entry.
 
 Reset frames read the latest 80 messages. `GET /api/v1/history` accepts one of
 `before`, `after` (exclusive sequence), or `around` (message ID), and an optional

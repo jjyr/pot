@@ -1,6 +1,7 @@
 import {icon} from './icons.mjs';
 import {createMarkdownView} from './markdown.mjs';
 import {replyFailureKind} from '../state/chat-replies.mjs';
+import {createResourceView} from './resource-view.mjs';
 
 const node=(tag,className='',text)=>{const value=document.createElement(tag);value.className=className;if(text!==undefined)value.textContent=text;return value;};
 
@@ -11,11 +12,13 @@ export function createReplyBubble(host) {
   status.setAttribute('aria-live','polite');
   host.classList.add('reply-bubble');host.append(content,status);
   const markdown=createMarkdownView(content);
-  let text,signature;
+  let text,signature,resourceKey,resourceNode;
   return {
-    update(message,{t,downloadFile,acquireFileImage,onSettings,onReconnect,onRetrySend,canRetrySend}){
+    update(message,{t,downloadFile,acquireFileImage,acquireResource,downloadResource,onSettings,onReconnect,onRetrySend,canRetrySend}){
       if(text!==message.text){markdown.update(message.text,{downloadFile,acquireFileImage});text=message.text;}
-      content.hidden=!message.text;
+      const nextResource=JSON.stringify(message.presentation||null);
+      if(resourceKey!==nextResource){resourceNode?.remove();resourceNode=null;resourceKey=nextResource;if(message.presentation){resourceNode=createResourceView(message.presentation,{acquireResource,downloadResource});content.append(resourceNode);}}
+      content.hidden=!message.text&&!message.presentation;
       const next=JSON.stringify([message.phase,message.error,t('replyFailed'),message.local,canRetrySend]);
       if(signature===next)return;signature=next;
       const expanded=!!status.querySelector('details')?.open;

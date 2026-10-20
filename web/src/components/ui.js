@@ -586,6 +586,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const requestMessageRender=resize=>{resizeAnchor ||= !!resize;renderMessages();};
   let renderingSnapshot=null,renderingSending=null,renderingForest=null;
   const markdownFiles=scope=>({
+    acquireResource:client.acquireResource?resource=>client.acquireResource(resource,scope):undefined,
+    downloadResource:client.downloadResource?resource=>client.downloadResource(resource,scope):undefined,
     acquireFileImage:client.acquireFileImage?({task,path})=>client.acquireFileImage(task,path,scope):undefined,
     downloadFile:client.downloadFile?async({task,path})=>{try{await client.downloadFile(task,path,scope);}catch(reason){error=reason.message;updateControls();}}:undefined,
   });

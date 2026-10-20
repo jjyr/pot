@@ -10,6 +10,7 @@ import (
 	"github.com/jjyr/pot/internal/controlplane"
 	"github.com/jjyr/pot/internal/gateway"
 	"github.com/jjyr/pot/internal/linkhost"
+	"github.com/jjyr/pot/internal/resources"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/internal/secrets"
@@ -57,6 +58,7 @@ type Service struct {
 	pluginMu            sync.Mutex
 	pluginStreams       map[string]backgroundStream
 	Attachments         *attachments.Store
+	Resources           *resources.Store
 	mu                  sync.Mutex
 	resourceMutations   sync.Mutex
 	options             Options
@@ -117,6 +119,10 @@ func Open(options Options) (*Service, error) {
 		}
 	}()
 	var err error
+	s.Resources, err = resources.Open(filepath.Join(options.Root, "resources"), filepath.Join(options.Root, "control.sqlite"))
+	if err != nil {
+		return nil, err
+	}
 	s.Attachments, err = attachments.Open(filepath.Join(options.Root, "attachments"))
 	if err != nil {
 		return nil, err
@@ -470,6 +476,9 @@ func (s *Service) Close() error {
 	}
 	if s.Registry != nil {
 		result = errors.Join(result, s.Registry.Close())
+	}
+	if s.Resources != nil {
+		result = errors.Join(result, s.Resources.Close())
 	}
 	return result
 }
