@@ -20,6 +20,7 @@ implementation. Code defines actual behavior.
 | Backend responsibilities and API contracts | [Backend components](backend-components.md) |
 | Reusable Go packages and embedding a host | [Go libraries](go-libraries.md) |
 | Native cross-machine transport, identities and session recovery | [Peer protocol](peer-protocol.md) |
+| Extension management UI, independent MCP servers and icons | [Extensions](extensions.md) |
 | Plugins, tools, approvals and browser execution | [Plugin packages](plugins.md), [composition](tool-composition.md), [permissions](permissions.md), [computer use](computer-use.md) |
 | Codex delegation and local plugin | [Codex Bridge](../integrations/codex/README.md) |
 | Assistant messaging and Agent Links | [Assistant messages](assistant-messages.md) |

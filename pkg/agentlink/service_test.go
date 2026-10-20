@@ -516,6 +516,8 @@ ALTER TABLE codex_agent_host RENAME COLUMN node_id TO control_id;
 DROP TABLE node_identity_secret_migration;
 DROP TABLE agent_link_claim_digest_formats;
 DROP TABLE display_resources;
+DROP TABLE extension_settings;
+DROP TABLE mcp_servers;
 ALTER TABLE assistant_definitions DROP COLUMN deleted;
 DELETE FROM pot_migrations WHERE id >= '0009_';`); err != nil {
 			t.Fatal(err)

@@ -9,7 +9,6 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/instance"
 	"github.com/jjyr/pot/pkg/modeldirectory"
-	"github.com/jjyr/pot/pkg/plugin"
 	"github.com/jjyr/pot/pkg/storage"
 	"net/url"
 	"os"
@@ -50,6 +49,7 @@ type ProfileStore struct {
 	directory        *modeldirectory.Directory
 	state            profileFile
 	ownerAction      func(func() error) error
+	extensions       *Service
 }
 
 func OpenProfiles(path, pluginRoot string, registry *gateway.Registry) (*ProfileStore, error) {
@@ -96,10 +96,16 @@ func OpenProfiles(path, pluginRoot string, registry *gateway.Registry) (*Profile
 // defaultAgentSettings discovers installed tool packages and pins execution snapshots.
 func (p *ProfileStore) defaultAgentSettings() (core.AgentSettings, error) {
 	settings := core.DefaultAgentSettings()
-	if p.pluginRoot == "" {
+	if p.pluginRoot == "" && p.extensions == nil {
 		return settings, nil
 	}
-	packages, err := plugin.Discover(p.pluginRoot)
+	roots := []string{p.pluginRoot}
+	if p.extensions != nil {
+		p.extensions.extensionsMu.Lock()
+		defer p.extensions.extensionsMu.Unlock()
+		roots = append(roots, filepath.Join(p.extensions.options.AgentHome, "plugins"))
+	}
+	packages, err := discoverPlugins(roots...)
 	if err != nil {
 		return settings, err
 	}
@@ -111,8 +117,31 @@ func (p *ProfileStore) defaultAgentSettings() (core.AgentSettings, error) {
 		if err != nil {
 			return settings, err
 		}
+		enabled := true
+		if p.extensions != nil {
+			enabled, err = p.extensions.enabled(context.Background(), "plugins", installed.Manifest.ID)
+			if err != nil {
+				return settings, err
+			}
+		}
 		root := installed.Root
-		settings.Plugins[installed.Manifest.ID] = core.PluginConfig{Enabled: true, Source: &root, Bundle: &bundle}
+		settings.Plugins[installed.Manifest.ID] = core.PluginConfig{Enabled: enabled, Source: &root, Bundle: &bundle}
+	}
+	if p.extensions != nil {
+		servers, err := p.extensions.mcpServers(context.Background())
+		if err != nil {
+			return settings, err
+		}
+		for _, server := range servers {
+			if !server.Enabled || len(server.Tools) == 0 || len(server.DisabledTools) == len(server.Tools) {
+				continue
+			}
+			bundle, err := mcpBundle(server)
+			if err != nil {
+				return settings, err
+			}
+			settings.Plugins[bundle.Manifest.ID] = core.PluginConfig{Enabled: true, Bundle: &bundle}
+		}
 	}
 	return settings, nil
 }

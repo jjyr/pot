@@ -301,6 +301,18 @@ func Allowed(method, path string) bool {
 	if path == "/api/v1/agent-links/invitation" {
 		return method == "POST"
 	}
+	if path == "/api/v1/extensions" {
+		return method == "GET" || method == "POST"
+	}
+	if path == "/api/v1/extensions/mcp/oauth/begin" || path == "/api/v1/extensions/mcp/oauth/complete" {
+		return method == "POST"
+	}
+	if path == "/api/v1/extensions/mcp" {
+		return method == "POST"
+	}
+	if strings.HasPrefix(path, "/api/v1/extensions/skills/") {
+		return method == "GET" && core.Identifier(strings.TrimPrefix(path, "/api/v1/extensions/skills/"))
+	}
 	if path == "/api/v1/plugin-notifications" {
 		return method == "GET"
 	}

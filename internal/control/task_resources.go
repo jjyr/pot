@@ -67,6 +67,11 @@ func (s *Service) selectTask(ctx context.Context, owner string, r protocol.Creat
 			return tasks.Selection{}, err
 		}
 	}
+	settings, err := s.Profiles.defaultAgentSettings()
+	if err != nil {
+		return tasks.Selection{}, err
+	}
+	spec.Params.Agent.Plugins = settings.Plugins
 	plugins := []string{}
 	for name, plugin := range spec.Params.Agent.Plugins {
 		if plugin.Enabled {
@@ -97,11 +102,20 @@ func (s *Service) currentTaskResource(ctx context.Context, l runner.Launch) (tas
 	if profile == nil {
 		return taskResource{}, errors.New("Task source Provider is unavailable for resource synchronization")
 	}
+	settings, err := s.Profiles.defaultAgentSettings()
+	if err != nil {
+		return taskResource{}, err
+	}
 	spec.Params.Agent.Plugins = map[string]core.PluginConfig{}
 	for _, name := range l.Plugins {
-		plugin, exists := profile.Params.Agent.Plugins[name]
+		plugin, exists := settings.Plugins[name]
 		if !exists || !plugin.Enabled {
 			return taskResource{}, fmt.Errorf("selected plugin %s is unavailable or disabled", name)
+		}
+		if strings.HasPrefix(name, "mcp-") {
+			plugin.Source = nil
+			spec.Params.Agent.Plugins[name] = plugin
+			continue
 		}
 		directory := filepath.Join(s.options.PluginRoot, name)
 		if plugin.Source != nil {
@@ -150,6 +164,13 @@ func (s *Service) currentTaskResource(ctx context.Context, l runner.Launch) (tas
 	}
 	selectedPaths := map[string]bool{}
 	for _, skill := range catalog.Skills {
+		enabled, err := s.enabled(ctx, "skills", extensionID(skill.Location))
+		if err != nil {
+			return taskResource{}, err
+		}
+		if !enabled {
+			return taskResource{}, fmt.Errorf("selected skill %s is disabled", skill.Name)
+		}
 		selectedPaths[filepath.Dir(skill.Location)] = true
 	}
 	resources := taskResource{Config: spec, ReservedNames: reserved, Roots: []taskSkillRoot{}}

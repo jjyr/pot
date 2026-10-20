@@ -41,7 +41,7 @@ possible-effects warnings and cannot assert a preflight status. Cleanup uncertai
 remains owned by the execution supervisor.
 
 Runtime loads packages from `PluginRoot`, defaulting to
-`ResourceDirectory/plugins`. Installed tools are enabled by default; Provider
+`ResourceDirectory/plugins`. Installed tools are enabled by default and can be disabled in [Extensions](extensions.md); Provider
 connection forms only configure models and credentials. Main turns and prepared
 Tasks retain their resource snapshots. Before a Task first prepares, the original
 Runner synchronizes selected current tool files and Skills through Control's
@@ -51,10 +51,9 @@ run-bound authenticated interface. Project instructions are read on the destinat
 execution scope and bundle digest. Cancellation, ownership checks, operation
 receipts and uncertainty fences apply to plugin calls as to built-in tools.
 
-`mise run build:plugins` packages only manifests and declared capability files.
+`mise run build:plugins` packages manifests, declared capability files and optional `icon.svg` / `icon.png` presentation assets and their attribution files.
 Packages contain no VM engines, images or guest bootstrap. Stop Runtime before
-replacing a complete package. Live reload, automatic installation, arbitrary MCP
-server configuration and a plugin marketplace remain outside this contract. The
+replacing a complete package. The Extensions page imports and updates user packages separately from packaged resources. Managed independent MCP servers use the same tool execution boundary; see [Extensions](extensions.md). A plugin marketplace and automatic package updates remain outside this contract. The
 [Codex Bridge](../integrations/codex/README.md) package owns its paired remote MCP
 connection and durable SSE consumer.
 

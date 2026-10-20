@@ -54,12 +54,14 @@ type Service struct {
 	agentLinks          *agentLinkHost
 	linkPlugins         *linkhost.Host
 	pluginWG            sync.WaitGroup
+	mcpOAuth            map[string]mcpOAuthSession
 	pluginMu            sync.Mutex
 	pluginStreams       map[string]backgroundStream
 	Attachments         *attachments.Store
 	Resources           *resources.Store
 	mu                  sync.Mutex
 	resourceMutations   sync.Mutex
+	extensionsMu        sync.Mutex
 	options             Options
 	ctx                 context.Context
 	cancel              context.CancelFunc
@@ -164,6 +166,7 @@ func Open(options Options) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.Profiles.extensions = s
 	s.Usage, err = usage.Open(filepath.Join(options.Root, "usage.sqlite"))
 	if err != nil {
 		return nil, err
@@ -317,7 +320,7 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 	if err != nil {
 		return assistant.RunOptions{}, err
 	}
-	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: thread.Owner, Turn: request.RequestID, Generation: thread.Generation, DefaultTarget: target, Spec: thread.Config, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, ApprovalOwner: principal, HostWorkspace: hostWorkspace, Usage: s.Usage, UsageScope: principal, Credentials: s.Integrations, Product: s.productDispatchBound(principal, thread.Owner, request.RequestID, thread.Generation, false)}
+	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: thread.Owner, Turn: request.RequestID, Generation: thread.Generation, DefaultTarget: target, Spec: thread.Config, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, ApprovalOwner: principal, HostWorkspace: hostWorkspace, Usage: s.Usage, UsageScope: principal, Credentials: s, Product: s.productDispatchBound(principal, thread.Owner, request.RequestID, thread.Generation, false)}
 	waitScope := principal
 	if thread.Owner != principal {
 		waitScope = thread.Owner

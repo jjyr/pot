@@ -123,9 +123,16 @@ Open the origin from that URL file at
 the shared DOM against synthetic messages and a deterministic loopback provider;
 attachment bytes are synthetic local blobs. Stop it with `POST /fixture/stop` at
 that private origin. This opt-in fixture adds no product data or native notifications.
- `mise run test:ui-http-integration` exercises real
-local HTTP/SSE and downloads with a deterministic loopback model fixture; it needs
-cached Playwright CLI and an installed browser.
+
+`mise run test:ui-http-integration` exercises real local HTTP/SSE and downloads
+with a deterministic loopback model fixture; it needs cached Playwright CLI and
+an installed browser.
+
+For assistant-switching scroll checks without a backend, serve the repository
+root on loopback and open
+`/scripts/tests/fixtures/chat-switching.html?conversation=alpha&locale=en`.
+It uses the shared production DOM with synthetic conversations and independently
+delayed subscriptions and background-task reads.
 
 For the resource tool and component fixture, run
 `POT_RESOURCE_FIXTURE_URL_FILE=/tmp/pot-resource-url mise exec -- go test

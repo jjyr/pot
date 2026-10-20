@@ -104,7 +104,7 @@ func TestDisplayResourcesUpgradePreservesExistingControl(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), "0013_") {
+		if entry.Name() >= "0014_" {
 			continue
 		}
 		name := "migrations/control/" + entry.Name()

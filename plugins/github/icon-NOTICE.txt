@@ -1,0 +1,3 @@
+GitHub mark from primer/octicons icons/mark-github-16.svg (MIT).
+https://github.com/primer/octicons
+The GitHub brand mark is a trademark of GitHub, Inc.
