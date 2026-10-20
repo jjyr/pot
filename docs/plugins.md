@@ -179,9 +179,10 @@ Statuses are stable identifiers: `ready`, `baseline`, `backoff`, `rate_limited`,
 `authorization`, `permission`, `overflow`; the host also reports `disabled` and
 `unavailable`. The settings projection also distinguishes `pending`,
 `waiting_assistant`, `assistant_missing` and `plugin_missing` from known host
-configuration state. Plugin discovery failures retain their raw diagnostic in
-settings details; runtime status identifiers and queue counts are also available
-there. Protocol/process/acceptance failures leave the old checkpoint and
+configuration state. Plugin discovery and host exchange failures retain their diagnostic in
+settings details. Host timeouts are identified explicitly; a successful exchange
+clears the previous diagnostic. Runtime status identifiers and queue counts are also
+available there. Protocol/process/acceptance failures leave the old checkpoint and
 schedule a five-minute retry. The plugin receives that old checkpoint again;
 there is no false success receipt. Owner management uses authenticated
 `GET /api/v1/plugin-notifications` and
@@ -222,54 +223,59 @@ the revision they started with, survive background updates and language changes,
 and require an explicit save; an outdated revision is rejected without discarding
 the draft. Expansion lasts for this settings visit and resets on account changes.
 All fields are directly visible in the expanded account, without advanced sections.
-Optional filters are comma-separated `owner/repo` names and labeled notification
-reasons, with a free-form field preserving other API/configured values.
-Blank reason filters select `mention`, `team_mention`, `review_requested`,
-`author`, `comment`, `subscribed`, `participating`. `subscribed` can include watched
-threads; restrict reasons/repositories to reduce noise. API reason values are
-matched locally;
-labels cover known GitHub reasons and a comma-separated field retains custom
-values. Filters do not add API reason parameters or change the default set.
-The one-time history request carries `existing` (a nonce) and `existing_account`
-(the connected GitHub identity). Consumed nonces remain consumed across account
-resets. Legacy unscoped requests cannot cross account identities, including on
-failed exchanges, so reconnecting does not silently replay history.
+The default scope is **All notifications**, with no reason or repository exclusions.
+This includes assignments, CI activity, invitations, security alerts, and future
+GitHub reason and subject types, as well as Issue/PR updates. This scope covers
+notifications GitHub exposes to the connected account; repository activity that
+GitHub does not put in that account's notification feed is not reconstructed.
+Choose **Selected reasons** to show labeled reason checkboxes. Existing explicit
+reason selections are preserved. Repository filters remain optional comma-separated
+`owner/repo` names; blank selects the account-wide feed. There is no free-form
+API-value field or historical-inbox import setting.
 
-The plugin uses only GET requests to the GitHub REST API. It requests all
-notification thread states (including read threads), follows pagination, respects
-`X-Poll-Interval`, and uses `Last-Modified` / `If-Modified-Since` on non-paginated
-responses plus a two-minute overlapping `since` cursor. A 304 with no accumulated
-updates invokes no model. The first successful scan of recent thread state establishes a baseline without
-walking the historical inbox or sending it to the model. Repository filters select
-repository notification endpoints, reducing upstream reads as well as model input. Account changes establish a
-fresh baseline. Offline/permission/rate-limit responses keep the old checkpoint
-and back off. The Settings status distinguishes those failures.
+The plugin uses only GET requests to the GitHub REST API. It requests all thread
+states (including read threads), respects `X-Poll-Interval`, and overlaps its
+`since` cursor by two minutes. The first scan establishes a baseline without
+emitting old notifications. Account changes establish a fresh baseline. Each
+complete scan advances its time cursor; an incomplete scan retains its feed,
+next page, remaining page rows and original start time in the opaque checkpoint.
+Restart continues that scan instead of fetching its completed pages again.
+Repository filters use the corresponding repository notification endpoints.
+`Last-Modified` / `If-Modified-Since` apply only to non-paginated feeds.
 
-To explicitly handle history, check **Process existing notifications on the next
-check**, then save. Each checked save supplies a fresh `config.existing` request
-ID (string, max 128 bytes). The plugin handles each request once after a complete
-scan; the UI checkbox is not a permanent replay setting. API configuration uses
-`{repositories: ["owner/repo"], reasons: ["mention"], existing: "request-id"}`.
+Notification ingestion takes priority over context expansion. Each changed,
+matching subject saves its title, reason, type and source link. For Issues/PRs,
+comment/review expansion is best-effort, with at most eight detail requests in
+an exchange. Failed, inaccessible or slow detail reads retain the basic update
+with `truncated: true`; they do not roll back another notification, a completed
+feed page or the scan cursor. Other subject types use a GitHub notifications link
+scoped to their repository and need no Issue/PR detail APIs. Feed access failures
+still report authorization, permission, rate-limit or connection status and
+respect backoff; already accepted pending updates can continue draining.
 
-Notifications are thread snapshots, not an event log. For changed Issue/PR
-threads, the plugin expands issue comments and PR review comments/reviews,
-filters using stored timestamps/content markers, and includes a reason update
-when a review request/mention has no new comment. Same-thread updates coalesce
-for at least one minute, with a five-minute collection threshold for continuously
-updated threads. The plugin releases at most eight ready thread events per five
-minutes across the connected account; the next release time is part of its opaque
-checkpoint and survives process/Control restarts. Older checkpoints without that
-field can release their ready events immediately. Pending threads remain in the
-checkpoint until acceptance; pacing, API backoff or a stopped Control can extend
-their wait. This bounds new event production, rather than delaying a claimed
-summary: an existing backlog can drain in consecutive bounded batches when the
-assistant is available. Context
-is bounded and marked truncated when needed; use source links for full threads.
-The current implementation keeps up to 2,000 thread checkpoints, 128 pending
-thread groups and 20 pages per endpoint. An over-limit response leaves its cursor
-unchanged with visible `overflow`; this is not a full GitHub archive or webhook
-replay. Deleted, edited or transient updates absent from GitHub's notification
-snapshot cannot be reconstructed. Only Issue and PullRequest subjects are expanded.
+Each poll has a 25-second work budget, at most 24 total requests, and a five-second
+per-request deadline, within the host's 45-second exchange limit. Large lists
+continue in later exchanges. The checkpoint keeps up to 2,000 thread markers
+and 128 pending groups; a full pending buffer pauses page consumption until
+accepted groups drain, retaining the unconsumed rows. Same-thread updates
+coalesce for at least one minute, with a five-minute collection threshold for
+continuously updated threads. At most eight ready groups are emitted per five
+minutes; pacing survives restart. Notification snapshots are not an event log:
+deleted, transient or otherwise absent updates cannot be reconstructed. Open the
+source link for complete context when an update is truncated.
+
+`tasks/0007_github_notification_progress.sql` removes the retired `existing` and
+`existing_account` configuration fields and `manual` checkpoint receipt. Pending
+history imports are cancelled and made immediately eligible for normal polling.
+The migration preserves baseline/cursor data, pending groups, accepted event IDs,
+original recipients and delivery receipts, and fences old settings drafts by
+incrementing the GitHub binding revision. It does not replay or reset accepted
+notifications. Removed history settings are rejected on new configuration saves.
+
+UI windows may close while Control continues polling. Control/computer shutdown
+stops polling and summaries; resume uses the stored cursor and scan progress.
+No public server, automatic GitHub reply/read-state mutation or cross-device
+coordination is added.
 
 GitHub notification access must succeed independently of repository access.
 The endpoint requires compatible OAuth/classic-token notification permissions
@@ -278,8 +284,3 @@ fine-grained PATs. Pot reuses the connected account and never upgrades scopes or
 runs `gh auth login` automatically. A permission status requires checking the
 existing authorization/organization policy; a connected label alone does not
 prove this endpoint is usable.
-
-UI windows may close while Control continues polling. Control/computer shutdown
-stops polling and summaries; resume uses the stored cursor and may combine
-accumulated updates. No public server, separate GitHub identity, MCP server,
-automatic GitHub reply/read-state mutation or cross-device coordination is added.
