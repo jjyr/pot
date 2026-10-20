@@ -3,9 +3,7 @@ package peer
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -13,46 +11,22 @@ import (
 	"time"
 )
 
+const protocolVersion = 4
+
 type hello struct {
-	Version  int             `json:"version"`
-	Identity Identity        `json:"identity"`
-	Nonce    string          `json:"nonce"`
-	Expected *Identity       `json:"expected"`
-	Service  string          `json:"service"`
-	Auth     json.RawMessage `json:"auth"`
-}
-type challenge struct {
-	Version  int      `json:"version"`
-	Identity Identity `json:"identity"`
-	Nonce    string   `json:"nonce"`
-	Hello    string   `json:"hello"`
-}
-type confirmation struct {
-	Session string `json:"session"`
-}
-type acceptance struct {
-	Session string `json:"session"`
-	Error   string `json:"error,omitempty"`
+	Version  int             `cbor:"version"`
+	Identity Identity        `cbor:"identity"`
+	Expected *Identity       `cbor:"expected"`
+	Service  string          `cbor:"service"`
+	Auth     json.RawMessage `cbor:"auth"`
 }
 
-func nonce() string {
-	var raw [32]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		panic(err)
-	}
-	return base64.RawURLEncoding.EncodeToString(raw[:])
+type acceptance struct {
+	Version  int      `cbor:"version"`
+	Identity Identity `cbor:"identity"`
+	Error    string   `cbor:"error,omitempty"`
 }
-func validNonce(n string) bool {
-	raw, err := base64.RawURLEncoding.DecodeString(n)
-	return err == nil && len(raw) == 32
-}
-func hash(parts ...[]byte) string {
-	h := sha256.New()
-	for _, p := range parts {
-		_, _ = h.Write(p)
-	}
-	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
-}
+
 func handshakeContext(ctx context.Context, c net.Conn) func() {
 	deadline := time.Now().Add(10 * time.Second)
 	if t, ok := ctx.Deadline(); ok && t.Before(deadline) {
@@ -68,22 +42,40 @@ func handshakeContext(ctx context.Context, c net.Conn) func() {
 		_ = c.SetDeadline(time.Time{})
 	}
 }
-func writeSigned(c net.Conn, key ed25519.PrivateKey, domain string, value any) ([]byte, error) {
-	raw, err := seal(key, domain, value)
-	if err == nil {
-		err = writePacket(c, raw, maxHandshake)
+func writeHandshake(c net.Conn, value any) error {
+	raw, err := wireEncoding.Marshal(value)
+	if err != nil {
+		return err
 	}
-	return raw, err
+	return writePacket(c, raw, maxHandshake)
 }
 func validHello(h hello) bool {
-	return h.Version == 2 && h.Identity.Validate() == nil && validNonce(h.Nonce) && len(h.Service) > 0 && len(h.Service) <= 128 && len(h.Auth) <= 32*1024 && json.Valid(h.Auth) && (h.Expected == nil || h.Expected.Validate() == nil)
+	if h.Version != protocolVersion || h.Identity.Validate() != nil || len(h.Service) < 1 || len(h.Service) > 128 || len(h.Auth) > 32*1024 || !json.Valid(h.Auth) {
+		return false
+	}
+	if h.Expected != nil {
+		return h.Expected.Validate() == nil
+	}
+	// An unpinned endpoint may only discover an untrusted identity. Never send
+	// capabilities or expose a reverse business handler before establishing trust.
+	return h.Service == "identity" && string(h.Auth) == "null"
 }
 
-// Dial authenticates a peer over private TCP. A nil Expected is suitable only
-// for untrusted identity discovery; service admission must use a trusted pin.
+// Dial authenticates a peer over TLS 1.3 on private TCP. A nil Expected permits
+// only capability-free identity discovery, whose result does not establish trust.
 // It never retries a request or falls back to another protocol.
 func Dial(ctx context.Context, endpoint string, options DialOptions) (*Session, error) {
 	if validLocal(options.Identity, options.PrivateKey) != nil {
+		return nil, ErrUnauthorized
+	}
+	if options.Expected != nil {
+		pin := *options.Expected
+		options.Expected = &pin
+	}
+	if options.Auth == nil {
+		options.Auth = json.RawMessage("null")
+	}
+	if !validHello(hello{protocolVersion, options.Identity, options.Expected, options.Service, options.Auth}) || options.Expected == nil && options.Handler != nil {
 		return nil, ErrUnauthorized
 	}
 	u, addresses, err := resolveEndpoint(ctx, endpoint)
@@ -109,36 +101,34 @@ func Dial(ctx context.Context, endpoint string, options DialOptions) (*Session, 
 func dialConn(ctx context.Context, c net.Conn, o DialOptions) (*Session, error) {
 	finish := handshakeContext(ctx, c)
 	defer func() { finish() }()
+	config, err := tlsConfig(o.Identity, o.PrivateKey, o.Expected, false)
+	if err != nil {
+		return nil, err
+	}
+	secured := tls.Client(c, config)
+	if err = secured.HandshakeContext(ctx); err != nil {
+		return nil, fmt.Errorf("%w: TLS handshake: %v", ErrUnauthorized, err)
+	}
+	remote, err := certificateIdentity(secured.ConnectionState(), false)
+	if err != nil {
+		return nil, err
+	}
 	if o.Auth == nil {
 		o.Auth = json.RawMessage("null")
 	}
-	h := hello{2, o.Identity, nonce(), o.Expected, o.Service, o.Auth}
-	if !validHello(h) {
-		return nil, fmt.Errorf("invalid peer handshake")
-	}
-	hraw, err := writeSigned(c, o.PrivateKey, "pot-peer/client-hello/v2", h)
-	if err != nil {
-		return nil, err
-	}
-	craw, err := readPacket(c, maxHandshake)
-	if err != nil {
-		return nil, err
-	}
-	var envelope signed
-	var ch challenge
-	if decode(craw, &envelope) != nil || decode(envelope.Payload, &ch) != nil || ch.Version != 2 || !validNonce(ch.Nonce) || ch.Hello != hash(hraw) || open(craw, ch.Identity, "pot-peer/server-challenge/v2", &ch) != nil || (o.Expected != nil && *o.Expected != ch.Identity) {
+	h := hello{protocolVersion, o.Identity, o.Expected, o.Service, o.Auth}
+	if !validHello(h) || o.Expected == nil && o.Handler != nil {
 		return nil, ErrUnauthorized
 	}
-	sid := hash(hraw, craw)
-	if _, err = writeSigned(c, o.PrivateKey, "pot-peer/client-confirm/v2", confirmation{sid}); err != nil {
+	if err = writeHandshake(secured, h); err != nil {
 		return nil, err
 	}
-	araw, err := readPacket(c, maxHandshake)
+	raw, err := readPacket(secured, maxHandshake)
 	if err != nil {
 		return nil, err
 	}
 	var accepted acceptance
-	if open(araw, ch.Identity, "pot-peer/server-accept/v2", &accepted) != nil || accepted.Session != sid {
+	if decode(raw, &accepted) != nil || accepted.Version != protocolVersion || accepted.Identity != remote {
 		return nil, ErrUnauthorized
 	}
 	if accepted.Error != "" {
@@ -148,10 +138,12 @@ func dialConn(ctx context.Context, c net.Conn, o DialOptions) (*Session, error) 
 	if lifetime == nil {
 		lifetime = context.Background()
 	}
-	// Clear handshake deadlines before starting either session goroutine.
 	finish()
 	finish = func() {}
-	s := newSession(lifetime, c, o.Identity, o.PrivateKey, ch.Identity, sid, o.Service, o.Auth, o.Handler, "client", "server")
+	s, err := newSession(lifetime, secured, remote, o.Service, o.Auth, o.Handler, true)
+	if err != nil {
+		return nil, err
+	}
 	s.start()
 	return s, nil
 }
@@ -172,46 +164,43 @@ func (s *Server) Accept(ctx context.Context, c net.Conn) (_ *Session, err error)
 			_ = c.Close()
 		}
 	}()
-	if validLocal(s.Identity, s.PrivateKey) != nil {
-		return nil, ErrUnauthorized
+	config, err := tlsConfig(s.Identity, s.PrivateKey, nil, true)
+	if err != nil {
+		return nil, err
 	}
 	admissionCtx, cancelAdmission := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelAdmission()
 	finish := handshakeContext(admissionCtx, c)
 	defer func() { finish() }()
-	hraw, err := readPacket(c, maxHandshake)
+	secured := tls.Server(c, config)
+	if err = secured.HandshakeContext(admissionCtx); err != nil {
+		return nil, fmt.Errorf("%w: TLS handshake: %v", ErrUnauthorized, err)
+	}
+	remote, err := certificateIdentity(secured.ConnectionState(), true)
 	if err != nil {
 		return nil, err
 	}
-	var envelope signed
+	raw, err := readPacket(secured, maxHandshake)
+	if err != nil {
+		return nil, err
+	}
 	var h hello
-	if decode(hraw, &envelope) != nil || decode(envelope.Payload, &h) != nil || !validHello(h) || open(hraw, h.Identity, "pot-peer/client-hello/v2", &h) != nil || (h.Expected != nil && *h.Expected != s.Identity) {
-		return nil, ErrUnauthorized
-	}
-	craw, err := writeSigned(c, s.PrivateKey, "pot-peer/server-challenge/v2", challenge{2, s.Identity, nonce(), hash(hraw)})
-	if err != nil {
-		return nil, err
-	}
-	sid := hash(hraw, craw)
-	fraw, err := readPacket(c, maxHandshake)
-	if err != nil {
-		return nil, err
-	}
-	var confirmed confirmation
-	if open(fraw, h.Identity, "pot-peer/client-confirm/v2", &confirmed) != nil || confirmed.Session != sid {
+	// The application identity must be the identity that actually completed
+	// mutual TLS, not a public key or node ID claimed in arbitrary metadata.
+	if decode(raw, &h) != nil || !validHello(h) || h.Identity != remote || h.Expected != nil && *h.Expected != s.Identity {
 		return nil, ErrUnauthorized
 	}
 	var handler Handler
 	if s.Authorize == nil {
 		err = ErrUnauthorized
 	} else {
-		handler, err = s.Authorize(admissionCtx, h.Identity, h.Service, append(json.RawMessage(nil), h.Auth...))
+		handler, err = s.Authorize(admissionCtx, remote, h.Service, append(json.RawMessage(nil), h.Auth...))
 	}
-	a := acceptance{Session: sid}
+	a := acceptance{Version: protocolVersion, Identity: s.Identity}
 	if err != nil {
 		a.Error = boundedError(err).Message
 	}
-	if _, sendErr := writeSigned(c, s.PrivateKey, "pot-peer/server-accept/v2", a); sendErr != nil {
+	if sendErr := writeHandshake(secured, a); sendErr != nil {
 		return nil, sendErr
 	}
 	if err != nil {
@@ -219,7 +208,10 @@ func (s *Server) Accept(ctx context.Context, c net.Conn) (_ *Session, err error)
 	}
 	finish()
 	finish = func() {}
-	conn := newSession(ctx, c, s.Identity, s.PrivateKey, h.Identity, sid, h.Service, h.Auth, handler, "server", "client")
+	conn, err := newSession(ctx, secured, remote, h.Service, h.Auth, handler, false)
+	if err != nil {
+		return nil, err
+	}
 	if s.OnSession != nil {
 		s.OnSession(conn)
 	}

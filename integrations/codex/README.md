@@ -1,6 +1,6 @@
 # Codex Agent Link adapter
 
-Codex joins Pot through the same Agent Link invitation and signed TCP transport
+Codex joins Pot through the same Agent Link invitation and TLS 1.3 TCP transport
 as another Pot node. The local plugin owns a directory of virtual assistants.
 Each virtual assistant maps to one persistent Codex App Server thread. Direct
 chat and delegated tasks use that same thread, in one queue per assistant.
@@ -11,7 +11,7 @@ Assistants pointing at the same directory still share those files.
 Pot chat / task tools
         |
    Agent Link (directory, messages, submit, status, cancel)
-        | signed TCP
+        | TLS 1.3 / Yamux / CBOR + optional Zstd
 Codex Agent Link host
         +-- assistant A -- serial chat/task queue -- persistent Codex thread A
         +-- assistant B -- serial chat/task queue -- persistent Codex thread B
@@ -66,8 +66,8 @@ Create another assistant for a different scope. Rename or change the default
 using the same command with the original workspace and mode. These are local
 owner operations, never remote task arguments.
 
-The owner HTTP listener is bound to `127.0.0.1:8792`; signed peer TCP uses
-`127.0.0.1:8793`. Configure a reachable private or Tailscale endpoint through the
+The owner HTTP listener is bound to `127.0.0.1:8792`; mutually authenticated TLS
+peer TCP uses `127.0.0.1:8793`. Configure a reachable private or Tailscale endpoint through the
 existing connection settings. One reachable endpoint permits bidirectional
 communication. The TCP endpoint never exposes the owner HTTP API. Identity keys
 and owner credentials are encrypted; the host root must be owner-only.

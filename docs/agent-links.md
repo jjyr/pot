@@ -13,7 +13,7 @@ Existing topology / assistant chat / task UI
                      |
           pkg/agentlink.Backend
             /                   \
-    local Pot adapter      signed peer session
+    local Pot adapter      TLS peer session
             |                   |
      local task journal     remote adapter
                           /              \
@@ -53,16 +53,19 @@ Invitation version 4 carries the pinned node key, reachable private TCP endpoint
 public display anchor and a single-use capability in its URL fragment. Never
 log this capability, expose it through model tools or send it in chat. Preview
 proves the server key before revealing the capability and cannot claim it or
-exchange business data. The signed pair claim persists before confirmation, so
+exchange business data. The pair intent persists before confirmation, so
 lost responses retry the original request. Both directions use one authenticated
 session; only the dialing side needs an endpoint.
 
 Endpoints permit loopback, private LAN, IPv6 ULA and Tailscale addresses, including
 DNS resolving entirely to allowed ranges. Dialing validates the actual numeric
 address again. There is no public HTTP, proxy or protocol downgrade fallback.
-Frames are signed, not encrypted: confidentiality comes from the trusted local
-network, VPN or Tailscale. Peer listeners expose only identity verification and
-Agent Link, without membership or distributed execution services.
+TLS 1.3 encrypts frames and invitation capabilities, with mutual Ed25519 key
+proof and the invitation or saved public-key pin. Self-signed certificates are
+generated automatically. Calls use independent Yamux streams with CBOR metadata
+and optionally Zstd-compressed bodies; see [Peer protocol](peer-protocol.md). Peer listeners
+expose only identity verification and Agent Link, without membership or
+distributed execution services.
 
 ## Business contract and recovery
 

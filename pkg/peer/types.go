@@ -1,9 +1,10 @@
 // Package peer provides authenticated, framed TCP sessions for Pot services.
 // It has no knowledge of assistants, machine membership, or execution policy.
-// Ed25519 authenticates identities and frames; it does not encrypt traffic.
+// TLS 1.3 encrypts traffic and proves possession of pinned Ed25519 identities.
 package peer
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
@@ -16,7 +17,6 @@ import (
 )
 
 const MaxPayload = 24 * 1024 * 1024
-const MaxFrame = 32 * 1024 * 1024
 const maxHandshake = 64 * 1024
 const maxPending = 64
 
@@ -28,8 +28,8 @@ var ErrClosed = errors.New("peer session closed")
 var ErrUncertain = errors.New("peer request outcome uncertain")
 
 type Identity struct {
-	NodeID    string `json:"node_id"`
-	PublicKey string `json:"public_key"`
+	NodeID    string `json:"node_id" cbor:"node_id"`
+	PublicKey string `json:"public_key" cbor:"public_key"`
 }
 
 func NewIdentity(id string, key ed25519.PublicKey) Identity {
@@ -46,6 +46,11 @@ func validLocal(i Identity, key ed25519.PrivateKey) error {
 	if i.Validate() != nil || len(key) != ed25519.PrivateKeySize || NewIdentity(i.NodeID, key.Public().(ed25519.PublicKey)) != i {
 		return ErrUnauthorized
 	}
+	// An Ed25519 private key includes a cached public suffix. Checking only
+	// Public() would accept another node's pin pasted onto an unrelated seed.
+	if !bytes.Equal(key, ed25519.NewKeyFromSeed(key.Seed())) {
+		return ErrUnauthorized
+	}
 	return nil
 }
 
@@ -60,9 +65,9 @@ type Authorizer func(context.Context, Identity, string, json.RawMessage) (Handle
 // RemoteError carries a bounded service error. Data belongs to that service;
 // peer never interprets business fault types or permission decisions.
 type RemoteError struct {
-	Message string          `json:"message"`
-	Code    string          `json:"code,omitempty"`
-	Data    json.RawMessage `json:"data,omitempty"`
+	Message string          `json:"message" cbor:"message"`
+	Code    string          `json:"code,omitempty" cbor:"code,omitempty"`
+	Data    json.RawMessage `json:"data,omitempty" cbor:"data,omitempty"`
 }
 
 func (e *RemoteError) Error() string { return e.Message }
@@ -79,8 +84,11 @@ type DialOptions struct {
 	Context context.Context
 }
 
+func validRequestMetadata(id, method string) bool {
+	return len(id) > 0 && len(id) <= 256 && !strings.ContainsRune(id, 0) && len(method) > 0 && len(method) <= 128
+}
 func validRequest(r Request) error {
-	if len(r.ID) < 1 || len(r.ID) > 256 || strings.ContainsRune(r.ID, 0) || len(r.Method) < 1 || len(r.Method) > 128 || len(r.Params) > MaxPayload || !json.Valid(r.Params) {
+	if !validRequestMetadata(r.ID, r.Method) || len(r.Params) > MaxPayload || !json.Valid(r.Params) {
 		return fmt.Errorf("invalid peer request")
 	}
 	return nil

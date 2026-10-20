@@ -81,10 +81,12 @@ launches or new delegations. SQLite schemas and upgrades belong to
 
 ## Transport and presentation
 
-[Peer transport](peer-protocol.md) uses stable Ed25519 identities and signed TCP
-sessions. Service admission separately verifies the saved Agent Link. Private
-`tcp://host:port` endpoints authenticate content; VPN or Tailscale supplies
-confidentiality. The listener exposes identity and collaboration services.
+[Peer transport](peer-protocol.md) uses stable Ed25519 identities and mutually
+authenticated TLS 1.3 sessions. Service admission separately verifies the saved
+Agent Link. Private `tcp://host:port` endpoints use automatic self-signed
+certificates and public-key pins to authenticate and encrypt content. The listener
+exposes identity and collaboration services. Yamux multiplexes independent calls;
+CBOR describes each message and Zstd optionally compresses large bodies.
 
 UI identity includes node, assistant and conversation. Drafts, history and
 notifications retain their owner; navigation generations reject late responses.
