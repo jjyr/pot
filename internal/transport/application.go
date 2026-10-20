@@ -337,9 +337,12 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 		switch path {
 		case "/api/v1/providers/allowances":
 			var body struct {
-				ProfileID string `json:"profile_id"`
-				Action    string `json:"action"`
-				control.ProviderAllowanceMonitorRequest
+				ProfileID string  `json:"profile_id"`
+				Action    string  `json:"action"`
+				Enabled   bool    `json:"enabled"`
+				Threshold float64 `json:"threshold"`
+				Assistant string  `json:"assistant"`
+				Revision  int64   `json:"revision"`
 			}
 			if err = decode(r.Body, &body); err != nil {
 				return nil, err
@@ -348,7 +351,7 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 			case "refresh":
 				return s.RefreshConnectionAllowances(ctx, body.ProfileID)
 			case "configure":
-				if err = s.ConfigureConnectionAllowance(ctx, body.ProfileID, body.ProviderAllowanceMonitorRequest); err != nil {
+				if err = s.ConfigureConnectionAllowance(ctx, body.ProfileID, control.ProviderAllowanceMonitorRequest{Enabled: body.Enabled, Threshold: body.Threshold, Assistant: body.Assistant, Revision: body.Revision}); err != nil {
 					return nil, err
 				}
 				return s.ConnectionAllowances(ctx, body.ProfileID)
