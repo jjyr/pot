@@ -23,14 +23,12 @@ type CheckProvider struct {
 	ProfileID      string `json:"profile_id"`
 }
 type ProviderCheck struct {
-	Catalog         *core.ProviderModelCatalog `json:"catalog,omitempty"`
-	Supported       bool                       `json:"supported"`
-	Models          []string                   `json:"models"`
-	InputModalities map[string][]string        `json:"input_modalities"`
+	Catalog   *core.ProviderModelCatalog `json:"catalog,omitempty"`
+	Supported bool                       `json:"supported"`
 }
 
 func (p *ProfileStore) Check(ctx context.Context, r CheckProvider) (ProviderCheck, error) {
-	result := ProviderCheck{Models: []string{}, InputModalities: map[string][]string{}}
+	result := ProviderCheck{}
 	resolved, err := resolveProviderEndpoint(r.Endpoint, r.Protocol)
 	if err != nil {
 		return result, err
@@ -63,55 +61,31 @@ func (p *ProfileStore) Check(ctx context.Context, r CheckProvider) (ProviderChec
 	if typ.Capabilities.Catalog == "none" {
 		return result, nil
 	}
+	var response core.ModelProviderResponse
 	if typ.Capabilities.Catalog == "plugin" {
-		response, err := p.pluginRead(ctx, typ, core.ModelProviderConnection{ID: requestConnectionID(r.ProfileID), Type: typ.definition.ID, Revision: 1, Endpoint: r.Endpoint, Protocol: r.Protocol}, "list_models", key)
-		if err != nil {
-			return result, err
+		response, err = p.pluginRead(ctx, typ, core.ModelProviderConnection{ID: requestConnectionID(r.ProfileID), Type: typ.definition.ID, Revision: 1, Endpoint: r.Endpoint, Protocol: r.Protocol}, "list_models", key)
+	} else {
+		result, err = p.checkHTTP(ctx, r, key)
+		if err == nil && !result.Supported {
+			return result, nil
 		}
-		result.Catalog = response.Catalog
-		result.Supported = true
-		for _, model := range response.Catalog.Models {
-			result.Models = append(result.Models, model.ID)
-			if len(model.InputModalities) > 0 {
-				result.InputModalities[model.ID] = conversationModalities(model.InputModalities)
-			}
-		}
-		slices.Sort(result.Models)
-		if err = p.checkedCatalogFence(ctx, r, typ, startingProfile); err != nil {
+		response.Catalog = result.Catalog
+	}
+	if err != nil {
+		return ProviderCheck{}, err
+	}
+	if err = p.checkedCatalogFence(ctx, r, typ, startingProfile); err != nil {
+		return ProviderCheck{}, err
+	}
+	if r.ProfileID != "" {
+		if err = p.cacheCheckedCatalog(ctx, r, typ, response, key, startingProfile); err != nil {
 			return ProviderCheck{}, err
 		}
-		if r.ProfileID != "" {
-			if err = p.cacheCheckedCatalog(ctx, r, typ, response, key, startingProfile); err != nil {
-				return ProviderCheck{}, err
-			}
-		}
-		p.rememberCatalog(typ, r.Endpoint, r.Protocol, key, response)
-		return result, nil
 	}
-	result, err = p.checkHTTP(ctx, r, key)
-	if err == nil {
-		models := []core.ProviderModel{}
-		for _, id := range result.Models {
-			models = append(models, core.ProviderModel{ID: id, InputModalities: result.InputModalities[id]})
-		}
-		catalog := result.Catalog
-		if catalog == nil {
-			catalog = &core.ProviderModelCatalog{Models: models, ReadAt: time.Now().UTC().Format(time.RFC3339Nano)}
-		}
-		response := core.ModelProviderResponse{Catalog: catalog}
-		result.Catalog = response.Catalog
-		if err = p.checkedCatalogFence(ctx, r, typ, startingProfile); err != nil {
-			return ProviderCheck{}, err
-		}
-		if r.ProfileID != "" {
-			if err = p.cacheCheckedCatalog(ctx, r, typ, response, key, startingProfile); err != nil {
-				return ProviderCheck{}, err
-			}
-		}
-		p.rememberCatalog(typ, r.Endpoint, r.Protocol, key, response)
-	}
-	return result, err
+	p.rememberCatalog(typ, r.Endpoint, r.Protocol, key, response)
+	return ProviderCheck{Supported: true, Catalog: response.Catalog}, nil
 }
+
 func requestConnectionID(id string) string {
 	if id == "" {
 		return "connection-draft"
@@ -119,7 +93,7 @@ func requestConnectionID(id string) string {
 	return id
 }
 func (p *ProfileStore) checkHTTP(ctx context.Context, r CheckProvider, key []byte) (ProviderCheck, error) {
-	result := ProviderCheck{Models: []string{}, InputModalities: map[string][]string{}}
+	result := ProviderCheck{}
 	resolved, err := resolveProviderEndpoint(r.Endpoint, r.Protocol)
 	if err != nil {
 		return result, err
@@ -179,7 +153,6 @@ func (p *ProfileStore) checkHTTP(ctx context.Context, r CheckProvider, key []byt
 		}
 		for _, m := range value.Models {
 			id := strings.TrimPrefix(m.Name, "models/")
-			result.Models = append(result.Models, id)
 			result.Catalog.Models = append(result.Catalog.Models, core.ProviderModel{ID: id, Name: m.DisplayName, MaxInput: m.MaxInput, MaxOutput: m.MaxOutput})
 		}
 	} else {
@@ -187,7 +160,6 @@ func (p *ProfileStore) checkHTTP(ctx context.Context, r CheckProvider, key []byt
 			return result, errors.New("model list missing")
 		}
 		for _, m := range value.Data {
-			result.Models = append(result.Models, m.ID)
 			model := core.ProviderModel{ID: m.ID, Name: m.DisplayName, ContextWindow: m.ContextWindow, MaxOutput: m.MaxOutput}
 			// Optional gateway extension, not part of the OpenAI model schema.
 			// A missing or incompatible extension must not reject a valid model list.
@@ -207,25 +179,9 @@ func (p *ProfileStore) checkHTTP(ctx context.Context, r CheckProvider, key []byt
 					model.OutputModalities = append(model.OutputModalities, kind)
 				}
 			}
-			if slices.Contains(modalities.Input, "text") {
-				inputs := []string{"text"}
-				for _, kind := range []string{"image", "audio", "pdf"} {
-					if slices.Contains(modalities.Input, kind) {
-						inputs = append(inputs, kind)
-					}
-				}
-				result.InputModalities[m.ID] = inputs
-			}
 			result.Catalog.Models = append(result.Catalog.Models, model)
 		}
 	}
-	for _, id := range result.Models {
-		if id == "" || len(id) > 256 || strings.ContainsAny(id, "\r\n\x00") {
-			return ProviderCheck{}, errors.New("invalid model identity")
-		}
-	}
-	slices.Sort(result.Models)
-	result.Models = slices.Compact(result.Models)
 	seen := map[string]bool{}
 	models := []core.ProviderModel{}
 	for _, model := range result.Catalog.Models {
@@ -234,6 +190,7 @@ func (p *ProfileStore) checkHTTP(ctx context.Context, r CheckProvider, key []byt
 			seen[model.ID] = true
 		}
 	}
+	slices.SortFunc(models, func(a, b core.ProviderModel) int { return strings.Compare(a.ID, b.ID) })
 	result.Catalog.Models = models
 	if err = (core.ModelProviderResponse{Catalog: result.Catalog}).Validate("list_models"); err != nil {
 		return ProviderCheck{}, err

@@ -329,14 +329,10 @@ func (p *ProfileStore) readSavedMetadataFresh(ctx context.Context, id, method st
 		if err != nil {
 			return response, err
 		}
-		models := []core.ProviderModel{}
-		for _, id := range checked.Models {
-			models = append(models, core.ProviderModel{ID: id, InputModalities: checked.InputModalities[id]})
+		if !checked.Supported {
+			return response, errors.New("model provider catalog unavailable")
 		}
 		response.Catalog = checked.Catalog
-		if response.Catalog == nil {
-			response.Catalog = &core.ProviderModelCatalog{Models: models, ReadAt: time.Now().UTC().Format(time.RFC3339Nano)}
-		}
 	} else {
 		response, err = p.pluginRead(ctx, typ, connection, method, key)
 		if err != nil {
@@ -387,9 +383,6 @@ func (p *ProfileStore) ReadAllowances(ctx context.Context, id string, refresh bo
 		return core.AllowanceSnapshot{}, err
 	}
 	return *response.Allowances, nil
-}
-func (s *Service) ReadProviderAllowances(ctx context.Context, id string, refresh bool) (core.AllowanceSnapshot, error) {
-	return s.Profiles.ReadAllowances(ctx, id, refresh)
 }
 
 // applyModelMetadata only uses the exact ID from a current contribution's cache.
@@ -652,7 +645,7 @@ dispatch:
 }
 
 func (p *ProfileStore) directoryCatalog(typ ProviderType) (ProviderCheck, error) {
-	result := ProviderCheck{Models: []string{}, InputModalities: map[string][]string{}, Catalog: &core.ProviderModelCatalog{Models: []core.ProviderModel{}, ReadAt: time.Now().UTC().Format(time.RFC3339Nano)}}
+	result := ProviderCheck{Catalog: &core.ProviderModelCatalog{Models: []core.ProviderModel{}, ReadAt: time.Now().UTC().Format(time.RFC3339Nano)}}
 	for _, option := range p.directory.Options() {
 		if option.ID != typ.DirectoryProvider {
 			continue
@@ -665,8 +658,6 @@ func (p *ProfileStore) directoryCatalog(typ ProviderType) (ProviderCheck, error)
 			if model.PDF {
 				inputs = append(inputs, "pdf")
 			}
-			result.Models = append(result.Models, model.ID)
-			result.InputModalities[model.ID] = inputs
 			result.Catalog.Models = append(result.Catalog.Models, core.ProviderModel{ID: model.ID, Name: model.Name, InputModalities: inputs, OutputModalities: []string{"text"}, ContextWindow: int64(model.Context), MaxInput: int64(model.Input), MaxOutput: int64(model.Output)})
 		}
 		result.Supported = true

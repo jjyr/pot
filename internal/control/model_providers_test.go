@@ -59,7 +59,7 @@ func TestProviderContributionCatalogCacheAndDisableGates(t *testing.T) {
 		t.Fatal(route)
 	}
 	checked, err := s.Profiles.Check(ctx, CheckProvider{ProfileID: profile.ID, Endpoint: route.Endpoint, Protocol: route.Protocol})
-	if err != nil || checked.Catalog == nil || len(checked.Models) != 1 {
+	if err != nil || checked.Catalog == nil || len(checked.Catalog.Models) != 1 {
 		t.Fatal(checked, err)
 	}
 	spec, err := s.Profiles.Resolve(profile.ID)
@@ -451,7 +451,7 @@ func TestDeclarativeDirectoryReaderUsesLocalFactsWithoutCredentials(t *testing.T
 	manifest := `{"schema_version":2,"id":"local-facts","version":"1","contributes":{"model_providers":{"providers":[{"id":"openai","name":"Local facts","protocol":"openai_responses","directory_provider":"openai","capabilities":{"catalog":"models_dev"}}]}}}`
 	writeTaskFixture(t, filepath.Join(root, "local-facts", "plugin.json"), manifest)
 	result, err := s.Profiles.Check(context.Background(), CheckProvider{ProviderTypeID: "local-facts/openai", Endpoint: "https://never-contacted.invalid/v1", Protocol: "openai_responses"})
-	if err != nil || !result.Supported || result.Catalog == nil || len(result.Models) == 0 {
+	if err != nil || !result.Supported || result.Catalog == nil || len(result.Catalog.Models) == 0 {
 		t.Fatal(result, err)
 	}
 }

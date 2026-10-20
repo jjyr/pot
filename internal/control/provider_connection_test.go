@@ -54,7 +54,7 @@ func TestProviderDiscoveryAndInference(t *testing.T) {
 			defer server.Close()
 			input := CheckProvider{Endpoint: server.URL + "/v1", Protocol: tt.protocol, APIKey: "private-test-key"}
 			result, err := s.Profiles.Check(context.Background(), input)
-			if err != nil || !result.Supported || len(result.Models) != 1 || calls != 0 {
+			if err != nil || !result.Supported || len(result.Catalog.Models) != 1 || calls != 0 {
 				t.Fatal(result, err, calls)
 			}
 			if _, err = s.Profiles.Test(context.Background(), TestProvider{Endpoint: input.Endpoint, Protocol: input.Protocol, APIKey: input.APIKey, ProfileID: input.ProfileID, Model: "model"}); err != nil || calls != 1 {
@@ -92,10 +92,21 @@ func TestDiscoveredInputModalitiesSurviveSelectionAndReload(t *testing.T) {
 	defer server.Close()
 	ctx := context.Background()
 	check, err := s.Profiles.Check(ctx, CheckProvider{Endpoint: server.URL + "/v1", Protocol: "openai_responses", APIKey: "test-key"})
-	if err != nil || len(check.InputModalities) != 2 {
+	if err != nil || check.Catalog == nil {
 		t.Fatal(check, err)
 	}
-	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "save-inputs", Name: "Custom", Model: "custom/vision", Endpoint: server.URL + "/v1", Protocol: "openai_responses", APIKey: "test-key", Models: check.Models, ModelSettings: &core.ModelSettings{InputModalities: check.InputModalities}})
+	ids := []string{}
+	inputs := map[string][]string{}
+	for _, model := range check.Catalog.Models {
+		ids = append(ids, model.ID)
+		if len(model.InputModalities) > 0 {
+			inputs[model.ID] = conversationModalities(model.InputModalities)
+		}
+	}
+	if len(inputs) != 2 {
+		t.Fatal(inputs)
+	}
+	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "save-inputs", Name: "Custom", Model: "custom/vision", Endpoint: server.URL + "/v1", Protocol: "openai_responses", APIKey: "test-key", Models: ids, ModelSettings: &core.ModelSettings{InputModalities: inputs}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +138,7 @@ func TestModelListOptionalModalitiesCompatibility(t *testing.T) {
 			}))
 			defer server.Close()
 			result, err := s.Profiles.Check(context.Background(), CheckProvider{Endpoint: server.URL + "/v1", Protocol: "openai_chat", APIKey: "test-key"})
-			if err != nil || !result.Supported || len(result.Models) != 2 || len(result.InputModalities) != 1 || len(result.InputModalities["extended"]) != 2 {
+			if err != nil || !result.Supported || result.Catalog == nil || len(result.Catalog.Models) != 2 || result.Catalog.Models[0].ID != "extended" || len(result.Catalog.Models[0].InputModalities) != 2 || len(result.Catalog.Models[1].InputModalities) != 0 {
 				t.Fatalf("valid model list rejected or absent facts treated as unsupported: %+v, %v", result, err)
 			}
 		})

@@ -18,7 +18,7 @@ func TestModelProviderUpgradePreservesImmutableRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if entry.Name() >= "0015_" {
+		if entry.Name() >= "0016_" {
 			continue
 		}
 		name := "migrations/control/" + entry.Name()

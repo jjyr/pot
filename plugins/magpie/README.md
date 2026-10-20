@@ -1,38 +1,34 @@
 # Magpie model connection
 
-This optional Pot plugin contributes one Magpie connection type. It reads the
-configured gateway's public HTTP API; it does not access Magpie's private files,
-change its providers, or install anything in Magpie.
+This optional plugin registers one model connection through Pot's shared
+[provider contribution contract](../../docs/plugins.md#model-connection-contributions).
+It uses only Magpie's public gateway API, preserving Pot's other connections and
+leaving Magpie's private files, configuration and plugin installation untouched.
 
-The connection uses OpenAI Responses by default. Chat Completions, Anthropic
-Messages, and Gemini protocols are also supported by Magpie and can be selected
-on the connection. Pot's Gateway handles inference directly using that protocol;
-this plugin never proxies model streams.
+The default endpoint is `http://127.0.0.1:3425`; OpenAI Responses is the default
+protocol, with Chat Completions, Anthropic Messages and Gemini also supported.
+Pot's Gateway handles inference directly. This adapter only reads metadata:
 
-The Control-local adapter reads `/v1/models` for the currently enabled models and
-routing groups, preserving their exact IDs. It reads `/v1/magpie/quotas` separately
-for subscription, plan, and balance account windows. A missing quota permission
-(for example, HTTP 403 for a restricted gateway key) does not prevent discovery
-or inference.
+- `/v1/models`: enabled models and routing groups, preserving their exact IDs.
+- `/v1/magpie/quotas`: account/plan labels and independent allowance windows.
 
-The default gateway address is `http://127.0.0.1:3425`. A configured connection
-credential is supplied transiently as `MAGPIE_API_KEY`; without one, reads identify
-Pot locally with `Authorization: Bearer magpie-pot`. A gateway on another computer
-requires a key authorized by its owner. Both use `User-Agent: Pot/0.1.0`.
+The public application credential defaults to `magpie-pot`; an owner-supplied
+private key is injected transiently as `MAGPIE_API_KEY`. A gateway on another
+computer requires an authorized gateway key. HTTP 403 from the quota endpoint
+reports permission failure independently of model discovery and inference.
+Metadata requests identify Pot, follow no redirects, and have a 15-second deadline
+and 1 MiB response limit. Diagnostics exclude upstream bodies and URLs.
 
-Metadata reads follow no redirects and have a 15-second deadline and a 1 MiB
-response limit. Errors exclude upstream bodies and URLs. Responses contain only
-the known metadata fields used by Pot.
+Window usage is a percentage. Shared pools and separate reset windows are never
+summed. Source `readAt`/`asOf` timestamps are retained; snapshot `read_at` only means
+Pot fetched the response. Unknown, unlimited, failed and deferred readings do not
+become zero usage. `until` with `renew: auto` identifies renewal, not expiration.
 
-Quota values are percentages, not fractions, and separate reset windows and
-shared pools remain separate. The source's `readAt` and `asOf` values are retained;
-the snapshot's `read_at` only records when Pot fetched it. Unlimited, deferred,
-failed, and absent values are never converted into zero usage. A plan's `until`
-with `renew: auto` is its renewal time, not an expiration claim.
+The current public quota API has no documented durable account/window IDs.
+Rows report ambiguous identities; labels, personal information and row positions
+are not invented stable IDs. Pot owns the generic connection-level threshold,
+freshness and notification policy described in
+[Plugins](../../docs/plugins.md#connection-allowance-monitoring). Catalog refresh and
+model defaults follow [the shared connection behavior](../../docs/model-directory.md).
 
-The current public quota response does not document durable account/window IDs.
-Rows therefore explicitly report ambiguous identities; display labels, personal
-information, row order, and reset timestamps are not invented stable identities.
-Pot owns the generic connection-level quota threshold and notification policy.
-
-The original Magpie icon is distributed with its MIT license and source notice.
+The official Magpie icon is retained with its MIT license and source notice.
