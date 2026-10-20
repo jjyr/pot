@@ -246,7 +246,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
         },{danger:true});
         const status=n('p','inline-error');status.setAttribute('role','alert');let deleteError='';
         const refreshDelete=()=>{summary.textContent=t('assistant.moreActions');remove.textContent=t('assistant.delete');status.textContent=deleteError?t(deleteError):'';status.hidden=!deleteError;};
-        more.append(summary,remove,status);form.form.append(more);refreshDelete();
+        more.append(summary,remove,status);form.form.querySelector('.editor-fields').append(more);refreshDelete();
         window.addEventListener('pot:locale',refreshDelete);form.lifecycle.dispose=()=>window.removeEventListener('pot:locale',refreshDelete);
       }
 
