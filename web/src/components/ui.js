@@ -78,7 +78,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let assistants = [], spaces = [], selectedAssistant = null, pendingSelection = null;
   let unsubscribe = () => {}, stopChanges = () => {};
   let directoryEpoch = 0, directorySignature = '';
-  let creationStarting=false;
+  let creationStarting=false,creationFailed=false;
   const assistantCreation=createAssistantCreation({request:(...args)=>client.request(...args),locale:()=>locale,changed:()=>{if(!disposed)renderShell();}});
   const positions = new Map(), cachedSnapshots = new Map(), readingPositions = new Map();
   let chatShown=false,pendingReadingPosition=null,pendingTaskToggle=null,lastTaskReadingPosition=null,pendingFollow=false,followFrame=0;
@@ -532,7 +532,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     unavailable.hidden = route === 'chat';
     if (!client.production) unavailable.textContent = t('unavailable');
     // Search is window state and survives narrow conversation navigation/resizes.
-    const nextDirectorySignature = JSON.stringify([locale,narrow,surface,selectedAssistant?.space_id,selectedAssistant?.id,spaces,assistants,state.snapshot?.assistants,replies.records(),creationStarting,assistantCreation.pending]);
+    const nextDirectorySignature = JSON.stringify([locale,narrow,surface,selectedAssistant?.space_id,selectedAssistant?.id,spaces,assistants,state.snapshot?.assistants,replies.records(),creationStarting,assistantCreation.pending,creationFailed]);
     if (nextDirectorySignature !== directorySignature || !directory.childElementCount) {
     directorySignature=nextDirectorySignature;
     const searchValue = directory.querySelector('input')?.value || '';
@@ -551,6 +551,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     add.setAttribute('aria-busy',String(creating));
     add.onclick = createAssistant;
     heading.append(add);
+    const creationFailure=el('p','inline-error assistant-creation-error',t('assistant.createFailed'));
+    creationFailure.hidden=!creationFailed;creationFailure.setAttribute('role','alert');
     const search = el('input', 'assistant-search');
     search.type = 'search'; search.placeholder = t('search'); search.setAttribute('aria-label', t('search')); search.value = searchValue;
     const list = el('div', 'assistant-list');
@@ -571,7 +573,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     const empty = el('p', 'hint', t(items.length ? 'searchEmpty' : 'noAssistants'));
     const filter = search => {let count=0;const list=search.nextElementSibling;for(const row of list.querySelectorAll('.assistant-row')){row.hidden=!row.dataset.searchName.includes(search.value.toLowerCase());if(!row.hidden)count++;}list.querySelector('.hint').hidden=count>0;};
-    search.oninput=event=>filter(event.currentTarget);list.append(empty);nextDirectory.append(heading,search,list);filter(search);reconcile(directory,nextDirectory);directory.querySelector('.assistant-list').scrollTop=scrollTop;
+    search.oninput=event=>filter(event.currentTarget);list.append(empty);nextDirectory.append(heading,creationFailure,search,list);filter(search);reconcile(directory,nextDirectory);directory.querySelector('.assistant-list').scrollTop=scrollTop;
     }
     menu.replaceChildren();
     const menuHeading = el('div', 'mobile-menu-heading', 'Pot');
@@ -887,7 +889,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(creationStarting||assistantCreation.pending)return;
     const target=creationSpace();if(!target||target.connected===false)return;
     const origin={route,owner:selectedAssistant?.id,space:selectedAssistant?.space_id};
-    creationStarting=true;renderShell();
+    creationStarting=true;creationFailed=false;error='';renderShell();
     try{
       if(!await pages.leave()||disposed)return;
       const providers=await (client.read||client.request)('/api/v1/providers',{space:target.id,owner:''});
@@ -909,7 +911,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       assistantCreation.complete(target);
       await loadDirectory();
     }catch{
-      if(!disposed){error=t('assistant.createFailed');updateControls();}
+      if(!disposed){creationFailed=true;error=t('assistant.createFailed');updateControls();}
     }finally{creationStarting=false;if(!disposed)renderShell();}
   }
   function clearSelectedAssistant() {

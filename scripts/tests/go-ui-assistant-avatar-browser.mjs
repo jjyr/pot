@@ -36,6 +36,9 @@ export async function runAvatarRegression(probe) {
   probe.failNext=true;await open('avatar-regression-'+view+'-1');
   await wait(()=>button('New assistant')&&!button('New assistant').disabled);
   assert(!preview(),'Plus never opens a creation editor');
+  const failureNotice=document.querySelector('.assistant-creation-error');
+  assert(!failureNotice.hidden&&failureNotice.textContent.includes('Could not create'),'Directory exposes a localized creation failure');
+  if(document.querySelector('.pot-app').classList.contains('show-directory'))assert(failureNotice.getClientRects().length>0,'Phone directory failure is visible while Chat is hidden');
   assert((await directory()).length===before,'Failed creation leaves the directory intact');
   const failure=probe.posts.at(-1);
   locale('zh-CN');button('新建助手').click();
