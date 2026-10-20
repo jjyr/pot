@@ -114,6 +114,9 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	if result, err, handled := a.attachmentCall(ctx, method, u, owner, r); handled {
 		return result, err
 	}
+	if result, err, handled := a.resourceCall(ctx, method, u, owner); handled {
+		return result, err
+	}
 	if result, err, handled := a.taskCall(ctx, method, u, owner, r); handled {
 		return result, err
 	}

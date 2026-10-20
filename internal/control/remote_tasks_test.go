@@ -6,6 +6,7 @@ import (
 	"github.com/jjyr/pot/internal/controlplane"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/internal/tasks"
+	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/protocol"
 	"io"
@@ -163,6 +164,15 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 	if err != nil || string(remoteFile) != "remote-proof" {
 		t.Fatalf("fixed remote result reader: %s %v", remoteFile, err)
 	}
+	resourceArgs, _ := json.Marshal(resourceSource{Path: "artifact.txt", TaskID: record.Info.ID})
+	resourceRaw, err := control.registerResource(ctx, "main", "main", "remote-resource", false, resourceArgs)
+	if err != nil {
+		t.Fatal("snapshotting original Runner resource", err)
+	}
+	var savedResource core.Resource
+	if err = json.Unmarshal(resourceRaw, &savedResource); err != nil {
+		t.Fatal(err)
+	}
 	transcript, err := control.TaskEvents(ctx, "main", record.Info.ID, 0, 100)
 	if err != nil || len(transcript.Events) == 0 || transcript.Unavailable {
 		t.Fatalf("remote task transcript: %+v %v", transcript, err)
@@ -268,5 +278,16 @@ func TestRemoteTaskUsesOutwardRPCControlModelApprovalAndFixedWorker(t *testing.T
 		if execution.Role == "task" {
 			t.Fatal("remote wait acquired Control task slot")
 		}
+	}
+	if err := os.Remove(filepath.Join(taskRoot, "artifact.txt")); err != nil {
+		t.Fatal(err)
+	}
+	file, _, err := control.Resources.OpenFile(ctx, "main", savedResource.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if original, err := io.ReadAll(file); err != nil || string(original) != "remote-proof" {
+		t.Fatal("resource depended on removed Runner original", err)
 	}
 }

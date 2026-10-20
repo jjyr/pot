@@ -1,6 +1,7 @@
 import {createResourceReads} from '../state/resource-cache.mjs';
 import {createTopicVersions} from '../state/changes.mjs';
 import {createFileImages} from '../state/file-images.mjs';
+import {createDisplayResources} from '../state/display-resources.mjs';
 // Shared product transport. Every operation captures its Space/owner before IO.
 export class APIError extends Error {
   constructor(status, value) { super(value?.message || (typeof value?.error === 'string' && value.error) || `HTTP ${status}`); this.status = status; this.code = value?.code || 'http_error'; }
@@ -88,6 +89,13 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
   const attachmentURLs=new Map(),attachmentLeases=new Map();
   const attachmentKey=(attachment,options)=>{const scope={...context,...options};return JSON.stringify([scope.space,scope.owner,attachment.id]);};
   const client = {production: true, desktop, runtime, request,readBaselines,
+    acquireResource:createDisplayResources(request,()=>context,(resource,path,scope,operation='content',token='')=>desktop?`/pot-resource-content?${new URLSearchParams({id:resource.id,path,assistant_id:scope.owner,space_id:scope.space,render:operation==='render'?'1':'0',token})}`:`${base}${scopedPath(`/api/v1/resources/${encodeURIComponent(resource.id)}/${operation}?${new URLSearchParams({path,token})}`,scope)}`),
+    async downloadResource(resource,options={}){
+      const scope={...context,...options};
+      if(desktop)return invoke('DownloadResource',resource.id,resource.download.path.split('/').at(-1),scope.owner,scope.space,'@download');
+      await request(`/api/v1/resources/${encodeURIComponent(resource.id)}/chunk?${new URLSearchParams({path:'@download',offset:'0'})}`,scope);
+      const link=document.createElement('a');link.href=`${base}${scopedPath(`/api/v1/resources/${encodeURIComponent(resource.id)}/download`,scope)}`;link.download=resource.download.path.split('/').at(-1);link.hidden=true;document.body.append(link);try{link.click();}finally{link.remove();}
+    },
     acquireFileImage:createFileImages(request,()=>context),
     scope: () => ({...context}), setScope: value => Object.assign(context, value),
     snapshot: async options => {

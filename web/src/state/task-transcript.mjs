@@ -1,4 +1,5 @@
 import {activeTool,applyToolUpdate} from './tool-calls.mjs';
+import {projectResourceMessages} from './display-resources.mjs';
 export function createTaskTranscript(){return {cursor:0,messages:[],active:null,tools:new Map(),inputs:new Map()};}
 export function appendTaskEvents(state,events){
   for(const row of events||[]){
@@ -37,5 +38,5 @@ export function projectTaskMessages(state,inputs,record,{offline=false}={}){
   const diagnostic=record.error||(record.result?.outcome?.kind!=='cancelled'?record.result?.outcome?.error:'');
   if(diagnostic&&!rows.some(row=>row.error===diagnostic)){const previous=rows.at(-1);if(previous?.role==='assistant'&&!previous.error){previous.phase='failed';previous.error=diagnostic;}else rows.push({id:'task-error',role:'assistant',text:'',phase:'failed',error:diagnostic});}
   if(!rows.length&&active)rows.push({id:'task-activity',role:'assistant',text:'',phase:offline?'reconnecting':record.info?.paused?'paused':phase==='waiting'?'waiting':'thinking'});
-  return rows;
+  return projectResourceMessages(rows);
 }

@@ -46,6 +46,9 @@ func Handler(app *Application, token string) http.Handler {
 			streamChanges(w, r, app)
 			return
 		}
+		if app.resourceContent(w, r) {
+			return
+		}
 		if app.download(w, r) {
 			return
 		}

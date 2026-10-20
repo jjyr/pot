@@ -95,6 +95,42 @@ INSERT INTO assistant_profile_requests VALUES
 	}
 }
 
+func TestDisplayResourcesUpgradePreservesExistingControl(t *testing.T) {
+	db := migrationDB(t)
+	ctx := context.Background()
+	old := fstest.MapFS{}
+	entries, err := fs.ReadDir(migrationFiles, "migrations/control")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() >= "0014_" {
+			continue
+		}
+		name := "migrations/control/" + entry.Name()
+		data, _ := fs.ReadFile(migrationFiles, name)
+		old[name] = &fstest.MapFile{Data: data}
+	}
+	if err := migrateDatabase(ctx, db, ControlDatabase, old); err != nil {
+		t.Fatal(err)
+	}
+	execMigrationSQL(t, db, `INSERT INTO assistant_definitions(id,name,revision,request_id,created_name) VALUES('kept','Kept',7,'kept-request','Kept')`)
+	for range 2 {
+		if err := Migrate(ctx, db, ControlDatabase); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var name string
+	var revision int
+	if err := db.QueryRow("SELECT name,revision FROM assistant_definitions WHERE id='kept'").Scan(&name, &revision); err != nil || name != "Kept" || revision != 7 {
+		t.Fatal("upgrade changed existing assistant", err)
+	}
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM display_resources").Scan(&count); err != nil || count != 0 {
+		t.Fatal("resource table upgrade", err)
+	}
+}
+
 func migrationDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db, err := OpenSQLite(filepath.Join(t.TempDir(), "test.sqlite"))

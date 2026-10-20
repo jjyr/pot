@@ -1,0 +1,19 @@
+import assert from 'node:assert/strict';
+import {createDisplayResources,resourcePresentation,projectResourceMessages} from '../../web/src/state/display-resources.mjs';
+import {projectChatReplies} from '../../web/src/state/chat-replies.mjs';
+
+const file={path:'report.txt',mime_type:'text/plain',size:6,digest:'fixed'},resource={id:'resource',name:'report.txt',entry:file.path,files:[file],download:file},scope={owner:'alice',space:'remote'},reads=[];
+const acquire=createDisplayResources(async(path,options)=>{reads.push({path,options});return {size:file.size,revision:file.digest,offset:0,data:btoa('report')};},()=>scope,(_,path,captured)=>JSON.stringify([captured,path]));
+const first=acquire(resource),second=acquire(resource);scope.owner='bob';scope.space='local';
+assert.equal(await first.read(file.path),await second.read(file.path));assert.equal(reads.length,1);assert.equal(reads[0].options.owner,'alice');assert.equal(reads[0].options.space,'remote');assert.match(first.url(file.path),/alice/);
+first.release();await Promise.resolve();assert(!reads[0].options.signal.aborted);second.release();await Promise.resolve();assert(reads[0].options.signal.aborted);
+const next=acquire(resource);await next.read(file.path);assert.equal(reads[1].options.owner,'bob');next.release();
+const message={id:'tool',tool:{name:'present_resource',phase:'completed',result:{presentation:{resource,mode:'preview'}}}};
+assert(resourcePresentation(message));assert.equal(projectResourceMessages([message])[1].presentation.resource.id,'resource');
+assert.equal(resourcePresentation({...message,tool:{...message.tool,phase:'failed'}}),null);
+assert.equal(resourcePresentation({...message,tool:{...message.tool,name:'get_screenshot'}}),null,'Only explicit presentation calls become replies');
+const persisted={id:'reply',role:'assistant',status:'complete',text:'',presentation:message.tool.result.presentation};
+assert.equal(projectChatReplies({messages:[persisted]},null)[0].presentation,persisted.presentation,'Resource-only replies survive projection without prose');
+const broken=createDisplayResources(async()=>({size:6,revision:'different',offset:0,data:btoa('report')}),()=>scope,()=>'/content')(resource);
+await assert.rejects(broken.read(file.path));broken.release();
+console.log('Display resources: immutable identity, captured owner/Space, sharing/disposal, explicit intent and resource-only replies passed');

@@ -68,6 +68,10 @@ Pele uses its own layouts rather than Mermaid's exact appearance.
 
 ## Generated image previews
 
+Typed assistant resource replies and uploaded attachment previews use the shared
+`ResourceView` component. Media playback, isolated HTML and explicit download
+behavior are defined in [Display resources](display-resources.md).
+
 The shared Markdown renderer displays owner-bound `pot-file://TASK_ID/PATH`
 images inline in Chat, Task conversations and Markdown tool results. Both image
 syntax (`![description](pot-file://...)`) and ordinary artifact links ending in

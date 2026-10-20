@@ -288,6 +288,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.assets.ServeHTTP(w, r)
 }
 func Allowed(method, path string) bool {
+	if method == "GET" && strings.HasPrefix(path, "/api/v1/resources/") {
+		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/resources/"), "/")
+		return core.Identifier(parts[0]) && (len(parts) == 1 || len(parts) == 2 && (parts[1] == "chunk" || parts[1] == "content" || parts[1] == "download" || parts[1] == "render"))
+	}
 	if strings.ContainsAny(path, "\\%") || strings.Contains(path, "//") || strings.Contains(path, "/../") {
 		return false
 	}
@@ -393,13 +397,18 @@ func (s *Server) proxy(w http.ResponseWriter, r *http.Request, generation uint64
 	if value := r.Header.Get("Content-Type"); value != "" {
 		upstream.Header.Set("Content-Type", value)
 	}
+	for _, key := range []string{"Range", "If-Range", "If-None-Match"} {
+		if value := r.Header.Get(key); value != "" {
+			upstream.Header.Set(key, value)
+		}
+	}
 	response, err := s.upstream.Client.Do(upstream)
 	if err != nil {
 		failure(w, 502, "Control unavailable")
 		return
 	}
 	defer response.Body.Close()
-	for _, key := range []string{"Content-Type", "Content-Disposition", "Content-Length", "Content-Security-Policy", "X-Accel-Buffering"} {
+	for _, key := range []string{"Content-Type", "Content-Disposition", "Content-Length", "Content-Security-Policy", "X-Accel-Buffering", "Accept-Ranges", "Content-Range", "ETag", "X-Content-Type-Options"} {
 		if v := response.Header.Get(key); v != "" {
 			w.Header().Set(key, v)
 		}
@@ -428,7 +437,7 @@ func (s *Server) proxy(w http.ResponseWriter, r *http.Request, generation uint64
 		}
 	}
 	limit := int64(32 * 1024 * 1024)
-	if strings.HasSuffix(r.URL.Path, "/file-download") {
+	if strings.HasSuffix(r.URL.Path, "/file-download") || strings.HasPrefix(r.URL.Path, "/api/v1/resources/") {
 		limit = 1 << 30
 	}
 	n, err := io.Copy(w, io.LimitReader(response.Body, limit+1))

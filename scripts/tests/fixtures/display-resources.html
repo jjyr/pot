@@ -1,0 +1,25 @@
+<!doctype html><html lang="zh-CN" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pot resource components</title><link rel="icon" href="/assets/PotCompanion.png"><link rel="stylesheet" href="/web/src/styles.css"><style>
+html,body{height:auto;overflow:auto}body{background:var(--canvas)}main{max-width:1140px;margin:32px auto;padding:0 24px}header{margin-bottom:22px;display:flex;justify-content:space-between;align-items:end;border-bottom:1px solid var(--divider);padding-bottom:18px}h1{font-size:24px;font-weight:550}header p{color:var(--muted);font-size:13px;margin-top:7px}.fixture-badge{font-size:12px;color:var(--muted)}.showcase{display:grid;grid-template-columns:1fr 1fr;gap:0 22px;align-items:start}.showcase .reply-bubble{margin:0;background:transparent;padding:0;min-width:0;max-width:100%;width:100%}.showcase .reply-content{width:100%;max-width:100%}.showcase pot-resource{margin:0 0 20px}.fixture-column{min-width:0}.showcase .resource-image{max-height:175px}.showcase .resource-document{height:205px}.showcase video{height:175px}.showcase .resource-interactive{height:350px}.before .reply-bubble{padding:18px;border:1px solid var(--divider);margin-bottom:20px;border-radius:14px}.before .file-image-preview img{max-height:175px}.before p{margin:0 0 10px}.before .fixture-label{font-size:12px;color:var(--muted);margin-bottom:12px}@media(max-width:720px){main{margin:20px auto;padding:0 14px}.showcase{grid-template-columns:1fr;gap:0}header{align-items:start}.fixture-badge{display:none}h1{font-size:21px}}
+</style></head><body><main><header><div><h1>对话中的资源</h1><p>图片、播放与交互直接使用，文件下载单独操作。</p></div><span class="fixture-badge">Pot · Shared UI</span></header><div id="showcase" class="showcase"><div id="left" class="fixture-column"></div><div id="right" class="fixture-column"></div></div></main><script type="module">
+import {createProductionClient} from '/web/src/adapters/production.mjs';
+import {createReplyBubble} from '/web/src/components/reply.mjs';
+import {translate} from '/web/src/locales/messages.mjs';
+const params=new URLSearchParams(location.search),client=await createProductionClient();client.setScope({owner:'main',space:''});
+document.documentElement.lang=params.get('locale')||'zh-CN';document.documentElement.dataset.theme=params.get('theme')||'light';
+const snapshot=await client.snapshot(),messages=snapshot.messages.filter(message=>message.presentation);
+const options={t:key=>translate(document.documentElement.lang,key),acquireResource:resource=>client.acquireResource(resource,{owner:'main',space:''}),downloadResource:resource=>client.downloadResource(resource,{owner:'main',space:''})};
+const order=[0,1,2,3,4,5,6],placement={0:'left',1:'left',2:'left',3:'right',4:'right',5:'right',6:'left'};
+const before=params.has('before');document.querySelector('#showcase').classList.toggle('before',before);
+const views=[];
+for(const index of order){
+  const message=messages[index];if(!message)continue;
+  const host=document.createElement('article');host.className='message-body';document.querySelector('#'+placement[index]).append(host);
+  const reply=createReplyBubble(host),resource=message.presentation.resource;
+  if(before){
+    const task='21cfe7c9-34cc-41a8-9156-39a8341ad3dc',source=`${message.presentation.caption}\n\n[${resource.name}](pot-file://${task}/${resource.entry})`;
+    reply.update({text:source,phase:'complete'},{...options,acquireFileImage:()=>{const lease=client.acquireResource(resource,{owner:'main',space:''});return {url:lease.blobURL(resource.entry),release:()=>lease.release()};},downloadFile:()=>options.downloadResource(resource)});
+  }else reply.update({...message,phase:'complete'},options);
+  views.push({host,reply,message});
+}
+window.resourceFixture={client,messages,views,options};window.fixtureReady=true;
+</script></body></html>

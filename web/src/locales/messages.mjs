@@ -1,5 +1,15 @@
 export const messages = {
   en: {
+    'resource.downloadFailed':'Could not download this file. Try again.',
+    'resource.result':'Component result',
+    'resource.downloadBundle':'Download ZIP',
+    'tool.registerResource':'Prepare resource', 'tool.presentResource':'Show resource',
+    'attachments.historyUnavailable':'The current model cannot read this earlier attachment.',
+    'resource.image':'Image', 'resource.audio':'Audio', 'resource.video':'Video', 'resource.pdf':'PDF', 'resource.html':'Interactive', 'resource.text':'Text', 'resource.file':'File',
+    'resource.download':'Download', 'resource.downloadName':'Download {name}', 'resource.expand':'Expand', 'resource.collapse':'Collapse',
+    'resource.loading':'Loading preview…', 'resource.unavailable':'Preview unavailable. You can try downloading the original.',
+    'resource.pause':'Pause animation', 'resource.resume':'Play animation',
+
     "extensions.authorizationRequired": "Authorization required",
     "extensions.tested": "Verified",
     "extensions.connectionFailed": "Connection failed",
@@ -592,6 +602,16 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'resource.downloadFailed':'文件下载失败，请重试。',
+    'resource.result':'组件结果',
+    'resource.downloadBundle':'下载资源包',
+    'tool.registerResource':'准备资源', 'tool.presentResource':'展示资源',
+    'attachments.historyUnavailable':'当前模型无法读取此历史附件。',
+    'resource.image':'图片', 'resource.audio':'音频', 'resource.video':'视频', 'resource.pdf':'PDF', 'resource.html':'交互组件', 'resource.text':'文本', 'resource.file':'文件',
+    'resource.download':'下载', 'resource.downloadName':'下载 {name}', 'resource.expand':'展开', 'resource.collapse':'收起',
+    'resource.loading':'正在加载预览……', 'resource.unavailable':'预览暂不可用，可以尝试下载原文件。',
+    'resource.pause':'暂停动图', 'resource.resume':'播放动图',
+
     "extensions.authorizationRequired": "需要授权",
     "extensions.tested": "已验证",
     "extensions.connectionFailed": "连接失败",

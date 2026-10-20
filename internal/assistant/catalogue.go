@@ -38,7 +38,14 @@ func (c *Conversation) Catalogue(ctx context.Context) (CatalogueState, error) {
 	}
 	if reply != nil {
 		out.ReplyID = reply.ID
-		text := []rune(strings.Join(strings.Fields(reply.Text), " "))
+		preview := reply.Text
+		if reply.Presentation != nil {
+			preview = reply.Presentation.Caption
+			if preview == "" {
+				preview = reply.Presentation.Resource.Name
+			}
+		}
+		text := []rune(strings.Join(strings.Fields(preview), " "))
 		out.Preview = string(text[:min(120, len(text))])
 	}
 	return out, nil

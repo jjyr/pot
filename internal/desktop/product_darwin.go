@@ -166,7 +166,7 @@ func runProduct(parent context.Context, root string) (result error) {
 	}
 	defer manager.Close()
 	service.spaces = manager
-	files := application.AssetFileServerFS(assets.FS())
+	files := service.resourceAssets(application.AssetFileServerFS(assets.FS()))
 
 	app := application.New(application.Options{Name: "Pot", Description: "Pot " + buildinfo.Version, Icon: appIcon, Services: []application.Service{application.NewService(service), application.NewService(notifier)}, Assets: application.AssetOptions{Handler: files}, Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false}, OnShutdown: func() {
 		stop()

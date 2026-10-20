@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	APIVersion          = 4
+	APIVersion          = 5
 	RuntimePort         = 17700
 	RuntimeEndpointFile = "runtime.json"
 	PathSnapshot        = "/api/v1/snapshot"
@@ -71,25 +71,34 @@ const (
 )
 
 type Message struct {
-	References        []core.MessageReference `json:"references,omitempty"`
-	Attachments       []core.Attachment       `json:"attachments,omitempty"`
-	Queued            bool                    `json:"queued,omitempty"`
-	Tool              *ToolCall               `json:"tool,omitempty"`
-	ID                string                  `json:"id" required:"true"`
-	ConversationID    string                  `json:"conversation_id" required:"true"`
-	Role              Role                    `json:"role" required:"true"`
-	Text              string                  `json:"text" required:"true"`
-	Status            MessageStatus           `json:"status" required:"true"`
-	CreatedAtMS       int64                   `json:"created_at_ms" required:"true"`
-	RequestID         *string                 `json:"request_id"`
-	AcceptedTurnID    string                  `json:"accepted_turn_id,omitempty"`
-	AcceptedRequestID string                  `json:"accepted_request_id,omitempty"`
-	Steering          bool                    `json:"steering,omitempty"`
-	ReplyTo           string                  `json:"reply_to,omitempty"`
-	Error             string                  `json:"error,omitempty"`
+	Presentation      *core.ResourcePresentation `json:"presentation,omitempty"`
+	References        []core.MessageReference    `json:"references,omitempty"`
+	Attachments       []core.Attachment          `json:"attachments,omitempty"`
+	Queued            bool                       `json:"queued,omitempty"`
+	Tool              *ToolCall                  `json:"tool,omitempty"`
+	ID                string                     `json:"id" required:"true"`
+	ConversationID    string                     `json:"conversation_id" required:"true"`
+	Role              Role                       `json:"role" required:"true"`
+	Text              string                     `json:"text" required:"true"`
+	Status            MessageStatus              `json:"status" required:"true"`
+	CreatedAtMS       int64                      `json:"created_at_ms" required:"true"`
+	RequestID         *string                    `json:"request_id"`
+	AcceptedTurnID    string                     `json:"accepted_turn_id,omitempty"`
+	AcceptedRequestID string                     `json:"accepted_request_id,omitempty"`
+	Steering          bool                       `json:"steering,omitempty"`
+	ReplyTo           string                     `json:"reply_to,omitempty"`
+	Error             string                     `json:"error,omitempty"`
 }
 
 func (m Message) Validate() error {
+	if m.Presentation != nil {
+		if m.Role != Assistant || m.Status != Complete {
+			return fmt.Errorf("resource presentation requires completed assistant role")
+		}
+		if err := m.Presentation.Validate(); err != nil {
+			return err
+		}
+	}
 	if err := core.ValidateMessageReferences(m.References); err != nil {
 		return err
 	}
