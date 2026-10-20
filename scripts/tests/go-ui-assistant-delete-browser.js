@@ -61,7 +61,7 @@ async page => {
   const list=await(await page.request.get(origin+'/api/v1/assistants')).json();
   check(list.length===0,'Confirmed deletion removes the actual persisted identity');
   await page.getByText('创建助手，开始新的对话。',{exact:true}).waitFor();
-  await page.reload();
+  const reloadURL=new URL(page.url());reloadURL.searchParams.set('locale','zh-CN');await page.goto(reloadURL.href);
   await page.getByText('创建助手，开始新的对话。',{exact:true}).waitFor();
   check((await(await page.request.get(origin+'/api/v1/assistants')).json()).length===0,'Reload does not recreate the last deleted assistant');
   await page.locator('.empty-chat').getByRole('button',{name:'新建助手',exact:true}).click();

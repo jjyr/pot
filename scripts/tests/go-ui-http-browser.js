@@ -39,10 +39,11 @@ async page=>{
   step='assistant creation';
   await page.getByRole('button',{name:'Save',exact:true}).waitFor();
   const providerAfter=await(await page.request.get(state.origin+'/api/v1/providers')).json(),newConnection=providerAfter.profiles.find(value=>value.name==='New local connection'),assistantsAfterProvider=await(await page.request.get(state.origin+'/api/v1/assistants')).json();
+  await page.waitForFunction(id=>document.querySelector('select[aria-label="Provider"]')?.value===id,newConnection.id);
   assert(providerAfter.profiles.length===providerBefore.profiles.length+1&&assistantsAfterProvider.length===assistantsBefore.length+1,'Saving Provider creates only the connection');
   assert(await page.getByLabel('Provider',{exact:true}).inputValue()===newConnection.id&&await page.getByLabel('Model',{exact:true}).inputValue()==='new-default-model'&&await page.getByLabel('Name',{exact:true}).inputValue()==='Setup flow proof'&&await page.getByLabel('Personality and preferences',{exact:true}).inputValue()==='Keep my assistant draft','Nested Provider selects its default model and restores all assistant fields');
   step='assistant creation';
-  await page.getByRole('button',{name:'Save',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#pot-composer')&&!document.querySelector('#pot-composer').disabled);
+  await page.getByRole('button',{name:'Save',exact:true}).click();await page.locator('.editor-form').waitFor({state:'detached'});await page.waitForFunction(()=>document.querySelector('#pot-composer')&&!document.querySelector('#pot-composer').disabled);
   const assistantsAfter=await(await page.request.get(state.origin+'/api/v1/assistants')).json(),created=assistantsAfter.find(value=>value.name==='Setup flow proof');
   assert(assistantsAfter.length===assistantsBefore.length+1&&!!created,'One-click creation registers once; settings edit the same assistant');
   const config=await(await page.request.get(state.origin+'/api/v1/agent?assistant_id='+created.id)).json(),rules=await(await page.request.get(state.origin+'/api/v1/instructions?assistant_id='+created.id)).json();
