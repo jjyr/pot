@@ -11,6 +11,7 @@ import {projectScriptRuns} from '../state/script-runs.mjs';
 import {avatar} from './avatar.mjs';
 import {assistantActivity,assistantActivityIndicator} from './assistant-activity.mjs';
 import {icon} from './icons.mjs';
+import {navigationIcon} from './navigation-icons.mjs';
 import {messages,translate} from '../locales/messages.mjs';
 import {acceptSnapshot, beginSend, beginSubscription, createConversationState, draft, draftReferences, setDraftReferences, ownerKey, setDraft, validSnapshot} from '../state/conversation.mjs';
 import {bindComposer} from './composer.mjs';
@@ -349,8 +350,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const fragment = document.createDocumentFragment();
     for (const name of ['chat', 'tasks', 'machines', 'extensions', 'usage', 'settings']) {
       const update=name==='settings'?updates?.button(inMenu):null;if(update)fragment.append(update);
- const item = button(name==='machines'?'topology':name, t(name), inMenu ? 'menu-destination' : `rail-button${name === 'settings'&&!update ? ' rail-bottom' : ''}`);
-      if (name === 'chat') { item.replaceChildren(); const image = el('img', 'pot-icon'); image.src = new URL('../assets/PotCompanion.png', import.meta.url).href; image.alt = ''; item.append(image); }
+      const item = button(name, t(name), inMenu ? 'menu-destination' : `rail-button${name === 'settings'&&!update ? ' rail-bottom' : ''}`);
+      item.replaceChildren(navigationIcon(name));
       if (inMenu) item.append(el('span', '', t(name === 'chat' ? 'assistants' : name)));
       item.classList.toggle('is-selected', route === name);
       if (route === name) item.setAttribute('aria-current', 'page');
