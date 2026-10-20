@@ -337,42 +337,29 @@ prove this endpoint is usable.
 
 ## Connection allowance monitoring
 
-Provider contributions with the `allowances` capability use the same durable
-background and inbox machinery. The host creates one instance per connection
-and source package. `plugin_id` identifies installed code; the binding's `id`
-identifies the independently configured instance, and `connection_id` identifies
-the saved model connection. Plugin event provenance carries both identities.
-Queue capacity, checkpoint acceptance, retry identity and routing are scoped to
-the instance. Existing GitHub and Codex instances keep their original IDs and
-accepted delivery receipts through migration.
+Connections with the `allowances` capability use an independent background
+instance per connection and source package. The plugin identity, instance routing,
+queue bounds and atomic checkpoint/inbox acceptance rules above apply. Connection
+settings own these monitors; the plugin notification list shows background
+contributions. See [Provider contributions](model-directory.md#provider-contributions)
+for model connections and their shared metadata reader.
 
-Allowance monitoring defaults to enabled at 90 percent. The first local assistant
-is selected when available; an empty target waits for the first assistant.
-An explicitly disabled monitor and its configured threshold survive refresh and
-reconnect. Removing an existing target does not silently select another assistant.
-The plugin notification settings list background contributions; connection
-monitors are configured within the connection's allowance details.
+Monitoring defaults to enabled at 90 percent. An initially empty target binds to
+the first local assistant when available. Explicit disablement and thresholds
+survive refresh and reconnect; removing a selected assistant never silently
+retargets accepted events or future warnings. Reads without an available assistant
+do not consume a warning episode.
 
-Control reads the contribution's shared metadata cache using the current
-connection credential. Each quota window is compared independently, without
-adding percentages across windows or shared pools. One fresh known window at
-or above the threshold starts one connection-level warning episode. Labels,
-plan names, and ambiguous account/window identifiers remain reference data;
-they are not synthesized into identities or event deduplication keys.
+Each known fresh window is compared independently, without adding percentages
+across windows or shared pools. A window at or above the threshold starts one
+connection warning episode; account and plan labels remain reference data, not IDs.
+Further high readings remain quiet across restarts. Recovery requires two complete,
+nonempty low observations at least 60 seconds apart with distinct source timestamps. Unknown values, failed reads, stale or expired windows and empty snapshots
+cannot establish recovery; explicit unlimited windows are skipped.
 
-The episode checkpoint and its ordinary `plugin_event` are committed atomically.
-Further high observations remain quiet across process restarts. Recovery requires
-a complete, nonempty observation of known constrained windows below the threshold,
-followed by another distinct source observation at least 60 seconds later.
-Stale data, read failures, unknown values, expired windows and empty snapshots
-cannot establish recovery. Snapshots require a fresh host read and source
-`read_at` or `as_of` within 15 minutes, with at most 30 seconds of clock skew. Explicit unlimited windows are ignored. Reset timestamp drift does not
-start another warning episode. The next high observation after confirmed recovery
-can emit a new warning. Without an available assistant, reads can update the
-cache but do not consume a warning episode.
-
-The host accepts only current connection routes, profile revisions, package
-digests and owner binding revisions. Credential/endpoint replacement, package
-disablement, retargeting or monitor edits fence an in-flight exchange. Permission
-failure for an allowance API is local to that metadata capability; it does not
-change the connection's inference availability or Pot's own spending policies.
+Both the host read and source `read_at` or `as_of` must be within 15 minutes,
+allowing at most 30 seconds of clock skew. If both source timestamps are present,
+both must be fresh. Reset timestamp drift does not create another episode.
+Connection routes and revisions, package identities and owner binding revisions
+fence acceptance as described above. Allowance permission failures affect that capability alone;
+inference and Pot's own spending policies remain independent.
