@@ -11,7 +11,7 @@ Assistants pointing at the same directory still share those files.
 Pot chat / task tools
         |
    Agent Link (directory, messages, submit, status, cancel)
-        | TLS 1.3 TCP
+        | TLS 1.3 / Yamux / CBOR + optional Zstd
 Codex Agent Link host
         +-- assistant A -- serial chat/task queue -- persistent Codex thread A
         +-- assistant B -- serial chat/task queue -- persistent Codex thread B

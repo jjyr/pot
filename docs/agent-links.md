@@ -62,7 +62,8 @@ DNS resolving entirely to allowed ranges. Dialing validates the actual numeric
 address again. There is no public HTTP, proxy or protocol downgrade fallback.
 TLS 1.3 encrypts frames and invitation capabilities, with mutual Ed25519 key
 proof and the invitation or saved public-key pin. Self-signed certificates are
-generated automatically; see [Peer protocol](peer-protocol.md). Peer listeners
+generated automatically. Calls use independent Yamux streams with CBOR metadata
+and optionally Zstd-compressed bodies; see [Peer protocol](peer-protocol.md). Peer listeners
 expose only identity verification and Agent Link, without membership or
 distributed execution services.
 

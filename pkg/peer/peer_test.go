@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -18,7 +17,7 @@ import (
 	"time"
 )
 
-func testIdentity(t *testing.T, id string) (Identity, ed25519.PrivateKey) {
+func testIdentity(t testing.TB, id string) (Identity, ed25519.PrivateKey) {
 	t.Helper()
 	pub, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -169,60 +168,52 @@ func TestUnknownOutcomeIsNotRetried(t *testing.T) {
 }
 
 func TestLateResponseCannotCompleteAnotherAttemptWithSameRequestID(t *testing.T) {
-	serverID, _ := testIdentity(t, "server")
-	a, b := net.Pipe()
-	defer b.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	started, unblock, oldReturned := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(unblock) })
+	client, _ := sessionPair(t, func(ctx context.Context, r Request) (json.RawMessage, error) {
+		if string(r.Params) == `"old"` {
+			close(started)
+			select {
+			case <-unblock:
+			case <-ctx.Done():
+			}
+			close(oldReturned)
+			return json.RawMessage(`"old"`), nil
+		}
+		if string(r.Params) == `"new"` {
+			once.Do(func() { close(unblock) })
+			<-oldReturned
+		}
+		return r.Params, nil
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	client := newSession(ctx, a, serverID, "execution", nil, nil)
-	client.start()
-	defer client.Close()
-	finished := make(chan error, 1)
+	firstCtx, stop := context.WithCancel(ctx)
+	first := make(chan error, 1)
 	go func() {
-		var requests [2]frame
-		for index := range requests {
-			raw, err := readPacket(b, MaxFrame)
-			if err != nil {
-				finished <- err
-				return
-			}
-			if err = decode(raw, &requests[index]); err != nil {
-				finished <- err
-				return
-			}
-		}
-		for index, request := range requests {
-			value := json.RawMessage(`"old"`)
-			if index == 1 {
-				value = json.RawMessage(`"new"`)
-			}
-			raw, _ := json.Marshal(frame{Kind: "response", ID: request.ID, Correlation: request.Correlation, Method: request.Method, Params: value})
-			if err := writePacket(b, raw, MaxFrame); err != nil {
-				finished <- err
-				return
-			}
-		}
-		finished <- nil
+		_, err := client.Call(firstCtx, Request{"same-id", "lookup", json.RawMessage(`"old"`)})
+		first <- err
 	}()
-	firstCtx, stop := context.WithTimeout(ctx, 20*time.Millisecond)
-	_, err := client.Call(firstCtx, Request{"same-id", "lookup", json.RawMessage(`"old-input"`)})
+	<-started
 	stop()
-	if !errors.Is(err, ErrUncertain) {
-		t.Fatalf("first result should be uncertain: %v", err)
+	if err := <-first; !errors.Is(err, ErrUncertain) {
+		t.Fatalf("expected uncertain: %v", err)
 	}
-	result, err := client.Call(ctx, Request{"same-id", "lookup", json.RawMessage(`"new-input"`)})
+	result, err := client.Call(ctx, Request{"same-id", "lookup", json.RawMessage(`"new"`)})
 	if err != nil || string(result) != `"new"` {
-		t.Fatalf("late response crossed attempts: %s %v", result, err)
+		t.Fatalf("crossed attempts: %s %v", result, err)
 	}
-	if err = <-finished; err != nil {
-		t.Fatal(err)
+	if _, err := client.Call(ctx, Request{"same-id", "lookup", json.RawMessage(`true`)}); err != nil {
+		t.Fatal("late response poisoned session", err)
 	}
 }
+
 func TestFrameBoundsAndTruncation(t *testing.T) {
-	for _, size := range []uint32{0, MaxFrame + 1} {
+	for _, size := range []uint32{0, maxHeader + 1} {
 		var header [4]byte
 		binary.BigEndian.PutUint32(header[:], size)
-		if _, err := readPacket(bytes.NewReader(header[:]), MaxFrame); err == nil {
+		if _, err := readPacket(bytes.NewReader(header[:]), maxHeader); err == nil {
 			t.Fatalf("accepted size %d", size)
 		}
 	}
@@ -247,97 +238,77 @@ func TestEndpointPolicy(t *testing.T) {
 	}
 }
 
-type observedConn struct {
-	net.Conn
-	once    sync.Once
-	writing chan struct{}
-}
-
-func (c *observedConn) Write(raw []byte) (int, error) {
-	if len(raw) > 1024*1024 {
-		c.once.Do(func() { close(c.writing) })
-	}
-	return c.Conn.Write(raw)
-}
-func duplexWithQueuedHeartbeats(t *testing.T, pings bool) (error, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	left, err := net.Dial("tcp", ln.Addr().String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	right, err := ln.Accept()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer left.Close()
-	defer right.Close()
-	left.(*net.TCPConn).SetWriteBuffer(4096)
-	right.(*net.TCPConn).SetWriteBuffer(4096)
-	a, ak := testIdentity(t, "a")
-	b, bk := testIdentity(t, "b")
-	clientConfig, err := tlsConfig(a, ak, &b, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	serverConfig, err := tlsConfig(b, bk, nil, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	securedLeft, securedRight := tls.Client(left, clientConfig), tls.Server(right, serverConfig)
-	handshakeCtx, stopHandshake := context.WithTimeout(context.Background(), 3*time.Second)
-	defer stopHandshake()
-	ready := make(chan error, 1)
-	go func() { ready <- securedRight.HandshakeContext(handshakeCtx) }()
-	if err = securedLeft.HandshakeContext(handshakeCtx); err != nil {
-		t.Fatal(err)
-	}
-	if err = <-ready; err != nil {
-		t.Fatal(err)
-	}
-	l := &observedConn{Conn: securedLeft, writing: make(chan struct{})}
-	r := &observedConn{Conn: securedRight, writing: make(chan struct{})}
-	handler := func(context.Context, Request) (json.RawMessage, error) { return json.RawMessage(`{"ok":true}`), nil }
-	sa := newSession(context.Background(), l, b, "svc", nil, handler)
-	sb := newSession(context.Background(), r, a, "svc", nil, handler)
-	defer sa.Close()
-	defer sb.Close()
-	if pings {
-		if err = sa.send(context.Background(), frame{Kind: "ping"}); err != nil {
-			t.Fatal(err)
-		}
-		if err = sb.send(context.Background(), frame{Kind: "ping"}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	raw, _ := json.Marshal(strings.Repeat("x", 2*1024*1024))
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+// sessionPair exercises the real pinned TLS handshake, admission and mux.
+func sessionPair(t *testing.T, handler Handler) (*Session, *Session) {
+	t.Helper()
+	accepted := make(chan *Session, 1)
+	endpoint, serverID, _ := testServer(t, func(context.Context, Identity, string, json.RawMessage) (Handler, error) { return handler, nil }, func(s *Session) { accepted <- s })
+	id, key := testIdentity(t, "client")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	results := make(chan error, 2)
-	go func() { _, err := sa.Call(ctx, Request{"a", "echo", raw}); results <- err }()
-	go func() { _, err := sb.Call(ctx, Request{"b", "echo", raw}); results <- err }()
-	select {
-	case <-l.writing:
-	case <-time.After(time.Second):
-		t.Fatal("left did not write")
+	client, err := Dial(ctx, endpoint, DialOptions{Identity: id, PrivateKey: key, Expected: &serverID, Service: "svc", Handler: handler})
+	if err != nil {
+		t.Fatal(err)
 	}
-	select {
-	case <-r.writing:
-	case <-time.After(time.Second):
-		t.Fatal("right did not write")
-	}
-	sa.start()
-	sb.start()
-	return <-results, <-results
+	t.Cleanup(client.Close)
+	return client, <-accepted
 }
 
-func TestHeartbeatDoesNotBlockDuplexLargeWrites(t *testing.T) {
-	first, second := duplexWithQueuedHeartbeats(t, true)
-	if first != nil || second != nil {
-		t.Fatalf("heartbeat blocked duplex writes: %v, %v", first, second)
+func TestSlowBulkStreamDoesNotBlockDuplexControlOrHeartbeat(t *testing.T) {
+	// Unread incompressible response exceeds the receive window and stalls only
+	// its stream. Concurrent calls and Yamux ping must still finish.
+	raw := make([]byte, 2*1024*1024)
+	if _, err := rand.Read(raw); err != nil {
+		t.Fatal(err)
+	}
+	bulk, _ := json.Marshal(raw)
+	serving := make(chan struct{})
+	client, server := sessionPair(t, func(ctx context.Context, r Request) (json.RawMessage, error) {
+		if r.Method == "bulk" {
+			close(serving)
+			return bulk, nil
+		}
+		return r.Params, nil
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	stream, err := client.mux.OpenStream(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Reset()
+	if err = writeMessage(ctx, stream, frame{Kind: "request", ID: "bulk", Method: "bulk"}, []byte("null"), client.memory); err != nil {
+		t.Fatal(err)
+	}
+	if err = stream.CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	<-serving
+	// Read a prefix to ensure the large response has started, then stop draining.
+	var prefix [4]byte
+	if _, err = io.ReadFull(stream, prefix[:]); err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan error, 3)
+	for _, s := range []*Session{client, server} {
+		go func() {
+			result, err := s.Call(ctx, Request{"control", "echo", json.RawMessage(`true`)})
+			if err == nil && string(result) != "true" {
+				err = errors.New("invalid control response")
+			}
+			results <- err
+		}()
+	}
+	go func() { _, err := client.mux.Ping(); results <- err }()
+	for range 3 {
+		select {
+		case err := <-results:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal("bulk blocked control/heartbeat")
+		}
 	}
 }
 
@@ -349,10 +320,11 @@ func TestPeerNodeIdentityRejectsOldWireFormat(t *testing.T) {
 		t.Fatal(string(raw), err)
 	}
 	var old Identity
-	if err = decode([]byte(`{"id":"logical-node","public_key":"`+identity.PublicKey+`"}`), &old); err == nil {
+	legacy, _ := wireEncoding.Marshal(map[string]string{"id": "logical-node", "public_key": identity.PublicKey})
+	if err = decode(legacy, &old); err == nil {
 		t.Fatal("old peer identity accepted")
 	}
-	for _, version := range []int{1, 2} {
+	for _, version := range []int{1, 2, 3} {
 		if validHello(hello{version, identity, nil, "message", json.RawMessage("null")}) {
 			t.Fatal("old handshake version accepted", version)
 		}

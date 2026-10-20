@@ -53,6 +53,7 @@ Tailscale endpoint. TLS 1.3 encrypts traffic and proves possession of both
 Ed25519 identity keys, using automatically generated self-signed certificates
 and public-key pins. No CA or certificate-file configuration is needed. The
 listener grants no remote owner, membership, model proxy or raw execution access.
+Both ends must support peer protocol v4 (TLS/Yamux/CBOR/Zstd); there is no downgrade.
 
 The private local socket serves CLI operator requests:
 

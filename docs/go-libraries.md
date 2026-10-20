@@ -22,9 +22,10 @@ Internal implementation types do not appear in its public signatures. See
 
 ## Native peer transport
 
-`pkg/peer` provides TLS 1.3 framed TCP sessions with mutual Ed25519 key proof,
-public-key pinning, service admission and bidirectional RPC. Hosts inject
-keys and handlers; the package has no product or third-party dependencies.
+`pkg/peer` provides TLS 1.3 TCP sessions with mutual Ed25519 key proof,
+public-key pinning, service admission and bidirectional RPC. Yamux multiplexes
+calls with CBOR metadata, opaque JSON body bytes and optional Zstd compression.
+Hosts inject keys and handlers; the package has no product dependencies.
 Use `Server` with a caller-created listener and `Dial` with a trusted expected
 identity. Business permissions and durable recovery remain in the service;
 uncertain calls are never automatically replayed. See [Peer protocol](peer-protocol.md).

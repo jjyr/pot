@@ -5,31 +5,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
+
+	yamux "github.com/libp2p/go-yamux/v5"
 )
 
-type frame struct {
-	Kind        string          `json:"kind"`
-	ID          string          `json:"id,omitempty"`
-	Correlation string          `json:"correlation,omitempty"`
-	Method      string          `json:"method,omitempty"`
-	Params      json.RawMessage `json:"params,omitempty"`
-	Error       *RemoteError    `json:"error,omitempty"`
-}
-type response struct {
-	raw json.RawMessage
-	err error
-}
-type pendingCall struct {
-	method      string
-	correlation string
-	result      chan response
-}
-
+// Session multiplexes independent RPC attempts over an authenticated connection.
+// Stream IDs correlate responses; request IDs belong to the business service.
 type Session struct {
 	conn      net.Conn
+	mux       *yamux.Session
 	remote    Identity
 	service   string
 	auth      json.RawMessage
@@ -38,236 +28,205 @@ type Session struct {
 	cancel    context.CancelFunc
 	done      chan struct{}
 	closeOnce sync.Once
-	writer    chan struct{}
 	mu        sync.Mutex
-	pending   map[string]pendingCall
-	inflight  map[string]bool
+	pending   map[string]bool
 	handlers  chan struct{}
-	pongs     chan struct{}
+	memory    *memoryBudget
 }
 
-func newSession(ctx context.Context, c net.Conn, remote Identity, service string, auth json.RawMessage, handler Handler) *Session {
+func newSession(ctx context.Context, c net.Conn, remote Identity, service string, auth json.RawMessage, handler Handler, client bool) (*Session, error) {
 	ctx, cancel := context.WithCancel(ctx)
-	return &Session{conn: c, remote: remote, service: service, auth: append(json.RawMessage(nil), auth...), handler: handler, ctx: ctx, cancel: cancel, done: make(chan struct{}), writer: make(chan struct{}, 1), pending: map[string]pendingCall{}, inflight: map[string]bool{}, handlers: make(chan struct{}, maxPending), pongs: make(chan struct{}, 1)}
+	budget := &memoryBudget{limit: maxSessionMemory, parent: hostMemory}
+	config := yamux.DefaultConfig()
+	config.AcceptBacklog = maxPending
+	config.MaxIncomingStreams = maxPending
+	config.InitialStreamWindowSize = 256 * 1024
+	config.MaxStreamWindowSize = 4 * 1024 * 1024
+	config.MaxMessageSize = 64 * 1024
+	config.KeepAliveInterval = 20 * time.Second
+	config.MeasureRTTInterval = 20 * time.Second
+	config.ConnectionWriteTimeout = 30 * time.Second
+	config.WriteCoalesceDelay = 0
+	config.LogOutput = io.Discard
+	manager := func() (yamux.MemoryManager, error) { return &streamMemory{budget: budget}, nil }
+	constructor := yamux.Server
+	if client {
+		constructor = yamux.Client
+	}
+	mux, err := constructor(c, config, manager)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	return &Session{conn: c, mux: mux, remote: remote, service: service, auth: append(json.RawMessage(nil), auth...), handler: handler, ctx: ctx, cancel: cancel, done: make(chan struct{}), pending: make(map[string]bool), handlers: make(chan struct{}, maxPending), memory: budget}, nil
 }
 func (s *Session) Remote() Identity      { return s.remote }
 func (s *Session) Service() string       { return s.service }
 func (s *Session) Auth() json.RawMessage { return append(json.RawMessage(nil), s.auth...) }
 func (s *Session) Done() <-chan struct{} { return s.done }
-func (s *Session) Close()                { s.closeOnce.Do(func() { s.cancel(); _ = s.conn.Close(); close(s.done) }) }
+func (s *Session) Close()                { s.closeOnce.Do(func() { s.cancel(); _ = s.mux.Close(); close(s.done) }) }
 func (s *Session) start() {
-	go s.readLoop()
+	go s.acceptLoop()
 	go func() {
-		ticker := time.NewTicker(20 * time.Second)
-		defer ticker.Stop()
-		defer s.Close()
-		for {
-			select {
-			case <-s.ctx.Done():
-				return
-			case <-ticker.C:
-				if s.send(s.ctx, frame{Kind: "ping"}) != nil {
-					return
-				}
-			case <-s.pongs:
-				if s.send(s.ctx, frame{Kind: "pong"}) != nil {
-					return
-				}
-			}
+		select {
+		case <-s.ctx.Done():
+		case <-s.mux.CloseChan():
 		}
+		s.Close()
 	}()
 }
-func (s *Session) send(ctx context.Context, value frame) error {
-	select {
-	case s.writer <- struct{}{}:
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-s.done:
-		return ErrClosed
-	}
-	defer func() { <-s.writer }()
-	if s.ctx.Err() != nil {
-		return ErrClosed
+func (s *Session) open(ctx context.Context, r Request) (*yamux.Stream, func(), error) {
+	if err := validRequest(r); err != nil {
+		return nil, nil, err
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, nil, err
 	}
-	raw, err := json.Marshal(value)
+	s.mu.Lock()
+	if s.ctx.Err() != nil {
+		s.mu.Unlock()
+		return nil, nil, ErrClosed
+	}
+	if s.pending[r.ID] || len(s.pending) >= maxPending {
+		s.mu.Unlock()
+		return nil, nil, fmt.Errorf("peer request conflict/capacity")
+	}
+	s.pending[r.ID] = true
+	s.mu.Unlock()
+	release := func() { s.mu.Lock(); delete(s.pending, r.ID); s.mu.Unlock() }
+	stream, err := s.mux.OpenStream(ctx)
 	if err != nil {
-		return err
+		release()
+		// Yamux cannot recover an initial receive-window reservation failure.
+		// Close the exhausted session rather than leaving half-open SYN slots.
+		if errors.Is(err, errMemoryCapacity) {
+			s.Close()
+		}
+		return nil, nil, err
 	}
-	deadline := time.Now().Add(30 * time.Second)
+	stop := context.AfterFunc(ctx, func() { _ = stream.Reset() })
+	cleanup := func() { stop(); _ = stream.Close(); release() }
+	return stream, cleanup, nil
+}
+func streamDeadline(ctx context.Context, duration time.Duration) time.Time {
+	deadline := time.Now().Add(duration)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
-	_ = s.conn.SetWriteDeadline(deadline)
-	done := make(chan struct{})
-	stop := context.AfterFunc(ctx, func() { _ = s.conn.SetWriteDeadline(time.Now()); close(done) })
-	err = writePacket(s.conn, raw, MaxFrame)
-	if !stop() {
-		<-done
-	}
-	_ = s.conn.SetWriteDeadline(time.Time{})
-	return err
+	return deadline
 }
 
 // Call sends one request exactly once. Any uncertain delivery is returned to the
 // business layer; peer never replays work on this session or after reconnect.
 func (s *Session) Call(ctx context.Context, r Request) (json.RawMessage, error) {
-	if err := validRequest(r); err != nil {
+	stream, cleanup, err := s.open(ctx, r)
+	if err != nil {
 		return nil, err
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
+	defer cleanup()
+	_ = stream.SetWriteDeadline(streamDeadline(ctx, 30*time.Second))
+	err = writeMessage(ctx, stream, frame{Kind: "request", ID: r.ID, Method: r.Method}, r.Params, s.memory)
+	if err == nil {
+		err = stream.CloseWrite()
 	}
-	s.mu.Lock()
-	if s.ctx.Err() != nil {
-		s.mu.Unlock()
-		return nil, ErrClosed
-	}
-	if _, exists := s.pending[r.ID]; exists || len(s.pending) >= maxPending {
-		s.mu.Unlock()
-		return nil, fmt.Errorf("peer request conflict/capacity")
-	}
-	ch := make(chan response, 1)
-	correlation := nonce()
-	s.pending[r.ID] = pendingCall{r.Method, correlation, ch}
-	s.mu.Unlock()
-	defer func() { s.mu.Lock(); delete(s.pending, r.ID); s.mu.Unlock() }()
-	if err := s.send(ctx, frame{Kind: "request", ID: r.ID, Correlation: correlation, Method: r.Method, Params: r.Params}); err != nil {
-		s.Close()
+	if err != nil {
+		_ = stream.Reset()
 		return nil, fmt.Errorf("%w: %v", ErrUncertain, err)
 	}
-	select {
-	case reply := <-ch:
-		return reply.raw, reply.err
-	case <-ctx.Done():
-		return nil, fmt.Errorf("%w: %v", ErrUncertain, ctx.Err())
-	case <-s.done:
-		return nil, ErrUncertain
+	_ = stream.SetReadDeadline(streamDeadline(ctx, 90*time.Second))
+	h, body, release, err := readMessage(stream, s.memory, func(h frame) bool { return h.Kind == "response" && h.ID == r.ID && h.Method == r.Method })
+	defer release()
+	if err != nil || !json.Valid(body) {
+		_ = stream.Reset()
+		if err == nil {
+			err = fmt.Errorf("invalid peer response JSON")
+		}
+		return nil, fmt.Errorf("%w: %v", ErrUncertain, err)
 	}
+	if h.Error != nil {
+		return body, h.Error
+	}
+	return body, nil
 }
 
 // Notify is a lossy hint, restricted to event methods. Durable effects use Call.
 func (s *Session) Notify(ctx context.Context, r Request) error {
-	if err := validRequest(r); err != nil {
-		return err
-	}
-	if len(r.Method) < 6 || r.Method[:6] != "event." {
+	if !strings.HasPrefix(r.Method, "event.") {
 		return fmt.Errorf("notifications require event methods")
 	}
-	if err := s.send(ctx, frame{Kind: "event", ID: r.ID, Method: r.Method, Params: r.Params}); err != nil {
-		s.Close()
+	stream, cleanup, err := s.open(ctx, r)
+	if err != nil {
 		return err
 	}
-	return nil
+	defer cleanup()
+	_ = stream.SetWriteDeadline(streamDeadline(ctx, 30*time.Second))
+	err = writeMessage(ctx, stream, frame{Kind: "event", ID: r.ID, Method: r.Method}, r.Params, s.memory)
+	if err == nil {
+		err = stream.CloseWrite()
+	}
+	if err != nil {
+		_ = stream.Reset()
+	}
+	return err
+}
+func boundedText(text string, limit int) string {
+	text = strings.ToValidUTF8(text, "?")
+	if len(text) <= limit {
+		return text
+	}
+	text = text[:limit]
+	for !utf8.ValidString(text) {
+		text = text[:len(text)-1]
+	}
+	return text
 }
 func boundedError(err error) *RemoteError {
 	var remote *RemoteError
 	if errors.As(err, &remote) {
 		out := *remote
-		if len(out.Message) > 4096 {
-			out.Message = out.Message[:4096]
-		}
-		if len(out.Code) > 128 {
-			out.Code = out.Code[:128]
-		}
+		out.Message = boundedText(out.Message, 4096)
+		out.Code = boundedText(out.Code, 128)
 		if len(out.Data) > 16*1024 || len(out.Data) > 0 && !json.Valid(out.Data) {
 			out.Data = nil
 		}
 		return &out
 	}
-	message := err.Error()
-	if len(message) > 4096 {
-		message = message[:4096]
-	}
-	return &RemoteError{Message: message}
+	return &RemoteError{Message: boundedText(err.Error(), 4096)}
 }
-func (s *Session) readLoop() {
+
+func (s *Session) acceptLoop() {
 	defer s.Close()
 	for {
-		_ = s.conn.SetReadDeadline(time.Now().Add(90 * time.Second))
-		raw, err := readPacket(s.conn, MaxFrame)
+		stream, err := s.mux.AcceptStream()
 		if err != nil {
 			return
 		}
-		var f frame
-		if decode(raw, &f) != nil {
-			return
-		}
-		if f.Kind == "ping" || f.Kind == "pong" {
-			if f.ID != "" || f.Correlation != "" || f.Method != "" || len(f.Params) != 0 || f.Error != nil {
-				return
-			}
-			if f.Kind == "ping" {
-				// The reader must drain large concurrent writes even when
-				// its own writer is busy. Keep heartbeat replies bounded.
-				select {
-				case s.pongs <- struct{}{}:
-				default:
-				}
-			}
-			continue
-		}
-		if f.Kind == "response" {
-			if !validNonce(f.Correlation) || len(f.Params) > MaxPayload || !json.Valid(f.Params) {
-				return
-			}
-			s.mu.Lock()
-			p, ok := s.pending[f.ID]
-			s.mu.Unlock()
-			if ok && p.correlation == f.Correlation {
-				if p.method != f.Method {
-					return
-				}
-				result := response{raw: f.Params}
-				if f.Error != nil {
-					if len(f.Error.Message) > 4096 || len(f.Error.Code) > 128 || len(f.Error.Data) > 16*1024 {
-						return
-					}
-					result.err = f.Error
-				}
-				select {
-				case p.result <- result:
-				default:
-				}
-			}
-			continue
-		}
-		if (f.Kind != "request" && f.Kind != "event") || f.Error != nil || validRequest(Request{f.ID, f.Method, f.Params}) != nil {
-			return
-		}
-		if f.Kind == "request" && !validNonce(f.Correlation) || f.Kind == "event" && f.Correlation != "" {
-			return
-		}
-		if f.Kind == "event" && (len(f.Method) < 6 || f.Method[:6] != "event.") {
-			return
-		}
-		s.mu.Lock()
-		if s.inflight[f.ID] {
-			s.mu.Unlock()
-			return
-		}
-		s.inflight[f.ID] = true
-		s.mu.Unlock()
 		select {
 		case s.handlers <- struct{}{}:
+			go s.handle(stream)
 		default:
-			return
+			_ = stream.Reset()
 		}
-		go s.handle(f)
 	}
 }
-func (s *Session) handle(f frame) {
-	defer func() { <-s.handlers; s.mu.Lock(); delete(s.inflight, f.ID); s.mu.Unlock() }()
+func (s *Session) handle(stream *yamux.Stream) {
+	defer func() { _ = stream.Close(); <-s.handlers }()
+	_ = stream.SetReadDeadline(time.Now().Add(90 * time.Second))
+	h, body, release, err := readMessage(stream, s.memory, func(h frame) bool { return h.Kind == "request" || h.Kind == "event" })
+	defer release()
+	if err != nil || !json.Valid(body) {
+		_ = stream.Reset()
+		return
+	}
 	var result json.RawMessage
-	var err error
 	if s.handler == nil {
 		err = fmt.Errorf("peer service method unavailable")
 	} else {
-		result, err = s.handler(s.ctx, Request{f.ID, f.Method, f.Params})
+		// An abandoned RPC wait does not cancel a durable business operation.
+		// The handler owns cancellation and deduplication through its receipts.
+		result, err = s.handler(s.ctx, Request{h.ID, h.Method, body})
 	}
-	if f.Kind == "event" {
+	if h.Kind == "event" {
 		return
 	}
 	if len(result) == 0 {
@@ -277,11 +236,16 @@ func (s *Session) handle(f frame) {
 		result = json.RawMessage("null")
 		err = fmt.Errorf("invalid peer response size/JSON")
 	}
-	reply := frame{Kind: "response", ID: f.ID, Correlation: f.Correlation, Method: f.Method, Params: result}
+	reply := frame{Kind: "response", ID: h.ID, Method: h.Method}
 	if err != nil {
 		reply.Error = boundedError(err)
 	}
-	if s.send(s.ctx, reply) != nil {
-		s.Close()
+	_ = stream.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	if writeMessage(s.ctx, stream, reply, result, s.memory) != nil {
+		_ = stream.Reset()
+		return
+	}
+	if stream.CloseWrite() != nil {
+		_ = stream.Reset()
 	}
 }

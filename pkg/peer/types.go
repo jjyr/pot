@@ -17,7 +17,6 @@ import (
 )
 
 const MaxPayload = 24 * 1024 * 1024
-const MaxFrame = 32 * 1024 * 1024
 const maxHandshake = 64 * 1024
 const maxPending = 64
 
@@ -29,8 +28,8 @@ var ErrClosed = errors.New("peer session closed")
 var ErrUncertain = errors.New("peer request outcome uncertain")
 
 type Identity struct {
-	NodeID    string `json:"node_id"`
-	PublicKey string `json:"public_key"`
+	NodeID    string `json:"node_id" cbor:"node_id"`
+	PublicKey string `json:"public_key" cbor:"public_key"`
 }
 
 func NewIdentity(id string, key ed25519.PublicKey) Identity {
@@ -66,9 +65,9 @@ type Authorizer func(context.Context, Identity, string, json.RawMessage) (Handle
 // RemoteError carries a bounded service error. Data belongs to that service;
 // peer never interprets business fault types or permission decisions.
 type RemoteError struct {
-	Message string          `json:"message"`
-	Code    string          `json:"code,omitempty"`
-	Data    json.RawMessage `json:"data,omitempty"`
+	Message string          `json:"message" cbor:"message"`
+	Code    string          `json:"code,omitempty" cbor:"code,omitempty"`
+	Data    json.RawMessage `json:"data,omitempty" cbor:"data,omitempty"`
 }
 
 func (e *RemoteError) Error() string { return e.Message }
@@ -85,8 +84,11 @@ type DialOptions struct {
 	Context context.Context
 }
 
+func validRequestMetadata(id, method string) bool {
+	return len(id) > 0 && len(id) <= 256 && !strings.ContainsRune(id, 0) && len(method) > 0 && len(method) <= 128
+}
 func validRequest(r Request) error {
-	if len(r.ID) < 1 || len(r.ID) > 256 || strings.ContainsRune(r.ID, 0) || len(r.Method) < 1 || len(r.Method) > 128 || len(r.Params) > MaxPayload || !json.Valid(r.Params) {
+	if !validRequestMetadata(r.ID, r.Method) || len(r.Params) > MaxPayload || !json.Valid(r.Params) {
 		return fmt.Errorf("invalid peer request")
 	}
 	return nil

@@ -3,9 +3,7 @@ package peer
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -13,33 +11,22 @@ import (
 	"time"
 )
 
-const protocolVersion = 3
+const protocolVersion = 4
 
 type hello struct {
-	Version  int             `json:"version"`
-	Identity Identity        `json:"identity"`
-	Expected *Identity       `json:"expected"`
-	Service  string          `json:"service"`
-	Auth     json.RawMessage `json:"auth"`
+	Version  int             `cbor:"version"`
+	Identity Identity        `cbor:"identity"`
+	Expected *Identity       `cbor:"expected"`
+	Service  string          `cbor:"service"`
+	Auth     json.RawMessage `cbor:"auth"`
 }
 
 type acceptance struct {
-	Version  int      `json:"version"`
-	Identity Identity `json:"identity"`
-	Error    string   `json:"error,omitempty"`
+	Version  int      `cbor:"version"`
+	Identity Identity `cbor:"identity"`
+	Error    string   `cbor:"error,omitempty"`
 }
 
-func nonce() string {
-	var raw [32]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		panic(err)
-	}
-	return base64.RawURLEncoding.EncodeToString(raw[:])
-}
-func validNonce(n string) bool {
-	raw, err := base64.RawURLEncoding.DecodeString(n)
-	return err == nil && len(raw) == 32
-}
 func handshakeContext(ctx context.Context, c net.Conn) func() {
 	deadline := time.Now().Add(10 * time.Second)
 	if t, ok := ctx.Deadline(); ok && t.Before(deadline) {
@@ -56,7 +43,7 @@ func handshakeContext(ctx context.Context, c net.Conn) func() {
 	}
 }
 func writeHandshake(c net.Conn, value any) error {
-	raw, err := json.Marshal(value)
+	raw, err := wireEncoding.Marshal(value)
 	if err != nil {
 		return err
 	}
@@ -153,7 +140,10 @@ func dialConn(ctx context.Context, c net.Conn, o DialOptions) (*Session, error) 
 	}
 	finish()
 	finish = func() {}
-	s := newSession(lifetime, secured, remote, o.Service, o.Auth, o.Handler)
+	s, err := newSession(lifetime, secured, remote, o.Service, o.Auth, o.Handler, true)
+	if err != nil {
+		return nil, err
+	}
 	s.start()
 	return s, nil
 }
@@ -196,7 +186,7 @@ func (s *Server) Accept(ctx context.Context, c net.Conn) (_ *Session, err error)
 	}
 	var h hello
 	// The application identity must be the identity that actually completed
-	// mutual TLS, not a public key or node ID claimed in arbitrary JSON.
+	// mutual TLS, not a public key or node ID claimed in arbitrary metadata.
 	if decode(raw, &h) != nil || !validHello(h) || h.Identity != remote || h.Expected != nil && *h.Expected != s.Identity {
 		return nil, ErrUnauthorized
 	}
@@ -218,7 +208,10 @@ func (s *Server) Accept(ctx context.Context, c net.Conn) (_ *Session, err error)
 	}
 	finish()
 	finish = func() {}
-	conn := newSession(ctx, secured, remote, h.Service, h.Auth, handler)
+	conn, err := newSession(ctx, secured, remote, h.Service, h.Auth, handler, false)
+	if err != nil {
+		return nil, err
+	}
 	if s.OnSession != nil {
 		s.OnSession(conn)
 	}

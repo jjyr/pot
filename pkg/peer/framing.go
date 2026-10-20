@@ -1,24 +1,11 @@
 package peer
 
 import (
-	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io"
 )
 
-func decode(raw []byte, out any) error {
-	d := json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
-	if err := d.Decode(out); err != nil {
-		return err
-	}
-	if d.Decode(new(any)) != io.EOF {
-		return fmt.Errorf("trailing peer JSON")
-	}
-	return nil
-}
 func writePacket(w io.Writer, raw []byte, limit int) error {
 	if len(raw) < 1 || len(raw) > limit {
 		return fmt.Errorf("peer frame exceeds limit")

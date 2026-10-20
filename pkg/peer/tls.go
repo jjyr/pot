@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const peerALPN = "pot-peer/3"
+const peerALPN = "pot-peer/4"
 
 // Each connection gets a fresh, in-memory certificate for the existing identity
 // key. Pinning the public key instead of the certificate permits renewal without
