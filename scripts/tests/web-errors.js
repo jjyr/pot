@@ -55,6 +55,28 @@ async function test() {
   const f = fixture();
   assert.equal(f.toast().hidden, true);
   assert.equal(f.launcher().hidden, true);
+  const resizeMessages = [
+    'ResizeObserver loop completed with undelivered notifications.',
+    'ResizeObserver loop limit exceeded',
+  ];
+  for (const message of resizeMessages) {
+    f.listeners.error({message, error: null, filename: 'https://example.test/', lineno: 0, colno: 0});
+  }
+  assert.equal(f.logs().length, 0, 'Deferred resize notifications are not application crashes');
+  assert.equal(f.toast().hidden, true);
+  assert.equal(f.launcher().hidden, true);
+  assert.equal(f.consoleErrors.length, 0);
+  assert.equal(f.storage.size, 0, 'Resize notifications do not enter the persisted crash log');
+
+  const resizeErrors = fixture();
+  for (const message of resizeMessages) {
+    resizeErrors.listeners.error({message, error: Error(message)});
+    resizeErrors.listeners.unhandledrejection({reason: Error(message)});
+    resizeErrors.context.potReportPanic(message);
+  }
+  resizeErrors.listeners.error({message: 'ResizeObserver callback failed'});
+  assert.equal(resizeErrors.logs().length, 7, 'Thrown errors, rejections, panics and other observer failures remain visible');
+  assert.equal(resizeErrors.toast().hidden, false);
   const error = Error('<img src=x onerror=alert(1)>');
   f.listeners.error({message: error.message, error});
   assert.equal(f.toast().hidden, false);
