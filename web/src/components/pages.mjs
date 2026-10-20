@@ -4,12 +4,13 @@ import {usageCalendar} from './usage-calendar.mjs';
 import {notificationSetting} from './notification-setting.mjs';
 import {usageNumbers,usageRows,usageTooltip,createUsageList} from './usage.mjs';
 import {createTaskConversation} from './task-conversation.mjs';
+import {createProviderSave,saveAllowanceConfiguration} from '../state/provider-save.mjs';
 import {connectProviderEditor} from './provider-connection.mjs';
 import {avatar,avatarFromFile} from './avatar.mjs';
 import {translate} from '../locales/messages.mjs';
 import {icon} from './icons.mjs';
 import {node as n, action, field, section, table, details} from './primitives.mjs';
-import {modelDefaults,createModelInputDiscovery} from '../state/models.mjs';
+import {modelDefaults,createModelInputDiscovery,providerConversationModels} from '../state/models.mjs';
 import {ownedItems,combineTasks,combineUsage} from '../state/aggregate.mjs';
 import {createTaskPages} from '../state/task-pages.mjs';
 import {bindSearch} from './search.mjs';
@@ -38,7 +39,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   let filter = {taskScope:'active', taskQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageScope:'all', usageSpace:'all',settingsTab:'general'};
   let pendingApprovals=[],notificationSettings=null;
   const taskDetails=new Map(),resourceBoots=new Map();
-  const toolMemory=new Map(),usageOffsets=new Map(),usageCache=new Map(),approvalCards=new Map(),taskNames=new Map();
+  const providerAllowanceMemory=new Map(),toolMemory=new Map(),usageOffsets=new Map(),usageCache=new Map(),approvalCards=new Map(),taskNames=new Map();
   const chatApprovals=createChatApprovals({host:chatApprovalHost,locale,visible:chatVisible});
   const cached = new Map(),spaceCache = new Map(),machineDrafts=new Map(),machineInvitationDrafts=new Map(),editorParents=[],taskDrafts=new Map(),taskDraftVersions=new Map(),taskWrites=new Map(),scheduleWrites=new Map();
   let extensionUI=null;const extensionMemory={};
@@ -274,7 +275,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       };
       const set=(name,value)=>{controls.get(name).value=value??'';session.set(name,value);};
       const defaults=()=>{const profile=profiles.find(value=>value.id===session.values.profile_id),catalog=profile?.model_settings?.catalog_provider||'custom',limits=modelDefaults(providers,catalog,session.values.model);const same=profile?.model===session.values.model;controls.get('context_window').placeholder=String(same?(profile?.model_settings?.context_window||limits.context):limits.context);controls.get('max_output_tokens').placeholder=String(same?(profile?.model_settings?.max_output_tokens||limits.output):limits.output);controls.get('reasoning_effort').placeholder=profile?.params?.reasoning_effort||tr('Provider default','提供商默认值');controls.get('model').required=!!profile;form.form.querySelector('.editor-actions .primary').disabled=!profile;};
-      const updateModels=()=>{const profile=profiles.find(value=>value.id===session.values.profile_id),catalog=(providers.directory||[]).find(value=>value.id===profile?.model_settings?.catalog_provider);const options=new Map();if(profile?.model)options.set(profile.model,profile.model);for(const model of catalog?.models||[])options.set(model.id,model.name||model.id);for(const model of providers.configured_models?.[profile?.id]||profile?.models||[])options.set(typeof model==='string'?model:model.id,typeof model==='string'?model:model.name||model.id);const input=controls.get('model_selection');input.replaceChildren();for(const [value,label]of [['',tr('Enter model ID','输入模型 ID')],...options]){const option=n('option','',label);option.value=value;input.append(option);}set('model_selection',options.has(session.values.model)?session.values.model:'');session.acknowledge({model_selection:session.values.model_selection});controls.get('model').closest('.form-row').hidden=!!input.value;defaults();};
+      const updateModels=()=>{const profile=profiles.find(value=>value.id===session.values.profile_id),catalog=(providers.directory||[]).find(value=>value.id===profile?.model_settings?.catalog_provider);const options=new Map();if(profile?.model)options.set(profile.model,profile.model);for(const model of catalog?.models||[])options.set(model.id,model.name||model.id);for(const model of providers.configured_models?.[profile?.id]||profile?.models||[])options.set(typeof model==='string'?model:model.id,typeof model==='string'?model:model.name||model.id);const facts=(providers.connections||[]).find(value=>value.profile_id===profile?.id)?.catalog?.models||[];const allowed=new Set(providerConversationModels(facts,session.values.model).map(value=>value.id));for(const model of facts){if(allowed.has(model.id))options.set(model.id,model.name||model.id);else options.delete(model.id);}const input=controls.get('model_selection');input.replaceChildren();for(const [value,label]of [['',tr('Enter model ID','输入模型 ID')],...options]){const option=n('option','',label);option.value=value;input.append(option);}set('model_selection',options.has(session.values.model)?session.values.model:'');session.acknowledge({model_selection:session.values.model_selection});controls.get('model').closest('.form-row').hidden=!!input.value;defaults();};
       controls.get('profile_id').addEventListener('change',()=>{const selected=profiles.find(value=>value.id===session.values.profile_id);set('model',selected?.model||'');updateModels();});
       controls.get('model_selection').addEventListener('change',()=>{if(controls.get('model_selection').value)set('model',controls.get('model_selection').value);controls.get('model').closest('.form-row').hidden=!!controls.get('model_selection').value;defaults();});controls.get('model').addEventListener('input',defaults);updateModels();
       const instructionsRow=controls.get('text').closest('.form-row'),parameters=n('details','editor-disclosure');parameters.dataset.section='parameters';parameters.append(n('summary','',tr('Model parameters','模型参数')));for(const name of ['context_window','max_output_tokens','reasoning_effort'])parameters.append(controls.get(name).closest('.form-row'));instructionsRow.before(parameters);
@@ -287,7 +288,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       if(thread?.pending)form.root.prepend(n('p','hint',tr('Saved settings will apply to the next new turn. The current turn keeps its original configuration.','已保存的设置将在下一次新回合生效，当前回合保持原配置。')));
     }catch(reason){if(gate.current(token))errorView(reason);}
   }
-  async function extensions(root,token){extensionUI=createExtensions({root,client,locale,memory:extensionMemory,onSettings:()=>{filter.settingsTab='integrations';routeChanged('settings');show('settings');},onPermissions:()=>{routeChanged('machines');show('machines');}});await extensionUI.load();}
+  async function extensions(root,token){extensionUI=createExtensions({root,client,locale,memory:extensionMemory,onSettings:(section='integrations')=>{filter.settingsTab=section;routeChanged('settings');show('settings');},onPermissions:()=>{routeChanged('machines');show('machines');}});await extensionUI.load();}
   async function settings(root, token) {
     root.classList.add('settings-content');const settingsKeys=['settings.general','settings.providers','integrations.title','settings.tasks'];const tabs=segments(['general','providers','integrations','tasks'].map((key,i)=>[key,translate(locale(),settingsKeys[i])]),filter.settingsTab,value=>{filter.settingsTab=value;show('settings');});[...tabs.children].forEach((node,i)=>{node.dataset.settingsI18n=settingsKeys[i];});root.append(tabs);
     if(filter.settingsTab==='general'){
@@ -304,7 +305,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const locations=client.spaces||[];if(!configurationSpace)configurationSpace=scope().space;
     const settingsScope={space:configurationSpace,owner:''};
     if(client.desktop&&locations.length>1){const location=field(tr('Configuration location','配置位置'),configurationSpace,{choices:locations.map(space=>[space.id,space.name])});location.input.onchange=()=>{configurationSpace=location.input.value;show('settings');};root.append(location.row);}
-    const current=()=>gate.current(token)&&!disposed,refresh=()=>pageView?.queue.run(),options={root,tr,request,scope:settingsScope,current,refresh};
+    const current=()=>gate.current(token)&&!disposed,refresh=()=>pageView?.queue.run(),options={root,tr,locale,request,scope:settingsScope,current,refresh,allowanceMemory:providerAllowanceMemory,allowanceMemoryKey:client.runtime.boot_id};
     if(filter.settingsTab==='integrations'){
       const refreshIntegrations=()=>{if(!current())return Promise.resolve();client.resources?.invalidate(['integrations'],{space:settingsScope.space});return refresh();};
       const update=createIntegrations({root,request,scope:settingsScope,signal:token.signal,locale,openExternal:client.openExternal,refresh:refreshIntegrations});
@@ -338,56 +339,63 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     await providerPicker(snapshot,captured);
     if(editor?.kind==='picker')editor.onboarding=true;
   }
+  function providerFormLocale(form,titleKey,fields) {
+    const t=key=>translate(locale(),'providers.'+key);
+    form.lifecycle.locale=()=>{form.lifecycle.setTitle(t(titleKey));for(const [name,key]of Object.entries(fields)){const input=form.controls.get(name);if(!input)continue;input.closest('.form-row').querySelector('.form-label').textContent=t(key);input.setAttribute('aria-label',t(key));}for(const node of form.root.querySelectorAll('[data-provider-i18n]'))node.textContent=t(node.dataset.providerI18n);};
+    const buttons=form.form.querySelector('.editor-actions').children;buttons[0].dataset.providerI18n='cancel';buttons[1].dataset.providerI18n='save';form.lifecycle.locale();
+  }
   async function providerPicker(snapshot,captured) {
     if(editor?.kind==='assistant')suspendEditor();else if(!await leave())return;
-    const form=renderEditor(tr('Add Provider','添加提供商'),{search:''},[{name:'search',label:tr('Search providers','搜索提供商'),kind:'search'}],()=>{}, {capturedScope:captured});
-    editor.kind='picker';
-    form.form.querySelector('.editor-actions .primary').remove();const grid=n('div','provider-grid'),hint=n('p','hint',tr('Choose the AI you want to use.','选择你要使用的 AI。'));form.form.querySelector('.editor-fields').prepend(hint);form.form.querySelector('.editor-fields').append(grid);let more=false;
-    const render=()=>{const query=form.controls.get('search').value.trim().toLowerCase();form.session.acknowledge({search:form.session.values.search});grid.replaceChildren();for(const provider of (snapshot.directory||[]).filter(value=>query?`${value.name} ${value.id}`.toLowerCase().includes(query):more||value.common)){
-      const choice=action(provider.name,()=>providerEditor(null,snapshot,captured,provider.id));choice.classList.add('provider-choice');if(provider.logo?.startsWith('<svg')){const image=n('img','provider-logo');image.alt='';image.src=`data:image/svg+xml;charset=utf-8,${encodeURIComponent(provider.logo)}`;choice.prepend(image);}grid.append(choice);
-    }if(!query||'custom api 自定义'.includes(query)){const custom=action(tr('Custom API','自定义 API'),()=>providerEditor(null,snapshot,captured,'custom'));custom.classList.add('provider-choice');const gear=icon('settings');gear.classList.add('provider-logo');custom.prepend(gear);grid.append(custom);}};
-    const toggle=action(tr('More providers…','更多提供商…'),()=>{more=!more;toggle.textContent=more?tr('Fewer providers','收起提供商'):tr('More providers…','更多提供商…');render();});form.form.querySelector('.editor-fields').append(toggle);form.controls.get('search').addEventListener('input',render);render();
+    const t=key=>translate(locale(),'providers.'+key),form=renderEditor(t('add'),{search:''},[{name:'search',label:t('search'),kind:'search'}],()=>{}, {capturedScope:captured});editor.kind='picker';
+    providerFormLocale(form,'add',{search:'search'});form.form.querySelector('.editor-actions .primary').remove();const grid=n('div','provider-grid'),hint=n('p','hint',t('choose'));hint.dataset.providerI18n='choose';form.form.querySelector('.editor-fields').prepend(hint);form.form.querySelector('.editor-fields').append(grid);let more=false;
+    const types=(snapshot.provider_types||[]).filter(value=>value.available!==false);
+    const render=()=>{const query=form.controls.get('search').value.trim().toLowerCase();form.session.acknowledge({search:form.session.values.search});grid.replaceChildren();for(const provider of types){const directory=(snapshot.directory||[]).find(value=>value.id===provider.directory_provider);if(query?!`${provider.name} ${provider.id}`.toLowerCase().includes(query):!more&&directory&&!directory.common)continue;
+      const choice=action(provider.name,()=>providerEditor(null,snapshot,captured,provider.id));choice.classList.add('provider-choice');const image=n('img','provider-logo');image.alt='';if(provider.icon){image.src=provider.icon;choice.prepend(image);}else{const fallback=icon('settings');fallback.classList.add('provider-logo');choice.prepend(fallback);}grid.append(choice);
+    }if(!grid.children.length)grid.append(n('p','hint',t('noTypes')));toggle.textContent=t(more?'fewer':'more');};
+    const toggle=action('',()=>{more=!more;render();});form.form.querySelector('.editor-fields').append(toggle);form.controls.get('search').addEventListener('input',render);const previous=form.lifecycle.locale;form.lifecycle.locale=()=>{previous();render();};render();
   }
-  async function providerEditor(profile, snapshot, settingsScope, providerOverride) {
-    const onboarding=(editor?.kind==='picker'&&editor.onboarding)||(!(client.assistants||[]).length&&!editorParents.some(parent=>parent.kind==='assistant'));
+  async function providerEditor(profile,snapshot,settingsScope,providerOverride) {
+    const t=key=>translate(locale(),'providers.'+key),onboarding=(editor?.kind==='picker'&&editor.onboarding)||(!(client.assistants||[]).length&&!editorParents.some(parent=>parent.kind==='assistant'));
     if(editor?.kind==='picker')suspendEditor();else if(!await leave())return;
-    const connection=(snapshot.connections||[]).find(c=>c.profile_id===profile?.id);
-    const providerID=providerOverride||profile?.model_settings?.catalog_provider||'custom';
-    const selectedEntry=(snapshot.directory||[]).find(value=>value.id===providerID);
-    const inherited=modelDefaults(snapshot,providerID,profile?.model||'');
-    let configuredModels=[...(snapshot.configured_models?.[profile?.id]||[])];
-    const inputDiscovery=createModelInputDiscovery(connection,profile?.model_settings?.input_modalities);
-    const baseName=selectedEntry?.name||tr('Custom Provider','自定义供应商'),names=new Set((snapshot.profiles||[]).map(value=>value.name));let defaultName=baseName;for(let index=2;names.has(defaultName);index++)defaultName=`${baseName} ${index}`;
-    const initial={name:profile?.name||defaultName,endpoint:connection?.endpoint||selectedEntry?.endpoint||'',api_key:'',model:profile?.model||'',model_selection:'',protocol:connection?.protocol||selectedEntry?.protocol||'openai_responses',context_window:profile?.model_settings?.context_window??null,max_output_tokens:profile?.model_settings?.max_output_tokens??null,reasoning_effort:profile?.params?.reasoning_effort||''};
-    const form=renderEditor(profile?tr('Edit Provider','编辑提供商'):tr('Add Provider','添加提供商'),initial,[
-      {name:'name',label:tr('Name','名称'),required:true},
-      {name:'endpoint',label:tr('Endpoint','API 地址'),kind:'url',required:true,help:tr('Base URL or complete request URL.','基础地址或完整请求地址。')},
-      {name:'api_key',label:tr('API key','API 密钥'),kind:'password',required:!profile,help:profile?tr('Leave blank to keep the saved key.','留空保留现有密钥。'):''},
-      {name:'model_selection',label:tr('Model','默认模型'),choices:[['',tr('Enter model ID','输入模型 ID')]]},
-      {name:'model',label:tr('Model ID','模型 ID'),required:true},
-      {name:'protocol',label:tr('Protocol','请求格式'),choices:[['openai_chat','OpenAI Chat Completions'],['openai_responses','OpenAI Responses'],['anthropic_messages','Anthropic Messages'],['gemini','Google Gemini']]},
-      {name:'context_window',label:tr('Context window','上下文窗口'),kind:'number',parse:value=>value?Number(value):null,min:1,placeholder:String(inherited.context),presets:[128000,200000,256000,400000,512000,1000000]},
-      {name:'max_output_tokens',label:tr('Maximum output tokens','最大输出 token'),kind:'number',parse:value=>value?Number(value):null,min:1,placeholder:String(inherited.output),presets:[8000,16000,32000,64000,128000]},
-      {name:'reasoning_effort',label:tr('Reasoning effort','推理强度'),placeholder:tr('Provider default','提供商默认值')},
-    ],(values,context)=>{
-      const {model_selection,context_window,...connectionValues}=values;
-      return request('/api/v1/providers',{...context,method:'POST',body:{request_id:context.request_id,profile_id:profile?.id||'',expected_revision:profile?.revision||0,models:[...new Set([...configuredModels,values.model].filter(Boolean))],...connectionValues,reasoning_effort:values.reasoning_effort.trim()||null,max_output_tokens:values.max_output_tokens||modelDefaults(snapshot,providerID,values.model).output,model_settings:{catalog_provider:providerID==='custom'?null:providerID,context_window:context_window||null,max_output_tokens:values.max_output_tokens||null,input_modalities:inputDiscovery.snapshot(values)}}});
-    },{capturedScope:settingsScope});
-    const controls=form.controls,session=form.session;let endpointEdited=false;
+    const connection=(snapshot.connections||[]).find(c=>c.profile_id===profile?.id),typeID=providerOverride||connection?.type_id||'',type=(snapshot.provider_types||[]).find(value=>value.id===typeID);
+    const providerID=type?.directory_provider||profile?.model_settings?.catalog_provider||'',selectedEntry=(snapshot.directory||[]).find(value=>value.id===providerID);
+    let monitorView=null,monitorLoaded=!profile,monitorFailure=false;
+    if(profile&&type?.capabilities?.allowances){const token=gate.next();body().append(n('p','hint',t('allowanceLoading')));try{monitorView=await request('/api/v1/providers/allowances?profile_id='+encodeURIComponent(profile.id),settingsScope);monitorLoaded=true;}catch{monitorFailure=true;}if(!gate.current(token)||disposed)return;}
+    const inherited=modelDefaults(snapshot,providerID,profile?.model||'');let configuredModels=[...(snapshot.configured_models?.[profile?.id]||[])],discovered=[...(connection?.catalog?.models||[])];
+    const inputDiscovery=createModelInputDiscovery(connection,profile?.model_settings?.input_modalities),baseName=type?.name||t('customName'),names=new Set((snapshot.profiles||[]).map(value=>value.name));let defaultName=baseName;for(let index=2;names.has(defaultName);index++)defaultName=`${baseName} ${index}`;
+    const assistantChoices=[...(monitorView?.assistants||(client.assistants||[]).filter(value=>value.space_id===settingsScope.space))],monitor=monitorView?.monitor;if(monitor?.assistant&&!assistantChoices.some(value=>value.id===monitor.assistant))assistantChoices.push({id:monitor.assistant,name:t('status.assistant_missing'),missing:true});
+    const initial={name:profile?.name||defaultName,endpoint:connection?.endpoint||type?.endpoint||'',api_key:'',model:profile?.model||'',model_selection:'',protocol:connection?.protocol||type?.protocol||'openai_responses',context_window:profile?.model_settings?.context_window??null,max_output_tokens:profile?.model_settings?.max_output_tokens??null,reasoning_effort:profile?.params?.reasoning_effort||'',...(type?.capabilities?.allowances&&monitorLoaded?{allowance_enabled:monitor?.enabled??true,allowance_threshold:monitor?.threshold??90,allowance_assistant:monitor?.assistant??assistantChoices[0]?.id??''}:{})};
+    const protocolNames={openai_chat:'OpenAI Chat Completions',openai_responses:'OpenAI Responses',anthropic_messages:'Anthropic Messages',gemini:'Google Gemini'},protocols=[...new Set([...(type?.protocols?.length?type.protocols:[type?.protocol||initial.protocol]),initial.protocol])];
+    const save=createProviderSave({profile,save:async(values,context,savedProfile)=>{if(!type||type.available===false)throw Object.assign(Error('provider unavailable'),{uiKey:'providers.unavailable'});const {model_selection,context_window,...connectionValues}=values;return request('/api/v1/providers',{...context,method:'POST',body:{request_id:context.request_id,provider_type_id:typeID,profile_id:savedProfile?.id||'',expected_revision:savedProfile?.revision||0,models:[...new Set([...configuredModels,values.model].filter(Boolean))],...connectionValues,reasoning_effort:values.reasoning_effort.trim()||null,max_output_tokens:values.max_output_tokens||limitsFor(values.model).output,model_settings:{catalog_provider:providerID||null,context_window:context_window||null,max_output_tokens:values.max_output_tokens||null,input_modalities:inputDiscovery.snapshot(values)}}});},configure:type?.capabilities?.allowances&&monitorLoaded?async(saved,values,context)=>{if(!monitorView)monitorView=await request('/api/v1/providers/allowances?profile_id='+encodeURIComponent(saved.id),settingsScope);const revision=monitorView.monitor.revision;monitorView=await saveAllowanceConfiguration({request,scope:context,profileID:saved.id,values,revision});}:null});
+    const definitions=[
+      {name:'name',label:t('name'),required:true},{name:'endpoint',label:t('endpoint'),kind:'url',required:true,help:t('endpointHelp')},
+      {name:'api_key',label:t('key'),kind:'password',required:!profile&&!type?.default_credential,help:profile?t('keepKey'):type?.default_credential?t('publicDefault'):''},
+      {name:'model_selection',label:t('model'),choices:[['',t('enterModel')]]},{name:'model',label:t('modelID'),required:true},
+      {name:'protocol',label:t('protocol'),choices:protocols.map(value=>[value,protocolNames[value]||value])},
+      {name:'context_window',label:t('context'),kind:'number',parse:value=>value?Number(value):null,min:1,max:Number.MAX_SAFE_INTEGER,placeholder:String(inherited.context),presets:[128000,200000,256000,400000,512000,1000000]},
+      {name:'max_output_tokens',label:t('output'),kind:'number',parse:value=>value?Number(value):null,min:1,max:Number.MAX_SAFE_INTEGER,placeholder:String(inherited.output),presets:[8000,16000,32000,64000,128000]},
+      {name:'reasoning_effort',label:t('reasoning'),placeholder:t('providerDefault')},
+      ...(type?.capabilities?.allowances&&monitorLoaded?[{section:t('allowances')},{name:'allowance_enabled',label:t('allowanceEnabled'),kind:'checkbox',help:t('allowanceDefaults')},{name:'allowance_threshold',label:t('threshold'),kind:'number',parse:Number,min:1,max:100,required:true},{name:'allowance_assistant',label:t('assistant'),choices:[['',t('waitingAssistant')],...assistantChoices.map(value=>[value.id,value.name])]}]:[]),
+    ];
+    const form=renderEditor(profile?t('edit'):t('add'),initial,definitions,save,{capturedScope:settingsScope}),controls=form.controls,session=form.session;let endpointEdited=false;
+    providerFormLocale(form,profile?'edit':'add',{name:'name',endpoint:'endpoint',api_key:'key',model_selection:'model',model:'modelID',protocol:'protocol',context_window:'context',max_output_tokens:'output',reasoning_effort:'reasoning',allowance_enabled:'allowanceEnabled',allowance_threshold:'threshold',allowance_assistant:'assistant'});
+    for(const [name,key]of [['endpoint','endpointHelp'],['api_key',profile?'keepKey':'publicDefault'],['allowance_enabled','allowanceDefaults']]){const hint=controls.get(name)?.closest('.field-body').querySelector('small');if(hint)hint.dataset.providerI18n=key;}
+    const section=form.form.querySelector('.page-section h2');if(section)section.dataset.providerI18n='allowances';
+    if(monitorFailure){const warning=n('p','inline-error',t('allowanceLoadFailed'));warning.dataset.providerI18n='allowanceLoadFailed';form.form.querySelector('.editor-fields').append(warning);}
+    if(!type||type.available===false){const warning=n('p','inline-error',t('unavailable'));warning.dataset.providerI18n='unavailable';form.form.prepend(warning);form.form.querySelector('.primary').disabled=true;}
     form.lifecycle.cancel=()=>back({skipPicker:true});form.lifecycle.afterSave=async saved=>{await back({skipPicker:true});await editor?.lifecycle.providersChanged?.(saved);if(onboarding){openChat();changed(saved);}};
-    const set=(name,value)=>{controls.get(name).value=value??'';session.set(name,value);};
-    const showModel=()=>{controls.get('model').closest('.form-row').hidden=!!controls.get('model_selection').value;};
-    const inherit=()=>{const limits=modelDefaults(snapshot,providerID,session.values.model);controls.get('context_window').placeholder=String(limits.context);controls.get('max_output_tokens').placeholder=String(limits.output);};
-    const models=(entries,selected='')=>{const input=controls.get('model_selection');input.replaceChildren();for(const [value,label]of [['',tr('Enter model ID','输入模型 ID')],...entries.map(model=>[typeof model==='string'?model:model.id,typeof model==='string'?model:model.name||model.id])]){const option=n('option','',label);option.value=value;input.append(option);}set('model_selection',entries.some(model=>(typeof model==='string'?model:model.id)===selected)?selected:'');session.acknowledge({model_selection:session.values.model_selection});showModel();};
-    models([...new Map([...(selectedEntry?.models||[]),...configuredModels,...(profile?.model?[profile.model]:[])].map(model=>[typeof model==='string'?model:model.id,model])).values()],initial.model);
+    const set=(name,value)=>{controls.get(name).value=value??'';session.set(name,value);},showModel=()=>{controls.get('model').closest('.form-row').hidden=!!controls.get('model_selection').value;};
+    function limitsFor(modelID){const entry=discovered.find(value=>value.id===modelID),base=modelDefaults(snapshot,providerID,modelID);return entry?{context:entry.context_window||base.context,input:entry.max_input||base.input,output:Math.min(entry.max_output||base.output,(entry.context_window||base.context)-1)}:base;}
+    const inherit=()=>{const limits=limitsFor(session.values.model);controls.get('context_window').placeholder=String(limits.context);controls.get('max_output_tokens').placeholder=String(limits.output);};
+    const models=(entries,selected='')=>{entries=providerConversationModels(entries,selected);const input=controls.get('model_selection');input.replaceChildren();for(const [value,label]of [['',t('enterModel')],...entries.map(model=>[typeof model==='string'?model:model.id,typeof model==='string'?model:model.name||model.id])]){const option=n('option','',label);option.value=value;input.append(option);}set('model_selection',entries.some(model=>(typeof model==='string'?model:model.id)===selected)?selected:'');session.acknowledge({model_selection:session.values.model_selection});showModel();};
+    models([...new Map([...(selectedEntry?.models||[]),...configuredModels,...(profile?.model?[profile.model]:[]),...discovered].map(model=>[typeof model==='string'?model:model.id,model])).values()],initial.model);
     const keyURL={openai:'https://platform.openai.com/api-keys',anthropic:'https://platform.claude.com/settings/keys',google:'https://aistudio.google.com/api-keys',deepseek:'https://platform.deepseek.com/api_keys',opencode:'https://opencode.ai/auth','opencode-go':'https://opencode.ai/auth'}[providerID];
-    if(keyURL){const link=n('a','provider-key-link',tr('Get API key ↗','获取 API Key ↗'));link.href=keyURL;link.target='_blank';link.rel='noopener noreferrer';if(client.openExternal)link.onclick=event=>{event.preventDefault();client.openExternal(keyURL);};controls.get('api_key').closest('.field-body').append(link);}
-    controls.get('model_selection').addEventListener('change',()=>{if(controls.get('model_selection').value){set('model',controls.get('model_selection').value);const model=selectedEntry?.models?.find(model=>model.id===session.values.model);if(model&&!endpointEdited){if(model.endpoint)set('endpoint',model.endpoint);if(model.protocol)set('protocol',model.protocol);}}showModel();inherit();});
-    controls.get('endpoint').addEventListener('input',()=>{endpointEdited=true;});
-    controls.get('protocol').addEventListener('change',()=>{endpointEdited=true;});
-    controls.get('model').addEventListener('input',inherit);inherit();
-    connectProviderEditor({form,request,scope:settingsScope,profile,connection,tr,current:()=>editor?.session===session&&!disposed&&client.runtime.boot_id===session.context.boot,connectionChanged:value=>inputDiscovery.connectionChanged(value),models:(entries,inputs)=>{inputDiscovery.adopt(session.values,inputs);configuredModels=entries.map(model=>typeof model==='string'?model:model.id);models([...new Map([...(selectedEntry?.models||[]),...configuredModels].map(model=>[typeof model==='string'?model:model.id,model])).values()],controls.get('model_selection').value);}});
-
+    if(keyURL){const link=n('a','provider-key-link',t('getKey'));link.dataset.providerI18n='getKey';link.href=keyURL;link.target='_blank';link.rel='noopener noreferrer';if(client.openExternal)link.onclick=event=>{event.preventDefault();client.openExternal(keyURL);};controls.get('api_key').closest('.field-body').append(link);}
+    controls.get('model_selection').addEventListener('change',()=>{if(controls.get('model_selection').value){set('model',controls.get('model_selection').value);const model=selectedEntry?.models?.find(model=>model.id===session.values.model);if(model&&!endpointEdited){if(model.endpoint)set('endpoint',model.endpoint);if(model.protocol&&protocols.includes(model.protocol))set('protocol',model.protocol);}}showModel();inherit();});
+    controls.get('endpoint').addEventListener('input',()=>{endpointEdited=true;});controls.get('protocol').addEventListener('change',()=>{endpointEdited=true;});controls.get('model').addEventListener('input',inherit);inherit();
+    const refreshLocale=form.lifecycle.locale;form.lifecycle.locale=()=>{refreshLocale();controls.get('model_selection').options[0].textContent=t('enterModel');controls.get('reasoning_effort').placeholder=t('providerDefault');if(controls.has('allowance_assistant')){const choices=controls.get('allowance_assistant').options;choices[0].textContent=t('waitingAssistant');for(const item of assistantChoices.filter(value=>value.missing)){const option=[...choices].find(value=>value.value===item.id);if(option)option.textContent=t('status.assistant_missing');}}};
+    let connectionRoute=JSON.stringify([initial.endpoint,initial.protocol]);
+    connectProviderEditor({form,request,scope:settingsScope,profile,connection,type,locale,current:()=>editor?.session===session&&!disposed&&client.runtime.boot_id===session.context.boot,connectionChanged:value=>{inputDiscovery.connectionChanged(value);const next=JSON.stringify([value.endpoint,value.protocol]);if(connectionRoute!==next){connectionRoute=next;discovered=[];inherit();}},models:(entries,inputs)=>{inputDiscovery.adopt(session.values,inputs);configuredModels=entries.map(model=>typeof model==='string'?model:model.id);discovered=entries.filter(model=>typeof model!=='string');models([...new Map([...(selectedEntry?.models||[]),...entries].map(model=>[typeof model==='string'?model:model.id,model])).values()],controls.get('model_selection').value);inherit();}});
   }
   function spaceEditor() {
     renderEditor(tr('Connect Space','连接 Space'),{name:'',endpoint:'',token:'',ca_pem:''},[

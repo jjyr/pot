@@ -17,3 +17,11 @@ export function createModelInputDiscovery(connection,initial={}) {
     snapshot(value){return key(value)===current?structuredClone(inputs):{};},
   };
 }
+
+// Unknown metadata leaves manual configuration available. Known non-conversation
+// models are excluded from suggestions, while preserving the current selection.
+export function providerConversationModels(entries,selected='') {
+  return entries.filter(model=>typeof model==='string'||model.id===selected||
+    ((!model.input_modalities?.length||model.input_modalities.includes('text'))&&
+     (!model.output_modalities?.length||model.output_modalities.includes('text'))));
+}
