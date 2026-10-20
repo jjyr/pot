@@ -227,7 +227,7 @@ func (s *Service) secret(ctx context.Context, id string) (credential, error) {
 func (s *Service) update(ctx context.Context, c Connection) error {
 	c.UpdatedAt = time.Now().UTC()
 	raw, _ := json.Marshal(c)
-	result, err := s.options.DB.ExecContext(ctx, `UPDATE agent_link_connections SET state=?,metadata=? WHERE id=? AND state!='revoked'`, c.State, string(raw), c.ID)
+	result, err := s.options.DB.ExecContext(ctx, `UPDATE agent_link_connections SET state=?,metadata=? WHERE id=? AND state!='revoked' AND (state!='disconnected' OR ?='disconnected')`, c.State, string(raw), c.ID, c.State)
 	if err != nil {
 		return err
 	}

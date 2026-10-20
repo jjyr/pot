@@ -74,3 +74,19 @@ func TestNodeDirectoryRoutesAllAssistantsAndPreservesDefaultIntent(t *testing.T)
 		t.Fatal("deletion removed history")
 	}
 }
+
+func TestStaleNetworkProjectionCannotResumeDisconnectedConnection(t *testing.T) {
+	ctx := context.Background()
+	a, b := newFixture(t, "stale-a"), newFixture(t, "stale-b")
+	c := connect(t, a, b)
+	if e := a.service.Disconnect(ctx, c.ID); e != nil {
+		t.Fatal(e)
+	}
+	if e := a.service.update(ctx, c); e == nil {
+		t.Fatal("stale network update overwrote pause")
+	}
+	current, e := a.service.Get(ctx, c.ID)
+	if e != nil || current.State != "disconnected" {
+		t.Fatal(current, e)
+	}
+}

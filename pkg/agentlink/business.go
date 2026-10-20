@@ -10,6 +10,8 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
+var ErrCapacity = errors.New("agent_link_capacity_exceeded")
+var ErrFenced = errors.New("agent_link_execution_fenced")
 var ErrUnsupported = errors.New("agent_link_capability_unsupported")
 var ErrDisconnected = errors.New("agent_link_disconnected")
 
@@ -90,8 +92,14 @@ func (s *Service) Directory(ctx context.Context, id string) (Directory, error) {
 		e = validateDirectory(d, c.PeerHost.NodeID)
 	}
 	if e == nil {
-		c.Directory = &d
-		e = s.update(ctx, c)
+		s.mu.Lock()
+		current, err := s.Get(ctx, id)
+		if err == nil {
+			current.Directory = &d
+			err = s.update(ctx, current)
+		}
+		s.mu.Unlock()
+		e = err
 	}
 	return d, e
 }
@@ -124,6 +132,12 @@ func (s *Service) Submit(ctx context.Context, id string, r TaskRequest) (Task, e
 	}
 	var t Task
 	e = s.call(ctx, session, "task.submit", r, &t)
+	if e == nil {
+		e = validateTask(t, c.PeerHost.NodeID, "", r.RequestID)
+		if r.AssistantID != "" && t.Assistant.Address.AgentID != r.AssistantID {
+			e = ErrConflict
+		}
+	}
 	return t, e
 }
 func (s *Service) Status(ctx context.Context, id string, from protocol.AgentRef, task string) (Task, error) {
@@ -146,9 +160,16 @@ func (s *Service) lookup(ctx context.Context, id string, from protocol.AgentRef,
 	}
 	var t Task
 	e = s.call(ctx, session, method, taskLookup{from, task}, &t)
+	if e == nil {
+		e = validateTask(t, c.PeerHost.NodeID, task, "")
+	}
 	return t, e
 }
 func (s *Service) business(ctx context.Context, c Connection, remote peer.Identity, r peer.Request) (json.RawMessage, error) {
+	if !s.admit(c.ID) {
+		return nil, ErrCapacity
+	}
+	defer s.release(c.ID)
 	d, e := s.localDirectory(ctx)
 	if e != nil {
 		return nil, e
@@ -229,7 +250,8 @@ func (s *Service) Reconnect(ctx context.Context, id string) error {
 	}
 	if e == nil {
 		c.State = "offline"
-		e = s.update(ctx, c)
+		raw, _ := json.Marshal(c)
+		_, e = s.options.DB.ExecContext(ctx, "UPDATE agent_link_connections SET state=?,metadata=? WHERE id=? AND state!='revoked'", c.State, string(raw), c.ID)
 	}
 	s.mu.Unlock()
 	if e != nil {
@@ -241,3 +263,14 @@ func (s *Service) Reconnect(ctx context.Context, id string) error {
 // Delete leaves a revocation tombstone so a stale peer cannot restore the link.
 // The saved directory is removed; business history and running work are retained.
 func (s *Service) Delete(ctx context.Context, id string) error { return s.Revoke(ctx, id) }
+
+func validateTask(t Task, node, id, request string) error {
+	if t.ID == "" || len(t.ID) > 256 || !validIdentity(t.Assistant) || t.Assistant.Address.NodeID != node || id != "" && t.ID != id || request != "" && t.RequestID != request || len(t.Result) > 1024*1024 || len(t.Error) > 65536 {
+		return ErrConflict
+	}
+	switch t.State {
+	case "queued", "waiting", "running", "waiting_approval", "cancelling", "complete", "completed", "failed", "cancelled", "interrupted", "unknown":
+		return nil
+	}
+	return ErrConflict
+}
