@@ -92,7 +92,12 @@ func (s *Service) BeginMCPOAuth(ctx context.Context, c MCPOAuthCommand) (any, er
 				w.WriteHeader(400)
 			}
 			_, _ = io.WriteString(w, "<html><title>Pot</title><script>window.close()</script></html>")
-			go callback.Close()
+			go func() {
+				// Close would abort this response before ServeHTTP has flushed it.
+				shutdown, stop := context.WithTimeout(context.Background(), 5*time.Second)
+				defer stop()
+				_ = callback.Shutdown(shutdown)
+			}()
 		})
 		go callback.Serve(listener)
 		go func() {
