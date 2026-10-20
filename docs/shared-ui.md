@@ -13,14 +13,14 @@ web/src: shell, pages, composer, drafts, configuration, navigation
                |                               |
          Wails bindings                  same-origin HTTP/SSE
        Go desktop service                 browser server
-      local + remote Spaces               one serving Control
+      local node + Agent Link peers       one local node
 ```
 
 ## Presentation and platform boundary
 
 [`components/ui.js`](../web/src/components/ui.js) owns the shell, assistant
 directory, Chat and input lifecycle. [`components/pages.mjs`](../web/src/components/pages.mjs)
-owns Tasks, schedules, Machines, Usage, configuration forms and return contexts.
+owns Tasks, schedules, Topology, Usage, configuration forms and return contexts.
 [`components/task-conversation.mjs`](../web/src/components/task-conversation.mjs)
 owns the task status, conversation history, menu and fixed composer, reusing the
 shared reply/tool/composer components. Pages retains task requests and owner scope.
@@ -82,13 +82,13 @@ download controls. Other file links retain their download behavior. Remote HTTP
 images remain explicit links and are never fetched automatically.
 
 The production client reads the existing authenticated Task file chunks through
-HTTP or the native bridge, retaining the original assistant and Space for every
+HTTP or the native bridge, retaining the original node and assistant for every
 chunk. It validates offsets, total size and revision before creating a Blob URL.
 Previews accept PNG, JPEG, WebP and GIF signatures, up to 16 MiB per image;
 unsupported, oversized and unavailable originals show a localized download
 fallback. No new file routes or model prompt instructions are needed.
 
-Connected `pot-file-image` elements share pending reads for the same owner, Space,
+Connected `pot-file-image` elements share pending reads for the same node, assistant,
 Task and path. Disconnection releases the lease, aborts unused reads and revokes
 unused Blob URLs; a synchronous streaming replacement reuses its lease. Preview
 dialogs close when their message leaves the document. Loading, error and dialog
@@ -98,12 +98,13 @@ controls follow the current UI language, including during asynchronous reads.
 
 `state/resource-cache.mjs` provides memory-only reads shared by Web and Wails.
 The client explicitly allows display resources: configuration summaries, directory,
-Tasks and schedules, usage pages, machines and membership status, About, and
-reference completion. A resource key includes Control, boot, Space, owner and the
-full query. Provider summaries share one Space entry across assistant contexts.
-Credentials, editor revision reads, approval decisions and permission reads bypass
-this cache. Membership status contains only identity, role, Control URL and epoch;
-invitation creation remains an uncached command.
+Tasks and schedules, usage pages, machines, Agent Link connections, About, and
+reference completion. A resource key includes the local node, boot, presentation
+scope, assistant and full query. Existing Space-scoped UI keys represent only
+the local presentation scope, not remote ownership. Provider summaries share one
+local entry across assistant contexts. Credentials, editor revision reads,
+approval decisions and permission reads bypass this cache. Invitation creation
+remains an uncached command.
 
 ```text
 page / directory / completion
@@ -119,7 +120,7 @@ page / directory / completion
 
 Fresh configuration reads last 30 seconds; dynamic lists and completion reads last
 5 seconds. TTL is checked on access and creates no polling. Domain events and
-successful commands invalidate their display domains within the captured Space;
+successful commands invalidate their display domains within the captured local scope;
 upload chunks and model checks do not invalidate unrelated resources. A confirmed new boot drops its
 old resource values. Reconnect resets require revalidation while retaining display
 data. Invalidation during IO requires a follow-up read before publishing. Leaving
@@ -127,15 +128,14 @@ one view never aborts a request shared by other consumers. Failures retain old
 values and show a localized retry notice. The bounded cache clones values for each
 consumer so local projection changes do not mutate other views.
 
-Task lists read the operator catalogue once per Space and cache backend pages.
-Each source supplies only the ordered prefix needed for the current global page;
-assistant count does not multiply reads. Fast Spaces render while other sources
-load, with pagination enabled when the combined page settles. Counts represent
-complete source totals. Schedule pagination retains complete source collections.
+Task lists read the local operator catalogue and cache backend pages; assistant
+count does not multiply reads. Delegated tasks retain their remote references in
+that catalogue. Counts represent complete totals. Schedule pagination retains
+complete source collections.
 Task detail keeps a bounded transcript cache and resumes events from
 its cursor, reading messages and record updates concurrently. Usage page offsets,
 scroll positions and disclosures remain view state. Chat restores confirmed
-snapshots with Space and Control identity, then waits for the subscription's
+snapshots with local node and assistant identity, then waits for the subscription's
 initial authoritative snapshot before enabling sends; it needs no extra snapshot
 GET. Existing cursor and generation fences reject late or older stream responses.
 Background updates do not replace editor sessions or their dirty values. Unsaved
@@ -167,12 +167,12 @@ macOS WebView; native attachment downloads use the host save dialog. See
 [Chat attachments](chat-attachments.md) for formats, capability checks and retention.
 
 Drafts, cached conversations, positions and late-response fences include the
-Control/Space and assistant identity. A matching authoritative receipt clears
+local node and assistant identity. A matching authoritative receipt clears
 only its submitted draft. Selecting another assistant does not change ownership
 of a request already in flight. Task Usage uses the Task ID for accounting while
 requests retain the owning assistant; its Back/history path preserves the
 independently selected Chat. Task approvals follow the Task owner and exact Task,
-including when a different assistant remains selected in Chat. See [Multi-Space UI](multi-space-ui.md).
+including when a different assistant remains selected in Chat. See [Node UI](node-ui.md).
 
 Pending approvals appear in one transient region immediately after the latest
 assistant message. New messages move this region to the new anchor, preserving
@@ -189,7 +189,7 @@ Task name, machine, exact operation, explanation, decision controls and errors.
 Cards start collapsed and expand in place. A successful Allow/Deny removes the
 resolved card in both views; the last decision removes the notice and assistant
 badge. Failed submissions keep the operation and retry controls. Decisions retain
-the original Space, assistant, Task/run and exact request identity.
+the original node, assistant, Task/run and exact request identity.
 
 The assistant catalogue exposes `pending_approvals` independently of replies.
 Permission invalidations refresh the directory even when another Chat is selected;
@@ -205,7 +205,8 @@ opening from Tasks makes Back return to the list. Nested Task Usage and browser
 Back/Forward preserve this origin.
 
 [`adapters/production.mjs`](../web/src/adapters/production.mjs) captures the owner
-and Space before every request. Desktop calls Go through Wails and receives
+and local presentation scope before every request. Desktop calls Go through Wails
+and receives
 `pot:snapshot`, `pot:subscription`, `pot:changed` and `pot:read` events. Browser
 uses same-origin fetch and EventSource. The Go desktop service owns window/tray
 lifecycle, the native file save dialog and desktop viewing. Browser adapters own
@@ -261,15 +262,15 @@ once; reconnect catch-up and duplicate updates do not replay it. Native read
 baselines are held by the Go attention service and shared between windows through
 `pot:read`. Go accepts a read only for the observed latest reply in a visible,
 focused Chat. Browsers keep baselines in local storage and synchronize same-origin
-tabs. Keys include the Control identity so a rebuilt database cannot inherit an
+tabs. Keys include the local node identity so a rebuilt database cannot inherit an
 unrelated baseline. Reduced Motion disables reactions and native tray animation.
 
 Each sidebar assistant name has a monochrome cooking Pot while its main turn or
 one of its background Tasks is executing. The compact assistant catalogue's
 `executing` projection combines those sources without loading message histories;
 queued, allowance-waiting, approval-waiting Tasks and paused work do not cook.
-Task and Runner invalidations refresh that catalogue in every Space, including
-assistants whose Chat is not selected. Offline cached entries never animate work.
+Task, local executor and Agent Link invalidations refresh that catalogue,
+including assistants whose Chat is not selected. Offline cached entries never animate work.
 Execution takes priority over older unread replies. When execution stops, an
 unread reply shows the settled lid, a success check and occasional gentle steam;
 the existing reply read receipt removes the Pot. Counts and approval controls
@@ -288,7 +289,7 @@ browser with undetermined permission sees a non-modal introduction. Only its
 **Allow notifications** click requests browser permission, within that click's
 user activation. **Not now**, closing the browser prompt, errors, and page reloads
 do not repeat the introduction. A permanent origin/profile IndexedDB transaction
-claims the introduction before display across tabs and Controls; if durable atomic
+claims the introduction before display across tabs and local node identities; if durable atomic
 storage is unavailable, discovery is skipped and settings remains available.
 This record is independent of delivery intent and OS permission.
 
@@ -342,7 +343,7 @@ Approval responses include an optional `task_title` for the notification name.
 
 Initial reads, the first read after disconnection, and Runtime boot replacements
 establish baselines. An in-flight read from a previous connection cannot establish
-that baseline. Notifications use explicit Control, Space, assistant and optional
+that baseline. Notifications use explicit node, assistant and optional
 Task identity. Clicks activate the browser tab or App main window and open that
 exact Chat/Task; a missing destination reports an error. App retains a click until
 its main WebView and directory are ready.

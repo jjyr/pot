@@ -1,0 +1,536 @@
+package agent
+
+import (
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/jjyr/pot/internal/inbox"
+	"github.com/jjyr/pot/pkg/agentlink"
+	"github.com/jjyr/pot/pkg/protocol"
+	"github.com/jjyr/pot/pkg/storage"
+)
+
+type assistant struct {
+	ID, Name, Workspace, Mode, ThreadID string
+	Default                             bool
+}
+type job struct {
+	Task             agentlink.Task        `json:"task"`
+	Request          agentlink.TaskRequest `json:"request"`
+	Message          *protocol.Envelope    `json:"message,omitempty"`
+	ThreadID         string                `json:"thread_id,omitempty"`
+	TurnID           string                `json:"turn_id,omitempty"`
+	Files            []string              `json:"files,omitempty"`
+	CleanupUncertain bool                  `json:"cleanup_uncertain,omitempty"`
+}
+
+// backend owns accepted work independently of link lifecycle. Its work queue is
+// shared by direct messages and delegated tasks and serialized per assistant.
+type backend struct {
+	db             *sql.DB
+	nodeID, binary string
+	worker         []string
+	mu             sync.Mutex
+	active         map[string]context.CancelFunc
+	workers        map[string]bool
+}
+
+func newBackend(db *sql.DB, nodeID, root string) (*backend, error) {
+	binary := "codex"
+	worker, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	b := &backend{db: db, nodeID: nodeID, binary: binary, worker: []string{worker}, active: map[string]context.CancelFunc{}, workers: map[string]bool{}}
+	// Fresh installations have an isolated local read-only workspace. Owners can
+	// add assistants pointing at their own directories through the local command.
+	workspace := filepath.Join(root, "workspace")
+	if err = os.MkdirAll(workspace, 0700); err != nil {
+		return nil, err
+	}
+	_, err = db.Exec(`INSERT INTO codex_link_assistants(id,name,workspace,mode,is_default) SELECT 'codex','Codex',?,'read-only',1 WHERE NOT EXISTS(SELECT 1 FROM codex_link_assistants)`, workspace)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+func (b *backend) list(ctx context.Context) ([]assistant, error) {
+	rows, err := b.db.QueryContext(ctx, "SELECT id,name,workspace,mode,thread_id,is_default FROM codex_link_assistants ORDER BY rowid")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []assistant{}
+	for rows.Next() {
+		var a assistant
+		if err = rows.Scan(&a.ID, &a.Name, &a.Workspace, &a.Mode, &a.ThreadID, &a.Default); err != nil {
+			return nil, err
+		}
+		result = append(result, a)
+	}
+	return result, rows.Err()
+}
+func (b *backend) identity(a assistant) agentlink.Identity {
+	return agentlink.Identity{Address: protocol.AgentRef{NodeID: b.nodeID, Kind: "assistant", AgentID: a.ID}, Name: a.Name, Adapter: "codex"}
+}
+func (b *backend) Directory(ctx context.Context) (agentlink.Directory, error) {
+	list, err := b.list(ctx)
+	d := agentlink.Directory{NodeID: b.nodeID, Name: "Codex", Adapter: "codex", Capabilities: []string{"chat", "tasks", "cancel"}, Assistants: []agentlink.Identity{}}
+	for _, a := range list {
+		d.Assistants = append(d.Assistants, b.identity(a))
+		if a.Default {
+			d.DefaultAssistantID = a.ID
+		}
+	}
+	return d, err
+}
+func (b *backend) resolve(ctx context.Context, id string) (assistant, error) {
+	var a assistant
+	query := "SELECT id,name,workspace,mode,thread_id,is_default FROM codex_link_assistants WHERE id=?"
+	var err error
+	if id == "" {
+		err = b.db.QueryRowContext(ctx, "SELECT id,name,workspace,mode,thread_id,is_default FROM codex_link_assistants WHERE is_default=1").Scan(&a.ID, &a.Name, &a.Workspace, &a.Mode, &a.ThreadID, &a.Default)
+	} else {
+		err = b.db.QueryRowContext(ctx, query, id).Scan(&a.ID, &a.Name, &a.Workspace, &a.Mode, &a.ThreadID, &a.Default)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		err = agentlink.ErrNotFound
+	}
+	return a, err
+}
+func (b *backend) ownerConfigure(ctx context.Context, a assistant) error {
+	if !validID(a.ID) || a.Name == "" || len(a.Name) > 128 || !filepath.IsAbs(a.Workspace) || (a.Mode != "read-only" && a.Mode != "workspace-write") {
+		return agentlink.ErrInvalid
+	}
+	path, err := filepath.EvalSymlinks(a.Workspace)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return agentlink.ErrInvalid
+	}
+	a.Workspace = path
+	return storage.Transaction(ctx, b.db, func(tx *sql.Tx) error {
+		var workspace, mode string
+		err := tx.QueryRowContext(ctx, "SELECT workspace,mode FROM codex_link_assistants WHERE id=?", a.ID).Scan(&workspace, &mode)
+		// A session's workspace/permission scope is immutable. Create another virtual
+		// assistant to use a different scope; accepted work keeps its original owner.
+		if err == nil && (workspace != a.Workspace || mode != a.Mode) {
+			return agentlink.ErrConflict
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if a.Default {
+			if _, err = tx.ExecContext(ctx, "UPDATE codex_link_assistants SET is_default=0"); err != nil {
+				return err
+			}
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO codex_link_assistants(id,name,workspace,mode,is_default) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,is_default=CASE WHEN excluded.is_default=1 THEN 1 ELSE codex_link_assistants.is_default END`, a.ID, a.Name, a.Workspace, a.Mode, a.Default)
+		return err
+	})
+}
+func callerKey(from protocol.AgentRef) string { return encoded(from) }
+func jobID(from protocol.AgentRef, request string) string {
+	sum := sha256.Sum256([]byte(callerKey(from) + "\x00" + request))
+	return hex.EncodeToString(sum[:])
+}
+func (b *backend) Submit(ctx context.Context, r agentlink.TaskRequest) (agentlink.Task, error) {
+	return b.submit(ctx, r, nil)
+}
+func (b *backend) submit(ctx context.Context, r agentlink.TaskRequest, message *protocol.Envelope) (agentlink.Task, error) {
+	if !validID(r.RequestID) || r.From.NodeID == "" || r.From.Kind != "assistant" || r.From.AgentID == "" || r.Text == "" || len(r.Text) > 65536 || message == nil && len(r.Text) > 24000 {
+		return agentlink.Task{}, agentlink.ErrInvalid
+	}
+	payload := encoded(r)
+	// Exact retries retain the original assistant even if the node default changes.
+	var oldPayload, oldData string
+	priorErr := b.db.QueryRowContext(ctx, "SELECT payload,data FROM codex_link_jobs WHERE caller=? AND request_id=?", callerKey(r.From), r.RequestID).Scan(&oldPayload, &oldData)
+	if priorErr == nil {
+		if oldPayload != payload {
+			return agentlink.Task{}, agentlink.ErrConflict
+		}
+		var previous job
+		if err := json.Unmarshal([]byte(oldData), &previous); err != nil {
+			return agentlink.Task{}, err
+		}
+		return previous.Task, nil
+	}
+	if !errors.Is(priorErr, sql.ErrNoRows) {
+		return agentlink.Task{}, priorErr
+	}
+	a, err := b.resolve(ctx, r.AssistantID)
+	if err != nil {
+		return agentlink.Task{}, err
+	}
+	if r.Workspace != "" && r.Workspace != a.ID {
+		return agentlink.Task{}, agentlink.ErrInvalid
+	}
+	var accepted job
+	err = storage.Transaction(ctx, b.db, func(tx *sql.Tx) error {
+		var data, old string
+		err := tx.QueryRowContext(ctx, "SELECT payload,data FROM codex_link_jobs WHERE caller=? AND request_id=?", callerKey(r.From), r.RequestID).Scan(&old, &data)
+		if err == nil {
+			if old != payload {
+				return agentlink.ErrConflict
+			}
+			return json.Unmarshal([]byte(data), &accepted)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		var count int
+		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM codex_link_jobs WHERE json_extract(data,'$.task.state') IN ('queued','running','cancelling','waiting_approval')`).Scan(&count); err != nil {
+			return err
+		}
+		if count >= 32 {
+			return agentlink.ErrCapacity
+		}
+		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM codex_link_jobs").Scan(&count); err != nil {
+			return err
+		}
+		if count >= 256 {
+			return agentlink.ErrCapacity
+		}
+		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM codex_link_jobs WHERE assistant_id=? AND json_extract(data,'$.cleanup_uncertain')=1`, a.ID).Scan(&count); err != nil {
+			return err
+		}
+		if count > 0 {
+			return agentlink.ErrFenced
+		}
+		now := time.Now().UTC()
+		accepted = job{Task: agentlink.Task{ID: jobID(r.From, r.RequestID), RequestID: r.RequestID, Assistant: b.identity(a), State: "queued", CreatedAt: now, UpdatedAt: now}, Request: r, Message: message}
+		_, err = tx.ExecContext(ctx, "INSERT INTO codex_link_jobs(id,caller,request_id,assistant_id,payload,data) VALUES(?,?,?,?,?,?)", accepted.Task.ID, callerKey(r.From), r.RequestID, a.ID, payload, encoded(accepted))
+		return err
+	})
+	return accepted.Task, err
+}
+func (b *backend) read(ctx context.Context, from protocol.AgentRef, id string) (job, error) {
+	var raw string
+	var j job
+	err := b.db.QueryRowContext(ctx, "SELECT data FROM codex_link_jobs WHERE caller=? AND id=?", callerKey(from), id).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return j, agentlink.ErrNotFound
+	}
+	if err == nil {
+		err = json.Unmarshal([]byte(raw), &j)
+	}
+	return j, err
+}
+func (b *backend) Status(ctx context.Context, from protocol.AgentRef, id string) (agentlink.Task, error) {
+	j, err := b.read(ctx, from, id)
+	return j.Task, err
+}
+func terminal(state string) bool {
+	return state == "completed" || state == "failed" || state == "cancelled"
+}
+func (b *backend) update(ctx context.Context, id string, fn func(*job) error) error {
+	return storage.Transaction(ctx, b.db, func(tx *sql.Tx) error {
+		var raw string
+		if err := tx.QueryRowContext(ctx, "SELECT data FROM codex_link_jobs WHERE id=?", id).Scan(&raw); err != nil {
+			return err
+		}
+		var j job
+		if err := json.Unmarshal([]byte(raw), &j); err != nil {
+			return err
+		}
+		if err := fn(&j); err != nil {
+			return err
+		}
+		j.Task.UpdatedAt = time.Now().UTC()
+		_, err := tx.ExecContext(ctx, "UPDATE codex_link_jobs SET data=? WHERE id=?", encoded(j), id)
+		return err
+	})
+}
+func (b *backend) Cancel(ctx context.Context, from protocol.AgentRef, id string) (agentlink.Task, error) {
+	if _, err := b.read(ctx, from, id); err != nil {
+		return agentlink.Task{}, err
+	}
+	err := b.update(ctx, id, func(j *job) error {
+		if terminal(j.Task.State) {
+			return nil
+		}
+		if j.Task.State == "queued" {
+			j.Task.State = "cancelled"
+		} else {
+			j.Task.State = "cancelling"
+		}
+		return nil
+	})
+	if err != nil {
+		return agentlink.Task{}, err
+	}
+	b.mu.Lock()
+	cancel := b.active[id]
+	b.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	return b.Status(ctx, from, id)
+}
+
+// recover fences every accepted unfinished turn. Even a queued task is not
+// silently replayed after a daemon restart. Historical IDs remain retryable.
+func (b *backend) recover(ctx context.Context) error {
+	rows, err := b.db.QueryContext(ctx, "SELECT id,data FROM codex_link_jobs WHERE json_extract(data,'$.task.state') NOT IN ('completed','failed','cancelled')")
+	if err != nil {
+		return err
+	}
+	var jobs []job
+	for rows.Next() {
+		var id, raw string
+		if err = rows.Scan(&id, &raw); err != nil {
+			rows.Close()
+			return err
+		}
+		var j job
+		if err = json.Unmarshal([]byte(raw), &j); err != nil {
+			rows.Close()
+			return err
+		}
+		jobs = append(jobs, j)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, j := range jobs {
+		if err = b.update(ctx, j.Task.ID, func(j *job) error {
+			if j.Task.State == "queued" {
+				j.Task.Error = "codex_host_restarted_before_execution"
+			} else {
+				j.Task.Error = "codex_host_restarted_outcome_unknown"
+				j.CleanupUncertain = true
+			}
+			j.Task.State = "failed"
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (b *backend) run(ctx context.Context) {
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	for {
+		list, err := b.list(ctx)
+		if err == nil {
+			for _, a := range list {
+				b.mu.Lock()
+				running := b.workers[a.ID]
+				if !running {
+					b.workers[a.ID] = true
+				}
+				b.mu.Unlock()
+				if !running {
+					wg.Add(1)
+					go func(id string) { defer wg.Done(); b.runAssistant(ctx, id) }(a.ID)
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
+}
+func (b *backend) runAssistant(ctx context.Context, id string) {
+	timer := time.NewTicker(100 * time.Millisecond)
+	defer timer.Stop()
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		var raw string
+		err := b.db.QueryRowContext(ctx, "SELECT data FROM codex_link_jobs WHERE assistant_id=? AND json_extract(data,'$.task.state')='queued' AND NOT EXISTS(SELECT 1 FROM codex_link_jobs fenced WHERE fenced.assistant_id=? AND json_extract(fenced.data,'$.cleanup_uncertain')=1) ORDER BY sequence LIMIT 1", id, id).Scan(&raw)
+		if err == nil {
+			var j job
+			if json.Unmarshal([]byte(raw), &j) == nil {
+				b.execute(ctx, j)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+	}
+}
+func (b *backend) execute(ctx context.Context, selected job) {
+	a, err := b.resolve(ctx, selected.Task.Assistant.Address.AgentID)
+	if err != nil {
+		return
+	}
+	var launch bool
+	err = b.update(ctx, selected.Task.ID, func(j *job) error {
+		if j.Task.State == "queued" {
+			j.Task.State = "running"
+			launch = true
+		}
+		return nil
+	})
+	if err != nil || !launch {
+		return
+	}
+	turnCtx, cancel := context.WithCancel(ctx)
+	b.mu.Lock()
+	b.active[selected.Task.ID] = cancel
+	b.mu.Unlock()
+	defer func() { cancel(); b.mu.Lock(); delete(b.active, selected.Task.ID); b.mu.Unlock() }()
+	// Cancellation may commit after queue claim but before active registration.
+	if current, e := b.read(ctx, selected.Request.From, selected.Task.ID); e != nil || current.Task.State == "cancelling" {
+		cancel()
+	}
+	result := runTurn(turnCtx, Session{AssistantID: a.ID, Binary: b.binary, Workspace: a.Workspace, Mode: a.Mode, ThreadID: a.ThreadID, Worker: b.worker}, selected.Request.Text, turnEvents{
+		Thread: func(thread string) error {
+			_, err := b.db.ExecContext(context.Background(), "UPDATE codex_link_assistants SET thread_id=? WHERE id=? AND (thread_id='' OR thread_id=?)", thread, a.ID, thread)
+			return err
+		},
+		Started: func(turn string) error {
+			return b.update(context.Background(), selected.Task.ID, func(j *job) error { j.TurnID = turn; return nil })
+		},
+		Approval: func() {
+			_ = b.update(context.Background(), selected.Task.ID, func(j *job) error {
+				if j.Task.State != "cancelling" {
+					j.Task.State = "waiting_approval"
+				}
+				return nil
+			})
+		},
+	})
+	_ = b.update(context.Background(), selected.Task.ID, func(j *job) error {
+		j.Task.State = result.Status
+		j.Task.Result = result.Text
+		j.Task.Error = result.Error
+		j.ThreadID = result.ThreadID
+		j.TurnID = result.TurnID
+		j.Files = result.Files
+		j.CleanupUncertain = result.CleanupUncertain
+		return nil
+	})
+}
+
+// receiveMessages admits each durable message to the same queue as tasks. A
+// message ID is its immutable request identity, including after a host restart.
+func (b *backend) receiveMessages(ctx context.Context) error {
+	rows, err := b.db.QueryContext(ctx, "SELECT envelope FROM agent_messages WHERE direction='incoming' AND state='queued' ORDER BY sequence LIMIT 32")
+	if err != nil {
+		return err
+	}
+	var messages []protocol.Envelope
+	for rows.Next() {
+		var raw string
+		var e protocol.Envelope
+		if err = rows.Scan(&raw); err != nil {
+			rows.Close()
+			return err
+		}
+		if err = json.Unmarshal([]byte(raw), &e); err != nil {
+			rows.Close()
+			return err
+		}
+		messages = append(messages, e)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, e := range messages {
+		if e.To.NodeID != b.nodeID {
+			continue
+		}
+		request := "mail:" + e.ID
+		if len(request) > 128 {
+			sum := sha256.Sum256([]byte(e.ID))
+			request = "mail:" + hex.EncodeToString(sum[:])
+		}
+		_, err = b.submit(ctx, agentlink.TaskRequest{RequestID: request, From: e.From, AssistantID: e.To.AgentID, Text: e.Text}, &e)
+		if err != nil {
+			return err
+		}
+		if _, err = b.db.ExecContext(ctx, "UPDATE agent_messages SET state='read' WHERE id=? AND state='queued'", e.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// publishMessages commits a reply and marks processing in one transaction. The
+// reply preserves the original node, assistant, conversation and causal parent.
+func (b *backend) publishMessages(ctx context.Context) error {
+	rows, err := b.db.QueryContext(ctx, `SELECT j.data FROM codex_link_jobs j JOIN agent_messages m ON m.id=json_extract(j.data,'$.message.id') WHERE m.direction='incoming' AND m.state='read' AND json_extract(j.data,'$.task.state') IN ('completed','failed','cancelled') ORDER BY j.sequence LIMIT 32`)
+	if err != nil {
+		return err
+	}
+	var jobs []job
+	for rows.Next() {
+		var raw string
+		var j job
+		if err = rows.Scan(&raw); err != nil {
+			rows.Close()
+			return err
+		}
+		if err = json.Unmarshal([]byte(raw), &j); err != nil {
+			rows.Close()
+			return err
+		}
+		jobs = append(jobs, j)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, j := range jobs {
+		if j.Message == nil {
+			continue
+		}
+		parent := j.Message
+		err = storage.Transaction(ctx, b.db, func(tx *sql.Tx) error {
+			text := j.Task.Result
+			if text != "" && parent.Hops < protocol.MaxMailHops {
+				reply := protocol.Envelope{ID: "codex-reply-" + j.Task.ID, Kind: "message", From: j.Task.Assistant.Address, To: parent.From, ConversationID: parent.ConversationID, ReplyTo: &parent.ID, Hops: parent.Hops + 1, Text: trimBytes(text, 65536)}
+				if err := inbox.EnqueueTx(ctx, tx, reply, "outgoing", "queued"); err != nil {
+					return err
+				}
+			}
+			_, err := tx.ExecContext(ctx, "UPDATE agent_messages SET state='processed',detail=? WHERE id=? AND direction='incoming'", j.Task.Error, parent.ID)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (b *backend) runMessages(ctx context.Context) {
+	timer := time.NewTicker(100 * time.Millisecond)
+	defer timer.Stop()
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		_ = b.receiveMessages(ctx)
+		_ = b.publishMessages(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+	}
+}

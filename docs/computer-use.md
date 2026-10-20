@@ -2,17 +2,16 @@
 
 The default-enabled `computer-use` plugin provides a persistent `cua_repl`
 JavaScript session and a dedicated headless Chromium on the fixed execution
-Runtime. Control applies exact execution authorization, including remote calls. Protected machines sandbox the plugin and browser; Trusted machines execute directly.
+Runtime. The owning node applies exact execution authorization. Protected machines sandbox the plugin and browser; Trusted machines execute directly.
 Each REPL has its own browser and temporary profile; cleanup does not close
 sibling Tasks' sessions. Native desktop automation and guest viewing are absent.
 
 ## Configuration
 
-For connected tasks, Control is the source of global plugin definitions and
-implementations. Launches contain selected plugin names only. Before starting the
-Agent, the execution Runtime synchronizes current bundles from Control and
-registers their tool definitions; it never discovers node-local global plugins.
-The prepared bundles remain stable for the run; new Tasks synchronize again. See [resource synchronization](architecture.md).
+Each node prepares its own selected plugin definitions and files before starting
+an Agent. Prepared bundles stay fixed for that run; new Tasks read current local
+sources. Agent Link delegation transfers no plugin bundle or execution permission.
+See [resource preparation](agent-context.md#prompt-sources-and-resource-preparation).
 
 Use owner-only `pot config get/set agent` (`GET/POST /api/v1/agent`). The default `params.agent.plugins` is:
 
@@ -28,7 +27,7 @@ Import or replace a trusted package from an absolute Host directory:
 {"computer-use": {"enabled": true, "source": "/absolute/path/computer-use"}}
 ```
 
-Saving imports the manifest and files into an immutable bundle pinned by version and SHA-256 digest. Running tasks keep their prepared bundle. Later executions synchronize the current bundle from the selected source Profile; unavailable or disabled selected plugins fail before sampling.
+Saving imports the manifest and files into an immutable bundle pinned by version and SHA-256 digest. Running tasks keep their prepared bundle. Later executions prepare the current bundle from the selected source Profile; unavailable or disabled selected plugins fail before sampling.
 
 ### Model capabilities
 

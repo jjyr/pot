@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/processscope"
+	"github.com/jjyr/pot/pkg/protocol"
 	"net/url"
 	"os"
 	"os/exec"
@@ -346,17 +347,9 @@ func (s *Service) prepareTaskWorkspace(ctx context.Context, l runner.Launch, pol
 					scope := "workspace:" + credentialScope(l.TaskID, l.RunID, l.Generation)
 					token, _ = s.Integrations.Credential(ctx, scope, "github", false)
 					s.Integrations.Forget(scope)
+
 				} else {
-					peer, e := s.Machines.ControlPeer()
-					if e != nil {
-						return nil, e
-					}
-					var reply struct {
-						Token string `json:"token"`
-					}
-					if e = s.remoteCall(ctx, peer, binding(l), "task.workspace.github", "workspace-github:"+l.RunID, nil, &reply); e == nil {
-						token = reply.Token
-					}
+					return nil, protocol.APIError{Code: "local_node_required"}
 				}
 				if token != "" {
 					ctx = context.WithValue(ctx, taskGitCredentialKey{}, token)

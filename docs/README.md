@@ -1,11 +1,11 @@
 # Documentation
 
-[Architecture](architecture.md) defines the current design and distinguishes pending
-implementation. Code defines actual behavior.
+[Architecture](architecture.md) describes node ownership and collaboration boundaries.
+Code defines actual behavior.
 
 | Topic | Read |
 |---|---|
-| Deployment, resource APIs, Control membership and web-ui-server | [Deployment](deployment.md) |
+| Deployment, resource APIs and web-ui-server | [Deployment](deployment.md) |
 | Local updates, interruption confirmation and release signing | [Updates](updates.md) |
 | Database schemas, version history and automatic upgrades | [Database migrations](database-migrations.md) |
 | Build, test and release | [Development](development.md) |
@@ -13,7 +13,7 @@ implementation. Code defines actual behavior.
 | Current product scope and deferred platform work | [Development plan](development-plan.md) |
 | Assistant rules, project AGENTS.md, routing and Skills | [Agent context](agent-context.md) |
 | Visual language, responsive navigation and editing-page interactions | [Design language](design-language.md) |
-| Native Space ownership, combined views and offline behavior | [Multi-Space UI](multi-space-ui.md) |
+| Node and assistant UI identity, views and offline behavior | [Node UI](node-ui.md) |
 | Encrypted credentials and master keys | [Secrets](secrets.md) |
 | Third-party login, integration components and credentials | [Credentials](credentials.md) |
 | Local execution and process lifetime | [Executor](executor.md), [Task workspace selection](task-workspaces.md) |
@@ -22,9 +22,9 @@ implementation. Code defines actual behavior.
 | Native cross-machine transport, identities and session recovery | [Peer protocol](peer-protocol.md) |
 | Extension management UI, independent MCP servers and icons | [Extensions](extensions.md) |
 | Plugins, tools, approvals and browser execution | [Plugin packages](plugins.md), [composition](tool-composition.md), [permissions](permissions.md), [computer use](computer-use.md) |
-| Codex delegation and local plugin | [Codex Bridge](../integrations/codex/README.md) |
+| Codex sessions and adapter | [Codex Agent Link](../integrations/codex/README.md) |
 | Assistant messaging and Agent Links | [Assistant messages](assistant-messages.md) |
-| Scoped Agent connections and reliable message transport | [Agent Link](agent-links.md) |
+| Node connections and reliable message transport | [Agent Link](agent-links.md) |
 | Runtime hooks and notification routes | [Hooks](hooks.md) |
 | Tasks, schedules and usage | [Tasks](task-coordination.md), [schedules](scheduled-tasks.md), [token usage](token-usage.md) |
 | Model connections, provider plugins and offline metadata | [Model directory](model-directory.md) |

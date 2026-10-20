@@ -72,25 +72,6 @@ func userCommand(ctx context.Context, args []string, out io.Writer) error {
 		return userAPI(ctx, root, owner, method, path, body)
 	}
 	switch args[0] {
-	case "codex-pair":
-		if len(args) != 2 {
-			return errors.New("usage: pot codex-pair [-root PATH] PAIRING_FILE")
-		}
-		raw, e := os.ReadFile(args[1])
-		if e != nil {
-			return e
-		}
-		defer clear(raw)
-		if len(raw) > 16384 {
-			return errors.New("pairing_file_too_large")
-		}
-		value, e := api("POST", "/api/v1/integrations/codex/connection", json.RawMessage(raw))
-		if e != nil {
-			return e
-		}
-		_, e = fmt.Fprintln(out, string(value))
-		return e
-
 	case "chat":
 		if len(args) < 2 || strings.TrimSpace(strings.Join(args[1:], " ")) == "" {
 			return errors.New("usage: pot chat [-root PATH] [-assistant ID] TEXT")

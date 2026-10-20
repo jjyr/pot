@@ -13,20 +13,20 @@ combine all models within each category and do not list model names.
 Below the calendar, matching stacked bars show complete annual category and model
 shares, token counts and percentages. A model's full ID determines its stable
 color independently of sorting, refreshes and other models. Small shares retain
-their true widths and remain readable in the labeled list. Overall Usage combines
-all available selected Spaces by date/category/model; unavailable Spaces retain
-availability notices. These summaries are complete aggregates, not first pages of
+their true widths and remain readable in the labeled list. Overall Usage aggregates this node by date/category/model. Linked nodes own
+their usage; their ledgers are not combined here. These summaries are complete aggregates, not first pages of
 model details. Conversation totals and detail lists remain lifetime values; their
 calendar and share bars cover the last year only. Cached tokens remain part of
 input and total tokens; token counts are not billed cost.
 
 Each task (including archived tasks) and main chat has a usage entry. Details show cumulative usage, model consumption, and tool call rankings. Guidance continues the same task; turn IDs link records. Global usage does not list tasks.
 
-Overall Usage places the location filter in the statistics heading as a compact select. Hide it when only one Space is available; multiple Spaces offer All locations and individual Space names. Conversation Usage has no location filter. Keep heading controls in normal document flow, wrapping on narrow windows.
+Overall and conversation Usage address the local node. Heading controls wrap
+on narrow windows.
 
 ## Metering
 
-Go Control captures provider usage through the generic model gateway. Shared SQLite `usage.sqlite` stores request IDs, session/task, turn, time, model, input/output/cache, and reservations. Route snapshots record Agent identity, profile ID, provider, execution generation, and spec hash. Tool events deduplicate by session+turn+call ID. Tasks share the ledger; archive retains records. DELETE journal/synchronous=EXTRA remain; only Runtime accesses the live database.
+The local gateway captures provider usage through the generic model gateway. Shared SQLite `usage.sqlite` stores request IDs, session/task, turn, time, model, input/output/cache, and reservations. Route snapshots record Agent identity, profile ID, provider, execution generation, and spec hash. Tool events deduplicate by session+turn+call ID. Tasks share the ledger; archive retains records. DELETE journal/synchronous=EXTRA remain; only Runtime accesses the live database.
 
 - Actual total = input + output. Cache hits are a subset of input, not added again.
 - Multiple usage frames update one request record. Missing usage is unknown, not zero.
@@ -38,7 +38,7 @@ Go Control captures provider usage through the generic model gateway. Shared SQL
 - Skills lack a reliable independent metering boundary, so no Skills statistics tab or estimated allocation. Skills loading remains unintegrated and unchanged here.
 - Pi development sessions and old usage databases are not imported; this revision starts a new usage database.
 
-Runtime uses indexed SQL aggregation over explicit local-day boundaries and independent 20-item pages for lifetime models, requests, tools and compactions. The summary defaults to 365 daily buckets with ISO dates and complete daily/annual Agent and annual model totals. Explicit 14/30/90-day API queries also use daily buckets. Calendar aggregation groups date/Agent/model in SQL without loading request records; all summary projections share one transaction. Requests sort by request start time descending, then ID descending; compactions sort by occurrence time ascending, then ID; tools sort by call count descending, then name. The summary never loads these lists. Initial summary/list queries run concurrently; subsequent paging refreshes only its list and retains rows while pending or on failure. The shared HTML frontend refreshes from persisted usage updates, keeps the displayed page while preparing replacements, preserves scroll, and rejects stale query responses. Disconnected cached values are labelled with their availability. Shared CSS and components render the charts, allowance bars and editing controls.
+Runtime uses indexed SQL aggregation over explicit local-day boundaries and independent 20-item pages for lifetime models, requests, tools and compactions. The summary defaults to 365 daily buckets with ISO dates and complete daily/annual Agent and annual model totals. Explicit 14/30/90-day API queries also use daily buckets. Calendar aggregation groups date/Agent/model in SQL without loading request records; all summary projections share one transaction. Requests sort by request start time descending, then ID descending; compactions sort by occurrence time ascending, then ID; tools sort by call count descending, then name. The summary never loads these lists. Initial summary/list queries run concurrently; subsequent paging refreshes only its list and retains rows while pending or on failure. The shared HTML frontend refreshes from persisted usage updates, keeps the displayed page while preparing replacements, preserves scroll, and rejects stale query responses. Shared CSS and components render the charts, allowance bars and editing controls.
 
 ## Context estimation
 
@@ -140,7 +140,7 @@ Usage query/policy/recovery APIs require the main Runtime token; workers cannot 
 
 - `GET /api/v1/usage/summary?days=14&timezone=Asia/Shanghai&scope=`: empty scope = global; assistant ID (`main` for the default assistant) or task ID = session. Session totals ignore days; trends follow days. Returns totals, trend buckets, allowances and waiting state, without detail lists.
 - `GET /api/v1/usage/{models|requests|tools|compactions}?scope=OWNER&timezone=Asia/Shanghai&offset=0`: returns `{items, offset, next_offset}`. Each resource has independent 20-item pagination. Requests/tools/compactions require a session scope and use lifetime data. Models accept empty scope for global data and `days=14|30|90|365`; scoped models use lifetime data. A null next offset marks the end. Request/compaction timestamps use ascending ID as the tie-breaker; tools use ascending name after descending call count.
-- Compaction lifecycle enters Control through injected execution services or the original run-bound signed port; Workers cannot read global usage or change policies.
+- Compaction lifecycle enters the local coordinator through injected execution services; Workers cannot read global usage or change policies.
 - `POST /api/v1/usage/policy`: `{period: none|day|week, limit, timezone, auto_resume}`.
 - `POST /api/v1/usage/resume?assistant_id=OWNER`: requires `{request_id, turn, since, scope?}`. The displayed original `turn`/`since` wait token and originating assistant must match the retained Main, Task or correspondence wait. Omitted `scope` selects Main. The exact wait-instance release and request receipt commit together; stale actions reject, and exact retries retain the original result without releasing a later wait. Available allowance is still required. `/api/v1/tasks/{id}/resume` requires the same `request_id`, `turn` and `since`; its path fixes the Task scope.
 - `POST /api/v1/turn/cancel` cancels the exact Main user-message turn, including allowance waiting; Tasks use their interrupt/cancel APIs.
@@ -187,5 +187,5 @@ share one ledger; compaction retains its actual Agent/model attribution.
 
 Global categories use the page's selected range/zone, matching global totals; session/task details use their scope's
 lifetime range, matching the total card. Pages hold 20 categories, sorted by input+output descending, then stable Agent/model order.
-Pagination does not change totals/trends/allowances; scope/zone changes reset pages, and the global model range resets its pages. Stale responses are discarded. In the combined locations view, model categories remain grouped and paginated per Space; partial model pages are never summed into misleading global category totals. Global totals and trends still combine complete aggregates across Spaces.
+Pagination does not change totals/trends/allowances; scope/zone changes reset pages, and the global model range resets its pages. Stale responses are discarded.
 Categories show input/output/input-cache hits. Incomplete-record counts are not calculated or exposed in usage aggregates or the UI. Individual request details keep missing token values as unknown rather than zero; reservations still retain conservative accounting until complete usage arrives or the allowance window ends.

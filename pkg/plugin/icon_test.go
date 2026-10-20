@@ -20,7 +20,7 @@ func TestPackageIconsAreLocalAndNonExecutable(t *testing.T) {
 			t.Fatal("unsafe icon accepted", svg)
 		}
 	}
-	for _, name := range []string{"github", "computer-use", "codex"} {
+	for _, name := range []string{"github", "computer-use"} {
 		installed, err := Load(filepath.Join("..", "..", "plugins", name))
 		if err != nil {
 			t.Fatal(err)

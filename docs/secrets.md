@@ -1,6 +1,6 @@
-# Control secrets
+# Node credentials
 
-Control is the only configuration owner. Its `control.sqlite` stores
+Each node owns its configuration. Its `control.sqlite` stores
 Provider metadata in `providers` and encrypted values in `secrets`. Provider
 metadata contains an immutable `secret_ref`; public API responses report whether
 a credential is configured, not its value. Assistant instructions remain scoped
@@ -15,21 +15,21 @@ fixed. SQLite pages and journals only receive ciphertext for secret values.
 
 ## Master key
 
-The master key is not stored in SQLite. On macOS, Control uses a Keychain item
-under service `pot.control.secrets` with account `go/<Control Runtime ID>`.
+The master key is not stored in SQLite. On macOS, Pot uses a Keychain item
+under service `pot.control.secrets` with account `go/<Runtime ID>`.
 The item is created on the first secret write. A locked or unavailable Keychain
 fails the operation; it never falls back to plaintext storage.
 
-On other platforms, Control automatically creates `~/.pot/secrets/master.key`
+On other platforms, Pot automatically creates `~/.pot/secrets/master.key`
 on the first secret write. New directories use mode `0700` and the key uses
 `0600`. The complete random key is published atomically without overwriting an
-existing key, including when multiple Control processes initialize concurrently.
+existing key, including when multiple node processes initialize concurrently.
 The file is reused on restart. A missing key with existing encrypted secrets is
 an error, not a reason to generate a replacement (also true for Keychain).
 
 To override either default, set `POT_SECRET_KEY_FILE` to an owner-only file
 containing exactly 32 random raw bytes. Explicitly configured files must already
-exist; Pot does not generate or overwrite them. For example, provision once before starting Control:
+exist; Pot does not generate or overwrite them. For example, provision once before starting the node:
 
 ```sh
 install -d -m 700 "$HOME/.config/pot"
@@ -42,20 +42,20 @@ pot serve
 Do not regenerate this file on restart. Restoring the database requires the same
 master key. Key rotation/re-encryption is not implemented. External-service account
 delivery is described in [Credentials](credentials.md); model Provider keys remain
-Control-only. Embedders can supply a `KeySource` before configuring
-Providers; all assistants share the Control configuration handle.
+node-local. Embedders can supply a `KeySource` before configuring
+Providers; all assistants share the node configuration handle.
 
 ## Execution boundary
 
-Runner sends run-bound model requests to Control. Control validates the fixed
-model and budget, then Gateway uses the Provider credential. Provider keys are
-never included in launch manifests, checkpoints, chat messages or Runner
-configuration. Gateway and Secrets are separate libraries in the Control process;
-there is no extra service to deploy.
+The local execution adapter validates the fixed model and budget, then Gateway
+uses the Provider credential. Keys are never included in launch manifests,
+checkpoints or chat messages. Gateway and Secrets are libraries in the same
+process. Agent Link peers select their own models and credentials; delegation
+never transfers this node's Provider keys.
 
 External-service credentials use separate account records and run-bound tool
 environment injection. This does not expose Provider secrets or provide a bulk
 secret export API. See [Credentials](credentials.md).
 
-Provider credentials are configured through Control; there is no plaintext
+Provider credentials are configured on the owning node; there is no plaintext
 credential-file reader or import endpoint.

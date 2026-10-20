@@ -7,7 +7,7 @@ import (
 	"testing/fstest"
 )
 
-func TestRunnerTCPUpgradeRetainsOriginalAuthorityAndJoinIntent(t *testing.T) {
+func TestAutonomousNodeUpgradeArchivesOriginalAuthorityAndJoinIntent(t *testing.T) {
 	ctx := context.Background()
 	db := migrationDB(t)
 	path := "migrations/machines/0001_baseline.sql"
@@ -28,7 +28,7 @@ func TestRunnerTCPUpgradeRetainsOriginalAuthorityAndJoinIntent(t *testing.T) {
 		}
 	}
 	var raw string
-	if err = db.QueryRow(`SELECT body FROM controlplane_state`).Scan(&raw); err != nil {
+	if err = db.QueryRow(`SELECT body FROM retired_membership_state`).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	var current map[string]any
@@ -40,6 +40,19 @@ func TestRunnerTCPUpgradeRetainsOriginalAuthorityAndJoinIntent(t *testing.T) {
 	enrollment := member["enrollment"].(map[string]any)
 	if current["version"] != float64(2) || current["key"] != "stable-key" || member["origin"] != "" || pending["origin"] != "" || enrollment["epoch"] != float64(9) || enrollment["token"] != "member-secret" || pending["request"].(map[string]any)["request_id"] != "uncertain-join" {
 		t.Fatal(raw)
+	}
+	var nodeRaw string
+	if err = db.QueryRow(`SELECT body FROM node_identity`).Scan(&nodeRaw); err != nil {
+		t.Fatal(err)
+	}
+	var node map[string]any
+	if json.Unmarshal([]byte(nodeRaw), &node) != nil || node["runtime_id"] != "runner" || node["key"] != "stable-key" || node["version"] != float64(1) {
+		t.Fatal(nodeRaw)
+	}
+	for _, retired := range []string{"owner", "role", "membership", "pending", "invites", "members"} {
+		if _, ok := node[retired]; ok {
+			t.Fatal("retired authority copied into live identity", nodeRaw)
+		}
 	}
 	if _, ok := member["ca_pem"]; ok {
 		t.Fatal("obsolete TLS configuration retained", raw)

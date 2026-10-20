@@ -342,31 +342,16 @@ func TestApplicationReceiptSaveFailureRetainsDurableFence(t *testing.T) {
 	}
 }
 
-func TestRunnerSameRevisionRetriesUnconfirmedDrain(t *testing.T) {
-	state := &remoteState{}
-	if err := state.applyPermissions(1, func() error { t.Fatal("initial revision drained"); return nil }); err != nil {
-		t.Fatal(err)
+func TestExecutionAndPermissionTargetsRemainLocal(t *testing.T) {
+	s := taskControl(t, "node", "")
+	ctx := context.Background()
+	if _, err := s.taskTarget(ctx, "remote"); err == nil {
+		t.Fatal("distributed execution target accepted")
 	}
-	attempts := 0
-	fail := func() error { attempts++; return errors.New("cleanup unconfirmed") }
-	for range 2 {
-		if err := state.applyPermissions(2, fail); err == nil {
-			t.Fatal("failed cleanup acknowledged")
-		}
-		if state.permissionApplied == state.permissionRevision {
-			t.Fatal("failed cleanup admitted new work")
-		}
+	if err := s.applyPermissionRevision("remote", 1); err == nil {
+		t.Fatal("remote permission revision forwarded")
 	}
-	if attempts != 2 {
-		t.Fatal("same revision skipped failed drain", attempts)
-	}
-	if err := state.applyPermissions(2, func() error { return nil }); err != nil {
-		t.Fatal(err)
-	}
-	if state.permissionApplied != 2 {
-		t.Fatal("confirmed cleanup not applied")
-	}
-	if err := state.applyPermissions(1, fail); err == nil {
-		t.Fatal("stale revision accepted")
+	if target, err := s.taskTarget(ctx, ""); err != nil || target.RuntimeID != "node" {
+		t.Fatal(target, err)
 	}
 }

@@ -8,7 +8,6 @@ import (
 
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
-	"github.com/jjyr/pot/pkg/storage"
 )
 
 const TaskFileChunkSize uint64 = 192 * 1024
@@ -27,23 +26,7 @@ func (s *Service) ReadTaskFileChunk(ctx context.Context, owner, task, path strin
 	}
 	target := r.Launch.ExecutionTarget
 	if target.RuntimeID != s.options.RuntimeID {
-		peer, err := s.Machines.Peer(target.RuntimeID)
-		if err != nil {
-			return protocol.FileChunk{}, err
-		}
-		var chunk protocol.FileChunk
-		err = s.remoteCall(ctx, peer, binding(*r.Launch), "task.file.chunk", "file:"+storage.ID(), protocol.FileQuery{Path: path, Offset: offset, Revision: revision}, &chunk)
-		if err != nil {
-			return chunk, err
-		}
-		if len(chunk.Data) > int((TaskFileChunkSize+2)/3*4) {
-			return protocol.FileChunk{}, errors.New("original Runner file chunk exceeds limit")
-		}
-		data, decodeErr := base64.StdEncoding.DecodeString(chunk.Data)
-		if decodeErr != nil || chunk.Offset != offset || chunk.Size > TaskFileSizeLimit || offset > chunk.Size || uint64(len(data)) > TaskFileChunkSize || offset+uint64(len(data)) > chunk.Size || chunk.Revision == "" || (revision != "" && revision != chunk.Revision) || (offset < chunk.Size && len(data) == 0) {
-			return protocol.FileChunk{}, errors.New("invalid original Runner file chunk")
-		}
-		return chunk, nil
+		return protocol.FileChunk{}, protocol.APIError{Code: "original_execution_unavailable"}
 	}
 	return s.localTaskFileChunk(ctx, target, task, path, offset, revision)
 }

@@ -2,9 +2,9 @@ import {translate} from '../locales/messages.mjs';
 import {node as n,action} from './primitives.mjs';
 import {createProviderAllowances} from './provider-allowances.mjs';
 import {icon} from './icons.mjs';
-import {keyedRows,setPending} from './reconcile.mjs';
+import {keyedRows} from './reconcile.mjs';
 
-export function createProviderList({root,tr,locale,request,scope,current,pick,edit,spaceEditor,refresh,allowanceMemory=new Map(),allowanceMemoryKey=''}) {
+export function createProviderList({root,tr,locale,request,scope,current,pick,edit,refresh,allowanceMemory=new Map(),allowanceMemoryKey=''}) {
   const t=key=>translate(locale(),'providers.'+key);
   let snapshot={},saving=false;
   root.append(n('p','hint',t('manage')));
@@ -12,7 +12,6 @@ export function createProviderList({root,tr,locale,request,scope,current,pick,ed
   header.append(n('h2','page-heading',t('configured')),add);root.append(header);
   const empty=n('p','page-empty',t('empty'));
   const help=n('p','hint provider-default-help',t('defaultHelp')),rows=n('div'),entries=new Map(),status=n('div','hint provider-defaults-status');status.setAttribute('role','status');status.setAttribute('aria-live','polite');root.append(empty,help,rows,status);empty.hidden=true;help.hidden=true;
-  const spaces=n('section','page-section page-card'),spaceRows=n('div'),spaceEntries=new Map();spaces.append(n('h2','',tr('Spaces and connections','Space 与连接')),spaceRows,action(tr('Connect Space','连接 Space'),spaceEditor));root.append(spaces);
   function defaults(){for(const entry of entries.values()){const selected=entry.item.id===snapshot.default_provider_id;entry.badge.hidden=!selected;entry.default.disabled=saving||selected;entry.default.setAttribute('aria-pressed',String(selected));entry.default.setAttribute('aria-label',`${entry.item.name}: ${selected?t('currentDefault'):t('setDefault')}`);entry.default.title=selected?t('currentDefault'):t('setDefault');}}
   async function setDefault(profile){
     if(saving||profile.id===snapshot.default_provider_id)return;saving=true;defaults();status.setAttribute('role','status');status.className='hint provider-defaults-status';status.textContent=t('settingDefault');
@@ -27,11 +26,7 @@ export function createProviderList({root,tr,locale,request,scope,current,pick,ed
       const entry={element,main,logo,name,badge,model};entry.dispose=()=>entry.allowances?.dispose();entry.default=action('',()=>setDefault(entry.item));entry.default.classList.add('icon-button','provider-default');entry.default.append(icon('star'));
       const configure=action(t('configure'),()=>edit(entry.item,snapshot));configure.setAttribute('aria-label',t('edit'));main.append(logo,info,entry.default,configure);element.append(main);return entry;
     },update:(entry,profile)=>{entry.name.textContent=profile.name;entry.model.textContent=profile.model;entry.default.dataset.providerId=profile.id;entry.connection=(snapshot.connections||[]).find(value=>value.profile_id===profile.id);const logo=entry.connection?.icon;entry.main.classList.toggle('provider-unavailable',entry.connection?.available===false);if(entry.connection?.available===false){entry.model.textContent=profile.model+' · '+t('unavailable');}if(entry.connection?.capabilities?.allowances&&!entry.allowances){const key=JSON.stringify([scope.space,allowanceMemoryKey,profile.id]);if(!allowanceMemory.has(key))allowanceMemory.set(key,{});entry.allowances=createProviderAllowances({root:entry.element,request,scope,profileID:profile.id,locale,current,memory:allowanceMemory.get(key),available:()=>entry.connection?.available!==false,identity:()=>[entry.connection?.provider_id,entry.connection?.type_id,entry.item.revision,entry.connection?.endpoint,entry.connection?.protocol,entry.connection?.available!==false],binding:()=>entry.connection?.plugin_id||entry.connection?.type_id||''});};if(!entry.connection?.capabilities?.allowances&&entry.allowances){entry.allowances.remove();entry.allowances=null;}entry.allowances?.();if(entry.logoValue!==logo||!entry.logo.childNodes.length){entry.logoValue=logo;entry.logo.replaceChildren();if(logo){const image=n('img','provider-logo');image.alt='';image.src=logo;entry.logo.append(image);}else entry.logo.append(icon('settings'));}}});defaults();
-    spaces.hidden=!data.spaces;
-    keyedRows(spaceRows,spaceEntries,data.spaces?.items||[],{key:space=>space.id,create:()=>{
-      const element=n('div','list-row'),name=n('span'),status=n('span','hint'),buttons=n('span'),entry={element,name,status,buttons};element.append(name,status,buttons);
-      for(const name of ['connect','disconnect','remove']){const button=action(tr({connect:'Connect',disconnect:'Disconnect',remove:'Remove'}[name],{connect:'连接',disconnect:'断开',remove:'移除'}[name]),async()=>{setPending(button,true);try{await request('/api/v1/spaces',{method:'POST',owner:'',space:'',body:{action:name,space_id:entry.item.id}});if(current())await refresh();}catch(error){if(current()){status.setAttribute('role','alert');status.classList.add('inline-error');status.textContent=error.message;}}finally{setPending(button,false);}});buttons.append(button);}return entry;
-    },update:(entry,space)=>{entry.name.textContent=space.name;entry.status.textContent=space.connected?tr('Connected','已连接'):tr('Offline','离线');entry.buttons.hidden=space.kind!=='remote';}});
+
   };
   update.invalidate=()=>{add.disabled=true;for(const type of snapshot.provider_types||[])type.available=false;for(const entry of entries.values()){if(entry.connection)entry.connection.available=false;entry.allowances?.();}};
   return update;

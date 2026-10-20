@@ -8,7 +8,7 @@ async page=>{
   if(await page.getByLabel('Access token',{exact:true}).isVisible()){await page.getByLabel('Access token',{exact:true}).fill(state.token);await page.getByRole('button',{name:'Connect',exact:true}).click();}
   await page.getByRole('button',{name:'连接 AI 供应商',exact:true}).waitFor();
   assert((await(await page.request.get(state.origin+'/api/v1/assistants')).json()).length===0,'No assistant before Provider setup');
-  await page.getByRole('button',{name:'连接 AI 供应商',exact:true}).click();await page.getByRole('button',{name:'自定义 API',exact:true}).click();
+  await page.getByRole('button',{name:'连接 AI 供应商',exact:true}).click();await page.getByRole('button',{name:'Custom API',exact:true}).click();
   await page.getByLabel('名称',{exact:true}).fill('Onboarding provider');await page.getByLabel('API 地址',{exact:true}).fill(state.endpoint);await page.getByLabel('请求格式',{exact:true}).selectOption('openai_chat');await page.getByLabel('API 密钥',{exact:true}).fill('isolated-key');await page.getByLabel('模型 ID',{exact:true}).fill('isolated-model');await page.getByRole('button',{name:'保存',exact:true}).click();
   await page.locator('.window-title .avatar-image').waitFor();await page.waitForFunction(()=>!document.querySelector('#pot-composer')?.disabled);
   assert(await page.getByRole('button',{name:'连接 AI 供应商',exact:true}).count()===0,'Setup CTA disappears after connection');

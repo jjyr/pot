@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "pot": {
-      "command": "__POT_BRIDGE_EXECUTABLE__",
+      "command": "__POT_AGENT_EXECUTABLE__",
       "args": ["host", "--root", "__POT_AGENT_HOST_ROOT__"]
     }
   }

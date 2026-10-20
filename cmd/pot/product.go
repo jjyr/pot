@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -32,10 +31,7 @@ func productCommand(ctx context.Context, args []string, out io.Writer) (result e
 	workspace := flags.String("workspace", "", "Host Agent workspace")
 	ui := flags.String("ui", "", "explicit loopback browser address, for example 127.0.0.1:17703")
 	method := flags.String("method", "GET", "API method")
-	peerListen := flags.String("peer-listen", "", "authenticated TCP Agent and Runner listener, separate from owner HTTP")
-	listen := flags.String("listen", "", "explicit standalone Control listener")
-	cert := flags.String("tls-cert", "", "Control TLS certificate PEM")
-	key := flags.String("tls-key", "", "Control TLS private key PEM")
+	peerListen := flags.String("peer-listen", "", "authenticated Agent Link TCP listener")
 	resources := flags.String("resources", "", "installed product resource directory")
 	body := flags.String("body", "", "API JSON request body, or - for stdin")
 	if err := flags.Parse(args[1:]); err != nil {
@@ -66,7 +62,7 @@ func productCommand(ctx context.Context, args []string, out io.Writer) (result e
 				name   string
 				target *string
 				saved  string
-			}{{"listen", listen, settings.Listen}, {"tls-cert", cert, settings.TLSCert}, {"tls-key", key, settings.TLSKey}, {"workspace", workspace, settings.Workspace}, {"resources", resources, settings.Resources}} {
+			}{{"workspace", workspace, settings.Workspace}, {"resources", resources, settings.Resources}} {
 				if !explicit[value.name] {
 					*value.target = value.saved
 				}
@@ -98,43 +94,7 @@ func productCommand(ctx context.Context, args []string, out io.Writer) (result e
 			_ = socket.Close(shutdown)
 		}()
 		if *peerListen != "" {
-			if err = runtime.Control.Machines.EnableControl(); err != nil {
-				return err
-			}
-			fmt.Fprintf(out, "Peer listener: %s\n", runtime.Control.PeerListenAddress())
-		}
-		failures := make(chan error, 1)
-		if *listen != "" {
-			if (*cert == "") != (*key == "") {
-				return errors.New("both Control TLS certificate and key required")
-			}
-			if *cert != "" {
-				if _, err = tls.LoadX509KeyPair(*cert, *key); err != nil {
-					return err
-				}
-			}
-			if err = runtime.Control.Machines.EnableControl(); err != nil {
-				return err
-			}
-			listener, err := net.Listen("tcp", *listen)
-			if err != nil {
-				return err
-			}
-			defer listener.Close()
-			server := &http.Server{Handler: runtime.Control.ControlServer(transport.Handler(app, runtime.Control.Machines.OwnerCredential())), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 16384}
-			go func() {
-				if *cert != "" || *key != "" {
-					failures <- server.ServeTLS(listener, *cert, *key)
-				} else {
-					failures <- server.Serve(listener)
-				}
-			}()
-			defer func() {
-				shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				_ = server.Shutdown(shutdown)
-			}()
-			fmt.Fprintf(out, "Control listener: %s\n", listener.Addr())
+			fmt.Fprintf(out, "Agent Link listener: %s\n", runtime.Control.PeerListenAddress())
 		}
 		fmt.Fprintf(out, "Runtime %s ready (%s)\n", app.RuntimeID, runtime.Root.Path)
 		if *ui != "" {
@@ -177,8 +137,6 @@ func productCommand(ctx context.Context, args []string, out io.Writer) (result e
 			select {
 			case <-ctx.Done():
 				return nil
-			case err := <-failures:
-				return err
 			case err := <-watchDone:
 				if ctx.Err() != nil {
 					return nil
@@ -197,8 +155,6 @@ func productCommand(ctx context.Context, args []string, out io.Writer) (result e
 		select {
 		case <-ctx.Done():
 			return nil
-		case err := <-failures:
-			return err
 		}
 	case "status", "api":
 		endpoint, err := transport.ReadEndpoint(*root)

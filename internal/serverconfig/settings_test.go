@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestServerSettingsRemainPrivateAndRequireCompleteTLS(t *testing.T) {
+func TestServerSettingsRemainPrivateAndRequireAbsoluteDirectories(t *testing.T) {
 	root := t.TempDir()
 	os.Chmod(root, 0700)
 	initialized, err := instance.Open(root)
@@ -15,7 +15,7 @@ func TestServerSettingsRemainPrivateAndRequireCompleteTLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	initialized.Close()
-	settings := Settings{Listen: "127.0.0.1:17701", TLSCert: "/tmp/certificate.pem", TLSKey: "/tmp/private.pem"}
+	settings := Settings{Version: 1, Workspace: "/tmp/workspace", Resources: "/tmp/resources"}
 	if err := Save(root, settings); err != nil {
 		t.Fatal(err)
 	}
@@ -27,9 +27,9 @@ func TestServerSettingsRemainPrivateAndRequireCompleteTLS(t *testing.T) {
 	if info.Mode().Perm() != 0600 {
 		t.Fatal("settings not private")
 	}
-	settings.TLSKey = ""
+	settings.Workspace = "relative"
 	if err = Save(root, settings); err == nil {
-		t.Fatal("partial TLS accepted")
+		t.Fatal("relative directory accepted")
 	}
 	os.Chmod(filepath.Join(root, "server.json"), 0644)
 	if _, err = Load(root); err == nil {

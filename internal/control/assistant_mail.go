@@ -26,9 +26,6 @@ func (s *Service) sendAssistantMail(ctx context.Context, id, owner string, send 
 }
 
 func (s *Service) deliverAssistantMail(ctx context.Context) {
-	if s.Machines.Role() == "runner" {
-		return
-	}
 	definitions, err := s.Registry.Definitions(ctx)
 	if err != nil {
 		return

@@ -18,9 +18,9 @@ user agreement; see the repository `AGENTS.md`.
 | Assistant profile | `update_agent_profile` | Main, including result handling |
 | Execution targets | `list_execution_targets` | Main |
 
-`list_execution_targets` lists enrolled Runtime destinations. `create_task` and
-`manage_schedule.spec` accept explicit `machine_id`; omission uses the owning
-Control. Execution tools remain fixed to their run and accept no destination
+`list_execution_targets` lists the local execution target. Local `create_task`
+and `manage_schedule.spec` accept that `machine_id`; omission uses the current
+node. Linked task delegation uses `link_id` and an optional assistant `target`. Execution tools remain fixed to their run and accept no destination
 selector. Target authorization is defined in [Permissions](permissions.md).
 
 Commands request external-service credentials through the `credentials`
@@ -47,7 +47,7 @@ await tools.update_agent_profile({avatar: {path: ""}}); // restore default
 
 Avatar paths are relative to the assistant's own workspace, or to an owned Task's
 original workspace when `task_id` is supplied. Task imports reuse the authenticated
-original-Runner file channel, including remote and completed Tasks; cross-owner
+original local task file channel, including completed Tasks; cross-owner
 Tasks and paths escaping the selected workspace fail. The tool imports existing
 files rather than generating images, fetching URLs or accepting model-encoded
 image bytes. Source images must be PNG/JPEG/WebP, at most 8 MiB, 8192 pixels per
@@ -56,7 +56,7 @@ PNG, persisted with the assistant registry independently of source-file lifetime
 An empty path without a Task restores the default Companion image.
 
 The owning Control publishes the normalized image in authenticated assistant
-directory responses, so browser and native remote Spaces use the same bytes.
+directory responses, so browser and native views use the same bytes.
 Profile tools return only identity, revision and `has_avatar`, keeping image bytes
 out of model context. The update receipt binds the source arguments and is checked
 before reading a file again; retries return the original result without overwriting
@@ -126,7 +126,7 @@ provider does not normalize those fields into required arguments. Direct and
 composed calls retain the same argument contract.
 
 Operator management endpoints remain separate from model tools. They require
-Control membership and an existing resource. Lost operations are inspected by
+local operator authentication and an existing resource. Lost operations are inspected by
 original identity and never resent; unresolved receipts block new effects.
 
 ## Optional tool parameters

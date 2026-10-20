@@ -1,3 +1,4 @@
+import {taskAgentSource} from './connection-visuals.mjs';
 import {icon} from './icons.mjs';
 import {reconcile} from './reconcile.mjs';
 import {taskElapsed} from './task-time.mjs';
@@ -16,7 +17,7 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
     let state=states.get(scope);
     if(!tasks.length){const changed=current===scope&&signature!=='';states.delete(scope);element.remove();current=null;signature='';return changed;}
     if(!state){state={expanded:false,order:[]};states.set(scope,state);}
-    const nextSignature=JSON.stringify([scope,locale(),state.expanded,tasks.map(task=>[taskKey(task),task.title,task.phase,task.started_at_ms,needsApproval(task.id,task.phase)])]);
+    const nextSignature=JSON.stringify([scope,locale(),state.expanded,tasks.map(task=>[taskKey(task),task.title,task.phase,task.started_at_ms,task.agent_link,needsApproval(task.id,task.phase)])]);
     if(current===scope&&signature===nextSignature)return false;
     signature=nextSignature;
     const byID=new Map(tasks.map(task=>[taskKey(task),task]));
@@ -35,6 +36,7 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
       const waiting=needsApproval(task.id,task.phase),meta=node('span','background-task-meta');open.classList.toggle('needs-approval',waiting);
       open.append(node('span','task-activity-dot'),node('span','background-task-title',task.title));
       const status=waiting?'tool.waiting_approval':task.phase==='queued'?'tasks.queued':task.phase==='waiting'?'tasks.waiting':'tool.running';
+      const source=taskAgentSource(task,locale());if(source)meta.append(source);
       meta.append(node('span','background-task-status',t(status)));
       const time=taskElapsed(task.started_at_ms,Date.now(),locale());
       if(time){

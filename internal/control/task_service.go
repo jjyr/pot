@@ -2,12 +2,10 @@ package control
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"github.com/jjyr/pot/internal/assistant"
-	"github.com/jjyr/pot/internal/controlplane"
-	"github.com/jjyr/pot/internal/linkhost"
+	"github.com/jjyr/pot/internal/nodeidentity"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/internal/tasks"
@@ -28,34 +26,15 @@ type taskLifecycle struct {
 	wg       sync.WaitGroup
 	watching map[string]bool
 	mu       sync.Mutex
-	remote   *remoteState
 }
 
 func (s *Service) openTasks() error {
 	var err error
 	s.taskLife = &taskLifecycle{wake: make(chan struct{}, 1), watching: map[string]bool{}}
-	s.Machines, err = controlplane.Open(filepath.Join(s.options.Root, "machines.sqlite"), controlplane.Options{RuntimeID: s.options.RuntimeID, Embedded: s.options.Embedded, CanJoin: func() error {
-		definitions, err := s.Registry.Definitions(s.ctx)
-		if err != nil {
-			return err
-		}
-		hasIntegrations, err := s.Integrations.HasState(s.ctx)
-		if err != nil {
-			return err
-		}
-		if len(definitions) != 0 || len(s.Profiles.Snapshot().Profiles) != 0 || hasIntegrations {
-			return errors.New("Runtime with AI configuration cannot join as Runner; use a separate data directory")
-		}
-		return nil
-	}})
+	s.Machines, err = nodeidentity.Open(filepath.Join(s.options.Root, "machines.sqlite"), nodeidentity.Options{RuntimeID: s.options.RuntimeID})
 	if err != nil {
 		return err
 	}
-	if err = s.linkPlugins.RegisterExecution(linkhost.Runner{Directory: s.Machines, Connector: controlplane.Connector{Directory: s.Machines, Handler: controlplane.RunnerHandler(s.Machines, remoteRunnerPort{s}, s.runnerRPC)}}); err != nil {
-		return err
-	}
-	// Directory serializes this gate with enrollment admission and its CanJoin
-	// configuration check, so a concurrent Provider save cannot hide AI state.
 	s.Profiles.ownerAction = s.Machines.OwnerAction
 	s.RunnerJournal, err = runner.Open(filepath.Join(s.options.Root, "runner.sqlite"), s.options.RuntimeID, s.options.BootID)
 	if err != nil {
@@ -84,9 +63,6 @@ func (s *Service) openTasks() error {
 	s.Mailbox, err = assistant.OpenMailbox(filepath.Join(s.options.Root, "tasks.sqlite"), s.options.RuntimeID)
 	if err != nil {
 		return err
-	}
-	if s.Machines.Role() == "runner" {
-		s.StartRunner()
 	}
 	return nil
 }
@@ -168,16 +144,11 @@ func (s *Service) taskTarget(ctx context.Context, machine string) (core.Executio
 	if machine == "" {
 		machine = s.options.RuntimeID
 	}
-	if s.Machines.Role() == "runner" {
-		return core.ExecutionTarget{}, errors.New("Runner cannot own Task coordination")
+	if machine != s.options.RuntimeID {
+		return core.ExecutionTarget{}, protocol.APIError{Code: "remote_execution_removed"}
 	}
 	if _, _, err := s.Permissions.Policy(machine); err != nil {
 		return core.ExecutionTarget{}, err
-	}
-	if machine != s.options.RuntimeID {
-		if _, err := s.Machines.Peer(machine); err != nil {
-			return core.ExecutionTarget{}, err
-		}
 	}
 	return core.RuntimeTarget(machine), nil
 }
@@ -198,13 +169,6 @@ func (s *Service) taskLoop() {
 			for {
 				if _, err := source.Next(s.ctx); err != nil {
 					return
-				}
-				if source == runnerSub && s.Machines.Role() == "runner" {
-					if peer, err := s.Machines.ControlPeer(); err == nil {
-						ctx, cancel := context.WithTimeout(s.ctx, time.Second)
-						_ = peer.Notify(ctx, controlplane.Request{ID: storage.ID(), Method: "event.runner.changed", Params: json.RawMessage(`{}`)})
-						cancel()
-					}
 				}
 				s.Changes.Notify("tasks")
 				s.Changes.Notify("assistant-mail")
@@ -246,7 +210,6 @@ func (s *Service) taskLoop() {
 			s.Changes.Notify("tasks")
 		}
 		s.resumeTaskAllowance(s.ctx)
-		s.reconcileRemoteResources(s.ctx)
 		if err := s.Schedules.Tick(s.ctx, storage.Now()); err != nil && s.ctx.Err() == nil {
 			s.Changes.Notify("schedules")
 		}
@@ -305,21 +268,13 @@ func (p taskRouter) original(ctx context.Context, control, task, run string) (ru
 	if r.Launch.RuntimeID == p.s.options.RuntimeID {
 		return p.s.Runner, nil
 	}
-	plugin, err := p.s.linkPlugins.Execution("runner")
-	if err != nil {
-		return nil, err
-	}
-	return plugin.Target(r.Launch.RuntimeID), nil
+	return nil, protocol.APIError{Code: "original_execution_unavailable"}
 }
 func (p taskRouter) Launch(ctx context.Context, l runner.Launch) (runner.Run, error) {
 	if l.RuntimeID == p.s.options.RuntimeID {
 		return p.s.Runner.Launch(ctx, l)
 	}
-	plugin, err := p.s.linkPlugins.Execution("runner")
-	if err != nil {
-		return runner.Run{}, err
-	}
-	return plugin.Target(l.RuntimeID).Launch(ctx, l)
+	return runner.Run{}, protocol.APIError{Code: "remote_execution_removed"}
 }
 func (p taskRouter) Inspect(ctx context.Context, c, t, r string) (*runner.Run, error) {
 	port, err := p.original(ctx, c, t, r)
@@ -329,7 +284,6 @@ func (p taskRouter) Inspect(ctx context.Context, c, t, r string) (*runner.Run, e
 	return port.Inspect(ctx, c, t, r)
 }
 func (p taskRouter) Stop(ctx context.Context, c, t, r, m string) error {
-	p.s.closeRemoteRun(r)
 	port, err := p.original(ctx, c, t, r)
 	if err != nil {
 		return err
@@ -351,7 +305,7 @@ func (p taskRouter) Resume(ctx context.Context, c, t, r string) error {
 func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepared, error) {
 	l := r.Launch
 	if l.ControlID != s.options.RuntimeID {
-		return s.prepareRemoteTask(ctx, r)
+		return runner.Prepared{}, protocol.APIError{Code: "original_execution_unavailable"}
 	}
 	resources, revision, err := s.prepareTaskResources(ctx, l, func() (taskResource, error) { return s.currentTaskResource(ctx, l) })
 	if err != nil {
@@ -532,39 +486,7 @@ type taskFiles struct{ s *Service }
 
 func (f taskFiles) ReadResult(ctx context.Context, target core.ExecutionTarget, task, path string, limit int64) (json.RawMessage, error) {
 	if target.RuntimeID != f.s.options.RuntimeID {
-		var raw []byte
-		if err := f.s.Tasks.DB().QueryRowContext(ctx, "SELECT body FROM tasks WHERE id=?", task).Scan(&raw); err != nil {
-			return nil, err
-		}
-		var record tasks.Record
-		if err := core.DecodeJSON(raw, &record); err != nil {
-			return nil, err
-		}
-		if record.Launch == nil || record.Launch.ExecutionTarget != target {
-			return nil, errors.New("result target differs from original Task")
-		}
-		peer, err := f.s.Machines.Peer(target.RuntimeID)
-		if err != nil {
-			return nil, errors.Join(tasks.ErrResultPending, err)
-		}
-		var reply struct {
-			Data string `json:"data"`
-		}
-		err = f.s.remoteCall(ctx, peer, binding(*record.Launch), "task.file", "file:"+storage.ID(), remoteFile{path, limit}, &reply)
-		if err != nil {
-			if errors.Is(err, controlplane.ErrUncertain) || errors.Is(err, controlplane.ErrDisconnected) {
-				return nil, errors.Join(tasks.ErrResultPending, err)
-			}
-			return nil, err
-		}
-		data, err := base64.RawStdEncoding.DecodeString(reply.Data)
-		if err != nil {
-			return nil, err
-		}
-		if int64(len(data)) > limit {
-			return nil, errors.New("remote Task file exceeds bound")
-		}
-		return data, nil
+		return nil, protocol.APIError{Code: "original_execution_unavailable"}
 	}
 	if !protocol.ValidFilePath(path) {
 		return nil, errors.New("invalid result path")

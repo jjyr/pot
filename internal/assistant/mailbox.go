@@ -189,6 +189,16 @@ func (m *Mailbox) Send(ctx context.Context, id string, from protocol.AgentRef, s
 	return message, err
 }
 func (m *Mailbox) Deliver(ctx context.Context, message protocol.Envelope) (protocol.Receipt, error) {
+	return m.deliver(ctx, message, "queued")
+}
+
+// DeliverChat durably accepts a direct-user reply without making it eligible
+// for autonomous agent consumption. Projection failure can retry the same receipt.
+func (m *Mailbox) DeliverChat(ctx context.Context, message protocol.Envelope) (protocol.Receipt, error) {
+	return m.deliver(ctx, message, "processed")
+}
+
+func (m *Mailbox) deliver(ctx context.Context, message protocol.Envelope, state string) (protocol.Receipt, error) {
 	if err := message.Validate(); err != nil {
 		return protocol.Receipt{}, err
 	}
@@ -223,7 +233,7 @@ func (m *Mailbox) Deliver(ctx context.Context, message protocol.Envelope) (proto
 				return errors.New("conversation already exists")
 			}
 		}
-		return insertMail(ctx, tx, message, "in")
+		return inbox.EnqueueTx(ctx, tx, message, "in", state)
 	})
 	if err == nil {
 		m.Changes.Notify("assistant-mail")

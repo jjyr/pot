@@ -95,6 +95,16 @@ nativeClick({...event,kind:'approval'});assert.equal(nativeOpened.length,0);
 nativeClient.assistants=[{...owner}];await native.directory();assert.equal(nativeOpened[0].task,'task');assert.equal(nativePrompts,0);
 await native.setEnabled(false);await native.setEnabled(true);assert.equal(storage.get('pot-system-notifications-browser-v1'),'false');native.dispose();
 
+// Linked assistants use the same reply notifications without querying local
+// execution or approval APIs under their synthetic directory identity.
+const linkedAlerts=[],linkedReads=[];
+const linkedOwner={...owner,id:'agent-link:connection:review',name:'Reviewer',origin:{kind:'codex',link_id:'connection',assistant_id:'review'}};
+const linkedClient={...nativeClient,assistants:[linkedOwner],request:async path=>{linkedReads.push(path);throw Error('Unsupported local read');},notifySystem:async event=>linkedAlerts.push(event),onNotificationClick:undefined};
+const linkedManager=createSystemNotifications({client:linkedClient,surface:'main',view:()=>route,open:()=>{},locale:()=> 'en',host:host()});
+await linkedManager.directory();await linkedManager.refresh();assert.deepEqual(linkedReads,[],'Linked assistants never query local task outcomes or permissions');
+linkedClient.assistants=[{...linkedOwner,reply_id:'remote-reply',reply_count:5}];await linkedManager.directory();
+assert.equal(linkedAlerts.length,1);assert.equal(linkedAlerts[0].kind,'reply');assert.equal(linkedAlerts[0].owner,linkedOwner.id,'Existing notification routing keeps the exact linked assistant');linkedManager.dispose();
+
 // Distinct committed terminal transitions keep distinct event IDs even when
 // their timestamps coincide. Explicit cancellations remain silent.
 const firstFinish=taskOutcomeNotifications(owner,[{...task('complete'),sequence:1,updated_at_ms:2}])[0];

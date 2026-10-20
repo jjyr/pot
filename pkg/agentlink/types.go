@@ -1,5 +1,4 @@
-// Package agentlink connects explicitly bound assistant identities over a narrow
-// message-only transport. It grants neither execution nor owner administration.
+// Package agentlink connects autonomous nodes through a shared collaboration port.
 package agentlink
 
 import (
@@ -45,6 +44,7 @@ type Connection struct {
 	UpdatedAt         time.Time     `json:"updated_at"`
 	LastSeen          *time.Time    `json:"last_seen,omitempty"`
 	LastError         string        `json:"last_error,omitempty"`
+	Directory         *Directory    `json:"directory,omitempty"`
 	RevocationPending bool          `json:"revocation_pending,omitempty"`
 }
 
@@ -69,7 +69,7 @@ type Preview struct {
 // immutable receipt. That receipt means inbox acceptance, not model processing.
 // Pending MUST filter the exact two addresses before applying its bounded limit.
 type Mailbox interface {
-	Pending(context.Context, protocol.AgentRef, protocol.AgentRef) ([]protocol.Envelope, error)
+	PendingNode(context.Context, string, string) ([]protocol.Envelope, error)
 	Deliver(context.Context, protocol.Envelope) (protocol.Receipt, error)
 	Acknowledge(context.Context, protocol.Receipt) error
 }
@@ -82,6 +82,7 @@ type SecretStore interface {
 
 type Options struct {
 	// DB is a caller-owned, migrated storage.ControlDatabase. Service never closes it.
+	Backend      Backend
 	DB           *sql.DB
 	Secrets      SecretStore
 	Identity     func(context.Context, string) (Identity, error)

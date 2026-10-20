@@ -1,9 +1,8 @@
 # Machine and command execution authorization
 
-Control owns policy for each Runtime membership in its Space. A trusted server
-and a protected personal Mac may coexist. Space membership does not grant host
-execution on every machine. Main uses its owning Control; Tasks retain their
-fixed Runtime. No denial or disconnect moves work to another destination.
+Each autonomous node owns its local execution policy. Agent Link does not grant
+host execution or policy administration on a peer. Main and Tasks run on their
+owning node; remote work is delegated to that node's assistant and policy.
 
 ## Machine defaults and command rules
 
@@ -13,13 +12,15 @@ fixed Runtime. No denial or disconnect moves work to another destination.
 | Trusted (`allow`) | Host execution without SRT, except matching explicit host-deny rules |
 | Blocked (`deny`) | No new execution; owned output polling and cleanup remain available |
 
-New machines are Protected, including Controls. Trust is an explicit owner choice.
-Machine settings belong to one enrollment; re-enrollment clears old rules/grants.
+New local nodes are Protected. Trust is an explicit owner choice.
+Machine settings and command rules bind the local machine identity and its
+persisted authorization epoch. Retired distributed enrollment cannot grant
+authority to a new node.
 
 A permanent command rule matches the full command source, canonical effective
 working directory, canonical shell, login/snapshot settings, terminal and
 interactive mode, and explicit credential references. It also binds the machine
-and enrollment. Output/yield limits are not authority. There are no prefix,
+and authorization epoch. Output/yield limits are not authority. There are no prefix,
 command-family or wildcard rules. `npm test`, `npm install`, `npm test -- --watch`
 and `npm test && curl ...` are different commands. A changed directory, shell or
 credential binding needs another matching rule.
@@ -48,8 +49,8 @@ not an accepted tool input. Results/events report the actual `host`/`sandbox`
 boundary; owned process polling retains the original process mode. The model
 cannot supply sandbox profiles, upgrade a live session or change destinations.
 
-Main context includes an `execution-environment` snapshot of the Control-owned
-destination policy and file/temp/network boundaries. Worker workspace context
+Main context includes an `execution-environment` snapshot of the node-owned
+execution policy and file/temp/network boundaries. Worker workspace context
 contains its prepared cwd; policy remains enforced by Runtime. Neither context
 grants authorization. Every operation is checked against current policy.
 
@@ -63,14 +64,14 @@ Current work means one foreground processing turn (which may aggregate pending
 user requests), one Task run, or one
 scheduled occurrence. Grants do not extend to other commands, subsequent user
 requests, child/sibling Tasks, scheduled occurrences, machines or generations.
-Completion/cancellation, restart, enrollment changes and policy invalidation clear
+Completion/cancellation, restart, authorization epoch changes and policy invalidation clear
 temporary grants. Background scheduling grants no authority.
 
 Instruction edits always require independent exact `allow_once`/`deny` review,
 even on Trusted or Blocked machines; command/task grants never approve them.
 
 Every pending decision binds owner, Task/run/turn, generation, call ID, Runtime,
-enrollment, tool and full arguments/context. A later grant cannot reverse a denial
+authorization epoch, tool and full arguments/context. A later grant cannot reverse a denial
 already given to that exact request. Persistent grants are saved before permitting
 execution; write failure leaves approval pending.
 
@@ -112,7 +113,7 @@ instructions guide model behavior; Control still enforces every approval.
 
 ## Owner management and applying changes
 
-Machines groups authority by Space and machine. Each machine shows its default
+Machines shows local node authority. Each machine shows its default
 execution policy directly, with permanent command rules collapsed behind a count.
 Active task grants appear only when present; application failures remain visible.
 There is no separate execution-permissions tab in Settings.
@@ -122,8 +123,7 @@ require explicit Save or Cancel and explain the execution interruption before
 saving. Unsaved choices survive live refresh and appearance/language changes;
 navigation asks before discarding them. A newer policy revision disables stale
 saves until the owner cancels and reloads the current policy. Cached permissions
-are read-only when their owning Space or policy service is unavailable. An offline
-execution machine can still be configured through its connected Control. Owner
+are read-only when their local policy service is unavailable. Owner
 edits change current authority; deleting a rule is not deleting a history record.
 
 Owner edits persist a new revision, invalidate pending/task grants and close the
@@ -131,25 +131,22 @@ machine's old execution Engines. This conservatively stops existing work on that
 machine. Processes and persistent plugin sessions do not silently inherit new
 permissions or retain old host authority. Work is not automatically restarted.
 
-Control and Runner serialize revision checks with actual process start. Runner
-receives authenticated revisions, rejects stale requests and does not admit host
-work from a disconnected cache. Offline/failed application is visible as pending
-and fences new admission. A stopped process does not undo prior file/network
-side effects; uncertain cleanup retains existing receipt/capacity fences.
+Local policy admission serializes revision checks with actual process start.
+Failed application remains visible as pending and fences new admission. A stopped
+process does not undo prior file/network side effects; uncertain cleanup retains
+receipt and capacity fences.
 
-An application interrupted by Runtime restart, or a missing cleanup receipt,
-requires owner recovery. Retry cannot manufacture proof after old Engines have
-disappeared. Reconcile the original execution scopes and deliberately replace the
-affected enrollment/root; preserve its old state for inspection. A Runner with
-unreconciled prior runs also refuses policy acknowledgment after restart.
+An application interrupted by restart or a missing cleanup receipt requires
+owner recovery. Retry cannot manufacture proof after old Engines disappeared.
+Preserve original state and reconcile original execution scopes.
 
 ## Storage and API
 
 Permission format 6 stores machines, enrollment epochs, exact command rules and
 durable policy-application fences. Restart retains pending/uncertain application.
 Temporary grants and pending decisions are not restored after restart. Unsupported
-old formats fail without rewriting the file or inferring new grants. Runner
-journal schema 7 retains execution mode/context-bearing requests and separates
+old formats fail without rewriting the file or inferring new grants. The local
+task journal schema 7 retains execution mode/context-bearing requests and separates
 original Run receipts from same-Task continuations.
 
 `GET /api/v1/permissions` returns `policy` (machines, rules, task_grants,

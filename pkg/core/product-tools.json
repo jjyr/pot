@@ -1,7 +1,7 @@
 [
   {
     "name": "create_task",
-    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. Interpret the applicable AGENTS.md routing rules semantically using available configured Providers and models. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor. Create a task for new work. To continue existing work, send owner guidance to that task with send_message; this also reopens archived tasks in their original workspace. Runtime prepares the workspace before the Worker starts. For Git feature development select workspace.kind=worktree and its source project_dir; reuse an existing worktree or explicitly requested in-place project with kind=directory. Without a project use temporary (the default). Runtime refreshes the remote base and creates managed worktrees; do not ask the Worker to choose directories, pull the base or create its own worktree. Keep workspace setup metadata out of the Worker text; the Worker receives its cwd. Omitted machine_id uses the owning Control. Files are not copied from other workspaces. Tool calls require current machine authorization; completion closes only this Task's processes and sessions while retaining files. The text must contain a concise title on its first line AND complete instructions on following lines. A title-only brief is rejected. Preserve the user's exact commands and constraints; workers do not see the chat.",
+    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. Interpret the applicable AGENTS.md routing rules semantically using available configured Providers and models. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor. Create a task for new work. To continue existing work, send owner guidance to that task with send_message; this also reopens archived tasks in their original workspace. Runtime prepares the workspace before the Worker starts. For Git feature development select workspace.kind=worktree and its source project_dir; reuse an existing worktree or explicitly requested in-place project with kind=directory. Without a project use temporary (the default). Runtime refreshes the remote base and creates managed worktrees; do not ask the Worker to choose directories, pull the base or create its own worktree. Keep workspace setup metadata out of the Worker text; the Worker receives its cwd. Omitted link_id and target use this node. To delegate to a linked node, provide its link_id and optionally target from list_assistants; the receiver uses its persisted default assistant when target is omitted. Linked nodes own their models, permissions, credentials and workspaces. Accepted work remains bound to the chosen receiver assistant. Files are not copied from other workspaces. Tool calls use the receiving node’s local authorization; completion closes only this Task's processes and sessions while retaining files. The text must contain a concise title on its first line AND complete instructions on following lines. A title-only brief is rejected. Preserve the user's exact commands and constraints; workers do not see the chat.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -45,10 +45,6 @@
           },
           "description": "Global skill names to include in this task. Omitted or empty loads no global skills. Project skills are always discovered independently."
         },
-        "machine_id": {
-          "type": "string",
-          "description": "Target enrolled Runtime ID. Omitted uses the owning Control. The destination is fixed for this run and never automatically replaced."
-        },
         "model": {
           "type": "string",
           "minLength": 1,
@@ -88,6 +84,34 @@
             }
           },
           "additionalProperties": false
+        },
+        "link_id": {
+          "type": "string",
+          "description": "Agent Link connection ID from list_execution_targets. Omit for local execution."
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "node_id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "assistant"
+              ]
+            },
+            "agent_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "node_id",
+            "kind",
+            "agent_id"
+          ],
+          "additionalProperties": false,
+          "description": "Explicit receiving assistant address from list_assistants. Omit to use the receiving node’s persisted default."
         }
       },
       "required": [
@@ -463,7 +487,7 @@
   },
   {
     "name": "list_execution_targets",
-    "description": "Inspect registered Runtime destinations and their machine policies. Discovery grants no execution authority.",
+    "description": "List this autonomous node and its Agent Link connections, provided assistants and advertised capabilities. Remote nodes own execution and authorization. No Control/Runner enrollment is required.",
     "inputSchema": {
       "type": "object",
       "properties": {},

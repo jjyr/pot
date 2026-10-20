@@ -18,20 +18,20 @@ points; `internal/` contains product implementation. All packages share one root
 | `pkg/instance`, `pkg/modeldirectory` | Private data-root identity/locking and provider model metadata |
 | `internal/assistant` | Identities, rules, conversation Threads, chat driver and durable mailboxes/sessions |
 | `pkg/peer` | Shared signed TCP sessions, host identity proof, framing and service admission; no business authorization |
-| `pkg/agentlink` | Assistant-bound authenticated message exchange, encrypted connection references and durable recovery |
-| `internal/linkhost` | Typed Agent message and Runner execution adapters plus one host-owned peer service registry/listener |
-| `internal/gateway`, `internal/secrets` | Control-owned provider HTTP routes and encrypted credential references |
+| `pkg/agentlink` | Node-bound authenticated collaboration, assistant directories and durable request recovery |
+| `internal/linkhost` | Agent Link adapters plus one host-owned peer service registry/listener |
+| `internal/gateway`, `internal/secrets` | Node-owned provider HTTP routes and encrypted credential references |
 | `pkg/integrations`, `pkg/integrations/github` | Independent service login, single-account connections and credential caching through injected account/Secrets stores; GitHub device authorization adapter |
 | `internal/usage` | Durable reservations, allowances, usage settlement, tools and compaction accounting |
 | `internal/control`, `internal/tasks`, `internal/schedule` | Product coordination, model selection, permissions, durable Tasks and schedules |
-| `internal/controlplane` | Stable signing identities, invitations, Runner membership and execution services over shared signed TCP sessions |
+| `internal/nodeidentity` | Autonomous node signing identity and local machine labels |
 | `internal/runner` | Destination-local immutable Task launches, checkpoints, original command inputs/receipts and event logs |
 | `pkg/execution` | Shared destination Agent queue, concurrency, cancellation and uncertainty fences |
 | `pkg/terminal` | Ephemeral user-operated PTYs, bounded replay and explicit process cleanup |
 | `pkg/plugin` | Common Plugin manifests, discovery, confined asset access and tool-only snapshots |
 | `pkg/runtime` | Public complete-host facade, lifecycle and authenticated operator handler |
 | `internal/runtime` | Product composition, root ownership and component lifecycle behind the facade |
-| `internal/transport`, `internal/spaces` | Private/native API adapters and owner-scoped local/remote client aggregation |
+| `internal/transport`, `internal/localui` | Private/native operator adapters and transient local UI projections |
 | `internal/webui`, `internal/access`, `internal/tailnet` | Independent browser service, authentication, access operator and embedded Tailscale |
 | `internal/desktop`, `cmd/pot-app` | Wails v3 windows, tray, native dialogs and shared frontend bridge |
 | `web/` | Shared HTML/CSS/JS frontend, DOM state, themes, localization and host adapters |
@@ -45,9 +45,8 @@ nor acquire provider credentials. Runtime composes components through their APIs
 HTTP adapters and databases stay with their owning components.
 
 Every product Agent invocation, including mail and summary sessions, passes
-through the destination's shared execution manager. Control owns provider keys,
-approvals, accounting and global resources. Connected Workers run beside their
-fixed Runtime and call Control through run-bound signed ports.
+through the destination's shared execution manager. The owning node manages provider keys,
+approvals, accounting and global resources. Workers run on their owning node and use its local execution services.
 
 Plugin manifests and declared assets under `plugins/` are packaged runtime data.
 The Go host loads them independently of execution.

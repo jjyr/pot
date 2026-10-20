@@ -28,22 +28,11 @@ func (s *Service) Completions(ctx context.Context, owner, query string) (map[str
 		}
 	}
 	addMachine(s.options.RuntimeID, s.Machines.LocalLabels(), "Local machine")
-	machines, err := s.Machines.Machines(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, machine := range machines {
-		detail := "Offline machine"
-		if machine.Online {
-			detail = "Connected machine"
-		}
-		addMachine(machine.Identity.RuntimeID, machine.Labels, detail)
-	}
 	for label := range tags {
 		candidates = append(candidates, protocol.Completion{Token: "/tag:" + label, Label: label, Detail: "Machine label"})
 	}
 	target := core.RuntimeTarget(s.options.RuntimeID)
-	_, _, err = s.Permissions.Policy(s.options.RuntimeID)
+	_, _, err := s.Permissions.Policy(s.options.RuntimeID)
 	if err != nil {
 		return nil, err
 	}

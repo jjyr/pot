@@ -6,11 +6,11 @@ service admission function and request handlers. It does not depend on Control,
 machine membership, assistant databases or plugin management.
 
 ```text
-Agent messages          Runner execution          Other native services
-routes / durable ACK    membership / run receipts  service-specific authority
-       |                        |                           |
-       +------------------------+---------------------------+
-                                |
+Agent Link collaboration          Signed identity probes
+ routes / durable ACK               identity proof
+          |                              |
+          +------------------------------+
+                         |
                          pkg/peer Session
            service admission / RPC / events / connection lifetime
            signed session + direction + sequence / bounded framing
@@ -82,9 +82,10 @@ seconds, reads expire after ninety seconds, and writes have bounded deadlines. R
 
 The transport never reconnects or replays business requests automatically. A call
 whose delivery or result is uncertain returns `ErrUncertain`. Agent messaging
-may retry immutable messages against durable deduplication and receipts. Runner
+may retry immutable messages against durable deduplication and receipts. Local task
 execution must reconcile the original run/request receipt before recovery. An
 event is only a resynchronizable hint, never an execution receipt or durable ACK.
 
-Browser APIs, local IPC, external account integrations and Codex MCP use their
-own interfaces. They do not acquire peer authority by sharing a process.
+Browser APIs, local IPC and external account integrations use their own
+interfaces and do not acquire peer authority by sharing a process. Codex
+collaboration uses the same Agent Link transport.

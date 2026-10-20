@@ -2,7 +2,7 @@
 
 This is the shared App/Web reference for visual language, responsive navigation
 and page interactions. Code defines current behavior. Platform responsibilities
-belong in [Shared UI](shared-ui.md), ownership in [Multi-Space UI](multi-space-ui.md),
+belong in [Shared UI](shared-ui.md), node and assistant identity in [Node UI](node-ui.md),
 and build and regression commands in [Development](development.md#checks).
 
 ## Visual language
@@ -109,7 +109,7 @@ All three columns extend to the top of the window, without a shared horizontal
 titlebar. Wide columns have 66 px
 headers: the assistant pane owns its heading, fold control and creation action;
 the conversation header uses the conversation canvas and owns the assistant avatar,
-name, Space, slider-shaped settings action and ellipsis menu. Usage stays in the
+name, source marker, slider-shaped settings action and ellipsis menu. Usage stays in the
 conversation menu. Narrow windows and the tray retain a 44 px header. Native
 window controls and draggable space share these headers; controls avoid the first
 80 px occupied by macOS window buttons.
@@ -120,8 +120,8 @@ editor navigation and narrow/wide resizing. Folding preserves the composer,
 draft, directory search/scroll and visible conversation anchor; it performs no
 backend reads and moves keyboard focus to the corresponding fold/expand control.
 Narrow windows continue to use the full-width directory and Back navigation.
-Clicking the conversation avatar/name opens assistant information with its Space
-and settings action; outside clicks and Escape dismiss it. Assistant settings still
+Clicking the conversation avatar/name opens assistant information with its source
+and available actions; outside clicks and Escape dismiss it. Assistant settings still
 open the existing editor with its return context and dirty-exit guard.
 
 ### Narrow surfaces
@@ -170,7 +170,7 @@ Task Back depends on its entry point. Opening a task from the Tasks list returns
 to that list, preserving its filters, pagination and scroll. All other task
 entries return to an assistant conversation: Chat restores the originating
 conversation; notifications and schedule run history open the task owner's
-conversation in its original Space. The titlebar button, ⌘[ and narrow edge Back
+conversation with its original node and assistant identity. The titlebar button, ⌘[ and narrow edge Back
 share this rule. Task Usage returns to the task first and retains its return
 destination. Locale changes and browser history restoration retain that destination.
 
@@ -200,8 +200,8 @@ expanded rows/panes and scroll positions. Nested AI steps retain parent input
 entities and draft checkpoints. Returning restores this presentation alongside
 current live data, without rolling back backend state. Source focus is captured
 only at widths of at least 720 px, avoiding keyboard activation on phones.
-A changed Control/Runtime identity produces an error instead of restoring an old
-context into the new owner.
+A changed local node or Runtime identity produces an error instead of restoring
+an old context into the replacement node.
 
 | Exit | Behavior |
 | --- | --- |
@@ -223,16 +223,15 @@ Configuration request reconciliation is described in
 
 ### Assistants
 
-The directory and wide pane share rows containing avatar, name, one-line preview
-and unread count. With more than one configured Space, a muted Space name follows
-the assistant name; a single Space needs no ownership label. These labels remain
-visible when a configured Space is offline, and execution machines within a Space
-do not affect their visibility. Long names truncate with full-text tooltips, while
-unread counts stay at the trailing edge. Search filters names without changing the
-selected conversation. Registry order remains stable; duplicate names include
-the Space name. Initial history does not count as unread. Opening the conversation
-clears its indicator. Offline, approval, configuration and activity previews
-reflect their own states rather than changing the avatar.
+The directory and wide pane keep their existing rows: avatar, name, one-line
+preview and unread count. Linked assistants add a Codex or remote Pot source icon
+and node name in these rows and the conversation title. Source markers remain
+visible while disconnected; they do not replace assistant avatars. Long names
+truncate with full-text tooltips and unread counts stay at the trailing edge.
+Search filters names without changing the selected conversation. Registry order
+remains stable; node identity distinguishes duplicate names. Initial history does
+not count as unread. Opening the conversation clears its indicator. Offline,
+approval, configuration and activity previews reflect their own states.
 
 Default avatars pair each kitchen character with one of eight soft pastel
 backgrounds. A stable hash of the creation request selects the background; the
@@ -245,7 +244,7 @@ persisted square PNG in the directory, chat title and settings preview; restorin
 the default uses the originally assigned kitchen character and pastel background.
 
 First-use Chat offers Connect AI provider when no connection exists. Saving that
-connection returns to Chat and automatically creates a randomly named kitchen assistant using the Space's
+connection returns to Chat and automatically creates a randomly named kitchen assistant using the local node's
 default Provider/model. An empty Chat with an existing Provider follows the same bootstrap
 path. Offline or failed directory loads offer recovery rather than connection setup.
 The empty directory caption is No assistants yet.
@@ -260,16 +259,15 @@ The assistant saves user-requested names and avatars through `update_agent_profi
 directory, title and settings use that same identity. Optional fields preserve
 omitted values. Workers and peer conversations cannot edit the assistant profile.
 
-The + action creates an assistant immediately and opens its conversation. The
-current assistant determines the destination Space; without a selected assistant,
-App uses its local Space and Web uses its serving Space. An unavailable Space does
-not fall back to another destination. Creation uses that Space's default Provider
-and concrete default model, with empty assistant instructions. Missing Provider
-configuration opens AI connection setup. First-use bootstrap uses the same random kitchen identities.
+The + action creates a local assistant immediately and opens its conversation,
+using the local default Provider and concrete default model with empty assistant
+instructions. Missing Provider configuration opens AI connection setup. First-use
+bootstrap uses the same random kitchen identities. Remote assistants come from
+the connected node's directory and are configured there.
 
 All new assistants randomly choose from Cup, Mug, Bowl, Pan, Wok, Spoon, Fork, Tray,
 Whisk, Kettle, Lid, Jar, Jug, Plate, Dish and Glass. These English identity values
-are not translated. Unused base names take priority within the destination Space,
+are not translated. Unused base names take priority within the local node,
 including names set manually (case-insensitive, ignoring surrounding whitespace).
 Once all bases are occupied, a random base gets its smallest available suffix
 starting at 2, for example Cup 2. Name allocation and registration share one
@@ -339,14 +337,16 @@ and expansion while long-chat history is virtualized. It previews three queued,
 running, allowance-waiting or approval-waiting tasks, with a
 full-width Expand remaining tasks row when more are available. Expand and Collapse
 operate in place, using Chat's scroll container. They preserve the reading anchor
-rather than jumping to the bottom. Expansion is scoped to Control, Space and
+rather than jumping to the bottom. Expansion is scoped to the local node and
 assistant for the mounted window and survives detail/settings navigation. Task
 additions and removals retain that choice; an empty region resets it. Task rows
 retain identity and order within each approval group across metadata/clock refreshes.
 Titles show at most two lines, with status and elapsed time on the next line.
+Delegated rows add the Codex or remote Pot source icon and node name without
+changing the task row layout.
 Approval-waiting rows come first, use an attention color and show Waiting for
 approval. Each row shows muted elapsed wall time from the original
-Runner's first execution claim, excluding the initial queue and including later
+receiving node's first execution claim, excluding the initial queue and including later
 approval, pause and allowance waits. Durations show seconds below a minute, minutes/seconds
 below an hour, hours/minutes below a day and days/hours thereafter. The clock
 continues across refresh and reconnect, updates only its text while Chat is visible,
@@ -384,7 +384,7 @@ Reconnecting, without declaring execution failed or automatically sending again.
 Recovery reads authoritative state. A connection notice below the composer is
 used only when no pending send or active reply already owns that status.
 
-Task file links download through the owning Control; App requests a save location
+Task file links download through the local node; App requests a save location
 and Web uses browser downloads. Delivery constraints belong in
 [Deployment](deployment.md). Native Chat can offer desktop recovery actions for
 recognized unsuccessful-task diagnostics; these reuse existing connection/resource
@@ -470,8 +470,8 @@ than manual creation forms. See [Task coordination](task-coordination.md) and
 
 ### Settings and first connection
 
-Settings has General / AI Providers / Third-party accounts / Task Configuration tabs and an explicit
-configuration location. General exposes Language, Appearance and keyboard shortcuts;
+Settings has General / AI Providers / Third-party accounts / Task Configuration
+tabs for the local node. General exposes Language, Appearance and keyboard shortcuts;
 shortcuts start collapsed on narrow windows. Locale/theme startup and live changes
 follow [Internationalization](internationalization.md), preserving drafts.
 
@@ -482,7 +482,7 @@ re-login action. Pending authorization shows a user code, browser link and Cance
 Expired accounts remain visible until logout. See [Integrations](credentials.md).
 
 AI Providers manages named connections, credentials, endpoints, protocols and
-concrete default models. One Provider is the Space's new-assistant default.
+concrete default models. One Provider is the local new-assistant default.
 The first saved Provider becomes the default automatically. Each configured row
 retains its brand icon and offers a star to choose the default; the selected row
 has a filled blue star and a Default badge. There is no separate default picker.
@@ -499,68 +499,26 @@ Loading preserves navigation and the chart region; failures retain inline recove
 Unknown or incomplete data is distinct from zero. Accounting and aggregation
 belong in [Token usage](token-usage.md).
 
-Topology replaces the Machines destination, retains its navigation shortcut, and
-projects authorized Controls, Agent message links and execution inventory. Controls
-form quiet ownership regions. Pot and Codex use their real brand marks; machines
-use device glyphs. The graph keeps short names and status dots, with full identity,
-relationship and operations available by clicking a node or connection. Wide
-windows put details on the right; narrow windows place them below the graph.
-Hover never opens information or changes selection. An independent Codex endpoint
-has no inferred machine wrapper and never contributes to machine counts.
+Topology retains its graph, ownership regions, edges, top connection toolbar and
+selection inspector. Wide windows put details on the right; narrow windows place
+them below the graph. Pot and Codex use their brand marks, machines use device
+glyphs, and full identities and operations appear on selection. Hover never changes
+selection. Keep the existing machine-policy editor and its dirty-exit protection.
 
-Thin Agent edges have slow bidirectional particles only while communication is
-ready. This indicates availability, not message traffic or task execution. Machine
-execution edges use a distinct dashed line; unavailable edges stay static and
-faint. Pause animation is explicit, and Reduced Motion hides particles. Selection
-and pause state survive configuration navigation and locale changes.
+Copy connection address obtains one short-lived invitation. Paste it into the
+existing Add Agent editor on the other node, then connect; validation and identity
+preview stay within that editor. Success returns to Topology and selects the node.
+Invitations remain outside history and cached view data. Connections bind nodes;
+their assistants appear in the existing directory and Chat. The node inspector
+lists provided assistants and offers Open chat, Disconnect/Reconnect and Delete.
+Delete requires confirmation; history and accepted tasks remain. Neither action
+silently cancels execution.
 
-The address region displays a nonsecret service endpoint. Copy connection address
-explicitly obtains a short-lived invitation and copies it without putting it in
-history or cached view data. Add Agent opens a single editing page with the other
-Agent's address with a clipboard action and, when needed, a local assistant picker.
-A bounded, read-only preview verifies the endpoint and invitation before showing
-the real Agent identity; it neither consumes the invitation nor creates a link.
-Editing the address immediately invalidates that preview. One Add action creates
-the connection, with concise retry or replacement guidance on failure. Successful connection
-returns to the topology and selects that endpoint. Access defaults to an existing
-private `tcp://host:port` address without a certificate field. Tailscale setup
-reuses or creates TCP forwarding, reports the actual address and keeps unrelated
-Serve configuration. An encrypted VPN supplies content confidentiality. The peer
-listener routes Agent and Runner services through separate admission checks;
-owner management remains on its own interface. Updating an enrolled Runner's
-Control address verifies the saved identity and preserves its original receipts.
-
-The connection permits messages;
-the receiving assistant retains its existing tool and approval rules. Account
-services such as GitHub stay in Third-party accounts settings.
-
-Add machine is a separate membership editor. It reuses existing native owner
-access, allows only a standalone Control to issue invitations, and keeps embedded
-or unavailable Controls visibly unavailable. One Copy join information action
-creates and copies a complete invitation; the payload stays out of the visible
-page. Installation help and nonsecret connection details start collapsed. Missing
-access addresses direct users to access setup. Returning to Topology keeps the
-invitation valid, and reopening resumes it within the current window session.
-Revocation requires a separate confirmation and never removes an enrolled machine.
-Waiting and completion use the exact invitation's server-side state; enrollment
-and online status remain distinct facts.
-
-Target machines paste bounded join information and automatically compare the
-reachable Control's ID and fingerprint with it. A match enables one Join action;
-a bare address requires a separately entered invitation and explicit identity
-confirmation. Changing the source invalidates the preview. Successful enrollment
-returns to Topology, where inventory supplies actual connectivity. Clipboard
-failures retain the same invitation for retry, and expired invitations offer one
-regenerate-and-copy action. Credentials remain in memory and out of history.
-
-Clicking an execution machine preserves its existing policy, command rules, labels
-and member operations. Permanent command permissions start collapsed and retain
-their disclosure on return. Changed defaults expose Save / Cancel and the existing
-execution-interruption warning. Drafts survive refresh and preference changes,
-and navigation uses the dirty-exit guard. Cached offline data remains visible and
-read-only when its owner is unavailable. A disconnected execution machine can
-still be configured through its online Control. Viewing a machine changes neither
-routing nor authorization. See [Multi-Space UI](multi-space-ui.md).
+Linked chat, task delegation and notifications use the existing surfaces, with
+source markers identifying the remote node. No separate binding wizard, task form
+or notification center is added. Each node owns its execution settings and
+permissions. See [Node UI](node-ui.md) and [Agent Link](agent-links.md) for connection
+and lifecycle contracts.
 
 ### Approvals and About
 

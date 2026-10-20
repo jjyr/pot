@@ -7,9 +7,9 @@ import (
 	"errors"
 	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/internal/attachments"
-	"github.com/jjyr/pot/internal/controlplane"
 	"github.com/jjyr/pot/internal/gateway"
 	"github.com/jjyr/pot/internal/linkhost"
+	"github.com/jjyr/pot/internal/nodeidentity"
 	"github.com/jjyr/pot/internal/resources"
 	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/schedule"
@@ -51,6 +51,7 @@ type Options struct {
 	IntegrationAdapters []integrations.Adapter
 }
 type Service struct {
+	linkMu              sync.Mutex
 	agentLinks          *agentLinkHost
 	linkPlugins         *linkhost.Host
 	pluginWG            sync.WaitGroup
@@ -81,7 +82,7 @@ type Service struct {
 	hostGenerations     map[string]uint64
 	instructions        InstructionSources
 	closed              bool
-	Machines            *controlplane.Directory
+	Machines            *nodeidentity.Directory
 	RunnerJournal       *runner.Journal
 	Runner              *runner.Executor
 	Tasks               *tasks.Service

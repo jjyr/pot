@@ -7,6 +7,22 @@ for other Tasks. Task-result and plugin-notification handling retain the
 assistant's configured tools and current machine permissions. A batch with
 eligible failed work additionally exposes the bounded retry tool described below.
 
+## Linked execution
+
+`create_task` accepts `link_id` and an optional assistant `target` address.
+Explicit targets select that assistant; otherwise the receiving node resolves its
+persisted default once. The receiver owns execution, model selection and local
+permissions. Local provider credentials and model snapshots are never forwarded.
+The directing node stores an idempotent delegation and remote reference rather
+than launching a local worker copy. Results notify the original directing
+assistant through the existing inbox and task-outcome projection.
+
+Linked tasks use the same lists and detail view, with a Codex or Pot source icon.
+Cancellation targets the original accepted task; local archive state is supported.
+Steering, pause, local allowance controls, remote file reads and execution
+transcripts require additional adapter capabilities and are currently unavailable.
+Disconnected nodes retain the last accepted state without replaying work.
+
 ## Autonomous model routing
 
 The invoking assistant selects a configured Provider and model using the task,
@@ -36,8 +52,8 @@ Tasks.
 
 Task history projects initial input, assistant guidance, user guidance and peer
 reference from the shared `agent_messages` table. The operator messages HTTP
-endpoint binds user provenance; model tools cannot choose their sender. Both
-local and remote workers consume and acknowledge inputs against the original run.
+endpoint binds user provenance; model tools cannot choose their sender. Local workers consume and acknowledge inputs against the original run.
+Linked adapters support only their advertised input capabilities.
 
 The model-visible `create_task` requires a title followed by complete execution
 instructions, preserving exact user commands and constraints; title-only briefs
@@ -104,7 +120,7 @@ and time. Ended Task-list rows do not retain a live clock.
 `POST /api/v1/tasks/{id}/control` accepts `{run_id, action: "pause" | "resume"}`
 for the original accepted run. Task info exposes `paused`; the fixed destination,
 configuration and run identity are unchanged. In-flight model/tool operations
-settle normally, then the local or connected Worker waits before the next model
+settle normally, then the local Worker waits before the next model
 request. Pending guidance remains accepted while paused. Cancellation wakes the
 wait and retains the usual cleanup and uncertainty rules. This control is
 separate from releasing an allowance-waiting run.
@@ -121,12 +137,11 @@ ended Task --owner guidance--> open Task + new Run ID + original workspace
 `interrupt` retains never-started guidance as history. It does not replay
 executing input, including suspended allowance-waiting input. New owner guidance
 can continue an ended Task after cleanup is confirmed. Inputs retained by an
-interruption are history and are not automatically replayed. Control restart
-reconciles an accepted remote run by its original input identity, without
-relaunching it or changing its execution context. Execution Runtime restart
-fences original runs. Explicit owner reconciliation settles known receipts and
-proven scope cleanup; unknown outcomes block replacement. See [persistence and
-updates](architecture.md#persistence-and-updates).
+interruption are history and are not automatically replayed. Node restart reconciles accepted local runs by their original input identity,
+without relaunching them or changing context. Historical remote runs remain
+fenced at the retired destination. Owner reconciliation settles known receipts
+and proven cleanup; unknown outcomes block replacement. See
+[Execution and recovery](architecture.md#execution-and-recovery).
 
 Owner recovery uses `POST /api/v1/tasks/{id}/recovery` with the original
 `run_id` and `action: "inspect" | "reconcile"`. A Runtime owner can address the
@@ -134,7 +149,7 @@ same original destination journal through `POST /api/v1/runtime/recovery` with
 `control_id`, `task_id`, `run_id` and the action. These private/native ports are
 excluded from browser publication. Inspection returns receipt states and unresolved
 reasons without starting a model or tool. Reconciliation consults the
-original Control operations, signed destination command receipts. It accepts no client-supplied result or cleanup
+original coordinator operations and local command receipts. It accepts no client-supplied result or cleanup
 acknowledgment. Known results update the original checkpoint once; only proven
 cleanup releases held capacity and ends the run as interrupted. A previous-boot
 Host run with issued operations and no recorded cleanup proof remains fenced.
@@ -229,8 +244,7 @@ wake the client notification reader. See [System notifications](shared-ui.md#sys
 `GET /api/v1/tasks/{id}/events?after=CURSOR&limit=100` reads a bounded,
 append-only page from the original Runner across all of the Task's Runs. Each item carries a durable
 `sequence` plus its generation/turn-bound Agent event. The page returns `cursor`
-and `has_more`; clients advance only through contiguous sequences. Control
-persists fetched remote pages, so an unavailable original Runner returns cached
-content with `unavailable: true`. A disconnected target never causes execution
-or transcript reads to move to a replacement machine. Terminal runs remain
-readable. Changes wake the existing `tasks` invalidation stream.
+and `has_more`; clients advance only through contiguous sequences. Historical remote pages remain cached with `unavailable: true`; retired
+Control/Runner destinations cannot execute or fetch new output. Agent Link task
+details expose their canonical result and return an empty transcript until the
+adapter advertises transcript support. Changes wake the existing `tasks` invalidation stream.

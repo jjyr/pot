@@ -9,7 +9,7 @@ async page=>{
   await page.setViewportSize({width:1200,height:900});await page.goto(state.origin+'/refresh-fixture');
   await page.evaluate(async()=>{
    const {createPages}=await import('/components/pages.mjs');
-   const f=window.refreshFixture={calls:[],pending:[],pendingMutations:[],writes:[],hold:'',notices:[],approvals:[]};
+   const f=window.refreshFixture={calls:[],pending:[],pendingMutations:[],writes:[],hold:'',notices:[],approvals:[],links:[]};
    Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{f.copied=value;}}});
    f.machines=[{id:'host',runtime_id:'host',name:'Development Mac',connected:true,tags:['macos'],policy:{execution_access:'ask',revision:1}}];
    f.policy={machines:{host:{execution_access:'ask',revision:1}},rules:[],task_grants:[],application:{}};
@@ -19,14 +19,12 @@ async page=>{
    f.integration={id:'github',name:'GitHub',login_available:true,status:'disconnected',login:{id:'login',status:'pending',user_code:'TEST-CODE',authorization_url:'https://example.invalid/authorize'}};
    f.response=(path,options)=>{
     if(options.method){const body=options.body||{};f.writes.push({path,body,...options});
-     if(path==='/api/v1/runtime/control'&&body.action==='create_invitation')return {id:'machine-invite',state:'pending',url:'tcp://fixture.example:8793',control:{runtime_id:'host',fingerprint:'fixture-fingerprint'},invitation:'single-use-fixture',expires_at_ms:2000000000000};
-     if(path==='/api/v1/runtime/control'&&body.action==='invitation_status')return {state:'pending'};
      if(path==='/api/v1/permissions'&&body.action==='configure'){if(body.machine_policy.revision!==f.policy.machines.host.revision)throw Error('Revision conflict');f.policy.machines.host={...body.machine_policy,revision:f.policy.machines.host.revision+1};}
      return {};
     }
     const url=new URL(path,location.origin),name=url.pathname;
     if(name==='/api/v1/machines')return {items:f.machines};
-    if(name==='/api/v1/runtime/control')return options.space==='remote'?{role:'embedded',identity:{runtime_id:'host'}}:{role:'control',url:'tcp://fixture.example:8793',identity:{runtime_id:'host',fingerprint:'fixture-fingerprint'}};
+    if(name==='/api/v1/agent-links')return {items:f.links};
     if(name==='/api/v1/permissions')return {policy:f.policy,pending:f.approvals};
     if(name==='/api/v1/providers')return f.providers;
     if(name==='/api/v1/integrations')return {items:[f.integration]};
@@ -56,19 +54,11 @@ async page=>{
   assert(await page.evaluate(()=>refreshFixture.metric.isConnected&&document.querySelector('.space-availability')),'Usage failures retain the cached projection');
   await page.evaluate(()=>refreshFixture.pages.show('machines'));await idle();
   const selectMachine=space=>page.locator(`.topology-node[data-node-id='machine:["${space}","host"]']`).click();
-  const reads=await page.evaluate(()=>refreshFixture.calls.length);await selectMachine('local');await page.getByText('More',{exact:true}).click();
+  const reads=await page.evaluate(()=>refreshFixture.calls.length);await selectMachine('local');await page.locator('.permission-rules>summary').click();
   assert(await page.evaluate(()=>refreshFixture.calls.length)===reads,'Selecting and expanding a machine performs no network read');
   await page.evaluate(async()=>{const f=refreshFixture;f.machine=document.querySelector('.topology-inspector .machine-card');f.machines[0].name='Renamed Mac';await f.pages.refresh(['machines']);});
-  assert(await page.evaluate(()=>refreshFixture.machine===document.querySelector('.topology-inspector .machine-card')&&refreshFixture.machine.textContent.includes('Renamed Mac')&&refreshFixture.machine.querySelector('.machine-actions').open),'Machine updates retain the selected inspector and expansion');
-  await page.getByRole('button',{name:'Add machine',exact:true}).click();await page.getByRole('button',{name:'Copy join information',exact:true}).click();await page.getByRole('button',{name:'Copied · copy again',exact:true}).waitFor();
-  await page.evaluate(async()=>{const f=refreshFixture;f.copyButton=document.querySelector('.machine-invitation-panel button');await f.pages.refresh(['machines']);});
-  assert(await page.evaluate(()=>refreshFixture.copyButton===document.querySelector('.machine-invitation-panel button')&&JSON.parse(refreshFixture.copied).invitation==='single-use-fixture'),'Machine refresh preserves the current invitation editor and copied join information');
-  await page.getByRole('button',{name:'Return to topology',exact:true}).click();await page.getByRole('button',{name:'Add machine',exact:true}).click();await page.getByRole('button',{name:'Copied · copy again',exact:true}).waitFor();
-  assert(await page.evaluate(()=>refreshFixture.writes.filter(write=>write.body.action==='create_invitation').length===1),'Returning and reopening retains the invitation without creating another');
-  await page.getByRole('button',{name:'Return to topology',exact:true}).click();
-  await page.evaluate(async()=>{const f=refreshFixture;f.client.spaces.push({id:'remote',name:'Remote',connected:true});await f.pages.refresh(['spaces']);});
-  assert(await page.locator('.machine-card').count()===2,'Identical machine IDs in different Spaces have distinct cards');
-  await page.evaluate(async()=>{const f=refreshFixture;f.client.spaces.pop();await f.pages.refresh(['spaces']);await f.pages.show('settings');});
+  assert(await page.evaluate(()=>refreshFixture.machine===document.querySelector('.topology-inspector .machine-card')&&refreshFixture.machine.textContent.includes('Renamed Mac')&&refreshFixture.machine.querySelector('.permission-rules').open),'Machine updates retain the selected inspector and expansion');
+  await page.evaluate(()=>refreshFixture.pages.show('settings'));
   const aboutReads=await page.evaluate(()=>refreshFixture.calls.filter(call=>call.path==='/api/v1/about').length);
   await page.evaluate(()=>{refreshFixture.pages.refresh(['tasks']);refreshFixture.pages.refresh(['usage']);});
   assert(await page.evaluate(()=>refreshFixture.calls.filter(call=>call.path==='/api/v1/about').length)===aboutReads,'General settings ignore unrelated runtime changes');
@@ -114,7 +104,7 @@ async page=>{
   await page.clock.resume();
   await page.evaluate(async()=>{
    const f=refreshFixture;f.pages.dispose();f.approvals=[];document.body.replaceChildren();const root=document.createElement('div');document.body.append(root);
-   const response=f.response;f.response=(path,options)=>{if(path==='/api/v1/spaces')return {active_space_id:'local',items:f.client.spaces};if(path==='/api/v1/assistants')return f.client.assistants.filter(item=>item.space_id===options.space);if(path.startsWith('/api/v1/tasks/query'))return {items:[{id:'background',assistant_id:'a',title:'Background review',phase:'running'}]};return response(path,options);};
+   const response=f.response;f.response=(path,options)=>{if(path==='/api/v1/spaces')return {active_space_id:'local',items:f.client.spaces};if(path==='/api/v1/assistants')return f.client.assistants.filter(item=>!item.origin&&item.space_id===options.space);if(path.startsWith('/api/v1/tasks/query'))return {items:[{id:'background',assistant_id:'a',title:'Background review',phase:'running'}]};return response(path,options);};
    f.selection={space:'local',owner:'a'};f.client.scope=()=>({...f.selection});f.client.setScope=value=>f.selection={...value};f.client.production=true;
    f.client.notificationStatus=async()=>({enabled:true,permission:'denied'});f.client.notificationView=async()=>{};f.client.notifySystem=async()=>{};
    const withPages=f.response;f.response=(path,options)=>path.startsWith('/api/v1/tasks/outcomes')?{items:[],cursor:0,has_more:false}:withPages(path,options);
@@ -126,18 +116,18 @@ async page=>{
   await page.evaluate(()=>{const f=refreshFixture;f.search=document.querySelector('.assistant-search');f.search.setSelectionRange(1,3);f.assistantRow=document.querySelector('.assistant-row');f.chatTask=document.querySelector('.background-task');f.nav=document.querySelector('.feature-rail button');f.client.assistants[0].name='Assistant renamed';f.changes(['assistants'],{space:'local'});});
   await page.getByText('Assistant renamed',{exact:true}).first().waitFor();
   assert(await page.evaluate(()=>refreshFixture.search===document.querySelector('.assistant-search')&&refreshFixture.search.value==='Assist'&&refreshFixture.search.selectionStart===1&&document.activeElement===refreshFixture.search&&refreshFixture.assistantRow===document.querySelector('.assistant-row')&&refreshFixture.nav===document.querySelector('.feature-rail button')),'Directory updates retain search, selection, focus, assistant rows and navigation');
-  assert(await page.locator('.assistant-location').count()===0,'A single Space has no ownership label');
-  await page.evaluate(()=>{const f=refreshFixture;f.client.spaces.push({id:'remote',name:'Work Space',kind:'remote',connected:true});f.changes(['spaces']);});
-  await page.locator('.assistant-location').filter({hasText:/^Local$/}).waitFor();
-  assert(await page.locator('.assistant-row').count()===1,'An empty second Space still enables ownership labels');
-  assert(await page.locator('.assistant-location').getAttribute('title')==='Local','Ownership text retains its full tooltip');
-  assert(await page.evaluate(()=>refreshFixture.assistantRow===document.querySelector('.assistant-row')&&refreshFixture.search===document.activeElement),'Space changes preserve assistant rows and search focus');
-  await page.evaluate(()=>{const f=refreshFixture;f.client.spaces[1].connected=false;f.client.spaces[0].name='Development Mac';f.changes(['spaces']);});
-  await page.locator('.assistant-location').filter({hasText:'Development Mac'}).waitFor();
-  assert(await page.locator('.assistant-location').count()===1,'An offline configured Space retains ownership labels');
-  await page.evaluate(()=>{const f=refreshFixture;f.client.spaces.pop();f.client.spaces[0].name='Local';f.changes(['spaces']);});
-  await page.waitForFunction(()=>!document.querySelector('.assistant-location'));
-  assert(await page.evaluate(()=>refreshFixture.assistantRow===document.querySelector('.assistant-row')&&refreshFixture.search.value==='Assist'),'Removing a Space hides labels without replacing the assistant row or search');
+  assert(await page.locator('.assistant-location').count()===0,'The local serving source needs no ownership label');
+  await page.evaluate(()=>{const f=refreshFixture;f.links=[{id:'codex-link',peer:{node_id:'codex-node',kind:'codex',name:'Development Codex'},status:'connected',assistants:[{address:{node_id:'codex-node',kind:'assistant',agent_id:'review'},adapter:'codex',name:'Review Assistant'}]}];f.changes(['agent-links'],{space:'local'});});
+  await page.locator('.assistant-row .agent-source').waitFor();
+  assert(await page.locator('.assistant-row').count()===2,'A linked assistant joins the existing directory');
+  assert(await page.locator('.assistant-row .agent-source').getAttribute('title')==='Codex · Development Codex','Source icon identifies the linked Codex node');
+  assert(await page.evaluate(()=>refreshFixture.assistantRow===document.querySelector('.assistant-row')&&refreshFixture.search===document.activeElement),'Agent Link changes preserve local assistant rows and search focus');
+  await page.evaluate(()=>{const f=refreshFixture;f.links[0].status='disconnected';f.changes(['agent-links'],{space:'local'});});
+  await page.locator('.assistant-row').filter({hasText:'Review Assistant'}).getByText('Service unavailable',{exact:true}).waitFor();
+  assert(await page.locator('.assistant-row .agent-source').count()===1,'A disconnected connection retains its source icon');
+  await page.evaluate(()=>{const f=refreshFixture;f.links=[];f.changes(['agent-links'],{space:'local'});});
+  await page.waitForFunction(()=>!document.querySelector('.assistant-row .agent-source'));
+  assert(await page.evaluate(()=>refreshFixture.assistantRow===document.querySelector('.assistant-row')&&refreshFixture.search.value==='Assist'),'Deleting a connection removes its assistants without replacing the local row or search');
   await page.evaluate(()=>{const f=refreshFixture;f.snapshot.cursor='2';f.receive(structuredClone(f.snapshot));f.changes(['tasks'],{space:'local'});});
   assert(await page.evaluate(()=>refreshFixture.chatTask===document.querySelector('.background-task')),'Chat updates retain the executing task action');
   await page.getByRole('button',{name:'Conversation actions',exact:true}).click();

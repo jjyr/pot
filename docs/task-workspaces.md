@@ -37,7 +37,7 @@ Example:
 ```
 
 The destination Runtime resolves its own OS user home; this is not the invoking
-Control's home or a literal shell `~`. The worktree location is independent of
+node's home or a literal shell `~`. The worktree location is independent of
 the Runtime data root and Agent resource directory. On Windows the same layout
 is joined using native path separators beneath the destination user's profile.
 
@@ -77,7 +77,7 @@ copying files.
 
 For a Task without a project, allocate one unique directory with the destination
 OS temporary-directory API, equivalent to `os.MkdirTemp("", "pot-task-")`.
-Do not hardcode `/tmp`, construct a path on Control for a remote Runner, or create
+Do not hardcode `/tmp`, construct a path on another node, or create
 another mandatory workspace beneath the Runtime data root.
 
 For a direct project or an explicitly reused worktree, validate the specified
@@ -175,9 +175,8 @@ Protected Git preparation uses SRT, including its normal host prerequisites.
 Repository checkout hooks and fsmonitor are disabled during Runtime Git commands.
 For GitHub HTTPS fetches, an available connected GitHub credential is injected
 transiently through the normal account service and never stored in workspace
-records. Joined Runners obtain that credential over their original authenticated
-run binding; provider/model credentials are not sent to them. Other Git
-authentication follows destination account configuration and the selected boundary.
+records. Credentials remain local to the executing node. Other Git authentication
+follows that node's account configuration and selected execution boundary.
 
 Temporary workspaces are currently retained for file delivery and recovery; no
 automatic reclamation is implemented. Their OS storage can still be removed

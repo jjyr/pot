@@ -1,11 +1,12 @@
 # Event-driven UI updates
 
 The Wails main window, tray panel and browser load initial projections and then
-subscribe to backend changes. They do not poll lists or conversation snapshots
-on a presentation interval. Input events, preference changes, request completion
+subscribe to backend changes for local projections. Linked conversations currently
+refresh Agent Link snapshots every 1.5 seconds while open; the local stream
+contract below does not imply remote streaming support. Input events, preference changes, request completion
 and subscriptions wake the shared DOM components.
 
-## Control invalidation stream
+## Local invalidation stream
 
 `GET /api/v1/changes` requires operator authorization. The standalone browser
 server exposes it through its authenticated proxy. SSE `changed` frames contain
@@ -15,7 +16,7 @@ and a stream sequence. Version markers are invalidation state, not durable
 conversation replay cursors.
 
 Subscriptions deliver their initial version map and coalesce pending changes.
-The frontend compares versions per Space through
+The frontend compares versions per local presentation scope through
 [`state/changes.mjs`](../web/src/state/changes.mjs). A boot change invalidates the
 version baseline. Usage-only updates do not reload the assistant directory. Permission changes
 refresh catalogue `pending_approvals` counts for every assistant independently of
@@ -25,8 +26,8 @@ Mutations publish after persistence; no-op reads do not produce invalidations.
 The global subscription remains active even when no assistant exists, so an
 assistant created by another client appears without reloading the page.
 
-Change callbacks retain their originating Space and boot identity. Each view
-declares the domains and Space it reads; unrelated notifications do not refresh
+Change callbacks retain their originating scope and boot identity. Each view
+declares the domains and scope it reads; unrelated notifications do not refresh
 it. General preferences and build information remain mounted without requesting
 them again on execution updates.
 
@@ -37,8 +38,7 @@ read when changes arrive during it. An invalidation never cancels that read.
 Navigation, editor entry and filter/owner changes retire the request generation.
 
 Existing projections remain visible during background reads and after failures,
-with inline errors and retry where appropriate. Multi-Space projections retain
-cached rows with explicit stale status. Cards, table rows and chart buckets
+with inline errors and retry where appropriate. Cards, table rows and chart buckets
 reconcile by their scoped identities. Search inputs, focus, selection, disclosure
 state and scroll positions survive unchanged projections. Shell navigation,
 approval actions and Chat task strips retain their nodes too. Action handlers use
@@ -46,14 +46,14 @@ the current projection; pending mutations stay disabled across refreshes.
 
 Task details refresh metadata, results, files and guidance alongside their
 incremental execution transcript. Schedule details and run history share the same
-background lifecycle as lists. Machine settings expand locally without reads;
-generated invitations remain visible until replaced or their membership changes.
+background lifecycle as lists. Machine settings expand locally without reads. Agent Link state retains the
+selected node and assistant directory across refreshes.
 Third-party account login status uses the same queue and retains its row during
 the bounded login-session status checks.
 
-Desktop Space adapters consume the same backend subscriptions and emit
-`pot:changed` through Wails. Responses and changes carry their Space identity;
-a failed remote request never falls back to another Control.
+The desktop local UI adapter consumes the same backend subscriptions and emits
+`pot:changed` through Wails. Responses and changes retain their local scope;
+Agent Link peer operations use their explicit connection identity.
 
 ## Main conversation streams
 
@@ -66,7 +66,7 @@ even when its original input is outside the loaded message window.
 `view.messages` contains message envelopes (`message`, decimal-string `sequence`,
 `version`, optional `context_only`); `view.history` describes the loaded interval.
 `GET /api/v1/snapshot` returns the same bounded reset frame. Protocol version 5
-uses this contract for browser, Wails and remote Space streams.
+uses this contract for browser and Wails streams.
 Completed assistant messages may include a typed resource `presentation` without
 Markdown text; it has its own durable message identity and unread entry.
 
@@ -92,7 +92,7 @@ message's projection; they do not resend unrelated history. HTTP writes retain
 the stream write deadline. No token queue grows behind a slow consumer.
 
 The browser uses EventSource and closes the old source when switching owners.
-Desktop forwards the same frames through `pot:snapshot`; its Space adapter
+Desktop forwards the same frames through `pot:snapshot`; its local UI adapter
 reconnects with bounded backoff. Every new connection begins with a reset. The
 client rejects old cursors and duplicate deltas and renews the subscription on a
 base-cursor gap or boot change. Read versions prevent a concurrent older page
@@ -159,7 +159,7 @@ carry independent `accepted_request_id` and `accepted_turn_id` fields, leaving
 UI window filtering. It confirms persistence, not Agent consumption.
 
 `GET /api/v1/messages/receipt` reads durable storage outside the message window.
-The authenticated Space/assistant scope and `conversation_id`, `request_id`, and
+The authenticated node/assistant scope and `conversation_id`, `request_id`, and
 optional `user_message_id` (steer) or `retry_user_message_id` identify the attempt.
 The response repeats that identity plus `runtime_id`, `owner_id` and `state`:
 `accepted` includes `message_id`; `unconfirmed` proves neither outcome; `rejected`
@@ -190,9 +190,9 @@ than being classified as a service disconnection.
 `GET /api/v1/tasks/{id}/events?after=...&limit=...` pages the original Runner's
 durable ordered log. Each row has an outer sequence and its execution update:
 message boundaries, text deltas, tool starts/output/results and turn outcomes.
-The reply contains `cursor`, `has_more` and `unavailable`. When the original
-machine is disconnected, cached rows remain readable and are explicitly marked
-unavailable; the UI does not silently change execution owner.
+The reply contains `cursor`, `has_more` and `unavailable`. Historical remote pages remain cached and marked unavailable. Linked tasks
+return an empty transcript until the adapter supports transcript reads. Neither
+case changes the original execution owner.
 
 [`state/task-transcript.mjs`](../web/src/state/task-transcript.mjs) incrementally
 reduces each ordered batch and ignores duplicates. New Runner output invalidates
@@ -230,9 +230,9 @@ transitions. Unsettled calls become stopped after cancellation or result-unconfi
 when the original run cannot establish a terminal receipt. Restart preserves these
 details and marks unfinished projections unconfirmed rather than replaying them.
 
-Task transcripts reduce the same start/state/output/finish events. Control forwards
-run-bound state updates to the original Runner, whose Agent sequences them into
-its durable log; destination executors stream output through that same Agent.
+Task transcripts reduce the same start/state/output/finish events. The local coordinator supplies
+run-bound state updates to the execution Agent, which sequences them into its
+durable journal alongside executor output.
 Composition children have explicit `parent_id` values scoped by the original turn.
 A returned process session or yielded script is distinct from completed execution.
 The shared execution-history projection folds command session receipts before
@@ -256,10 +256,9 @@ Backend shutdown or request cancellation closes subscriptions. Browser logout
 revokes access and reloads into authentication. Window/client disposal removes
 listeners and releases subscriptions.
 
-Execution, schedule deadlines, authorization expiry, resource transfer and
-membership monitoring retain their own backend lifecycle responsibilities.
+Execution, schedule deadlines, authorization expiry, resource preparation and
+Agent Link recovery retain their own backend lifecycle responsibilities.
 Animation frames advance only active presentation effects; Reduced Motion makes
-activity indicators static and disables avatar/tray animation. These clocks do
-not add interval-based UI projection refreshes.
+activity indicators static and disables avatar/tray animation. Local stream keepalives do not add UI snapshot reads.
 
 See [Development](development.md) for backend and shared UI verification commands.

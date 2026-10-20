@@ -35,11 +35,11 @@ uncertain calls are never automatically replayed. See [Peer protocol](peer-proto
 `Adapter`, `AccountStore` and `SecretStore` ports. `SQLAccounts` accepts a
 caller-owned database. `CredentialResolver` provides scoped reads for execution
 callers. `pkg/integrations/github` implements GitHub browser device authorization.
-`pkg/integrations/codex` verifies owner-supplied Bridge pairings over HTTPS.
-These adapters do not import Control or internal product code. The standalone
-Bridge implementation lives in `integrations/codex/bridge`, with its executable
-entry point in `cmd/pot-codex-bridge`; see the [integration guide](../integrations/codex/README.md). See
-[Integrations](credentials.md) for API and lifecycle contracts.
+Codex is an autonomous Agent Link adapter in `integrations/codex/agent`,
+with executable `cmd/pot-codex-agent`. It exposes persistent virtual assistants
+and receiver-owned execution through `pkg/agentlink.Backend`; it is not an
+OAuth account or a separate Bridge service. See the
+[integration guide](../integrations/codex/README.md) and [Integrations](credentials.md) for API and lifecycle contracts.
 
 ## Embed an Agent loop
 
@@ -141,7 +141,7 @@ all use of borrowed managers before closing it. `Info()` returns a copy of its
 identity. `Handler(token)` provides the authenticated operator API, including
 streams; the caller owns the listener, transport and token distribution. An empty
 token denies all requests. The facade does not publish the shared browser UI.
-Its separate Agent/Runner peer host runs under the same lifecycle. `PeerListen`
+Its Agent Link peer host runs under the same lifecycle. `PeerListen`
 optionally overrides the TCP bind address; owner HTTP listeners and TLS settings
 are independent. Peer connections use the shared [TCP protocol](peer-protocol.md)
 and do not accept an HTTP client or private CA.

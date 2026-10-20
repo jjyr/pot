@@ -19,9 +19,6 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 	if path != "/api/v1/tasks" && !strings.HasPrefix(path, "/api/v1/tasks/") && path != "/api/v1/schedules" && path != "/api/v1/schedules/preview" && path != protocol.AssistantMailAPI {
 		return nil, nil, false
 	}
-	if s.Machines.Role() == "runner" {
-		return nil, errors.New("execution Runner cannot own assistant APIs"), true
-	}
 	catalog := method == "GET" && path == "/api/v1/tasks/catalog"
 	if !catalog {
 		if _, err := s.Conversation(ctx, owner); err != nil {
@@ -42,7 +39,7 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 		var request protocol.TaskDispositions
 		if err = decode(r.Body, &request); err == nil {
 			var items []protocol.TaskInfo
-			items, err = s.Tasks.SetDispositions(ctx, owner, request.Decisions)
+			items, err = s.SetTaskDispositions(ctx, owner, request.Decisions)
 			result = map[string]any{"items": items}
 		}
 	case method == "GET" && path == "/api/v1/tasks/outcomes":
@@ -71,16 +68,15 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 		}
 		if err == nil {
 			if catalog {
-				result, err = s.Tasks.Catalog(ctx, q)
+				result, err = s.TaskPage(ctx, "", q)
 			} else {
-				result, err = s.Tasks.Page(ctx, owner, q)
+				result, err = s.TaskPage(ctx, owner, q)
 			}
 		}
 	case method == "POST" && path == "/api/v1/tasks":
 		var request protocol.CreateTask
 		if err = decode(r.Body, &request); err == nil {
-			record, e := s.Tasks.Create(ctx, owner, request)
-			result, err = record.Info, e
+			result, err = s.CreateTask(ctx, owner, request)
 		}
 	case path == "/api/v1/schedules/preview" && method == "POST":
 		var request schedule.PreviewRequest
@@ -139,12 +135,30 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 		}
 		id := parts[0]
 		if len(parts) == 1 && method == "GET" {
-			result, err = s.Tasks.Get(ctx, owner, id)
+			result, err = s.GetTask(ctx, owner, id)
 			break
 		}
 		if len(parts) != 2 {
 			err = errors.New("Task route unavailable")
 			break
+		}
+		if s.LinkTask(ctx, owner, id) {
+			switch parts[1] {
+			case "events":
+				if method == "GET" {
+					return map[string]any{"events": []any{}, "cursor": 0, "has_more": false, "unavailable": false}, nil, true
+				}
+			case "messages":
+				if method == "GET" {
+					return []any{}, nil, true
+				}
+			case "cancel":
+				if method == "POST" {
+					err := s.StopTask(ctx, owner, id, "cancel")
+					return map[string]bool{"accepted": err == nil}, err, true
+				}
+			}
+			return nil, protocol.APIError{Code: "agent_link_capability_unsupported"}, true
 		}
 		switch parts[1] {
 		case "file":
@@ -191,7 +205,7 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 				ID string `json:"request_id" required:"true"`
 			}
 			if err = decode(r.Body, &request); err == nil {
-				err = s.Tasks.Stop(ctx, owner, id, parts[1])
+				err = s.StopTask(ctx, owner, id, parts[1])
 			}
 			result = map[string]bool{"accepted": err == nil}
 		case "control":

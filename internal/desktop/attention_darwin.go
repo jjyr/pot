@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jjyr/pot/internal/attention"
+	"github.com/jjyr/pot/internal/localui"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"image"
@@ -25,7 +26,21 @@ var trayLight []byte
 //go:embed assets/TrayDark.png
 var trayDark []byte
 
-func (s *Service) AssistantReads() []attention.Receipt { return s.reads.Records() }
+func (s *Service) AssistantReads() []attention.Receipt {
+	owners := map[string]string{}
+	for _, scope := range s.spaces.Snapshot().Items {
+		for key, owner := range localui.LinkedOwners(scope.LinkedAssistants) {
+			owners[scope.ControlID+"/"+key] = owner
+		}
+	}
+	receipts := s.reads.Records()
+	for i := range receipts {
+		if owner, ok := owners[receipts[i].ControlID+"/"+receipts[i].Owner]; ok {
+			receipts[i].Owner = owner
+		}
+	}
+	return receipts
+}
 func (s *Service) SetReducedMotion(value bool) {
 	s.mu.Lock()
 	s.reduceMotion = value
@@ -34,7 +49,8 @@ func (s *Service) SetReducedMotion(value bool) {
 	s.wakeAttention()
 }
 func (s *Service) ReadAssistant(ctx context.Context, space, owner, replyID string, count uint64) (map[string]any, error) {
-	if !core.Identifier(owner) || count > core.MaxSafeInteger {
+	nativeOwner, valid := localui.AttentionID(owner)
+	if !valid || count > core.MaxSafeInteger {
 		return nil, errors.New("invalid assistant read acknowledgement")
 	}
 	if !(s.main.IsVisible() && s.main.IsFocused()) && !(s.tray.IsVisible() && s.tray.IsFocused()) {
@@ -50,11 +66,11 @@ func (s *Service) ReadAssistant(ctx context.Context, space, owner, replyID strin
 	if _, err = s.observeAttention(); err != nil {
 		return nil, err
 	}
-	receipt, err := s.reads.Read(attention.Receipt{ControlID: value.ControlID, Owner: owner, ReplyID: replyID, Count: count})
+	receipt, err := s.reads.Read(attention.Receipt{ControlID: value.ControlID, Owner: nativeOwner, ReplyID: replyID, Count: count})
 	if err != nil {
 		return nil, err
 	}
-	result := map[string]any{"space_id": space, "control_id": receipt.ControlID, "owner": receipt.Owner, "reply_id": receipt.ReplyID, "reply_count": receipt.Count}
+	result := map[string]any{"space_id": space, "control_id": receipt.ControlID, "owner": owner, "reply_id": receipt.ReplyID, "reply_count": receipt.Count}
 	s.app.Event.Emit("pot:read", result)
 	s.wakeAttention()
 	return result, nil
@@ -76,15 +92,27 @@ func (s *Service) observeAttention() (attention.Status, error) {
 			Working            uint64 `json:"working"`
 			Failed             bool   `json:"failed"`
 			NeedsConfiguration bool   `json:"needs_configuration"`
+			Connected          *bool  `json:"connected"`
 		}
-		if len(space.Assistants) == 0 {
-			continue
-		}
-		if err := json.Unmarshal(space.Assistants, &catalogue); err != nil {
-			return attention.Status{}, err
-		}
-		for _, item := range catalogue {
-			rows = append(rows, attention.Row{Receipt: attention.Receipt{ControlID: space.ControlID, Owner: item.ID, ReplyID: item.ReplyID, Count: item.Count}, Connected: space.Connected, Running: item.Responding || item.Working > 0, Failed: item.Failed, NeedsConfiguration: item.NeedsConfiguration})
+		for _, raw := range []json.RawMessage{space.Assistants, space.LinkedAssistants} {
+			if len(raw) == 0 {
+				continue
+			}
+			catalogue = nil
+			if err := json.Unmarshal(raw, &catalogue); err != nil {
+				return attention.Status{}, err
+			}
+			for _, item := range catalogue {
+				owner, valid := localui.AttentionID(item.ID)
+				if !valid {
+					return attention.Status{}, errors.New("invalid assistant attention identity")
+				}
+				connected := space.Connected
+				if item.Connected != nil {
+					connected = connected && *item.Connected
+				}
+				rows = append(rows, attention.Row{Receipt: attention.Receipt{ControlID: space.ControlID, Owner: owner, ReplyID: item.ReplyID, Count: item.Count}, Connected: connected, Running: item.Responding || item.Working > 0, Failed: item.Failed, NeedsConfiguration: item.NeedsConfiguration})
+			}
 		}
 	}
 	return s.reads.Observe(rows)

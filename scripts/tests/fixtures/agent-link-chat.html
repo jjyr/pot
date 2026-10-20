@@ -1,0 +1,18 @@
+<!doctype html><html lang="en" data-platform="browser" data-theme="light"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Disposable Agent Link chat fixture</title><link rel="stylesheet" href="../../../web/src/styles.css"><div id="app"></div><script type="module">
+import {mountApp} from '../../../web/src/components/ui.js';
+const fixture=window.agentChatFixture={scope:{space:'local',owner:'pot'},calls:[],version:1,listeners:new Set(),messages:[],origin:{node_id:'codex-node',kind:'codex',name:'Codex',link_id:'codex-link',assistant_id:'review'}};
+const source=fixture.origin,space={id:'local',control_id:'local-node',name:'Local Pot',kind:'local',connected:true};
+const frame=()=>({runtime_id:'local-node',boot_id:'fixture',owner_id:JSON.stringify(['local',fixture.scope.owner]),conversation_id:fixture.scope.owner,cursor:String(fixture.version),running:false,turn_id:null,agent:{phase:'ready'},messages:[{id:'request',request_id:'initial',role:'user',text:'Review the changes and run the relevant checks.',status:'complete'},{id:'reply',role:'assistant',text:'I’m reviewing the changes in this Codex session. I’ll report the findings here when the checks finish.',status:'complete'},...fixture.messages]});
+const task={id:'review-task',assistant_id:'pot',title:'Review Agent Link changes',phase:'running',executor_icon:'codex',agent_link:source,started_at_ms:Date.now()-65000};
+const client={production:true,runtime:{runtime_id:'local-node',boot_id:'fixture'},spaces:[space],scope:()=>({...fixture.scope}),setScope:value=>fixture.scope={...value},request:async(path,options={})=>{
+ fixture.calls.push({path,...options});const name=new URL(path,location.href).pathname;
+ if(name==='/api/v1/spaces')return {items:[space],active_space_id:'local'};
+ if(name==='/api/v1/assistants')return [{id:'pot',name:'Pot',revision:1}];
+ if(name==='/api/v1/agent-links')return {items:[{id:'codex-link',peer:{node_id:'codex-node',name:'Codex',kind:'codex'},status:'connected',assistants:[{address:{node_id:'codex-node',kind:'assistant',agent_id:'review'},name:'Code review',adapter:'codex'}]},{id:'cloud-link',peer:{node_id:'cloud-node',name:'Cloud Pot',kind:'pot'},status:'connected',assistants:[{address:{node_id:'cloud-node',kind:'assistant',agent_id:'research'},name:'Research',adapter:'pot'}]}]};
+ if(name==='/api/v1/permissions')return {pending:[],policy:{machines:{}}};
+ if(name==='/api/v1/tasks/query'||name==='/api/v1/tasks/catalog')return {items:[task],counts:{active:1},total:1};
+ if(name==='/api/v1/tasks/outcomes')return {items:[],cursor:0,has_more:false};
+ return {items:[]};
+},snapshot:async()=>frame(),subscribe(receive,status){fixture.listeners.add(receive);const timer=setTimeout(()=>{status('connected');receive(frame());},0);return ()=>{clearTimeout(timer);fixture.listeners.delete(receive);};},changes:()=>()=>{},send:async body=>{fixture.messages.push({id:'sent-'+fixture.version,request_id:body.request_id,role:'user',text:body.text,status:'complete'});fixture.version++;for(const receive of fixture.listeners)receive(frame());return {message_id:fixture.messages.at(-1).id,duplicate:false};}};
+fixture.dispose=mountApp(document.querySelector('#app'),client);
+</script></html>

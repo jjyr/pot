@@ -1,5 +1,4 @@
-.agent-links{display:flex;flex-direction:column;gap:10px;min-width:0}.agent-links>.form-row{max-width:600px}.agent-link-identity{display:flex;gap:14px;align-items:center;min-width:0}.agent-link-address{min-width:0;overflow-wrap:anywhere;color:var(--muted);font-size:12px}.agent-links p{margin:0}.agent-links>.page-toolbar{margin:0;gap:8px}.agent-links>.inline-error:empty{display:none}.agent-link-row{display:flex;align-items:center;justify-content:space-between;gap:16px;border-top:1px solid var(--divider);padding:14px 0}.agent-link-row p{margin:2px 0 0}.agent-link-editor{max-width:760px;margin:0 auto;min-width:0}.agent-link-editor>h2{font-size:24px}.agent-link-guide{padding:10px 0}.agent-link-guide li{margin:8px 0}.agent-links[hidden]{display:none}.agent-links .detail-disclosure{margin-top:4px}@media(max-width:719px){.agent-link-identity{align-items:flex-start;flex-direction:column;gap:4px}.agent-links>.page-toolbar .control{min-height:44px}.agent-link-row{flex-wrap:wrap}}
-.agent-link-recovery[hidden]{display:none}.agent-link-recovery{display:flex;flex-wrap:wrap;align-items:center;gap:10px}.agent-link-recovery p{margin:0}
+.agent-links{display:flex;flex-direction:column;gap:10px;min-width:0}.agent-links>.form-row{max-width:600px}.agent-link-identity{display:flex;gap:14px;align-items:center;min-width:0}.agent-link-address{min-width:0;overflow-wrap:anywhere;color:var(--muted);font-size:12px}.agent-links p{margin:0}.agent-links>.page-toolbar{margin:0;gap:8px}.agent-links>.inline-error:empty{display:none}.agent-link-editor{max-width:760px;margin:0 auto;min-width:0}.agent-link-editor>h2{font-size:24px}.agent-link-guide{padding:10px 0}.agent-link-guide li{margin:8px 0}.agent-links[hidden]{display:none}.agent-links .detail-disclosure{margin-top:4px}@media(max-width:719px){.agent-link-identity{align-items:flex-start;flex-direction:column;gap:4px}.agent-links>.page-toolbar .control{min-height:44px}}
 
 /* Connection editors share the shell titlebar and keep one focused content column. */
 .page-content.connection-setup,.agent-link-editor.connection-setup{max-width:640px;margin:0 auto;padding:36px 40px 28px;width:100%;min-width:0}
@@ -22,3 +21,20 @@
 @media(max-width:719px){.page-content.connection-setup,.agent-link-editor.connection-setup{padding:28px 20px 24px}.connection-setup .editor-form{min-height:540px}.connection-intro h2{font-size:21px}.connection-input-group .field-input{font-size:16px}.connection-input-group>.control{min-height:40px}.connection-identity-card{padding:14px;gap:10px;flex-wrap:wrap}.connection-verified{margin-left:54px}.connection-setup .editor-actions{flex-wrap:wrap}.connection-setup .editor-actions .control{min-height:44px}.connection-assistant .field-body{max-width:180px}}
 @media(pointer:coarse){.connection-input-group .field-input{font-size:16px}.connection-input-group>.control{min-height:44px}}
 .agent-link-editor.connection-setup>h2{display:none}
+
+.agent-source{display:inline-flex;align-items:center;gap:2px;flex:none;vertical-align:middle;color:var(--muted)}
+.agent-source .connection-brand{width:16px;height:16px}
+.agent-source>svg{width:11px;height:11px}
+.assistant-name>.agent-source{margin-left:4px}
+.assistant-identity-name{display:flex;align-items:center;gap:6px}
+.topology-assistants{margin:20px 0}
+.topology-inspector .topology-assistant{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;text-align:left;padding:8px 0}
+.topology-assistant .connection-brand{width:24px;height:24px}
+.topology-assistant-name{flex:1;min-width:0;overflow-wrap:anywhere}
+.topology-link-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+
+.agent-link-row{display:flex;align-items:center;gap:12px;border-top:1px solid var(--divider);padding:14px 0}
+.agent-link-row>.connection-brand{width:32px;height:32px}
+.agent-link-row>.row-info{flex:1;min-width:0}
+.agent-link-row>.page-toolbar{margin:0;flex-wrap:wrap;gap:8px}
+@media(max-width:719px){.agent-link-row{flex-wrap:wrap}.agent-link-row>.page-toolbar{flex-basis:100%}}

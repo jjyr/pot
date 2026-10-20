@@ -93,9 +93,6 @@ type backgroundStream struct {
 func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 	s.pluginMu.Lock()
 	defer s.pluginMu.Unlock()
-	if s.Machines.Role() == "runner" {
-		return
-	}
 	if err := s.ensureGitHubNotifications(ctx); err != nil {
 		return
 	}
@@ -250,9 +247,6 @@ func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 // an absent binding is uninitialized; never infer intent from enabled/target.
 // Reuse the background loop for late account/assistant creation, without a new poller.
 func (s *Service) ensureGitHubNotifications(ctx context.Context) error {
-	if s.Machines.Role() == "runner" {
-		return nil
-	}
 	return s.Machines.OwnerAction(func() error {
 		stored, err := s.Mailbox.Backgrounds(ctx)
 		if err != nil {

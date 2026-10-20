@@ -1,10 +1,10 @@
 # Third-party integrations and credentials
 
 Settings → Third-party accounts lists every supported service, including those
-not connected. GitHub is currently the only adapter. Each Control can connect one
+not connected. GitHub is currently the only adapter. Each Pot node can connect one
 account per service. The list shows the username and logged-in or expired state;
 changing accounts requires logging out first. Configured accounts are available
-to every assistant and Task of that Control. Upstream permissions and branch
+to every assistant and Task on that node. Upstream permissions and branch
 protections determine the allowed operations.
 
 ## Component boundary
@@ -22,7 +22,7 @@ Task, Assistant or internal product packages. Hosts inject these ports:
   cache cleanup; they do not depend on authorization or persistence internals.
 
 The bundled `SQLAccounts` uses a caller-owned database and owns only its table.
-Control composes it over the existing `control.sqlite` and injects the existing
+The local service composes it over the existing `control.sqlite` and injects the existing
 [Secrets](secrets.md) component, sharing its master key. It supplies an ownership
 write gate and change notifications. Integrations requires no separate database,
 process or deployment. Other hosts can supply different stores and adapters.
@@ -37,14 +37,14 @@ Command / plugin -> CredentialResolver -> transient process environment
 
 ## Browser authorization
 
-Control embeds the public Client ID of the **Pot** GitHub OAuth App owned by
+Pot embeds the public Client ID of the **Pot** GitHub OAuth App owned by
 `jjyr`: `Ov23lijqmW8fsHmUPXl9`. GitHub login is available without deployment
 configuration. There is no environment variable, configuration field or UI option
 to replace this identity. The GitHub tool plugin consumes execution credentials;
 it does not own the OAuth application or login flow.
 
 The official OAuth App enables **Device Flow** and expiring tokens. Each user's
-Control contacts GitHub directly; Pot operates no intermediary authorization
+node contacts GitHub directly; Pot operates no intermediary authorization
 server. No Client Secret is generated, embedded or required for device login or
 refresh. The Client ID identifies the application and is not a user's credential.
 
@@ -52,7 +52,7 @@ The GitHub adapter requests a fixed set of development scopes, obtains a device
 challenge, and opens `https://github.com/login/device` in the user's browser. Pot
 displays the one-time user code. The adapter respects GitHub's polling interval
 and slowdown responses, then fetches the authenticated user's stable ID and
-username before saving the account. This works with local or remote Controls
+username before saving the account. This works on each autonomous node
 without a public callback endpoint. Device codes and OAuth tokens never reach
 the management API.
 
@@ -85,7 +85,7 @@ promise registry login or publishing from `npm`/`docker`; use the supported
 credential for that environment. See [Packages permissions](https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages)
 and the [Packages REST API](https://docs.github.com/en/rest/packages/packages).
 
-After updating the owning Control to a version with these scopes, existing
+After updating the node to a version with these scopes, existing
 accounts must sign out and sign in again under Settings → Third-party accounts,
 then approve the new GitHub authorization. Refreshing an existing token does not
 request additional scopes. A connected state describes credential availability,
@@ -97,7 +97,7 @@ rules before retrying a write.
 ### Token lifetime
 
 The official app issues access tokens that expire after eight hours and refresh
-tokens that expire after six months without use. On credential use, Control
+tokens that expire after six months without use. On credential use, the local service
 refreshes an expired or near-expiry access token without browser interaction and
 persists the new token pair encrypted in its own Secrets store. It does not run a
 background renewal timer. A refreshable account remains connected even when its
@@ -110,8 +110,7 @@ user must log out and authorize again. See GitHub's
 
 Login sessions are memory-only, bounded by the provider's deadline, and do not
 survive restart. One pending session is allowed per service. Cancellation, logout
-and shutdown fence late authorization results. Pending and connected integrations
-prevent the host from enrolling as an execution Runner. Logout cancels any pending
+and shutdown fence late authorization results. Logout cancels any pending
 session, clears all credential caches and deletes the local encrypted credential.
 It does not revoke the application's authorization at GitHub; users can revoke it
 in GitHub settings. Existing processes retain credentials already injected at
@@ -119,7 +118,8 @@ startup.
 
 ## Management API
 
-All routes use existing owner authentication and Space routing. There is no
+All routes use the local operator authentication; Agent Link peers cannot manage
+these accounts. There is no
 public token-read, manual-token-write, account-selection or default-account API.
 
 | Method and route | Contract |
@@ -156,7 +156,7 @@ target does not perform a second lookup. Execution target and Host approval stil
 follow [machine policy](permissions.md).
 
 Credentials are decrypted on first use and cached in memory by an opaque
-execution scope. Control constructs that scope from owner, turn/run and generation.
+execution scope. The local service constructs that scope from owner, turn/run and generation.
 Concurrent misses are coalesced. Near-expiry values are reloaded up to 30 seconds
 before expiration, with a one-second minimum interval, and refreshed when the
 adapter supports it. Failed refreshes never retry an external command. Expired
@@ -169,7 +169,7 @@ A non-expiring token revoked at GitHub is discovered by the actual command;
 logged-in UI state does not perform continuous upstream validation. When refresh
 cannot restore access, log out and log in again.
 
-Transient environment fields are excluded from Runner command records and shell initialization snapshots. Plugin
+Transient environment fields are excluded from local execution command records and shell initialization snapshots. Plugin
 packages, tool arguments and launch manifests contain references only. Persistent
 plugin sessions must be reset if credentials change; `session_mode: call` starts a
 fresh process for each invocation.

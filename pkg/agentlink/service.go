@@ -102,7 +102,7 @@ func validToken(value string) bool {
 }
 func digest(value []byte) string { hash := sha256.Sum256(value); return hex.EncodeToString(hash[:]) }
 func route(local, peer protocol.AgentRef) string {
-	value, _ := json.Marshal([]protocol.AgentRef{local, peer})
+	value, _ := json.Marshal([]string{local.NodeID, peer.NodeID})
 	return digest(value)
 }
 func validID(id string) bool { return len(id) == 48 && strings.Trim(id, "0123456789abcdef") == "" }
@@ -116,7 +116,7 @@ func parseAddress(ctx context.Context, raw string) (address, error) {
 		return value, ErrInvalid
 	}
 	data, err := base64.RawURLEncoding.DecodeString(u.Fragment)
-	if err != nil || decodeJSON(data, &value) != nil || value.Version != 3 || value.Host.Validate() != nil || value.Host.NodeID != value.Identity.Address.NodeID || !validIdentity(value.Identity) || !validID(value.Invitation) || !validToken(value.Code) {
+	if err != nil || decodeJSON(data, &value) != nil || value.Version != 4 || value.Host.Validate() != nil || value.Host.NodeID != value.Identity.Address.NodeID || !validIdentity(value.Identity) || !validID(value.Invitation) || !validToken(value.Code) {
 		return address{}, ErrInvalid
 	}
 	origin, err := peer.ValidateEndpoint(ctx, value.Endpoint)
@@ -128,7 +128,7 @@ func parseAddress(ctx context.Context, raw string) (address, error) {
 }
 
 func (s *Service) Invite(ctx context.Context, assistantID, endpoint string) (Invitation, error) {
-	identity, err := s.options.Identity(ctx, assistantID)
+	identity, err := s.localIdentity(ctx, assistantID)
 	if err != nil {
 		return Invitation{}, err
 	}
@@ -162,7 +162,7 @@ func (s *Service) Invite(ctx context.Context, assistantID, endpoint string) (Inv
 		return Invitation{}, err
 	}
 	defer clear(secret)
-	value, _ := json.Marshal(address{Version: 3, Host: s.options.HostIdentity, Endpoint: endpoint, Identity: identity, Invitation: id, Code: string(secret)})
+	value, _ := json.Marshal(address{Version: 4, Host: s.options.HostIdentity, Endpoint: endpoint, Identity: identity, Invitation: id, Code: string(secret)})
 	return Invitation{Address: endpoint + "#" + base64.RawURLEncoding.EncodeToString(value), ExpiresAt: time.UnixMilli(expires).UTC()}, nil
 }
 
@@ -227,7 +227,7 @@ func (s *Service) secret(ctx context.Context, id string) (credential, error) {
 func (s *Service) update(ctx context.Context, c Connection) error {
 	c.UpdatedAt = time.Now().UTC()
 	raw, _ := json.Marshal(c)
-	result, err := s.options.DB.ExecContext(ctx, `UPDATE agent_link_connections SET state=?,metadata=? WHERE id=? AND state!='revoked'`, c.State, string(raw), c.ID)
+	result, err := s.options.DB.ExecContext(ctx, `UPDATE agent_link_connections SET state=?,metadata=? WHERE id=? AND state!='revoked' AND (state!='disconnected' OR ?='disconnected')`, c.State, string(raw), c.ID, c.State)
 	if err != nil {
 		return err
 	}
@@ -246,7 +246,7 @@ func (s *Service) Connect(ctx context.Context, assistantID, raw string) (Connect
 	if err != nil {
 		return Connection{}, err
 	}
-	local, err := s.options.Identity(ctx, assistantID)
+	local, err := s.localIdentity(ctx, assistantID)
 	if err != nil {
 		return Connection{}, err
 	}
@@ -259,11 +259,14 @@ func (s *Service) Connect(ctx context.Context, assistantID, raw string) (Connect
 	var value Connection
 	if errors.Is(err, sql.ErrNoRows) {
 		now := time.Now().UTC()
-		value = Connection{SchemaVersion: 3, PeerHost: address.Host, ID: newID(), Local: local, Peer: address.Identity, Endpoint: address.Endpoint, State: "connecting", CreatedAt: now, UpdatedAt: now}
+		value = Connection{SchemaVersion: 4, PeerHost: address.Host, ID: newID(), Local: local, Peer: address.Identity, Endpoint: address.Endpoint, State: "connecting", CreatedAt: now, UpdatedAt: now}
 		request := pairRequest{ID: value.ID, Invitation: address.Invitation, Local: local, Peer: address.Identity, Code: address.Code}
 		err = s.save(ctx, value, credential{Pair: &request})
 	} else if err == nil {
 		value, err = s.Get(ctx, id)
+		if err == nil && value.PeerHost != address.Host {
+			err = ErrConflict
+		}
 		// A definitively expired invitation never established a remote binding.
 		// A newly copied invitation may replace that failed intent; ambiguous
 		// network failures keep their original idempotent handshake instead.
@@ -282,7 +285,7 @@ func (s *Service) Connect(ctx context.Context, assistantID, raw string) (Connect
 				}
 				if err == nil {
 					now := time.Now().UTC()
-					value = Connection{SchemaVersion: 3, PeerHost: address.Host, ID: newID(), Local: local, Peer: address.Identity, Endpoint: address.Endpoint, State: "connecting", CreatedAt: now, UpdatedAt: now}
+					value = Connection{SchemaVersion: 4, PeerHost: address.Host, ID: newID(), Local: local, Peer: address.Identity, Endpoint: address.Endpoint, State: "connecting", CreatedAt: now, UpdatedAt: now}
 					request := pairRequest{ID: value.ID, Invitation: address.Invitation, Local: local, Peer: address.Identity, Code: address.Code}
 					err = s.save(ctx, value, credential{Pair: &request})
 				}
@@ -317,8 +320,8 @@ func (s *Service) accept(ctx context.Context, request pairRequest, remote peer.I
 	if decodeJSON(rawIdentity, &identity) != nil || !equalIdentity(identity, request.Peer) {
 		return Connection{}, ErrConflict
 	}
-	current, err := s.options.Identity(ctx, identity.Address.AgentID)
-	if err != nil || !equalIdentity(current, identity) {
+	current := identity
+	if current.Address.NodeID != s.options.HostIdentity.NodeID {
 		return Connection{}, ErrConflict
 	}
 	secret, err := s.options.Secrets.Get(ctx, ref)
@@ -343,7 +346,7 @@ func (s *Service) accept(ctx context.Context, request pairRequest, remote peer.I
 		return Connection{}, ErrExpired
 	}
 	now := time.Now().UTC()
-	value := Connection{SchemaVersion: 3, PeerHost: remote, ID: request.ID, Local: current, Peer: request.Local, State: "connecting", CreatedAt: now, UpdatedAt: now}
+	value := Connection{SchemaVersion: 4, PeerHost: remote, ID: request.ID, Local: current, Peer: request.Local, State: "connecting", CreatedAt: now, UpdatedAt: now}
 	credential := credential{}
 	secretRaw, _ := json.Marshal(credential)
 	secretRef := "agent-link/connection/" + value.ID
@@ -388,6 +391,9 @@ func (s *Service) Run(ctx context.Context) {
 			for _, c := range values {
 				if ctx.Err() != nil {
 					return
+				}
+				if c.State == "disconnected" {
+					continue
 				}
 				if c.State == "revoked" {
 					if c.RevocationPending && c.Endpoint != "" {

@@ -20,7 +20,7 @@ async function request(path,options={}){
  const response=await fetch(path,{...options,signal:AbortSignal.any([lifecycle.signal,options.signal,AbortSignal.timeout(15000)].filter(Boolean)),headers,body:options.body&&typeof options.body!=='string'?JSON.stringify(options.body):options.body});
  const data=await response.json();if(!response.ok)throw Object.assign(new Error(data.error),{code:data.error});return data;
 }
-const component=createAgentLinks({root:content,request,locale,notify,currentAssistant:()=> 'codex',assistants:()=>[{id:'codex',name:'Codex'}],fixedAssistant:true,showConnections:true,signal:lifecycle.signal});
+const component=createAgentLinks({root:content,request,locale,notify,showConnections:true,signal:lifecycle.signal});
 let stopped=false,pending=false,timer;
 async function refresh(){if(stopped||pending||document.hidden)return;pending=true;try{await component.load();}finally{pending=false;if(!stopped)timer=setTimeout(refresh,3000);}}
 await refresh();

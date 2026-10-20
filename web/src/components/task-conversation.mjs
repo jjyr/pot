@@ -1,3 +1,5 @@
+import {taskAgentSource} from './connection-visuals.mjs';
+import {agentFailureKey} from '../state/agent-links.mjs';
 import {node as n,action} from './primitives.mjs';
 import {icon} from './icons.mjs';
 import {translate} from '../locales/messages.mjs';
@@ -34,6 +36,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   let forest,reading=null;
   const editor=bindComposer(input,{onInput:text=>{draftVersion++;onDraft(text);updateComposer();},onSend:submit,onCompositionEnd:updateComposer});
   const completion=bindCompletions(input,{client:{scope:()=>scope,request:(path,options)=>client.request(path,options)},host:composerArea,locale,mobile:editor.mobile,id:`pot-task-${task.id}-completions`});
+  const linked=()=>record.info?.agent_link||task.agent_link;
   const active=()=>['queued','running','waiting','waiting_approval'].includes(record.info?.phase||task.phase);
   const nearBottom=()=>history.scrollHeight-history.clientHeight-history.scrollTop<64;
   function scrollBottom(){history.scrollTop=history.scrollHeight;following=true;latest.hidden=true;}
@@ -48,28 +51,30 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   async function run(work){
     if(busy||disposed)return;busy=true;error.hidden=true;updateComposer();renderMenu();
     try{await work();if(!disposed){dialog.close();error.textContent='';}}
-    catch(reason){if(!disposed){error.textContent=reason.code==='task_disposition_conflict'?t('tasks.dispositionConflict'):reason.message||String(reason);error.hidden=false;if(dialog.open)dialog.querySelector('.task-menu-error')?.replaceChildren(n('span','',error.textContent));}}
+    catch(reason){if(!disposed){error.textContent=reason.code==='task_disposition_conflict'?t('tasks.dispositionConflict'):agentFailureKey(reason.code||reason.message)?t(agentFailureKey(reason.code||reason.message)):reason.message||String(reason);error.hidden=false;if(dialog.open)dialog.querySelector('.task-menu-error')?.replaceChildren(n('span','',error.textContent));}}
     finally{busy=false;if(!disposed){updateComposer();renderMenu();}}
   }
   async function submit(){
-    if(busy||editor.composing||!input.value.trim()||connectionError)return;
+    if(linked()||busy||editor.composing||!input.value.trim()||connectionError)return;
     const text=input.value,version=draftVersion;
     await run(async()=>{await onSend(text);if(disposed)return;if(input.value===text&&version===draftVersion){editor.setValue('');onDraft('');}completion.reset();});
   }
   form.onsubmit=event=>{event.preventDefault();if(!editor.mobile)submit();};send.onclick=()=>input.value.trim()?submit():run(onStop);
   function updateComposer(){
     const running=active(),hasText=!!input.value.trim(),stop=running&&!hasText;
-    form.hidden=false;input.readOnly=false;input.setAttribute('aria-label',t('tasks.followupLabel'));input.placeholder=t('tasks.followupPlaceholder');
+    form.hidden=!!linked();input.readOnly=!!linked();input.setAttribute('aria-label',t('tasks.followupLabel'));input.placeholder=t('tasks.followupPlaceholder');
     send.hidden=false;send.replaceChildren(icon(stop?'stop':'send'));label(send,stop?tr('Stop task','停止任务'):t('tasks.sendFollowup'));
     send.disabled=busy||(!running&&!hasText)||!!connectionError;retry.disabled=busy;
     footer.hidden=running;footer.textContent=t(record.info?.archived?'tasks.archivedHint':'tasks.followupHint');
+    if(linked()){footer.hidden=false;footer.textContent=t('agentLinks.remoteTaskHint').replace('{name}',linked().name||t(linked().kind==='codex'?'agentLinks.sourceCodex':'agentLinks.sourcePot'));}
     if(!running&&record.info?.archive_reason)footer.textContent+=' · '+record.info.archive_reason;
   }
   function renderStage(){
     const rawPhase=record.info?.phase||task.phase,pending=approvals.length,phase=rawPhase==='waiting_approval'?'running':rawPhase;
     stage.dataset.phase=unavailable||connectionError?'offline':pending?'approval':record.info?.paused?'paused':phase;
     const text=connectionError?tr('Connection interrupted · Showing retained history','连接中断 · 显示已有记录'):unavailable?tr('Original machine is offline · Showing cached output','原执行机器离线 · 显示缓存执行输出'):pending?tr(`Waiting for approval · ${pending} pending`,`等待授权 · ${pending} 项待处理`):record.info?.paused?tr('Paused','已暂停'):tr({running:'Running',queued:'Queued',waiting:'Waiting for allowance',complete:'Complete',failed:'Failed',interrupted:'Interrupted',cancelled:'Cancelled'}[phase]||phase,{running:'运行中',queued:'排队中',waiting:'等待配额',complete:'已完成',failed:'失败',interrupted:'已中断',cancelled:'已取消'}[phase]||phase);
-    if(stageLabel.textContent!==text)stageLabel.textContent=text;stageLabel.title=connectionError;locate.hidden=!pending||!!connectionError;retry.hidden=!connectionError;retry.disabled=busy;
+    stageInner.querySelector('.agent-source')?.remove();const source=taskAgentSource({...task,agent_link:linked()},locale());if(source)stageInner.prepend(source);
+    if(stageLabel.textContent!==text)stageLabel.textContent=text;stageLabel.title=connectionError;locate.hidden=!pending||!!connectionError;retry.hidden=!connectionError||!!linked();retry.disabled=busy;
   }
   function locateApproval(){
     for(const message of projectTaskMessages(state,inputs,record))if(message.tool&&approvalFor(message.tool)){
@@ -98,7 +103,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
         entry.childrenWindow.set(entry.tool.element.open?children.map(child=>({...child.message,viewKey:child.message.id})):[]);
       }else{
         if(!entry.body){entry.body=n('div','message-body');entry.element.append(entry.body);if(message.role==='assistant')entry.reply=createReplyBubble(entry.body);}
-        if(message.role==='assistant')entry.reply.update(message,{t,downloadFile,acquireFileImage,...resourceOptions,onReconnect:()=>run(onRefresh),onSettings});
+        if(message.role==='assistant')entry.reply.update(message,{t,downloadFile,acquireFileImage,...resourceOptions,onReconnect:linked()?undefined:()=>run(onRefresh),onSettings:linked()?undefined:onSettings});
         else{
           if(!entry.source){entry.source=n('div','task-message-source');entry.element.prepend(entry.source);}
           const sender=message.input?.sender,name=sender===task.assistant_id?assistantName:(client.assistants||[]).find(item=>item.id===sender&&item.space_id===scope.space)?.name||sender;
@@ -121,20 +126,20 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   }
   function renderMenu(force=false){
     if(!dialog.open&&!force)return;
-    const signature=JSON.stringify([menuMode,record.info?.phase,record.info?.paused,record.info?.archived,busy,locale()]);if(!force&&signature===menuSignature)return;menuSignature=signature;
+    const signature=JSON.stringify([menuMode,record.info?.phase,record.info?.paused,record.info?.archived,linked(),busy,locale()]);if(!force&&signature===menuSignature)return;menuSignature=signature;
     const heading=n('div','task-menu-heading'),close=iconButton('close',t('close'));close.onclick=()=>dialog.close();heading.append(n('h2','',tr('Task actions','任务操作')),close);dialog.replaceChildren(heading);
     const choice=(text,work,{danger=false}={})=>{const button=action(text,work,{danger});button.classList.add('menu-destination');button.disabled=busy;dialog.append(button);return button;};
     if(menuMode==='details'){
       heading.firstChild.textContent=tr('Task details','任务详情');const data=n('dl','task-info');
-      for(const [key,value]of [[tr('Assistant','助手'),assistantName],[tr('Machine','执行机器'),record.info?.machine_id||task.machine_id],[tr('Model','模型'),record.config?.model],[tr('Started','开始时间'),record.info?.started_at_ms?new Date(record.info.started_at_ms).toLocaleString(locale()):null],[tr('Task ID','任务 ID'),task.id]])if(value)data.append(n('dt','',key),n('dd','',value));
+      for(const [key,value]of [[tr('Assistant','助手'),assistantName],[t('agentLinks.executionSource'),linked()?.name],[tr('Machine','执行机器'),linked()?null:record.info?.machine_id||task.machine_id],[tr('Model','模型'),linked()?null:record.config?.model],[tr('Started','开始时间'),record.info?.started_at_ms?new Date(record.info.started_at_ms).toLocaleString(locale()):null],[tr('Task ID','任务 ID'),task.id]])if(value)data.append(n('dt','',key),n('dd','',value));
       dialog.append(data);choice(tr('Back','返回'),()=>{menuMode='actions';renderMenu(true);});return;
     }
     if(menuMode==='cancel'){
       dialog.append(n('p','',tr('Stop this task and retain its history?','取消任务并保留已有记录？')));choice(tr('Keep task','保留任务'),()=>{menuMode='actions';renderMenu(true);});choice(tr('Cancel task','取消任务'),()=>run(onCancel),{danger:true});
     }else{
-      if(['running','waiting_approval'].includes(record.info?.phase))choice(record.info?.paused?tr('Resume task','恢复任务'):tr('Pause task','暂停任务'),()=>run(onPause));
+      if(!linked()&&['running','waiting_approval'].includes(record.info?.phase))choice(record.info?.paused?tr('Resume task','恢复任务'):tr('Pause task','暂停任务'),()=>run(onPause));
       if(!active())choice(t(record.info?.archived?'tasks.unarchive':'tasks.archive'),()=>run(onArchive));
-      choice(tr('Usage','用量'),()=>{dialog.close();onUsage();});choice(tr('Task details','任务详情'),()=>{menuMode='details';renderMenu(true);});
+      if(!linked())choice(tr('Usage','用量'),()=>{dialog.close();onUsage();});choice(tr('Task details','任务详情'),()=>{menuMode='details';renderMenu(true);});
       if(!['complete','cancelled'].includes(record.info?.phase))choice(tr('Cancel task','取消任务'),()=>{menuMode='cancel';renderMenu(true);},{danger:true});
     }
     dialog.append(n('p','inline-error task-menu-error',error.hidden?'':error.textContent));

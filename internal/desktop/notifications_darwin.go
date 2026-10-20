@@ -4,7 +4,7 @@ package desktop
 
 import (
 	"errors"
-	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/internal/localui"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
 
@@ -69,7 +69,8 @@ func (s *Service) SetNotificationView(surface string, view NotificationView) err
 	return nil
 }
 func (s *Service) NotifySystem(event SystemNotification) error {
-	if event.ID == "" || len(event.ID) > 2048 || !core.Identifier(event.Owner) || len(event.Title) > 512 || len(event.Body) > 512 {
+	_, validOwner := localui.AttentionID(event.Owner)
+	if event.ID == "" || len(event.ID) > 2048 || !validOwner || len(event.Title) > 512 || len(event.Body) > 512 {
 		return errors.New("invalid system notification")
 	}
 	space, err := s.spaces.Space(event.Space)

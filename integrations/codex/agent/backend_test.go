@@ -1,0 +1,371 @@
+package agent
+
+import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/jjyr/pot/internal/linkhost"
+	"github.com/jjyr/pot/pkg/agentlink"
+	"github.com/jjyr/pot/pkg/processscope"
+	"github.com/jjyr/pot/pkg/protocol"
+	"github.com/jjyr/pot/pkg/storage"
+)
+
+var fakeBinary string
+
+func TestMain(m *testing.M) {
+	if processscope.HandleWorker() {
+		return
+	}
+	dir, err := os.MkdirTemp("", "pot-codex-agent-fixture-")
+	if err != nil {
+		panic(err)
+	}
+	fakeBinary = filepath.Join(dir, "codex")
+	cmd := exec.Command("go", "build", "-o", fakeBinary, "./testdata/fake-codex")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		panic(string(out))
+	}
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+func testBackend(t *testing.T) *backend {
+	t.Helper()
+	root := t.TempDir()
+	db, err := storage.OpenDatabase(filepath.Join(root, "tasks.sqlite"), storage.TasksDatabase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	b, err := newBackend(db, "codex-test", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.binary = fakeBinary
+	return b
+}
+func awaitTask(t *testing.T, b *backend, from protocol.AgentRef, id string, want string) agentlink.Task {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		task, err := b.Status(context.Background(), from, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if task.State == want {
+			return task
+		}
+		if terminal(task.State) {
+			t.Fatalf("got terminal %+v want %s", task, want)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("task did not reach " + want)
+	return agentlink.Task{}
+}
+func TestPersistentSessionSerializesChatAndTasks(t *testing.T) {
+	b := testBackend(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { b.run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	from := protocol.AgentRef{NodeID: "pot-sender", Kind: "assistant", AgentID: "main"}
+	r := agentlink.TaskRequest{RequestID: "first", From: from, Text: "hello"}
+	first, err := b.Submit(ctx, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := awaitTask(t, b, from, first.ID, "completed")
+	if completed.Result != "result: hello\n" {
+		t.Fatal(completed)
+	}
+	original, err := b.resolve(ctx, "codex")
+	if err != nil || original.ThreadID == "" {
+		t.Fatal(original, err)
+	}
+	// A direct message joins the same assistant queue and resumes its thread.
+	parent := protocol.Envelope{ID: "incoming-one", Kind: "message", From: from, To: originalIdentity(b, original), ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: "continue"}
+	mailbox := &hostMailbox{db: b.db, local: originalIdentity(b, original), backend: b}
+	if _, err = mailbox.Deliver(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	if err = b.receiveMessages(ctx); err != nil {
+		t.Fatal(err)
+	}
+	id := jobID(from, "mail:"+parent.ID)
+	awaitTask(t, b, from, id, "completed")
+	if err = b.publishMessages(ctx); err != nil {
+		t.Fatal(err)
+	}
+	after, err := b.resolve(ctx, "codex")
+	if err != nil || after.ThreadID != original.ThreadID {
+		t.Fatal("session replaced", after, err)
+	}
+	outgoing, err := mailbox.PendingNode(ctx, parent.To.NodeID, from.NodeID)
+	if err != nil || len(outgoing) != 1 {
+		t.Fatal(outgoing, err)
+	}
+	reply := outgoing[0]
+	if reply.ConversationID != parent.ConversationID || reply.ReplyTo == nil || *reply.ReplyTo != parent.ID || reply.Hops != 1 || reply.To != from {
+		t.Fatal("reply lost original route", reply)
+	}
+	if err = b.publishMessages(ctx); err != nil {
+		t.Fatal(err)
+	}
+	outgoing, _ = mailbox.PendingNode(ctx, parent.To.NodeID, from.NodeID)
+	if len(outgoing) != 1 {
+		t.Fatal("duplicate reply", outgoing)
+	}
+}
+func originalIdentity(b *backend, a assistant) protocol.AgentRef { return b.identity(a).Address }
+func TestDefaultRetryBindingAndCallerScope(t *testing.T) {
+	b := testBackend(t)
+	ctx := context.Background()
+	from := protocol.AgentRef{NodeID: "pot-sender", Kind: "assistant", AgentID: "main"}
+	r := agentlink.TaskRequest{RequestID: "same", From: from, Text: "hello"}
+	first, err := b.Submit(ctx, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = b.ownerConfigure(ctx, assistant{ID: "second", Name: "Second", Workspace: t.TempDir(), Mode: "read-only", Default: true}); err != nil {
+		t.Fatal(err)
+	}
+	retry, err := b.Submit(ctx, r)
+	if err != nil || retry.ID != first.ID || retry.Assistant.Address.AgentID != "codex" {
+		t.Fatal("retry moved to changed default", retry, err)
+	}
+	r.RequestID = "new"
+	second, err := b.Submit(ctx, r)
+	if err != nil || second.Assistant.Address.AgentID != "second" {
+		t.Fatal(second, err)
+	}
+	r.RequestID = "same"
+	r.Text = "changed"
+	if _, err = b.Submit(ctx, r); !errors.Is(err, agentlink.ErrConflict) {
+		t.Fatal("changed retry accepted", err)
+	}
+	other := from
+	other.AgentID = "different"
+	if _, err = b.Status(ctx, other, first.ID); !errors.Is(err, agentlink.ErrNotFound) {
+		t.Fatal("foreign task visible", err)
+	}
+}
+func TestQueuedCancelAndRestartFence(t *testing.T) {
+	b := testBackend(t)
+	ctx := context.Background()
+	from := protocol.AgentRef{NodeID: "pot-sender", Kind: "assistant", AgentID: "main"}
+	first, err := b.Submit(ctx, agentlink.TaskRequest{RequestID: "cancel", From: from, Text: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelled, err := b.Cancel(ctx, from, first.ID)
+	if err != nil || cancelled.State != "cancelled" {
+		t.Fatal(cancelled, err)
+	}
+	second, err := b.Submit(ctx, agentlink.TaskRequest{RequestID: "running", From: from, Text: "hang"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = b.update(ctx, second.ID, func(j *job) error { j.Task.State = "running"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err = b.recover(ctx); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := b.Status(ctx, from, second.ID)
+	if err != nil || recovered.State != "failed" || recovered.Error != "codex_host_restarted_outcome_unknown" {
+		t.Fatal(recovered, err)
+	}
+	if _, err = b.Submit(ctx, agentlink.TaskRequest{RequestID: "unsafe-replay", From: from, Text: "hello"}); err == nil {
+		t.Fatal("uncertain cleanup failed to fence new admission")
+	}
+}
+func TestRunningCancelWaitsForInterruptedTurn(t *testing.T) {
+	b := testBackend(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { b.run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	from := protocol.AgentRef{NodeID: "pot-sender", Kind: "assistant", AgentID: "main"}
+	task, err := b.Submit(ctx, agentlink.TaskRequest{RequestID: "hang", From: from, Text: "hang"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		j, err := b.read(ctx, from, task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if j.TurnID != "" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	requested, err := b.Cancel(ctx, from, task.ID)
+	if err != nil || requested.State != "cancelling" {
+		t.Fatal(requested, err)
+	}
+	awaitTask(t, b, from, task.ID, "cancelled")
+}
+
+func TestSignedAgentLinkDelegatesToCodexDirectory(t *testing.T) {
+	local, _ := testHost(t)
+	defer local.close()
+	remote, _ := testHost(t)
+	defer remote.close()
+	remote.backend.binary = fakeBinary
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { remote.backend.run(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+	listener, err := linkhost.ListenPeer(ctx, "127.0.0.1:0", remote.peerServer())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	invitation, err := remote.links.Invite(ctx, "codex", "tcp://"+listener.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := local.links.Connect(ctx, "codex", invitation.Address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory, err := local.links.Directory(ctx, connection.ID)
+	if err != nil || directory.DefaultAssistantID != "codex" || len(directory.Assistants) != 1 {
+		t.Fatal(directory, err)
+	}
+	request := agentlink.TaskRequest{RequestID: "signed-task", From: local.identity.Address, Text: "from signed link"}
+	accepted, err := local.links.Submit(ctx, connection.ID, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	awaitTask(t, remote.backend, request.From, accepted.ID, "completed")
+	final, err := local.links.Status(ctx, connection.ID, request.From, accepted.ID)
+	if err != nil || final.Result != "result: from signed link\n" {
+		t.Fatal(final, err)
+	}
+	if err = local.links.Disconnect(ctx, connection.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Link lifecycle does not delete the receiver-owned task or its result.
+	final, err = remote.backend.Status(ctx, request.From, accepted.ID)
+	if err != nil || final.State != "completed" {
+		t.Fatal(final, err)
+	}
+}
+
+func TestAssistantsParallelButOwnSessionSerial(t *testing.T) {
+	b := testBackend(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { b.run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	if err := b.ownerConfigure(ctx, assistant{ID: "second", Name: "Second", Workspace: t.TempDir(), Mode: "read-only"}); err != nil {
+		t.Fatal(err)
+	}
+	from := protocol.AgentRef{NodeID: "pot-sender", Kind: "assistant", AgentID: "main"}
+	first, err := b.Submit(ctx, agentlink.TaskRequest{RequestID: "hang-first", From: from, AssistantID: "codex", Text: "hang"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		j, err := b.read(ctx, from, first.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if j.TurnID != "" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	next, err := b.Submit(ctx, agentlink.TaskRequest{RequestID: "queued-next", From: from, AssistantID: "codex", Text: "after interruption"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parallel, err := b.Submit(ctx, agentlink.TaskRequest{RequestID: "other-session", From: from, AssistantID: "second", Text: "parallel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awaitTask(t, b, from, parallel.ID, "completed")
+	waiting, err := b.Status(ctx, from, next.ID)
+	if err != nil || waiting.State != "queued" {
+		t.Fatal("same session executed concurrently", waiting, err)
+	}
+	if _, err = b.Cancel(ctx, from, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	awaitTask(t, b, from, first.ID, "cancelled")
+	awaitTask(t, b, from, next.ID, "completed")
+	a, err := b.resolve(ctx, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := b.resolve(ctx, "second")
+	if err != nil || a.ThreadID == other.ThreadID {
+		t.Fatal("assistants share conversation identity", a, other, err)
+	}
+}
+func TestVirtualAssistantSendKeepsActiveMessageParent(t *testing.T) {
+	b := testBackend(t)
+	ctx := context.Background()
+	a, err := b.resolve(ctx, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := protocol.AgentRef{NodeID: "peer-node", Kind: "assistant", AgentID: "remote"}
+	parent := protocol.Envelope{ID: "parent-message", Kind: "message", From: from, To: b.identity(a).Address, ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: "reference", Hops: 7}
+	task, err := b.submit(ctx, agentlink.TaskRequest{RequestID: "message-parent", From: from, AssistantID: a.ID, Text: parent.Text}, &parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = b.update(ctx, task.ID, func(j *job) error { j.Task.State = "running"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	mailbox := &hostMailbox{db: b.db, local: parent.To, backend: b}
+	reply, err := mailbox.sendFrom(ctx, parent.To, from, "virtual-send", "response", false)
+	if err != nil || reply.Hops != 8 || reply.ReplyTo == nil || *reply.ReplyTo != parent.ID || reply.ConversationID != parent.ConversationID {
+		t.Fatal(reply, err)
+	}
+	if err = b.update(ctx, task.ID, func(j *job) error { j.Message.Hops = protocol.MaxMailHops; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = mailbox.sendFrom(ctx, parent.To, from, "bypass", "response", false); err == nil {
+		t.Fatal("virtual session bypassed causal limit")
+	}
+}
+
+func TestUnknownCleanupFencesAlreadyQueuedWork(t *testing.T) {
+	b := testBackend(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	from := protocol.AgentRef{NodeID: "pot-sender", Kind: "assistant", AgentID: "main"}
+	first, err := b.Submit(ctx, agentlink.TaskRequest{RequestID: "uncertain", From: from, Text: "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued, err := b.Submit(ctx, agentlink.TaskRequest{RequestID: "already-queued", From: from, Text: "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = b.update(ctx, first.ID, func(j *job) error { j.Task.State = "failed"; j.CleanupUncertain = true; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { b.run(ctx); close(done) }()
+	time.Sleep(250 * time.Millisecond)
+	cancel()
+	<-done
+	got, err := b.Status(context.Background(), from, queued.ID)
+	if err != nil || got.State != "queued" {
+		t.Fatal("queued work escaped cleanup fence", got, err)
+	}
+}

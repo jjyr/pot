@@ -1,8 +1,8 @@
 # Command execution
 
-Control authorizes an operation and its execution mode; the fixed destination
-Runtime executes it through `pkg/executor`. Main uses its owning Control; explicit
-remote Tasks use the authenticated Runner. Tools cannot change destinations.
+The owning node authorizes each operation and execution mode, then executes it
+locally through `pkg/executor`. Agent Link peers execute their own accepted work.
+Tools cannot change their fixed execution destination.
 See [permissions](permissions.md).
 
 ```text
@@ -21,9 +21,8 @@ Main uses `WORKSPACE/assistants/ASSISTANT_ID`. Workers bind their selected proje
 a managed Git worktree, or an OS temporary directory before their first model
 request. Commands, patches, plugins, instruction discovery and protected execution
 use this same binding. [Task workspace selection](task-workspaces.md) defines
-selection, base refresh, directory naming and recovery. Control resources
-synchronize before preparation and selected Skills remain in the destination
-Runtime resource cache. Project replication, VM images and host/guest path
+selection, base refresh, directory naming and recovery. Selected local resources are prepared before execution and remain fixed in the
+run's resource cache. Project replication, VM images and host/guest path
 translation are absent.
 
 Protected launches require packaged Node/SRT assets and a confined workspace.

@@ -24,7 +24,7 @@ type revokeRequest struct {
 }
 
 func validateMessage(value protocol.Envelope, from, to protocol.AgentRef) error {
-	if value.Validate() != nil || value.Kind != "message" || value.From != from || value.To != to {
+	if value.Validate() != nil || value.Kind != "message" || value.From.NodeID != from.NodeID || value.To.NodeID != to.NodeID || value.From.Kind != "assistant" || value.To.Kind != "assistant" {
 		return ErrConflict
 	}
 	return nil
@@ -51,7 +51,7 @@ func (s *Service) exchange(ctx context.Context, connection Connection, request e
 	if err != nil {
 		return response, err
 	}
-	if current.State == "revoked" {
+	if current.State == "revoked" || current.State == "disconnected" {
 		return response, ErrRevoked
 	}
 	for _, value := range request.Receipts {
@@ -85,6 +85,9 @@ func (s *Service) Sync(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if connection.State == "disconnected" {
+		return ErrDisconnected
+	}
 	if connection.State == "revoked" {
 		return ErrRevoked
 	}
@@ -110,7 +113,17 @@ func (s *Service) Sync(ctx context.Context, id string) error {
 			return s.failed(ctx, connection, err)
 		}
 	}
-	messages, err := s.options.Mailbox.Pending(ctx, connection.Local.Address, connection.Peer.Address)
+	if s.options.Backend != nil {
+		var directory Directory
+		if err = s.call(ctx, session, "directory", struct{}{}, &directory); err != nil {
+			return s.failed(ctx, connection, err)
+		}
+		if err = validateDirectory(directory, connection.PeerHost.NodeID); err != nil {
+			return err
+		}
+		connection.Directory = &directory
+	}
+	messages, err := s.pending(ctx, connection)
 	if err != nil {
 		return err
 	}
@@ -153,7 +166,7 @@ func (s *Service) Sync(ctx context.Context, id string) error {
 	// Check cancellation/revocation again after network I/O and before admission.
 	s.mu.Lock()
 	current, err := s.Get(ctx, id)
-	if err == nil && current.State == "revoked" {
+	if err == nil && (current.State == "revoked" || current.State == "disconnected") {
 		err = ErrRevoked
 	}
 	if err == nil {
@@ -239,7 +252,7 @@ func (s *Service) revokeLocal(ctx context.Context, connection Connection, pendin
 	if err != nil {
 		return err
 	}
-	if current.State == "revoked" && pending && !current.RevocationPending {
+	if (current.State == "revoked" || current.State == "disconnected") && pending && !current.RevocationPending {
 		return nil
 	}
 	current.State = "revoked"

@@ -9,7 +9,7 @@ import (
 )
 
 // Reader gives native media elements bounded seekable reads through the same
-// captured Space bridge as ordinary API calls, without buffering a whole movie.
+// captured local UI adapter as ordinary API calls, without buffering a whole movie.
 type Reader struct {
 	File        File
 	ReadChunk   func(uint64) (protocol.FileChunk, error)

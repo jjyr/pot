@@ -8,33 +8,39 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
-func TestPendingLinkFiltersFullRouteBeforePageLimit(t *testing.T) {
+func TestPendingNodeFiltersBeforePageLimitAndKeepsAssistantRoutes(t *testing.T) {
 	ctx := context.Background()
 	mail, _ := mailbox(t, "source")
 	local, peer := address("source", "alice"), address("target", "bob")
 	for index := 0; index < protocol.MailPageSize+1; index++ {
-		sendMail(t, mail, fmt.Sprintf("other-local-%d", index), address("source", "other"), peer, nil)
-		sendMail(t, mail, fmt.Sprintf("other-peer-%d", index), local, address("target", "other"), nil)
-		sendMail(t, mail, fmt.Sprintf("other-control-%d", index), local, address("elsewhere", "bob"), nil)
+		sendMail(t, mail, fmt.Sprintf("other-node-%d", index), local, address("elsewhere", "bob"), nil)
 	}
-	// Identical text IDs with another kind are a distinct source identity.
 	task := local
 	task.Kind = "task"
-	sendMail(t, mail, "task-same-id", task, peer, nil)
-	wanted := sendMail(t, mail, "bound-route", local, peer, nil)
-	pending, err := mail.PendingLink(ctx, local, peer)
-	if err != nil || len(pending) != 1 || !sameEnvelope(pending[0], wanted) {
-		t.Fatal("unrelated backlog blocked or leaked into link", pending, err)
+	wanted := []protocol.Envelope{
+		sendMail(t, mail, "alice-bob", local, peer, nil),
+		sendMail(t, mail, "other-bob", address("source", "other"), peer, nil),
+		sendMail(t, mail, "alice-other", local, address("target", "other"), nil),
+		sendMail(t, mail, "task-bob", task, peer, nil),
 	}
-	if err = mail.Acknowledge(ctx, protocol.Receipt{Message: wanted}); err != nil {
-		t.Fatal(err)
+	pending, err := mail.PendingNode(ctx, "source", "target")
+	if err != nil || len(pending) != len(wanted) {
+		t.Fatal(pending, err)
 	}
-	pending, err = mail.PendingLink(ctx, local, peer)
+	for i, message := range wanted {
+		if !sameEnvelope(pending[i], message) {
+			t.Fatal("node delivery changed assistant route", pending[i])
+		}
+		if err = mail.Acknowledge(ctx, protocol.Receipt{Message: message}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pending, err = mail.PendingNode(ctx, "source", "target")
 	if err != nil || len(pending) != 0 {
 		t.Fatal(pending, err)
 	}
-	other, err := mail.PendingLink(ctx, address("source", "other"), peer)
+	other, err := mail.PendingNode(ctx, "source", "elsewhere")
 	if err != nil || len(other) != protocol.MailPageSize {
-		t.Fatal("another link lost its pending messages", other, err)
+		t.Fatal("another node lost its backlog", other, err)
 	}
 }

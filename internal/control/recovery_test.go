@@ -3,9 +3,6 @@ package control
 import (
 	"context"
 	"encoding/json"
-	"github.com/jjyr/pot/internal/controlplane"
-	"github.com/jjyr/pot/internal/tasks"
-	"github.com/jjyr/pot/pkg/protocol"
 	"strings"
 	"testing"
 	"time"
@@ -175,77 +172,5 @@ func TestRecoveryOriginalOwnerRunAndTargetCannotBeRebound(t *testing.T) {
 	}
 	if _, err := s.TaskRecovery(ctx, "another-owner", l.TaskID, l.RunID, "reconcile"); err == nil {
 		t.Fatal("owner identity changed")
-	}
-}
-
-func TestRecoveryUsesSignedOriginalRunnerAndControlReceipts(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	control := taskControl(t, "control", "")
-	worker := taskControl(t, "worker", "")
-	if err := control.Machines.EnableControl(); err != nil {
-		t.Fatal(err)
-	}
-	server := controlPeerEndpoint(control)
-	invitation, err := control.Machines.Invitation(ctx, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	connector := controlplane.Connector{Directory: worker.Machines}
-	if _, err = connector.Enroll(ctx, server, control.Machines.Identity(), invitation.Code, "recovery-enroll"); err != nil {
-		t.Fatal(err)
-	}
-	peer, err := worker.RunnerConnect(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer peer.Close()
-	l := runner.Launch{ControlID: "control", AssistantID: "main", RuntimeID: "worker", TaskID: "remote-task", RunID: "original-run", Generation: 1, ExecutionTarget: core.RuntimeTarget("worker"), Config: taskConfig(t), Plugins: []string{}, Text: "original"}
-	// The Control identity record is already terminal here to keep its automatic
-	// lifecycle from racing this deliberately incomplete destination fixture.
-	task := tasks.Record{SchemaVersion: 4, AssistantID: l.AssistantID, Info: protocol.TaskInfo{ID: l.TaskID, AssistantID: l.AssistantID, MachineID: l.RuntimeID, Phase: protocol.TaskInterrupted, ExecutionTarget: &l.ExecutionTarget}, Config: l.Config, Plugins: []string{}, RunID: l.RunID, Generation: l.Generation, Launch: &l, LaunchSent: true}
-	raw, _ := json.Marshal(task)
-	if _, err = control.Tasks.DB().ExecContext(ctx, "INSERT INTO tasks VALUES(?,?,?,0,?)", l.AssistantID, l.TaskID, protocol.TaskInterrupted, string(raw)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = worker.RunnerJournal.Accept(ctx, l); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = worker.RunnerJournal.Claim(ctx, l.ControlID, l.TaskID, l.RunID); err != nil {
-		t.Fatal(err)
-	}
-	op := Operation{Owner: l.TaskID, Turn: l.RunID, Generation: l.Generation, CallID: "command", Target: l.ExecutionTarget, Tool: "exec_command", Args: json.RawMessage(`{"cmd":"never replay"}`), Worker: true}
-	receipt, _, err := control.Operations.Begin(ctx, op)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = control.Operations.Unknown(ctx, receipt.ID); err != nil {
-		t.Fatal(err)
-	}
-	raw, _ = json.Marshal(remoteExecute{op, executor.Request{ID: op.CallID, Operation: op.Tool, CWD: "/original", Policy: l.Config.Params.Agent.Shell, Args: map[string]any{"cmd": "never replay"}}})
-	if _, _, err = worker.RunnerJournal.BeginCommand(ctx, l.ControlID, l.TaskID, l.RunID, op.CallID, raw); err != nil {
-		t.Fatal(err)
-	}
-	reply, _ := json.Marshal(executeReply{Value: json.RawMessage(`{"stdout":"signed original result"}`)})
-	if err = worker.RunnerJournal.CompleteCommand(ctx, l.ControlID, l.TaskID, l.RunID, op.CallID, reply); err != nil {
-		t.Fatal(err)
-	}
-	if err = worker.RunnerJournal.RecordCleanup(ctx, l.ControlID, l.TaskID, l.RunID); err != nil {
-		t.Fatal(err)
-	}
-	if err = worker.RunnerJournal.Fence(ctx, l.ControlID, l.TaskID, l.RunID); err != nil {
-		t.Fatal(err)
-	}
-	out, err := control.TaskRecovery(ctx, l.AssistantID, l.TaskID, l.RunID, "reconcile")
-	if err != nil || !out.Reconciled || out.Phase != runner.Interrupted {
-		t.Fatal(out, err)
-	}
-	settled, err := control.Operations.Get(ctx, receipt.ID)
-	if err != nil || settled.State != "complete" || !strings.Contains(string(settled.Result), "signed original result") {
-		t.Fatal(settled, err)
-	}
-	// A fresh Task/run selector cannot reuse an authenticated old Runner result.
-	if _, err = control.TaskRecovery(ctx, l.AssistantID, l.TaskID, "replacement-run", "reconcile"); err == nil {
-		t.Fatal("original run rebound")
 	}
 }

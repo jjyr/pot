@@ -109,7 +109,7 @@ export function createSystemNotifications({client,surface,view,open,locale,host=
     const key=ownerKey(assistant),boot=bootOf(assistant);let entry=owners.get(key);
     if(entry&&entry.boot!==boot){stopOwner(entry);projection.reset(assistant.space_id,assistant.id,assistant.control_id);entry=null;}
     if(entry)return entry;
-    entry={key,boot,space:assistant.space_id,abort:new AbortController(),cursor:null};
+    entry={key,boot,space:assistant.space_id,linked:!!assistant.origin,abort:new AbortController(),cursor:null};
     const latest=()=>(client.assistants||[]).find(item=>ownerKey(item)===key);
     const current=()=>{
       const item=latest(),space=(client.spaces||[]).find(space=>space.id===entry.space);
@@ -174,7 +174,7 @@ export function createSystemNotifications({client,surface,view,open,locale,host=
         return Promise.resolve();
       }
       const reads=[];
-      for(const entry of owners.values())if(!space||entry.space===space){
+      for(const entry of owners.values())if((!space||entry.space===space)&&!entry.linked){
         if(!topics.length||topics.includes('task-outcomes'))reads.push(entry.tasks.run());
         if(!topics.length||topics.includes('permissions'))reads.push(entry.approvals.run());
       }
@@ -193,7 +193,7 @@ export function createSystemNotifications({client,surface,view,open,locale,host=
         }
         const existing=owners.get(key),entry=watch(item);
         for(const event of projection.observe(item,undefined,entry.boot))deliveries.push(deliver(event,entry.current).catch(fail));
-        if(existing!==entry)deliveries.push(entry.tasks.run(),entry.approvals.run());
+        if(existing!==entry&&!entry.linked)deliveries.push(entry.tasks.run(),entry.approvals.run());
       }
       return Promise.all(deliveries);
     },

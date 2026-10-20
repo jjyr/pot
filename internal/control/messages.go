@@ -132,17 +132,23 @@ func (s *Service) deliverNotifications(ctx context.Context, owner string) {
 		case "task_result":
 			result := notice.Result
 			task := map[string]any{"kind": notice.Kind, "title": result.Title, "phase": result.Phase, "result": result.Text, "error": result.Error, "evidence": result.Evidence, "artifacts": result.Artifacts, "artifact_task_id": result.TaskID, "task_id": result.TaskID, "run_id": result.RunID}
-			eligible, err := s.Tasks.CanRetry(ctx, owner, result.TaskID)
-			if err != nil {
-				return
-			}
-			task["retry_allowed"] = eligible
-			record, err := s.Tasks.Run(ctx, owner, result.TaskID, result.RunID)
-			if err != nil {
-				return
-			}
-			if record != nil {
-				task["original_instructions"] = record.Request.Text
+			if delegation, e := s.linkDelegation(ctx, owner, result.TaskID); e == nil {
+				task["retry_allowed"] = false
+				task["original_instructions"] = delegation.Request.Text
+				task["agent_link"] = delegation.Info.AgentLink
+			} else {
+				eligible, err := s.Tasks.CanRetry(ctx, owner, result.TaskID)
+				if err != nil {
+					return
+				}
+				task["retry_allowed"] = eligible
+				record, err := s.Tasks.Run(ctx, owner, result.TaskID, result.RunID)
+				if err != nil {
+					return
+				}
+				if record != nil {
+					task["original_instructions"] = record.Request.Text
+				}
 			}
 			item = task
 		case "plugin_event":

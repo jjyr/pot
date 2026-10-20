@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"github.com/jjyr/pot/internal/controlplane"
 	"github.com/jjyr/pot/pkg/peer"
 	"net"
 	"strings"
@@ -35,14 +34,26 @@ type agentLinkHost struct {
 
 type controlLinkMailbox struct{ s *Service }
 
-func (m controlLinkMailbox) Pending(ctx context.Context, local, peer protocol.AgentRef) ([]protocol.Envelope, error) {
-	return m.s.Mailbox.PendingLink(ctx, local, peer)
+func (m controlLinkMailbox) PendingNode(ctx context.Context, local, peer string) ([]protocol.Envelope, error) {
+	return m.s.Mailbox.PendingNode(ctx, local, peer)
 }
 func (m controlLinkMailbox) Deliver(ctx context.Context, value protocol.Envelope) (protocol.Receipt, error) {
 	if _, err := m.s.agentLinkIdentity(ctx, value.To.AgentID); err != nil {
 		return protocol.Receipt{}, err
 	}
-	receipt, err := m.s.Mailbox.Deliver(ctx, value)
+	direct, err := m.s.isLinkChatReply(ctx, value)
+	if err != nil {
+		return protocol.Receipt{}, err
+	}
+	var receipt protocol.Receipt
+	if direct {
+		receipt, err = m.s.Mailbox.DeliverChat(ctx, value)
+	} else {
+		receipt, err = m.s.Mailbox.Deliver(ctx, value)
+	}
+	if err == nil && direct {
+		err = m.s.captureLinkChat(ctx, value)
+	}
 	if err == nil {
 		m.s.wakeTasks()
 		m.s.Changes.Notify("assistant-mail")
@@ -68,7 +79,7 @@ func (s *Service) agentLinkIdentity(ctx context.Context, id string) (agentlink.I
 
 func (s *Service) openAgentLinks() error {
 	hostIdentity, hostKey := s.Machines.TransportIdentity()
-	service, err := agentlink.New(agentlink.Options{HostIdentity: hostIdentity, HostKey: hostKey, DB: s.integrationDB, Secrets: s.integrationSecrets, Identity: s.agentLinkIdentity, Mailbox: controlLinkMailbox{s}, Changed: func() { s.Changes.Notify("agent-links"); s.Changes.Notify("assistant-mail"); s.wakeTasks() }})
+	service, err := agentlink.New(agentlink.Options{HostIdentity: hostIdentity, HostKey: hostKey, DB: s.integrationDB, Backend: potLinkBackend{s}, Secrets: s.integrationSecrets, Identity: s.agentLinkIdentity, Mailbox: controlLinkMailbox{s}, Changed: func() { s.Changes.Notify("agent-links"); s.Changes.Notify("assistant-mail"); s.wakeTasks() }})
 	if err != nil {
 		return err
 	}
@@ -81,21 +92,26 @@ func (s *Service) openAgentLinks() error {
 		host.config.Listen = s.options.PeerListen
 	}
 	host.registry = linkhost.NewRegistry(hostIdentity, hostKey)
-	machines := s.machinePeerServer(nil)
-	for _, serviceName := range []string{controlplane.MembershipService, controlplane.ExecutionService} {
-		if err = host.registry.Register(serviceName, machines.Authorize, machines.Attach); err != nil {
-			return err
-		}
-	}
 	if err = host.registry.Register(agentlink.ServiceName, func(ctx context.Context, remote peer.Identity, name string, auth json.RawMessage) (peer.Handler, error) {
-		if s.Machines.Role() == "runner" {
-			return nil, peer.ErrUnauthorized
-		}
 		return service.Authorize(ctx, remote, name, auth)
 	}, service.Attach); err != nil {
 		return err
 	}
 	s.agentLinks = host
+	s.pluginWG.Add(1)
+	go func() {
+		defer s.pluginWG.Done()
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-ticker.C:
+				s.syncLinkDelegations(s.ctx)
+			}
+		}
+	}()
 	if err = s.linkPlugins.RegisterAgent(linkhost.Messages{Name: "pot", Service: service}); err != nil {
 		return err
 	}
@@ -207,6 +223,8 @@ func (s *Service) AgentLinks(ctx context.Context, assistantID string) (any, erro
 		status, reason = "needs_access", "agent_link_assistant_unavailable"
 	}
 	self := map[string]any{"id": identity.Address.AgentID, "node_id": s.options.RuntimeID, "kind": "pot", "name": identity.Name, "address": config.Endpoint, "endpoint": config.Endpoint, "status": status, "reason_code": reason}
+	localDirectory, _ := (potLinkBackend{s}).Directory(ctx)
+	self["name"] = localDirectory.Name
 	connections, err := h.service.List(ctx)
 	if err != nil {
 		return nil, err
@@ -220,7 +238,25 @@ func (s *Service) AgentLinks(ctx context.Context, assistantID string) (any, erro
 		if state == "ready" || state == "active" {
 			state = "connected"
 		}
-		items = append(items, map[string]any{"id": c.ID, "local_assistant_id": c.Local.Address.AgentID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "node_id": c.Peer.Address.NodeID, "kind": c.Peer.Adapter, "name": c.Peer.Name, "address": c.Endpoint}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
+		peerName := c.Peer.Name
+		assistants := []any{}
+		if c.Directory != nil {
+			for _, a := range c.Directory.Assistants {
+				var count int64
+				var replyID, preview string
+				var at int64
+				if e := s.integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM agent_link_chat WHERE link_id=? AND assistant_id=? AND role='assistant'", c.ID, a.Address.AgentID).Scan(&count); e != nil {
+					return nil, e
+				}
+				e := s.integrationDB.QueryRowContext(ctx, "SELECT id,text,created_at FROM agent_link_chat WHERE link_id=? AND assistant_id=? AND role='assistant' ORDER BY rowid DESC LIMIT 1", c.ID, a.Address.AgentID).Scan(&replyID, &preview, &at)
+				if e != nil && !errors.Is(e, sql.ErrNoRows) {
+					return nil, e
+				}
+				assistants = append(assistants, map[string]any{"address": a.Address, "name": a.Name, "adapter": a.Adapter, "reply_count": count, "reply_id": replyID, "preview": preview, "last_reply_at_ms": at})
+			}
+			peerName = c.Directory.Name
+		}
+		items = append(items, map[string]any{"assistants": assistants, "directory": c.Directory, "id": c.ID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "node_id": c.Peer.Address.NodeID, "kind": c.Peer.Adapter, "name": peerName, "address": c.Endpoint}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
 	}
 	return map[string]any{"self": self, "items": items, "network": map[string]any{"listen": config.Listen, "endpoint": config.Endpoint, "mode": config.Mode, "status": status, "reason_code": reason}}, nil
 }
@@ -241,7 +277,7 @@ func agentLinkError(err error) error {
 	if err == nil {
 		return nil
 	}
-	for _, known := range []error{agentlink.ErrInvalid, agentlink.ErrNotFound, agentlink.ErrUnauthorized, agentlink.ErrExpired, agentlink.ErrUsed, agentlink.ErrConflict, agentlink.ErrRevoked, agentlink.ErrReconnectRequired, agentlink.ErrUnavailable} {
+	for _, known := range []error{agentlink.ErrInvalid, agentlink.ErrNotFound, agentlink.ErrUnauthorized, agentlink.ErrExpired, agentlink.ErrUsed, agentlink.ErrConflict, agentlink.ErrRevoked, agentlink.ErrReconnectRequired, agentlink.ErrUnavailable, agentlink.ErrUnsupported, agentlink.ErrDisconnected, agentlink.ErrCapacity, agentlink.ErrFenced} {
 		if errors.Is(err, known) {
 			return protocol.APIError{Code: known.Error()}
 		}
@@ -254,7 +290,7 @@ func agentLinkError(err error) error {
 }
 
 func (s *Service) ManageAgentLink(ctx context.Context, command AgentLinkCommand) (any, error) {
-	if s.agentLinks == nil || s.Machines.Role() == "runner" {
+	if s.agentLinks == nil {
 		return nil, protocol.APIError{Code: "agent_link_unavailable"}
 	}
 	var result any
@@ -288,9 +324,15 @@ func (s *Service) ManageAgentLink(ctx context.Context, command AgentLinkCommand)
 			return nil, protocol.APIError{Code: "agent_link_identity_conflict"}
 		}
 		if err == nil {
-			err = s.agentLinks.service.Revoke(ctx, command.ID)
+			err = s.agentLinks.service.Disconnect(ctx, command.ID)
 		}
 		result = map[string]bool{"disconnected": err == nil}
+	case "reconnect":
+		err = s.agentLinks.service.Reconnect(ctx, command.ID)
+		result = map[string]bool{"connected": err == nil}
+	case "delete":
+		err = s.agentLinks.service.Delete(ctx, command.ID)
+		result = map[string]bool{"deleted": err == nil}
 	case "configure":
 		result, err = s.configureAgentAccess(ctx, command)
 	default:
@@ -394,8 +436,21 @@ func (s *Service) linkedPeer(ctx context.Context, local, peer protocol.AgentRef)
 		return false
 	}
 	for _, link := range links {
-		if link.State != "revoked" && link.LastSeen != nil && link.Local.Address == local && link.Peer.Address == peer {
-			return true
+		if link.State == "revoked" || link.State == "disconnected" || link.LastSeen == nil || link.Local.Address.NodeID != local.NodeID || link.Peer.Address.NodeID != peer.NodeID {
+			continue
+		}
+		d := link.Directory
+		if d == nil {
+			fresh, e := s.agentLinks.service.Directory(ctx, link.ID)
+			if e != nil {
+				continue
+			}
+			d = &fresh
+		}
+		for _, a := range d.Assistants {
+			if a.Address == peer {
+				return true
+			}
 		}
 	}
 	return false
@@ -411,8 +466,18 @@ func (s *Service) agentLinkPeers(ctx context.Context, owner string) ([]protocol.
 		return nil, err
 	}
 	for _, link := range links {
-		if link.State != "revoked" && link.LastSeen != nil && (owner == "" || link.Local.Address.AgentID == owner) {
-			result = append(result, protocol.MailAssistant{Address: link.Peer.Address, Name: link.Peer.Name})
+		if link.State != "revoked" && link.State != "disconnected" && link.LastSeen != nil {
+			if link.Directory == nil {
+				d, e := s.agentLinks.service.Directory(ctx, link.ID)
+				if e == nil {
+					link.Directory = &d
+				}
+			}
+			if link.Directory != nil {
+				for _, a := range link.Directory.Assistants {
+					result = append(result, protocol.MailAssistant{Address: a.Address, Name: a.Name})
+				}
+			}
 		}
 	}
 	return result, nil
