@@ -67,6 +67,16 @@ class GoPackaging(unittest.TestCase):
                                 "plugin.json",
                                 *(
                                     name
+                                    for name in (
+                                        "icon.svg",
+                                        "icon.png",
+                                        "icon-NOTICE.txt",
+                                        "icon-LICENSE.txt",
+                                    )
+                                    if (ROOT / "plugins" / package.name / name).is_file()
+                                ),
+                                *(
+                                    name
                                     for capability in manifest["contributes"].values()
                                     for name in capability["files"]
                                 ),

@@ -102,6 +102,9 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	if result, err, handled := a.agentLinkCall(ctx, method, path, owner, r); handled {
 		return result, err
 	}
+	if result, err, handled := a.extensionCall(ctx, method, path, owner, r); handled {
+		return result, err
+	}
 	if result, err, handled := a.pluginNotificationsCall(ctx, method, path, r); handled {
 		return result, err
 	}

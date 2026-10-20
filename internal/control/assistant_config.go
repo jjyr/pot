@@ -122,6 +122,13 @@ func (p *ProfileStore) ResolveAssistant(selection AssistantSelection) (core.Reso
 			profile.Params.ReasoningEffort = &value
 		}
 	}
+	defaults, err := p.defaultAgentSettings()
+	if err != nil {
+		return core.ResolvedSpec{}, err
+	}
+	profile.Params.Agent.Plugins = defaults.Plugins
+	profile.Params.Agent.BuiltinTools = defaults.BuiltinTools
+	profile.Params.Agent.AllowedTools = nil
 	resolved, err := p.directory.Apply(*profile)
 	if err != nil {
 		return core.ResolvedSpec{}, err

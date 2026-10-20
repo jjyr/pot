@@ -404,7 +404,7 @@ func (s *Service) controlRPC(ctx context.Context, p controlplane.Principal, requ
 		}
 		stopDispatch := context.AfterFunc(authority.ctx, cancel)
 		defer stopDispatch()
-		dispatcher := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: launch.TaskID, ApprovalOwner: launch.AssistantID, Task: launch.TaskID, Turn: launch.RunID, Generation: launch.Generation, DefaultTarget: launch.ExecutionTarget, Spec: authority.model.Spec, Product: s.productDispatchBound(launch.AssistantID, launch.TaskID, launch.RunID, launch.Generation, true), Credentials: s.Integrations, Usage: s.Usage, UsageScope: launch.TaskID, Permissions: s.Permissions, Operations: s.Operations, ResolveCommand: func(ctx context.Context, args map[string]any) (*CommandContext, error) {
+		dispatcher := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: launch.TaskID, ApprovalOwner: launch.AssistantID, Task: launch.TaskID, Turn: launch.RunID, Generation: launch.Generation, DefaultTarget: launch.ExecutionTarget, Spec: authority.model.Spec, Product: s.productDispatchBound(launch.AssistantID, launch.TaskID, launch.RunID, launch.Generation, true), Credentials: s, Usage: s.Usage, UsageScope: launch.TaskID, Permissions: s.Permissions, Operations: s.Operations, ResolveCommand: func(ctx context.Context, args map[string]any) (*CommandContext, error) {
 			var value CommandContext
 			err := s.remoteCall(ctx, peer, binding(launch), "task.command_context", "context:"+q.Call.ID, args, &value)
 			return &value, err

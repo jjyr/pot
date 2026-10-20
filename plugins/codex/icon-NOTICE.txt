@@ -1,0 +1,4 @@
+icon.png identifies the OpenAI Codex integration.
+It is resized from the official Codex application icon distributed with
+ChatGPT.app (icon-codex-light.png).
+OpenAI and Codex are trademarks of OpenAI. These brand marks are not Pot artwork.
