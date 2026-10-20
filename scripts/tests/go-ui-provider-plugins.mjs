@@ -24,6 +24,7 @@ class Element extends EventTarget {
  setAttribute(key,value){this.attributes.set(key,String(value));}getAttribute(key){return this.attributes.get(key);}
  append(...children){this.children.push(...children);}replaceChildren(...children){this._text='';this.children=children;}
  querySelector(selector){const [tag,cls]=selector.split('.');return this.children.find(node=>(!tag||node.tagName===tag)&&(!cls||(node.className||'').split(' ').includes(cls)))||this.children.map(node=>node.querySelector(selector)).find(Boolean)||null;}
+ remove(){this.isConnected=false;this.removed=true;}
  reportValidity(){return this.value!==''&&Number(this.value)>=1&&Number(this.value)<=100;}
  click(){if(!this.disabled)this.onclick?.();}
 }
@@ -64,3 +65,21 @@ console.log('Provider reminders: acknowledgement recovery, captured revision con
 
 assert.deepEqual(providerConversationModels([{id:'chat',input_modalities:['text'],output_modalities:['text']},{id:'image',input_modalities:['text'],output_modalities:['image']},{id:'speech',input_modalities:['audio'],output_modalities:['text']},'manual']),[{id:'chat',input_modalities:['text'],output_modalities:['text']},'manual']);
 assert.equal(providerConversationModels([{id:'current',output_modalities:['image']}],'current').length,1,'Refreshing catalog suggestions cannot overwrite the user-selected model');
+
+
+// A profile keeps its row identity when credentials/route change. Quota data
+// must follow the immutable connection identity rather than that row key.
+let source=['route-a','package/type',1],plugin='package';const swaps=[],sourceMemory={},sourceRoot=new Element('div');
+const sourceView=createProviderAllowances({root:sourceRoot,request:()=>{const next=deferred();swaps.push(next);return next.promise;},scope:{space:'one'},profileID:'same-profile',locale:()=> 'en',identity:()=>source,binding:()=>plugin,memory:sourceMemory});
+const sourceDetails=sourceRoot.children[0];sourceDetails.open=true;sourceDetails.dispatchEvent(new Event('toggle'));
+source=['route-b','package/type',2];sourceView();assert.equal(swaps.length,2,'An expanded connection rereads after immutable route identity changes');
+swaps[0].resolve({status:'ready',snapshot:{read_at:fresh,accounts:[{name:'Private account A',windows:[]}]},monitor:{...desired,revision:1}});await tick();assert(!sourceRoot.textContent.includes('Private account A'),'A late response from previous credentials cannot enter the current connection');
+swaps[1].resolve({status:'ready',snapshot:{read_at:fresh,accounts:[{name:'Account B',windows:[]}]},monitor:{...desired,revision:2},assistants:[]});await tick();assert.match(sourceRoot.textContent,/Account B/);
+const reminderB=sourceDetails.children[1].children[3],editB=reminderB.children[1].children[1].children[0];editB.value='96';editB.dispatchEvent(new Event('input'));
+source=['route-c','package/type',3];sourceView();assert(!sourceRoot.textContent.includes('Account B'),'Changing identity clears an already displayed private snapshot immediately');assert.equal(sourceMemory.draft.threshold,96,'Same-plugin reconnect keeps reminder intent');assert.equal(sourceMemory.revision,2,'Reconnect does not silently rebase a dirty reminder revision');
+sourceView.dispose();const recreatedSourceRoot=new Element('div');source=['route-d','package/type',4];const recreated=createProviderAllowances({root:recreatedSourceRoot,request:()=>assert.fail('Collapsed reconstruction must stay read-only'),scope:{space:'one'},profileID:'same-profile',locale:()=> 'en',identity:()=>source,binding:()=>plugin,memory:sourceMemory});assert(!recreatedSourceRoot.textContent.includes('Account B'),'Restored memory also verifies connection provenance');assert.equal(sourceMemory.draft.threshold,96);
+plugin='other-package';source=['route-e','other-package/type',5];recreated();assert.equal(sourceMemory.draft,undefined,'A different plugin cannot inherit another binding reminder draft');assert.equal(sourceMemory.view,undefined);recreated.dispose();swaps[2].resolve({status:'ready',snapshot:{read_at:fresh,accounts:[{name:'Late C',windows:[]}]}});await tick();assert.equal(sourceMemory.view,undefined,'An old component cannot refill memory after another plugin takes the connection');
+console.log('Provider quota provenance: pending/read snapshots fenced by immutable route, restored memory checked, same-plugin intent retained, and different-plugin drafts reset');
+
+const removedMemory={signature:JSON.stringify(['route','package/type',1]),binding:'package',view:{snapshot:{accounts:[{name:'Old capability account'}]},monitor:{...desired,revision:1},assistants:[]},draft:{...desired},baseline:{...desired},revision:1};
+const removedRoot=new Element('div'),removed=createProviderAllowances({root:removedRoot,request:()=>assert.fail('Capability removal cannot read'),scope:{},profileID:'removed',locale:()=> 'en',identity:()=>['route','package/type',1],binding:()=> 'package',memory:removedMemory});removed.remove();assert.equal(removedRoot.children[0].removed,true,'Losing allowance capability removes the disclosure');assert.equal(removedMemory.view,undefined,'Capability removal discards cached private data');assert.equal(removedMemory.draft.enabled,false,'Same binding retains the explicit-off intent if its capability returns');
