@@ -4,6 +4,7 @@ package schedule
 
 import (
 	"fmt"
+	"github.com/jjyr/pot/pkg/cronexpr"
 	"github.com/jjyr/pot/pkg/protocol"
 	"strings"
 	"time"
@@ -11,6 +12,9 @@ import (
 )
 
 func Validate(spec protocol.ScheduleSpec) error {
+	if _, err := cronexpr.Location(spec.Timezone); err != nil {
+		return err
+	}
 	if strings.TrimSpace(spec.Title) == "" || utf8.RuneCountInString(spec.Title) > 80 || strings.TrimSpace(spec.Goal) == "" || len(spec.Goal) > 8000 {
 		return fmt.Errorf("schedule needs a 1–80 character title and goal up to 8000 bytes")
 	}
@@ -24,9 +28,6 @@ func Validate(spec protocol.ScheduleSpec) error {
 		if _, err := once(spec); err != nil {
 			return err
 		}
-	}
-	if spec.Kind == "weekly" && len(spec.Weekdays) > 7 {
-		return fmt.Errorf("weekly schedule accepts at most seven weekdays")
 	}
 	return nil
 }
@@ -93,32 +94,39 @@ func Next(spec protocol.ScheduleSpec, afterMS int64) (*int64, error) {
 		}
 		due := afterMS + step
 		return &due, nil
-	default:
-		zone, _ := time.LoadLocation(spec.Timezone)
+	case "cron":
+		parsed, err := cronexpr.Parse(spec.Cron)
+		if err != nil {
+			return nil, err
+		}
+		zone, _ := cronexpr.Location(spec.Timezone)
 		after := time.UnixMilli(afterMS).In(zone)
-		clock, _ := time.Parse("15:04", spec.Time)
-		date := time.Date(after.Year(), after.Month(), after.Day(), 0, 0, 0, 0, time.UTC)
-		for day := 0; day <= 8; day++ {
-			candidateDate := date.AddDate(0, 0, day)
-			weekday := (int(candidateDate.Weekday())+6)%7 + 1
-			if spec.Kind == "weekly" {
-				selected := false
-				for _, d := range spec.Weekdays {
-					if int(d) == weekday {
-						selected = true
-					}
-				}
-				if !selected {
-					continue
-				}
+		horizon := after.AddDate(8, 0, 0)
+		// robfig advances through zone transitions. Retain Pot's earlier-only
+		// repeated-wall-time contract by rejecting the later duplicate.
+		for attempts := 0; attempts < 3000; attempts++ {
+			candidate := parsed.Next(after)
+			if candidate.IsZero() {
+				// The library searches through year+5. Leap days can be eight
+				// years apart across a non-leap century (2096 -> 2104).
+				// Continue with one bounded window, without reparsing syntax.
+				start := time.Date(after.Year()+6, time.January, 1, 0, 0, 0, 0, zone)
+				candidate = parsed.Next(start.Add(-time.Nanosecond))
 			}
-			instant, exists := localInstant(zone, candidateDate, clock.Hour(), clock.Minute())
-			if exists && instant.UnixMilli() > afterMS {
-				due := instant.UnixMilli()
+			if candidate.IsZero() || candidate.After(horizon) {
+				return nil, fmt.Errorf("cron: no occurrence within eight years")
+			}
+			local := candidate.In(zone)
+			first, exists := localInstant(zone, local, local.Hour(), local.Minute())
+			if exists && first.Equal(candidate) {
+				due := candidate.UnixMilli()
 				return &due, nil
 			}
+			after = candidate
 		}
-		return nil, fmt.Errorf("cannot find next schedule occurrence")
+		return nil, fmt.Errorf("cron: repeated-time search limit exceeded")
+	default:
+		return nil, fmt.Errorf("unknown schedule kind")
 	}
 }
 func AfterDue(spec protocol.ScheduleSpec, dueMS, nowMS int64) (*int64, error) {

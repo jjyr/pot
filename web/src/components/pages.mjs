@@ -1,3 +1,4 @@
+import {browserTimezone,connectScheduleEditor} from './schedule-editor.mjs';
 import {usageCalendar} from './usage-calendar.mjs';
 import {notificationSetting} from './notification-setting.mjs';
 import {usageNumbers,usageRows,usageTooltip,createUsageList} from './usage.mjs';
@@ -520,7 +521,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     await permissions();
   }
   async function schedules(root,token) {
-    root.classList.add('schedules-content');const content=n('div','schedule-projection');root.append(content);
+    root.classList.add('schedules-content');root.append(toolbar(action(translate(locale(),'schedule.new'),()=>scheduleEditor())));const content=n('div','schedule-projection');root.append(content);
     return connectView(root,token,()=>across('/api/v1/schedules?limit=50',token,{paginate:true,perAssistant:true}),pages=>{
       const projection=n('div','schedule-projection');renderSchedules(projection,pages);reconcile(content,projection);
     },{topics:['schedules','tasks','assistants','spaces','machines']});
@@ -535,7 +536,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       const owner=n('span','schedule-owner'),assistant=(client.assistants||[]).find(owner=>owner.id===item._assistant_id&&owner.space_id===item._space_id),space=(client.spaces||[]).find(space=>space.id===item._space_id);
       owner.append(n('span','',assistant?.name||item._assistant_id));owner.title=item._space_name||'';
       owner.append(icon(space?.kind==='local'&&!space?.remote?'machines':'cloud'));
-      row.append(button,owner,n('span','hint',item._stale?tr('Stale','已过期'):item.spec.enabled?item.next_label||tr('Not scheduled','未安排'):tr('Paused','已暂停')));row.dataset.viewKey=JSON.stringify([item._space_id,item._assistant_id,item.id]);rows.append(row);
+      row.append(button,owner,...(item.spec.kind==='cron'?[n('code','schedule-rule',`${item.spec.cron} · ${item.spec.timezone}`)]:[]),n('span','hint',item._stale?tr('Stale','已过期'):item.spec.enabled?item.next_label||tr('Not scheduled','未安排'):tr('Paused','已暂停')));row.dataset.viewKey=JSON.stringify([item._space_id,item._assistant_id,item.id]);rows.append(row);
     }
     root.append(rows);
     const footer=n('div','schedule-pagination'),buttons=toolbar(action(tr('Previous','上一页'),()=>{filter.scheduleOffset=Math.max(0,filter.scheduleOffset-20);show('tasks');},{disabled:!filter.scheduleOffset}),action(tr('Next','下一页'),()=>{filter.scheduleOffset+=20;show('tasks');},{disabled:filter.scheduleOffset+20>=items.length}));
@@ -555,7 +556,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   }
   function renderScheduleHistory(root,view,value,runsOffset) {
     const selected=view.item;heading(selected.spec.title);const info=card(tr('Schedule details','定时计划详情'));
-    info.append(n('p','hint',selected.spec.goal),n('p','hint',`${selected.spec.timezone||''} · ${selected.next_label||tr('Not scheduled','未安排')}`));if(selected.last_error)info.append(n('p','inline-error',selected.last_error));
+    info.append(n('code','',selected.spec.kind==='cron'?selected.spec.cron:translate(locale(),`schedule.${selected.spec.kind}`)),n('p','hint',selected.spec.goal),n('p','hint',`${selected.spec.timezone||''} · ${selected.next_label||tr('Not scheduled','未安排')}`));if(selected.last_error)info.append(n('p','inline-error',selected.last_error));
     const actions=toolbar();
     for(const name of ['run',selected.spec.enabled?'pause':'resume','edit','delete']) {
       const writeKey=JSON.stringify([selected._space_id,selected._assistant_id,selected.id,name]);
@@ -577,16 +578,29 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     root.append(toolbar(action(tr('Newer entries','较新记录'),()=>scheduleHistory(selected,false,Math.max(0,runsOffset-20)),{disabled:!runsOffset}),action(tr('Older entries','较早记录'),()=>scheduleHistory(selected,false,value.runs_next_offset),{disabled:value.runs_next_offset==null})));
   }
   function scheduleEditor(item) {
-    const spec=item?.spec||{title:'',goal:'',machine_id:'',timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,kind:'daily',at:'',every_minutes:60,time:'09:00',weekdays:[1,2,3,4,5],misfire:'coalesce',notify:'changes',enabled:true,profile:null,model:null,requirements:{tools:false,desktop:false,exact_budget:false,live_steering:false}};
-    renderEditor(item?tr('Edit schedule','编辑定时计划'):tr('New schedule','新建定时计划'),{...spec,owner_ref:JSON.stringify([item?item._space_id:scope().space,item?item._assistant_id:scope().owner]),weekdays:(spec.weekdays||[]).join(',')},[
-      ...(!item?[{name:'owner_ref',label:tr('Assistant','助手'),choices:(client.assistants||[]).map(owner=>[JSON.stringify([owner.space_id,owner.id]),`${owner.name} · ${owner.space_name||''}`])}]:[]),
-      {name:'title',label:tr('Title','标题'),required:true},{name:'goal',label:tr('Goal','目标'),kind:'textarea',required:true},{name:'machine_id',label:tr('Machine ID','机器 ID')},
-      {name:'timezone',label:tr('Time zone','时区'),required:true},{name:'kind',label:tr('Repeat','重复'),choices:[['once',tr('Once','一次')],['interval',tr('Interval','间隔')],['daily',tr('Daily','每日')],['weekly',tr('Weekly','每周')]]},
-      {name:'at',label:tr('Date and time','日期与时间'),help:'YYYY-MM-DD HH:MM'},{name:'every_minutes',label:tr('Interval in minutes','间隔分钟'),kind:'number',parse:Number},{name:'time',label:tr('Time','时间'),kind:'time'},
-      {name:'weekdays',label:tr('Weekdays','星期'),help:tr('1 = Monday, 7 = Sunday; comma separated.','1 为周一，7 为周日；以逗号分隔。')},
-      {name:'misfire',label:tr('Missed runs','错过执行'),choices:[['coalesce',tr('Run once','合并执行一次')],['skip',tr('Skip','跳过')]]},
-      {name:'notify',label:tr('Notifications','通知'),choices:[['changes',tr('Changes','发生变化')],['all',tr('Every run','每次执行')],['failures',tr('Failures','仅失败')]]},{name:'enabled',label:tr('Enabled','启用'),kind:'checkbox'},
-    ],(values,context)=>{const {owner_ref,...specValues}=values;const [space,owner]=JSON.parse(owner_ref);return request('/api/v1/schedules',{...context,space,owner,method:'POST',body:{request_id:context.request_id,action:item?'update':'create',schedule_id:item?.id||'',spec:{...specValues,weekdays:values.weekdays.split(',').filter(Boolean).map(Number)}}});},{capturedScope:item?{space:item._space_id,owner:item._assistant_id}:scope()});
+    const t=key=>translate(locale(),`schedule.${key}`);
+    const spec=item?.spec||{title:'',goal:'',machine_id:'',timezone:browserTimezone(),kind:'cron',cron:'0 9 * * *',at:'',every_minutes:60,misfire:'coalesce',notify:'changes',enabled:true,profile:null,model:null,requirements:{tools:false,desktop:false,exact_budget:false,live_steering:false}};
+    const definitions=[
+      ...(!item?[{name:'owner_ref',key:'assistant',choices:(client.assistants||[]).map(owner=>[JSON.stringify([owner.space_id,owner.id]),`${owner.name} · ${owner.space_name||''}`])}]:[]),
+      {name:'title',key:'title',required:true},{name:'goal',key:'goal',kind:'textarea',required:true},{name:'machine_id',key:'machine'},
+      {name:'timezone',key:'timezone',helpKey:'timezoneHelp',required:true},
+      {name:'kind',key:'repeat',choiceKeys:{once:'once',interval:'interval',cron:'cron'},choices:['once','interval','cron'].map(key=>[key,t(key)])},
+      {name:'at',key:'at',help:'YYYY-MM-DD HH:MM'},
+      {name:'every_minutes',key:'minutes',kind:'number',min:1,max:525600,parse:Number},
+      {name:'cron',key:'cron',helpKey:'cronHelp',placeholder:'0 8-20 * * *'},
+      {name:'misfire',key:'misfire',choiceKeys:{coalesce:'coalesce',skip:'skip'},choices:['coalesce','skip'].map(key=>[key,t(key)])},
+      {name:'notify',key:'notify',choiceKeys:{changes:'changes',all:'all',failures:'failures'},choices:['changes','all','failures'].map(key=>[key,t(key)])},
+      {name:'enabled',key:'enabled',kind:'checkbox'},
+    ].map(definition=>({...definition,label:t(definition.key),...(definition.helpKey?{help:t(definition.helpKey)}:{})}));
+    let preview;
+    const view=renderEditor(t(item?'edit':'new'),{...spec,owner_ref:JSON.stringify([item?item._space_id:scope().space,item?item._assistant_id:scope().owner])},definitions,async(values,context)=>{
+      await preview.validate(values);
+      const {owner_ref,...specValues}=values;const [space,owner]=JSON.parse(owner_ref);
+      const canonical={...specValues,cron:values.kind==='cron'?values.cron:'',at:values.kind==='once'?values.at:'',every_minutes:values.kind==='interval'?values.every_minutes:0};
+      return request('/api/v1/schedules',{...context,space,owner,method:'POST',body:{request_id:context.request_id,action:item?'update':'create',schedule_id:item?.id||'',spec:canonical}});
+    },{capturedScope:item?{space:item._space_id,owner:item._assistant_id}:scope(),submitLabel:t('save')});
+    preview=connectScheduleEditor({view,request,locale,definitions,current:()=>editor?.session===view.session&&!disposed});
+    const refresh=view.lifecycle.locale;view.lifecycle.locale=()=>{refresh();view.lifecycle.setTitle(t(item?'edit':'new'));};
     if(item)editor.returnSchedule={...item};
   }
   async function usage(root, token) {
