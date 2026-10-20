@@ -23,13 +23,15 @@ import (
 )
 
 type Service struct {
-	options         Options
-	sessions        map[string]*peer.Session
-	pendingSessions map[*peer.Session]bool
-	mu              sync.Mutex
-	running         sync.Mutex
-	syncMu          sync.Mutex
-	rates           map[string]rate
+	options                  Options
+	sessions                 map[string]*peer.Session
+	pendingSessions          map[*peer.Session]bool
+	mu                       sync.Mutex
+	running                  sync.Mutex
+	syncMu                   sync.Mutex
+	rates                    map[string]rate
+	observations             map[string]ObservationSample
+	observationNotifications map[string]int64
 }
 type rate struct {
 	At     time.Time
@@ -75,7 +77,7 @@ func New(options Options) (*Service, error) {
 		return nil, ErrInvalid
 	}
 	options.HostKey = append(ed25519.PrivateKey(nil), options.HostKey...)
-	return &Service{options: options, sessions: map[string]*peer.Session{}, pendingSessions: map[*peer.Session]bool{}, rates: map[string]rate{}}, nil
+	return &Service{options: options, sessions: map[string]*peer.Session{}, pendingSessions: map[*peer.Session]bool{}, rates: map[string]rate{}, observations: map[string]ObservationSample{}, observationNotifications: map[string]int64{}}, nil
 }
 
 func validIdentity(identity Identity) bool {

@@ -70,11 +70,38 @@ distributed execution services.
 
 ## Business contract and recovery
 
-`Backend` provides `Directory`, `Submit`, `Status` and `Cancel`. The same receiver
+`Backend` provides `Directory`, `Observe`, `Submit`, `Status` and `Cancel`. The same receiver
 implementation owns in-process calls and authenticated remote calls. Directory
 capabilities are truthful; unsupported operations return a specific error.
 Remote operations are scoped to the authenticated node and original assistant
 caller. Returned task IDs, request identity and assistant node are checked.
+
+`observe` returns a live, payload-free node summary: hostname, per-assistant task
+counts (running, queued, waiting for approval or allowance), chat activity and
+uncertain-cleanup fences. Counts cover all tasks owned by that receiving node,
+not only the caller's delegations. No prompts, task text, workspace paths, tool
+arguments, model settings or credentials are exported. Outbox counts and the
+oldest known acceptance timestamp are scoped to the authenticated caller's node;
+the request cannot select another peer. Delivery receipts still mean durable
+acceptance, never completed processing.
+
+The existing recovery pass samples observations over the authenticated session.
+The sender validates node identity, assistant membership, unique IDs, bounded
+counts and states, then caches the sample in memory with its local receipt time.
+The sample is separate from the persisted directory and is lost on restart.
+Sampling failure retains the last sample with an error; disconnect retains it as
+cached data. Status changes invalidate the UI, and unchanged samples publish at
+most every 15 seconds. Topology additionally refreshes every 10 seconds while
+visible so local activity, queue timestamps and freshness remain current.
+After 30 seconds, a disconnected owner or a sampling failure, current totals
+exclude that node and assistant activity is unknown. Cached values remain labeled
+in the inspector. Connection health and execution state stay independent.
+
+Message migration `0012_agent_message_timestamps` records local insertion time
+outside immutable envelopes. Exact retries retain that timestamp. Historical
+messages retain zero (unknown); if an outbox contains such a message, its oldest
+timestamp remains unknown. Aggregates cover the entire node route rather than a
+bounded delivery page.
 
 The receiver durably deduplicates the complete task request before executing.
 The sender stores a delegation and remote reference, never a local worker copy.

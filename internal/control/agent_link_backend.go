@@ -17,7 +17,7 @@ type potLinkBackend struct{ s *Service }
 
 func (b potLinkBackend) Directory(ctx context.Context) (agentlink.Directory, error) {
 	defs, e := b.s.Registry.Definitions(ctx)
-	d := agentlink.Directory{NodeID: b.s.options.RuntimeID, Name: "Pot", Adapter: "pot", Assistants: []agentlink.Identity{}, Capabilities: []string{"chat", "tasks", "cancel"}}
+	d := agentlink.Directory{NodeID: b.s.options.RuntimeID, Name: "Pot", Adapter: "pot", Assistants: []agentlink.Identity{}, Capabilities: []string{"chat", "tasks", "cancel", "observe"}}
 	if e != nil {
 		return d, e
 	}

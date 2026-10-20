@@ -30,7 +30,7 @@ import {createChatApprovals} from './chat-approvals.mjs';
 import {taskElapsed,bindTaskClock} from './task-time.mjs';
 import {createTopology} from './topology.mjs';
 import {createAgentLinks} from './agent-links.mjs';
-import {projectTopology,agentNodeID} from '../state/topology.mjs';
+import {projectTopology,agentNodeID,machineDisplayName,linkEndpoint,assistantActivityState} from '../state/topology.mjs';
 
 export function createPages({onApprovalsChanged=()=>{},client, host, approvalHost, chatApprovalHost, chatVisible, locale, notify, changed, titleChanged, openChat, routeChanged=()=>{}}) {
   const gate = createRequestGate(), approvalGate = createRequestGate();
@@ -684,7 +684,29 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   async function machines(root,token) {
     const t=key=>translate(locale(),key);root.classList.add('topology-page');
     const toolbar=n('div','topology-toolbar'),connectionRoot=n('div','topology-connection'),storage=n('div','topology-machine-storage'),rows=n('div'),entries=new Map(),linkNotice=n('p','inline-error');storage.hidden=true;storage.append(rows);connectionRoot.className='agent-links-container';toolbar.append(connectionRoot);root.append(toolbar,linkNotice,storage);
-    let model,view,currentNode=null;
+    let model,view,currentNode=null,currentEdgeID='';const identityPanels=new Map();
+    function identityDetails(id,values){let panel=identityPanels.get(id);if(!panel){const element=n('details','topology-technical'),summary=n('summary'),list=n('dl','topology-metadata');element.append(summary,list);panel={element,summary,list};identityPanels.set(id,panel);}panel.summary.textContent=t('topology.technicalDetails');panel.list.replaceChildren();for(const [key,value]of values){if(value)panel.list.append(n('dt','',t(key)),n('dd','',value));}return panel.element;}
+    const timestamp=value=>value?new Date(value).toLocaleString(locale()):t('topology.activity.unknown');
+    function showActivity(node){
+      const observation=node.observation;
+      if(!observation)return;
+      const section=n('section','topology-activity');
+      section.append(n('h3','section-heading',t('topology.workload')));
+      if(observation.value){const counts=n('p','topology-workload-counts',t('topology.taskLoad').replace('{running}',String(observation.counts.running)).replace('{queued}',String(observation.counts.queued)));section.append(counts,n('p','hint',t('topology.waitingTasks').replace('{approval}',String(observation.counts.waiting_approval)).replace('{allowance}',String(observation.counts.waiting_allowance))));}
+      if(!observation.fresh)section.append(n('p','hint',t('topology.issue.stale')));
+      if(node.issue&&node.issue!=='stale'){const notice=n('p','topology-issue-notice',t('topology.issueDetail.'+node.issue));section.append(notice);}
+      section.append(n('p','hint',t('topology.sampleTime').replace('{time}',timestamp(observation.observedAt))),n('p','hint',t('topology.workloadScope')));
+      view.inspector.append(section);
+    }
+    function showQueues(link,fromName,toName){
+      const section=n('section','topology-queues');section.append(n('h3','section-heading',t('topology.messageQueues')));
+      for(const [from,to,queue,stale]of [[fromName,toName,link.outbox,false],[toName,fromName,link.observation?.value?.outbox,link.status!=='connected'||!!link.observation?.error||Date.now()-(link.observation?.observed_at_ms||0)>=30000]]){
+        const row=n('div','topology-queue-row');row.append(n('p','',t('topology.queueDirection').replace('{from}',from).replace('{to}',to).replace('{count}',queue?String(queue.pending):t('topology.activity.unknown'))));
+        if(queue?.pending>0)row.append(n('p','hint',t('topology.oldestQueued').replace('{time}',timestamp(queue.oldest_at_ms))));
+        if(stale)row.append(n('p','hint',t('topology.cachedQueue')));section.append(row);
+      }
+      section.append(n('p','hint',t('topology.lastExchange').replace('{time}',timestamp(link.last_exchange_at_ms))),n('p','hint',t('topology.receiptMeaning')));view.inspector.append(section);
+    }
     const data={inventory:[],permissionPages:[],permissionsPending:true,linkPages:[]};
     agentOwnerSpace=client.spaces.some(space=>space.id===agentOwnerSpace)?agentOwnerSpace:scope().space||client.spaces[0]?.id;
     const selectedScope=()=>({space:agentOwnerSpace,owner:''});
@@ -693,15 +715,21 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const connections=createAgentLinks({root:connectionRoot,request,locale,notify,scope:selectedScope,edit,signal:token.signal,onConnected:async result=>{const id=result?.id||result?.link?.id;if(id){const peer=result.peer||result.link?.peer;const identity=peer?.address?{id:peer.address.agent_id,node_id:peer.address.node_id,kind:peer.adapter}:peer;const owned=identity?.kind==='pot'&&client.spaces.find(space=>space.control_id===identity.node_id);topologySelection=owned?'control:'+owned.id:agentNodeID(identity);}client.resources?.invalidate(['agent-links'],selectedScope());await changed(result);}});
     function related(node){const section=n('div','topology-related');section.append(n('p','hint',t('topology.related')));for(const edge of model.edges.filter(item=>item.from===node.id||item.to===node.id)){const a=model.nodes.find(item=>item.id===edge.from),b=model.nodes.find(item=>item.id===edge.to);section.append(action(a.name+(edge.kind==='agent'?' ↔ ':' → ')+b.name,()=>showEdge(edge)));}return section;}
     function preserveInspectorFocus(){
+      const active=document.activeElement,nodeID=active?.closest('[data-node-id]')?.dataset.nodeId,edgeID=active?.closest('[data-edge-id]')?.dataset.edgeId;
       const focused=view.inspector.contains(document.activeElement)?document.activeElement:null;
-      return ()=>{if(focused?.isConnected&&view.inspector.contains(focused)&&document.activeElement!==focused)focused.focus({preventScroll:true});};
+      const label=focused?.getAttribute('aria-label'),text=focused?.textContent;
+      return ()=>{if(nodeID||edgeID){const target=[...root.querySelectorAll('[data-node-id],[data-edge-id]')].find(node=>nodeID?node.dataset.nodeId===nodeID:node.dataset.edgeId===edgeID);target?.focus({preventScroll:true});return;}if(!focused)return;const target=focused.isConnected&&view.inspector.contains(focused)?focused:[...view.inspector.querySelectorAll('button,summary')].find(node=>label?node.getAttribute('aria-label')===label:node.textContent===text);if(target&&document.activeElement!==target)target.focus({preventScroll:true});};
     }
     function keepMachine(){for(const card of view.inspector.querySelectorAll('.machine-card'))rows.append(card);}
-    function showNode(node){if(!node)return;const restore=currentNode?.id===node.id?preserveInspectorFocus():()=>{};currentNode=node;topologySelection=node.id;keepMachine();view.inspector.replaceChildren();
+    function showNode(node){if(!node)return;currentEdgeID='';const restore=currentNode?.id===node.id?preserveInspectorFocus():()=>{};currentNode=node;topologySelection=node.id;keepMachine();view.inspector.replaceChildren();
       if(node.kind==='machine'){const entry=entries.get(JSON.stringify([node.space,node.identity]));if(entry){entry.renderPermissions?.();view.inspector.append(entry.element);}}
       else {
         const paused=node.link?.state==='disconnected'||node.link?.status==='disconnected';
-        view.inspector.append(view.brand(node),n('p','hint',t('topology.kind.'+node.kind)),n('h2','',node.name),n('p',node.status==='connected'?'success-text':'hint',t(paused?'agentLinks.disconnected':node.status==='stale'?'topology.status.stale':'agentLinks.status.'+(node.status==='connected'?'connected':node.status==='connecting'?'connecting':'offline'))),n('p','topology-identity',node.identity),n('p','hint',t(paused?'agentLinks.disconnectedDescription':'topology.messageScope')));
+        view.inspector.append(view.brand(node),n('p','hint',t('topology.kind.'+node.kind)),n('h2','',node.name));
+        if(node.subtitle)view.inspector.append(n('p','hint topology-host',node.subtitle));
+        const endpoint=linkEndpoint(node.link);if(endpoint&&endpoint!==node.subtitle)view.inspector.append(n('p','hint topology-host',endpoint));
+        view.inspector.append(n('p',node.status==='connected'?'success-text':'hint',t(paused?'agentLinks.disconnected':node.status==='stale'?'topology.status.stale':'agentLinks.status.'+(node.status==='connected'?'connected':node.status==='connecting'?'connecting':'offline'))),n('p','hint',t(paused?'agentLinks.disconnectedDescription':'topology.messageScope')),identityDetails(node.id,[['topology.nodeID',node.identity],['topology.endpoint',linkEndpoint(node.link)]]));
+        showActivity(node);
         const assistants=node.link?.assistants||node.link?.directory?.assistants||(!node.link?(client.assistants||[]).filter(item=>!item.origin&&item.space_id===node.space):[]),directory=n('section','topology-assistants');
         directory.append(n('h3','section-heading',t('agentLinks.providedAssistants')));
         if(!assistants.length)directory.append(n('p','hint',t('agentLinks.noAssistants')));
@@ -709,11 +737,14 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
           const remoteID=assistant.address?.agent_id||assistant.id,id=node.link?'agent-link:'+node.link.id+':'+remoteID:assistant.id;
           const open=action('',()=>openChat({space:node.space,owner:id}));open.className='control topology-assistant';
           open.append(connectionBrand(assistant.adapter||node.kind),n('span','topology-assistant-name',assistant.name||remoteID));
+          const activity=node.activities?.get(remoteID),state=node.observation?.fresh?assistantActivityState(activity):'unknown';
+          open.append(n('span','topology-assistant-state state-'+state,t('topology.activity.'+state)));
           if(remoteID===(node.link?.default_assistant_id||node.link?.directory?.default_assistant_id))open.append(n('span','hint',t('agentLinks.defaultAssistant')));
           open.setAttribute('aria-label',t('agentLinks.openChat')+' · '+(assistant.name||remoteID));directory.append(open);
         }
         view.inspector.append(directory);
         if(node.link){
+          const local=model.nodes.find(item=>item.self&&item.space===node.space);showQueues(node.link,local?.name||'',node.name);
           if(node.link.last_error==='agent_link_reconnect_required')view.inspector.append(n('p','hint',t('agentLinks.reconnectRequired')));
           const link={...node.link,_space:node.space},actions=n('div','topology-link-actions');
           actions.append(action(t(paused?'agentLinks.reconnect':'agentLinks.disconnect'),()=>{(paused?connections.reconnect(link):connections.disconnect(link)).catch(()=>{});}),action(t('agentLinks.delete'),()=>connections.remove(link),{danger:true}));view.inspector.append(actions);
@@ -721,17 +752,21 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       }
       view.inspector.append(related(node));restore();
     }
-    function showEdge(edge){keepMachine();view.inspector.replaceChildren();const a=model.nodes.find(node=>node.id===edge.from),b=model.nodes.find(node=>node.id===edge.to);view.inspector.append(n('p','hint',t(edge.kind==='agent'?'topology.agentLegend':'topology.machineLegend')),n('h2','',a.name+(edge.kind==='agent'?' ↔ ':' → ')+b.name),n('p','hint',t(edge.kind==='agent'?'topology.messageScope':'topology.executionScope')),action(t('topology.viewSource'),()=>view.select(a.id)),action(t('topology.viewTarget'),()=>view.select(b.id)));}
+    function showEdge(edge){currentEdgeID=edge.id;keepMachine();view.inspector.replaceChildren();const a=model.nodes.find(node=>node.id===edge.from),b=model.nodes.find(node=>node.id===edge.to);view.inspector.append(n('p','hint',t(edge.kind==='agent'?'topology.agentLegend':'topology.machineLegend')),n('h2','',a.name+(edge.kind==='agent'?' ↔ ':' → ')+b.name),n('p','hint',t(edge.kind==='agent'?'topology.messageScope':'topology.executionScope')),action(t('topology.viewSource'),()=>view.select(a.id)),action(t('topology.viewTarget'),()=>view.select(b.id)));if(edge.kind==='agent')showQueues(edge.link,a.name,b.name);}
     view=createTopology({root,locale,initialSelection:topologySelection,paused:topologyPaused,onPause:value=>{topologyPaused=value;},onSelect:showNode,onEdge:showEdge,signal:token.signal});
+    const freshnessTimer=setInterval(()=>{if(!document.hidden&&gate.current(token)&&!editor)pageView?.queue.run();},10000);
+    token.signal.addEventListener('abort',()=>clearInterval(freshnessTimer),{once:true});
     const update=async({inventory,permissionPages,permissionsPending,linkPages})=>{
       if(!gate.current(token)||disposed)return;
       const restore=preserveInspectorFocus(),items=inventory.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner));
       keyedRows(rows,entries,items,{key:machine=>JSON.stringify([machine._space_id,machine.runtime_id||machine.id]),create:()=>{
-        const element=n('section','page-card machine-card'),header=n('div','machine-header'),mark=n('span','machine-icon'),name=n('span','machine-name'),status=n('span'),tags=n('p','hint machine-tags'),location=n('p','hint machine-location'),permissions=n('div','machine-permissions');mark.append(icon('machines'));header.append(mark,name,status);element.append(location,header,tags,permissions);return {element,name,status,tags,location,permissions};
+        const element=n('section','page-card machine-card'),header=n('div','machine-header'),mark=n('span','machine-icon'),name=n('span','machine-name'),status=n('span'),tags=n('p','hint machine-tags'),location=n('p','hint machine-location'),addresses=n('p','hint machine-addresses'),metadata=n('div'),permissions=n('div','machine-permissions');mark.append(icon('machines'));header.append(mark,name,status);element.append(location,header,addresses,tags,metadata,permissions);return {element,name,status,tags,location,addresses,metadata,permissions};
       },update:(entry,machine)=>{
         const id=machine.runtime_id||machine.id,permissionPage=permissionPages.find(page=>page.space.id===machine._space_id),policy=permissionPage?.value.policy;
         const stale=machine._stale||permissionPage?.stale||client.spaces.find(space=>space.id===machine._space_id)?.connected===false,permissions=entry.permissions;
-        entry.element.dataset.machineId=id;entry.element.dataset.spaceId=machine._space_id;entry.name.textContent=machine.name||id;entry.location.textContent=machine._space_name;entry.status.textContent=t(stale?'topology.status.stale':machine.connected?'agentLinks.status.connected':'agentLinks.status.offline');entry.status.className=machine.connected&&!stale?'success-text':'hint';entry.tags.textContent=(machine.tags||[]).join(' · ');entry.tags.hidden=!machine.tags?.length;
+        entry.element.dataset.machineId=id;entry.element.dataset.spaceId=machine._space_id;entry.name.textContent=machineDisplayName(machine)||t('topology.kind.machine');entry.location.textContent=machine._space_name;entry.status.textContent=t(stale?'topology.status.stale':machine.connected?'agentLinks.status.connected':'agentLinks.status.offline');entry.status.className=machine.connected&&!stale?'success-text':'hint';entry.tags.textContent=(machine.tags||[]).join(' · ');entry.tags.hidden=!machine.tags?.length;
+        entry.addresses.textContent=(machine.ip_addresses||[])[0]||'';entry.addresses.hidden=!entry.addresses.textContent;
+        entry.metadata.replaceChildren(identityDetails(JSON.stringify([machine._space_id,id]),[['topology.hostname',machine.hostname],['topology.interfaceAddresses',(machine.ip_addresses||[]).join(' · ')],['topology.nodeID',id]]));
         entry.renderPermissions=()=>{
         if(permissionsPending&&!policy?.machines?.[id]){permissions.replaceChildren(n('p','hint',t('loading.pending')));return;}
         if(!policy?.machines?.[id]){permissions.replaceChildren(n('p','inline-error',t('topology.permissionsUnavailable')),action(t('retry'),()=>show('machines')));return;}
@@ -742,8 +777,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
         };
         if(currentNode?.kind==='machine'&&currentNode.space===machine._space_id&&currentNode.identity===id)entry.renderPermissions();
       }});
-      model=projectTopology(client.spaces,items,linkPages);view.update(model);restore();
-      if(currentNode?.kind==='machine')showNode(currentNode);
+      const edgeSelection=currentEdgeID;model=projectTopology(client.spaces,items,linkPages);view.update(model);if(currentNode?.kind==='machine')showNode(currentNode);if(edgeSelection){const edge=model.edges.find(item=>item.id===edgeSelection);if(edge)showEdge(edge);}restore();
     };
     return connectView(root,token,async()=>{
       const connectionRequest=connections.load();
@@ -751,7 +785,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       const permissions=across('/api/v1/permissions',token).catch(()=>[]).then(pages=>{data.permissionPages=pages;data.permissionsPending=false;if(data.inventory.length)return update(data);});
       const links=across('/api/v1/agent-links',token,{errorTarget:connectionRoot}).then(pages=>{data.linkPages=pages;linkNotice.hidden=true;}).catch(reason=>{if(reason.name==='AbortError')return;linkNotice.hidden=false;linkNotice.replaceChildren(n('span','',t('topology.connectionUnavailable')),action(t('retry'),()=>pageView?.queue.run()));});
       data.inventory=await across('/api/v1/machines',token);await links;await update(data);await permissions;await connectionRequest;return data;
-    },update,{topics:['machines','spaces','permissions','agent-links'],space:client.spaces?.length===1?client.spaces[0].id:''});
+    },update,{topics:['machines','spaces','permissions','agent-links','tasks','assistant-mail','runtime'],space:client.spaces?.length===1?client.spaces[0].id:''});
   }
   const approvalScope=()=>taskView?.scope||scope();
   const approvalContext=()=>JSON.stringify([approvalScope(),taskView?.task.id||'']);

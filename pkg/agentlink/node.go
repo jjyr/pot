@@ -45,6 +45,7 @@ type Task struct {
 // requests before starting work, and fence interrupted work with unknown effects.
 type Backend interface {
 	Directory(context.Context) (Directory, error)
+	Observe(context.Context, string) (Observation, error)
 	Submit(context.Context, TaskRequest) (Task, error)
 	Status(context.Context, protocol.AgentRef, string) (Task, error)
 	Cancel(context.Context, protocol.AgentRef, string) (Task, error)

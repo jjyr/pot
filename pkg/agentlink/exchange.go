@@ -121,7 +121,20 @@ func (s *Service) Sync(ctx context.Context, id string) error {
 		if err = validateDirectory(directory, connection.PeerHost.NodeID); err != nil {
 			return err
 		}
+		if !reflect.DeepEqual(connection.Directory, &directory) {
+			s.mu.Lock()
+			current, updateErr := s.Get(ctx, id)
+			if updateErr == nil && current.State != "disconnected" && current.State != "revoked" {
+				current.Directory = &directory
+				updateErr = s.update(ctx, current)
+			}
+			s.mu.Unlock()
+			if updateErr != nil {
+				return updateErr
+			}
+		}
 		connection.Directory = &directory
+		s.sampleObservation(ctx, connection, directory, session)
 	}
 	messages, err := s.pending(ctx, connection)
 	if err != nil {
