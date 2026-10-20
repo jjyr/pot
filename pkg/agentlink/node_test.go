@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/jjyr/pot/pkg/protocol"
 	"testing"
+	"time"
 )
 
 type testBackend struct {
@@ -88,5 +89,28 @@ func TestStaleNetworkProjectionCannotResumeDisconnectedConnection(t *testing.T) 
 	current, e := a.service.Get(ctx, c.ID)
 	if e != nil || current.State != "disconnected" {
 		t.Fatal(current, e)
+	}
+}
+
+func TestIncomingConnectionReconnectAcceptsResumeWithoutCallbackEndpoint(t *testing.T) {
+	ctx := context.Background()
+	a, b := newFixture(t, "resume-a"), newFixture(t, "resume-b")
+	c := connect(t, a, b)
+	if e := b.service.Disconnect(ctx, c.ID); e != nil {
+		t.Fatal(e)
+	}
+	if e := b.service.Reconnect(ctx, c.ID); e != nil {
+		t.Fatal("incoming resume requires no callback address", e)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		e := a.service.Sync(ctx, c.ID)
+		if e == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal(e)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

@@ -226,6 +226,12 @@ func (s *Service) Reconnect(ctx context.Context, id string) error {
 	if e != nil {
 		return e
 	}
+	if c.Endpoint == "" {
+		if s.options.Changed != nil {
+			s.options.Changed()
+		}
+		return nil
+	}
 	return s.Sync(ctx, id)
 }
 
