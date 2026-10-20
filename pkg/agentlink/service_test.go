@@ -32,26 +32,6 @@ type sqlMailbox struct {
 func (m sqlMailbox) PendingNode(ctx context.Context, local, peer string) ([]protocol.Envelope, error) {
 	return m.Mailbox.PendingNode(ctx, local, peer)
 }
-func (m sqlMailbox) Pending(ctx context.Context, local, peer protocol.AgentRef) ([]protocol.Envelope, error) {
-	rows, err := m.db.QueryContext(ctx, `SELECT envelope FROM agent_messages WHERE direction='out' AND state='queued' AND json_extract(envelope,'$.from.node_id')=? AND json_extract(envelope,'$.from.kind')=? AND json_extract(envelope,'$.from.agent_id')=? AND json_extract(envelope,'$.to.node_id')=? AND json_extract(envelope,'$.to.kind')=? AND json_extract(envelope,'$.to.agent_id')=? ORDER BY sequence LIMIT ?`, local.NodeID, local.Kind, local.AgentID, peer.NodeID, peer.Kind, peer.AgentID, protocol.MailPageSize)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	result := []protocol.Envelope{}
-	for rows.Next() {
-		var raw []byte
-		var value protocol.Envelope
-		if err = rows.Scan(&raw); err != nil {
-			return nil, err
-		}
-		if err = json.Unmarshal(raw, &value); err != nil {
-			return nil, err
-		}
-		result = append(result, value)
-	}
-	return result, rows.Err()
-}
 
 type fixture struct {
 	t                      *testing.T
