@@ -16,7 +16,7 @@ var ErrUnsupported = errors.New("agent_link_capability_unsupported")
 var ErrDisconnected = errors.New("agent_link_disconnected")
 
 func validateDirectory(d Directory, node string) error {
-	if d.NodeID != node || len(d.Assistants) > 256 || len(d.Assistants) == 0 || d.Name == "" || (d.Adapter != "pot" && d.Adapter != "codex") {
+	if d.NodeID != node || len(d.Assistants) > 256 || d.Name == "" || (d.Adapter != "pot" && d.Adapter != "codex") {
 		return ErrConflict
 	}
 	seen := map[string]bool{}
@@ -26,7 +26,7 @@ func validateDirectory(d Directory, node string) error {
 		}
 		seen[a.Address.AgentID] = true
 	}
-	if !seen[d.DefaultAssistantID] {
+	if d.DefaultAssistantID != "" && !seen[d.DefaultAssistantID] {
 		return ErrConflict
 	}
 	return nil
@@ -50,29 +50,7 @@ func (s *Service) localDirectory(ctx context.Context) (Directory, error) {
 	return d, e
 }
 func (s *Service) pending(ctx context.Context, c Connection) ([]protocol.Envelope, error) {
-	if s.options.Backend == nil || c.Directory == nil {
-		return s.options.Mailbox.Pending(ctx, c.Local.Address, c.Peer.Address)
-	}
-	local, e := s.localDirectory(ctx)
-	if e != nil {
-		return nil, e
-	}
-	out := []protocol.Envelope{}
-	for _, a := range local.Assistants {
-		for _, b := range c.Directory.Assistants {
-			messages, e := s.options.Mailbox.Pending(ctx, a.Address, b.Address)
-			if e != nil {
-				return nil, e
-			}
-			for _, m := range messages {
-				if len(out) == protocol.MailPageSize {
-					return out, nil
-				}
-				out = append(out, m)
-			}
-		}
-	}
-	return out, nil
+	return s.options.Mailbox.PendingNode(ctx, c.Local.Address.NodeID, c.PeerHost.NodeID)
 }
 
 // Directory refreshes the remote node's advertised assistants. It grants no
@@ -191,15 +169,6 @@ func (s *Service) business(ctx context.Context, c Connection, remote peer.Identi
 			return nil, ErrInvalid
 		}
 
-		found := input.AssistantID == ""
-		for _, a := range d.Assistants {
-			if a.Address.AgentID == input.AssistantID {
-				found = true
-			}
-		}
-		if !found {
-			return nil, ErrNotFound
-		}
 		result, e = s.options.Backend.Submit(ctx, input)
 	case "task.status", "task.cancel":
 		if !supports(d, "tasks") || r.Method == "task.cancel" && !supports(d, "cancel") {

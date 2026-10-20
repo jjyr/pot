@@ -151,3 +151,24 @@ func (m *hostMailbox) messages(ctx context.Context) ([]protocol.MailRecord, erro
 	}
 	return items, rows.Err()
 }
+
+func (m *hostMailbox) PendingNode(ctx context.Context, local, peer string) ([]protocol.Envelope, error) {
+	rows, err := m.db.QueryContext(ctx, `SELECT envelope FROM agent_messages WHERE direction='outgoing' AND state='queued' AND json_extract(envelope,'$.from.node_id')=? AND json_extract(envelope,'$.to.node_id')=? ORDER BY sequence LIMIT 32`, local, peer)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []protocol.Envelope{}
+	for rows.Next() {
+		var raw string
+		var value protocol.Envelope
+		if err = rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal([]byte(raw), &value); err != nil {
+			return nil, err
+		}
+		out = append(out, value)
+	}
+	return out, rows.Err()
+}

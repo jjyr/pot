@@ -29,6 +29,9 @@ type sqlMailbox struct {
 	db *sql.DB
 }
 
+func (m sqlMailbox) PendingNode(ctx context.Context, local, peer string) ([]protocol.Envelope, error) {
+	return m.Mailbox.PendingNode(ctx, local, peer)
+}
 func (m sqlMailbox) Pending(ctx context.Context, local, peer protocol.AgentRef) ([]protocol.Envelope, error) {
 	rows, err := m.db.QueryContext(ctx, `SELECT envelope FROM agent_messages WHERE direction='out' AND state='queued' AND json_extract(envelope,'$.from.node_id')=? AND json_extract(envelope,'$.from.kind')=? AND json_extract(envelope,'$.from.agent_id')=? AND json_extract(envelope,'$.to.node_id')=? AND json_extract(envelope,'$.to.kind')=? AND json_extract(envelope,'$.to.agent_id')=? ORDER BY sequence LIMIT ?`, local.NodeID, local.Kind, local.AgentID, peer.NodeID, peer.Kind, peer.AgentID, protocol.MailPageSize)
 	if err != nil {
@@ -363,7 +366,7 @@ func TestTCPListenerRevocationAndPendingBacklogIsolation(t *testing.T) {
 	connection := connect(t, a, b)
 	other, _ := a.service.options.Identity(ctx, "other")
 	for index := 0; index < protocol.MailPageSize+1; index++ {
-		if _, err := a.mail.Send(ctx, fmt.Sprintf("other-%d", index), other.Address, protocol.SendMail{To: b.identity().Address, Text: "not bound"}, nil); err != nil {
+		if _, err := a.mail.Send(ctx, fmt.Sprintf("other-%d", index), other.Address, protocol.SendMail{To: protocol.AgentRef{NodeID: "another-node", Kind: "assistant", AgentID: "main"}, Text: "another node"}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

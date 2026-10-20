@@ -69,7 +69,7 @@ type Preview struct {
 // immutable receipt. That receipt means inbox acceptance, not model processing.
 // Pending MUST filter the exact two addresses before applying its bounded limit.
 type Mailbox interface {
-	Pending(context.Context, protocol.AgentRef, protocol.AgentRef) ([]protocol.Envelope, error)
+	PendingNode(context.Context, string, string) ([]protocol.Envelope, error)
 	Deliver(context.Context, protocol.Envelope) (protocol.Receipt, error)
 	Acknowledge(context.Context, protocol.Receipt) error
 }
