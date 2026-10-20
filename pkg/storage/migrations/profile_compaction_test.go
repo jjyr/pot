@@ -17,7 +17,8 @@ func TestProfileCompactionUpgradePreservesRoutesAndReceipts(t *testing.T) {
 	snapshot := value["snapshot"].(map[string]any)
 	profile := snapshot["profiles"].([]any)[0].(map[string]any)
 	settings := profile["model_settings"].(map[string]any)
-	if profile["auth_ref"] != "secret:reference" || settings["catalog_provider"] != "custom" || settings["input_modalities"] == nil || settings["idle_compact_models"] == nil {
+	_, hasIdleTiming := settings["idle_compact_minutes"]
+	if profile["auth_ref"] != "secret:reference" || settings["catalog_provider"] != "custom" || settings["input_modalities"] == nil || !hasIdleTiming {
 		t.Fatal(value)
 	}
 	receipt := value["requests"].(map[string]any)["receipt"].(map[string]any)

@@ -76,17 +76,17 @@ func TestIdleCompactionCanonicalOutcomeGate(t *testing.T) {
 	}
 	check(true)
 }
-func TestIdleCompactionDelayConnectionAndModel(t *testing.T) {
+func TestIdleCompactionDelayConnection(t *testing.T) {
 	s := taskResourceService(t)
 	ctx := context.Background()
 	minutes := uint64(20)
 	s.Profiles.mu.Lock()
-	s.Profiles.state.Profiles = []core.Profile{{ID: "p", ModelSettings: &core.ModelSettings{IdleCompactMinutes: &minutes, IdleCompactModels: map[string]uint64{"fast": 5}}}}
+	s.Profiles.state.Profiles = []core.Profile{{ID: "p", ModelSettings: &core.ModelSettings{IdleCompactMinutes: &minutes}}, {ID: "default"}}
 	s.Profiles.mu.Unlock()
 	for _, tc := range []struct {
 		profile, model string
 		want           time.Duration
-	}{{"p", "fast", 5 * time.Minute}, {"p", "other", 20 * time.Minute}, {"removed", "fast", 0}} {
+	}{{"p", "fast", 20 * time.Minute}, {"p", "other", 20 * time.Minute}, {"default", "fast", 15 * time.Minute}, {"removed", "fast", 0}} {
 		got, err := s.idleCompactPolicy(ctx, core.Thread{Config: core.ResolvedSpec{SourceProfileID: tc.profile, Model: tc.model}})
 		if err != nil || got.Delay != tc.want {
 			t.Fatal(tc, got, err)

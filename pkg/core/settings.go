@@ -117,8 +117,7 @@ type ToolPolicy struct {
 	Unattended          string `json:"unattended" required:"true"`
 }
 type ModelSettings struct {
-	IdleCompactMinutes *uint64           `json:"idle_compact_minutes,omitempty"`
-	IdleCompactModels  map[string]uint64 `json:"idle_compact_models,omitempty"`
+	IdleCompactMinutes *uint64 `json:"idle_compact_minutes,omitempty"`
 
 	CatalogProvider *string             `json:"catalog_provider"`
 	ContextWindow   *uint64             `json:"context_window"`
@@ -142,15 +141,6 @@ func (p Profile) Validate() error {
 		if value := p.ModelSettings.IdleCompactMinutes; value != nil && (*value == 0 || *value > 525600) {
 			return fmt.Errorf("invalid idle compact duration")
 		}
-		if len(p.ModelSettings.IdleCompactModels) > 10000 {
-			return fmt.Errorf("too many compact model overrides")
-		}
-		for model, value := range p.ModelSettings.IdleCompactModels {
-			if strings.TrimSpace(model) == "" || len(model) > 256 || value == 0 || value > 525600 {
-				return fmt.Errorf("invalid compact model override")
-			}
-		}
-
 		if len(p.ModelSettings.InputModalities) > 10000 {
 			return fmt.Errorf("too many model input descriptors")
 		}

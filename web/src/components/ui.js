@@ -719,7 +719,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     row.dataset.messageId=message.id;row.dataset.sequence=message.sequence||'';
     bubble.dataset.scrollAnchor=`message:${message.viewKey}`;
     if(message.compaction){
- if(!record.compact){const scope=client.scope();record.compact=createCompaction({locale:()=>locale,request:(path,options)=>client.request(path,options),scope:scope.owner,owner:scope});bubble.append(record.compact.element);}
+ if(!record.compact){record.compact=createCompaction({locale:()=>locale});bubble.append(record.compact.element);}
  record.compact.update(message);
  }else if(message.role==='tool'&&message.tool){
       const scope=client.scope?.()||{},key=JSON.stringify([scope.space,scope.owner,message.id]);

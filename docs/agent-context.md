@@ -138,7 +138,7 @@ resume:  [stable system | tools | current runtime | summary | last user batch]
 ```
 
 Window pressure reserves space for the full appended instruction and summary
-output. Idle maintenance checks at the connection/model configured delay (15
+output. Idle maintenance checks at the connection's configured delay (15
 minutes by default, never early), with context above 30%. It requires settled
 current work, no queued user input and no completed-but-unprocessed Task results.
 Unfinished background Tasks do not block it. The canonical Task completion writer
@@ -181,8 +181,9 @@ builds a smaller cache. Actual provider usage determines cache hits.
 
 The transcript exposes a foldable compact operation, not a synthetic tool call.
 It includes trigger, status, elapsed time and estimated before/after size. Its
-private downloadable JSON record contains request/response evidence and links to
-the actual metered attempts; usage is never added twice.
+private diagnostic record retains request/response evidence and links to the
+actual metered attempts for investigation; usage is never added twice. Chat and
+usage pages do not expose a download action.
 
 ## Assistant tools
 

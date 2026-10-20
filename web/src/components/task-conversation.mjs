@@ -96,7 +96,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
       if(!entry){const element=n('article',`message task-event role-${message.role}`);entry={element,row:element,text:null};}
       entry.element.dataset.messageId=message.id;
       if(message.compaction){
- if(!entry.compact){entry.compact=createCompaction({locale,request:(path,options)=>client.request(path,options),scope:task.id,owner:scope});entry.element.append(entry.compact.element);}
+ if(!entry.compact){entry.compact=createCompaction({locale});entry.element.append(entry.compact.element);}
  entry.compact.update(message);
  }else if(message.tool){
         if(!entry.tool){entry.tool=createToolCall({memory:toolMemory,key:JSON.stringify([scope,task.id,message.id]),locale,onDecision,downloadFile,acquireFileImage});entry.element.append(entry.tool.element);}

@@ -5,7 +5,7 @@ import (
 	"errors"
 )
 
-// UpgradeProfileCompaction adopts connection/model idle timing intent. Route,
+// UpgradeProfileCompaction adopts connection idle timing intent. Route,
 // credentials, immutable execution snapshots and request receipts are retained.
 func UpgradeProfileCompaction(raw []byte) ([]byte, bool, error) {
 	var file map[string]json.RawMessage
@@ -32,7 +32,6 @@ func UpgradeProfileCompaction(raw []byte) ([]byte, bool, error) {
 			}
 		}
 		settings["idle_compact_minutes"] = json.RawMessage("null")
-		settings["idle_compact_models"] = json.RawMessage("{}")
 		body, err := json.Marshal(settings)
 		if err != nil {
 			return err

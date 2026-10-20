@@ -21,10 +21,6 @@ func (s *Service) idleCompactPolicy(_ context.Context, thread core.Thread) (assi
 					minutes = *settings.IdleCompactMinutes
 					source = "connection"
 				}
-				if value, ok := settings.IdleCompactModels[thread.Config.Model]; ok {
-					minutes = value
-					source = "model"
-				}
 			}
 			return assistant.IdleCompactionPolicy{Delay: time.Duration(minutes) * time.Minute, Source: source}, nil
 		}
