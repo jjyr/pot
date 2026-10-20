@@ -77,8 +77,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let assistants = [], spaces = [], selectedAssistant = null, pendingSelection = null;
   let unsubscribe = () => {}, stopChanges = () => {};
   let directoryEpoch = 0, directorySignature = '';
-  const positions = new Map(), cachedSnapshots = new Map(), readingPositions = new Map();
-  let chatShown=false,pendingReadingPosition=null,pendingTaskToggle=null,lastTaskReadingPosition=null,pendingFollow=false,followFrame=0;
+  const positions = new Map(), cachedSnapshots = new Map();
+  let chatShown=false,pendingReadingPosition=null,pendingTaskToggle=null,lastTaskReadingPosition=null,pendingFollow=false;
+  let chatPosition=null,chatNavigation=0;
+  const chatHeights=new Map();
   let restoredSnapshot=false,awaitingSnapshot=false;
   const snapshotKey=(space=client.scope?.().space||'',owner=client.scope?.().owner||'')=>JSON.stringify([(client.spaces||[]).find(item=>item.id===space)?.control_id||client.runtime?.runtime_id||'',space,owner]);
   const t = key => translate(locale,key);
@@ -202,37 +204,36 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let referenceDraftSignature='',referenceNotice='';
   let historyLoading=false,historyFailure='',historyGeneration=0,historyFlight=null;
   function readHistory(query,options={}){
+    if(options.positionTicket&&!currentChatPosition(options.positionTicket))return Promise.resolve(false);
     const receivedEpoch=epoch;
     if(historyLoading&&historyFlight)return historyFlight.then(()=>receivedEpoch===epoch?readHistory(query,options):false);
     historyFlight=readHistoryNow(query,options);return historyFlight;
   }
-  async function readHistoryNow(query,{around=false}={}) {
+  async function readHistoryNow(query,{around=false,positionTicket}={}) {
     if(!client.history||!state.snapshot||historyLoading)return false;
     const receivedEpoch=epoch,generation=++historyGeneration,scope={...client.scope()},anchor=readingAnchor(history);
     historyLoading=true;historyFailure='';renderMessages();
     try {
       const page=await client.history(query,{...scope,signal:abort.signal});
-      if(disposed||receivedEpoch!==epoch||generation!==historyGeneration)return false;
+      if(disposed||receivedEpoch!==epoch||generation!==historyGeneration||positionTicket&&!currentChatPosition(positionTicket))return false;
       const merged=mergeHistoryPage(state.snapshot,page,state.uiAnchor,{around});
       if(!merged)return false;
       state.snapshot=merged;cacheSnapshot(merged);lastAnchor=anchor;resizeAnchor=true;renderMessagesNow();
-      if(around&&anchor){messageWindow.seek(anchor.id);renderMessagesNow();restoreReadingAnchor(history,anchor);}
+      if(around&&anchor&&!positionTicket){messageWindow.seek(anchor.id);renderMessagesNow();restoreReadingAnchor(history,anchor);}
       return true;
-    }catch(reason){if(!disposed&&receivedEpoch===epoch){historyFailure=reason?.status===404?'history.missing':'history.failed';}return false;}
+    }catch(reason){if(!disposed&&receivedEpoch===epoch&&generation===historyGeneration&&(!positionTicket||currentChatPosition(positionTicket))){historyFailure=reason?.status===404?'history.missing':'history.failed';}return false;}
     finally{if(!disposed&&receivedEpoch===epoch&&generation===historyGeneration){historyLoading=false;renderMessages();}}
   }
   async function jumpToMessage(id){
+    const ticket=positionChat({kind:'message',id});
     let message=state.snapshot?.messages.find(message=>message.id===id&&!message.context_only);
-    if(!message){if(!await readHistory({around:id},{around:true}))return;message=state.snapshot?.messages.find(message=>message.id===id);}
-    if(!message){historyFailure='history.missing';renderMessages();return;}
+    if(!message){if(!await readHistory({around:id},{around:true,positionTicket:ticket})){if(currentChatPosition(ticket))chatPosition=null;return;}message=state.snapshot?.messages.find(message=>message.id===id);}
+    if(!currentChatPosition(ticket))return;
+    if(!message){chatPosition=null;historyFailure='history.missing';renderMessages();return;}
     state.uiAnchor=message.sequence;
-    // Estimate once to mount the target; measured windows refine its position.
-    following=false;renderMessagesNow();messageWindow.seek(message.id);
-    const targetRow=()=>[...messageNodes.values()].find(record=>record.row.dataset.messageId===id)?.row;
-    for(let attempt=0;attempt<4&&!targetRow();attempt++){renderMessages();await new Promise(requestAnimationFrame);}
-    const row=targetRow();if(!row)return;
-    for(let parent=row.parentElement?.closest('details');parent;parent=parent.parentElement?.closest('details'))parent.open=true;
-    row.scrollIntoView({block:'center',behavior:'instant'});following=false;row.classList.remove('reference-target');requestAnimationFrame(()=>row.classList.add('reference-target'));
+    renderMessagesNow();
+    const row=[...messageNodes.values()].find(record=>record.row.dataset.messageId===id)?.row;
+    row?.classList.add('reference-target');
   }
 
   const stopMessageSelection=bindMessageSelection(history,{capture:refs=>{
@@ -410,22 +411,17 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const shellRoots={rail,titlebar,menu};
   function rememberChatPosition(){
     if(!state.snapshot)return;
-    positions.set(ownerKey(state.snapshot),{top:history.scrollTop,anchor:readingAnchor(history),following});
-    // A visible task row at the bottom is not a paused reading position.
-    if(following)readingPositions.delete(snapshotKey());
-    else readingPositions.set(snapshotKey(),captureReadingPosition(history));
+    positions.set(snapshotKey(),{top:history.scrollTop,anchor:readingAnchor(history),reading:captureReadingPosition(history),following});
+    chatHeights.delete(snapshotKey());chatHeights.set(snapshotKey(),new Map(windowHeights));
+    while(chatHeights.size>8)chatHeights.delete(chatHeights.keys().next().value);
   }
   const closeAssistantProfile = () => assistantProfile.hidePopover();
   window.addEventListener('resize', closeAssistantProfile);
   function toggleDirectory() {
-    const position = captureReadingPosition(history);
+    positionChat({kind:'restore',position:{top:history.scrollTop,anchor:readingAnchor(history),reading:captureReadingPosition(history),following}});
     directoryCollapsed = !directoryCollapsed;
     renderShell();
-    requestAnimationFrame(() => {
-      if (disposed) return;
-      restoreReadingPosition(history, position);
-      root.querySelector('.directory-toggle')?.focus({preventScroll: true});
-    });
+    root.querySelector('.directory-toggle')?.focus({preventScroll: true});
   }
   function openAssistantSettings() {
     assistantProfile.hidePopover();
@@ -437,8 +433,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function renderShell() {
     root.classList.toggle('is-background',document.visibilityState==='hidden');
     const showingChat=route==='chat'&&!(media.matches&&directoryOpen);
-    if(chatShown&&!showingChat)rememberChatPosition();
-    if(!chatShown&&showingChat)pendingReadingPosition=readingPositions.get(snapshotKey())||pendingReadingPosition;
+    if(chatShown&&!showingChat){rememberChatPosition();cancelChatPosition();}
+    if(!chatShown&&showingChat&&!chatPosition)positionChat({kind:'restore',position:positions.get(snapshotKey())});
     chatShown=showingChat;
     queueMicrotask(()=>{if(!disposed)notifications?.report();});
     const rail=shellRoots.rail.cloneNode(false),titlebar=shellRoots.titlebar.cloneNode(false),menu=shellRoots.menu.cloneNode(false);
@@ -583,14 +579,23 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if (preferencesOpen) renderPreferences();
     updateControls();
     taskClock.refresh();
-    requestAnimationFrame(() => { if (!disposed) editor.resize(); });
+    // Layout and position restoration must finish before the newly visible Chat paints.
+    if(chatShown){editor.resize();renderMessagesNow();}
   }
   function selectedSequence(){const selection=getSelection();if(!selection?.rangeCount||selection.isCollapsed||!history.contains(selection.anchorNode))return null;const element=selection.anchorNode.nodeType===Node.ELEMENT_NODE?selection.anchorNode:selection.anchorNode.parentElement;return element?.closest('article.message')?.dataset.sequence||null;}
   function nearBottom() { return history.scrollHeight - history.clientHeight - history.scrollTop < 80; }
   function atBottom() { return history.scrollHeight - history.clientHeight - history.scrollTop <= 1; }
   let following=true,renderFrame=0,lastAnchor=null,resizeAnchor=false,lastScrollTop=0,upwardIntent=false;
+  function currentChatPosition(ticket){return !disposed&&ticket.generation===chatNavigation&&ticket.key===snapshotKey();}
+  function cancelChatPosition(){chatNavigation++;chatPosition=null;}
+  function positionChat(intent){
+    const ticket={...intent,key:snapshotKey(),generation:++chatNavigation};
+    chatPosition=ticket;pendingFollow=false;pendingReadingPosition=null;
+    following=intent.kind==='latest'||intent.kind==='restore'&&(intent.position?.following??true);
+    upwardIntent=false;renderMessages();return ticket;
+  }
   function scrollBottom() { following=true;upwardIntent=false;history.scrollTop = history.scrollHeight;lastScrollTop=history.scrollTop; latest.hidden = true; }
-  function pauseFollowing(){following=false;pendingFollow=false;latest.hidden=false;}
+  function pauseFollowing(){cancelChatPosition();following=false;pendingFollow=false;latest.hidden=false;}
   function loadEarlierNearTop(){
     if(!historyLoading&&!historyFailure&&history.scrollTop<Math.max(180,history.clientHeight)&&state.snapshot?.history?.has_more){
       pauseFollowing();readHistory({before:state.snapshot.history.before});
@@ -606,21 +611,33 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     upwardIntent=true;pauseFollowing();loadEarlierNearTop();
   }
   history.addEventListener('wheel',event=>{
+    if(!event.ctrlKey&&!event.metaKey&&Math.abs(event.deltaY)>Math.abs(event.deltaX))cancelChatPosition();
     if(!event.ctrlKey&&!event.metaKey&&event.deltaY<0&&Math.abs(event.deltaY)>Math.abs(event.deltaX))scrollUpIntent(event);
   },{passive:true});
+  history.addEventListener('pointerdown',cancelChatPosition,{passive:true});
   let touchY=null;
-  history.addEventListener('touchstart',event=>{touchY=event.touches.length===1?event.touches[0].clientY:null;},{passive:true});
+  history.addEventListener('touchstart',event=>{cancelChatPosition();touchY=event.touches.length===1?event.touches[0].clientY:null;},{passive:true});
   history.addEventListener('touchmove',event=>{
     const nextY=event.touches.length===1?event.touches[0].clientY:null;
     if(touchY!==null&&nextY!==null&&nextY>touchY)scrollUpIntent(event);
     touchY=nextY;
   },{passive:true});
   history.addEventListener('keydown',event=>{
+    if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End','Tab',' '].includes(event.key))cancelChatPosition();
     if(event.ctrlKey||event.metaKey||event.altKey||event.target.closest('input,textarea,select,button,a,summary,[contenteditable]'))return;
     if(['ArrowUp','PageUp','Home'].includes(event.key)||event.key===' '&&event.shiftKey)scrollUpIntent(event);
   });
   history.addEventListener('scroll', () => {
     if(!chatShown)return;
+    const focus=document.activeElement;
+    if(chatPosition?.kind==='message'&&chatPosition.resolved&&focus instanceof HTMLIFrameElement&&history.contains(focus)){
+      // Native embedded viewers can focus themselves while loading in overscan.
+      // Keep the explicit destination until the reader gestures or focuses it.
+      renderMessagesNow();return;
+    }
+    // Programmatic restoration already recorded this exact viewport. Its queued
+    // scroll event must not start pagination or cancel a newer navigation intent.
+    if(Math.abs(history.scrollTop-lastScrollTop)<.5)return;
     lastTaskReadingPosition=captureReadingPosition(history);
     if(history.scrollTop<lastScrollTop-.5)pauseFollowing();
     else if(atBottom()){following=true;upwardIntent=false;}
@@ -630,7 +647,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     loadEarlierNearTop();
     if(!historyLoading&&!historyFailure&&nearBottom()&&state.snapshot?.history?.has_newer){pauseFollowing();readHistory({after:state.snapshot.history.after});}
   }, {passive: true});
-  latest.onclick = async()=>{if(state.snapshot?.history?.has_newer)await readHistory({},{around:true});following=true;state.uiAnchor=null;renderMessages();requestAnimationFrame(scrollBottom);};
+  latest.onclick = async()=>{const ticket=positionChat({kind:'latest'});if(state.snapshot?.history?.has_newer)await readHistory({},{around:true,positionTicket:ticket});if(!currentChatPosition(ticket))return;state.uiAnchor=null;renderMessagesNow();};
   historyStatus.onclick=()=>{pauseFollowing();if(historyFailure==='history.missing'){historyFailure='';renderMessages();}else if(!historyLoading&&state.snapshot?.history?.has_more)readHistory({before:state.snapshot.history.before});};
   const messageNodes = new Map(),toolMemory=new Map();
   const taskCache=new Map();
@@ -659,8 +676,16 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   const windowHeights=new Map();
   const disposeMessage=record=>{record.childrenWindow?.close();record.attachmentNode?.dispose?.();record.row.remove();messageNodes.delete(record.row.dataset.windowKey);};
-  const requestMessageRender=resize=>{resizeAnchor ||= !!resize;renderMessages();};
-  let renderingSnapshot=null,renderingSending=null,renderingForest=null;
+  const requestMessageRender=resize=>{
+    // ResizeObserver runs before paint. Compensate now, before a queued scroll
+    // event can mistake a layout correction for a new reading position.
+    if(resize&&chatShown&&!chatPosition){
+      if(following)scrollBottom();else restoreReadingAnchor(history,lastAnchor);
+      lastScrollTop=history.scrollTop;
+    }
+    resizeAnchor ||= !!resize;renderMessages();
+  };
+  let renderingSnapshot=null,renderingSending=null,renderingForest=null,navigationPath=new Map();
   const markdownFiles=scope=>({
     acquireResource:client.acquireResource?resource=>client.acquireResource(resource,scope):undefined,
     downloadResource:client.downloadResource?resource=>client.downloadResource(resource,scope):undefined,
@@ -728,8 +753,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
 
     if(record.tool){
       const entry=forest.byID.get(message.tool.turn_id+':'+message.tool.id),children=entry?.children.map(child=>child.message)||[];
+      if(chatPosition&&navigationPath.has(message.id))record.tool.element.open=true;
       if(!record.childrenWindow){record.childrenWindow=createMessageWindow({scroller:history,host:record.tool.children,render:renderMessage,dispose:disposeMessage,requestRender:requestMessageRender,heights:windowHeights});record.tool.element.addEventListener('toggle',()=>renderMessages());}
-      record.childrenWindow.set(record.tool.element.open?children:[]);
+      record.childrenWindow.set(record.tool.element.open?children:[],{target:navigationPath.has(message.id)?{id:navigationPath.get(message.id)}:undefined});
     }
     return record;
   };
@@ -738,9 +764,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function renderMessages(){if(disposed||renderFrame)return;renderFrame=requestAnimationFrame(()=>{renderFrame=0;renderMessagesNow();});}
   function renderMessagesNow() {
     if(!chatShown)return;
+    const navigation=chatPosition?.key===snapshotKey()?chatPosition:null;
     const follow=following||pendingFollow,resized=resizeAnchor;
     const taskReading=pendingReadingPosition||(resized&&lastTaskReadingPosition)||captureReadingPosition(history);
-    const anchor=resizeAnchor?lastAnchor:readingAnchor(history);resizeAnchor=false;
+    const anchor=navigation?.kind==='restore'?navigation.position?.anchor:resizeAnchor?lastAnchor:readingAnchor(history);resizeAnchor=false;
     const snapshot=state.snapshot||(client.production&&selectedAssistant?cachedSnapshots.get(snapshotKey(selectedAssistant.space_id||'',selectedAssistant.id)):null);
     const sending=state.sends.get(editorOwner||(snapshot&&ownerKey(snapshot)));
     const activeTurn=snapshot?.running?(snapshot.messages.find(message=>message.id===snapshot.turn_id)?.request_id||snapshot.turn_id):null;
@@ -748,7 +775,17 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const forest=toolForest(visibleMessages);
     renderingSnapshot=snapshot;renderingSending=sending;renderingForest=forest;
     const roots=visibleMessages.filter(message=>!message.tool?.parent_id||!forest.byID.has(message.tool.turn_id+':'+message.tool.parent_id));
-    messageWindow.set(roots,{anchor:anchor?.id});
+    navigationPath=new Map();
+    let destination=visibleMessages.find(message=>message.id===(navigation?.kind==='message'?navigation.id:anchor?.id));
+    const destinationID=destination?.id;
+    const ancestry=new Set();
+    while(destination?.tool?.parent_id&&!ancestry.has(destination.id)){
+      ancestry.add(destination.id);
+      const parent=forest.byID.get(destination.tool.turn_id+':'+destination.tool.parent_id)?.message;
+      if(!parent)break;
+      navigationPath.set(parent.id,destination.id);destination=parent;
+    }
+    const target=follow?{end:true}:destination?{id:destination.id,offset:navigation?.kind==='message'?undefined:anchor?.offset}:undefined;
     historyStatus.hidden=!client.history||!snapshot;
     historyStatus.disabled=historyLoading||!historyFailure&&!snapshot?.history?.has_more;
     historyStatus.textContent=t(historyLoading?'history.loading':historyFailure|| (snapshot?.history?.has_more?'history.earlier':'history.start'));
@@ -762,7 +799,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       const retained=new Set([...backgroundTaskView.element.querySelectorAll('[data-scroll-anchor]')].map(node=>node.dataset.scrollAnchor));
       if(!retained.has(taskReading.anchors[0].key))taskReading.anchors=[{key:'background-tasks-heading',offset:0}];
     }
-    const restoreTasks=pendingReadingPosition||(!follow&&(tasksChanged||resized&&taskReading.anchors.some(item=>item.key.startsWith('task:')))?taskReading:null);
+    const restoreTasks=navigation?.kind==='restore'&&!follow?navigation.position?.reading:pendingReadingPosition||(!follow&&(tasksChanged||resized&&taskReading.anchors.some(item=>item.key.startsWith('task:')))?taskReading:null);
     pendingTaskToggle=null;
     taskClock.refresh();
     if (snapshot && !visibleMessages.length) {
@@ -772,30 +809,30 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     pages?.renderApprovals();
     if(!chatApprovals.hidden&&locateApprovals===JSON.stringify(client.scope?.())){locateApprovals='';requestAnimationFrame(()=>{if(!disposed&&route==='chat')chatApprovals.scrollIntoView({block:'nearest',behavior:reducedMotion.matches?'instant':'smooth'});});}
-    if(restoreTasks&&chatShown&&!pendingFollow){following=false;restoreReadingPosition(history,restoreTasks);pendingReadingPosition=null;latest.hidden=nearBottom();}
-    else if(follow)scrollBottom();else{restoreReadingAnchor(history,anchor);latest.hidden=false;}
+    messageWindow.layout(roots,{anchor:anchor?.id,target,restore:()=>{
+      if(navigation?.kind==='message'&&destinationID){
+        const row=[...messageNodes.values()].find(record=>record.row.dataset.messageId===destinationID)?.row;
+        if(row){history.scrollTop+=row.getBoundingClientRect().top-history.getBoundingClientRect().top-(history.clientHeight-row.getBoundingClientRect().height)/2;following=false;latest.hidden=false;}
+      }else if(restoreTasks&&!pendingFollow){following=false;restoreReadingPosition(history,restoreTasks);latest.hidden=nearBottom();}
+      else if(follow)scrollBottom();else if(anchor){restoreReadingAnchor(history,anchor);latest.hidden=false;}
+      else if(navigation?.position)history.scrollTop=navigation.position.top;
+    }});
+    pendingReadingPosition=null;
+    if(navigation&&snapshot&&!historyLoading){
+      if(navigation.kind==='message')navigation.resolved=!!destinationID;
+      else chatPosition=null;
+    }
     if(snapshot&&!snapshot.history?.has_more&&!snapshot.history?.has_newer&&history.scrollHeight<=history.clientHeight+1)scrollBottom();
     lastTaskReadingPosition=captureReadingPosition(history);
     lastScrollTop=history.scrollTop;
     lastAnchor=readingAnchor(history);if(!following)state.uiAnchor=selectedSequence()||lastAnchor?.sequence||null;
     if(following)state.uiAnchor=null;
-    if(pendingFollow&&!followFrame)followFrame=requestAnimationFrame(()=>{followFrame=0;if(!disposed&&chatShown&&pendingFollow){scrollBottom();pendingFollow=false;}});
+    pendingFollow=false;
   }
   function cacheSnapshot(snapshot){const key=snapshotKey();cachedSnapshots.delete(key);cachedSnapshots.set(key,{...snapshot,kind:'reset',base_cursor:0});while(cachedSnapshots.size>8)cachedSnapshots.delete(cachedSnapshots.keys().next().value);while(positions.size>32)positions.delete(positions.keys().next().value);while(toolMemory.size>1280)toolMemory.delete(toolMemory.keys().next().value);}
   function restoreSavedPosition(position){
-    const saved=readingPositions.get(snapshotKey());
-    following=position.following;state.uiAnchor=position.anchor?.sequence||null;
-    if(!following&&saved?.anchors.some(item=>item.key.startsWith('task:')||item.key.startsWith('background-tasks'))){
-      renderMessagesNow();restoreReadingPosition(history,saved);
-    }else{
-      renderMessagesNow();
-      if(following)scrollBottom();else if(position.anchor){messageWindow.seek(position.anchor.id);renderMessagesNow();restoreReadingAnchor(history,position.anchor);}else history.scrollTop=position.top;
-    }
-    // Resize and delayed task reads must use the restored viewport, not the
-    // intermediate window used to mount the saved message.
-    lastAnchor=readingAnchor(history);lastScrollTop=history.scrollTop;
-    lastTaskReadingPosition=captureReadingPosition(history);
-    latest.hidden=following;
+    positionChat({kind:'restore',position});
+    state.uiAnchor=position?.anchor?.sequence||null;
   }
   function pendingSend(){return state.snapshot&&state.pending.has(ownerKey(state.snapshot));}
   function onSnapshot(snapshot, receivedEpoch = epoch) {
@@ -822,11 +859,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     connectionError = '';
     snapshot=state.snapshot;
     if(client.production)cacheSnapshot(snapshot);
-    const restorePosition = editorOwner !== ownerKey(snapshot) ? positions.get(ownerKey(snapshot)) : undefined;
+    if(editorOwner !== ownerKey(snapshot)&&!chatPosition)restoreSavedPosition(positions.get(snapshotKey()));
     syncEditor();
     restoreFailedAttachments();
     if(markVisibleRead())renderShell();
-    renderMessages(); if (restorePosition !== undefined) {const key=ownerKey(snapshot);requestAnimationFrame(()=>{if(!disposed&&receivedEpoch===epoch&&editorOwner===key)restoreSavedPosition(restorePosition);});} updateControls();
+    renderMessages();updateControls();
     if(client.production)pages.syncApprovals();
     if(readingBeforeReset&&!snapshot.messages.some(message=>message.id===readingBeforeReset.id&&!message.context_only)){
       readHistory({around:readingBeforeReset.id},{around:true});
@@ -867,13 +904,16 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if (editor.composing) { input.blur(); if (editor.composing) return; }
     if (pages && !await pages.leave()) return;
     if(chatShown)rememberChatPosition();
+    cancelChatPosition();
     pages?.clearApprovals();locateApprovals=item.pending_approvals?JSON.stringify({owner:item.id,space:item.space_id||''}):'';selectedAssistant = item; client.setScope({owner:item.id, space:item.space_id || ''});updates?.refresh(client.scope());
     epoch = beginSubscription(state); editorOwner = null; route = 'chat'; if(!initial)directoryOpen = false;
-    pendingReadingPosition=readingPositions.get(snapshotKey())||null;pendingTaskToggle=null;lastTaskReadingPosition=null;resizeAnchor=false;pendingFollow=false;
+    pendingReadingPosition=null;pendingTaskToggle=null;lastTaskReadingPosition=null;resizeAnchor=false;pendingFollow=false;
     messageWindow.set([]);windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);messageNodes.clear();windowHeights.clear();following=true;upwardIntent=false;lastScrollTop=0;lastAnchor=null;historyGeneration++;historyLoading=false;historyFailure='';state.uiAnchor=null;error = ''; connectionError = ''; disconnected = false;
+    for(const [key,height]of chatHeights.get(snapshotKey())||[])windowHeights.set(key,height);
+    restoreSavedPosition(positions.get(snapshotKey()));
     const cached=cachedSnapshots.get(snapshotKey(item.space_id||'',item.id));
     restoredSnapshot=!!cached;connection='connecting';
-    if(cached){acceptSnapshot(state,cached,epoch);syncEditor();renderMessages();const top=positions.get(ownerKey(cached)),receivedEpoch=epoch;if(top!==undefined)requestAnimationFrame(()=>{if(!disposed&&receivedEpoch===epoch&&editorOwner===ownerKey(cached)){restoreSavedPosition(top);}});}
+    if(cached){acceptSnapshot(state,cached,epoch);syncEditor();}
     if(client.production&&record)saveNavigation('chat',initial);
     renderShell();attach();pages?.permissions();refreshBackgroundTasks();
   }
@@ -1034,7 +1074,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     await Promise.all([snapshot,loadDirectory()]);
   });
   return () => {
-    disposed = true;updates?.close();confirmations.close();cancelAnimationFrame(renderFrame);cancelAnimationFrame(followFrame);viewportObserver.disconnect();messageWindow.close();stopResources?.();client.resources?.clear();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
+    disposed = true;updates?.close();confirmations.close();cancelAnimationFrame(renderFrame);viewportObserver.disconnect();messageWindow.close();stopResources?.();client.resources?.clear();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     stopMessageSelection();completions?.dispose();attachmentUI?.destroy();client.releaseAttachments?.();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);
