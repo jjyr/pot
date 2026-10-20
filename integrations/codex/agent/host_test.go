@@ -20,6 +20,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"github.com/jjyr/pot/internal/linkhost"
+	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/peer"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
