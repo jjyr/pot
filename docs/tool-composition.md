@@ -18,9 +18,9 @@ user agreement; see the repository `AGENTS.md`.
 | Assistant profile | `update_agent_profile` | Main, including result handling |
 | Execution targets | `list_execution_targets` | Main |
 
-`list_execution_targets` lists enrolled Runtime destinations. `create_task` and
-`manage_schedule.spec` accept explicit `machine_id`; omission uses the owning
-Control. Execution tools remain fixed to their run and accept no destination
+`list_execution_targets` lists the local execution target. Local `create_task`
+and `manage_schedule.spec` accept that `machine_id`; omission uses the current
+node. Linked task delegation uses `link_id` and an optional assistant `target`. Execution tools remain fixed to their run and accept no destination
 selector. Target authorization is defined in [Permissions](permissions.md).
 
 Commands request external-service credentials through the `credentials`

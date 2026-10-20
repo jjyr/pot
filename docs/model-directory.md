@@ -1,6 +1,6 @@
 # Model connections and metadata
 
-Control owns Space-wide model connections and metadata. Builtin providers,
+The node owns Space-wide model connections and metadata. Builtin providers,
 Custom API and optional providers such as Magpie all register through the same
 [`contributes.model_providers` contract](plugins.md#model-connection-contributions).
 A package contributes connection types; owners create named connections with
@@ -11,7 +11,7 @@ package expands supported models.dev entries and contributes Custom API. The sam
 validated manifest is embedded for hosts without a packaged plugin directory;
 installed copies take precedence and both obey Extensions enablement. Standard
 readers reuse Pot's protocol implementations. Optional Node adapters read provider
-metadata on Control; all inference goes directly through Pot's Gateway.
+metadata on node; all inference goes directly through Pot's Gateway.
 
 ## Provider contributions
 
@@ -22,14 +22,14 @@ an independent list of connection implementations. UI features and request forma
 follow registered capabilities and supported protocols.
 
 Gateway routes retain the namespaced type and package identity separately from
-public-directory identity. Control migration 0016 assigns existing routes to
+public-directory identity. node migration 0016 assigns existing routes to
 Custom API while preserving endpoint, protocol, allowed hosts, credential
 references, route IDs and directory bindings. Package identity records provenance;
 a package update can supply the current adapter for a future metadata read.
 
 Public facts come from the bundled `resources/model-directory.json` snapshot of
 `https://models.dev/api.json?type=all` and the last valid
-`models-dev/catalog.json` under Control's data directory. Source/update instructions
+`models-dev/catalog.json` under node's data directory. Source/update instructions
 and licenses are retained with the assets. Bundled `resources/provider-logos/`
 artwork takes precedence over directory logos. Plugin types use their package icon;
 missing artwork uses the shared fallback.
@@ -44,11 +44,11 @@ SDK is loaded. The models.dev catalog used for these facts is separate from
 
 ## Catalog refresh and discovery
 
-App and Web consume Control's local projection; they do not fetch models.dev or
+App and Web consume node's local projection; they do not fetch models.dev or
 keep an independent upstream cache. Ordinary snapshots, selection and inference
 perform no upstream metadata requests.
 
-Control refreshes public models.dev data every 24 hours, recording the attempt in
+The node refreshes public models.dev data every 24 hours, recording the attempt in
 `models-dev/check.json` before fetching. Restarts preserve that interval. Fetches
 use ETag, bounded responses and timeouts; failed updates retain the last valid
 catalog and logos. No credentials or connection details are sent to models.dev.
@@ -80,17 +80,17 @@ saved snapshot. A quota permission failure does not disable inference.
 
 ## Connection ownership and editing
 
-Connections belong to the Space and are available to its assistants. Saving one
-does not create an assistant. The first saved connection becomes the Space default;
+Connections belong to the local node and are available to its assistants. Saving one
+does not create an assistant. The first saved connection becomes the node default;
 changing that default initializes newly created assistants without altering existing
 assistants, connection order or Task snapshots. An assistant's Add Provider flow
 retains its settings draft, selects the newly saved connection when returning, and
 restores the prior selection on cancellation. One-click assistant creation uses the
-Space default connection and its concrete default model; missing configuration
+The node default connection and its concrete default model; missing configuration
 opens connection setup.
 
 First-use Chat explicitly calls `POST /api/v1/assistants/bootstrap` with its locale.
-Control creates Pot only if the Space has a default connection and no assistant
+The node creates Pot only if the node has a default connection and no assistant
 history. Concurrent clients reuse that identity. Nested setup in an assistant draft
 does not bootstrap another assistant.
 
@@ -102,7 +102,7 @@ controls remain within the connection; their contract is described in
 [Plugins](plugins.md#connection-allowance-monitoring).
 
 API URLs accept HTTP/HTTPS origins, recognized version bases such as `/proxy/v1`,
-or complete inference endpoints. Control shares one resolver across save,
+or complete inference endpoints. node shares one resolver across save,
 discovery and tests. Origins default to `/v1` (`/v1beta` for Gemini); recognized
 bases receive the selected protocol's suffix. Complete custom paths are retained.
 A recognized endpoint for a different protocol is rejected, and the editor offers
@@ -113,7 +113,7 @@ A saved credential can be reused for discovery or tests only when resolved
 endpoint, protocol and type still match the saved route. A changed provider type
 requires an explicit credential. Blank fields retain a saved private key; a public
 application credential declared by the type applies when there is no saved or
-explicit key. Private credentials stay in Control's encrypted store.
+explicit key. Private credentials stay in node's encrypted store.
 
 Test connection sends one short streaming inference request with the unsaved
 settings. Success requires a complete decoded text reply. It does not save the

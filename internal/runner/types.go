@@ -1,5 +1,5 @@
 // Package runner owns immutable destination-local Task Agent launches and their
-// durable receipts. Transport authentication and signing are injected by Runtime.
+// durable receipts, checkpoints and recovery evidence on the owning node.
 package runner
 
 import (

@@ -13,12 +13,14 @@ owning node; remote work is delegated to that node's assistant and policy.
 | Blocked (`deny`) | No new execution; owned output polling and cleanup remain available |
 
 New local nodes are Protected. Trust is an explicit owner choice.
-Machine settings belong to one enrollment; re-enrollment clears old rules/grants.
+Machine settings and command rules bind the local machine identity and its
+persisted authorization epoch. Retired distributed enrollment cannot grant
+authority to a new node.
 
 A permanent command rule matches the full command source, canonical effective
 working directory, canonical shell, login/snapshot settings, terminal and
 interactive mode, and explicit credential references. It also binds the machine
-and enrollment. Output/yield limits are not authority. There are no prefix,
+and authorization epoch. Output/yield limits are not authority. There are no prefix,
 command-family or wildcard rules. `npm test`, `npm install`, `npm test -- --watch`
 and `npm test && curl ...` are different commands. A changed directory, shell or
 credential binding needs another matching rule.
@@ -47,8 +49,8 @@ not an accepted tool input. Results/events report the actual `host`/`sandbox`
 boundary; owned process polling retains the original process mode. The model
 cannot supply sandbox profiles, upgrade a live session or change destinations.
 
-Main context includes an `execution-environment` snapshot of the Control-owned
-destination policy and file/temp/network boundaries. Worker workspace context
+Main context includes an `execution-environment` snapshot of the node-owned
+execution policy and file/temp/network boundaries. Worker workspace context
 contains its prepared cwd; policy remains enforced by Runtime. Neither context
 grants authorization. Every operation is checked against current policy.
 
@@ -62,14 +64,14 @@ Current work means one foreground processing turn (which may aggregate pending
 user requests), one Task run, or one
 scheduled occurrence. Grants do not extend to other commands, subsequent user
 requests, child/sibling Tasks, scheduled occurrences, machines or generations.
-Completion/cancellation, restart, enrollment changes and policy invalidation clear
+Completion/cancellation, restart, authorization epoch changes and policy invalidation clear
 temporary grants. Background scheduling grants no authority.
 
 Instruction edits always require independent exact `allow_once`/`deny` review,
 even on Trusted or Blocked machines; command/task grants never approve them.
 
 Every pending decision binds owner, Task/run/turn, generation, call ID, Runtime,
-enrollment, tool and full arguments/context. A later grant cannot reverse a denial
+authorization epoch, tool and full arguments/context. A later grant cannot reverse a denial
 already given to that exact request. Persistent grants are saved before permitting
 execution; write failure leaves approval pending.
 

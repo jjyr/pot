@@ -169,13 +169,6 @@ func (m *Manager) watch() {
 		}
 	}
 }
-func (m *Manager) RefreshSpace(ctx context.Context, id string) error {
-	if _, err := m.Space(id); err != nil {
-		return err
-	}
-	m.Refresh(ctx)
-	return nil
-}
 func (m *Manager) Close() error {
 	m.cancel()
 	m.wg.Wait()

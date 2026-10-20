@@ -4,15 +4,14 @@
 menu. Plugins, MCP servers and Skills share one searchable catalogue, grouped
 by type and expanded by default. Each group can collapse independently and owns
 an Add action. Source and status filters apply across all groups. Configuration
-belongs to the selected Space; a disconnected Space reports failure without
-writing into another Space. Skill project context uses the selected assistant's
+belongs to the local node; linked peers manage their own settings. Skill project context uses the selected assistant's
 actual execution workspace, rather than a browser filesystem directory.
 
 ```text
-Extensions (selected Space) -> owning Control catalogue
+Extensions (local node) -> local node catalogue
     |-- tools / Skills       -> prepared execution -> selected Runtime
     |-- background services  -> assistant notifications
-    `-- model connections    -> AI Providers -> Control readers / Gateway
+    `-- model connections    -> AI Providers -> node readers / Gateway
 ```
 
 Builtin and user Plugins use the same contribution and enablement rules.
@@ -34,7 +33,7 @@ Other background-service routing remains under third-party accounts.
 The catalogue discovers packaged `PluginRoot` directories and user installations
 under `AgentHome/plugins`. Package IDs are unique across both roots; `mcp-` is
 reserved for managed MCP adapters. Import accepts an absolute directory on the
-owning Control, validates declared capabilities and copies only their files.
+owning node, validates declared capabilities and copies only their files.
 User installations can update from their recorded source or be removed. Removal
 moves the directory into `AgentHome/extension-trash` for manual recovery. Builtin
 packages update with Pot and cannot be removed individually.
@@ -93,7 +92,7 @@ are rejected. The adapter is digest-pinned and follows normal approval,
 cancellation, operation receipts, cleanup supervision and execution-machine
 policy. Stdio commands run on that execution machine, so their executable,
 arguments, working directory and dependencies must exist there; connection tests
-run on the owning Control. There is no fallback to another machine.
+run on the owning node. There is no fallback to another machine.
 
 Environment variables and request headers are stored in the existing encrypted
 secret store. Public catalogue responses and execution snapshots contain no
@@ -107,7 +106,7 @@ OAuth authorization-code clients with PKCE S256. OAuth discovery uses protected
 resource/authorization-server metadata, optional dynamic client registration or
 an owner-supplied client ID, and an optional scope. Browser authorization returns
 to the same-origin callback page; native clients use a short-lived loopback
-callback on the owning Control. State is single-use, revision-bound and expires
+callback on the owning node. State is single-use, revision-bound and expires
 in ten minutes. Access tokens are encrypted and never returned to the UI. Expired
 or revoked access tokens require reconnecting; automatic token refresh and
 confidential OAuth client secrets are not supported. Connection tests and calls
@@ -120,7 +119,7 @@ Owner APIs are `GET/POST /api/v1/extensions`,
 `GET /api/v1/extensions/skills/{id}`, `POST /api/v1/extensions/mcp`, and
 `POST /api/v1/extensions/mcp/oauth/{begin,complete}`. The authenticated browser
 allowlist exposes only these paths. Mutations check current revisions; package
-file mutation is serialized on the owning Control. Catalogue refreshes and live
+file mutation is serialized on the owning node. Catalogue refreshes and live
 locale changes preserve open drafts. Closing or navigating away from a modified
 draft asks to discard it; pending writes block leaving. Errors keep inputs and
 provide a localized summary with diagnostics.

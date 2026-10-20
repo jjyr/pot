@@ -3,7 +3,7 @@
 A plugin is a trusted locally installed directory with a schema-2 `plugin.json`
 manifest. `pkg/plugin` validates identity and confined file access without
 starting processes. Packages can contribute tools, owner-enabled background
-services and Control-local model connection types. Unknown manifest fields fail explicitly.
+services and node-local model connection types. Unknown manifest fields fail explicitly.
 
 ```text
 Package manifest + declared files
@@ -11,8 +11,8 @@ Package manifest + declared files
      validated loader
            |
            +-- tools ----------> digest-pinned Task bundle -> executor
-           +-- background -----> Control service -> assistant inbox
-           `-- model_providers -> Control connection registry / metadata reader
+           +-- background -----> local service -> assistant inbox
+           `-- model_providers -> local connection registry / metadata reader
 ```
 
 ## Manifest and execution
@@ -41,9 +41,9 @@ remains owned by the execution supervisor.
 Runtime loads packages from `PluginRoot`, defaulting to
 `ResourceDirectory/plugins`. Installed tools are enabled by default and can be disabled in [Extensions](extensions.md); Provider
 connection forms only configure models and credentials. Main turns and prepared
-Tasks retain their resource snapshots. Before a Task first prepares, the original
-Runner synchronizes selected current tool files and Skills through Control's
-run-bound authenticated interface. Project instructions are read on the destination.
+Tasks retain their resource snapshots. Before a Task first executes, the local executor prepares selected current tool
+files and Skills from its owning node. Linked nodes prepare their own resources.
+Project instructions are read from the execution workspace.
 
 `pkg/pluginhost` owns bounded Node process sessions. Execution mode and policy revision are pinned alongside the bundle; policy changes close the old session. Tool processes follow their
 execution scope and bundle digest. Cancellation, ownership checks, operation
@@ -51,9 +51,8 @@ receipts and uncertainty fences apply to plugin calls as to built-in tools.
 
 `mise run build:plugins` packages manifests, declared capability files and optional `icon.svg` / `icon.png` presentation assets and their attribution files.
 Packages contain no VM engines, images or guest bootstrap. Stop Runtime before
-replacing a complete package. The Extensions page imports and updates user packages separately from packaged resources. Managed independent MCP servers use the same tool execution boundary; see [Extensions](extensions.md). A plugin marketplace and automatic package updates remain outside this contract. The
-[Codex Bridge](../integrations/codex/README.md) package owns its paired remote MCP
-connection and durable SSE consumer.
+replacing a complete package. The Extensions page imports and updates user packages separately from packaged resources. Managed independent MCP servers use the same tool execution boundary; see [Extensions](extensions.md). A plugin marketplace and automatic package updates remain outside this contract. The [Codex Agent Link adapter](../integrations/codex/README.md) is a standalone
+node adapter, separate from tool-plugin background services.
 
 ## Model connection contributions
 
@@ -111,7 +110,7 @@ shared pools. Pool percentages must not be summed. Account/window identity is
 RFC3339. The complete DTO and validation bounds are in
 [`pkg/core/model_providers.go`](../pkg/core/model_providers.go).
 
-The host runs one supervised Control-local process per exchange, with a 30-second
+The host runs one supervised node-local process per exchange, with a 30-second
 lifetime, 3 MiB output bound, cancellation and descendant cleanup. Adapter files
 are confined UTF-8 text, up to 32 files / 512 KiB. Credentials enter only through
 `credential_env`; unrelated service tokens and Node loader variables are not
@@ -137,17 +136,17 @@ An installed schema-2 package can additionally declare `contributes.background`:
 
 This capability is disabled until the owner binds it to an existing local
 assistant. It is independent of model tool selection. Only installed, trusted
-package code runs: the service executes on the owning Control, with host access,
+package code runs: the service executes on the owning node, with host access,
 not on a Task's selected machine. Enabling it authorizes its background process
 and declared credential reads. No background files/capabilities travel in Task
-tool bundles. Stop Control before replacing installed packages.
+tool bundles. Stop the node before replacing installed packages.
 
-Control uses the existing process supervisor for descendant cleanup, cancellation,
+The node uses the existing process supervisor for descendant cleanup, cancellation,
 a 45-second exchange deadline, bounded protocol IO,
 credential injection and durable acceptance. A fresh Node process imports the
 entrypoint's `export async function poll(input)` for each exchange. Credentials
 are transient environment values resolved through Integrations, never config,
-argv, protocol fields or diagnostics. Processes do not survive Control shutdown.
+argv, protocol fields or diagnostics. Processes do not survive node shutdown.
 Packages own HTTP/business behavior, polling intervals, retries, filtering,
 aggregation and their opaque checkpoint. They must make repeated exchanges safe;
 a failed exchange can run again with the previously committed checkpoint.
@@ -162,11 +161,10 @@ Only that ACK lets the plugin advance its in-memory checkpoint. A rejected frame
 ends the process without acknowledging it. Stream frames retain the ordinary
 response/event bounds; `delay_seconds` applies after exit, not to a healthy stream.
 The plugin owns heartbeats, protocol retries, reconnect backoff, aggregation and
-quiet-state behavior. Control does not interpret service events or add a model
+quiet-state behavior. The node does not interpret service events or add a model
 consumer. A binding revision, account change, package identity change, disabled
-binding or Control shutdown cancels the process and drains descendants. Host
+binding or node shutdown cancels the process and drains descendants. Host
 failures retain the last accepted checkpoint and use the ordinary retry delay.
-See [Codex Bridge](../integrations/codex/README.md) for an SSE implementation.
 
 The version-1 stdin request is:
 

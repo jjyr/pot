@@ -37,9 +37,6 @@ type controlLinkMailbox struct{ s *Service }
 func (m controlLinkMailbox) PendingNode(ctx context.Context, local, peer string) ([]protocol.Envelope, error) {
 	return m.s.Mailbox.PendingNode(ctx, local, peer)
 }
-func (m controlLinkMailbox) Pending(ctx context.Context, local, peer protocol.AgentRef) ([]protocol.Envelope, error) {
-	return m.s.Mailbox.PendingLink(ctx, local, peer)
-}
 func (m controlLinkMailbox) Deliver(ctx context.Context, value protocol.Envelope) (protocol.Receipt, error) {
 	if _, err := m.s.agentLinkIdentity(ctx, value.To.AgentID); err != nil {
 		return protocol.Receipt{}, err
@@ -259,7 +256,7 @@ func (s *Service) AgentLinks(ctx context.Context, assistantID string) (any, erro
 			}
 			peerName = c.Directory.Name
 		}
-		items = append(items, map[string]any{"assistants": assistants, "directory": c.Directory, "id": c.ID, "local_assistant_id": c.Local.Address.AgentID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "node_id": c.Peer.Address.NodeID, "kind": c.Peer.Adapter, "name": peerName, "address": c.Endpoint}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
+		items = append(items, map[string]any{"assistants": assistants, "directory": c.Directory, "id": c.ID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "node_id": c.Peer.Address.NodeID, "kind": c.Peer.Adapter, "name": peerName, "address": c.Endpoint}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
 	}
 	return map[string]any{"self": self, "items": items, "network": map[string]any{"listen": config.Listen, "endpoint": config.Endpoint, "mode": config.Mode, "status": status, "reason_code": reason}}, nil
 }

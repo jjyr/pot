@@ -1,6 +1,6 @@
 # Agent context
 
-Control/execution target adapters own AGENTS.md discovery, execution-target selection, refresh and error policy. `pkg/agent` receives caller-provided text through `core.ExecutionContext.Instructions`; it performs no AGENTS.md filesystem discovery. Standalone callers can inject their own instructions or leave this field empty.
+Local execution adapters own AGENTS.md discovery, execution-target selection, refresh and error policy. `pkg/agent` receives caller-provided text through `core.ExecutionContext.Instructions`; it performs no AGENTS.md filesystem discovery. Standalone callers can inject their own instructions or leave this field empty.
 
 Main handles simple searches, focused research and design discussions directly in
 chat, using available tools to verify current information. Tool use, multiple
@@ -26,11 +26,11 @@ produce neither a completed chat bubble nor a reply notification.
 
 Global Main instructions come from the owning Runtime's
 `~/.pot/agent/AGENTS.md` (`POT_AGENT_HOME` overrides the Agent home directory).
-For Control-owned assistants this source belongs to Control, not joined execution
-nodes. Task Agents do not load global Main or assistant AGENTS.md. The approved
-remote launch uses Control-selected global skills/plugins while preserving project
-AGENTS.md and project skills at the execution workspace; see
-[Architecture](architecture.md) for the execution contract.
+Task Agents do not load global Main or assistant AGENTS.md. The owning node
+prepares selected global Skills/plugins and discovers project instructions in
+its local execution workspace. A linked node prepares its own resources; see
+[Architecture](architecture.md).
+
 Permission storage is separate from instruction discovery; see
 [Agent permissions](permissions.md). Project discovery uses the actual tool execution cwd. Main resolves the machine's
 local workspace at the start of each run. Workers use their recorded destination
@@ -183,58 +183,20 @@ An exact retry returns the original receipt and never retargets another turn.
 boundaries; in-flight work settles normally. It neither recreates a turn nor
 relaxes tool or machine permissions.
 
-## Reference and tests
+## Prompt sources and resource preparation
 
-Assistant prompt text is kept in `internal/assistant/assets/`.
-Main's built-in delegation prompt lives in
-[`main_prompt.txt`](../internal/assistant/assets/main_prompt.txt).
-The Go assistant package embeds it at compile time
-with `go:embed`; Control supplies it when preparing Main execution context.
-Editing the text requires rebuilding the binary; there is no runtime file read. It is not global `AGENTS.md` or a routine scheduler. A custom
-`system_prompt` replaces the default `pkg/agent` prompt.
+Main's built-in delegation prompt is embedded from
+[`main_prompt.txt`](../internal/assistant/assets/main_prompt.txt). Updating it
+requires explicit authorization and rebuilding; a custom `system_prompt`
+replaces the default `pkg/agent` prompt.
 
-Tests cover repository/worktree markers, nested repositories, absent roots, ignored overrides, file changes/removal, empty and invalid UTF-8 files, files larger than 32 KiB, global failure/recovery/cache clearing, Main Host project context and fixed task assignment. Runtime context tests cover Main/Worker roles plus notification context refresh; `pkg/agent` request tests cover all four supported model protocols, custom prompts, append-only history, cold-cache prefix replay and compaction reconstruction. Run `mise run test` and `mise run check:go`.
-
-
-## Global ownership
-
-Control selects global plugins and Skills for connected Tasks. Execution machines
-synchronize the selected names from Control before each run, never using their
-own global catalogs. Requests contain names, not versions. Missing resources or
-unsupported configuration fail explicitly. Independent local mode uses its own
-globals. Project AGENTS.md and Skills remain execution-workspace resources.
-
-## Pre-execution resource synchronization
-
-```text
-Control task launch
-  brief + model settings + skill names + plugin names
-                         |
-                         v
-Execution Runtime accepts the run
-                         |
-             authenticated request by name
-                         |
-                         v
-Control current Skills / owning assistant's plugin Profile
-                         |
-                         v
-Runtime verifies and materializes the selected bundles
-  + discovers local project Skills and AGENTS.md
-  + registers synchronized plugin tool definitions
-                         |
-                         v
-Task Agent starts: ordinary cat / scripts / tool calls
-```
-
-No Skill-loading tool, virtual filesystem or resource version parameter is
-introduced. Synchronization failure stops the run before model sampling. The destination Runner records the prepared content and digest once for the
-original run. Allowance resumes reuse that evidence; queued Tasks still read the
-current sources on first preparation. Control keeps no per-Task resource archive.
-Cache digests identify content integrity and bind one execution; they are not
-Task resource selectors. Local tasks prepare the same resource layout without a
-network hop. Global Skill metadata and paths are injected; full instructions
-remain lazy reads of ordinary files.
+Before a local Task first executes, the node prepares the selected current global
+Skills and source assistant's plugin Profile. Missing resources fail before model
+sampling. The executor records prepared content and digests once for that run;
+allowance resumes reuse them. Queued Tasks read current sources on first
+preparation. Project Skills and AGENTS.md come from the fixed execution workspace.
+Global Skill metadata includes ordinary file paths; full instructions load lazily.
+See [Plugin packages](plugins.md) for tool bundles.
 
 ## Routing rules
 
@@ -246,9 +208,11 @@ assistant or global Agent-home rules.
 The built-in dispatch instructions and fresh configured Provider/model catalog remain
 injected independently. A custom system prompt still receives file instructions.
 
-Explicit task choices take precedence over saved rules. Without an explicit target,
-Control defaults to its own Runtime; an explicit selection chooses a registered
-remote Runtime. Task and schedule requests select `machine_id`.
+Explicit task choices take precedence over saved rules. Local `machine_id`
+selections must identify the current node. Remote collaboration uses `link_id`
+and an optional assistant `target`; the receiver resolves its default once and
+owns execution. See [Task lifecycle](task-coordination.md#linked-execution).
+
 The fixed Runtime and workspace are recorded for the run; reruns create new
 Tasks. Each tool uses current machine execution authorization. Labels never grant
 capabilities or implicitly move work; unsupported execution fails visibly.
@@ -258,7 +222,7 @@ enable an unconfigured service or grant execution authority. `create_task` retai
 been removed with user agreement. Existing tasks retain configuration snapshots.
 
 Use the persistent Chat assistant pane to select assistants and its + action to
-create one. Creation selects the owning Space's default Provider and that
+create one. Creation selects the owning node's default Provider and that
 Provider's concrete default model. The assistant editor changes name, Provider,
 model, parameters and its own instructions without opening global settings.
 Instructions and model parameters start collapsed. Edits remain drafts until
@@ -301,7 +265,6 @@ Task-routing token accounting remains a subset of the invoking assistant's
 chat usage, never an additional allocation. The Runtime usage ledger is shared;
 Threads, routing defaults, task ownership and assistant rules are independent.
 
-
 # Skill bundles
 
 ## Directories and discovery
@@ -313,8 +276,7 @@ PROJECT/.agents/skills/<name>/    # Project-specific bundles
 ```
 
 Main discovers its owning Runtime's global user and builtin skills. Tasks load
-only explicitly selected global skills. Connected tasks use the selected global
-versions supplied by Control. Every bundle contains UTF-8 SKILL.md
+only explicitly selected global skills. Each node supplies its own selected global resources. Every bundle contains UTF-8 SKILL.md
 with YAML frontmatter and optional scripts, references and assets. Only metadata
 is advertised during discovery; full instructions are read on demand.
 
@@ -325,13 +287,13 @@ Malformed bundles produce diagnostics and are omitted. Symlink directories and S
 ## Unified execution view and permissions
 
 Main execution advertises actual user/builtin source paths. Tasks materialize
-selected Control bundles beneath `.pot/control-resources/<digest>/` in their
+selected local bundles beneath `.pot/control-resources/<digest>/` in their
 fixed workspace. The digest identifies prepared content, not a user-requested
 version. Injected paths are absolute destination-local paths; no mount or HOME
 translation is performed. Project Skills remain independently discovered.
 
 Skills grant no execution authority. Instructions and Skills use the same local
-filesystem rules for local and explicitly remote Task execution. Runtime asset
+filesystem rules for execution on the owning node. Runtime asset
 paths are set by host composition and remain independent of guest management.
 See [Permissions](permissions.md) and [Executor](executor.md).
 
@@ -339,9 +301,9 @@ See [Permissions](permissions.md) and [Executor](executor.md).
 
 `core.ExecutionContext.SkillResources` carries ordered SkillRoot entries, reserved names and optional selections. `pkg/agent` discovers supplied filesystem roots without interpreting product roles or machine discovery. Callers provide `core.SkillResources` for Main and Task contexts.
 
-Task creation accepts optional `skills: ["name", ...]` selecting global user or builtin bundles only. Omitted or empty lists load no global skills. Project skills are always discovered independently and are not filtered by this list. Selections persist, but each new execution synchronizes current contents before starting the Agent. Contents remain stable for that run; Control does not retain per-task bundle versions. Unavailable selected global skills fail visibly when preparing a turn, even if a project skill has that name.
+Task creation accepts optional `skills: ["name", ...]` selecting global user or builtin bundles only. Omitted or empty lists load no global skills. Project skills are always discovered independently and are not filtered by this list. Selections persist, but each new execution prepares current contents before starting the Agent. Contents remain stable for that run; Control does not retain per-task bundle versions. Unavailable selected global skills fail visibly when preparing a turn, even if a project skill has that name.
 
-Space-owned [extension settings](extensions.md) filter disabled bundles before Main discovery and reject disabled explicit global Task selections. Builtin names remain reserved even when disabled.
+Node-owned [extension settings](extensions.md) filter disabled bundles before Main discovery and reject disabled explicit global Task selections. Builtin names remain reserved even when disabled.
 
 Catalogs reload each execution and use the classified `skills` history section. Unchanged rendered metadata is not appended again; changes replace the complete section through a new message. Removal appends an explicit revocation. Notification executions load the same catalog as user chat; `pkg/agent` does not advertise skills if the final tools lack exec_command. Chat `/skill:name` references explicitly select global Skills for new tasks delegated from that user message; they are also visible to the assistant as user instructions. Main project discovery reflects its actual execution directory; active tasks retain their recorded execution location.
 
@@ -353,7 +315,7 @@ The creator's scripts/quick_validate.py validates YAML metadata and scaffolds, a
 
 The installer uses the adjacent creator validator. It accepts a local bundle, GitHub repo/path/ref or tree URL. Downloads use only credentials available in the current execution target. Archive extraction rejects traversal and special files. Installation preserves resource contents and executable permissions, normalizes readable permissions, validates before publishing, and refuses replacement without --replace. Ordinary publication failures restore the previous directory; crash recovery and concurrent installers are not transactional.
 
-apply_patch remains workspace-scoped. Global installation/update is performed on the owning Control, or the independent local Runtime in App local mode. Connected tasks cannot modify supplied global bundles. Use injected bundle paths for helper scripts, and `--dest PROJECT/.agents/skills` for project installation.
+apply_patch remains workspace-scoped. Global installation/update is performed on the owning node. Tasks cannot modify supplied global bundles. Use injected bundle paths for helper scripts, and `--dest PROJECT/.agents/skills` for project installation.
 
 ## Message references and machine labels
 
@@ -362,8 +324,8 @@ of the slash selectors below. Main can read referenced original messages by ID
 after compaction. See [Chat references](chat-references.md).
 
 App and Web autocomplete standalone `/` words at the caret using authenticated,
-assistant-scoped `/api/v1/completions` metadata. Candidates include registered
-machines, Control-managed labels, and the assistant's current global Skill catalog. Project Skills are discovered by the
+assistant-scoped `/api/v1/completions` metadata. Candidates include the local
+machine, node-managed labels, and the assistant's current global Skill catalog. Project Skills are discovered by the
 task and are not offered as global selectors.
 References are editable message text: `/machine:RUNTIME_ID`, `/tag:desktop`,
 `/skill:skill-creator`. Their identifiers survive drafts, retries and history.
@@ -377,10 +339,9 @@ previous messages, system task reports, existing tasks and scheduled occurrences
 never inherit new selections. Selected Skills are persisted with the new task.
 Global/project Skill discovery and project AGENTS.md still use the existing rules.
 
-Runtime labels describe machines and never implicitly place Tasks. New roots
-and joined machines carry their OS label. Control owns all label edits;
-heartbeats, repeated enrollment and restarts do not restore removed labels.
-Labels use lowercase ASCII letters, digits, hyphens and underscores.
+Runtime labels describe the local machine and never implicitly place Tasks.
+New roots carry their OS label. Owner edits persist across restarts; labels use
+lowercase ASCII letters, digits, hyphens and underscores.
 
 ## Recovering a stopped Main turn
 

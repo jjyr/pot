@@ -49,9 +49,7 @@ func (f Functions) Stream(ctx context.Context, path string, receive func(Event) 
 
 type HTTPClient struct {
 	origin, token, expectedID string
-	prefix                    string
 	client                    *http.Client
-	transport                 *http.Transport
 }
 
 // NewLocalHTTPClient uses an injected private Unix-socket HTTP transport. The
@@ -93,7 +91,7 @@ func (c *HTTPClient) request(ctx context.Context, method, path string, body json
 	if err != nil {
 		return nil, err
 	}
-	request, err := http.NewRequestWithContext(ctx, method, c.origin+c.prefix+path, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, method, c.origin+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -206,10 +204,4 @@ func (c *HTTPClient) Stream(ctx context.Context, path string, receive func(Event
 		return err
 	}
 	return io.EOF
-}
-func (c *HTTPClient) Close() error {
-	if c.transport != nil {
-		c.transport.CloseIdleConnections()
-	}
-	return nil
 }

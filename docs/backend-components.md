@@ -20,7 +20,7 @@ points; `internal/` contains product implementation. All packages share one root
 | `pkg/peer` | Shared signed TCP sessions, host identity proof, framing and service admission; no business authorization |
 | `pkg/agentlink` | Node-bound authenticated collaboration, assistant directories and durable request recovery |
 | `internal/linkhost` | Agent Link adapters plus one host-owned peer service registry/listener |
-| `internal/gateway`, `internal/secrets` | Control-owned provider HTTP routes and encrypted credential references |
+| `internal/gateway`, `internal/secrets` | Node-owned provider HTTP routes and encrypted credential references |
 | `pkg/integrations`, `pkg/integrations/github` | Independent service login, single-account connections and credential caching through injected account/Secrets stores; GitHub device authorization adapter |
 | `internal/usage` | Durable reservations, allowances, usage settlement, tools and compaction accounting |
 | `internal/control`, `internal/tasks`, `internal/schedule` | Product coordination, model selection, permissions, durable Tasks and schedules |
@@ -45,7 +45,7 @@ nor acquire provider credentials. Runtime composes components through their APIs
 HTTP adapters and databases stay with their owning components.
 
 Every product Agent invocation, including mail and summary sessions, passes
-through the destination's shared execution manager. Control owns provider keys,
+through the destination's shared execution manager. The owning node manages provider keys,
 approvals, accounting and global resources. Workers run on their owning node and use its local execution services.
 
 Plugin manifests and declared assets under `plugins/` are packaged runtime data.
