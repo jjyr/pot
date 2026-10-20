@@ -9,25 +9,25 @@ writing into another Space. Skill project context uses the selected assistant's
 actual execution workspace, rather than a browser filesystem directory.
 
 ```text
-App / Web: Extensions (selected Space)
-    | authenticated owner routes
-    v
-Control: catalogue + revisioned configuration + encrypted credentials
-    |                         |
-    | fresh execution         | explicit MCP connection test
-    v                         v
-pinned tools / Skills     supervised Node adapter
-    |
-ordinary dispatch -> approval + operation receipt -> selected execution machine
+Extensions (selected Space) -> owning Control catalogue
+    |-- tools / Skills       -> prepared execution -> selected Runtime
+    |-- background services  -> assistant notifications
+    `-- model connections    -> AI Providers -> Control readers / Gateway
 ```
 
-Builtin Plugins and Skills stay enabled unless the owner disables them. Settings
-are stored in `control.sqlite`; an absent setting means enabled. Updates apply
-at fresh execution boundaries. Already prepared executions retain their resource
-snapshots. Selecting a now-disabled global Skill or Plugin for an unprepared Task
-fails visibly. Skill completion uses the enabled catalogue. Package enablement
-also gates future background-service discovery; notification routing remains a
-separate setting under third-party accounts.
+Builtin and user Plugins use the same contribution and enablement rules.
+Settings are stored in `control.sqlite`; an absent setting means enabled.
+Disabled packages cannot supply new tools, background services or model
+connections. Saved model connections retain their configuration and report
+unavailable; already prepared executions retain their fixed resources.
+Skill completion likewise uses the enabled catalogue.
+
+A model-provider Plugin's details link to **AI Providers**, where users configure
+connections and optional quota reminders. The bundled `standard-model-providers`
+package supplies the directory brands and Custom API through this same flow;
+Magpie supplies one connection with its visible models and quotas. See
+[Model connections](model-directory.md#provider-contributions).
+Other background-service routing remains under third-party accounts.
 
 ## Plugins and icons
 

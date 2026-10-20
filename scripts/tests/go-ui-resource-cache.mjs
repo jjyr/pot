@@ -79,3 +79,19 @@ try{
   transport.resources.clear();
 }finally{globalThis.fetch=originalFetch;}
 console.log('Shared transport save invalidation and captured-scope fencing passed');
+
+// Extension lifecycle changes alter executable provider types. Unlike ordinary
+// data refreshes, navigation cannot reuse the previously enabled projection.
+let pluginEnabled=true;const pluginCalls=[];
+globalThis.fetch=async(path,options={})=>{const url=new URL(path,'http://fixture');pluginCalls.push({path:url.pathname,space:url.searchParams.get('space_id'),method:options.method||'GET'});if(url.pathname==='/api/v1/runtime')return new Response(JSON.stringify({runtime_id:'plugins',boot_id:'boot'}));if(options.method==='POST'){pluginEnabled=false;return new Response(JSON.stringify({saved:true}));}return new Response(JSON.stringify({provider_types:[{id:'plugin/type',available:pluginEnabled}],connections:[{profile_id:'one',available:pluginEnabled}]}));};
+try{
+ const transport=await createProductionClient();transport.spaces=[{id:'a',control_id:'a'},{id:'b',control_id:'b'}];transport.setScope({space:'a',owner:''});
+ assert.equal((await transport.read('/api/v1/providers')).provider_types[0].available,true);
+ transport.setScope({space:'b'});await transport.read('/api/v1/providers');transport.setScope({space:'a'});
+ await transport.request('/api/v1/extensions',{method:'POST',body:{action:'toggle',kind:'plugins',id:'plugin',enabled:false,revision:1}});
+ assert.equal((await transport.read('/api/v1/providers')).provider_types[0].available,false,'Disabling a plugin must not serve enabled provider types while a background revalidation runs');
+ const before=pluginCalls.length;transport.setScope({space:'b'});await transport.read('/api/v1/providers');assert.equal(pluginCalls.length,before,'Plugin lifecycle invalidation remains scoped to its Control/Space');transport.setScope({space:'a'});
+ pluginEnabled=true;transport.resources.invalidate(['extensions'],{space:'a'});
+ assert.equal((await transport.read('/api/v1/providers')).connections[0].available,true,'An extension lifecycle event from another window invalidates the same projection');transport.resources.clear();
+}finally{globalThis.fetch=originalFetch;}
+console.log('Provider registry lifecycle: extension commands and streamed events invalidate executable availability without stale reuse or cross-Space eviction');

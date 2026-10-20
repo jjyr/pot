@@ -72,7 +72,7 @@ export function createResourceCache({now=Date.now,limit=256,onChange=()=>{}}={})
 const resources={
   '/api/v1/spaces':['spaces'],
   '/api/v1/assistants':['assistants','conversation','assistant-mail','permissions','tasks','runner'],
-  '/api/v1/providers':['providers'],
+  '/api/v1/providers':['providers','extensions'],
   '/api/v1/agent/routing':['settings','providers'],
   '/api/v1/usage/providers':['usage','providers'],
   '/api/v1/integrations':['integrations'],
@@ -123,7 +123,12 @@ export function createResourceReads(client) {
         // independently of which topic happened to carry the first new version.
         cache.reset(key=>{const meta=JSON.parse(key);return !source.space||meta.space===source.space||meta.path==='/api/v1/spaces';});
       }else if(topics.includes('spaces'))cache.reset(matches);
-      else cache.invalidate(matches);
+      else {
+        // Plugin lifecycle changes alter which connection types may execute.
+        // Do not serve the previous enabled/type projection while revalidating.
+        if(topics.includes('extensions'))cache.reset(key=>matches(key)&&JSON.parse(key).path==='/api/v1/providers');
+        cache.invalidate(matches);
+      }
     },
     clear(){cache.reset();boots.clear();},
   };
