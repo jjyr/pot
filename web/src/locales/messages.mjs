@@ -10,6 +10,9 @@ export const messages = {
     'resource.loading':'Loading preview…', 'resource.unavailable':'Preview unavailable. You can try downloading the original.',
     'resource.pause':'Pause animation', 'resource.resume':'Play animation',
 
+    "assistant.cooking": "Cooking · Work in progress",
+    "assistant.ready": "Ready · Unread reply",
+    "assistant.unreadReplies": "{count} unread replies",
     "machineJoin.addTitle": "Add an execution machine",
     "machineJoin.inviteHint": "Copy join information to the target machine.",
     "machineJoin.continueTitle": "Continue on the target machine",
@@ -454,6 +457,9 @@ export const messages = {
     'resource.loading':'正在加载预览……', 'resource.unavailable':'预览暂不可用，可以尝试下载原文件。',
     'resource.pause':'暂停动图', 'resource.resume':'播放动图',
 
+    "assistant.cooking": "正在煮 · 任务执行中",
+    "assistant.ready": "煮好了 · 回复未读",
+    "assistant.unreadReplies": "{count} 条未读回复",
     "machineJoin.addTitle": "添加一台执行机器",
     "machineJoin.inviteHint": "把加入信息交给目标机器。",
     "machineJoin.continueTitle": "在目标机器上继续",

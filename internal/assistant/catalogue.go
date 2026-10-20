@@ -13,6 +13,7 @@ type CatalogueState struct {
 	Preview            string `json:"preview"`
 	Responding         bool   `json:"responding"`
 	Running            bool   `json:"running"`
+	Executing          bool   `json:"executing"`
 	Failed             bool   `json:"failed"`
 	NeedsConfiguration bool   `json:"needs_configuration"`
 }
@@ -22,6 +23,7 @@ func (c *Conversation) Catalogue(ctx context.Context) (CatalogueState, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	out := CatalogueState{Responding: c.turn != nil, Running: c.turn != nil, Failed: c.blocked || c.lastError != nil, NeedsConfiguration: c.thread == nil}
+	out.Executing = c.turn != nil && c.turn.State == "running" && !c.turn.Paused
 	count, err := c.store.NotificationCount(ctx)
 	if err != nil {
 		return out, err

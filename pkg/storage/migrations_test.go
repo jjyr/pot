@@ -17,14 +17,7 @@ import (
 func TestDefaultAvatarImageUpgrade(t *testing.T) {
 	db := migrationDB(t)
 	ctx := context.Background()
-	baseline, err := fs.ReadFile(migrationFiles, "migrations/control/0001_baseline.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	old := fstest.MapFS{"migrations/control/0001_baseline.sql": &fstest.MapFile{Data: baseline}}
-	if err := migrateDatabase(ctx, db, ControlDatabase, old); err != nil {
-		t.Fatal(err)
-	}
+	nodeMigrationPrefix(t, db, ControlDatabase, 10)
 	execMigrationSQL(t, db, `INSERT INTO assistant_definitions(id,name,revision,request_id,created_name) VALUES
 ('missing','Missing',3,'seed-missing','Original'),('empty','Empty',4,'seed-empty','Empty'),('custom','Custom',5,'seed-custom','Custom');
 INSERT INTO assistant_profiles VALUES('empty',''),('custom','custom-image');

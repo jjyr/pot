@@ -9,6 +9,7 @@ import {createToolCall} from './tool-call.mjs';
 import {toolForest} from '../state/tool-calls.mjs';
 import {projectScriptRuns} from '../state/script-runs.mjs';
 import {avatar} from './avatar.mjs';
+import {assistantActivity,assistantActivityIndicator} from './assistant-activity.mjs';
 import {icon} from './icons.mjs';
 import {messages,translate} from '../locales/messages.mjs';
 import {acceptSnapshot, beginSend, beginSubscription, createConversationState, draft, draftReferences, setDraftReferences, ownerKey, setDraft, validSnapshot} from '../state/conversation.mjs';
@@ -402,6 +403,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   preferences.addEventListener('close', () => { preferencesOpen = false;notifications?.report(); });
   const shellRoots={rail,titlebar,menu};
   function renderShell() {
+    root.classList.toggle('is-background',document.visibilityState==='hidden');
     const showingChat=route==='chat'&&!(media.matches&&directoryOpen);
     if(chatShown&&!showingChat)readingPositions.set(snapshotKey(),captureReadingPosition(history));
     if(!chatShown&&showingChat)pendingReadingPosition=readingPositions.get(snapshotKey())||pendingReadingPosition;
@@ -481,8 +483,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       const selected = (!client.production&&item.id==='main') || selectedAssistant?.id === item.id && selectedAssistant?.space_id === item.space_id;
       const row = el('button', `assistant-row${selected ? ' is-selected' : ''}`); row.type = 'button';row.dataset.viewKey=JSON.stringify([item.space_id,item.id]);row.dataset.searchName=item.name.toLowerCase();
       row.append(assistantAvatar(item,32)); const labels = el('span', 'assistant-labels'); const name = el('span', 'assistant-name');const title=el('span','assistant-title',item.name);title.title=item.name;name.append(title);
+      const unread=replies.unread(controlOf(item),item.id,item.reply_count||0),activity=assistantActivity(item,unread);
+      if(activity)name.append(assistantActivityIndicator(activity,locale));
       if(spaces.length>1){const location=el('span','assistant-location',item.space_name||t(item.space_kind==='remote'?'remote':'local'));location.title=location.textContent;name.append(location);}
-      const unread=replies.unread(controlOf(item),item.id,item.reply_count||0);if(unread){const badge=el('span','unread-badge',unread>9?'9+':String(unread));badge.title=String(unread);badge.setAttribute('aria-label',`${unread} ${locale==='zh-CN'?'条未读回复':'unread replies'}`);name.append(badge);row.classList.add('has-unread');}
+      if(unread){const badge=el('span','unread-badge',unread>9?'9+':String(unread));badge.title=String(unread);badge.setAttribute('aria-label',t('assistant.unreadReplies').replace('{count}',unread.toLocaleString(locale)));name.append(badge);row.classList.add('has-unread');}
       const pending=Number(item.pending_approvals)||0;
       if(pending){row.classList.add('needs-approval');labels.append(name,el('span','assistant-approval-status',`${t('tool.awaitingApproval')} · ${pending}`));}
       else labels.append(name, el('span', 'assistant-preview', item.offline ? t('offline') : item.preview || ({failed:t('replyFailed'),needs_configuration:t('setupAI'),ready:t('connected')}[item.phase] || item.phase || '')));
@@ -925,7 +929,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if(source.boot){for(const [key,value]of cachedSnapshots)if((!source.space||JSON.parse(key)[1]===source.space)&&value.boot_id!==source.boot)cachedSnapshots.delete(key);if(state.snapshot&&(!source.space||source.space===client.scope().space)&&state.snapshot.boot_id!==source.boot)loadSnapshot(true);}
       if(source.reset){notifications?.refresh({reset:true,space:source.space});loadDirectory();}
       else if(relevantChange(keys,['task-outcomes','permissions']))notifications?.refresh({topics:keys,space:source.space});
-      if(relevantChange(keys,['spaces','assistants','assistant-mail','conversation','runtime','permissions']))loadDirectory();
+      if(relevantChange(keys,['spaces','assistants','assistant-mail','conversation','runtime','permissions','tasks','runner']))loadDirectory();
       if(relevantChange(keys,['tasks','runner'],client.scope().space,source))refreshBackgroundTasks();
       pages.refresh(keys,source);if(relevantChange(keys,['permissions','spaces','runtime'],pages.approvalSpace,source))pages.permissions();
     },{space:''});
