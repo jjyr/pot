@@ -405,8 +405,13 @@ func (s *Service) installExtension(ctx context.Context, c ExtensionCommand, entr
 				}
 				files = append(files, p.Manifest.Contributes.Background.Files...)
 			}
-			if _, err = p.Icon(); err == nil {
-				files = append(files, "icon.svg")
+			if name, _, iconErr := p.IconAsset(); iconErr == nil {
+				files = append(files, name)
+			}
+			for _, name := range []string{"icon-NOTICE.txt", "icon-LICENSE.txt"} {
+				if _, noticeErr := p.ReadFile(name, 64*1024); noticeErr == nil {
+					files = append(files, name)
+				}
 			}
 			for _, file := range files {
 				data, err := p.ReadFile(file, 512*1024)

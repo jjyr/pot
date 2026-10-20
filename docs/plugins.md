@@ -51,7 +51,7 @@ run-bound authenticated interface. Project instructions are read on the destinat
 execution scope and bundle digest. Cancellation, ownership checks, operation
 receipts and uncertainty fences apply to plugin calls as to built-in tools.
 
-`mise run build:plugins` packages manifests, declared capability files and optional validated `icon.svg` presentation assets.
+`mise run build:plugins` packages manifests, declared capability files and optional `icon.svg` / `icon.png` presentation assets and their attribution files.
 Packages contain no VM engines, images or guest bootstrap. Stop Runtime before
 replacing a complete package. The Extensions page imports and updates user packages separately from packaged resources. Managed independent MCP servers use the same tool execution boundary; see [Extensions](extensions.md). A plugin marketplace and automatic package updates remain outside this contract. The
 [Codex Bridge](../integrations/codex/README.md) package owns its paired remote MCP

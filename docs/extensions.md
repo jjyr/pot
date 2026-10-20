@@ -39,10 +39,13 @@ User installations can update from their recorded source or be removed. Removal
 moves the directory into `AgentHome/extension-trash` for manual recovery. Builtin
 packages update with Pot and cannot be removed individually.
 
-A package may include **`icon.svg`** beside `plugin.json`, independent of its
-capability file lists. Packaging includes this optional presentation asset. The
-loader accepts a regular, package-local file up to 64 KiB containing only
-self-contained SVG shape elements and attributes. Scripts, external references,
+A package may include **`icon.svg`** or **`icon.png`** beside `plugin.json`,
+independent of its capability file lists. SVG takes precedence. Packaging and
+imports retain these assets and optional `icon-NOTICE.txt` / `icon-LICENSE.txt`
+attribution files. GitHub uses its Octicons brand mark; Codex uses the official
+application icon already used elsewhere in Pot. Each icon is a regular,
+package-local file up to 64 KiB. PNG icons must decode successfully and be at
+most 512 × 512 pixels; SVG accepts only self-contained shapes and attributes. Scripts, external references,
 embedded documents, processing instructions and symlinks are rejected. The
 catalogue returns a validated data URL; missing or invalid icons use the shared
 default extension glyph. Icons never enter transferable execution bundles or

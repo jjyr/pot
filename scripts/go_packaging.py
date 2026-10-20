@@ -298,7 +298,11 @@ def prepare_plugins(destination, platform):
         shutil.copy2(manifest_path, package / "plugin.json")
         for name in sorted(
             {name for capability in contributions.values() for name in capability["files"]}
-            | ({"icon.svg"} if (source / "icon.svg").is_file() else set())
+            | {
+                name
+                for name in ("icon.svg", "icon.png", "icon-NOTICE.txt", "icon-LICENSE.txt")
+                if (source / name).is_file()
+            }
         ):
             relative = Path(name)
             if relative.is_absolute() or ".." in relative.parts or (source / relative).is_symlink():

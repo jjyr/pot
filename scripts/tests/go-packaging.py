@@ -65,7 +65,16 @@ class GoPackaging(unittest.TestCase):
                         sorted(
                             {
                                 "plugin.json",
-                                "icon.svg",
+                                *(
+                                    name
+                                    for name in (
+                                        "icon.svg",
+                                        "icon.png",
+                                        "icon-NOTICE.txt",
+                                        "icon-LICENSE.txt",
+                                    )
+                                    if (ROOT / "plugins" / package.name / name).is_file()
+                                ),
                                 *(
                                     name
                                     for capability in manifest["contributes"].values()
