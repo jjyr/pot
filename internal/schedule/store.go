@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/cronexpr"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 	"strings"
@@ -47,9 +48,6 @@ func readPlan(ctx context.Context, q query, assistant, id string) (*Plan, error)
 	return &plan, nil
 }
 func writePlan(ctx context.Context, tx *sql.Tx, assistant string, plan Plan) error {
-	if plan.Info.Spec.Weekdays == nil {
-		plan.Info.Spec.Weekdays = []uint32{}
-	}
 	raw, err := json.Marshal(plan)
 	if err != nil {
 		return err
@@ -121,9 +119,6 @@ func (s *Service) Manage(ctx context.Context, assistant string, request Request,
 			return nil, fmt.Errorf("schedule spec required")
 		}
 		spec := *request.Spec
-		if spec.Weekdays == nil {
-			spec.Weekdays = []uint32{}
-		}
 		if spec.MachineID == "" {
 			if request.Action == "create" {
 				spec.MachineID, err = s.options.Tasks.ResolveMachine(ctx, "")
@@ -141,7 +136,32 @@ func (s *Service) Manage(ctx context.Context, assistant string, request Request,
 				spec.MachineID = plan.Info.Spec.MachineID
 			}
 		}
+		if spec.Timezone == "" {
+			if request.Action == "update" {
+				plan, e := s.Get(ctx, assistant, request.ScheduleID)
+				if e != nil {
+					return nil, e
+				}
+				if plan == nil {
+					return nil, fmt.Errorf("schedule missing")
+				}
+				spec.Timezone = plan.Info.Spec.Timezone
+			} else {
+				resolve := s.options.SystemTimezone
+				if resolve == nil {
+					resolve = cronexpr.SystemTimezone
+				}
+				spec.Timezone, err = resolve()
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
 		if err := Validate(spec); err != nil {
+			return nil, err
+		}
+		// Check time rules even for disabled definitions before persisting them.
+		if _, err := Next(spec, at); err != nil {
 			return nil, err
 		}
 		if _, err := s.resolve(ctx, assistant, spec, "schedule-validation", nil); err != nil {
@@ -245,8 +265,8 @@ func (s *Service) Manage(ctx context.Context, assistant string, request Request,
 						return fmt.Errorf("one-off schedule must be in the future")
 					}
 				}
+				plan.Generation++
 				if spec.Goal != plan.Info.Spec.Goal || spec.MachineID != plan.Info.Spec.MachineID {
-					plan.Generation++
 					plan.Info.Baseline = nil
 				}
 				plan.Info.Spec = spec

@@ -13,6 +13,7 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -25,16 +26,16 @@ func millis(value string) int64 {
 	return instant.UnixMilli()
 }
 func defaultSpec() protocol.ScheduleSpec {
-	return protocol.ScheduleSpec{MachineID: "machine", Title: "Monitor", Goal: "Check source", Timezone: "Asia/Shanghai", Kind: "interval", EveryMinutes: 1, Weekdays: []uint32{}, Misfire: "coalesce", Notify: "changes", Enabled: true}
+	return protocol.ScheduleSpec{MachineID: "machine", Title: "Monitor", Goal: "Check source", Timezone: "Asia/Shanghai", Kind: "interval", EveryMinutes: 1, Misfire: "coalesce", Notify: "changes", Enabled: true}
 }
 func TestCalendarDSTEarlierOccurrenceGapsAndWeekdays(t *testing.T) {
-	for _, test := range []struct{ kind, zone, clock, at, after, want string }{{"daily", "America/New_York", "02:30", "", "2026-03-07T08:00:00Z", "2026-03-09T06:30:00Z"}, {"daily", "America/New_York", "01:30", "", "2026-11-01T05:00:00Z", "2026-11-01T05:30:00Z"}, {"daily", "America/New_York", "01:30", "", "2026-11-01T05:31:00Z", "2026-11-02T06:30:00Z"}, {"once", "America/New_York", "", "2026-11-01 01:30", "2026-10-31T00:00:00Z", "2026-11-01T05:30:00Z"}, {"weekly", "Asia/Shanghai", "09:00", "", "2026-10-16T02:00:00Z", "2026-10-19T01:00:00Z"}} {
+	for _, test := range []struct{ kind, zone, clock, at, after, want string }{{"cron", "America/New_York", "02:30", "", "2026-03-07T08:00:00Z", "2026-03-09T06:30:00Z"}, {"cron", "America/New_York", "01:30", "", "2026-11-01T05:00:00Z", "2026-11-01T05:30:00Z"}, {"cron", "America/New_York", "01:30", "", "2026-11-01T05:31:00Z", "2026-11-02T06:30:00Z"}, {"once", "America/New_York", "", "2026-11-01 01:30", "2026-10-31T00:00:00Z", "2026-11-01T05:30:00Z"}, {"cron", "Asia/Shanghai", "09:00", "", "2026-10-16T02:00:00Z", "2026-10-19T01:00:00Z"}} {
 		spec := defaultSpec()
 		spec.Kind = test.kind
 		spec.Timezone = test.zone
-		spec.Time = test.clock
+		spec.Cron = map[string]string{"02:30": "30 2 * * *", "01:30": "30 1 * * *", "09:00": "0 9 * * MON"}[test.clock]
 		spec.At = test.at
-		spec.Weekdays = []uint32{1}
+
 		due, err := Next(spec, millis(test.after))
 		if err != nil || due == nil || *due != millis(test.want) {
 			t.Fatalf("%+v due=%v err=%v", test, due, err)
@@ -119,12 +120,15 @@ func setup(t *testing.T) fixture {
 	}
 	port := &destination{runs: map[string]runner.Run{}}
 	reads := 0
+	var readsMu sync.Mutex
 	var service *Service
 	var events []hooks.Event
 	queue, err := tasks.Open(filepath.Join(t.TempDir(), "tasks.sqlite"), tasks.Options{ControlID: "control", RuntimeID: "machine", Port: port, PublishHook: func(event hooks.Event) { events = append(events, event) }, PrepareOutcome: func(ctx context.Context, record tasks.Record, event protocol.TaskResultEvent) (tasks.OutcomeCommit, error) {
 		return service.PrepareOutcome(ctx, record, event)
 	}, ResolveModel: func(context.Context, string, protocol.CreateTask) (tasks.Selection, error) {
+		readsMu.Lock()
 		reads++
+		readsMu.Unlock()
 		return tasks.Selection{Config: spec, Plugins: []string{}}, nil
 	}, ResolveTarget: func(context.Context, string) (core.ExecutionTarget, error) { return core.RuntimeTarget("machine"), nil }})
 	if err != nil {

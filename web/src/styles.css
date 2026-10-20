@@ -663,3 +663,7 @@ pot-file-image[data-state="error"] .file-image-status { color: var(--danger); }
 .update-confirmation { max-width: 440px; }
 .update-confirmation p { line-height: 1.6; color: var(--muted); }
 .update-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+
+.schedule-rule{overflow-wrap:anywhere;font-size:13px}
+.schedule-preview{border:1px solid var(--divider);border-radius:8px;padding:12px;overflow-wrap:anywhere}
+.schedule-preview ol{padding-inline-start:24px}
