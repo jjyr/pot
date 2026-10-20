@@ -3,9 +3,9 @@
 Task guidance, reference messages and completion events share the Agent inbox;
 see [Agent messages](assistant-messages.md). Main manages Tasks. Workers can
 message only their owning assistant; they cannot create, inspect, stop or wait
-for other Tasks. Task-result batches expose bounded inspection and batch archive decisions; a batch
-with eligible failed work also exposes the bounded recovery tool described below.
-Plugin-only summaries have no tools.
+for other Tasks. Task-result and plugin-notification handling retain the
+assistant's configured tools and current machine permissions. A batch with
+eligible failed work additionally exposes the bounded retry tool described below.
 
 ## Autonomous model routing
 
@@ -59,8 +59,9 @@ results; `write_stdin` manages a worker's command session.
 
 A delivered failed manual Task may receive one model-directed replacement through
 `retry_task({task_id, instructions})`. Runtime binds the source to the owner's
-currently claimed result batch. `get_task` can inspect only Tasks in that batch;
-the recovery role has no command, messaging, scheduling or general creation tools.
+currently claimed result batch. The assistant retains its ordinary configured
+tools, including commands, messaging, scheduling and task creation. `get_task`
+can inspect any task owned by this assistant.
 Worker output and plugin events remain untrusted reference data.
 
 The replacement retains the original brief, all additional inputs with their
@@ -164,8 +165,8 @@ The assistant's `set_task_dispositions({decisions})` accepts 1–8 decisions in 
 atomic batch. Each decision supplies `task_id`, current `run_id`, `archived` and
 `reason`. `POST /api/v1/tasks/dispositions` exposes the same owner-scoped operation
 for clients. A running Run, pending owner guidance, or a different current Run
-rejects the batch without partial changes. During result handling only Runs in
-the currently claimed delivery batch are eligible. Workers cannot make archive
+rejects the batch without partial changes. Result handling uses the same
+owner-scoped archive operation as user chat. Workers cannot make archive
 decisions. Explicit cancellation archives after confirmed cleanup.
 
 The owning assistant judges whether delivery is complete or feedback is needed.

@@ -83,10 +83,11 @@ report deduplication. Approval hooks update UI and user reminders without waking
 an assistant model. See [Hooks](hooks.md) and [Agent messages](assistant-messages.md).
 
 Main and Worker invocations share the destination Runtime execution manager.
-Workers cannot coordinate other Tasks. Plugin-only summaries have no tools; Task
-results use a bounded role for batch-scoped inspection and archive decisions.
-Eligible failures additionally allow one durable replacement. Accepted recovery
-is silent. Both roles produce owner-chat reports only when useful. Synthetic
+Workers cannot coordinate other Tasks. Task results and plugin notifications
+resume the owning assistant with its configured tools and current machine
+permissions. Eligible failures additionally allow one durable replacement through
+the batch-bound retry tool. Accepted recovery is silent. Notification turns
+produce owner-chat reports only when useful. Synthetic
 results remain reference data rather than new user authority. See
 [Tasks](task-coordination.md), [schedules](scheduled-tasks.md) and
 [usage](token-usage.md).

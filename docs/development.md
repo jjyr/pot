@@ -220,9 +220,13 @@ POT_LIVE=1 POT_CONFIGURED_LIVE_ROOT=/absolute/control/root \
 
 `TestConfiguredModelAgentProfileLive` uses `POT_CONFIGURED_LIVE_ROOT` and the
 machine's existing key-file selector to read its configured model credentials
-locally. It runs the production Agent, executor and profile tool in a disposable
-Control, asking the model to draw an original cow/horse PNG and set both its name
-and avatar. The test caps provider calls at 12 and output at 4096 tokens per call.
+locally. It runs the production Agent, executor and profile tool in disposable
+Controls. The direct case draws a cow/horse PNG and saves the name and avatar in
+user chat. The background case delegates a monkey/keyboard PNG to a Task, then
+imports that Task artifact and updates the profile during result handling. It
+verifies the persisted avatar against the actual Task image and the successful
+notification tool receipt. Each case caps provider calls at 24 and output at 4096
+tokens per call.
 `POT_LIVE_OUTPUT` optionally saves the normalized PNG and non-secret evidence
 outside the repository. Production conversations, profiles and services are not
 modified. Run with `POT_LIVE=1 mise exec -- go test ./internal/control -run

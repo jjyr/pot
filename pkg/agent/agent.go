@@ -183,7 +183,7 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 		}
 	}
 	sections = append(sections, core.ContextSection{Key: "plugins", Text: pluginInstructions})
-	if !execution.Role.IsNotification() && containsTool(available, "exec_command") {
+	if containsTool(available, "exec_command") {
 		var catalog SkillCatalog
 		if a.Skills != nil {
 			catalog, err = a.Skills(ctx, execution)
@@ -211,11 +211,9 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 		}
 		sections = append(sections, section)
 	}
-	if !execution.Role.IsNotification() {
-		state.Messages, err = SynchronizeSections(state.Messages, sections)
-		if err != nil {
-			return err
-		}
+	state.Messages, err = SynchronizeSections(state.Messages, sections)
+	if err != nil {
+		return err
 	}
 	if !resuming && state.LastRequest != request.RequestID {
 		message := m.TextMessage("user", request.Text)
@@ -477,9 +475,6 @@ func (a *Agent) available(role core.ExecutionRole, settings core.AgentSettings, 
 			if !slices.Contains(settings.BuiltinTools, tool.Name) {
 				continue
 			}
-		}
-		if role == core.Summary || role == core.Recovery && tool.Name != "get_task" && tool.Name != "retry_task" && tool.Name != "set_task_dispositions" {
-			continue
 		}
 		if role == core.Worker && slices.Contains([]string{"create_task", "retry_task", "set_task_dispositions", "list_tasks", "get_task", "interrupt", "cancel_task", "list_assistants", "list_schedules", "get_schedule", "manage_schedule", "read_agent_instructions", "update_agent_instructions", "update_agent_profile"}, tool.Name) {
 			continue

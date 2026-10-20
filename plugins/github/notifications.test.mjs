@@ -12,13 +12,12 @@ function harness(){
  const run=(now,state=null,config={})=>poll({now:start+now*1000,state,config,accounts:{github:'123'}},{fetch:fake});
  return {run,calls,set(value){if(value.rows)rows=value.rows;if(value.comments)comments=value.comments;if(value.code)code=value.code;if(value.headers)headers=value.headers;}};
 }
-test('baseline, overlapping cursor, incremental comments, coalescing, 304, restart and manual history',async()=>{
+test('baseline, overlapping cursor, incremental comments, coalescing, 304 and restart',async()=>{
  const h=harness();let r=await h.run(0);assert.equal(r.status,'baseline');assert.deepEqual(r.events,[]);assert.equal(h.calls.length,1);assert.equal(r.delay_seconds,90);
  h.set({rows:[thread(80)],comments:[comment(-1),comment(80)]});r=await h.run(90,r.state);assert.equal(r.events.length,0);assert.match(h.calls[1].url,/since=/);assert.ok(h.calls[1].headers['If-Modified-Since']);
  h.set({rows:[thread(160)],comments:[comment(80),comment(160)]});r=await h.run(180,JSON.parse(JSON.stringify(r.state)));assert.equal(r.events.length,0);
  h.set({code:304});r=await h.run(270,r.state);assert.equal(r.events.length,1);assert.match(r.events[0].body,/comment-160/);assert.match(r.events[0].body,/comment-80/);assert.doesNotMatch(r.events[0].body,/comment--1/);
- const id=r.events[0].id;r=await h.run(360,r.state);assert.equal(r.events.length,0);
- h.set({code:200,comments:[comment(-1),comment(80),comment(160)]});r=await h.run(450,r.state,{existing:'manual-request'});assert.equal(r.events.length,0);h.set({code:304});r=await h.run(540,r.state,{existing:'manual-request'});assert.equal(r.events.length,0);r=await h.run(630,JSON.parse(JSON.stringify(r.state)),{existing:'manual-request'});assert.equal(r.events.length,1);assert.notEqual(r.events[0].id,id);assert.match(r.events[0].body,/comment--1/);
+ r=await h.run(360,r.state);assert.equal(r.events.length,0);
 });
 test('filters establish progress without model events; account switch establishes a fresh baseline',async()=>{
  const h=harness();let r=await h.run(0);h.set({rows:[thread(80)]});r=await h.run(90,r.state,{repositories:['other/repo']});assert.deepEqual(r.events,[]);assert.equal(h.calls.length,2);assert.match(h.calls[1].url,/\/repos\/other\/repo\/notifications/);
@@ -76,34 +75,68 @@ test('emission pacing is checkpointed across threads and restart without losing 
  r=await h.run(480,JSON.parse(JSON.stringify(r.state)));assert.equal(r.events.length,1);assert.match(r.events[0].url,/issues\/2$/);assert.deepEqual(r.state.pending,{});
  r=await h.run(540,r.state);assert.equal(r.events.length,0);
 });
-test('consumed and legacy history requests cannot replay after an account switch',async()=>{
- const h=harness();let r=await h.run(0);
- const config={existing:'consumed',existing_account:'123'};
- h.set({rows:[thread(80)],comments:[comment(-1)]});r=await h.run(90,r.state,config);
- assert.equal(r.state.manual,'consumed');
- // Same consumed request, then a pending legacy request from another identity.
- for(const [state,nextConfig]of [[{...r.state,account:'old'},config],[{...r.state,account:'old',manual:'previous'},{existing:'old-unconsumed'}]]){
-  const before=h.calls.length,next=await h.run(180,state,nextConfig);
-  assert.equal(next.status,'baseline');assert.deepEqual(next.events,[]);assert.deepEqual(next.state.pending,{});
-  assert.match(h.calls[before].url,/since=/,'Account switch only scans recent baseline');
-  h.set({code:403});const failed=await h.run(180,state,nextConfig);assert.equal(failed.status,'permission');
-  h.set({code:200});const retried=await h.run(4000,failed.state,nextConfig);assert.equal(retried.status,'baseline');assert.deepEqual(retried.state.pending,{},'Failed account transition cannot resurrect history intent');
- }
- // A new owner request explicitly scoped to the connected account still works.
- const before=h.calls.length;
- r=await h.run(270,{...r.state,account:'old'},{existing:'fresh-request',existing_account:'123'});
- assert.equal(r.status,'ready');assert.ok(Object.keys(r.state.pending).length);
- assert.doesNotMatch(h.calls[before].url,/since=/);
- // A request for another account must establish a baseline instead.
- r=await h.run(360,{...r.state,account:'old'},{existing:'wrong-account',existing_account:'other'});
- assert.equal(r.status,'baseline');assert.deepEqual(r.state.pending,{});
-});
-test('reason filters match supported API and custom values without changing defaults',async()=>{
+test('all reasons are included by default, explicit filters narrow the feed',async()=>{
  for(const reason of ['assign','ci_activity','security_alert','custom_reason']){
   const h=harness();let r=await h.run(0);h.set({rows:[thread(80,reason)],comments:[comment(80)]});
   r=await h.run(90,r.state,{reasons:[reason]});assert.equal(r.status,'ready');assert.ok(Object.keys(r.state.pending).length,reason);
  }
  const h=harness();let r=await h.run(0);h.set({rows:[thread(80,'assign')],comments:[comment(80)]});
- r=await h.run(90,r.state);assert.deepEqual(r.state.pending,{},'Defaults stay unchanged');
+ r=await h.run(90,r.state);assert.ok(Object.keys(r.state.pending).length,'Assignments are included by default');
  r=await h.run(180,r.state,{reasons:['invalid reason']});assert.equal(r.status,'overflow');
+});
+
+test('all GitHub subject types produce linked snapshots without optional detail APIs',async()=>{
+ for(const type of ['CheckSuite','Release','Discussion','RepositoryVulnerabilityAlert','FutureNotification']){
+  const h=harness();let r=await h.run(0);const next=thread(80,'ci_activity');next.subject={title:'Update',type,url:'https://api.github.com/repos/me/repo/check-suites/1'};
+  h.set({rows:[next]});r=await h.run(90,r.state);assert.equal(h.calls.length,2);
+  h.set({code:304});r=await h.run(180,r.state);assert.equal(r.events.length,1,type);assert.match(r.events[0].body,new RegExp(type));assert.match(r.events[0].url,/^https:\/\/github.com\//);
+ }
+});
+test('failed detail reads cannot roll back a notification or prevent later updates',async()=>{
+ const h=harness();const baseline=await h.run(0);let calls=0;
+ let r=await poll({now:start+90000,state:baseline.state,config:{},accounts:{github:'123'}},{fetch:async url=>{
+  calls++;if(url.pathname.endsWith('/notifications'))return Response.json([thread(80),{...thread(81,'assign'),id:'t2',subject:{...thread(81).subject,url:'https://api.github.com/repos/me/repo/issues/2'}}]);
+  throw Error('deleted, private or temporarily offline');
+ }});
+ assert.equal(r.status,'ready');assert.equal(calls,3);assert.equal(Object.keys(r.state.pending).length,2);assert.equal(r.state.since,date(90));
+ h.set({code:304});r=await h.run(180,r.state);assert.equal(r.events.length,2);assert.ok(r.events.every(e=>JSON.parse(e.body).updates[0].truncated));
+ h.set({code:200,rows:[thread(260)],comments:[comment(260)]});r=await h.run(270,r.state);assert.equal(r.status,'ready');assert.ok(r.state.pending['me/repo#1']);
+});
+test('slow detail reads exhaust the shared budget without blocking snapshot progress',async()=>{
+ const h=harness(),baseline=await h.run(0);let elapsed=0,calls=0;
+ const rows=Array.from({length:30},(_,i)=>({...thread(80),id:'t'+i,subject:{...thread(80).subject,url:'https://api.github.com/repos/me/repo/issues/'+i}}));
+ let r=await poll({now:start+90000,state:baseline.state,config:{},accounts:{github:'123'}},{clock:()=>elapsed,fetch:async url=>{calls++;elapsed+=5000;if(url.pathname.endsWith('/notifications'))return Response.json(rows);return Response.json({});}});
+ assert.equal(r.status,'ready');assert.ok(calls<=5);assert.equal(r.state.since,date(90));assert.equal(Object.keys(r.state.pending).length,30);
+ h.set({code:304});r=await h.run(180,r.state);assert.equal(r.events.length,8);
+});
+test('large feeds checkpoint pages across restarts instead of restarting the scan',async()=>{
+ let elapsed=0;const calls=[];
+ const fake=async url=>{calls.push(url.searchParams.get('page')||'1');elapsed+=13000;const page=Number(url.searchParams.get('page')||1);return Response.json([{...thread(-1),id:'p'+page}],{headers:page<4?{link:'<https://api.github.com/notifications?page='+(page+1)+'>; rel="next"'}:{}});};
+ let r=await poll({now:start,state:null,config:{},accounts:{github:'123'}},{clock:()=>elapsed,fetch:fake});assert.deepEqual(calls,['1','2']);assert.equal(r.state.since,null);assert.ok(r.state.scan);
+ elapsed=0;r=await poll({now:start+60000,state:JSON.parse(JSON.stringify(r.state)),config:{},accounts:{github:'123'}},{clock:()=>elapsed,fetch:fake});assert.deepEqual(calls,['1','2','3','4']);assert.equal(r.status,'baseline');assert.equal(r.state.scan,null);assert.equal(r.state.since,date(0));assert.equal(Object.keys(r.state.threads).length,4);
+});
+test('previously accepted notifications drain during a feed failure',async()=>{
+ const h=harness();let r=await h.run(0);h.set({rows:[thread(80)]});r=await h.run(90,r.state);h.set({code:403});r=await h.run(180,r.state);assert.equal(r.status,'permission');assert.equal(r.events.length,1);assert.equal(r.state.since,date(90));
+});
+test('removed history settings are rejected rather than starting an unbounded import',async()=>{
+ const h=harness();const r=await h.run(0,null,{existing:'obsolete'});assert.equal(r.status,'overflow');assert.equal(h.calls.length,0);
+});
+test('detail rate limits preserve snapshots and delay further upstream reads',async()=>{
+ const h=harness();const baseline=await h.run(0);let calls=0;
+ const fake=async url=>{calls++;return url.pathname.endsWith('/notifications')?Response.json([thread(80)]):Response.json({}, {status:429,headers:{'retry-after':'600'}});};
+ let r=await poll({now:start+90000,state:baseline.state,config:{},accounts:{github:'123'}},{fetch:fake});assert.equal(r.status,'rate_limited');assert.equal(r.state.since,date(90));assert.ok(r.state.pending['me/repo#1']);
+ r=await poll({now:start+180000,state:JSON.parse(JSON.stringify(r.state)),config:{},accounts:{github:'123'}},{fetch:fake});assert.equal(calls,2);assert.equal(r.events.length,1);assert.equal(r.status,'rate_limited');
+});
+test('a full pending buffer resumes remaining rows without losing notifications',async()=>{
+ const h=harness();const baseline=await h.run(0);let reads=0;
+ const rows=Array.from({length:140},(_,i)=>({...thread(80,'ci_activity'),id:'burst'+i,subject:{title:'CI '+i,type:'CheckSuite'}}));
+ const fake=async()=>{reads++;return Response.json(rows);};
+ let r=await poll({now:start+90000,state:baseline.state,config:{},accounts:{github:'123'}},{fetch:fake});assert.equal(Object.keys(r.state.pending).length,128);assert.equal(r.state.scan.rows.length,12);assert.equal(r.state.since,date(0));
+ const ids=new Set();for(let t=180;t<9000;t+=90){r=await poll({now:start+t*1000,state:JSON.parse(JSON.stringify(r.state)),config:{},accounts:{github:'123'}},{fetch:fake});for(const e of r.events){assert.ok(!ids.has(e.id));ids.add(e.id);}if(ids.size===140)break;}
+ assert.equal(ids.size,140);assert.equal(r.state.scan,null);
+});
+test('malformed subjects fall back to basic notifications without blocking valid rows',async()=>{
+ const h=harness();let r=await h.run(0);const bad=thread(80);bad.subject.url='https://[';
+ h.set({rows:[null,bad,{...thread(81,'assign'),id:'valid'}]});r=await h.run(90,r.state);assert.equal(r.status,'ready');assert.equal(r.state.since,date(90));assert.equal(Object.keys(r.state.pending).length,2);
+ h.set({code:304});r=await h.run(180,r.state);assert.equal(r.events.length,2);assert.ok(r.events.some(e=>e.url.startsWith('https://github.com/notifications?')));
 });

@@ -837,7 +837,7 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 	if options.Execution.Owner != thread.Owner || options.Services == nil || options.Cleanup == nil {
 		return execution.Result{Phase: execution.Failed, Err: errors.New("invalid fixed assistant execution ports")}
 	}
-	if strings.HasPrefix(request.RequestID, "pot-result-") && options.Execution.Role != core.Recovery {
+	if strings.HasPrefix(request.RequestID, "pot-result-") {
 		options.Execution.Role = core.Summary
 	}
 	binding := &turnFeedback{conversation: c, thread: thread, request: request, options: options, gate: core.NewEventGate(thread.Generation, request.RequestID), toolMessages: map[string]string{}}

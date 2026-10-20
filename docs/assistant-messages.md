@@ -116,9 +116,11 @@ receiver uses one readiness/read/claim/Report/release path, and plugin
 acceptance wakes it through the existing inbox change subscription. The receiver
 reads immutable event data rather than reinterpreting current Task state.
 Schedule policy can suppress an outcome before delivery; no separate schedule
-notification queue or reporting turn exists. Task-result handling exposes only
-batch-scoped inspection and archive decisions, plus retry for eligible failures.
-Plugin-only summaries have no tools. Both omit undelivered Tasks' states and
+notification queue or reporting turn exists. Notification handling uses the same
+configured tools, instruction refresh and Skills as user chat, under the current
+machine permissions. Eligible failures additionally expose the batch-bound retry
+tool. Result delivery does not restrict ordinary task inspection, archive decisions
+or follow-up operations. Replies omit undelivered Tasks' states and
 identifiers from prose. Real Task identifiers remain available for artifact
 download URLs.
 

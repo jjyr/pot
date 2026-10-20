@@ -678,5 +678,9 @@ pot-resource.is-expanded .resource-image{max-height:80vh;cursor:zoom-out}pot-res
 pot-resource.is-expanded .resource-text{max-height:75vh}
 @media(max-width:720px){.resource-heading{padding:11px;gap:8px;flex-wrap:wrap}.resource-actions{margin-left:auto}.resource-body{padding:8px}.resource-interactive,.resource-document{height:var(--resource-height,320px)}.resource-image{max-height:260px}}
 
+.schedule-rule{overflow-wrap:anywhere;font-size:13px}
+.schedule-preview{border:1px solid var(--divider);border-radius:8px;padding:12px;overflow-wrap:anywhere}
+.schedule-preview ol{padding-inline-start:24px}
+
 .assistant-delete { margin-top: 28px; border-top: 1px solid var(--divider); padding-top: 16px; }
 .assistant-delete > .control { margin-top: 12px; }
