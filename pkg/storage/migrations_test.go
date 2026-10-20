@@ -38,7 +38,7 @@ INSERT INTO assistant_profile_requests VALUES
 		t.Fatal("invalid historical seed accepted")
 	}
 	var created int
-	if err := db.QueryRow("SELECT COUNT(*) FROM assistant_profiles WHERE assistant_id='missing'").Scan(&created); err != nil || created != 0 || migrationCount(t, db) != 1 {
+	if err := db.QueryRow("SELECT COUNT(*) FROM assistant_profiles WHERE assistant_id='missing'").Scan(&created); err != nil || created != 0 || migrationCount(t, db) != 10 {
 		t.Fatal("failed avatar migration did not roll back", err)
 	}
 	execMigrationSQL(t, db, "DELETE FROM assistant_profile_requests WHERE id='bad'")
