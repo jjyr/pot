@@ -37,7 +37,7 @@ def digest(path):
 def install(home, binary, build=True, codex=None):
     destination = home / ".codex/plugins/pot"
     marketplace = home / ".agents/plugins/marketplace.json"
-    config = home / ".config/pot-codex/bridge.json"
+    config = home / ".config/pot-codex/agent"
     if any(
         p.is_symlink()
         for p in [
@@ -75,15 +75,15 @@ def install(home, binary, build=True, codex=None):
         if path.is_file()
     }
     mcp = json.loads(desired[".mcp.json"])
-    mcp["mcpServers"]["pot"]["command"] = str(destination / "bin/pot-codex-bridge")
+    mcp["mcpServers"]["pot"]["command"] = str(destination / "bin/pot-codex-agent")
     mcp["mcpServers"]["pot"]["args"] = [
         "host",
         "--root",
         str(home / ".config/pot-codex/agent"),
     ]
     desired[".mcp.json"] = (json.dumps(mcp, indent=2) + "\n").encode()
-    # Protect edits and unmanaged packages; local-pair.json belongs to the owner.
-    for relative in set(desired) | set(previous) | {"bin/pot-codex-bridge", ".pot-install.json"}:
+    # Protect edits and unmanaged packages; private Agent Link data belongs to the owner.
+    for relative in set(desired) | set(previous) | {"bin/pot-codex-agent", ".pot-install.json"}:
         target = destination / relative
         if any(p.is_symlink() for p in [target, *target.parents] if p != home.parent):
             raise ValueError(f"Refusing symlink: {relative}")
@@ -97,19 +97,19 @@ def install(home, binary, build=True, codex=None):
         go = shutil.which("go")
         if not go:
             raise ValueError(
-                "Go is required to build the bridge; use mise exec -- python3 integrations/codex/install.py or --binary PATH"
+                "Go is required to build the Agent Link host; use mise exec -- python3 integrations/codex/install.py or --binary PATH"
             )
         subprocess.run(
-            [go, "build", "-mod=readonly", "-o", str(binary), "./cmd/pot-codex-bridge"],
+            [go, "build", "-mod=readonly", "-o", str(binary), "./cmd/pot-codex-agent"],
             cwd=REPO,
             check=True,
         )
     if not binary.is_file():
-        raise ValueError("Bridge binary missing; build it or pass --binary PATH")
-    desired["bin/pot-codex-bridge"] = binary.read_bytes()
-    target_binary = destination / "bin/pot-codex-bridge"
-    if target_binary.exists() and previous.get("bin/pot-codex-bridge") != digest(target_binary):
-        raise ValueError("Locally modified bridge binary retained")
+        raise ValueError("Agent Link binary missing; build it or pass --binary PATH")
+    desired["bin/pot-codex-agent"] = binary.read_bytes()
+    target_binary = destination / "bin/pot-codex-agent"
+    if target_binary.exists() and previous.get("bin/pot-codex-agent") != digest(target_binary):
+        raise ValueError("Locally modified Agent Link binary retained")
     for relative, data in desired.items():
         path = destination / relative
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -128,28 +128,14 @@ def install(home, binary, build=True, codex=None):
     old["pot"] = expected
     catalog["plugins"] = list(old.values())
     atomic(marketplace, json.dumps(catalog, indent=2) + "\n")
-    if not config.exists():
-        atomic(
-            config,
-            json.dumps(
-                {
-                    "listen": "127.0.0.1:8791",
-                    "database": "bridge.sqlite",
-                    "codex": codex or shutil.which("codex") or "codex",
-                    "workspaces": {},
-                },
-                indent=2,
-            )
-            + "\n",
-        )
     if not codex and not shutil.which("codex"):
         print(
-            "Codex CLI is missing from PATH: install/login locally on B before running the Bridge."
+            "Codex CLI is missing from PATH: install/login locally on B before running the Agent Link host."
         )
     print(f"Installed local plugin source: {destination}")
     print("Local source registered; enable Pot with a supported Codex CLI or plugin directory.")
     print(
-        "The message Bridge starts automatically when Codex enables the plugin. Open its connections page with pot_open_connections; no network/system configuration was changed."
+        "The Agent Link host starts automatically when Codex enables the plugin. Open its connections page with pot_open_connections; no network/system configuration was changed."
     )
     return destination
 
@@ -201,7 +187,7 @@ def main():
         default=Path.home(),
         help="Personal configuration home (use an isolated directory for testing)",
     )
-    parser.add_argument("--binary", type=Path, help="Use an already built bridge executable")
+    parser.add_argument("--binary", type=Path, help="Use an already built Agent Link executable")
     parser.add_argument(
         "--codex", help="Codex executable for supported plugin activation (defaults to PATH)"
     )
@@ -214,7 +200,7 @@ def main():
     args = parser.parse_args()
     try:
         with tempfile.TemporaryDirectory(prefix="pot-codex-install-") as directory:
-            binary = args.binary.resolve() if args.binary else Path(directory) / "pot-codex-bridge"
+            binary = args.binary.resolve() if args.binary else Path(directory) / "pot-codex-agent"
             home = args.home.resolve()
             codex = args.codex or shutil.which("codex")
             install(home, binary, build=args.binary is None, codex=codex)

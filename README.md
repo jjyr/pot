@@ -6,9 +6,10 @@
 
 Pot is an open-source implementation of the Dot experience.
 
-Pot runs assistants and background tasks through a Go Control with local execution.
-Explicitly enrolled Runners support remote Tasks. Commands and tool plugins run
-on the selected machine with owner authorization; Runtime manages no VMs or containers.
+Pot runs assistants and background tasks on autonomous Go nodes. Agent Link
+connects Pot, Codex and compatible agents for conversation and task delegation.
+Each node owns its models, credentials, workspace and authorized local execution.
+Runtime manages no VMs or containers.
 
 ## Install
 
@@ -20,7 +21,7 @@ Requires Apple Silicon and macOS 26 or later.
 brew install --cask jjyr/tap/pot
 ```
 
-### Server (Control or execution-only)
+### Server node
 
 On Linux or macOS, use a Go CLI archive or build the complete runtime from a
 checkout with the pinned toolchains in `mise.toml`:
@@ -30,13 +31,9 @@ mise install
 mise run build:cli
 ```
 
-Both modes use the same CLI:
-
-- **[Control](docs/deployment.md#standalone-control)** manages assistants, conversations,
-  model credentials, tasks and joined machines. Connect with the macOS App or Web UI.
-- **[Execution-only (Runner)](docs/deployment.md#runner-membership)** joins
-  a Control and provides explicitly selected local execution.
-  It connects outward and needs no model-provider credentials.
+A [server node](docs/deployment.md#standalone-node) manages its assistants,
+conversations, model credentials and local tasks. Connect agents through Agent
+Link, and publish browser access with the independent Web UI service.
 
 Go hosts the product logic. The macOS App uses Wails v3 and the system WebView;
 main window, tray and the independent browser service share HTML/CSS/JavaScript.
@@ -47,7 +44,7 @@ browser tools use Chrome/Chromium installed on the execution machine.
 ## Features
 
 - **A personal AI assistant** — give instructions, ask questions, and follow up through chat.
-- **Local execution** — tools run on the Control by default, with explicit remote Task destinations.
+- **Local execution** — tools run on their owning node; remote work uses Agent Link delegation.
 - **Background tasks** — Pot binds each task to a fixed Runtime, tracks progress, and reports results.
 - **Scheduled work** — ask Pot to run recurring tasks and notify you when something changes.
 - **Persistent workspaces** — retain files in assistant and Task directories.
@@ -56,19 +53,19 @@ See the [documentation](docs/README.md) for details.
 
 ## Codex integration
 
-Delegate independent tasks from Pot to your local Codex on another Tailscale
-machine. An authenticated HTTPS Bridge starts separate Codex App Server threads;
-SSE pushes progress and durable results back to Pot. The local Codex plugin can
-also send messages/requests to a paired Pot assistant and query receipts. Your
-current Codex App chat stays separate. See the [installation and pairing guide](integrations/codex/README.md).
+Connect Codex through Agent Link by copying a connection segment and pasting it
+into **Add Agent**. Pot discovers the Codex plugin's virtual assistants and uses
+the existing chat and delegation interfaces. Each virtual assistant owns one
+persistent Codex session, shared by its serialized chat and task queue. Codex
+keeps its own login, model settings, workspace and permissions. See the
+[installation and connection guide](integrations/codex/README.md).
 
-Copy this prompt into Codex from a checkout containing the integration (use the PR
-branch before merge, `main` after merge):
+From a checkout containing the integration:
 
-> Read `integrations/codex/README.md` in this Pot checkout, then run its idempotent
-> installer and verify the local plugin/MCP setup using my normal permissions.
-> Preserve existing checkout and configuration changes. Infer defaults; ask only
-> for the Bridge/Pot endpoint, pairing route or allowed workspaces that you cannot
-> determine. Keep credentials in private files, never in chat or command output.
-> Report separately whether the plugin is installed/enabled and whether both
-> machines are paired and connected; do not change Tailscale ACLs or enable Funnel.
+```sh
+mise exec -- python3 integrations/codex/install.py
+```
+
+Enable the Pot plugin in Codex, open `pot_open_connections`, then copy and paste
+the connection segment between nodes. Configure additional assistants and their
+local workspaces through the host's local `assistant` command.
