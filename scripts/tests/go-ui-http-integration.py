@@ -250,9 +250,19 @@ def run(binary, base, env, cli_command, profile_only=False):
                 reserve.bind(("127.0.0.1", 0))
                 web_port = reserve.getsockname()[1]
             origin = f"http://127.0.0.1:{web_port}"
+            resources = base / "resources"
+            shutil.copytree(ROOT / "plugins", resources / "plugins")
+            shutil.copytree(ROOT / "skills", resources / "skills")
             processes.append(
                 subprocess.Popen(
-                    [str(binary), "serve", "-root", str(base / "runtime")],
+                    [
+                        str(binary),
+                        "serve",
+                        "-root",
+                        str(base / "runtime"),
+                        "-resources",
+                        str(resources),
+                    ],
                     env=env,
                     stdout=log,
                     stderr=log,
