@@ -72,7 +72,7 @@ func newBackend(db *sql.DB, nodeID, root string) (*backend, error) {
 	return b, nil
 }
 func (b *backend) list(ctx context.Context) ([]assistant, error) {
-	rows, err := b.db.QueryContext(ctx, "SELECT id,name,workspace,mode,thread_id,is_default,avatar,character,revision FROM codex_link_assistants ORDER BY rowid")
+	rows, err := b.db.QueryContext(ctx, "SELECT id,name,workspace,mode,thread_id,is_default,avatar,character,revision FROM codex_link_assistants WHERE deleted=0 ORDER BY rowid")
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func (b *backend) Directory(ctx context.Context) (agentlink.Directory, error) {
 		identity := b.identity(a)
 		identity.Avatar = a.Avatar
 		d.Assistants = append(d.Assistants, identity)
-		d.Operations[a.ID] = agentlink.Description{Version: 1, Scope: "peer", Operations: append(agentlink.PeerOperations(), agentlink.AssistantProfile)}
+		d.Operations[a.ID] = agentlink.Description{Version: 1, Scope: "peer", Operations: append(agentlink.PeerOperations(), agentlink.AssistantProfile, agentlink.AssistantDelete)}
 		if a.Default {
 			d.DefaultAssistantID = a.ID
 		}
@@ -107,10 +107,10 @@ func (b *backend) Directory(ctx context.Context) (agentlink.Directory, error) {
 }
 func (b *backend) resolve(ctx context.Context, id string) (assistant, error) {
 	var a assistant
-	query := "SELECT id,name,workspace,mode,thread_id,is_default,avatar,character,revision FROM codex_link_assistants WHERE id=?"
+	query := "SELECT id,name,workspace,mode,thread_id,is_default,avatar,character,revision FROM codex_link_assistants WHERE id=? AND deleted=0"
 	var err error
 	if id == "" {
-		err = b.db.QueryRowContext(ctx, "SELECT id,name,workspace,mode,thread_id,is_default,avatar,character,revision FROM codex_link_assistants WHERE is_default=1").Scan(&a.ID, &a.Name, &a.Workspace, &a.Mode, &a.ThreadID, &a.Default, &a.Avatar, &a.Character, &a.Revision)
+		err = b.db.QueryRowContext(ctx, "SELECT id,name,workspace,mode,thread_id,is_default,avatar,character,revision FROM codex_link_assistants WHERE is_default=1 AND deleted=0").Scan(&a.ID, &a.Name, &a.Workspace, &a.Mode, &a.ThreadID, &a.Default, &a.Avatar, &a.Character, &a.Revision)
 	} else {
 		err = b.db.QueryRowContext(ctx, query, id).Scan(&a.ID, &a.Name, &a.Workspace, &a.Mode, &a.ThreadID, &a.Default, &a.Avatar, &a.Character, &a.Revision)
 	}
@@ -134,7 +134,14 @@ func (b *backend) ownerConfigure(ctx context.Context, a assistant) error {
 	a.Workspace = path
 	return storage.Transaction(ctx, b.db, func(tx *sql.Tx) error {
 		var workspace, mode, existingName string
-		err := tx.QueryRowContext(ctx, "SELECT workspace,mode,name FROM codex_link_assistants WHERE id=?", a.ID).Scan(&workspace, &mode, &existingName)
+		var retired bool
+		if err := tx.QueryRowContext(ctx, "SELECT deleted FROM codex_link_assistants WHERE id=?", a.ID).Scan(&retired); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if retired {
+			return agentlink.ErrNotFound
+		}
+		err := tx.QueryRowContext(ctx, "SELECT workspace,mode,name FROM codex_link_assistants WHERE id=? AND deleted=0", a.ID).Scan(&workspace, &mode, &existingName)
 		// A session's workspace/permission scope is immutable. Create another virtual
 		// assistant to use a different scope; accepted work keeps its original owner.
 		if err == nil && (workspace != a.Workspace || mode != a.Mode) {
@@ -234,6 +241,9 @@ func (b *backend) submit(ctx context.Context, r agentlink.TaskRequest, message *
 			return json.Unmarshal([]byte(data), &accepted)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err = activeAssistantTx(ctx, tx, a.ID); err != nil {
 			return err
 		}
 		var count int
@@ -401,6 +411,9 @@ func (b *backend) runAssistant(ctx context.Context, id string) {
 	defer timer.Stop()
 	for {
 		if ctx.Err() != nil {
+			return
+		}
+		if _, err := b.resolve(ctx, id); errors.Is(err, agentlink.ErrNotFound) {
 			return
 		}
 		var raw string

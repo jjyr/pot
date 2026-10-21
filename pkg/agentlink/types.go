@@ -15,6 +15,8 @@ import (
 const ServiceName = "agent-link"
 
 var (
+	ErrAssistantBusy     = errors.New("assistant_busy")
+	ErrAssistantChanged  = errors.New("assistant_changed")
 	ErrInvalid           = errors.New("agent_link_invalid")
 	ErrNotFound          = errors.New("agent_link_not_found")
 	ErrUnauthorized      = errors.New("agent_link_authentication_failed")

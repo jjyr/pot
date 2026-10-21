@@ -42,7 +42,7 @@ export function mutationTopics(path,body,value) {
   if(path==='/api/v1/agent-links/invitation')return null;
   if(path.startsWith('/api/v1/agent-links'))return ['agent-links','assistants'];
   if(path.startsWith('/api/v1/providers'))return ['providers','settings','assistants','conversation','usage'];
-  if(path.startsWith('/api/v1/assistants'))return ['assistants','conversation','schedules'];
+  if(path.startsWith('/api/v1/assistants'))return ['assistants','agent-links','conversation','schedules'];
   if(path.startsWith('/api/v1/extensions'))return ['extensions','skills','assistants','conversation'];
   if(path.startsWith('/api/v1/integrations'))return ['integrations'];
   if(path.startsWith('/api/v1/permissions'))return ['permissions','machines','assistants','tasks'];

@@ -1,8 +1,11 @@
 async page=>{
-  const checks=[],assert=(value,message)=>{if(!value)throw Error(message);checks.push(message);},errors=[];
+  const checks=[],assert=(value,message)=>{if(!value)throw Error(message);checks.push(message);},errors=[],profileResponses=[];
+  page.on('response',response=>{const path=new URL(response.url()).pathname;if(path.startsWith('/api/v1/assistants/'))profileResponses.push({path,method:response.request().method(),status:response.status()});});
   page.on('pageerror',error=>errors.push(error.message));
   page.on('dialog',dialog=>dialog.accept());
   const locale=value=>page.evaluate(value=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-go-preview-locale',value}})),value);
+  const login=await page.request.post(new URL('/fixture/login',page.url()).href);
+  assert(login.ok(),'Disposable browser session authenticates before product requests');
   await page.setViewportSize({width:1280,height:900});
   await page.goto(new URL('/scripts/tests/fixtures/codex-profile.html?locale=zh-CN',page.url()).href);
   await page.locator('.role-assistant').filter({hasText:'运行在 Codex'}).waitFor();
@@ -41,6 +44,9 @@ async page=>{
   await page.getByRole('textbox',{name:'名称',exact:true}).waitFor();
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile profile editor has no horizontal overflow');
   assert(await page.getByRole('button',{name:'更换头像',exact:true}).isVisible(),'Mobile exposes translated avatar editing');
+  assert(profileResponses.some(value=>value.path==='/api/v1/assistants/profile'&&value.status===200),'Profile read succeeds through the browser allowlist');
+  assert(profileResponses.some(value=>value.path==='/api/v1/assistants/default-avatar'&&value.status===200),'Default avatar read succeeds through the browser allowlist');
+  assert(profileResponses.some(value=>value.method==='POST'&&value.status===200),'Remote profile update succeeds through the browser allowlist');
   assert(errors.length===0,'No browser script errors: '+errors.join('; '));
   return {checks,modelCalls:0};
 }

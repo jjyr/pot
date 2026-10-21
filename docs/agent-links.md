@@ -55,6 +55,15 @@ cached capability descriptions; the receiver still enforces authorization at
 admission. Directory descriptions must cover every advertised assistant; a peer
 cannot publish an owner-scoped description. Upgrade connected adapters together.
 
+`assistant.profile` permits presentation editing only; it does not authorize
+retirement. `assistant.delete` is an independent receiver-advertised operation
+available only to authenticated user callers, never assistant or task callers.
+Its typed request binds the selected assistant and saved profile revision.
+The receiver retires only an idle identity and rejects stale revisions, active
+work and unconfirmed cleanup. No deletion is queued while disconnected. A
+successful deletion refreshes the sender's directory; it does not revoke the
+node connection, choose a replacement default or delete workspace files.
+
 Chat capabilities distinguish send, receipt, history, subscription, attachments,
 references and individual turn controls. Task capabilities distinguish submit,
 read, list, cancel, input, events, files, archive and advanced owner controls.

@@ -46,12 +46,20 @@ func (m *hostMailbox) Deliver(ctx context.Context, e protocol.Envelope) (protoco
 	if e.Kind != "message" || e.To.Kind != "assistant" || e.To.NodeID != m.local.NodeID {
 		return protocol.Receipt{}, errors.New("agent_link_target_mismatch")
 	}
-	if m.backend != nil {
-		if _, err := m.backend.resolve(ctx, e.To.AgentID); err != nil {
-			return protocol.Receipt{}, err
+	err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
+		if m.backend != nil {
+			var accepted bool
+			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_messages WHERE id=? AND direction='incoming')", e.ID).Scan(&accepted); err != nil {
+				return err
+			}
+			if !accepted {
+				if err := activeAssistantTx(ctx, tx, e.To.AgentID); err != nil {
+					return err
+				}
+			}
 		}
-	}
-	err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error { return inbox.EnqueueTx(ctx, tx, e, "incoming", "queued") })
+		return inbox.EnqueueTx(ctx, tx, e, "incoming", "queued")
+	})
 	return protocol.Receipt{Message: e}, err
 }
 func (m *hostMailbox) Acknowledge(ctx context.Context, r protocol.Receipt) error {

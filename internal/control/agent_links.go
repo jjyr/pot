@@ -327,7 +327,7 @@ func agentLinkError(err error) error {
 	if err == nil {
 		return nil
 	}
-	for _, known := range []error{agentlink.ErrInvalid, agentlink.ErrNotFound, agentlink.ErrUnauthorized, agentlink.ErrExpired, agentlink.ErrUsed, agentlink.ErrConflict, agentlink.ErrRevoked, agentlink.ErrReconnectRequired, agentlink.ErrUnavailable, agentlink.ErrUnsupported, agentlink.ErrDisconnected, agentlink.ErrCapacity, agentlink.ErrFenced} {
+	for _, known := range []error{agentlink.ErrAssistantBusy, agentlink.ErrAssistantChanged, agentlink.ErrInvalid, agentlink.ErrNotFound, agentlink.ErrUnauthorized, agentlink.ErrExpired, agentlink.ErrUsed, agentlink.ErrConflict, agentlink.ErrRevoked, agentlink.ErrReconnectRequired, agentlink.ErrUnavailable, agentlink.ErrUnsupported, agentlink.ErrDisconnected, agentlink.ErrCapacity, agentlink.ErrFenced} {
 		if errors.Is(err, known) {
 			return protocol.APIError{Code: known.Error()}
 		}
