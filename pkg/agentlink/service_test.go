@@ -507,6 +507,7 @@ DROP TABLE agent_link_received_tasks;
 DROP TABLE agent_link_chat;
 DROP TABLE agent_link_chat_sessions;
 DROP TABLE codex_agent_endpoints;
+DROP TABLE agent_link_endpoints;
 DROP TABLE display_resources;
 DROP TABLE provider_metadata;
 DROP TABLE extension_settings;
@@ -614,7 +615,7 @@ func TestEstablishedAssistantAnchorUpgradeRetainsSignedConnection(t *testing.T) 
 		if err = side.service.update(ctx, connection); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = side.db.Exec(`DROP TABLE agent_link_chat_sessions; ALTER TABLE agent_link_chat DROP COLUMN sender_kind; DELETE FROM pot_migrations WHERE id LIKE '0020_%'`); err != nil {
+		if _, err = side.db.Exec(`DROP TABLE agent_link_chat_sessions; DROP TABLE agent_link_endpoints; ALTER TABLE agent_link_chat DROP COLUMN sender_kind; DELETE FROM pot_migrations WHERE id >= '0020_'`); err != nil {
 			t.Fatal(err)
 		}
 		side.close()

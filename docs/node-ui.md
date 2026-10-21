@@ -11,7 +11,7 @@ and `ip_addresses` as live, best-effort presentation metadata; it does not persi
 them or change stable routing/policy IDs. Only up, non-loopback interfaces supply
 unicast addresses; link-local addresses are omitted. Addresses are deduplicated
 and sorted with IPv4 before IPv6. These addresses do not prove remote reachability.
-The topology graph and inspector show the same host information directly.
+The Link graph and inspector show the same host information directly.
 Execution machines show their hostname and one interface IP. Linked nodes show
 the reported hostname, falling back to the saved TCP endpoint's host and port;
 this endpoint is a connection address, not a discovered remote interface inventory.
