@@ -20,6 +20,14 @@ complete-host facade and may compose `internal/` services behind private fields.
 Internal implementation types do not appear in its public signatures. See
 [component boundaries](backend-components.md) for package responsibilities.
 
+## MCP sessions
+
+`pkg/mcp` exposes SDK protocol types, bounded tool discovery, calls, cancellation
+and stdio/HTTP transport integration without product dependencies. Callers own
+process supervision, credentials and execution policy. It also owns the canonical
+Node SDK assets used by Runtime adapters and plugin servers. See [MCP](mcp.md)
+for API boundaries, host extensions and asset rebuilding.
+
 ## Native peer transport
 
 `pkg/peer` provides TLS 1.3 TCP sessions with mutual Ed25519 key proof,

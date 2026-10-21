@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/jjyr/pot/internal/assistant"
 	"os"
 	"path/filepath"
@@ -19,12 +20,6 @@ import (
 	"github.com/jjyr/pot/pkg/plugin"
 )
 
-type subscriptionFixture struct {
-	ID, Assistant, AccountID string
-	Enabled                  bool
-	Revision                 int64
-	Filters                  map[string]any
-}
 type settingsFixture struct {
 	AccountID     string `json:"account_id"`
 	Revision      int64
@@ -63,10 +58,13 @@ func TestPluginMCPSubscriptionsDiscoveryCRUDDefaultAndSharedUI(t *testing.T) {
 			t.Fatalf("%s: %s %v", method, r.StructuredContent, e)
 		}
 		var v settingsFixture
-		if e = json.Unmarshal(r.StructuredContent, &v); e != nil {
+		if e = json.Unmarshal(mustMCPJSON(r.StructuredContent), &v); e != nil {
 			t.Fatal(e)
 		}
 		return v
+	}
+	if _, err = s.ManageMCP(ctx, MCPCommand{Action: "save", Server: MCPServer{ID: "github", Name: "Colliding server", Enabled: true, Transport: "stdio", Command: "node"}}); err == nil {
+		t.Fatal("MCP package namespace collision accepted")
 	}
 	tools, _, err := s.invokePluginMCP(ctx, p, "", nil)
 	if err != nil || len(tools) != 5 {
@@ -218,10 +216,10 @@ func TestPluginMCPDefaultDeletionSurvivesServiceRestartAndReconnect(t *testing.T
 		raw, _ := json.Marshal(args)
 		_, r, e := s.invokePluginMCP(ctx, p, name, raw)
 		if e != nil || r.IsError {
-			t.Fatal(e, string(r.StructuredContent))
+			t.Fatal(e, fmt.Sprint(r.StructuredContent))
 		}
 		var v settingsFixture
-		if e = json.Unmarshal(r.StructuredContent, &v); e != nil {
+		if e = json.Unmarshal(mustMCPJSON(r.StructuredContent), &v); e != nil {
 			t.Fatal(e)
 		}
 		return v
@@ -313,11 +311,13 @@ func TestPluginMCPHostScopesOpaqueInstancesToInstalledPackage(t *testing.T) {
 	}
 	args, _ := json.Marshal(map[string]any{"request_id": "foreign-instance", "account_id": "123", "assistant": receiver.ID, "enabled": true, "filters": map[string]any{"repositories": nil, "reasons": nil, "subject_types": nil, "threads": nil}})
 	_, result, err := s.invokePluginMCP(ctx, p, "create_subscription", args)
-	if err != nil || !result.IsError || !strings.Contains(string(result.StructuredContent), "plugin_instance_mismatch") {
-		t.Fatal(string(result.StructuredContent), err)
+	if err != nil || !result.IsError || !strings.Contains(fmt.Sprint(result.StructuredContent), "plugin_instance_mismatch") {
+		t.Fatal(fmt.Sprint(result.StructuredContent), err)
 	}
 	rows, err := s.Mailbox.Backgrounds(ctx)
 	if err != nil || len(rows) != 1 || rows[0].Revision != 1 || string(rows[0].Config) != string(original.Config) {
 		t.Fatal(rows, err)
 	}
 }
+
+func mustMCPJSON(value any) []byte { raw, _ := json.Marshal(value); return raw }

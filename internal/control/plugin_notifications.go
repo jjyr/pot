@@ -321,7 +321,8 @@ func (s *Service) PluginNotificationCall(ctx context.Context, id, tool string, a
 		return nil, err
 	}
 	if r.IsError {
-		return nil, errors.New(string(r.StructuredContent))
+		raw, _ := json.Marshal(r.StructuredContent)
+		return nil, errors.New(string(raw))
 	}
 	return s.PluginNotifications(ctx)
 }

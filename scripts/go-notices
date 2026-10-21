@@ -36,6 +36,10 @@ for module in sorted(modules.values(), key=lambda value: value["Path"]):
     notices.extend(path.read_text(errors="replace") for path in licenses)
 goroot = subprocess.check_output(["go", "env", "GOROOT"], text=True).strip()
 notices.append("\nGo runtime\n" + (Path(goroot) / "LICENSE").read_text())
+notices.append(
+    "\nBundled MCP JavaScript runtime\n"
+    + (Path(__file__).resolve().parent.parent / "pkg/mcp/assets/NOTICE.txt").read_text()
+)
 args.output.parent.mkdir(parents=True, exist_ok=True)
 args.output.write_text("\n".join(notices))
 print(args.output)

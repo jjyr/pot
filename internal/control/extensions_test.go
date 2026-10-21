@@ -100,6 +100,10 @@ func TestMCPHTTPDiscoveryCallToolSelectionAndEncryptedCredentials(t *testing.T) 
 			w.WriteHeader(401)
 			return
 		}
+		if r.Method == "GET" {
+			w.WriteHeader(405)
+			return
+		}
 		if r.Method == "DELETE" {
 			w.WriteHeader(204)
 			return
@@ -120,7 +124,7 @@ func TestMCPHTTPDiscoveryCallToolSelectionAndEncryptedCredentials(t *testing.T) 
 		var result any
 		switch req.Method {
 		case "initialize":
-			result = map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
+			result = map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]any{"name": "fixture", "version": "1"}}
 		case "tools/list":
 			result = map[string]any{"tools": []any{map[string]any{"name": "echo", "description": "Echo", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"message": map[string]string{"type": "string"}}}}}}
 		case "tools/call":
@@ -162,6 +166,9 @@ func TestMCPHTTPDiscoveryCallToolSelectionAndEncryptedCredentials(t *testing.T) 
 	if bundle == nil {
 		t.Fatal(settings)
 	}
+	if len(bundle.Files) != 3 || bundle.Files["mcp-runtime.mjs"] == "" || bundle.Files["config.json"] == "" || bundle.Manifest.Contributes.Tools.Entrypoint != "mcp-adapter.mjs" {
+		t.Fatal("incomplete MCP runtime snapshot")
+	}
 	raw, _ = json.Marshal(bundle)
 	if strings.Contains(string(raw), "fixture-private") {
 		t.Fatal("bundle leaked secret")
@@ -172,7 +179,7 @@ func TestMCPHTTPDiscoveryCallToolSelectionAndEncryptedCredentials(t *testing.T) 
 		t.Fatal(err)
 	}
 	worker, _ := os.Executable()
-	host, err := pluginhost.New(pluginhost.Config{Identity: bundle.Digest, Files: bundle.Files, Entrypoint: "mcp-client.mjs", Mode: "text", ProcessWorker: []string{worker}, Environment: map[string]string{"MCP_CREDENTIALS": secret}})
+	host, err := pluginhost.New(pluginhost.Config{Identity: bundle.Digest, Files: bundle.Files, Entrypoint: bundle.Manifest.Contributes.Tools.Entrypoint, Mode: "text", Workspace: t.TempDir(), ProcessWorker: []string{worker}, Environment: map[string]string{"MCP_CREDENTIALS": secret}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,7 +3,8 @@
 A plugin is a trusted locally installed directory with a schema-2 `plugin.json`
 manifest. `pkg/plugin` validates identity and confined file access without
 starting processes. Packages can contribute tools, owner-enabled background
-services and node-local model connection types. Unknown manifest fields fail explicitly.
+services, Control-local MCP servers and node-local model connection types.
+Unknown manifest fields fail explicitly.
 
 ```text
 Package manifest + declared files
@@ -12,6 +13,7 @@ Package manifest + declared files
            |
            +-- tools ----------> digest-pinned Task bundle -> executor
            +-- background -----> local service -> assistant inbox
+           +-- mcp ------------> Control-local stdio server / tool handlers
            `-- model_providers -> local connection registry / metadata reader
 ```
 
@@ -124,11 +126,14 @@ inference availability; host policy owns monitoring and assistant delivery.
 
 `contributes.mcp` declares `runtime: "node"`, `execution: "control"`, an entrypoint,
 a bounded file set and optional declared credentials. These files stay on the
-owning Control and never enter Runtime tool bundles. Discovery and calls use real
-MCP stdio with protocol version `2025-06-18`, supervised cleanup, cancellation,
-a 30-second invocation deadline and bounded frames/catalogues. Credentials enter
-only declared environment variables, never model arguments or configuration.
-The host rejects plugin changes between discovery and invocation.
+owning Control and never enter Runtime tool bundles.
+`pkg/mcp` supplies the official Go SDK client and shared Node SDK server runtime;
+`pkg/pluginhost` owns process startup, declared credentials, a 30-second
+invocation deadline and supervised cleanup. The plugin entrypoint imports the
+host-provided `POT_MCP_RUNTIME` file URL and registers its tools/handlers with
+`serve`. MCP protocol versions are negotiated by the SDKs. No plugin implements
+a private JSON-RPC loop. See [MCP](mcp.md) for the protocol and asset contract.
+The host rejects package changes between discovery and invocation.
 
 An optional `configuration: {list, create, update, delete}` maps the generic
 settings bridge to discovered tool names. Business semantics live in the package.
@@ -261,17 +266,20 @@ fit the single-event bound. Additional messages stay durable. Claiming a batch
 has no cooldown or model charge; if a user input wins before `Report` starts,
 release makes the same events immediately eligible. Existing model allowance
 limits still apply. Producers own aggregation and emission pacing; Control adds
-no plugin-specific delivery timer, rate table or model role. `queued` and
-`attention` counts expose backlog and failed/interrupted attempts in settings.
+no plugin-specific delivery timer, rate table or model role. `queued`, `attention`
+and diagnostic fields expose shared-instance backlog and
+failed/interrupted attempts in the configuration projection. They are not
+per-subscription delivery counters.
 
 Statuses are stable identifiers: `ready`, `baseline`, `backoff`, `rate_limited`,
 `authorization`, `permission`, `overflow`; the host also reports `disabled` and
 `unavailable`. The settings projection also distinguishes `pending`,
 `waiting_assistant`, `assistant_missing`, `account_changed` and `plugin_missing` from known host
 configuration state. Plugin discovery and host exchange failures retain their diagnostic in
-settings details. Host timeouts are identified explicitly; a successful exchange
-clears the previous diagnostic. Runtime status identifiers and queue counts are also
-available there. Protocol/process/acceptance failures leave the old checkpoint and
+the configuration projection. Host timeouts are identified explicitly; a successful exchange
+clears the previous diagnostic. Runtime status identifiers are rendered by
+settings; queue counts and host diagnostics remain available in the configuration
+projection. Protocol/process/acceptance failures leave the old checkpoint and
 schedule a five-minute retry. The plugin receives that old checkpoint again;
 there is no false success receipt. Owner management uses authenticated
 `GET /api/v1/plugin-notifications` and
@@ -297,9 +305,9 @@ server** exposes `list_subscriptions`, `create_subscription`, `update_subscripti
 `delete_subscription` and `read_notifications`. Agent preparation performs MCP
 `initialize` and `tools/list`; `mcp_github` forwards the selected name and JSON
 object arguments to a fresh supervised connection and real `tools/call`. It is
-available to both Main and Tasks without installing another server. There are no
-native `github_*_notification_filters` tools. The package no longer contributes
-a Runtime GitHub CLI tool; ordinary authorized shell workflows can still use `gh`.
+available to both Main and Tasks without installing another server. The server
+provides notification subscriptions and reads; ordinary authorized
+shell workflows can use `gh` for other GitHub operations.
 
 ```text
 Main / Task -- mcp_github -- MCP stdio -- GitHub plugin subscriptions / reader
@@ -435,8 +443,8 @@ prove this endpoint is usable.
 Connections with the `allowances` capability use an independent background
 instance per connection and source package. The plugin identity, instance routing,
 queue bounds and atomic checkpoint/inbox acceptance rules above apply. Connection
-settings own these monitors; the plugin notification list shows background
-contributions. See [Provider contributions](model-directory.md#provider-contributions)
+settings own these monitors; connection monitor instances are excluded from
+the subscription settings projection. See [Provider contributions](model-directory.md#provider-contributions)
 for model connections and their shared metadata reader.
 
 Monitoring defaults to enabled at 90 percent. An initially empty target binds to
