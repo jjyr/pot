@@ -235,7 +235,7 @@ func TestPluginStoredFormatUpgradePreservesBindingAndReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Recreate only the removed fields/table from the previous PR format.
-	if _, err := m.db.Exec(`DROP INDEX agent_messages_outbox_route; ALTER TABLE agent_messages DROP COLUMN accepted_at_ms; ALTER TABLE assistant_mail_identity RENAME COLUMN node_id TO control_id; ALTER TABLE assistant_contacts RENAME COLUMN node TO control; DROP TABLE task_input_digest_formats; DROP TABLE codex_mail_consumers; DROP TABLE codex_link_jobs; DROP TABLE codex_link_assistants; DROP TABLE pot_migrations; DROP INDEX agent_link_user_chat_routes; DROP INDEX agent_plugin_instance_state; ALTER TABLE plugin_background DROP COLUMN diagnostic; ALTER TABLE plugin_background DROP COLUMN plugin_id; ALTER TABLE plugin_background DROP COLUMN connection_id; CREATE TABLE plugin_delivery_rates(owner TEXT PRIMARY KEY,next INTEGER NOT NULL); INSERT INTO plugin_delivery_rates VALUES('main',9999999999999);
+	if _, err := m.db.Exec(`DROP INDEX agent_messages_outbox_route; ALTER TABLE agent_messages DROP COLUMN accepted_at_ms; ALTER TABLE assistant_mail_identity RENAME COLUMN node_id TO control_id; ALTER TABLE assistant_contacts RENAME COLUMN node TO control; DROP TABLE task_input_digest_formats; DROP TABLE codex_mail_consumers; DROP TABLE codex_link_jobs; DROP TABLE codex_link_assistants; DROP TABLE pot_migrations; DROP TABLE plugin_background_writes; DROP INDEX agent_link_user_chat_routes; DROP INDEX agent_plugin_instance_state; ALTER TABLE plugin_background DROP COLUMN diagnostic; ALTER TABLE plugin_background DROP COLUMN plugin_id; ALTER TABLE plugin_background DROP COLUMN connection_id; CREATE TABLE plugin_delivery_rates(owner TEXT PRIMARY KEY,next INTEGER NOT NULL); INSERT INTO plugin_delivery_rates VALUES('main',9999999999999);
  UPDATE agent_messages SET envelope=json_set(envelope,'$.plugin.event.group','thread','$.text','old duplicate');
  UPDATE agent_messages SET state=json_extract(envelope,'$.plugin.event.id');`); err != nil {
 		t.Fatal(err)
@@ -420,7 +420,7 @@ func TestPluginDefaultInitializationConcurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	bindings, err = m.Backgrounds(ctx)
-	if err != nil || bindings[0].Enabled || bindings[0].Assistant != "chosen" || bindings[0].Revision != 2 || string(bindings[0].State) != `{"account":"old","baseline":true}` {
+	if err != nil || bindings[0].Enabled || bindings[0].Assistant != "chosen" || bindings[0].Revision != 2 || !strings.Contains(string(bindings[0].State), `"baseline":true`) {
 		t.Fatal(bindings, err)
 	}
 	if err = m.ConfigureBackground(ctx, b); err == nil {
@@ -590,5 +590,51 @@ func TestBackgroundWaitingInstanceCanCommitCheckpointWithoutEvents(t *testing.T)
 	response.Events = []core.PluginEvent{{ID: "premature", Title: "Quota", Body: `{"used":90}`, OccurredAt: "2026-10-20T00:00:00Z"}}
 	if err = m.CommitBackground(ctx, b, identity, response, 200); err == nil {
 		t.Fatal("event accepted without target")
+	}
+}
+
+func TestGitHubFilterWritesFenceInflightAndRetainProgress(t *testing.T) {
+	ctx := context.Background()
+	m, _ := mailbox(t, "local")
+	defer m.Close()
+	if err := m.EnsureBackground(ctx, "github", "main"); err != nil {
+		t.Fatal(err)
+	}
+	bindings, _ := m.Backgrounds(ctx)
+	b := bindings[0]
+	identity := core.PluginIdentity{ID: "github", Version: "1", Digest: "installed"}
+	checkpoint := json.RawMessage(`{"account":"123","baseline":true,"since":"2026-01-01T00:00:00Z","threads":{"123":{"marker":"retained"}},"pending":{"old":{"body":"discard"}},"scan":{"rows":[1]}}`)
+	if err := m.CommitBackground(ctx, b, identity, core.BackgroundResponse{State: checkpoint, DelaySeconds: 60, Status: "ready"}, 100); err != nil {
+		t.Fatal(err)
+	}
+	old := b
+	b.Enabled = false
+	if err := m.ConfigureBackgroundRequest(ctx, b, "off"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ConfigureBackgroundRequest(ctx, b, "off"); err != nil {
+		t.Fatal("retry", err)
+	}
+	if err := m.ConfigureBackgroundRequest(ctx, b, "another-off"); err == nil {
+		t.Fatal("stale accepted")
+	}
+	// A completed old poll must not enqueue or restore its pending state.
+	r := core.BackgroundResponse{State: checkpoint, DelaySeconds: 60, Status: "ready", Events: []core.PluginEvent{{ID: "old-event", Title: "old", Body: "untrusted", OccurredAt: "2026-01-01T00:00:00Z"}}}
+	if err := m.CommitBackground(ctx, old, identity, r, 200); err == nil {
+		t.Fatal("old inflight accepted")
+	}
+	bindings, _ = m.Backgrounds(ctx)
+	next := bindings[0]
+	var state map[string]any
+	json.Unmarshal(next.State, &state)
+	if next.Revision != 2 || next.Enabled || state["since"] != "2026-01-01T00:00:00Z" || state["threads"].(map[string]any)["123"] == nil || len(state["pending"].(map[string]any)) != 0 || state["scan"] != nil || state["filterSince"] == nil {
+		t.Fatal(next, string(next.State))
+	}
+	next.Enabled = true
+	if err := m.ConfigureBackgroundRequest(ctx, next, "on"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.CommitBackground(ctx, old, identity, r, 300); err == nil {
+		t.Fatal("reenabling revived old response")
 	}
 }

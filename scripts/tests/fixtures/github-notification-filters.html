@@ -1,0 +1,20 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GitHub notification filters fixture</title><link rel="stylesheet" href="/web/src/styles.css"><body><main style="max-width:760px;margin:auto;padding:20px" id="fixture"></main><script type="module">
+const params=new URLSearchParams(location.search),source=params.has('before')?'/output/github-before/web/src':'/web/src';
+if(params.has('phone')){params.delete('phone');const frame=document.createElement('iframe');frame.title='393px phone viewport';frame.style.cssText='width:393px;height:760px;border:0';frame.src=location.pathname+'?'+params;document.body.replaceChildren(frame);}else{
+const {createPluginNotifications}=await import(source+'/components/plugin-notifications.mjs');
+let locale=params.get('locale')||'en',revision=1,rejectSave=false,delaySave=false,finish;
+const account={identity:{id:'fixture-account',username:'fixture-user'}};
+let data={items:[{id:'github',plugin_id:'github',enabled:true,assistant:'main',revision,config:params.has('before')?{}:{account_id:'fixture-account',repositories:null,reasons:['mention'],subject_types:null,threads:null},status:'ready',queued:0,attention:0}],assistants:[{id:'main',name:'Pot'}]};
+const root=document.querySelector('#fixture'),controls=document.createElement('nav');
+const button=(label,run)=>{const b=document.createElement('button');b.textContent=label;b.onclick=run;controls.append(b);};
+button('Switch language',()=>{locale=locale==='en'?'zh-CN':'en';render();});
+button('Toggle save error',()=>{rejectSave=!rejectSave;});
+button('Toggle delayed save',()=>{delaySave=!delaySave;});
+button('Complete save',()=>finish?.());
+button('Simulate tool edit',()=>{data.items[0]={...data.items[0],revision:++revision,config:{...data.items[0].config,reasons:['review_requested']}};form.update(data,account);render();});
+const details=document.createElement('details');details.open=true;const summary=document.createElement('summary');summary.textContent='GitHub · fixture-user';details.append(summary);const content=document.createElement('div');details.append(content);root.append(controls,details);
+const form=createPluginNotifications({request:async(path,{body})=>{if(delaySave)await new Promise(resolve=>{finish=resolve;});if(rejectSave||body.revision!==revision)throw Error('stale plugin configuration');data={...data,items:[{...data.items[0],...body,revision:++revision}]};return structuredClone(data);},scope:{},signal:new AbortController().signal,locale:()=>locale,refresh:async()=>{form.update(data,account);},render});
+function render(){content.replaceChildren(form.form());}
+form.update(data,account);render();
+}
+</script></body></html>

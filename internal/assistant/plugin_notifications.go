@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/jjyr/pot/internal/inbox"
 	"github.com/jjyr/pot/pkg/core"
@@ -55,7 +56,11 @@ func (m *Mailbox) Backgrounds(ctx context.Context) ([]BackgroundBinding, error) 
 // EnsureBackground inserts defaults once. A persisted row, including an explicit
 // disabled binding, always wins. No checkpoint or revision is changed on conflict.
 func (m *Mailbox) EnsureBackground(ctx context.Context, id, target string) error {
-	return m.EnsureBackgroundInstance(ctx, BackgroundBinding{ID: id, PluginID: id, Enabled: true, Assistant: target, Config: json.RawMessage(`{}`)})
+	config := json.RawMessage(`{}`)
+	if id == "github" {
+		config = json.RawMessage(`{"account_id":"","repositories":null,"reasons":["mention"],"subject_types":null,"threads":null}`)
+	}
+	return m.EnsureBackgroundInstance(ctx, BackgroundBinding{ID: id, PluginID: id, Enabled: true, Assistant: target, Config: config})
 }
 
 // EnsureBackgroundInstance inserts owner defaults once without changing an
@@ -73,10 +78,35 @@ func validBackground(b BackgroundBinding) bool {
 }
 
 func (m *Mailbox) ConfigureBackground(ctx context.Context, b BackgroundBinding) error {
-	if !validBackground(b) {
+	return m.ConfigureBackgroundRequest(ctx, b, "")
+}
+
+func (m *Mailbox) ConfigureBackgroundRequest(ctx context.Context, b BackgroundBinding, requestID string) error {
+	if !validBackground(b) || requestID != "" && !core.Identifier(requestID) {
 		return errors.New("invalid background configuration")
 	}
 	return storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
+		hash, _ := core.HashJSON([]any{b.ID, b.PluginID, b.ConnectionID, b.Enabled, b.Assistant, b.Config, b.Revision})
+		if requestID != "" {
+			var prior string
+			err := tx.QueryRowContext(ctx, "SELECT input_hash FROM plugin_background_writes WHERE instance=? AND request_id=?", b.ID, requestID).Scan(&prior)
+			if err == nil {
+				if prior != hash {
+					return errors.New("notification_request_conflict")
+				}
+				return nil
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+		}
+		receipt := func() error {
+			if requestID == "" {
+				return nil
+			}
+			_, err := tx.ExecContext(ctx, "INSERT INTO plugin_background_writes VALUES(?,?,?)", b.ID, requestID, hash)
+			return err
+		}
 		var revision int64
 		var pluginID, connectionID string
 		err := tx.QueryRowContext(ctx, "SELECT revision,plugin_id,connection_id FROM plugin_background WHERE id=?", b.ID).Scan(&revision, &pluginID, &connectionID)
@@ -85,7 +115,10 @@ func (m *Mailbox) ConfigureBackground(ctx context.Context, b BackgroundBinding) 
 				return errors.New("stale plugin configuration")
 			}
 			_, err = tx.ExecContext(ctx, "INSERT INTO plugin_background(id,plugin_id,connection_id,enabled,assistant,config,revision,state,next,status,conversation) VALUES(?,?,?,?,?,?,1,'null',0,'disabled',?)", b.ID, b.PluginID, b.ConnectionID, b.Enabled, b.Assistant, string(b.Config), newConversation())
-			return err
+			if err != nil {
+				return err
+			}
+			return receipt()
 		}
 		if err != nil {
 			return err
@@ -94,8 +127,11 @@ func (m *Mailbox) ConfigureBackground(ctx context.Context, b BackgroundBinding) 
 			return errors.New("stale plugin configuration")
 		}
 		// State belongs to the account, not the target. Retargeting cannot replay history.
-		_, err = tx.ExecContext(ctx, "UPDATE plugin_background SET enabled=?,assistant=?,config=?,revision=revision+1 WHERE id=?", b.Enabled, b.Assistant, string(b.Config), b.ID)
-		return err
+		_, err = tx.ExecContext(ctx, "UPDATE plugin_background SET enabled=?,assistant=?,config=?,revision=revision+1,state=CASE WHEN id='github' AND json_type(state)='object' THEN json_set(state,'$.pending',json('{}'),'$.scan',NULL,'$.modified',NULL,'$.filterSince',?) ELSE state END WHERE id=?", b.Enabled, b.Assistant, string(b.Config), time.Now().UTC().Format(time.RFC3339Nano), b.ID)
+		if err != nil {
+			return err
+		}
+		return receipt()
 	})
 }
 

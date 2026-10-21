@@ -1,8 +1,10 @@
+import {readNotifications} from './read-notifications.mjs';
 import {spawn} from 'node:child_process';
 
 export function createPlugin({emit}) {
   return {
-    async execute({input}) {
+    async execute({tool,input}) {
+      if(tool==='github_read_notifications'){emit({type:'text',text:JSON.stringify(await readNotifications(input))});return;}
       if (!input.args.length) throw new Error('Supply a gh subcommand');
       const result = await new Promise((resolve, reject) => {
         const child = spawn('gh', input.args, {

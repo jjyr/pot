@@ -669,7 +669,7 @@ func TestGitHubNotificationMigrationCancelsHistoryAndPreservesDelivery(t *testin
 			if err = json.Unmarshal([]byte(raw), &s); err != nil {
 				t.Fatal(err)
 			}
-			if c["existing"] != nil || c["existing_account"] != nil || s["manual"] != nil || s["scan"] != nil || s["since"] != "2026-01-01T00:00:00Z" || s["pending"] == nil || s["threads"] == nil || revision != 10 || diagnostic != "" || conversation != "conversation" {
+			if c["existing"] != nil || c["existing_account"] != nil || s["manual"] != nil || s["scan"] != nil || s["since"] != "2026-01-01T00:00:00Z" || s["pending"] == nil || s["threads"] == nil || revision != 11 || diagnostic != "" || conversation != "conversation" {
 				t.Fatal(config, raw, revision, diagnostic, conversation)
 			}
 			if !consumed && (next != 0 || status != "pending" || s["nextPollAt"] != float64(0)) {
@@ -702,7 +702,7 @@ func TestGitHubNotificationMigrationHandlesUninitializedAndFailedBaseline(t *tes
 		if err := db.QueryRow(`SELECT state,config,next,status FROM plugin_background`).Scan(&raw, &config, &next, &status); err != nil {
 			t.Fatal(err)
 		}
-		if config != "{}" || next != 0 || status != "pending" {
+		if !strings.Contains(config, `"reasons":["mention"]`) || next != 0 || status != "pending" {
 			t.Fatal(raw, config, next, status)
 		}
 		if state == "null" && raw != "null" {
