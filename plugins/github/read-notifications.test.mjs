@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readNotifications} from './read-notifications.mjs';
-import {createPlugin} from './index.mjs';
+import {handleTool} from './mcp.mjs';
 process.env.GH_TOKEN='fixture-token';
 const row={id:'12345',reason:'subscribed',updated_at:'2026-01-01T00:00:00Z',unread:false,repository:{full_name:'nervosnetwork/fiber'},subject:{type:'PullRequest',title:'PR 1701',url:'https://api.github.com/repos/nervosnetwork/fiber/pulls/1701'}};
 test('active reads are paginated GETs, independent of realtime state and mark-read',async()=>{
@@ -16,9 +16,8 @@ test('active reads are paginated GETs, independent of realtime state and mark-re
 test('actual plugin tool routes read without gh and preserves permission failures',async()=>{
  const original=globalThis.fetch,events=[];
  try{
- globalThis.fetch=async()=>Response.json([row]);const plugin=createPlugin({emit:event=>events.push(event)});
- await plugin.execute({tool:'github_read_notifications',input:{threads:['12345']}});assert.equal(JSON.parse(events[0].text).items[0].thread_id,'12345');
- globalThis.fetch=async()=>new Response(null,{status:403});await assert.rejects(plugin.execute({tool:'github_read_notifications',input:{}}),/github_notifications_permission/);
+ globalThis.fetch=async()=>Response.json([row]);const value=await handleTool('read_notifications',{threads:['12345']},()=>{throw Error('read must not access configuration');});assert.equal(value.items[0].thread_id,'12345');
+ globalThis.fetch=async()=>new Response(null,{status:403});await assert.rejects(handleTool('read_notifications',{},()=>{}),/github_notifications_permission/);
  }finally{globalThis.fetch=original;}
 });
 test('query validation, permission failures and unsafe pagination stop before extra requests',async()=>{

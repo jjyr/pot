@@ -44,7 +44,7 @@ func TestBackgroundInstanceUpgradePreservesAcceptedReceipts(t *testing.T) {
 	if err = db.QueryRow(`SELECT plugin_id,connection_id,enabled,revision,state,next,conversation,diagnostic FROM plugin_background WHERE id='github'`).Scan(&pluginID, &connectionID, &enabled, &revision, &checkpoint, &next, &conversation, &diagnostic); err != nil {
 		t.Fatal(err)
 	}
-	if pluginID != "github" || connectionID != "" || enabled || revision != 10 || next != 9000 || conversation != "kept-conversation" || diagnostic != "keep" {
+	if pluginID != "github" || connectionID != "" || !enabled || revision != 11 || next != 9000 || conversation != "kept-conversation" || diagnostic != "keep" {
 		t.Fatal(pluginID, connectionID, enabled, revision, checkpoint, next, conversation, diagnostic)
 	}
 	var progress map[string]any

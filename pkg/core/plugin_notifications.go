@@ -12,12 +12,13 @@ import (
 // PluginBackground is a local, owner-enabled service capability. It never enters
 // a transferable tool bundle and does not confer model/tool execution authority.
 type PluginBackground struct {
-	Mode        string             `json:"mode,omitempty"`
-	Runtime     string             `json:"runtime"`
-	Execution   string             `json:"execution"`
-	Entrypoint  string             `json:"entrypoint"`
-	Files       []string           `json:"files"`
-	Credentials CredentialBindings `json:"credentials,omitempty"`
+	EventRouting bool               `json:"event_routing,omitempty"`
+	Mode         string             `json:"mode,omitempty"`
+	Runtime      string             `json:"runtime"`
+	Execution    string             `json:"execution"`
+	Entrypoint   string             `json:"entrypoint"`
+	Files        []string           `json:"files"`
+	Credentials  CredentialBindings `json:"credentials,omitempty"`
 }
 
 func (b PluginBackground) Validate() error {
@@ -37,6 +38,7 @@ func (b PluginBackground) Validate() error {
 // PluginEvent is data, never an instruction or an address. Host binds provenance
 // and routing from the installed package and owner configuration.
 type PluginEvent struct {
+	Assistant  string `json:"assistant,omitempty"`
 	ID         string `json:"id"`
 	Title      string `json:"title"`
 	Body       string `json:"body"`
@@ -65,11 +67,14 @@ func (e PluginEvent) Validate() error {
 }
 
 type BackgroundRequest struct {
-	Version  int               `json:"version"`
-	Now      int64             `json:"now"`
-	Config   json.RawMessage   `json:"config"`
-	State    json.RawMessage   `json:"state"`
-	Accounts map[string]string `json:"accounts"`
+	Assistants []string          `json:"assistants"`
+	InstanceID string            `json:"instance_id"`
+	Assistant  string            `json:"assistant"`
+	Version    int               `json:"version"`
+	Now        int64             `json:"now"`
+	Config     json.RawMessage   `json:"config"`
+	State      json.RawMessage   `json:"state"`
+	Accounts   map[string]string `json:"accounts"`
 }
 type BackgroundResponse struct {
 	State        json.RawMessage `json:"state"`

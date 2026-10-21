@@ -58,6 +58,7 @@ type Service struct {
 	mcpOAuth            map[string]mcpOAuthSession
 	pluginMu            sync.Mutex
 	pluginStreams       map[string]backgroundStream
+	pluginBootstrap     map[string]string
 	Attachments         *attachments.Store
 	Resources           *resources.Store
 	mu                  sync.Mutex
@@ -349,6 +350,11 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 		definitions = append(definitions, definition)
 	}
 	definitions = append(definitions, s.productTools(false)...)
+	mcpTools, err := s.pluginMCPTools(ctx, dispatch.Product)
+	if err != nil {
+		return assistant.RunOptions{}, err
+	}
+	definitions = append(definitions, mcpTools...)
 	if strings.HasPrefix(request.RequestID, "pot-result-") {
 		retryTools, err := s.resultRetryTools(ctx, principal, request.RequestID)
 		if err != nil {

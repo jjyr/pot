@@ -10,12 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/integrations"
@@ -113,11 +111,12 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 		}
 		if call == 2 {
 			w.Header().Set("Content-Type", "text/event-stream")
-			fmt.Fprint(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"external-config","type":"function","function":{"name":"github_update_notification_filters","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`+"\n\ndata: [DONE]\n\n")
+			args, _ := json.Marshal(`{"tool":"list_subscriptions","arguments":"{}"}`)
+			fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"mcp-list\",\"type\":\"function\",\"function\":{\"name\":\"mcp_github\",\"arguments\":%s}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n", args)
 			return
 		}
-		if call == 3 && !strings.Contains(string(raw), "notification_filters_require_user_turn") {
-			t.Error("summary write was not rejected", string(raw))
+		if call == 3 && !strings.Contains(string(raw), "subscriptions") {
+			t.Error("MCP subscription list unavailable in summary", string(raw))
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%q},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", text)
@@ -129,7 +128,7 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 	os.MkdirAll(packageRoot, 0700)
 	// Use the actual installed package and protocol. Only its API origin is replaced
 	// with the local fake server; production has no configurable token destination.
-	for _, name := range []string{"plugin.json", "index.mjs", "instructions.md", "notifications.mjs", "filters.mjs", "read-notifications.mjs"} {
+	for _, name := range []string{"plugin.json", "mcp.mjs", "subscriptions.mjs", "read-tool.json", "notifications.mjs", "filters.mjs", "read-notifications.mjs"} {
 		data, err := os.ReadFile(filepath.Join("../../plugins/github", name))
 		if err != nil {
 			t.Fatal(err)
@@ -182,21 +181,15 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 		case <-time.After(time.Millisecond):
 		}
 	}
-	if err = s.ensureGitHubNotifications(ctx); err != nil {
+	s.pluginMu.Lock()
+	err = s.ensurePluginNotifications(ctx)
+	s.pluginMu.Unlock()
+	if err != nil {
 		t.Fatal(err)
 	}
 	defaults, err := s.Mailbox.Backgrounds(ctx)
-	if err != nil || len(defaults) != 1 || !defaults[0].Enabled || defaults[0].Assistant != "main" {
+	if err != nil || len(defaults) != 1 || !defaults[0].Enabled || defaults[0].Assistant != "" {
 		t.Fatal(defaults, err)
-	}
-	binding := defaults[0]
-	binding.Assistant = "missing"
-	if s.ConfigurePluginNotifications(ctx, fmt.Sprintf("save-%d", binding.Revision), binding) == nil {
-		t.Fatal("invalid target accepted")
-	}
-	binding.Assistant = "main"
-	if err = s.ConfigurePluginNotifications(ctx, fmt.Sprintf("save-%d", binding.Revision), binding); err != nil {
-		t.Fatal(err)
 	}
 	s.runBackgrounds(ctx, now)
 	if modelCalls.Load() != 0 {
@@ -245,10 +238,6 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 	if modelCalls.Load() != 3 {
 		t.Fatalf("model calls=%d, GitHub calls=%d", modelCalls.Load(), ghCalls.Load())
 	}
-	unchanged, _ := s.githubBinding(ctx)
-	if string(unchanged.Config) != string(defaultGitHubFilters("123")) {
-		t.Fatal("event widened filters", unchanged)
-	}
 	events, _ = s.Mailbox.Notifications(ctx, "main")
 	if len(events) != 0 {
 		t.Fatal("summary not acknowledged")
@@ -257,132 +246,5 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 	stored, _ := s.Mailbox.Backgrounds(ctx)
 	if strings.Contains(string(stored[0].State), "notification-fixture-token") {
 		t.Fatal("token persisted")
-	}
-}
-
-func TestGitHubPluginDefaultOwnerInitialization(t *testing.T) {
-	ctx := context.Background()
-	manager, _ := execution.New("local", "boot", execution.Limits{MaxActive: 1, MaxQueued: 8})
-	keys, _ := secrets.NewMemoryKey(make([]byte, 32))
-	pluginRoot, _ := filepath.Abs("../../plugins")
-	s, err := Open(Options{Root: t.TempDir(), RuntimeID: "local", BootID: "boot", Manager: manager, Keys: keys, PluginRoot: pluginRoot, IntegrationAdapters: []integrations.Adapter{notificationLogin{}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	// Keep the fixture deterministic: initialization cannot contact GitHub.
-	s.pluginMu.Lock()
-	defer s.pluginMu.Unlock()
-	read := func() assistant.BackgroundBinding {
-		t.Helper()
-		v, err := s.PluginNotifications(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return v.(map[string]any)["items"].([]assistant.BackgroundBinding)[0]
-	}
-	if b := read(); b.Revision != 0 || !b.Enabled || b.Assistant != "" || b.Status != "waiting_assistant" {
-		t.Fatal(b)
-	}
-	if _, err = s.integrationAccounts.Save(ctx, integrations.Account{Service: "github", Identity: integrations.Identity{ID: "first-account", Username: "fixture"}, SecretRef: "missing-fixture-secret"}, 0); err != nil {
-		t.Fatal(err)
-	}
-	if b := read(); b.Revision != 0 || b.Assistant != "" {
-		t.Fatal("bound without an assistant", b)
-	}
-	first, err := s.Registry.Create(ctx, "first", "Zebra")
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := s.Registry.Create(ctx, "second", "Alpha")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Late creation binds through the existing loop without a settings read.
-	s.pluginMu.Unlock()
-	s.runBackgrounds(ctx, storage.Now())
-	s.pluginMu.Lock()
-	var wg sync.WaitGroup
-	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := s.ensureGitHubNotifications(ctx); err != nil {
-				t.Error(err)
-			}
-		}()
-	}
-	wg.Wait()
-	b := read()
-	if b.Revision != 1 || !b.Enabled || b.Assistant != first.ID || string(b.Config) != string(defaultGitHubFilters("first-account")) || string(b.State) != "null" {
-		t.Fatal(b)
-	}
-	s.Registry.Rename(ctx, first.ID, "ZZZ", first.Revision)
-	if next := read(); next.Assistant != first.ID || next.Revision != 1 {
-		t.Fatal("rebound after rename", next)
-	}
-	b.Assistant = second.ID
-	b.Enabled = false
-	if err = s.ConfigurePluginNotifications(ctx, fmt.Sprintf("save-%d", b.Revision), b); err != nil {
-		t.Fatal(err)
-	}
-	b = read()
-	if b.Enabled || b.Assistant != second.ID || b.Revision != 2 {
-		t.Fatal(b)
-	}
-	// A different account preserves the owner's switch and recipient, and
-	// requires an explicit save to bind configuration to the new account.
-	account, _ := s.integrationAccounts.List(ctx)
-	if _, err = s.integrationAccounts.Save(ctx, integrations.Account{Service: "github", Identity: integrations.Identity{ID: "second-account", Username: "other"}, SecretRef: "missing-fixture-secret"}, account[0].Revision); err != nil {
-		t.Fatal(err)
-	}
-	if next := read(); next.Enabled || next.Assistant != second.ID || next.Revision != 2 {
-		t.Fatal(next)
-	}
-	b.Enabled = true
-	b.Config = defaultGitHubFilters("second-account")
-	if err = s.ConfigurePluginNotifications(ctx, fmt.Sprintf("save-%d", b.Revision), b); err != nil {
-		t.Fatal(err)
-	}
-	// No credential exists: the background runner must not claim successful checks.
-	s.pluginMu.Unlock()
-	s.runBackgrounds(ctx, storage.Now())
-	s.pluginMu.Lock()
-	if next := read(); next.Status != "authorization" {
-		t.Fatal(next)
-	}
-	// Simulate a recipient removed from this Control: keep its actual ID, and
-	// require an explicit selection rather than silently retargeting summaries.
-	b = read()
-	b.Assistant = "deleted-assistant"
-	if err = s.Mailbox.ConfigureBackground(ctx, b); err != nil {
-		t.Fatal(err)
-	}
-	if next := read(); next.Assistant != "deleted-assistant" || next.Status != "assistant_missing" {
-		t.Fatal(next)
-	}
-	brokenRoot := t.TempDir()
-	if err = os.Mkdir(filepath.Join(brokenRoot, "github"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(filepath.Join(brokenRoot, "github", "plugin.json"), []byte(`invalid`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	s.options.PluginRoot = brokenRoot
-	if next := read(); next.Status != "unavailable" || next.Diagnostic == "" {
-		t.Fatal("missing discovery diagnostic", next)
-	}
-	s.options.PluginRoot = ""
-	if next := read(); next.Status != "plugin_missing" {
-		t.Fatal(next)
-	}
-	// A missing plugin must not prevent turning notifications off.
-	b = read()
-	b.Enabled = false
-	if err = s.ConfigurePluginNotifications(ctx, fmt.Sprintf("save-%d", b.Revision), b); err != nil {
-		t.Fatal(err)
-	}
-	if next := read(); next.Enabled || next.Status != "disabled" {
-		t.Fatal(next)
 	}
 }

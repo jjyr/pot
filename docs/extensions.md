@@ -69,7 +69,12 @@ be inspected, edited and disabled in their actual assistant workspace.
 
 ## Independent MCP servers
 
-MCP servers are installed independently of Plugin packages. Supported transports
+Independent MCP servers are configured separately from Plugin packages. Packages
+can also declare a Control-local stdio MCP capability (for example GitHub
+subscriptions); see [Control-local MCP contributions](plugins.md#control-local-mcp-contributions).
+These package servers are discovered and invoked on the owning Control, including
+for remote Tasks; their files and credentials do not travel to the execution machine.
+The independent server transports below retain their execution-machine behavior. Supported transports
 are stdio (command, argument array and optional absolute working directory) and
 Streamable HTTP. The UI also imports `mcpServers` JSON entries containing either
 `command`/`args` or `url`; duplicate IDs fail rather than overwrite. Entries save

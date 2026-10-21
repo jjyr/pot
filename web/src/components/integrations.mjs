@@ -11,7 +11,7 @@ export function createIntegrations({root,request,scope,signal,locale,openExterna
   const section=n('section','integrations');root.append(section);
   const heading=n('h2','page-heading'),description=n('p','hint');section.append(heading,description);
   const rows=n('div','integration-list');section.append(rows);
-  const notifications=createPluginNotifications({request,scope:context,signal,locale,refresh,render});
+  const notifications=createPluginNotifications({pluginID: 'github',request,scope:context,signal,locale,refresh,render});
   let expanded=false,accountIdentity=null;
   let items=[],timer,busy=false;
   const active=()=>!signal.aborted;

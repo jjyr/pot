@@ -209,3 +209,28 @@ func (p Package) ModelProviderIdentity() (core.PluginIdentity, error) {
 	identity.Digest, err = core.HashJSON([]any{p.Manifest, files})
 	return identity, err
 }
+
+// MCPIdentity pins a local MCP contribution and all declared source files.
+func (p Package) MCPIdentity() (core.PluginIdentity, error) {
+	identity := core.PluginIdentity{ID: p.Manifest.ID, Version: p.Manifest.Version}
+	c := p.Manifest.Contributes.MCP
+	if c == nil {
+		return identity, errors.New("MCP capability unavailable")
+	}
+	files := map[string]string{}
+	size := 0
+	for _, name := range c.Files {
+		raw, err := p.ReadFile(name, 512*1024)
+		if err != nil {
+			return identity, err
+		}
+		size += len(raw)
+		if size > 512*1024 || !utf8.Valid(raw) {
+			return identity, errors.New("invalid MCP package files")
+		}
+		files[name] = string(raw)
+	}
+	var err error
+	identity.Digest, err = core.HashJSON([]any{p.Manifest, files})
+	return identity, err
+}
