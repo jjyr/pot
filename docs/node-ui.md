@@ -53,5 +53,12 @@ original conversation. Existing chat bubbles, composer, task detail and result
 notification components remain shared. See [Design language](design-language.md)
 and [Agent Links](agent-links.md).
 
-Local assistants are created directly from + with random kitchen names and the
-local node's default Provider and model.
+First-use Chat and + open the same Add assistant page in the conversation region.
+Its choices are API, another Pot, then Codex. The directory remains available on
+wide windows; narrow windows use a full-width page with Back. Returning to a
+conversation preserves its draft and reading position. API creation uses the
+local default Provider/model or opens the shared Provider editor first. Linked
+assistants come from the receiver directory; adding a node does not create a
+local assistant. One received assistant, or the receiver's default, opens
+automatically; otherwise the page offers a choice. Empty remote directories
+offer refresh, and failed directory reads offer recovery rather than API setup.

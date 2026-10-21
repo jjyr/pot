@@ -32,8 +32,9 @@ import {createTopology} from './topology.mjs';
 import {createAgentLinks} from './agent-links.mjs';
 import {projectTopology,agentNodeID,machineDisplayName,linkEndpoint,assistantActivityState} from '../state/topology.mjs';
 
-export function createPages({onApprovalsChanged=()=>{},client, host, approvalHost, chatApprovalHost, chatVisible, locale, notify, changed, titleChanged, openChat, routeChanged=()=>{}}) {
+export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>{},client, host, approvalHost, chatApprovalHost, chatVisible, locale, notify, changed, titleChanged, openChat, routeChanged=()=>{}}) {
   const gate = createRequestGate(), approvalGate = createRequestGate();
+  let assistantStartRefresh=null;
   let route = '', title = '', editor = null, disposed = false, pageVersion = 0, configurationSpace = '',taskView=null,taskOrigin=null,taskListView=null,scheduleView=null,detailParent=false,usageOwner=null;
   let filter = {taskScope:'active', taskQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageScope:'all', usageSpace:'all',settingsTab:'general'};
   let pendingApprovals=[],notificationSettings=null;
@@ -146,7 +147,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   }
   async function leave({toParent=false}={}) {
  if(extensionUI&&!await extensionUI.leave())return false;extensionUI?.dispose();extensionUI=null;
-    captureView();
+    captureView();assistantStartRefresh=null;
     const sessions=[...(editor?[editor]:[]),...(!toParent?[...editorParents,...[...machineDrafts.values()].map(session=>({session}))]:[])];
     if(sessions.some(value=>value.session.pending)) {notify(tr('Please wait for the save result.','请等待保存结果。'));return false;}
     if(sessions.some(value=>value.session.dirty)&&!await confirmDiscard())return false;
@@ -186,6 +187,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     return {session,root,form,controls,lifecycle};
   }
   async function back({skipPicker=false}={}) {
+    if(!editor&&route==='add-assistant'){await leave();route='';await openChat({directory:true});return true;}
     const current=editor,taskReturn=taskView?.returnTo||taskOrigin,returnToConversation=!editor&&usageOwner;
     if(!await leave({toParent:true}))return false;
     if(skipPicker&&editorParents.at(-1)?.kind==='picker')editorParents.pop();
@@ -355,7 +357,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     form.lifecycle.providersInvalidated=refreshTypes;form.lifecycle.dispose=()=>{typeVersion++;typeController?.abort();};await refreshTypes();
   }
   async function providerEditor(profile,snapshot,settingsScope,providerOverride) {
-    const t=key=>translate(locale(),'providers.'+key),onboarding=(editor?.kind==='picker'&&editor.onboarding)||(!(client.assistants||[]).length&&!editorParents.some(parent=>parent.kind==='assistant'));
+    const t=key=>translate(locale(),'providers.'+key),onboarding=editor?.kind==='picker'&&editor.onboarding;
     if(editor?.kind==='picker')suspendEditor();else if(!await leave())return;
     const connection=(snapshot.connections||[]).find(c=>c.profile_id===profile?.id),typeID=providerOverride||connection?.type_id||'',type=(snapshot.provider_types||[]).find(value=>value.id===typeID)||{id:typeID,available:false};
     const providerID=type?.directory_provider||profile?.model_settings?.catalog_provider||'',selectedEntry=(snapshot.directory||[]).find(value=>value.id===providerID);
@@ -384,7 +386,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const section=form.form.querySelector('.page-section h2');if(section)section.dataset.providerI18n='allowances';
     if(monitorFailure){const warning=n('p','inline-error',t('allowanceLoadFailed'));warning.dataset.providerI18n='allowanceLoadFailed';form.form.querySelector('.editor-fields').append(warning);}
     const availabilityWarning=n('p','inline-error',t('unavailable'));availabilityWarning.dataset.providerI18n='unavailable';availabilityWarning.hidden=type.available!==false;form.form.prepend(availabilityWarning);if(type.available===false)form.form.querySelector('.primary').disabled=true;
-    form.lifecycle.cancel=()=>back({skipPicker:true});form.lifecycle.afterSave=async saved=>{await back({skipPicker:true});await editor?.lifecycle.providersChanged?.(saved);if(onboarding){openChat();changed(saved);}};
+    form.lifecycle.cancel=()=>back({skipPicker:true});form.lifecycle.afterSave=async saved=>{await back({skipPicker:true});await editor?.lifecycle.providersChanged?.(saved);if(onboarding){await leave();await createLocalAssistant();}};
     const set=(name,value)=>{controls.get(name).value=value??'';session.set(name,value);},showModel=()=>{controls.get('model').closest('.form-row').hidden=!!controls.get('model_selection').value;};
     function limitsFor(modelID){const entry=discovered.find(value=>value.id===modelID),base=modelDefaults(snapshot,providerID,modelID);return entry?{context:entry.context_window||base.context,input:entry.max_input||base.input,output:Math.min(entry.max_output||base.output,(entry.context_window||base.context)-1)}:base;}
     const inherit=()=>{const limits=limitsFor(session.values.model);controls.get('context_window').placeholder=String(limits.context);controls.get('max_output_tokens').placeholder=String(limits.output);};
@@ -682,6 +684,53 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       {name:'limit',label:tr('Token limit','Token 上限'),kind:'number',parse:Number,required:true},{name:'timezone',label:tr('Time zone','时区'),required:true},{name:'auto_resume',label:tr('Automatically resume','自动恢复'),kind:'checkbox'},
     ],(values,context)=>request('/api/v1/usage/policy',{...context,method:'POST',body:values}),{capturedScope:owner});
   }
+  async function addAssistantPage(root,token) {
+    assistantStartRefresh=null;
+    const t=key=>translate(locale(),'assistantStart.'+key),captured={space:client.spaces.find(item=>item.kind==='local')?.id||scope().space,owner:''};
+    const first=!(client.assistants||[]).length;
+    heading(t(first?'firstTitle':'title'));root.classList.add('assistant-start');
+    const intro=n('div','assistant-start-intro');intro.append(n('h1','',t(first?'firstTitle':'title')),n('p','hint',t('description')));root.append(intro);
+    const options=n('div','assistant-start-options');root.append(options);
+    for(const kind of ['api','pot','codex']) {
+      const option=n('section','page-card assistant-start-option');
+      const header=n('div','assistant-start-option-header'),mark=n('span','assistant-start-icon assistant-start-icon-'+kind),content=n('div','assistant-start-option-content');
+      mark.setAttribute('aria-hidden','true');mark.append(kind==='api'?icon('plug'):connectionBrand(kind));
+      content.append(n('h2','',t(kind+'Title')),n('p','hint',t(kind+'Description')));header.append(mark,content);option.append(header);
+      const button=action(t(kind+'Action'),async()=>{
+        if(kind==='api'){button.disabled=true;try{await createLocalAssistant();}finally{button.disabled=false;}return;}
+        await connection(kind);
+      },{primary:kind==='api'});option.append(button);options.append(option);
+    }
+    async function connection(kind) {
+      if(!gate.current(token))return;
+      let connectedID='',connections;const lifetime=new AbortController();
+      async function openDirectory() {
+        const currentEditor=editor,currentRoot=host.firstElementChild;
+        const snapshot=await request('/api/v1/agent-links',captured);
+        await changed();
+        if(disposed||editor!==currentEditor||host.firstElementChild!==currentRoot)return;
+        const link=(snapshot.items||[]).find(item=>item.id===connectedID);
+        if(!link)throw Error(translate(locale(),'agentLinks.failed'));
+        const assistants=link.assistants||link.directory?.assistants||[],defaultID=link.directory?.default_assistant_id;
+        const chosen=assistants.length===1?assistants[0]:assistants.find(item=>(item.address?.agent_id||item.id)===defaultID);
+        const open=assistant=>openChat({space:captured.space,owner:'agent-link:'+connectedID+':'+(assistant.address?.agent_id||assistant.id)});
+        if(chosen){await leave();await open(chosen);return;}
+        await leave();route='add-assistant';assistantStartRefresh=openDirectory;const list=body();
+        heading(t(assistants.length?'chooseTitle':'emptyTitle'));
+        list.append(n('h1','',t(assistants.length?'chooseTitle':'emptyTitle')),n('p','hint',t(assistants.length?'chooseDescription':'emptyDescription')));
+        for(const assistant of assistants)list.append(action(assistant.name||assistant.address.agent_id,()=>open(assistant)));
+        const status=n('p','inline-error');status.setAttribute('role','alert');list.append(status);
+        list.append(action(t('refresh'),async()=>{try{await openDirectory();}catch{status.textContent=t('refreshFailed');}}),action(t('back'),()=>show('add-assistant',{force:true})));
+      }
+      connections=createAgentLinks({root:n('div'),request,locale,scope:()=>captured,signal:lifetime.signal,
+        edit:({title,initial,fields,save,scope:context,submitLabel})=>{
+          const form=renderEditor(title,initial,fields,save,{capturedScope:context,submitLabel});
+          form.lifecycle.afterSave=()=>openDirectory();return form;
+        },onConnected:async result=>{connectedID=result?.id||result?.link?.id;}});
+      const form=connections.addAgent({guideKey:'assistantStart.'+kind+'Guide'}),dispose=form.lifecycle.dispose;
+      form.lifecycle.dispose=()=>{dispose?.();lifetime.abort();};
+    }
+  }
   async function machines(root,token) {
     const t=key=>translate(locale(),key);root.classList.add('topology-page');
     const toolbar=n('div','topology-toolbar'),connectionRoot=n('div','topology-connection'),storage=n('div','topology-machine-storage'),rows=n('div'),entries=new Map(),linkNotice=n('p','inline-error');storage.hidden=true;storage.append(rows);connectionRoot.className='agent-links-container';toolbar.append(connectionRoot);root.append(toolbar,linkNotice,storage);
@@ -846,7 +895,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     route=next;heading(next==='extensions'?translate(locale(),'extensions.title'):tr({tasks:filter.taskTab==='schedules'?'Schedules':'Tasks',machines:translate(locale(),'topology.title'),usage:'Usage',settings:'Settings'}[next]||next,{tasks:filter.taskTab==='schedules'?'定时计划':'任务',machines:translate(locale(),'topology.title'),usage:'用量',settings:'设置'}[next]||next));
     const version=++pageVersion,token=gate.next(),root=body();currentViewKey=viewKey;
     root.append(n('p','hint',tr('Loading…','正在加载…')));
-    try {root.replaceChildren();await ({settings,tasks,machines,usage,extensions}[next]||settings)(root,token);if(gate.current(token))restoreView(viewKey,token);}
+    try {root.replaceChildren();await ({settings,tasks,machines,usage,extensions,'add-assistant':addAssistantPage}[next]||settings)(root,token);if(gate.current(token))restoreView(viewKey,token);}
     catch(reason){if(gate.current(token)&&version===pageVersion&&!disposed)errorView(reason,root);}
   }
   function openUsageView(context,record=true){usageOwner={...context};route='usage';if(record)history.pushState({potRoute:'usage',potScope:{space:context.space,owner:context.owner},potUsage:{...usageOwner}},'',location.href);routeChanged('usage');return show('usage',{keepUsageOwner:true});}
@@ -855,9 +904,9 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const current=editor;if(!await back())history.pushState({...history.state,potEditor:current.id},'',location.href);return true;
   };
   const beforeUnload=event=>{if([...(editor?[editor.session]:[]),...editorParents.map(value=>value.session),...machineDrafts.values()].some(session=>session.dirty||session.pending)){event.preventDefault();event.returnValue='';}};
-  const preference=()=>{if(extensionUI){heading(translate(locale(),'extensions.title'));return;}if(editor){editor.lifecycle.locale?.();for(const status of editor.root.querySelectorAll('[data-error-key]')){const span=status.querySelector(':scope>span');if(span)span.textContent=translate(locale(),status.dataset.errorKey);const summary=status.querySelector('details>summary');if(summary)summary.textContent=translate(locale(),'agentLinks.diagnostics');}return;}if(route==='settings'&&filter.settingsTab==='integrations'&&!editor){heading(translate(locale(),'settings'));for(const node of host.querySelectorAll('[data-settings-i18n]'))node.textContent=translate(locale(),node.dataset.settingsI18n);return;}if(taskView){taskDetail(taskView.task,{recordHistory:false,returnTo:taskView.returnTo});return;}if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner,force:true});};
+  const preference=()=>{if(extensionUI){heading(translate(locale(),'extensions.title'));return;}if(editor){editor.lifecycle.locale?.();for(const status of editor.root.querySelectorAll('[data-error-key]')){const span=status.querySelector(':scope>span');if(span)span.textContent=translate(locale(),status.dataset.errorKey);const summary=status.querySelector('details>summary');if(summary)summary.textContent=translate(locale(),'agentLinks.diagnostics');}return;}if(route==='add-assistant'&&assistantStartRefresh){assistantStartRefresh().catch(()=>notify(translate(locale(),'assistantStart.refreshFailed')));return;}if(route==='settings'&&filter.settingsTab==='integrations'&&!editor){heading(translate(locale(),'settings'));for(const node of host.querySelectorAll('[data-settings-i18n]'))node.textContent=translate(locale(),node.dataset.settingsI18n);return;}if(taskView){taskDetail(taskView.task,{recordHistory:false,returnTo:taskView.returnTo});return;}if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner,force:true});};
   window.addEventListener('beforeunload',beforeUnload);window.addEventListener('pot:locale',preference);
-  return {get title(){return title;},get editing(){return !!editor;},get approvalSpace(){return approvalScope().space;},get notificationContext(){return taskView?{space:taskView.scope.space,owner:taskView.scope.owner,task:taskView.task.id}:null;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner;},show,assistant,setupAI,leave,back,permissions,syncApprovals:renderApprovals,taskMenu(){taskView?.ui.openMenu();},handleHistory:popstate,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalQueue?.close();approvalQueue=null;approvalQueueKey='';approvalGate.close();approvalOwner='';pendingApprovals=[];approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);},approvalFor,decideApproval,taskNeedsApproval,rememberTasks,renderApprovals,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,options={}){route='tasks';return taskDetail(task,options);},
+  return {get title(){return title;},get editing(){return !!editor;},get approvalSpace(){return approvalScope().space;},get notificationContext(){return taskView?{space:taskView.scope.space,owner:taskView.scope.owner,task:taskView.task.id}:null;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner||route==='add-assistant'&&!host.hidden;},show,assistant,setupAI,leave,back,permissions,syncApprovals:renderApprovals,taskMenu(){taskView?.ui.openMenu();},handleHistory:popstate,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalQueue?.close();approvalQueue=null;approvalQueueKey='';approvalGate.close();approvalOwner='';pendingApprovals=[];approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);},approvalFor,decideApproval,taskNeedsApproval,rememberTasks,renderApprovals,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,options={}){route='tasks';return taskDetail(task,options);},
     showProviders(){filter.settingsTab='providers';return show('settings');},
     refresh(topics=[],source={}){
  if(extensionUI){if(topics.includes('extensions')||topics.includes('spaces'))extensionUI.refresh();return;}

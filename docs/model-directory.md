@@ -89,10 +89,12 @@ restores the prior selection on cancellation. One-click assistant creation uses 
 local node default connection and its concrete default model; missing configuration
 opens connection setup.
 
-First-use Chat explicitly calls `POST /api/v1/assistants/bootstrap` with its locale.
-The node creates a kitchen-named assistant only if a default connection exists and
-there is no assistant history. Concurrent clients reuse that identity. Nested setup in an assistant draft
-does not bootstrap another assistant.
+First-use Chat offers the shared Add assistant page and never bootstraps an
+assistant while reading its directory. Selecting API creation uses the default
+connection or opens Provider setup, then explicitly creates one kitchen-named
+assistant with the selected UI locale. Nested setup in an assistant draft
+returns to that draft. The explicit bootstrap API retains its one-time identity
+receipt for callers that intentionally request it; ordinary page loads do not call it.
 
 Provider setup uses the shared chooser and editor. Names and marks come from the
 registered types. The editor exposes name, API URL, credential, default model,

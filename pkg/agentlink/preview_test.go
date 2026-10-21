@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"github.com/jjyr/pot/pkg/protocol"
 	"io"
 	"net"
 	"strings"
@@ -31,7 +32,7 @@ func previewCounts(t *testing.T, f *fixture) []int {
 func TestPreviewVerifiesLiveIdentityWithoutClaimOrPersistentState(t *testing.T) {
 	ctx := context.Background()
 	a, b := newFixture(t, "preview-a"), newFixture(t, "preview-b")
-	invitation, err := b.service.Invite(ctx, "assistant", b.endpoint)
+	invitation, err := b.service.Invite(ctx, b.endpoint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +47,7 @@ func TestPreviewVerifiesLiveIdentityWithoutClaimOrPersistentState(t *testing.T) 
 	}
 	for range 2 {
 		result, err := a.service.Preview(ctx, invitation.Address)
-		if err != nil || result.Identity.Name != "Current remote name" || result.Identity.Address != b.identity().Address || result.Host != b.service.options.HostIdentity || result.Endpoint != b.endpoint || result.Fingerprint != hostFingerprint(b.service.options.HostIdentity) || !strings.HasPrefix(result.Fingerprint, "SHA256:") {
+		if err != nil || result.Identity.Name != "Current remote name" || result.Identity.Address != (protocol.AgentRef{NodeID: b.id, Kind: "node", AgentID: b.id}) || result.Host != b.service.options.HostIdentity || result.Endpoint != b.endpoint || result.Fingerprint != hostFingerprint(b.service.options.HostIdentity) || !strings.HasPrefix(result.Fingerprint, "SHA256:") {
 			t.Fatal(result, err)
 		}
 	}
@@ -66,7 +67,7 @@ func TestPreviewVerifiesLiveIdentityWithoutClaimOrPersistentState(t *testing.T) 
 		}
 	}
 	// Reading the card leaves the same invitation available for the one real add.
-	connection, err := a.service.Connect(ctx, "assistant", invitation.Address)
+	connection, err := a.service.Connect(ctx, invitation.Address)
 	if err != nil || connection.State != "ready" {
 		t.Fatal(connection, err)
 	}
@@ -78,7 +79,7 @@ func TestPreviewVerifiesLiveIdentityWithoutClaimOrPersistentState(t *testing.T) 
 func TestPreviewRejectsExpiredInvalidAndDifferentTargetAddresses(t *testing.T) {
 	ctx := context.Background()
 	a, b := newFixture(t, "preview-a"), newFixture(t, "preview-b")
-	invitation, _ := b.service.Invite(ctx, "assistant", b.endpoint)
+	invitation, _ := b.service.Invite(ctx, b.endpoint)
 	value, _ := parseAddress(ctx, invitation.Address)
 	if _, err := b.db.Exec(`UPDATE agent_link_invitations SET expires_at=? WHERE id=?`, time.Now().Add(-time.Second).UnixMilli(), value.Invitation); err != nil {
 		t.Fatal(err)
@@ -86,7 +87,7 @@ func TestPreviewRejectsExpiredInvalidAndDifferentTargetAddresses(t *testing.T) {
 	if _, err := a.service.Preview(ctx, invitation.Address); !errors.Is(err, ErrExpired) {
 		t.Fatal(err)
 	}
-	fresh, _ := b.service.Invite(ctx, "assistant", b.endpoint)
+	fresh, _ := b.service.Invite(ctx, b.endpoint)
 	value, _ = parseAddress(ctx, fresh.Address)
 	for _, change := range []func(*address){func(v *address) { v.Code = token() }, func(v *address) { v.Identity.Address.AgentID = "other" }, func(v *address) { v.Host = a.service.options.HostIdentity }} {
 		changed := value
@@ -105,7 +106,7 @@ func TestPreviewRejectsExpiredInvalidAndDifferentTargetAddresses(t *testing.T) {
 func TestPreviewPinsActualServerKeyAndHasNoOtherServiceAuthority(t *testing.T) {
 	ctx := context.Background()
 	a, b, other := newFixture(t, "preview-a"), newFixture(t, "preview-b"), newFixture(t, "another-host")
-	invitation, _ := b.service.Invite(ctx, "assistant", b.endpoint)
+	invitation, _ := b.service.Invite(ctx, b.endpoint)
 	value, _ := parseAddress(ctx, invitation.Address)
 	value.Endpoint = other.endpoint
 	raw, _ := json.Marshal(value)
@@ -142,7 +143,7 @@ func TestPreviewPinsActualServerKeyAndHasNoOtherServiceAuthority(t *testing.T) {
 func TestPreviewAndConnectDoNotRevealCodesBeforeServerKeyProof(t *testing.T) {
 	ctx := context.Background()
 	a, b := newFixture(t, "private-a"), newFixture(t, "private-b")
-	invitation, _ := b.service.Invite(ctx, "assistant", b.endpoint)
+	invitation, _ := b.service.Invite(ctx, b.endpoint)
 	original, _ := parseAddress(ctx, invitation.Address)
 	for _, operation := range []string{"preview", "connect"} {
 		t.Run(operation, func(t *testing.T) {
@@ -179,7 +180,7 @@ func TestPreviewAndConnectDoNotRevealCodesBeforeServerKeyProof(t *testing.T) {
 			if operation == "preview" {
 				_, err = a.service.Preview(ctx, address)
 			} else {
-				_, err = a.service.Connect(ctx, "assistant", address)
+				_, err = a.service.Connect(ctx, address)
 			}
 			if err == nil {
 				t.Fatal("unauthenticated endpoint accepted")
@@ -199,9 +200,9 @@ func TestPreviewAndConnectDoNotRevealCodesBeforeServerKeyProof(t *testing.T) {
 func TestPendingPairSessionRequiresCodeBeforeClaimOrMessaging(t *testing.T) {
 	ctx := context.Background()
 	a, b := newFixture(t, "pending-a"), newFixture(t, "pending-b")
-	invitation, _ := b.service.Invite(ctx, "assistant", b.endpoint)
+	invitation, _ := b.service.Invite(ctx, b.endpoint)
 	value, _ := parseAddress(ctx, invitation.Address)
-	metadata := pairRequest{ID: newID(), Invitation: value.Invitation, Local: a.identity(), Peer: value.Identity}
+	metadata := pairRequest{ID: newID(), Invitation: value.Invitation, Local: mustNodeIdentity(t, a), Peer: value.Identity}
 	auth, _ := json.Marshal(sessionAuth{ID: metadata.ID, Pair: &metadata})
 	session, err := peer.Dial(ctx, b.endpoint, peer.DialOptions{Identity: a.service.options.HostIdentity, PrivateKey: a.key, Expected: &value.Host, Service: ServiceName, Auth: auth})
 	if err != nil {
@@ -235,7 +236,7 @@ func TestPreviewHonorsCallerDeadlineAgainstUnresponsiveEndpoint(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	a, b := newFixture(t, "preview-a"), newFixture(t, "preview-b")
-	invitation, _ := b.service.Invite(context.Background(), "assistant", b.endpoint)
+	invitation, _ := b.service.Invite(context.Background(), b.endpoint)
 	value, _ := parseAddress(context.Background(), invitation.Address)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -299,4 +300,13 @@ func TestHistoricalClaimDigestRetainsOriginalNamesAndCapability(t *testing.T) {
 			t.Fatal("historical claim weakened "+change, value, err)
 		}
 	}
+}
+
+func mustNodeIdentity(t *testing.T, f *fixture) Identity {
+	t.Helper()
+	identity, err := f.service.localIdentity(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return identity
 }

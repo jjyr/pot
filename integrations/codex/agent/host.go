@@ -29,7 +29,7 @@ import (
 	webassets "github.com/jjyr/pot/web"
 )
 
-const hostVersion = "5"
+const hostVersion = "6"
 const hostListen = "127.0.0.1:8792"
 const hostPeerListen = "127.0.0.1:8793"
 
@@ -117,6 +117,9 @@ func openAgentHost(root string) (*agentHost, error) {
 	}
 	h.mailbox = &hostMailbox{db: h.tasks, local: h.identity.Address, backend: h.backend}
 	h.links, err = agentlink.New(agentlink.Options{DB: db, Secrets: h.secrets, Mailbox: h.mailbox, Backend: h.backend, HostIdentity: h.peerIdentity, HostKey: h.peerKey, Identity: func(_ context.Context, assistant string) (agentlink.Identity, error) {
+		if assistant == "" {
+			return agentlink.Identity{Address: protocol.AgentRef{NodeID: id, Kind: "node", AgentID: id}, Name: "Codex", Adapter: "codex"}, nil
+		}
 		a, err := h.backend.resolve(context.Background(), assistant)
 		if err != nil {
 			return agentlink.Identity{}, err
@@ -296,7 +299,7 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, err.Error())
 			return
 		}
-		inv, err := h.links.Invite(r.Context(), "codex", endpoint)
+		inv, err := h.links.Invite(r.Context(), endpoint)
 		if err != nil {
 			fail(w, 400, err.Error())
 			return
@@ -332,7 +335,7 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 			v = map[string]any{"peer": map[string]any{"id": preview.Identity.Address.AgentID, "node_id": preview.Identity.Address.NodeID, "kind": preview.Identity.Adapter, "name": preview.Identity.Name}, "endpoint": preview.Endpoint, "fingerprint": preview.Fingerprint, "expires_at_ms": preview.ExpiresAt.UnixMilli()}
 		}
 	case "connect":
-		v, err = h.links.Connect(r.Context(), "codex", in.Address)
+		v, err = h.links.Connect(r.Context(), in.Address)
 	case "reconnect":
 		err = h.links.Reconnect(r.Context(), in.ID)
 	case "delete":

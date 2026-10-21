@@ -22,7 +22,7 @@ async page=>{
   const providerBefore=await(await page.request.get(state.origin+'/api/v1/providers')).json(),assistantsBefore=await(await page.request.get(state.origin+'/api/v1/assistants')).json();
   const existingConnection=providerBefore.connections[0];
   const quickResponse=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/v1/assistants'&&response.request().method()==='POST'&&response.ok());
-  await page.getByRole('button',{name:'New assistant',exact:true}).click();
+  await page.getByRole('button',{name:'Add assistant',exact:true}).click();await page.getByRole('button',{name:'Create assistant',exact:true}).click();
   const quick=await(await quickResponse).json();await page.locator('.assistant-identity-name').filter({hasText:quick.name}).waitFor();
   await page.getByRole('button',{name:'Assistant settings',exact:true}).click();
   await page.locator('.editor-fields>.avatar').waitFor();

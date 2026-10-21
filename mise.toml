@@ -184,7 +184,7 @@ xcrun swiftc -module-cache-path .local/icons/modules resources/app/PotIcon.swift
 
 [tasks."test:ui-http-integration"]
 description = "Opt-in real local browser/HTTP/SSE integration (cached Playwright CLI and browser required)"
-run = "python scripts/tests/go-ui-http-integration.py"
+run = ["python scripts/tests/go-ui-http-integration.py", "python scripts/tests/go-ui-assistant-start-browser.py"]
 
 [tasks."test:public-api"]
 description = "Verify reusable Go libraries from an independent external module"

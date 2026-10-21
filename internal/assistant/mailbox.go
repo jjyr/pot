@@ -202,7 +202,9 @@ func (m *Mailbox) deliver(ctx context.Context, message protocol.Envelope, state 
 	if err := message.Validate(); err != nil {
 		return protocol.Receipt{}, err
 	}
-	if message.Kind != "message" || message.From.Kind != "assistant" || message.To.Kind != "assistant" || message.To.NodeID != m.nodeID || message.From.NodeID == m.nodeID {
+	assistantDelivery := message.To.Kind == "assistant" && (message.From.Kind == "assistant" || message.From.Kind == "user")
+	userReply := state == "processed" && message.To.Kind == "user" && message.From.Kind == "assistant" && message.ReplyTo != nil
+	if message.Kind != "message" || !(assistantDelivery || userReply) || message.To.NodeID != m.nodeID || message.From.NodeID == m.nodeID {
 		return protocol.Receipt{}, errors.New("invalid remote delivery")
 	}
 	err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {

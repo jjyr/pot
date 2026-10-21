@@ -51,16 +51,6 @@ type Backend interface {
 	Cancel(context.Context, protocol.AgentRef, string) (Task, error)
 }
 
-func (s *Service) localIdentity(ctx context.Context, id string) (Identity, error) {
-	if id == "" && s.options.Backend != nil {
-		d, err := s.options.Backend.Directory(ctx)
-		if err != nil {
-			return Identity{}, err
-		}
-		if err = validateDirectory(d, s.options.HostIdentity.NodeID); err != nil {
-			return Identity{}, err
-		}
-		id = d.DefaultAssistantID
-	}
-	return s.options.Identity(ctx, id)
+func (s *Service) localIdentity(ctx context.Context) (Identity, error) {
+	return s.options.Identity(ctx, "")
 }

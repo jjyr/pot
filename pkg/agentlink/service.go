@@ -81,7 +81,10 @@ func New(options Options) (*Service, error) {
 }
 
 func validIdentity(identity Identity) bool {
-	return identity.Address.Valid() && identity.Address.Kind == "assistant" && (identity.Adapter == "pot" || identity.Adapter == "codex") && strings.TrimSpace(identity.Name) != "" && utf8.ValidString(identity.Name) && len(identity.Name) <= 512
+	return identity.Address.Valid() && (identity.Address.Kind == "assistant" || identity.Address.Kind == "node") && (identity.Adapter == "pot" || identity.Adapter == "codex") && strings.TrimSpace(identity.Name) != "" && utf8.ValidString(identity.Name) && len(identity.Name) <= 512
+}
+func validNodeIdentity(identity Identity) bool {
+	return validIdentity(identity) && identity.Address.Kind == "node" && identity.Address.AgentID == identity.Address.NodeID
 }
 func equalIdentity(a, b Identity) bool { return a.Address == b.Address && a.Adapter == b.Adapter }
 func newID() string {
@@ -118,7 +121,7 @@ func parseAddress(ctx context.Context, raw string) (address, error) {
 		return value, ErrInvalid
 	}
 	data, err := base64.RawURLEncoding.DecodeString(u.Fragment)
-	if err != nil || decodeJSON(data, &value) != nil || value.Version != 4 || value.Host.Validate() != nil || value.Host.NodeID != value.Identity.Address.NodeID || !validIdentity(value.Identity) || !validID(value.Invitation) || !validToken(value.Code) {
+	if err != nil || decodeJSON(data, &value) != nil || value.Version != 5 || value.Identity.Address.Kind != "node" || value.Host.Validate() != nil || value.Host.NodeID != value.Identity.Address.NodeID || !validNodeIdentity(value.Identity) || !validID(value.Invitation) || !validToken(value.Code) {
 		return address{}, ErrInvalid
 	}
 	origin, err := peer.ValidateEndpoint(ctx, value.Endpoint)
@@ -129,12 +132,12 @@ func parseAddress(ctx context.Context, raw string) (address, error) {
 	return value, nil
 }
 
-func (s *Service) Invite(ctx context.Context, assistantID, endpoint string) (Invitation, error) {
-	identity, err := s.localIdentity(ctx, assistantID)
+func (s *Service) Invite(ctx context.Context, endpoint string) (Invitation, error) {
+	identity, err := s.localIdentity(ctx)
 	if err != nil {
 		return Invitation{}, err
 	}
-	if !validIdentity(identity) || identity.Address.NodeID != s.options.HostIdentity.NodeID {
+	if !validNodeIdentity(identity) || identity.Address.NodeID != s.options.HostIdentity.NodeID {
 		return Invitation{}, ErrInvalid
 	}
 	endpoint, err = peer.ValidateEndpoint(ctx, endpoint)
@@ -164,7 +167,7 @@ func (s *Service) Invite(ctx context.Context, assistantID, endpoint string) (Inv
 		return Invitation{}, err
 	}
 	defer clear(secret)
-	value, _ := json.Marshal(address{Version: 4, Host: s.options.HostIdentity, Endpoint: endpoint, Identity: identity, Invitation: id, Code: string(secret)})
+	value, _ := json.Marshal(address{Version: 5, Host: s.options.HostIdentity, Endpoint: endpoint, Identity: identity, Invitation: id, Code: string(secret)})
 	return Invitation{Address: endpoint + "#" + base64.RawURLEncoding.EncodeToString(value), ExpiresAt: time.UnixMilli(expires).UTC()}, nil
 }
 
@@ -243,16 +246,16 @@ func (s *Service) update(ctx context.Context, c Connection) error {
 	return err
 }
 
-func (s *Service) Connect(ctx context.Context, assistantID, raw string) (Connection, error) {
+func (s *Service) Connect(ctx context.Context, raw string) (Connection, error) {
 	address, err := parseAddress(ctx, raw)
 	if err != nil {
 		return Connection{}, err
 	}
-	local, err := s.localIdentity(ctx, assistantID)
+	local, err := s.localIdentity(ctx)
 	if err != nil {
 		return Connection{}, err
 	}
-	if !validIdentity(local) || local.Address.NodeID != s.options.HostIdentity.NodeID || local.Address.NodeID == address.Identity.Address.NodeID {
+	if !validNodeIdentity(local) || local.Address.NodeID != s.options.HostIdentity.NodeID || local.Address.NodeID == address.Identity.Address.NodeID {
 		return Connection{}, ErrInvalid
 	}
 	s.mu.Lock()
@@ -261,7 +264,7 @@ func (s *Service) Connect(ctx context.Context, assistantID, raw string) (Connect
 	var value Connection
 	if errors.Is(err, sql.ErrNoRows) {
 		now := time.Now().UTC()
-		value = Connection{SchemaVersion: 4, PeerHost: address.Host, ID: newID(), Local: local, Peer: address.Identity, Endpoint: address.Endpoint, State: "connecting", CreatedAt: now, UpdatedAt: now}
+		value = Connection{SchemaVersion: 5, PeerHost: address.Host, ID: newID(), Local: local, Peer: address.Identity, Endpoint: address.Endpoint, State: "connecting", CreatedAt: now, UpdatedAt: now}
 		request := pairRequest{ID: value.ID, Invitation: address.Invitation, Local: local, Peer: address.Identity, Code: address.Code}
 		err = s.save(ctx, value, credential{Pair: &request})
 	} else if err == nil {
@@ -287,7 +290,7 @@ func (s *Service) Connect(ctx context.Context, assistantID, raw string) (Connect
 				}
 				if err == nil {
 					now := time.Now().UTC()
-					value = Connection{SchemaVersion: 4, PeerHost: address.Host, ID: newID(), Local: local, Peer: address.Identity, Endpoint: address.Endpoint, State: "connecting", CreatedAt: now, UpdatedAt: now}
+					value = Connection{SchemaVersion: 5, PeerHost: address.Host, ID: newID(), Local: local, Peer: address.Identity, Endpoint: address.Endpoint, State: "connecting", CreatedAt: now, UpdatedAt: now}
 					request := pairRequest{ID: value.ID, Invitation: address.Invitation, Local: local, Peer: address.Identity, Code: address.Code}
 					err = s.save(ctx, value, credential{Pair: &request})
 				}
@@ -305,7 +308,7 @@ func (s *Service) Connect(ctx context.Context, assistantID, raw string) (Connect
 }
 
 func (s *Service) accept(ctx context.Context, request pairRequest, remote peer.Identity) (Connection, error) {
-	if !validID(request.ID) || !validID(request.Invitation) || !validIdentity(request.Local) || !validIdentity(request.Peer) || !validToken(request.Code) || remote.Validate() != nil || remote.NodeID != request.Local.Address.NodeID || request.Local.Address.NodeID == request.Peer.Address.NodeID {
+	if !validID(request.ID) || !validID(request.Invitation) || !validNodeIdentity(request.Local) || !validNodeIdentity(request.Peer) || !validToken(request.Code) || remote.Validate() != nil || remote.NodeID != request.Local.Address.NodeID || request.Local.Address.NodeID == request.Peer.Address.NodeID {
 		return Connection{}, ErrInvalid
 	}
 	s.mu.Lock()
@@ -348,7 +351,7 @@ func (s *Service) accept(ctx context.Context, request pairRequest, remote peer.I
 		return Connection{}, ErrExpired
 	}
 	now := time.Now().UTC()
-	value := Connection{SchemaVersion: 4, PeerHost: remote, ID: request.ID, Local: current, Peer: request.Local, State: "connecting", CreatedAt: now, UpdatedAt: now}
+	value := Connection{SchemaVersion: 5, PeerHost: remote, ID: request.ID, Local: current, Peer: request.Local, State: "connecting", CreatedAt: now, UpdatedAt: now}
 	credential := credential{}
 	secretRaw, _ := json.Marshal(credential)
 	secretRef := "agent-link/connection/" + value.ID

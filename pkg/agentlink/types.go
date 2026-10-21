@@ -82,9 +82,10 @@ type SecretStore interface {
 
 type Options struct {
 	// DB is a caller-owned, migrated storage.ControlDatabase. Service never closes it.
-	Backend      Backend
-	DB           *sql.DB
-	Secrets      SecretStore
+	Backend Backend
+	DB      *sql.DB
+	Secrets SecretStore
+	// Identity resolves the node for an empty selector, and assistants for explicit IDs.
 	Identity     func(context.Context, string) (Identity, error)
 	Mailbox      Mailbox
 	HostIdentity peer.Identity

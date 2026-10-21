@@ -46,7 +46,7 @@ func (s *Service) Preview(ctx context.Context, raw string) (Preview, error) {
 		return Preview{}, transportError(err)
 	}
 	var result Preview
-	if len(response) > 8192 || decodeJSON(response, &result) != nil || !validIdentity(result.Identity) || !equalIdentity(result.Identity, address.Identity) || result.Host != address.Host || result.Host != session.Remote() || result.Endpoint != address.Endpoint || result.Fingerprint != hostFingerprint(address.Host) {
+	if len(response) > 8192 || decodeJSON(response, &result) != nil || !validNodeIdentity(result.Identity) || !equalIdentity(result.Identity, address.Identity) || result.Host != address.Host || result.Host != session.Remote() || result.Endpoint != address.Endpoint || result.Fingerprint != hostFingerprint(address.Host) {
 		return Preview{}, ErrConflict
 	}
 	if !result.ExpiresAt.After(time.Now()) {
@@ -62,7 +62,7 @@ func hostFingerprint(identity peer.Identity) string {
 }
 
 func (s *Service) previewInvitation(ctx context.Context, request previewRequest) (Preview, error) {
-	if !validID(request.Invitation) || !validToken(request.Code) || !validIdentity(request.Target) || request.Target.Address.NodeID != s.options.HostIdentity.NodeID {
+	if !validID(request.Invitation) || !validToken(request.Code) || !validNodeIdentity(request.Target) || request.Target.Address.NodeID != s.options.HostIdentity.NodeID {
 		return Preview{}, ErrInvalid
 	}
 	var raw []byte
@@ -89,7 +89,7 @@ func (s *Service) previewInvitation(ctx context.Context, request previewRequest)
 	if expiry <= time.Now().UnixMilli() {
 		return Preview{}, ErrExpired
 	}
-	current, err := s.options.Identity(ctx, identity.Address.AgentID)
+	current, err := s.localIdentity(ctx)
 	if err != nil || current.Address.NodeID != s.options.HostIdentity.NodeID {
 		return Preview{}, ErrConflict
 	}

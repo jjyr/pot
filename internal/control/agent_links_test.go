@@ -47,15 +47,15 @@ func agentControl(t *testing.T, id string) *agentControlFixture {
 func connectAgentControls(t *testing.T, a, b *agentControlFixture) agentlink.Connection {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", AssistantID: "main", Mode: "address", Endpoint: b.endpoint}); err != nil {
+	if _, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", Mode: "address", Endpoint: b.endpoint}); err != nil {
 		t.Fatal(err)
 	}
-	invitation, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "invite", AssistantID: "main"})
+	invitation, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "invite"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	address := invitation.(map[string]any)["address"].(string)
-	value, err := a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "connect", AssistantID: "main", Address: address})
+	value, err := a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "connect", Address: address})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestAgentLinkControlsExchangeWithoutAppAndDoNotGrantExecution(t *testing.T)
 		if err != nil || len(peers) != 1 || peers[0].Address.NodeID != item.remote.options.RuntimeID {
 			t.Fatal(peers, err)
 		}
-		links, err := item.local.AgentLinks(ctx, "main")
+		links, err := item.local.AgentLinks(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -202,10 +202,10 @@ func TestMissingAssistantCannotPublishIdentity(t *testing.T) {
 func TestAgentLinkControlPreviewDoesNotClaimInvitation(t *testing.T) {
 	ctx := context.Background()
 	a, b := agentControl(t, "preview-a"), agentControl(t, "preview-b")
-	if _, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", AssistantID: "main", Mode: "address", Endpoint: b.endpoint}); err != nil {
+	if _, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", Mode: "address", Endpoint: b.endpoint}); err != nil {
 		t.Fatal(err)
 	}
-	invitation, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "invite", AssistantID: "main"})
+	invitation, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "invite"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestAgentLinkControlPreviewDoesNotClaimInvitation(t *testing.T) {
 		t.Fatal(err)
 	}
 	preview := value.(map[string]any)
-	if len(preview) != 4 || !reflect.DeepEqual(preview["peer"], map[string]any{"id": "main", "node_id": "preview-b", "kind": "pot", "name": "Main"}) || preview["endpoint"] != b.endpoint || preview["expires_at_ms"] != invite["expires_at_ms"] {
+	if len(preview) != 4 || !reflect.DeepEqual(preview["peer"], map[string]any{"id": "preview-b", "node_id": "preview-b", "kind": "pot", "name": "Pot"}) || preview["endpoint"] != b.endpoint || preview["expires_at_ms"] != invite["expires_at_ms"] {
 		t.Fatalf("unexpected preview projection: %#v", preview)
 	}
 	fingerprint, ok := preview["fingerprint"].(string)
@@ -233,7 +233,7 @@ func TestAgentLinkControlPreviewDoesNotClaimInvitation(t *testing.T) {
 	if err := b.service.integrationDB.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(SUM(CASE WHEN claim_hash!='' OR connection_id!='' THEN 1 ELSE 0 END),0) FROM agent_link_invitations").Scan(&count, &claimed); err != nil || count != 1 || claimed != 0 {
 		t.Fatal("preview consumed its invitation", count, claimed, err)
 	}
-	if _, err = a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "connect", AssistantID: "main", Address: address}); err != nil {
+	if _, err = a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "connect", Address: address}); err != nil {
 		t.Fatal("preview prevented subsequent connection", err)
 	}
 	_, err = a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "preview", Address: address})
@@ -246,10 +246,10 @@ func TestAgentLinkControlPreviewDoesNotClaimInvitation(t *testing.T) {
 func TestAgentLinkControlPreviewExpiredInvitation(t *testing.T) {
 	ctx := context.Background()
 	a, b := agentControl(t, "expired-a"), agentControl(t, "expired-b")
-	if _, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", AssistantID: "main", Mode: "address", Endpoint: b.endpoint}); err != nil {
+	if _, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", Mode: "address", Endpoint: b.endpoint}); err != nil {
 		t.Fatal(err)
 	}
-	invitation, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "invite", AssistantID: "main"})
+	invitation, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "invite"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -65,7 +65,7 @@ UPDATE agent_messages SET envelope=json_set(envelope,'$.digest',?) WHERE json_ex
 UPDATE tasks SET body=replace(json_set(body,'$.schema_version',9),'"node_id":','"control_id":');
 DROP INDEX agent_messages_outbox_route; ALTER TABLE agent_messages DROP COLUMN accepted_at_ms; ALTER TABLE assistant_mail_identity RENAME COLUMN node_id TO control_id;
 ALTER TABLE assistant_contacts RENAME COLUMN node TO control;
-DROP TABLE task_input_digest_formats; DROP TABLE codex_link_jobs; DROP TABLE codex_link_assistants;
+DROP TABLE task_input_digest_formats; DROP TABLE codex_link_jobs; DROP TABLE codex_link_assistants; DROP INDEX agent_link_user_chat_routes;
 ALTER TABLE plugin_background DROP COLUMN diagnostic;
 DROP INDEX agent_plugin_instance_state;
 ALTER TABLE plugin_background DROP COLUMN plugin_id;

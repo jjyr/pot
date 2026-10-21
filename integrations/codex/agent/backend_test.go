@@ -230,11 +230,11 @@ func TestSignedAgentLinkDelegatesToCodexDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	invitation, err := remote.links.Invite(ctx, "codex", "tcp://"+listener.Addr())
+	invitation, err := remote.links.Invite(ctx, "tcp://"+listener.Addr())
 	if err != nil {
 		t.Fatal(err)
 	}
-	connection, err := local.links.Connect(ctx, "codex", invitation.Address)
+	connection, err := local.links.Connect(ctx, invitation.Address)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,14 +331,14 @@ func TestVirtualAssistantSendKeepsActiveMessageParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	mailbox := &hostMailbox{db: b.db, local: parent.To, backend: b}
-	reply, err := mailbox.sendFrom(ctx, parent.To, from, "virtual-send", "response", false)
+	reply, err := mailbox.sendFrom(ctx, parent.To, from, "virtual-send", "response")
 	if err != nil || reply.Hops != 8 || reply.ReplyTo == nil || *reply.ReplyTo != parent.ID || reply.ConversationID != parent.ConversationID {
 		t.Fatal(reply, err)
 	}
 	if err = b.update(ctx, task.ID, func(j *job) error { j.Message.Hops = protocol.MaxMailHops; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = mailbox.sendFrom(ctx, parent.To, from, "bypass", "response", false); err == nil {
+	if _, err = mailbox.sendFrom(ctx, parent.To, from, "bypass", "response"); err == nil {
 		t.Fatal("virtual session bypassed causal limit")
 	}
 }
