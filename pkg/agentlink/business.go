@@ -196,6 +196,17 @@ func (s *Service) business(ctx context.Context, c Connection, remote peer.Identi
 			return nil, ErrInvalid
 		}
 		result = d
+	case "assistant.delete":
+		var input DeleteAssistantRequest
+		if decodeJSON(r.Params, &input) != nil || input.From.Kind != "user" || !input.From.Valid() || input.From.NodeID != remote.NodeID || input.AssistantID == "" || input.Revision == 0 {
+			return nil, ErrInvalid
+		}
+		backend, ok := s.options.Backend.(AssistantDeletionBackend)
+		if !ok || !d.Operations[input.AssistantID].Supports(AssistantDelete) {
+			return nil, ErrUnsupported
+		}
+		e = backend.DeleteAssistant(ctx, input)
+		result = AssistantDeletion{ID: input.AssistantID, Deleted: e == nil}
 	case "assistant.profile":
 		var input ProfileRequest
 		if decodeJSON(r.Params, &input) != nil || input.From.Kind != "user" || !input.From.Valid() || input.From.NodeID != remote.NodeID || input.AssistantID == "" {

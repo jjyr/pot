@@ -377,7 +377,7 @@ func Allowed(method, path string) bool {
 			}
 			id := strings.TrimPrefix(path, "/api/v1/assistants/")
 			if strings.HasPrefix(id, "agent-link:") {
-				link, assistant, found := strings.Cut(strings.TrimPrefix(id, "agent-link:"), ":")
+				link, assistant, found := strings.Cut(strings.TrimPrefix(strings.TrimSuffix(id, "/delete"), "agent-link:"), ":")
 				return found && core.Identifier(link) && core.Identifier(assistant)
 			}
 			return core.Identifier(strings.TrimSuffix(id, "/delete"))

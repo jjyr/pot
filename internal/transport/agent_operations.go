@@ -104,6 +104,9 @@ func (a *Application) agentOperation(ctx context.Context, method string, u *url.
 		}
 		owner = id
 		op = agentlink.AssistantProfile
+		if call.Action == "delete" {
+			op = agentlink.AssistantDelete
+		}
 	}
 	if op == "" && strings.HasPrefix(path, "/api/v1/tasks/") && path != "/api/v1/tasks/catalog" {
 		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/tasks/"), "/")

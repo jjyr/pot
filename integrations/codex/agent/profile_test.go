@@ -146,12 +146,38 @@ func TestCodexProfilePeerRejectsAssistantCallersAndOwnerOperations(t *testing.T)
 		t.Fatal("assistant caller could manage peer profile")
 	}
 	input.From.Kind = "user"
+	deletion := agentlink.DeleteAssistantRequest{From: input.From, AssistantID: "codex", Revision: 1}
+	deletion.From.Kind = "assistant"
+	if _, err = b.links.DeleteAssistant(ctx, connection.ID, deletion); err == nil {
+		t.Fatal("assistant caller could retire peer")
+	}
 	for _, action := range []string{"delete", "configure", "rules"} {
 		input.Action = action
 		if _, err = b.links.Profile(ctx, connection.ID, input); err == nil {
 			t.Fatal("owner operation allowed through profile", action)
 		}
 	}
+}
+
+func profileBrowserHandler(t *testing.T, app *transport.Application) (http.Handler, *http.Cookie) {
+	t.Helper()
+	upstream := httptest.NewServer(transport.Handler(app, "private"))
+	t.Cleanup(upstream.Close)
+	config := webui.NewConfig()
+	handler, err := webui.New(webui.Options{Origin: "http://localhost", Config: config, Upstream: webui.Upstream{URL: upstream.URL, Credential: "private", Client: upstream.Client()}, Assets: webassets.FS()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { handler.Close() })
+	login := httptest.NewRequest("POST", "http://localhost/access/token", nil)
+	login.Header.Set("Authorization", "Bearer "+config.Token)
+	loginResponse := httptest.NewRecorder()
+	handler.ServeHTTP(loginResponse, login)
+	if loginResponse.Code != http.StatusOK {
+		t.Fatal(loginResponse.Code, loginResponse.Body.String())
+	}
+	cookie := loginResponse.Result().Cookies()[0]
+	return handler, cookie
 }
 
 func TestCodexProfileThroughPotBrowserKeepsThreadAndWelcome(t *testing.T) {
@@ -167,22 +193,7 @@ func TestCodexProfileThroughPotBrowserKeepsThreadAndWelcome(t *testing.T) {
 	if _, err = h.tasks.Exec("UPDATE codex_link_assistants SET thread_id='same-thread' WHERE id='codex'"); err != nil {
 		t.Fatal(err)
 	}
-	upstream := httptest.NewServer(transport.Handler(app, "private"))
-	defer upstream.Close()
-	config := webui.NewConfig()
-	handler, err := webui.New(webui.Options{Origin: "http://localhost", Config: config, Upstream: webui.Upstream{URL: upstream.URL, Credential: "private", Client: upstream.Client()}, Assets: webassets.FS()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer handler.Close()
-	login := httptest.NewRequest("POST", "http://localhost/access/token", nil)
-	login.Header.Set("Authorization", "Bearer "+config.Token)
-	loginResponse := httptest.NewRecorder()
-	handler.ServeHTTP(loginResponse, login)
-	if loginResponse.Code != http.StatusOK {
-		t.Fatal(loginResponse.Code, loginResponse.Body.String())
-	}
-	cookie := loginResponse.Result().Cookies()[0]
+	handler, cookie := profileBrowserHandler(t, app)
 	call := func(method, path string, input any, status int) []byte {
 		t.Helper()
 		var raw []byte

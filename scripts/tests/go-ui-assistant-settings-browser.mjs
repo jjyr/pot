@@ -35,6 +35,7 @@ async function run(){
   context={space:'other-space',owner:'other-assistant'};fail=false;button('retry').click();await wait(()=>pending.length);pending.shift()();await wait(()=>pages.editing);
   check(calls.at(-1).owner===assistant.id&&calls.at(-1).space==='local','Retry retains the original full target after selection changes');
   check(host.querySelectorAll('.form-row').length===1,'Profile capability opens only the name and avatar editor');
+  check(!host.querySelector('.assistant-delete'),'Profile capability alone does not expose deletion');
   button('assistant.resetAvatar').click();await wait(()=>calls.at(-1).path.endsWith('default-avatar'));await Promise.resolve();
   check(calls.at(-1).owner===assistant.id,'Default avatar uses the captured remote target');
   const name=host.querySelector('input[aria-label="'+t('assistant.name')+'"]');name.value='Edited remote';name.dispatchEvent(new Event('input',{bubbles:true}));

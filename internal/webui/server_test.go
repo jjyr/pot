@@ -246,6 +246,8 @@ func TestAgentLinkPublicationAllowlist(t *testing.T) {
 		{"GET", "/api/v1/assistants/profile/extra", false},
 		{"GET", "/api/v1/assistants/default-avatar/extra", false},
 		{"POST", "/api/v1/assistants/agent-link:peer:codex", true},
+		{"POST", "/api/v1/assistants/agent-link:peer:codex/delete", true},
+		{"POST", "/api/v1/assistants/agent-link:peer:codex/delete/extra", false},
 		{"POST", "/api/v1/assistants/agent-link:peer:codex/extra", false},
 		{"POST", "/api/v1/assistants/agent-link:peer:", false},
 		{"POST", "/api/v1/assistants/agent-link:peer:codex:extra", false},

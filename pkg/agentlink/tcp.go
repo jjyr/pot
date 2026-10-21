@@ -93,7 +93,7 @@ func (s *Service) handler(id string, remote peer.Identity) peer.Handler {
 				return nil, ErrInvalid
 			}
 			result = connection
-		case "directory", "observe", "task.submit", "task.status", "task.cancel", "chat.status", "assistant.profile":
+		case "directory", "observe", "task.submit", "task.status", "task.cancel", "chat.status", "assistant.profile", "assistant.delete":
 			return s.business(ctx, connection, remote, request)
 		case "exchange":
 			var input exchangeRequest
@@ -253,7 +253,7 @@ func transportError(err error) error {
 	if errors.Is(err, peer.ErrUnauthorized) {
 		return ErrUnauthorized
 	}
-	for _, known := range []error{ErrInvalid, ErrNotFound, ErrUnauthorized, ErrExpired, ErrUsed, ErrConflict, ErrRevoked, ErrReconnectRequired, ErrDisconnected, ErrUnsupported, ErrCapacity, ErrFenced} {
+	for _, known := range []error{ErrAssistantBusy, ErrAssistantChanged, ErrInvalid, ErrNotFound, ErrUnauthorized, ErrExpired, ErrUsed, ErrConflict, ErrRevoked, ErrReconnectRequired, ErrDisconnected, ErrUnsupported, ErrCapacity, ErrFenced} {
 		if errors.Is(err, known) || strings.Contains(err.Error(), known.Error()) {
 			return known
 		}

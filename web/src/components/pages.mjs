@@ -133,12 +133,12 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       dialog.addEventListener('cancel',event=>{event.preventDefault();dialog.close();resolve(false);},{once:true});dialog.addEventListener('close',()=>dialog.remove(),{once:true});dialog.showModal();
     });
   }
-  async function confirmAssistantDelete(name) {
+  async function confirmAssistantDelete(name,remote=false) {
     return new Promise(resolve=>{
       const dialog=n('dialog','preferences'),title=n('h2'),description=n('p','hint');
       const finish=value=>{dialog.close();resolve(value);};
       const cancel=action('',()=>finish(false)),confirm=action('',()=>finish(true),{danger:true});
-      const refresh=()=>{title.textContent=translate(locale(),'assistant.deleteTitle').replace('{name}',name);description.textContent=translate(locale(),'assistant.deleteBody');cancel.textContent=translate(locale(),'assistant.deleteCancel');confirm.textContent=translate(locale(),'assistant.delete');};
+      const refresh=()=>{title.textContent=translate(locale(),'assistant.deleteTitle').replace('{name}',name);description.textContent=translate(locale(),remote?'assistant.deleteRemoteBody':'assistant.deleteBody');cancel.textContent=translate(locale(),'assistant.deleteCancel');confirm.textContent=translate(locale(),'assistant.delete');};
       title.id='assistant-delete-title';dialog.setAttribute('aria-labelledby',title.id);description.id='assistant-delete-description';dialog.setAttribute('aria-describedby',description.id);
       dialog.append(title,description,toolbar(cancel,confirm));document.body.append(dialog);refresh();
       window.addEventListener('pot:locale',refresh);
@@ -183,7 +183,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
         const saved=await save(attempt.values,{...captured,request_id:attempt.request_id},session);
         session.settle(true);changed(saved);if(lifecycle.afterSave)await lifecycle.afterSave(saved);else await back();
       } catch(reason) {session.settle(false);if(reason.uiKey){status.dataset.errorKey=reason.uiKey;status.replaceChildren(n('span','',translate(locale(),reason.uiKey)));if(reason.diagnostic){const details=n('details','detail-disclosure');details.append(n('summary','',translate(locale(),'agentLinks.diagnostics')),n('pre','',reason.diagnostic));status.append(details);}}else status.textContent=reason.message||String(reason);}
-      finally {for(const control of controls.values())control.disabled=false;cancel.disabled=submit.disabled=false;lifecycle.settled?.();}
+      finally {for(const control of controls.values())control.disabled=false;cancel.disabled=submit.disabled=false;lifecycle.settled?.();lifecycle.refreshDelete?.();}
     };
     return {session,root,form,controls,lifecycle};
   }
@@ -200,6 +200,33 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     if(current?.returnSchedule){const state={...history.state};delete state.potEditor;history.replaceState(state,'',location.href);await scheduleHistory(current.returnSchedule,false);return true;}
     const state={...history.state};for(const key of ['potEditor','potTask','potTaskReturn','potSchedule','potResource','potUsage'])delete state[key];state.potRoute=current?.returnChat||returnToConversation?'chat':current?.caller||route||'settings';history.replaceState(state,'',location.href);
     if(current?.returnChat)openChat();else{usageOwner=current?.returnUsageOwner||usageOwner;show(current?.caller||route||'settings',{keepUsageOwner:!!usageOwner});}return true;
+  }
+  function assistantDeleteEditor(form,definition,captured,getRevision) {
+    if(!supportsCapability(definition,'assistant.delete'))return;
+    const session=form.session;
+    const t=key=>translate(locale(),key),more=n('details','editor-disclosure assistant-delete');more.dataset.section='delete';
+    const summary=n('summary'),remove=action('',async()=>{
+      if(!session.begin())return;
+      const disabled=new Map([...form.form.querySelectorAll('input,select,textarea,button')].map(node=>[node,node.disabled]));
+      for(const node of disabled.keys())node.disabled=true;
+      deleteError='';refreshDelete();
+      try{
+        if(!await confirmAssistantDelete(definition.name,!!definition.origin))return;
+        if(editor?.session!==session||disposed)return;
+        if(!available()){deleteError='assistant.deleteOffline';return;}
+        if(client.runtime.boot_id!==session.context.boot){deleteError='assistant.deleteRuntimeChanged';return;}
+        await request(`/api/v1/assistants/${encodeURIComponent(definition.id)}/delete`,{...captured,method:'POST',body:{revision:getRevision()}});
+        session.settle(true);await leave();route='chat';
+        history.replaceState({potRoute:'chat',potScope:{space:captured.space,owner:''},potDirectory:true},'',location.href);
+        routeChanged('chat');await changed({deletedAssistant:{space:captured.space,owner:definition.id}});
+      }catch(reason){deleteError=reason.code==='assistant_busy'?'assistant.deleteBusy':reason.code==='assistant_changed'?'assistant.deleteChanged':'assistant.deleteFailed';}
+      finally{if(session.pending)session.settle(false);for(const [node,value]of disabled)node.disabled=value;refreshDelete();}
+    },{danger:true});
+    const status=n('p','inline-error');status.setAttribute('role','alert');let deleteError='';
+    const available=()=>{const item=client.assistants?.find(item=>item.id===definition.id&&item.space_id===captured.space)||(!client.assistants?definition:null);return !!item&&!item.offline&&supportsCapability(item,'assistant.delete');};
+    const refreshDelete=()=>{summary.textContent=t('assistant.moreActions');remove.textContent=t('assistant.delete');remove.disabled=session.pending||!available();const key=!available()?'assistant.deleteOffline':deleteError;status.textContent=key?t(key):'';status.hidden=!key;};
+    more.append(summary,remove,status);form.form.querySelector('.editor-fields').append(more);refreshDelete();
+    window.addEventListener('pot:locale',refreshDelete);const dispose=form.lifecycle.dispose;form.lifecycle.dispose=()=>{dispose?.();window.removeEventListener('pot:locale',refreshDelete);};form.lifecycle.refreshDelete=refreshDelete;
   }
   function renderAssistantLoad() {
     const view=assistantLoad;if(!view)return;
@@ -247,29 +274,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
         if(values.text!==initial.text){const saved=await request('/api/v1/instructions',{...options,body:{text:values.text,revision:rulesRevision}});rulesRevision=saved.revision;initial.text=values.text;session.acknowledge({text:values.text});}
       },{returnChat:true,capturedScope:captured});
       const controls=form.controls,session=form.session;
-      if(definition){
-        const t=key=>translate(locale(),key),more=n('details','editor-disclosure assistant-delete');more.dataset.section='delete';
-        const summary=n('summary'),remove=action('',async()=>{
-          if(!session.begin())return;
-          const disabled=new Map([...form.form.querySelectorAll('input,select,textarea,button')].map(node=>[node,node.disabled]));
-          for(const node of disabled.keys())node.disabled=true;
-          deleteError='';refreshDelete();
-          try{
-            if(!await confirmAssistantDelete(definition.name))return;
-            if(editor?.session!==session||disposed)return;
-            if(client.runtime.boot_id!==session.context.boot){deleteError='assistant.deleteRuntimeChanged';return;}
-            await request(`/api/v1/assistants/${encodeURIComponent(definition.id)}/delete`,{...captured,method:'POST',body:{revision}});
-            session.settle(true);await leave();route='chat';
-            history.replaceState({potRoute:'chat',potScope:{space:captured.space,owner:''},potDirectory:true},'',location.href);
-            routeChanged('chat');await changed({deletedAssistant:{space:captured.space,owner:definition.id}});
-          }catch(reason){deleteError=reason.code==='assistant_busy'?'assistant.deleteBusy':reason.code==='assistant_changed'?'assistant.deleteChanged':'assistant.deleteFailed';}
-          finally{if(session.pending)session.settle(false);for(const [node,value]of disabled)node.disabled=value;refreshDelete();}
-        },{danger:true});
-        const status=n('p','inline-error');status.setAttribute('role','alert');let deleteError='';
-        const refreshDelete=()=>{summary.textContent=t('assistant.moreActions');remove.textContent=t('assistant.delete');status.textContent=deleteError?t(deleteError):'';status.hidden=!deleteError;};
-        more.append(summary,remove,status);form.form.querySelector('.editor-fields').append(more);refreshDelete();
-        window.addEventListener('pot:locale',refreshDelete);form.lifecycle.dispose=()=>window.removeEventListener('pot:locale',refreshDelete);
-      }
+      assistantDeleteEditor(form,definition,captured,()=>revision);
 
       editor.kind='assistant';
       const preview=avatar(56,definition.avatar);
@@ -327,7 +332,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       error.hidden=true;
       try{const {value,image}=await work();form.session.settle(false);form.session.set('avatar',value);preview.replaceChildren(...avatar(56,image).childNodes);}
       catch{form.session.settle(false);error.hidden=false;error.textContent=t('assistant.avatarFailed');}
-      finally{for(const node of controls)node.disabled=false;}
+      finally{for(const node of controls)node.disabled=false;form.lifecycle.refreshDelete?.();}
     };
     const change=action('',()=>upload.click()),reset=action('',()=>edit(async()=>{const value=await request('/api/v1/assistants/default-avatar',captured);return {value:'',image:value.avatar};}));
     upload.onchange=async()=>{const file=upload.files?.[0];upload.value='';if(file)await edit(async()=>{const image=await avatarFromFile(file);return {value:image,image};});};
@@ -340,6 +345,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       change.textContent=t('assistant.changeAvatar');reset.textContent=t('assistant.resetAvatar');help.textContent=t('assistant.avatarHelp');
       if(!error.hidden)error.textContent=t('assistant.avatarFailed');
     };form.lifecycle.locale();
+    assistantDeleteEditor(form,definition,captured,()=>revision);
   }
   async function extensions(root,token){extensionUI=createExtensions({root,client,locale,memory:extensionMemory,onSettings:(section='integrations')=>{filter.settingsTab=section;routeChanged('settings');show('settings');},onPermissions:()=>{routeChanged('machines');show('machines');}});await extensionUI.load();}
   async function settings(root, token) {
@@ -962,7 +968,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
  if(extensionUI){if(topics.includes('extensions')||topics.includes('spaces'))extensionUI.refresh();return;}
       if(source.boot&&(resourceBoots.get(source.space)||client.runtime.boot_id)!==source.boot){readTaskPages.clear();if(source.boot)resourceBoots.set(source.space,source.boot);for(const key of taskDetails.keys())if(!source.space||JSON.parse(key)[2]===source.space)taskDetails.delete(key);spaceCache.clear();usageCache.clear();if(taskView&&(!source.space||taskView.scope.space===source.space)){taskView.invalidated=true;taskView.readGeneration=(taskView.readGeneration||0)+1;}}
       if(topics.includes('spaces')){readTaskPages.clear();spaceCache.clear();usageCache.clear();taskDetails.clear();if(taskView){taskView.invalidated=true;taskView.readGeneration=(taskView.readGeneration||0)+1;}}
-      if(editor){if(topics.includes('extensions')&&(!source.space||source.space===editor.session.context.space))editor.lifecycle.providersInvalidated?.();return;}if(disposed||!route||!host.offsetParent)return;
+      if(editor){editor.lifecycle.refreshDelete?.();if(topics.includes('extensions')&&(!source.space||source.space===editor.session.context.space))editor.lifecycle.providersInvalidated?.();return;}if(disposed||!route||!host.offsetParent)return;
       if(pageView){if(relevantChange(topics,pageView.topics,pageView.space,source)){pageView.invalidate?.(topics);return pageView.queue.run();}return;}
       if(route==='settings')return;
       if(route==='tasks'&&!relevantChange(topics,['tasks','runner','spaces','assistants','machines',...(filter.taskTab==='schedules'?['schedules']:[])],taskView?.scope.space||'',source))return;
