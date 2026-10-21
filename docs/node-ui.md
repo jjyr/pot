@@ -11,11 +11,12 @@ and `ip_addresses` as live, best-effort presentation metadata; it does not persi
 them or change stable routing/policy IDs. Only up, non-loopback interfaces supply
 unicast addresses; link-local addresses are omitted. Addresses are deduplicated
 and sorted with IPv4 before IPv6. These addresses do not prove remote reachability.
-Topology shows the hostname and one interface IP, with all addresses and the
-stable node ID under Technical details. Linked nodes show the saved TCP endpoint's
-host and port when available; this is a connection address, not a discovered
-remote hostname or interface inventory. An incoming-only link may have no saved
-endpoint. Full node identities remain available under Technical details.
+The topology graph and inspector show the same host information directly.
+Execution machines show their hostname and one interface IP. Linked nodes show
+the reported hostname, falling back to the saved TCP endpoint's host and port;
+this endpoint is a connection address, not a discovered remote interface inventory.
+An incoming-only link may have no saved endpoint. Missing host information stays
+empty. Internal node IDs and a technical-details disclosure are not shown.
 
 The icon topology adds task load below each Agent and current totals above the
 graph. Waiting for approval, allowance exhaustion, unconfirmed execution cleanup,
@@ -25,8 +26,8 @@ Ordinary execution and queueing do not produce warnings. The inspector shows
 per-assistant activity, task counts and their node-wide scope, receipt time and
 directional message queues. Edges show locally pending delivery counts; moving
 lights indicate pending delivery on a connected link, not model execution or
-measured network throughput. Selection, keyboard focus and technical disclosures
-survive refreshes. See [Agent Link](agent-links.md) for sampling and stale data.
+measured network throughput. Selection and keyboard focus survive refreshes.
+See [Agent Link](agent-links.md) for sampling and stale data.
 
 The topology retains its existing graph, regions, edges, toolbar and responsive
 inspector. Copy connection information on one side and paste it into Add Agent
@@ -34,6 +35,8 @@ on the other. Validation and connection return to the original graph with the
 node selected. The inspector exposes its assistants and disconnect, reconnect
 and delete actions. Deletion confirms removal; task and conversation history
 remain available. No separate binding wizard or task creation page is required.
+Provided assistants use their saved profile avatars, matching the chat directory;
+node headers keep the Pot or Codex brand icon.
 
 Local machine permissions stay with the local node. Linked nodes own their
 models, credentials, workspaces and execution permissions. The UI provides no
