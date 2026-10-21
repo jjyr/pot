@@ -263,6 +263,13 @@ incompatible unaccepted pending groups and unfinished scans are retired. The
 root remains present after deleting the last subscription, preventing default
 recreation on restart or reconnect.
 
+`tasks/0016_codex_assistant_profiles` assigns existing Codex virtual assistants
+their saved character avatars and initializes profile revisions. It preserves
+names, workspace permissions, thread IDs, defaults and accepted jobs.
+`control/0024_agent_link_directory_avatars` adds empty avatar slots to cached
+remote directories, preserving any existing images and all routes and receipts.
+An authenticated directory refresh supplies the receiver's saved image.
+
 MCP protocol implementation and SDK asset updates do not change the stored
 independent-server catalogue or GitHub subscription format. The stored catalogue
 remains a product projection (name, description, input schema); complete protocol

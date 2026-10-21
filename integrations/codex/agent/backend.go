@@ -14,12 +14,15 @@ import (
 
 	"github.com/jjyr/pot/internal/inbox"
 	"github.com/jjyr/pot/pkg/agentlink"
+	"github.com/jjyr/pot/pkg/assistantavatar"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 )
 
 type assistant struct {
 	ID, Name, Workspace, Mode, ThreadID string
+	Avatar, Character                   string
+	Revision                            uint64
 	Default                             bool
 }
 type job struct {
@@ -56,14 +59,20 @@ func newBackend(db *sql.DB, nodeID, root string) (*backend, error) {
 	if err = os.MkdirAll(workspace, 0700); err != nil {
 		return nil, err
 	}
-	_, err = db.Exec(`INSERT INTO codex_link_assistants(id,name,workspace,mode,is_default) SELECT 'codex','Codex',?,'read-only',1 WHERE NOT EXISTS(SELECT 1 FROM codex_link_assistants)`, workspace)
+	name := assistantavatar.RandomName(nil)
+	character := assistantavatar.ForName(name, "codex")
+	avatar, err := assistantavatar.Render(character, "codex")
+	if err != nil {
+		return nil, err
+	}
+	_, err = db.Exec(`INSERT INTO codex_link_assistants(id,name,workspace,mode,is_default,avatar,character) SELECT 'codex',?,?,'read-only',1,?,? WHERE NOT EXISTS(SELECT 1 FROM codex_link_assistants)`, name, workspace, avatar, character)
 	if err != nil {
 		return nil, err
 	}
 	return b, nil
 }
 func (b *backend) list(ctx context.Context) ([]assistant, error) {
-	rows, err := b.db.QueryContext(ctx, "SELECT id,name,workspace,mode,thread_id,is_default FROM codex_link_assistants ORDER BY rowid")
+	rows, err := b.db.QueryContext(ctx, "SELECT id,name,workspace,mode,thread_id,is_default,avatar,character,revision FROM codex_link_assistants ORDER BY rowid")
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +80,7 @@ func (b *backend) list(ctx context.Context) ([]assistant, error) {
 	result := []assistant{}
 	for rows.Next() {
 		var a assistant
-		if err = rows.Scan(&a.ID, &a.Name, &a.Workspace, &a.Mode, &a.ThreadID, &a.Default); err != nil {
+		if err = rows.Scan(&a.ID, &a.Name, &a.Workspace, &a.Mode, &a.ThreadID, &a.Default, &a.Avatar, &a.Character, &a.Revision); err != nil {
 			return nil, err
 		}
 		result = append(result, a)
@@ -86,8 +95,10 @@ func (b *backend) Directory(ctx context.Context) (agentlink.Directory, error) {
 	d := agentlink.Directory{NodeID: b.nodeID, Name: "Codex", Adapter: "codex", Assistants: []agentlink.Identity{}}
 	d.Operations = map[string]agentlink.Description{}
 	for _, a := range list {
-		d.Assistants = append(d.Assistants, b.identity(a))
-		d.Operations[a.ID] = agentlink.Description{Version: 1, Scope: "peer", Operations: agentlink.PeerOperations()}
+		identity := b.identity(a)
+		identity.Avatar = a.Avatar
+		d.Assistants = append(d.Assistants, identity)
+		d.Operations[a.ID] = agentlink.Description{Version: 1, Scope: "peer", Operations: append(agentlink.PeerOperations(), agentlink.AssistantProfile)}
 		if a.Default {
 			d.DefaultAssistantID = a.ID
 		}
@@ -96,12 +107,12 @@ func (b *backend) Directory(ctx context.Context) (agentlink.Directory, error) {
 }
 func (b *backend) resolve(ctx context.Context, id string) (assistant, error) {
 	var a assistant
-	query := "SELECT id,name,workspace,mode,thread_id,is_default FROM codex_link_assistants WHERE id=?"
+	query := "SELECT id,name,workspace,mode,thread_id,is_default,avatar,character,revision FROM codex_link_assistants WHERE id=?"
 	var err error
 	if id == "" {
-		err = b.db.QueryRowContext(ctx, "SELECT id,name,workspace,mode,thread_id,is_default FROM codex_link_assistants WHERE is_default=1").Scan(&a.ID, &a.Name, &a.Workspace, &a.Mode, &a.ThreadID, &a.Default)
+		err = b.db.QueryRowContext(ctx, "SELECT id,name,workspace,mode,thread_id,is_default,avatar,character,revision FROM codex_link_assistants WHERE is_default=1").Scan(&a.ID, &a.Name, &a.Workspace, &a.Mode, &a.ThreadID, &a.Default, &a.Avatar, &a.Character, &a.Revision)
 	} else {
-		err = b.db.QueryRowContext(ctx, query, id).Scan(&a.ID, &a.Name, &a.Workspace, &a.Mode, &a.ThreadID, &a.Default)
+		err = b.db.QueryRowContext(ctx, query, id).Scan(&a.ID, &a.Name, &a.Workspace, &a.Mode, &a.ThreadID, &a.Default, &a.Avatar, &a.Character, &a.Revision)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		err = agentlink.ErrNotFound
@@ -109,7 +120,7 @@ func (b *backend) resolve(ctx context.Context, id string) (assistant, error) {
 	return a, err
 }
 func (b *backend) ownerConfigure(ctx context.Context, a assistant) error {
-	if !validID(a.ID) || a.Name == "" || len(a.Name) > 128 || !filepath.IsAbs(a.Workspace) || (a.Mode != "read-only" && a.Mode != "workspace-write") {
+	if !validID(a.ID) || !filepath.IsAbs(a.Workspace) || (a.Mode != "read-only" && a.Mode != "workspace-write") {
 		return agentlink.ErrInvalid
 	}
 	path, err := filepath.EvalSymlinks(a.Workspace)
@@ -122,8 +133,8 @@ func (b *backend) ownerConfigure(ctx context.Context, a assistant) error {
 	}
 	a.Workspace = path
 	return storage.Transaction(ctx, b.db, func(tx *sql.Tx) error {
-		var workspace, mode string
-		err := tx.QueryRowContext(ctx, "SELECT workspace,mode FROM codex_link_assistants WHERE id=?", a.ID).Scan(&workspace, &mode)
+		var workspace, mode, existingName string
+		err := tx.QueryRowContext(ctx, "SELECT workspace,mode,name FROM codex_link_assistants WHERE id=?", a.ID).Scan(&workspace, &mode, &existingName)
 		// A session's workspace/permission scope is immutable. Create another virtual
 		// assistant to use a different scope; accepted work keeps its original owner.
 		if err == nil && (workspace != a.Workspace || mode != a.Mode) {
@@ -132,12 +143,44 @@ func (b *backend) ownerConfigure(ctx context.Context, a assistant) error {
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
+		if a.Name == "" {
+			a.Name = existingName
+		}
+		if a.Name == "" {
+			rows, err := tx.QueryContext(ctx, "SELECT name FROM codex_link_assistants")
+			if err != nil {
+				return err
+			}
+			var used []string
+			for rows.Next() {
+				var name string
+				if err = rows.Scan(&name); err != nil {
+					rows.Close()
+					return err
+				}
+				used = append(used, name)
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return err
+			}
+			a.Name = assistantavatar.RandomName(used)
+		}
+		if err := validateProfileName(a.Name); err != nil {
+			return err
+		}
+		a.Character = assistantavatar.ForName(a.Name, a.ID)
+		a.Avatar, err = assistantavatar.Render(a.Character, a.ID)
+		if err != nil {
+			return err
+		}
 		if a.Default {
 			if _, err = tx.ExecContext(ctx, "UPDATE codex_link_assistants SET is_default=0"); err != nil {
 				return err
 			}
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO codex_link_assistants(id,name,workspace,mode,is_default) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,is_default=CASE WHEN excluded.is_default=1 THEN 1 ELSE codex_link_assistants.is_default END`, a.ID, a.Name, a.Workspace, a.Mode, a.Default)
+		_, err = tx.ExecContext(ctx, `INSERT INTO codex_link_assistants(id,name,workspace,mode,is_default,avatar,character) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,revision=codex_link_assistants.revision+CASE WHEN codex_link_assistants.name<>excluded.name THEN 1 ELSE 0 END,is_default=CASE WHEN excluded.is_default=1 THEN 1 ELSE codex_link_assistants.is_default END`, a.ID, a.Name, a.Workspace, a.Mode, a.Default, a.Avatar, a.Character)
 		return err
 	})
 }

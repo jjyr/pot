@@ -29,6 +29,7 @@ var (
 type Identity struct {
 	Address protocol.AgentRef `json:"address"`
 	Name    string            `json:"name"`
+	Avatar  string            `json:"avatar,omitempty"`
 	Adapter string            `json:"adapter"`
 }
 

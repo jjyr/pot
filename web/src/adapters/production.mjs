@@ -107,7 +107,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
     supports:(operation,options={})=>{const scope={...context,...options};return supportsCapability(client.assistants?.find(item=>item.id===scope.owner&&item.space_id===scope.space),operation);},
     snapshot: async options => {
       const scope = {...context,...options};
-      const value = await request('/api/v1/snapshot', scope);
+      const value = await request('/api/v1/snapshot?'+new URLSearchParams({locale:client.uiLocale?.()||'en'}), scope);
       return normalizeSnapshot(value, runtime, scope.owner, scope.space);
     },
     history: async (query, options = {}) => {const page=await request(`/api/v1/history?${new URLSearchParams(query)}`,options);return {...page,messages:page.messages.map(({message,...meta})=>({...message,...meta}))};},
@@ -193,7 +193,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
         let timer,controller;
         const poll=async()=>{
           controller=new AbortController();
-          try{const value=await request('/api/v1/snapshot',{...scope,signal:controller.signal});if(active){deliver(value);onStatus('connected');}}
+          try{const value=await request('/api/v1/snapshot?'+new URLSearchParams({locale:client.uiLocale?.()||'en'}),{...scope,signal:controller.signal});if(active){deliver(value);onStatus('connected');}}
           catch(reason){if(active&&reason.name!=='AbortError')onStatus('offline',reason);}
           finally{if(active)timer=setTimeout(poll,1500);}
         };

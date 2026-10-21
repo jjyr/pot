@@ -300,11 +300,26 @@ func (p agentPort) Call(ctx context.Context, target agentlink.Target, operation 
 
 func (p agentPort) linkedCall(ctx context.Context, target agentlink.Target, op agentlink.Operation, call agentlink.Call) (any, error) {
 	s := p.s
+	if op == agentlink.AssistantProfile {
+		var input struct {
+			Name     *string `json:"name,omitempty"`
+			Avatar   *string `json:"avatar,omitempty"`
+			Revision uint64  `json:"revision"`
+		}
+		if err := protocol.DecodeStrict(call.Body, &input); err != nil {
+			return nil, err
+		}
+		action := call.Action
+		if action == "write" {
+			action = "update"
+		}
+		return s.agentLinks.service.Profile(ctx, target.LinkID, agentlink.ProfileRequest{From: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: linkChatID(target.LinkID, target.AssistantID)}, AssistantID: target.AssistantID, Action: action, Name: input.Name, Avatar: input.Avatar, Revision: input.Revision})
+	}
 	if op == agentlink.ChatRead || op == agentlink.ChatReceipt {
 		if op == agentlink.ChatReceipt && call.Query["conversation_id"] != linkChatID(target.LinkID, target.AssistantID) {
 			return nil, agentlink.ErrConflict
 		}
-		return s.LinkChat(ctx, target.LinkID, target.AssistantID, call.Query["request_id"])
+		return s.linkChatLocale(ctx, target.LinkID, target.AssistantID, call.Query["request_id"], call.Query["locale"])
 	}
 	if op == agentlink.ChatSend {
 		var input protocol.SendMessage

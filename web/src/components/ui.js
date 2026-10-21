@@ -385,7 +385,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   let preferenceControls;
   function renderPreferences() {
-    if(client.production){preferences.classList.add('product-actions');const projection=preferences.cloneNode(false);const close=button('close',t('close'));close.onclick=()=>preferences.close();projection.append(close);const action=(label,run)=>{const choice=el('button','menu-destination',label);choice.type='button';choice.onclick=()=>{preferences.close();run();};projection.append(choice);};if(selectedAssistant&&can('assistant.configure')){action(t('assistantSettings'),()=>{route='settings';pages.assistant(selectedAssistant);renderShell();});action(t('usage'),()=>{route='usage';pages.conversationUsage(selectedAssistant.name);renderShell();});}if(state.snapshot?.running&&can('chat.control')){const captured={...client.scope()},target=state.snapshot.turn_id,paused=!!state.snapshot.turn?.paused;action(t(paused?'chat.resume':'chat.pause'),async()=>{try{await client.controlTurn({user_message_id:target,action:paused?'resume':'pause'},captured);}catch(reason){error=reason.message;updateControls();}});}action(t('settings'),()=>navigate('settings'));reconcile(preferences,projection);return;}
+    if(client.production){preferences.classList.add('product-actions');const projection=preferences.cloneNode(false);const close=button('close',t('close'));close.onclick=()=>preferences.close();projection.append(close);const action=(label,run)=>{const choice=el('button','menu-destination',label);choice.type='button';choice.onclick=()=>{preferences.close();run();};projection.append(choice);};if(selectedAssistant&&(can('assistant.configure')||can('assistant.profile')))action(t('assistantSettings'),()=>{route='settings';pages.assistant(selectedAssistant);renderShell();});if(selectedAssistant&&can('assistant.usage'))action(t('usage'),()=>{route='usage';pages.conversationUsage(selectedAssistant.name);renderShell();});if(state.snapshot?.running&&can('chat.control')){const captured={...client.scope()},target=state.snapshot.turn_id,paused=!!state.snapshot.turn?.paused;action(t(paused?'chat.resume':'chat.pause'),async()=>{try{await client.controlTurn({user_message_id:target,action:paused?'resume':'pause'},captured);}catch(reason){error=reason.message;updateControls();}});}action(t('settings'),()=>navigate('settings'));reconcile(preferences,projection);return;}
     if (!preferenceControls) {
       const heading = el('div', 'preferences-heading');
       const title = el('h2');
@@ -520,7 +520,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         heading.append(assistantAvatar(selectedAssistant, 40), info);
         const settings = button('sliders', t('assistantSettings'), 'assistant-profile-settings');
         settings.append(el('span', '', t('assistantSettings'))); settings.onclick = openAssistantSettings;
-        projection.append(heading);if(can('assistant.configure'))projection.append(settings);reconcile(assistantProfile, projection);
+        projection.append(heading);if(can('assistant.configure')||can('assistant.profile'))projection.append(settings);reconcile(assistantProfile, projection);
       }
       title.append(identity);
     } else title.append(el('span', '', titleText));
@@ -531,7 +531,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       open.onclick = async () => { try { await client.openMain(); } catch (reason) { error = reason.message; updateControls(); } };
       titlebar.append(open);
     }
-    if (client.production && route === 'chat' && selectedAssistant && can('assistant.configure')) { const settings = button('sliders', t('assistantSettings')); settings.onclick = openAssistantSettings; titlebar.append(settings); }
+    if (client.production && route === 'chat' && selectedAssistant && (can('assistant.configure')||can('assistant.profile'))) { const settings = button('sliders', t('assistantSettings')); settings.onclick = openAssistantSettings; titlebar.append(settings); }
     if(!client.production){const cloud=el('span','icon-button');cloud.title=t('remote');cloud.append(icon('cloud'));titlebar.append(cloud);}
     const more = button('more', t(client.production ? 'chat.actions' : 'more'));
     more.setAttribute('aria-haspopup', 'dialog');
