@@ -77,8 +77,13 @@ still prevent access; discovery does not prove remote reachability.
 Copy the connection segment on one side and paste it into **Add Agent** on the
 other side. Only one side needs a reachable address; the same connection carries
 traffic in both directions. The node directory supplies available assistants. Pot can connect and chat with
-Codex without any local assistant or API. Node identity owns connection admission;
-a persistent user session address owns direct chat and its correlated replies. An explicitly
+Codex and submit tasks without any local assistant or API. The directory
+advertises versioned `peer` operation descriptions per assistant; Pot uses them
+for controls and queries. Node identity owns connection admission. Task callers
+can be authenticated assistants, tasks or user sessions; the original caller
+owns receipts and result routing. A persistent user session address owns direct
+chat and its correlated replies. Peer task submission cannot supply owner-only
+configuration, model credentials or Skills. An explicitly
 selected assistant handles the work; otherwise the receiver uses its persisted
 default, initially its first assistant. An accepted task keeps its original
 assistant even when the default subsequently changes.

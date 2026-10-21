@@ -273,7 +273,7 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 			if directory == nil {
 				directory = &agentlink.Directory{Assistants: []agentlink.Identity{c.Peer}}
 			}
-			view = append(view, map[string]any{"id": c.ID, "assistants": directory.Assistants, "capabilities": directory.Capabilities, "default_assistant_id": directory.DefaultAssistantID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "node_id": c.Peer.Address.NodeID, "address": c.Endpoint, "kind": c.Peer.Adapter, "name": c.Peer.Name}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
+			view = append(view, map[string]any{"id": c.ID, "assistants": directory.Assistants, "operations": directory.Operations, "default_assistant_id": directory.DefaultAssistantID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "node_id": c.Peer.Address.NodeID, "address": c.Endpoint, "kind": c.Peer.Adapter, "name": c.Peer.Name}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
 		}
 		directory, err := h.backend.Directory(r.Context())
 		if handleError(w, err) {

@@ -24,20 +24,39 @@ type linkDelegation struct {
 }
 
 func (s *Service) CreateTask(ctx context.Context, owner string, request protocol.CreateTask) (protocol.TaskInfo, error) {
+	return s.createTaskFrom(ctx, owner, protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "assistant", AgentID: owner}, request)
+}
+
+func (s *Service) createTaskFrom(ctx context.Context, owner string, from protocol.AgentRef, request protocol.CreateTask) (protocol.TaskInfo, error) {
 	s.linkMu.Lock()
 	defer s.linkMu.Unlock()
+	// Resolve an accepted submission before consulting mutable directories or
+	// capabilities. A retry can return its receipt after target/link removal,
+	// without gaining authority to submit any replacement work.
+	encodedRequest, _ := json.Marshal(request)
+	var previousPayload, previousBody string
+	previousErr := s.integrationDB.QueryRowContext(ctx, "SELECT payload,body FROM agent_link_delegations WHERE owner=? AND request_id=?", owner, request.RequestID).Scan(&previousPayload, &previousBody)
+	if previousErr == nil {
+		var previous linkDelegation
+		if previousPayload != string(encodedRequest) {
+			return protocol.TaskInfo{}, agentlink.ErrConflict
+		}
+		if err := json.Unmarshal([]byte(previousBody), &previous); err != nil {
+			return protocol.TaskInfo{}, err
+		}
+		if previous.Request.From != from {
+			return protocol.TaskInfo{}, agentlink.ErrConflict
+		}
+		return previous.Info, nil
+	}
+	if !errors.Is(previousErr, sql.ErrNoRows) {
+		return protocol.TaskInfo{}, previousErr
+	}
 	if request.Target != nil && request.LinkID == "" && request.Target.NodeID == s.options.RuntimeID && request.Target.AgentID == owner {
 		request.Target = nil
 	}
 	if request.LinkID == "" && request.Target == nil {
-		var exists bool
-		if err := s.integrationDB.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_link_delegations WHERE owner=? AND request_id=?)", owner, request.RequestID).Scan(&exists); err != nil {
-			return protocol.TaskInfo{}, err
-		}
-		if exists {
-			return protocol.TaskInfo{}, agentlink.ErrConflict
-		}
-		accepted, e := (potLinkBackend{s}).Submit(ctx, agentlink.TaskRequest{Native: &request, RequestID: request.RequestID, From: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "assistant", AgentID: owner}, AssistantID: owner, Text: request.Text})
+		accepted, e := s.agentLinks.service.Submit(ctx, "", agentlink.TaskRequest{Configuration: &request, RequestID: request.RequestID, From: from, AssistantID: owner, Text: request.Text})
 		if e != nil {
 			return protocol.TaskInfo{}, e
 		}
@@ -88,7 +107,6 @@ func (s *Service) CreateTask(ctx context.Context, owner string, request protocol
 	if request.Profile != nil || request.Model != nil || request.Skills != nil || request.Workspace.Mode() == "worktree" || request.Requirements.Desktop || request.Requirements.ExactBudget || request.Requirements.LiveSteering {
 		return protocol.TaskInfo{}, agentlink.ErrUnsupported
 	}
-	from := protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "assistant", AgentID: owner}
 	r := agentlink.TaskRequest{RequestID: request.RequestID, From: from, Text: request.Text, Workspace: request.Workspace.ProjectDir}
 	if request.Target != nil {
 		r.AssistantID = request.Target.AgentID
@@ -101,19 +119,6 @@ func (s *Service) CreateTask(ctx context.Context, owner string, request protocol
 	}
 	if written {
 		return protocol.TaskInfo{}, agentlink.ErrConflict
-	}
-	var old, body string
-	e = s.integrationDB.QueryRowContext(ctx, "SELECT payload,body FROM agent_link_delegations WHERE id=?", id).Scan(&old, &body)
-	if e == nil {
-		if old != string(payload) {
-			return protocol.TaskInfo{}, agentlink.ErrConflict
-		}
-		var d linkDelegation
-		e = json.Unmarshal([]byte(body), &d)
-		return d.Info, e
-	}
-	if !errors.Is(e, sql.ErrNoRows) {
-		return protocol.TaskInfo{}, e
 	}
 	now := time.Now().UnixMilli()
 	origin := &protocol.AgentLinkOrigin{LinkID: selected.ID, NodeID: selected.PeerHost.NodeID, AssistantID: r.AssistantID, Kind: selected.Peer.Adapter, Name: selected.Peer.Name}
@@ -142,7 +147,8 @@ func (s *Service) linkDelegation(ctx context.Context, owner, id string) (linkDel
 func (s *Service) GetTask(ctx context.Context, owner, id string) (any, error) {
 	d, e := s.linkDelegation(ctx, owner, id)
 	if e == nil {
-		return map[string]any{"info": d.Info, "task": d.Info, "error": d.Remote.Error, "result": d.Remote.Result, "outcome": map[string]any{"text": d.Remote.Result}, "request": map[string]any{"text": d.Request.Text}, "run_id": d.Info.RunID}, nil
+		info := s.taskPresentation(ctx, d.Info)
+		return map[string]any{"info": info, "task": info, "error": d.Remote.Error, "result": d.Remote.Result, "outcome": map[string]any{"text": d.Remote.Result}, "request": map[string]any{"text": d.Request.Text}, "run_id": d.Info.RunID}, nil
 	}
 	if !errors.Is(e, sql.ErrNoRows) {
 		return nil, e
@@ -267,6 +273,9 @@ func (s *Service) syncLinkDelegations(ctx context.Context) {
 	}
 }
 func (s *Service) linkTaskNotification(ctx context.Context, id, owner string, d linkDelegation) error {
+	if d.Request.From.Kind == "user" {
+		return s.linkUserTaskNotification(ctx, id, owner, d)
+	}
 	// Receiver-owned task outcomes enter the same durable notification inbox as
 	// local outcomes. IDs and routing are fixed at submission, even if defaults change.
 	run := linkRunID(id)
@@ -332,7 +341,15 @@ func (s *Service) TaskPage(ctx context.Context, owner string, q protocol.TaskQue
 	}
 	page := protocol.TaskPage{Items: []protocol.TaskInfo{}, Offset: q.Offset}
 	filtered := []protocol.TaskInfo{}
+	presentationOwners := map[string]string{}
 	for _, info := range all {
+		owner := info.AssistantID
+		if display, ok := presentationOwners[owner]; ok {
+			info.AssistantID = display
+		} else {
+			info = s.taskPresentation(ctx, info)
+			presentationOwners[owner] = info.AssistantID
+		}
 		if info.Archived {
 			page.Counts.Archived++
 		} else if info.Phase.Scope() == "active" {
@@ -383,6 +400,45 @@ func (s *Service) TaskPage(ctx context.Context, owner string, q protocol.TaskQue
 		}
 	}
 	return page, rows.Err()
+}
+
+// The session remains the durable owner; presentation uses the conversation's
+// directory key so task cards and notifications return to the original chat.
+func (s *Service) taskPresentation(ctx context.Context, info protocol.TaskInfo) protocol.TaskInfo {
+	var link, assistant string
+	if s.integrationDB.QueryRowContext(ctx, "SELECT link_id,assistant_id FROM agent_link_chat_sessions WHERE id=?", info.AssistantID).Scan(&link, &assistant) == nil {
+		info.AssistantID = "agent-link:" + link + ":" + assistant
+	}
+	return info
+}
+
+func (s *Service) linkUserTaskNotification(ctx context.Context, id, owner string, d linkDelegation) error {
+	var link, assistant string
+	if err := s.integrationDB.QueryRowContext(ctx, "SELECT link_id,assistant_id FROM agent_link_chat_sessions WHERE id=?", owner).Scan(&link, &assistant); err != nil {
+		return err
+	}
+	text := d.Remote.Result
+	if text == "" {
+		text = d.Remote.Error
+	}
+	if text == "" {
+		text = d.Info.Title
+	}
+	// Delivery is idempotent across the two stores: publish the conversation row
+	// first, then the outcome receipt. Recovery repeats the same stable IDs.
+	if _, err := s.integrationDB.ExecContext(ctx, "INSERT INTO agent_link_chat(id,link_id,assistant_id,request_id,role,text,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING", id, link, assistant, id, "assistant", text, time.Now().UnixMilli()); err != nil {
+		return err
+	}
+	err := storage.Transaction(ctx, s.Tasks.DB(), func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "INSERT INTO task_outcomes(assistant_id,task_id,title,phase,updated_at_ms) SELECT ?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM task_outcomes WHERE assistant_id=? AND task_id=?)", owner, id, d.Info.Title, d.Info.Phase, d.Info.UpdatedAtMS, owner, id)
+		return err
+	})
+	if err == nil {
+		s.Changes.Notify("agent-links")
+		s.Changes.Notify("assistants")
+		s.Changes.Notify("task-outcomes")
+	}
+	return err
 }
 
 func linkRunID(id string) string {
@@ -448,19 +504,19 @@ func (s *Service) LinkTask(ctx context.Context, owner, id string) bool {
 
 func (s *Service) submitLinkTask(ctx context.Context, link string, r agentlink.TaskRequest) (agentlink.Task, error) {
 	if link == "local" {
-		return (potLinkBackend{s}).Submit(ctx, r)
+		link = ""
 	}
 	return s.agentLinks.service.Submit(ctx, link, r)
 }
 func (s *Service) statusLinkTask(ctx context.Context, link string, from protocol.AgentRef, id string) (agentlink.Task, error) {
 	if link == "local" {
-		return (potLinkBackend{s}).Status(ctx, from, id)
+		link = ""
 	}
 	return s.agentLinks.service.Status(ctx, link, from, id)
 }
 func (s *Service) cancelLinkTask(ctx context.Context, link string, from protocol.AgentRef, id string) (agentlink.Task, error) {
 	if link == "local" {
-		return (potLinkBackend{s}).Cancel(ctx, from, id)
+		link = ""
 	}
 	return s.agentLinks.service.Cancel(ctx, link, from, id)
 }

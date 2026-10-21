@@ -73,6 +73,7 @@ assert.deepEqual(changeEvents,[{topics:['usage'],source:{space:'local',boot:'boo
 sources.at(-1).onerror();sources.at(-1).onopen();
 assert.deepEqual(changeEvents.slice(-2),[{topics:[],source:{space:'local',reset:true}},{topics:[],source:{space:'local',reset:true}}],'Disconnect and reconnect explicitly reset notification baselines');stopChanges();
 const statuses=[];
+client.assistants=[{id:'b',space_id:'local',capabilities:{version:1,operations:['chat.subscribe']}}];
 const stopStream=client.subscribe(()=>{throw Error('Rendering failed');},(...value)=>statuses.push(value));
 const source=sources.at(-1),receive=source.handlers.get('conversation');
 assert.throws(()=>receive({data:JSON.stringify(toUIFrame(raw))}),/Rendering failed/,'Rendering exceptions reach the interface error handler');

@@ -441,6 +441,7 @@ def run(binary, base, env, cli_command, profile_only=False):
                 raise RuntimeError("Provider editor browser contracts did not pass")
             (ROOT / "output/pr-images/task-progress").mkdir(parents=True, exist_ok=True)
             for script in [
+                "go-ui-agent-capabilities-browser.js",
                 "go-ui-tasks-browser.js",
                 "go-ui-task-refresh-browser.js",
                 "go-ui-machines-browser.js",

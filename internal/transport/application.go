@@ -10,7 +10,6 @@ import (
 	"github.com/jjyr/pot/internal/buildinfo"
 	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/usage"
-	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 	"net/url"
@@ -55,7 +54,7 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	if owner == "" {
 		owner = "main"
 	}
-	if !core.Identifier(owner) {
+	if _, err := control.AgentTarget(owner); err != nil {
 		return nil, errors.New("invalid assistant identity")
 	}
 	path := u.Path
@@ -97,6 +96,9 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	if result, err, handled := a.agentLinkCall(ctx, method, path, r); handled {
 		return result, err
 	}
+	if result, err, handled := a.agentOperation(ctx, method, u, owner, r); handled {
+		return result, err
+	}
 	if result, err, handled := a.extensionCall(ctx, method, path, owner, r); handled {
 		return result, err
 	}
@@ -104,9 +106,6 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 		return result, err
 	}
 	if result, err, handled := a.integrationCall(ctx, method, path, r); handled {
-		return result, err
-	}
-	if result, err, handled := a.attachmentCall(ctx, method, u, owner, r); handled {
 		return result, err
 	}
 	if result, err, handled := a.resourceCall(ctx, method, u, owner); handled {
@@ -128,7 +127,7 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 		}
 		return s.RecoverMain(ctx, owner, command)
 	}
-	if result, err, handled := a.turnControlCall(ctx, method, path, owner, r); handled {
+	if result, err, handled := a.providerAllowanceCall(ctx, method, path, r); handled {
 		return result, err
 	}
 	conversation := func() (*assistant.Conversation, error) { return s.Conversation(ctx, owner) }
@@ -146,12 +145,6 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 		switch path {
 		case "/api/v1/usage/compaction-record":
 			return s.CompactionRecord(ctx, owner, u.Query().Get("scope"), u.Query().Get("id"))
-		case "/api/v1/messages/receipt":
-			c, err := conversation()
-			if err != nil {
-				return nil, err
-			}
-			return c.SendReceipt(ctx, assistant.SendReceiptQuery{RequestID: u.Query().Get("request_id"), ConversationID: u.Query().Get("conversation_id"), UserMessageID: u.Query().Get("user_message_id"), RetryUserMessageID: u.Query().Get("retry_user_message_id")})
 		case "/api/v1/agent/diagnostics":
 			if task := u.Query().Get("task_id"); task != "" {
 				after, err := strconv.ParseUint(u.Query().Get("after"), 10, 64)
@@ -169,15 +162,10 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 				return nil, err
 			}
 			return c.Diagnostics(ctx)
-		case "/api/v1/completions":
-			return s.Completions(ctx, owner, u.Query().Get("q"))
 		case "/api/v1/runtime":
 			return map[string]any{"api_version": protocol.APIVersion, "runtime_id": a.RuntimeID, "boot_id": a.BootID, "implementation": "go", "version": buildinfo.Version, "control_id": a.RuntimeID, "name": a.Name}, nil
 		case "/api/v1/control":
 			return map[string]any{"id": a.RuntimeID, "name": a.Name, "runtime_id": a.RuntimeID, "connected": true, "role": s.ControlRole()}, nil
-		case "/api/v1/assistants/default-avatar":
-			avatar, err := s.Registry.DefaultAvatar(ctx, owner)
-			return map[string]any{"avatar": avatar}, err
 		case "/api/v1/assistants":
 			definitions, err := s.Registry.Definitions(ctx)
 			if err != nil {
@@ -186,6 +174,11 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 			items := []map[string]any{}
 			for _, d := range definitions {
 				item := map[string]any{"id": d.ID, "name": d.Name, "revision": d.Revision, "request_id": d.RequestID, "avatar": d.Avatar, "control_id": a.RuntimeID}
+				capabilities, err := s.AgentCapabilities(ctx, d.ID)
+				if err != nil {
+					return nil, err
+				}
+				item["capabilities"] = capabilities
 				c, err := s.Conversation(ctx, d.ID)
 				if err != nil {
 					return nil, err
@@ -219,79 +212,8 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 			return items, nil
 		case "/api/v1/providers":
 			return s.Profiles.Snapshot(), nil
-		case "/api/v1/agent":
-			return s.AssistantConfiguration(ctx, owner)
-		case "/api/v1/instructions":
-			c, err := conversation()
-			if err != nil {
-				return nil, err
-			}
-			return c.Instructions(ctx)
-		case "/api/v1/snapshot":
-			c, err := conversation()
-			if err != nil {
-				return nil, err
-			}
-			return c.UIFrame(ctx, 0, true)
-		case "/api/v1/history":
-			c, err := conversation()
-			if err != nil {
-				return nil, err
-			}
-			q := u.Query()
-			parse := func(key string) (int64, error) {
-				if q.Get(key) == "" {
-					return 0, nil
-				}
-				n, e := strconv.ParseInt(q.Get(key), 10, 64)
-				if e != nil || n <= 0 || uint64(n) > core.MaxSafeInteger {
-					return 0, errors.New("invalid history cursor")
-				}
-				return n, nil
-			}
-			before, err := parse("before")
-			if err != nil {
-				return nil, err
-			}
-			after, err := parse("after")
-			if err != nil {
-				return nil, err
-			}
-			limit := 0
-			if q.Get("limit") != "" {
-				limit, err = strconv.Atoi(q.Get("limit"))
-				if err != nil || limit < 1 || limit > storage.UIMaxPageSize {
-					return nil, errors.New("invalid history page size")
-				}
-			}
-			around := q.Get("around")
-			if before > 0 && after > 0 || around != "" && (before > 0 || after > 0 || !core.Identifier(around)) {
-				return nil, errors.New("invalid history query")
-			}
-			page, err := c.UIHistory(ctx, before, after, around, limit)
-			if storage.IsMissingUIMessage(err) {
-				return nil, protocol.APIError{Code: "not_found", Message: "Message unavailable"}
-			}
-			return page, err
-
 		case "/api/v1/permissions":
-			type pendingApproval struct {
-				control.Approval
-				TaskTitle string `json:"task_title,omitempty"`
-			}
-			pending := []pendingApproval{}
-			for _, approval := range s.Permissions.Pending(owner) {
-				item := pendingApproval{Approval: approval}
-				if approval.Request.Task != "" {
-					// The name is optional presentation context. A missing Task
-					// must never hide the authoritative pending decision.
-					if task, err := s.Tasks.Get(ctx, owner, approval.Request.Task); err == nil && task != nil {
-						item.TaskTitle = task.Info.Title
-					}
-				}
-				pending = append(pending, item)
-			}
-			return map[string]any{"policy": s.Permissions.Snapshot(), "pending": pending}, nil
+			return s.ApprovalView(ctx, owner), nil
 		case "/api/v1/usage/summary", "/api/v1/usage/models", "/api/v1/usage/requests", "/api/v1/usage/tools", "/api/v1/usage/compactions":
 			days := 365
 			if text := u.Query().Get("days"); text != "" {
@@ -411,106 +333,8 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 				return nil, err
 			}
 			return s.BootstrapAssistant(ctx, body.Locale)
-		case "/api/v1/agent":
-			var body control.SaveAssistantConfiguration
-			if err = decode(r.Body, &body); err != nil {
-				return nil, err
-			}
-			return s.SaveAssistantConfiguration(ctx, owner, body)
-		case "/api/v1/instructions":
-			var body struct {
-				Text     string `json:"text" required:"true"`
-				Revision string `json:"revision" required:"true"`
-			}
-			if err = decode(r.Body, &body); err != nil {
-				return nil, err
-			}
-			c, err := conversation()
-			if err != nil {
-				return nil, err
-			}
-			return c.SaveInstructions(ctx, body.Text, body.Revision)
-		case "/api/v1/turn/retry":
-			var body struct {
-				RequestID     string `json:"request_id"`
-				UserMessageID string `json:"user_message_id"`
-			}
-			if err = decode(r.Body, &body); err != nil {
-				return nil, err
-			}
-			c, err := conversation()
-			if err != nil {
-				return nil, err
-			}
-			return c.RetryFailed(ctx, body.RequestID, body.UserMessageID)
-		case "/api/v1/turn/continue":
-			var body control.ContinueMainCommand
-			if err = decode(r.Body, &body); err != nil {
-				return nil, err
-			}
-			return s.ContinueMain(ctx, owner, body)
-		case "/api/v1/messages":
-			var body protocol.SendMessage
-			if err = decode(r.Body, &body); err != nil {
-				return nil, err
-			}
-			c, err := conversation()
-			if err != nil {
-				return nil, err
-			}
-			return c.Send(ctx, body)
-		case "/api/v1/turn/cancel":
-			var body protocol.CancelTurn
-			if err = decode(r.Body, &body); err != nil {
-				return nil, err
-			}
-			c, err := conversation()
-			if err != nil {
-				return nil, err
-			}
-			waiting, waitErr := s.Usage.Waiting(ctx, owner)
-			if waitErr != nil {
-				return nil, waitErr
-			}
-			err = c.Cancel(ctx, body)
-			if err == nil && waiting != nil {
-				err = s.Usage.ClearWaitForTurn(ctx, owner, waiting.Turn)
-			}
-			return map[string]bool{"accepted": err == nil}, err
 		case "/api/v1/permissions":
-			var body struct {
-				ID               string                 `json:"id,omitempty"`
-				Action           string                 `json:"action" required:"true"`
-				MachineID        string                 `json:"machine_id,omitempty"`
-				MachinePolicy    *control.MachinePolicy `json:"machine_policy,omitempty"`
-				Rule             *control.CommandRule   `json:"rule,omitempty"`
-				OldID            string                 `json:"old_id,omitempty"`
-				ExpectedRevision uint64                 `json:"expected_revision,omitempty"`
-			}
-			if err = decode(r.Body, &body); err != nil {
-				return nil, err
-			}
-			switch body.Action {
-			case "save_rule":
-				if body.Rule == nil {
-					return nil, errors.New("command rule required")
-				}
-				err = s.SaveCommandRule(ctx, "owner", *body.Rule, body.OldID, body.ExpectedRevision)
-			case "delete_rule":
-				err = s.Permissions.DeleteRule(body.MachineID, body.ID, body.ExpectedRevision)
-			case "remove_task_grant":
-				err = s.Permissions.RemoveGrant(body.ID)
-			case "retry":
-				err = s.Permissions.Retry(body.MachineID, body.ExpectedRevision)
-			case "configure":
-				if body.MachinePolicy == nil || body.MachinePolicy.Revision == 0 {
-					return nil, errors.New("machine policy required")
-				}
-				err = s.Permissions.Configure(body.MachineID, *body.MachinePolicy)
-			default:
-				err = s.Permissions.Decide(owner, body.ID, body.Action)
-			}
-			return map[string]bool{"accepted": err == nil}, err
+			return s.ManageApproval(ctx, owner, r.Body)
 		case "/api/v1/usage/policy":
 			var body usage.Policy
 			if err = decode(r.Body, &body); err != nil {
@@ -527,39 +351,7 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 			err = s.ResumeAllowance(ctx, owner, body)
 			return map[string]bool{"accepted": err == nil}, err
 		}
-		if strings.HasPrefix(path, "/api/v1/assistants/") {
-			id := strings.TrimPrefix(path, "/api/v1/assistants/")
-			if strings.HasSuffix(id, "/delete") {
-				id = strings.TrimSuffix(id, "/delete")
-				if !core.Identifier(id) {
-					return nil, errors.New("invalid assistant path")
-				}
-				var body struct {
-					Revision uint64 `json:"revision" required:"true"`
-				}
-				if err := decode(r.Body, &body); err != nil {
-					return nil, err
-				}
-				err := s.DeleteAssistant(ctx, id, body.Revision)
-				return map[string]bool{"deleted": err == nil}, err
-			}
-			if !core.Identifier(id) {
-				return nil, errors.New("invalid assistant path")
-			}
-			var body struct {
-				Name     *string `json:"name,omitempty"`
-				Avatar   *string `json:"avatar,omitempty"`
-				Revision uint64  `json:"revision" required:"true"`
-			}
-			if err = decode(r.Body, &body); err != nil {
-				return nil, err
-			}
-			definition, err := s.Registry.UpdateProfile(ctx, id, assistant.ProfileUpdate{Name: body.Name, Avatar: body.Avatar}, body.Revision)
-			if err == nil {
-				s.Changes.Notify("assistants")
-			}
-			return definition, err
-		}
+
 	}
 	return nil, protocol.APIError{Code: "not_found", Message: "application route unavailable"}
 }

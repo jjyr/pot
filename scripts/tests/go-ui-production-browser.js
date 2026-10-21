@@ -2,6 +2,7 @@
 // This does not validate backend integration or make a visual parity claim.
 async page => {
  const assert=(value,message)=>{if(!value)throw Error(message);};
+ const capabilities={version:1,scope:'owner',operations:['chat.read','chat.send','chat.subscribe','assistant.configure','assistant.usage','approvals.manage','task.read','task.list','task.cancel','task.interrupt','task.control','task.events','task.input','task.archive','task.outcomes','task.files','schedules.manage']};
  const errors=[],posts=[],reads=[];
  let taskPage=0,longTaskList=false,remoteOffline=false,approvalFor='',approvalTask='',taskBeta=false,scheduleFixture=false,scheduleDeleted=false,loseScheduleReply=true;
  let releaseGuidance,guidanceArrived;const guidanceReady=new Promise(resolve=>guidanceArrived=resolve);
@@ -33,7 +34,7 @@ async page => {
   if(path==='/api/v1/runtime')value={runtime_id:'contract-test',boot_id:'boot'};
   else if(path==='/api/v1/spaces')value={active_space_id:'local',items:[{id:'local',control_id:'control-local',name:'Local',kind:'local',connected:true},...(remoteOffline?[{id:'remote-offline',control_id:'control-remote-offline',name:'Offline Space',kind:'remote',connected:false,assistants:[{id:'cached-remote',name:'Cached remote assistant',revision:1}]}]:[])]};
   else if(path==='/api/v1/assistants/bootstrap')value={assistant:null};
-  else if(path==='/api/v1/assistants')value=definitions;
+  else if(path==='/api/v1/assistants')value=definitions.map(item=>({...item,capabilities}));
   else if(path==='/api/v1/snapshot')value={cursor:1,api_version:3,boot_id:'boot',conversation_id:url.searchParams.get('assistant_id'),messages:[{id:'file-message',role:'assistant',status:'complete',text:`[Download report](pot-file://${fileTask}/reports/result.txt)`},{id:'internal-report',role:'system',status:'complete',request_id:'pot-result-task-proof',text:'Hidden internal report instructions'},{id:'normal-system',role:'system',status:'complete',text:'Ordinary system note'}],turn:null,agent:{phase:'ready',model:'test-model'}};
   else if(path===`/api/v1/tasks/${fileTask}/file`)value={size:7,offset:0,revision:'fixture',data:'cmVwb3J0Cg=='};
   else if(path===`/api/v1/tasks/${fileTask}/file-download`){await route.fulfill({status:200,contentType:'application/octet-stream',headers:{'Content-Disposition':'attachment; filename="result.txt"'},body:'report\n'});return;}
@@ -65,7 +66,7 @@ async page => {
   else if(path==='/api/v1/tasks/task-beta')value={run_id:'beta-run',info:{phase:'running'},request:{text:'Other-owner goal'}};
   else if(path==='/api/v1/tasks/task-beta/messages')value=[];
   else if(path==='/api/v1/tasks/task-beta/events')value={events:[],cursor:0,has_more:false};
-  else if(path==='/api/v1/tasks/task-proof')value={run_id:'original-run',info:{phase:'running'},request:{text:'Task goal'}};
+  else if(path==='/api/v1/tasks/task-proof')value={capabilities,run_id:'original-run',info:{phase:'running'},request:{text:'Task goal'}};
   else if(path==='/api/v1/tasks/task-proof/resume'){await new Promise(resolve=>{releaseTaskResume=resolve;taskResumeArrived();});value={accepted:true};}
   else if(path==='/api/v1/tasks/task-proof/control')value={accepted:true};
   else if(path==='/api/v1/tasks/task-proof/messages'){if(method==='POST'){await new Promise(resolve=>{releaseGuidance=resolve;guidanceArrived();});value={accepted:true};}else value=[];}

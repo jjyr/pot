@@ -232,3 +232,8 @@ notifications](plugins.md#github-notifications) for account binding, supported
 management tools and configuration-boundary behavior.
 
 `control/0021_agent_link_addresses` records independently enabled Pot peer endpoints, preserving the existing configured endpoint. Startup restores listeners after migration without replaying agent work.
+
+`control/0022_agent_link_operations` converts cached Agent Link feature flags to
+versioned per-assistant peer operation descriptions and removes the old flags.
+It retains connection keys,
+caller identities, accepted tasks and request receipts without replay.

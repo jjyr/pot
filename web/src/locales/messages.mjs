@@ -148,6 +148,7 @@ export const messages = {
     'resource.image':'Image', 'resource.audio':'Audio', 'resource.video':'Video', 'resource.pdf':'PDF', 'resource.html':'Interactive', 'resource.text':'Text', 'resource.file':'File',
     'resource.download':'Download', 'resource.downloadName':'Download {name}', 'resource.expand':'Expand', 'resource.collapse':'Collapse',
     'resource.loading':'Loading preview…', 'resource.unavailable':'Preview unavailable. You can try downloading the original.',
+    'chat.pause':'Pause turn', 'chat.resume':'Resume turn',
     'resource.pause':'Pause animation', 'resource.resume':'Play animation',
 
     "extensions.authorizationRequired": "Authorization required",
@@ -863,6 +864,7 @@ export const messages = {
     'resource.image':'图片', 'resource.audio':'音频', 'resource.video':'视频', 'resource.pdf':'PDF', 'resource.html':'交互组件', 'resource.text':'文本', 'resource.file':'文件',
     'resource.download':'下载', 'resource.downloadName':'下载 {name}', 'resource.expand':'展开', 'resource.collapse':'收起',
     'resource.loading':'正在加载预览……', 'resource.unavailable':'预览暂不可用，可以尝试下载原文件。',
+    'chat.pause':'暂停回复', 'chat.resume':'恢复回复',
     'resource.pause':'暂停动图', 'resource.resume':'播放动图',
 
     "extensions.authorizationRequired": "需要授权",

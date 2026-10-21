@@ -8,7 +8,11 @@ or Linux. An independent `web-ui-server` publishes its local node. Native App
 presents local assistants and Agent Link peers through existing chat and task UI.
 
 Each node owns models, credentials, workspaces and local execution. Cross-node
-work uses Agent Link delegation to an autonomous recipient. The internal local
+work uses Agent Link delegation to an autonomous recipient. Local and linked
+agent operations share a capability-driven port; linked chat and task submission
+need no local assistant. The local agent and scheduler remain in-process, and
+Skills remain local to the execution implementation. Plugin extraction and Skill
+transport are deferred. The internal local
 task executor retains original receipts and cleanup fences. Runtime supplies no
 VM/container management or guest desktop. Existing user data and unknown work
 are never implicitly deleted, adopted or replayed.

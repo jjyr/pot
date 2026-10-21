@@ -9,10 +9,11 @@ async page=>{
   await page.evaluate(async()=>{
    const {createPages}=await import('/components/pages.mjs');
    const f=window.taskFixture={calls:[],pending:[],notices:[]};
+   f.capabilities={version:1,scope:'owner',operations:['chat.read','chat.send','chat.subscribe','assistant.configure','assistant.usage','approvals.manage','task.read','task.list','task.cancel','task.interrupt','task.control','task.events','task.input','task.archive','task.outcomes','task.files','schedules.manage']};
    f.items=Array.from({length:12},(_,index)=>({id:String(index),title:'分析任务 '+(index+1),phase:'running',assistant_id:'a',updated_at_ms:100-index}));
-   f.client={spaces:[{id:'local',name:'本机'}],assistants:[{id:'a',space_id:'local',name:'项目助手'}],runtime:{boot_id:'fixture'},scope:()=>({space:'local',owner:'a'}),request:(path,options={})=>{
+   f.client={spaces:[{id:'local',name:'本机'}],assistants:[{id:'a',space_id:'local',name:'项目助手',capabilities:f.capabilities}],runtime:{boot_id:'fixture'},scope:()=>({space:'local',owner:'a'}),request:(path,options={})=>{
     if(path.includes('/permissions'))return Promise.resolve({items:[]});
-    if(/^\/api\/v1\/tasks\/[^/]+$/.test(path)&&f.detailRecord)return Promise.resolve(structuredClone(f.detailRecord));
+    if(/^\/api\/v1\/tasks\/[^/]+$/.test(path)&&f.detailRecord)return Promise.resolve({...structuredClone(f.detailRecord),capabilities:f.capabilities});
     if(path.endsWith('/messages'))return Promise.resolve({items:[]});
     if(path.includes('/events?'))return Promise.resolve({events:[],cursor:0});
     return new Promise((resolve,reject)=>{const call={path,options,resolve,reject};f.calls.push(call);f.pending.push(call);});
@@ -68,7 +69,7 @@ async page=>{
   await page.getByRole('button',{name:'助手 b',exact:true}).click();
   await page.evaluate(()=>{taskFixture.pages.refresh(['tasks']);});
   assert(await page.evaluate(()=>taskFixture.pending.length===1&&taskFixture.pending[0].options.owner==='b'&&!taskFixture.pending[0].options.signal.aborted),'Changes during detail loading do not navigate back to the list');
-  await page.evaluate(()=>{taskFixture.detailRecord={info:{phase:'running'},request:{text:'目标'}};taskFixture.pending.shift().resolve(taskFixture.detailRecord);});
+  await page.evaluate(()=>{taskFixture.detailRecord={capabilities:taskFixture.capabilities,info:{phase:'running'},request:{text:'目标'}};taskFixture.pending.shift().resolve(taskFixture.detailRecord);});
   await page.getByLabel('任务追加',{exact:true}).waitFor();
   await page.getByLabel('任务追加',{exact:true}).fill('保留任务指导');
   await page.evaluate(async()=>{taskFixture.guidance=document.querySelector('textarea');taskFixture.detailRecord.info.phase='complete';taskFixture.detailRecord.result={text:'完成结果'};await taskFixture.pages.refresh(['tasks']);});

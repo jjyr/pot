@@ -29,6 +29,7 @@ import {createApprovalCard} from './approval-card.mjs';
 import {createChatApprovals} from './chat-approvals.mjs';
 import {taskElapsed,bindTaskClock} from './task-time.mjs';
 import {createTopology} from './topology.mjs';
+import {supportsCapability} from '../state/agent-links.mjs';
 import {createAgentLinks} from './agent-links.mjs';
 import {projectTopology,agentNodeID,machineDisplayName,assistantActivityState} from '../state/topology.mjs';
 
@@ -65,7 +66,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
   async function across(path, token, {spaceID='all', paginate=false,perAssistant=false,ownerID='',errorTarget=null}={}) {
     const spaces=(client.spaces||[]).filter(space=>spaceID==='all'||space.id===spaceID);
     if(!spaces.length)throw Error(tr('Space is unavailable.','Space 不可用。'));
-    const targets=spaces.flatMap(space=>perAssistant?(client.assistants||[]).filter(item=>!item.origin&&item.space_id===space.id).map(item=>({space,owner:item.id})):[{space,owner:ownerID}]);
+    const targets=spaces.flatMap(space=>perAssistant?(client.assistants||[]).filter(item=>supportsCapability(item,path.startsWith('/api/v1/schedules')?'schedules.manage':'assistant.usage')&&item.space_id===space.id).map(item=>({space,owner:item.id})):[{space,owner:ownerID}]);
     const results=await Promise.allSettled(targets.map(async({space,owner})=>{
       const key=JSON.stringify([space.id,space.control_id,owner,path]);
       try {
@@ -523,11 +524,12 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     let render=false;
     try{
       const path=`/api/v1/tasks/${encodeURIComponent(view.task.id)}`,options={...view.scope,signal:view.token.signal};
-      const events=(async()=>{let count=0,page;
+      const can=operation=>supportsCapability(view.record,operation);
+      const events=!can('task.events')?Promise.resolve({events:[],cursor:view.state.cursor,has_more:false,unavailable:false}):(async()=>{let count=0,page;
         do{page=await request(`${path}/events?${new URLSearchParams({after:view.state.cursor,limit:100})}`,options);if(!current())return;const previous=view.state.cursor;appendTaskEvents(view.state,page.events);if(page.has_more&&view.state.cursor===previous)throw Error('Task event cursor did not advance');count+=(page.events||[]).length;}while(page.has_more&&count<5000);
         return page;
       })();
-      const updates=await Promise.allSettled([view.initialRead?Promise.resolve(view.record):request(path,options),request(`${path}/messages`,options),events]);view.initialRead=false;
+      const updates=await Promise.allSettled([view.initialRead?Promise.resolve(view.record):request(path,options),can('task.input')?request(`${path}/messages`,options):Promise.resolve([]),events]);view.initialRead=false;
       if(!current())return;
       if(updates[0].status==='fulfilled')view.record=updates[0].value;if(updates[1].status==='fulfilled')view.inputs=list(updates[1].value);
       view.connectionError=updates.filter(update=>update.status==='rejected'&&update.reason.name!=='AbortError').map(update=>update.reason.message).join('\n');
@@ -610,7 +612,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     const t=key=>translate(locale(),`schedule.${key}`);
     const spec=item?.spec||{title:'',goal:'',machine_id:'',timezone:browserTimezone(),kind:'cron',cron:'0 9 * * *',at:'',every_minutes:60,misfire:'coalesce',notify:'changes',enabled:true,profile:null,model:null,requirements:{tools:false,desktop:false,exact_budget:false,live_steering:false}};
     const definitions=[
-      ...(!item?[{name:'owner_ref',key:'assistant',choices:(client.assistants||[]).filter(owner=>!owner.origin).map(owner=>[JSON.stringify([owner.space_id,owner.id]),`${owner.name} · ${owner.space_name||''}`])}]:[]),
+      ...(!item?[{name:'owner_ref',key:'assistant',choices:(client.assistants||[]).filter(owner=>supportsCapability(owner,'schedules.manage')).map(owner=>[JSON.stringify([owner.space_id,owner.id]),`${owner.name} · ${owner.space_name||''}`])}]:[]),
       {name:'title',key:'title',required:true},{name:'goal',key:'goal',kind:'textarea',required:true},{name:'machine_id',key:'machine'},
       {name:'timezone',key:'timezone',helpKey:'timezoneHelp',required:true},
       {name:'kind',key:'repeat',choiceKeys:{once:'once',interval:'interval',cron:'cron'},choices:['once','interval','cron'].map(key=>[key,t(key)])},
@@ -864,7 +866,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
   let approvalQueue=null,approvalQueueKey='';
   function permissions(){
     const captured={...approvalScope()},key=approvalContext();
-    if(!captured.owner||disposed){approvalQueue?.close();approvalQueue=null;approvalQueueKey='';approvalGate.close();pendingApprovals=[];approvalOwner='';approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);onApprovalsChanged();return Promise.resolve();}
+    if(!captured.owner||disposed||!supportsCapability((client.assistants||[]).find(item=>item.id===captured.owner&&item.space_id===captured.space),'approvals.manage')){approvalQueue?.close();approvalQueue=null;approvalQueueKey='';approvalGate.close();pendingApprovals=[];approvalOwner='';approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);onApprovalsChanged();return Promise.resolve();}
     if(!approvalQueue||approvalQueueKey!==key){
       approvalQueue?.close();approvalQueueKey=key;const token=approvalGate.next(),current=()=>!disposed&&approvalGate.current(token)&&approvalQueueKey===key&&approvalContext()===key;
       pendingApprovals=[];approvalOwner='';approvalCards.clear();approvalHost.replaceChildren();

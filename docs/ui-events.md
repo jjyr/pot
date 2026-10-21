@@ -212,9 +212,11 @@ than being classified as a service disconnection.
 `GET /api/v1/tasks/{id}/events?after=...&limit=...` pages the original Runner's
 durable ordered log. Each row has an outer sequence and its execution update:
 message boundaries, text deltas, tool starts/output/results and turn outcomes.
-The reply contains `cursor`, `has_more` and `unavailable`. Historical remote pages remain cached and marked unavailable. Linked tasks
-return an empty transcript until the adapter supports transcript reads. Neither
-case changes the original execution owner.
+The reply contains `cursor`, `has_more` and `unavailable`. Historical remote pages
+remain cached and marked unavailable. Task details advertise `task.events` when
+transcript reads are supported. Clients omit unsupported reads and controls;
+direct unsupported requests return a capability error. The original execution
+owner remains fixed.
 
 [`state/task-transcript.mjs`](../web/src/state/task-transcript.mjs) incrementally
 reduces each ordered batch and ignores duplicates. New Runner output invalidates

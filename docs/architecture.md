@@ -5,17 +5,19 @@ Wails App. App, tray and browser share the HTML/CSS/JS frontend. Each installati
 is an autonomous node; Agent Link supplies collaboration between nodes.
 
 ```text
-Chat / task delegation / notifications
-                 |
-       Agent Link business contract
-                 |
-      +----------+-----------------------+
-      |                                  |
-local in-process adapter          authenticated peer TCP
-      |                                  |
-local Pot assistants             Pot / Codex node
-      |                          assistant directory + default
-local executor                   own execution and task facts
+Chat / tasks / current scheduler / agent tools
+                       |
+             Agent Link operation port
+          capability discovery + authorization
+                       |
+              +--------+--------+
+              |                 |
+        local owner adapter    authenticated peer adapter
+              |                 |
+        current Pot agent    Pot / Codex agent
+        current executor     receiver-owned task execution
+              |
+        local tools / Skills / model configuration
 ```
 
 ## Ownership
@@ -29,7 +31,7 @@ collaboration capabilities, never remote operator access or credentials.
 Fresh roots contain no assistants. First-use Chat and the directory + action
 open the same Add assistant page, ordered API, another Pot, then Codex. Only an
 explicit API creation action creates a kitchen-named local assistant. Linked
-assistants need neither a local Provider nor a local assistant. Provider storage
+assistants and user-originated linked tasks need neither a local Provider nor a local assistant. Provider storage
 alone creates no assistant. Each root retains
 its stable signing identity and secret master key. App and standalone Runtime
 cannot open the same root concurrently. Closing an App window keeps background
@@ -48,10 +50,17 @@ delegation and original remote reference. Status, results, cancellation and
 notifications address that original identity. Unsupported operations fail
 explicitly. Accepted cancellation does not prove execution stopped.
 
+Chat and assistant-scoped task/schedule operations enter the same Agent Link
+port for local and linked assistants. UI controls follow versioned operation
+descriptions, never adapter type or location. Local owner-only configuration
+remains an explicit capability; peer authentication does not grant it.
+
 Direct conversations have durable independent contexts. Incoming peer text is
 reference data, not user authority. Explicit messaging tools send replies; final
-model text is not automatically forwarded. Results enter the original assistant's
-existing notification flow. See [Agent Links](agent-links.md),
+model text is not automatically forwarded. Assistant-directed task results enter
+the original assistant's inbox. User-directed task results return to their
+original conversation and task notifications without a local assistant.
+See [Agent Links](agent-links.md),
 [assistant messages](assistant-messages.md), [task lifecycle](task-coordination.md)
 and the [Codex adapter](../integrations/codex/README.md).
 

@@ -16,7 +16,7 @@ var ErrUnsupported = errors.New("agent_link_capability_unsupported")
 var ErrDisconnected = errors.New("agent_link_disconnected")
 
 func validateDirectory(d Directory, node string) error {
-	if d.NodeID != node || len(d.Assistants) > 256 || d.Name == "" || (d.Adapter != "pot" && d.Adapter != "codex") {
+	if d.NodeID != node || len(d.Assistants) > 256 || len(d.Operations) != len(d.Assistants) || d.Name == "" || (d.Adapter != "pot" && d.Adapter != "codex") {
 		return ErrConflict
 	}
 	seen := map[string]bool{}
@@ -29,15 +29,19 @@ func validateDirectory(d Directory, node string) error {
 	if d.DefaultAssistantID != "" && !seen[d.DefaultAssistantID] {
 		return ErrConflict
 	}
-	return nil
-}
-func supports(d Directory, capability string) bool {
-	for _, c := range d.Capabilities {
-		if c == capability {
-			return true
+	for id, description := range d.Operations {
+		if !seen[id] || description.Version != 1 || description.Scope != "peer" || len(description.Operations) > 64 {
+			return ErrConflict
+		}
+		seenOperations := map[Operation]bool{}
+		for _, operation := range description.Operations {
+			if operation == "" || seenOperations[operation] {
+				return ErrConflict
+			}
+			seenOperations[operation] = true
 		}
 	}
-	return false
+	return nil
 }
 func (s *Service) localDirectory(ctx context.Context) (Directory, error) {
 	if s.options.Backend == nil {
@@ -56,6 +60,9 @@ func (s *Service) pending(ctx context.Context, c Connection) ([]protocol.Envelop
 // Directory refreshes the remote node's advertised assistants. It grants no
 // access to its owner APIs, files, credentials or execution transport.
 func (s *Service) Directory(ctx context.Context, id string) (Directory, error) {
+	if id == "" {
+		return s.localDirectory(ctx)
+	}
 	c, e := s.Get(ctx, id)
 	if e != nil {
 		return Directory{}, e
@@ -97,8 +104,20 @@ type taskLookup struct {
 }
 
 func (s *Service) Submit(ctx context.Context, id string, r TaskRequest) (Task, error) {
-	if r.From.NodeID != s.options.HostIdentity.NodeID {
+	if !taskCaller(r.From) || r.From.NodeID != s.options.HostIdentity.NodeID {
 		return Task{}, ErrUnauthorized
+	}
+	if r.Configuration != nil && id != "" {
+		return Task{}, ErrUnsupported
+	}
+	if strings.TrimSpace(r.RequestID) == "" || len(r.RequestID) > 128 || strings.TrimSpace(r.Text) == "" || len(r.Text) > 65536 {
+		return Task{}, ErrInvalid
+	}
+	if id == "" {
+		if s.options.Backend == nil {
+			return Task{}, ErrUnsupported
+		}
+		return s.options.Backend.Submit(ctx, r)
 	}
 	c, e := s.Get(ctx, id)
 	if e != nil {
@@ -125,8 +144,17 @@ func (s *Service) Cancel(ctx context.Context, id string, from protocol.AgentRef,
 	return s.lookup(ctx, id, from, task, "task.cancel")
 }
 func (s *Service) lookup(ctx context.Context, id string, from protocol.AgentRef, task, method string) (Task, error) {
-	if from.NodeID != s.options.HostIdentity.NodeID {
+	if !taskCaller(from) || from.NodeID != s.options.HostIdentity.NodeID {
 		return Task{}, ErrUnauthorized
+	}
+	if id == "" {
+		if s.options.Backend == nil {
+			return Task{}, ErrUnsupported
+		}
+		if method == "task.cancel" {
+			return s.options.Backend.Cancel(ctx, from, task)
+		}
+		return s.options.Backend.Status(ctx, from, task)
 	}
 	c, e := s.Get(ctx, id)
 	if e != nil {
@@ -167,21 +195,18 @@ func (s *Service) business(ctx context.Context, c Connection, remote peer.Identi
 		}
 		result = d
 	case "task.submit":
-		if !supports(d, "tasks") {
-			return nil, ErrUnsupported
-		}
 		var input TaskRequest
-		if decodeJSON(r.Params, &input) != nil || !input.From.Valid() || input.From.Kind != "assistant" || input.From.NodeID != remote.NodeID || strings.TrimSpace(input.RequestID) == "" || len(input.RequestID) > 256 || strings.TrimSpace(input.Text) == "" || len(input.Text) > 1024*1024 {
+		if decodeJSON(r.Params, &input) != nil || !taskCaller(input.From) || input.From.NodeID != remote.NodeID || strings.TrimSpace(input.RequestID) == "" || len(input.RequestID) > 128 || strings.TrimSpace(input.Text) == "" || len(input.Text) > 65536 {
 			return nil, ErrInvalid
+		}
+		if input.Configuration != nil {
+			return nil, ErrUnsupported
 		}
 
 		result, e = s.options.Backend.Submit(ctx, input)
 	case "task.status", "task.cancel":
-		if !supports(d, "tasks") || r.Method == "task.cancel" && !supports(d, "cancel") {
-			return nil, ErrUnsupported
-		}
 		var input taskLookup
-		if decodeJSON(r.Params, &input) != nil || !input.From.Valid() || input.From.NodeID != remote.NodeID || input.ID == "" {
+		if decodeJSON(r.Params, &input) != nil || !taskCaller(input.From) || input.From.NodeID != remote.NodeID || input.ID == "" {
 			return nil, ErrInvalid
 		}
 		if r.Method == "task.status" {
@@ -196,6 +221,10 @@ func (s *Service) business(ctx context.Context, c Connection, remote peer.Identi
 		return nil, e
 	}
 	return json.Marshal(result)
+}
+
+func taskCaller(from protocol.AgentRef) bool {
+	return from.Valid() && (from.Kind == "assistant" || from.Kind == "task" || from.Kind == "user")
 }
 
 // Disconnect pauses communication without deleting keys, history or work.
