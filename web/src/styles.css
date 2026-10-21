@@ -736,3 +736,5 @@ pot-resource.is-expanded .resource-text{max-height:75vh}
 
 /* Provider connections keep subscription details within their existing row. */
 .provider-summary-card{margin:0 0 14px;}.provider-summary-card .provider-summary{margin:0;min-height:52px;}.provider-unavailable .row-info{color:var(--muted);}.provider-allowances{border-top:1px solid var(--divider);margin-top:12px;padding-top:10px;}.provider-allowances>summary{cursor:pointer;font-size:13px;color:var(--muted);}.provider-allowance-content{padding-top:10px;}.provider-allowance-content>p{margin:6px 0;}.provider-allowance-account{padding:10px 0;border-top:1px solid var(--divider);margin-top:10px;}.provider-allowance-account p{margin:4px 0;}.provider-allowance-window{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;margin:12px 0;overflow-wrap:anywhere;}.provider-allowance-window progress,.provider-allowance-window small{grid-column:1/-1;}.provider-allowance-window progress{width:100%;height:6px;accent-color:var(--primary);}.provider-allowance-content>.control{margin:6px 0;}
+
+.compact-record{max-width:100%;color:var(--muted);font-size:12px;overflow-wrap:anywhere;}

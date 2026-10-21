@@ -209,3 +209,10 @@ metadata without changing existing task/run identities or effect receipts.
 enabled by copying a discovered address. It preserves the existing configured
 endpoint, host identity, encrypted secret references and connection history.
 Listener restoration happens after migration and never replays model work.
+
+Profile file format 2 adds explicit inherited idle compaction timing to saved
+connections and save receipts. The upgrade preserves routes, credential references
+and receipt hashes. Conversation migration 0004 persists the last ordinary request
+anchor, prefix and attempted-history identity; existing conversations initialize
+it on their next successful ordinary request. Usage migration 0002 retains private
+compaction evidence linked to the existing operation and request ledger.

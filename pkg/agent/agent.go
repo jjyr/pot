@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -110,10 +111,13 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 			return err
 		}
 	}
+	if a.CompactOnly && (state.Started != nil || state.ModelRequestID != nil || len(state.Pending) > 0) {
+		return fmt.Errorf("cannot compact unsettled history")
+	}
 	if state.Started != nil || state.ModelRequestID != nil {
 		return ErrUncertainEffects
 	}
-	if state.CompletedRequest == request.RequestID {
+	if !a.CompactOnly && state.CompletedRequest == request.RequestID {
 		return nil
 	}
 	if len(state.Pending) > 0 {
@@ -167,6 +171,7 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 	if containsTool(available, "exec_command") {
 		system += " Execution permission workflow: use ordinary exec_command calls by default. Unless the user forbids host access or permission requests, if a sandbox restriction blocks an operation needed to complete the user's request, inspect the failure and any partial effects, then submit a new narrowly scoped exec_command with request_unsandboxed=true and a specific justification for only the remaining operation. This tool call asks the owner for approval through the permission UI; do not ask for separate chat confirmation before submitting it or stop by telling the user to move files/change permissions. Requesting approval does not grant authority: wait for the tool result. A sandbox restriction is not an owner refusal. If the owner denies the host request, stop that operation, report the denial and do not retry through another command, tool or destination. Ordinary command errors alone do not prove a sandbox restriction."
 	}
+	system += "\n\n" + compactSystem
 	sections := []core.ContextSection{{Key: "instructions", Text: execution.Instructions}}
 	pluginInstructions := ""
 	pluginIDs := make([]string, 0, len(settings.Plugins))
@@ -211,11 +216,13 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 		}
 		sections = append(sections, section)
 	}
-	state.Messages, err = SynchronizeSections(state.Messages, sections)
+	if !a.CompactOnly {
+		state.Messages, err = SynchronizeSections(state.Messages, sections)
+	}
 	if err != nil {
 		return err
 	}
-	if !resuming && state.LastRequest != request.RequestID {
+	if !a.CompactOnly && !resuming && state.LastRequest != request.RequestID {
 		message := m.TextMessage("user", request.Text)
 		message.Attachments = append([]core.Attachment(nil), request.Attachments...)
 		if len(message.Attachments) > 0 {
@@ -240,7 +247,7 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 		state.Receipts = []ToolReceipt{}
 		state.SteeringIDs = []string{}
 	}
-	if resuming && state.LastRequest != request.RequestID {
+	if !a.CompactOnly && resuming && state.LastRequest != request.RequestID {
 		return fmt.Errorf("resume request does not match checkpoint")
 	}
 	if err := a.save(ctx, &state); err != nil {
@@ -260,12 +267,15 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 		if err := a.Feedback.Ready(ctx); err != nil {
 			return err
 		}
-		if _, err := a.acceptSteering(ctx, &state, false, emit); err != nil {
-			return err
+		if !a.CompactOnly {
+			if _, err := a.acceptSteering(ctx, &state, false, emit); err != nil {
+				return err
+			}
 		}
 		input := m.Request{Protocol: m.Protocol(thread.Config.GatewayProtocol), Model: thread.Config.Model, System: system, Messages: portable(thread.Config, state.Messages, descriptor.Vision()), Tools: available, MaxOutputTokens: thread.Config.Params.MaxOutputTokens, ReasoningEffort: thread.Config.Params.ReasoningEffort}
-		if err := a.compact(ctx, execution, thread, &state, &input, sections, descriptor.Vision(), emit); err != nil {
-			return err
+		if a.CompactOnly && a.IdlePrefix != nil {
+			input.System = a.IdlePrefix.System
+			input.Tools = a.IdlePrefix.Tools
 		}
 		input.Messages, err = a.resolveMessages(ctx, thread.Config, input.Messages)
 		if err != nil {
@@ -277,6 +287,13 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 				return err
 			}
 		}
+		if err := a.compact(ctx, execution, thread, &state, &input, sections, descriptor.Vision(), emit); err != nil {
+			return err
+		}
+		if a.CompactOnly {
+			return nil
+		}
+
 		tokens, err := a.estimate(input, state.UsageAnchor, settings.UseProviderUsage)
 		if err != nil {
 			return err
@@ -529,10 +546,6 @@ func failedResult(raw json.RawMessage) bool {
 	return reason
 }
 func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoint, input m.Request, compactionID *string, emit func(core.Update) error) (response m.Message, result error) {
-	input.Messages, result = a.resolveMessages(ctx, thread.Config, input.Messages)
-	if result != nil {
-		return response, result
-	}
 	body, err := m.Encode(input)
 	if err != nil {
 		return response, err
@@ -556,6 +569,29 @@ func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoin
 			result = errors.Join(result, err)
 		}
 	}()
+	var native bytes.Buffer
+	var usageFrames []m.UsageReport
+	var firstTextMS *int64
+	sampleStarted := time.Now()
+	if compactionID != nil {
+		evidence := func(value any) error {
+			data, _ := json.Marshal(value)
+			raw, _ := json.Marshal(core.CompactionReport{ID: *compactionID, Action: "evidence", Evidence: data})
+			return a.Services.Compaction(context.WithoutCancel(ctx), raw)
+		}
+		if err := evidence(map[string]any{"request_id": requestID, "request": body}); err != nil {
+			return response, err
+		}
+		defer func() {
+			var detail string
+			if result != nil {
+				detail = result.Error()
+			}
+			if err := evidence(map[string]any{"request_id": requestID, "native_response_sse": native.String(), "usage_frames": usageFrames, "first_text_ms": firstTextMS, "duration_ms": time.Since(sampleStarted).Milliseconds(), "error": detail}); err != nil {
+				result = errors.Join(result, err)
+			}
+		}()
+	}
 	stage := "agent"
 	if compactionID != nil {
 		stage = "compaction"
@@ -570,6 +606,11 @@ func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoin
 			detail = &message
 		}
 		observation := Observation{Kind: "request_finished", ID: requestID, Stage: stage, CompactionID: compactionID, Error: detail}
+		if compactionID == nil && result == nil {
+			prefix := input
+			prefix.Messages = nil
+			observation.RequestPrefix = &prefix
+		}
 		if response.Usage != nil {
 			observation.Usage = &m.UsageReport{InputTokens: &response.Usage.Input, OutputTokens: &response.Usage.Output}
 		}
@@ -595,6 +636,9 @@ func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoin
 			return response, err
 		}
 		n, readErr := stream.Read(buffer)
+		if compactionID != nil {
+			native.Write(buffer[:n])
+		}
 		received += n
 		if received > 16*1024*1024 {
 			return response, fmt.Errorf("model response exceeds limit")
@@ -609,9 +653,16 @@ func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoin
 				return response, err
 			}
 			if update.Usage != nil {
+				if compactionID != nil {
+					usageFrames = append(usageFrames, *update.Usage)
+				}
 				if err := a.Feedback.Observe(ctx, Observation{Kind: "usage_observed", ID: requestID, Stage: stage, Usage: update.Usage}); err != nil {
 					return response, err
 				}
+			}
+			if compactionID != nil && update.TextDelta != "" && firstTextMS == nil {
+				elapsed := time.Since(sampleStarted).Milliseconds()
+				firstTextMS = &elapsed
 			}
 			if update.TextDelta != "" && compactionID == nil {
 				if err := emit(core.Update{Type: "text_delta", Text: update.TextDelta}); err != nil {

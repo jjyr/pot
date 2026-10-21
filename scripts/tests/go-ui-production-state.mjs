@@ -189,3 +189,13 @@ const forest=toolForest([parentTool('a'),childTool('a'),parentTool('b'),childToo
 assert.equal(forest.roots.length,2);assert.equal(forest.roots[0].children[0].message.id,'a-child');assert.equal(forest.roots[1].children[0].message.id,'b-child','Repeated call IDs cannot reparent across turns');
 assert.equal(toolForest([{tool:{id:'a',parent_id:'b'}},{tool:{id:'b',parent_id:'a'}}]).roots.length,2,'Malformed cycles remain top-level');
 applyToolUpdate(detail,{type:'turn_finished',outcome:{kind:'unknown',error:'uncertain'}});assert.equal(detail.phase,'unknown');
+
+// Compact operations have independent identities; they never become fake tools
+// or error replies when a task transcript is reconstructed from stored events.
+const compactTranscript=createTaskTranscript();
+appendTaskEvents(compactTranscript,[event(1,'compaction',{at_ms:1000,result:{id:'compact-one',action:'start',reason:'threshold',tokens:24000}}),event(2,'compaction',{at_ms:1500,result:{id:'compact-one',action:'complete',reason:'threshold',tokens:2100}})]);
+const compactRows=projectTaskMessages(compactTranscript,[],{info:{phase:'complete'}});
+assert.equal(compactRows.length,1);assert.equal(compactRows[0].role,'system');assert.equal(compactRows[0].tool,undefined);assert.equal(compactRows[0].error,undefined);
+assert.deepEqual(compactRows[0].compaction,{id:'compact-one',reason:'threshold',before:24000,state:'complete',after:2100,finished_at_ms:1500});
+appendTaskEvents(compactTranscript,[event(2,'compaction',{result:{id:'compact-one',action:'complete',tokens:0}})]);
+assert.equal(compactTranscript.messages.length,1);assert.equal(compactTranscript.messages[0].compaction.after,2100,'Repeated history pages do not overwrite terminal compact receipts');

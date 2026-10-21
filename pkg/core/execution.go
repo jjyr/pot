@@ -18,6 +18,16 @@ var (
 	Unknown   = Outcome{Kind: "unknown"}
 )
 
+// CompactionReport carries lifecycle and private diagnostic evidence. It never
+// enters model history or grants authority.
+type CompactionReport struct {
+	ID       string          `json:"id"`
+	Action   string          `json:"action"`
+	Reason   string          `json:"reason,omitempty"`
+	Tokens   uint64          `json:"tokens,omitempty"`
+	Evidence json.RawMessage `json:"evidence,omitempty"`
+}
+
 type Update struct {
 	ExecutionMode string           `json:"execution_mode,omitempty"`
 	ParentID      string           `json:"parent_id,omitempty"`

@@ -23,14 +23,15 @@ type SteeringInput struct {
 	Text        string
 }
 type Observation struct {
-	Kind         string                     `json:"kind"`
-	ID           string                     `json:"id,omitempty"`
-	Stage        string                     `json:"stage,omitempty"`
-	CompactionID *string                    `json:"compaction_id,omitempty"`
-	Usage        *modelprotocol.UsageReport `json:"usage,omitempty"`
-	Error        *string                    `json:"error,omitempty"`
-	Tokens       uint64                     `json:"tokens,omitempty"`
-	Threshold    uint64                     `json:"threshold,omitempty"`
+	RequestPrefix *modelprotocol.Request     `json:"-"` // Local idle cache prefix, not transcript data.
+	Kind          string                     `json:"kind"`
+	ID            string                     `json:"id,omitempty"`
+	Stage         string                     `json:"stage,omitempty"`
+	CompactionID  *string                    `json:"compaction_id,omitempty"`
+	Usage         *modelprotocol.UsageReport `json:"usage,omitempty"`
+	Error         *string                    `json:"error,omitempty"`
+	Tokens        uint64                     `json:"tokens,omitempty"`
+	Threshold     uint64                     `json:"threshold,omitempty"`
 }
 
 // Feedback acknowledgments must validate owner/generation/turn. SaveContext is
@@ -71,6 +72,9 @@ type Services interface {
 // Composer is optional for model-only and ordinary tool use. To enable composed
 // tools, set it to a composition.ProcessRunner with an explicit worker command.
 type Agent struct {
+	IdlePrefix         *modelprotocol.Request
+	CompactSchedule    json.RawMessage
+	CompactOnly        bool // An owning lane requested idle maintenance; never accept synthetic user input.
 	MessageID          func(context.Context) (string, error)
 	Services           Services
 	Feedback           Feedback

@@ -126,6 +126,7 @@ type ToolDefinition struct {
 	InputSchema json.RawMessage `json:"inputSchema"`
 }
 type Request struct {
+	DisableTools    bool // Request-local; preserve definitions and replay while forbidding new calls.
 	Protocol        Protocol
 	Model           string
 	System          string

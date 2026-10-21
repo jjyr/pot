@@ -59,7 +59,7 @@ func (c *Conversation) Control(ctx context.Context, r TurnControl) error {
 func (c *Conversation) Steer(ctx context.Context, r SteerRequest) (protocol.SendMessageAccepted, error) {
 	r.Attachments = slices.Clone(r.Attachments)
 	r.References = slices.Clone(r.References)
-	if !core.Identifier(r.RequestID) || strings.HasPrefix(r.RequestID, "pot-result-") || !core.Identifier(r.UserMessageID) || (strings.TrimSpace(r.Text) == "" && len(r.Attachments) == 0) || len(r.Text) > 65536 {
+	if !core.Identifier(r.RequestID) || strings.HasPrefix(r.RequestID, "pot-result-") || isCompactRequest(r.RequestID) || !core.Identifier(r.UserMessageID) || (strings.TrimSpace(r.Text) == "" && len(r.Attachments) == 0) || len(r.Text) > 65536 {
 		return protocol.SendMessageAccepted{}, errors.New("invalid steering input")
 	}
 	if err := core.ValidateAttachments(r.Attachments); err != nil {
@@ -81,7 +81,7 @@ func (c *Conversation) Steer(ctx context.Context, r SteerRequest) (protocol.Send
 		}
 		return protocol.SendMessageAccepted{MessageID: old.ID, Duplicate: true}, nil
 	}
-	if c.turn != nil && c.turn.UserMessageID == r.UserMessageID && strings.HasPrefix(c.turn.Request.RequestID, "pot-result-") {
+	if c.turn != nil && c.turn.UserMessageID == r.UserMessageID && (strings.HasPrefix(c.turn.Request.RequestID, "pot-result-") || isCompactRequest(c.turn.Request.RequestID)) {
 		request := protocol.SendMessage{RequestID: r.RequestID, ConversationID: c.options.ConversationID, Text: r.Text, Attachments: r.Attachments, References: r.References}
 		old, err := c.store.Duplicate(ctx, r.RequestID)
 		if err != nil {

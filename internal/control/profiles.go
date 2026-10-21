@@ -10,6 +10,7 @@ import (
 	"github.com/jjyr/pot/pkg/instance"
 	"github.com/jjyr/pot/pkg/modeldirectory"
 	"github.com/jjyr/pot/pkg/storage"
+	"github.com/jjyr/pot/pkg/storage/migrations"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -66,7 +67,7 @@ type ProfileStore struct {
 }
 
 func OpenProfiles(path, pluginRoot string, registry *gateway.Registry) (*ProfileStore, error) {
-	p := &ProfileStore{metadataWake: make(chan struct{}, 1), path: path, pluginRoot: pluginRoot, registry: registry, state: profileFile{Version: 1, ProfileSnapshot: ProfileSnapshot{Profiles: []core.Profile{}, Connections: []Connection{}, ConfiguredModels: map[string][]string{}}, Requests: map[string]profileReceipt{}}}
+	p := &ProfileStore{metadataWake: make(chan struct{}, 1), path: path, pluginRoot: pluginRoot, registry: registry, state: profileFile{Version: 2, ProfileSnapshot: ProfileSnapshot{Profiles: []core.Profile{}, Connections: []Connection{}, ConfiguredModels: map[string][]string{}}, Requests: map[string]profileReceipt{}}}
 	directory, err := modeldirectory.Open(filepath.Join(filepath.Dir(path), "models-dev"))
 	if err != nil {
 		return nil, err
@@ -79,10 +80,14 @@ func OpenProfiles(path, pluginRoot string, registry *gateway.Registry) (*Profile
 	if err != nil {
 		return nil, err
 	}
+	body, upgraded, err := migrations.UpgradeProfileCompaction(body)
+	if err != nil {
+		return nil, err
+	}
 	if err = core.DecodeJSON(body, &p.state); err != nil {
 		return nil, err
 	}
-	if p.state.Version != 1 || p.state.Requests == nil {
+	if p.state.Version != 2 || p.state.Requests == nil {
 		return nil, errors.New("unsupported profile store")
 	}
 	settings, err := p.defaultAgentSettings()
@@ -100,6 +105,11 @@ func OpenProfiles(path, pluginRoot string, registry *gateway.Registry) (*Profile
 		}
 		profile.Params.Agent = defaults
 		if err = profile.Validate(); err != nil {
+			return nil, err
+		}
+	}
+	if upgraded {
+		if err := instance.WriteJSON(path, p.state); err != nil {
 			return nil, err
 		}
 	}
@@ -159,7 +169,24 @@ func (p *ProfileStore) defaultAgentSettings() (core.AgentSettings, error) {
 	return settings, nil
 }
 
-func (p *ProfileStore) Snapshot() ProfileSnapshot {
+// savedSnapshot copies saved connection intent without building UI directory
+// metadata. Execution paths must not enumerate every known model to read IDs.
+func (p *ProfileStore) savedSnapshot() ProfileSnapshot {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	body, _ := json.Marshal(p.state.ProfileSnapshot)
+	var result ProfileSnapshot
+	_ = json.Unmarshal(body, &result)
+	return result
+}
+
+func (p *ProfileStore) Snapshot() ProfileSnapshot { return p.connectionSnapshot(true) }
+
+// routingSnapshot retains cached provider discovery without expanding the
+// public model directory and all of its default limits on every model turn.
+func (p *ProfileStore) routingSnapshot() ProfileSnapshot { return p.connectionSnapshot(false) }
+
+func (p *ProfileStore) connectionSnapshot(includeDirectory bool) ProfileSnapshot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	body, _ := json.Marshal(p.state.ProfileSnapshot)
@@ -168,7 +195,9 @@ func (p *ProfileStore) Snapshot() ProfileSnapshot {
 	types, err := p.providerTypes(context.Background())
 	if err == nil {
 		result.ProviderTypes = types
-		result.Directory = p.registeredDirectory(types)
+		if includeDirectory {
+			result.Directory = p.registeredDirectory(types)
+		}
 		byID := map[string]ProviderType{}
 		for _, typ := range types {
 			byID[typ.ID] = typ
@@ -217,7 +246,9 @@ func (p *ProfileStore) Snapshot() ProfileSnapshot {
 			}
 		}
 	}
-	result.ModelDefaults = p.directory.Defaults()
+	if includeDirectory {
+		result.ModelDefaults = p.directory.Defaults()
+	}
 	return result
 }
 func (p *ProfileStore) Resolve(id string) (core.ResolvedSpec, error) {
