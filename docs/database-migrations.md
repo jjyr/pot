@@ -238,6 +238,10 @@ versioned per-assistant peer operation descriptions and removes the old flags.
 It retains connection keys,
 caller identities, accepted tasks and request receipts without replay.
 
+`control/0023_agent_link_address_mode` converts the retired `tailscale` publication
+mode to ordinary `address` mode. Existing listener addresses, endpoints and enabled
+endpoint records survive; the host no longer configures system Tailscale Serve.
+
 Profile format 3 replaces idle-delay settings with `prompt_cache_minutes`, an
 estimated cache lifetime. Explicit durations and immutable save receipt hashes
 are preserved; retired field names are removed. Conversation migration 0005 adds
@@ -266,3 +270,14 @@ metadata and result content are handled by `pkg/mcp` at invocation time. Updatin
 a plugin's code/assets changes its ordinary digest-pinned resource snapshot.
 Any future persisted catalogue or snapshot schema change still requires its own
 migration and upgrade coverage.
+
+## Retired embedded browser network
+
+`RetireBrowserTailnet` retires the standalone `access-settings.json` flags when
+the independent browser service starts. Browser access continues to use the
+explicit listener/origin and the authoritative `browser-access.json`; its token,
+session key, generation, disablement and session revocations are preserved.
+The migration is idempotent and rejects unrecognized or unsafe settings files
+without deleting them. Inactive files under the old `tailscale/` directory are
+left untouched and are no longer loaded. The non-SQL storage-format marker is
+advanced, so package-only automatic updates cannot cross this transition.

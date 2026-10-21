@@ -20,13 +20,13 @@ async page => {
  assert(!await page.getByRole('button',{name:'Configure access',exact:true}).count(),'Pot has no manual access configuration');
  assert(!await page.evaluate(()=>topologyFixture.calls.some(call=>call.method==='POST')),'Opening Link does not enable addresses');
  for(const endpoint of ['tcp://local-pot.fixture-tailnet.ts.net:8793','tcp://203.0.113.10:8793','tcp://192.168.1.24:8793','tcp://127.0.0.1:8793']){
-  const row=addresses.filter({hasText:endpoint});await row.getByRole('button',{name:'Copy connection address',exact:true}).click();await row.getByRole('button',{name:'Copied',exact:true}).waitFor();
+  const row=addresses.filter({hasText:endpoint});await row.getByRole('button',{name:'Get connection address',exact:true}).click();await page.getByLabel('Full connection address',{exact:true}).waitFor();await page.locator('.agent-link-manual-copy').getByRole('button',{name:'Copy connection address',exact:true}).click();await page.locator('.agent-link-manual-copy').getByRole('button',{name:'Copied',exact:true}).waitFor();
   assert(await page.evaluate(()=>topologyFixture.clipboard)===endpoint+'#synthetic-local-invitation','Copy uses the exact selected endpoint');
  }
  await page.getByRole('button',{name:'Close address list',exact:true}).click();
  await page.locator('#fixture-scenario').selectOption('access');
  await page.locator('.agent-link-choose').click();
- await addresses.first().getByRole('button',{name:'Copy connection address',exact:true}).waitFor();
+ await addresses.first().getByRole('button',{name:'Get connection address',exact:true}).waitFor();
  assert(!await page.getByRole('button',{name:'Configure access',exact:true}).count(),'Unconfigured Pot also uses discovered addresses');
  await page.locator('#fixture-scenario').selectOption('ready');
  assert(await page.locator('.topology-zone').count()===2,'Local and cloud Pot keep topology regions');
@@ -83,14 +83,14 @@ async page => {
  await page.waitForFunction(()=>!topologyFixture.links.some(link=>link.id==='new-agent'));
  await page.setViewportSize({width:393,height:700});
  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Narrow topology fits its viewport');
- assert((await page.locator('.agent-link-address-row button').allTextContents()).every(text=>text==='复制连接地址'),'All hidden copy actions update to Chinese');
+ assert((await page.locator('.agent-link-address-row button').allTextContents()).every(text=>text==='获取连接地址'),'All hidden copy actions update to Chinese');
  assert(!await addresses.first().isVisible(),'Returning from other operations leaves addresses closed');
  await page.evaluate(()=>{topologyFixture.addresses=Array.from({length:50},(_,index)=>({kind:'private',interface:'interface-'+index,endpoint:'tcp://192.168.1.'+(index+1)+':8793'}));return topologyFixture.pages.refresh(['agent-links']);});
  await page.locator('.agent-link-choose').click();
  const mobilePicker=page.getByRole('dialog',{name:'选择连接地址',exact:true});await mobilePicker.waitFor();
  assert(await mobilePicker.locator('.agent-link-address-row').count()===50,'Many interfaces remain available in the popup');
  const box=await mobilePicker.boundingBox();assert(box.height<=500&&box.y>=0&&box.y+box.height<=700,'Many interfaces stay within a bounded popup');
- const last=mobilePicker.locator('.agent-link-address-row').last();await last.getByRole('button',{name:'复制连接地址',exact:true}).click();
+ const last=mobilePicker.locator('.agent-link-address-row').last();await last.getByRole('button',{name:'获取连接地址',exact:true}).click();await page.getByLabel('完整连接地址',{exact:true}).waitFor();await page.locator('.agent-link-manual-copy').getByRole('button',{name:'复制连接地址',exact:true}).click();
  assert(await page.evaluate(()=>topologyFixture.clipboard)==='tcp://192.168.1.50:8793#synthetic-local-invitation','The last interface is reachable through scrolling');
  await mobilePicker.getByRole('button',{name:'关闭地址列表',exact:true}).click();
  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Address popup fits the narrow viewport');

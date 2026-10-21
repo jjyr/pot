@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/jjyr/pot/pkg/peer"
 	"net"
 	"testing"
@@ -88,5 +89,27 @@ func TestMissingVPNInterfaceKeepsControlAndAccessSetupAvailable(t *testing.T) {
 	}
 	if _, err = f.service.Registry.Definitions(ctx); err != nil {
 		t.Fatal("owner access unavailable", err)
+	}
+}
+
+func TestAgentAccessRejectsRetiredTailscaleMode(t *testing.T) {
+	f := agentControl(t, "ordinary-tcp")
+	f.service.agentLinks.mu.Lock()
+	before := f.service.agentLinks.config
+	f.service.agentLinks.mu.Unlock()
+	_, err := f.service.ManageAgentLink(context.Background(), AgentLinkCommand{Action: "configure", Mode: "tailscale", Endpoint: f.endpoint})
+	var api protocol.APIError
+	if !errors.As(err, &api) || api.Code != "agent_link_invalid" {
+		t.Fatal("retired publication mode accepted", err)
+	}
+	var saved agentLinkConfig
+	if err := f.service.integrationDB.QueryRow("SELECT listen,endpoint,mode FROM agent_link_host").Scan(&saved.Listen, &saved.Endpoint, &saved.Mode); err != nil {
+		t.Fatal(err)
+	}
+	f.service.agentLinks.mu.Lock()
+	after := f.service.agentLinks.config
+	f.service.agentLinks.mu.Unlock()
+	if saved != before || after != before {
+		t.Fatal("rejected publication changed host configuration", before, saved, after)
 	}
 }

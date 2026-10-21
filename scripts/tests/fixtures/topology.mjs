@@ -13,7 +13,7 @@ fixture.links[0].outbox={pending:3,oldest_at_ms:Date.now()-40000};fixture.links[
 fixture.links[1].observation=sample('cloud-id','cloud-worker',[activity('cloud-assistant',{waiting_allowance:1})]);fixture.links[1].outbox={pending:0,oldest_at_ms:0};
 fixture.localObservation=sample('local-id','mac-studio.local',[activity('dev',{running:1,chat_state:'running'}),activity('pot')]);
 const spaces=[{id:'local',control_id:'local-id',name:'Local Pot',kind:'local',connected:true}];
-fixture.clipboard='';Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{if(fixture.clipboardFail)throw Error('Synthetic clipboard denied');fixture.clipboard=text;},readText:async()=>{if(fixture.clipboardReadWait)return await new Promise(resolve=>fixture.releaseClipboardRead=resolve);if(fixture.clipboardFail)throw Error('Synthetic clipboard denied');return fixture.clipboard;}}});
+fixture.clipboard='';fixture.clipboardFail=new URLSearchParams(location.search).get('clipboard')==='denied';Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{if(fixture.clipboardFail)throw Error('Synthetic clipboard denied');fixture.clipboard=text;},readText:async()=>{if(fixture.clipboardReadWait)return await new Promise(resolve=>fixture.releaseClipboardRead=resolve);if(fixture.clipboardFail)throw Error('Synthetic clipboard denied');return fixture.clipboard;}}});
 fixture.networks={local:{listen:'127.0.0.1:8793',endpoint:'tcp://100.101.102.103:8793',mode:'address'}};
 const policy=()=>({machines:{'my-mac':{execution_access:'ask',revision:1}},rules:[],task_grants:[],application:{}});
 const localAssistants=[{id:'dev',name:'Development assistant',space_id:'local',avatar:profileAvatar('#5c609c')},{id:'pot',name:'Pot',space_id:'local',avatar:profileAvatar('#ad7630')}];
@@ -22,11 +22,6 @@ const client={desktop:true,production:true,runtime:{boot_id:'fixture-boot'},spac
  fixture.calls.push({path,...options});const body=options.body||{},space=options.space||'local';
  if(path.startsWith('/api/v1/agent-links/invitation'))return {address:(body.endpoint||'tcp://fixture.example:8793')+'#synthetic-local-invitation',expires_at_ms:Date.now()+3600000};
  if(path.startsWith('/api/v1/agent-links')){
-  if(body.action==='configure'){
-   if(body.mode==='tailscale'&&fixture.scenario==='tsmissing')throw Object.assign(Error('Synthetic Tailscale executable missing'),{code:'agent_link_tailscale_missing'});
-   if(body.mode==='address'&&(!body.endpoint.startsWith('tcp://')||!/^(100\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(new URL(body.endpoint).hostname)))throw Object.assign(Error('Synthetic non-private TCP endpoint rejected'),{code:'agent_link_invalid'});
-   fixture.networks[space]={...fixture.networks[space],...body,endpoint:body.mode==='tailscale'?'tcp://local-pot.fixture-tailnet.ts.net:8793':body.endpoint};fixture.scenario='ready';document.querySelector('#fixture-scenario').value='ready';return {network:fixture.networks[space]};
-  }
   if(body.action==='preview'){
    if(fixture.previewWait)await new Promise(resolve=>fixture.releasePreview=resolve);
    if(fixture.scenario==='expired')throw Object.assign(Error('Synthetic invitation expired'),{code:'invitation_expired'});
@@ -41,9 +36,9 @@ const client={desktop:true,production:true,runtime:{boot_id:'fixture-boot'},spac
   }
   if(['disconnect','reconnect'].includes(body.action)){const link=fixture.links.find(item=>item.id===body.id);link.status=body.action==='disconnect'?'disconnected':'connected';link.state=link.status;refreshDirectory();return link;}
   if(body.action==='delete'){fixture.links=fixture.links.filter(item=>item.id!==body.id);refreshDirectory();return {deleted:true};}
-  const network=fixture.networks[space],needsAccess=['access','tsmissing'].includes(fixture.scenario),endpoint=needsAccess?'':network.endpoint;
+  const network=fixture.networks[space],needsAccess=fixture.scenario==='access',endpoint=needsAccess?'':network.endpoint;
   if(!fixture.freezeObservations){fixture.localObservation.observed_at_ms=Date.now();for(const link of fixture.links)if(link.observation)link.observation.observed_at_ms=Date.now();}
-  return {addresses:fixture.addresses||[{kind:'tailscale',endpoint:'tcp://local-pot.fixture-tailnet.ts.net:8793',requires_setup:true},{kind:'public',interface:'en0',endpoint:'tcp://203.0.113.10:8793'},{kind:'private',interface:'en0',endpoint:'tcp://192.168.1.24:8793'},{kind:'loopback',endpoint:'tcp://127.0.0.1:8793'}],self:{node_id:'local-id',kind:'pot',name:'Local Pot',address:endpoint,endpoint,status:needsAccess?'needs_access':'ready',observation:fixture.localObservation},items:fixture.links,network:{...network,endpoint}};
+  return {addresses:fixture.addresses||[{kind:'tailscale',endpoint:'tcp://local-pot.fixture-tailnet.ts.net:8793'},{kind:'public',interface:'en0',endpoint:'tcp://203.0.113.10:8793'},{kind:'private',interface:'en0',endpoint:'tcp://192.168.1.24:8793'},{kind:'loopback',endpoint:'tcp://127.0.0.1:8793'}],self:{node_id:'local-id',kind:'pot',name:'Local Pot',address:endpoint,endpoint,status:needsAccess?'needs_access':'ready',observation:fixture.localObservation},items:fixture.links,network:{...network,endpoint}};
  }
  if(path==='/api/v1/machines')return {items:[{id:'my-mac',name:'my-mac',hostname:'mac-studio.local',ip_addresses:['192.168.1.24','fd00::24'],os:'darwin',connected:true}]};
  if(path==='/api/v1/permissions')return {policy:policy()};

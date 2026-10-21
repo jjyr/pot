@@ -86,10 +86,20 @@ outside click or the close button dismisses the popup. Opening either page reads
 local interfaces and existing Tailscale forwarding without enabling access.
 Addresses are ordered by Tailscale
 name, Tailscale IP, public IP, private IP and loopback, followed by other saved
-addresses. Copying enables only the selected endpoint, verifies this node’s
-identity and copies one single-use invitation. Tailscale copying creates private
-TCP forwarding when needed. All copied endpoints remain enabled independently
+addresses. **Get connection address** enables only the selected endpoint, verifies
+this node’s identity and displays the complete single-use invitation in a selected,
+read-only field. Manual copying is available immediately; the clipboard button is
+an optional shortcut. Closing the popup clears the invitation, and invitations
+are never put in snapshots or browser storage. Tailscale names and IPs use direct
+listeners without requiring Serve configuration or administrator permissions.
+Existing raw TCP forwarding can be reused, but copying never changes Tailscale
+configuration. All selected endpoints remain enabled independently
 and are restored on restart; an unavailable interface does not block startup.
+
+System Tailscale is optional and managed outside Pot. Pot only reads its addresses
+and existing forwarding; it has no login, Serve configuration or disconnect
+operation for the system client. Explicit endpoint configuration accepts only
+`address` mode and verifies the same signed TCP identity.
 
 Paste the invitation in the existing Add Agent editor; live verification is
 followed by connection, then Link selects the new node. No assistant binding

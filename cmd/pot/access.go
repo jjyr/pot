@@ -27,7 +27,7 @@ func accessCommand(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 	if flags.NArg() != 1 {
-		return errors.New("usage: pot access -browser-root PATH status|token|regenerate-token|qr|enable|disable|connect|disconnect")
+		return errors.New("usage: pot access -browser-root PATH status|token|regenerate-token|qr|enable|disable")
 	}
 	if *browserRoot != "" {
 		if *root != "" {
@@ -49,7 +49,7 @@ func accessCommand(ctx context.Context, args []string, out io.Writer) error {
 	}
 	action := flags.Arg(0)
 	switch action {
-	case "status", "token", "regenerate-token", "qr", "enable", "disable", "connect", "disconnect":
+	case "status", "token", "regenerate-token", "qr", "enable", "disable":
 	default:
 		return errors.New("unknown access command")
 	}
@@ -79,8 +79,6 @@ func accessCommand(ctx context.Context, args []string, out io.Writer) error {
 			if err != nil {
 				return err
 			}
-		default:
-			return errors.New("start the independent web-ui-server before changing its Tailscale connection")
 		}
 		value = map[string]any{"enabled": !config.Disabled, "token": config.Token, "generation": config.Generation, "origin": *origin, "running": false}
 	}

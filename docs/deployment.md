@@ -135,8 +135,11 @@ pot access -browser-root "$HOME/.pot-web" token
 pot open -root "$HOME/.pot-web"
 ```
 
-`regenerate-token`, `disable`, `connect`, `disconnect` and `qr` use the same
-operator scope. Embedded Tailscale belongs to this browser service. The browser
+`regenerate-token`, `disable` and `qr` use the same operator scope. Browser
+publication uses the explicit `-listen` and `-origin` settings. For access over
+Tailscale, install and manage the system client independently and bind the
+browser listener to its interface; Pot does not run an embedded Tailscale node.
+Browser HTTPS still uses the configured certificate and key. The browser
 uses its access token to establish server-managed sessions; upstream owner keys
 never reach browser JavaScript. Rotation/disabling invalidates existing sessions
 and streams. Logout removes the active session. Browser policy excludes native
@@ -184,10 +187,10 @@ installing an archive starts a VM or installs a user service.
 
 The topology page manages Agent Links. Each node starts a loopback TCP peer
 listener and shows its actual bind address. Access setup verifies a reachable
-`tcp://host:port` on a private interface or explicitly creates a Tailscale TCP
-Serve mapping. Opening the page does not change network settings or overwrite
-unrelated mappings. Setup verifies the node's signing identity before saving an
-endpoint. See [Peer protocol](peer-protocol.md).
+`tcp://host:port` on a public, private or system Tailscale interface. Existing TCP
+forwarding can be reused; getting an invitation never changes Tailscale Serve
+configuration. Opening the page does not change network settings. Setup verifies
+the node's signing identity before saving an endpoint. See [Peer protocol](peer-protocol.md).
 
 Copy connection information from one node and paste the complete segment into
 Add Agent on the other. It carries a short-lived, single-use invitation, so treat

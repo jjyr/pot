@@ -351,19 +351,13 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	case "configure":
-		if in.Mode != "" && in.Mode != "address" && in.Mode != "tailscale" {
+		if in.Mode != "" && in.Mode != "address" {
 			err = agentlink.ErrInvalid
 			break
 		}
 		if in.Listen != "" && in.Listen != hostPeerListen {
 			err = errors.New("agent_link_listener_restart_required")
 			break
-		}
-		if in.Mode == "tailscale" {
-			in.Endpoint, err = configureHostTailscale(r.Context())
-			if err != nil {
-				break
-			}
 		}
 		err = h.configureEndpoint(r.Context(), in.Endpoint)
 	default:

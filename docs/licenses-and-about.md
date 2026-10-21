@@ -46,8 +46,7 @@ includes the Go runtime license. A dependency without a notice fails packaging.
 Cross-compiled archives collect this graph with their target GOOS/GOARCH and
 CGO settings, rather than inheriting the packaging host's dependency selection.
 The App inventory includes Wails; portable headless CLI inventories omit GUI
-packages. The linked `tailscale.com/tsnet` implementation and its dependencies
-are included in this Go inventory.
+packages.
 
 Run `mise run licenses` to generate the CLI/runtime inventory locally. App
 packaging regenerates it for the native entry point as well. These are notice

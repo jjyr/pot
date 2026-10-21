@@ -432,18 +432,21 @@ func TestAgentHostConfigurePinsTCPIdentity(t *testing.T) {
 	}
 	defer own.Close()
 	endpoint := "tcp://" + own.Addr()
-	configure := func(endpoint string) int {
-		payload, _ := json.Marshal(map[string]string{"action": "configure", "mode": "address", "endpoint": endpoint, "listen": hostPeerListen})
+	configure := func(endpoint, mode string) *httptest.ResponseRecorder {
+		payload, _ := json.Marshal(map[string]string{"action": "configure", "mode": mode, "endpoint": endpoint, "listen": hostPeerListen})
 		r := httptest.NewRequest(http.MethodPost, "http://"+hostListen+"/api/v1/agent-links", strings.NewReader(string(payload)))
 		r.Host = hostListen
 		r.RemoteAddr = "127.0.0.1:12345"
 		r.Header.Set("Authorization", "Bearer "+h.token)
 		w := httptest.NewRecorder()
 		h.handler().ServeHTTP(w, r)
-		return w.Code
+		return w
 	}
-	if status := configure(endpoint); status != 200 {
-		t.Fatal(status)
+	if response := configure(endpoint, "address"); response.Code != 200 {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	if response := configure(endpoint, "tailscale"); response.Code != 400 || !strings.Contains(response.Body.String(), agentlink.ErrInvalid.Error()) {
+		t.Fatal("retired publication mode accepted", response.Code, response.Body.String())
 	}
 	foreign, _ := testHost(t)
 	defer foreign.close()
@@ -461,8 +464,8 @@ func TestAgentHostConfigurePinsTCPIdentity(t *testing.T) {
 	}
 	defer stranger.Close()
 	for _, invalid := range []string{"tcp://" + stranger.Addr(), "http://127.0.0.1:8793", "https://agent.example", "tcp://0.0.0.0:8793", "tcp://user:password@127.0.0.1:8793", "tcp://127.0.0.1:8793?token=secret"} {
-		if status := configure(invalid); status != 400 {
-			t.Fatal("unverified peer accepted", status)
+		if response := configure(invalid, "address"); response.Code != 400 {
+			t.Fatal("unverified peer accepted", response.Code)
 		}
 		var saved string
 		if err = h.db.QueryRow("SELECT endpoint FROM codex_agent_host").Scan(&saved); err != nil || saved != endpoint {

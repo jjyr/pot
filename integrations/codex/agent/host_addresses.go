@@ -59,18 +59,6 @@ func (h *agentHost) selectAddress(ctx context.Context, endpoint string) (string,
 	if selected == nil {
 		return "", agentlink.ErrInvalid
 	}
-	if selected.RequiresSetup {
-		actual, err := configureHostTailscale(ctx)
-		if err != nil {
-			return "", err
-		}
-		h.discoveryMu.Lock()
-		h.discoveryAt = time.Time{}
-		h.discoveryMu.Unlock()
-		if actual != endpoint {
-			return "", agentlink.ErrConflict
-		}
-	}
 	if err := h.enableAddress(ctx, endpoint); err != nil {
 		return "", err
 	}

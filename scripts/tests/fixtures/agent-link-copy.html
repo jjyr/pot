@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Agent Link copy fixture</title><link rel="stylesheet" href="../../../web/src/styles.css">
+<style>body{position:static!important;overflow:auto!important}#fixture-controls{display:flex;flex-wrap:wrap;gap:12px;padding:12px;border-bottom:1px solid var(--divider);font:12px system-ui}main{max-width:820px;margin:auto;padding:32px 24px}#fixture-result{padding:12px;font:12px monospace}</style>
+<div id="fixture-controls"><span>Disposable fixture · synthetic invitations</span><label>Language <select id="fixture-language"><option value="en">English</option><option value="zh-CN">中文</option></select></label><label>Clipboard <select id="fixture-clipboard"><option value="denied">Denied</option><option value="allowed">Allowed</option></select></label><label><input id="fixture-hold" type="checkbox">Hold invitation</label><button id="fixture-release">Complete pending invitation</button></div>
+<main><h1>Agent Link</h1><div id="connections"></div></main><div id="fixture-result" role="status"></div>
+<script type="module">
+import {createAgentLinks} from '../../../web/src/components/agent-links.mjs';
+let language='en',clipboard='',reads=0,writes=0,invitations=0,release;
+const result=document.querySelector('#fixture-result'),languageInput=document.querySelector('#fixture-language'),clipboardInput=document.querySelector('#fixture-clipboard'),hold=document.querySelector('#fixture-hold');
+const render=()=>{result.textContent=`Invitations: ${invitations}; clipboard reads: ${reads}; writes: ${writes}`;};
+Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{writes++;render();if(clipboardInput.value==='denied')throw Error('Synthetic clipboard denied');clipboard=value;},readText:async()=>{reads++;render();return clipboard;}}});
+const addresses=[{kind:'tailscale',endpoint:'tcp://example.tailnet.ts.net:8793'},{kind:'private',interface:'en0',endpoint:'tcp://192.168.1.24:8793'},{kind:'loopback',endpoint:'tcp://127.0.0.1:8793'}];
+const component=createAgentLinks({root:document.querySelector('#connections'),locale:()=>language,request:async(path,options={})=>{if(path.endsWith('/invitation')){invitations++;render();if(hold.checked)await new Promise(resolve=>release=resolve);return {address:options.body.endpoint+'#synthetic-single-use-invitation',expires_at_ms:Date.now()+3600000};}return {addresses,items:[]};}});
+languageInput.onchange=()=>{language=languageInput.value;document.documentElement.lang=language;window.dispatchEvent(new Event('pot:locale'));};
+document.querySelector('#fixture-release').onclick=()=>{release?.();release=null;};
+await component.load();render();
+</script></html>

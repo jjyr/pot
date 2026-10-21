@@ -1,10 +1,21 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestAccessCommandRejectsEmbeddedNetworkActions(t *testing.T) {
+	for _, action := range []string{"connect", "disconnect"} {
+		var output bytes.Buffer
+		if err := accessCommand(context.Background(), []string{"-browser-root", t.TempDir(), action}, &output); err == nil {
+			t.Fatal("retired network action accepted", action)
+		}
+	}
+}
 
 func TestBrowserRootNeverSilentlyChangesControl(t *testing.T) {
 	root := t.TempDir()

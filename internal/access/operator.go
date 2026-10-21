@@ -181,7 +181,6 @@ func (m *Manager) WatchAccess(ctx context.Context) error {
 				err = browser.ReplaceAccess(c)
 				if err == nil {
 					m.applied = c.Generation
-					m.settings.Enabled = !c.Disabled
 				}
 			}
 			m.op.Unlock()

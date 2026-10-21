@@ -5,7 +5,7 @@ async parentPage=>{
  const context=await parentPage.context().browser().newContext({viewport:{width:1280,height:720},serviceWorkers:'block'}),page=await context.newPage(),errors=[],calls=[];
  let releasePreview,releaseConnect,items=[];
  const address='tcp://cloud-pot.tailnet.ts.net:8793#synthetic-invitation';
- await context.addInitScript(()=>{localStorage.setItem('pot-go-preview-locale','en');window.fixtureClipboard='';Object.defineProperty(navigator,'clipboard',{value:{readText:async()=>window.fixtureClipboard,writeText:async value=>{window.fixtureClipboard=value;}}});});
+ await context.addInitScript(()=>{localStorage.setItem('pot-go-preview-locale','en');window.fixtureClipboard='';window.fixtureClipboardWrites=0;window.fixtureClipboardDenied=false;Object.defineProperty(navigator,'clipboard',{value:{readText:async()=>window.fixtureClipboard,writeText:async value=>{window.fixtureClipboardWrites++;if(window.fixtureClipboardDenied)throw Error('Synthetic clipboard denied');window.fixtureClipboard=value;}}});});
  page.on('pageerror',error=>errors.push(error.message));
  await page.route('**/api/v1/agent-links**',async route=>{
   const request=route.request(),body=JSON.parse(request.postData()||'{}');calls.push({method:request.method(),body});
@@ -15,7 +15,7 @@ async parentPage=>{
   if(body.action==='reconnect')items[0].status='connected';
   if(body.action==='delete')items=[];
   if(new URL(request.url()).pathname.endsWith('/invitation'))return route.fulfill({json:{address:body.endpoint+'#synthetic-own-invitation'}});
-  return route.fulfill({json:{self:{node_id:'codex-node',kind:'codex',name:'Codex',address:'',status:'needs_access'},addresses:[{kind:'tailscale',endpoint:'tcp://codex.tailnet.ts.net:8793',requires_setup:true},{kind:'public',interface:'en0',endpoint:'tcp://203.0.113.10:8793'},{kind:'private',interface:'en0',endpoint:'tcp://192.168.1.10:8793'},{kind:'loopback',endpoint:'tcp://127.0.0.1:8793'}],network:{listen:'127.0.0.1:8793'},items,unread:99,unconfirmed:99}});
+  return route.fulfill({json:{self:{node_id:'codex-node',kind:'codex',name:'Codex',address:'',status:'needs_access'},addresses:[{kind:'tailscale',endpoint:'tcp://codex.tailnet.ts.net:8793'},{kind:'public',interface:'en0',endpoint:'tcp://203.0.113.10:8793'},{kind:'private',interface:'en0',endpoint:'tcp://192.168.1.10:8793'},{kind:'loopback',endpoint:'tcp://127.0.0.1:8793'}],network:{listen:'127.0.0.1:8793'},items,unread:99,unconfirmed:99}});
  });
  try{
   await page.goto(origin+'/codex-connections.html?theme=light#synthetic-owner');
@@ -27,9 +27,28 @@ async parentPage=>{
   assert(!await page.getByRole('button',{name:'Configure access',exact:true}).count(),'Discovery needs no separate access configuration');
   assert(!calls.some(call=>call.method==='POST'),'Discovery does not configure access or create invitations');
   for(const endpoint of ['tcp://codex.tailnet.ts.net:8793','tcp://203.0.113.10:8793','tcp://192.168.1.10:8793','tcp://127.0.0.1:8793']){
-   const row=rows.filter({hasText:endpoint});await row.getByRole('button',{name:'Copy connection address',exact:true}).click();await row.getByRole('button',{name:'Copied',exact:true}).waitFor();
+   const writesBefore=await page.evaluate(()=>fixtureClipboardWrites);
+   const row=rows.filter({hasText:endpoint});await row.getByRole('button',{name:'Get connection address',exact:true}).click();
+   const manual=page.getByLabel('Full connection address',{exact:true});await manual.waitFor();assert(await manual.inputValue()===endpoint+'#synthetic-own-invitation','Full invitation is immediately available for manual copying');
+   assert(await page.evaluate(()=>fixtureClipboardWrites)===writesBefore,'Preparing exposes the invitation without touching the clipboard');
+   const writes=await page.evaluate(()=>fixtureClipboardWrites);await page.locator('.agent-link-manual-copy').getByRole('button',{name:'Copy connection address',exact:true}).click();await page.locator('.agent-link-manual-copy').getByRole('button',{name:'Copied',exact:true}).waitFor();assert(await page.evaluate(()=>fixtureClipboardWrites)===writes+1,'Only the explicit shortcut accesses the clipboard');
    assert(await page.evaluate(()=>fixtureClipboard)===endpoint+'#synthetic-own-invitation','Each copied invitation uses the selected address');
   }
+  await page.evaluate(()=>{window.fixtureClipboardDenied=true;});
+  const writesBeforeDenied=await page.evaluate(()=>fixtureClipboardWrites);
+  await rows.first().getByRole('button',{name:'Get connection address',exact:true}).click();
+  const full=page.locator('.agent-link-manual-copy textarea');await full.waitFor();
+  const invitation=await full.inputValue(),invites=calls.filter(call=>call.body.endpoint).length,writes=await page.evaluate(()=>fixtureClipboardWrites);
+  assert(await full.getAttribute('readonly')!==null,'Manual invitation cannot be edited');
+  assert(writes===writesBeforeDenied,'Preparing the invitation needs no clipboard permission');
+  await page.locator('.agent-link-manual-copy').getByRole('button',{name:'Copy connection address',exact:true}).click();
+  await page.getByText('Clipboard copying is unavailable. Select the full address above and copy it manually.',{exact:true}).waitFor();
+  assert(await full.inputValue()===invitation&&calls.filter(call=>call.body.endpoint).length===invites,'Shortcut failure preserves the same manually copyable invitation');
+  await page.evaluate(()=>{localStorage.setItem('pot-go-preview-locale','zh-CN');window.dispatchEvent(new Event('pot:locale'));});
+  await page.getByLabel('完整连接地址',{exact:true}).waitFor();assert(await page.getByLabel('完整连接地址',{exact:true}).inputValue()===invitation,'Locale changes preserve the invitation');
+  await page.getByText('快捷复制不可用，请选中上方完整地址并手动复制。',{exact:true}).waitFor();
+  await page.keyboard.press('Escape');assert(await full.inputValue()==='','Closing clears the invitation');
+  await page.evaluate(()=>{window.fixtureClipboardDenied=false;localStorage.setItem('pot-go-preview-locale','en');window.dispatchEvent(new Event('pot:locale'));});
   assert(!calls.find(call=>call.method==='POST').body.assistant_id,'Invitations are not bound to a local assistant');
   assert(!await page.locator('.agent-link-recovery,.agent-link-unread').count(),'Manual message consumer recovery is removed');
   await page.getByRole('button',{name:'Add Agent',exact:true}).click();const editor=page.locator('.agent-connection-setup');
