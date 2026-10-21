@@ -64,8 +64,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     form.hidden=!can('task.input')&&!can('task.interrupt');input.readOnly=!can('task.input');input.setAttribute('aria-label',t('tasks.followupLabel'));input.placeholder=t('tasks.followupPlaceholder');
     send.hidden=false;send.replaceChildren(icon(stop?'stop':'send'));label(send,stop?tr('Stop task','停止任务'):t('tasks.sendFollowup'));
     send.disabled=busy||(!running&&!hasText)||!!connectionError||(stop?!can('task.interrupt'):!can('task.input'));retry.disabled=busy;
-    footer.hidden=running;footer.textContent=t(record.info?.archived?'tasks.archivedHint':'tasks.followupHint');
-    if(linked()){footer.hidden=false;footer.textContent=t('agentLinks.remoteTaskHint').replace('{name}',linked().name||t(linked().kind==='codex'?'agentLinks.sourceCodex':'agentLinks.sourcePot'));}
+    footer.hidden=running||!can('task.input');footer.textContent=t(record.info?.archived?'tasks.archivedHint':'tasks.followupHint');
     if(!running&&record.info?.archive_reason)footer.textContent+=' · '+record.info.archive_reason;
   }
   function renderStage(){
