@@ -1,3 +1,4 @@
+import {linkDisplayName,linkHostLabel} from '../state/machine-identity.mjs';
 import {translate} from '../locales/messages.mjs';
 import {node as n, action, field} from './primitives.mjs';
 import {icon} from './icons.mjs';
@@ -54,7 +55,7 @@ export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({
       if(!snapshot?.items?.length)list.append(n('p','hint',t('agentLinks.noConnections')));
       for(const link of snapshot?.items||[]){
         const paused=link.status==='disconnected',row=n('div','agent-link-row'),info=n('div','row-info'),buttons=n('div','page-toolbar');
-        info.append(n('strong','',link.peer?.name||link.peer?.node_id),n('span','hint',t(paused?'agentLinks.disconnected':'agentLinks.status.'+(link.status==='connected'?'connected':link.status==='connecting'?'connecting':'offline'))));
+        info.append(n('strong','',linkDisplayName(link)),n('span','hint',linkHostLabel(link)||t('machine.unavailable')),n('span','hint',t(paused?'agentLinks.disconnected':'agentLinks.status.'+(link.status==='connected'?'connected':link.status==='connecting'?'connecting':'offline'))));
         const lifecycle=action(t(paused?'agentLinks.reconnect':'agentLinks.disconnect'),async event=>{event.currentTarget.disabled=true;try{await (paused?reconnect(link):disconnect(link));}catch{}finally{sync();}});
         buttons.append(lifecycle,action(t('agentLinks.delete'),()=>remove(link),{danger:true}));row.append(connectionBrand(link.peer?.kind),info,buttons);list.append(row);
       }

@@ -12,8 +12,14 @@ them or change stable routing/policy IDs. Only up, non-loopback interfaces suppl
 unicast addresses; link-local addresses are omitted. Addresses are deduplicated
 and sorted with IPv4 before IPv6. These addresses do not prove remote reachability.
 The Link graph and inspector show the same host information directly.
+Tasks, tool execution details and approval cards resolve execution IDs through
+the owning node's machine inventory and show hostname plus the first interface IP.
+Schedule editors select these machine labels while submitting stable IDs.
+Unavailable inventory shows a localized missing-information label, never an ID.
+Connection lists and assistant source labels show the peer name and available
+host information; they never fall back to a node ID.
 Execution machines show their hostname and one interface IP. Linked nodes show
-the reported hostname, falling back to the saved TCP endpoint's host and port;
+the reported hostname together with the saved TCP endpoint's host and port;
 this endpoint is a connection address, not a discovered remote interface inventory.
 An incoming-only link may have no saved endpoint. Missing host information stays
 empty. Internal node IDs and a technical-details disclosure are not shown.

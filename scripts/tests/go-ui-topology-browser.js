@@ -38,6 +38,7 @@ async page => {
  assert(await page.locator('.topology-inspector .topology-host').textContent()===await page.locator('.topology-node.selected .topology-node-subtitle').textContent(),'Local host information matches the graph');
  await page.locator('.topology-node').filter({hasText:'Cloud Pot'}).click();
  assert(await page.getByRole('button',{name:'Open chat · Cloud assistant',exact:true}).locator('.avatar-image').getAttribute('src')===await page.evaluate(()=>topologyFixture.links.find(link=>link.id==='cloud-link').assistants[0].avatar),'Remote Pot assistants use their advertised profile avatars');
+ assert(await page.locator('.topology-inspector .topology-host').textContent()==='cloud-worker · 100.88.0.8:8793','Remote host and connection address are displayed together');
  assert(await page.locator('.topology-inspector .topology-host').textContent()===await page.locator('.topology-node.selected .topology-node-subtitle').textContent(),'Remote hostname matches the graph without a second endpoint row');
  await page.evaluate(()=>{topologyFixture.links.find(link=>link.id==='cloud-link').observation.value.hostname='';return topologyFixture.pages.refresh(['agent-links']);});
  assert(await page.locator('.topology-inspector .topology-host').textContent()==='100.88.0.8:8793'&&await page.locator('.topology-node.selected .topology-node-subtitle').textContent()==='100.88.0.8:8793','Both views fall back to the same IP endpoint when the hostname is unavailable');

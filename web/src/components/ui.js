@@ -1,3 +1,4 @@
+import {machinePresentation} from '../state/machine-identity.mjs';
 import {createCompaction} from './compaction.mjs';
 import {projectLinkedAssistants,supportsCapability} from '../state/agent-links.mjs';
 import {agentSource} from './connection-visuals.mjs';
@@ -690,7 +691,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
  record.compact.update(message);
  }else if(message.role==='tool'&&message.tool){
       const scope=client.scope?.()||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
-      if(!record.tool){record.tool=createToolCall({memory:toolMemory,key,locale:()=>locale,onDecision:(approval,action)=>pages.decideApproval(approval,action),onInteract:event=>reading.engage(event),onLocate:(call,turn)=>{const target=renderingForest.byID.get(turn+':'+call)?.message;if(target)jumpToMessage(target.id,{expand:true});},...markdownFiles(scope)});bubble.append(record.tool.element);}
+      if(!record.tool){record.tool=createToolCall({memory:toolMemory,key,locale:()=>locale,machineLabel:id=>machinePresentation(client).label(id,scope,locale),onDecision:(approval,action)=>pages.decideApproval(approval,action),onInteract:event=>reading.engage(event),onLocate:(call,turn)=>{const target=renderingForest.byID.get(turn+':'+call)?.message;if(target)jumpToMessage(target.id,{expand:true});},...markdownFiles(scope)});bubble.append(record.tool.element);}
       record.tool.update(message,{offline:connection==='offline'||disconnected,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
     }else if(message.role==='assistant'){
       record.reply ||= createReplyBubble(bubble);
@@ -920,12 +921,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     messageWindow.set([]);messageNodes.clear();windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);
     input.value='';directoryOpen=true;error='';
   }
-  const stopResources=client.resources?.subscribe((meta,reason)=>{if(disposed||!['/api/v1/spaces','/api/v1/assistants','/api/v1/agent-links'].includes(meta.path))return;if(reason){error=translate(locale,'loading.stale');updateControls();return;}if(error===translate(locale,'loading.stale'))error='';loadDirectory();});
+  const stopResources=client.resources?.subscribe((meta,reason)=>{if(disposed||!['/api/v1/spaces','/api/v1/assistants','/api/v1/agent-links','/api/v1/machines'].includes(meta.path))return;if(reason){error=translate(locale,'loading.stale');updateControls();return;}if(error===translate(locale,'loading.stale'))error='';loadDirectory();});
   const directoryQueue=createRefreshQueue(()=>readDirectory(),{active:()=>!disposed});
   function loadDirectory(){return directoryQueue.run();}
   async function readDirectory() {
     if (!client.production) return;
     const notificationEpoch=notifications?.epoch;
+    const previousMachines=machinePresentation(client).revision;
     const ticket = ++directoryEpoch,previousSpaces=JSON.stringify(spaces),previousOwners=JSON.stringify(assistants.map(item=>[item.space_id,item.id,item.name,item.offline,item.capabilities]));
     try {
       const catalog = await (client.read||client.request)('/api/v1/spaces', {owner:'', space:'',signal:abort.signal});
@@ -936,7 +938,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       const projectAssistants=(value,space,offline)=>{let items=value;if(typeof items==='string'){try{items=JSON.parse(items);}catch{items=[];}}return (items?.items||items||[]).map(item=>({...item,control_id:space.control_id||space.id,space_id:space.id,space_name:space.name,space_kind:space.kind,offline}));};
       const linkFailures=[];
       const results = await Promise.allSettled(spaces.map(async space => {
-        const items = await (client.read||client.request)('/api/v1/assistants', {owner:'', space:space.id,signal:abort.signal});
+        const [items]=await Promise.all([(client.read||client.request)('/api/v1/assistants',{owner:'',space:space.id,signal:abort.signal}),machinePresentation(client).load({space:space.id,signal:abort.signal})]);
         const local=projectAssistants(items,space,space.connected===false);
         try{const links=await (client.read||client.request)('/api/v1/agent-links',{owner:'',space:space.id,signal:abort.signal});return [...local,...projectLinkedAssistants(links,space)];}
         catch{linkFailures.push(space.id);return [...local,...assistants.filter(item=>item.origin&&item.space_id===space.id).map(item=>({...item,offline:true}))];}
@@ -944,7 +946,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if (ticket !== directoryEpoch || disposed) return;
       assistants = results.flatMap((result, index) => result.status === 'fulfilled' ? result.value : (()=>{const space=spaces[index],previous=assistants.filter(item=>item.space_id===space.id);return previous.length?previous.map(item=>({...item,offline:true})):projectAssistants(space.assistants||[],space,true);})());
       client.assistants=assistants;
-      const changed=[];if(previousSpaces!==JSON.stringify(spaces))changed.push('spaces');if(previousOwners!==JSON.stringify(assistants.map(item=>[item.space_id,item.id,item.name,item.offline,item.capabilities])))changed.push('assistants');if(changed.length)pages.refresh(changed);
+      const changed=[];if(previousMachines!==machinePresentation(client).revision)changed.push('machines');if(previousSpaces!==JSON.stringify(spaces))changed.push('spaces');if(previousOwners!==JSON.stringify(assistants.map(item=>[item.space_id,item.id,item.name,item.offline,item.capabilities])))changed.push('assistants');if(changed.length)pages.refresh(changed);
       for(const item of assistants){const arrival=replies.observe(controlOf(item),item.id,item.reply_id||'',item.reply_count||0,!item.offline);if(arrival.arrived&&route==='chat'&&document.visibilityState!=='hidden'&&!reducedMotion.matches){reactions.set(replyKey(controlOf(item),item.id),performance.now());setTimeout(()=>{if(!disposed){directorySignature='';renderShell();}},650);}}saveReads();
       if (linkFailures.length||results.some(result => result.status === 'rejected')) error = t('partialOffline');else if(error===t('partialOffline'))error='';
       if(selectedAssistant&&!pages.editing&&!assistants.some(item=>item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id)){
@@ -952,7 +954,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         if(source>=0&&results[source].status==='fulfilled'&&spaces[source].connected!==false)clearSelectedAssistant();
       }
       if (selectedAssistant){selectedAssistant = assistants.find(item => item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id) || selectedAssistant;if(selectedAssistant.offline)connection='offline';}
-      renderShell();
+      renderShell();renderMessages();
       if(!assistants.length&&route==='chat'&&!pages.editing){
         const available=!linkFailures.length&&results.every(result=>result.status==='fulfilled')&&spaces.some(space=>space.connected!==false);
         if(available){directoryOpen=false;route='add-assistant';renderShell();await pages.show('add-assistant');}else{directoryOpen=false;renderShell();const empty=el('div','empty-chat');empty.append(el('p','hint',t('partialOffline')));const retry=el('button','control',t('retry'));retry.onclick=()=>loadDirectory();empty.append(retry);messageColumn.replaceChildren(empty);}
