@@ -18,20 +18,20 @@ export function createEnterGuard(now = () => performance.now()) {
   };
 }
 
-export function bindComposer(input, {onInput, onSend, onCompositionEnd, mobile = isMobileBrowser()}) {
+export function bindComposer(input, {onInput, onSend, onCompositionEnd, layout = work => work(), mobile = isMobileBrowser()}) {
   const guard = createEnterGuard();
   if (mobile) input.setAttribute('enterkeyhint', 'enter');
   let measuredValue, measuredWidth, measuredScrollHeight;
-  const resize = () => {
+  const resize = () => layout(() => {
     const width = input.clientWidth;
     if (!width || (input.value === measuredValue && width === measuredWidth && input.scrollHeight === measuredScrollHeight)) return;
     input.style.height = 'auto';
     input.style.height = `${Math.min(input.scrollHeight, 150)}px`;
     measuredValue = input.value; measuredWidth = input.clientWidth; measuredScrollHeight = input.scrollHeight;
-  };
+  });
   const start = () => guard.start();
-  const end = () => { guard.end(); onInput(input.value); resize(); onCompositionEnd?.(); };
-  const change = () => { onInput(input.value); resize(); };
+  const end = () => layout(() => { guard.end(); onInput(input.value); resize(); onCompositionEnd?.(); });
+  const change = () => layout(() => { onInput(input.value); resize(); });
   const key = event => {
     if (!mobile && guard.shouldSend(event)) { event.preventDefault(); onSend(); }
   };

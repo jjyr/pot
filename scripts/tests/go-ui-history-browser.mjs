@@ -4,6 +4,7 @@ const frame=document.querySelector('iframe'),results=document.querySelector('#re
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const wait=async(test,label)=>{for(let i=0;i<300;i++){if(test())return;await pause(20);}throw Error('Timed out: '+label);};
 const check=(value,label)=>{if(!value)throw Error(label);results.textContent+='PASS '+label+'\n';};
+function userScroll(history,top){const w=history.ownerDocument.defaultView;history.dispatchEvent(new w.WheelEvent('wheel',{deltaY:top-history.scrollTop||1,bubbles:true}));history.scrollTop=top;}
 const app=()=>frame.contentWindow,doc=()=>frame.contentDocument;
 const anchor=()=>{const history=doc().querySelector('.history'),top=history.getBoundingClientRect().top;const row=[...doc().querySelectorAll('article.message')].find(row=>{const box=row.getBoundingClientRect();return box.height&&box.top<=top+4&&box.bottom>top;})||[...doc().querySelectorAll('article.message')].find(row=>row.getBoundingClientRect().top>top);return {id:row?.dataset.messageId,offset:row?.getBoundingClientRect().top-top};};
 const position=id=>{const history=doc().querySelector('.history'),row=[...doc().querySelectorAll('article.message')].find(row=>row.dataset.messageId===id);return row?.getBoundingClientRect().top-history.getBoundingClientRect().top;};
@@ -16,14 +17,14 @@ async function run(mobile){
   const {client,metrics}=app().fixture,history=doc().querySelector('.history');
   check(metrics.frames[0].kind==='reset'&&metrics.frames[0].count<=113,'bounded initial snapshot: '+metrics.frames[0].count+' messages, '+metrics.frames[0].bytes+' bytes');
   check(doc().querySelectorAll('article.message').length<80,'initial mounted messages: '+doc().querySelectorAll('article.message').length);
-  history.scrollTop-=24;await pause(200);
+  userScroll(history,history.scrollTop-24);await pause(200);
   check(history.scrollHeight-history.clientHeight-history.scrollTop>=23,'small upward scroll escapes bottom following');
   const smallScroll=anchor(),smallFrames=metrics.frames.length;
   await client.send({request_id:'small-scroll-'+Date.now(),conversation_id:'main',text:'Small-scroll reading fixture'});
   await wait(()=>metrics.frames.slice(smallFrames).some(value=>value.kind==='delta'),'update near bottom');await pause(800);
   check(Math.abs(position(smallScroll.id)-smallScroll.offset)<5,'streaming within 80px of bottom preserves paused reading');
   doc().querySelector('.latest-button').click();await pause(200);
-  history.scrollTop=Math.max(300,history.scrollHeight/2);history.dispatchEvent(new Event('scroll'));await pause(300);
+  userScroll(history,Math.max(300,history.scrollHeight/2));history.dispatchEvent(new Event('scroll'));await pause(300);
   const before=anchor(),pages=metrics.pages.length;doc().querySelector('.history-page-status').click();
   await wait(()=>metrics.pages.length>pages,'older page');await pause(800);
   const error=Math.abs(position(before.id)-before.offset);
@@ -49,7 +50,7 @@ async function run(mobile){
   const labels=doc().querySelector('.history-page-status').textContent;
   check(mobile?/加载|开头/.test(labels):/Load|Beginning/.test(labels),'current locale history labels');
   const selection=app().getSelection(),prose=doc().querySelector('.reply-content');
-  if(prose?.textContent){const range=doc().createRange();range.selectNodeContents(prose);selection.removeAllRanges();selection.addRange(range);const selectedRow=prose.closest('article');history.scrollTop=Math.max(300,history.scrollTop-1500);history.dispatchEvent(new Event('scroll'));await pause(200);check(selectedRow.isConnected,'selected text remains mounted');selection.removeAllRanges();}
+  if(prose?.textContent){const range=doc().createRange();range.selectNodeContents(prose);selection.removeAllRanges();selection.addRange(range);const selectedRow=prose.closest('article');userScroll(history,Math.max(300,history.scrollTop-1500));history.dispatchEvent(new Event('scroll'));await pause(200);check(selectedRow.isConnected,'selected text remains mounted');selection.removeAllRanges();}
   doc().querySelector('.latest-button').click();await pause(400);
   // Failure restores the same original input, and retry must not duplicate it.
   const setInput=text=>{input.value=text;input.dispatchEvent(new Event('input',{bubbles:true}));};
@@ -59,7 +60,7 @@ async function run(mobile){
   setInput('steering-primary-fixture');submit();await wait(()=>doc().querySelector('.reply-bubble.is-waiting,.reply-bubble.is-streaming'),'active turn');setInput('steering-addition-fixture');await wait(()=>!doc().querySelector('.send-button').disabled,'steering receipt ready');submit();await pause(1000);const afterSteering=await client.snapshot();check(afterSteering.messages.some(message=>message.steering&&message.text==='steering-addition-fixture'),'steering input reconciles during streaming');
   let maxDOM=doc().querySelectorAll('article.message').length;
   for(let page=0;page<10;page++){
-    history.scrollTop=500;history.dispatchEvent(new Event('scroll'));await pause(80);
+    userScroll(history,500);history.dispatchEvent(new Event('scroll'));await pause(80);
     const pagesBefore=metrics.pages.length;doc().querySelector('.history-page-status').click();await wait(()=>metrics.pages.length>pagesBefore,'long traversal page');await pause(100);
     maxDOM=Math.max(maxDOM,doc().querySelectorAll('article.message').length);
   }
@@ -67,7 +68,7 @@ async function run(mobile){
   check(metrics.errors.length===0,'no browser errors');
   check(doc().querySelectorAll('article.message').length<90,'final mounted messages: '+doc().querySelectorAll('article.message').length);
   results.textContent+='DONE '+(mobile?'mobile':'desktop')+' — '+metrics.pages.length+' page reads; largest page '+Math.max(...metrics.pages.map(page=>page.count))+' messages\n';
- }catch(reason){results.textContent+='FAIL '+reason.stack+'\n';}
+ }catch(reason){results.textContent+='FAIL '+reason.message+'\n'+reason.stack+'\n';}
 }
 document.querySelector('#run').onclick=()=>run(false);document.querySelector('#mobile').onclick=()=>run(true);
 document.querySelector('#scroll').onclick=async()=>{
@@ -99,7 +100,7 @@ document.querySelector('#scroll').onclick=async()=>{
     await wait(()=>metrics.pages.length>0,'gesture loads history without scroll event');await pause(300);
     check(metrics.pages.length===1,`${gesture}: repeated gestures share one pending history read`);
     check(history.scrollHeight>history.clientHeight,`${gesture}: older messages become scrollable`);
-    const count=metrics.pages.length;history.scrollTop=history.clientHeight-10;
+    const count=metrics.pages.length;userScroll(history,history.clientHeight-10);
     await wait(()=>metrics.pages.length>count,'one viewport prefetch');
     check(metrics.errors.length===0,'no browser errors');
    }
@@ -118,7 +119,7 @@ document.querySelector('#scroll').onclick=async()=>{
    check(history.scrollHeight-history.clientHeight-history.scrollTop<=1&&doc().querySelector('.latest-button').hidden,'new messages still follow after gestures on complete short history');
   }
   results.textContent+='DONE upward-scroll boundary checks\n';
- }catch(reason){results.textContent+='FAIL '+reason.stack+'\n';}
+ }catch(reason){results.textContent+='FAIL '+reason.message+'\n'+reason.stack+'\n';}
 };
 document.querySelector('#earlier').onclick=()=>doc().querySelector('.history-page-status').click();document.querySelector('#latest').onclick=()=>doc().querySelector('.latest-button').click();
 
@@ -127,7 +128,7 @@ document.querySelector('#extras').onclick=async()=>{
  try{
   await wait(()=>app().fixture&&doc().querySelector('article.message'),'mounted chat');
   const {client,metrics}=app().fixture,history=doc().querySelector('.history');
-  history.scrollTop=Math.max(500,history.scrollHeight/2);history.dispatchEvent(new Event('scroll'));await pause(500);
+  userScroll(history,Math.max(500,history.scrollHeight/2));history.dispatchEvent(new Event('scroll'));await pause(500);
   const before=anchor();frame.style.width='700px';await pause(500);
   check(Math.abs(position(before.id)-before.offset)<5,'viewport resize preserves reading anchor');
   frame.style.width='390px';await pause(500);check(Math.abs(position(before.id)-before.offset)<5,'phone width restore preserves reading anchor');
@@ -147,5 +148,5 @@ document.querySelector('#extras').onclick=async()=>{
   await pause(800);check(Math.abs(position(saved.id)-saved.offset)<5,'cached navigation and authoritative refresh preserve anchor');
   check(doc().querySelector('.chat-approvals').isConnected&&!doc().querySelector('.message-window').contains(doc().querySelector('.chat-approvals')),'approval region remains outside recycled messages');
   check(metrics.errors.length===0,'no browser errors');results.textContent+='DONE cache and resize checks\n';
- }catch(reason){results.textContent+='FAIL '+reason.stack+'\n';}
+ }catch(reason){results.textContent+='FAIL '+reason.message+'\n'+reason.stack+'\n';}
 };

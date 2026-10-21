@@ -3,7 +3,8 @@ import {projectLinkedAssistants} from '../state/agent-links.mjs';
 import {agentSource} from './connection-visuals.mjs';
 import {createUpdates} from './updates.mjs';
 import {mergeHistoryPage} from '../state/chat-history.mjs';
-import {createMessageWindow,readingAnchor,restoreReadingAnchor} from './message-window.mjs';
+import {createMessageWindow} from './message-window.mjs';
+import {createReadingCursor} from './reading-cursor.mjs';
 import {notificationOnboarding} from './notification-onboarding.mjs';
 import {createSendConfirmation} from '../state/send-confirmation.mjs';
 import {bindMessageSelection,renderMessageReferences,referenceProblem} from './message-references.mjs';
@@ -30,7 +31,6 @@ import {reconcile} from './reconcile.mjs';
 import {createRefreshQueue,relevantChange} from '../state/refresh.mjs';
 import {bindTaskClock} from './task-time.mjs';
 import {createBackgroundTasks} from './background-tasks.mjs';
-import {captureReadingPosition,restoreReadingPosition} from './reading-position.mjs';
 import {bindResumeRecovery} from '../state/resume.mjs';
 import {bindViewport} from './viewport.mjs';
 import {createAssistantCreation} from '../state/assistant-creation.mjs';
@@ -86,7 +86,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   let creationStarting=false,creationFailed=false;
   const assistantCreation=createAssistantCreation({request:(...args)=>client.request(...args),locale:()=>locale,changed:()=>{if(!disposed)renderShell();}});
   const positions = new Map(), cachedSnapshots = new Map();
-  let chatShown=false,pendingReadingPosition=null,pendingTaskToggle=null,lastTaskReadingPosition=null,pendingFollow=false;
+  let chatShown=false,pendingTaskToggle=null;
   let chatPosition=null,chatNavigation=0;
   const chatHeights=new Map();
   let restoredSnapshot=false,awaitingSnapshot=false;
@@ -139,6 +139,19 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   assistantProfile.setAttribute('popover', 'auto');
   assistantProfile.setAttribute('role', 'dialog');
   root.append(rail, titlebar, directory, workspace, menu, preferences, assistantProfile);
+  chatApprovals.dataset.scrollAnchor='chat-approvals';
+  const reading=createReadingCursor(history,{
+    active:()=>chatShown&&!disposed,
+    requestRender:()=>renderMessages(),
+    changed:()=>{latest.hidden=reading.following;state.uiAnchor=reading.following?null:selectedSequence()||reading.anchor?.sequence||null;},
+    interact:()=>cancelChatPosition(),
+    upward:()=>loadEarlierNearTop(),
+    canReadEarlier:()=>!!(state.snapshot?.history?.has_more||state.snapshot?.history?.has_newer),
+    scrolled:()=>{
+      loadEarlierNearTop();
+      if(!historyLoading&&!historyFailure&&nearBottom()&&state.snapshot?.history?.has_newer){pauseFollowing();readHistory({after:state.snapshot.history.after});}
+    },
+  });
   const notifications=client.production?createSystemNotifications({client,surface,locale:()=>locale,
     view:()=>({...((route==='tasks'&&pages?.notificationContext)||{space:selectedAssistant?.space_id||'',owner:selectedAssistant?.id||''}),route:menuOpen||preferencesOpen||root.classList.contains('show-directory')?'navigation':route}),
     open:openNotification}):null;
@@ -199,6 +212,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   client.setReducedMotion?.(reducedMotion.matches).catch(()=>{});
   reducedMotion.addEventListener('change',reducedChanged);window.addEventListener('focus',focusRead);document.addEventListener('visibilitychange',focusRead);window.addEventListener('storage',readStorage);
   const editor = bindComposer(input, {
+    layout:work=>reading.layout(work),
     onInput: text => { setDraft(state, text, editorOwner); updateControls(); },
     onSend: submit,
     onCompositionEnd: () => { syncEditor(); updateControls(); },
@@ -219,21 +233,20 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   async function readHistoryNow(query,{around=false,positionTicket}={}) {
     if(!client.history||!state.snapshot||historyLoading)return false;
-    const receivedEpoch=epoch,generation=++historyGeneration,scope={...client.scope()},anchor=readingAnchor(history);
+    const receivedEpoch=epoch,generation=++historyGeneration,scope={...client.scope()};
     historyLoading=true;historyFailure='';renderMessages();
     try {
       const page=await client.history(query,{...scope,signal:abort.signal});
       if(disposed||receivedEpoch!==epoch||generation!==historyGeneration||positionTicket&&!currentChatPosition(positionTicket))return false;
       const merged=mergeHistoryPage(state.snapshot,page,state.uiAnchor,{around});
       if(!merged)return false;
-      state.snapshot=merged;cacheSnapshot(merged);lastAnchor=anchor;resizeAnchor=true;renderMessagesNow();
-      if(around&&anchor&&!positionTicket){messageWindow.seek(anchor.id);renderMessagesNow();restoreReadingAnchor(history,anchor);}
+      state.snapshot=merged;cacheSnapshot(merged);renderMessagesNow();
       return true;
     }catch(reason){if(!disposed&&receivedEpoch===epoch&&generation===historyGeneration&&(!positionTicket||currentChatPosition(positionTicket))){historyFailure=reason?.status===404?'history.missing':'history.failed';}return false;}
     finally{if(!disposed&&receivedEpoch===epoch&&generation===historyGeneration){historyLoading=false;renderMessages();}}
   }
-  async function jumpToMessage(id){
-    const ticket=positionChat({kind:'message',id});
+  async function jumpToMessage(id,{expand=false}={}){
+    const ticket=positionChat({kind:'message',id,expand});
     let message=state.snapshot?.messages.find(message=>message.id===id&&!message.context_only);
     if(!message){if(!await readHistory({around:id},{around:true,positionTicket:ticket})){if(currentChatPosition(ticket))chatPosition=null;return;}message=state.snapshot?.messages.find(message=>message.id===id);}
     if(!currentChatPosition(ticket))return;
@@ -310,7 +323,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   form.addEventListener('submit', event => { event.preventDefault(); if(!editor.mobile)submit(); });
   send.addEventListener('click', () => state.snapshot?.running&&!draft(state).trim()&&!attachmentUI?.items().length ? cancel() : submit());
-  function updateControls() {
+  function updateControls() { return reading.layout(updateControlsLayout); }
+  function updateControlsLayout() {
     const snapshot = state.snapshot;
     const pending = snapshot && state.pending.get(ownerKey(snapshot));
     const running = snapshot?.running;
@@ -419,14 +433,14 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const shellRoots={rail,titlebar,menu};
   function rememberChatPosition(){
     if(!state.snapshot)return;
-    positions.set(snapshotKey(),{top:history.scrollTop,anchor:readingAnchor(history),reading:captureReadingPosition(history),following});
+    positions.set(snapshotKey(),reading.snapshot());
     chatHeights.delete(snapshotKey());chatHeights.set(snapshotKey(),new Map(windowHeights));
     while(chatHeights.size>8)chatHeights.delete(chatHeights.keys().next().value);
   }
   const closeAssistantProfile = () => assistantProfile.hidePopover();
   window.addEventListener('resize', closeAssistantProfile);
   function toggleDirectory() {
-    positionChat({kind:'restore',position:{top:history.scrollTop,anchor:readingAnchor(history),reading:captureReadingPosition(history),following}});
+    positionChat({kind:'restore',position:reading.snapshot()});
     directoryCollapsed = !directoryCollapsed;
     renderShell();
     root.querySelector('.directory-toggle')?.focus({preventScroll: true});
@@ -596,81 +610,30 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   }
   function selectedSequence(){const selection=getSelection();if(!selection?.rangeCount||selection.isCollapsed||!history.contains(selection.anchorNode))return null;const element=selection.anchorNode.nodeType===Node.ELEMENT_NODE?selection.anchorNode:selection.anchorNode.parentElement;return element?.closest('article.message')?.dataset.sequence||null;}
   function nearBottom() { return history.scrollHeight - history.clientHeight - history.scrollTop < 80; }
-  function atBottom() { return history.scrollHeight - history.clientHeight - history.scrollTop <= 1; }
-  let following=true,renderFrame=0,lastAnchor=null,resizeAnchor=false,lastScrollTop=0,upwardIntent=false;
-  let historyWidth=0,historyHeight=0;
-  // A shell redraw may precede ResizeObserver. Retain the pre-reflow anchor
-  // until the new viewport has been measured and positioned.
-  const historyResized=()=>historyWidth>0&&(history.clientWidth!==historyWidth||history.clientHeight!==historyHeight);
+  let renderFrame=0;
   function currentChatPosition(ticket){return !disposed&&ticket.generation===chatNavigation&&ticket.key===snapshotKey();}
   function cancelChatPosition(){chatNavigation++;chatPosition=null;}
   function positionChat(intent){
-    const ticket={...intent,key:snapshotKey(),generation:++chatNavigation};
-    chatPosition=ticket;pendingFollow=false;pendingReadingPosition=null;
-    following=intent.kind==='latest'||intent.kind==='restore'&&(intent.position?.following??true);
-    upwardIntent=false;renderMessages();return ticket;
+    const ticket={kind:intent.kind,key:snapshotKey(),generation:++chatNavigation};
+    chatPosition=ticket;
+    if(intent.kind==='restore')reading.restore(intent.position);
+    else if(intent.kind==='latest')reading.latest();
+    else reading.locate({id:intent.id,expand:intent.expand});
+    renderMessages();return ticket;
   }
-  function scrollBottom() { following=true;upwardIntent=false;history.scrollTop = history.scrollHeight;lastScrollTop=history.scrollTop; latest.hidden = true; }
-  function pauseFollowing(){cancelChatPosition();following=false;pendingFollow=false;latest.hidden=false;}
+  function pauseFollowing(){cancelChatPosition();reading.pause();}
   function loadEarlierNearTop(){
     if(!historyLoading&&!historyFailure&&history.scrollTop<Math.max(180,history.clientHeight)&&state.snapshot?.history?.has_more){
       pauseFollowing();readHistory({before:state.snapshot.history.before});
     }
   }
-  function scrollUpIntent(event){
-    if(event.defaultPrevented||!chatShown)return;
-    // Let nested output panes consume their own scrolling first.
-    for(let node=event.target instanceof Element?event.target:null;node&&node!==history;node=node.parentElement){
-      if(node.scrollTop>0&&node.scrollHeight>node.clientHeight&&/^(auto|scroll)$/.test(getComputedStyle(node).overflowY))return;
-    }
-    if(history.scrollHeight<=history.clientHeight+1&&!state.snapshot?.history?.has_more&&!state.snapshot?.history?.has_newer)return;
-    upwardIntent=true;pauseFollowing();loadEarlierNearTop();
-  }
-  history.addEventListener('wheel',event=>{
-    if(!event.ctrlKey&&!event.metaKey&&Math.abs(event.deltaY)>Math.abs(event.deltaX))cancelChatPosition();
-    if(!event.ctrlKey&&!event.metaKey&&event.deltaY<0&&Math.abs(event.deltaY)>Math.abs(event.deltaX))scrollUpIntent(event);
-  },{passive:true});
-  history.addEventListener('pointerdown',cancelChatPosition,{passive:true});
-  let touchY=null;
-  history.addEventListener('touchstart',event=>{cancelChatPosition();touchY=event.touches.length===1?event.touches[0].clientY:null;},{passive:true});
-  history.addEventListener('touchmove',event=>{
-    const nextY=event.touches.length===1?event.touches[0].clientY:null;
-    if(touchY!==null&&nextY!==null&&nextY>touchY)scrollUpIntent(event);
-    touchY=nextY;
-  },{passive:true});
-  history.addEventListener('keydown',event=>{
-    if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End','Tab',' '].includes(event.key))cancelChatPosition();
-    if(event.ctrlKey||event.metaKey||event.altKey||event.target.closest('input,textarea,select,button,a,summary,[contenteditable]'))return;
-    if(['ArrowUp','PageUp','Home'].includes(event.key)||event.key===' '&&event.shiftKey)scrollUpIntent(event);
-  });
-  history.addEventListener('scroll', () => {
-    if(!chatShown)return;
-    if(historyResized()){requestMessageRender(true);return;}
-    const focus=document.activeElement;
-    if(chatPosition?.kind==='message'&&chatPosition.resolved&&focus instanceof HTMLIFrameElement&&history.contains(focus)){
-      // Native embedded viewers can focus themselves while loading in overscan.
-      // Keep the explicit destination until the reader gestures or focuses it.
-      renderMessagesNow();return;
-    }
-    // Programmatic restoration already recorded this exact viewport. Its queued
-    // scroll event must not start pagination or cancel a newer navigation intent.
-    if(Math.abs(history.scrollTop-lastScrollTop)<.5)return;
-    lastTaskReadingPosition=captureReadingPosition(history);
-    if(history.scrollTop<lastScrollTop-.5)pauseFollowing();
-    else if(atBottom()){following=true;upwardIntent=false;}
-    lastScrollTop=history.scrollTop;latest.hidden=following;
-    lastAnchor=readingAnchor(history);state.uiAnchor=selectedSequence()||lastAnchor?.sequence||null;
-    renderMessages();
-    loadEarlierNearTop();
-    if(!historyLoading&&!historyFailure&&nearBottom()&&state.snapshot?.history?.has_newer){pauseFollowing();readHistory({after:state.snapshot.history.after});}
-  }, {passive: true});
   latest.onclick = async()=>{const ticket=positionChat({kind:'latest'});if(state.snapshot?.history?.has_newer)await readHistory({},{around:true,positionTicket:ticket});if(!currentChatPosition(ticket))return;state.uiAnchor=null;renderMessagesNow();};
   historyStatus.onclick=()=>{pauseFollowing();if(historyFailure==='history.missing'){historyFailure='';renderMessages();}else if(!historyLoading&&state.snapshot?.history?.has_more)readHistory({before:state.snapshot.history.before});};
   const messageNodes = new Map(),toolMemory=new Map();
   const taskCache=new Map();
   const backgroundTaskView=createBackgroundTasks({locale:()=>locale,
     onOpen:task=>{const returnTo={route:'chat',scope:{...client.scope()}};route='tasks';pages.openTask(task,{returnTo});renderShell();},
-    onToggle:change=>{pendingReadingPosition=captureReadingPosition(history,{ignoreToggle:!!change.expanded});pendingTaskToggle=change;pendingFollow=false;following=false;renderMessages();},
+    onToggle:change=>{cancelChatPosition();reading.pause({ignoreToggle:!!change.expanded});pendingTaskToggle=change;renderMessages();},
   });
   let backgroundTasks=null,backgroundTaskKey='';
   function refreshBackgroundTasks(){
@@ -695,13 +658,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const windowHeights=new Map();
   const disposeMessage=record=>{record.childrenWindow?.close();record.attachmentNode?.dispose?.();record.row.remove();messageNodes.delete(record.row.dataset.windowKey);};
   const requestMessageRender=resize=>{
-    // ResizeObserver runs before paint. Compensate now, before a queued scroll
-    // event can mistake a layout correction for a new reading position.
-    if(resize&&chatShown&&!chatPosition){
-      if(following)scrollBottom();else restoreReadingAnchor(history,lastAnchor);
-      lastScrollTop=history.scrollTop;
-    }
-    resizeAnchor ||= !!resize;renderMessages();
+    if(resize&&chatShown)reading.reflow();else renderMessages();
   };
   let renderingSnapshot=null,renderingSending=null,renderingForest=null,navigationPath=new Map();
   const markdownFiles=scope=>({
@@ -722,13 +679,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     const {row, bubble} = record;
     row.dataset.messageId=message.id;row.dataset.sequence=message.sequence||'';
-    bubble.dataset.scrollAnchor=`message:${message.viewKey}`;
+    row.dataset.scrollAnchor=`message:${message.viewKey}`;
     if(message.compaction){
  if(!record.compact){record.compact=createCompaction({locale:()=>locale});bubble.append(record.compact.element);}
  record.compact.update(message);
  }else if(message.role==='tool'&&message.tool){
       const scope=client.scope?.()||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
-      if(!record.tool){record.tool=createToolCall({memory:toolMemory,key,locale:()=>locale,onDecision:(approval,action)=>pages.decideApproval(approval,action),...markdownFiles(scope)});bubble.append(record.tool.element);}
+      if(!record.tool){record.tool=createToolCall({memory:toolMemory,key,locale:()=>locale,onDecision:(approval,action)=>pages.decideApproval(approval,action),onInteract:event=>reading.engage(event),onLocate:(call,turn)=>{const target=renderingForest.byID.get(turn+':'+call)?.message;if(target)jumpToMessage(target.id,{expand:true});},...markdownFiles(scope)});bubble.append(record.tool.element);}
       record.tool.update(message,{offline:connection==='offline'||disconnected,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
     }else if(message.role==='assistant'){
       record.reply ||= createReplyBubble(bubble);
@@ -774,21 +731,20 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
 
     if(record.tool){
       const entry=forest.byID.get(message.tool.turn_id+':'+message.tool.id),children=entry?.children.map(child=>child.message)||[];
-      if(chatPosition&&navigationPath.has(message.id))record.tool.element.open=true;
-      if(!record.childrenWindow){record.childrenWindow=createMessageWindow({scroller:history,host:record.tool.children,render:renderMessage,dispose:disposeMessage,requestRender:requestMessageRender,heights:windowHeights});record.tool.element.addEventListener('toggle',()=>renderMessages());}
+      if(chatPosition&&navigationPath.has(message.id)||reading.destination?.expand&&reading.destination.id===message.id)record.tool.element.open=true;
+      if(!record.childrenWindow){record.childrenWindow=createMessageWindow({scroller:history,host:record.tool.children,render:renderMessage,dispose:disposeMessage,requestRender:requestMessageRender,compensate:delta=>reading.compensate(delta),heights:windowHeights});record.tool.element.addEventListener('toggle',()=>renderMessages());}
       record.childrenWindow.set(record.tool.element.open?children:[],{target:navigationPath.has(message.id)?{id:navigationPath.get(message.id)}:undefined});
     }
     return record;
   };
-  const messageWindow=createMessageWindow({scroller:history,host:windowHost,render:renderMessage,dispose:disposeMessage,requestRender:requestMessageRender,heights:windowHeights});
+  const messageWindow=createMessageWindow({scroller:history,host:windowHost,render:renderMessage,dispose:disposeMessage,requestRender:requestMessageRender,compensate:delta=>reading.compensate(delta),heights:windowHeights});
   const viewportObserver=new ResizeObserver(()=>requestMessageRender(true));viewportObserver.observe(history);
   function renderMessages(){if(disposed||renderFrame)return;renderFrame=requestAnimationFrame(()=>{renderFrame=0;renderMessagesNow();});}
   function renderMessagesNow() {
     if(!chatShown)return;
     const navigation=chatPosition?.key===snapshotKey()?chatPosition:null;
-    const follow=following||pendingFollow,resized=resizeAnchor||historyResized();
-    const taskReading=pendingReadingPosition||(resized&&lastTaskReadingPosition)||captureReadingPosition(history);
-    const anchor=navigation?.kind==='restore'?navigation.position?.anchor:resized?lastAnchor:readingAnchor(history);resizeAnchor=false;
+    reading.flush();
+    const anchor=reading.anchor;
     const snapshot=state.snapshot||(client.production&&selectedAssistant?cachedSnapshots.get(snapshotKey(selectedAssistant.space_id||'',selectedAssistant.id)):null);
     const sending=state.sends.get(editorOwner||(snapshot&&ownerKey(snapshot)));
     const activeTurn=snapshot?.running?(snapshot.messages.find(message=>message.id===snapshot.turn_id)?.request_id||snapshot.turn_id):null;
@@ -797,8 +753,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     renderingSnapshot=snapshot;renderingSending=sending;renderingForest=forest;
     const roots=visibleMessages.filter(message=>!message.tool?.parent_id||!forest.byID.has(message.tool.turn_id+':'+message.tool.parent_id));
     navigationPath=new Map();
-    let destination=visibleMessages.find(message=>message.id===(navigation?.kind==='message'?navigation.id:anchor?.id));
-    const destinationID=destination?.id;
+    let destination=visibleMessages.find(message=>message.id===(reading.destination?.id||anchor?.id));
     const ancestry=new Set();
     while(destination?.tool?.parent_id&&!ancestry.has(destination.id)){
       ancestry.add(destination.id);
@@ -806,21 +761,20 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if(!parent)break;
       navigationPath.set(parent.id,destination.id);destination=parent;
     }
-    const target=follow?{end:true}:destination?{id:destination.id,offset:navigation?.kind==='message'?undefined:anchor?.offset}:undefined;
+    let target=reading.following?{end:true}:destination?{id:destination.id,offset:reading.destination?undefined:anchor?.offset}:undefined;
     historyStatus.hidden=!client.history||!snapshot;
     historyStatus.disabled=historyLoading||!historyFailure&&!snapshot?.history?.has_more;
     historyStatus.textContent=t(historyLoading?'history.loading':historyFailure|| (snapshot?.history?.has_more?'history.earlier':'history.start'));
     const tasks=client.production?(taskCache.get(JSON.stringify([client.scope().space,client.scope().owner]))||[]):[];
-    const tasksChanged=client.production?backgroundTaskView.update(snapshotKey(),tasks,(id,phase)=>pages.taskNeedsApproval(id,phase)):false;
+    if(client.production)backgroundTaskView.update(snapshotKey(),tasks,(id,phase)=>pages.taskNeedsApproval(id,phase));
     // The task region stays outside recycled message rows and shares the chat scroller.
     if(client.production&&tasks.length){
       if(backgroundTaskView.element.parentElement!==messageColumn)messageColumn.insertBefore(backgroundTaskView.element,chatApprovals);
     }else backgroundTaskView.element.remove();
-    if(pendingTaskToggle&&!pendingTaskToggle.expanded&&taskReading.anchors[0]?.key.startsWith('task:')){
+    if(pendingTaskToggle&&!pendingTaskToggle.expanded&&reading.position?.anchors[0]?.key.startsWith('task:')){
       const retained=new Set([...backgroundTaskView.element.querySelectorAll('[data-scroll-anchor]')].map(node=>node.dataset.scrollAnchor));
-      if(!retained.has(taskReading.anchors[0].key))taskReading.anchors=[{key:'background-tasks-heading',offset:0}];
+      if(!retained.has(reading.position.anchors[0].key))reading.locate({key:'background-tasks-heading',align:'nearest'});
     }
-    const restoreTasks=navigation?.kind==='restore'&&!follow?navigation.position?.reading:pendingReadingPosition||(!follow&&(tasksChanged||resized&&taskReading.anchors.some(item=>item.key.startsWith('task:')))?taskReading:null);
     pendingTaskToggle=null;
     taskClock.refresh();
     if (snapshot && !visibleMessages.length) {
@@ -829,32 +783,19 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       messageColumn.querySelector('.empty-chat')?.remove();
     }
     pages?.renderApprovals();
-    if(!chatApprovals.hidden&&locateApprovals===JSON.stringify(client.scope?.())){locateApprovals='';requestAnimationFrame(()=>{if(!disposed&&route==='chat')chatApprovals.scrollIntoView({block:'nearest',behavior:reducedMotion.matches?'instant':'smooth'});});}
-    messageWindow.layout(roots,{anchor:anchor?.id,target,restore:()=>{
-      if(navigation?.kind==='message'&&destinationID){
-        const row=[...messageNodes.values()].find(record=>record.row.dataset.messageId===destinationID)?.row;
-        if(row){history.scrollTop+=row.getBoundingClientRect().top-history.getBoundingClientRect().top-(history.clientHeight-row.getBoundingClientRect().height)/2;following=false;latest.hidden=false;}
-      }else if(restoreTasks&&!pendingFollow){following=false;restoreReadingPosition(history,restoreTasks);latest.hidden=nearBottom();}
-      else if(follow)scrollBottom();else if(anchor){restoreReadingAnchor(history,anchor);latest.hidden=false;}
-      else if(navigation?.position)history.scrollTop=navigation.position.top;
-    }});
-    pendingReadingPosition=null;
-    if(navigation&&snapshot&&!historyLoading){
-      if(navigation.kind==='message')navigation.resolved=!!destinationID;
-      else chatPosition=null;
+    if(!chatApprovals.hidden&&locateApprovals===JSON.stringify(client.scope?.())){
+      locateApprovals='';cancelChatPosition();reading.locate({key:'chat-approvals',align:'nearest'});
     }
-    if(snapshot&&!snapshot.history?.has_more&&!snapshot.history?.has_newer&&history.scrollHeight<=history.clientHeight+1)scrollBottom();
-    lastTaskReadingPosition=captureReadingPosition(history);
-    historyWidth=history.clientWidth;historyHeight=history.clientHeight;
-    lastScrollTop=history.scrollTop;
-    lastAnchor=readingAnchor(history);if(!following)state.uiAnchor=selectedSequence()||lastAnchor?.sequence||null;
-    if(following)state.uiAnchor=null;
-    pendingFollow=false;
+    if(reading.destination?.key==='chat-approvals')target={end:true};
+    messageWindow.layout(roots,{anchor:anchor?.id,target,restore:()=>reading.apply()});
+    if(navigation&&snapshot&&!historyLoading&&navigation.kind!=='message')chatPosition=null;
+    latest.hidden=reading.following;
+    state.uiAnchor=reading.following?null:selectedSequence()||reading.anchor?.sequence||null;
   }
   function cacheSnapshot(snapshot){const key=snapshotKey();cachedSnapshots.delete(key);cachedSnapshots.set(key,{...snapshot,kind:'reset',base_cursor:0});while(cachedSnapshots.size>8)cachedSnapshots.delete(cachedSnapshots.keys().next().value);while(positions.size>32)positions.delete(positions.keys().next().value);while(toolMemory.size>1280)toolMemory.delete(toolMemory.keys().next().value);}
   function restoreSavedPosition(position){
     positionChat({kind:'restore',position});
-    state.uiAnchor=position?.anchor?.sequence||null;
+    state.uiAnchor=reading.anchor?.sequence||null;
   }
   function pendingSend(){return state.snapshot&&state.pending.has(ownerKey(state.snapshot));}
   function onSnapshot(snapshot, receivedEpoch = epoch) {
@@ -867,15 +808,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if (state.snapshot && validSnapshot(snapshot) && ownerKey(snapshot) !== ownerKey(state.snapshot)) {
       connection = 'offline'; error = t('identityChanged'); updateControls(); return;
     }
-    // A return to the bottom can precede its scroll event and the next frame.
-    const wasFollowing=chatShown&&(following&&nearBottom()||!upwardIntent&&atBottom());
-    const readingBeforeReset=snapshot.kind==='reset'&&!following?readingAnchor(history):null;
+    reading.flush();
+    const readingBeforeReset=snapshot.kind==='reset'&&!reading.following?reading.anchor:null;
     const initialSnapshot = !state.snapshot;
     if(validSnapshot(snapshot)){awaitingSnapshot=false;restoredSnapshot=false;}
     const pendingReceipt=state.pending.get(ownerKey(snapshot));
     let accepted;try{accepted=acceptSnapshot(state,snapshot,receivedEpoch);}catch(reason){if(reason.message==='conversation_gap'){loadSnapshot(true);return;}throw reason;}
     if (!accepted){if(state.snapshot&&validSnapshot(snapshot)&&state.snapshot.cursor===snapshot.cursor){connection='connected';updateControls();}return;}
-    if(wasFollowing){following=true;pendingFollow=true;}
     if(pendingReceipt && !state.pending.has(pendingReceipt.key))confirmations.confirmed(pendingReceipt);
     connection = 'connected';
     connectionError = '';
@@ -929,8 +868,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     cancelChatPosition();
     pages?.clearApprovals();locateApprovals=item.pending_approvals?JSON.stringify({owner:item.id,space:item.space_id||''}):'';selectedAssistant = item; client.setScope({owner:item.id, space:item.space_id || ''});updates?.refresh(client.scope());
     epoch = beginSubscription(state); editorOwner = null; route = 'chat'; if(!initial)directoryOpen = false;
-    pendingReadingPosition=null;pendingTaskToggle=null;lastTaskReadingPosition=null;resizeAnchor=false;pendingFollow=false;
-    messageWindow.set([]);windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);messageNodes.clear();windowHeights.clear();following=true;upwardIntent=false;lastScrollTop=0;lastAnchor=null;historyGeneration++;historyLoading=false;historyFailure='';state.uiAnchor=null;error = ''; connectionError = ''; disconnected = false;
+    pendingTaskToggle=null;reading.restore();
+    messageWindow.set([]);windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);messageNodes.clear();windowHeights.clear();historyGeneration++;historyLoading=false;historyFailure='';state.uiAnchor=null;error = ''; connectionError = ''; disconnected = false;
     for(const [key,height]of chatHeights.get(snapshotKey())||[])windowHeights.set(key,height);
     restoreSavedPosition(positions.get(snapshotKey()));
     const cached=cachedSnapshots.get(snapshotKey(item.space_id||'',item.id));
@@ -1117,7 +1056,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     await Promise.all([snapshot,loadDirectory()]);
   });
   return () => {
-    disposed = true;updates?.close();confirmations.close();cancelAnimationFrame(renderFrame);viewportObserver.disconnect();messageWindow.close();stopResources?.();client.resources?.clear();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
+    disposed = true;updates?.close();confirmations.close();cancelAnimationFrame(renderFrame);viewportObserver.disconnect();reading.dispose();messageWindow.close();stopResources?.();client.resources?.clear();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     stopMessageSelection();completions?.dispose();attachmentUI?.destroy();client.releaseAttachments?.();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);

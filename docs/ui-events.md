@@ -133,6 +133,25 @@ text pin mounted rows. Recycling disconnects observers and releases attachment
 leases, while shared viewers/downloads retain their own leases. Rendering merges
 wakeups into animation frames; unchanged replies retain their Markdown nodes.
 
+Main Chat and Task conversations share one reading-cursor controller per history.
+The cursor owns Latest following, an anchored reading position (stable row key
+and offset within the history viewport), or an explicit message/region destination.
+DOM `scrollTop` is a projection of that cursor, not its source of truth. Wheel,
+touch, keyboard, scrollbar and selection-drag scrolling update the cursor;
+Latest, references, tool-failure links and approval navigation set explicit
+destinations. Conversation and page caches retain the logical cursor, including
+Task history, rather than inferring reading intent from restored pixel offsets.
+
+Composers publish synchronous layout transactions without knowing the history's
+reading mode. Input resizing, draft/reference/attachment controls, row measurement,
+history paging and viewport reflow preserve the existing cursor and project it
+back before paint. This includes a textarea temporarily shrinking and returning
+to the same height within one input event, which need not deliver a resize
+observation. Compensation scroll events never overwrite reading intent. Tool
+lists delegate offset compensation to the same controller; nested output panes
+retain their own scrolling. Explicit navigation retains the scoped generation
+checks described above, so late history responses cannot supersede newer intent.
+
 These APIs only project UI messages. Internal `Conversation.Snapshot`, the full
 `c.messages` collection, model checkpoints, input queues, persistence, recovery,
 retry and model requests are unchanged. Sidebar reply IDs and counts still come
