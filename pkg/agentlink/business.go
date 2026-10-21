@@ -154,6 +154,12 @@ func (s *Service) business(ctx context.Context, c Connection, remote peer.Identi
 	}
 	var result any
 	switch r.Method {
+	case "observe":
+		var empty struct{}
+		if decodeJSON(r.Params, &empty) != nil {
+			return nil, ErrInvalid
+		}
+		result, e = s.localObservation(ctx, remote.NodeID)
 	case "directory":
 		var empty struct{}
 		if decodeJSON(r.Params, &empty) != nil {

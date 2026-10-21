@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {projectTopology,agentNodeID,layoutTopology} from '../../web/src/state/topology.mjs';
+import {projectTopology,agentNodeID,layoutTopology,machineDisplayName,linkEndpoint,assistantActivityState,nodeObservation} from '../../web/src/state/topology.mjs';
 const local={id:'local',name:'Local Pot',kind:'local',connected:true,control_id:'local-node'},spaces=[local];
 const machines=[{id:'my-mac',name:'My Mac',_space_id:'local',connected:true}];
 const links=[
@@ -42,4 +42,33 @@ const paused=projectTopology(spaces,[],[page([{id:'paused',peer:{node_id:'codex-
 assert.equal(paused.agents,2,'Node links do not require a peer assistant binding');
 assert.equal(paused.nodes.find(node=>node.kind==='codex').link.assistants,directory,'Inspector receives the node assistant directory');
 assert.equal(paused.edges[0].status,'disconnected','Disconnect retains the relationship in the graph');
+const inventory=[{id:'opaque-id',runtime_id:'opaque-id',name:'mac-studio.local',hostname:'mac-studio.local',ip_addresses:['192.168.1.24','fd00::24'],_space_id:'local',connected:true}];
+const located=projectTopology(spaces,inventory,[page([{...links[0],peer:{...links[0].peer,address:'tcp://dev-box.example:8793'}}])]);
+assert.equal(located.nodes.find(node=>node.kind==='machine').name,'mac-studio.local');
+assert.equal(located.nodes.find(node=>node.kind==='machine').identity,'opaque-id','Host metadata never changes routing identity');
+assert.equal(located.nodes.find(node=>node.kind==='machine').subtitle,'192.168.1.24');
+assert.equal(located.nodes.find(node=>node.self).subtitle,'mac-studio.local');
+assert.equal(located.nodes.find(node=>node.kind==='codex').subtitle,'dev-box.example:8793');
+assert.equal(machineDisplayName({ip_addresses:['10.0.0.2']}),'10.0.0.2');
+for(const address of [undefined,'invalid','https://host.example','tcp://host.example:8793#invitation','tcp://user:secret@host.example:8793'])assert.equal(linkEndpoint({peer:{address}}),'','Only capability-free TCP endpoints become display metadata');
+assert.equal(linkEndpoint({peer:{address:'tcp://[fd00::1]:8793'}}),'[fd00::1]:8793');
+const activity={assistant_id:'review',running:1,queued:2,waiting_approval:0,waiting_allowance:0,chat_state:'idle',fenced:false},sample={observed_at_ms:Date.now(),value:{node_id:'codex-node-one',hostname:'dev-box.local',assistants:[activity],outbox:{pending:2,oldest_at_ms:1}}};
+const observed=projectTopology(spaces,[],[page([{...links[0],observation:sample}])]);
+assert.equal(observed.nodes.find(node=>node.kind==='codex').subtitle,'dev-box.local','A verified node report supplies the remote hostname');
+assert.deepEqual(observed.counts,{running:1,queued:2});
+assert.equal(observed.nodes.find(node=>node.kind==='codex').issue,'','Ordinary execution and queueing have no warning');
+assert.equal(assistantActivityState(activity),'running');
+assert.equal(assistantActivityState({...activity,fenced:true}),'fenced');
+assert.equal(assistantActivityState({...activity,waiting_approval:1}),'approval');
+assert.equal(assistantActivityState({...activity,waiting_allowance:1}),'allowance');
+assert.equal(assistantActivityState(undefined),'unknown');
+for(const change of [{observed_at_ms:Date.now()-31000},{error:'unavailable'}]){
+ const staleSample={...sample,...change};assert.equal(nodeObservation(staleSample,'connected').fresh,false);
+ const staleModel=projectTopology(spaces,[],[page([{...links[0],observation:staleSample}])]);
+ assert.equal(staleModel.counts.running,0,'Stale node totals are excluded from current counts');
+ assert.equal(staleModel.nodes.find(node=>node.kind==='codex').observation.counts.running,1,'The inspector can retain explicitly cached values');
+}
+assert.equal(nodeObservation(sample,'disconnected').fresh,false,'Disconnect never advertises last known load as current');
+const waiting=projectTopology(spaces,[],[page([{...links[0],observation:{...sample,value:{...sample.value,assistants:[{...activity,waiting_allowance:1}]}}}])]);
+assert.equal(waiting.nodes.find(node=>node.kind==='codex').issue,'allowance','Problems belong to the affected node');
 console.log('Node topology: local inventory, independent peers, directory projection, deduplication and responsive layout passed');

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/jjyr/pot/pkg/protocol"
 )
@@ -35,6 +36,6 @@ func EnqueueTx(ctx context.Context, tx *sql.Tx, message protocol.Envelope, direc
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, "INSERT INTO agent_messages(id,envelope,direction,state,conversation,recipient) VALUES(?,?,?,?,?,?)", message.ID, string(body), direction, state, message.ConversationID, message.To.AgentID)
+	_, err = tx.ExecContext(ctx, "INSERT INTO agent_messages(id,envelope,direction,state,conversation,recipient,accepted_at_ms) VALUES(?,?,?,?,?,?,?)", message.ID, string(body), direction, state, message.ConversationID, message.To.AgentID, time.Now().UnixMilli())
 	return err
 }

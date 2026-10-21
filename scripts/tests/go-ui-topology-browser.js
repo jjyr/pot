@@ -7,7 +7,15 @@ async page => {
  await page.getByText('3 Agents · 1 machine',{exact:true}).waitFor();
  assert(await page.locator('.topology-zone').count()===2,'Local and cloud Pot keep topology regions');
  assert(await page.locator('.topology-node.machine').count()===1,'Only local physical inventory creates a machine node');
- await page.getByRole('button',{name:'My Mac · Execution machine · Connected',exact:true}).click();
+ await page.getByRole('button',{name:'mac-studio.local · Execution machine · Connected',exact:true}).click();
+ assert(await page.locator('.machine-addresses').textContent()==='192.168.1.24','Machine shows an observed interface IP');
+ assert(!await page.locator('.topology-inspector .topology-technical').getAttribute('open'),'Technical identifiers start collapsed');
+ await page.locator('.topology-inspector .topology-technical summary').click();
+ assert(await page.locator('.topology-inspector .topology-metadata').textContent().then(text=>text.includes('my-mac')&&text.includes('fd00::24')),'Full node ID and IPv6 remain available in details');
+ await page.locator('.topology-inspector .topology-technical summary').focus();
+ await page.evaluate(()=>topologyFixture.pages.refresh(['agent-links']));
+ assert(await page.locator('.topology-inspector .topology-technical').evaluate(element=>element.open),'Refreshing retains expanded technical details');
+ assert(await page.locator('.topology-inspector .topology-technical summary').evaluate(element=>element===document.activeElement),'Refreshing retains keyboard focus in technical details');
  assert(await page.locator('.topology-inspector .machine-permissions select').count()===1,'Local execution policy remains available');
  await page.locator('.topology-node').filter({hasText:'Codex'}).click();
  assert(await page.locator('.topology-inspector .topology-assistant').count()===2,'Codex exposes persistent-session assistants in the existing inspector');

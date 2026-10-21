@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jjyr/pot/internal/inbox"
 	"github.com/jjyr/pot/internal/linkhost"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -225,6 +226,14 @@ func (s *Service) AgentLinks(ctx context.Context, assistantID string) (any, erro
 	self := map[string]any{"id": identity.Address.AgentID, "node_id": s.options.RuntimeID, "kind": "pot", "name": identity.Name, "address": config.Endpoint, "endpoint": config.Endpoint, "status": status, "reason_code": reason}
 	localDirectory, _ := (potLinkBackend{s}).Directory(ctx)
 	self["name"] = localDirectory.Name
+	localObservation, observationErr := (potLinkBackend{s}).Observe(ctx, "")
+	localSample := agentlink.ObservationSample{ObservedAtMS: time.Now().UnixMilli()}
+	if observationErr == nil {
+		localSample.Value = &localObservation
+	} else {
+		localSample.Error = "agent_link_observation_unavailable"
+	}
+	self["observation"] = localSample
 	connections, err := h.service.List(ctx)
 	if err != nil {
 		return nil, err
@@ -239,6 +248,11 @@ func (s *Service) AgentLinks(ctx context.Context, assistantID string) (any, erro
 			state = "connected"
 		}
 		peerName := c.Peer.Name
+		localOutbox := agentlink.MessageQueue{}
+		localOutbox.Pending, localOutbox.OldestAtMS, err = inbox.OutboxStats(ctx, s.Tasks.DB(), "out", s.options.RuntimeID, c.PeerHost.NodeID)
+		if err != nil {
+			return nil, err
+		}
 		assistants := []any{}
 		if c.Directory != nil {
 			for _, a := range c.Directory.Assistants {
@@ -256,7 +270,11 @@ func (s *Service) AgentLinks(ctx context.Context, assistantID string) (any, erro
 			}
 			peerName = c.Directory.Name
 		}
-		items = append(items, map[string]any{"assistants": assistants, "directory": c.Directory, "id": c.ID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "node_id": c.Peer.Address.NodeID, "kind": c.Peer.Adapter, "name": peerName, "address": c.Endpoint}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
+		lastExchange := int64(0)
+		if c.LastSeen != nil {
+			lastExchange = c.LastSeen.UnixMilli()
+		}
+		items = append(items, map[string]any{"assistants": assistants, "directory": c.Directory, "id": c.ID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "node_id": c.Peer.Address.NodeID, "kind": c.Peer.Adapter, "name": peerName, "address": c.Endpoint}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError, "last_exchange_at_ms": lastExchange, "outbox": localOutbox, "observation": h.service.Observation(c.ID)})
 	}
 	return map[string]any{"self": self, "items": items, "network": map[string]any{"listen": config.Listen, "endpoint": config.Endpoint, "mode": config.Mode, "status": status, "reason_code": reason}}, nil
 }
