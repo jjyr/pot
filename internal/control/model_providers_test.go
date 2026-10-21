@@ -22,9 +22,7 @@ import (
 
 func installMetadataFixture(t *testing.T, s *Service) string {
 	t.Helper()
-	root := t.TempDir()
-	s.options.PluginRoot = root
-	s.Profiles.pluginRoot = root
+	root := s.options.PluginRoot
 	target := filepath.Join(root, "acme")
 	if err := os.Mkdir(target, 0700); err != nil {
 		t.Fatal(err)
