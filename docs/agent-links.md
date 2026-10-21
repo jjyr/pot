@@ -39,6 +39,10 @@ native adapters only translate typed requests; there is no separate linked-chat
 HTTP API or unexported native task payload. The local adapter remains in the
 current process; this change does not introduce an agent or scheduler plugin.
 
+`agentPort.Call` is the operation entry point. It uses the effective capabilities
+for admission and dispatches operations to their implementations. Owner and peer
+describe authorization scope; dispatch follows the requested capability and target.
+
 Directories advertise a version-1 operation description per assistant under
 `operations`, with explicit `peer` scope. The authenticated local operator sees
 an `owner` description. `GET /api/v1/agent-links/capabilities?assistant_id=...`

@@ -8,7 +8,9 @@ import (
 	"strings"
 
 	"github.com/jjyr/pot/internal/assistant"
+	"github.com/jjyr/pot/internal/attachments"
 	"github.com/jjyr/pot/internal/schedule"
+	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -200,7 +202,100 @@ func (p agentPort) Call(ctx context.Context, target agentlink.Target, operation 
 	if target.LinkID != "" {
 		return p.linkedCall(ctx, target, operation, call)
 	}
-	return p.localCall(ctx, target.AssistantID, operation, call)
+	s := p.s
+	assistantID := target.AssistantID
+	switch operation {
+	case agentlink.ChatAttachments:
+		if call.Action == "read" {
+			if !core.Identifier(call.ID) {
+				return nil, agentlink.ErrInvalid
+			}
+			offset, err := queryUint(call.Query, "offset")
+			if err != nil {
+				return nil, err
+			}
+			return s.Attachments.Chunk(assistantID, call.ID, offset)
+		}
+		var input attachments.Upload
+		if err := protocol.DecodeStrict(call.Body, &input); err != nil {
+			return nil, err
+		}
+		return s.UploadAttachment(ctx, assistantID, input)
+	case agentlink.AssistantProfile:
+		if call.Action == "read" {
+			avatar, err := s.Registry.DefaultAvatar(ctx, assistantID)
+			return map[string]any{"avatar": avatar}, err
+		}
+		if call.Action == "delete" {
+			var input struct {
+				Revision uint64 `json:"revision" required:"true"`
+			}
+			if err := protocol.DecodeStrict(call.Body, &input); err != nil {
+				return nil, err
+			}
+			err := s.DeleteAssistant(ctx, assistantID, input.Revision)
+			return map[string]bool{"deleted": err == nil}, err
+		}
+		var input struct {
+			Name     *string `json:"name,omitempty"`
+			Avatar   *string `json:"avatar,omitempty"`
+			Revision uint64  `json:"revision" required:"true"`
+		}
+		if err := protocol.DecodeStrict(call.Body, &input); err != nil {
+			return nil, err
+		}
+		definition, err := s.Registry.UpdateProfile(ctx, assistantID, assistant.ProfileUpdate{Name: input.Name, Avatar: input.Avatar}, input.Revision)
+		if err == nil {
+			s.Changes.Notify("assistants")
+		}
+		return definition, err
+	case agentlink.Approvals:
+		if call.Action == "read" {
+			return s.ApprovalView(ctx, assistantID), nil
+		}
+		return s.ManageApproval(ctx, assistantID, call.Body)
+	case agentlink.AssistantUsage:
+		days, offset := 365, 0
+		var err error
+		if call.Query["days"] != "" {
+			days, err = strconv.Atoi(call.Query["days"])
+			if err != nil {
+				return nil, err
+			}
+		}
+		if call.Query["offset"] != "" {
+			offset, err = strconv.Atoi(call.Query["offset"])
+			if err != nil {
+				return nil, err
+			}
+		}
+		zone := call.Query["timezone"]
+		if zone == "" {
+			zone = "Asia/Shanghai"
+		}
+		q := usage.Query{Days: days, Timezone: zone, Scope: call.Query["scope"], Offset: offset}
+		if call.ID != "summary" {
+			switch call.ID {
+			case "models", "requests", "tools", "compactions":
+				return s.Usage.Page(ctx, call.ID, q, storage.Now())
+			default:
+				return nil, agentlink.ErrUnsupported
+			}
+		}
+		summary, err := s.Usage.Summary(ctx, q, storage.Now())
+		if err != nil {
+			return nil, err
+		}
+		mail, err := s.MailAllowanceWaits(ctx, assistantID)
+		if err != nil {
+			return nil, err
+		}
+		return struct {
+			usage.Summary
+			MailWaits []usage.Waiting `json:"mail_waits"`
+		}{summary, mail}, nil
+	}
+	return p.localCall(ctx, assistantID, operation, call)
 }
 
 func (p agentPort) linkedCall(ctx context.Context, target agentlink.Target, op agentlink.Operation, call agentlink.Call) (any, error) {
@@ -251,13 +346,10 @@ func (s *Service) linkNodeID(ctx context.Context, link string) string {
 	return c.PeerHost.NodeID
 }
 
-func (p agentPort) localCall(ctx context.Context, owner string, op agentlink.Operation, call agentlink.Call) (any, error) {
+func (p agentPort) localCall(ctx context.Context, assistantID string, op agentlink.Operation, call agentlink.Call) (any, error) {
 	s := p.s
-	if op == agentlink.ChatAttachments || op == agentlink.AssistantProfile || op == agentlink.AssistantUsage || op == agentlink.Approvals {
-		return p.ownerCall(ctx, owner, op, call)
-	}
 	if strings.HasPrefix(string(op), "task.") {
-		return p.taskCall(ctx, owner, op, call)
+		return p.taskCall(ctx, assistantID, op, call)
 	}
 	if op == agentlink.Schedules {
 		if call.Action == "read" {
@@ -265,33 +357,33 @@ func (p agentPort) localCall(ctx context.Context, owner string, op agentlink.Ope
 			if err != nil {
 				return nil, err
 			}
-			return s.Schedules.Page(ctx, owner, q)
+			return s.Schedules.Page(ctx, assistantID, q)
 		}
 		var input schedule.Request
 		if err := protocol.DecodeStrict(call.Body, &input); err != nil {
 			return nil, err
 		}
-		value, err := s.Schedules.Manage(ctx, owner, input, storage.Now())
+		value, err := s.Schedules.Manage(ctx, assistantID, input, storage.Now())
 		if err == nil {
 			s.Changes.Notify("schedules")
 			s.wakeTasks()
 		}
 		return value, err
 	}
-	c, err := s.Conversation(ctx, owner)
+	c, err := s.Conversation(ctx, assistantID)
 	if err != nil {
 		return nil, err
 	}
 	switch op {
 	case agentlink.AssistantConfigure:
 		if call.Action == "read" {
-			return s.AssistantConfiguration(ctx, owner)
+			return s.AssistantConfiguration(ctx, assistantID)
 		}
 		var input SaveAssistantConfiguration
 		if err = protocol.DecodeStrict(call.Body, &input); err != nil {
 			return nil, err
 		}
-		return s.SaveAssistantConfiguration(ctx, owner, input)
+		return s.SaveAssistantConfiguration(ctx, assistantID, input)
 	case agentlink.AssistantRules:
 		if call.Action == "read" {
 			return c.Instructions(ctx)
@@ -305,7 +397,7 @@ func (p agentPort) localCall(ctx context.Context, owner string, op agentlink.Ope
 		}
 		return c.SaveInstructions(ctx, input.Text, input.Revision)
 	case agentlink.ChatCompletions:
-		return s.Completions(ctx, owner, call.Query["q"])
+		return s.Completions(ctx, assistantID, call.Query["q"])
 	case agentlink.ChatRead:
 		return c.UIFrame(ctx, 0, true)
 	case agentlink.ChatReceipt:
@@ -343,13 +435,13 @@ func (p agentPort) localCall(ctx context.Context, owner string, op agentlink.Ope
 		if err = protocol.DecodeStrict(call.Body, &input); err != nil {
 			return nil, err
 		}
-		waiting, e := s.Usage.Waiting(ctx, owner)
+		waiting, e := s.Usage.Waiting(ctx, assistantID)
 		if e != nil {
 			return nil, e
 		}
 		err = c.Cancel(ctx, input)
 		if err == nil && waiting != nil {
-			err = s.Usage.ClearWaitForTurn(ctx, owner, waiting.Turn)
+			err = s.Usage.ClearWaitForTurn(ctx, assistantID, waiting.Turn)
 		}
 	case agentlink.ChatSteer:
 		var input assistant.SteerRequest
@@ -376,7 +468,7 @@ func (p agentPort) localCall(ctx context.Context, owner string, op agentlink.Ope
 		if err = protocol.DecodeStrict(call.Body, &input); err != nil {
 			return nil, err
 		}
-		return s.ContinueMain(ctx, owner, input)
+		return s.ContinueMain(ctx, assistantID, input)
 	default:
 		return nil, agentlink.ErrUnsupported
 	}
