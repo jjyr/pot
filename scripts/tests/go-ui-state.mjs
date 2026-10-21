@@ -247,6 +247,22 @@ assert.equal(replyFailureKind('model provider returned HTTP 404'),'configuration
 assert.equal(replyFailureKind('model provider returned HTTP 503'),'service');
 assert.equal(replyFailureKind('model provider returned HTTP 429'),'limit');
 
+const remoteError='codex_thread_open_failed: codex_rpc_rejected_thread_resume (-32600): session unavailable';
+for(const state of ['failed','cancelled','unknown'])for(const partial of ['', 'Partial answer']){
+ const payload=JSON.stringify({state:state==='unknown'?'failed':state,error:remoteError,partial_output:partial});
+ const snapshot={messages:[chatInput,{id:'remote-reply',reply_to:chatInput.id,role:'assistant',text:payload,status:'complete'}],replies:[{input_id:chatInput.id,state,error:remoteError}]};
+ const rows=projectChatReplies(snapshot);
+ assert.equal(rows.length,2,'An empty failed outcome still has one reply');
+ assert.equal(rows[1].text,partial,'The failure envelope is not model prose');
+ assert.equal(rows[1].phase,state==='cancelled'?'stopped':state);
+ assert.equal(rows[1].error,remoteError,'Detailed receiver diagnostics stay separate from prose');
+ assert.equal(snapshot.messages[1].text,payload,'Projection does not rewrite stored mail');
+ for(const lifecycle of [{state:'completed',error:remoteError},{state:'running',error:remoteError},{state,error:'other error'},{state:'failed',error:remoteError+' other'}]){
+  const unchanged=projectChatReplies({...snapshot,replies:[{input_id:chatInput.id,...lifecycle}]});
+  assert.equal(unchanged[1].text,payload,'JSON is only decoded when the receiver confirms the exact outcome');
+ }
+}
+
 assert(allowedLink('https://example.com'));
 for (const value of ['javascript:alert(1)', 'data:text/html,hello', 'file:///etc/passwd', '/api/private']) assert(!allowedLink(value));
 const task='de305d54-75b4-431b-adb2-eb6b9e546014';

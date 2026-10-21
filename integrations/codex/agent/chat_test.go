@@ -34,7 +34,11 @@ func TestChatStatusTracksReceiverOutcomeIndependentlyOfReplyText(t *testing.T) {
 			t.Fatal(err)
 		}
 		status, err := b.ChatStatus(ctx, query)
-		if err != nil || status.State != state || len(status.Messages) != 0 {
+		wantMessages := 0
+		if state == "failed" || state == "cancelled" {
+			wantMessages = 1
+		}
+		if err != nil || status.State != state || len(status.Messages) != wantMessages {
 			t.Fatal(status, err)
 		}
 		if state == "failed" && status.Error != "codex_turn_failed" {

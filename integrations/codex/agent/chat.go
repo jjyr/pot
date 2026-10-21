@@ -7,7 +7,6 @@ import (
 	"errors"
 	"github.com/jjyr/pot/internal/inbox"
 	"github.com/jjyr/pot/pkg/agentlink"
-	"github.com/jjyr/pot/pkg/protocol"
 )
 
 func (b *backend) ChatStatus(ctx context.Context, query agentlink.ChatLookup) (agentlink.ChatStatus, error) {
@@ -45,8 +44,7 @@ func (b *backend) ChatStatus(ctx context.Context, query agentlink.ChatLookup) (a
 	}
 	// The durable job outcome is authoritative even before the outbox publisher
 	// gets its next wakeup. This is the identical immutable envelope it publishes.
-	if j.Task.Result != "" && result.Terminal() {
-		reply := protocol.Envelope{ID: "codex-reply-" + j.Task.ID, Kind: "message", From: parent.To, To: parent.From, ConversationID: parent.ConversationID, ReplyTo: &parent.ID, Hops: parent.Hops + 1, Text: trimBytes(j.Task.Result, 65536)}
+	if reply := messageReply(j); reply != nil && result.Terminal() {
 		found := false
 		for _, m := range result.Messages {
 			if m.ID == reply.ID {
@@ -54,7 +52,7 @@ func (b *backend) ChatStatus(ctx context.Context, query agentlink.ChatLookup) (a
 			}
 		}
 		if !found {
-			result.Messages = append(result.Messages, reply)
+			result.Messages = append(result.Messages, *reply)
 		}
 	}
 	return result, nil
