@@ -114,8 +114,6 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   const windowHost=el('div','message-window');
   messageColumn.append(historyStatus,windowHost,chatApprovals);
   history.append(messageColumn);
-  const status = el('div', 'connection-status');
-  status.setAttribute('role', 'status');
   const latest = button('down', t('latest'), 'latest-button');
   latest.hidden = true;
   const composerArea = el('div', 'composer-area');
@@ -126,7 +124,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   input.setAttribute('autocapitalize', 'sentences');
   const send = button('send', t('send'), 'send-button');
   form.append(input, send);
-  composerArea.append(latest, form, status);
+  composerArea.append(latest, form);
   const continuation=client.production?createTurnContinuation({client,locale:()=>locale}):null;
   if(continuation)composerArea.prepend(continuation.root);
   const unavailable = el('div', client.production ? 'page-host' : 'unavailable');
@@ -339,25 +337,31 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     attachmentUI?.update();
     updateReferenceDraft();
     input.disabled = !snapshot && !editorOwner;
+    const status=titlebar.querySelector('.connection-status');
+    if(status)reconcile(status,connectionStatus());
+    renderMessages();
+  }
+  function connectionStatus() {
+    const pending=state.snapshot&&state.pending.get(ownerKey(state.snapshot));
     const visibleConnection=selectedAssistant?.offline?'offline':connection;
-    const projection=status.cloneNode(false);
-    projection.replaceChildren();
+    const projection=el('div','connection-status');
+    projection.setAttribute('role','status');
+    const label=text=>{const value=el('span','',text);value.title=text;return value;};
     projection.classList.toggle('has-error', Boolean(error || connectionError) || visibleConnection === 'offline');
     projection.classList.toggle('is-connected',!pending&&!error&&!connectionError&&visibleConnection==='connected');
     const replyOwnsConnection=state.snapshot?.running||state.sends.has(editorOwner);
     if(pending){
-      projection.append(el('span','',t(pending.phase==='uncertain'?'send.unknown':'send.confirming')));
+      projection.append(label(t(pending.phase==='uncertain'?'send.unknown':'send.confirming')));
       if(pending.recoverable){const retry=el('button','text-button',t('send.checkRetry'));retry.type='button';retry.disabled=visibleConnection!=='connected';retry.onclick=()=>confirmations.recover(pending);projection.append(retry);}
     }
-    if(error||!replyOwnsConnection)projection.append(el('span', '', error || connectionError || (visibleConnection === 'connected' ? t(client.production?'connected':'preview') : t(visibleConnection))));
+    if(error||!replyOwnsConnection)projection.append(label(error || connectionError || (visibleConnection === 'connected' ? t(client.production?'connected':'preview') : t(visibleConnection))));
     if (visibleConnection === 'offline'&&!replyOwnsConnection) {
       const retry = el('button', 'text-button', t('retry'));
       retry.type = 'button';
       retry.onclick = () => loadSnapshot(true);
       projection.append(retry);
     }
-    reconcile(status,projection);
-    renderMessages();
+    return projection;
   }
   function saveNavigation(next,replace=false){const value={potRoute:next,potScope:client.scope?.()||{},potDirectory:directoryOpen};window.history[replace?'replaceState':'pushState'](value,'',location.href);}
   async function navigate(next,{replace=false,record=true}={}) {
@@ -522,7 +526,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         settings.append(el('span', '', t('assistantSettings'))); settings.onclick = openAssistantSettings;
         projection.append(heading);if(can('assistant.configure'))projection.append(settings);reconcile(assistantProfile, projection);
       }
-      title.append(identity);
+      title.append(identity,connectionStatus());
     } else title.append(el('span', '', titleText));
     titlebar.append(title);
  if(narrow){const update=updates?.button();if(update){update.className="update-button icon-button";titlebar.append(update);}}
