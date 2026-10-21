@@ -1,6 +1,6 @@
 {
   "name": "pot",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Connect Pot and Codex Agents through a local connection page and share persistent Codex assistants for chat and delegated tasks.",
   "mcpServers": "./.mcp.json",
   "homepage": "https://github.com/jjyr/pot",

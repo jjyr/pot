@@ -22,7 +22,7 @@ type AgentRef struct {
 }
 
 func (r AgentRef) Valid() bool {
-	return mailID(r.NodeID) && mailID(r.AgentID) && (r.Kind == "assistant" || r.Kind == "task" || r.Kind == "user" || r.Kind == "runtime")
+	return mailID(r.NodeID) && mailID(r.AgentID) && (r.Kind == "assistant" || r.Kind == "task" || r.Kind == "user" || r.Kind == "runtime" || r.Kind == "node")
 }
 func mailID(value string) bool { return core.Identifier(value) && !strings.Contains(value, ".") }
 
@@ -54,8 +54,13 @@ func (e Envelope) Validate() error {
 	if e.Kind != "message" && e.Kind != "input" && e.Kind != "guidance" && e.Kind != "user_guidance" && e.Kind != "reference" && e.Kind != "task_result" && e.Kind != "plugin_event" {
 		return fmt.Errorf("invalid agent message kind")
 	}
-	if e.Kind == "message" && (e.To.Kind != "assistant" || (e.From.Kind != "assistant" && e.From.Kind != "task") || e.Result != nil || e.Owner != "" || e.RequestID != "" || e.Digest != "") {
-		return fmt.Errorf("invalid agent correspondence")
+	if e.Kind == "message" {
+		assistantMessage := e.To.Kind == "assistant" && (e.From.Kind == "assistant" || e.From.Kind == "task")
+		userRequest := e.From.Kind == "user" && e.To.Kind == "assistant" && e.ReplyTo == nil
+		userReply := e.From.Kind == "assistant" && e.To.Kind == "user" && e.ReplyTo != nil
+		if !(assistantMessage || userRequest || userReply) || e.Result != nil || e.Owner != "" || e.RequestID != "" || e.Digest != "" {
+			return fmt.Errorf("invalid agent correspondence")
+		}
 	}
 	if e.Kind != "message" && e.Kind != "task_result" && e.Kind != "plugin_event" && (e.To.Kind != "task" || !mailID(e.Owner) || !core.Identifier(e.RequestID) || e.Result != nil) {
 		return fmt.Errorf("invalid Task inbox message")

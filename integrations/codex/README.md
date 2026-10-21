@@ -75,7 +75,9 @@ still prevent access; discovery does not prove remote reachability.
 
 Copy the connection segment on one side and paste it into **Add Agent** on the
 other side. Only one side needs a reachable address; the same connection carries
-traffic in both directions. The node directory supplies available assistants. An explicitly
+traffic in both directions. The node directory supplies available assistants. Pot can connect and chat with
+Codex without any local assistant or API. Node identity owns connection admission;
+a persistent user session address owns direct chat and its correlated replies. An explicitly
 selected assistant handles the work; otherwise the receiver uses its persisted
 default, initially its first assistant. An accepted task keeps its original
 assistant even when the default subsequently changes.
@@ -102,7 +104,7 @@ communication. The TCP endpoint never exposes the owner HTTP API. Identity keys
 and owner credentials are encrypted; the host root must be owner-only.
 
 The detached host keeps receiving work after an MCP chat closes. Subsequent
-plugin processes verify and reuse that host. Version 5 requires stopping an old
+plugin processes verify and reuse that host. Version 6 requires stopping an old
 message host before upgrading. Stable node identity, message IDs and history
 survive the database migration. The old independent Bridge pairing, HTTP/SSE
 channel, `codex_*` tools and Pot-side Codex integration plugin have been removed.
@@ -138,3 +140,18 @@ fixture and do not claim live paid model or two-machine Tailscale qualification.
 mise exec -- go test -race ./integrations/codex/agent
 mise exec -- python3 integrations/codex/install_test.py
 ```
+
+## Explicit message recipients
+
+Plugin 0.7.0 / host version 6 uses Agent Link invitation version 5. Upgrade it with
+Pot from the same revision. Established connections retain their node pins and
+IDs after migration; unfinished admissions need a fresh invitation. Existing
+virtual assistants, Codex threads and mailbox history remain intact.
+
+`pot_connections` exposes connected nodes and their assistant directories.
+`pot_send` requires `connection_id`, `assistant_id`, `request_id` and `text`.
+Codex chooses a real recipient from the directory. Missing or deleted targets
+fail instead of selecting the receiver default. This does not change task
+submission's persisted default behavior. Direct chat results return through the
+original request to the Pot user's conversation even when that Pot has no local
+assistants. Local owner configuration is not a recipient binding UI.

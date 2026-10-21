@@ -8,7 +8,8 @@ credentials or grant execution permissions.
 ## Addresses and provenance
 
 An Agent address is `{node_id, kind, agent_id}`. Model recipients may have
-kind `assistant` or `task`; Task addresses belong to their owning Control,
+kind `assistant` or `task`, or the original `user` address when replying to a
+direct Agent Link chat; Task addresses belong to their owning Control,
 independently of the destination machine running the Task. `list_assistants`
 returns assistant addresses; Task metadata includes its address. Worker context
 contains its own address and its owning assistant's address.
@@ -141,7 +142,10 @@ establishes both directions. A connection cannot grant owner APIs, model proxyin
 credentials or raw execution access. Task delegation goes through the same link's
 receiver-owned business port; it is distinct from ordinary peer text.
 
-Direct user chat uses the existing assistant conversation UI with a source icon.
+Direct user chat uses a persistent session address independent of local assistants
+and the existing assistant conversation UI with a source icon. Replies to user
+addresses require the authenticated processing parent; arbitrary user targets
+are rejected.
 Replies to those requests enter a user projection atomically without becoming
 eligible for the local assistant's autonomous peer-message processing. Existing
 unread and notification paths observe the projected reply metadata.

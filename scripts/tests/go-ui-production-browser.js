@@ -88,9 +88,10 @@ async page => {
  try {
   await page.setViewportSize({width:1200,height:792});
   await page.goto('http://127.0.0.1:17702/?theme=light&locale=en&contract=ui-production');
-  await page.getByRole('button',{name:'Connect AI provider',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Create assistant',exact:true}).waitFor();
   definitions=[{id:'alpha',name:'Alpha',revision:1},{id:'beta',name:'Beta',revision:1}];
   await page.evaluate(()=>window.__potContractChanges({assistants:1}));
+  await page.locator('.assistant-row').filter({hasText:'Alpha'}).click();
   await page.waitForFunction(()=>document.querySelector('#pot-composer')&&!document.querySelector('#pot-composer').disabled);
   assert(await page.title()==='Pot','Production bootstrap selected');
   assert(await page.evaluate(()=>window.__potContractSubscriptions())===1,'One global changes subscription exists without an initial assistant');

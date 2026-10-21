@@ -145,13 +145,13 @@ func TestConfiguredModelAgentLinksLive(t *testing.T) {
 		if err = conversation.Configure(ctx, spec, 0); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = f.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", AssistantID: "main", Mode: "address", Endpoint: controlPeerEndpoint(f.service)}); err != nil {
+		if _, err = f.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", Mode: "address", Endpoint: controlPeerEndpoint(f.service)}); err != nil {
 			t.Fatal(err)
 		}
 		return f
 	}
 	a, b := create("link-live-a"), create("link-live-b")
-	invite, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "invite", AssistantID: "main"})
+	invite, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "invite"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestConfiguredModelAgentLinksLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	peer := preview.(map[string]any)["peer"].(map[string]any)
-	if peer["node_id"] != "link-live-b" || peer["id"] != "main" || peer["kind"] != "pot" {
+	if peer["node_id"] != "link-live-b" || peer["id"] != "link-live-b" || peer["kind"] != "pot" {
 		t.Fatal("preview matched a different Agent")
 	}
 	for _, f := range []*liveControl{a, b} {
@@ -170,7 +170,7 @@ func TestConfiguredModelAgentLinksLive(t *testing.T) {
 			t.Fatal("preview created a connection", err)
 		}
 	}
-	value, err := a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "connect", AssistantID: "main", Address: address})
+	value, err := a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "connect", Address: address})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,5 +293,43 @@ func TestConfiguredModelAgentLinksLive(t *testing.T) {
 			t.Fatal("unexpected duplicates or reply loop", f.options.RuntimeID, count, err)
 		}
 	}
+	// A user-only client has no provider or local assistant. Only the receiver
+	// calls the configured real model through its production message consumer.
+	keys, err := secrets.NewMemoryKey(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty := &liveControl{options: Options{Context: ctx, Root: t.TempDir(), RuntimeID: "live-user-only", Keys: keys}}
+	open(empty, "user-only-boot")
+	defer closeControl(empty)
+	invite, err = b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "invite"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connected, err := empty.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "connect", Address: invite.(map[string]any)["address"].(string)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directLink := connected.(agentlink.Connection)
+	text := "POT190_DIRECT：请计算 23+19，通过 send_message 向本条消息的发送者回复标记 POT190_DIRECT 和结果。不要另发给任何助手，不创建任务。"
+	if _, err = empty.service.SendLinkChat(ctx, directLink.ID, "main", "direct-live", text); err != nil {
+		t.Fatal(err)
+	}
+	wait(func() bool {
+		frame, err := empty.service.LinkChat(ctx, directLink.ID, "main", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages := frame.(protocol.UIFrame).Messages
+		return len(messages) == 2 && strings.Contains(messages[1].Text, "42") && strings.Contains(messages[1].Text, "POT190_DIRECT")
+	})
+	defs, err := empty.service.Registry.Definitions(ctx)
+	if err != nil || len(defs) != 0 {
+		t.Fatal("hidden local assistant created", defs, err)
+	}
+	if _, err = empty.service.SendLinkChat(ctx, directLink.ID, "main", "direct-live", text); err != nil {
+		t.Fatal(err)
+	}
+	t.Log("POT190_DIRECT: user-only Pot received the real model reply without a local provider or assistant")
 	t.Logf("real model requests=%d (cap 24); restart retained identity and exactly six immutable messages", requests.Load())
 }

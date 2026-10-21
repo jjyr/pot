@@ -6,12 +6,12 @@ async page=>{
  try{
   await page.setViewportSize({width:1200,height:820});await page.goto(state.origin+'/?theme=light&locale=zh-CN');
   if(await page.getByLabel('Access token',{exact:true}).isVisible()){await page.getByLabel('Access token',{exact:true}).fill(state.token);await page.getByRole('button',{name:'Connect',exact:true}).click();}
-  await page.getByRole('button',{name:'连接 AI 供应商',exact:true}).waitFor();
+  await page.getByRole('button',{name:'创建助手',exact:true}).waitFor();
   assert((await(await page.request.get(state.origin+'/api/v1/assistants')).json()).length===0,'No assistant before Provider setup');
-  await page.getByRole('button',{name:'连接 AI 供应商',exact:true}).click();await page.getByRole('button',{name:'Custom API',exact:true}).click();
+  await page.getByRole('button',{name:'创建助手',exact:true}).click();await page.getByRole('button',{name:'Custom API',exact:true}).click();
   await page.getByLabel('名称',{exact:true}).fill('Onboarding provider');await page.getByLabel('API 地址',{exact:true}).fill(state.endpoint);await page.getByLabel('请求格式',{exact:true}).selectOption('openai_chat');await page.getByLabel('API 密钥',{exact:true}).fill('isolated-key');await page.getByLabel('模型 ID',{exact:true}).fill('isolated-model');await page.getByRole('button',{name:'保存',exact:true}).click();
-  await page.locator('.window-title .avatar-image').waitFor();await page.waitForFunction(()=>!document.querySelector('#pot-composer')?.disabled);
-  assert(await page.getByRole('button',{name:'连接 AI 供应商',exact:true}).count()===0,'Setup CTA disappears after connection');
+  try{await page.locator('.window-title .avatar-image').waitFor();}catch(error){throw Error(JSON.stringify({title:await page.locator('.window-title').textContent(),headings:await page.locator('h1,h2').allTextContents(),errors:await page.locator('.inline-error').allTextContents(),assistants:await(await page.request.get(state.origin+'/api/v1/assistants')).json()}));}await page.waitForFunction(()=>!document.querySelector('#pot-composer')?.disabled);
+  assert(await page.locator('.assistant-start').count()===0,'Setup CTA disappears after connection');
   let assistants=await(await page.request.get(state.origin+'/api/v1/assistants')).json();assert(assistants.length===1&&['Cup','Mug','Bowl','Pan','Wok','Spoon','Fork','Tray','Whisk','Kettle','Lid','Jar','Jug','Plate','Dish','Glass'].includes(assistants[0].name),'First Provider creates exactly one kitchen assistant');const pot=assistants[0];
   await page.screenshot({path:state.screenshot});
   const frame=await(await page.request.get(state.origin+'/api/v1/snapshot?assistant_id='+pot.id)).json(),snapshot={messages:frame.view.messages.map(value=>value.message)};assert(snapshot.messages.length===1&&snapshot.messages[0].role==='assistant'&&snapshot.messages[0].text.startsWith('你好，我是 '+pot.name+'。'),'Welcome persisted as assistant message');assert(pot.reply_count===0,'Welcome creates no unread notification');

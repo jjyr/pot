@@ -184,6 +184,16 @@ func TestAgentHostRestartStableIdentityAndMailbox(t *testing.T) {
 	if _, err = h.mailbox.Deliver(ctx, wrong); err == nil {
 		t.Fatal("wrong target accepted")
 	}
+	wrong = incoming
+	wrong.ID = "wrong-user-target"
+	wrong.To.Kind = "user"
+	wrong.ReplyTo = &outgoing.ID
+	if err = wrong.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = h.mailbox.Deliver(ctx, wrong); err == nil {
+		t.Fatal("user address consumed as a Codex assistant")
+	}
 	h.close()
 	h, err = openAgentHost(root)
 	if err != nil {
@@ -284,7 +294,7 @@ func TestAgentHostPreviewDoesNotConnectOrConsumeInvitation(t *testing.T) {
 	}
 	defer listener.Close()
 	endpoint := "tcp://" + listener.Addr()
-	invitation, err := remote.links.Invite(ctx, "codex", endpoint)
+	invitation, err := remote.links.Invite(ctx, endpoint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +323,7 @@ func TestAgentHostPreviewDoesNotConnectOrConsumeInvitation(t *testing.T) {
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if result.Peer.ID != "codex" || result.Peer.NodeID != remote.identity.Address.NodeID || result.Peer.Kind != "codex" || result.Peer.Name != remote.identity.Name || result.Endpoint != endpoint || result.Fingerprint == "" || result.ExpiresAt != invitation.ExpiresAt.UnixMilli() {
+	if result.Peer.ID != remote.identity.Address.NodeID || result.Peer.NodeID != remote.identity.Address.NodeID || result.Peer.Kind != "codex" || result.Peer.Name != remote.identity.Name || result.Endpoint != endpoint || result.Fingerprint == "" || result.ExpiresAt != invitation.ExpiresAt.UnixMilli() {
 		t.Fatal(result)
 	}
 	if strings.Contains(w.Body.String(), "#") || strings.Contains(w.Body.String(), local.token) {
@@ -328,7 +338,7 @@ func TestAgentHostPreviewDoesNotConnectOrConsumeInvitation(t *testing.T) {
 	if invalid := preview("https://untrusted.example"); invalid.Code != 400 {
 		t.Fatal("invalid address accepted", invalid.Code)
 	}
-	if _, err = local.links.Connect(ctx, "codex", invitation.Address); err != nil {
+	if _, err = local.links.Connect(ctx, invitation.Address); err != nil {
 		t.Fatal("preview consumed invitation", err)
 	}
 }
@@ -345,11 +355,11 @@ func TestAgentHostPeerDeliveryRemainsUnreadUntilCodexReads(t *testing.T) {
 	}
 	defer remote.Close()
 	endpoint := "tcp://" + remote.Addr()
-	invitation, err := a.links.Invite(ctx, "codex", endpoint)
+	invitation, err := a.links.Invite(ctx, endpoint)
 	if err != nil {
 		t.Fatal(err)
 	}
-	connection, err := b.links.Connect(ctx, "codex", invitation.Address)
+	connection, err := b.links.Connect(ctx, invitation.Address)
 	if err != nil {
 		t.Fatal(err)
 	}

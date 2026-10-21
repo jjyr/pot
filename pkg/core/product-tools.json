@@ -245,7 +245,8 @@
               "type": "string",
               "enum": [
                 "assistant",
-                "task"
+                "task",
+                "user"
               ]
             },
             "agent_id": {

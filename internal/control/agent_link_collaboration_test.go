@@ -31,11 +31,10 @@ func TestPotLinkDirectChatUsesExistingMailboxAndSeparateUserProjection(t *testin
 	}
 	message := awaitAgentLinkMail(t, b.service, id).Message
 	replyCtx := context.WithValue(ctx, mailParentKey{}, message)
-	reply, e := b.service.sendAssistantMail(replyCtx, "peer-reply", "main", protocol.SendMail{To: message.From, Text: "answer"})
+	_, e = b.service.sendAssistantMail(replyCtx, "peer-reply", "main", protocol.SendMail{To: message.From, Text: "answer"})
 	if e != nil {
 		t.Fatal(e)
 	}
-	awaitAgentLinkMail(t, a.service, reply.ID)
 	var frame any
 	var view protocol.UIFrame
 	deadline := time.Now().Add(5 * time.Second)

@@ -364,3 +364,29 @@ failure after a real model request. All other processing keeps the production
 prompts and tools. The run is capped at 24 paid requests, 768 output tokens per
 response and 240 seconds. `POT_LIVE_OUTPUT` may name a fresh private output
 directory for the observation; request headers and credentials are never recorded.
+
+The Add assistant browser fixture is included in `test:ui-http-integration` and can
+also run independently with `mise exec -- python
+scripts/tests/go-ui-assistant-start-browser.py`. It uses synthetic node directories
+and no model credentials. Desktop/mobile, English/Chinese and light/dark cases
+cover explicit API creation, conversation draft restoration, source-specific
+connection instructions, remote default/explicit selection, empty-directory
+refresh and directory-load failure recovery. Screenshots stay under ignored
+`output/playwright/`.
+
+`TestCodexDirectChatFromEmptyPot` runs a real Agent Link transport and supervised
+App Server protocol fixture between an assistant-free Pot and the Codex adapter.
+It checks two turns in one persistent thread, exact retries, explicit proactive
+recipients and rejection after recipient deletion. For the same chat path using
+the locally authenticated real Codex CLI, opt in with:
+
+```sh
+POT_CODEX_LIVE=1 mise exec -- go test ./integrations/codex/agent \
+  -run '^TestCodexDirectChatRealLive$' -count=1 -v -timeout=3m
+```
+
+This makes two read-only Codex turns with an exact marker response, using a
+private host root and workspace. It does not qualify arbitrary existing Codex App
+chats or remote approval handling. `TestConfiguredModelAgentLinksLive` also checks
+a user-only Pot receiving a reply from the machine's configured real model with
+no local assistant or Provider; its existing total request/output caps still apply.

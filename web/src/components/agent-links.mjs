@@ -27,7 +27,7 @@ export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({
     if(!active())return;
     identity.firstChild.textContent=t('agentLinks.self');
     address.textContent=snapshot?.self?.address||snapshot?.self?.endpoint||t('agentLinks.noAddress');
-    const ready=snapshot?.self?.status==='ready';status.textContent=ready?t('agentLinks.ready'):t(snapshot?.self?.reason_code==='agent_link_assistant_unavailable'?'topology.noAssistants':'agentLinks.needsAccess');
+    const ready=snapshot?.self?.status==='ready';status.textContent=ready?t('agentLinks.ready'):t('agentLinks.needsAccess');
     copy.textContent=t(copy.dataset.copied==='true'?'copied':'agentLinks.copy');copy.disabled=busy||!ready;add.textContent=t('agentLinks.add');add.disabled=busy;configure.textContent=t('agentLinks.configure');configure.hidden=ready;
     if(discoverAddresses){
       identity.hidden=true;copy.hidden=true;status.textContent=t('agentLinks.discoveredHint');
@@ -68,7 +68,7 @@ export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({
     form.onsubmit=async event=>{event.preventDefault();if(pending||!form.reportValidity())return;pending=true;cancel.disabled=submit.disabled=true;for(const input of controls.values())input.disabled=true;error.replaceChildren();const values=Object.fromEntries([...controls].map(([name,input])=>[name,input.value]));try{await save(values,{...captured(),request_id:requestID});finish();}catch(reason){failure(reason,error);}finally{pending=false;cancel.disabled=submit.disabled=false;for(const input of controls.values())input.disabled=false;result.lifecycle.settled?.();}};
     const result={root:panel,form,controls,lifecycle:{setTitle:value=>{heading.textContent=value;}},session:{values:initial}};localEditor=result;return result;
   }
-  function addAgent(){
+  function addAgent({guideKey}={}){
     const initial={address:''},ownerScope={...captured()};
     const definitions=[{name:'address',label:t('agentLinks.peerAddress'),required:true,placeholder:t('agentLinks.pasteAddress')}];
     let verified=null,verifiedAddress='',phase='empty',previewTimer,previewRequest,previewVersion=0,closed=false,previewError=null;
@@ -89,7 +89,7 @@ export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({
     const alive=()=>!closed&&form.root.isConnected;
     function paint(){
       if(!alive())return;
-      heading.textContent=t('agentLinks.addHeading');description.textContent=t('agentLinks.addDescription');hint.textContent=t('agentLinks.addressHint');note.textContent=t('agentLinks.nodeScope');
+      heading.textContent=t('agentLinks.addHeading');description.textContent=t(guideKey||'agentLinks.addDescription');hint.textContent=t('agentLinks.addressHint');note.textContent=t('agentLinks.nodeScope');
       row.querySelector('.form-label').textContent=t('agentLinks.peerAddress');input.setAttribute('aria-label',t('agentLinks.peerAddress'));input.placeholder=t('agentLinks.pasteAddress');
       paste.replaceChildren(icon('copy'),n('span','',t('agentLinks.paste')));paste.disabled=phase==='adding';
       submit.hidden=true;submit.textContent=t(phase==='adding'?'agentLinks.pending':'agentLinks.add');submit.disabled=phase==='adding'||!verified||verifiedAddress!==input.value.trim();cancel.textContent=t('integrations.cancel');

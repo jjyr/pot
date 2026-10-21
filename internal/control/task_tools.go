@@ -215,7 +215,7 @@ func (s *Service) productCall(ctx context.Context, owner, id, name string, args 
 		if err != nil {
 			return nil, err
 		}
-		links, err := s.AgentLinks(ctx, owner)
+		links, err := s.AgentLinks(ctx)
 		return map[string]any{"local": map[string]any{"runtime_id": s.options.RuntimeID, "policy": policy}, "agent_links": links}, err
 	case "list_assistants":
 		directory, err := s.MailDirectory(ctx)

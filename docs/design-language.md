@@ -243,11 +243,28 @@ Custom avatars use the same shape and animation. They display the assistant's
 persisted square PNG in the directory, chat title and settings preview; restoring
 the default uses the originally assigned kitchen character and pastel background.
 
-First-use Chat offers Connect AI provider when no connection exists. Saving that
-connection returns to Chat and automatically creates a randomly named kitchen assistant using the local node's
-default Provider/model. An empty Chat with an existing Provider follows the same bootstrap
-path. Offline or failed directory loads offer recovery rather than connection setup.
-The empty directory caption is No assistants yet.
+First-use Chat and the directory + action share an Add assistant page in the
+conversation region, retaining the assistant pane at wide widths. Choices always
+appear in this order: Create an assistant with API, Connect another Pot, Connect
+Codex. Only the explicit API creation action creates a local assistant, using the
+node default or the shared Provider editor. Visiting the page never creates an
+assistant. Linked chats do not require a local model connection.
+
+Each choice pairs its heading and description with a consistent rounded icon
+holder: a blue plug for API creation and the existing Pot/Codex brand assets for
+connections. Icons are decorative; the translated heading names each choice.
+The API action retains the primary button emphasis in both themes.
+
+Subflows stay in the same region. Back restores the choices; returning to an
+existing conversation restores its draft and reading position without stopping
+background execution. Narrow layouts use the same content full-width with Back.
+Connecting Pot or Codex uses the same invitation editor, with source-specific
+instructions, without a detour through the topology. The receiver's sole or
+default assistant opens after connection; multiple assistants without a default
+offer a choice. An empty remote directory remains connected and offers refresh.
+Directory failures offer retry; disconnected conversations remain visible with
+reconnection controls. Deleting the last assistant returns to Add assistant and
+never automatically creates a replacement.
 
 Every newly created assistant starts with a fixed welcome message in the creation
 UI's language, introducing its saved name and naturally pointing to settings for
@@ -259,11 +276,9 @@ The assistant saves user-requested names and avatars through `update_agent_profi
 directory, title and settings use that same identity. Optional fields preserve
 omitted values. Workers and peer conversations cannot edit the assistant profile.
 
-The + action creates a local assistant immediately and opens its conversation,
-using the local default Provider and concrete default model with empty assistant
-instructions. Missing Provider configuration opens AI connection setup. First-use
-bootstrap uses the same random kitchen identities. Remote assistants come from
-the connected node's directory and are configured there.
+The + action opens Add assistant. API creation uses random kitchen identities and
+empty assistant instructions. Remote assistants are configured by their source
+node and displayed from its directory.
 
 All new assistants randomly choose from Cup, Mug, Bowl, Pan, Wok, Spoon, Fork, Tray,
 Whisk, Kettle, Lid, Jar, Jug, Plate, Dish and Glass. These English identity values
