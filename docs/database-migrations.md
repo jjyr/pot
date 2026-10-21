@@ -228,8 +228,8 @@ and converts GitHub notification whitelists to explicit null/empty semantics.
 Ambiguous old broad reason lists become mention-only; explicit nonempty filters,
 disablement, recipients, cursors, thread markers and inbox receipts survive.
 Unaccepted pending groups and incomplete scans are retired. See [GitHub
-notifications](plugins.md#github-notifications) for account binding, supported
-management tools and configuration-boundary behavior.
+notifications](plugins.md#github-notifications) for account binding, the current
+subscription contract and configuration-boundary behavior.
 
 `control/0021_agent_link_addresses` records independently enabled Pot peer endpoints, preserving the existing configured endpoint. Startup restores listeners after migration without replaying agent work.
 
@@ -244,3 +244,20 @@ Usage migration 0003 persists whether a request reported cache-read usage. Exist
 positive cache counts remain known; historical zero counts remain unknown because
 the old ledger did not distinguish missing data from a reported zero. Request
 identities, usage amounts, reservations and compaction evidence remain intact.
+
+`tasks/0015_plugin_mcp_subscriptions` converts the previous GitHub binding into a
+plugin-owned subscription collection with a persistent initialization marker.
+The original target, disablement, explicit filters and account become one
+`legacy-github` subscription; the host root becomes an enabled shared scanner.
+Cursor/thread deduplication, accepted inbox messages and write receipts survive;
+incompatible unaccepted pending groups and unfinished scans are retired. The
+root remains present after deleting the last subscription, preventing default
+recreation on restart or reconnect.
+
+MCP protocol implementation and SDK asset updates do not change the stored
+independent-server catalogue or GitHub subscription format. The stored catalogue
+remains a product projection (name, description, input schema); complete protocol
+metadata and result content are handled by `pkg/mcp` at invocation time. Updating
+a plugin's code/assets changes its ordinary digest-pinned resource snapshot.
+Any future persisted catalogue or snapshot schema change still requires its own
+migration and upgrade coverage.

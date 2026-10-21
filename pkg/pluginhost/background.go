@@ -143,7 +143,7 @@ func runBackground(ctx context.Context, node string, p plugin.Package, input cor
 				if err := core.DecodeJSON(raw, &frame); err != nil {
 					return errors.New("invalid background protocol")
 				}
-				if err := frame.Validate(); err != nil {
+				if err := validateBackgroundRouting(p, frame); err != nil {
 					return err
 				}
 				for _, value := range credentials {
@@ -188,7 +188,7 @@ func runBackground(ctx context.Context, node string, p plugin.Package, input cor
 	if err = core.DecodeJSON(raw, &result); err != nil {
 		return result, errors.New("invalid background protocol")
 	}
-	if err = result.Validate(); err != nil {
+	if err = validateBackgroundRouting(p, result); err != nil {
 		return result, err
 	}
 	// Defense in depth: no credential material may enter durable state/events.
@@ -216,4 +216,16 @@ func containsBackgroundCredential(raw []byte, value string) bool {
 		}
 	}
 	return false
+}
+
+func validateBackgroundRouting(p plugin.Package, response core.BackgroundResponse) error {
+	if err := response.Validate(); err != nil {
+		return err
+	}
+	for _, event := range response.Events {
+		if event.Assistant != "" && !p.Manifest.Contributes.Background.EventRouting {
+			return errors.New("event routing unavailable")
+		}
+	}
+	return nil
 }

@@ -11,6 +11,7 @@ actual execution workspace, rather than a browser filesystem directory.
 Extensions (local node) -> local node catalogue
     |-- tools / Skills       -> prepared execution -> selected Runtime
     |-- background services  -> assistant notifications
+    |-- plugin MCP servers   -> owning Control / shared MCP component
     `-- model connections    -> AI Providers -> node readers / Gateway
 ```
 
@@ -69,7 +70,12 @@ be inspected, edited and disabled in their actual assistant workspace.
 
 ## Independent MCP servers
 
-MCP servers are installed independently of Plugin packages. Supported transports
+Independent MCP servers are configured separately from Plugin packages. Packages
+can also declare a Control-local stdio MCP capability (for example GitHub
+subscriptions); see [Control-local MCP contributions](plugins.md#control-local-mcp-contributions).
+These package servers are discovered and invoked on the owning Control, including
+for remote Tasks; their files and credentials do not travel to the execution machine.
+The independent server transports below retain their execution-machine behavior. Supported transports
 are stdio (command, argument array and optional absolute working directory) and
 Streamable HTTP. The UI also imports `mcpServers` JSON entries containing either
 `command`/`args` or `url`; duplicate IDs fail rather than overwrite. Entries save
@@ -88,7 +94,8 @@ Each enabled server supplies one `mcp_<normalized-id>` tool through the existing
 flat Plugin contract, with a selected tool name and a JSON object string for its
 arguments. Original schemas accompany that tool's description. This supports
 nested MCP inputs without changing other tool interfaces. Namespace collisions
-are rejected. The adapter is digest-pinned and follows normal approval,
+are rejected. The adapter and shared Node SDK asset come from [pkg/mcp](mcp.md).
+Their files are digest-pinned and follow normal approval,
 cancellation, operation receipts, cleanup supervision and execution-machine
 policy. Stdio commands run on that execution machine, so their executable,
 arguments, working directory and dependencies must exist there; connection tests

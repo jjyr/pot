@@ -126,6 +126,9 @@ func (s *Service) extensionCatalog(ctx context.Context, owner string) ([]Extensi
 				}
 			}
 		}
+		if p.Manifest.Contributes.MCP != nil {
+			item.Tools = append(item.Tools, "mcp_"+strings.ReplaceAll(p.Manifest.ID, "-", "_"))
+		}
 		item.Background = p.Manifest.Contributes.Background != nil
 		if p.Manifest.Contributes.ModelProviders != nil {
 			item.ModelProviders = true
@@ -414,6 +417,12 @@ func (s *Service) installExtension(ctx context.Context, c ExtensionCommand, entr
 				}
 				files = append(files, p.Manifest.Contributes.Tools.Files...)
 			}
+			if p.Manifest.Contributes.MCP != nil {
+				if _, err = p.MCPIdentity(); err != nil {
+					return nil, err
+				}
+				files = append(files, p.Manifest.Contributes.MCP.Files...)
+			}
 			if p.Manifest.Contributes.Background != nil {
 				if _, err = p.BackgroundIdentity(); err != nil {
 					return nil, err
@@ -467,23 +476,19 @@ func (s *Service) installExtension(ctx context.Context, c ExtensionCommand, entr
 		if err != nil {
 			return nil, err
 		}
-		if candidate.Manifest.Contributes.Tools != nil {
-			for _, raw := range candidate.Manifest.Contributes.Tools.Tools {
-				var tool struct{ Name string }
-				_ = json.Unmarshal(raw, &tool)
-				for _, other := range entries {
-					if other.Kind == "plugins" && other.ID != name && slices.Contains(other.Tools, tool.Name) {
-						return nil, errors.New("plugin tool name already registered")
-					}
+		servers, err := s.mcpServers(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, toolName := range pluginModelToolNames(candidate) {
+			for _, other := range entries {
+				if other.Kind == "plugins" && other.ID != name && slices.Contains(other.Tools, toolName) {
+					return nil, errors.New("plugin tool name already registered")
 				}
-				servers, err := s.mcpServers(ctx)
-				if err != nil {
-					return nil, err
-				}
-				for _, server := range servers {
-					if tool.Name == "mcp_"+strings.ReplaceAll(server.ID, "-", "_") {
-						return nil, errors.New("plugin tool name conflicts with MCP server")
-					}
+			}
+			for _, server := range servers {
+				if toolName == "mcp_"+strings.ReplaceAll(server.ID, "-", "_") {
+					return nil, errors.New("plugin tool name conflicts with MCP server")
 				}
 			}
 		}

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/jjyr/pot/pkg/mcp"
 )
 
 const maxBody = 64 * 1024

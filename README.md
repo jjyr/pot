@@ -37,6 +37,9 @@ Link, and publish browser access with the independent Web UI service.
 
 Go hosts the product logic. The macOS App uses Wails v3 and the system WebView;
 main window, tray and the independent browser service share HTML/CSS/JavaScript.
+The reusable [MCP component](docs/mcp.md) supplies SDK-based protocol support for
+plugin tools, independent servers and Codex integration.
+
 Trusted [Plugin packages](docs/plugins.md) contribute tools, background services
 and model connections. The Runtime supplies Node for JavaScript adapters;
 browser tools use Chrome/Chromium installed on the execution machine.

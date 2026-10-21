@@ -397,7 +397,7 @@ func TestPluginDefaultInitializationConcurrent(t *testing.T) {
 		}
 		go func() {
 			defer wg.Done()
-			if err := store.EnsureBackground(ctx, "github", "first"); err != nil {
+			if err := store.EnsureBackgroundInstance(ctx, BackgroundBinding{ID: "example", PluginID: "example", Enabled: true, Assistant: "first", Config: json.RawMessage(`{}`)}); err != nil {
 				t.Error(err)
 			}
 		}()
@@ -408,7 +408,7 @@ func TestPluginDefaultInitializationConcurrent(t *testing.T) {
 		t.Fatal(bindings, err)
 	}
 	b := bindings[0]
-	if err = m.CommitBackground(ctx, b, core.PluginIdentity{ID: "github", Version: "1", Digest: "installed"}, core.BackgroundResponse{State: json.RawMessage(`{"account":"old","baseline":true}`), Status: "baseline", DelaySeconds: 90}, 100); err != nil {
+	if err = m.CommitBackground(ctx, b, core.PluginIdentity{ID: "example", Version: "1", Digest: "installed"}, core.BackgroundResponse{State: json.RawMessage(`{"account":"old","baseline":true}`), Status: "baseline", DelaySeconds: 90}, 100); err != nil {
 		t.Fatal(err)
 	}
 	b.Enabled = false
@@ -416,7 +416,7 @@ func TestPluginDefaultInitializationConcurrent(t *testing.T) {
 	if err = m.ConfigureBackground(ctx, b); err != nil {
 		t.Fatal(err)
 	}
-	if err = m.EnsureBackground(ctx, "github", "different"); err != nil {
+	if err = m.EnsureBackgroundInstance(ctx, BackgroundBinding{ID: "example", PluginID: "example", Enabled: true, Assistant: "different", Config: json.RawMessage(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 	bindings, err = m.Backgrounds(ctx)
@@ -430,7 +430,7 @@ func TestPluginDefaultInitializationConcurrent(t *testing.T) {
 	if err = m.ConfigureBackground(ctx, BackgroundBinding{ID: "waiting", PluginID: "waiting", Enabled: false, Config: json.RawMessage(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
-	if err = m.EnsureBackground(ctx, "waiting", "late-assistant"); err != nil {
+	if err = m.EnsureBackgroundInstance(ctx, BackgroundBinding{ID: "waiting", PluginID: "waiting", Enabled: true, Assistant: "late-assistant", Config: json.RawMessage(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 	bindings, err = m.Backgrounds(ctx)
@@ -593,16 +593,16 @@ func TestBackgroundWaitingInstanceCanCommitCheckpointWithoutEvents(t *testing.T)
 	}
 }
 
-func TestGitHubFilterWritesFenceInflightAndRetainProgress(t *testing.T) {
+func TestBackgroundWritesFenceInflightAndRetainOpaqueProgress(t *testing.T) {
 	ctx := context.Background()
 	m, _ := mailbox(t, "local")
 	defer m.Close()
-	if err := m.EnsureBackground(ctx, "github", "main"); err != nil {
+	if err := m.EnsureBackgroundInstance(ctx, BackgroundBinding{ID: "example", PluginID: "example", Enabled: true, Assistant: "main", Config: json.RawMessage(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 	bindings, _ := m.Backgrounds(ctx)
 	b := bindings[0]
-	identity := core.PluginIdentity{ID: "github", Version: "1", Digest: "installed"}
+	identity := core.PluginIdentity{ID: "example", Version: "1", Digest: "installed"}
 	checkpoint := json.RawMessage(`{"account":"123","baseline":true,"since":"2026-01-01T00:00:00Z","threads":{"123":{"marker":"retained"}},"pending":{"old":{"body":"discard"}},"scan":{"rows":[1]}}`)
 	if err := m.CommitBackground(ctx, b, identity, core.BackgroundResponse{State: checkpoint, DelaySeconds: 60, Status: "ready"}, 100); err != nil {
 		t.Fatal(err)
@@ -627,7 +627,7 @@ func TestGitHubFilterWritesFenceInflightAndRetainProgress(t *testing.T) {
 	next := bindings[0]
 	var state map[string]any
 	json.Unmarshal(next.State, &state)
-	if next.Revision != 2 || next.Enabled || state["since"] != "2026-01-01T00:00:00Z" || state["threads"].(map[string]any)["123"] == nil || len(state["pending"].(map[string]any)) != 0 || state["scan"] != nil || state["filterSince"] == nil {
+	if next.Revision != 2 || next.Enabled || state["since"] != "2026-01-01T00:00:00Z" || state["threads"].(map[string]any)["123"] == nil || len(state["pending"].(map[string]any)) != 1 || state["scan"] == nil {
 		t.Fatal(next, string(next.State))
 	}
 	next.Enabled = true
@@ -636,5 +636,74 @@ func TestGitHubFilterWritesFenceInflightAndRetainProgress(t *testing.T) {
 	}
 	if err := m.CommitBackground(ctx, old, identity, r, 300); err == nil {
 		t.Fatal("reenabling revived old response")
+	}
+}
+
+// A shared scan must commit every receiver together with its checkpoint. Even
+// capacity exhaustion on the last receiver rolls back the earlier enqueue.
+func TestPluginFanoutAtomicBackpressureRevisionAndRetry(t *testing.T) {
+	ctx := context.Background()
+	m, err := OpenMailbox(filepath.Join(t.TempDir(), "mail.sqlite"), "control")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	b := BackgroundBinding{ID: "fanout", PluginID: "fanout", Enabled: true, Config: json.RawMessage(`{}`)}
+	if err = m.ConfigureBackground(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := m.Backgrounds(ctx)
+	b = rows[0]
+	b.EventRouting = true
+	identity := core.PluginIdentity{ID: "fanout", Version: "1", Digest: "fixture"}
+	event := func(id, target string) core.PluginEvent {
+		return core.PluginEvent{ID: id, Assistant: target, Title: "Update", Body: "fixture", OccurredAt: "2026-01-01T00:00:00Z"}
+	}
+	for i := 0; i < 63; i++ {
+		r := core.BackgroundResponse{State: json.RawMessage(`{"cursor":1}`), Events: []core.PluginEvent{event(fmt.Sprint("seed-", i), "B")}, DelaySeconds: 60, Status: "ready"}
+		if err = m.CommitBackground(ctx, b, identity, r, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	response := core.BackgroundResponse{State: json.RawMessage(`{"cursor":2}`), Events: []core.PluginEvent{event("new-B", "B"), event("new-C", "C")}, DelaySeconds: 60, Status: "ready"}
+	if err = m.CommitBackground(ctx, b, identity, response, 0); err == nil {
+		t.Fatal("capacity overflow accepted")
+	}
+	rows, _ = m.Backgrounds(ctx)
+	B, _ := m.Notifications(ctx, "B")
+	C, _ := m.Notifications(ctx, "C")
+	var queued int
+	if err = m.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM agent_messages WHERE state='queued'").Scan(&queued); err != nil {
+		t.Fatal(err)
+	}
+	if queued != 63 || len(C) != 0 || string(rows[0].State) != `{"cursor":1}` {
+		t.Fatal("partial fanout committed", len(B), len(C), string(rows[0].State))
+	}
+	if _, err = m.db.ExecContext(ctx, `UPDATE agent_messages SET state='processed'`); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.CommitBackground(ctx, b, identity, response, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.CommitBackground(ctx, b, identity, response, 0); err != nil {
+		t.Fatal(err)
+	}
+	B, _ = m.Notifications(ctx, "B")
+	C, _ = m.Notifications(ctx, "C")
+	if len(B) != 1 || len(C) != 1 {
+		t.Fatal("retry duplicated or missed a receiver", len(B), len(C))
+	}
+	// A subscription deletion/reassignment increments the root revision. Results
+	// already fetched under the old revision cannot advance the shared cursor.
+	if err = m.ConfigureBackground(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	response.State = json.RawMessage(`{"cursor":3}`)
+	if err = m.CommitBackground(ctx, b, identity, response, 0); err == nil {
+		t.Fatal("old in-flight revision accepted")
+	}
+	rows, _ = m.Backgrounds(ctx)
+	if string(rows[0].State) != `{"cursor":2}` {
+		t.Fatal(string(rows[0].State))
 	}
 }

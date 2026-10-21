@@ -1,6 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {poll} from './notifications.mjs';
+import {poll as pollAccount} from './notifications.mjs';
+// The original polling regressions use one ordinary subscription fixture.
+const poll=(input,options)=>pollAccount({...input,config:{initialized:true,subscriptions:[{id:'fixture',assistant:'main',enabled:true,account_id:input.accounts.github,changed_at:input.changedAt||'',filters:{repositories:null,reasons:['mention'],subject_types:null,threads:null,...input.config}}]}},options);
 process.env.GH_TOKEN='fake-token';
 const start=Date.parse('2026-01-01T10:00:00Z');
 const date=n=>new Date(start+n*1000).toISOString();
@@ -9,7 +11,7 @@ const comment=n=>({id:n,body:'comment-'+n,created_at:date(n),updated_at:date(n),
 function harness(){
  let rows=[thread(-1)],comments=[],code=200,headers={'X-Poll-Interval':'90','Last-Modified':'Thu, 01 Jan 2026 10:00:00 GMT'},calls=[];
  const fake=async(url,init)=>{calls.push({url:String(url),...init});assert.equal(init.method,'GET');assert.equal(init.headers.Authorization,'Bearer fake-token');if(url.pathname.endsWith('/notifications'))return new Response(code===304?null:JSON.stringify(rows),{status:code,headers});if(url.pathname.endsWith('/comments'))return Response.json(comments);return Response.json({body:'Issue context',user:{login:'me'}});};
- const run=(now,state=null,config={reasons:null})=>poll({now:start+now*1000,state,config,accounts:{github:'123'}},{fetch:fake});
+ const run=(now,state=null,config={reasons:null},changedAt='')=>poll({now:start+now*1000,state,config,changedAt,accounts:{github:'123'}},{fetch:fake});
  return {run,calls,set(value){if(value.rows)rows=value.rows;if(value.comments)comments=value.comments;if(value.code)code=value.code;if(value.headers)headers=value.headers;}};
 }
 test('baseline, overlapping cursor, incremental comments, coalescing, 304 and restart',async()=>{
@@ -70,7 +72,7 @@ test('emission pacing is checkpointed across threads and restart without losing 
  assert.equal(r.state.nextEmitAt,start+480000);assert.equal('group' in r.events[0],false);
  const next={...thread(200),id:'t2',subject:{...thread(200).subject,url:'https://api.github.com/repos/me/repo/issues/2'}};
  h.set({code:200,rows:[next],comments:[comment(200)]});r=await h.run(270,r.state);
- h.set({code:304});r=await h.run(360,JSON.parse(JSON.stringify(r.state)));assert.equal(r.events.length,0);assert.ok(r.state.pending['me/repo#2']);
+ h.set({code:304});r=await h.run(360,JSON.parse(JSON.stringify(r.state)));assert.equal(r.events.length,0);assert.ok(r.state.pending['main:me/repo#2']);
  r=await h.run(479,r.state);assert.equal(r.events.length,0);
  r=await h.run(480,JSON.parse(JSON.stringify(r.state)));assert.equal(r.events.length,1);assert.match(r.events[0].url,/issues\/2$/);assert.deepEqual(r.state.pending,{});
  r=await h.run(540,r.state);assert.equal(r.events.length,0);
@@ -100,7 +102,7 @@ test('failed detail reads cannot roll back a notification or prevent later updat
  }});
  assert.equal(r.status,'ready');assert.equal(calls,3);assert.equal(Object.keys(r.state.pending).length,2);assert.equal(r.state.since,date(90));
  h.set({code:304});r=await h.run(180,r.state);assert.equal(r.events.length,2);assert.ok(r.events.every(e=>JSON.parse(e.body).updates[0].truncated));
- h.set({code:200,rows:[thread(260)],comments:[comment(260)]});r=await h.run(270,r.state);assert.equal(r.status,'ready');assert.ok(r.state.pending['me/repo#1']);
+ h.set({code:200,rows:[thread(260)],comments:[comment(260)]});r=await h.run(270,r.state);assert.equal(r.status,'ready');assert.ok(r.state.pending['main:me/repo#1']);
 });
 test('slow detail reads exhaust the shared budget without blocking snapshot progress',async()=>{
  const h=harness(),baseline=await h.run(0);let elapsed=0,calls=0;
@@ -124,7 +126,7 @@ test('removed history settings are rejected rather than starting an unbounded im
 test('detail rate limits preserve snapshots and delay further upstream reads',async()=>{
  const h=harness();const baseline=await h.run(0);let calls=0;
  const fake=async url=>{calls++;return url.pathname.endsWith('/notifications')?Response.json([thread(80)]):Response.json({}, {status:429,headers:{'retry-after':'600'}});};
- let r=await poll({now:start+90000,state:baseline.state,config:{reasons:null},accounts:{github:'123'}},{fetch:fake});assert.equal(r.status,'rate_limited');assert.equal(r.state.since,date(90));assert.ok(r.state.pending['me/repo#1']);
+ let r=await poll({now:start+90000,state:baseline.state,config:{reasons:null},accounts:{github:'123'}},{fetch:fake});assert.equal(r.status,'rate_limited');assert.equal(r.state.since,date(90));assert.ok(r.state.pending['main:me/repo#1']);
  r=await poll({now:start+180000,state:JSON.parse(JSON.stringify(r.state)),config:{reasons:null},accounts:{github:'123'}},{fetch:fake});assert.equal(calls,2);assert.equal(r.events.length,1);assert.equal(r.status,'rate_limited');
 });
 test('a full pending buffer resumes remaining rows without losing notifications',async()=>{
@@ -156,7 +158,7 @@ test('repository/type/reason/thread filters use AND with OR values; null all and
  validateFilters(filter);assert(matches(row,filter));
  for(const key of Object.keys(filter)){assert(!matches(row,{...filter,[key]:[]}));assert(matches(row,{[key]:null}));}
  assert(!matches(row,{...filter,threads:['1701']}));
- for(const invalid of [{reasons:['direct_reply']},{reasons:['participating']},{subject_types:['Fake']},{threads:['me/repo#1701']},{repositories:['repo']},{author:['me']}])assert.throws(()=>validateFilters(invalid));
+ for(const invalid of [{reasons:['direct_reply']},{reasons:['participating']},{subject_types:['Fake']},{threads:['main:me/repo#1701']},{repositories:['repo']},{author:['me']}])assert.throws(()=>validateFilters(invalid));
  assert.match(reasonSemantics,/mention can persist/);assert.match(reasonSemantics,/do not mean a direct reply/);
 });
 
@@ -166,7 +168,7 @@ test('newly allowed threads already older than cursor do not replay history',asy
 });
 
 test('reenabling/broadening only emits updates after the configuration boundary',async()=>{
- const h=harness();let r=await h.run(0,null,{});r.state.filterSince=date(150);
- h.set({rows:[{...thread(100,'subscribed'),id:'older'}]});r=await h.run(180,r.state,{reasons:null});assert.deepEqual(r.state.pending,{});assert.equal(h.calls.length,2);
- h.set({rows:[{...thread(220,'subscribed'),id:'older'}]});r=await h.run(270,r.state,{reasons:null});assert.ok(Object.keys(r.state.pending).length);
+ const h=harness();let r=await h.run(0,null,{});
+ h.set({rows:[{...thread(100,'subscribed'),id:'older'}]});r=await h.run(180,r.state,{reasons:null},date(150));assert.deepEqual(r.state.pending,{});assert.equal(h.calls.length,2);
+ h.set({rows:[{...thread(220,'subscribed'),id:'older'}]});r=await h.run(270,r.state,{reasons:null},date(150));assert.ok(Object.keys(r.state.pending).length);
 });
