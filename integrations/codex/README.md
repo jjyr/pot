@@ -162,7 +162,14 @@ persistent conversation context.
 
 Failed and cancelled message replies carry `state`, `error` and `partial_output`
 as JSON text, including when no model output was produced. The original reply
-route and receipt behavior apply to these outcomes as well. App Server JSONL
+route and receipt behavior apply to these outcomes as well. Status reads and
+outbox delivery return the identical envelope. The chat view shows only
+`partial_output` as prose when the receiver's lifecycle confirms the same
+terminal outcome and diagnostic; the localized failure and raw diagnostic stay
+in the reply status. Successful JSON answers remain verbatim. Thread-open
+failures retain the RPC method, rejection code and bounded server diagnostic,
+so a resume failure can be investigated without replacing its saved thread.
+App Server JSONL
 events are bounded to 4 MiB per line independently of the final-answer limit;
 read failures (including oversized events) are reported as
 `codex_jsonl_read_failed_outcome_unknown`, separately from process EOF.
@@ -173,7 +180,19 @@ silently cancels accepted work or removes its history.
 
 The host starts or resumes the assistant's persistent App Server thread and
 persists the thread ID before starting a turn. Failure to resume never silently
-creates a replacement context. Cancellation requests interruption; cancellation
+creates a replacement context. A thread has one App Server writer, including
+while that writer is idle. Opening the adapter's thread in Codex desktop or
+another client can therefore block Pot with `already has an active writer`.
+The adapter reports `codex_thread_in_use` for this rejection; Pot explains the
+conflict and recovery steps in the UI language while retaining the RPC diagnostic
+in error details. Other thread-open errors keep their general failure summary.
+Release that thread in the owning client before retrying in Pot. For an idle
+Codex desktop chat, temporarily archive and then restore it to release the loaded
+writer while retaining its history and thread identity. Do not delete writer-lock
+files or reset the assistant's thread binding. Merely reconnecting Agent Link
+does not release a writer owned by another App Server.
+
+Cancellation requests interruption; cancellation
 is final only after a confirmed interrupted turn and supervised process cleanup.
 Restart never replays unfinished work: queued tasks fail before execution and
 started tasks fail with unknown outcome. Unknown cleanup fences new admission

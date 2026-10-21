@@ -80,6 +80,14 @@ func main() {
 			if state != 2 || m.Params.Cwd == "" || m.Params.Approval != "on-request" || (m.Params.Sandbox != "read-only" && m.Params.Sandbox != "workspace-write") {
 				os.Exit(16)
 			}
+			if m.Params.ThreadID == "busy-thread" {
+				send(map[string]any{"id": m.ID, "error": map[string]any{"code": -32600, "message": "thread busy-thread already has an active writer"}})
+				continue
+			}
+			if m.Params.ThreadID == "missing-thread" || filepath.Base(m.Params.Cwd) == "reject-thread-start" {
+				send(map[string]any{"id": m.ID, "error": map[string]any{"code": -32600, "message": "fixture thread unavailable"}})
+				continue
+			}
 			state = 3
 			workspace = m.Params.Cwd
 			if m.Method == "thread/resume" {

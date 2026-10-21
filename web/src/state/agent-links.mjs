@@ -24,6 +24,7 @@ export function agentFailureKey(error) {
     codex_approval_requires_local_review:'agentLinks.codexApproval',
     codex_host_restarted_outcome_unknown:'agentLinks.codexOutcomeUnknown',
     codex_cleanup_unconfirmed_requires_local_reconciliation:'agentLinks.codexCleanupUnknown',
+    codex_thread_in_use:'agentLinks.codexSessionInUse',
     codex_thread_open_failed:'agentLinks.codexSessionFailed',
     agent_link_capability_unsupported:'agentLinks.capabilityUnavailable',
     agent_link_disconnected:'agentLinks.disconnectedDescription',

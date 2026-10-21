@@ -1,13 +1,49 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/iotest"
 )
+
+func TestThreadOpenFailureRetainsRPCDiagnostic(t *testing.T) {
+	for _, tc := range []struct{ name, method, thread, code, detail string }{
+		{"start", "start", "", "codex_thread_open_failed", "fixture thread unavailable"},
+		{"resume", "resume", "missing-thread", "codex_thread_open_failed", "fixture thread unavailable"},
+		{"writer-conflict", "resume", "busy-thread", "codex_thread_in_use", "already has an active writer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			session := Session{Binary: fakeBinary, Workspace: workspace, Mode: "read-only"}
+			worker, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			session.Worker = []string{worker}
+			if tc.method == "resume" {
+				session.ThreadID = tc.thread
+			} else {
+				session.Workspace = filepath.Join(workspace, "reject-thread-start")
+				if err := os.Mkdir(session.Workspace, 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result := runTurn(context.Background(), session, "must not run", turnEvents{
+				Thread:  func(string) error { t.Error("persisted a rejected thread"); return nil },
+				Started: func(string) error { t.Error("started a turn after rejection"); return nil },
+			})
+			if result.Status != "failed" || result.Text != "" || result.ThreadID != session.ThreadID || !strings.HasPrefix(result.Error, tc.code+": ") || !strings.Contains(result.Error, "codex_rpc_rejected_thread_"+tc.method) || !strings.Contains(result.Error, "-32600") || !strings.Contains(result.Error, tc.detail) {
+				t.Fatal(result)
+			}
+		})
+	}
+}
 
 func TestAppServerReadFailureIsDistinctFromProcessExit(t *testing.T) {
 	for _, tc := range []struct {

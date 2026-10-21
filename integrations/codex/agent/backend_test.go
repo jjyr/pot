@@ -233,7 +233,7 @@ func TestUnsuccessfulMessageRepliesIncludeOutcome(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				parent := protocol.Envelope{ID: "failed-message", Kind: "message", From: protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}, To: b.identity(a).Address, ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: "request"}
+				parent := protocol.Envelope{ID: "failed-message", Kind: "message", From: protocol.AgentRef{NodeID: "pot", Kind: "user", AgentID: "user-session"}, To: b.identity(a).Address, ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: "request"}
 				mailbox := &hostMailbox{db: b.db, local: parent.To, backend: b}
 				if _, err = mailbox.Deliver(ctx, parent); err != nil {
 					t.Fatal(err)
@@ -247,6 +247,11 @@ func TestUnsuccessfulMessageRepliesIncludeOutcome(t *testing.T) {
 				}); err != nil {
 					t.Fatal(err)
 				}
+				query := agentlink.ChatLookup{From: parent.From, AssistantID: a.ID, MessageID: parent.ID}
+				before, err := b.ChatStatus(ctx, query)
+				if err != nil || len(before.Messages) != 1 {
+					t.Fatal("terminal status omitted the failure envelope", before, err)
+				}
 				for i := 0; i < 2; i++ {
 					if err = b.publishMessages(ctx); err != nil {
 						t.Fatal(err)
@@ -259,6 +264,10 @@ func TestUnsuccessfulMessageRepliesIncludeOutcome(t *testing.T) {
 				var outcome map[string]string
 				if err = json.Unmarshal([]byte(replies[0].Text), &outcome); err != nil || outcome["state"] != state || outcome["error"] != "codex_jsonl_read_failed_outcome_unknown" || outcome["partial_output"] != tc.want {
 					t.Fatal("failure concealed by partial text", replies[0], err)
+				}
+				after, err := b.ChatStatus(ctx, query)
+				if err != nil || len(after.Messages) != 1 || encoded(before.Messages[0]) != encoded(replies[0]) || encoded(before.Messages[0]) != encoded(after.Messages[0]) {
+					t.Fatalf("status and publisher returned different immutable envelopes: before=%d published=%d after=%d err=%v", len(before.Messages), len(replies), len(after.Messages), err)
 				}
 			})
 		}

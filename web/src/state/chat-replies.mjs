@@ -1,4 +1,17 @@
 import {activeTool} from './tool-calls.mjs';
+
+// Outcome envelopes are protocol data only when the receiver independently
+// confirms the same terminal state and diagnostic for this exact input.
+function replyText(text, lifecycle) {
+  if(!['failed','cancelled','unknown'].includes(lifecycle.state))return text;
+  try{
+    const outcome=JSON.parse(text);
+    if(outcome&&Object.keys(outcome).length===3&&['failed','cancelled'].includes(outcome.state)&&
+      (outcome.state===lifecycle.state||lifecycle.state==='unknown')&&typeof outcome.error==='string'&&
+      outcome.error===(lifecycle.error||'')&&typeof outcome.partial_output==='string')return outcome.partial_output;
+  }catch{}
+  return text;
+}
 // Reply identities survive the optimistic send, its receipt, and the first
 // streamed assistant message. Transport loss never declares execution failed.
 export function projectChatReplies(snapshot, send, {offline=false}={}) {
@@ -36,6 +49,7 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
   for(const lifecycle of snapshot?.replies||[]){
     const input=inputs.get(lifecycle.input_id);if(!input)continue;
     const outputs=rows.filter(row=>row.role==='assistant'&&row.inputID===input.id);
+    for(const output of outputs)output.text=replyText(output.text,lifecycle);
     const terminal=['completed','failed','cancelled','unknown'].includes(lifecycle.state);
     if(terminal&&!outputs.length&&!rows.some(row=>row.id===input.id))continue;
     let reply=outputs.at(-1);

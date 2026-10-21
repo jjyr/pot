@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -95,8 +96,16 @@ func (a *appTurn) rpc(ctx context.Context, method string, params any) (json.RawM
 	defer timer.Stop()
 	select {
 	case m := <-ch:
-		if len(m.Error) > 0 {
-			return nil, errors.New("codex_rpc_rejected_" + strings.ReplaceAll(method, "/", "_"))
+		if len(m.Error) > 0 && string(m.Error) != "null" {
+			code := "codex_rpc_rejected_" + strings.ReplaceAll(method, "/", "_")
+			var diagnostic struct {
+				Code    int    `json:"code"`
+				Message string `json:"message"`
+			}
+			if json.Unmarshal(m.Error, &diagnostic) == nil && diagnostic.Message != "" {
+				return nil, fmt.Errorf("%s (%d): %s", code, diagnostic.Code, trimBytes(diagnostic.Message, 2048))
+			}
+			return nil, errors.New(code)
 		}
 		return m.Result, nil
 	case <-ctx.Done():
@@ -375,7 +384,7 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 			},
 		},
 	}); err != nil {
-		a.finish("failed", "codex_initialize_failed")
+		a.finish("failed", "codex_initialize_failed: "+err.Error())
 		return
 	}
 	if a.send(map[string]string{"method": "initialized"}) != nil {
@@ -393,7 +402,11 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 	}
 	raw, err := a.rpc(ctx, method, params)
 	if err != nil {
-		a.finish("failed", "codex_thread_open_failed")
+		code := "codex_thread_open_failed"
+		if strings.Contains(err.Error(), "already has an active writer") {
+			code = "codex_thread_in_use"
+		}
+		a.finish("failed", code+": "+err.Error())
 		return
 	}
 	var thread struct {
@@ -417,7 +430,7 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 	}
 	raw, err = a.rpc(ctx, "turn/start", map[string]any{"threadId": thread.Thread.ID, "input": []any{map[string]any{"type": "text", "text": prompt, "text_elements": []any{}}}})
 	if err != nil {
-		a.finish("failed", "codex_turn_start_failed_outcome_unknown")
+		a.finish("failed", "codex_turn_start_failed_outcome_unknown: "+err.Error())
 		return
 	}
 	var turn struct {

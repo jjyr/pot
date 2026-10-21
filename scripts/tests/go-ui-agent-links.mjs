@@ -54,3 +54,5 @@ console.log('Agent Link directory identity, lifecycle projection, chat routing a
 assert.equal(agentFailureKey('codex_host_restarted_outcome_unknown'),'agentLinks.codexOutcomeUnknown');
 assert.equal(agentFailureKey('prefix: original_execution_unavailable'),'agentLinks.originalExecutionUnavailable');
 assert.equal(agentFailureKey('arbitrary provider diagnostic'),null);
+assert.equal(agentFailureKey('codex_thread_in_use: codex_rpc_rejected_thread_resume (-32600): thread busy-thread already has an active writer'),'agentLinks.codexSessionInUse');
+assert.equal(agentFailureKey('codex_thread_open_failed: codex_rpc_rejected_thread_resume (-32600): session unavailable'),'agentLinks.codexSessionFailed','Other resume failures do not claim another client owns the conversation');
