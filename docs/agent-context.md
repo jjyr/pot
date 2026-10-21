@@ -179,7 +179,8 @@ saved in the checkpoint; normal requests restore ordinary tool policy. No cache
 flush is sent: replacing history changes the prefix, so the next normal request
 builds a smaller cache. Actual provider usage determines cache hits.
 
-The transcript displays the compact operation directly, without a disclosure control.
+The transcript displays the compact operation as a plain line of text, without a
+bubble or disclosure control.
 It includes trigger, status, elapsed time and estimated before/after size. Its
 private diagnostic record retains request/response evidence and links to the
 actual metered attempts for investigation; usage is never added twice. Chat and
