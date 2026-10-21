@@ -14,6 +14,9 @@ assert.equal(resourcePresentation({...message,tool:{...message.tool,phase:'faile
 assert.equal(resourcePresentation({...message,tool:{...message.tool,name:'get_screenshot'}}),null,'Only explicit presentation calls become replies');
 const persisted={id:'reply',role:'assistant',status:'complete',text:'',presentation:message.tool.result.presentation};
 assert.equal(projectChatReplies({messages:[persisted]},null)[0].presentation,persisted.presentation,'Resource-only replies survive projection without prose');
+const completedResource=projectChatReplies({messages:[{id:'input',role:'user',text:'Show the report'}, {...persisted,reply_to:'input'}],replies:[{input_id:'input',state:'completed'}]});
+assert.equal(completedResource[1].presentation,persisted.presentation,'Completed resource-only replies remain visible while empty results settle silently');
+assert.equal(completedResource[1].phase,'complete');
 const broken=createDisplayResources(async()=>({size:6,revision:'different',offset:0,data:btoa('report')}),()=>scope,()=>'/content')(resource);
 await assert.rejects(broken.read(file.path));broken.release();
 console.log('Display resources: immutable identity, captured owner/Space, sharing/disposal, explicit intent and resource-only replies passed');

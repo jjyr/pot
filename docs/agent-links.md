@@ -221,9 +221,11 @@ retains a separate reply lifecycle, independent of its send receipt and the
 assistant's aggregate activity. The authenticated `chat.status` peer operation
 checks the original caller, input and target before returning execution facts and
 explicit correlated replies. It cannot read another caller's conversation.
-Status reads never submit or repeat work. Failed, cancelled, empty and unconfirmed
-outcomes remain visible without requiring a text message. Text arriving before
-execution ends remains intermediate output.
+Status reads never submit or repeat work. Failed, cancelled and unconfirmed
+outcomes remain visible without requiring a text message. Successful empty
+outcomes settle execution silently; only agent-authored text or resource
+presentations produce completed reply bubbles. Text arriving before execution
+ends remains intermediate output.
 
 The [UI event contract](ui-events.md#main-conversation-streams) defines wire fields and
 states. See [database migrations](database-migrations.md) for persisted projection

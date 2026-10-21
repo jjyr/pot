@@ -3,12 +3,19 @@ import {activeTool} from './tool-calls.mjs';
 // streamed assistant message. Transport loss never declares execution failed.
 export function projectChatReplies(snapshot, send, {offline=false}={}) {
   const messages=snapshot?.messages||[],inputs=new Map(),replyInputs=new Map(),firstReplies=new Set(),rows=[];
+  const positions=new Map(messages.map((message,index)=>[message.id,index])),anchors=new Map(),turnInputs=new Map();
+  const completedInputs=new Set((snapshot?.replies||[]).filter(reply=>reply.state==='completed').map(reply=>reply.input_id));
   let currentInput='';
   for(const message of messages){
     if((message.role==='user'&&!message.steering)||message.role==='system'&&!message.compaction){
       inputs.set(message.id,message);currentInput=message.id;
+      anchors.set(message.id,positions.get(message.id));turnInputs.set(message.request_id||message.id,message.id);
     }
     if(message.role==='assistant'){const input=message.reply_to||currentInput;replyInputs.set(message.id,input);}
+  }
+  for(const message of messages){
+    const input=message.role==='assistant'?replyInputs.get(message.id):message.role==='tool'?turnInputs.get(message.tool?.turn_id):null;
+    if(input)anchors.set(input,Math.max(anchors.get(input)??-1,positions.get(message.id)));
   }
   for(const message of messages){
     if(message.context_only&&message.role!=='tool' || message.role==='system'&&message.request_id?.startsWith('pot-result-'))continue;
@@ -17,7 +24,7 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
       const input=inputs.get(replyInputs.get(message.id));
       // Tool-only model rounds have no prose to keep. The next output adopts
       // their waiting bubble instead of leaving empty cards in the transcript.
-      if(!message.text.trim()&&!message.presentation&&message.status==='complete')continue;
+      if(!message.text.trim()&&!message.presentation&&(message.status==='complete'||completedInputs.has(input?.id||message.reply_to)))continue;
       row.inputID=input?.id||message.reply_to;
       if(input&&!firstReplies.has(input.id)){
         row.viewKey=`reply:${input.request_id||input.id}`;firstReplies.add(input.id);
@@ -36,13 +43,19 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
   for(const lifecycle of snapshot?.replies||[]){
     const input=inputs.get(lifecycle.input_id);if(!input)continue;
     const outputs=rows.filter(row=>row.role==='assistant'&&row.inputID===input.id);
+    // Successful execution does not require a user-facing reply. Settling an
+    // empty turn removes its activity bubble without inventing assistant text.
+    if(lifecycle.state==='completed'&&!outputs.length)continue;
     const terminal=['completed','failed','cancelled','unknown'].includes(lifecycle.state);
     if(terminal&&!outputs.length&&!rows.some(row=>row.id===input.id))continue;
     let reply=outputs.at(-1);
     if(!reply){
       reply={id:`waiting:${input.id}`,viewKey:`reply:${input.request_id||input.id}`,role:'assistant',text:'',status:terminal?'complete':'streaming',inputID:input.id};rows.push(reply);
+      // A lifecycle has no durable message sequence of its own. Keep its
+      // placeholder after that input's last output/tool, before later messages.
+      positions.set(reply.id,anchors.get(input.id)+0.5);
     }
-    const phase={pending:'awaiting',queued:'queued',running:reply.text?'streaming':'thinking',waiting:'waiting',paused:'paused',cancelling:'cancelling',completed:reply.text||reply.presentation?'complete':'empty',failed:'failed',cancelled:'stopped',unknown:'unknown'}[lifecycle.state];
+    const phase={pending:'awaiting',queued:'queued',running:reply.text?'streaming':'thinking',waiting:'waiting',paused:'paused',cancelling:'cancelling',completed:'complete',failed:'failed',cancelled:'stopped',unknown:'unknown'}[lifecycle.state];
     if(!terminal&&(offline||lifecycle.uncertain))reply.phase='reconnecting';
     else {
       const tools=lifecycle.state==='running'?messages.filter(message=>activeTool(message.tool)&&message.tool.turn_id===(input.request_id||input.id)):[];
@@ -50,7 +63,8 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
     }
     if(lifecycle.error)reply.error=lifecycle.error;
   }
-  return rows;
+  const order=new Map(rows.map((row,index)=>[row,positions.get(row.id)??messages.length+index]));
+  return rows.sort((a,b)=>order.get(a)-order.get(b));
 }
 
 export function replyFailureKind(detail='') {
