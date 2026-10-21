@@ -393,20 +393,11 @@ func (s *Service) configureAgentAccess(ctx context.Context, command AgentLinkCom
 	if command.Listen != "" && command.Listen != config.Listen {
 		return nil, protocol.APIError{Code: "agent_link_listener_restart_required"}
 	}
-	if command.Mode != "" {
-		config.Mode = command.Mode
-	}
-	if config.Mode == "tailscale" {
-		endpoint, err := configureAgentTailscale(ctx, config.Listen)
-		if err != nil {
-			return nil, err
-		}
-		config.Endpoint = endpoint
-	} else if config.Mode == "address" {
-		config.Endpoint = strings.TrimRight(command.Endpoint, "/")
-	} else {
+	if command.Mode != "" && command.Mode != "address" {
 		return nil, agentlink.ErrInvalid
 	}
+	config.Mode = "address"
+	config.Endpoint = strings.TrimRight(command.Endpoint, "/")
 	endpoint, err := peer.ValidateEndpoint(ctx, config.Endpoint)
 	if err != nil {
 		return nil, agentlink.ErrInvalid

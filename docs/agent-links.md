@@ -96,6 +96,11 @@ Existing raw TCP forwarding can be reused, but copying never changes Tailscale
 configuration. All selected endpoints remain enabled independently
 and are restored on restart; an unavailable interface does not block startup.
 
+System Tailscale is optional and managed outside Pot. Pot only reads its addresses
+and existing forwarding; it has no login, Serve configuration or disconnect
+operation for the system client. Explicit endpoint configuration accepts only
+`address` mode and verifies the same signed TCP identity.
+
 Paste the invitation in the existing Add Agent editor; live verification is
 followed by connection, then Link selects the new node. No assistant binding
 wizard is required. Link keeps its graph, regions, edges and responsive inspector.

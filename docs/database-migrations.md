@@ -238,6 +238,10 @@ versioned per-assistant peer operation descriptions and removes the old flags.
 It retains connection keys,
 caller identities, accepted tasks and request receipts without replay.
 
+`control/0023_agent_link_address_mode` converts the retired `tailscale` publication
+mode to ordinary `address` mode. Existing listener addresses, endpoints and enabled
+endpoint records survive; the host no longer configures system Tailscale Serve.
+
 Profile format 3 replaces idle-delay settings with `prompt_cache_minutes`, an
 estimated cache lifetime. Explicit durations and immutable save receipt hashes
 are preserved; retired field names are removed. Conversation migration 0005 adds
