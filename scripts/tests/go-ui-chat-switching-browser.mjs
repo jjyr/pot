@@ -138,6 +138,12 @@ async function navigationFrames({root,client,select,snapshot,historyReads,emit})
   await frames('Cached chat switch follows latest from its first frame',async()=>{await select('beta');await select('alpha');},atLatest);
   history().dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));history().scrollTop=history().scrollHeight/2;await settle();
   const anchor=capture();check(!!anchor.id,'Reading frame has a message anchor');
+  // A shell redraw can run before ResizeObserver after width-driven reflow.
+  // Keep the saved reading anchor instead of capturing the reflowed viewport.
+  const savedWidth=root.style.width;
+  const reflow=async width=>{root.style.width=width;window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-go-preview-theme',value:'light'}}));await settle();};
+  await frames('Width reflow preserves reading before the resize observer',()=>reflow(narrow?'620px':'680px'),atAnchor(anchor));
+  await frames('Restoring width preserves the same reading anchor',()=>reflow(savedWidth),atAnchor(anchor));
   await settings();await frames('Settings return restores reading before exposure',returnFromSettings,atAnchor(anchor));
   await select('beta');
   await frames('Cached chat restores reading before exposure',()=>select('alpha'),()=>{if(client.scope().owner==='alpha')atAnchor(anchor)();});
