@@ -250,6 +250,11 @@ Codex. Only the explicit API creation action creates a local assistant, using th
 node default or the shared Provider editor. Visiting the page never creates an
 assistant. Linked chats do not require a local model connection.
 
+Each choice pairs its heading and description with a consistent rounded icon
+holder: a blue plug for API creation and the existing Pot/Codex brand assets for
+connections. Icons are decorative; the translated heading names each choice.
+The API action retains the primary button emphasis in both themes.
+
 Subflows stay in the same region. Back restores the choices; returning to an
 existing conversation restores its draft and reading position without stopping
 background execution. Narrow layouts use the same content full-width with Back.

@@ -692,7 +692,9 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     const options=n('div','assistant-start-options');root.append(options);
     for(const kind of ['api','pot','codex']) {
       const option=n('section','page-card assistant-start-option');
-      option.append(n('h2','',t(kind+'Title')),n('p','hint',t(kind+'Description')));
+      const header=n('div','assistant-start-option-header'),mark=n('span','assistant-start-icon assistant-start-icon-'+kind),content=n('div','assistant-start-option-content');
+      mark.setAttribute('aria-hidden','true');mark.append(kind==='api'?icon('plug'):connectionBrand(kind));
+      content.append(n('h2','',t(kind+'Title')),n('p','hint',t(kind+'Description')));header.append(mark,content);option.append(header);
       const button=action(t(kind+'Action'),async()=>{
         if(kind==='api'){button.disabled=true;try{await createLocalAssistant();}finally{button.disabled=false;}return;}
         await connection(kind);
