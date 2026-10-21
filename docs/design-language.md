@@ -396,8 +396,11 @@ readable after navigation or restart.
 
 Connection loss during a reply or uncertain send updates the bubble to
 Reconnecting, without declaring execution failed or automatically sending again.
-Recovery reads authoritative state. A connection notice below the composer is
-used only when no pending send or active reply already owns that status.
+Recovery reads authoritative state. Connection notices appear beside the assistant
+name in the Chat header, keeping history and composer geometry unchanged as the
+connection state changes. They are used only when no pending send or active reply
+already owns that status. Long notices truncate within the header, retain their
+full text on hover and leave recovery actions available.
 
 Task file links download through the local node; App requests a save location
 and Web uses browser downloads. Delivery constraints belong in

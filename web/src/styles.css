@@ -198,7 +198,9 @@ pot-mermaid[data-state='error'] .mermaid-canvas { color: var(--danger); }
 .send-button { width: 32px; height: 32px; margin-bottom: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 50%; background: var(--primary); color: #fff; }
 .send-button:not(:disabled):hover { background: var(--primary-hover); }
 .send-button:not(:disabled):active { background: var(--primary-active); }
-.connection-status { max-width: var(--conversation-width); margin: 6px auto 0; display: flex; gap: 8px; justify-content: center; min-height: 18px; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.connection-status { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; min-width: 0; max-width: 50%; font-size: 12px; font-weight: 400; color: var(--muted); }
+.connection-status > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connection-status > button { flex: none; }
 .connection-status:empty,.connection-status.is-connected { display: none; }
 .connection-status.has-error { color: var(--danger); }
 .text-button { padding: 0; border: 0; background: transparent; color: var(--primary); text-decoration: underline; }
