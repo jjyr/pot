@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jjyr/pot/pkg/core"
 	m "github.com/jjyr/pot/pkg/modelprotocol"
@@ -74,6 +75,7 @@ func TestCompactFailurePreservesOriginalAndNeverDispatches(t *testing.T) {
 
 func TestWindowCompactsBeforeLargeOrdinaryOutputBudgetWouldFail(t *testing.T) {
 	a, f, s, thread, execution := setup(t)
+	a.CompactDeadline = time.Now().Add(-time.Minute) // Cache policy must not disable window protection.
 	thread.Config.Params.MaxOutputTokens = 20000
 	thread.Config.Params.Agent.UseProviderUsage = false
 	if err := thread.Config.Rehash(); err != nil {
@@ -101,5 +103,26 @@ func TestWindowCompactsBeforeLargeOrdinaryOutputBudgetWouldFail(t *testing.T) {
 	}
 	if s.calls != 2 {
 		t.Fatal("window protection did not compact before continuation", s.calls)
+	}
+}
+
+func TestCacheExpiryDuringPreparationSkipsModel(t *testing.T) {
+	a, f, s, thread, execution := setup(t)
+	a.CompactOnly = true
+	a.CompactDeadline = time.Now().Add(time.Hour)
+	a.PrepareContext = func(_ context.Context, _ core.ExecutionContext, messages []m.Message) ([]m.Message, error) {
+		a.CompactDeadline = time.Now().Add(-time.Second)
+		return messages, nil
+	}
+	state := Checkpoint{Type: "context", Version: 2, Messages: []m.Message{}, Pending: []m.ToolCall{}, Receipts: []ToolReceipt{}, SteeringIDs: []string{}}
+	for range 4 {
+		state.Messages = append(state.Messages, m.TextMessage("user", strings.Repeat("goal ", 1000)), m.TextMessage("assistant", strings.Repeat("observed ", 1000)))
+	}
+	f.body, _ = json.Marshal(state)
+	if err := a.Execute(context.Background(), execution, thread, core.TurnRequest{RequestID: "expired-cache"}, false, func(core.AgentEvent) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if s.calls != 0 {
+		t.Fatal("expired cache reached model", s.calls)
 	}
 }

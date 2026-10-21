@@ -19,7 +19,7 @@ func TestCompactionDatabaseUpgradesPreserveHistoryAndUsage(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, entry := range entries {
-				if entry.Name() == "0004_idle_compaction.sql" || entry.Name() == "0002_compaction_records.sql" {
+				if entry.Name() == "0004_idle_compaction.sql" || entry.Name() == "0005_cache_compaction.sql" || entry.Name() == "0002_compaction_records.sql" || entry.Name() == "0003_cache_reporting.sql" {
 					continue
 				}
 				path := root + "/" + entry.Name()

@@ -7,7 +7,8 @@ import (
 
 type UsageObserver struct {
 	anthropicInput *uint64
-	anthropicCache uint64
+	anthropicCache *uint64
+	anthropicWrite *uint64
 }
 
 func (o *UsageObserver) Observe(protocol Protocol, raw json.RawMessage) (*UsageReport, error) {
@@ -44,22 +45,23 @@ func (o *UsageObserver) observe(protocol Protocol, event map[string]any) (*Usage
 		report.InputTokens = uintValue(usage["input_tokens"])
 		report.OutputTokens = uintValue(usage["output_tokens"])
 		report.CacheReadTokens = uintValue(get(usage, "input_tokens_details", "cached_tokens"))
+		report.CacheWriteTokens = uintValue(get(usage, "input_tokens_details", "cache_write_tokens"))
 	case AnthropicMessages:
 		if event["type"] == "message_start" {
 			usage := obj(get(event, "message", "usage"))
+			o.anthropicCache = uintValue(usage["cache_read_input_tokens"])
+			o.anthropicWrite = uintValue(usage["cache_creation_input_tokens"])
 			if n := uintValue(usage["input_tokens"]); n != nil {
-				cache := uintValue(usage["cache_read_input_tokens"])
-				write := uintValue(usage["cache_creation_input_tokens"])
-				o.anthropicCache = 0
-				if cache != nil {
-					o.anthropicCache = *cache
+				var cache uint64
+				if o.anthropicCache != nil {
+					cache = *o.anthropicCache
 				}
-				total, err := sum(*n, o.anthropicCache)
+				total, err := sum(*n, cache)
 				if err != nil {
 					return nil, err
 				}
-				if write != nil {
-					total, err = sum(total, *write)
+				if o.anthropicWrite != nil {
+					total, err = sum(total, *o.anthropicWrite)
 					if err != nil {
 						return nil, err
 					}
@@ -67,11 +69,13 @@ func (o *UsageObserver) observe(protocol Protocol, event map[string]any) (*Usage
 				o.anthropicInput = integer(total)
 			}
 			report.InputTokens = o.anthropicInput
-			report.CacheReadTokens = integer(o.anthropicCache)
+			report.CacheReadTokens = o.anthropicCache
+			report.CacheWriteTokens = o.anthropicWrite
 		} else if event["type"] == "message_delta" && obj(event["usage"]) != nil {
 			report.InputTokens = o.anthropicInput
 			report.OutputTokens = uintValue(get(event, "usage", "output_tokens"))
-			report.CacheReadTokens = integer(o.anthropicCache)
+			report.CacheReadTokens = o.anthropicCache
+			report.CacheWriteTokens = o.anthropicWrite
 		} else {
 			return nil, nil
 		}

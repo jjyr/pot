@@ -30,15 +30,28 @@ function agentRows(rows=[]) {
 function agentLabel(agent,locale) {
   return [...agentKeys,'unknown','recovery'].includes(agent)?translate(locale,'usage.agent.'+agent):agent;
 }
+export function usageCompactionRows(rows=[]) {
+  return ['precompact','compact'].map(kind=>({kind,input:0,output:0,cache:0,requests:0,input_known:true,output_known:true,cache_known:true,...rows.find(row=>row.kind===kind)}));
+}
+export function compactionTokens(row,locale) {
+  const value=tokens(row),formatted=usageNumbers(locale).compact(value);
+  if(row.input_known===false||row.output_known===false)return value?translate(locale,'usage.atLeastTokens').replace('{count}',formatted):'—';
+  return formatted;
+}
 function distribution(rows,{locale,kind='agent',exact=false}) {
   const root=n('div','usage-distribution'),bar=n('div','usage-share-bar'),list=n('div','usage-share-list'),total=rows.reduce((sum,row)=>sum+tokens(row),0),numbers=usageNumbers(locale);
-  const label=row=>kind==='model'?row.model:agentLabel(row.agent,locale);
+  const label=row=>kind==='compaction'?translate(locale,'usage.compaction.'+row.kind):kind==='model'?row.model:agentLabel(row.agent,locale);
   bar.setAttribute('role','img');bar.setAttribute('aria-label',rows.map(row=>`${label(row)} ${usagePercent(tokens(row),total,locale)}`).join(' · ')||translate(locale,'usage.empty'));
   for(const row of rows){
-    const value=tokens(row),color=kind==='model'?usageModelColor(row.model):agentKeys.includes(row.agent)?`var(--usage-${row.agent})`:usageModelColor(row.agent);
+    const value=tokens(row),color=kind==='compaction'?usageModelColor(row.kind==='precompact'?'precompaction':'compaction'):kind==='model'?usageModelColor(row.model):agentKeys.includes(row.agent)?`var(--usage-${row.agent})`:usageModelColor(row.agent);
     if(value){const segment=n('span');segment.style.width=`${value/total*100}%`;segment.style.background=color;bar.append(segment);}
-    const line=n('div','usage-share-row'),name=n('span','usage-share-name'),swatch=n('i'),amount=n('span','hint usage-share-value',exact?numbers.exact(value):numbers.compact(value));
-    line.dataset.viewKey=kind==='model'?row.model:row.agent;swatch.style.background=color;swatch.setAttribute('aria-hidden','true');name.append(swatch,n('span','',label(row)));line.append(name,amount,n('span','usage-share-percent',usagePercent(value,total,locale)));list.append(line);
+    const line=n('div','usage-share-row'),name=n('span','usage-share-name'),swatch=n('i'),amount=n('span','hint usage-share-value',kind==='compaction'?compactionTokens(row,locale):exact?numbers.exact(value):numbers.compact(value));
+    line.dataset.viewKey=kind==='compaction'?row.kind:kind==='model'?row.model:row.agent;swatch.style.background=color;swatch.setAttribute('aria-hidden','true');name.append(swatch,n('span','',label(row)));line.append(name,amount,n('span','usage-share-percent',usagePercent(value,total,locale)));
+    if(kind==='compaction'){
+      line.append(n('span','usage-compaction-cache',translate(locale,'usage.compactionCacheHit').replace('{rate}',numbers.hitRate(row))));
+      usageTooltip(line,{title:label(row),rows:usageRows(row,locale),note:translate(locale,'usage.compactionNote')});
+    }
+    list.append(line);
   }
   root.append(bar,list);if(!rows.length)root.append(n('p','hint',translate(locale,'usage.empty')));return root;
 }
@@ -76,5 +89,9 @@ export function usageCalendar(data,{locale,timezone}) {
   for(const [key,rows,kind]of [['annualAgents',agentRows(data.agents),'agent'],['annualModels',sortRows(data.models||[],'model'),'model']]){
     const section=n('section','usage-annual-share'),header=n('div','usage-share-heading');section.dataset.viewKey=key;header.append(n('h3','',t(key)),n('span','hint',t('tokens').replace('{count}',numbers.compact(tokens(data.total||{})))));section.append(header,distribution(rows,{locale,kind}));card.append(section);
   }
+  const compactions=usageCompactionRows(data.compaction_totals),compactionTotal={input:0,output:0,input_known:true,output_known:true};
+  for(const row of compactions){compactionTotal.input+=row.input;compactionTotal.output+=row.output;compactionTotal.input_known&&=row.input_known;compactionTotal.output_known&&=row.output_known;}
+  const compactSection=n('section','usage-annual-share'),compactHeading=n('div','usage-share-heading');compactSection.dataset.viewKey='annualCompaction';
+  compactHeading.append(n('h3','',t('annualCompaction')),n('span','hint',t('tokens').replace('{count}',compactionTokens(compactionTotal,locale))));compactSection.append(compactHeading,distribution(compactions,{locale,kind:'compaction'}));card.append(compactSection);
   card.append(n('p','hint usage-calendar-note',t('calendarNote').replace('{timezone}',timezone)));return card;
 }

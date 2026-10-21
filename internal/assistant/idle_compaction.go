@@ -13,8 +13,8 @@ import (
 )
 
 type IdleCompactionPolicy struct {
-	Delay  time.Duration
-	Source string
+	CacheTTL time.Duration
+	Source   string
 }
 
 const compactPrefix = "pot-compact-"
@@ -23,7 +23,7 @@ var ErrCompactDeferred = errors.New("compaction deferred for pending input or re
 
 func isCompactRequest(id string) bool { return strings.HasPrefix(id, compactPrefix) }
 func idleRoute(spec core.ResolvedSpec) string {
-	key, _ := core.HashJSON([]string{spec.Provider, spec.Model, spec.GatewayProtocol, spec.AuthRef})
+	key, _ := core.HashJSON([]any{spec.Provider, spec.Model, spec.GatewayProtocol, spec.AuthRef, spec.Params.ReasoningEffort})
 	return key
 }
 
@@ -49,29 +49,8 @@ func (c *Conversation) CheckIdleCompaction(ctx context.Context, now time.Time) e
 	if c.closed || c.blocked || c.turn != nil || c.thread == nil || !c.thread.Config.Params.Agent.AutoCompact {
 		return nil
 	}
-	var request, route, attempt string
-	var finished int64
-	if err := c.store.DB().QueryRowContext(ctx, "SELECT request_id,finished_at,route,attempt_for FROM assistant_idle_compaction WHERE singleton=1").Scan(&request, &finished, &route, &attempt); err != nil {
+	if eligible, err := c.idleEligibleLocked(ctx, now); err != nil || !eligible {
 		return err
-	}
-	if config, err := c.configurationLocked(ctx); err != nil {
-		return err
-	} else if config.PendingSpec != nil {
-		return nil
-	}
-	if request == "" || request == attempt || route != idleRoute(c.thread.Config) {
-		return nil
-	}
-	delay := 15 * time.Minute
-	if c.options.IdlePolicy != nil {
-		policy, err := c.options.IdlePolicy(ctx, *c.thread)
-		delay = policy.Delay
-		if err != nil {
-			return err
-		}
-	}
-	if delay <= 0 || now.UnixMilli() < finished+delay.Milliseconds() {
-		return nil
 	}
 	var pending int
 	if err := c.store.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM chat_user_inbox").Scan(&pending); err != nil {
@@ -116,25 +95,9 @@ func (c *Conversation) CheckIdleCompaction(ctx context.Context, now time.Time) e
 // completed-result race across the two databases.
 func (c *Conversation) startIdleLocked(ctx context.Context) error {
 	start := func() error {
-		var finished int64
-		var route string
-		if err := c.store.DB().QueryRowContext(ctx, "SELECT finished_at,route FROM assistant_idle_compaction WHERE singleton=1").Scan(&finished, &route); err != nil {
+		if eligible, err := c.idleEligibleLocked(ctx, time.Now()); err != nil {
 			return err
-		}
-		delay := 15 * time.Minute
-		if c.options.IdlePolicy != nil {
-			policy, err := c.options.IdlePolicy(ctx, *c.thread)
-			if err != nil {
-				return err
-			}
-			delay = policy.Delay
-		}
-		if delay <= 0 || time.Now().UnixMilli() < finished+delay.Milliseconds() || route != idleRoute(c.thread.Config) {
-			return ErrCompactDeferred
-		}
-		if config, err := c.configurationLocked(ctx); err != nil {
-			return err
-		} else if config.PendingSpec != nil {
+		} else if !eligible {
 			return ErrCompactDeferred
 		}
 		var pending int
@@ -189,18 +152,53 @@ func (c *Conversation) abandonIdleLocked(ctx context.Context) error {
 	return c.appendTurnLocked(ctx)
 }
 
-func (c *Conversation) idleScheduleLocked(ctx context.Context) json.RawMessage {
-	var finished int64
-	_ = c.store.DB().QueryRowContext(ctx, "SELECT finished_at FROM assistant_idle_compaction WHERE singleton=1").Scan(&finished)
-	delay := 15 * time.Minute
-	source := "default"
+func (c *Conversation) idlePolicyLocked(ctx context.Context) (IdleCompactionPolicy, error) {
 	if c.options.IdlePolicy != nil {
-		if value, err := c.options.IdlePolicy(ctx, *c.thread); err == nil {
-			delay = value.Delay
-			source = value.Source
-		}
+		return c.options.IdlePolicy(ctx, *c.thread)
 	}
-	body, _ := json.Marshal(map[string]any{"idle_minutes": delay.Minutes(), "source": source, "anchor_ms": finished, "deadline_ms": finished + delay.Milliseconds(), "started_ms": storage.Now(), "provider_cache_ttl": nil, "provider_cache_source": "unknown"})
+	return IdleCompactionPolicy{CacheTTL: 15 * time.Minute, Source: "default"}, nil
+}
+
+// TTL estimates a reuse window. Arm at 90% from request start, and never
+// launch after expiry. Missing/zero cache evidence closes this opportunity.
+func (c *Conversation) idleEligibleLocked(ctx context.Context, now time.Time) (bool, error) {
+	var request, route, attempt string
+	var started int64
+	var active bool
+	if err := c.store.DB().QueryRowContext(ctx, "SELECT request_id,started_at,route,attempt_for,COALESCE(cache_read,0)>0 OR COALESCE(cache_write,0)>0 FROM assistant_idle_compaction WHERE singleton=1").Scan(&request, &started, &route, &attempt, &active); err != nil {
+		return false, err
+	}
+	if request == "" || request == attempt || started <= 0 || route != idleRoute(c.thread.Config) {
+		return false, nil
+	}
+	if config, err := c.configurationLocked(ctx); err != nil {
+		return false, err
+	} else if config.PendingSpec != nil {
+		return false, nil
+	}
+	policy, err := c.idlePolicyLocked(ctx)
+	if err != nil {
+		return false, err
+	}
+	ttl := policy.CacheTTL.Milliseconds()
+	if ttl <= 0 || now.UnixMilli() < started+ttl*9/10 {
+		return false, nil
+	}
+	if !active || now.UnixMilli() >= started+ttl {
+		// Only a new successful ordinary response can arm another opportunity.
+		_, err = c.store.DB().ExecContext(ctx, "UPDATE assistant_idle_compaction SET attempt_for=request_id WHERE singleton=1")
+		return false, err
+	}
+	return true, nil
+}
+
+func (c *Conversation) idleScheduleLocked(ctx context.Context) json.RawMessage {
+	var started int64
+	var read, write *int64
+	_ = c.store.DB().QueryRowContext(ctx, "SELECT started_at,cache_read,cache_write FROM assistant_idle_compaction WHERE singleton=1").Scan(&started, &read, &write)
+	policy, _ := c.idlePolicyLocked(ctx)
+	ttl := policy.CacheTTL.Milliseconds()
+	body, _ := json.Marshal(map[string]any{"cache_ttl_minutes": policy.CacheTTL.Minutes(), "source": policy.Source, "anchor_ms": started, "due_ms": started + ttl*9/10, "expires_ms": started + ttl, "started_ms": storage.Now(), "cache_read_tokens": read, "cache_write_tokens": write})
 	return body
 }
 

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import {usageCalendarWeeks,usageModelColor,usagePercent} from '../../web/src/components/usage-calendar.mjs';
+import {usageCalendarWeeks,usageModelColor,usagePercent,usageCompactionRows,compactionTokens} from '../../web/src/components/usage-calendar.mjs';
+import {usageNumbers,usageRows} from '../../web/src/components/usage.mjs';
 import {combineUsage} from '../../web/src/state/aggregate.mjs';
 
 for(let weekday=0;weekday<7;weekday++){
@@ -32,4 +33,19 @@ assert.equal(combined.models.find(row=>row.model==='shared').input,220,'The same
 assert.equal(combined.models.reduce((n,row)=>n+row.input+(row.output||0),0),320,'Complete model shares reconcile with annual totals');
 assert.equal(combined.spaces[1].stale,true);
 assert.equal(usageModelColor(combined.models[0].model),usageModelColor('shared'),'Aggregation order never affects model colors');
+const compactRow=(input,cache,known=true)=>({kind:'precompact',input,output:10,cache,requests:1,input_known:true,output_known:true,cache_known:known});
+const compacted=combineUsage([{space:{id:'a'},value:{compaction_totals:[compactRow(100,90)]}},{space:{id:'b'},value:{compaction_totals:[compactRow(900,90)]}}]);
+const precompact=compacted.compaction_totals[0];
+assert.equal(usageNumbers('en').hitRate(precompact),'18%','Cache rate weights by input tokens across Spaces, never averaging request percentages');
+assert.equal(precompact.requests,2);
+assert.equal(compacted.total.input,0,'Compaction subset is never added to ordinary totals');
+const unknown=combineUsage([{value:{compaction_totals:[compactRow(100,90)]}},{value:{compaction_totals:[compactRow(100,0,false)]}}]).compaction_totals[0];
+assert.equal(usageNumbers('en').hitRate(unknown),'—','Unknown cache reporting must not become a zero hit rate');
+assert.equal(usageNumbers('en').uncached(unknown),null);
+assert.equal(usageRows(unknown,'en').find(([label])=>label==='Cached input')[1],'—');
+assert.equal(usageNumbers('en').hitRate(compactRow(100,0)),'0%','Reported zero is distinct from missing cache usage');
+assert.equal(compactionTokens({...precompact,output_known:false},'en'),'≥ 1.0K');
+assert.equal(compactionTokens({...precompact,input:0,output:0,input_known:false},'en'),'—');
+assert.deepEqual(usageCompactionRows([precompact]).map(row=>row.kind),['precompact','compact']);
+assert.equal(usageCompactionRows([]).reduce((sum,row)=>sum+row.input+row.output,0),0);
 console.log('Usage calendar dates, stable colors, small shares and cross-Space aggregation passed');

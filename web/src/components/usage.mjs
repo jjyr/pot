@@ -5,8 +5,8 @@ import {translate} from '../locales/messages.mjs';
 export function usageNumbers(locale) {
   const exact=value=>value==null?'—':Number(value).toLocaleString(locale);
   const compact=value=>value==null?'—':value>=1e6?(value/1e6).toFixed(1)+'M':value>=1e3?(value/1e3).toFixed(1)+'K':exact(value);
-  const uncached=value=>value.input==null?null:Math.max(0,value.input-(value.cache||0));
-  const hitRate=value=>value.input>0?new Intl.NumberFormat(locale,{style:'percent',maximumFractionDigits:1}).format((value.cache||0)/value.input):'—';
+  const uncached=value=>value.input==null||value.input_known===false||value.cache_known===false?null:Math.max(0,value.input-(value.cache||0));
+  const hitRate=value=>value.input>0&&value.input_known!==false&&value.cache_known!==false?new Intl.NumberFormat(locale,{style:'percent',maximumFractionDigits:1}).format((value.cache||0)/value.input):'—';
   return {exact,compact,uncached,hitRate};
 }
 
@@ -30,11 +30,12 @@ export function usageTooltip(target,{title,rows=[],note='',render}) {
 export function usageRows(value,locale) {
   const {exact,uncached,hitRate}=usageNumbers(locale);
   const t=key=>translate(locale,'usage.'+key);
-  return [[t('total'),value.input==null||value.output==null?'—':exact(value.input+value.output)],
-    [t('input'),exact(value.input)],
-    [t('cached'),value.input==null?'—':exact(value.cache||0)],
+  const total=value.input==null||value.output==null?'—':value.input_known===false||value.output_known===false?value.input+value.output?translate(locale,'usage.atLeastTokens').replace('{count}',exact(value.input+value.output)):'—':exact(value.input+value.output);
+  return [[t('total'),total],
+    [t('input'),value.input_known===false?'—':exact(value.input)],
+    [t('cached'),value.input==null||value.cache_known===false?'—':exact(value.cache||0)],
     [t('uncached'),exact(uncached(value))],
-    [t('output'),exact(value.output)],
+    [t('output'),value.output_known===false?'—':exact(value.output)],
     [t('hitRate'),hitRate(value)]];
 }
 

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jjyr/pot/internal/inbox"
 	"github.com/jjyr/pot/pkg/agent"
@@ -890,6 +891,13 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 	if isCompactRequest(request.RequestID) {
 		loop.CompactOnly = true
 		loop.CompactSchedule = compactSchedule
+		var schedule struct {
+			ExpiresMS int64 `json:"expires_ms"`
+		}
+		if err = json.Unmarshal(compactSchedule, &schedule); err != nil {
+			return execution.Result{Phase: execution.Failed, Err: err}
+		}
+		loop.CompactDeadline = time.UnixMilli(schedule.ExpiresMS)
 		c.mu.Lock()
 		var raw string
 		err = c.store.DB().QueryRowContext(runCtx, "SELECT prefix FROM assistant_idle_compaction WHERE singleton=1").Scan(&raw)

@@ -138,15 +138,17 @@ resume:  [stable system | tools | current runtime | summary | last user batch]
 ```
 
 Window pressure reserves space for the full appended instruction and summary
-output. Idle maintenance checks at the connection's configured delay (15
-minutes by default, never early), with context above 30%. It requires settled
-current work, no queued user input and no completed-but-unprocessed Task results.
+output. Idle maintenance becomes due at 90% of the estimated cache lifetime
+(15 minutes by default), with context above 30%. It requires positive reported
+cache reads or writes on the last ordinary response. Unknown/zero cache activity
+or an expired window skips maintenance without a standalone fallback. It requires
+settled current work, no queued user input and no completed-but-unprocessed Task results.
 Unfinished background Tasks do not block it. The canonical Task completion writer
 boundary and the conversation lane serialize the final start check. Results or
 user input arriving after start remain queued until compaction finishes.
 
-The last successful ordinary model request anchors the persisted timer. Timing
-edits recalculate from that anchor; routing changes discard the old timer until a
+The start of the last successful ordinary model request anchors the persisted
+cache window. Timing edits recalculate from that anchor; routing changes discard the old timer until a
 new request completes. No new conversation work means no self-compaction, and an
 unchanged history gets only one idle attempt. Restart abandons interrupted idle
 sampling without replaying tools; failed maintenance retains the original history
