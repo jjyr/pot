@@ -76,8 +76,13 @@ terminal unconfirmed outcome that must not replay work. Uncertain marks a cached
 state whose receiver cannot currently be queried; it never fabricates failure.
 Both native and peer adapters supply this projection. Reset frames replace the
 projection; delta frames update the lifecycles they contain. A completed intermediate
-message does not end an active reply. Empty successful results, terminal failures
-and cancellation each have an explicit presentation without requiring reply text.
+message does not end an active reply. A successful result without text or a
+resource presentation silently removes its activity bubble; the UI does not
+invent a chat message from execution completion. Failures, cancellation and
+unconfirmed outcomes remain visible without requiring reply text.
+Lifecycle placeholders without a durable message sequence stay after their
+input's last loaded output or tool call. Later messages follow them; lifecycle
+array order and subsequent refreshes do not move old outcomes to the chat tail.
 
 `GET /api/v1/snapshot` returns the same bounded reset frame. Protocol version 7
 uses this contract for browser and Wails streams.

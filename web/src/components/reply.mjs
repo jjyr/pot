@@ -47,7 +47,6 @@ export function createReplyBubble(host) {
         else if(message.phase==='stopped')status.append(node('span','',t('replyStopped')));
         else if(message.phase==='paused')status.append(node('span','',t('replyPaused')));
         else if(message.phase==='waiting')status.append(node('span','',t('replyWaiting')));
-        else if(message.phase==='empty')status.append(node('span','',t('replyEmpty')));
         else if(message.phase==='unknown'){
           status.append(node('span','',t('replyUnknown')));
           if(message.error){const details=node('details','reply-error-details');details.open=expanded;details.append(node('summary','',t('errorDetails')),node('pre','',message.error));status.append(details);}
