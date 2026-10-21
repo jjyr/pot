@@ -18,10 +18,12 @@ import (
 	"github.com/jjyr/pot/internal/linkhost"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/internal/transport"
+	"github.com/jjyr/pot/internal/webui"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/assistantavatar"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/protocol"
+	"github.com/jjyr/pot/web"
 )
 
 func profileApplication(t *testing.T) (*agentHost, *transport.Application, string) {
@@ -144,6 +146,11 @@ func TestCodexProfilePeerRejectsAssistantCallersAndOwnerOperations(t *testing.T)
 		t.Fatal("assistant caller could manage peer profile")
 	}
 	input.From.Kind = "user"
+	deletion := agentlink.DeleteAssistantRequest{From: input.From, AssistantID: "codex", Revision: 1}
+	deletion.From.Kind = "assistant"
+	if _, err = b.links.DeleteAssistant(ctx, connection.ID, deletion); err == nil {
+		t.Fatal("assistant caller could retire peer")
+	}
 	for _, action := range []string{"delete", "configure", "rules"} {
 		input.Action = action
 		if _, err = b.links.Profile(ctx, connection.ID, input); err == nil {
@@ -152,7 +159,28 @@ func TestCodexProfilePeerRejectsAssistantCallersAndOwnerOperations(t *testing.T)
 	}
 }
 
-func TestCodexProfileThroughPotHTTPKeepsThreadAndWelcome(t *testing.T) {
+func profileBrowserHandler(t *testing.T, app *transport.Application) (http.Handler, *http.Cookie) {
+	t.Helper()
+	upstream := httptest.NewServer(transport.Handler(app, "private"))
+	t.Cleanup(upstream.Close)
+	config := webui.NewConfig()
+	handler, err := webui.New(webui.Options{Origin: "http://localhost", Config: config, Upstream: webui.Upstream{URL: upstream.URL, Credential: "private", Client: upstream.Client()}, Assets: webassets.FS()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { handler.Close() })
+	login := httptest.NewRequest("POST", "http://localhost/access/token", nil)
+	login.Header.Set("Authorization", "Bearer "+config.Token)
+	loginResponse := httptest.NewRecorder()
+	handler.ServeHTTP(loginResponse, login)
+	if loginResponse.Code != http.StatusOK {
+		t.Fatal(loginResponse.Code, loginResponse.Body.String())
+	}
+	cookie := loginResponse.Result().Cookies()[0]
+	return handler, cookie
+}
+
+func TestCodexProfileThroughPotBrowserKeepsThreadAndWelcome(t *testing.T) {
 	h, app, owner := profileApplication(t)
 	ctx := context.Background()
 	original, err := h.backend.resolve(ctx, "codex")
@@ -165,15 +193,15 @@ func TestCodexProfileThroughPotHTTPKeepsThreadAndWelcome(t *testing.T) {
 	if _, err = h.tasks.Exec("UPDATE codex_link_assistants SET thread_id='same-thread' WHERE id='codex'"); err != nil {
 		t.Fatal(err)
 	}
-	handler := transport.Handler(app, "private")
+	handler, cookie := profileBrowserHandler(t, app)
 	call := func(method, path string, input any, status int) []byte {
 		t.Helper()
 		var raw []byte
 		if input != nil {
 			raw, _ = json.Marshal(input)
 		}
-		r := httptest.NewRequest(method, path+"?assistant_id="+url.QueryEscape(owner)+"&locale=zh-CN", bytes.NewReader(raw))
-		r.Header.Set("Authorization", "Bearer private")
+		r := httptest.NewRequest(method, "http://localhost"+path+"?assistant_id="+url.QueryEscape(owner)+"&space_id=local&locale=zh-CN", bytes.NewReader(raw))
+		r.AddCookie(cookie)
 		r.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, r)
@@ -201,8 +229,8 @@ func TestCodexProfileThroughPotHTTPKeepsThreadAndWelcome(t *testing.T) {
 		t.Fatal("profile not saved", after.Name)
 	}
 	// An old settings page cannot overwrite a newer MCP or UI edit.
-	stale := httptest.NewRequest("POST", "/api/v1/assistants/"+url.PathEscape(owner)+"?assistant_id="+url.QueryEscape(owner), strings.NewReader(`{"name":"stale","revision":1}`))
-	stale.Header.Set("Authorization", "Bearer private")
+	stale := httptest.NewRequest("POST", "http://localhost/api/v1/assistants/"+url.PathEscape(owner)+"?assistant_id="+url.QueryEscape(owner), strings.NewReader(`{"name":"stale","revision":1}`))
+	stale.AddCookie(cookie)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, stale)
 	if w.Code < 400 {
@@ -245,14 +273,21 @@ func TestCodexProfileBrowserFixture(t *testing.T) {
 		t.Skip("opt-in browser fixture")
 	}
 	_, app, _ := profileApplication(t)
-	handler := transport.Handler(app, "private")
+	upstream := httptest.NewServer(transport.Handler(app, "private"))
+	defer upstream.Close()
 	repo, err := filepath.Abs("../../..")
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := http.FileServer(http.Dir(repo))
+	server := httptest.NewUnstartedServer(nil)
+	origin := "http://" + server.Listener.Addr().String()
+	config := webui.NewConfig()
+	browser, err := webui.New(webui.Options{Origin: origin, Config: config, Upstream: webui.Upstream{URL: upstream.URL, Credential: "private", Client: upstream.Client()}, Assets: os.DirFS(repo)})
+	if err != nil {
+		t.Fatal(err)
+	}
 	done := make(chan struct{}, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/fixture/stop" {
 			select {
 			case done <- struct{}{}:
@@ -260,14 +295,19 @@ func TestCodexProfileBrowserFixture(t *testing.T) {
 			}
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/") {
-			r.Header.Set("Authorization", "Bearer private")
-			handler.ServeHTTP(w, r)
+		// This opt-in loopback fixture grants only its disposable browser session.
+		// All product routes still pass through browser authentication and Allowed.
+		if r.URL.Path == "/fixture/login" && r.Method == http.MethodPost {
+			login := httptest.NewRequest(http.MethodPost, origin+"/access/token", nil)
+			login.Header.Set("Authorization", "Bearer "+config.Token)
+			browser.ServeHTTP(w, login)
 			return
 		}
-		files.ServeHTTP(w, r)
-	}))
+		browser.ServeHTTP(w, r)
+	})
+	server.Start()
 	defer server.Close()
+	defer browser.Close()
 	if err = os.WriteFile(file, []byte(server.URL), 0600); err != nil {
 		t.Fatal(err)
 	}

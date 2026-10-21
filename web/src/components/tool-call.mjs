@@ -10,7 +10,7 @@ function scheduleClock(update){clocks.add(update);if(clockFrame)return;const fra
 
 
 // Stable nodes preserve native disclosure, selection and output scroll on updates.
-export function createToolCall({memory=new Map(),key='',locale=()=> 'en',onDecision,onLocate,onInteract=()=>{},downloadFile,acquireFileImage}={}){
+export function createToolCall({memory=new Map(),key='',locale=()=> 'en',machineLabel=()=>translate(locale(),'machine.unavailable'),onDecision,onLocate,onInteract=()=>{},downloadFile,acquireFileImage}={}){
   const t=name=>translate(locale(),`tool.${name}`),root=n('details','tool-call'),summary=n('summary','tool-summary');
   root.dataset.cacheKey=`tool:${key}`;
   summary.addEventListener('click',onInteract);
@@ -69,14 +69,15 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',onDecis
     // Live clocks run only while a visible operation needs one, and honor backend time.
     const elapsed=start?Math.max(0,((tool.finished_at_ms||Date.now())-start)/1000):null;
     duration.textContent=elapsed===null?'':`${phase==='waiting_approval'&&!script?t('waited')+' ':''}${elapsed<1?elapsed.toFixed(1):Math.floor(elapsed)}s`;
-    context.textContent=[tool.target?.runtime_id,tool.workdir,tool.execution_mode==='host'?t('hostExecution'):tool.execution_mode==='sandbox'?t('sandboxExecution'):''].filter(Boolean).join(' · ');context.hidden=!activeTool(tool)||!context.textContent;
+    const targetLabel=tool.target?.runtime_id?machineLabel(tool.target.runtime_id):'';
+    context.textContent=[targetLabel,tool.workdir,tool.execution_mode==='host'?t('hostExecution'):tool.execution_mode==='sandbox'?t('sandboxExecution'):''].filter(Boolean).join(' · ');context.hidden=!activeTool(tool)||!context.textContent;
     const error=isGroup?'':tool.diagnostic||(tool.failurePhase?t(tool.failurePhase):['failed','denied','unknown'].includes(phase)?String(toolFailure(tool)||t(phase)).split('\n')[0]:'');failure.textContent=String(error).split('\n')[0];failure.hidden=!error;
     failure.onclick=script?event=>{event.preventDefault();root.open=true;onLocate?.(tool.failureID||script.failureID,tool.turn_id);}:null;
     if(script&&error){failure.tabIndex=0;failure.setAttribute('role','button');failure.onkeydown=event=>{if(['Enter',' '].includes(event.key)){event.preventDefault();failure.click();}};}else{failure.removeAttribute('tabindex');failure.removeAttribute('role');failure.onkeydown=null;}
-    const nextSignature=JSON.stringify([tool.name,tool.target,tool.workdir,tool.execution_mode,locale()]);
-    if(signature!==nextSignature){signature=nextSignature;metadata.replaceChildren();for(const [label,value]of [[t('executionMode'),tool.execution_mode==='host'?t('hostExecution'):tool.execution_mode==='sandbox'?t('sandboxExecution'):null],[t('name'),tool.name],[t('target'),tool.target?.runtime_id],[t('workdir'),tool.workdir]])if(value)metadata.append(n('dt','',label),n('dd','',value));}
+    const nextSignature=JSON.stringify([tool.name,tool.target,tool.workdir,tool.execution_mode,targetLabel,locale()]);
+    if(signature!==nextSignature){signature=nextSignature;metadata.replaceChildren();for(const [label,value]of [[t('executionMode'),tool.execution_mode==='host'?t('hostExecution'):tool.execution_mode==='sandbox'?t('sandboxExecution'):null],[t('name'),tool.name],[t('target'),targetLabel],[t('workdir'),tool.workdir]])if(value)metadata.append(n('dt','',label),n('dd','',value));}
     if(pending){
-      if(approvalID!==pending.id){approvalID=pending.id;approvalCard=createApprovalCard({locale,onDecision});approval.replaceChildren(approvalCard.element);}
+      if(approvalID!==pending.id){approvalID=pending.id;approvalCard=createApprovalCard({locale,machineLabel,onDecision});approval.replaceChildren(approvalCard.element);}
       approvalCard.update(pending);
     }else{approvalID='';approvalCard=null;approval.replaceChildren();}
     approval.hidden=!pending;

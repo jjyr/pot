@@ -246,21 +246,33 @@ func (p agentPort) Call(ctx context.Context, target agentlink.Target, operation 
 			return nil, err
 		}
 		return s.UploadAttachment(ctx, assistantID, input)
+	case agentlink.AssistantDelete:
+		var input struct {
+			Revision uint64 `json:"revision" required:"true"`
+		}
+		if err := protocol.DecodeStrict(call.Body, &input); err != nil {
+			return nil, err
+		}
+		err := s.DeleteAssistant(ctx, assistantID, input.Revision)
+		return map[string]bool{"deleted": err == nil}, err
 	case agentlink.AssistantProfile:
+		if call.Action == "get" {
+			definitions, err := s.Registry.Definitions(ctx)
+			if err != nil {
+				return nil, err
+			}
+			for _, d := range definitions {
+				if d.ID == assistantID {
+					return agentlink.Profile{ID: d.ID, Name: d.Name, Avatar: d.Avatar, Revision: d.Revision}, nil
+				}
+			}
+			return nil, agentlink.ErrNotFound
+		}
 		if call.Action == "read" {
 			avatar, err := s.Registry.DefaultAvatar(ctx, assistantID)
 			return map[string]any{"avatar": avatar}, err
 		}
-		if call.Action == "delete" {
-			var input struct {
-				Revision uint64 `json:"revision" required:"true"`
-			}
-			if err := protocol.DecodeStrict(call.Body, &input); err != nil {
-				return nil, err
-			}
-			err := s.DeleteAssistant(ctx, assistantID, input.Revision)
-			return map[string]bool{"deleted": err == nil}, err
-		}
+
 		var input struct {
 			Name     *string `json:"name,omitempty"`
 			Avatar   *string `json:"avatar,omitempty"`
@@ -325,6 +337,15 @@ func (p agentPort) Call(ctx context.Context, target agentlink.Target, operation 
 
 func (p agentPort) linkedCall(ctx context.Context, target agentlink.Target, op agentlink.Operation, call agentlink.Call) (any, error) {
 	s := p.s
+	if op == agentlink.AssistantDelete {
+		var input struct {
+			Revision uint64 `json:"revision" required:"true"`
+		}
+		if err := protocol.DecodeStrict(call.Body, &input); err != nil {
+			return nil, err
+		}
+		return s.agentLinks.service.DeleteAssistant(ctx, target.LinkID, agentlink.DeleteAssistantRequest{From: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: linkChatID(target.LinkID, target.AssistantID)}, AssistantID: target.AssistantID, Revision: input.Revision})
+	}
 	if op == agentlink.AssistantProfile {
 		var input struct {
 			Name     *string `json:"name,omitempty"`

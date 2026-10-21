@@ -27,6 +27,14 @@ Codex Agent Link host
         +-- assistant B -- serial chat/task queue -- persistent Codex thread B
 ```
 
+Online users may retire an idle virtual assistant through the separate
+`assistant.delete` capability. Settings use Pot's shared deletion disclosure and
+confirmation dialog. Queued messages, active jobs and uncertain cleanup prevent
+retirement. The adapter keeps a tombstone, thread binding and durable history;
+restart and owner configuration cannot resurrect that ID. Removing the default
+leaves the default unset. This does not delete the underlying Codex thread or
+workspace files, and other assistants and the node connection remain available.
+
 The receiving host chooses its local Codex login, model configuration, workspace
 and sandbox mode. Remote requests cannot select arbitrary paths, change sandbox
 permissions or approve an interactive request. The host declines approvals and

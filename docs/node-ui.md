@@ -12,8 +12,14 @@ them or change stable routing/policy IDs. Only up, non-loopback interfaces suppl
 unicast addresses; link-local addresses are omitted. Addresses are deduplicated
 and sorted with IPv4 before IPv6. These addresses do not prove remote reachability.
 The Link graph and inspector show the same host information directly.
+Tasks, tool execution details and approval cards resolve execution IDs through
+the owning node's machine inventory and show hostname plus the first interface IP.
+Schedule editors select these machine labels while submitting stable IDs.
+Unavailable inventory shows a localized missing-information label, never an ID.
+Connection lists and assistant source labels show the peer name and available
+host information; they never fall back to a node ID.
 Execution machines show their hostname and one interface IP. Linked nodes show
-the reported hostname, falling back to the saved TCP endpoint's host and port;
+the reported hostname together with the saved TCP endpoint's host and port;
 this endpoint is a connection address, not a discovered remote interface inventory.
 An incoming-only link may have no saved endpoint. Missing host information stays
 empty. Internal node IDs and a technical-details disclosure are not shown.
@@ -37,9 +43,20 @@ and delete actions. Deletion confirms removal; task and conversation history
 remain available. No separate binding wizard or task creation page is required.
 Provided assistants use their saved profile avatars, matching the chat directory;
 node headers keep the Pot or Codex brand icon.
-Agent Link directories carry the receiver's saved avatars. Codex assistants
-advertise a profile-only settings operation for names and avatars, independent
-of model configuration. Profile edits preserve routing and the original session.
+Agent Link directories carry the receiver's saved avatars. Pot and Codex
+assistants advertise profile settings for names and avatars independently of
+model configuration. Profile edits preserve routing and the original session.
+The authenticated browser service publishes the same profile read, update and
+default-avatar operations as the native UI. Settings loading and retries retain
+the selected assistant's full identity. A failed load replaces the loading state
+with a localized error and retry action; leaving cancels the pending read.
+Local and linked settings share the **More actions → Delete assistant** disclosure,
+confirmation dialog and error states. Linked deletion requires the separately
+advertised `assistant.delete` capability and an online destination. Disconnecting
+while editing disables deletion without discarding drafts. Confirmation explains
+that retirement affects every client of that remote assistant. The receiver
+rejects ongoing replies, queued work and uncertain execution cleanup. Deleting
+one assistant preserves its node connection and other assistants.
 
 Chat, task controls, assistant settings and notifications use the selected
 assistant's versioned Agent Link capabilities. They never infer support from

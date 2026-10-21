@@ -333,6 +333,9 @@ func Allowed(method, path string) bool {
 		return len(parts) == 2 && (parts[1] == "login" && method == "POST" || parts[1] == "connection" && method == "DELETE") || len(parts) == 3 && parts[1] == "login" && core.Identifier(parts[2]) && (method == "GET" || method == "DELETE")
 	}
 	if method == "GET" {
+		if path == "/api/v1/assistants/profile" || path == "/api/v1/assistants/default-avatar" {
+			return true
+		}
 		if strings.HasPrefix(path, "/api/v1/attachments/") {
 			return core.Identifier(strings.TrimPrefix(path, "/api/v1/attachments/"))
 		}
@@ -373,6 +376,10 @@ func Allowed(method, path string) bool {
 				return true
 			}
 			id := strings.TrimPrefix(path, "/api/v1/assistants/")
+			if strings.HasPrefix(id, "agent-link:") {
+				link, assistant, found := strings.Cut(strings.TrimPrefix(strings.TrimSuffix(id, "/delete"), "agent-link:"), ":")
+				return found && core.Identifier(link) && core.Identifier(assistant)
+			}
 			return core.Identifier(strings.TrimSuffix(id, "/delete"))
 		}
 

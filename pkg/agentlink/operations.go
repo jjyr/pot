@@ -29,6 +29,7 @@ const (
 	AssistantConfigure Operation = "assistant.configure"
 	AssistantRules     Operation = "assistant.rules"
 	AssistantProfile   Operation = "assistant.profile"
+	AssistantDelete    Operation = "assistant.delete"
 	AssistantUsage     Operation = "assistant.usage"
 	Approvals          Operation = "approvals.manage"
 	TaskSubmit         Operation = "task.submit"
@@ -97,7 +98,7 @@ func PeerOperations() []Operation {
 func OwnerOperations() []Operation {
 	return []Operation{ChatRead, ChatSend, ChatReceipt, ChatHistory, ChatSubscribe,
 		ChatCancel, ChatSteer, ChatControl, ChatRetry, ChatContinue, ChatAttachments,
-		ChatReferences, ChatCompletions, AssistantConfigure, AssistantRules, AssistantProfile, AssistantUsage, Approvals,
+		ChatReferences, ChatCompletions, AssistantConfigure, AssistantRules, AssistantProfile, AssistantDelete, AssistantUsage, Approvals,
 		TaskSubmit, TaskRead, TaskList, TaskCancel, TaskInterrupt, TaskControl, TaskInput,
 		TaskEvents, TaskFiles, TaskRecovery, TaskResume, TaskArchive, TaskOutcomes,
 		TaskConfigure, Schedules}

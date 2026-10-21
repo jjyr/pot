@@ -55,6 +55,15 @@ cached capability descriptions; the receiver still enforces authorization at
 admission. Directory descriptions must cover every advertised assistant; a peer
 cannot publish an owner-scoped description. Upgrade connected adapters together.
 
+`assistant.profile` permits presentation editing only; it does not authorize
+retirement. `assistant.delete` is an independent receiver-advertised operation
+available only to authenticated user callers, never assistant or task callers.
+Its typed request binds the selected assistant and saved profile revision.
+The receiver retires only an idle identity and rejects stale revisions, active
+work and unconfirmed cleanup. No deletion is queued while disconnected. A
+successful deletion refreshes the sender's directory; it does not revoke the
+node connection, choose a replacement default or delete workspace files.
+
 Chat capabilities distinguish send, receipt, history, subscription, attachments,
 references and individual turn controls. Task capabilities distinguish submit,
 read, list, cancel, input, events, files, archive and advanced owner controls.
@@ -221,9 +230,11 @@ retains a separate reply lifecycle, independent of its send receipt and the
 assistant's aggregate activity. The authenticated `chat.status` peer operation
 checks the original caller, input and target before returning execution facts and
 explicit correlated replies. It cannot read another caller's conversation.
-Status reads never submit or repeat work. Failed, cancelled, empty and unconfirmed
-outcomes remain visible without requiring a text message. Text arriving before
-execution ends remains intermediate output.
+Status reads never submit or repeat work. Failed, cancelled and unconfirmed
+outcomes remain visible without requiring a text message. Successful empty
+outcomes settle execution silently; only agent-authored text or resource
+presentations produce completed reply bubbles. Text arriving before execution
+ends remains intermediate output.
 
 The [UI event contract](ui-events.md#main-conversation-streams) defines wire fields and
 states. See [database migrations](database-migrations.md) for persisted projection

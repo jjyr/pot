@@ -41,7 +41,7 @@ func (b potLinkBackend) Directory(ctx context.Context) (agentlink.Directory, err
 		}
 		i.Avatar = a.Avatar
 		d.Assistants = append(d.Assistants, i)
-		d.Operations[a.ID] = agentlink.Description{Version: 1, Scope: "peer", Operations: agentlink.PeerOperations()}
+		d.Operations[a.ID] = agentlink.Description{Version: 1, Scope: "peer", Operations: append(agentlink.PeerOperations(), agentlink.AssistantProfile, agentlink.AssistantDelete)}
 	}
 	var savedDefault string
 	e = b.s.integrationDB.QueryRowContext(ctx, "SELECT default_assistant_id FROM agent_link_node_settings WHERE singleton=1").Scan(&savedDefault)

@@ -115,6 +115,17 @@ or `mise exec -- go run ./cmd/pot-app -preview` for a native fixture. Neither us
 product data or model calls. Browser fixtures do not establish real authentication
 or remote transport behavior.
 
+For linked profile editing and deletion through the authenticated browser gateway
+and a real isolated Agent Link peer, start
+`POT_CODEX_PROFILE_FIXTURE_URL_FILE=/tmp/pot-profile-url mise exec -- go test
+./integrations/codex/agent -run '^TestCodexProfileBrowserFixture$' -count=1 -v
+-timeout=20m`. Open the origin written to that file with the cached Playwright CLI,
+then run `scripts/tests/go-ui-codex-profile-browser.js` or
+`scripts/tests/go-ui-linked-assistant-delete-browser.js` using `run-code --filename`.
+The latter retires the disposable remote assistant; restart the fixture before
+repeating it. The fixture login grants only its temporary browser session; product
+routes still pass through the real browser allowlist. Stop with `POST /fixture/stop`.
+
 For an isolated long-chat browser fixture with real local history/SSE endpoints,
 run `POT_HISTORY_FIXTURE_URL_FILE=/tmp/pot-history-url mise exec -- go test
 ./internal/transport -run '^TestHistoryBrowserFixture$' -v -count=1 -timeout=35m`.

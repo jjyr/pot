@@ -1,3 +1,4 @@
+import {machinePresentation,machineDisplayName} from '../state/machine-identity.mjs';
 import {connectionBrand,taskAgentSource} from './connection-visuals.mjs';
 import {createExtensions} from './extensions.mjs';
 import {browserTimezone,connectScheduleEditor} from './schedule-editor.mjs';
@@ -31,11 +32,12 @@ import {taskElapsed,bindTaskClock} from './task-time.mjs';
 import {createTopology} from './topology.mjs';
 import {supportsCapability} from '../state/agent-links.mjs';
 import {createAgentLinks} from './agent-links.mjs';
-import {projectTopology,agentNodeID,machineDisplayName,assistantActivityState} from '../state/topology.mjs';
+import {projectTopology,agentNodeID,assistantActivityState} from '../state/topology.mjs';
 
 export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>{},client, host, approvalHost, chatApprovalHost, chatVisible, locale, notify, changed, titleChanged, openChat, routeChanged=()=>{}}) {
+  const machineInfo=machinePresentation(client);
   const gate = createRequestGate(), approvalGate = createRequestGate();
-  let assistantStartRefresh=null;
+  let assistantStartRefresh=null,assistantLoad=null;
   let route = '', title = '', editor = null, disposed = false, pageVersion = 0, configurationSpace = '',taskView=null,taskOrigin=null,taskListView=null,scheduleView=null,detailParent=false,usageOwner=null;
   let filter = {taskScope:'active', taskQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageScope:'all', usageSpace:'all',settingsTab:'general'};
   let pendingApprovals=[],notificationSettings=null;
@@ -53,11 +55,11 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
   const stopResources=client.resources?.subscribe((meta,error)=>{
     if(disposed||editor||!host.offsetParent)return;
     if(pageView&&!relevantChange(meta.topics,pageView.topics,pageView.space,{space:meta.space}))return;
-    if(taskListView&&!meta.topics.includes('tasks'))return;
+    if(taskListView&&!meta.topics.some(topic=>['tasks','machines'].includes(topic)))return;
     if(error){const target=pageView?.root||taskListView?.rows;if(target){let status=target.querySelector('.resource-refresh-error');if(!status){status=n('p','inline-error resource-refresh-error');status.setAttribute('role','alert');target.prepend(status);}status.dataset.resource=JSON.stringify(meta);status.replaceChildren(n('span','',translate(locale(),'loading.stale')),action(translate(locale(),'retry'),()=>{client.resources.invalidate(meta.topics,{space:meta.space});if(pageView)pageView.queue.run();else refreshTaskList();}));}return;}
     const failure=host.querySelector('.resource-refresh-error');if(failure?.dataset.resource===JSON.stringify(meta))failure.remove();
     if(pageView&&relevantChange(meta.topics,pageView.topics,pageView.space,{space:meta.space}))pageView.queue.run();
-    else if(taskListView&&meta.topics.includes('tasks'))refreshTaskList();
+    else if(taskListView&&meta.topics.some(topic=>['tasks','machines'].includes(topic)))refreshTaskList();
   });
   const uid = () => crypto.randomUUID();
   const list = value => Array.isArray(value) ? value : value?.items || [];
@@ -133,12 +135,12 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       dialog.addEventListener('cancel',event=>{event.preventDefault();dialog.close();resolve(false);},{once:true});dialog.addEventListener('close',()=>dialog.remove(),{once:true});dialog.showModal();
     });
   }
-  async function confirmAssistantDelete(name) {
+  async function confirmAssistantDelete(name,remote=false) {
     return new Promise(resolve=>{
       const dialog=n('dialog','preferences'),title=n('h2'),description=n('p','hint');
       const finish=value=>{dialog.close();resolve(value);};
       const cancel=action('',()=>finish(false)),confirm=action('',()=>finish(true),{danger:true});
-      const refresh=()=>{title.textContent=translate(locale(),'assistant.deleteTitle').replace('{name}',name);description.textContent=translate(locale(),'assistant.deleteBody');cancel.textContent=translate(locale(),'assistant.deleteCancel');confirm.textContent=translate(locale(),'assistant.delete');};
+      const refresh=()=>{title.textContent=translate(locale(),'assistant.deleteTitle').replace('{name}',name);description.textContent=translate(locale(),remote?'assistant.deleteRemoteBody':'assistant.deleteBody');cancel.textContent=translate(locale(),'assistant.deleteCancel');confirm.textContent=translate(locale(),'assistant.delete');};
       title.id='assistant-delete-title';dialog.setAttribute('aria-labelledby',title.id);description.id='assistant-delete-description';dialog.setAttribute('aria-describedby',description.id);
       dialog.append(title,description,toolbar(cancel,confirm));document.body.append(dialog);refresh();
       window.addEventListener('pot:locale',refresh);
@@ -148,7 +150,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
   }
   async function leave({toParent=false}={}) {
  if(extensionUI&&!await extensionUI.leave())return false;extensionUI?.dispose();extensionUI=null;
-    captureView();assistantStartRefresh=null;
+    captureView();assistantStartRefresh=null;assistantLoad=null;
     const sessions=[...(editor?[editor]:[]),...(!toParent?[...editorParents,...[...machineDrafts.values()].map(session=>({session}))]:[])];
     if(sessions.some(value=>value.session.pending)) {notify(tr('Please wait for the save result.','请等待保存结果。'));return false;}
     if(sessions.some(value=>value.session.dirty)&&!await confirmDiscard())return false;
@@ -183,11 +185,12 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
         const saved=await save(attempt.values,{...captured,request_id:attempt.request_id},session);
         session.settle(true);changed(saved);if(lifecycle.afterSave)await lifecycle.afterSave(saved);else await back();
       } catch(reason) {session.settle(false);if(reason.uiKey){status.dataset.errorKey=reason.uiKey;status.replaceChildren(n('span','',translate(locale(),reason.uiKey)));if(reason.diagnostic){const details=n('details','detail-disclosure');details.append(n('summary','',translate(locale(),'agentLinks.diagnostics')),n('pre','',reason.diagnostic));status.append(details);}}else status.textContent=reason.message||String(reason);}
-      finally {for(const control of controls.values())control.disabled=false;cancel.disabled=submit.disabled=false;lifecycle.settled?.();}
+      finally {for(const control of controls.values())control.disabled=false;cancel.disabled=submit.disabled=false;lifecycle.settled?.();lifecycle.refreshDelete?.();}
     };
     return {session,root,form,controls,lifecycle};
   }
   async function back({skipPicker=false}={}) {
+    if(assistantLoad){await leave();route='';await openChat();return true;}
     if(!editor&&route==='add-assistant'){await leave();route='';await openChat({directory:true});return true;}
     const current=editor,taskReturn=taskView?.returnTo||taskOrigin,returnToConversation=!editor&&usageOwner;
     if(!await leave({toParent:true}))return false;
@@ -200,17 +203,56 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     const state={...history.state};for(const key of ['potEditor','potTask','potTaskReturn','potSchedule','potResource','potUsage'])delete state[key];state.potRoute=current?.returnChat||returnToConversation?'chat':current?.caller||route||'settings';history.replaceState(state,'',location.href);
     if(current?.returnChat)openChat();else{usageOwner=current?.returnUsageOwner||usageOwner;show(current?.caller||route||'settings',{keepUsageOwner:!!usageOwner});}return true;
   }
-  async function assistant(definition) {
+  function assistantDeleteEditor(form,definition,captured,getRevision) {
+    if(!supportsCapability(definition,'assistant.delete'))return;
+    const session=form.session;
+    const t=key=>translate(locale(),key),more=n('details','editor-disclosure assistant-delete');more.dataset.section='delete';
+    const summary=n('summary'),remove=action('',async()=>{
+      if(!session.begin())return;
+      const disabled=new Map([...form.form.querySelectorAll('input,select,textarea,button')].map(node=>[node,node.disabled]));
+      for(const node of disabled.keys())node.disabled=true;
+      deleteError='';refreshDelete();
+      try{
+        if(!await confirmAssistantDelete(definition.name,!!definition.origin))return;
+        if(editor?.session!==session||disposed)return;
+        if(!available()){deleteError='assistant.deleteOffline';return;}
+        if(client.runtime.boot_id!==session.context.boot){deleteError='assistant.deleteRuntimeChanged';return;}
+        await request(`/api/v1/assistants/${encodeURIComponent(definition.id)}/delete`,{...captured,method:'POST',body:{revision:getRevision()}});
+        session.settle(true);await leave();route='chat';
+        history.replaceState({potRoute:'chat',potScope:{space:captured.space,owner:''},potDirectory:true},'',location.href);
+        routeChanged('chat');await changed({deletedAssistant:{space:captured.space,owner:definition.id}});
+      }catch(reason){deleteError=reason.code==='assistant_busy'?'assistant.deleteBusy':reason.code==='assistant_changed'?'assistant.deleteChanged':'assistant.deleteFailed';}
+      finally{if(session.pending)session.settle(false);for(const [node,value]of disabled)node.disabled=value;refreshDelete();}
+    },{danger:true});
+    const status=n('p','inline-error');status.setAttribute('role','alert');let deleteError='';
+    const available=()=>{const item=client.assistants?.find(item=>item.id===definition.id&&item.space_id===captured.space)||(!client.assistants?definition:null);return !!item&&!item.offline&&supportsCapability(item,'assistant.delete');};
+    const refreshDelete=()=>{summary.textContent=t('assistant.moreActions');remove.textContent=t('assistant.delete');remove.disabled=session.pending||!available();const key=!available()?'assistant.deleteOffline':deleteError;status.textContent=key?t(key):'';status.hidden=!key;};
+    more.append(summary,remove,status);form.form.querySelector('.editor-fields').append(more);refreshDelete();
+    window.addEventListener('pot:locale',refreshDelete);const dispose=form.lifecycle.dispose;form.lifecycle.dispose=()=>{dispose?.();window.removeEventListener('pot:locale',refreshDelete);};form.lifecycle.refreshDelete=refreshDelete;
+  }
+  function renderAssistantLoad() {
+    const view=assistantLoad;if(!view)return;
+    const t=key=>translate(locale(),key);
+    heading(t('assistantSettings'));view.root.setAttribute('aria-busy',String(!view.error));
+    if(!view.error){view.root.replaceChildren(n('p','hint',t('loading.pending')));return;}
+    const box=n('div','inline-error');box.setAttribute('role','alert');
+    const diagnostic=n('details','detail-disclosure');diagnostic.append(n('summary','',t('agentLinks.diagnostics')),n('pre','',view.error.message||String(view.error)));
+    box.append(n('p','',t('assistant.settingsLoadFailed')),action(t('retry'),()=>assistant(view.definition,view.scope)),diagnostic);view.root.replaceChildren(box);
+  }
+  async function assistant(definition,capturedScope={...scope(),owner:definition.id,space:definition.space_id??scope().space}) {
     if(!await leave())return;
-    const token=gate.next(),captured=scope(),loading=body();loading.append(n('p','hint',tr('Loading…','正在加载…')));
+    const token=gate.next(),captured={...capturedScope},loading=body();assistantLoad={definition,scope:captured,root:loading};renderAssistantLoad();
     try{
       if(supportsCapability(definition,'assistant.profile')&&!supportsCapability(definition,'assistant.configure')){
-        const profile=await request('/api/v1/assistants/profile',captured);
+        const profile=await request('/api/v1/assistants/profile',{...captured,signal:token.signal});
         if(!gate.current(token)||disposed)return;
+        assistantLoad=null;
         linkedProfile(definition,profile,captured);return;
       }
-      const [providers,thread,rules]=await Promise.all([read('/api/v1/providers',captured),request('/api/v1/agent',captured),request('/api/v1/instructions',captured)]);
+      const options={...captured,signal:token.signal};
+      const [providers,thread,rules]=await Promise.all([read('/api/v1/providers',options),request('/api/v1/agent',options),request('/api/v1/instructions',options)]);
       if(!gate.current(token)||disposed)return;
+      assistantLoad=null;
       let profiles=providers.profiles||[],revision=definition?.revision,generation=thread?.generation||0,configurationRevision=thread?.revision||0,rulesRevision=rules?.revision||'';
       const selection=thread?.selection||{},profileID=selection.profile_id||thread?.config?.source_profile_id||providers.default_provider_id||'',profile=profiles.find(value=>value.id===profileID);
       const initial={space_id:captured.space,name:definition.name,avatar:definition.avatar||'',profile_id:profileID,model:selection.model||thread?.config?.model||profile?.model||'',model_selection:'',context_window:selection.context_window??null,max_output_tokens:selection.max_output_tokens??null,reasoning_effort:selection.reasoning_effort||'',text:rules?.text||''};
@@ -232,31 +274,9 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
         const signature=JSON.stringify(selection);
         if(selection&&signature!==initialSelection){const saved=await request('/api/v1/agent',{...options,body:{request_id:context.request_id,expected_generation:generation,expected_revision:configurationRevision,selection}});generation=saved.generation;configurationRevision=saved.revision;initialSelection=signature;session.acknowledge(Object.fromEntries(['profile_id','model','model_selection','context_window','max_output_tokens','reasoning_effort'].map(key=>[key,values[key]])));}
         if(values.text!==initial.text){const saved=await request('/api/v1/instructions',{...options,body:{text:values.text,revision:rulesRevision}});rulesRevision=saved.revision;initial.text=values.text;session.acknowledge({text:values.text});}
-      },{returnChat:true});
+      },{returnChat:true,capturedScope:captured});
       const controls=form.controls,session=form.session;
-      if(definition){
-        const t=key=>translate(locale(),key),more=n('details','editor-disclosure assistant-delete');more.dataset.section='delete';
-        const summary=n('summary'),remove=action('',async()=>{
-          if(!session.begin())return;
-          const disabled=new Map([...form.form.querySelectorAll('input,select,textarea,button')].map(node=>[node,node.disabled]));
-          for(const node of disabled.keys())node.disabled=true;
-          deleteError='';refreshDelete();
-          try{
-            if(!await confirmAssistantDelete(definition.name))return;
-            if(editor?.session!==session||disposed)return;
-            if(client.runtime.boot_id!==session.context.boot){deleteError='assistant.deleteRuntimeChanged';return;}
-            await request(`/api/v1/assistants/${encodeURIComponent(definition.id)}/delete`,{...captured,method:'POST',body:{revision}});
-            session.settle(true);await leave();route='chat';
-            history.replaceState({potRoute:'chat',potScope:{space:captured.space,owner:''},potDirectory:true},'',location.href);
-            routeChanged('chat');await changed({deletedAssistant:{space:captured.space,owner:definition.id}});
-          }catch(reason){deleteError=reason.code==='assistant_busy'?'assistant.deleteBusy':reason.code==='assistant_changed'?'assistant.deleteChanged':'assistant.deleteFailed';}
-          finally{if(session.pending)session.settle(false);for(const [node,value]of disabled)node.disabled=value;refreshDelete();}
-        },{danger:true});
-        const status=n('p','inline-error');status.setAttribute('role','alert');let deleteError='';
-        const refreshDelete=()=>{summary.textContent=t('assistant.moreActions');remove.textContent=t('assistant.delete');status.textContent=deleteError?t(deleteError):'';status.hidden=!deleteError;};
-        more.append(summary,remove,status);form.form.querySelector('.editor-fields').append(more);refreshDelete();
-        window.addEventListener('pot:locale',refreshDelete);form.lifecycle.dispose=()=>window.removeEventListener('pot:locale',refreshDelete);
-      }
+      assistantDeleteEditor(form,definition,captured,()=>revision);
 
       editor.kind='assistant';
       const preview=avatar(56,definition.avatar);
@@ -293,7 +313,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       form.lifecycle.providersChanged=async saved=>{const value=await request('/api/v1/providers',{space:session.values.space_id||captured.space,owner:''});if(editor?.session!==session)return;profiles=value.profiles||[];Object.assign(providers,value);providerHelp.hidden=profiles.length>0;const input=controls.get('profile_id');input.replaceChildren();for(const profile of profiles){const option=n('option','',profile.name);option.value=profile.id;input.append(option);}const selected=profiles.find(profile=>profile.id===saved?.id)||profiles.find(profile=>profile.id===session.values.profile_id)||profiles[0];const changedProvider=selected?.id!==session.values.profile_id;set('profile_id',selected?.id||'');if(changedProvider||!session.values.model)set('model',selected?.model||'');updateModels();};
       form.lifecycle.settled=defaults;
       if(thread?.pending)form.root.prepend(n('p','hint',tr('Saved settings will apply to the next new turn. The current turn keeps its original configuration.','已保存的设置将在下一次新回合生效，当前回合保持原配置。')));
-    }catch(reason){if(gate.current(token))errorView(reason);}
+    }catch(reason){if(gate.current(token)&&!disposed){assistantLoad={definition,scope:captured,root:loading,error:reason};renderAssistantLoad();}}
   }
   function linkedProfile(definition,profile,captured){
     const t=key=>translate(locale(),key);
@@ -314,7 +334,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       error.hidden=true;
       try{const {value,image}=await work();form.session.settle(false);form.session.set('avatar',value);preview.replaceChildren(...avatar(56,image).childNodes);}
       catch{form.session.settle(false);error.hidden=false;error.textContent=t('assistant.avatarFailed');}
-      finally{for(const node of controls)node.disabled=false;}
+      finally{for(const node of controls)node.disabled=false;form.lifecycle.refreshDelete?.();}
     };
     const change=action('',()=>upload.click()),reset=action('',()=>edit(async()=>{const value=await request('/api/v1/assistants/default-avatar',captured);return {value:'',image:value.avatar};}));
     upload.onchange=async()=>{const file=upload.files?.[0];upload.value='';if(file)await edit(async()=>{const image=await avatarFromFile(file);return {value:image,image};});};
@@ -327,6 +347,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       change.textContent=t('assistant.changeAvatar');reset.textContent=t('assistant.resetAvatar');help.textContent=t('assistant.avatarHelp');
       if(!error.hidden)error.textContent=t('assistant.avatarFailed');
     };form.lifecycle.locale();
+    assistantDeleteEditor(form,definition,captured,()=>revision);
   }
   async function extensions(root,token){extensionUI=createExtensions({root,client,locale,memory:extensionMemory,onSettings:(section='integrations')=>{filter.settingsTab=section;routeChanged('settings');show('settings');},onPermissions:()=>{routeChanged('machines');show('machines');}});await extensionUI.load();}
   async function settings(root, token) {
@@ -473,7 +494,10 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     const token=view.token,offset=filter.taskOffset,current=()=>gate.current(token)&&taskListView===view;
     view.rows.setAttribute('aria-busy','true');view.next.disabled=true;
     try {
-      const {pages,partial}=await readTaskPages({scope:filter.taskScope,q:filter.taskQuery,offset,signal:token.signal,onProgress:pages=>{if(current())updateTaskList(view,pages,true);}});
+      const [,{pages,partial}]=await Promise.all([
+        Promise.all((client.spaces||[]).map(space=>machineInfo.load({space:space.id,signal:token.signal}))),
+        readTaskPages({scope:filter.taskScope,q:filter.taskQuery,offset,signal:token.signal,onProgress:pages=>{if(current())updateTaskList(view,pages,true);}}),
+      ]);
       if(!current())return;
       const total=pages.reduce((sum,page)=>sum+(page.value.total??page.value.items?.length??0),0);
       if(!partial&&filter.taskOffset>=total&&filter.taskOffset){filter.taskOffset=Math.max(0,Math.floor((total-1)/20)*20);currentViewKey=JSON.stringify(['tasks',[filter.taskTab,filter.taskScope,filter.taskQuery,filter.taskOffset,filter.scheduleOffset]]);}
@@ -507,7 +531,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
         if(time)entry.row.setAttribute('aria-describedby',entry.elapsed.id);else entry.row.removeAttribute('aria-describedby');
         if(time)entry.elapsed.dataset.startedAt=task.started_at_ms;else delete entry.elapsed.dataset.startedAt;
         entry.elapsed.title=tr('Total time since execution first started, including waits','自首次开始执行起的总耗时，包含中间等待');
-        text(entry.meta,`${task._space_name||''}${task.machine_id?' · '+task.machine_id:''}${task.pending?' · '+task.pending+' '+tr('pending instructions','条待处理指令'):''}${task._stale?' · '+tr('Stale','已过期'):''}`);
+        text(entry.meta,`${task._space_name||''}${task.machine_id?' · '+machineInfo.label(task.machine_id,{space:task._space_id},locale()):''}${task.pending?' · '+task.pending+' '+tr('pending instructions','条待处理指令'):''}${task._stale?' · '+tr('Stale','已过期'):''}`);
       }
       if(!result.items.length)text(retain('empty',()=>({row:n('p','page-empty')})).row,tr('No ongoing tasks. Describe a goal in Chat to get started.','暂无进行中的任务，在聊天中描述目标即可开始。'));
       const scroll=view.rows.scrollTop,focused=view.rows.contains(document.activeElement)?document.activeElement:null;
@@ -527,7 +551,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     if(recordHistory){const replace=history.state?.potTask?.id===task.id&&history.state?.potScope?.space===task._space_id;history[replace?'replaceState':'pushState']({potRoute:'tasks',potScope:{space:task._space_id,owner:task.assistant_id},potTask:{...task},potTaskReturn:returnTo},'',location.href);}
     const path=`/api/v1/tasks/${encodeURIComponent(task.id)}`,fileScope={owner:task.assistant_id,space:task._space_id};
     const cacheKey=taskDetailKey(task),saved=taskDetails.get(cacheKey);
-    const result=await load(token=>saved?.record||request(path,{...fileScope,signal:token.signal}));if(!result)return;
+    const result=await load(async token=>{const [record]=await Promise.all([saved?.record||request(path,{...fileScope,signal:token.signal}),machineInfo.load({...fileScope,signal:token.signal})]);return record;});if(!result)return;
     const {root,token}=result,record=result.value;host.classList.add('task-page-host');
     const draftKey=JSON.stringify([task._space_id,task.assistant_id,task.id]);
     const view={task,record,token,returnTo,cacheKey,initialRead:!saved,scope:fileScope,state:saved?.state||createTaskTranscript(),inputs:saved?.inputs||[],busy:false,again:false,unavailable:false};
@@ -651,7 +675,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     const spec=item?.spec||{title:'',goal:'',machine_id:'',timezone:browserTimezone(),kind:'cron',cron:'0 9 * * *',at:'',every_minutes:60,misfire:'coalesce',notify:'changes',enabled:true,profile:null,model:null,requirements:{tools:false,desktop:false,exact_budget:false,live_steering:false}};
     const definitions=[
       ...(!item?[{name:'owner_ref',key:'assistant',choices:(client.assistants||[]).filter(owner=>supportsCapability(owner,'schedules.manage')).map(owner=>[JSON.stringify([owner.space_id,owner.id]),`${owner.name} · ${owner.space_name||''}`])}]:[]),
-      {name:'title',key:'title',required:true},{name:'goal',key:'goal',kind:'textarea',required:true},{name:'machine_id',key:'machine'},
+      {name:'title',key:'title',required:true},{name:'goal',key:'goal',kind:'textarea',required:true},{name:'machine_id',key:'machine',choices:[['',t('defaultMachine')],...(spec.machine_id?[[spec.machine_id,machineInfo.label(spec.machine_id,{space:item?._space_id||scope().space},locale())]]:[])]},
       {name:'timezone',key:'timezone',helpKey:'timezoneHelp',required:true},
       {name:'kind',key:'repeat',choiceKeys:{once:'once',interval:'interval',cron:'cron'},choices:['once','interval','cron'].map(key=>[key,t(key)])},
       {name:'at',key:'at',help:'YYYY-MM-DD HH:MM'},
@@ -668,7 +692,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       const canonical={...specValues,cron:values.kind==='cron'?values.cron:'',at:values.kind==='once'?values.at:'',every_minutes:values.kind==='interval'?values.every_minutes:0};
       return request('/api/v1/schedules',{...context,space,owner,method:'POST',body:{request_id:context.request_id,action:item?'update':'create',schedule_id:item?.id||'',spec:canonical}});
     },{capturedScope:item?{space:item._space_id,owner:item._assistant_id}:scope(),submitLabel:t('save')});
-    preview=connectScheduleEditor({view,request,locale,definitions,current:()=>editor?.session===view.session&&!disposed});
+    preview=connectScheduleEditor({view,request,locale,definitions,machineInfo,current:()=>editor?.session===view.session&&!disposed});
     const refresh=view.lifecycle.locale;view.lifecycle.locale=()=>{refresh();view.lifecycle.setTitle(t(item?'edit':'new'));};
     if(item)editor.returnSchedule={...item};
   }
@@ -800,7 +824,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     agentOwnerSpace=client.spaces.some(space=>space.id===agentOwnerSpace)?agentOwnerSpace:scope().space||client.spaces[0]?.id;
     const selectedScope=()=>({space:agentOwnerSpace,owner:''});
     const edit=({title,initial,fields,save,scope:captured,submitLabel})=>renderEditor(title,initial,fields,save,{capturedScope:captured,submitLabel});
-    if(client.spaces.length>1){const owner=field(t('agentLinks.selectControl'),agentOwnerSpace,{choices:client.spaces.map(space=>[space.id,space.name||space.id])});connectionRoot.append(owner.row);owner.input.onchange=()=>{agentOwnerSpace=owner.input.value;connections.load();};}
+    if(client.spaces.length>1){const owner=field(t('agentLinks.selectControl'),agentOwnerSpace,{choices:client.spaces.map(space=>[space.id,space.name||t('machine.unavailable')])});connectionRoot.append(owner.row);owner.input.onchange=()=>{agentOwnerSpace=owner.input.value;connections.load();};}
     const connections=createAgentLinks({root:connectionRoot,request,locale,notify,scope:selectedScope,edit,signal:token.signal,onConnected:async result=>{const id=result?.id||result?.link?.id;if(id){const peer=result.peer||result.link?.peer;const identity=peer?.address?{id:peer.address.agent_id,node_id:peer.address.node_id,kind:peer.adapter}:peer;const owned=identity?.kind==='pot'&&client.spaces.find(space=>space.control_id===identity.node_id);topologySelection=owned?'control:'+owned.id:agentNodeID(identity);}client.resources?.invalidate(['agent-links'],selectedScope());await changed(result);}});
     function related(node){const section=n('div','topology-related');section.append(n('p','hint',t('topology.related')));for(const edge of model.edges.filter(item=>item.from===node.id||item.to===node.id)){const a=model.nodes.find(item=>item.id===edge.from),b=model.nodes.find(item=>item.id===edge.to);section.append(action(a.name+(edge.kind==='agent'?' ↔ ':' → ')+b.name,()=>showEdge(edge)));}return section;}
     function preserveInspectorFocus(){
@@ -886,7 +910,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       const key=JSON.stringify([approvalOwner,approval.id]);retained.add(key);
       if(!approvalCards.has(key)) {
         const capturedKey=approvalOwner;
-        approvalCards.set(key,createApprovalCard({locale,onDecision:async(original,decision)=>{
+        approvalCards.set(key,createApprovalCard({locale,machineLabel:id=>machineInfo.label(id,approvalScope(),locale()),onDecision:async(original,decision)=>{
           if(approvalContext()!==capturedKey)throw Error(tr('Approval context changed.','授权上下文已改变。'));
           await decideApproval(original,decision);
         }}));
@@ -909,7 +933,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       approvalQueue?.close();approvalQueueKey=key;const token=approvalGate.next(),current=()=>!disposed&&approvalGate.current(token)&&approvalQueueKey===key&&approvalContext()===key;
       pendingApprovals=[];approvalOwner='';approvalCards.clear();approvalHost.replaceChildren();
       approvalQueue=createRefreshQueue(async()=>{
-        const value=await request('/api/v1/permissions',{...captured,signal:token.signal});if(!current())return;
+        const [value]=await Promise.all([request('/api/v1/permissions',{...captured,signal:token.signal}),machineInfo.load({...captured,signal:token.signal})]);if(!current())return;
         pendingApprovals=(value.pending||[]).filter(item=>item.request?.owner===captured.owner&&(!taskView||item.request.task===taskView.task.id));approvalOwner=key;
         if(taskView)renderTaskTranscript(taskView);onApprovalsChanged();renderApprovals();
         await Promise.all([...new Set(pendingApprovals.map(item=>item.request.task).filter(Boolean))].map(async id=>{
@@ -941,15 +965,15 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     const current=editor;if(!await back())history.pushState({...history.state,potEditor:current.id},'',location.href);return true;
   };
   const beforeUnload=event=>{if([...(editor?[editor.session]:[]),...editorParents.map(value=>value.session),...machineDrafts.values()].some(session=>session.dirty||session.pending)){event.preventDefault();event.returnValue='';}};
-  const preference=()=>{if(extensionUI){heading(translate(locale(),'extensions.title'));return;}if(editor){editor.lifecycle.locale?.();for(const status of editor.root.querySelectorAll('[data-error-key]')){const span=status.querySelector(':scope>span');if(span)span.textContent=translate(locale(),status.dataset.errorKey);const summary=status.querySelector('details>summary');if(summary)summary.textContent=translate(locale(),'agentLinks.diagnostics');}return;}if(route==='add-assistant'&&assistantStartRefresh){assistantStartRefresh().catch(()=>notify(translate(locale(),'assistantStart.refreshFailed')));return;}if(route==='settings'&&filter.settingsTab==='integrations'&&!editor){heading(translate(locale(),'settings'));for(const node of host.querySelectorAll('[data-settings-i18n]'))node.textContent=translate(locale(),node.dataset.settingsI18n);return;}if(taskView){taskDetail(taskView.task,{recordHistory:false,returnTo:taskView.returnTo});return;}if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner,force:true});};
+  const preference=()=>{if(assistantLoad){renderAssistantLoad();return;}if(extensionUI){heading(translate(locale(),'extensions.title'));return;}if(editor){editor.lifecycle.locale?.();for(const status of editor.root.querySelectorAll('[data-error-key]')){const span=status.querySelector(':scope>span');if(span)span.textContent=translate(locale(),status.dataset.errorKey);const summary=status.querySelector('details>summary');if(summary)summary.textContent=translate(locale(),'agentLinks.diagnostics');}return;}if(route==='add-assistant'&&assistantStartRefresh){assistantStartRefresh().catch(()=>notify(translate(locale(),'assistantStart.refreshFailed')));return;}if(route==='settings'&&filter.settingsTab==='integrations'&&!editor){heading(translate(locale(),'settings'));for(const node of host.querySelectorAll('[data-settings-i18n]'))node.textContent=translate(locale(),node.dataset.settingsI18n);return;}if(taskView){taskDetail(taskView.task,{recordHistory:false,returnTo:taskView.returnTo});return;}if(scheduleView&&!editor){scheduleHistory(scheduleView.item,false,scheduleView.runsOffset);return;}if(!editor&&route)show(route,{keepUsageOwner:!!usageOwner,force:true});};
   window.addEventListener('beforeunload',beforeUnload);window.addEventListener('pot:locale',preference);
-  return {get title(){return title;},get editing(){return !!editor;},get approvalSpace(){return approvalScope().space;},get notificationContext(){return taskView?{space:taskView.scope.space,owner:taskView.scope.owner,task:taskView.task.id}:null;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!editor||detailParent||!!usageOwner||route==='add-assistant'&&!host.hidden;},show,assistant,setupAI,leave,back,permissions,syncApprovals:renderApprovals,taskMenu(){taskView?.ui.openMenu();},handleHistory:popstate,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalQueue?.close();approvalQueue=null;approvalQueueKey='';approvalGate.close();approvalOwner='';pendingApprovals=[];approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);},approvalFor,decideApproval,taskNeedsApproval,rememberTasks,renderApprovals,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,options={}){route='tasks';return taskDetail(task,options);},
+  return {get title(){return title;},get editing(){return !!editor;},get approvalSpace(){return approvalScope().space;},get notificationContext(){return taskView?{space:taskView.scope.space,owner:taskView.scope.owner,task:taskView.task.id}:null;},get taskOwner(){return taskView?.scope.owner||'';},get hasParent(){return !!assistantLoad||!!editor||detailParent||!!usageOwner||route==='add-assistant'&&!host.hidden;},show,assistant,setupAI,leave,back,permissions,syncApprovals:renderApprovals,taskMenu(){taskView?.ui.openMenu();},handleHistory:popstate,openSchedule:scheduleHistory,openUsage:openUsageView,clearApprovals(){approvalQueue?.close();approvalQueue=null;approvalQueueKey='';approvalGate.close();approvalOwner='';pendingApprovals=[];approvalCards.clear();approvalHost.replaceChildren();chatApprovals.update(JSON.stringify(scope()),[]);},approvalFor,decideApproval,taskNeedsApproval,rememberTasks,renderApprovals,conversationUsage(name,record=true){return openUsageView({...scope(),name},record);},openTask(task,options={}){route='tasks';return taskDetail(task,options);},
     showProviders(){filter.settingsTab='providers';return show('settings');},
     refresh(topics=[],source={}){
  if(extensionUI){if(topics.includes('extensions')||topics.includes('spaces'))extensionUI.refresh();return;}
       if(source.boot&&(resourceBoots.get(source.space)||client.runtime.boot_id)!==source.boot){readTaskPages.clear();if(source.boot)resourceBoots.set(source.space,source.boot);for(const key of taskDetails.keys())if(!source.space||JSON.parse(key)[2]===source.space)taskDetails.delete(key);spaceCache.clear();usageCache.clear();if(taskView&&(!source.space||taskView.scope.space===source.space)){taskView.invalidated=true;taskView.readGeneration=(taskView.readGeneration||0)+1;}}
       if(topics.includes('spaces')){readTaskPages.clear();spaceCache.clear();usageCache.clear();taskDetails.clear();if(taskView){taskView.invalidated=true;taskView.readGeneration=(taskView.readGeneration||0)+1;}}
-      if(editor){if(topics.includes('extensions')&&(!source.space||source.space===editor.session.context.space))editor.lifecycle.providersInvalidated?.();return;}if(disposed||!route||!host.offsetParent)return;
+      if(editor){editor.lifecycle.refreshDelete?.();if(topics.includes('extensions')&&(!source.space||source.space===editor.session.context.space))editor.lifecycle.providersInvalidated?.();return;}if(disposed||!route||!host.offsetParent)return;
       if(pageView){if(relevantChange(topics,pageView.topics,pageView.space,source)){pageView.invalidate?.(topics);return pageView.queue.run();}return;}
       if(route==='settings')return;
       if(route==='tasks'&&!relevantChange(topics,['tasks','runner','spaces','assistants','machines',...(filter.taskTab==='schedules'?['schedules']:[])],taskView?.scope.space||'',source))return;

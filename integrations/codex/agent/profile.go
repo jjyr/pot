@@ -63,7 +63,7 @@ func (b *backend) Profile(ctx context.Context, r agentlink.ProfileRequest) (agen
 		}
 	}
 	err = storage.Transaction(ctx, b.db, func(tx *sql.Tx) error {
-		updated, err := tx.ExecContext(ctx, "UPDATE codex_link_assistants SET name=?,avatar=?,revision=revision+1 WHERE id=? AND revision=?", result.Name, result.Avatar, a.ID, r.Revision)
+		updated, err := tx.ExecContext(ctx, "UPDATE codex_link_assistants SET name=?,avatar=?,revision=revision+1 WHERE id=? AND revision=? AND deleted=0", result.Name, result.Avatar, a.ID, r.Revision)
 		if err != nil {
 			return err
 		}

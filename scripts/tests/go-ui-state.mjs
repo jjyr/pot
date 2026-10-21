@@ -228,10 +228,12 @@ const toolInput={...chatReply,text:'',status:'complete'},toolOutput={id:'tool',r
 const toolRound=projectChatReplies({...waiting,messages:[chatInput,toolInput,toolOutput]});
 const afterTool=projectChatReplies({...waiting,messages:[chatInput,toolInput,toolOutput,nextOutput]});
 assert.equal(afterTool.filter(row=>row.role==='assistant').length,1,'Tool-only rounds do not leave empty reply bubbles');
-for(const text of ['',' \n\t']){
-  const silent=projectChatReplies({...waiting,running:false,turn_id:null,replies:[{input_id:'input',state:'completed'}],messages:[chatInput,{...chatReply,text,status:'complete'}]});
-  assert.deepEqual(silent.filter(row=>row.role==='assistant').map(row=>row.phase),['empty'],'Silent completion has an explicit outcome');
+for(const text of ['',' \n\t'])for(const status of ['streaming','complete']){
+  const silent=projectChatReplies({...waiting,running:false,turn_id:null,replies:[{input_id:'input',state:'completed'}],messages:[chatInput,{...chatReply,text,status}]});
+  assert.deepEqual(silent.filter(row=>row.role==='assistant'),[],'Successful empty execution removes activity without generating a chat bubble');
 }
+const silentAfterProse=projectChatReplies({...waiting,replies:[{input_id:'input',state:'completed'}],messages:[chatInput,{...chatReply,text:'A useful update',status:'complete'},{...chatReply,id:'empty-final',text:'',status:'streaming'}]});
+assert.deepEqual(silentAfterProse.filter(row=>row.role==='assistant').map(row=>[row.text,row.phase]),[['A useful update','complete']],'Silent final completion preserves earlier agent-authored prose without adding another bubble');
 assert.equal(toolRound.find(row=>row.role==='assistant').viewKey,afterTool.at(-1).viewKey,'Output after a tool round adopts the waiting bubble');
 assert.equal(projectChatReplies(waiting,null,{offline:true})[1].phase,'reconnecting','Connection loss does not declare execution failed');
 const failed=projectChatReplies({...waiting,running:false,turn_id:null,replies:[{input_id:'input',state:'failed',error:'HTTP 404'}],messages:[chatInput,{...chatReply,text:'Partial',status:'failed',error:'HTTP 404'}]});
@@ -288,7 +290,8 @@ for(const owner of ['main','agent-link:peer:assistant','an-arbitrary-endpoint'])
  rows=update('running',{messages:[input,{...chatReply,text:'Progress',status:'complete'}]});assert.equal(rows[0].phase,'streaming','Intermediate prose never ends an active turn');
  rows=update('running',{uncertain:true});assert.equal(rows[0].phase,'reconnecting');
  rows=update('failed',{error:'preparation failed'});assert.equal(rows[0].phase,'failed');assert.equal(rows[0].error,'preparation failed');
- rows=update('completed');assert.equal(rows[0].phase,'empty','A successful empty result has an explicit end');
+ rows=update('completed');assert.deepEqual(rows,[],'A successful empty result settles silently for every endpoint');
+ assert.equal(state.snapshot.replies[0].state,'completed','Hiding empty bubbles retains receiver-owned completion state');
  rows=update('cancelled');assert.equal(rows[0].phase,'stopped');
  rows=update('unknown');assert.equal(rows[0].phase,'unknown','Unconfirmed outcomes never fabricate failure or replay');
  rows=update('completed',{messages:[input,{...chatReply,text:'Done',status:'complete'}]});assert.equal(rows.length,1);assert.equal(rows[0].phase,'complete');
@@ -303,8 +306,27 @@ assert.equal(parallelRows.find(row=>row.id==='answer-one').phase,'streaming','Ou
 
 assert.deepEqual(projectChatReplies({messages:[{...chatInput,context_only:true}],replies:[{input_id:chatInput.id,state:'completed'}]}),[],'Historical context dependencies cannot create visible empty replies');
 
+// Outcomes without a message belong to their original turn, even after later
+// sends, stream resets, and lifecycle updates arriving in a different order.
+const silentInputs=Array.from({length:3},(_,i)=>({id:`silent-${i}`,request_id:`silent-request-${i}`,role:'user',text:`Earlier input ${i}`,status:'accepted'}));
+const laterInput={id:'later',request_id:'later-request',role:'user',text:'New message',status:'accepted'};
+for(const phase of ['queued','running','failed','cancelled','unknown']){
+  const ordered=projectChatReplies({messages:[...silentInputs,laterInput],replies:[...silentInputs].reverse().map(input=>({input_id:input.id,state:phase}))});
+  assert.deepEqual(ordered.map(row=>row.id),silentInputs.flatMap(input=>[input.id,`waiting:${input.id}`]).concat(laterInput.id),`${phase} outcomes stay with their inputs instead of following newer messages`);
+}
+const silentTool={id:'silent-tool',role:'tool',text:'result',status:'complete',tool:{turn_id:silentInputs[0].request_id,id:'call',phase:'completed'}};
+const silentOutput={id:'silent-output',role:'assistant',reply_to:silentInputs[0].id,text:'',status:'complete'};
+const silentHistory={messages:[silentInputs[0],silentTool,silentOutput,laterInput],replies:[{input_id:silentInputs[0].id,state:'completed'}]};
+assert.deepEqual(projectChatReplies(silentHistory).map(row=>row.id),[silentInputs[0].id,silentTool.id,laterInput.id],'Silent outcomes leave real tool output without adding a reply');
+assert.deepEqual(projectChatReplies({...silentHistory,messages:[silentInputs[0],silentTool,laterInput]}).map(row=>row.id),[silentInputs[0].id,silentTool.id,laterInput.id],'Tool-only completion does not require a persisted assistant message');
+assert.deepEqual(projectChatReplies({messages:[...silentInputs,laterInput],replies:silentInputs.map(input=>({input_id:input.id,state:'completed'}))}).map(row=>row.id),[...silentInputs,laterInput].map(row=>row.id),'Multiple silent turns leave no synthetic completed replies');
+const pendingAfterSilent=projectChatReplies(silentHistory,{request:{request_id:'new-send',text:'Newest message'},phase:'sending'});
+assert.deepEqual(pendingAfterSilent.slice(-2).map(row=>row.id),['pending:new-send','pending-reply:new-send'],'Optimistic sends follow earlier silent outcomes');
+const hiddenSummary={id:'summary',request_id:'pot-result-summary',role:'system',text:'Background notification',status:'complete'};
+assert.deepEqual(projectChatReplies({messages:[hiddenSummary,laterInput],replies:[{input_id:hiddenSummary.id,state:'completed'}]}).map(row=>row.id),[laterInput.id],'Hidden background notifications do not create empty outcomes');
+
 assert.equal(projectChatReplies({...waiting,running:false,turn_id:null,turn:null})[1].phase,'thinking','Reply lifecycle is independent of aggregate turn metadata');
 assert(!acceptSnapshot(invalidLifecycle,{...snapshot(),replies:undefined},invalidEpoch),'Every endpoint supplies the lifecycle contract');
 const activeCall={...toolOutput,tool:{turn_id:'request',phase:'waiting_approval'}};
 assert.equal(projectChatReplies({...waiting,messages:[chatInput,activeCall]}).at(-1).phase,'approval');
-assert.equal(projectChatReplies({...waiting,messages:[chatInput,{...activeCall,tool:{turn_id:'other-request',phase:'running'}}]}).at(-1).phase,'thinking','Another input tool cannot change this reply');
+assert.equal(projectChatReplies({...waiting,messages:[chatInput,{...activeCall,tool:{turn_id:'other-request',phase:'running'}}]}).find(row=>row.role==='assistant').phase,'thinking','Another input tool cannot change this reply');
