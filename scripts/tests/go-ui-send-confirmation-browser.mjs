@@ -12,7 +12,7 @@ async function mount(){
   const {mountApp}=await import('../../web/src/components/ui.js');
   const f=window.sendFixture={calls:[],queries:[],errors:[],receiptState:'unconfirmed',queryOffline:false,cursor:0,messages:[],running:true,scope:{space:'one',owner:'alpha'}};
   window.addEventListener('error',event=>f.errors.push(event.message));window.addEventListener('unhandledrejection',event=>f.errors.push(String(event.reason?.stack||event.reason)));
-  const snap=()=>({runtime_id:'fixture',boot_id:'boot',owner_id:JSON.stringify([f.scope.space,f.scope.owner]),conversation_id:'main',cursor:String(++f.cursor),running:f.running,turn_id:f.running?'original':null,messages:f.messages,agent:{phase:'ready',attachments:{image:true,pdf:true}}});
+  const snap=()=>({runtime_id:'fixture',boot_id:'boot',owner_id:JSON.stringify([f.scope.space,f.scope.owner]),conversation_id:'main',cursor:String(++f.cursor),replies:[],running:f.running,turn_id:f.running?'original':null,messages:f.messages,agent:{phase:'ready',attachments:{image:true,pdf:true}}});
   let receive;
   const client={production:true,runtime:{runtime_id:'fixture'},scope:()=>({...f.scope}),setScope:value=>Object.assign(f.scope,value),snapshot:async()=>snap(),
     subscribe:(onSnapshot,status)=>{receive=onSnapshot;queueMicrotask(()=>{status('connected');onSnapshot(snap());});return()=>{};},changes:()=>()=>{},

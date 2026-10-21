@@ -182,6 +182,8 @@ func (s *Service) business(ctx context.Context, c Connection, remote peer.Identi
 	}
 	var result any
 	switch r.Method {
+	case "chat.status":
+		result, e = s.chatBusiness(ctx, remote.NodeID, r.Params)
 	case "observe":
 		var empty struct{}
 		if decodeJSON(r.Params, &empty) != nil {

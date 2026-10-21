@@ -111,6 +111,9 @@ func (s *Service) openAgentLinks() error {
 		return err
 	}
 	s.agentLinks = host
+	if err := s.restoreChatReplyBindings(s.ctx); err != nil {
+		return err
+	}
 	s.pluginWG.Add(1)
 	go func() {
 		defer s.pluginWG.Done()
@@ -122,6 +125,20 @@ func (s *Service) openAgentLinks() error {
 				return
 			case <-ticker.C:
 				s.syncLinkDelegations(s.ctx)
+			}
+		}
+	}()
+	s.pluginWG.Add(1)
+	go func() {
+		defer s.pluginWG.Done()
+		ticker := time.NewTicker(3 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-ticker.C:
+				s.syncLinkChats(s.ctx)
 			}
 		}
 	}()

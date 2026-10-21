@@ -57,18 +57,14 @@ func (p agentPort) Subscribe(ctx context.Context, target agentlink.Target) (agen
 	if err != nil {
 		return agentlink.Subscription{}, err
 	}
-	if !d.Supports(agentlink.ChatSubscribe) || target.LinkID != "" {
+	if !d.Supports(agentlink.ChatSubscribe) {
 		return agentlink.Subscription{}, agentlink.ErrUnsupported
 	}
-	c, err := p.s.Conversation(ctx, target.AssistantID)
+	endpoint, err := p.chatEndpoint(ctx, target)
 	if err != nil {
 		return agentlink.Subscription{}, err
 	}
-	updates, remove, err := c.SubscribeUI(ctx)
-	if err != nil {
-		return agentlink.Subscription{}, err
-	}
-	return agentlink.Subscription{Updates: updates, Frame: c.UIFrame, Close: remove}, nil
+	return endpoint.Subscribe(ctx)
 }
 
 func (s *Service) CallAgent(ctx context.Context, owner string, operation agentlink.Operation, call agentlink.Call) (any, error) {
@@ -162,7 +158,7 @@ func (p agentPort) Describe(ctx context.Context, target agentlink.Target) (agent
 		return d, err
 	}
 	if d.Version != 1 && retained {
-		return agentlink.Description{Version: 1, Scope: "caller", Operations: []agentlink.Operation{agentlink.ChatRead, agentlink.ChatReceipt, agentlink.TaskRead, agentlink.TaskList, agentlink.TaskArchive, agentlink.TaskOutcomes}}, nil
+		return agentlink.Description{Version: 1, Scope: "caller", Operations: []agentlink.Operation{agentlink.ChatRead, agentlink.ChatReceipt, agentlink.ChatSubscribe, agentlink.TaskRead, agentlink.TaskList, agentlink.TaskArchive, agentlink.TaskOutcomes}}, nil
 	}
 	if d.Version != 1 {
 		return d, agentlink.ErrNotFound
@@ -198,6 +194,34 @@ func (p agentPort) Call(ctx context.Context, target agentlink.Target, operation 
 	}
 	if len(call.Body) == 0 {
 		call.Body = json.RawMessage(`{}`)
+	}
+	if operation == agentlink.ChatRead || operation == agentlink.ChatSend || operation == agentlink.ChatReceipt {
+		endpoint, err := p.chatEndpoint(ctx, target)
+		if err != nil {
+			return nil, err
+		}
+		switch operation {
+		case agentlink.ChatRead:
+			return endpoint.Read(ctx)
+		case agentlink.ChatReceipt:
+			query := protocol.SendReceiptQuery{RequestID: call.Query["request_id"], ConversationID: call.Query["conversation_id"], UserMessageID: call.Query["user_message_id"], RetryUserMessageID: call.Query["retry_user_message_id"]}
+			if !core.Identifier(query.RequestID) || !core.Identifier(query.ConversationID) || query.UserMessageID != "" && !core.Identifier(query.UserMessageID) || query.RetryUserMessageID != "" && (!core.Identifier(query.RetryUserMessageID) || query.UserMessageID != "") {
+				return nil, agentlink.ErrInvalid
+			}
+			if query.UserMessageID != "" && !d.Supports(agentlink.ChatSteer) || query.RetryUserMessageID != "" && !d.Supports(agentlink.ChatRetry) {
+				return nil, agentlink.ErrUnsupported
+			}
+			return endpoint.Receipt(ctx, query)
+		case agentlink.ChatSend:
+			var input protocol.SendMessage
+			if err := protocol.DecodeStrict(call.Body, &input); err != nil {
+				return nil, err
+			}
+			if err := input.Validate(); err != nil {
+				return nil, err
+			}
+			return endpoint.Send(ctx, input)
+		}
 	}
 	if target.LinkID != "" {
 		return p.linkedCall(ctx, target, operation, call)
@@ -300,25 +324,6 @@ func (p agentPort) Call(ctx context.Context, target agentlink.Target, operation 
 
 func (p agentPort) linkedCall(ctx context.Context, target agentlink.Target, op agentlink.Operation, call agentlink.Call) (any, error) {
 	s := p.s
-	if op == agentlink.ChatRead || op == agentlink.ChatReceipt {
-		if op == agentlink.ChatReceipt && call.Query["conversation_id"] != linkChatID(target.LinkID, target.AssistantID) {
-			return nil, agentlink.ErrConflict
-		}
-		return s.LinkChat(ctx, target.LinkID, target.AssistantID, call.Query["request_id"])
-	}
-	if op == agentlink.ChatSend {
-		var input protocol.SendMessage
-		if err := protocol.DecodeStrict(call.Body, &input); err != nil {
-			return nil, err
-		}
-		if len(input.Attachments) != 0 || len(input.References) != 0 {
-			return nil, agentlink.ErrUnsupported
-		}
-		if input.ConversationID != linkChatID(target.LinkID, target.AssistantID) {
-			return nil, agentlink.ErrConflict
-		}
-		return s.SendLinkChat(ctx, target.LinkID, target.AssistantID, input.RequestID, input.Text)
-	}
 	owner := linkChatID(target.LinkID, target.AssistantID)
 	if op == agentlink.TaskSubmit {
 		var input protocol.CreateTask
@@ -398,16 +403,6 @@ func (p agentPort) localCall(ctx context.Context, assistantID string, op agentli
 		return c.SaveInstructions(ctx, input.Text, input.Revision)
 	case agentlink.ChatCompletions:
 		return s.Completions(ctx, assistantID, call.Query["q"])
-	case agentlink.ChatRead:
-		return c.UIFrame(ctx, 0, true)
-	case agentlink.ChatReceipt:
-		return c.SendReceipt(ctx, assistant.SendReceiptQuery{RequestID: call.Query["request_id"], ConversationID: call.Query["conversation_id"], UserMessageID: call.Query["user_message_id"], RetryUserMessageID: call.Query["retry_user_message_id"]})
-	case agentlink.ChatSend:
-		var input protocol.SendMessage
-		if err = protocol.DecodeStrict(call.Body, &input); err != nil {
-			return nil, err
-		}
-		return c.Send(ctx, input)
 	case agentlink.ChatHistory:
 		before, e := queryUint(call.Query, "before")
 		if e != nil {

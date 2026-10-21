@@ -615,7 +615,13 @@ func TestEstablishedAssistantAnchorUpgradeRetainsSignedConnection(t *testing.T) 
 		if err = side.service.update(ctx, connection); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = side.db.Exec(`DROP TABLE agent_link_chat_sessions; DROP TABLE agent_link_endpoints; ALTER TABLE agent_link_chat DROP COLUMN sender_kind; DELETE FROM pot_migrations WHERE id >= '0020_'`); err != nil {
+		if _, err = side.db.Exec(`DROP INDEX agent_link_chat_replies;
+ALTER TABLE agent_link_chat DROP COLUMN reply_to;
+ALTER TABLE agent_link_chat DROP COLUMN reply_state;
+ALTER TABLE agent_link_chat DROP COLUMN reply_error;
+ALTER TABLE agent_link_chat DROP COLUMN reply_uncertain;
+ALTER TABLE agent_link_chat DROP COLUMN checked_at;
+DROP TABLE agent_link_chat_sessions; DROP TABLE agent_link_endpoints; ALTER TABLE agent_link_chat DROP COLUMN sender_kind; DELETE FROM pot_migrations WHERE id >= '0020_'`); err != nil {
 			t.Fatal(err)
 		}
 		side.close()

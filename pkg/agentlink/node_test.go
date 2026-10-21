@@ -15,6 +15,10 @@ type testBackend struct {
 	observationFailed atomic.Bool
 }
 
+func (b *testBackend) ChatStatus(context.Context, ChatLookup) (ChatStatus, error) {
+	return ChatStatus{}, ErrUnsupported
+}
+
 func (b *testBackend) Observe(ctx context.Context, _ string) (Observation, error) {
 	if b.observationFailed.Load() {
 		return Observation{}, ErrUnavailable

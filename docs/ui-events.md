@@ -1,9 +1,10 @@
 # Event-driven UI updates
 
 The Wails main window, tray panel and browser load initial projections and then
-subscribe to backend changes for local projections. Linked conversations currently
-refresh Agent Link snapshots every 1.5 seconds while open; the local stream
-contract below does not imply remote streaming support. Input events, preference changes, request completion
+subscribe to backend changes. Every chat uses the same conversation subscription;
+adapters own native wakeups, peer polling and reconnection (see the
+[chat contract](agent-links.md#chat-execution-projection)). A subscription does not
+imply token streaming support at every endpoint. Input events, preference changes, request completion
 and subscriptions wake the shared DOM components.
 
 ## Local invalidation stream
@@ -65,7 +66,18 @@ original continuation boundary. Continuation survives bounded reset/delta reads
 even when its original input is outside the loaded message window.
 `view.messages` contains message envelopes (`message`, decimal-string `sequence`,
 `version`, optional `context_only`); `view.history` describes the loaded interval.
-`GET /api/v1/snapshot` returns the same bounded reset frame. Protocol version 6
+`view.replies` describes per-input execution using `input_id`, `state`, optional
+`error` and `uncertain`. States are pending, queued, running, waiting, paused,
+cancelling, completed, failed, cancelled and unknown. Pending means a locally
+accepted input has no confirmed receiver execution state yet. Unknown is a
+terminal unconfirmed outcome that must not replay work. Uncertain marks a cached
+state whose receiver cannot currently be queried; it never fabricates failure.
+Both native and peer adapters supply this projection. Reset frames replace the
+projection; delta frames update the lifecycles they contain. A completed intermediate
+message does not end an active reply. Empty successful results, terminal failures
+and cancellation each have an explicit presentation without requiring reply text.
+
+`GET /api/v1/snapshot` returns the same bounded reset frame. Protocol version 7
 uses this contract for browser and Wails streams.
 Completed assistant messages may include a typed resource `presentation` without
 Markdown text; it has its own durable message identity and unread entry. System

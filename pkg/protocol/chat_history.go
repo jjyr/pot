@@ -36,6 +36,7 @@ type UISnapshot struct {
 	Snapshot `json:"state" required:"true"`
 	Messages []UIMessage `json:"messages"`
 	History  UIHistory   `json:"history"`
+	Replies  []ChatReply `json:"replies"`
 }
 
 type UIFrame struct {
@@ -47,6 +48,13 @@ type UIFrame struct {
 func (s UISnapshot) Validate() error {
 	if err := s.Snapshot.Validate(); err != nil {
 		return err
+	}
+	seen := map[string]bool{}
+	for _, reply := range s.Replies {
+		if !reply.Valid() || seen[reply.InputID] {
+			return fmt.Errorf("invalid chat reply lifecycle")
+		}
+		seen[reply.InputID] = true
 	}
 	for _, m := range s.Messages {
 		if err := m.Message.Validate(); err != nil {

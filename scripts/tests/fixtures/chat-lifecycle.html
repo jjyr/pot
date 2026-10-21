@@ -1,0 +1,37 @@
+<!doctype html><html lang="en" data-platform="browser" data-theme="light"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Disposable chat lifecycle fixture</title><link rel="stylesheet" href="../../../web/src/styles.css">
+<div id="app"></div><aside style="position:fixed;bottom:8px;left:8px;z-index:10000;background:var(--surface,#fff);padding:8px;border:1px solid #aaa" aria-label="Fixture controls"></aside>
+<script>for(const name of ['error','unhandledrejection'])addEventListener(name,event=>{const error=document.createElement('pre');error.textContent=event.message||String(event.reason);document.body.append(error);});</script>
+<script type="module">
+import {mountApp} from '../../../web/src/components/ui.js';
+const params=new URLSearchParams(location.search),owner=params.get('owner')||'main';
+const space={id:'local',control_id:'fixture-node',name:'Fixture',kind:'local',connected:true};
+const fixture={scope:{owner,space:'local'},version:1,input:null,output:null,phase:'pending',uncertain:false,offline:false,listeners:new Set(),statuses:new Set()};
+const frame=()=>({runtime_id:'fixture-node',boot_id:'fixture',owner_id:JSON.stringify(['local',owner]),conversation_id:'fixture-chat',cursor:String(fixture.version),running:false,turn_id:null,messages:[fixture.input,fixture.output].filter(Boolean),replies:fixture.input?[{input_id:fixture.input.id,state:fixture.phase,uncertain:fixture.uncertain,error:fixture.phase==='failed'?'fixture_preparation_failed':''}]:[]});
+const publish=()=>{fixture.version++;for(const receive of fixture.listeners)receive(frame());};
+const capabilities={version:1,scope:'caller',operations:['chat.read','chat.send','chat.receipt','chat.subscribe']};
+const client={production:true,runtime:{runtime_id:'fixture-node',boot_id:'fixture'},spaces:[space],scope:()=>({...fixture.scope}),setScope:v=>fixture.scope={...v},
+ request:async(path)=>{
+  const name=new URL(path,location.href).pathname;
+  if(name==='/api/v1/spaces')return {items:[space],active_space_id:'local'};
+  if(name==='/api/v1/assistants')return [{id:owner,name:'Chat contract',phase:'ready',capabilities}];
+  if(name==='/api/v1/permissions')return {pending:[],policy:{machines:{}}};
+  if(name==='/api/v1/tasks/query'||name==='/api/v1/tasks/catalog')return {items:[],counts:{},total:0};
+  if(name==='/api/v1/tasks/outcomes')return {items:[],cursor:0,has_more:false};
+  return {items:[]};
+ },snapshot:async()=>frame(),changes:()=>()=>{},
+ subscribe(receive,status){fixture.listeners.add(receive);fixture.statuses.add(status);queueMicrotask(()=>{status(fixture.offline?'offline':'connected');receive(frame());});return ()=>{fixture.listeners.delete(receive);fixture.statuses.delete(status);};},
+ send:async input=>{fixture.input={id:'input',request_id:input.request_id,role:'user',text:input.text,status:'accepted',sequence:'1',version:fixture.version};fixture.output=null;fixture.phase='pending';fixture.uncertain=false;publish();return {message_id:'input',duplicate:false};}
+};
+mountApp(document.querySelector('#app'),client);
+const controls=document.querySelector('aside[aria-label="Fixture controls"]');
+controls.hidden=params.has('capture');
+for(const [label,run] of [
+ ['Queued',()=>{fixture.phase='queued';}],['Running',()=>{fixture.phase='running';}],
+ ['Disconnected',()=>{fixture.offline=true;fixture.uncertain=true;for(const status of fixture.statuses)status('offline');}],
+ ['Reconnected',()=>{fixture.offline=false;fixture.uncertain=false;for(const status of fixture.statuses)status('connected');}],
+ ['Failed',()=>{fixture.output=null;fixture.phase='failed';}],['Empty result',()=>{fixture.output=null;fixture.phase='completed';}],
+ ['Reply',()=>{fixture.phase='completed';fixture.output={id:'output',reply_to:'input',role:'assistant',text:'The reply arrived.',status:'complete',sequence:'2',version:fixture.version};}],
+ ['Chinese',()=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-go-preview-locale',value:'zh-CN'}}))],
+ ['English',()=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-go-preview-locale',value:'en'}}))]
+]){const button=document.createElement('button');button.textContent=label;button.onclick=()=>{run();publish();};controls.append(button);}
+</script></html>

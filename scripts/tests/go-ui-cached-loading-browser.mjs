@@ -83,7 +83,7 @@ async function chatChecks(){
   context={space:'a',owner:'alpha'};delays={};failProviders=false;
   const raw=client.request;
   client.request=async(path,options={})=>{if(path==='/api/v1/spaces'){directoryReads.catalog++;return {items:client.spaces,active_space_id:'a'};}if(path==='/api/v1/assistants'){directoryReads[options.space]++;return {items:options.space==='a'?[{id:'alpha',name:'Alpha'},{id:'beta',name:'Beta'}]:[{id:'alpha',name:'Remote Alpha'}]};}return raw(path,options);};
-  const snapshot=(scope,cursor=1,text=scope.owner+' confirmed')=>({runtime_id:'fixture-control',boot_id:chatBoot,owner_id:JSON.stringify([scope.space,scope.owner]),conversation_id:scope.owner,cursor:String(cursor),running:false,turn_id:null,messages:[{id:'reply',role:'assistant',text:scope.space+' '+text,status:'complete'}]});
+  const snapshot=(scope,cursor=1,text=scope.owner+' confirmed')=>({runtime_id:'fixture-control',boot_id:chatBoot,owner_id:JSON.stringify([scope.space,scope.owner]),conversation_id:scope.owner,cursor:String(cursor),replies:[],running:false,turn_id:null,messages:[{id:'reply',role:'assistant',text:scope.space+' '+text,status:'complete'}]});
   client.snapshot=async()=>{snapshotReads++;return snapshot(client.scope());};
   client.subscribe=(receive,status)=>{subscriptions++;const scope=client.scope(),timer=setTimeout(()=>receive(snapshot(scope)),250);deliver=(cursor,text)=>receive(snapshot(scope,cursor,text));status('connected');return ()=>clearTimeout(timer);};
   client.changes=callback=>{change=callback;return ()=>{};};

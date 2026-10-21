@@ -4,7 +4,7 @@ import {projectChatReplies} from '../../web/src/state/chat-replies.mjs';
 import {referenceProblem} from '../../web/src/components/message-references.mjs';
 import {createProductionClient} from '../../web/src/adapters/production.mjs';
 const state=createConversationState(),epoch=beginSubscription(state);
-const snapshot={runtime_id:'control',boot_id:'boot',owner_id:'alice',conversation_id:'main',cursor:'1',messages:[],running:false,turn_id:null};
+const snapshot={runtime_id:'control',boot_id:'boot',owner_id:'alice',conversation_id:'main',cursor:'1',messages:[],replies:[],running:false,turn_id:null};
 acceptSnapshot(state,snapshot,epoch);setDraft(state,'为什么？');
 const refs=[{message_id:'source',quote:'只有选中的字🙂'}];setDraftReferences(state,refs);
 const receipt=beginSend(state,'first');assert.deepEqual(receipt.request.references,refs);

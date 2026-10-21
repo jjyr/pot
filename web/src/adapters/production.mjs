@@ -26,8 +26,8 @@ export function scopedPath(path, {owner = '', space = ''} = {}) {
   return `${base}${params.size ? `?${params}` : ''}`;
 }
 export function normalizeSnapshot(frame, runtime, owner, space = '') {
-  if(!frame?.view||!['reset','delta'].includes(frame.kind))throw Error('Invalid conversation frame');
-  const value={...frame.view.state,kind:frame.kind,base_cursor:frame.base_cursor,history:frame.view.history,
+  if(!frame?.view||!Array.isArray(frame.view.replies)||!['reset','delta'].includes(frame.kind))throw Error('Invalid conversation frame');
+  const value={...frame.view.state,replies:frame.view.replies,kind:frame.kind,base_cursor:frame.base_cursor,history:frame.view.history,
     messages:frame.view.messages.map(({message,...meta})=>({...message,...meta}))};
   if (!Number.isSafeInteger(value.cursor) || value.cursor < 0) throw Error('Invalid conversation cursor');
   return {...value, runtime_id: runtime.runtime_id || runtime.id, owner_id: space ? JSON.stringify([space, owner]) : owner,
@@ -189,16 +189,6 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
         catch (reason) { onStatus('offline', reason); return; }
         onSnapshot(snapshot);
       };
-      if(!client.supports('chat.subscribe',scope)){
-        let timer,controller;
-        const poll=async()=>{
-          controller=new AbortController();
-          try{const value=await request('/api/v1/snapshot',{...scope,signal:controller.signal});if(active){deliver(value);onStatus('connected');}}
-          catch(reason){if(active&&reason.name!=='AbortError')onStatus('offline',reason);}
-          finally{if(active)timer=setTimeout(poll,1500);}
-        };
-        poll();return ()=>{active=false;clearTimeout(timer);controller?.abort();};
-      }
       if (desktop) {
         const stop = runtimeAPI.Events.On('pot:snapshot', event => {
           const value = event.data;

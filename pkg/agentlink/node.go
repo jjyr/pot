@@ -50,6 +50,7 @@ type Backend interface {
 	Submit(context.Context, TaskRequest) (Task, error)
 	Status(context.Context, protocol.AgentRef, string) (Task, error)
 	Cancel(context.Context, protocol.AgentRef, string) (Task, error)
+	ChatStatus(context.Context, ChatLookup) (ChatStatus, error)
 }
 
 func (s *Service) localIdentity(ctx context.Context) (Identity, error) {

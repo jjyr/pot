@@ -8,28 +8,11 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
-// SendReceiptQuery identifies an acceptance, not whether the Agent consumed it.
-// The owning Control and assistant are selected by the authenticated transport.
-type SendReceiptQuery struct {
-	RequestID          string `json:"request_id"`
-	ConversationID     string `json:"conversation_id"`
-	UserMessageID      string `json:"user_message_id,omitempty"`
-	RetryUserMessageID string `json:"retry_user_message_id,omitempty"`
-}
-
-type SendReceipt struct {
-	SendReceiptQuery
-	RuntimeID string `json:"runtime_id"`
-	OwnerID   string `json:"owner_id"`
-	State     string `json:"state"`
-	MessageID string `json:"message_id,omitempty"`
-}
-
 // SendReceipt reads durable storage independently of transcript paging. An absent
 // receipt is unknown while the original request can still arrive. A closed steer
 // target, however, cannot subsequently accept that request under the same lock.
-func (c *Conversation) SendReceipt(ctx context.Context, q SendReceiptQuery) (SendReceipt, error) {
-	result := SendReceipt{SendReceiptQuery: q, State: "unconfirmed", RuntimeID: c.options.RuntimeID, OwnerID: c.options.Owner}
+func (c *Conversation) SendReceipt(ctx context.Context, q protocol.SendReceiptQuery) (protocol.SendReceipt, error) {
+	result := protocol.SendReceipt{SendReceiptQuery: q, State: "unconfirmed", RuntimeID: c.options.RuntimeID, OwnerID: c.options.Owner}
 	if !core.Identifier(q.RequestID) || q.ConversationID != c.options.ConversationID ||
 		(q.UserMessageID != "" && !core.Identifier(q.UserMessageID)) ||
 		(q.RetryUserMessageID != "" && (!core.Identifier(q.RetryUserMessageID) || q.UserMessageID != "")) {

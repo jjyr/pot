@@ -21,9 +21,9 @@ func TestPotLinkDirectChatUsesExistingMailboxAndSeparateUserProjection(t *testin
 	if e != nil {
 		t.Fatal(e)
 	}
-	id := result.(map[string]any)["message_id"].(string)
+	id := result.MessageID
 	repeat, e := a.service.SendLinkChat(ctx, c.ID, "main", "user-request", "hello")
-	if e != nil || !repeat.(map[string]any)["duplicate"].(bool) {
+	if e != nil || !repeat.Duplicate {
 		t.Fatal(repeat, e)
 	}
 	if _, e = a.service.SendLinkChat(ctx, c.ID, "main", "user-request", "different"); e == nil {
@@ -35,15 +35,15 @@ func TestPotLinkDirectChatUsesExistingMailboxAndSeparateUserProjection(t *testin
 	if e != nil {
 		t.Fatal(e)
 	}
-	var frame any
+	var frame protocol.UIFrame
 	var view protocol.UIFrame
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		frame, e = a.service.LinkChat(ctx, c.ID, "main", "")
+		frame, e = a.service.LinkChat(ctx, c.ID, "main")
 		if e != nil {
 			t.Fatal(e)
 		}
-		view = frame.(protocol.UIFrame)
+		view = frame
 		if len(view.Messages) == 2 {
 			break
 		}
@@ -74,8 +74,8 @@ func TestPotLinkDirectChatUsesExistingMailboxAndSeparateUserProjection(t *testin
 	if e = a.service.agentLinks.service.Delete(ctx, c.ID); e != nil {
 		t.Fatal(e)
 	}
-	frame, e = a.service.LinkChat(ctx, c.ID, "main", "")
-	if e != nil || len(frame.(protocol.UIFrame).Messages) != 2 {
+	frame, e = a.service.LinkChat(ctx, c.ID, "main")
+	if e != nil || len(frame.Messages) != 2 {
 		t.Fatal("delete removed conversation", frame, e)
 	}
 }

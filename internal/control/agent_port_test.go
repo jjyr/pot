@@ -52,11 +52,11 @@ func TestAgentPortEmptyNodeUserTaskResultAndRetrySurviveRestart(t *testing.T) {
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		a.service.syncLinkDelegations(ctx)
-		frame, e := a.service.LinkChat(ctx, c.ID, "main", "")
+		frame, e := a.service.LinkChat(ctx, c.ID, "main")
 		if e != nil {
 			t.Fatal(e)
 		}
-		messages := frame.(protocol.UIFrame).Messages
+		messages := frame.Messages
 		if len(messages) == 1 && messages[0].Text == "remote-user-task-result" {
 			break
 		}
@@ -98,8 +98,8 @@ func TestAgentPortEmptyNodeUserTaskResultAndRetrySurviveRestart(t *testing.T) {
 		t.Fatal(repeated, err)
 	}
 	a.service.syncLinkDelegations(ctx)
-	frame, err := a.service.LinkChat(ctx, c.ID, "main", "")
-	if err != nil || len(frame.(protocol.UIFrame).Messages) != 1 {
+	frame, err := a.service.LinkChat(ctx, c.ID, "main")
+	if err != nil || len(frame.Messages) != 1 {
 		t.Fatal("result duplicated after restart", frame, err)
 	}
 	page, err := a.service.CallAgent(ctx, owner, agentlink.TaskList, agentlink.Call{Query: map[string]string{"scope": "all"}})

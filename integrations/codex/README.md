@@ -118,7 +118,7 @@ communication. The TCP endpoint never exposes the owner HTTP API. Identity keys
 and owner credentials are encrypted; the host root must be owner-only.
 
 The detached host keeps receiving work after an MCP chat closes. Subsequent
-plugin processes verify and reuse that host. Version 6 requires stopping an old
+plugin processes verify and reuse that host. Version 7 requires stopping an old
 message host before upgrading. Stable node identity, message IDs and history
 survive the database migration. The old independent Bridge pairing, HTTP/SSE
 channel, `codex_*` tools and Pot-side Codex integration plugin have been removed.
@@ -157,7 +157,7 @@ mise exec -- python3 integrations/codex/install_test.py
 
 ## Explicit message recipients
 
-Plugin 0.7.0 / host version 6 uses Agent Link invitation version 5. Upgrade it with
+Plugin 0.8.0 / host version 7 uses Agent Link invitation version 5. Upgrade it with
 Pot from the same revision. Established connections retain their node pins and
 IDs after migration; unfinished admissions need a fresh invitation. Existing
 virtual assistants, Codex threads and mailbox history remain intact.
@@ -169,3 +169,10 @@ fail instead of selecting the receiver default. This does not change task
 submission's persisted default behavior. Direct chat results return through the
 original request to the Pot user's conversation even when that Pot has no local
 assistants. Local owner configuration is not a recipient binding UI.
+
+The Codex adapter implements the shared [chat endpoint contract](../../docs/agent-links.md#chat-execution-projection).
+Its authenticated `chat.status` read projects the original caller-owned job and
+returns the durable final reply even before the ordinary outbox publisher wakes;
+subsequent delivery deduplicates that identical envelope. Cleanup uncertainty
+remains unknown. Codex text is currently published at turn completion; this
+adapter does not advertise incremental text or tool events.

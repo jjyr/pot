@@ -10,6 +10,7 @@ export function validSnapshot(value) {
     && typeof value.cursor === 'string' && /^(0|[1-9]\d*)$/.test(value.cursor)
     && typeof value.running === 'boolean'
     && (value.running ? typeof value.turn_id === 'string' && value.turn_id.length > 0 : value.turn_id === null)
+    && (Array.isArray(value.replies) && value.replies.every(reply=>reply&&typeof reply.input_id==='string'&&reply.input_id.length>0&&['pending','queued','running','waiting','paused','cancelling','completed','failed','cancelled','unknown'].includes(reply.state)&&(reply.error===undefined||typeof reply.error==='string')&&(reply.uncertain===undefined||typeof reply.uncertain==='boolean')))
     && Array.isArray(value.messages)
     && value.messages.every(message => message && typeof message.id === 'string'
       && ['user', 'assistant', 'system', 'tool'].includes(message.role)

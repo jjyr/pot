@@ -90,7 +90,7 @@ type Subscription struct {
 }
 
 func PeerOperations() []Operation {
-	return []Operation{ChatRead, ChatSend, ChatReceipt, TaskSubmit, TaskRead, TaskCancel}
+	return []Operation{ChatRead, ChatSend, ChatReceipt, ChatSubscribe, TaskSubmit, TaskRead, TaskCancel}
 }
 
 func OwnerOperations() []Operation {

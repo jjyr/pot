@@ -50,7 +50,14 @@ function combine(previous, incoming, anchor, {replace = false, page = false} = {
 export function mergeUIFrame(previous, incoming, anchor) {
   if (!['reset', 'delta'].includes(incoming.kind)) return incoming;
   if (incoming.kind === 'delta' && (!previous || String(incoming.base_cursor) !== previous.cursor)) throw Error('conversation_gap');
-  return {...incoming, ...combine(previous, incoming, anchor, {replace: incoming.kind === 'reset'}), raw: undefined};
+  const merged={...incoming, ...combine(previous, incoming, anchor, {replace: incoming.kind === 'reset'}), raw: undefined};
+  // Lifecycle deltas update only their inputs. Keep other visible outcomes until
+  // a reset replaces them, and evict state with the bounded message window.
+  const replies=new Map((incoming.kind==='delta'?previous.replies:[]).map(reply=>[reply.input_id,reply]));
+  for(const reply of incoming.replies)replies.set(reply.input_id,reply);
+  const inputs=new Set(merged.messages.map(message=>message.id));
+  merged.replies=[...replies.values()].filter(reply=>inputs.has(reply.input_id));
+  return merged;
 }
 export function mergeHistoryPage(snapshot, page, anchor, {around = false} = {}) {
   if (!snapshot || page.boot_id !== snapshot.boot_id || page.conversation_id !== snapshot.conversation_id) return null;

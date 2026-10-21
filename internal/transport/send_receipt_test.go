@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/jjyr/pot/internal/assistant"
+	"github.com/jjyr/pot/pkg/protocol"
 )
 
 func TestSendReceiptHTTPIdentityAndAuthorization(t *testing.T) {
@@ -28,7 +28,7 @@ func TestSendReceiptHTTPIdentityAndAuthorization(t *testing.T) {
 			t.Fatalf("%s: %d %s", test.query, w.Code, w.Body.String())
 		}
 		if w.Code == 200 {
-			var value assistant.SendReceipt
+			var value protocol.SendReceipt
 			if err := json.Unmarshal(w.Body.Bytes(), &value); err != nil {
 				t.Fatal(err)
 			}

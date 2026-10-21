@@ -9,7 +9,7 @@ const click=text=>{const button=[...root.querySelectorAll('button')].find(item=>
 const chinese=new URLSearchParams(location.search).get('locale')==='zh-CN';
 let scope={space:'local',owner:''},assistants=[],links=[],created=0,bootstraps=0,defaultProvider='fixture',failDirectory=true,remoteDefault='codex';
 let remoteAssistants=[{address:{node_id:'codex-node',kind:'assistant',agent_id:'codex'},name:'Codex',adapter:'codex'}];
-const frame=()=>({kind:'reset',runtime_id:'fixture',boot_id:'boot',owner_id:JSON.stringify(['local',scope.owner]),conversation_id:scope.owner,cursor:'1',running:false,messages:[{id:'welcome',sequence:'1',role:'assistant',text:'Fixture conversation',status:'complete'}],history:{has_more:false,has_newer:false}});
+const frame=()=>({kind:'reset',runtime_id:'fixture',boot_id:'boot',owner_id:JSON.stringify(['local',scope.owner]),conversation_id:scope.owner,cursor:'1',replies:[],running:false,messages:[{id:'welcome',sequence:'1',role:'assistant',text:'Fixture conversation',status:'complete'}],history:{has_more:false,has_newer:false}});
 const client={production:true,runtime:{runtime_id:'fixture',boot_id:'boot'},scope:()=>({...scope}),setScope:value=>scope={...scope,...value},changes:()=>()=>{},
  subscribe(receive,status){const timer=setTimeout(()=>{status('connected');receive(frame());},10);return()=>clearTimeout(timer);},
  async request(path,options={}){const url=new URL(path,location.href);

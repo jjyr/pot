@@ -20,7 +20,7 @@ async function run(){
     const counts={alpha:80,beta:12},versions={alpha:1,beta:1},historyReads=[];
     const snapshot=owner=>{
       const count=counts[owner],messages=Array.from({length:count},(_,index)=>({id:`${owner}-${index+1}`,sequence:String(index+1),role:index%2?'assistant':'user',...(index%2?{reply_to:`${owner}-${index}`} : {}),...(index===count-2?{references:[{message_id:`${owner}-2`,quote:'Jump to the earlier answer'}]}:{}),text:`${owner} message ${index+1}. `+'Synthetic chat text for checking assistant navigation. '.repeat(10),status:'complete'}));
-      return {kind:'reset',base_cursor:0,runtime_id:'fixture',boot_id:'boot',owner_id:JSON.stringify(['one',owner]),conversation_id:owner,cursor:String(versions[owner]),running:false,turn_id:null,messages,history:{before:'1',after:String(count),has_more:false,has_newer:false}};
+      return {kind:'reset',base_cursor:0,runtime_id:'fixture',boot_id:'boot',owner_id:JSON.stringify(['one',owner]),conversation_id:owner,cursor:String(versions[owner]),replies:[],running:false,turn_id:null,messages,history:{before:'1',after:String(count),has_more:false,has_newer:false}};
     };
     const client={production:true,runtime:{runtime_id:'fixture',boot_id:'boot'},scope:()=>({...scope}),setScope:value=>scope={...scope,...value},
       changes:()=>()=>{},subscribe(receive,status){const owner=scope.owner,record={owner,receive};subscription=record;const timer=setTimeout(()=>{status('connected');receive(snapshot(owner));},200);return()=>clearTimeout(timer);},

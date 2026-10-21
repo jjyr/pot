@@ -52,6 +52,7 @@ type Options struct {
 }
 type Service struct {
 	linkMu              sync.Mutex
+	chatRecoveryMu      sync.Mutex
 	agentLinks          *agentLinkHost
 	linkPlugins         *linkhost.Host
 	pluginWG            sync.WaitGroup

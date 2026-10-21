@@ -281,3 +281,10 @@ The migration is idempotent and rejects unrecognized or unsafe settings files
 without deleting them. Inactive files under the old `tailscale/` directory are
 left untouched and are no longer loaded. The non-SQL storage-format marker is
 advanced, so package-only automatic updates cannot cross this transition.
+
+`control/0024_chat_reply_lifecycle` separates accepted chat inputs from reply
+execution state and retains correlated reply IDs, polling freshness and projection
+revisions. Existing text, request identities and sender bindings survive. Earlier
+assistant-bound inputs retain unknown outcomes; polling never replays them.
+`tasks/0016_chat_reply_routes` indexes caller-bound correlated reply reads without
+rewriting immutable envelopes or receipts.
