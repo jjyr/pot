@@ -508,6 +508,12 @@ func (b *backend) publishMessages(ctx context.Context) error {
 		parent := j.Message
 		err = storage.Transaction(ctx, b.db, func(tx *sql.Tx) error {
 			text := j.Task.Result
+			if j.Task.State != "completed" {
+				// Diagnostic identifiers are protocol data. Never present partial
+				// model output alone as the reply to an unsuccessful request.
+				// Leave room for JSON escaping within the 64 KiB mail limit.
+				text = encoded(map[string]string{"state": j.Task.State, "error": j.Task.Error, "partial_output": trimBytes(text, maxResult/2)})
+			}
 			if text != "" && parent.Hops < protocol.MaxMailHops {
 				reply := protocol.Envelope{ID: "codex-reply-" + j.Task.ID, Kind: "message", From: j.Task.Assistant.Address, To: parent.From, ConversationID: parent.ConversationID, ReplyTo: &parent.ID, Hops: parent.Hops + 1, Text: trimBytes(text, 65536)}
 				if err := inbox.EnqueueTx(ctx, tx, reply, "outgoing", "queued"); err != nil {
