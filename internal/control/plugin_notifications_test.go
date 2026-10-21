@@ -111,6 +111,14 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 				t.Error("notification lost assistant tools")
 			}
 		}
+		if call == 2 {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"external-config","type":"function","function":{"name":"github_update_notification_filters","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`+"\n\ndata: [DONE]\n\n")
+			return
+		}
+		if call == 3 && !strings.Contains(string(raw), "notification_filters_require_user_turn") {
+			t.Error("summary write was not rejected", string(raw))
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%q},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", text)
 	}))
@@ -121,7 +129,7 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 	os.MkdirAll(packageRoot, 0700)
 	// Use the actual installed package and protocol. Only its API origin is replaced
 	// with the local fake server; production has no configurable token destination.
-	for _, name := range []string{"plugin.json", "index.mjs", "instructions.md", "notifications.mjs"} {
+	for _, name := range []string{"plugin.json", "index.mjs", "instructions.md", "notifications.mjs", "filters.mjs", "read-notifications.mjs"} {
 		data, err := os.ReadFile(filepath.Join("../../plugins/github", name))
 		if err != nil {
 			t.Fatal(err)
@@ -183,11 +191,11 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 	}
 	binding := defaults[0]
 	binding.Assistant = "missing"
-	if s.ConfigurePluginNotifications(ctx, binding) == nil {
+	if s.ConfigurePluginNotifications(ctx, fmt.Sprintf("save-%d", binding.Revision), binding) == nil {
 		t.Fatal("invalid target accepted")
 	}
 	binding.Assistant = "main"
-	if err = s.ConfigurePluginNotifications(ctx, binding); err != nil {
+	if err = s.ConfigurePluginNotifications(ctx, fmt.Sprintf("save-%d", binding.Revision), binding); err != nil {
 		t.Fatal(err)
 	}
 	s.runBackgrounds(ctx, now)
@@ -234,8 +242,12 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 	}
 	s.runBackgrounds(ctx, now+270000)
 	s.deliverNotifications(ctx, "main")
-	if modelCalls.Load() != 2 {
+	if modelCalls.Load() != 3 {
 		t.Fatalf("model calls=%d, GitHub calls=%d", modelCalls.Load(), ghCalls.Load())
+	}
+	unchanged, _ := s.githubBinding(ctx)
+	if string(unchanged.Config) != string(defaultGitHubFilters("123")) {
+		t.Fatal("event widened filters", unchanged)
 	}
 	events, _ = s.Mailbox.Notifications(ctx, "main")
 	if len(events) != 0 {
@@ -302,7 +314,7 @@ func TestGitHubPluginDefaultOwnerInitialization(t *testing.T) {
 	}
 	wg.Wait()
 	b := read()
-	if b.Revision != 1 || !b.Enabled || b.Assistant != first.ID || string(b.Config) != "{}" || string(b.State) != "null" {
+	if b.Revision != 1 || !b.Enabled || b.Assistant != first.ID || string(b.Config) != string(defaultGitHubFilters("first-account")) || string(b.State) != "null" {
 		t.Fatal(b)
 	}
 	s.Registry.Rename(ctx, first.ID, "ZZZ", first.Revision)
@@ -311,15 +323,15 @@ func TestGitHubPluginDefaultOwnerInitialization(t *testing.T) {
 	}
 	b.Assistant = second.ID
 	b.Enabled = false
-	if err = s.ConfigurePluginNotifications(ctx, b); err != nil {
+	if err = s.ConfigurePluginNotifications(ctx, fmt.Sprintf("save-%d", b.Revision), b); err != nil {
 		t.Fatal(err)
 	}
 	b = read()
 	if b.Enabled || b.Assistant != second.ID || b.Revision != 2 {
 		t.Fatal(b)
 	}
-	// A different account preserves the owner's switch and recipient. The plugin,
-	// rather than default initialization, owns account-specific baseline changes.
+	// A different account preserves the owner's switch and recipient, and
+	// requires an explicit save to bind configuration to the new account.
 	account, _ := s.integrationAccounts.List(ctx)
 	if _, err = s.integrationAccounts.Save(ctx, integrations.Account{Service: "github", Identity: integrations.Identity{ID: "second-account", Username: "other"}, SecretRef: "missing-fixture-secret"}, account[0].Revision); err != nil {
 		t.Fatal(err)
@@ -328,7 +340,8 @@ func TestGitHubPluginDefaultOwnerInitialization(t *testing.T) {
 		t.Fatal(next)
 	}
 	b.Enabled = true
-	if err = s.ConfigurePluginNotifications(ctx, b); err != nil {
+	b.Config = defaultGitHubFilters("second-account")
+	if err = s.ConfigurePluginNotifications(ctx, fmt.Sprintf("save-%d", b.Revision), b); err != nil {
 		t.Fatal(err)
 	}
 	// No credential exists: the background runner must not claim successful checks.
@@ -366,7 +379,7 @@ func TestGitHubPluginDefaultOwnerInitialization(t *testing.T) {
 	// A missing plugin must not prevent turning notifications off.
 	b = read()
 	b.Enabled = false
-	if err = s.ConfigurePluginNotifications(ctx, b); err != nil {
+	if err = s.ConfigurePluginNotifications(ctx, fmt.Sprintf("save-%d", b.Revision), b); err != nil {
 		t.Fatal(err)
 	}
 	if next := read(); next.Enabled || next.Status != "disabled" {

@@ -1,6 +1,6 @@
 // Measured DOM windows share the chat scroller, including nested tool lists.
 // Data, disclosure memory and send lifecycle live outside recycled DOM nodes.
-export function createMessageWindow({scroller, host, render, dispose, requestRender, heights = new Map()}) {
+export function createMessageWindow({scroller, host, render, dispose, requestRender, compensate, heights = new Map()}) {
   let rows = [], mounted = new Map(), closed = false;
   const spacers = [];
   function measure() {
@@ -74,7 +74,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       index++;
     }
     while (host.children.length > index) host.lastElementChild.remove();
-    if(shift)scroller.scrollTop+=shift;
+    if(shift)compensate(shift);
   }
   return {set, measure, layout(next,{anchor,target,restore}={}) {
     // Resolve estimates, mount the destination and measure it in the same paint.
@@ -88,23 +88,5 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       if (!changed && Math.abs(scroller.scrollTop - top) < .5) break;
       top = scroller.scrollTop;
     }
-  }, seek(id) {
-    let offset=0;
-    for(const item of rows){if(item.id===id||item.viewKey===id){scroller.scrollTop+=host.getBoundingClientRect().top-scroller.getBoundingClientRect().top+offset-scroller.clientHeight/3;requestRender();return true;}offset+=heights.get(item.viewKey)??(item.role==='user'?120:item.role==='tool'?70:180);}
-    return false;
   }, close() { closed = true; observer.disconnect(); for (const record of mounted.values()) dispose(record); mounted.clear(); for (const spacer of spacers) spacer.remove(); }};
-}
-
-export function readingAnchor(scroller) {
-  const top = scroller.getBoundingClientRect().top;
-  const nodes = [...scroller.querySelectorAll('article.message')];
-  // Prefer the deepest message crossing the top, then the first visible row.
-  const candidates = nodes.filter(row => { const box = row.getBoundingClientRect(); return box.height && box.bottom > top && box.top < top + scroller.clientHeight; });
-  const row = candidates.findLast(row => row.getBoundingClientRect().top <= top + 4) || candidates[0];
-  return row ? {id: row.dataset.messageId, offset: row.getBoundingClientRect().top - top, sequence: row.dataset.sequence} : null;
-}
-export function restoreReadingAnchor(scroller, anchor) {
-  if (!anchor) return;
-  const row = [...scroller.querySelectorAll('article.message')].find(row => row.dataset.messageId === anchor.id);
-  if (row) scroller.scrollTop += row.getBoundingClientRect().top - scroller.getBoundingClientRect().top - anchor.offset;
 }

@@ -100,7 +100,7 @@ async function run(){
   results.textContent+='ALL CHECKS PASSED\n';
 }
 window.chatSwitchingRun=run;
-run().catch(error=>results.textContent+='FAIL '+error.stack+'\n');
+run().catch(error=>results.textContent+='FAIL '+error.message+'\n'+error.stack+'\n');
 
 // Sample every rendered frame, rather than just waiting for a final position.
 // The first visible frame must already have the correct measured message window.
@@ -134,10 +134,22 @@ async function navigationFrames({root,client,select,snapshot,historyReads,emit})
   if(new URLSearchParams(location.search).has('capture-navigation')){
     window.navigationCaptureReady=true;await new Promise(resolve=>window.navigationCaptureContinue=resolve);
   }
+  await frames('Typing in an already tall composer retains Latest',async()=>{
+    input.value+='继续输入';input.dispatchEvent(new Event('input',{bubbles:true}));await settle();
+  },()=>{atLatest();if(!root.querySelector('.latest-button').hidden)throw Error('Typing paused following');});
+  const drag=history();drag.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));drag.scrollTop-=600;await settle();
+  const firstDrag=capture();drag.scrollTop-=600;await settle();const nextDrag=capture();
+  check(nextDrag.id!==firstDrag.id||Math.abs(nextDrag.offset-firstDrag.offset)>100,'Scrollbar dragging continues across virtual row resize callbacks');
+  window.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));root.querySelector('.latest-button').click();await settle();
   await settings();await frames('Settings return follows latest from its first frame',returnFromSettings,()=>{atLatest();if(Math.abs(root.querySelector('.composer-area').getBoundingClientRect().height-composerHeight)>1)throw Error('Composer height changed');});
   await frames('Cached chat switch follows latest from its first frame',async()=>{await select('beta');await select('alpha');},atLatest);
   history().dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));history().scrollTop=history().scrollHeight/2;await settle();
   const anchor=capture();check(!!anchor.id,'Reading frame has a message anchor');
+  await frames('Composer growth and shrink preserve historical reading',async()=>{
+    for(const text of ['Short draft','A multiline draft\n'.repeat(7),'A multiline draft\n'.repeat(7)+'继续输入']){
+      input.value=text;input.dispatchEvent(new Event('input',{bubbles:true}));await settle();
+    }
+  },atAnchor(anchor));
   // A shell redraw can run before ResizeObserver after width-driven reflow.
   // Keep the saved reading anchor instead of capturing the reflowed viewport.
   const savedWidth=root.style.width;
@@ -171,6 +183,7 @@ async function navigationFrames({root,client,select,snapshot,historyReads,emit})
   const nested=snapshot(client.scope().owner),turn=nested.messages[0].id;
   const tool=(id,parent='')=>({id,role:'tool',text:'',status:'complete',tool:{id,turn_id:turn,parent_id:parent,name:'fixture_tool',phase:'completed',args:{value:id},output:[]}});
   const parent=tool('parent-tool'),children=Array.from({length:40},(_,i)=>tool(`child-tool-${i}`,parent.id));
+  parent.tool.script={failureID:'child-tool-25'};parent.tool.diagnostic='Synthetic nested failure';
   nested.cursor='90';nested.messages.splice(-2,0,parent,...children);nested.messages.forEach((message,i)=>message.sequence=String(i+1));nested.messages.at(-2).references=[{message_id:'child-tool-25',quote:'Nested tool destination'}];
   root.querySelector('.latest-button').click();emit(nested);await settle();
   root.querySelector('.message-reference-open').click();await settle();
@@ -179,6 +192,8 @@ async function navigationFrames({root,client,select,snapshot,historyReads,emit})
   const disclosure=row('parent-tool').querySelector('details');
   disclosure.querySelector('summary').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));disclosure.querySelector('summary').click();await settle();
   check(!disclosure.open,'User disclosure changes supersede the restored nested reading anchor');
+  row('parent-tool').querySelector('.tool-failure').click();await settle();
+  check(!!row('child-tool-25')&&disclosure.open,'Tool failure navigation uses the cursor to mount a recycled child');
   root.querySelector('.latest-button').click();await settle();
   const original=snapshot(client.scope().owner);original.cursor='91';emit(original);await settle();
   check(historyReads.length===0,'Cached navigation and loaded references do not fetch history');

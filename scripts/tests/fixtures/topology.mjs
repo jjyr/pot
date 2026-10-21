@@ -1,6 +1,7 @@
 import {createPages} from '../../../web/src/components/pages.mjs';
 import {projectLinkedAssistants} from '../../../web/src/state/agent-links.mjs';
-const assistant=(node,id,name,adapter)=>({address:{node_id:node,kind:'assistant',agent_id:id},name,adapter});
+const profileAvatar=color=>{const canvas=document.createElement('canvas');canvas.width=canvas.height=128;const context=canvas.getContext('2d');context.fillStyle=color;context.fillRect(0,0,128,128);context.fillStyle='#fff';context.font='64px system-ui';context.textAlign='center';context.textBaseline='middle';context.fillText('P',64,68);return canvas.toDataURL('image/png');};
+const assistant=(node,id,name,adapter)=>({address:{node_id:node,kind:'assistant',agent_id:id},name,adapter,...(id==='cloud-assistant'?{avatar:profileAvatar('#42736c')}:{})});
 const fixture=window.topologyFixture={calls:[],language:'en',scenario:'ready',links:[
  {id:'codex-link',peer:{node_id:'codex-control',kind:'codex',name:'Codex',address:'tcp://dev-box.example:8793'},status:'connected',revision:1,default_assistant_id:'review',assistants:[assistant('codex-control','review','Code review','codex'),assistant('codex-control','build','Development','codex')]},
  {id:'cloud-link',peer:{node_id:'cloud-id',kind:'pot',name:'Cloud Pot',address:'tcp://100.88.0.8:8793'},status:'connected',revision:1,default_assistant_id:'cloud-assistant',assistants:[assistant('cloud-id','cloud-assistant','Cloud assistant','pot')]}
@@ -15,7 +16,7 @@ const spaces=[{id:'local',control_id:'local-id',name:'Local Pot',kind:'local',co
 fixture.clipboard='';Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{if(fixture.clipboardFail)throw Error('Synthetic clipboard denied');fixture.clipboard=text;},readText:async()=>{if(fixture.clipboardReadWait)return await new Promise(resolve=>fixture.releaseClipboardRead=resolve);if(fixture.clipboardFail)throw Error('Synthetic clipboard denied');return fixture.clipboard;}}});
 fixture.networks={local:{listen:'127.0.0.1:8793',endpoint:'tcp://100.101.102.103:8793',mode:'address'}};
 const policy=()=>({machines:{'my-mac':{execution_access:'ask',revision:1}},rules:[],task_grants:[],application:{}});
-const localAssistants=[{id:'dev',name:'Development assistant',space_id:'local'},{id:'pot',name:'Pot',space_id:'local'}];
+const localAssistants=[{id:'dev',name:'Development assistant',space_id:'local',avatar:profileAvatar('#5c609c')},{id:'pot',name:'Pot',space_id:'local',avatar:profileAvatar('#ad7630')}];
 const refreshDirectory=()=>{client.assistants=[...localAssistants,...projectLinkedAssistants({items:fixture.links},spaces[0])];};
 const client={desktop:true,production:true,runtime:{boot_id:'fixture-boot'},spaces,assistants:localAssistants,scope:()=>({space:'local',owner:'dev'}),request:async(path,options={})=>{
  fixture.calls.push({path,...options});const body=options.body||{},space=options.space||'local';

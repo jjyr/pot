@@ -88,6 +88,13 @@ async page => {
   await taskCard().waitFor();await expand(taskCard());
   assert(await taskCard().innerHTML()===chatReview,'Chat and Task use identical approval markup, content and controls');
   assert(JSON.stringify(await reviewStyles(taskCard()))===JSON.stringify(chatStyles),'Chat and Task retain identical review styles inside different transcript containers');
+  const approvalTool=page.locator('.task-transcript .tool-call[data-call-id="shared-call"]');
+  await approvalTool.locator(':scope > summary').click();
+  await page.getByRole('button',{name:'查看授权',exact:true}).click();
+  assert(await approvalTool.evaluate(node=>node.open)&&await taskCard().isVisible(),'Approval locate expands and positions its tool through the cursor');
+  await approvalTool.locator(':scope > summary').click();
+  assert(!await approvalTool.evaluate(node=>node.open),'Reader disclosure supersedes approval positioning');
+  await page.getByRole('button',{name:'查看授权',exact:true}).click();
   await page.screenshot({path:'output/pr-images/task-approval-shared-task-after.png'});
   await page.locator('.task-status').getByText(/等待授权/).waitFor();
   await back().click();await page.locator('#pot-composer:visible').waitFor();

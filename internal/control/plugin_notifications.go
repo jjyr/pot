@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"regexp"
 	"time"
 
 	"github.com/jjyr/pot/internal/assistant"
@@ -15,7 +14,10 @@ import (
 	"github.com/jjyr/pot/pkg/storage"
 )
 
-func (s *Service) ConfigurePluginNotifications(ctx context.Context, b assistant.BackgroundBinding) error {
+func (s *Service) ConfigurePluginNotifications(ctx context.Context, requestID string, b assistant.BackgroundBinding) error {
+	if !core.Identifier(requestID) {
+		return errors.New("invalid_request_id")
+	}
 	return s.Machines.OwnerAction(func() error {
 		if b.ConnectionID != "" || b.PluginID != "" && b.PluginID != b.ID {
 			return errors.New("invalid plugin background identity")
@@ -43,7 +45,20 @@ func (s *Service) ConfigurePluginNotifications(ctx context.Context, b assistant.
 		if b.Enabled && !found {
 			return errors.New("notification assistant unavailable")
 		}
-		if err = s.Mailbox.ConfigureBackground(ctx, b); err == nil {
+		if b.ID == "github" {
+			account, e := s.githubAccount(ctx)
+			if e != nil {
+				return e
+			}
+			var config githubFilters
+			if e = decodeGitHubFilters(b.Config, &config); e != nil {
+				return e
+			}
+			if config.AccountID != account {
+				return errors.New("github_account_changed")
+			}
+		}
+		if err = s.Mailbox.ConfigureBackgroundRequest(ctx, b, requestID); err == nil {
 			s.Changes.Notify("plugin-notifications")
 		}
 		return err
@@ -254,6 +269,19 @@ func (s *Service) ensureGitHubNotifications(ctx context.Context) error {
 		}
 		for _, b := range stored {
 			if b.ID == "github" {
+				var config githubFilters
+				if err = decodeGitHubFilters(b.Config, &config); err != nil {
+					return err
+				}
+				if config.AccountID == "" {
+					account, e := s.githubAccount(ctx)
+					if e != nil {
+						return nil
+					}
+					config.AccountID = account
+					b.Config, _ = json.Marshal(config)
+					return s.Mailbox.ConfigureBackground(ctx, b)
+				}
 				return nil
 			}
 		}
@@ -267,7 +295,7 @@ func (s *Service) ensureGitHubNotifications(ctx context.Context) error {
 		}
 		for _, item := range catalog {
 			if item.ID == "github" && item.Account != nil {
-				return s.Mailbox.EnsureBackground(ctx, "github", definitions[0].ID)
+				return s.Mailbox.EnsureBackgroundInstance(ctx, assistant.BackgroundBinding{ID: "github", PluginID: "github", Enabled: true, Assistant: definitions[0].ID, Config: defaultGitHubFilters(item.Account.Identity.ID)})
 			}
 		}
 		return nil
@@ -309,6 +337,9 @@ func (s *Service) PluginNotifications(ctx context.Context) (any, error) {
 	bindings := []assistant.BackgroundBinding{}
 	for _, id := range ids {
 		b := assistant.BackgroundBinding{ID: id, PluginID: id, Enabled: id == "github", Config: json.RawMessage(`{}`), Status: "pending"}
+		if id == "github" {
+			b.Config = defaultGitHubFilters("")
+		}
 		for _, old := range stored {
 			if old.ID == id {
 				b = old
@@ -331,10 +362,18 @@ func (s *Service) PluginNotifications(ctx context.Context) (any, error) {
 			b.Status = "assistant_missing"
 		} else {
 			for _, item := range catalog {
-				if item.ID == id && item.Account == nil {
-					b.Status = "authorization"
+				if item.ID == id {
+					if item.Account == nil {
+						b.Status = "authorization"
+					} else if id == "github" {
+						var config githubFilters
+						if decodeGitHubFilters(b.Config, &config) == nil && config.AccountID != "" && config.AccountID != item.Account.Identity.ID {
+							b.Status = "account_changed"
+						}
+					}
 				}
 			}
+
 			if b.Status == "disabled" {
 				b.Status = "pending"
 			}
@@ -355,34 +394,4 @@ func (s *Service) validateNotificationTarget(ctx context.Context, id string) err
 		}
 	}
 	return errors.New("notification assistant unavailable")
-}
-
-// Reject removed/unknown settings before committing a configuration that cannot poll.
-func validateGitHubNotificationConfig(raw json.RawMessage) error {
-	var config struct {
-		Repositories []string `json:"repositories"`
-		Reasons      []string `json:"reasons"`
-	}
-	if string(raw) == "null" {
-		return errors.New("invalid GitHub notification configuration")
-	}
-	if err := core.DecodeJSON(raw, &config); err != nil {
-		return err
-	}
-	repository := regexp.MustCompile(`^[-\w.]+/[-\w.]+$`)
-	reason := regexp.MustCompile(`^[-a-zA-Z0-9_]+$`)
-	if len(config.Repositories) > 100 || len(config.Reasons) > 100 {
-		return errors.New("too many GitHub notification filters")
-	}
-	for _, value := range config.Repositories {
-		if len(value) > 200 || !repository.MatchString(value) {
-			return errors.New("invalid GitHub notification repository")
-		}
-	}
-	for _, value := range config.Reasons {
-		if len(value) > 200 || !reason.MatchString(value) {
-			return errors.New("invalid GitHub notification reason")
-		}
-	}
-	return nil
 }

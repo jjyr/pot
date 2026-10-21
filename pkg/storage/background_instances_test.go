@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"io/fs"
 	"testing"
 	"testing/fstest"
@@ -43,8 +44,12 @@ func TestBackgroundInstanceUpgradePreservesAcceptedReceipts(t *testing.T) {
 	if err = db.QueryRow(`SELECT plugin_id,connection_id,enabled,revision,state,next,conversation,diagnostic FROM plugin_background WHERE id='github'`).Scan(&pluginID, &connectionID, &enabled, &revision, &checkpoint, &next, &conversation, &diagnostic); err != nil {
 		t.Fatal(err)
 	}
-	if pluginID != "github" || connectionID != "" || enabled || revision != 9 || checkpoint != `{"cursor":"keep"}` || next != 9000 || conversation != "kept-conversation" || diagnostic != "keep" {
+	if pluginID != "github" || connectionID != "" || enabled || revision != 10 || next != 9000 || conversation != "kept-conversation" || diagnostic != "keep" {
 		t.Fatal(pluginID, connectionID, enabled, revision, checkpoint, next, conversation, diagnostic)
+	}
+	var progress map[string]any
+	if err = json.Unmarshal([]byte(checkpoint), &progress); err != nil || progress["cursor"] != "keep" {
+		t.Fatal(checkpoint, err)
 	}
 	var id, instance, state, detail, sender, body string
 	if err = db.QueryRow(`SELECT id,json_extract(envelope,'$.plugin.instance_id'),state,detail,json_extract(envelope,'$.from.agent_id'),json_extract(envelope,'$.plugin.event.body') FROM agent_messages`).Scan(&id, &instance, &state, &detail, &sender, &body); err != nil {

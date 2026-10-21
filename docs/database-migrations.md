@@ -223,4 +223,12 @@ established connection IDs, pins and historical sender bindings, expires old
 invitations and fences unfinished admissions. `tasks/0013_agent_link_direct_chat`
 adds a typed user-chat route index while preserving existing immutable envelopes.
 
+`tasks/0014_github_notification_filters` adds idempotent configuration write receipts
+and converts GitHub notification whitelists to explicit null/empty semantics.
+Ambiguous old broad reason lists become mention-only; explicit nonempty filters,
+disablement, recipients, cursors, thread markers and inbox receipts survive.
+Unaccepted pending groups and incomplete scans are retired. See [GitHub
+notifications](plugins.md#github-notifications) for account binding, supported
+management tools and configuration-boundary behavior.
+
 `control/0021_agent_link_addresses` records independently enabled Pot peer endpoints, preserving the existing configured endpoint. Startup restores listeners after migration without replaying agent work.
