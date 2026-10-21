@@ -4,13 +4,27 @@ import (
 	"context"
 	"errors"
 	"github.com/jjyr/pot/pkg/protocol"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 type testBackend struct {
-	f         *fixture
-	submitted TaskRequest
+	f                 *fixture
+	submitted         TaskRequest
+	observationFailed atomic.Bool
+}
+
+func (b *testBackend) Observe(ctx context.Context, _ string) (Observation, error) {
+	if b.observationFailed.Load() {
+		return Observation{}, ErrUnavailable
+	}
+	d, err := b.Directory(ctx)
+	value := Observation{NodeID: d.NodeID, Assistants: []Activity{}}
+	for _, a := range d.Assistants {
+		value.Assistants = append(value.Assistants, Activity{AssistantID: a.Address.AgentID, ChatState: "idle"})
+	}
+	return value, err
 }
 
 func (b *testBackend) Directory(ctx context.Context) (Directory, error) {

@@ -7,6 +7,12 @@ chat and delegated tasks use that same thread, in one queue per assistant.
 Separate assistants can run in parallel and retain separate conversation context.
 Assistants pointing at the same directory still share those files.
 
+The adapter's `observe` operation reports live task counts, chat queue activity,
+hostname and cleanup fences without exporting task text, workspaces or model
+configuration. Task and chat jobs share the execution queue but remain separate
+in reported task counts. Directional pending-message summaries are scoped to the
+authenticated peer. Pot displays these summaries in the existing icon topology.
+
 ```text
 Pot chat / task tools
         |

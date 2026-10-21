@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -92,7 +93,11 @@ func TestMCPOAuthPKCEStateRevisionAndSecretStorage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	body, err := io.ReadAll(response.Body)
 	response.Body.Close()
+	if err != nil || !strings.Contains(string(body), "window.close()") {
+		t.Fatal("native callback response was truncated", string(body), err)
+	}
 	if response.StatusCode != 200 {
 		t.Fatal("native callback rejected", response.StatusCode)
 	}

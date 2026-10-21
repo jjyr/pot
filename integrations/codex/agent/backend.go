@@ -83,7 +83,7 @@ func (b *backend) identity(a assistant) agentlink.Identity {
 }
 func (b *backend) Directory(ctx context.Context) (agentlink.Directory, error) {
 	list, err := b.list(ctx)
-	d := agentlink.Directory{NodeID: b.nodeID, Name: "Codex", Adapter: "codex", Capabilities: []string{"chat", "tasks", "cancel"}, Assistants: []agentlink.Identity{}}
+	d := agentlink.Directory{NodeID: b.nodeID, Name: "Codex", Adapter: "codex", Capabilities: []string{"chat", "tasks", "cancel", "observe"}, Assistants: []agentlink.Identity{}}
 	for _, a := range list {
 		d.Assistants = append(d.Assistants, b.identity(a))
 		if a.Default {
