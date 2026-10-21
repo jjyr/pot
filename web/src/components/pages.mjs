@@ -30,7 +30,7 @@ import {createChatApprovals} from './chat-approvals.mjs';
 import {taskElapsed,bindTaskClock} from './task-time.mjs';
 import {createTopology} from './topology.mjs';
 import {createAgentLinks} from './agent-links.mjs';
-import {projectTopology,agentNodeID,machineDisplayName,linkEndpoint,assistantActivityState} from '../state/topology.mjs';
+import {projectTopology,agentNodeID,machineDisplayName,assistantActivityState} from '../state/topology.mjs';
 
 export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>{},client, host, approvalHost, chatApprovalHost, chatVisible, locale, notify, changed, titleChanged, openChat, routeChanged=()=>{}}) {
   const gate = createRequestGate(), approvalGate = createRequestGate();
@@ -43,7 +43,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
   const chatApprovals=createChatApprovals({host:chatApprovalHost,locale,visible:chatVisible});
   const cached = new Map(),spaceCache = new Map(),machineDrafts=new Map(),editorParents=[],taskDrafts=new Map(),taskDraftVersions=new Map(),taskWrites=new Map(),scheduleWrites=new Map();
   let extensionUI=null;const extensionMemory={};
-  let pageView=null,currentViewKey='',viewReady=false,shortcutOpen=null,approvalOwner='',topologySelection='',topologyPaused=false,agentOwnerSpace='';
+  let pageView=null,currentViewKey='',viewReady=false,shortcutOpen=null,approvalOwner='',topologySelection='',agentOwnerSpace='';
   const tr = (en, zh) => locale() === 'zh-CN' ? zh : en;
   const scope = () => client.scope();
   const readTaskPages=createTaskPages(client);
@@ -734,8 +734,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
   async function machines(root,token) {
     const t=key=>translate(locale(),key);root.classList.add('topology-page');
     const toolbar=n('div','topology-toolbar'),connectionRoot=n('div','topology-connection'),storage=n('div','topology-machine-storage'),rows=n('div'),entries=new Map(),linkNotice=n('p','inline-error');storage.hidden=true;storage.append(rows);connectionRoot.className='agent-links-container';toolbar.append(connectionRoot);root.append(toolbar,linkNotice,storage);
-    let model,view,currentNode=null,currentEdgeID='';const identityPanels=new Map();
-    function identityDetails(id,values){let panel=identityPanels.get(id);if(!panel){const element=n('details','topology-technical'),summary=n('summary'),list=n('dl','topology-metadata');element.append(summary,list);panel={element,summary,list};identityPanels.set(id,panel);}panel.summary.textContent=t('topology.technicalDetails');panel.list.replaceChildren();for(const [key,value]of values){if(value)panel.list.append(n('dt','',t(key)),n('dd','',value));}return panel.element;}
+    let model,view,currentNode=null,currentEdgeID='';
     const timestamp=value=>value?new Date(value).toLocaleString(locale()):t('topology.activity.unknown');
     function showActivity(node){
       const observation=node.observation;
@@ -777,8 +776,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
         const paused=node.link?.state==='disconnected'||node.link?.status==='disconnected';
         view.inspector.append(view.brand(node),n('p','hint',t('topology.kind.'+node.kind)),n('h2','',node.name));
         if(node.subtitle)view.inspector.append(n('p','hint topology-host',node.subtitle));
-        const endpoint=linkEndpoint(node.link);if(endpoint&&endpoint!==node.subtitle)view.inspector.append(n('p','hint topology-host',endpoint));
-        view.inspector.append(n('p',node.status==='connected'?'success-text':'hint',t(paused?'agentLinks.disconnected':node.status==='stale'?'topology.status.stale':'agentLinks.status.'+(node.status==='connected'?'connected':node.status==='connecting'?'connecting':'offline'))),n('p','hint',t(paused?'agentLinks.disconnectedDescription':'topology.messageScope')),identityDetails(node.id,[['topology.nodeID',node.identity],['topology.endpoint',linkEndpoint(node.link)]]));
+        view.inspector.append(n('p',node.status==='connected'?'success-text':'hint',t(paused?'agentLinks.disconnected':node.status==='stale'?'topology.status.stale':'agentLinks.status.'+(node.status==='connected'?'connected':node.status==='connecting'?'connecting':'offline'))),n('p','hint',t(paused?'agentLinks.disconnectedDescription':'topology.messageScope')));
         showActivity(node);
         const assistants=node.link?.assistants||node.link?.directory?.assistants||(!node.link?(client.assistants||[]).filter(item=>!item.origin&&item.space_id===node.space):[]),directory=n('section','topology-assistants');
         directory.append(n('h3','section-heading',t('agentLinks.providedAssistants')));
@@ -786,7 +784,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
         for(const assistant of assistants){
           const remoteID=assistant.address?.agent_id||assistant.id,id=node.link?'agent-link:'+node.link.id+':'+remoteID:assistant.id;
           const open=action('',()=>openChat({space:node.space,owner:id}));open.className='control topology-assistant';
-          open.append(connectionBrand(assistant.adapter||node.kind),n('span','topology-assistant-name',assistant.name||remoteID));
+          open.append(avatar(24,assistant.avatar),n('span','topology-assistant-name',assistant.name||remoteID));
           const activity=node.activities?.get(remoteID),state=node.observation?.fresh?assistantActivityState(activity):'unknown';
           open.append(n('span','topology-assistant-state state-'+state,t('topology.activity.'+state)));
           if(remoteID===(node.link?.default_assistant_id||node.link?.directory?.default_assistant_id))open.append(n('span','hint',t('agentLinks.defaultAssistant')));
@@ -803,20 +801,19 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       view.inspector.append(related(node));restore();
     }
     function showEdge(edge){currentEdgeID=edge.id;keepMachine();view.inspector.replaceChildren();const a=model.nodes.find(node=>node.id===edge.from),b=model.nodes.find(node=>node.id===edge.to);view.inspector.append(n('p','hint',t(edge.kind==='agent'?'topology.agentLegend':'topology.machineLegend')),n('h2','',a.name+(edge.kind==='agent'?' ↔ ':' → ')+b.name),n('p','hint',t(edge.kind==='agent'?'topology.messageScope':'topology.executionScope')),action(t('topology.viewSource'),()=>view.select(a.id)),action(t('topology.viewTarget'),()=>view.select(b.id)));if(edge.kind==='agent')showQueues(edge.link,a.name,b.name);}
-    view=createTopology({root,locale,initialSelection:topologySelection,paused:topologyPaused,onPause:value=>{topologyPaused=value;},onSelect:showNode,onEdge:showEdge,signal:token.signal});
+    view=createTopology({root,locale,initialSelection:topologySelection,onSelect:showNode,onEdge:showEdge,signal:token.signal});
     const freshnessTimer=setInterval(()=>{if(!document.hidden&&gate.current(token)&&!editor)pageView?.queue.run();},10000);
     token.signal.addEventListener('abort',()=>clearInterval(freshnessTimer),{once:true});
     const update=async({inventory,permissionPages,permissionsPending,linkPages})=>{
       if(!gate.current(token)||disposed)return;
       const restore=preserveInspectorFocus(),items=inventory.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner));
       keyedRows(rows,entries,items,{key:machine=>JSON.stringify([machine._space_id,machine.runtime_id||machine.id]),create:()=>{
-        const element=n('section','page-card machine-card'),header=n('div','machine-header'),mark=n('span','machine-icon'),name=n('span','machine-name'),status=n('span'),tags=n('p','hint machine-tags'),location=n('p','hint machine-location'),addresses=n('p','hint machine-addresses'),metadata=n('div'),permissions=n('div','machine-permissions');mark.append(icon('machines'));header.append(mark,name,status);element.append(location,header,addresses,tags,metadata,permissions);return {element,name,status,tags,location,addresses,metadata,permissions};
+        const element=n('section','page-card machine-card'),header=n('div','machine-header'),mark=n('span','machine-icon'),name=n('span','machine-name'),status=n('span'),tags=n('p','hint machine-tags'),location=n('p','hint machine-location'),addresses=n('p','hint machine-addresses'),permissions=n('div','machine-permissions');mark.append(icon('machines'));header.append(mark,name,status);element.append(location,header,addresses,tags,permissions);return {element,name,status,tags,location,addresses,permissions};
       },update:(entry,machine)=>{
         const id=machine.runtime_id||machine.id,permissionPage=permissionPages.find(page=>page.space.id===machine._space_id),policy=permissionPage?.value.policy;
         const stale=machine._stale||permissionPage?.stale||client.spaces.find(space=>space.id===machine._space_id)?.connected===false,permissions=entry.permissions;
         entry.element.dataset.machineId=id;entry.element.dataset.spaceId=machine._space_id;entry.name.textContent=machineDisplayName(machine)||t('topology.kind.machine');entry.location.textContent=machine._space_name;entry.status.textContent=t(stale?'topology.status.stale':machine.connected?'agentLinks.status.connected':'agentLinks.status.offline');entry.status.className=machine.connected&&!stale?'success-text':'hint';entry.tags.textContent=(machine.tags||[]).join(' · ');entry.tags.hidden=!machine.tags?.length;
         entry.addresses.textContent=(machine.ip_addresses||[])[0]||'';entry.addresses.hidden=!entry.addresses.textContent;
-        entry.metadata.replaceChildren(identityDetails(JSON.stringify([machine._space_id,id]),[['topology.hostname',machine.hostname],['topology.interfaceAddresses',(machine.ip_addresses||[]).join(' · ')],['topology.nodeID',id]]));
         entry.renderPermissions=()=>{
         if(permissionsPending&&!policy?.machines?.[id]){permissions.replaceChildren(n('p','hint',t('loading.pending')));return;}
         if(!policy?.machines?.[id]){permissions.replaceChildren(n('p','inline-error',t('topology.permissionsUnavailable')),action(t('retry'),()=>show('machines')));return;}
