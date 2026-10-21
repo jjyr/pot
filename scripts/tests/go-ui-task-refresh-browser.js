@@ -12,6 +12,7 @@ async page=>{
    f.capabilities={version:1,scope:'owner',operations:['chat.read','chat.send','chat.subscribe','assistant.configure','assistant.usage','approvals.manage','task.read','task.list','task.cancel','task.interrupt','task.control','task.events','task.input','task.archive','task.outcomes','task.files','schedules.manage']};
    f.items=Array.from({length:12},(_,index)=>({id:String(index),title:'分析任务 '+(index+1),phase:'running',assistant_id:'a',updated_at_ms:100-index}));
    f.client={spaces:[{id:'local',name:'本机'}],assistants:[{id:'a',space_id:'local',name:'项目助手',capabilities:f.capabilities}],runtime:{boot_id:'fixture'},scope:()=>({space:'local',owner:'a'}),request:(path,options={})=>{
+    if(path==='/api/v1/machines')return Promise.resolve({items:[{id:'fixture-machine',hostname:'fixture.local',ip_addresses:['192.168.1.24']}]});
     if(path.includes('/permissions'))return Promise.resolve({items:[]});
     if(/^\/api\/v1\/tasks\/[^/]+$/.test(path)&&f.detailRecord)return Promise.resolve({...structuredClone(f.detailRecord),capabilities:f.capabilities});
     if(path.endsWith('/messages'))return Promise.resolve({items:[]});

@@ -1,3 +1,4 @@
+import {machinePresentation,machineDisplayName} from '../state/machine-identity.mjs';
 import {connectionBrand,taskAgentSource} from './connection-visuals.mjs';
 import {createExtensions} from './extensions.mjs';
 import {browserTimezone,connectScheduleEditor} from './schedule-editor.mjs';
@@ -31,9 +32,10 @@ import {taskElapsed,bindTaskClock} from './task-time.mjs';
 import {createTopology} from './topology.mjs';
 import {supportsCapability} from '../state/agent-links.mjs';
 import {createAgentLinks} from './agent-links.mjs';
-import {projectTopology,agentNodeID,machineDisplayName,assistantActivityState} from '../state/topology.mjs';
+import {projectTopology,agentNodeID,assistantActivityState} from '../state/topology.mjs';
 
 export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>{},client, host, approvalHost, chatApprovalHost, chatVisible, locale, notify, changed, titleChanged, openChat, routeChanged=()=>{}}) {
+  const machineInfo=machinePresentation(client);
   const gate = createRequestGate(), approvalGate = createRequestGate();
   let assistantStartRefresh=null,assistantLoad=null;
   let route = '', title = '', editor = null, disposed = false, pageVersion = 0, configurationSpace = '',taskView=null,taskOrigin=null,taskListView=null,scheduleView=null,detailParent=false,usageOwner=null;
@@ -53,11 +55,11 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
   const stopResources=client.resources?.subscribe((meta,error)=>{
     if(disposed||editor||!host.offsetParent)return;
     if(pageView&&!relevantChange(meta.topics,pageView.topics,pageView.space,{space:meta.space}))return;
-    if(taskListView&&!meta.topics.includes('tasks'))return;
+    if(taskListView&&!meta.topics.some(topic=>['tasks','machines'].includes(topic)))return;
     if(error){const target=pageView?.root||taskListView?.rows;if(target){let status=target.querySelector('.resource-refresh-error');if(!status){status=n('p','inline-error resource-refresh-error');status.setAttribute('role','alert');target.prepend(status);}status.dataset.resource=JSON.stringify(meta);status.replaceChildren(n('span','',translate(locale(),'loading.stale')),action(translate(locale(),'retry'),()=>{client.resources.invalidate(meta.topics,{space:meta.space});if(pageView)pageView.queue.run();else refreshTaskList();}));}return;}
     const failure=host.querySelector('.resource-refresh-error');if(failure?.dataset.resource===JSON.stringify(meta))failure.remove();
     if(pageView&&relevantChange(meta.topics,pageView.topics,pageView.space,{space:meta.space}))pageView.queue.run();
-    else if(taskListView&&meta.topics.includes('tasks'))refreshTaskList();
+    else if(taskListView&&meta.topics.some(topic=>['tasks','machines'].includes(topic)))refreshTaskList();
   });
   const uid = () => crypto.randomUUID();
   const list = value => Array.isArray(value) ? value : value?.items || [];
@@ -492,7 +494,10 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     const token=view.token,offset=filter.taskOffset,current=()=>gate.current(token)&&taskListView===view;
     view.rows.setAttribute('aria-busy','true');view.next.disabled=true;
     try {
-      const {pages,partial}=await readTaskPages({scope:filter.taskScope,q:filter.taskQuery,offset,signal:token.signal,onProgress:pages=>{if(current())updateTaskList(view,pages,true);}});
+      const [,{pages,partial}]=await Promise.all([
+        Promise.all((client.spaces||[]).map(space=>machineInfo.load({space:space.id,signal:token.signal}))),
+        readTaskPages({scope:filter.taskScope,q:filter.taskQuery,offset,signal:token.signal,onProgress:pages=>{if(current())updateTaskList(view,pages,true);}}),
+      ]);
       if(!current())return;
       const total=pages.reduce((sum,page)=>sum+(page.value.total??page.value.items?.length??0),0);
       if(!partial&&filter.taskOffset>=total&&filter.taskOffset){filter.taskOffset=Math.max(0,Math.floor((total-1)/20)*20);currentViewKey=JSON.stringify(['tasks',[filter.taskTab,filter.taskScope,filter.taskQuery,filter.taskOffset,filter.scheduleOffset]]);}
@@ -526,7 +531,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
         if(time)entry.row.setAttribute('aria-describedby',entry.elapsed.id);else entry.row.removeAttribute('aria-describedby');
         if(time)entry.elapsed.dataset.startedAt=task.started_at_ms;else delete entry.elapsed.dataset.startedAt;
         entry.elapsed.title=tr('Total time since execution first started, including waits','自首次开始执行起的总耗时，包含中间等待');
-        text(entry.meta,`${task._space_name||''}${task.machine_id?' · '+task.machine_id:''}${task.pending?' · '+task.pending+' '+tr('pending instructions','条待处理指令'):''}${task._stale?' · '+tr('Stale','已过期'):''}`);
+        text(entry.meta,`${task._space_name||''}${task.machine_id?' · '+machineInfo.label(task.machine_id,{space:task._space_id},locale()):''}${task.pending?' · '+task.pending+' '+tr('pending instructions','条待处理指令'):''}${task._stale?' · '+tr('Stale','已过期'):''}`);
       }
       if(!result.items.length)text(retain('empty',()=>({row:n('p','page-empty')})).row,tr('No ongoing tasks. Describe a goal in Chat to get started.','暂无进行中的任务，在聊天中描述目标即可开始。'));
       const scroll=view.rows.scrollTop,focused=view.rows.contains(document.activeElement)?document.activeElement:null;
@@ -546,7 +551,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     if(recordHistory){const replace=history.state?.potTask?.id===task.id&&history.state?.potScope?.space===task._space_id;history[replace?'replaceState':'pushState']({potRoute:'tasks',potScope:{space:task._space_id,owner:task.assistant_id},potTask:{...task},potTaskReturn:returnTo},'',location.href);}
     const path=`/api/v1/tasks/${encodeURIComponent(task.id)}`,fileScope={owner:task.assistant_id,space:task._space_id};
     const cacheKey=taskDetailKey(task),saved=taskDetails.get(cacheKey);
-    const result=await load(token=>saved?.record||request(path,{...fileScope,signal:token.signal}));if(!result)return;
+    const result=await load(async token=>{const [record]=await Promise.all([saved?.record||request(path,{...fileScope,signal:token.signal}),machineInfo.load({...fileScope,signal:token.signal})]);return record;});if(!result)return;
     const {root,token}=result,record=result.value;host.classList.add('task-page-host');
     const draftKey=JSON.stringify([task._space_id,task.assistant_id,task.id]);
     const view={task,record,token,returnTo,cacheKey,initialRead:!saved,scope:fileScope,state:saved?.state||createTaskTranscript(),inputs:saved?.inputs||[],busy:false,again:false,unavailable:false};
@@ -670,7 +675,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     const spec=item?.spec||{title:'',goal:'',machine_id:'',timezone:browserTimezone(),kind:'cron',cron:'0 9 * * *',at:'',every_minutes:60,misfire:'coalesce',notify:'changes',enabled:true,profile:null,model:null,requirements:{tools:false,desktop:false,exact_budget:false,live_steering:false}};
     const definitions=[
       ...(!item?[{name:'owner_ref',key:'assistant',choices:(client.assistants||[]).filter(owner=>supportsCapability(owner,'schedules.manage')).map(owner=>[JSON.stringify([owner.space_id,owner.id]),`${owner.name} · ${owner.space_name||''}`])}]:[]),
-      {name:'title',key:'title',required:true},{name:'goal',key:'goal',kind:'textarea',required:true},{name:'machine_id',key:'machine'},
+      {name:'title',key:'title',required:true},{name:'goal',key:'goal',kind:'textarea',required:true},{name:'machine_id',key:'machine',choices:[['',t('defaultMachine')],...(spec.machine_id?[[spec.machine_id,machineInfo.label(spec.machine_id,{space:item?._space_id||scope().space},locale())]]:[])]},
       {name:'timezone',key:'timezone',helpKey:'timezoneHelp',required:true},
       {name:'kind',key:'repeat',choiceKeys:{once:'once',interval:'interval',cron:'cron'},choices:['once','interval','cron'].map(key=>[key,t(key)])},
       {name:'at',key:'at',help:'YYYY-MM-DD HH:MM'},
@@ -687,7 +692,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       const canonical={...specValues,cron:values.kind==='cron'?values.cron:'',at:values.kind==='once'?values.at:'',every_minutes:values.kind==='interval'?values.every_minutes:0};
       return request('/api/v1/schedules',{...context,space,owner,method:'POST',body:{request_id:context.request_id,action:item?'update':'create',schedule_id:item?.id||'',spec:canonical}});
     },{capturedScope:item?{space:item._space_id,owner:item._assistant_id}:scope(),submitLabel:t('save')});
-    preview=connectScheduleEditor({view,request,locale,definitions,current:()=>editor?.session===view.session&&!disposed});
+    preview=connectScheduleEditor({view,request,locale,definitions,machineInfo,current:()=>editor?.session===view.session&&!disposed});
     const refresh=view.lifecycle.locale;view.lifecycle.locale=()=>{refresh();view.lifecycle.setTitle(t(item?'edit':'new'));};
     if(item)editor.returnSchedule={...item};
   }
@@ -819,7 +824,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     agentOwnerSpace=client.spaces.some(space=>space.id===agentOwnerSpace)?agentOwnerSpace:scope().space||client.spaces[0]?.id;
     const selectedScope=()=>({space:agentOwnerSpace,owner:''});
     const edit=({title,initial,fields,save,scope:captured,submitLabel})=>renderEditor(title,initial,fields,save,{capturedScope:captured,submitLabel});
-    if(client.spaces.length>1){const owner=field(t('agentLinks.selectControl'),agentOwnerSpace,{choices:client.spaces.map(space=>[space.id,space.name||space.id])});connectionRoot.append(owner.row);owner.input.onchange=()=>{agentOwnerSpace=owner.input.value;connections.load();};}
+    if(client.spaces.length>1){const owner=field(t('agentLinks.selectControl'),agentOwnerSpace,{choices:client.spaces.map(space=>[space.id,space.name||t('machine.unavailable')])});connectionRoot.append(owner.row);owner.input.onchange=()=>{agentOwnerSpace=owner.input.value;connections.load();};}
     const connections=createAgentLinks({root:connectionRoot,request,locale,notify,scope:selectedScope,edit,signal:token.signal,onConnected:async result=>{const id=result?.id||result?.link?.id;if(id){const peer=result.peer||result.link?.peer;const identity=peer?.address?{id:peer.address.agent_id,node_id:peer.address.node_id,kind:peer.adapter}:peer;const owned=identity?.kind==='pot'&&client.spaces.find(space=>space.control_id===identity.node_id);topologySelection=owned?'control:'+owned.id:agentNodeID(identity);}client.resources?.invalidate(['agent-links'],selectedScope());await changed(result);}});
     function related(node){const section=n('div','topology-related');section.append(n('p','hint',t('topology.related')));for(const edge of model.edges.filter(item=>item.from===node.id||item.to===node.id)){const a=model.nodes.find(item=>item.id===edge.from),b=model.nodes.find(item=>item.id===edge.to);section.append(action(a.name+(edge.kind==='agent'?' ↔ ':' → ')+b.name,()=>showEdge(edge)));}return section;}
     function preserveInspectorFocus(){
@@ -905,7 +910,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       const key=JSON.stringify([approvalOwner,approval.id]);retained.add(key);
       if(!approvalCards.has(key)) {
         const capturedKey=approvalOwner;
-        approvalCards.set(key,createApprovalCard({locale,onDecision:async(original,decision)=>{
+        approvalCards.set(key,createApprovalCard({locale,machineLabel:id=>machineInfo.label(id,approvalScope(),locale()),onDecision:async(original,decision)=>{
           if(approvalContext()!==capturedKey)throw Error(tr('Approval context changed.','授权上下文已改变。'));
           await decideApproval(original,decision);
         }}));
@@ -928,7 +933,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       approvalQueue?.close();approvalQueueKey=key;const token=approvalGate.next(),current=()=>!disposed&&approvalGate.current(token)&&approvalQueueKey===key&&approvalContext()===key;
       pendingApprovals=[];approvalOwner='';approvalCards.clear();approvalHost.replaceChildren();
       approvalQueue=createRefreshQueue(async()=>{
-        const value=await request('/api/v1/permissions',{...captured,signal:token.signal});if(!current())return;
+        const [value]=await Promise.all([request('/api/v1/permissions',{...captured,signal:token.signal}),machineInfo.load({...captured,signal:token.signal})]);if(!current())return;
         pendingApprovals=(value.pending||[]).filter(item=>item.request?.owner===captured.owner&&(!taskView||item.request.task===taskView.task.id));approvalOwner=key;
         if(taskView)renderTaskTranscript(taskView);onApprovalsChanged();renderApprovals();
         await Promise.all([...new Set(pendingApprovals.map(item=>item.request.task).filter(Boolean))].map(async id=>{

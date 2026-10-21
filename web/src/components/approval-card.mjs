@@ -3,7 +3,7 @@ import {translate} from '../locales/messages.mjs';
 import {toolSummary} from '../state/tool-calls.mjs';
 
 // Chat, Task calls and transcript-less requests share this exact review UI.
-export function createApprovalCard({locale,onDecision}) {
+export function createApprovalCard({locale,machineLabel=()=>translate(locale(),'machine.unavailable'),onDecision}) {
   const t=key=>translate(locale(),`tool.${key}`);
   const element=n('details','approval-card'),summary=n('summary','approval-summary'),title=n('strong','approval-title'),machine=n('span','approval-machine'),state=n('span','approval-state'),operation=n('span','approval-operation');
   summary.append(title,machine,state,operation);
@@ -14,14 +14,14 @@ export function createApprovalCard({locale,onDecision}) {
   function update(approval,{taskTitle=approval.task_title||''}={}) {
     current=approval;const request=approval.request;
     element.dataset.approvalId=approval.id;element.dataset.taskId=request.task||'';
-    title.textContent=taskTitle||t('approvalTitle');machine.textContent=request.machine_id;state.textContent=t('waiting_approval');
+    title.textContent=taskTitle||t('approvalTitle');machine.textContent=machineLabel(request.machine_id);state.textContent=t('waiting_approval');
     operation.textContent=toolSummary({name:request.tool,args:request.args});operation.title=operation.textContent;
-    const next=JSON.stringify([approval.id,request,locale()]);
+    const next=JSON.stringify([approval.id,request,machine.textContent,locale()]);
     if(signature===next)return;signature=next;
     command.hidden=!request.args?.cmd;command.textContent=request.args?.cmd||'';
     reason.hidden=!request.args?.justification;reason.textContent=`${t('justification')}: ${request.args?.justification||''}`;
     consent.textContent=t(request.tool==='update_agent_instructions'?'instructionConsent':'hostConsent');
-    exact.textContent=`${request.machine_id} · ${request.tool}\n${JSON.stringify(request.command_context||request.args,null,2)}`;
+    exact.textContent=`${machine.textContent} · ${request.tool}\n${JSON.stringify(request.command_context||request.args,null,2)}`;
     const names=request.tool==='update_agent_instructions'?['allow_once','deny']:['allow_always','allow_task','deny'];
     for(const name of names) {
       if(!buttons.has(name))buttons.set(name,action('',async()=>{

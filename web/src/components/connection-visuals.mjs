@@ -1,3 +1,4 @@
+import {linkDisplayName} from '../state/machine-identity.mjs';
 import {translate} from '../locales/messages.mjs';
 import {icon} from './icons.mjs';
 import {node as n} from './primitives.mjs';
@@ -15,7 +16,7 @@ export function connectionBrand(kind='pot') {
 export function agentSource(source,locale) {
   if(!source||!['pot','codex'].includes(source.kind))return null;
   const label=translate(locale,source.kind==='codex'?'agentLinks.sourceCodex':'agentLinks.sourcePot');
-  const mark=n('span','agent-source');mark.title=source.name&&source.name!==label?`${label} · ${source.name}`:label;mark.setAttribute('aria-label',mark.title);
+  const name=linkDisplayName({peer:source}),mark=n('span','agent-source');mark.title=name&&name!==label?`${label} · ${name}`:label;mark.setAttribute('aria-label',mark.title);
   mark.append(connectionBrand(source.kind));
   if(source.kind==='pot')mark.append(icon('cloud'));
   return mark;

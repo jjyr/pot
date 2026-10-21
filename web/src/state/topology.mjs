@@ -2,10 +2,7 @@
 // connection registry. In particular an Agent identity is not a machine fact.
 export const agentNodeID=peer=>'peer:'+JSON.stringify([peer.node_id,peer.kind]);
 const identityKey=peer=>JSON.stringify([peer.node_id,peer.kind]);
-export const machineDisplayName=machine=>machine.hostname||machine.name||machine.ip_addresses?.[0]||machine.os||'';
-export function linkEndpoint(link){
-  try{const url=new URL(link?.peer?.address);return url.protocol==='tcp:'&&!url.username&&!url.password&&!url.search&&!url.hash?url.host:'';}catch{return '';}
-}
+import {machineDisplayName,machineHostLabel,linkHostLabel,linkDisplayName} from './machine-identity.mjs';
 
 export function assistantActivityState(value){
   if(!value)return 'unknown';
@@ -28,16 +25,16 @@ export function nodeObservation(sample,status,now=Date.now()){
 
 export function projectTopology(spaces,machines,linkPages=[]) {
   const nodes=[],edges=[],groups=[],selfIDs=new Map(),bySpace=new Map();
-  for(const space of spaces){const page=linkPages.find(item=>item.space.id===space.id),self=page?.value?.self,group={id:space.id,name:space.name,local:space.kind==='local'&&!space.remote,nodes:[]},agent={id:'control:'+space.id,kind:'pot',name:space.name||self?.name||space.control_id,space:space.id,group:space.id,status:space.connected===false||page?.stale?'offline':'connected',identity:self?.node_id||space.control_id,self:true};groups.push(group);nodes.push(agent);group.nodes.push(agent.id);bySpace.set(space.id,agent);if(self?.node_id)selfIDs.set(identityKey(self),agent);}
-  for(const machine of machines){const group=groups.find(item=>item.id===machine._space_id);if(!group)continue;const node={id:'machine:'+JSON.stringify([machine._space_id,machine.runtime_id||machine.id]),kind:'machine',name:machine.name||machine.runtime_id||machine.id,space:machine._space_id,group:group.id,status:machine._stale||spaces.find(space=>space.id===machine._space_id)?.connected===false?'stale':machine.connected?'connected':'offline',identity:machine.runtime_id||machine.id,machine};nodes.push(node);group.nodes.push(node.id);edges.push({id:'execute:'+node.id,from:bySpace.get(node.space).id,to:node.id,kind:'execute',status:node.status});}
+  for(const space of spaces){const page=linkPages.find(item=>item.space.id===space.id),self=page?.value?.self,group={id:space.id,name:space.name,local:space.kind==='local'&&!space.remote,nodes:[]},agent={id:'control:'+space.id,kind:'pot',name:space.name||self?.name||'Pot',space:space.id,group:space.id,status:space.connected===false||page?.stale?'offline':'connected',identity:self?.node_id||space.control_id,self:true};groups.push(group);nodes.push(agent);group.nodes.push(agent.id);bySpace.set(space.id,agent);if(self?.node_id)selfIDs.set(identityKey(self),agent);}
+  for(const machine of machines){const group=groups.find(item=>item.id===machine._space_id);if(!group)continue;const node={id:'machine:'+JSON.stringify([machine._space_id,machine.runtime_id||machine.id]),kind:'machine',name:machineDisplayName(machine),space:machine._space_id,group:group.id,status:machine._stale||spaces.find(space=>space.id===machine._space_id)?.connected===false?'stale':machine.connected?'connected':'offline',identity:machine.runtime_id||machine.id,machine};nodes.push(node);group.nodes.push(node.id);edges.push({id:'execute:'+node.id,from:bySpace.get(node.space).id,to:node.id,kind:'execute',status:node.status});}
   for(const page of linkPages){const from=bySpace.get(page.space.id);if(!from)continue;for(const link of page.value?.items||[]){if(typeof link.peer?.node_id!=='string'||!link.peer.node_id.trim())continue;let peer=selfIDs.get(identityKey(link.peer))||nodes.find(node=>node.id===agentNodeID(link.peer));const status=page.stale?'stale':link.status;
-      if(!peer){const kind=link.peer.kind==='codex'?'codex':'pot',groupID=kind==='pot'?(spaces.find(space=>space.control_id===link.peer.node_id)?.id||'peer-control:'+link.peer.node_id):'';peer={id:agentNodeID(link.peer),kind,name:link.peer.name||link.peer.node_id,space:page.space.id,group:groupID,status,identity:link.peer.node_id,link};nodes.push(peer);if(groupID){const group=groups.find(item=>item.id===groupID);if(group)group.nodes.push(peer.id);else groups.push({id:groupID,name:peer.name,local:false,nodes:[peer.id],remote:true});}}
+      if(!peer){const kind=link.peer.kind==='codex'?'codex':'pot',groupID=kind==='pot'?(spaces.find(space=>space.control_id===link.peer.node_id)?.id||'peer-control:'+link.peer.node_id):'';peer={id:agentNodeID(link.peer),kind,name:linkDisplayName(link),space:page.space.id,group:groupID,status,identity:link.peer.node_id,link};nodes.push(peer);if(groupID){const group=groups.find(item=>item.id===groupID);if(group)group.nodes.push(peer.id);else groups.push({id:groupID,name:peer.name,local:false,nodes:[peer.id],remote:true});}}
       peer.link=link;peer.space=page.space.id;if(from.id===peer.id)continue;const key=[page.value?.self?.node_id||page.space.control_id,link.peer.node_id].sort().join('|');const existing=edges.find(edge=>edge.kind==='agent'&&edge.pair===key);if(!existing)edges.push({id:'agent:'+page.space.id+':'+link.id,from:from.id,to:peer.id,pair:key,kind:'agent',status,link,space:page.space.id});
     }}
   for(const node of nodes){
     if(node.kind==='machine'){node.name=machineDisplayName(node.machine);node.subtitle=node.machine.ip_addresses?.[0]||'';}
-    else if(node.self){node.subtitle=machines.find(machine=>machine._space_id===node.group)?.hostname||'';}
-    else {node.subtitle=node.link?.observation?.value?.hostname||linkEndpoint(node.link);}
+    else if(node.self){node.subtitle=machineHostLabel(machines.find(machine=>machine._space_id===node.group));}
+    else {node.subtitle=linkHostLabel(node.link);}
     if(node.kind!=='machine'){
       const self=linkPages.find(page=>page.space.id===node.group)?.value?.self;
       node.observation=nodeObservation(node.self?self?.observation:node.link?.observation,node.status);
