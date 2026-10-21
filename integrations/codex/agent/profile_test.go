@@ -262,14 +262,21 @@ func TestCodexProfileBrowserFixture(t *testing.T) {
 		t.Skip("opt-in browser fixture")
 	}
 	_, app, _ := profileApplication(t)
-	handler := transport.Handler(app, "private")
+	upstream := httptest.NewServer(transport.Handler(app, "private"))
+	defer upstream.Close()
 	repo, err := filepath.Abs("../../..")
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := http.FileServer(http.Dir(repo))
+	server := httptest.NewUnstartedServer(nil)
+	origin := "http://" + server.Listener.Addr().String()
+	config := webui.NewConfig()
+	browser, err := webui.New(webui.Options{Origin: origin, Config: config, Upstream: webui.Upstream{URL: upstream.URL, Credential: "private", Client: upstream.Client()}, Assets: os.DirFS(repo)})
+	if err != nil {
+		t.Fatal(err)
+	}
 	done := make(chan struct{}, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/fixture/stop" {
 			select {
 			case done <- struct{}{}:
@@ -277,14 +284,19 @@ func TestCodexProfileBrowserFixture(t *testing.T) {
 			}
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/") {
-			r.Header.Set("Authorization", "Bearer private")
-			handler.ServeHTTP(w, r)
+		// This opt-in loopback fixture grants only its disposable browser session.
+		// All product routes still pass through browser authentication and Allowed.
+		if r.URL.Path == "/fixture/login" && r.Method == http.MethodPost {
+			login := httptest.NewRequest(http.MethodPost, origin+"/access/token", nil)
+			login.Header.Set("Authorization", "Bearer "+config.Token)
+			browser.ServeHTTP(w, login)
 			return
 		}
-		files.ServeHTTP(w, r)
-	}))
+		browser.ServeHTTP(w, r)
+	})
+	server.Start()
 	defer server.Close()
+	defer browser.Close()
 	if err = os.WriteFile(file, []byte(server.URL), 0600); err != nil {
 		t.Fatal(err)
 	}
