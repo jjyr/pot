@@ -316,11 +316,11 @@ func TestConfiguredModelAgentLinksLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	wait(func() bool {
-		frame, err := empty.service.LinkChat(ctx, directLink.ID, "main", "")
+		frame, err := empty.service.LinkChat(ctx, directLink.ID, "main")
 		if err != nil {
 			t.Fatal(err)
 		}
-		messages := frame.(protocol.UIFrame).Messages
+		messages := frame.Messages
 		return len(messages) == 2 && strings.Contains(messages[1].Text, "42") && strings.Contains(messages[1].Text, "POT190_DIRECT")
 	})
 	defs, err := empty.service.Registry.Definitions(ctx)

@@ -33,7 +33,7 @@ func configurationService(t *testing.T) (*Service, core.Profile) {
 		t.Fatal(err)
 	}
 	keys, _ := secrets.NewMemoryKey(make([]byte, 32))
-	service, err := Open(Options{Root: t.TempDir(), RuntimeID: "runtime", BootID: "boot", Manager: manager, Keys: keys, PluginRoot: t.TempDir()})
+	service, err := Open(Options{Root: t.TempDir(), PluginRoot: t.TempDir(), RuntimeID: "runtime", BootID: "boot", Manager: manager, Keys: keys})
 	if err != nil {
 		t.Fatal(err)
 	}

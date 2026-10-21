@@ -9,7 +9,7 @@ class Clock {
   clearTimeout(id){this.timers.delete(id);}
   async advance(ms){const end=this.now+ms;while(true){const next=[...this.timers].sort((a,b)=>a[1].at-b[1].at)[0];if(!next||next[1].at>end)break;this.now=next[1].at;this.timers.delete(next[0]);next[1].fn();await flush();}this.now=end;await flush();}
 }
-const snapshot=(overrides={})=>({runtime_id:'runtime',boot_id:'boot',owner_id:'["space","a"]',conversation_id:'main',cursor:'1',running:true,turn_id:'original',messages:[],...overrides});
+const snapshot=(overrides={})=>({runtime_id:'runtime',boot_id:'boot',owner_id:'["space","a"]',conversation_id:'main',cursor:'1',replies:[],running:true,turn_id:'original',messages:[],...overrides});
 const user=(request,extra={})=>({id:request.request_id,role:'user',text:request.text,status:'accepted',accepted_request_id:request.request_id,steering:true,accepted_turn_id:request.user_message_id,...extra});
 function fixture(){
   const state=createConversationState(),clock=new Clock(),calls=[],queries=[],accepted=[],rejected=[];

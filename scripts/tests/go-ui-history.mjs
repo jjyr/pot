@@ -3,7 +3,7 @@ import {mergeUIFrame,mergeHistoryPage,HISTORY_CACHE_LIMIT} from '../../web/src/s
 import {createConversationState,beginSubscription,acceptSnapshot} from '../../web/src/state/conversation.mjs';
 import {normalizeSnapshot} from '../../web/src/adapters/production.mjs';
 const message=(n,text=`message ${n}`,version=10)=>({id:`m${n}`,conversation_id:'chat',sequence:String(n),version,role:n%2?'user':'assistant',reply_to:n%2?undefined:`m${n-1}`,text,status:'complete'});
-const frame=(cursor,kind,messages,base=0)=>({runtime_id:'r',owner_id:'a',conversation_id:'chat',boot_id:'boot',cursor:String(cursor),kind,base_cursor:base,running:false,turn_id:null,messages,history:{before:messages[0]?.sequence||'',after:messages.at(-1)?.sequence||''}});
+const frame=(cursor,kind,messages,base=0)=>({runtime_id:'r',owner_id:'a',conversation_id:'chat',boot_id:'boot',cursor:String(cursor),kind,base_cursor:base,replies:[],running:false,turn_id:null,messages,history:{before:messages[0]?.sequence||'',after:messages.at(-1)?.sequence||''}});
 let current=mergeUIFrame(null,frame(10,'reset',[message(9),message(10)]));
 current=mergeUIFrame(current,frame(12,'delta',[message(10,'new tokens',12),message(11,'new input',12)],10));
 const stale={boot_id:'boot',conversation_id:'chat',cursor:10,messages:[message(8),message(9),message(10,'old tokens')],history:{before:'8',after:'10'}};
@@ -27,7 +27,7 @@ const oldLength=current.messages.length;
 current=mergeUIFrame(current,frame(11,'delta',[message(2001,'unloaded latest',11)],10),'10');
 assert.equal(current.messages.length,oldLength,'unloaded changes do not grow the reading window');
 assert.equal(current._latest,'2001');
-const wire={kind:'reset',base_cursor:0,view:{state:{boot_id:'boot',cursor:10,conversation_id:'chat',turn:null},messages:[{message:{id:'m',role:'user',text:'hello',status:'complete'},sequence:'1',version:10}],history:{before:'1',after:'1'}}};
+const wire={kind:'reset',base_cursor:0,view:{replies:[],state:{boot_id:'boot',cursor:10,conversation_id:'chat',turn:null},messages:[{message:{id:'m',role:'user',text:'hello',status:'complete'},sequence:'1',version:10}],history:{before:'1',after:'1'}}};
 assert.equal(normalizeSnapshot(wire,{runtime_id:'r'},'a').messages[0].text,'hello');
 console.log('Chat history: bounded cache, concurrent pages/deltas, stale pages, cursor gaps, duplicates, boot reset and wire projection passed');
 // A send receipt must settle even when the reader's bounded window excludes it.
@@ -37,3 +37,12 @@ scoped.snapshot.history.has_newer=true;scoped.snapshot._latest='100';
 const incoming=frame(2,'delta',[{...message(101,'sent input',2),role:'user',request_id:'sent-request'}],1);
 const key=JSON.stringify(['r','a','chat']);scoped.sends.set(key,{request:{request_id:'sent-request'},phase:'sending'});
 assert(acceptSnapshot(scoped,incoming,scopeEpoch));assert.equal(scoped.sends.has(key),false);assert(!scoped.snapshot.messages.some(m=>m.id==='m101'));
+
+const pendingFrame={...frame(1,'reset',[message(1)],0),replies:[{input_id:'m1',state:'running'}]};
+let lifecycle=mergeUIFrame(null,pendingFrame);
+lifecycle=mergeUIFrame(lifecycle,frame(2,'delta',[message(2)],1));
+assert.equal(lifecycle.replies[0].state,'running','An unrelated delta retains a visible reply lifecycle');
+lifecycle=mergeUIFrame(lifecycle,{...frame(3,'delta',[],2),replies:[{input_id:'m1',state:'completed'}]});
+assert.equal(lifecycle.replies[0].state,'completed','An empty cleanup delta settles its input');
+lifecycle=mergeUIFrame(lifecycle,frame(4,'reset',[message(3)]));
+assert.deepEqual(lifecycle.replies,[],'Resets remove lifecycles from the previous window');

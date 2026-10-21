@@ -159,3 +159,32 @@ func TestUIDeltaSizeDoesNotScaleWithHistory(t *testing.T) {
 		t.Fatalf("delta grew with historical messages: %v", sizes)
 	}
 }
+
+func TestUIReplyLifecycleSettlesOnEmptyCleanupDelta(t *testing.T) {
+	ctx := context.Background()
+	var cleanup atomic.Int64
+	c := conversationFixture(t, filepath.Join(t.TempDir(), "chat.sqlite"), "boot", func(context.Context, core.ModelRequest) (io.ReadCloser, error) { return replySSE("ok"), nil }, &cleanup)
+	c.mu.Lock()
+	input := protocol.Message{ID: "input", ConversationID: "main", Role: protocol.User, Text: "hello", Status: protocol.Complete, CreatedAtMS: 1}
+	if err := c.putMessageLocked(ctx, input, nil); err != nil {
+		t.Fatal(err)
+	}
+	output := protocol.Message{ID: "output", ConversationID: "main", Role: protocol.Assistant, ReplyTo: input.ID, Text: "", Status: protocol.Complete, CreatedAtMS: 1}
+	if err := c.putMessageLocked(ctx, output, nil); err != nil {
+		t.Fatal(err)
+	}
+	c.turn = &savedTurn{UserMessageID: input.ID, State: "thinking"}
+	before := c.cursor
+	c.mu.Unlock()
+	active, err := c.UIFrame(ctx, before, false)
+	if err != nil || len(active.Replies) != 1 || active.Replies[0].State != "running" {
+		t.Fatal(active, err)
+	}
+	c.mu.Lock()
+	c.turn = nil
+	c.mu.Unlock()
+	settled, err := c.UIFrame(ctx, before, false)
+	if err != nil || len(settled.Messages) != 0 || len(settled.Replies) != 1 || settled.Replies[0].State != "completed" {
+		t.Fatal(settled, err)
+	}
+}

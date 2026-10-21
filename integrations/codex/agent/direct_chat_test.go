@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -70,18 +71,29 @@ func codexEmptyPot(t *testing.T, live bool) {
 		t.Fatal("borrowed local assistant", link)
 	}
 	firstThread := ""
+	owner := "agent-link:" + link.ID + ":codex"
+	subscription, err := pot.SubscribeAgent(ctx, owner, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Close()
 	for _, request := range []string{"one", "two"} {
-		_, err = pot.SendLinkChat(ctx, link.ID, "codex", request, "Reply with exactly POT190_OK. Do not use tools.")
+		initial, err := subscription.Frame(ctx, 0, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := json.Marshal(protocol.SendMessage{RequestID: request, ConversationID: initial.ConversationID, Text: "Reply with exactly POT190_OK. Do not use tools."})
+		_, err = pot.CallAgent(ctx, owner, agentlink.ChatSend, agentlink.Call{Body: body})
 		if err != nil {
 			t.Fatal(err)
 		}
 		for {
-			frame, err := pot.LinkChat(ctx, link.ID, "codex", "")
+			frame, err := subscription.Frame(ctx, 0, true)
 			if err != nil {
 				t.Fatal(err)
 			}
-			messages := frame.(protocol.UIFrame).Messages
-			if len(messages) == map[string]int{"one": 2, "two": 4}[request] {
+			messages := frame.Messages
+			if len(messages) == map[string]int{"one": 2, "two": 4}[request] && len(frame.Replies) > 0 && frame.Replies[len(frame.Replies)-1].State == "completed" {
 				if live && strings.TrimSpace(messages[len(messages)-1].Text) != "POT190_OK" {
 					t.Fatal("unexpected real Codex response", messages[len(messages)-1].Text)
 				}

@@ -18,7 +18,7 @@ assert.equal(attachmentProblem(ready.slice(1),{image:false,pdf:true}), '','Remov
 assert(attachmentProblem([{attachment:image,phase:'failed'}],{image:true}));
 assert(attachmentProblem([{attachment:image,phase:'uploading'}],{image:true}));
 const state=createConversationState(),epoch=beginSubscription(state);
-const snapshot={runtime_id:'runtime',boot_id:'boot',owner_id:'remote/alice',conversation_id:'main',cursor:'1',messages:[],running:false,turn_id:null};
+const snapshot={runtime_id:'runtime',boot_id:'boot',owner_id:'remote/alice',conversation_id:'main',cursor:'1',messages:[],replies:[],running:false,turn_id:null};
 acceptSnapshot(state,snapshot,epoch);
 const first=beginSend(state,'send',{attachments:[image,pdf]});
 assert(first,'An attachment-only message sends');assert.equal(first.request.text,'');

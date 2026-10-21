@@ -24,7 +24,7 @@ export function createReplyBubble(host) {
       if(signature===next)return;signature=next;
       const expanded=!!status.querySelector('details')?.open;
       status.replaceChildren();host.classList.toggle('is-failed',message.phase==='failed');
-      host.classList.toggle('is-waiting',['sending','thinking','reconnecting','tools','approval'].includes(message.phase));
+      host.classList.toggle('is-waiting',['sending','thinking','awaiting','queued','cancelling','reconnecting','tools','approval'].includes(message.phase));
       host.classList.toggle('is-streaming',message.phase==='streaming');
       const action=(label,run)=>{const button=node('button','reply-action control',label);button.type='button';button.onclick=run;return button;};
       if(message.phase==='failed'){
@@ -37,16 +37,21 @@ export function createReplyBubble(host) {
         else if(kind==='configuration'&&onSettings)status.append(action(t('checkAISettings'),onSettings));
       }else{
         status.removeAttribute('role');
-        if(['sending','thinking','reconnecting','tools','approval'].includes(message.phase)){
+        if(['sending','thinking','awaiting','queued','cancelling','reconnecting','tools','approval'].includes(message.phase)){
           const line=node('div','reply-status-title');
           if(!['reconnecting','approval'].includes(message.phase)){const dots=node('span','waiting-dots');dots.setAttribute('aria-hidden','true');dots.append(node('i'),node('i'),node('i'));line.append(dots);}
           else line.append(icon(message.phase==='approval'?'clock':'cloud'));
-          line.append(node('span','',t(message.phase==='sending'?'sending':message.phase==='reconnecting'?'replyReconnecting':message.phase==='tools'?'tool.executing':message.phase==='approval'?'tool.awaitingApproval':'working')));status.append(line);
+          line.append(node('span','',t(({sending:'sending',reconnecting:'replyReconnecting',tools:'tool.executing',approval:'tool.awaitingApproval',awaiting:'replyAwaiting',queued:'replyQueued',cancelling:'replyCancelling'})[message.phase]||'working')));status.append(line);
           if(message.phase==='reconnecting'){status.append(node('p','reply-connection-detail',t('replyStateUnknown')),...(onReconnect?[action(t('reconnect'),onReconnect)]:[]));}
         }else if(message.phase==='streaming'){const dot=node('span','activity-dot');dot.setAttribute('aria-label',t('working'));status.append(dot);}
         else if(message.phase==='stopped')status.append(node('span','',t('replyStopped')));
         else if(message.phase==='paused')status.append(node('span','',t('replyPaused')));
         else if(message.phase==='waiting')status.append(node('span','',t('replyWaiting')));
+        else if(message.phase==='empty')status.append(node('span','',t('replyEmpty')));
+        else if(message.phase==='unknown'){
+          status.append(node('span','',t('replyUnknown')));
+          if(message.error){const details=node('details','reply-error-details');details.open=expanded;details.append(node('summary','',t('errorDetails')),node('pre','',message.error));status.append(details);}
+        }
       }
       status.hidden=!status.childElementCount;
     },

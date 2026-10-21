@@ -47,7 +47,8 @@ Directories advertise a version-1 operation description per assistant under
 `operations`, with explicit `peer` scope. The authenticated local operator sees
 an `owner` description. `GET /api/v1/agent-links/capabilities?assistant_id=...`
 returns the effective description; assistant catalogue rows carry the same data.
-The frontend chooses controls and subscription/polling from these descriptions.
+The frontend chooses controls from these descriptions and uses the shared chat
+subscription. Adapters own native wakeups, peer polling and reconnection.
 Source icons and location labels do not grant or remove functionality. Missing
 or unknown-version descriptions grant no operations. Directory refreshes replace
 cached capability descriptions; the receiver still enforces authorization at
@@ -210,6 +211,24 @@ Task details expose cancellation and local archive state; unsupported local
 controls, steering and file access are unavailable. Neither current adapter
 advertises cross-node artifact access. Directory entries and exported capabilities
 must be implemented before additional controls are exposed.
+
+## Chat execution projection
+
+Chat access uses one typed endpoint contract for send, read, acceptance receipt
+and subscription. Endpoint resolution chooses an implementation; lifecycle and
+rendering rules never branch on location or adapter identity. Each accepted input
+retains a separate reply lifecycle, independent of its send receipt and the
+assistant's aggregate activity. The authenticated `chat.status` peer operation
+checks the original caller, input and target before returning execution facts and
+explicit correlated replies. It cannot read another caller's conversation.
+Status reads never submit or repeat work. Failed, cancelled, empty and unconfirmed
+outcomes remain visible without requiring a text message. Text arriving before
+execution ends remains intermediate output.
+
+The [UI event contract](ui-events.md#main-conversation-streams) defines wire fields and
+states. See [database migrations](database-migrations.md) for persisted projection
+upgrades and the [Codex adapter](../integrations/codex/README.md) for job projection
+and output timing. Upgrade Pot and its Codex plugin together for this contract.
 
 ## Lifecycle and upgrades
 

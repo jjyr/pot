@@ -14,7 +14,7 @@ func TestCodexProfilesUpgradeKeepsSessionAndAssignedAvatar(t *testing.T) {
 	prior := fstest.MapFS{}
 	entries, _ := fs.ReadDir(migrationFiles, "migrations/tasks")
 	for _, entry := range entries {
-		if entry.Name() >= "0016_" {
+		if entry.Name() >= "0017_" {
 			continue
 		}
 		path := "migrations/tasks/" + entry.Name()
@@ -51,7 +51,7 @@ func TestDirectoryAvatarUpgradePreservesRoutesAndCustomImages(t *testing.T) {
 	prior := fstest.MapFS{}
 	entries, _ := fs.ReadDir(migrationFiles, "migrations/control")
 	for _, entry := range entries {
-		if entry.Name() >= "0024_" {
+		if entry.Name() >= "0025_" {
 			continue
 		}
 		path := "migrations/control/" + entry.Name()

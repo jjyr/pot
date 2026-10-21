@@ -49,6 +49,7 @@ const (
 )
 
 type Target struct {
+	Locale      string `json:"locale,omitempty"`
 	LinkID      string `json:"link_id,omitempty"`
 	AssistantID string `json:"assistant_id"`
 }
@@ -90,7 +91,7 @@ type Subscription struct {
 }
 
 func PeerOperations() []Operation {
-	return []Operation{ChatRead, ChatSend, ChatReceipt, TaskSubmit, TaskRead, TaskCancel}
+	return []Operation{ChatRead, ChatSend, ChatReceipt, ChatSubscribe, TaskSubmit, TaskRead, TaskCancel}
 }
 
 func OwnerOperations() []Operation {

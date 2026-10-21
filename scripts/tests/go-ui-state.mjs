@@ -79,7 +79,7 @@ assert.equal(translate('en','integrations.login'),'Log in');
 assert.equal(translate('unsupported','integrations.login'),'Log in','Unknown locales fall back to English');
 assert.equal(translate('zh-CN','missing.translation'),'missing.translation','Unknown keys remain visible for diagnosis');
 
-const snapshot = (overrides = {}) => ({runtime_id: 'runtime', boot_id: 'boot', owner_id: 'control/assistant', conversation_id: 'conversation', cursor: '9007199254740993', messages: [], running: false, turn_id: null, ...overrides});
+const snapshot = (overrides = {}) => ({runtime_id: 'runtime', boot_id: 'boot', owner_id: 'control/assistant', conversation_id: 'conversation', cursor: '9007199254740993', messages: [], replies:[],running: false, turn_id: null, ...overrides});
 const state = createConversationState();
 const epoch = beginSubscription(state);
 assert(acceptSnapshot(state, snapshot(), epoch));
@@ -214,7 +214,7 @@ console.log('Go UI state and DOM composer checks passed');
 
 const chatInput={id:'input',request_id:'request',role:'user',text:'Hello',status:'streaming'};
 const chatReply={id:'output',reply_to:'input',role:'assistant',text:'',status:'streaming'};
-const waiting={...snapshot(),running:true,turn_id:'input',messages:[chatInput]};
+const waiting={...snapshot(),running:true,turn_id:'input',messages:[chatInput],replies:[{input_id:'input',state:'running'}]};
 const optimistic=projectChatReplies(snapshot(),{request:{request_id:'request',text:'Hello'},phase:'sending'});
 const thinking=projectChatReplies(waiting);
 const streaming=projectChatReplies({...waiting,messages:[chatInput,{...chatReply,text:'Partial'}]});
@@ -229,18 +229,18 @@ const toolRound=projectChatReplies({...waiting,messages:[chatInput,toolInput,too
 const afterTool=projectChatReplies({...waiting,messages:[chatInput,toolInput,toolOutput,nextOutput]});
 assert.equal(afterTool.filter(row=>row.role==='assistant').length,1,'Tool-only rounds do not leave empty reply bubbles');
 for(const text of ['',' \n\t']){
-  const silent=projectChatReplies({...waiting,running:false,turn_id:null,messages:[chatInput,{...chatReply,text,status:'complete'}]});
-  assert.equal(silent.filter(row=>row.role==='assistant').length,0,'Silent completion must not leave an empty reply bubble');
+  const silent=projectChatReplies({...waiting,running:false,turn_id:null,replies:[{input_id:'input',state:'completed'}],messages:[chatInput,{...chatReply,text,status:'complete'}]});
+  assert.deepEqual(silent.filter(row=>row.role==='assistant').map(row=>row.phase),['empty'],'Silent completion has an explicit outcome');
 }
-assert.equal(toolRound[1].viewKey,afterTool.at(-1).viewKey,'Output after a tool round adopts the waiting bubble');
+assert.equal(toolRound.find(row=>row.role==='assistant').viewKey,afterTool.at(-1).viewKey,'Output after a tool round adopts the waiting bubble');
 assert.equal(projectChatReplies(waiting,null,{offline:true})[1].phase,'reconnecting','Connection loss does not declare execution failed');
-const failed=projectChatReplies({...waiting,running:false,turn_id:null,messages:[chatInput,{...chatReply,text:'Partial',status:'failed',error:'HTTP 404'}]});
+const failed=projectChatReplies({...waiting,running:false,turn_id:null,replies:[{input_id:'input',state:'failed',error:'HTTP 404'}],messages:[chatInput,{...chatReply,text:'Partial',status:'failed',error:'HTTP 404'}]});
 assert.equal(failed.filter(row=>row.phase==='failed').length,1,'Only one failed reply is displayed');
 assert.equal(failed[1].text,'Partial','Partial prose stays in the original reply');
 assert.equal(failed[1].error,'HTTP 404');
 assert.equal(failed[1].viewKey,thinking[1].viewKey,'Failure updates the original reply');
 assert.equal(projectChatReplies(waiting,{request:{request_id:'request',text:'Hello'},phase:'uncertain'}).length,2,'An uncertain receipt cannot duplicate an already accepted input');
-assert.equal(projectChatReplies({...waiting,turn:{paused:true}})[1].phase,'paused','Paused turns do not keep thinking');
+assert.equal(projectChatReplies({...waiting,replies:[{input_id:'input',state:'paused'}]})[1].phase,'paused','Paused turns do not keep thinking');
 assert.equal(replyFailureKind('model provider returned HTTP 404'),'configuration');
 assert.equal(replyFailureKind('model provider returned HTTP 503'),'service');
 assert.equal(replyFailureKind('model provider returned HTTP 429'),'limit');
@@ -251,3 +251,44 @@ const task='de305d54-75b4-431b-adb2-eb6b9e546014';
 assert.deepEqual(parseFileLink(`pot-file://${task}/reports/%E6%B5%8B%E8%AF%95.txt`),{task,path:'reports/测试.txt'});
 for(const path of ['../secret','%2e%2e/secret','/etc/passwd','a//b','a/%00b','a/%5Cb','a#fragment','a?query','%FF'])assert.equal(parseFileLink(`pot-file://${task}/${path}`),null,path);
 assert.equal(parseFileLink('pot-file://not-a-task/a.txt'),null);
+
+// The same lifecycle projection is used for every owner identity and transport.
+for(const owner of ['main','agent-link:peer:assistant','an-arbitrary-endpoint']){
+ const state=createConversationState(),epoch=beginSubscription(state);
+ const first={...snapshot(),owner_id:owner,messages:[],replies:[]};
+ assert(acceptSnapshot(state,first,epoch));setDraft(state,'Hello');
+ const receipt=beginSend(state,'lifecycle-request');
+ const initial=projectChatReplies(state.snapshot,state.sends.get(receipt.key));
+ const input={...chatInput,request_id:'lifecycle-request'};
+ const update=(status,{messages=[input],offline=false,error='',uncertain=false}={})=>{
+  const frame={...first,cursor:String(BigInt(state.snapshot.cursor)+1n),messages,replies:[{input_id:input.id,state:status,error,uncertain}]};
+  assert(acceptSnapshot(state,frame,epoch));
+  return projectChatReplies(state.snapshot,state.sends.get(receipt.key),{offline}).filter(row=>row.role==='assistant');
+ };
+ let rows=update('pending');assert.equal(rows.length,1);assert.equal(rows[0].phase,'awaiting');assert.equal(rows[0].viewKey,initial[1].viewKey,'Persistence acceptance retains the waiting bubble');
+ assert.equal(state.sends.size,0,'Send confirmation is independent of execution');
+ rows=update('queued');assert.equal(rows[0].phase,'queued');
+ rows=update('running');assert.equal(rows[0].phase,'thinking');
+ rows=update('running',{messages:[input,{...chatReply,text:'Progress',status:'complete'}]});assert.equal(rows[0].phase,'streaming','Intermediate prose never ends an active turn');
+ rows=update('running',{uncertain:true});assert.equal(rows[0].phase,'reconnecting');
+ rows=update('failed',{error:'preparation failed'});assert.equal(rows[0].phase,'failed');assert.equal(rows[0].error,'preparation failed');
+ rows=update('completed');assert.equal(rows[0].phase,'empty','A successful empty result has an explicit end');
+ rows=update('cancelled');assert.equal(rows[0].phase,'stopped');
+ rows=update('unknown');assert.equal(rows[0].phase,'unknown','Unconfirmed outcomes never fabricate failure or replay');
+ rows=update('completed',{messages:[input,{...chatReply,text:'Done',status:'complete'}]});assert.equal(rows.length,1);assert.equal(rows[0].phase,'complete');
+}
+
+const invalidLifecycle=createConversationState(),invalidEpoch=beginSubscription(invalidLifecycle);
+assert(!acceptSnapshot(invalidLifecycle,snapshot({replies:[{input_id:'input',state:'invented'}]}),invalidEpoch),'Unknown lifecycle states cannot silently clear feedback');
+assert(!acceptSnapshot(invalidLifecycle,snapshot({replies:[{input_id:'input',state:'running',uncertain:'yes'}]}),invalidEpoch),'Invalid connection certainty is rejected');
+const parallelRows=projectChatReplies({messages:[{id:'one',request_id:'one',role:'user',text:'one',status:'accepted'},{id:'two',request_id:'two',role:'user',text:'two',status:'accepted'},{id:'answer-two',reply_to:'two',role:'assistant',text:'answer two',status:'complete'},{id:'answer-one',reply_to:'one',role:'assistant',text:'partial one',status:'complete'}],replies:[{input_id:'one',state:'running'},{input_id:'two',state:'completed'}]});
+assert.equal(parallelRows.find(row=>row.id==='answer-two').phase,'complete');
+assert.equal(parallelRows.find(row=>row.id==='answer-one').phase,'streaming','Out-of-order output keeps its own input lifecycle');
+
+assert.deepEqual(projectChatReplies({messages:[{...chatInput,context_only:true}],replies:[{input_id:chatInput.id,state:'completed'}]}),[],'Historical context dependencies cannot create visible empty replies');
+
+assert.equal(projectChatReplies({...waiting,running:false,turn_id:null,turn:null})[1].phase,'thinking','Reply lifecycle is independent of aggregate turn metadata');
+assert(!acceptSnapshot(invalidLifecycle,{...snapshot(),replies:undefined},invalidEpoch),'Every endpoint supplies the lifecycle contract');
+const activeCall={...toolOutput,tool:{turn_id:'request',phase:'waiting_approval'}};
+assert.equal(projectChatReplies({...waiting,messages:[chatInput,activeCall]}).at(-1).phase,'approval');
+assert.equal(projectChatReplies({...waiting,messages:[chatInput,{...activeCall,tool:{turn_id:'other-request',phase:'running'}}]}).at(-1).phase,'thinking','Another input tool cannot change this reply');

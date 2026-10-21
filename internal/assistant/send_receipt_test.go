@@ -41,7 +41,7 @@ func TestSendReceiptDurableIdentityAndOrderedSteering(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-started
-	q := SendReceiptQuery{RequestID: "first", ConversationID: "main", UserMessageID: original.MessageID}
+	q := protocol.SendReceiptQuery{RequestID: "first", ConversationID: "main", UserMessageID: original.MessageID}
 	if value, err := c.SendReceipt(ctx, q); err != nil || value.State != "unconfirmed" {
 		t.Fatal(value, err)
 	}
@@ -91,7 +91,7 @@ func TestSendReceiptDurableIdentityAndOrderedSteering(t *testing.T) {
 	if _, err = c.SendReceipt(ctx, wrong); err == nil {
 		t.Fatal("receipt crossed conversations")
 	}
-	ordinary := SendReceiptQuery{RequestID: "original", ConversationID: "main"}
+	ordinary := protocol.SendReceiptQuery{RequestID: "original", ConversationID: "main"}
 	if value, err := c.SendReceipt(ctx, ordinary); err != nil || value.State != "accepted" || value.MessageID != original.MessageID {
 		t.Fatal(value, err)
 	}

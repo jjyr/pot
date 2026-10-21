@@ -98,6 +98,26 @@ func (c *Conversation) UIFrame(ctx context.Context, after int64, reset bool) (pr
 	if err == nil {
 		frame.Messages, err = c.uiContextLocked(ctx, frame.Messages)
 	}
+	// Derive outcomes from authoritative history, not a partial delta that may
+	// omit an earlier failure or an intermediate output. Emit only dependencies
+	// of this frame; an empty cleanup delta still settles the latest input.
+	inputs := map[string]bool{}
+	for _, m := range frame.Messages {
+		inputs[m.ID] = true
+	}
+	replies := protocol.ProjectChatReplies(c.messages, state.Turn)
+	if len(frame.Messages) == 0 && len(replies) > 0 {
+		inputs[replies[len(replies)-1].InputID] = true
+	}
+	if state.Turn != nil {
+		inputs[state.Turn.UserMessageID] = true
+	}
+	frame.Replies = []protocol.ChatReply{}
+	for _, reply := range replies {
+		if inputs[reply.InputID] {
+			frame.Replies = append(frame.Replies, reply)
+		}
+	}
 	return frame, err
 }
 

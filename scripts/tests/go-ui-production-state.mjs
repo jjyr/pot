@@ -36,7 +36,7 @@ editor.set('profile_id','first');assert.equal(editor.dirty,false,'saved name is 
 editor.set('text','new rules');assert.notEqual(editor.begin().request_id,first.request_id);editor.settle(true);assert.equal(editor.dirty,false);
 const gate=createRequestGate(),old=gate.next(),fresh=gate.next();assert.equal(gate.current(old),false);assert.equal(old.signal.aborted,true);assert.equal(gate.current(fresh),true);gate.close();assert.equal(gate.current(fresh),false);
 assert.equal(scopedPath('/api/v1/snapshot?offset=10',{owner:'a b',space:'cloud'}),'/api/v1/snapshot?offset=10&assistant_id=a+b&space_id=cloud');
-const toUIFrame=value=>({kind:'reset',base_cursor:0,view:{state:{...value,messages:[]},messages:value.messages.map((message,index)=>({message,sequence:String(index+1),version:value.cursor})),history:{before:'1',after:String(value.messages.length),has_more:false,has_newer:false}}});
+const toUIFrame=value=>({kind:'reset',base_cursor:0,view:{replies:[],state:{...value,messages:[]},messages:value.messages.map((message,index)=>({message,sequence:String(index+1),version:value.cursor})),history:{before:'1',after:String(value.messages.length),has_more:false,has_newer:false}}});
 const raw={cursor:1,boot_id:'boot',conversation_id:'c',messages:[],turn:{user_message_id:'u'}};
 assert.equal(normalizeSnapshot(toUIFrame(raw),{runtime_id:'runtime'},'a').turn_id,'u');
 assert.throws(()=>normalizeSnapshot(toUIFrame({...raw,cursor:9007199254740992}),{runtime_id:'r'},'a'));
@@ -146,7 +146,7 @@ assert.equal(completionQuery('https://example.com/path',24),null);assert.equal(c
 
 const {createConversationState,beginSubscription,acceptSnapshot,setDraft,beginSend,settleSend}=await import('../../web/src/state/conversation.mjs');
 const resumeState=createConversationState(),resumeEpoch=beginSubscription(resumeState);
-const resumeSnapshot={runtime_id:'runtime',boot_id:'boot',owner_id:'owner',conversation_id:'chat',cursor:'1',running:false,turn_id:null,messages:[]};
+const resumeSnapshot={runtime_id:'runtime',boot_id:'boot',owner_id:'owner',conversation_id:'chat',cursor:'1',replies:[],running:false,turn_id:null,messages:[]};
 acceptSnapshot(resumeState,resumeSnapshot,resumeEpoch);setDraft(resumeState,'sent before switching windows');
 const resumeReceipt=beginSend(resumeState,'resume-send');
 const renewedEpoch=beginSubscription(resumeState,{retainPending:true});
@@ -165,7 +165,7 @@ acceptSnapshot(resumeState,resumeSnapshot,resumeState.epoch);setDraft(resumeStat
 const editedResumeReceipt=beginSend(resumeState,'edited-resume-send');beginSubscription(resumeState,{retainPending:true});setDraft(resumeState,'new typing',editedResumeReceipt.key);
 settleSend(resumeState,editedResumeReceipt,true);assert.equal(resumeState.drafts.get(editedResumeReceipt.key),'new typing','Recovery never clears text typed after sending');
 const steeringState=createConversationState(),steeringEpoch=beginSubscription(steeringState);
-acceptSnapshot(steeringState,{runtime_id:'runtime',boot_id:'boot',owner_id:'owner',conversation_id:'chat',cursor:'1',running:true,turn_id:'original-turn',messages:[]},steeringEpoch);setDraft(steeringState,'live guidance');
+acceptSnapshot(steeringState,{runtime_id:'runtime',boot_id:'boot',owner_id:'owner',conversation_id:'chat',cursor:'1',replies:[],running:true,turn_id:'original-turn',messages:[]},steeringEpoch);setDraft(steeringState,'live guidance');
 assert.equal(beginSend(steeringState,'ignored'),null,'Preview cannot steer a running turn');
 const steeringReceipt=beginSend(steeringState,'steering-request',{allowRunning:true});assert.equal(steeringReceipt.request.user_message_id,'original-turn');steeringReceipt.phase='uncertain';
 steeringState.snapshot={...steeringState.snapshot,cursor:'2',running:false,turn_id:null};assert.equal(beginSend(steeringState,'different-request',{allowRunning:true}),null,'Unknown acceptance keeps the original send pending');assert.equal(steeringReceipt.request.request_id,'steering-request');assert.equal(steeringReceipt.request.user_message_id,'original-turn','Uncertain steering receipt never retargets another turn');settleSend(steeringState,steeringReceipt,true);
@@ -200,3 +200,5 @@ assert.equal(compactRows.length,1);assert.equal(compactRows[0].role,'system');as
 assert.deepEqual(compactRows[0].compaction,{id:'compact-one',reason:'threshold',before:24000,state:'complete',after:2100,finished_at_ms:1500});
 appendTaskEvents(compactTranscript,[event(2,'compaction',{result:{id:'compact-one',action:'complete',tokens:0}})]);
 assert.equal(compactTranscript.messages.length,1);assert.equal(compactTranscript.messages[0].compaction.after,2100,'Repeated history pages do not overwrite terminal compact receipts');
+
+assert.throws(()=>normalizeSnapshot({...toUIFrame(raw),view:{...toUIFrame(raw).view,replies:undefined}},{runtime_id:'runtime'},'a'),/Invalid conversation frame/,'Missing lifecycle projections cannot silently erase waiting');

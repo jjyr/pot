@@ -33,7 +33,7 @@ func TestAgentLinkEmptyNodeChatSurvivesAssistantDeletionAndRestart(t *testing.T)
 		if err != nil {
 			t.Fatal(err)
 		}
-		id := out.(map[string]any)["message_id"].(string)
+		id := out.MessageID
 		m := awaitAgentLinkMail(t, b.service, id).Message
 		if m.From.Kind != "user" {
 			t.Fatal("chat used assistant identity", m)
@@ -44,11 +44,11 @@ func TestAgentLinkEmptyNodeChatSurvivesAssistantDeletionAndRestart(t *testing.T)
 		}
 		deadline := time.Now().Add(10 * time.Second)
 		for time.Now().Before(deadline) {
-			frame, err := a.service.LinkChat(ctx, c.ID, "main", "")
+			frame, err := a.service.LinkChat(ctx, c.ID, "main")
 			if err != nil {
 				t.Fatal(err)
 			}
-			messages := frame.(protocol.UIFrame).Messages
+			messages := frame.Messages
 			if len(messages) > 0 && messages[len(messages)-1].Text == "answer "+request {
 				return m
 			}
@@ -99,15 +99,15 @@ func TestAgentLinkEmptyNodeChatSurvivesAssistantDeletionAndRestart(t *testing.T)
 		t.Fatal(err)
 	}
 	repeated, err := a.service.SendLinkChat(ctx, c.ID, "main", "one", "question one")
-	if err != nil || !repeated.(map[string]any)["duplicate"].(bool) {
+	if err != nil || !repeated.Duplicate {
 		t.Fatal("retry lost immutable receipt", repeated, err)
 	}
 	third := send("three")
 	if third.From != first.From {
 		t.Fatal("restart changed session identity")
 	}
-	frame, err := a.service.LinkChat(ctx, c.ID, "main", "")
-	if err != nil || len(frame.(protocol.UIFrame).Messages) != 6 {
+	frame, err := a.service.LinkChat(ctx, c.ID, "main")
+	if err != nil || len(frame.Messages) != 6 {
 		t.Fatal("duplicate chat or missing history", frame, err)
 	}
 	// Empty nodes still publish invitations, and no model profile was introduced.

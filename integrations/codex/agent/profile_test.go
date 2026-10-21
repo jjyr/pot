@@ -277,3 +277,25 @@ func TestCodexProfileBrowserFixture(t *testing.T) {
 		t.Fatal("fixture expired")
 	}
 }
+
+func TestCodexSubscriptionPersistsFirstWelcomeLocale(t *testing.T) {
+	_, app, owner := profileApplication(t)
+	ctx := context.Background()
+	sub, err := app.Control.SubscribeAgent(ctx, owner, "zh-CN")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+	first, err := sub.Frame(ctx, 0, true)
+	if err != nil || len(first.Messages) != 1 || !strings.Contains(first.Messages[0].Text, "Codex") || !strings.Contains(first.Messages[0].Text, "我") {
+		t.Fatal(first, err)
+	}
+	again, err := app.Control.CallAgent(ctx, owner, agentlink.ChatRead, agentlink.Call{Query: map[string]string{"locale": "en"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := again.(protocol.UIFrame)
+	if len(saved.Messages) != 1 || saved.Messages[0].Text != first.Messages[0].Text || saved.Cursor != first.Cursor || len(saved.Replies) != 0 {
+		t.Fatal("welcome was duplicated, relocalized or treated as execution", saved)
+	}
+}

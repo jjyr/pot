@@ -101,7 +101,8 @@ CBOR describes each message and Zstd optionally compresses large bodies.
 
 UI identity includes node, assistant and conversation. Drafts, history and
 notifications retain their owner; navigation generations reject late responses.
-Local changes and conversation output use subscriptions. Linked conversations
-currently refresh snapshots on a bounded interval. The existing topology,
+All conversations use the same [chat endpoint contract](agent-links.md#chat-execution-projection).
+Native and peer adapters supply receiver-owned per-input execution lifecycles;
+the frontend does not choose chat behavior by assistant location. The topology,
 assistant directory, chat and task components remain shared. See [Node UI](node-ui.md),
 [Shared UI](shared-ui.md) and [UI events](ui-events.md).

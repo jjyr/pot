@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/jjyr/pot/internal/inbox"
 	"strings"
 	"time"
 
@@ -14,6 +15,17 @@ import (
 )
 
 type potLinkBackend struct{ s *Service }
+
+func (b potLinkBackend) ChatStatus(ctx context.Context, query agentlink.ChatLookup) (agentlink.ChatStatus, error) {
+	_, result, err := inbox.ReadChat(ctx, b.s.Tasks.DB(), query, "in", "out")
+	if errors.Is(err, sql.ErrNoRows) {
+		err = agentlink.ErrNotFound
+	}
+	if errors.Is(err, inbox.ErrChatBinding) {
+		err = agentlink.ErrUnauthorized
+	}
+	return result, err
+}
 
 func (b potLinkBackend) Directory(ctx context.Context) (agentlink.Directory, error) {
 	defs, e := b.s.Registry.Definitions(ctx)
