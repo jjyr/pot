@@ -20,7 +20,7 @@ authenticated peer. Pot displays these summaries in the existing icon topology.
 ```text
 Pot chat / task tools
         |
-   Agent Link (directory, messages, submit, status, cancel)
+   Agent Link (directory, messages, profile, submit, status, cancel)
         | TLS 1.3 / Yamux / CBOR + optional Zstd
 Codex Agent Link host
         +-- assistant A -- serial chat/task queue -- persistent Codex thread A
@@ -97,7 +97,11 @@ default, initially its first assistant. An accepted task keeps its original
 assistant even when the default subsequently changes.
 
 The initial `codex` assistant uses an isolated read-only directory under the host
-root. Create another assistant for an owner-selected workspace:
+root. New assistants receive the same random kitchen name and saved character
+avatar as ordinary Pot assistants; an explicit name overrides the random name.
+Pot saves an introduction in the first reader's UI language when opening an empty
+Codex conversation. This does not start a Codex turn or alter existing history.
+Create another assistant for an owner-selected workspace:
 
 ```sh
 ~/.codex/plugins/pot/bin/pot-codex-agent assistant \
@@ -105,6 +109,21 @@ root. Create another assistant for an owner-selected workspace:
   --id project --name Project --workspace /absolute/path/to/project \
   --mode workspace-write --default
 ```
+
+Pot's assistant settings can edit the linked assistant's name and avatar and
+restore its original character. The advertised `assistant.profile` peer operation
+accepts authenticated user callers and presentation edits only, with a revision
+check against stale settings. It cannot delete assistants or change execution
+configuration. Directory refreshes distribute the receiver's saved image and name.
+
+The plugin's `pot_update_profile` tool supports reading the current profile,
+changing `name`, importing `avatar_path` (workspace-relative PNG, JPEG or WebP,
+at most 8 MiB), or `reset_avatar: true`. A running virtual assistant is bound to
+its own identity through `POT_CODEX_ASSISTANT_ID`; an ordinary Codex chat must
+explicitly select an `assistant_id` from `pot_assistants`. It never selects the
+node default implicitly. Images are normalized to 128px PNGs; escaping workspace
+paths and symlinks are rejected. Rename and avatar changes retain the original
+character, background, workspace, permissions and Codex thread.
 
 An assistant's workspace and permission mode remain fixed for its session.
 Create another assistant for a different scope. Rename or change the default
@@ -118,7 +137,7 @@ communication. The TCP endpoint never exposes the owner HTTP API. Identity keys
 and owner credentials are encrypted; the host root must be owner-only.
 
 The detached host keeps receiving work after an MCP chat closes. Subsequent
-plugin processes verify and reuse that host. Version 6 requires stopping an old
+plugin processes verify and reuse that host. Version 7 requires stopping an old
 message host before upgrading. Stable node identity, message IDs and history
 survive the database migration. The old independent Bridge pairing, HTTP/SSE
 channel, `codex_*` tools and Pot-side Codex integration plugin have been removed.

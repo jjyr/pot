@@ -18,9 +18,11 @@ globalThis.fetch=async(url,options)=>{
  return new Response(JSON.stringify(value));
 };
 const client=await createProductionClient();client.assistants=projected;client.setScope({space:'local',owner:projected[0].id});
+client.uiLocale=()=> 'zh-CN';
 assert.equal((await client.snapshot()).owner_id,JSON.stringify(['local',projected[0].id]));
 let route=new URL(calls.at(-1).url,'http://fixture');
 assert.equal(route.pathname,'/api/v1/snapshot');assert.equal(route.searchParams.get('assistant_id'),projected[0].id,'The unified host port receives the exact assistant presentation key');
+assert.equal(route.searchParams.get('locale'),'zh-CN','Initial linked read receives the current UI locale');
 assert.equal(route.searchParams.get('link_id'),null,'The client does not choose a transport or an alternate business API');
 await client.send({request_id:'same-request',conversation_id:'mail-conversation',text:'Review this'});
 assert.deepEqual(JSON.parse(calls.at(-1).options.body),{request_id:'same-request',conversation_id:'mail-conversation',text:'Review this'});
@@ -28,6 +30,7 @@ await client.sendReceipt({request_id:'same-request',conversation_id:'mail-conver
 route=new URL(calls.at(-1).url,'http://fixture');assert.equal(route.searchParams.get('request_id'),'same-request');assert.equal(route.searchParams.get('conversation_id'),'mail-conversation');
 await assert.rejects(client.cancel({request_id:'stop',turn_id:'turn'}),error=>error.code==='agent_link_capability_unsupported','Unsupported controls never fall back to local execution');
 let delivered;const stop=client.subscribe(value=>{delivered=value;});await new Promise(resolve=>setTimeout(resolve,0));stop();assert.equal(delivered.owner_id,JSON.stringify(['local',projected[0].id]),'Polling retains the exact linked assistant owner');
+route=new URL(calls.at(-1).url,'http://fixture');assert.equal(route.searchParams.get('locale'),'zh-CN','The first polling read cannot save a welcome in a different locale');
 assert.equal(supportsCapability(projected[0],'task.list'),true);
 assert.equal(supportsCapability({...projected[0],origin:null},'chat.cancel'),false,'Local-looking metadata never grants a capability');
 assert.equal(supportsCapability({...projected[0],capabilities:{version:1,operations:['chat.cancel']}},'chat.cancel'),true,'Remote-looking metadata never blocks an advertised capability');

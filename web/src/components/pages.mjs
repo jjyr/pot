@@ -204,6 +204,11 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     if(!await leave())return;
     const token=gate.next(),captured=scope(),loading=body();loading.append(n('p','hint',tr('Loading…','正在加载…')));
     try{
+      if(supportsCapability(definition,'assistant.profile')&&!supportsCapability(definition,'assistant.configure')){
+        const profile=await request('/api/v1/assistants/profile',captured);
+        if(!gate.current(token)||disposed)return;
+        linkedProfile(definition,profile,captured);return;
+      }
       const [providers,thread,rules]=await Promise.all([read('/api/v1/providers',captured),request('/api/v1/agent',captured),request('/api/v1/instructions',captured)]);
       if(!gate.current(token)||disposed)return;
       let profiles=providers.profiles||[],revision=definition?.revision,generation=thread?.generation||0,configurationRevision=thread?.revision||0,rulesRevision=rules?.revision||'';
@@ -289,6 +294,39 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       form.lifecycle.settled=defaults;
       if(thread?.pending)form.root.prepend(n('p','hint',tr('Saved settings will apply to the next new turn. The current turn keeps its original configuration.','已保存的设置将在下一次新回合生效，当前回合保持原配置。')));
     }catch(reason){if(gate.current(token))errorView(reason);}
+  }
+  function linkedProfile(definition,profile,captured){
+    const t=key=>translate(locale(),key);
+    let revision=profile.revision;
+    const initial={name:profile.name,avatar:profile.avatar};
+    const form=renderEditor(t('assistantSettings'),initial,[{name:'name',label:t('assistant.name'),required:true}],async(values,context,session)=>{
+      try{
+        const saved=await request('/api/v1/assistants/'+encodeURIComponent(definition.id),{...captured,method:'POST',body:{name:values.name,avatar:values.avatar,revision}});
+        revision=saved.revision;session.acknowledge({name:values.name,avatar:values.avatar});return saved;
+      }catch(error){throw Object.assign(error,{uiKey:'assistant.profileFailed',diagnostic:error.message});}
+    },{returnChat:true,capturedScope:captured});
+    editor.kind='assistant';
+    const preview=avatar(56,profile.avatar),actions=toolbar(),upload=n('input'),help=n('p','hint'),error=n('p','inline-error');
+    upload.type='file';upload.accept='image/png,image/jpeg,image/webp';upload.hidden=true;error.hidden=true;error.setAttribute('role','alert');
+    const edit=async work=>{
+      if(!form.session.begin())return;
+      const controls=[...form.form.querySelectorAll('input,button')];for(const node of controls)node.disabled=true;
+      error.hidden=true;
+      try{const {value,image}=await work();form.session.settle(false);form.session.set('avatar',value);preview.replaceChildren(...avatar(56,image).childNodes);}
+      catch{form.session.settle(false);error.hidden=false;error.textContent=t('assistant.avatarFailed');}
+      finally{for(const node of controls)node.disabled=false;}
+    };
+    const change=action('',()=>upload.click()),reset=action('',()=>edit(async()=>{const value=await request('/api/v1/assistants/default-avatar',captured);return {value:'',image:value.avatar};}));
+    upload.onchange=async()=>{const file=upload.files?.[0];upload.value='';if(file)await edit(async()=>{const image=await avatarFromFile(file);return {value:image,image};});};
+    actions.append(change,reset,upload);form.form.querySelector('.editor-fields').prepend(preview,actions,help,error);
+    form.lifecycle.locale=()=>{
+      form.lifecycle.setTitle?.(t('assistantSettings'));
+      const name=form.controls.get('name'),buttons=form.form.querySelector('.editor-actions').children;
+      name.closest('.form-row').querySelector('.form-label').textContent=t('assistant.name');name.setAttribute('aria-label',t('assistant.name'));
+      buttons[0].textContent=t('assistant.cancel');buttons[1].textContent=t('assistant.save');
+      change.textContent=t('assistant.changeAvatar');reset.textContent=t('assistant.resetAvatar');help.textContent=t('assistant.avatarHelp');
+      if(!error.hidden)error.textContent=t('assistant.avatarFailed');
+    };form.lifecycle.locale();
   }
   async function extensions(root,token){extensionUI=createExtensions({root,client,locale,memory:extensionMemory,onSettings:(section='integrations')=>{filter.settingsTab=section;routeChanged('settings');show('settings');},onPermissions:()=>{routeChanged('machines');show('machines');}});await extensionUI.load();}
   async function settings(root, token) {

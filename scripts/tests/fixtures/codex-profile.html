@@ -1,0 +1,6 @@
+<!doctype html><html lang="en" data-platform="browser" data-theme="light"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Disposable Codex profile fixture</title><link rel="icon" href="../../../web/src/assets/PotCompanion.png"><link rel="stylesheet" href="../../../web/src/styles.css"><div id="app"></div><script type="module">
+import {mountApp} from '../../../web/src/components/ui.js';
+import {createProductionClient} from '../../../web/src/adapters/production.mjs';
+const client=await createProductionClient();
+window.codexProfileFixture={client,dispose:mountApp(document.querySelector('#app'),client)};
+</script></html>

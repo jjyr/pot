@@ -11,6 +11,7 @@ import (
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
+	webassets "github.com/jjyr/pot/web"
 )
 
 func linkChatID(link, assistant string) string {
@@ -114,6 +115,9 @@ func (s *Service) captureLinkChat(ctx context.Context, message protocol.Envelope
 	return nil
 }
 func (s *Service) LinkChat(ctx context.Context, link, assistant, request string) (any, error) {
+	return s.linkChatLocale(ctx, link, assistant, request, "en")
+}
+func (s *Service) linkChatLocale(ctx context.Context, link, assistant, request, locale string) (any, error) {
 	conversation := linkChatID(link, assistant)
 	if request != "" {
 		var id string
@@ -132,6 +136,16 @@ func (s *Service) LinkChat(ctx context.Context, link, assistant, request string)
 			return nil, e
 		}
 		return map[string]any{"runtime_id": s.options.RuntimeID, "owner_id": "agent-link:" + link + ":" + assistant, "request_id": request, "conversation_id": conversation, "state": state, "message_id": id}, nil
+	}
+	// Only a genuinely empty Codex conversation receives an introduction. It is
+	// ordinary saved UI text in the first reader's locale, never model work.
+	_, identity, targetErr := s.linkChatTarget(ctx, link, assistant)
+	if targetErr == nil && identity.Adapter == "codex" {
+		text := strings.ReplaceAll(webassets.Translate(locale, "assistant.codexWelcome"), "{name}", identity.Name)
+		_, err := s.integrationDB.ExecContext(ctx, `INSERT INTO agent_link_chat(id,link_id,assistant_id,request_id,role,text,created_at) SELECT ?,?,?,?,'assistant',?,? WHERE NOT EXISTS(SELECT 1 FROM agent_link_chat WHERE link_id=? AND assistant_id=?) ON CONFLICT(id) DO NOTHING`, "welcome:"+conversation, link, assistant, "welcome:"+conversation, text, time.Now().UnixMilli(), link, assistant)
+		if err != nil {
+			return nil, err
+		}
 	}
 	rows, e := s.integrationDB.QueryContext(ctx, "SELECT rowid,id,request_id,role,text,created_at FROM agent_link_chat WHERE link_id=? AND assistant_id=? ORDER BY rowid", link, assistant)
 	if e != nil {

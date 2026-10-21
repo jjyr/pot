@@ -27,6 +27,7 @@ func (b potLinkBackend) Directory(ctx context.Context) (agentlink.Directory, err
 		if e != nil {
 			return d, e
 		}
+		i.Avatar = a.Avatar
 		d.Assistants = append(d.Assistants, i)
 		d.Operations[a.ID] = agentlink.Description{Version: 1, Scope: "peer", Operations: agentlink.PeerOperations()}
 	}

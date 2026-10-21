@@ -29,7 +29,7 @@ import (
 	webassets "github.com/jjyr/pot/web"
 )
 
-const hostVersion = "6"
+const hostVersion = "7"
 const hostListen = "127.0.0.1:8792"
 const hostPeerListen = "127.0.0.1:8793"
 
