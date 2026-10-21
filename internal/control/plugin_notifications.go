@@ -14,56 +14,6 @@ import (
 	"github.com/jjyr/pot/pkg/storage"
 )
 
-func (s *Service) ConfigurePluginNotifications(ctx context.Context, requestID string, b assistant.BackgroundBinding) error {
-	if !core.Identifier(requestID) {
-		return errors.New("invalid_request_id")
-	}
-	return s.Machines.OwnerAction(func() error {
-		if b.ConnectionID != "" || b.PluginID != "" && b.PluginID != b.ID {
-			return errors.New("invalid plugin background identity")
-		}
-		b.PluginID = b.ID
-		if b.ID == "github" {
-			if err := validateGitHubNotificationConfig(b.Config); err != nil {
-				return err
-			}
-		}
-		_, err := s.backgroundPackage(b.PluginID)
-		if err != nil && b.ID != "github" {
-			return err
-		}
-		definitions, err := s.Registry.Definitions(ctx)
-		if err != nil {
-			return err
-		}
-		found := false
-		for _, d := range definitions {
-			if d.ID == b.Assistant {
-				found = true
-			}
-		}
-		if b.Enabled && !found {
-			return errors.New("notification assistant unavailable")
-		}
-		if b.ID == "github" {
-			account, e := s.githubAccount(ctx)
-			if e != nil {
-				return e
-			}
-			var config githubFilters
-			if e = decodeGitHubFilters(b.Config, &config); e != nil {
-				return e
-			}
-			if config.AccountID != account {
-				return errors.New("github_account_changed")
-			}
-		}
-		if err = s.Mailbox.ConfigureBackgroundRequest(ctx, b, requestID); err == nil {
-			s.Changes.Notify("plugin-notifications")
-		}
-		return err
-	})
-}
 func (s *Service) backgroundPackage(id string) (plugin.Package, error) {
 	packages, err := s.installedPlugins()
 	if err != nil {
@@ -108,7 +58,7 @@ type backgroundStream struct {
 func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 	s.pluginMu.Lock()
 	defer s.pluginMu.Unlock()
-	if err := s.ensureGitHubNotifications(ctx); err != nil {
+	if err := s.ensurePluginNotifications(ctx); err != nil {
 		return
 	}
 	if err := s.ensureProviderAllowanceBindings(ctx); err != nil {
@@ -150,7 +100,10 @@ func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 		p, err := s.backgroundPackage(b.PluginID)
 		status := "unavailable"
 		if err == nil {
-			err = s.validateNotificationTarget(ctx, b.Assistant)
+			b.EventRouting = p.Manifest.Contributes.Background.EventRouting
+			if !b.EventRouting {
+				err = s.validateNotificationTarget(ctx, b.Assistant)
+			}
 		}
 		if err == nil {
 			streaming := p.Manifest.Contributes.Background.Mode == "stream"
@@ -184,6 +137,15 @@ func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 				}
 			}
 			if err == nil {
+				defs, directoryErr := s.Registry.Definitions(exchangeCtx)
+				if directoryErr != nil {
+					cancel()
+					continue
+				}
+				assistants := make([]string, 0, len(defs))
+				for _, d := range defs {
+					assistants = append(assistants, d.ID)
+				}
 				var response core.BackgroundResponse
 				worker, workerErr := os.Executable()
 				if workerErr != nil {
@@ -203,14 +165,14 @@ func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 						defer s.pluginWG.Done()
 						defer cancel()
 						defer s.Integrations.Forget(scope)
-						streamErr := pluginhost.RunBackgroundStream(exchangeCtx, s.options.Node, p, core.BackgroundRequest{Version: 1, Now: now, Config: b.Config, State: b.State, Accounts: accounts}, env, []string{worker}, func(frame core.BackgroundResponse) error {
+						streamErr := pluginhost.RunBackgroundStream(exchangeCtx, s.options.Node, p, core.BackgroundRequest{Version: 1, Now: now, Config: b.Config, State: b.State, Accounts: accounts, InstanceID: b.ID, Assistant: b.Assistant, Assistants: assistants}, env, []string{worker}, func(frame core.BackgroundResponse) error {
 							after, e := s.Integrations.List(exchangeCtx)
 							beforeJSON, _ := json.Marshal(catalog)
 							afterJSON, _ := json.Marshal(after)
 							if e != nil || string(beforeJSON) != string(afterJSON) {
 								return errors.New("integration changed during stream")
 							}
-							if e = s.validateNotificationTarget(exchangeCtx, b.Assistant); e != nil {
+							if e = s.validateBackgroundTargets(exchangeCtx, b, frame); e != nil {
 								return e
 							}
 							if e = s.Mailbox.CommitBackground(exchangeCtx, b, identity, frame, storage.Now()); e != nil {
@@ -229,7 +191,7 @@ func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 					}()
 					continue
 				}
-				response, err = pluginhost.RunBackground(exchangeCtx, s.options.Node, p, core.BackgroundRequest{Version: 1, Now: now, Config: b.Config, State: b.State, Accounts: accounts}, env, []string{worker})
+				response, err = pluginhost.RunBackground(exchangeCtx, s.options.Node, p, core.BackgroundRequest{Version: 1, Now: now, Config: b.Config, State: b.State, Accounts: accounts, InstanceID: b.ID, Assistant: b.Assistant, Assistants: assistants}, env, []string{worker})
 				if err == nil {
 					after, checkErr := s.Integrations.List(exchangeCtx)
 					beforeJSON, _ := json.Marshal(catalog)
@@ -240,7 +202,7 @@ func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 						identity, identityErr := p.BackgroundIdentity()
 						err = identityErr
 						if err == nil {
-							err = s.validateNotificationTarget(exchangeCtx, b.Assistant)
+							err = s.validateBackgroundTargets(exchangeCtx, b, response)
 						}
 						if err == nil {
 							err = s.Mailbox.CommitBackground(exchangeCtx, b, identity, response, now)
@@ -258,129 +220,111 @@ func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 	}
 }
 
-// Registry definitions are ordered by their persistent creation sequence. Only
-// an absent binding is uninitialized; never infer intent from enabled/target.
-// Reuse the background loop for late account/assistant creation, without a new poller.
-func (s *Service) ensureGitHubNotifications(ctx context.Context) error {
-	return s.Machines.OwnerAction(func() error {
-		stored, err := s.Mailbox.Backgrounds(ctx)
-		if err != nil {
-			return err
-		}
-		for _, b := range stored {
-			if b.ID == "github" {
-				var config githubFilters
-				if err = decodeGitHubFilters(b.Config, &config); err != nil {
-					return err
-				}
-				if config.AccountID == "" {
-					account, e := s.githubAccount(ctx)
-					if e != nil {
-						return nil
-					}
-					config.AccountID = account
-					b.Config, _ = json.Marshal(config)
-					return s.Mailbox.ConfigureBackground(ctx, b)
-				}
-				return nil
-			}
-		}
-		definitions, err := s.Registry.Definitions(ctx)
-		if err != nil || len(definitions) == 0 {
-			return err
-		}
-		catalog, err := s.Integrations.List(ctx)
-		if err != nil {
-			return err
-		}
-		for _, item := range catalog {
-			if item.ID == "github" && item.Account != nil {
-				return s.Mailbox.EnsureBackgroundInstance(ctx, assistant.BackgroundBinding{ID: "github", PluginID: "github", Enabled: true, Assistant: definitions[0].ID, Config: defaultGitHubFilters(item.Account.Identity.ID)})
-			}
-		}
-		return nil
-	})
-}
-
-func (s *Service) PluginNotifications(ctx context.Context) (any, error) {
-	if err := s.ensureGitHubNotifications(ctx); err != nil {
-		return nil, err
-	}
-	packages := []plugin.Package{}
-	var err error
-	if s.options.PluginRoot != "" {
-		packages, err = s.installedPlugins()
-	}
-	discoveryErr := err
-	stored, err := s.Mailbox.Backgrounds(ctx)
+// Bootstrap uses the plugin's real MCP configuration interface. The persistent
+// initialization marker and instance writes are atomic; the cache only avoids
+// repeating discovery when accounts, assistants and package identity are stable.
+func (s *Service) ensurePluginNotifications(ctx context.Context) error {
+	packages, err := s.installedPlugins()
 	if err != nil {
-		return nil, err
-	}
-	definitions, err := s.Registry.Definitions(ctx)
-	if err != nil {
-		return nil, err
+		return err
 	}
 	catalog, err := s.Integrations.List(ctx)
 	if err != nil {
+		return err
+	}
+	defs, err := s.Registry.Definitions(ctx)
+	if err != nil {
+		return err
+	}
+	if s.pluginBootstrap == nil {
+		s.pluginBootstrap = map[string]string{}
+	}
+	for _, p := range packages {
+		c := p.Manifest.Contributes.MCP
+		if c == nil || c.Configuration == nil {
+			continue
+		}
+		enabled, e := s.enabled(ctx, "plugins", p.Manifest.ID)
+		if e != nil {
+			return e
+		}
+		if !enabled {
+			continue
+		}
+		identity, e := p.MCPIdentity()
+		if e != nil {
+			return e
+		}
+		key, _ := core.HashJSON([]any{catalog, defs, identity})
+		if s.pluginBootstrap[p.Manifest.ID] == key {
+			continue
+		}
+		_, r, e := s.invokePluginMCP(ctx, p, c.Configuration.List, json.RawMessage(`{}`))
+		if e != nil {
+			return e
+		}
+		if r.IsError {
+			return errors.New("plugin configuration initialization failed")
+		}
+		s.pluginBootstrap[p.Manifest.ID] = key
+	}
+	return nil
+}
+
+// Configuration projections come from each plugin's MCP server. The host never
+// interprets service-specific filters, defaults or checkpoint formats.
+func (s *Service) PluginNotifications(ctx context.Context) (any, error) {
+	packages, err := s.installedPlugins()
+	if err != nil {
 		return nil, err
 	}
-	ids := []string{"github"}
-	installed := map[string]bool{}
+	defs, err := s.Registry.Definitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items := []any{}
 	for _, p := range packages {
-		if p.Manifest.Contributes.Background != nil {
-			installed[p.Manifest.ID] = true
-			if p.Manifest.ID != "github" {
-				ids = append(ids, p.Manifest.ID)
-			}
+		c := p.Manifest.Contributes.MCP
+		if c == nil || c.Configuration == nil {
+			continue
 		}
+		enabled, e := s.enabled(ctx, "plugins", p.Manifest.ID)
+		if e != nil {
+			return nil, e
+		}
+		if !enabled {
+			continue
+		}
+		_, r, e := s.invokePluginMCP(ctx, p, c.Configuration.List, json.RawMessage(`{}`))
+		if e != nil {
+			items = append(items, map[string]any{"id": p.Manifest.ID, "diagnostic": e.Error()})
+			continue
+		}
+		items = append(items, map[string]any{"id": p.Manifest.ID, "settings": r.StructuredContent})
 	}
-	bindings := []assistant.BackgroundBinding{}
-	for _, id := range ids {
-		b := assistant.BackgroundBinding{ID: id, PluginID: id, Enabled: id == "github", Config: json.RawMessage(`{}`), Status: "pending"}
-		if id == "github" {
-			b.Config = defaultGitHubFilters("")
-		}
-		for _, old := range stored {
-			if old.ID == id {
-				b = old
-			}
-		}
-		enabled, checkErr := s.enabled(ctx, "plugins", id)
-		if checkErr != nil {
-			return nil, checkErr
-		}
-		if !b.Enabled || !enabled {
-			b.Status = "disabled"
-		} else if discoveryErr != nil {
-			b.Status = "unavailable"
-			b.Diagnostic = discoveryErr.Error()
-		} else if !installed[id] {
-			b.Status = "plugin_missing"
-		} else if b.Assistant == "" {
-			b.Status = "waiting_assistant"
-		} else if s.validateNotificationTarget(ctx, b.Assistant) != nil {
-			b.Status = "assistant_missing"
-		} else {
-			for _, item := range catalog {
-				if item.ID == id {
-					if item.Account == nil {
-						b.Status = "authorization"
-					} else if id == "github" {
-						var config githubFilters
-						if decodeGitHubFilters(b.Config, &config) == nil && config.AccountID != "" && config.AccountID != item.Account.Identity.ID {
-							b.Status = "account_changed"
-						}
-					}
-				}
-			}
-
-			if b.Status == "disabled" {
-				b.Status = "pending"
-			}
-		}
-		bindings = append(bindings, b)
+	return map[string]any{"items": items, "assistants": defs}, nil
+}
+func (s *Service) PluginNotificationCall(ctx context.Context, id, tool string, args json.RawMessage) (any, error) {
+	p, err := s.backgroundPackage(id)
+	if err != nil {
+		return nil, err
 	}
-	return map[string]any{"items": bindings, "assistants": definitions}, nil
+	c := p.Manifest.Contributes.MCP
+	if c == nil || c.Configuration == nil {
+		return nil, errors.New("plugin configuration unavailable")
+	}
+	if tool != c.Configuration.List && tool != c.Configuration.Create && tool != c.Configuration.Update && tool != c.Configuration.Delete {
+		return nil, errors.New("unknown configuration tool")
+	}
+	_, r, err := s.invokePluginMCP(ctx, p, tool, args)
+	if err != nil {
+		return nil, err
+	}
+	if r.IsError {
+		raw, _ := json.Marshal(r.StructuredContent)
+		return nil, errors.New(string(raw))
+	}
+	return s.PluginNotifications(ctx)
 }
 
 func (s *Service) validateNotificationTarget(ctx context.Context, id string) error {
@@ -394,4 +338,16 @@ func (s *Service) validateNotificationTarget(ctx context.Context, id string) err
 		}
 	}
 	return errors.New("notification assistant unavailable")
+}
+
+func (s *Service) validateBackgroundTargets(ctx context.Context, b assistant.BackgroundBinding, r core.BackgroundResponse) error {
+	if !b.EventRouting {
+		return s.validateNotificationTarget(ctx, b.Assistant)
+	}
+	for _, event := range r.Events {
+		if err := s.validateNotificationTarget(ctx, event.Assistant); err != nil {
+			return err
+		}
+	}
+	return nil
 }

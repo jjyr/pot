@@ -45,18 +45,21 @@ func TestCredentialCommandEnvironmentAndNonsecretReceipts(t *testing.T) {
 	}
 }
 func TestBundledGitHubPluginContract(t *testing.T) {
-	bundle, err := plugin.LoadPlugin("../../plugins/github")
+	p, err := plugin.Load("../../plugins/github")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = bundle.ValidateInput("github", map[string]any{"args": []any{"pr", "list", "--repo", "owner/repo"}}); err != nil {
+	if p.Manifest.Contributes.Tools != nil || p.Manifest.Contributes.MCP == nil {
+		t.Fatal("GitHub must expose real Control-local MCP")
+	}
+	if _, err = p.MCPIdentity(); err != nil {
 		t.Fatal(err)
 	}
-	if err = bundle.ValidateInput("github", map[string]any{"args": []any{17}}); err == nil {
-		t.Fatal("nonstring argv accepted")
+	if _, err = p.ToolBundle(); err == nil {
+		t.Fatal("Control MCP became a Runtime tool bundle")
 	}
-	if bundle.Manifest.Contributes.Tools.Credentials["GH_TOKEN"].Service != "github" || bundle.Manifest.Contributes.Tools.SessionMode != "call" {
-		t.Fatal("incorrect credential/lifecycle declaration")
+	if p.Manifest.Contributes.MCP.Credentials["GH_TOKEN"].Service != "github" {
+		t.Fatal("incorrect credential declaration")
 	}
 }
 

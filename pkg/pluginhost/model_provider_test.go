@@ -91,11 +91,11 @@ func TestModelProviderRPCDrainsDetachedDescendantsOnDeadline(t *testing.T) {
 
 func TestModelProviderCredentialRejectionIncludesEscapedStrings(t *testing.T) {
 	for _, raw := range []string{`{"catalog":{"models":[{"id":"\u0066ixture-private-token"}]}}`, `{"fixtur\u0065-private-token":"value"}`} {
-		if !containsModelProviderCredential([]byte(raw), "fixture-private-token") {
+		if !containsPluginCredential([]byte(raw), "fixture-private-token") {
 			t.Fatal("JSON escaping hid credential", raw)
 		}
 	}
-	if containsModelProviderCredential([]byte(`{"catalog":{"models":[{"id":"public-model"}]}}`), "fixture-private-token") {
+	if containsPluginCredential([]byte(`{"catalog":{"models":[{"id":"public-model"}]}}`), "fixture-private-token") {
 		t.Fatal("public metadata rejected")
 	}
 }

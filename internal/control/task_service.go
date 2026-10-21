@@ -355,6 +355,11 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 		definitions = append(definitions, d)
 	}
 	definitions = append(definitions, s.productTools(true)...)
+	mcpTools, err := s.pluginMCPTools(ctx, dispatch.Product)
+	if err != nil {
+		return runner.Prepared{}, err
+	}
+	definitions = append(definitions, mcpTools...)
 	loop := &agent.Agent{Services: ports, Feedback: feedback, Dispatch: dispatch.Dispatch, Tools: definitions, Composer: s.options.Composer, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
 		s.Integrations.Forget(credentialScope(l.TaskID, l.RunID, l.Generation))
 		s.Permissions.Expire(l.AssistantID, l.RunID, l.Generation)

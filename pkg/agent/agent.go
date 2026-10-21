@@ -571,6 +571,7 @@ func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoin
 	}()
 	var native bytes.Buffer
 	var usageFrames []m.UsageReport
+	var observedUsage m.UsageReport
 	var firstTextMS *int64
 	sampleStarted := time.Now()
 	if compactionID != nil {
@@ -605,15 +606,17 @@ func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoin
 			message := "Model request failed"
 			detail = &message
 		}
-		observation := Observation{Kind: "request_finished", ID: requestID, Stage: stage, CompactionID: compactionID, Error: detail}
+		observation := Observation{Kind: "request_finished", ID: requestID, Stage: stage, CompactionID: compactionID, Error: detail, StartedAtMS: sampleStarted.UnixMilli()}
 		if compactionID == nil && result == nil {
 			prefix := input
 			prefix.Messages = nil
 			observation.RequestPrefix = &prefix
 		}
 		if response.Usage != nil {
-			observation.Usage = &m.UsageReport{InputTokens: &response.Usage.Input, OutputTokens: &response.Usage.Output}
+			observedUsage.InputTokens = &response.Usage.Input
+			observedUsage.OutputTokens = &response.Usage.Output
 		}
+		observation.Usage = &observedUsage
 		if err := a.Feedback.Observe(ctx, observation); err != nil && result == nil {
 			result = err
 		}
@@ -653,6 +656,18 @@ func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoin
 				return response, err
 			}
 			if update.Usage != nil {
+				if update.Usage.InputTokens != nil {
+					observedUsage.InputTokens = update.Usage.InputTokens
+				}
+				if update.Usage.OutputTokens != nil {
+					observedUsage.OutputTokens = update.Usage.OutputTokens
+				}
+				if update.Usage.CacheReadTokens != nil {
+					observedUsage.CacheReadTokens = update.Usage.CacheReadTokens
+				}
+				if update.Usage.CacheWriteTokens != nil {
+					observedUsage.CacheWriteTokens = update.Usage.CacheWriteTokens
+				}
 				if compactionID != nil {
 					usageFrames = append(usageFrames, *update.Usage)
 				}

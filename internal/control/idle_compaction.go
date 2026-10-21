@@ -17,12 +17,12 @@ func (s *Service) idleCompactPolicy(_ context.Context, thread core.Thread) (assi
 			minutes := uint64(15)
 			source := "default"
 			if settings := profile.ModelSettings; settings != nil {
-				if settings.IdleCompactMinutes != nil {
-					minutes = *settings.IdleCompactMinutes
+				if settings.PromptCacheMinutes != nil {
+					minutes = *settings.PromptCacheMinutes
 					source = "connection"
 				}
 			}
-			return assistant.IdleCompactionPolicy{Delay: time.Duration(minutes) * time.Minute, Source: source}, nil
+			return assistant.IdleCompactionPolicy{CacheTTL: time.Duration(minutes) * time.Minute, Source: source}, nil
 		}
 	}
 	return assistant.IdleCompactionPolicy{}, nil // A removed connection cannot schedule new background work.

@@ -2,7 +2,6 @@ package control
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,12 +13,11 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/mcp"
 	"github.com/jjyr/pot/pkg/pluginhost"
 )
 
-//go:embed assets/mcp-client.mjs
-var mcpClientSource string
-
+// MCPTool is the persisted catalogue projection; full wire types live in pkg/mcp.
 type MCPTool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
@@ -167,15 +165,8 @@ func (s *Service) ManageMCP(ctx context.Context, command MCPCommand) (any, error
 				return err
 			}
 			for _, installed := range packages {
-				if installed.Manifest.Contributes.Tools == nil {
-					continue
-				}
-				for _, raw := range installed.Manifest.Contributes.Tools.Tools {
-					var tool struct{ Name string }
-					_ = json.Unmarshal(raw, &tool)
-					if tool.Name == "mcp_"+strings.ReplaceAll(server.ID, "-", "_") {
-						return errors.New("MCP tool name already registered")
-					}
+				if slices.Contains(pluginModelToolNames(installed), "mcp_"+strings.ReplaceAll(server.ID, "-", "_")) {
+					return errors.New("MCP tool name already registered")
 				}
 			}
 		}
@@ -268,21 +259,20 @@ func (s *Service) ManageMCP(ctx context.Context, command MCPCommand) (any, error
 	return result, err
 }
 func mcpBundle(server MCPServer) (core.PluginBundle, error) {
-	names := []string{}
-	description := "MCP server " + server.Name + ". Call one of its tools with arguments encoded as a JSON object string. Tools:\n"
+	selected := []MCPTool{}
 	for _, tool := range server.Tools {
 		if !slices.Contains(server.DisabledTools, tool.Name) {
-			names = append(names, tool.Name)
-			description += tool.Name + ": " + tool.Description + " Schema: " + string(tool.InputSchema) + "\n"
+			selected = append(selected, tool)
 		}
 	}
+	definition, names := mcpModelTool(server.ID, "MCP server "+server.Name+". Call one of its tools with arguments encoded as a JSON object string. Tools:\n", selected)
 	config, _ := json.Marshal(map[string]any{"transport": server.Transport, "command": server.Command, "args": server.Args, "cwd": server.CWD, "url": server.URL, "tools": names})
-	tool, _ := json.Marshal(map[string]any{"name": "mcp_" + strings.ReplaceAll(server.ID, "-", "_"), "description": description, "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"tool": map[string]any{"type": "string", "enum": names}, "arguments": map[string]any{"type": "string", "description": "JSON object containing the selected tool's arguments", "maxLength": 131072}}, "required": []string{"tool", "arguments"}, "additionalProperties": false}})
+	tool, _ := json.Marshal(definition)
 	bindings := core.CredentialBindings{}
 	if server.SecretRef != "" {
 		bindings["MCP_CREDENTIALS"] = core.CredentialRef{Service: server.SecretRef}
 	}
-	b := core.PluginBundle{Manifest: core.PluginManifest{SchemaVersion: 2, ID: "mcp-" + server.ID, Version: fmt.Sprint(server.Revision), Contributes: core.PluginContributions{Tools: &core.PluginTools{Runtime: "node", Execution: "runtime", SessionMode: "call", Entrypoint: "mcp-client.mjs", Files: []string{"mcp-client.mjs", "config.json"}, Requirements: []string{"node"}, Credentials: bindings, Tools: []json.RawMessage{tool}}}}, Files: map[string]string{"mcp-client.mjs": mcpClientSource, "config.json": string(config)}}
+	b := core.PluginBundle{Manifest: core.PluginManifest{SchemaVersion: 2, ID: "mcp-" + server.ID, Version: fmt.Sprint(server.Revision), Contributes: core.PluginContributions{Tools: &core.PluginTools{Runtime: "node", Execution: "runtime", SessionMode: "call", Entrypoint: "mcp-adapter.mjs", Files: []string{"mcp-adapter.mjs", "mcp-runtime.mjs", "config.json"}, Requirements: []string{"node"}, Credentials: bindings, Tools: []json.RawMessage{tool}}}}, Files: map[string]string{"mcp-adapter.mjs": mcp.NodeAdapter, "mcp-runtime.mjs": mcp.NodeRuntime, "config.json": string(config)}}
 	var err error
 	b.Digest, err = b.Hash()
 	if err != nil {
@@ -308,7 +298,7 @@ func (s *Service) discoverMCP(ctx context.Context, server MCPServer) (tools []MC
 	if err != nil {
 		return nil, err
 	}
-	host, err := pluginhost.New(pluginhost.Config{Node: s.options.Node, Identity: bundle.Digest, Files: bundle.Files, Entrypoint: "mcp-client.mjs", Mode: "text", Environment: env, ProcessWorker: []string{worker}, Workspace: s.options.Workspace})
+	host, err := pluginhost.New(pluginhost.Config{Node: s.options.Node, Identity: bundle.Digest, Files: bundle.Files, Entrypoint: "mcp-adapter.mjs", Mode: "text", Environment: env, ProcessWorker: []string{worker}, Workspace: s.options.Workspace})
 	if err != nil {
 		return nil, err
 	}

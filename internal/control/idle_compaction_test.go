@@ -81,14 +81,14 @@ func TestIdleCompactionDelayConnection(t *testing.T) {
 	ctx := context.Background()
 	minutes := uint64(20)
 	s.Profiles.mu.Lock()
-	s.Profiles.state.Profiles = []core.Profile{{ID: "p", ModelSettings: &core.ModelSettings{IdleCompactMinutes: &minutes}}, {ID: "default"}}
+	s.Profiles.state.Profiles = []core.Profile{{ID: "p", ModelSettings: &core.ModelSettings{PromptCacheMinutes: &minutes}}, {ID: "default"}}
 	s.Profiles.mu.Unlock()
 	for _, tc := range []struct {
 		profile, model string
 		want           time.Duration
 	}{{"p", "fast", 20 * time.Minute}, {"p", "other", 20 * time.Minute}, {"default", "fast", 15 * time.Minute}, {"removed", "fast", 0}} {
 		got, err := s.idleCompactPolicy(ctx, core.Thread{Config: core.ResolvedSpec{SourceProfileID: tc.profile, Model: tc.model}})
-		if err != nil || got.Delay != tc.want {
+		if err != nil || got.CacheTTL != tc.want {
 			t.Fatal(tc, got, err)
 		}
 	}

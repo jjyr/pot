@@ -3,9 +3,9 @@ package assistant
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"time"
 
 	"github.com/jjyr/pot/internal/inbox"
 	"github.com/jjyr/pot/pkg/core"
@@ -13,9 +13,11 @@ import (
 	"github.com/jjyr/pot/pkg/storage"
 )
 
-// BackgroundBinding is owner configuration; no plugin-supplied address is used.
+// BackgroundBinding stores opaque plugin configuration and host routing policy.
 type BackgroundBinding struct {
 	// Diagnostic is optional host projection data, never plugin state or config.
+	InputHash    string          `json:"-"`
+	EventRouting bool            `json:"-"`
 	Diagnostic   string          `json:"diagnostic,omitempty"`
 	ID           string          `json:"id"`
 	PluginID     string          `json:"plugin_id"`
@@ -53,16 +55,6 @@ func (m *Mailbox) Backgrounds(ctx context.Context) ([]BackgroundBinding, error) 
 	return out, rows.Err()
 }
 
-// EnsureBackground inserts defaults once. A persisted row, including an explicit
-// disabled binding, always wins. No checkpoint or revision is changed on conflict.
-func (m *Mailbox) EnsureBackground(ctx context.Context, id, target string) error {
-	config := json.RawMessage(`{}`)
-	if id == "github" {
-		config = json.RawMessage(`{"account_id":"","repositories":null,"reasons":["mention"],"subject_types":null,"threads":null}`)
-	}
-	return m.EnsureBackgroundInstance(ctx, BackgroundBinding{ID: id, PluginID: id, Enabled: true, Assistant: target, Config: config})
-}
-
 // EnsureBackgroundInstance inserts owner defaults once without changing an
 // existing instance, including an explicitly disabled or waiting instance.
 func (m *Mailbox) EnsureBackgroundInstance(ctx context.Context, b BackgroundBinding) error {
@@ -82,11 +74,14 @@ func (m *Mailbox) ConfigureBackground(ctx context.Context, b BackgroundBinding) 
 }
 
 func (m *Mailbox) ConfigureBackgroundRequest(ctx context.Context, b BackgroundBinding, requestID string) error {
-	if !validBackground(b) || requestID != "" && !core.Identifier(requestID) {
+	if !validBackground(b) || !validBackgroundInputHash(b.InputHash) || requestID != "" && !core.Identifier(requestID) {
 		return errors.New("invalid background configuration")
 	}
 	return storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
 		hash, _ := core.HashJSON([]any{b.ID, b.PluginID, b.ConnectionID, b.Enabled, b.Assistant, b.Config, b.Revision})
+		if b.InputHash != "" {
+			hash, _ = core.HashJSON([]string{b.ID, b.PluginID, b.InputHash})
+		}
 		if requestID != "" {
 			var prior string
 			err := tx.QueryRowContext(ctx, "SELECT input_hash FROM plugin_background_writes WHERE instance=? AND request_id=?", b.ID, requestID).Scan(&prior)
@@ -101,6 +96,7 @@ func (m *Mailbox) ConfigureBackgroundRequest(ctx context.Context, b BackgroundBi
 			}
 		}
 		receipt := func() error {
+
 			if requestID == "" {
 				return nil
 			}
@@ -127,7 +123,7 @@ func (m *Mailbox) ConfigureBackgroundRequest(ctx context.Context, b BackgroundBi
 			return errors.New("stale plugin configuration")
 		}
 		// State belongs to the account, not the target. Retargeting cannot replay history.
-		_, err = tx.ExecContext(ctx, "UPDATE plugin_background SET enabled=?,assistant=?,config=?,revision=revision+1,state=CASE WHEN id='github' AND json_type(state)='object' THEN json_set(state,'$.pending',json('{}'),'$.scan',NULL,'$.modified',NULL,'$.filterSince',?) ELSE state END WHERE id=?", b.Enabled, b.Assistant, string(b.Config), time.Now().UTC().Format(time.RFC3339Nano), b.ID)
+		_, err = tx.ExecContext(ctx, "UPDATE plugin_background SET enabled=?,assistant=?,config=?,revision=revision+1 WHERE id=?", b.Enabled, b.Assistant, string(b.Config), b.ID)
 		if err != nil {
 			return err
 		}
@@ -142,7 +138,7 @@ func (m *Mailbox) ConfigureBackgroundRequest(ctx context.Context, b BackgroundBi
 // A repeated ID with identical content is accepted; conflicting content rolls
 // back the entire exchange, leaving the original cursor eligible for retry.
 func (m *Mailbox) CommitBackground(ctx context.Context, b BackgroundBinding, identity core.PluginIdentity, r core.BackgroundResponse, now int64) error {
-	if identity.ID != b.PluginID || !validBackground(b) || b.Assistant == "" && len(r.Events) > 0 {
+	if identity.ID != b.PluginID || !validBackground(b) || b.Assistant == "" && !b.EventRouting && len(r.Events) > 0 {
 		return errors.New("plugin identity mismatch")
 	}
 	if err := r.Validate(); err != nil {
@@ -163,8 +159,18 @@ func (m *Mailbox) CommitBackground(ctx context.Context, b BackgroundBinding, ide
 			return err
 		}
 		for _, event := range r.Events {
+			recipient := owner
+			if b.EventRouting {
+				recipient = event.Assistant
+				if !core.Identifier(recipient) {
+					return errors.New("notification assistant unavailable")
+				}
+			} else if event.Assistant != "" {
+				return errors.New("event routing unavailable")
+			}
+
 			id, _ := core.HashJSON([]string{m.nodeID, b.ID, event.ID})
-			message := protocol.Envelope{Kind: "plugin_event", ID: id, From: protocol.AgentRef{NodeID: m.nodeID, Kind: "runtime", AgentID: "plugin-" + b.ID}, To: protocol.AgentRef{NodeID: m.nodeID, Kind: "assistant", AgentID: owner}, ConversationID: conversation, Plugin: &protocol.PluginNotification{Identity: identity, InstanceID: b.ID, ConnectionID: b.ConnectionID, Event: event}}
+			message := protocol.Envelope{Kind: "plugin_event", ID: id, From: protocol.AgentRef{NodeID: m.nodeID, Kind: "runtime", AgentID: "plugin-" + b.ID}, To: protocol.AgentRef{NodeID: m.nodeID, Kind: "assistant", AgentID: recipient}, ConversationID: conversation, Plugin: &protocol.PluginNotification{Identity: identity, InstanceID: b.ID, ConnectionID: b.ConnectionID, Event: event}}
 			// Identity/version and owner are bound at first acceptance and kept on retries.
 			old, err := findMail(ctx, tx, id)
 			if err != nil {
@@ -195,4 +201,43 @@ func (m *Mailbox) CommitBackground(ctx context.Context, b BackgroundBinding, ide
 func (m *Mailbox) BackgroundError(ctx context.Context, b BackgroundBinding, status, diagnostic string, now int64) error {
 	_, err := m.db.ExecContext(ctx, "UPDATE plugin_background SET next=?,status=?,diagnostic=? WHERE id=? AND revision=?", now+300000, status, diagnostic, b.ID, b.Revision)
 	return err
+}
+
+// Initialization inserts the plugin's initial opaque configuration once. A
+// retained empty configuration is configured intent, not an absent installation.
+func (m *Mailbox) InitializeBackground(ctx context.Context, pluginID string, b *BackgroundBinding) error {
+	if b == nil || b.PluginID != pluginID {
+		return errors.New("invalid plugin initialization")
+	}
+	return m.EnsureBackgroundInstance(ctx, *b)
+}
+
+func (m *Mailbox) BackgroundWriteApplied(ctx context.Context, pluginID, id, requestID, inputHash string) (bool, error) {
+	if !core.Identifier(id) || !core.Identifier(requestID) || !validBackgroundInputHash(inputHash) {
+		return false, errors.New("invalid background receipt")
+	}
+	var prior string
+	err := m.db.QueryRowContext(ctx, "SELECT input_hash FROM plugin_background_writes WHERE instance=? AND request_id=?", id, requestID).Scan(&prior)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	hash, _ := core.HashJSON([]string{id, pluginID, inputHash})
+	if hash != prior {
+		return false, errors.New("notification_request_conflict")
+	}
+	return true, nil
+}
+
+func validBackgroundInputHash(value string) bool {
+	if value == "" {
+		return true
+	}
+	if len(value) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }

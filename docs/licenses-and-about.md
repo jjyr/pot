@@ -52,7 +52,9 @@ are included in this Go inventory.
 Run `mise run licenses` to generate the CLI/runtime inventory locally. App
 packaging regenerates it for the native entry point as well. These are notice
 inventories; distributed non-Go files have separate notices and are not covered
-by the Go dependency graph.
+by the Go dependency graph. `scripts/go-notices` also appends the embedded
+MCP JavaScript runtime notices from `pkg/mcp/assets/NOTICE.txt`, generated from
+the pinned bundle inputs.
 
 The narrowly pinned Wails macOS tray adaptations in [patches](../patches/README.md)
 preserve the tray artwork's aspect ratio and expose the status accessibility

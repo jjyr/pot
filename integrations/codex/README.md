@@ -7,6 +7,10 @@ chat and delegated tasks use that same thread, in one queue per assistant.
 Separate assistants can run in parallel and retain separate conversation context.
 Assistants pointing at the same directory still share those files.
 
+The local MCP stdio surface uses [the shared MCP component](../../docs/mcp.md)
+and its official Go SDK server. Agent Link and Codex App Server JSONL retain
+their own transports and business handlers.
+
 The adapter's `observe` operation reports live task counts, chat queue activity,
 hostname and cleanup fences without exporting task text, workspaces or model
 configuration. Task and chat jobs share the execution queue but remain separate

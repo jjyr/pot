@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/jjyr/pot/pkg/integrations"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -54,8 +55,25 @@ func TestGitHubFilterSettingsPortReturnsEffectiveRevisionAndIdempotentRetry(t *t
 	manager, _ := execution.New("local", "boot", execution.Limits{MaxActive: 1, MaxQueued: 8})
 	done := make(chan struct{})
 	close(done)
-	// No installed background package: the fixture cannot contact GitHub.
-	s, err := control.Open(control.Options{Root: t.TempDir(), RuntimeID: "local", BootID: "boot", Manager: manager, Keys: keys, IntegrationAdapters: []integrations.Adapter{loginAdapter{done}}})
+	// Real MCP server, with a local inert poller: no external API calls.
+	pluginRoot := t.TempDir()
+	packageDir := filepath.Join(pluginRoot, "github")
+	if err := os.MkdirAll(packageDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"plugin.json", "mcp.mjs", "subscriptions.mjs", "filters.mjs", "read-notifications.mjs", "read-tool.json"} {
+		raw, err := os.ReadFile(filepath.Join("../../plugins/github", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(filepath.Join(packageDir, name), raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(packageDir, "notifications.mjs"), []byte(`export async function poll(input) { return {state:input.state,events:[],delay_seconds:60,status:'ready'}; }`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := control.Open(control.Options{Root: t.TempDir(), RuntimeID: "local", BootID: "boot", Manager: manager, Keys: keys, PluginRoot: pluginRoot, IntegrationAdapters: []integrations.Adapter{loginAdapter{done}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,24 +101,34 @@ func TestGitHubFilterSettingsPortReturnsEffectiveRevisionAndIdempotentRetry(t *t
 	if _, err = app.Call(ctx, Request{Method: "GET", Path: "/api/v1/plugin-notifications"}); err != nil {
 		t.Fatal(err)
 	}
-	request := Request{Method: "POST", Path: "/api/v1/plugin-notifications/github", Body: json.RawMessage(`{"request_id":"ui-save","revision":1,"enabled":false,"assistant":"main","config":{"account_id":"123","repositories":null,"reasons":[],"subject_types":null,"threads":null}}`)}
+	request := Request{Method: "POST", Path: "/api/v1/plugin-notifications/github", Body: json.RawMessage(`{"tool":"update_subscription","arguments":{"id":"default","request_id":"ui-save","revision":1,"account_id":"123","enabled":false,"assistant":"main","filters":{"repositories":null,"reasons":[],"subject_types":null,"threads":null}}}`)}
 	for range 2 {
 		result, e := app.Call(ctx, request)
 		if e != nil {
 			t.Fatal(e)
 		}
 		raw, _ := json.Marshal(result)
+
 		var projection struct {
 			Items []struct {
-				Revision int  `json:"revision"`
-				Enabled  bool `json:"enabled"`
-				Config   struct {
-					Reasons []string `json:"reasons"`
-				} `json:"config"`
-			} `json:"items"`
+				Settings struct {
+					Revision      int
+					Subscriptions []struct {
+						Revision int
+						Enabled  bool
+						Filters  struct{ Reasons []string }
+					}
+				}
+			}
 		}
-		json.Unmarshal(raw, &projection)
-		if len(projection.Items) != 1 || projection.Items[0].Revision != 2 || projection.Items[0].Enabled || projection.Items[0].Config.Reasons == nil || len(projection.Items[0].Config.Reasons) != 0 {
+		if err := json.Unmarshal(raw, &projection); err != nil {
+			t.Fatal(err)
+		}
+		if len(projection.Items) != 1 || projection.Items[0].Settings.Revision != 2 || len(projection.Items[0].Settings.Subscriptions) != 1 {
+			t.Fatal(string(raw))
+		}
+		sub := projection.Items[0].Settings.Subscriptions[0]
+		if sub.Revision != 2 || sub.Enabled || sub.Filters.Reasons == nil || len(sub.Filters.Reasons) != 0 {
 			t.Fatal(string(raw))
 		}
 	}

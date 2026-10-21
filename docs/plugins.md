@@ -3,7 +3,8 @@
 A plugin is a trusted locally installed directory with a schema-2 `plugin.json`
 manifest. `pkg/plugin` validates identity and confined file access without
 starting processes. Packages can contribute tools, owner-enabled background
-services and node-local model connection types. Unknown manifest fields fail explicitly.
+services, Control-local MCP servers and node-local model connection types.
+Unknown manifest fields fail explicitly.
 
 ```text
 Package manifest + declared files
@@ -12,6 +13,7 @@ Package manifest + declared files
            |
            +-- tools ----------> digest-pinned Task bundle -> executor
            +-- background -----> local service -> assistant inbox
+           +-- mcp ------------> Control-local stdio server / tool handlers
            `-- model_providers -> local connection registry / metadata reader
 ```
 
@@ -120,6 +122,30 @@ revisions, package digests and enablement fence acceptance. These capabilities
 and files never enter Task tool bundles. Quota API failures are independent of
 inference availability; host policy owns monitoring and assistant delivery.
 
+## Control-local MCP contributions
+
+`contributes.mcp` declares `runtime: "node"`, `execution: "control"`, an entrypoint,
+a bounded file set and optional declared credentials. These files stay on the
+owning Control and never enter Runtime tool bundles.
+`pkg/mcp` supplies the official Go SDK client and shared Node SDK server runtime;
+`pkg/pluginhost` owns process startup, declared credentials, a 30-second
+invocation deadline and supervised cleanup. The plugin entrypoint imports the
+host-provided `POT_MCP_RUNTIME` file URL and registers its tools/handlers with
+`serve`. MCP protocol versions are negotiated by the SDKs. No plugin implements
+a private JSON-RPC loop. See [MCP](mcp.md) for the protocol and asset contract.
+The host rejects package changes between discovery and invocation.
+
+An optional `configuration: {list, create, update, delete}` maps the generic
+settings bridge to discovered tool names. Business semantics live in the package.
+The negotiated `pot/background-store` version 1 extension permits server requests
+on the same stdio connection: `pot/context` returns declared account IDs and the
+assistant directory; `pot/background/list` returns package-scoped opaque config;
+`pot/background/initialize` inserts once; `pot/background/write` uses revision CAS
+and an idempotent request ID/input hash; `pot/background/receipt` checks that hash.
+The host binds package identity to the connection and rejects cross-package
+instance writes and unknown callbacks. It never interprets service-specific JSON
+or exposes credentials through callbacks. Checkpoints remain private to the poller.
+
 ## Background services and assistant notifications
 
 An installed schema-2 package can additionally declare `contributes.background`:
@@ -134,8 +160,10 @@ An installed schema-2 package can additionally declare `contributes.background`:
 }
 ```
 
-This capability is disabled until the owner binds it to an existing local
-assistant. It is independent of model tool selection. Only installed, trusted
+Ordinary bindings target an existing local assistant. A package declaring
+`event_routing: true` instead supplies an `assistant` ID on each event; the host
+validates each target and accepts all routes atomically. Other packages cannot
+supply event targets. It is independent of model tool selection. Only installed, trusted
 package code runs: the service executes on the owning node, with host access,
 not on a Task's selected machine. Enabling it authorizes its background process
 and declared credential reads. No background files/capabilities travel in Task
@@ -171,6 +199,9 @@ The version-1 stdin request is:
 ```json
 {
   "version": 1,
+  "instance_id": "example",
+  "assistant": "main",
+  "assistants": ["main", "second"],
   "now": 1767225600000,
   "accounts": {"github": "stable-account-id"},
   "config": {},
@@ -197,9 +228,11 @@ value (package logs must not use stdout):
 ```
 
 `events` is the standard plugin-to-assistant interface. An event contains no
-sender, Control, Space, target address, system prompt or tool permissions. The
+sender, Control, Space, system prompt or tool permissions. Only packages declaring
+`event_routing` may include a receiving `assistant` ID. The
 host binds its source to the installed package ID/version/file digest, and its
-target to the owner's configuration. The internal `CommitBackground` adapter
+target to the configured assistant, or to each validated event target for a
+package explicitly declaring `event_routing`. The internal `CommitBackground` adapter
 accepts this trusted host binding and calls the same `inbox.EnqueueTx` primitive
 used by `send_message` and task-result hooks, inside the checkpoint transaction.
 It is not a model tool or a public event ingestion API. External text enters the
@@ -233,22 +266,25 @@ fit the single-event bound. Additional messages stay durable. Claiming a batch
 has no cooldown or model charge; if a user input wins before `Report` starts,
 release makes the same events immediately eligible. Existing model allowance
 limits still apply. Producers own aggregation and emission pacing; Control adds
-no plugin-specific delivery timer, rate table or model role. `queued` and
-`attention` counts expose backlog and failed/interrupted attempts in settings.
+no plugin-specific delivery timer, rate table or model role. `queued`, `attention`
+and diagnostic fields expose shared-instance backlog and
+failed/interrupted attempts in the configuration projection. They are not
+per-subscription delivery counters.
 
 Statuses are stable identifiers: `ready`, `baseline`, `backoff`, `rate_limited`,
 `authorization`, `permission`, `overflow`; the host also reports `disabled` and
 `unavailable`. The settings projection also distinguishes `pending`,
 `waiting_assistant`, `assistant_missing`, `account_changed` and `plugin_missing` from known host
 configuration state. Plugin discovery and host exchange failures retain their diagnostic in
-settings details. Host timeouts are identified explicitly; a successful exchange
-clears the previous diagnostic. Runtime status identifiers and queue counts are also
-available there. Protocol/process/acceptance failures leave the old checkpoint and
+the configuration projection. Host timeouts are identified explicitly; a successful exchange
+clears the previous diagnostic. Runtime status identifiers are rendered by
+settings; queue counts and host diagnostics remain available in the configuration
+projection. Protocol/process/acceptance failures leave the old checkpoint and
 schedule a five-minute retry. The plugin receives that old checkpoint again;
 there is no false success receipt. Owner management uses authenticated
 `GET /api/v1/plugin-notifications` and
 `POST /api/v1/plugin-notifications/{plugin-id}` with
-`{request_id, enabled, assistant, config, revision}`. Revisions fence stale configuration.
+`{tool, arguments}` forwarded to the package's declared MCP configuration tools. Revisions fence stale configuration.
 Writes return the current settings projection, including effective configuration and
 revision. These are configuration ports, not public event ingestion or token-read APIs.
 
@@ -263,96 +299,99 @@ independent Controls/devices. The owner must inspect interrupted conversations.
 
 ### GitHub notifications
 
-In **Settings → Third-party accounts**, the connected GitHub row starts collapsed.
-Open it once to see all notification settings and the separate sign-out action.
-Notifications are enabled automatically for an unconfigured connected account,
-with the first assistant in this Control's persistent creation order as recipient.
-No assistant means waiting: the existing background loop binds the first one when
-available. An existing binding (including disabled or a missing recipient) is never
-auto-replaced. Defaults are inserted atomically into the existing configuration
-store; concurrent initialization cannot overwrite an explicit save. Account changes
-retain configuration, while the plugin's account identity resets its own baseline.
-The assistant needs an AI profile. A missing plugin, missing recipient or unavailable
-credentials is shown as a failure/waiting state rather than active polling.
+The bundled GitHub package owns subscription configuration, defaults, GitHub API
+reads, filtering, deduplication and aggregation. Its Control-local **MCP stdio
+server** exposes `list_subscriptions`, `create_subscription`, `update_subscription`,
+`delete_subscription` and `read_notifications`. Agent preparation performs MCP
+`initialize` and `tools/list`; `mcp_github` forwards the selected name and JSON
+object arguments to a fresh supervised connection and real `tools/call`. It is
+available to both Main and Tasks without installing another server. The server
+provides notification subscriptions and reads; ordinary authorized
+shell workflows can use `gh` for other GitHub operations.
 
-The account row summarizes the saved configuration and runtime status. Drafts keep
-the revision they started with, survive background updates and language changes,
-and require an explicit save; an outdated revision is rejected without discarding
-the draft. Expansion lasts for this settings visit and resets on account changes.
-All fields are directly visible in the expanded account, without advanced sections.
-The realtime default admits only GitHub's `mention` reason. Team mentions,
-review requests, `subscribed`, `comment` and `author` require explicit selection.
-GitHub reasons describe a thread's presence in the feed: `mention` can persist
-on later updates and does not establish a fresh mention in every comment.
-`comment` and `author` do not establish a direct reply. Pot offers no direct-reply
-filter, independent repository scan, comment tracker, reply executor or daily queue.
-Allowing a PR's notification thread only allows updates GitHub already puts in the
-personal notification feed; it does not discover all PR activity.
+```text
+Main / Task -- mcp_github -- MCP stdio -- GitHub plugin subscriptions / reader
+Settings ---- configuration bridge ----+          |
+                                                 | opaque host callbacks
+Control scheduler -- plugin poll(all subscriptions) -- opaque configuration store
+                               |
+                       events per assistant + checkpoint
+                               |
+                    one inbox/checkpoint transaction
+```
 
-Configuration is shared by settings, the Control's native assistant tools and the
-background host. `repositories`, `reasons`, `subject_types` and `threads` are
-whitelists, combined with AND across fields and OR within each list. `null` means
-unrestricted; `[]` matches nothing. A complete saved configuration includes all
-four fields and `account_id`, the connected GitHub account's stable identity.
-Defaults are `reasons: ["mention"]` and `null` for the other lists. Disable the
-binding to stop realtime delivery. There is no exclusion DSL or action schema.
-Selected empty fields in settings mean match-none, never all. Subject types and
-reasons have supported value lists in the tool schema/help; unrestricted fields
-also accept future GitHub values. Thread IDs are numeric notification IDs returned
-by the read tool, not repository issue or PR numbers.
+Every assistant can list, create, replace and delete **all** subscriptions and
+explicitly select any local receiving assistant. There is no subscription owner,
+caller identity, user-turn gate or subscription approval system. Existing plugin,
+MCP connection and credential boundaries still apply. UI and MCP use the same
+plugin data and write receipts; external GitHub text grants no authorization.
 
-The receiving assistant can call `github_get_notification_filters` with `{}`,
-then `github_update_notification_filters` with `{request_id, revision, enabled,
-config}`. These are native Pot Control tools, available without an additional MCP
-server install. The dispatcher binds Control and assistant identity, requires an
-active ordinary user turn and checks its generation. Tasks, peer conversations
-and event-summary turns cannot manage filters. External notification content grants
-no write authority. Updates cannot retarget another assistant. Owner settings can
-change the target through the same business operation. Every write uses an
-idempotent request ID and revision check, returns the current effective configuration
-and revision, and rejects reuse with different input. A changed connected account
-requires an explicit save using its new `account_id`; an existing binding is never
-silently moved to another account. Unbound legacy configurations bind once when a
-connected account becomes available.
+In **Settings → Third-party accounts**, expand the GitHub account once to edit its
+subscription list. Each subscription has a stable ID, receiving assistant,
+enabled flag, independent revision and repository/reason/subject-type/thread
+whitelists. One assistant may have several subscriptions; each may include several
+repositories. Fields combine with AND, values within a field with OR. `null`
+means unrestricted and `[]` matches nothing. Every create/replace explicitly
+supplies all four filter fields. New repository subscriptions do not implicitly
+force `mention`. Thread IDs are numeric Notifications thread IDs, not issue or PR
+numbers. Drafts retain their starting revision across refresh and language changes;
+conflicts keep the draft. Saves and deletes use an idempotent `request_id`.
 
-This repository's general MCP support is a **client** for independently installed
-servers. It does not expose these Control-owned tools to external MCP clients or
-the official GitHub MCP server. The native assistant call path is the supported
-management surface; a standalone Runtime plugin/MCP process must not write the
-Control database or impersonate its owner.
+On the first connected list/bootstrap with an available assistant, the plugin
+atomically initializes one ordinary subscription for the first assistant in
+persistent creation order: all repositories, only `mention`. With no assistant,
+it waits. An existing root always wins over defaults, including a manually created
+collection or an empty collection after deleting every subscription. Reconnect,
+restart and account replacement never recreate a deleted default. The retained
+root is the persistent initialization marker. Legacy subscriptions without an
+account bind once. A different account requires an explicit replace with the new
+`account_id`; old subscriptions do not silently follow it.
 
-The GitHub plugin additionally provides `github_read_notifications`. It reads one
-page from GitHub Notifications using `since`, `before`, `all`, `participating`,
-`page` and `per_page` (default 30, maximum 100). `all` includes read notifications;
-`participating` uses GitHub's participating/mention restriction, not a fabricated
-notification reason. Optional local filters use the same whitelist semantics,
-with omitted fields unrestricted for this independent read. Results include stable
-thread/event identifiers, source URLs, GitHub reasons, `next_page` and the reason
-semantics caveat. An empty filtered page may still have a next page. Pass the same
-range/filter parameters with that next page. This tool makes only GET requests,
-does not expand comment bodies, modify read/watch/subscription state, enqueue
-inbox events or advance the realtime checkpoint. Assistants can use it on demand
-or through an existing user-authorized Cron with a prior query timestamp. Installing
-this feature creates no Cron or automatic reply task. Both plugin tools are loaded
-from the bundled GitHub package through the existing supervised Node host.
+Polling shares one account scan and matches every enabled subscription inside
+the plugin. A snapshot matching several assistants goes once to each; overlapping
+subscriptions for the same assistant produce one update. Details are expanded
+once, then shared. Pending groups are keyed by receiving assistant and subject.
+The host commits **all** receiver envelopes and the shared checkpoint in one
+transaction. Backpressure or a conflicting event rolls back the entire exchange,
+so the next attempt starts from its last accepted checkpoint. The shared instance
+has a 64-message queued bound; a slow receiver can therefore delay every receiver.
+At most eight groups emit per exchange. Configuration is bounded to 16 KiB and
+100 subscriptions; either limit can reject a save.
 
-Tasks migration `0014_github_notification_filters` converts the old configuration.
-Old empty/missing reason lists were indistinguishable from the broad default, so
-they conservatively become `mention` only, including deliberately broad empty
-selections whose intent cannot be recovered. Explicit nonempty reason/repository
-lists, enabled state and recipients survive. Old empty repository lists become
-`null` (unrestricted). Pending, not-yet-enqueued groups are discarded; cursors,
-thread markers and accepted inbox receipts survive. Unknown explicit legacy
-values remain visible and must be corrected to a supported value before polling.
+Each subscription revision has its own `changed_at` boundary. Replace, disable,
+delete and retarget revalidate pending snapshots for that subscription without
+removing valid snapshots for other subscriptions or assistants. The root revision
+provides collection CAS and fences old in-flight exchanges. Concurrent writes to
+different subscriptions can still conflict at this collection boundary; retry
+from a fresh list. Broadening, re-enabling or retargeting admits only snapshots
+updated after that save and does not replay old history. Already accepted inbox
+messages keep their original route. Missing assistants do not receive events and
+do not block other subscriptions on subsequent polls.
 
-Every later configuration save also discards pending groups and an incomplete
-scan, retaining cursor/dedup records and setting a timestamp boundary for future
-updates. This intentionally drops unaccepted groups even on broadening or a
-recipient-only save. A stale in-flight exchange cannot commit after the revision
-changes. Broadening or re-enabling does not replay snapshots from before that
-save; already accepted inbox messages retain their original route. As with
-GitHub's timestamp snapshot API, same-timestamp activity and deleted/transient
-updates cannot be reconstructed.
+GitHub reasons describe why a thread is present: `mention` can persist on later
+comments. `comment` and `author` do not prove a direct reply. There is no direct
+reply filter, repository activity backfill, automatic reply engine or daily queue.
+“Every reason in fiber” means every matching fiber thread in the **personal
+Notifications feed**, not all activity in that repository. Filters never change
+GitHub watch, thread subscription or read/unread state.
+
+`read_notifications` independently reads one Notifications page with `since`,
+`before`, `all`, `participating`, `page` and `per_page` (default 30, maximum 100).
+Optional local whitelists have the same semantics; omitted reader filters are
+unrestricted. Results contain thread IDs, reasons, links and `next_page`; an empty
+filtered page may still have a next page. Repeat the same parameters with that
+page. It performs GET only, does not expand comment bodies, create subscriptions,
+enqueue messages or advance the realtime checkpoint. Installing the plugin creates
+no Cron. Analysis and replies remain agent work under existing authorization.
+
+Migration `0014_github_notification_filters` narrows ambiguous old broad reason
+lists to `mention`, keeps explicit nonempty filters and turns old empty repository
+lists into `null`. Migration `0015_plugin_mcp_subscriptions` converts the actual
+single binding into `legacy-github`, retaining its recipient, enabled state,
+account, filters and prior timestamp boundary. It preserves cursors, thread
+markers, write receipts and accepted inbox messages while retiring incompatible
+unaccepted groups and scans. The retained initialized root prevents default
+resurrection. Published migrations are unchanged.
 
 The plugin uses only GET requests to the GitHub REST API. It requests all thread
 states (including read threads), respects `X-Poll-Interval`, and overlaps its
@@ -404,8 +443,8 @@ prove this endpoint is usable.
 Connections with the `allowances` capability use an independent background
 instance per connection and source package. The plugin identity, instance routing,
 queue bounds and atomic checkpoint/inbox acceptance rules above apply. Connection
-settings own these monitors; the plugin notification list shows background
-contributions. See [Provider contributions](model-directory.md#provider-contributions)
+settings own these monitors; connection monitor instances are excluded from
+the subscription settings projection. See [Provider contributions](model-directory.md#provider-contributions)
 for model connections and their shared metadata reader.
 
 Monitoring defaults to enabled at 90 percent. An initially empty target binds to

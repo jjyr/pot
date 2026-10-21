@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Usage compaction fixture</title>
+<link id="styles" rel="stylesheet" href="/web/src/styles.css">
+<style>html,body{height:auto;overflow:auto}body{margin:0;background:var(--canvas);color:var(--text)}#fixture-controls{padding:12px;display:flex;gap:12px;flex-wrap:wrap}#result{white-space:pre-wrap;padding:12px}.capture #fixture-controls,.capture #result{display:none}</style>
+<div id="fixture-controls">
+  <label>Language <select id="fixture-locale"><option value="en">English</option><option value="zh-CN">简体中文</option></select></label>
+  <label>Theme <select id="fixture-theme"><option value="light">Light</option><option value="dark">Dark</option></select></label>
+  <label>Scenario <select id="fixture-case"><option value="complete">Complete</option><option value="empty">Empty</option><option value="unknown">Unknown cache</option><option value="partial">Partial usage</option></select></label>
+</div>
+<main id="page"></main><div id="approvals"></div><div id="chat-approvals"></div><pre id="result"></pre>
+<script type="module" src="../go-ui-usage-compaction-browser.mjs"></script>
+</html>

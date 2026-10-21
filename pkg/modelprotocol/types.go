@@ -137,9 +137,10 @@ type Request struct {
 }
 type Response = Message
 type UsageReport struct {
-	InputTokens     *uint64 `json:"prompt_tokens"`
-	OutputTokens    *uint64 `json:"completion_tokens"`
-	CacheReadTokens *uint64 `json:"prompt_cache_hit_tokens"`
+	InputTokens      *uint64 `json:"prompt_tokens"`
+	OutputTokens     *uint64 `json:"completion_tokens"`
+	CacheReadTokens  *uint64 `json:"prompt_cache_hit_tokens"`
+	CacheWriteTokens *uint64 `json:"prompt_cache_write_tokens"`
 }
 type StreamEvent struct {
 	TextDelta string

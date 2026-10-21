@@ -7,6 +7,7 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 	m "github.com/jjyr/pot/pkg/modelprotocol"
 	"strings"
+	"time"
 )
 
 const compactSystem = `默认正常处理任务。仅当最后输入明确要求 compact 时，只输出续接摘要，不继续任务、不调用工具。
@@ -23,6 +24,9 @@ const compactRequest = `<pot_compact_request>
 func (a *Agent) compact(ctx context.Context, execution core.ExecutionContext, thread core.Thread, state *Checkpoint, input *m.Request, sections []core.ContextSection, vision bool, emit func(core.Update) error) (result error) {
 	settings := thread.Config.Params.Agent
 	if !settings.AutoCompact {
+		return nil
+	}
+	if a.CompactOnly && !a.CompactDeadline.IsZero() && !time.Now().Before(a.CompactDeadline) {
 		return nil
 	}
 	prepared := *input

@@ -35,6 +35,16 @@ type ModelTotal struct {
 	Model string `json:"model"`
 	Totals
 }
+
+// CompactionTotal is a subset of ordinary request accounting. Known token
+// sums remain available when another attempt has incomplete provider usage.
+type CompactionTotal struct {
+	Kind string `json:"kind"`
+	Totals
+	InputKnown  bool `json:"input_known"`
+	OutputKnown bool `json:"output_known"`
+	CacheKnown  bool `json:"cache_known"`
+}
 type AgentModel struct {
 	Agent string `json:"agent"`
 	Model string `json:"model"`
@@ -74,19 +84,20 @@ type CompactionRecord struct {
 	Totals
 }
 type Summary struct {
-	RoutingTotal Totals          `json:"routing_total"`
-	Days         int             `json:"days"`
-	Timezone     string          `json:"timezone"`
-	Scope        string          `json:"scope"`
-	Total        Totals          `json:"total"`
-	Lifetime     Totals          `json:"lifetime"`
-	Historical   Totals          `json:"historical"`
-	Buckets      []Bucket        `json:"buckets"`
-	Agents       []AgentTotal    `json:"agents"`
-	Models       []ModelTotal    `json:"models"`
-	Quota        Quota           `json:"quota"`
-	Waiting      *Waiting        `json:"waiting"`
-	Capabilities map[string]bool `json:"capabilities"`
+	RoutingTotal     Totals            `json:"routing_total"`
+	Days             int               `json:"days"`
+	Timezone         string            `json:"timezone"`
+	Scope            string            `json:"scope"`
+	Total            Totals            `json:"total"`
+	Lifetime         Totals            `json:"lifetime"`
+	Historical       Totals            `json:"historical"`
+	Buckets          []Bucket          `json:"buckets"`
+	Agents           []AgentTotal      `json:"agents"`
+	Models           []ModelTotal      `json:"models"`
+	CompactionTotals []CompactionTotal `json:"compaction_totals"`
+	Quota            Quota             `json:"quota"`
+	Waiting          *Waiting          `json:"waiting"`
+	Capabilities     map[string]bool   `json:"capabilities"`
 }
 
 func aggregate(ctx context.Context, db queryer, scope string, start, end int64, extra string, args ...any) (Totals, error) {
@@ -136,6 +147,9 @@ func summary(ctx context.Context, db queryDB, q Query, atMS int64) (Summary, err
 	stop := min(end.UnixMilli(), atMS+1)
 	s := Summary{Days: q.Days, Timezone: q.Timezone, Scope: q.Scope, Capabilities: map[string]bool{"compaction": true, "provider_quota": true}}
 	if err = calendarSummary(ctx, db, q, first, zone, atMS, &s); err != nil {
+		return s, err
+	}
+	if s.CompactionTotals, err = compactionTotals(ctx, db, q.Scope, begin.UnixMilli(), stop); err != nil {
 		return s, err
 	}
 	if s.Lifetime, err = aggregate(ctx, db, q.Scope, 0, math.MaxInt64, ""); err != nil {

@@ -48,7 +48,7 @@ func TestUsageSummaryAndIndependentListRoutes(t *testing.T) {
 			if err := json.Unmarshal(data, &summary); err != nil || summary.Days != 365 || len(summary.Buckets) != 365 {
 				t.Fatal("summary must default to a year of daily slots", string(data), err)
 			}
-			if value["total"] == nil || value["buckets"] == nil || value["agents"] == nil || value["models"] == nil || value["requests"] != nil || value["agent_models"] != nil || value["tools"] != nil || value["compactions"] != nil {
+			if value["total"] == nil || value["buckets"] == nil || value["agents"] == nil || value["models"] == nil || string(value["compaction_totals"]) != "[]" || value["requests"] != nil || value["agent_models"] != nil || value["tools"] != nil || value["compactions"] != nil {
 				t.Fatal("summary must not load detail lists", string(data))
 			}
 		} else if value["items"] == nil || string(value["items"]) == "null" || value["next_offset"] == nil || value["total"] != nil {

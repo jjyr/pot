@@ -218,7 +218,11 @@ func (f *turnFeedback) Observe(ctx context.Context, observation agent.Observatio
 	}
 	if observation.Kind == "request_finished" && observation.Stage == "agent" && observation.Error == nil {
 		prefix, _ := json.Marshal(observation.RequestPrefix)
-		if _, err := c.store.DB().ExecContext(ctx, "UPDATE assistant_idle_compaction SET request_id=?,finished_at=?,route=?,prefix=? WHERE singleton=1", observation.ID, storage.Now(), idleRoute(f.thread.Config), string(prefix)); err != nil {
+		var read, write *uint64
+		if observation.Usage != nil {
+			read, write = observation.Usage.CacheReadTokens, observation.Usage.CacheWriteTokens
+		}
+		if _, err := c.store.DB().ExecContext(ctx, "UPDATE assistant_idle_compaction SET request_id=?,finished_at=?,started_at=?,cache_read=?,cache_write=?,route=?,prefix=? WHERE singleton=1", observation.ID, storage.Now(), observation.StartedAtMS, read, write, idleRoute(f.thread.Config), string(prefix)); err != nil {
 			c.mu.Unlock()
 			return err
 		}

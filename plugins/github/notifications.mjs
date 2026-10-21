@@ -1,6 +1,6 @@
 // GitHub owns polling, cursors, filtering and best-effort context expansion.
 // Notification snapshots are checkpointed independently of optional detail reads.
-import {validateFilters,matches,realtimeFilters} from './filters.mjs';
+import {validateFilters,matches} from './filters.mjs';
 import {createHash} from 'node:crypto';
 const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const clean=(value,max)=>String(value??'').slice(0,max);
@@ -9,7 +9,7 @@ class Failure extends Error {constructor(status,delay){super(status);this.status
 class Budget extends Error {}
 
 export async function poll(input,options={}) {
- const now=input.now,config=realtimeFilters(input.config||{}),account=input.accounts.github;
+ const now=input.now,config=input.config||{},account=input.accounts.github;
  // Tests can inject a fake API and clock; production has no configurable origin.
  const base=options.base||'https://api.github.com',fetcher=options.fetch||fetch,clock=options.clock||(()=>performance.now());
  const deadline=clock()+25000;
@@ -48,13 +48,17 @@ export async function poll(input,options={}) {
  }
  return rows;
  };
+ const subscriptions=Array.isArray(config.subscriptions)?config.subscriptions:[];
+ const eligible=(sub,thread)=>sub.enabled&&(!input.assistants||input.assistants.includes(sub.assistant))&&sub.account_id===account&&matches(thread,sub.filters)&&(!sub.changed_at||Date.parse(thread.updated_at)>Date.parse(sub.changed_at));
  const flush=()=>{
  const events=[];
  if(state.nextEmitAt>now)return events;
  for(const [key,pending]of Object.entries(state.pending)){
  if(events.length>=8)break;
  if(now-pending.last<60000&&now-pending.first<300000)continue;
- events.push({id:account+':'+digest([key,pending.items]),title:pending.title,body:JSON.stringify({repository:pending.repository,reason:pending.reason,updates:pending.items}),url:pending.url,occurred_at:pending.updated});delete state.pending[key];
+ const items=pending.items.filter(item=>subscriptions.some(sub=>sub.assistant===pending.assistant&&eligible(sub,{id:item.thread_id,repository:{full_name:pending.repository},subject:{type:item.type},reason:item.reason,updated_at:item.updated})));
+ delete state.pending[key];if(!items.length)continue;
+ events.push({assistant:pending.assistant,id:account+':'+digest([key,items]),title:pending.title,body:JSON.stringify({repository:pending.repository,reason:pending.reason,updates:items}),url:pending.url,occurred_at:pending.updated});delete state.pending[key];
  }
  if(events.length)state.nextEmitAt=now+300000;
  return events;
@@ -66,8 +70,10 @@ export async function poll(input,options={}) {
  const enrich=[];
  let detailFailure;
  try {
- try{validateFilters(config,{binding:true});}catch{throw new Failure('overflow',3600);}
- if(config.account_id&&config.account_id!==account)throw new Failure('authorization',900);
+ try{
+ if(!config.initialized||!Array.isArray(config.subscriptions)||subscriptions.length>100)throw Error('invalid_subscriptions');
+ for(const sub of subscriptions){validateFilters(sub.filters);if(typeof sub.assistant!=='string'||typeof sub.enabled!=='boolean'||typeof sub.account_id!=='string')throw Error('invalid_subscription');}
+ }catch{throw new Failure('overflow',3600);}
  const selection=digest(config);
  if(!state.scan||state.scan.selection!==selection){
  const since=new Date(state.since?Date.parse(state.since)-120000:now-120000).toISOString();
@@ -93,24 +99,30 @@ export async function poll(input,options={}) {
  const thread=scan.rows[0],repo=thread.repository?.full_name,subject=thread.subject||{},id=String(thread.id),updated=thread.updated_at;
  if(!repo||repo.length>200||!/^[-\w.]+\/[-\w.]+$/.test(repo)||!thread.id||!Number.isFinite(Date.parse(updated))){scan.rows.shift();continue;}
  const marker=digest([updated,thread.reason,subject.latest_comment_url]),old=state.threads[id];
- const matched=matches(thread,config)&&(!state.filterSince||Date.parse(updated)>Date.parse(state.filterSince));
+ const recipients=[...new Set(subscriptions.filter(sub=>eligible(sub,thread)).map(sub=>sub.assistant))];
+ const matched=recipients.length>0;
  if(old?.marker===marker){scan.rows.shift();continue;}
  let subjectURL,match;
  try {subjectURL=new URL(subject.url||'',base);match=subjectURL.origin===new URL(base).origin&&subjectURL.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/(issues|pulls)\/(\d+)$/);}catch{}
  const expandable=match&&repo===match[1]+'/'+match[2]&&['Issue','PullRequest'].includes(subject.type);
  const key=expandable?repo+'#'+match[4]:repo+'#notification-'+id;
- if(!scan.initial&&matched&&!state.pending[key]&&Object.keys(state.pending).length>=128){
+ const newGroups=recipients.filter(assistant=>!state.pending[assistant+':'+key]).length;
+ if(!scan.initial&&matched&&Object.keys(state.pending).length+newGroups>128){
  if(!events.length)events.push(...flush());
- if(Object.keys(state.pending).length>=128){paused=true;break;}
+ if(Object.keys(state.pending).length+newGroups>128){paused=true;break;}
  }
  const record={marker,at:updated,seen:old?.seen||[],latest:subject.latest_comment_url};
  if(!scan.initial&&matched&&(old||!state.since||Date.parse(updated)>Date.parse(state.since))){
- const previous=old||{at:state.since||new Date(now).toISOString(),seen:[]},pending=state.pending[key];
- const item={type:clean(subject.type||'Notification',100),updated,reason:clean(thread.reason,200),changes:[],truncated:['Issue','PullRequest'].includes(subject.type)};
- const items=[...(pending?.items||[]),item];
+ const previous=old||{at:state.since||new Date(now).toISOString(),seen:[]};
+ const item={thread_id:id,type:clean(subject.type||'Notification',100),updated,reason:clean(thread.reason,200),changes:[],truncated:['Issue','PullRequest'].includes(subject.type)};
+ const itemSets=[];
+ for(const assistant of recipients){
+ const group=assistant+':'+key,pending=state.pending[group],items=[...(pending?.items||[]),item];
  while(Buffer.byteLength(JSON.stringify(items))>12000&&items.length>1){items.shift();item.truncated=true;}
- state.pending[key]={title:titleBytes(subject.title)||repo,repository:repo,reason:thread.reason,url:expandable?'https://github.com/'+repo+'/'+(subject.type==='PullRequest'?'pull':'issues')+'/'+match[4]:'https://github.com/notifications?query='+encodeURIComponent('repo:'+repo),updated,first:pending?.first||now,last:now,items};
- if(expandable)enrich.push({repo,subjectURL,number:match[4],subject,previous,record,item,items});
+ state.pending[group]={assistant,title:titleBytes(subject.title)||repo,repository:repo,reason:thread.reason,url:expandable?'https://github.com/'+repo+'/'+(subject.type==='PullRequest'?'pull':'issues')+'/'+match[4]:'https://github.com/notifications?query='+encodeURIComponent('repo:'+repo),updated,first:pending?.first||now,last:now,items};
+ itemSets.push(items);
+ }
+ if(expandable)enrich.push({repo,subjectURL,number:match[4],subject,previous,record,item,itemSets});
  }
  state.threads[id]=record;scan.rows.shift();
  }
@@ -128,7 +140,7 @@ export async function poll(input,options={}) {
  // Detail failures never invalidate the feed cursor or another notification.
  for(const entry of enrich){
  if(clock()>=deadline||detailReads>=8)break;
- const {repo,subjectURL,number,subject,previous,record,item,items}=entry;
+ const {repo,subjectURL,number,subject,previous,record,item,itemSets}=entry;
  try {
  const info=await json(await request(subjectURL.href,{},true)),issue='/repos/'+repo+'/issues/'+number,since='&since='+encodeURIComponent(previous.at);
  const comments=(await pages(issue+'/comments?per_page=100'+since)).map(c=>({...c,kind:'comment'}));
@@ -146,8 +158,10 @@ export async function poll(input,options={}) {
  seen.push(fingerprint);changes.push({kind:comment.kind,author:clean(comment.user?.login,100),at,body:clean(comment.body,3000),url:clean(comment.html_url,2048)});
  }
  Object.assign(item,{author:clean(info.user?.login,100),description:clean(info.body,1200),changes:changes.slice(0,30),truncated:changes.length>30});
+ for(const items of itemSets){
  while(Buffer.byteLength(JSON.stringify(items))>12000&&items.length>1){items.shift();item.truncated=true;}
  while(Buffer.byteLength(JSON.stringify(items))>12000&&item.changes.length){item.changes.pop();item.truncated=true;}
+ }
  record.seen=seen.slice(-300);
  }catch(error){
  if(error.status==='rate_limited'||error.status==='authorization'){detailFailure=error;break;}

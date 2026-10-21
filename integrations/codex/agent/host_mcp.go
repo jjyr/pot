@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/jjyr/pot/pkg/mcp"
 )
 
 type hostToolInput struct {
