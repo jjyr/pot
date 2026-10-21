@@ -285,9 +285,14 @@ def prepare_plugins(destination, platform):
             continue
         manifest = json.loads(manifest_path.read_text())
         contributions = manifest["contributes"]
-        if not contributions or set(contributions) - {"tools", "background", "model_providers"}:
+        if not contributions or set(contributions) - {
+            "tools",
+            "background",
+            "model_providers",
+            "mcp",
+        }:
             raise ValueError("unsupported plugin capability")
-        targets = {"tools": "runtime", "background": "control"}
+        targets = {"tools": "runtime", "background": "control", "mcp": "control"}
         declarations = []
         for capability, declaration in contributions.items():
             if capability == "model_providers":

@@ -232,3 +232,12 @@ notifications](plugins.md#github-notifications) for account binding, supported
 management tools and configuration-boundary behavior.
 
 `control/0021_agent_link_addresses` records independently enabled Pot peer endpoints, preserving the existing configured endpoint. Startup restores listeners after migration without replaying agent work.
+
+`tasks/0015_plugin_mcp_subscriptions` converts the previous GitHub binding into a
+plugin-owned subscription collection with a persistent initialization marker.
+The original target, disablement, explicit filters and account become one
+`legacy-github` subscription; the host root becomes an enabled shared scanner.
+Cursor/thread deduplication, accepted inbox messages and write receipts survive;
+incompatible unaccepted pending groups and unfinished scans are retired. The
+root remains present after deleting the last subscription, preventing default
+recreation on restart or reconnect.

@@ -126,6 +126,9 @@ func (s *Service) extensionCatalog(ctx context.Context, owner string) ([]Extensi
 				}
 			}
 		}
+		if p.Manifest.Contributes.MCP != nil {
+			item.Tools = append(item.Tools, "mcp_"+strings.ReplaceAll(p.Manifest.ID, "-", "_"))
+		}
 		item.Background = p.Manifest.Contributes.Background != nil
 		if p.Manifest.Contributes.ModelProviders != nil {
 			item.ModelProviders = true
@@ -413,6 +416,12 @@ func (s *Service) installExtension(ctx context.Context, c ExtensionCommand, entr
 					return nil, err
 				}
 				files = append(files, p.Manifest.Contributes.Tools.Files...)
+			}
+			if p.Manifest.Contributes.MCP != nil {
+				if _, err = p.MCPIdentity(); err != nil {
+					return nil, err
+				}
+				files = append(files, p.Manifest.Contributes.MCP.Files...)
 			}
 			if p.Manifest.Contributes.Background != nil {
 				if _, err = p.BackgroundIdentity(); err != nil {

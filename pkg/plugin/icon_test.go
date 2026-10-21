@@ -28,6 +28,9 @@ func TestPackageIconsAreLocalAndNonExecutable(t *testing.T) {
 		if _, err = installed.Icon(); err != nil {
 			t.Fatal(name, err)
 		}
+		if installed.Manifest.Contributes.Tools == nil {
+			continue
+		}
 		bundle, err := installed.ToolBundle()
 		if err != nil {
 			t.Fatal(err)

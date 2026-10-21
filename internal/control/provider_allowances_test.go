@@ -146,7 +146,16 @@ func TestProviderAllowanceDefaultsCredentialsWaitingAndOffPersistence(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, b := range pluginView.(map[string]any)["items"].([]assistant.BackgroundBinding) {
+	raw, _ := json.Marshal(pluginView)
+	var projection struct {
+		Items []struct {
+			ConnectionID string `json:"connection_id"`
+		}
+	}
+	if err = json.Unmarshal(raw, &projection); err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range projection.Items {
 		if b.ConnectionID != "" {
 			t.Fatal("connection monitor leaked into background extension settings", b)
 		}

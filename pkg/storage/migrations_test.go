@@ -669,7 +669,7 @@ func TestGitHubNotificationMigrationCancelsHistoryAndPreservesDelivery(t *testin
 			if err = json.Unmarshal([]byte(raw), &s); err != nil {
 				t.Fatal(err)
 			}
-			if c["existing"] != nil || c["existing_account"] != nil || s["manual"] != nil || s["scan"] != nil || s["since"] != "2026-01-01T00:00:00Z" || s["pending"] == nil || s["threads"] == nil || revision != 11 || diagnostic != "" || conversation != "conversation" {
+			if c["existing"] != nil || c["existing_account"] != nil || s["manual"] != nil || s["scan"] != nil || s["since"] != "2026-01-01T00:00:00Z" || s["pending"] == nil || s["threads"] == nil || revision != 12 || diagnostic != "" || conversation != "conversation" {
 				t.Fatal(config, raw, revision, diagnostic, conversation)
 			}
 			if !consumed && (next != 0 || status != "pending" || s["nextPollAt"] != float64(0)) {
