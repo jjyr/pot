@@ -18,7 +18,11 @@ import (
 	"github.com/jjyr/pot/pkg/processscope"
 )
 
-const maxResult = 16000
+const (
+	maxResult = 16000
+	// Tool results and resumed threads can be much larger than the final reply.
+	maxAppServerMessage = 4 * 1024 * 1024
+)
 
 // Session binds an owner-selected workspace and permission mode to a persistent
 // Codex thread. Restarting App Server resumes that thread; it never starts over
@@ -119,7 +123,7 @@ func (a *appTurn) interrupt() {
 func (a *appTurn) read(output io.Reader) {
 	defer close(a.readerDone)
 	scanner := bufio.NewScanner(output)
-	scanner.Buffer(make([]byte, 4096), 256*1024)
+	scanner.Buffer(make([]byte, 4096), maxAppServerMessage)
 	for scanner.Scan() {
 		var m rpcMessage
 		if json.Unmarshal(scanner.Bytes(), &m) != nil {
@@ -148,6 +152,15 @@ func (a *appTurn) read(output io.Reader) {
 			continue
 		}
 		a.notification(m)
+		select {
+		case <-a.done:
+			return
+		default:
+		}
+	}
+	if scanner.Err() != nil {
+		a.finish("failed", "codex_jsonl_read_failed_outcome_unknown")
+		return
 	}
 	a.finish("failed", "codex_process_ended_outcome_unknown")
 }
@@ -169,6 +182,11 @@ func (a *appTurn) approval(m rpcMessage) {
 	}
 }
 func (a *appTurn) notification(m rpcMessage) {
+	switch m.Method {
+	case "turn/started", "turn/completed", "item/completed":
+	default:
+		return
+	}
 	var p struct {
 		ThreadID string `json:"threadId"`
 		Turn     struct {
@@ -178,6 +196,7 @@ func (a *appTurn) notification(m rpcMessage) {
 		Item struct {
 			Type    string `json:"type"`
 			Text    string `json:"text"`
+			Phase   string `json:"phase"`
 			Changes []struct {
 				Path string `json:"path"`
 			} `json:"changes"`
@@ -226,7 +245,9 @@ func (a *appTurn) notification(m rpcMessage) {
 	case "item/completed":
 		a.mu.Lock()
 		defer a.mu.Unlock()
-		if p.Item.Type == "agentMessage" {
+		// Phase is optional in the App Server protocol. Explicit intermediate
+		// messages never become the final reply or consume its bounded space.
+		if p.Item.Type == "agentMessage" && (p.Item.Phase == "" || p.Item.Phase == "final_answer") {
 			a.result.Text = trimBytes(a.result.Text+p.Item.Text+"\n", maxResult)
 		}
 		if p.Item.Type == "fileChange" {
@@ -333,7 +354,27 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 			result.Error = "codex_cleanup_unconfirmed_outcome_unknown"
 		}
 	}()
-	if _, err = a.rpc(ctx, "initialize", map[string]any{"clientInfo": map[string]string{"name": "pot_agent_link", "version": "1"}, "capabilities": map[string]bool{"experimentalApi": false}}); err != nil {
+	if _, err = a.rpc(ctx, "initialize", map[string]any{
+		"clientInfo": map[string]string{"name": "pot_agent_link", "version": "1"},
+		"capabilities": map[string]any{
+			"experimentalApi": false,
+			// item/completed must remain enabled: it carries both tool results
+			// and authoritative final answers. Approval requests are not muted.
+			"optOutNotificationMethods": []string{
+				"item/started",
+				"item/agentMessage/delta",
+				"item/plan/delta",
+				"item/reasoning/summaryTextDelta",
+				"item/reasoning/summaryPartAdded",
+				"item/reasoning/textDelta",
+				"item/commandExecution/outputDelta",
+				"item/fileChange/outputDelta",
+				"turn/diff/updated",
+				"turn/plan/updated",
+				"thread/tokenUsage/updated",
+			},
+		},
+	}); err != nil {
 		a.finish("failed", "codex_initialize_failed")
 		return
 	}
@@ -346,6 +387,7 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 	if s.ThreadID != "" {
 		method = "thread/resume"
 		params["threadId"] = s.ThreadID
+		params["excludeTurns"] = true
 	} else {
 		params["ephemeral"] = false
 	}

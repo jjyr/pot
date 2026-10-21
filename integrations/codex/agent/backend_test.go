@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,6 +126,144 @@ func TestPersistentSessionSerializesChatAndTasks(t *testing.T) {
 	}
 }
 func originalIdentity(b *backend, a assistant) protocol.AgentRef { return b.identity(a).Address }
+
+func TestMessageReplyAfterLargeToolResult(t *testing.T) {
+	b := testBackend(t)
+	ctx := context.Background()
+	a, err := b.resolve(ctx, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := protocol.Envelope{ID: "large-tool-message", Kind: "message", From: protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}, To: b.identity(a).Address, ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: "large-tool-result"}
+	mailbox := &hostMailbox{db: b.db, local: parent.To, backend: b}
+	if _, err = mailbox.Deliver(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	if err = b.receiveMessages(ctx); err != nil {
+		t.Fatal(err)
+	}
+	j, err := b.read(ctx, parent.From, jobID(parent.From, "mail:"+parent.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.execute(ctx, j)
+	completed := awaitTask(t, b, parent.From, j.Task.ID, "completed")
+	if completed.Result != "result: large-tool-result\n" {
+		t.Fatalf("final reply contains progress or lost its answer: %+v", completed)
+	}
+	if err = b.publishMessages(ctx); err != nil {
+		t.Fatal(err)
+	}
+	replies, err := mailbox.PendingNode(ctx, parent.To.NodeID, parent.From.NodeID)
+	if err != nil || len(replies) != 1 {
+		t.Fatal(replies, err)
+	}
+	if reply := replies[0]; reply.Text != completed.Result || reply.To != parent.From || reply.ReplyTo == nil || *reply.ReplyTo != parent.ID || reply.ConversationID != parent.ConversationID {
+		t.Fatal("final answer lost its original route", reply)
+	}
+}
+
+func TestMessageReplyWaitsForTurnCompletion(t *testing.T) {
+	b := testBackend(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a, err := b.resolve(ctx, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := protocol.Envelope{ID: "waiting-message", Kind: "message", From: protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}, To: b.identity(a).Address, ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: "hold-after-answer"}
+	mailbox := &hostMailbox{db: b.db, local: parent.To, backend: b}
+	if _, err = mailbox.Deliver(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	if err = b.receiveMessages(ctx); err != nil {
+		t.Fatal(err)
+	}
+	j, err := b.read(ctx, parent.From, jobID(parent.From, "mail:"+parent.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { defer close(done); b.execute(ctx, j) }()
+	t.Cleanup(func() { cancel(); <-done })
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err = os.Stat(filepath.Join(a.Workspace, "answer-ready")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("fixture did not produce the final answer", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// The fixture emitted its final answer but has not ended the turn.
+	if err = b.publishMessages(ctx); err != nil {
+		t.Fatal(err)
+	}
+	replies, err := mailbox.PendingNode(ctx, parent.To.NodeID, parent.From.NodeID)
+	if err != nil || len(replies) != 0 {
+		t.Fatal("answer delivered before turn completion", replies, err)
+	}
+	if err = os.WriteFile(filepath.Join(a.Workspace, "complete-turn"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	awaitTask(t, b, parent.From, j.Task.ID, "completed")
+	for i := 0; i < 2; i++ {
+		if err = b.publishMessages(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	replies, err = mailbox.PendingNode(ctx, parent.To.NodeID, parent.From.NodeID)
+	if err != nil || len(replies) != 1 || replies[0].Text != "result: hold-after-answer\n" {
+		t.Fatal("turn did not deliver one final reply", replies, err)
+	}
+}
+
+func TestUnsuccessfulMessageRepliesIncludeOutcome(t *testing.T) {
+	for _, state := range []string{"failed", "cancelled"} {
+		for _, tc := range []struct{ name, output, want string }{
+			{"empty", "", ""},
+			{"partial", "partial output", "partial output"},
+			{"escaped", strings.Repeat("\x00", maxResult), strings.Repeat("\x00", maxResult/2)},
+		} {
+			t.Run(state+"/"+tc.name, func(t *testing.T) {
+				b := testBackend(t)
+				ctx := context.Background()
+				a, err := b.resolve(ctx, "codex")
+				if err != nil {
+					t.Fatal(err)
+				}
+				parent := protocol.Envelope{ID: "failed-message", Kind: "message", From: protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}, To: b.identity(a).Address, ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: "request"}
+				mailbox := &hostMailbox{db: b.db, local: parent.To, backend: b}
+				if _, err = mailbox.Deliver(ctx, parent); err != nil {
+					t.Fatal(err)
+				}
+				if err = b.receiveMessages(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if err = b.update(ctx, jobID(parent.From, "mail:"+parent.ID), func(j *job) error {
+					j.Task.State, j.Task.Result, j.Task.Error = state, tc.output, "codex_jsonl_read_failed_outcome_unknown"
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				for i := 0; i < 2; i++ {
+					if err = b.publishMessages(ctx); err != nil {
+						t.Fatal(err)
+					}
+				}
+				replies, err := mailbox.PendingNode(ctx, parent.To.NodeID, parent.From.NodeID)
+				if err != nil || len(replies) != 1 {
+					t.Fatal("missing or repeated terminal reply", replies, err)
+				}
+				var outcome map[string]string
+				if err = json.Unmarshal([]byte(replies[0].Text), &outcome); err != nil || outcome["state"] != state || outcome["error"] != "codex_jsonl_read_failed_outcome_unknown" || outcome["partial_output"] != tc.want {
+					t.Fatal("failure concealed by partial text", replies[0], err)
+				}
+			})
+		}
+	}
+}
 func TestDefaultRetryBindingAndCallerScope(t *testing.T) {
 	b := testBackend(t)
 	ctx := context.Background()

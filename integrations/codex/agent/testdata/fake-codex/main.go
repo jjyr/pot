@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -22,8 +24,14 @@ func main() {
 	var mu sync.Mutex
 	send := func(v any) { mu.Lock(); defer mu.Unlock(); _ = json.NewEncoder(os.Stdout).Encode(v) }
 	reply := func(id any, v any) { send(map[string]any{"id": id, "result": v}) }
-	notification := func(method string, p any) { send(map[string]any{"method": method, "params": p}) }
+	muted := map[string]bool{}
+	notification := func(method string, p any) {
+		if !muted[method] {
+			send(map[string]any{"method": method, "params": p})
+		}
+	}
 	threadID := fmt.Sprintf("thread-%d", os.Getpid())
+	workspace := ""
 	state := 0
 	prompt := ""
 	scanner := bufio.NewScanner(os.Stdin)
@@ -33,13 +41,17 @@ func main() {
 			ID     any    `json:"id"`
 			Method string `json:"method"`
 			Params struct {
-				ClientInfo any                           `json:"clientInfo"`
-				Cwd        string                        `json:"cwd"`
-				Sandbox    string                        `json:"sandbox"`
-				Approval   string                        `json:"approvalPolicy"`
-				ThreadID   string                        `json:"threadId"`
-				TurnID     string                        `json:"turnId"`
-				Input      []struct{ Type, Text string } `json:"input"`
+				ClientInfo   any `json:"clientInfo"`
+				Capabilities struct {
+					OptOut []string `json:"optOutNotificationMethods"`
+				} `json:"capabilities"`
+				Cwd          string                        `json:"cwd"`
+				Sandbox      string                        `json:"sandbox"`
+				Approval     string                        `json:"approvalPolicy"`
+				ThreadID     string                        `json:"threadId"`
+				ExcludeTurns bool                          `json:"excludeTurns"`
+				TurnID       string                        `json:"turnId"`
+				Input        []struct{ Type, Text string } `json:"input"`
 			} `json:"params"`
 			Result map[string]any `json:"result"`
 		}
@@ -52,6 +64,12 @@ func main() {
 				os.Exit(14)
 			}
 			state = 1
+			for _, method := range m.Params.Capabilities.OptOut {
+				muted[method] = true
+			}
+			if !muted["item/commandExecution/outputDelta"] || !muted["item/agentMessage/delta"] || muted["item/completed"] || muted["turn/completed"] || muted["turn/started"] {
+				os.Exit(22)
+			}
 			reply(m.ID, map[string]any{"userAgent": "fake-codex/0.163.0"})
 		case "initialized":
 			if state != 1 {
@@ -63,8 +81,9 @@ func main() {
 				os.Exit(16)
 			}
 			state = 3
+			workspace = m.Params.Cwd
 			if m.Method == "thread/resume" {
-				if m.Params.ThreadID == "" {
+				if m.Params.ThreadID == "" || !m.Params.ExcludeTurns {
 					os.Exit(21)
 				}
 				threadID = m.Params.ThreadID
@@ -86,12 +105,28 @@ func main() {
 			if prompt == "hang" {
 				continue
 			}
+			if prompt == "large-tool-result" {
+				notification("item/completed", map[string]any{"threadId": threadID, "item": map[string]any{"type": "mcpToolCall", "result": map[string]string{"text": strings.Repeat("x", 722126)}}})
+			}
 			go func() {
+				notification("item/completed", map[string]any{"threadId": threadID, "item": map[string]string{"type": "agentMessage", "phase": "commentary", "text": "Checking the request."}})
 				for i := 0; i < 3; i++ {
 					notification("item/agentMessage/delta", map[string]any{"threadId": threadID, "itemId": "answer-1", "delta": fmt.Sprint(i)})
 					time.Sleep(15 * time.Millisecond)
 				}
-				notification("item/completed", map[string]any{"threadId": threadID, "item": map[string]string{"type": "agentMessage", "text": "result: " + prompt}})
+				notification("item/completed", map[string]any{"threadId": threadID, "item": map[string]string{"type": "agentMessage", "phase": "partial_answer", "text": "Preliminary answer."}})
+				notification("item/completed", map[string]any{"threadId": threadID, "item": map[string]string{"type": "agentMessage", "phase": "final_answer", "text": "result: " + prompt}})
+				if prompt == "hold-after-answer" {
+					if os.WriteFile(filepath.Join(workspace, "answer-ready"), nil, 0600) != nil {
+						os.Exit(23)
+					}
+					for {
+						if _, err := os.Stat(filepath.Join(workspace, "complete-turn")); err == nil {
+							break
+						}
+						time.Sleep(10 * time.Millisecond)
+					}
+				}
 				notification("turn/completed", map[string]any{"threadId": threadID, "turn": map[string]string{"id": "turn-1", "status": "completed"}})
 			}()
 		case "turn/interrupt":
