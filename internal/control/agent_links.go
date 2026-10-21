@@ -31,6 +31,10 @@ type agentLinkHost struct {
 	setup        sync.Mutex
 	networkError string
 	registry     *linkhost.Registry
+	discoveryMu  sync.Mutex
+	discoveryAt  time.Time
+	discovered   []linkhost.Address
+	additional   map[string]*linkhost.PeerListener
 }
 
 type controlLinkMailbox struct{ s *Service }
@@ -135,6 +139,9 @@ func (s *Service) openAgentLinks() error {
 		}
 		host.networkError = "agent_link_listener_unavailable"
 	}
+	if err = s.restoreAgentAddresses(s.ctx); err != nil {
+		return err
+	}
 	s.pluginWG.Add(1)
 	go func() { defer s.pluginWG.Done(); s.linkPlugins.Run(s.ctx) }()
 	return nil
@@ -196,6 +203,11 @@ func (s *Service) closeAgentLinks() error {
 	s.agentLinks.mu.Lock()
 	server := s.agentLinks.server
 	s.agentLinks.mu.Unlock()
+	s.agentLinks.setup.Lock()
+	defer s.agentLinks.setup.Unlock()
+	for _, listener := range s.agentLinks.additional {
+		listener.Close()
+	}
 	if server != nil {
 		return server.Close()
 	}
@@ -272,7 +284,11 @@ func (s *Service) AgentLinks(ctx context.Context) (any, error) {
 		}
 		items = append(items, map[string]any{"assistants": assistants, "directory": c.Directory, "id": c.ID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "node_id": c.Peer.Address.NodeID, "kind": c.Peer.Adapter, "name": peerName, "address": c.Endpoint}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError, "last_exchange_at_ms": lastExchange, "outbox": localOutbox, "observation": h.service.Observation(c.ID)})
 	}
-	return map[string]any{"self": self, "items": items, "network": map[string]any{"listen": config.Listen, "endpoint": config.Endpoint, "mode": config.Mode, "status": status, "reason_code": reason}}, nil
+	addresses, err := s.agentAddresses(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"self": self, "items": items, "addresses": addresses, "network": map[string]any{"listen": config.Listen, "endpoint": config.Endpoint, "mode": config.Mode, "status": status, "reason_code": reason}}, nil
 }
 
 type AgentLinkCommand struct {
@@ -313,6 +329,12 @@ func (s *Service) ManageAgentLink(ctx context.Context, command AgentLinkCommand)
 		s.agentLinks.mu.Lock()
 		endpoint := s.agentLinks.config.Endpoint
 		s.agentLinks.mu.Unlock()
+		if command.Endpoint != "" {
+			endpoint, err = s.selectAgentAddress(ctx, command.Endpoint)
+			if err != nil {
+				return nil, agentLinkError(err)
+			}
+		}
 		if endpoint == "" {
 			return nil, protocol.APIError{Code: "agent_link_access_required"}
 		}

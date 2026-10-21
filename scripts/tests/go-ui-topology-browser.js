@@ -5,6 +5,30 @@ async page => {
  const cdp=await page.context().newCDPSession(page);await cdp.send('Network.setCacheDisabled',{cacheDisabled:true});
  await page.setViewportSize({width:1024,height:700});await page.goto('http://127.0.0.1:18743/scripts/tests/fixtures/topology.html');
  await page.getByText('3 Agents · 1 machine',{exact:true}).waitFor();
+ assert(await page.locator('#fixture-title').innerText()==='Link','English page title is Link');
+ const addresses=page.locator('.agent-link-address-row'),picker=page.getByRole('dialog',{name:'Choose a connection address',exact:true}),choose=page.locator('.agent-link-choose');
+ assert(!await addresses.first().isVisible(),'Address list is hidden by default');
+ const mapBefore=await page.locator('.topology-content').boundingBox();
+ await choose.click();await picker.waitFor();
+ assert((await page.locator('.topology-content').boundingBox()).y===mapBefore.y,'Opening addresses does not move the connection graph');
+ await page.keyboard.press('Escape');await picker.waitFor({state:'hidden'});
+ assert(await choose.evaluate(element=>document.activeElement===element),'Escape returns focus to the address button');
+ await choose.click();await picker.waitFor();
+ await page.locator('#fixture-title').click();await picker.waitFor({state:'hidden'});
+ await choose.click();await picker.waitFor();
+ assert(await addresses.count()===4,'Pot shows the same discovered address choices as Codex');
+ assert(!await page.getByRole('button',{name:'Configure access',exact:true}).count(),'Pot has no manual access configuration');
+ assert(!await page.evaluate(()=>topologyFixture.calls.some(call=>call.method==='POST')),'Opening Link does not enable addresses');
+ for(const endpoint of ['tcp://local-pot.fixture-tailnet.ts.net:8793','tcp://203.0.113.10:8793','tcp://192.168.1.24:8793','tcp://127.0.0.1:8793']){
+  const row=addresses.filter({hasText:endpoint});await row.getByRole('button',{name:'Copy connection address',exact:true}).click();await row.getByRole('button',{name:'Copied',exact:true}).waitFor();
+  assert(await page.evaluate(()=>topologyFixture.clipboard)===endpoint+'#synthetic-local-invitation','Copy uses the exact selected endpoint');
+ }
+ await page.getByRole('button',{name:'Close address list',exact:true}).click();
+ await page.locator('#fixture-scenario').selectOption('access');
+ await page.locator('.agent-link-choose').click();
+ await addresses.first().getByRole('button',{name:'Copy connection address',exact:true}).waitFor();
+ assert(!await page.getByRole('button',{name:'Configure access',exact:true}).count(),'Unconfigured Pot also uses discovered addresses');
+ await page.locator('#fixture-scenario').selectOption('ready');
  assert(await page.locator('.topology-zone').count()===2,'Local and cloud Pot keep topology regions');
  assert(await page.locator('.topology-node.machine').count()===1,'Only local physical inventory creates a machine node');
  await page.getByRole('button',{name:'mac-studio.local · Execution machine · Connected',exact:true}).click();
@@ -42,6 +66,7 @@ async page => {
  assert(await page.getByLabel('对方连接地址',{exact:true}).inputValue()==='tcp://second.example:8793#synthetic','Language switching retains the draft while validation is pending');
  await page.evaluate(()=>{topologyFixture.releasePreview();});
  await page.locator('.topology-inspector').getByRole('heading',{name:'Second Codex',exact:true}).waitFor();
+ assert(await page.locator('#fixture-title').innerText()==='连接','Chinese page title is 连接');
  const connect=await page.evaluate(()=>topologyFixture.calls.filter(call=>call.body?.action==='connect'));
  assert(connect.length===1&&connect[0].body.assistant_id===undefined,'One paste connects once without assistant binding or another wizard');
  assert(await page.locator('.topology-map').evaluate(element=>element.classList.contains('topology-paused')),'Returning from editor retains topology animation choice');
@@ -50,6 +75,17 @@ async page => {
  await page.waitForFunction(()=>!topologyFixture.links.some(link=>link.id==='new-agent'));
  await page.setViewportSize({width:393,height:700});
  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Narrow topology fits its viewport');
+ assert((await page.locator('.agent-link-address-row button').allTextContents()).every(text=>text==='复制连接地址'),'All hidden copy actions update to Chinese');
+ assert(!await addresses.first().isVisible(),'Returning from other operations leaves addresses closed');
+ await page.evaluate(()=>{topologyFixture.addresses=Array.from({length:50},(_,index)=>({kind:'private',interface:'interface-'+index,endpoint:'tcp://192.168.1.'+(index+1)+':8793'}));return topologyFixture.pages.refresh(['agent-links']);});
+ await page.locator('.agent-link-choose').click();
+ const mobilePicker=page.getByRole('dialog',{name:'选择连接地址',exact:true});await mobilePicker.waitFor();
+ assert(await mobilePicker.locator('.agent-link-address-row').count()===50,'Many interfaces remain available in the popup');
+ const box=await mobilePicker.boundingBox();assert(box.height<=500&&box.y>=0&&box.y+box.height<=700,'Many interfaces stay within a bounded popup');
+ const last=mobilePicker.locator('.agent-link-address-row').last();await last.getByRole('button',{name:'复制连接地址',exact:true}).click();
+ assert(await page.evaluate(()=>topologyFixture.clipboard)==='tcp://192.168.1.50:8793#synthetic-local-invitation','The last interface is reachable through scrolling');
+ await mobilePicker.getByRole('button',{name:'关闭地址列表',exact:true}).click();
+ assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Address popup fits the narrow viewport');
  await page.emulateMedia({reducedMotion:'reduce'});
  assert(!await page.getByRole('button',{name:'添加机器',exact:true}).count(),'Remote Runner enrollment is removed');
  assert(!errors.length,'No browser exceptions: '+errors.join('; '));

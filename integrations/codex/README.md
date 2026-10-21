@@ -61,8 +61,9 @@ For a system-browser fallback outside Codex:
 The connection page discovers loopback, active public and private interface
 addresses (IPv4 and IPv6), and Tailscale addresses. Tailscale names appear first,
 followed by Tailscale IPs, public IPs, other private IPs, loopback and unclassified
-saved addresses. Each row has its own **Copy
-connection address** action. Choose loopback for Pot on the same computer, a LAN
+saved addresses. Click **Copy connection address** to open the scrollable address
+list; it stays hidden by default. Each row has its own copy action. Choose
+loopback for Pot on the same computer, a LAN
 address for the same private network, a public address for other networks, or
 Tailscale for the same tailnet. Discovery
 only reads network state. Copying enables the selected signed peer listener and

@@ -7,7 +7,7 @@ credentials, workspaces, permissions and execution supervision. A connection
 never grants owner HTTP APIs, model proxying or raw process launch access.
 
 ```text
-Existing topology / assistant chat / task UI
+Link view / assistant chat / task UI
                      |
           Pot collaboration coordinator
                      |
@@ -42,10 +42,21 @@ Accepted tasks retain their original owner and historical reference.
 
 ## Copy and paste admission
 
-The protected local connection toolbar copies one single-use invitation. Paste
-it in the existing Add Agent editor; live verification is followed by connection,
-then the existing topology selects the new node. No assistant binding wizard is
-required. The topology graph, regions, edges and responsive inspector remain.
+The Link page (连接 in Chinese) and Codex connection page share address discovery
+and copy actions. Addresses stay in a scrollable popup opened by **Copy connection
+address**, leaving the default page for the graph and other actions. Escape, an
+outside click or the close button dismisses the popup. Opening either page reads
+local interfaces and existing Tailscale forwarding without enabling access.
+Addresses are ordered by Tailscale
+name, Tailscale IP, public IP, private IP and loopback, followed by other saved
+addresses. Copying enables only the selected endpoint, verifies this node’s
+identity and copies one single-use invitation. Tailscale copying creates private
+TCP forwarding when needed. All copied endpoints remain enabled independently
+and are restored on restart; an unavailable interface does not block startup.
+
+Paste the invitation in the existing Add Agent editor; live verification is
+followed by connection, then Link selects the new node. No assistant binding
+wizard is required. Link keeps its graph, regions, edges and responsive inspector.
 The inspector shows provided assistants, opens their existing chat UI, and offers
 disconnect, reconnect and confirmed deletion.
 
@@ -94,7 +105,7 @@ counts and states, then caches the sample in memory with its local receipt time.
 The sample is separate from the persisted directory and is lost on restart.
 Sampling failure retains the last sample with an error; disconnect retains it as
 cached data. Status changes invalidate the UI, and unchanged samples publish at
-most every 15 seconds. Topology additionally refreshes every 10 seconds while
+most every 15 seconds. Link additionally refreshes every 10 seconds while
 visible so local activity, queue timestamps and freshness remain current.
 After 30 seconds, a disconnected owner or a sampling failure, current totals
 exclude that node and assistant activity is unknown. Cached values remain labeled

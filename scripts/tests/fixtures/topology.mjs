@@ -19,7 +19,7 @@ const localAssistants=[{id:'dev',name:'Development assistant',space_id:'local'},
 const refreshDirectory=()=>{client.assistants=[...localAssistants,...projectLinkedAssistants({items:fixture.links},spaces[0])];};
 const client={desktop:true,production:true,runtime:{boot_id:'fixture-boot'},spaces,assistants:localAssistants,scope:()=>({space:'local',owner:'dev'}),request:async(path,options={})=>{
  fixture.calls.push({path,...options});const body=options.body||{},space=options.space||'local';
- if(path.startsWith('/api/v1/agent-links/invitation'))return {address:'tcp://fixture.example:8793#synthetic-local-invitation',expires_at_ms:Date.now()+3600000};
+ if(path.startsWith('/api/v1/agent-links/invitation'))return {address:(body.endpoint||'tcp://fixture.example:8793')+'#synthetic-local-invitation',expires_at_ms:Date.now()+3600000};
  if(path.startsWith('/api/v1/agent-links')){
   if(body.action==='configure'){
    if(body.mode==='tailscale'&&fixture.scenario==='tsmissing')throw Object.assign(Error('Synthetic Tailscale executable missing'),{code:'agent_link_tailscale_missing'});
@@ -42,7 +42,7 @@ const client={desktop:true,production:true,runtime:{boot_id:'fixture-boot'},spac
   if(body.action==='delete'){fixture.links=fixture.links.filter(item=>item.id!==body.id);refreshDirectory();return {deleted:true};}
   const network=fixture.networks[space],needsAccess=['access','tsmissing'].includes(fixture.scenario),endpoint=needsAccess?'':network.endpoint;
   if(!fixture.freezeObservations){fixture.localObservation.observed_at_ms=Date.now();for(const link of fixture.links)if(link.observation)link.observation.observed_at_ms=Date.now();}
-  return {self:{node_id:'local-id',kind:'pot',name:'Local Pot',address:endpoint,endpoint,status:needsAccess?'needs_access':'ready',observation:fixture.localObservation},items:fixture.links,network:{...network,endpoint}};
+  return {addresses:fixture.addresses||[{kind:'tailscale',endpoint:'tcp://local-pot.fixture-tailnet.ts.net:8793',requires_setup:true},{kind:'public',interface:'en0',endpoint:'tcp://203.0.113.10:8793'},{kind:'private',interface:'en0',endpoint:'tcp://192.168.1.24:8793'},{kind:'loopback',endpoint:'tcp://127.0.0.1:8793'}],self:{node_id:'local-id',kind:'pot',name:'Local Pot',address:endpoint,endpoint,status:needsAccess?'needs_access':'ready',observation:fixture.localObservation},items:fixture.links,network:{...network,endpoint}};
  }
  if(path==='/api/v1/machines')return {items:[{id:'my-mac',name:'my-mac',hostname:'mac-studio.local',ip_addresses:['192.168.1.24','fd00::24'],os:'darwin',connected:true}]};
  if(path==='/api/v1/permissions')return {policy:policy()};

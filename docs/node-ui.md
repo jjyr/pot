@@ -11,7 +11,7 @@ and `ip_addresses` as live, best-effort presentation metadata; it does not persi
 them or change stable routing/policy IDs. Only up, non-loopback interfaces supply
 unicast addresses; link-local addresses are omitted. Addresses are deduplicated
 and sorted with IPv4 before IPv6. These addresses do not prove remote reachability.
-Topology shows the hostname and one interface IP, with all addresses and the
+Link shows the hostname and one interface IP, with all addresses and the
 stable node ID under Technical details. Linked nodes show the saved TCP endpoint's
 host and port when available; this is a connection address, not a discovered
 remote hostname or interface inventory. An incoming-only link may have no saved

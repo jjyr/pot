@@ -222,3 +222,5 @@ assistant directories and persists independent user-chat sessions. It retains
 established connection IDs, pins and historical sender bindings, expires old
 invitations and fences unfinished admissions. `tasks/0013_agent_link_direct_chat`
 adds a typed user-chat route index while preserving existing immutable envelopes.
+
+`control/0021_agent_link_addresses` records independently enabled Pot peer endpoints, preserving the existing configured endpoint. Startup restores listeners after migration without replaying agent work.
