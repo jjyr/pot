@@ -239,7 +239,7 @@ no plugin-specific delivery timer, rate table or model role. `queued` and
 Statuses are stable identifiers: `ready`, `baseline`, `backoff`, `rate_limited`,
 `authorization`, `permission`, `overflow`; the host also reports `disabled` and
 `unavailable`. The settings projection also distinguishes `pending`,
-`waiting_assistant`, `assistant_missing` and `plugin_missing` from known host
+`waiting_assistant`, `assistant_missing`, `account_changed` and `plugin_missing` from known host
 configuration state. Plugin discovery and host exchange failures retain their diagnostic in
 settings details. Host timeouts are identified explicitly; a successful exchange
 clears the previous diagnostic. Runtime status identifiers and queue counts are also
@@ -248,8 +248,9 @@ schedule a five-minute retry. The plugin receives that old checkpoint again;
 there is no false success receipt. Owner management uses authenticated
 `GET /api/v1/plugin-notifications` and
 `POST /api/v1/plugin-notifications/{plugin-id}` with
-`{enabled, assistant, config, revision}`. Revisions fence stale configuration.
-These are configuration ports, not public event ingestion or token-read APIs.
+`{request_id, enabled, assistant, config, revision}`. Revisions fence stale configuration.
+Writes return the current settings projection, including effective configuration and
+revision. These are configuration ports, not public event ingestion or token-read APIs.
 
 The event payload is the sole source of plugin title/body/URL data; the inbox
 `text` field is empty.
@@ -279,15 +280,79 @@ the revision they started with, survive background updates and language changes,
 and require an explicit save; an outdated revision is rejected without discarding
 the draft. Expansion lasts for this settings visit and resets on account changes.
 All fields are directly visible in the expanded account, without advanced sections.
-The default scope is **All notifications**, with no reason or repository exclusions.
-This includes assignments, CI activity, invitations, security alerts, and future
-GitHub reason and subject types, as well as Issue/PR updates. This scope covers
-notifications GitHub exposes to the connected account; repository activity that
-GitHub does not put in that account's notification feed is not reconstructed.
-Choose **Selected reasons** to show labeled reason checkboxes. Existing explicit
-reason selections are preserved. Repository filters remain optional comma-separated
-`owner/repo` names; blank selects the account-wide feed. There is no free-form
-API-value field or historical-inbox import setting.
+The realtime default admits only GitHub's `mention` reason. Team mentions,
+review requests, `subscribed`, `comment` and `author` require explicit selection.
+GitHub reasons describe a thread's presence in the feed: `mention` can persist
+on later updates and does not establish a fresh mention in every comment.
+`comment` and `author` do not establish a direct reply. Pot offers no direct-reply
+filter, independent repository scan, comment tracker, reply executor or daily queue.
+Allowing a PR's notification thread only allows updates GitHub already puts in the
+personal notification feed; it does not discover all PR activity.
+
+Configuration is shared by settings, the Control's native assistant tools and the
+background host. `repositories`, `reasons`, `subject_types` and `threads` are
+whitelists, combined with AND across fields and OR within each list. `null` means
+unrestricted; `[]` matches nothing. A complete saved configuration includes all
+four fields and `account_id`, the connected GitHub account's stable identity.
+Defaults are `reasons: ["mention"]` and `null` for the other lists. Disable the
+binding to stop realtime delivery. There is no exclusion DSL or action schema.
+Selected empty fields in settings mean match-none, never all. Subject types and
+reasons have supported value lists in the tool schema/help; unrestricted fields
+also accept future GitHub values. Thread IDs are numeric notification IDs returned
+by the read tool, not repository issue or PR numbers.
+
+The receiving assistant can call `github_get_notification_filters` with `{}`,
+then `github_update_notification_filters` with `{request_id, revision, enabled,
+config}`. These are native Pot Control tools, available without an additional MCP
+server install. The dispatcher binds Control and assistant identity, requires an
+active ordinary user turn and checks its generation. Tasks, peer conversations
+and event-summary turns cannot manage filters. External notification content grants
+no write authority. Updates cannot retarget another assistant. Owner settings can
+change the target through the same business operation. Every write uses an
+idempotent request ID and revision check, returns the current effective configuration
+and revision, and rejects reuse with different input. A changed connected account
+requires an explicit save using its new `account_id`; an existing binding is never
+silently moved to another account. Unbound legacy configurations bind once when a
+connected account becomes available.
+
+This repository's general MCP support is a **client** for independently installed
+servers. It does not expose these Control-owned tools to external MCP clients or
+the official GitHub MCP server. The native assistant call path is the supported
+management surface; a standalone Runtime plugin/MCP process must not write the
+Control database or impersonate its owner.
+
+The GitHub plugin additionally provides `github_read_notifications`. It reads one
+page from GitHub Notifications using `since`, `before`, `all`, `participating`,
+`page` and `per_page` (default 30, maximum 100). `all` includes read notifications;
+`participating` uses GitHub's participating/mention restriction, not a fabricated
+notification reason. Optional local filters use the same whitelist semantics,
+with omitted fields unrestricted for this independent read. Results include stable
+thread/event identifiers, source URLs, GitHub reasons, `next_page` and the reason
+semantics caveat. An empty filtered page may still have a next page. Pass the same
+range/filter parameters with that next page. This tool makes only GET requests,
+does not expand comment bodies, modify read/watch/subscription state, enqueue
+inbox events or advance the realtime checkpoint. Assistants can use it on demand
+or through an existing user-authorized Cron with a prior query timestamp. Installing
+this feature creates no Cron or automatic reply task. Both plugin tools are loaded
+from the bundled GitHub package through the existing supervised Node host.
+
+Tasks migration `0014_github_notification_filters` converts the old configuration.
+Old empty/missing reason lists were indistinguishable from the broad default, so
+they conservatively become `mention` only, including deliberately broad empty
+selections whose intent cannot be recovered. Explicit nonempty reason/repository
+lists, enabled state and recipients survive. Old empty repository lists become
+`null` (unrestricted). Pending, not-yet-enqueued groups are discarded; cursors,
+thread markers and accepted inbox receipts survive. Unknown explicit legacy
+values remain visible and must be corrected to a supported value before polling.
+
+Every later configuration save also discards pending groups and an incomplete
+scan, retaining cursor/dedup records and setting a timestamp boundary for future
+updates. This intentionally drops unaccepted groups even on broadening or a
+recipient-only save. A stale in-flight exchange cannot commit after the revision
+changes. Broadening or re-enabling does not replay snapshots from before that
+save; already accepted inbox messages retain their original route. As with
+GitHub's timestamp snapshot API, same-timestamp activity and deleted/transient
+updates cannot be reconstructed.
 
 The plugin uses only GET requests to the GitHub REST API. It requests all thread
 states (including read threads), respects `X-Poll-Interval`, and overlaps its
@@ -296,7 +361,8 @@ emitting old notifications. Account changes establish a fresh baseline. Each
 complete scan advances its time cursor; an incomplete scan retains its feed,
 next page, remaining page rows and original start time in the opaque checkpoint.
 Restart continues that scan instead of fetching its completed pages again.
-Repository filters use the corresponding repository notification endpoints.
+The account feed is scanned to retain progress for excluded threads too; local
+filters run before optional Issue/PR body/comment expansion.
 `Last-Modified` / `If-Modified-Since` apply only to non-paginated feeds.
 
 Notification ingestion takes priority over context expansion. Each changed,

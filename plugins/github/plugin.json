@@ -10,7 +10,9 @@
       "entrypoint": "index.mjs",
       "files": [
         "index.mjs",
-        "instructions.md"
+        "instructions.md",
+        "filters.mjs",
+        "read-notifications.mjs"
       ],
       "requirements": [
         "node",
@@ -48,6 +50,61 @@
             ],
             "additionalProperties": false
           }
+        },
+        {
+          "name": "github_read_notifications",
+          "description": "Read one page of the connected GitHub account notification feed, independently of realtime filters and checkpoints. GET only; never marks read or changes subscriptions. all=true includes read notifications; participating=true restricts to participating/mention notifications according to GitHub. Defaults: unread, account feed, 30 rows. since/before are ISO timestamps. Local whitelist filters are AND across fields, OR within each list; omitted fields allow all (omit unrestricted fields rather than passing null), empty arrays match none. thread IDs are notification IDs, not issue/PR numbers. A filtered page can be empty and still have next_page. GitHub reason is a thread-level reason and mention may persist on later comments; no direct-reply inference. No comment/body expansion.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "since": {
+                "type": "string"
+              },
+              "before": {
+                "type": "string"
+              },
+              "all": {
+                "type": "boolean"
+              },
+              "participating": {
+                "type": "boolean"
+              },
+              "page": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "per_page": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100
+              },
+              "repositories": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "subject_types": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "threads": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
         }
       ]
     },
@@ -56,7 +113,8 @@
       "execution": "control",
       "entrypoint": "notifications.mjs",
       "files": [
-        "notifications.mjs"
+        "notifications.mjs",
+        "filters.mjs"
       ],
       "credentials": {
         "GH_TOKEN": {

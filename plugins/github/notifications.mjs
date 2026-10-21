@@ -1,20 +1,15 @@
 // GitHub owns polling, cursors, filtering and best-effort context expansion.
 // Notification snapshots are checkpointed independently of optional detail reads.
+import {validateFilters,matches,realtimeFilters} from './filters.mjs';
 import {createHash} from 'node:crypto';
 const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const clean=(value,max)=>String(value??'').slice(0,max);
 const titleBytes=value=>{let text='';for(const ch of String(value??'')){if(Buffer.byteLength(text+ch)>512)break;text+=ch;}return text;};
 class Failure extends Error {constructor(status,delay){super(status);this.status=status;this.delay=delay;}}
 class Budget extends Error {}
-function validate(config){
- if(!config||typeof config!=='object'||Array.isArray(config)||Object.keys(config).some(k=>!['repositories','reasons'].includes(k)))throw new Failure('overflow',3600);
- for(const key of ['repositories','reasons'])if(config[key]!==undefined&&(!Array.isArray(config[key])||config[key].length>100||config[key].some(v=>typeof v!=='string'||v.length>200)))throw new Failure('overflow',3600);
- if(config.repositories?.some(v=>!/^[-\w.]+\/[-\w.]+$/.test(v)))throw new Failure('overflow',3600);
- if(config.reasons?.some(v=>!/^[-a-zA-Z0-9_]+$/.test(v)))throw new Failure('overflow',3600);
-}
 
 export async function poll(input,options={}) {
- const now=input.now,config=input.config||{},account=input.accounts.github;
+ const now=input.now,config=realtimeFilters(input.config||{}),account=input.accounts.github;
  // Tests can inject a fake API and clock; production has no configurable origin.
  const base=options.base||'https://api.github.com',fetcher=options.fetch||fetch,clock=options.clock||(()=>performance.now());
  const deadline=clock()+25000;
@@ -71,11 +66,12 @@ export async function poll(input,options={}) {
  const enrich=[];
  let detailFailure;
  try {
- validate(config);
- const selection=digest([config.repositories||[],config.reasons||[]]);
+ try{validateFilters(config,{binding:true});}catch{throw new Failure('overflow',3600);}
+ if(config.account_id&&config.account_id!==account)throw new Failure('authorization',900);
+ const selection=digest(config);
  if(!state.scan||state.scan.selection!==selection){
  const since=new Date(state.since?Date.parse(state.since)-120000:now-120000).toISOString();
- state.scan={selection,at:now,initial:!state.baseline,index:0,rows:[],feeds:(config.repositories?.length?[...new Set(config.repositories)]:[null]).map(repository=>({repository,path:(repository?'/repos/'+repository:'')+'/notifications?all=true&per_page=100&since='+encodeURIComponent(since),modified:repository?state.repositoryModified?.[repository]:state.modified,paginated:false}))};
+ state.scan={selection,at:now,initial:!state.baseline,index:0,rows:[],feeds:[{path:'/notifications?all=true&per_page=100&since='+encodeURIComponent(since),modified:state.modified,paginated:false}]};
  }
  const scan=state.scan;
  let paused=false;
@@ -97,7 +93,7 @@ export async function poll(input,options={}) {
  const thread=scan.rows[0],repo=thread.repository?.full_name,subject=thread.subject||{},id=String(thread.id),updated=thread.updated_at;
  if(!repo||repo.length>200||!/^[-\w.]+\/[-\w.]+$/.test(repo)||!thread.id||!Number.isFinite(Date.parse(updated))){scan.rows.shift();continue;}
  const marker=digest([updated,thread.reason,subject.latest_comment_url]),old=state.threads[id];
- const matched=(!config.repositories?.length||config.repositories.some(r=>r.toLowerCase()===repo.toLowerCase()))&&(!config.reasons?.length||config.reasons.includes(thread.reason));
+ const matched=matches(thread,config)&&(!state.filterSince||Date.parse(updated)>Date.parse(state.filterSince));
  if(old?.marker===marker){scan.rows.shift();continue;}
  let subjectURL,match;
  try {subjectURL=new URL(subject.url||'',base);match=subjectURL.origin===new URL(base).origin&&subjectURL.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/(issues|pulls)\/(\d+)$/);}catch{}
@@ -108,7 +104,7 @@ export async function poll(input,options={}) {
  if(Object.keys(state.pending).length>=128){paused=true;break;}
  }
  const record={marker,at:updated,seen:old?.seen||[],latest:subject.latest_comment_url};
- if(!scan.initial&&matched){
+ if(!scan.initial&&matched&&(old||!state.since||Date.parse(updated)>Date.parse(state.since))){
  const previous=old||{at:state.since||new Date(now).toISOString(),seen:[]},pending=state.pending[key];
  const item={type:clean(subject.type||'Notification',100),updated,reason:clean(thread.reason,200),changes:[],truncated:['Issue','PullRequest'].includes(subject.type)};
  const items=[...(pending?.items||[]),item];
@@ -120,9 +116,8 @@ export async function poll(input,options={}) {
  }
  if(paused)break;
  if(!feed.path){
- state.repositoryModified ||= {};
  const modified=feed.paginated?null:feed.modified||null;
- if(feed.repository)state.repositoryModified[feed.repository]=modified;else state.modified=modified;
+ state.modified=modified;
  scan.index++;
  }
  }
