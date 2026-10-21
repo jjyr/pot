@@ -11,26 +11,28 @@ import (
 	"testing/fstest"
 )
 
-type fakeTailnet struct{ connects, webs, closes int }
-
-func (f *fakeTailnet) Connect(context.Context) error { f.connects++; return nil }
-func (f *fakeTailnet) Status(context.Context) (any, error) {
-	return map[string]string{"state": "Running"}, nil
-}
-func (f *fakeTailnet) SetWeb(_ context.Context, _ int, on bool) (string, error) {
-	if on {
-		f.webs++
-		return "https://fixture.example", nil
-	}
-	return "", nil
-}
-func (f *fakeTailnet) Close() error { f.closes++; return nil }
-func TestFreshAccessIsPrivateAndOwnerActionsRotateSessions(t *testing.T) {
+func TestExplicitBrowserAccessRotatesAndRevokesSessions(t *testing.T) {
 	ctx := context.Background()
-	node := &fakeTailnet{}
+	root := t.TempDir()
+	store := webui.AccessStore{Path: filepath.Join(root, "browser-access.json")}
+	if _, err := store.Load(true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Change("disable"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "access-settings.json"), []byte(`{"connected":true,"enabled":true}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{}`)) }))
 	defer upstream.Close()
-	manager, err := Open(ctx, Options{Root: t.TempDir(), Upstream: webui.Upstream{URL: upstream.URL, Credential: "control", Client: upstream.Client(), ControlID: "control"}, Assets: fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("UI")}}, Tailnet: node})
+	options := Options{Root: root, Origin: "https://fixture.example", Upstream: webui.Upstream{URL: upstream.URL, Credential: "control", Client: upstream.Client(), ControlID: "control"}, Assets: fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("UI")}}}
+	missingOrigin := options
+	missingOrigin.Origin = ""
+	if _, err := Open(missingOrigin); err == nil {
+		t.Fatal("accepted implicit browser publication")
+	}
+	manager, err := Open(options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,14 +41,19 @@ func TestFreshAccessIsPrivateAndOwnerActionsRotateSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.(map[string]any)["enabled"] != false || node.connects != 0 || node.webs != 0 {
-		t.Fatal("fresh startup published network access")
+	value := status.(map[string]any)
+	if value["enabled"] != false || value["tailscale"] != nil {
+		t.Fatal("unexpected browser status", value["enabled"])
 	}
-	if _, err = manager.Call(ctx, "POST", []byte(`{"action":"enable"}`)); err == nil {
-		t.Fatal("enabled without connection")
+	generation := value["generation"]
+	for _, action := range []string{"connect", "disconnect"} {
+		if _, err = manager.Call(ctx, "POST", []byte(`{"action":"`+action+`"}`)); err == nil {
+			t.Fatal("retired network action accepted", action)
+		}
 	}
-	if _, err = manager.Call(ctx, "POST", []byte(`{"action":"connect"}`)); err != nil {
-		t.Fatal(err)
+	status, err = manager.Call(ctx, "GET", nil)
+	if err != nil || status.(map[string]any)["generation"] != generation {
+		t.Fatal("retired network actions changed access")
 	}
 	status, err = manager.Call(ctx, "POST", []byte(`{"action":"enable"}`))
 	if err != nil {
@@ -78,11 +85,67 @@ func TestFreshAccessIsPrivateAndOwnerActionsRotateSessions(t *testing.T) {
 	if w = invoke("GET", "/api/v1/runtime", cookie, ""); w.Code != 401 {
 		t.Fatal("old cookie survived rotation", w.Code)
 	}
-	if _, err = manager.Call(ctx, "POST", []byte(`{"action":"disconnect"}`)); err != nil {
+	if _, err = manager.Call(ctx, "POST", []byte(`{"action":"disable"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if node.connects != 1 || node.webs != 1 || node.closes != 1 {
-		t.Fatal(node)
+	config, _ = manager.store.Load(false)
+	if w = invoke("POST", "/access/token", "", "Bearer "+config.Token); w.Code != 403 {
+		t.Fatal("disabled browser accepted login", w.Code)
+	}
+	if _, err = os.Stat(filepath.Join(root, "access-settings.json")); !os.IsNotExist(err) {
+		t.Fatal("retired settings were recreated", err)
+	}
+}
+
+func TestEmbeddedTailnetUpgradePreservesBrowserAccess(t *testing.T) {
+	root := t.TempDir()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{}`)) }))
+	defer upstream.Close()
+	options := Options{Root: root, Origin: "https://fixture.example", Upstream: webui.Upstream{URL: upstream.URL, Credential: "control", Client: upstream.Client(), ControlID: "control"}, Assets: fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("UI")}}}
+	manager, err := Open(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := manager.store.Load(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	login := httptest.NewRequest("POST", "https://fixture.example/access/token", nil)
+	login.Header.Set("Authorization", "Bearer "+config.Token)
+	w := httptest.NewRecorder()
+	manager.ServeHTTP(w, login)
+	if w.Code != 200 {
+		t.Fatal(w.Code)
+	}
+	cookie := w.Result().Cookies()[0]
+	manager.Close()
+	before, err := os.ReadFile(filepath.Join(root, "browser-access.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(root, "access-settings.json"), []byte(`{"connected":true,"enabled":false}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		manager, err = Open(options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest("GET", "https://fixture.example/api/v1/runtime", nil)
+		request.AddCookie(cookie)
+		w = httptest.NewRecorder()
+		manager.ServeHTTP(w, request)
+		manager.Close()
+		if w.Code != 200 {
+			t.Fatal("browser session lost during upgrade", attempt, w.Code)
+		}
+		after, err := os.ReadFile(filepath.Join(root, "browser-access.json"))
+		if err != nil || string(before) != string(after) {
+			t.Fatal("upgrade modified browser credentials or session state", err)
+		}
+	}
+	if _, err = os.Stat(filepath.Join(root, "access-settings.json")); !os.IsNotExist(err) {
+		t.Fatal("obsolete settings survived upgrade", err)
 	}
 }
 
@@ -96,10 +159,10 @@ func TestLegacyPushStateIsIgnored(t *testing.T) {
 	}
 	t.Setenv("POT_ACCESS_VAPID_KEY", filepath.Join(root, "missing-vapid-key"))
 	t.Setenv("POT_ACCESS_VAPID_CONTACT", "invalid retired configuration")
-	manager, err := Open(context.Background(), Options{
+	manager, err := Open(Options{
 		Root: root, Origin: "https://fixture.example",
 		Upstream: webui.Upstream{URL: "https://control.invalid", Credential: "control", Client: &http.Client{}, ControlID: "control"},
-		Assets:   fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("UI")}}, Tailnet: &fakeTailnet{},
+		Assets:   fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("UI")}},
 	})
 	if err != nil {
 		t.Fatal("legacy push state blocked startup", err)

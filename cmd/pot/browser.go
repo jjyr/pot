@@ -19,7 +19,6 @@ import (
 	"github.com/jjyr/pot/internal/access"
 	"github.com/jjyr/pot/internal/buildinfo"
 	"github.com/jjyr/pot/internal/selfupdate"
-	"github.com/jjyr/pot/internal/tailnet"
 	"github.com/jjyr/pot/internal/transport"
 	"github.com/jjyr/pot/internal/webui"
 	"github.com/jjyr/pot/pkg/instance"
@@ -176,7 +175,7 @@ func browserCommand(ctx context.Context, args []string, out io.Writer) error {
 	if err = pinBrowserControl(directory, identity.ID); err != nil {
 		return err
 	}
-	publication, err := access.Open(ctx, access.Options{Root: directory, Origin: *origin, Upstream: upstream, Assets: assets.FS(), Tailnet: tailnet.New(directory, "pot")})
+	publication, err := access.Open(access.Options{Root: directory, Origin: *origin, Upstream: upstream, Assets: assets.FS()})
 	if err != nil {
 		return err
 	}

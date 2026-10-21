@@ -266,3 +266,14 @@ metadata and result content are handled by `pkg/mcp` at invocation time. Updatin
 a plugin's code/assets changes its ordinary digest-pinned resource snapshot.
 Any future persisted catalogue or snapshot schema change still requires its own
 migration and upgrade coverage.
+
+## Retired embedded browser network
+
+`RetireBrowserTailnet` retires the standalone `access-settings.json` flags when
+the independent browser service starts. Browser access continues to use the
+explicit listener/origin and the authoritative `browser-access.json`; its token,
+session key, generation, disablement and session revocations are preserved.
+The migration is idempotent and rejects unrecognized or unsafe settings files
+without deleting them. Inactive files under the old `tailscale/` directory are
+left untouched and are no longer loaded. The non-SQL storage-format marker is
+advanced, so package-only automatic updates cannot cross this transition.

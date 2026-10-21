@@ -19,7 +19,7 @@ func TestPrivateOperatorControlsOnlyIndependentBrowserService(t *testing.T) {
 	defer os.RemoveAll(root)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{}`)) }))
 	defer upstream.Close()
-	manager, err := Open(context.Background(), Options{Root: root, Origin: "https://browser.example", Upstream: webui.Upstream{URL: upstream.URL, Credential: "control", Client: upstream.Client(), ControlID: "control"}, Assets: fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("UI")}}, Tailnet: &fakeTailnet{}})
+	manager, err := Open(Options{Root: root, Origin: "https://browser.example", Upstream: webui.Upstream{URL: upstream.URL, Credential: "control", Client: upstream.Client(), ControlID: "control"}, Assets: fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("UI")}}})
 	if err != nil {
 		t.Fatal(err)
 	}
