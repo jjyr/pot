@@ -55,12 +55,6 @@ func (m *Mailbox) Backgrounds(ctx context.Context) ([]BackgroundBinding, error) 
 	return out, rows.Err()
 }
 
-// EnsureBackground inserts defaults once. A persisted row, including an explicit
-// disabled binding, always wins. No checkpoint or revision is changed on conflict.
-func (m *Mailbox) EnsureBackground(ctx context.Context, id, target string) error {
-	return m.EnsureBackgroundInstance(ctx, BackgroundBinding{ID: id, PluginID: id, Enabled: true, Assistant: target, Config: json.RawMessage(`{}`)})
-}
-
 // EnsureBackgroundInstance inserts owner defaults once without changing an
 // existing instance, including an explicitly disabled or waiting instance.
 func (m *Mailbox) EnsureBackgroundInstance(ctx context.Context, b BackgroundBinding) error {

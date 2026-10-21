@@ -11,6 +11,7 @@ actual execution workspace, rather than a browser filesystem directory.
 Extensions (local node) -> local node catalogue
     |-- tools / Skills       -> prepared execution -> selected Runtime
     |-- background services  -> assistant notifications
+    |-- plugin MCP servers   -> owning Control / shared MCP component
     `-- model connections    -> AI Providers -> node readers / Gateway
 ```
 
@@ -93,7 +94,8 @@ Each enabled server supplies one `mcp_<normalized-id>` tool through the existing
 flat Plugin contract, with a selected tool name and a JSON object string for its
 arguments. Original schemas accompany that tool's description. This supports
 nested MCP inputs without changing other tool interfaces. Namespace collisions
-are rejected. The adapter is digest-pinned and follows normal approval,
+are rejected. The adapter and shared Node SDK asset come from [pkg/mcp](mcp.md).
+Their files are digest-pinned and follow normal approval,
 cancellation, operation receipts, cleanup supervision and execution-machine
 policy. Stdio commands run on that execution machine, so their executable,
 arguments, working directory and dependencies must exist there; connection tests

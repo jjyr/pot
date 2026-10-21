@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/mcp"
 	"github.com/jjyr/pot/pkg/plugin"
 )
 
@@ -30,13 +31,13 @@ func mcpFixture(t *testing.T, body string) (plugin.Package, []string) {
 	return p, []string{worker}
 }
 
-const initializeMCP = `if(f.method==='initialize'){send({jsonrpc:'2.0',id:f.id,result:{protocolVersion:'2025-06-18',capabilities:{experimental:{'pot/background-store':{version:1}}},serverInfo:{name:'fixture',version:'1'}}});return;}`
+const initializeMCP = `if(f.method==='initialize'){send({jsonrpc:'2.0',id:f.id,result:{protocolVersion:'2025-06-18',capabilities:{tools:{},experimental:{'pot/background-store':{version:1}}},serverInfo:{name:'fixture',version:'1'}}});return;}`
 
 func TestMCPRealDiscoveryPaginationAndDeclaredCredentials(t *testing.T) {
 	t.Setenv("GH_TOKEN", "ambient-must-not-leak")
 	p, worker := mcpFixture(t, initializeMCP+`if(f.method==='tools/list'){const next=!!f.params.cursor;send({jsonrpc:'2.0',id:f.id,result:{tools:[{name:next?'second':'first',description:'fixture',inputSchema:{type:'object'}}],...(next?{}:{nextCursor:'page2'})}});return;}if(f.method==='tools/call')send({jsonrpc:'2.0',id:f.id,result:{content:[{type:'text',text:process.env.SERVICE_TOKEN==='fixture-private-token'&&!process.env.GH_TOKEN?'isolated':'bad environment'}],structuredContent:{ok:true}}});`)
 	tools, r, err := RunMCP(context.Background(), "", p, map[string]string{"SERVICE_TOKEN": "fixture-private-token"}, worker, "second", json.RawMessage(`{}`), nil)
-	if err != nil || len(tools) != 2 || len(r.Content) != 1 || r.Content[0].Text != "isolated" {
+	if err != nil || len(tools) != 2 || len(r.Content) != 1 || r.Content[0].(*mcp.TextContent).Text != "isolated" {
 		t.Fatal(tools, r, err)
 	}
 	if _, _, err = RunMCP(context.Background(), "", p, map[string]string{"UNDECLARED": "value"}, worker, "", nil, nil); err == nil {
@@ -45,7 +46,12 @@ func TestMCPRealDiscoveryPaginationAndDeclaredCredentials(t *testing.T) {
 }
 
 func TestMCPRejectsMalformedOutputAndCredentialDisclosure(t *testing.T) {
-	for _, body := range []string{`send({jsonrpc:'1.0',id:f.id,result:{}});`, `send({jsonrpc:'2.0',id:f.id,result:{secret:process.env.SERVICE_TOKEN}});`} {
+	for _, body := range []string{
+		`send({jsonrpc:'1.0',id:f.id,result:{}});`,
+		`send({jsonrpc:process.env.SERVICE_TOKEN,id:f.id,result:{}});`,
+		`send({jsonrpc:'2.0',id:f.id,result:{secret:process.env.SERVICE_TOKEN}});`,
+		`process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:f.id,result:{secret:process.env.SERVICE_TOKEN}}).replace('fixture-private-token','\\u0066ixture-private-token')+'\n');`,
+	} {
 		p, worker := mcpFixture(t, body)
 		if _, _, err := RunMCP(context.Background(), "", p, map[string]string{"SERVICE_TOKEN": "fixture-private-token"}, worker, "", nil, nil); err == nil || strings.Contains(err.Error(), "fixture-private-token") {
 			t.Fatal("invalid output accepted or secret leaked", err)

@@ -50,7 +50,8 @@ func TestGitHubReadToolInstalledSchemaThroughMCP(t *testing.T) {
 		t.Fatal("independent read accessed host store")
 		return nil, nil
 	})
-	if err != nil || result.IsError || len(tools) != 5 || !strings.Contains(string(result.StructuredContent), `"thread_id":"123"`) {
+	raw, _ := json.Marshal(result.StructuredContent)
+	if err != nil || result.IsError || len(tools) != 5 || !strings.Contains(string(raw), `"thread_id":"123"`) {
 		t.Fatal(tools, result, err)
 	}
 }

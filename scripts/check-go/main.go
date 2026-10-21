@@ -78,6 +78,18 @@ func check() error {
 				}
 			}
 		}
+		for _, dep := range pkg.Imports {
+			if strings.HasPrefix(dep, "github.com/modelcontextprotocol/go-sdk/") && pkg.ImportPath != "github.com/jjyr/pot/pkg/mcp" {
+				return fmt.Errorf("MCP protocol SDK must be used through pkg/mcp: %s imports %s", pkg.ImportPath, dep)
+			}
+		}
+		if pkg.ImportPath == "github.com/jjyr/pot/pkg/mcp" {
+			for _, dep := range pkg.Deps {
+				if strings.HasPrefix(dep, "github.com/jjyr/pot/") {
+					return fmt.Errorf("MCP protocol package depends on Pot component %s", dep)
+				}
+			}
+		}
 		base := strings.TrimPrefix(pkg.ImportPath, "github.com/jjyr/pot/internal/")
 		if base == "runner" {
 			for _, dep := range pkg.Deps {

@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {poll as pollAccount} from './notifications.mjs';
 // The original polling regressions use one ordinary subscription fixture.
-const poll=(input,options)=>pollAccount({...input,config:{initialized:true,subscriptions:[{id:'fixture',assistant:'main',enabled:true,account_id:input.accounts.github,changed_at:input.state?.filterSince||'',filters:{repositories:null,reasons:['mention'],subject_types:null,threads:null,...input.config}}]}},options);
+const poll=(input,options)=>pollAccount({...input,config:{initialized:true,subscriptions:[{id:'fixture',assistant:'main',enabled:true,account_id:input.accounts.github,changed_at:input.changedAt||'',filters:{repositories:null,reasons:['mention'],subject_types:null,threads:null,...input.config}}]}},options);
 process.env.GH_TOKEN='fake-token';
 const start=Date.parse('2026-01-01T10:00:00Z');
 const date=n=>new Date(start+n*1000).toISOString();
@@ -11,7 +11,7 @@ const comment=n=>({id:n,body:'comment-'+n,created_at:date(n),updated_at:date(n),
 function harness(){
  let rows=[thread(-1)],comments=[],code=200,headers={'X-Poll-Interval':'90','Last-Modified':'Thu, 01 Jan 2026 10:00:00 GMT'},calls=[];
  const fake=async(url,init)=>{calls.push({url:String(url),...init});assert.equal(init.method,'GET');assert.equal(init.headers.Authorization,'Bearer fake-token');if(url.pathname.endsWith('/notifications'))return new Response(code===304?null:JSON.stringify(rows),{status:code,headers});if(url.pathname.endsWith('/comments'))return Response.json(comments);return Response.json({body:'Issue context',user:{login:'me'}});};
- const run=(now,state=null,config={reasons:null})=>poll({now:start+now*1000,state,config,accounts:{github:'123'}},{fetch:fake});
+ const run=(now,state=null,config={reasons:null},changedAt='')=>poll({now:start+now*1000,state,config,changedAt,accounts:{github:'123'}},{fetch:fake});
  return {run,calls,set(value){if(value.rows)rows=value.rows;if(value.comments)comments=value.comments;if(value.code)code=value.code;if(value.headers)headers=value.headers;}};
 }
 test('baseline, overlapping cursor, incremental comments, coalescing, 304 and restart',async()=>{
@@ -168,7 +168,7 @@ test('newly allowed threads already older than cursor do not replay history',asy
 });
 
 test('reenabling/broadening only emits updates after the configuration boundary',async()=>{
- const h=harness();let r=await h.run(0,null,{});r.state.filterSince=date(150);
- h.set({rows:[{...thread(100,'subscribed'),id:'older'}]});r=await h.run(180,r.state,{reasons:null});assert.deepEqual(r.state.pending,{});assert.equal(h.calls.length,2);
- h.set({rows:[{...thread(220,'subscribed'),id:'older'}]});r=await h.run(270,r.state,{reasons:null});assert.ok(Object.keys(r.state.pending).length);
+ const h=harness();let r=await h.run(0,null,{});
+ h.set({rows:[{...thread(100,'subscribed'),id:'older'}]});r=await h.run(180,r.state,{reasons:null},date(150));assert.deepEqual(r.state.pending,{});assert.equal(h.calls.length,2);
+ h.set({rows:[{...thread(220,'subscribed'),id:'older'}]});r=await h.run(270,r.state,{reasons:null},date(150));assert.ok(Object.keys(r.state.pending).length);
 });

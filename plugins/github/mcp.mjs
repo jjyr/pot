@@ -1,6 +1,5 @@
 // Real newline-delimited JSON-RPC MCP stdio server. The optional negotiated
 // background-store extension is supplied only by Pot's installed-plugin host.
-import {createInterface} from 'node:readline';
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {subscriptionCall} from './subscriptions.mjs';
@@ -17,28 +16,10 @@ export const tools=[
  JSON.parse(readFileSync(new URL('./read-tool.json',import.meta.url),'utf8')),
 ];
 export async function handleTool(name,input,host){if(name==='read_notifications')return readNotifications(input);if(!tools.some(t=>t.name===name))throw Error('unknown_tool');return subscriptionCall(host,name,input);}
-export function serve(input=process.stdin,output=process.stdout){
- let initialized=false,extension=false,next=0;const pending=new Map();
- const send=value=>output.write(JSON.stringify(value)+'\n');
- const host=(method,params)=>{if(!extension)throw Error('pot_background_store_required');return new Promise((resolve,reject)=>{const id='host-'+(++next);pending.set(id,{resolve,reject});send({jsonrpc:'2.0',id,method,params});});};
- const lines=createInterface({input,crlfDelay:Infinity});
- lines.on('line',async line=>{
- if(Buffer.byteLength(line)>1024*1024){lines.close();return;}
- let frame;try{frame=JSON.parse(line);}catch{send({jsonrpc:'2.0',id:null,error:{code:-32700,message:'Parse error'}});return;}
- if(!frame.method){const waiter=pending.get(frame.id);if(waiter){pending.delete(frame.id);frame.error?waiter.reject(Error(frame.error.message)):waiter.resolve(frame.result);}return;}
- if(frame.id===undefined)return;
- try{
- let result;
- if(frame.method==='initialize'){if(frame.params?.protocolVersion!=='2025-06-18')throw Error('unsupported_protocol');initialized=true;extension=frame.params.capabilities?.experimental?.['pot/background-store']?.version===1;result={protocolVersion:'2025-06-18',capabilities:{tools:{},experimental:{'pot/background-store':{version:1}}},serverInfo:{name:'pot-github',version:'1'}};}
- else if(!initialized)throw Error('initialize_required');
- else if(frame.method==='tools/list')result={tools};
- else if(frame.method==='tools/call'){
- try{const value=await handleTool(frame.params.name,frame.params.arguments,host);result={content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value};}
- catch(error){const value={error:error.message};result={isError:true,content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value};}
- }else throw Error('unsupported_method');
- send({jsonrpc:'2.0',id:frame.id,result});
- }catch(error){send({jsonrpc:'2.0',id:frame.id,error:{code:-32601,message:error.message}});}
- });
- return lines;
+if(process.argv[1]===fileURLToPath(import.meta.url)){
+ const {serve}=await import(process.env.POT_MCP_RUNTIME);
+ await serve({info:{name:'pot-github',version:'1'},tools,capabilities:{tools:{},experimental:{'pot/background-store':{version:1}}},handle:(name,input,peer)=>handleTool(name,input,(method,params)=>{
+  if(peer.capabilities()?.experimental?.['pot/background-store']?.version!==1)throw Error('pot_background_store_required');
+  return peer.request(method,params);
+ })});
 }
-if(process.argv[1]===fileURLToPath(import.meta.url))serve();

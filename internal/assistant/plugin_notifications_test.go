@@ -397,7 +397,7 @@ func TestPluginDefaultInitializationConcurrent(t *testing.T) {
 		}
 		go func() {
 			defer wg.Done()
-			if err := store.EnsureBackground(ctx, "github", "first"); err != nil {
+			if err := store.EnsureBackgroundInstance(ctx, BackgroundBinding{ID: "example", PluginID: "example", Enabled: true, Assistant: "first", Config: json.RawMessage(`{}`)}); err != nil {
 				t.Error(err)
 			}
 		}()
@@ -408,7 +408,7 @@ func TestPluginDefaultInitializationConcurrent(t *testing.T) {
 		t.Fatal(bindings, err)
 	}
 	b := bindings[0]
-	if err = m.CommitBackground(ctx, b, core.PluginIdentity{ID: "github", Version: "1", Digest: "installed"}, core.BackgroundResponse{State: json.RawMessage(`{"account":"old","baseline":true}`), Status: "baseline", DelaySeconds: 90}, 100); err != nil {
+	if err = m.CommitBackground(ctx, b, core.PluginIdentity{ID: "example", Version: "1", Digest: "installed"}, core.BackgroundResponse{State: json.RawMessage(`{"account":"old","baseline":true}`), Status: "baseline", DelaySeconds: 90}, 100); err != nil {
 		t.Fatal(err)
 	}
 	b.Enabled = false
@@ -416,7 +416,7 @@ func TestPluginDefaultInitializationConcurrent(t *testing.T) {
 	if err = m.ConfigureBackground(ctx, b); err != nil {
 		t.Fatal(err)
 	}
-	if err = m.EnsureBackground(ctx, "github", "different"); err != nil {
+	if err = m.EnsureBackgroundInstance(ctx, BackgroundBinding{ID: "example", PluginID: "example", Enabled: true, Assistant: "different", Config: json.RawMessage(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 	bindings, err = m.Backgrounds(ctx)
@@ -430,7 +430,7 @@ func TestPluginDefaultInitializationConcurrent(t *testing.T) {
 	if err = m.ConfigureBackground(ctx, BackgroundBinding{ID: "waiting", PluginID: "waiting", Enabled: false, Config: json.RawMessage(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
-	if err = m.EnsureBackground(ctx, "waiting", "late-assistant"); err != nil {
+	if err = m.EnsureBackgroundInstance(ctx, BackgroundBinding{ID: "waiting", PluginID: "waiting", Enabled: true, Assistant: "late-assistant", Config: json.RawMessage(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 	bindings, err = m.Backgrounds(ctx)
@@ -593,16 +593,16 @@ func TestBackgroundWaitingInstanceCanCommitCheckpointWithoutEvents(t *testing.T)
 	}
 }
 
-func TestGitHubFilterWritesFenceInflightAndRetainProgress(t *testing.T) {
+func TestBackgroundWritesFenceInflightAndRetainOpaqueProgress(t *testing.T) {
 	ctx := context.Background()
 	m, _ := mailbox(t, "local")
 	defer m.Close()
-	if err := m.EnsureBackground(ctx, "github", "main"); err != nil {
+	if err := m.EnsureBackgroundInstance(ctx, BackgroundBinding{ID: "example", PluginID: "example", Enabled: true, Assistant: "main", Config: json.RawMessage(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 	bindings, _ := m.Backgrounds(ctx)
 	b := bindings[0]
-	identity := core.PluginIdentity{ID: "github", Version: "1", Digest: "installed"}
+	identity := core.PluginIdentity{ID: "example", Version: "1", Digest: "installed"}
 	checkpoint := json.RawMessage(`{"account":"123","baseline":true,"since":"2026-01-01T00:00:00Z","threads":{"123":{"marker":"retained"}},"pending":{"old":{"body":"discard"}},"scan":{"rows":[1]}}`)
 	if err := m.CommitBackground(ctx, b, identity, core.BackgroundResponse{State: checkpoint, DelaySeconds: 60, Status: "ready"}, 100); err != nil {
 		t.Fatal(err)

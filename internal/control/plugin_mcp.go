@@ -10,15 +10,16 @@ import (
 	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/mcp"
 	"github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/plugin"
 	"github.com/jjyr/pot/pkg/pluginhost"
 )
 
-func (s *Service) invokePluginMCP(ctx context.Context, p plugin.Package, name string, args json.RawMessage) ([]pluginhost.MCPTool, pluginhost.MCPResult, error) {
+func (s *Service) invokePluginMCP(ctx context.Context, p plugin.Package, name string, args json.RawMessage) ([]*mcp.Tool, *mcp.CallToolResult, error) {
 	identity, err := p.MCPIdentity()
 	if err != nil {
-		return nil, pluginhost.MCPResult{}, err
+		return nil, &mcp.CallToolResult{}, err
 	}
 	checkPackage := func() error {
 		fresh, e := plugin.Load(p.Root)
@@ -32,11 +33,11 @@ func (s *Service) invokePluginMCP(ctx context.Context, p plugin.Package, name st
 		return nil
 	}
 	if err = checkPackage(); err != nil {
-		return nil, pluginhost.MCPResult{}, err
+		return nil, &mcp.CallToolResult{}, err
 	}
 	catalog, err := s.Integrations.List(ctx)
 	if err != nil {
-		return nil, pluginhost.MCPResult{}, err
+		return nil, &mcp.CallToolResult{}, err
 	}
 	before, _ := json.Marshal(catalog)
 	accounts := map[string]string{}
@@ -58,7 +59,7 @@ func (s *Service) invokePluginMCP(ctx context.Context, p plugin.Package, name st
 	}
 	worker, err := os.Executable()
 	if err != nil {
-		return nil, pluginhost.MCPResult{}, err
+		return nil, &mcp.CallToolResult{}, err
 	}
 	host := func(ctx context.Context, method string, raw json.RawMessage) (any, error) {
 		// The package is fixed by the supervised connection; no Control/plugin identity
@@ -165,12 +166,12 @@ func (s *Service) invokePluginMCP(ctx context.Context, p plugin.Package, name st
 		return tools, result, err
 	}
 	if err = checkPackage(); err != nil {
-		return nil, pluginhost.MCPResult{}, err
+		return nil, &mcp.CallToolResult{}, err
 	}
 	after, err := s.Integrations.List(ctx)
 	now, _ := json.Marshal(after)
 	if err != nil || string(now) != string(before) {
-		return nil, pluginhost.MCPResult{}, errors.New("integration_changed")
+		return nil, &mcp.CallToolResult{}, errors.New("integration_changed")
 	}
 	return tools, result, nil
 }
@@ -200,18 +201,17 @@ func (s *Service) pluginMCPTools(ctx context.Context, dispatch map[string]agent.
 		if e != nil {
 			return nil, e
 		}
-		names := []string{}
-		description := "Call this installed plugin's MCP server. Supply a tool name and its arguments as a JSON object string. Tools:\n"
+		catalog := make([]MCPTool, 0, len(tools))
 		for _, tool := range tools {
-			names = append(names, tool.Name)
-			description += tool.Name + ": " + tool.Description + " Schema: " + string(tool.InputSchema) + "\n"
+			schema, _ := json.Marshal(tool.InputSchema)
+			catalog = append(catalog, MCPTool{Name: tool.Name, Description: tool.Description, InputSchema: schema})
 		}
-		schema, _ := json.Marshal(map[string]any{"type": "object", "properties": map[string]any{"tool": map[string]any{"type": "string", "enum": names}, "arguments": map[string]any{"type": "string", "maxLength": 131072}}, "required": []string{"tool", "arguments"}, "additionalProperties": false})
-		name := "mcp_" + strings.ReplaceAll(p.Manifest.ID, "-", "_")
+		definition, _ := mcpModelTool(p.Manifest.ID, "Call this installed plugin's MCP server. Supply a tool name and its arguments as a JSON object string. Tools:\n", catalog)
+		name := definition.Name
 		if dispatch[name] != nil {
 			return nil, errors.New("MCP tool namespace collision")
 		}
-		out = append(out, modelprotocol.ToolDefinition{Name: name, Description: description, InputSchema: schema})
+		out = append(out, definition)
 		dispatch[name] = func(ctx context.Context, execution core.ExecutionContext, call modelprotocol.ToolCall, emit func(core.Update) error) (json.RawMessage, error) {
 			fresh, e := plugin.Load(p.Root)
 			if e != nil {

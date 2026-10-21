@@ -64,7 +64,7 @@ func RunModelProvider(ctx context.Context, node string, p plugin.Package, input 
 		return result, errors.New("invalid model provider request")
 	}
 	for _, value := range credentials {
-		if containsModelProviderCredential(data, value) {
+		if containsPluginCredential(data, value) {
 			return result, errors.New("credential in model provider request")
 		}
 	}
@@ -122,7 +122,7 @@ func RunModelProvider(ctx context.Context, node string, p plugin.Package, input 
 		return result, errors.New("model provider exchange failed")
 	}
 	for _, value := range credentials {
-		if containsModelProviderCredential(raw, value) {
+		if containsPluginCredential(raw, value) {
 			return result, errors.New("credential in model provider response")
 		}
 	}
@@ -144,7 +144,7 @@ func RunModelProvider(ctx context.Context, node string, p plugin.Package, input 
 
 // Inspect decoded string values as well as wire bytes: JSON escaping must not
 // turn a secret into apparently safe metadata. No plugin diagnostics are returned.
-func containsModelProviderCredential(raw []byte, value string) bool {
+func containsPluginCredential(raw []byte, value string) bool {
 	if containsBackgroundCredential(raw, value) {
 		return true
 	}
