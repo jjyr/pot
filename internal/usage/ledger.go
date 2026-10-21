@@ -347,7 +347,7 @@ func (l *Ledger) Settle(ctx context.Context, id string, u Frame) error {
 		} else {
 			cache = 0
 		}
-		_, err := tx.ExecContext(ctx, "UPDATE requests SET input=?,output=?,cache=?,reserved=CASE WHEN ? THEN 0 ELSE reserved END,state='reported' WHERE id=?", input, output, cache, input.Valid && output.Valid, id)
+		_, err := tx.ExecContext(ctx, "UPDATE requests SET input=?,output=?,cache=?,cache_reported=MAX(cache_reported,?),reserved=CASE WHEN ? THEN 0 ELSE reserved END,state='reported' WHERE id=?", input, output, cache, u.Cache != nil, input.Valid && output.Valid, id)
 		return err
 	})
 }

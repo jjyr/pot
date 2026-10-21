@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,88 @@ import (
 type idlePort struct{ modelPort }
 
 func (idlePort) Compaction(context.Context, json.RawMessage) error { return nil }
+
+func TestOrdinaryResponsePersistsCacheActivityAndRequestStart(t *testing.T) {
+	ctx := context.Background()
+	var cleanup atomic.Int64
+	c := conversationFixture(t, filepath.Join(t.TempDir(), "chat.sqlite"), "boot", func(context.Context, core.ModelRequest) (io.ReadCloser, error) {
+		return io.NopCloser(strings.NewReader("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4096,\"completion_tokens\":2,\"prompt_cache_hit_tokens\":2048}}\n\ndata: [DONE]\n\n")), nil
+	}, &cleanup)
+	if _, err := c.Send(ctx, protocol.SendMessage{RequestID: "cache-evidence", ConversationID: "main", Text: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil })
+	var started, finished, read int64
+	var write *int64
+	if err := c.store.DB().QueryRow("SELECT started_at,finished_at,cache_read,cache_write FROM assistant_idle_compaction WHERE singleton=1").Scan(&started, &finished, &read, &write); err != nil || started <= 0 || started > finished || read != 2048 || write != nil {
+		t.Fatal(started, finished, read, write, err)
+	}
+}
+
+func TestQueuedPrecompactionRechecksExpiryBeforeStart(t *testing.T) {
+	var cleanup atomic.Int64
+	c := conversationFixture(t, filepath.Join(t.TempDir(), "chat.sqlite"), "boot", func(context.Context, core.ModelRequest) (io.ReadCloser, error) {
+		t.Error("expired compact reached model")
+		return replySSE(""), nil
+	}, &cleanup)
+	primeIdle(t, c, time.Now().Add(-14*time.Minute))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if eligible, err := c.idleEligibleLocked(context.Background(), time.Now()); err != nil || !eligible {
+		t.Fatal(eligible, err)
+	}
+	if _, err := c.store.DB().Exec("UPDATE assistant_idle_compaction SET started_at=?", time.Now().Add(-15*time.Minute).UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.startIdleLocked(context.Background()); !errors.Is(err, ErrCompactDeferred) {
+		t.Fatal(err)
+	}
+}
+
+func TestCachePrecompactionRequiresActivityAndUnexpiredWindow(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		read, write any
+		age         time.Duration
+		want        bool
+	}{
+		{"read", 512, nil, 27 * time.Minute / 2, true},
+		{"write", 0, 1200, 27 * time.Minute / 2, true},
+		{"unknown", nil, nil, 27 * time.Minute / 2, false},
+		{"zero", 0, 0, 27 * time.Minute / 2, false},
+		{"early", 512, nil, 13 * time.Minute, false},
+		{"expired", 512, nil, 15 * time.Minute, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var cleanup atomic.Int64
+			c := conversationFixture(t, filepath.Join(t.TempDir(), "chat.sqlite"), "boot", func(context.Context, core.ModelRequest) (io.ReadCloser, error) {
+				t.Error("unexpected model call")
+				return replySSE(""), nil
+			}, &cleanup)
+			anchor := time.Now()
+			primeIdle(t, c, anchor)
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			if _, err := c.store.DB().Exec("UPDATE assistant_idle_compaction SET cache_read=?,cache_write=?", tc.read, tc.write); err != nil {
+				t.Fatal(err)
+			}
+			got, err := c.idleEligibleLocked(context.Background(), anchor.Add(tc.age))
+			if err != nil || got != tc.want {
+				t.Fatal(got, err)
+			}
+			if tc.name == "expired" || tc.name == "zero" || tc.name == "unknown" {
+				// Extending TTL does not resurrect a discarded opportunity.
+				c.options.IdlePolicy = func(context.Context, core.Thread) (IdleCompactionPolicy, error) {
+					return IdleCompactionPolicy{CacheTTL: 20 * time.Minute}, nil
+				}
+				got, err = c.idleEligibleLocked(context.Background(), anchor.Add(18*time.Minute))
+				if err != nil || got {
+					t.Fatal("discarded opportunity resurrected", got, err)
+				}
+			}
+		})
+	}
+}
 
 func primeIdle(t *testing.T, c *Conversation, finished time.Time) {
 	t.Helper()
@@ -43,7 +126,7 @@ func primeIdle(t *testing.T, c *Conversation, finished time.Time) {
 		t.Fatal(err)
 	}
 	prefix, _ := json.Marshal(modelprotocol.Request{System: "stable system", Tools: []modelprotocol.ToolDefinition{}})
-	if _, err := c.store.DB().Exec(`UPDATE assistant_idle_compaction SET request_id='last-model',finished_at=?,route=?,prefix=?`, finished.UnixMilli(), idleRoute(c.thread.Config), string(prefix)); err != nil {
+	if _, err := c.store.DB().Exec(`UPDATE assistant_idle_compaction SET request_id='last-model',finished_at=?,started_at=?,cache_read=512,route=?,prefix=?`, finished.UnixMilli(), finished.UnixMilli(), idleRoute(c.thread.Config), string(prefix)); err != nil {
 		t.Fatal(err)
 	}
 	prepare := c.options.Prepare
@@ -71,15 +154,15 @@ func TestIdleDeadlineDedupeAndQueuedUser(t *testing.T) {
 		}
 		return replySSE("normal reply"), nil
 	}, &cleanup)
-	anchor := time.Now().Add(-15 * time.Minute)
+	anchor := time.Now().Add(-27 * time.Minute / 2)
 	primeIdle(t, c, anchor)
-	if err := c.CheckIdleCompaction(ctx, anchor.Add(15*time.Minute-time.Millisecond)); err != nil {
+	if err := c.CheckIdleCompaction(ctx, anchor.Add(27*time.Minute/2-time.Millisecond)); err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 0 {
 		t.Fatal("triggered early")
 	}
-	if err := c.CheckIdleCompaction(ctx, anchor.Add(15*time.Minute)); err != nil {
+	if err := c.CheckIdleCompaction(ctx, anchor.Add(27*time.Minute/2)); err != nil {
 		t.Fatal(err)
 	}
 	var r core.ModelRequest
@@ -180,22 +263,22 @@ func TestIdleTimingRecalculatesAndRouteChangeInvalidates(t *testing.T) {
 	}, &cleanup)
 	anchor := time.Now()
 	primeIdle(t, c, anchor)
-	policy := IdleCompactionPolicy{Delay: 20 * time.Minute, Source: "connection"}
+	policy := IdleCompactionPolicy{CacheTTL: 20 * time.Minute, Source: "connection"}
 	checks := 0
 	c.mu.Lock()
 	c.options.IdlePolicy = func(context.Context, core.Thread) (IdleCompactionPolicy, error) { return policy, nil }
 	c.options.CompactGate = func(context.Context, func() error) error { checks++; return ErrCompactDeferred }
 	c.mu.Unlock()
-	if err := c.CheckIdleCompaction(ctx, anchor.Add(15*time.Minute)); err != nil || checks != 0 {
+	if err := c.CheckIdleCompaction(ctx, anchor.Add(27*time.Minute/2)); err != nil || checks != 0 {
 		t.Fatal("ignored connection delay", err, checks)
 	}
-	if err := c.CheckIdleCompaction(ctx, anchor.Add(20*time.Minute)); err != nil || checks != 1 {
+	if err := c.CheckIdleCompaction(ctx, anchor.Add(18*time.Minute)); err != nil || checks != 1 {
 		t.Fatal("missed exact deadline", err, checks)
 	}
 	c.mu.Lock()
-	policy = IdleCompactionPolicy{Delay: 5 * time.Minute, Source: "model"}
+	policy = IdleCompactionPolicy{CacheTTL: 10 * time.Minute, Source: "model"}
 	c.mu.Unlock()
-	if err := c.CheckIdleCompaction(ctx, anchor.Add(6*time.Minute)); err != nil || checks != 2 {
+	if err := c.CheckIdleCompaction(ctx, anchor.Add(9*time.Minute)); err != nil || checks != 2 {
 		t.Fatal("did not recalculate original anchor", err, checks)
 	}
 	c.mu.Lock()

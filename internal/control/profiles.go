@@ -67,7 +67,7 @@ type ProfileStore struct {
 }
 
 func OpenProfiles(path, pluginRoot string, registry *gateway.Registry) (*ProfileStore, error) {
-	p := &ProfileStore{metadataWake: make(chan struct{}, 1), path: path, pluginRoot: pluginRoot, registry: registry, state: profileFile{Version: 2, ProfileSnapshot: ProfileSnapshot{Profiles: []core.Profile{}, Connections: []Connection{}, ConfiguredModels: map[string][]string{}}, Requests: map[string]profileReceipt{}}}
+	p := &ProfileStore{metadataWake: make(chan struct{}, 1), path: path, pluginRoot: pluginRoot, registry: registry, state: profileFile{Version: 3, ProfileSnapshot: ProfileSnapshot{Profiles: []core.Profile{}, Connections: []Connection{}, ConfiguredModels: map[string][]string{}}, Requests: map[string]profileReceipt{}}}
 	directory, err := modeldirectory.Open(filepath.Join(filepath.Dir(path), "models-dev"))
 	if err != nil {
 		return nil, err
@@ -80,14 +80,14 @@ func OpenProfiles(path, pluginRoot string, registry *gateway.Registry) (*Profile
 	if err != nil {
 		return nil, err
 	}
-	body, upgraded, err := migrations.UpgradeProfileCompaction(body)
+	body, upgraded, err := migrations.UpgradeProfileCacheTTL(body)
 	if err != nil {
 		return nil, err
 	}
 	if err = core.DecodeJSON(body, &p.state); err != nil {
 		return nil, err
 	}
-	if p.state.Version != 2 || p.state.Requests == nil {
+	if p.state.Version != 3 || p.state.Requests == nil {
 		return nil, errors.New("unsupported profile store")
 	}
 	settings, err := p.defaultAgentSettings()

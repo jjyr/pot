@@ -166,12 +166,20 @@ can adopt updated facts for the same saved connection revision; explicit overrid
 survive those updates. Changing a connection default affects future selections,
 not existing assistant intent.
 
-## Idle compaction timing
+## Prompt cache lifetime
 
-A saved connection's `model_settings.idle_compact_minutes` sets its positive idle
-maintenance delay in minutes (blank inherits 15). The provider editor has one
-timing field shared by all models on that connection, ranging from 1 to 525,600
-minutes. Separate connections retain independent timing. Changes apply to unstarted
-timers using the original last-model-completion time. Already running requests
-use their captured execution settings. Provider cache TTL is advisory, not a
-scheduling guarantee; the delay never silently subtracts a safety margin.
+A saved connection's `model_settings.prompt_cache_minutes` estimates the model
+prompt cache lifetime in minutes (blank inherits 15). The provider editor exposes
+one value shared by that connection's models, from 1 to 525,600 minutes. Separate
+connections retain independent estimates. This is not a provider expiry query or
+a guarantee that a request will read the cache.
+
+Cache pre-compaction becomes due at 90% of this lifetime, measured from the last
+successful ordinary request's start. It requires positive reported cache reads
+or writes, an unchanged route and thinking setting, and context above 30%.
+Unknown/zero cache activity or an expired window skips that opportunity without
+falling back to standalone summarization. Queue/start checks re-evaluate the
+window; preparation also respects its captured expiry. Changes recalculate
+unstarted opportunities from the same anchor. A skipped/attempted history needs a
+new ordinary model response before another opportunity. Context-window protection
+continues independently of this cache-maintenance policy.

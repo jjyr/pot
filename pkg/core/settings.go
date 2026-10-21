@@ -117,7 +117,7 @@ type ToolPolicy struct {
 	Unattended          string `json:"unattended" required:"true"`
 }
 type ModelSettings struct {
-	IdleCompactMinutes *uint64 `json:"idle_compact_minutes,omitempty"`
+	PromptCacheMinutes *uint64 `json:"prompt_cache_minutes,omitempty"`
 
 	CatalogProvider *string             `json:"catalog_provider"`
 	ContextWindow   *uint64             `json:"context_window"`
@@ -138,8 +138,8 @@ type Profile struct {
 
 func (p Profile) Validate() error {
 	if p.ModelSettings != nil {
-		if value := p.ModelSettings.IdleCompactMinutes; value != nil && (*value == 0 || *value > 525600) {
-			return fmt.Errorf("invalid idle compact duration")
+		if value := p.ModelSettings.PromptCacheMinutes; value != nil && (*value == 0 || *value > 525600) {
+			return fmt.Errorf("invalid prompt cache lifetime")
 		}
 		if len(p.ModelSettings.InputModalities) > 10000 {
 			return fmt.Errorf("too many model input descriptors")

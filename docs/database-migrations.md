@@ -233,6 +233,18 @@ subscription contract and configuration-boundary behavior.
 
 `control/0021_agent_link_addresses` records independently enabled Pot peer endpoints, preserving the existing configured endpoint. Startup restores listeners after migration without replaying agent work.
 
+Profile format 3 replaces idle-delay settings with `prompt_cache_minutes`, an
+estimated cache lifetime. Explicit durations and immutable save receipt hashes
+are preserved; retired field names are removed. Conversation migration 0005 adds
+request-start time and nullable cache read/write evidence. Old timing anchors are
+disarmed until a new ordinary response supplies evidence; transcript and usage
+records remain unchanged.
+
+Usage migration 0003 persists whether a request reported cache-read usage. Existing
+positive cache counts remain known; historical zero counts remain unknown because
+the old ledger did not distinguish missing data from a reported zero. Request
+identities, usage amounts, reservations and compaction evidence remain intact.
+
 `tasks/0015_plugin_mcp_subscriptions` converts the previous GitHub binding into a
 plugin-owned subscription collection with a persistent initialization marker.
 The original target, disablement, explicit filters and account become one

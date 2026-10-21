@@ -31,7 +31,7 @@ The local gateway captures provider usage through the generic model gateway. Sha
 - Actual total = input + output. Cache hits are a subset of input, not added again.
 - Multiple usage frames update one request record. Missing usage is unknown, not zero.
 - Tools show calls, failures, duration, and output estimates (serialized UTF-8 bytes / 4). Estimates are not provider billing and are not added to actual totals.
-- Pot Agent compacts conversation history after tools settle when its context estimate approaches the profile-configured window, reserving room for the appended compact instruction and summary output. Idle maintenance enters the same path after its configured delay when context exceeds 30%. [Context estimation](#context-estimation) uses Codex's content-cost rules with provider-native replay. Context estimates and allowance reservations do not contribute to actual token totals. Storage persists full current context injection, the replacement summary and the last real user message in that order. Earlier assistant/tool messages are represented by the summary; see [context and compaction](agent-context.md#compaction-and-continuation).
+- Pot Agent compacts conversation history after tools settle when its context estimate approaches the profile-configured window, reserving room for the appended compact instruction and summary output. Cache maintenance enters the same path at 90% of its configured estimated cache lifetime when context exceeds 30% and the last response reported positive cache reads or writes. Expired windows and unknown/zero cache activity skip maintenance. [Context estimation](#context-estimation) uses Codex's content-cost rules with provider-native replay. Context estimates and allowance reservations do not contribute to actual token totals. Storage persists full current context injection, the replacement summary and the last real user message in that order. Earlier assistant/tool messages are represented by the summary; see [context and compaction](agent-context.md#compaction-and-continuation).
 - Agent reports compaction lifecycle directly to Runtime. Start persists before its ID tags the metered gateway request. Summary usage is a subset of request usage, never counted twice.
 - Session details show paginated model requests with input, cached input and output; input tooltips include uncached input and cache hit rate. One user turn can produce multiple model requests, each carrying its full context input. Missing input/output stays unknown; unknown input also hides cache breakdown and hit rate. A zero input has no hit rate. Tool output contributes neither to model totals nor input cache calculations.
 - Underlying request/compaction lifecycle records and archived records remain; API detail pagination remains supported. Context sizes before/after compaction are estimates, not billing.
@@ -39,6 +39,19 @@ The local gateway captures provider usage through the generic model gateway. Sha
 - Pi development sessions and old usage databases are not imported; this revision starts a new usage database.
 
 Runtime uses indexed SQL aggregation over explicit local-day boundaries and independent 20-item pages for lifetime models, requests, tools and compactions. The summary defaults to 365 daily buckets with ISO dates and complete daily/annual Agent and annual model totals. Explicit 14/30/90-day API queries also use daily buckets. Calendar aggregation groups date/Agent/model in SQL without loading request records; all summary projections share one transaction. Requests sort by request start time descending, then ID descending; compactions sort by occurrence time ascending, then ID; tools sort by call count descending, then name. The summary never loads these lists. Initial summary/list queries run concurrently; subsequent paging refreshes only its list and retains rows while pending or on failure. The shared HTML frontend refreshes from persisted usage updates, keeps the displayed page while preparing replacements, preserves scroll, and rejects stale query responses. Shared CSS and components render the charts, allowance bars and editing controls.
+
+Annual compaction usage appears below the annual model distribution, using the
+same horizontal stacked bar. `compaction_totals` in the summary groups linked
+requests into `precompact` (cache maintenance) and `compact` (threshold, overflow
+and manual triggers), within the calendar's scope and local-day interval. Every
+metered attempt contributes once, including failures and retries; never-sent
+rejections are excluded. This is a subset of the existing Agent/model totals.
+Consumption is input + output; cache reads are already included in input. Cache
+hit rates use summed cache reads / summed input, including across Spaces. The
+ledger retains whether cache reads were reported, distinguishing a reported zero
+from unknown. If any contributing input/cache report is missing, its aggregate
+hit rate displays as unknown. Partial token sums remain visible as lower bounds;
+the bar represents reported usage. The tooltip shows input/output/cache details.
 
 ## Context estimation
 

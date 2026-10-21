@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"time"
 
 	"github.com/jjyr/pot/pkg/composition"
 	"github.com/jjyr/pot/pkg/core"
@@ -23,6 +24,7 @@ type SteeringInput struct {
 	Text        string
 }
 type Observation struct {
+	StartedAtMS   int64                      `json:"started_at_ms,omitempty"`
 	RequestPrefix *modelprotocol.Request     `json:"-"` // Local idle cache prefix, not transcript data.
 	Kind          string                     `json:"kind"`
 	ID            string                     `json:"id,omitempty"`
@@ -72,6 +74,7 @@ type Services interface {
 // Composer is optional for model-only and ordinary tool use. To enable composed
 // tools, set it to a composition.ProcessRunner with an explicit worker command.
 type Agent struct {
+	CompactDeadline    time.Time // Estimated cache expiry for idle-only work; zero for explicit hosts/window compaction.
 	IdlePrefix         *modelprotocol.Request
 	CompactSchedule    json.RawMessage
 	CompactOnly        bool // An owning lane requested idle maintenance; never accept synthetic user input.
