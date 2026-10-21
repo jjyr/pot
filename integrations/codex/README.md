@@ -132,6 +132,22 @@ messages enter the same assistant queue as tasks, and final replies retain their
 original peer, assistant, conversation and causal parent. Durable inbox acceptance
 remains distinct from completed execution.
 
+Normal completion waits for `turn/completed` and supervised process cleanup
+before making the reply eligible for delivery to Pot. Successful replies contain the
+final answer, excluding commentary and explicitly marked intermediate answers.
+Command output, reasoning and progress notifications are disabled on this
+connection; remaining tool items are discarded after reading and never included
+in replies. Approval requests and turn lifecycle notifications remain enabled.
+Resuming a thread excludes its history from the response without changing Codex's
+persistent conversation context.
+
+Failed and cancelled message replies carry `state`, `error` and `partial_output`
+as JSON text, including when no model output was produced. The original reply
+route and receipt behavior apply to these outcomes as well. App Server JSONL
+events are bounded to 4 MiB per line independently of the final-answer limit;
+read failures (including oversized events) are reported as
+`codex_jsonl_read_failed_outcome_unknown`, separately from process EOF.
+
 Disconnect pauses transport and preserves configuration. Reconnect resumes it.
 Delete removes the saved connection and directory entries. Neither operation
 silently cancels accepted work or removes its history.
