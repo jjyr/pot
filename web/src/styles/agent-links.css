@@ -22,6 +22,8 @@
 @media(pointer:coarse){.connection-input-group .field-input{font-size:16px}.connection-input-group>.control{min-height:44px}}
 .agent-link-editor.connection-setup>h2{display:none}
 
+.agent-link-manual-copy{display:flex;flex:none;flex-direction:column;gap:8px;border-top:1px solid var(--divider);padding-top:12px;min-width:0}.agent-link-manual-copy[hidden]{display:none}.agent-link-manual-copy>label{font-size:13px;font-weight:500}.agent-link-manual-copy>.hint{font-size:12px;line-height:1.6}.agent-link-manual-copy>textarea.field-input{width:100%;box-sizing:border-box;resize:none;height:80px;min-height:64px;max-height:100px;font:12px monospace;overflow-wrap:anywhere}.agent-link-manual-copy>.control{align-self:flex-end}.agent-link-addresses{flex:1 1 auto}
+
 .agent-source{display:inline-flex;align-items:center;gap:2px;flex:none;vertical-align:middle;color:var(--muted)}
 .agent-source .connection-brand{width:16px;height:16px}
 .agent-source>svg{width:11px;height:11px}

@@ -34,11 +34,12 @@ func TestDiscoveredInterfacesIncludePublicAndExcludeUnusableAddresses(t *testing
 func TestTailscaleDiscoveryNeverChangesServe(t *testing.T) {
 	for _, test := range []struct {
 		config   string
-		setup    bool
 		endpoint string
 	}{
-		{`{"TCP":{}}`, true, "tcp://codex.tail.ts.net:8793"},
-		{`{"TCP":{"443":{"TCPForward":"127.0.0.1:8793"}}}`, false, "tcp://codex.tail.ts.net:443"},
+		{`{"TCP":{}}`, "tcp://codex.tail.ts.net:8793"},
+		{`{"TCP":{"443":{"TCPForward":"127.0.0.1:8793"}}}`, "tcp://codex.tail.ts.net:443"},
+		{`{"TCP":{"8793":{"TCPForward":"127.0.0.1:9999"}}}`, "tcp://codex.tail.ts.net:8793"},
+		{`unavailable`, "tcp://codex.tail.ts.net:8793"},
 	} {
 		binary := filepath.Join(t.TempDir(), "tailscale")
 		script := `#!/bin/sh
@@ -50,7 +51,7 @@ exit 1
 		os.WriteFile(binary, []byte(script), 0700)
 		os.WriteFile(binary+".config", []byte(test.config), 0600)
 		got, err := DiscoverTailscaleAddress(context.Background(), binary, "127.0.0.1:8793")
-		if err != nil || got.Endpoint != test.endpoint || got.RequiresSetup != test.setup {
+		if err != nil || got.Endpoint != test.endpoint {
 			t.Fatal(got, err)
 		}
 		if _, err = os.Stat(binary + ".mutated"); !os.IsNotExist(err) {

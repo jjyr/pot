@@ -65,21 +65,6 @@ func (s *Service) selectAgentAddress(ctx context.Context, endpoint string) (stri
 		h := s.agentLinks
 		h.setup.Lock()
 		defer h.setup.Unlock()
-		if address.RequiresSetup {
-			h.mu.Lock()
-			listen := h.config.Listen
-			h.mu.Unlock()
-			actual, err := linkhost.ConfigureTailscale(ctx, listen)
-			if err != nil {
-				return "", err
-			}
-			h.discoveryMu.Lock()
-			h.discoveryAt = time.Time{}
-			h.discoveryMu.Unlock()
-			if actual != endpoint {
-				return "", agentlink.ErrConflict
-			}
-		}
 		if err = s.enableAgentAddress(ctx, endpoint); err != nil {
 			return "", err
 		}

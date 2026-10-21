@@ -4,6 +4,8 @@ import (
 	"context"
 	"net"
 	"net/url"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -87,4 +89,41 @@ func TestPotSelectedListenerClosesOnPersistenceFailure(t *testing.T) {
 		t.Fatal("failed copy left listener enabled", err)
 	}
 	listener.Close()
+}
+
+func TestPotTailscaleInvitationPairsWithoutServePermission(t *testing.T) {
+	a, b := agentControl(t, "tailnet-a"), agentControl(t, "tailnet-b")
+	binary := filepath.Join(t.TempDir(), "tailscale")
+	script := `#!/bin/sh
+if [ "$1" = status ]; then echo '{"BackendState":"Running","Self":{"DNSName":"localhost."}}'; exit 0; fi
+if [ "$2" = status ]; then echo '{}'; exit 0; fi
+echo mutation > "$0.mutated"
+exit 1
+`
+	if err := os.WriteFile(binary, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Dir(binary))
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listen := listener.Addr().String()
+	listener.Close()
+	address, err := linkhost.DiscoverTailscaleAddress(context.Background(), binary, listen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.service.agentLinks.discovered = []linkhost.Address{address}
+	b.service.agentLinks.discoveryAt = time.Now()
+	value, err := b.service.ManageAgentLink(context.Background(), AgentLinkCommand{Action: "invite", Endpoint: address.Endpoint})
+	if err != nil {
+		t.Fatal("direct Tailscale invitation required Serve permission", err)
+	}
+	if _, err = a.service.ManageAgentLink(context.Background(), AgentLinkCommand{Action: "connect", Address: value.(map[string]any)["address"].(string)}); err != nil {
+		t.Fatal("direct Tailscale invitation failed to pair", err)
+	}
+	if _, err = os.Stat(binary + ".mutated"); !os.IsNotExist(err) {
+		t.Fatal("invitation attempted to modify Tailscale")
+	}
 }

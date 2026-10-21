@@ -66,14 +66,18 @@ The connection page discovers loopback, active public and private interface
 addresses (IPv4 and IPv6), and Tailscale addresses. Tailscale names appear first,
 followed by Tailscale IPs, public IPs, other private IPs, loopback and unclassified
 saved addresses. Click **Copy connection address** to open the scrollable address
-list; it stays hidden by default. Each row has its own copy action. Choose
+list; it stays hidden by default. Each row has a **Get connection address** action. Choose
 loopback for Pot on the same computer, a LAN
 address for the same private network, a public address for other networks, or
 Tailscale for the same tailnet. Discovery
-only reads network state. Copying enables the selected signed peer listener and
-creates an invitation bound to that exact endpoint. A Tailscale row without an
-existing mapping explains that copying also enables its private TCP forwarding;
-unrelated Serve mappings are preserved. Selected addresses are persisted and
+only reads network state. Getting an address enables the selected signed peer
+listener and displays the complete invitation in a selected, read-only field.
+Copy it manually or use the optional clipboard button; browser clipboard access
+is not a prerequisite. Closing the address list clears the invitation, and it is
+never saved in browser storage. Tailscale names can bind directly to the assigned
+IP, just like numeric addresses. An existing raw TCP forwarding mapping can be
+reused; this flow never requires or changes Tailscale Serve configuration.
+Selected addresses are persisted and
 restored independently on restart. An unavailable address does not prevent the
 local page or other addresses from working. A firewall or remote network can
 still prevent access; discovery does not prove remote reachability.

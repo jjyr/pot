@@ -15,10 +15,9 @@ import (
 )
 
 type Address struct {
-	Endpoint      string `json:"endpoint"`
-	Kind          string `json:"kind"`
-	Interface     string `json:"interface,omitempty"`
-	RequiresSetup bool   `json:"requires_setup,omitempty"`
+	Endpoint  string `json:"endpoint"`
+	Kind      string `json:"kind"`
+	Interface string `json:"interface,omitempty"`
 }
 
 func InterfaceAddresses(listen string, interfaces []net.Interface, addresses func(net.Interface) ([]net.Addr, error)) []Address {
@@ -90,9 +89,11 @@ func DiscoverTailscaleAddress(ctx context.Context, binary, listen string) (Addre
 	if dns == "" {
 		return Address{}, agentlink.ErrUnavailable
 	}
+	_, port, _ := net.SplitHostPort(listen)
+	direct := Address{Endpoint: "tcp://" + net.JoinHostPort(dns, port), Kind: "tailscale"}
 	raw, err = exec.CommandContext(ctx, binary, "serve", "status", "--json").Output()
 	if err != nil {
-		return Address{}, err
+		return direct, nil
 	}
 	var config struct {
 		TCP map[string]struct {
@@ -101,7 +102,7 @@ func DiscoverTailscaleAddress(ctx context.Context, binary, listen string) (Addre
 		}
 	}
 	if err = json.Unmarshal(raw, &config); err != nil {
-		return Address{}, err
+		return direct, nil
 	}
 	ports := make([]string, 0, len(config.TCP))
 	for port := range config.TCP {
@@ -114,12 +115,9 @@ func DiscoverTailscaleAddress(ctx context.Context, binary, listen string) (Addre
 			return Address{Endpoint: "tcp://" + net.JoinHostPort(dns, port), Kind: "tailscale"}, nil
 		}
 	}
-	_, port, _ := net.SplitHostPort(listen)
-	// Show the discovered name even before the owner enables its Serve mapping.
-	if _, occupied := config.TCP[port]; occupied {
-		return Address{}, agentlink.ErrConflict
-	}
-	return Address{Endpoint: "tcp://" + net.JoinHostPort(dns, port), Kind: "tailscale", RequiresSetup: true}, nil
+	// Serve is optional: a name resolving to an assigned IP can use a direct
+	// listener, just like the numeric Tailscale or LAN address.
+	return direct, nil
 }
 
 func AddressPriority(address Address) int {

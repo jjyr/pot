@@ -7,9 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jjyr/pot/internal/linkhost"
 )
 
 func TestDiscoveredAddressesPreferTailscaleThenPublic(t *testing.T) {
@@ -96,6 +100,36 @@ func TestSelectedListenerIsClosedWhenPersistenceFails(t *testing.T) {
 		t.Fatal("failed persistence left a listener", err)
 	}
 	listener.Close()
+}
+
+func TestTailscaleAddressConnectsWithoutServePermission(t *testing.T) {
+	h, _ := testHost(t)
+	defer h.close()
+	binary := filepath.Join(t.TempDir(), "tailscale")
+	script := `#!/bin/sh
+if [ "$1" = status ]; then echo '{"BackendState":"Running","Self":{"DNSName":"localhost."}}'; exit 0; fi
+if [ "$2" = status ]; then echo '{}'; exit 0; fi
+echo mutation > "$0.mutated"
+exit 1
+`
+	if err := os.WriteFile(binary, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Dir(binary))
+	address, err := linkhost.DiscoverTailscaleAddress(context.Background(), binary, freePeerAddress(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.discover = func(context.Context) []hostAddress { return []hostAddress{address} }
+	if _, err = h.selectAddress(context.Background(), address.Endpoint); err != nil {
+		t.Fatal("direct Tailscale listener required Serve permission", err)
+	}
+	if err = h.probeEndpoint(context.Background(), address.Endpoint); err != nil {
+		t.Fatal("direct listener did not authenticate", err)
+	}
+	if _, err = os.Stat(binary + ".mutated"); !os.IsNotExist(err) {
+		t.Fatal("address selection attempted to modify Tailscale")
+	}
 }
 
 func TestInvitationUsesSelectedAddress(t *testing.T) {

@@ -4,23 +4,26 @@ import {icon} from './icons.mjs';
 import {connectionBrand} from './connection-visuals.mjs';
 
 const base='/api/v1/agent-links';
-// Node invitations only live in the clipboard operation, never in widget/history data.
+// Invitations live only in the open address picker, never in snapshots or storage.
 export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({}),edit,onConnected=()=>{},signal,showConnections=false}) {
   const t=key=>translate(locale(),key),section=n('section','agent-links'),status=n('p','hint'),actions=n('div','page-toolbar'),list=n('div','agent-link-list');
   const add=action(t('agentLinks.add'),addAgent,{primary:true}),choose=action(t('agentLinks.copy'),toggleAddresses);
   choose.classList.add('agent-link-choose');choose.setAttribute('aria-haspopup','dialog');choose.setAttribute('aria-expanded','false');
   const picker=n('div','agent-link-picker'),pickerHeader=n('div','agent-link-picker-header'),pickerTitle=n('h2'),close=action('',closePicker),copyError=n('p','inline-error');
   picker.id='agent-link-picker-'+crypto.randomUUID();picker.setAttribute('popover','auto');picker.setAttribute('role','dialog');choose.setAttribute('aria-controls',picker.id);close.append(icon('close'));pickerHeader.append(pickerTitle,close);
-  const addresses=n('div','agent-link-addresses'),addressRows=new Map(),copiedAddresses=new Map();
-  const message=n('p','inline-error');message.setAttribute('role','alert');copyError.setAttribute('role','alert');status.setAttribute('role','status');actions.append(choose,add);picker.append(pickerHeader,status,addresses,copyError);section.append(actions,picker,message,list);root.append(section);
-  let snapshot=null,disposed=false,version=0,busy=false,localEditor=null,loadedScope='';
+  const addresses=n('div','agent-link-addresses'),addressRows=new Map();
+  const manual=n('div','agent-link-manual-copy'),manualLabel=n('label'),manualHint=n('p','hint'),manualAddress=n('textarea','field-input'),copy=action('',copyPreparedAddress);
+  manualAddress.id='agent-link-invitation-'+crypto.randomUUID();manualAddress.readOnly=true;manualAddress.rows=3;manualAddress.autocomplete='off';manualAddress.spellcheck=false;manualLabel.htmlFor=manualAddress.id;manual.hidden=true;manual.append(manualLabel,manualHint,manualAddress,copy);
+  const message=n('p','inline-error');message.setAttribute('role','alert');copyError.setAttribute('role','alert');status.setAttribute('role','status');actions.append(choose,add);picker.append(pickerHeader,status,addresses,manual,copyError);section.append(actions,picker,message,list);root.append(section);
+  let snapshot=null,disposed=false,version=0,busy=false,localEditor=null,loadedScope='',addressVersion=0,copied=false,copyTimer;
   const active=()=>!disposed&&!signal?.aborted&&root.isConnected;
   const captured=()=>typeof scope==='function'?scope():scope;
   const call=(path,options={})=>request(path,{...captured(),...options});
-  function closePicker(){if(picker.matches(':popover-open'))picker.hidePopover();}
+  function clearInvitation(){addressVersion++;clearTimeout(copyTimer);manualAddress.value='';manual.hidden=true;copied=false;copyError.replaceChildren();delete copyError.dataset.errorKey;}
+  function closePicker(){clearInvitation();if(picker.matches(':popover-open'))picker.hidePopover();}
   function positionPicker(){if(!picker.matches(':popover-open'))return;const rect=choose.getBoundingClientRect(),below=innerHeight-rect.bottom-16,above=rect.top-16,downward=below>=above;picker.style.maxHeight=Math.min(500,Math.max(120,downward?below:above),innerHeight-16)+'px';const box=picker.getBoundingClientRect();picker.style.left=Math.max(8,Math.min(rect.left,innerWidth-box.width-8))+'px';picker.style.top=Math.max(8,Math.min(downward?rect.bottom+8:rect.top-box.height-8,innerHeight-box.height-8))+'px';}
   function toggleAddresses(){if(picker.matches(':popover-open')){closePicker();return;}picker.showPopover();positionPicker();addresses.querySelector('button')?.focus({preventScroll:true});}
-  picker.addEventListener('toggle',event=>choose.setAttribute('aria-expanded',String(event.newState==='open')));
+  picker.addEventListener('toggle',event=>{choose.setAttribute('aria-expanded',String(event.newState==='open'));if(event.newState==='closed')clearInvitation();});
   window.addEventListener('resize',positionPicker);
   function errorKey(error) {
     const code=error?.code||error?.data?.code||error?.error?.code;
@@ -34,14 +37,15 @@ export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({
   function sync() {
     if(!active())return;
     add.textContent=t('agentLinks.add');add.disabled=busy;choose.textContent=t('agentLinks.copy');status.textContent=t('agentLinks.discoveredHint');pickerTitle.textContent=t('agentLinks.chooseAddress');picker.setAttribute('aria-label',t('agentLinks.chooseAddress'));close.setAttribute('aria-label',t('agentLinks.closeAddresses'));
+    manualLabel.textContent=t('agentLinks.fullAddress');manualHint.textContent=t('agentLinks.manualCopyHint');copy.textContent=t(copied?'copied':'agentLinks.copy');
     const candidates=snapshot?.addresses||[],present=new Set(candidates.map(item=>item.endpoint));
     for(const [endpoint,row]of addressRows){if(!present.has(endpoint)){row.element.remove();addressRows.delete(endpoint);}}
     for(const [index,item]of candidates.entries()){
       let row=addressRows.get(item.endpoint);
-      if(!row){const element=n('div','agent-link-address-row'),info=n('div','row-info'),label=n('strong'),value=n('code','agent-link-address',item.endpoint),hint=n('p','hint'),button=action('',()=>copyAddress(item.endpoint));info.append(label,value,hint);element.append(info,button);addresses.append(element);row={element,label,hint,button};addressRows.set(item.endpoint,row);}
+      if(!row){const element=n('div','agent-link-address-row'),info=n('div','row-info'),label=n('strong'),value=n('code','agent-link-address',item.endpoint),hint=n('p','hint'),button=action('',()=>prepareAddress(item.endpoint));info.append(label,value,hint);element.append(info,button);addresses.append(element);row={element,label,hint,button};addressRows.set(item.endpoint,row);}
       row.label.textContent=t(`agentLinks.addressKind.${item.kind}`)+(item.interface?` · ${item.interface}`:'');
-      row.hint.textContent=t(item.requires_setup?'agentLinks.addressSetup':`agentLinks.addressScope.${item.kind}`);
-      row.button.textContent=t(copiedAddresses.has(item.endpoint)?'copied':'agentLinks.copy');row.button.disabled=busy;
+      row.hint.textContent=t(`agentLinks.addressScope.${item.kind}`);
+      row.button.textContent=t('agentLinks.getAddress');row.button.disabled=busy;
       if(addresses.children[index]!==row.element)addresses.insertBefore(row.element,addresses.children[index]||null);
     }
     positionPicker();
@@ -59,7 +63,16 @@ export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({
   }
   async function load(){const generation=++version,key=JSON.stringify(captured());if(key!==loadedScope){closePicker();loadedScope=key;snapshot=null;sync();}try{const value=await call(base,{signal});if(active()&&generation===version)update(value);return value;}catch(error){if(active()&&generation===version&&error.name!=='AbortError'){snapshot=null;sync();failure(error);}}}
   function update(value){snapshot=value;sync();}
-  async function copyAddress(endpoint){if(busy)return;busy=true;sync();copyError.replaceChildren();try{const value=await call(base+'/invitation',{method:'POST',body:{endpoint}});await navigator.clipboard.writeText(value.address);if(active()){clearTimeout(copiedAddresses.get(endpoint));copiedAddresses.set(endpoint,setTimeout(()=>{copiedAddresses.delete(endpoint);sync();},1600));}}catch(error){if(active())failure(error,copyError);}finally{busy=false;sync();}}
+  async function prepareAddress(endpoint){
+    if(busy)return;clearInvitation();const generation=addressVersion;busy=true;sync();
+    try{const value=await call(base+'/invitation',{method:'POST',body:{endpoint}});if(!active()||generation!==addressVersion||!picker.matches(':popover-open'))return;manualAddress.value=value.address;manual.hidden=false;positionPicker();manualAddress.focus({preventScroll:true});manualAddress.select();}
+    catch(error){if(active()&&generation===addressVersion)failure(error,copyError);}finally{busy=false;sync();}
+  }
+  async function copyPreparedAddress(){
+    const value=manualAddress.value,generation=addressVersion;if(!value)return;
+    try{await navigator.clipboard.writeText(value);if(active()&&generation===addressVersion){copied=true;copyError.replaceChildren();delete copyError.dataset.errorKey;clearTimeout(copyTimer);copyTimer=setTimeout(()=>{copied=false;sync();},1600);sync();}}
+    catch(error){if(active()&&generation===addressVersion){failure(uiError(error,'agentLinks.copyFailed'),copyError);manualAddress.focus({preventScroll:true});manualAddress.select();positionPicker();}}
+  }
   // Use the existing editing-page lifecycle and dirty navigation guard.
   function openEditor(title,initial,definitions,save,submitLabel){
     if(edit)return edit({title,initial,fields:definitions,save,scope:captured(),submitLabel});
@@ -135,5 +148,5 @@ export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({
     dialog.addEventListener('cancel',event=>{if(confirm.disabled)event.preventDefault();});buttons.append(cancel,confirm);dialog.append(error,buttons);document.body.append(dialog);dialog.showModal();
   }
   const preference=()=>{sync();localEditor?.lifecycle?.locale?.();for(const status of root.querySelectorAll('[data-error-key]')){const span=status.querySelector(':scope>span');if(span)span.textContent=t(status.dataset.errorKey);const summary=status.querySelector('details>summary');if(summary)summary.textContent=t('agentLinks.diagnostics');}};window.addEventListener('pot:locale',preference);signal?.addEventListener('abort',()=>{disposed=true;closePicker();window.removeEventListener('resize',positionPicker);window.removeEventListener('pot:locale',preference);},{once:true});sync();
-  return {update,load,addAgent,disconnect,reconnect,remove,get snapshot(){return snapshot;},dispose(){disposed=true;closePicker();window.removeEventListener('resize',positionPicker);for(const timer of copiedAddresses.values())clearTimeout(timer);window.removeEventListener('pot:locale',preference);localEditor?.lifecycle?.dispose?.();localEditor?.root.remove();section.remove();}};
+  return {update,load,addAgent,disconnect,reconnect,remove,get snapshot(){return snapshot;},dispose(){disposed=true;closePicker();window.removeEventListener('resize',positionPicker);window.removeEventListener('pot:locale',preference);localEditor?.lifecycle?.dispose?.();localEditor?.root.remove();section.remove();}};
 }
