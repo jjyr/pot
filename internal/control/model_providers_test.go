@@ -22,9 +22,7 @@ import (
 
 func installMetadataFixture(t *testing.T, s *Service) string {
 	t.Helper()
-	root := t.TempDir()
-	s.options.PluginRoot = root
-	s.Profiles.pluginRoot = root
+	root := s.options.PluginRoot
 	target := filepath.Join(root, "acme")
 	if err := os.Mkdir(target, 0700); err != nil {
 		t.Fatal(err)
@@ -446,9 +444,7 @@ func TestDeclarativeDirectoryReaderUsesLocalFactsWithoutCredentials(t *testing.T
 		t.Fatal(err)
 	}
 	s.Profiles.directory = directory
-	root := t.TempDir()
-	s.options.PluginRoot = root
-	s.Profiles.pluginRoot = root
+	root := s.options.PluginRoot
 	manifest := `{"schema_version":2,"id":"local-facts","version":"1","contributes":{"model_providers":{"providers":[{"id":"openai","name":"Local facts","protocol":"openai_responses","directory_provider":"openai","capabilities":{"catalog":"models_dev"}}]}}}`
 	writeTaskFixture(t, filepath.Join(root, "local-facts", "plugin.json"), manifest)
 	result, err := s.Profiles.Check(context.Background(), CheckProvider{ProviderTypeID: "local-facts/openai", Endpoint: "https://never-contacted.invalid/v1", Protocol: "openai_responses"})
