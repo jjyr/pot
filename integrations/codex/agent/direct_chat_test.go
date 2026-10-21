@@ -72,7 +72,7 @@ func codexEmptyPot(t *testing.T, live bool) {
 	}
 	firstThread := ""
 	owner := "agent-link:" + link.ID + ":codex"
-	subscription, err := pot.SubscribeAgent(ctx, owner)
+	subscription, err := pot.SubscribeAgent(ctx, owner, "")
 	if err != nil {
 		t.Fatal(err)
 	}

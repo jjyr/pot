@@ -196,6 +196,16 @@ func (s *Service) business(ctx context.Context, c Connection, remote peer.Identi
 			return nil, ErrInvalid
 		}
 		result = d
+	case "assistant.profile":
+		var input ProfileRequest
+		if decodeJSON(r.Params, &input) != nil || input.From.Kind != "user" || !input.From.Valid() || input.From.NodeID != remote.NodeID || input.AssistantID == "" {
+			return nil, ErrInvalid
+		}
+		backend, ok := s.options.Backend.(ProfileBackend)
+		if !ok || !d.Operations[input.AssistantID].Supports(AssistantProfile) {
+			return nil, ErrUnsupported
+		}
+		result, e = backend.Profile(ctx, input)
 	case "task.submit":
 		var input TaskRequest
 		if decodeJSON(r.Params, &input) != nil || !taskCaller(input.From) || input.From.NodeID != remote.NodeID || strings.TrimSpace(input.RequestID) == "" || len(input.RequestID) > 128 || strings.TrimSpace(input.Text) == "" || len(input.Text) > 65536 {

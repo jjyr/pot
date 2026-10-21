@@ -101,7 +101,7 @@ func streamSnapshots(w http.ResponseWriter, r *http.Request, app *Application) {
 	if owner == "" {
 		owner = "main"
 	}
-	subscription, err := app.Control.SubscribeAgent(r.Context(), owner)
+	subscription, err := app.Control.SubscribeAgent(r.Context(), owner, r.URL.Query().Get("locale"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, protocol.APIError{Code: "owner_unavailable", Message: err.Error()})
 		return

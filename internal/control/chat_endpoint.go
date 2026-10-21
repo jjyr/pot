@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-func (p agentPort) chatEndpoint(ctx context.Context, target agentlink.Target) (agentlink.ChatEndpoint, error) {
+func (p agentPort) chatEndpoint(ctx context.Context, target agentlink.Target, locale string) (agentlink.ChatEndpoint, error) {
 	if target.LinkID != "" {
-		return linkedChatEndpoint{p.s, target}, nil
+		return linkedChatEndpoint{s: p.s, target: target, locale: locale}, nil
 	}
 	c, err := p.s.Conversation(ctx, target.AssistantID)
 	return nativeChatEndpoint{c}, err
@@ -39,10 +39,11 @@ func (a nativeChatEndpoint) Subscribe(ctx context.Context) (agentlink.Subscripti
 type linkedChatEndpoint struct {
 	s      *Service
 	target agentlink.Target
+	locale string
 }
 
 func (a linkedChatEndpoint) Read(ctx context.Context) (protocol.UIFrame, error) {
-	v, err := a.s.LinkChat(ctx, a.target.LinkID, a.target.AssistantID)
+	v, err := a.s.linkChatLocale(ctx, a.target.LinkID, a.target.AssistantID, a.locale)
 	if err != nil {
 		return protocol.UIFrame{}, err
 	}

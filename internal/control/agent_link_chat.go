@@ -12,6 +12,7 @@ import (
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
+	webassets "github.com/jjyr/pot/web"
 )
 
 func linkChatID(link, assistant string) string {
@@ -148,7 +149,35 @@ func (s *Service) linkChatReceipt(ctx context.Context, link, assistant, request 
 }
 
 func (s *Service) LinkChat(ctx context.Context, link, assistant string) (protocol.UIFrame, error) {
+	return s.linkChatLocale(ctx, link, assistant, "")
+}
+
+func (s *Service) linkChatLocale(ctx context.Context, link, assistant, locale string) (protocol.UIFrame, error) {
 	conversation := linkChatID(link, assistant)
+
+	// An explicit localized read owns the first welcome. Subscriptions without
+	// a locale wait for that read instead of saving text in a guessed language.
+	_, identity, targetErr := s.linkChatTarget(ctx, link, assistant)
+	if locale != "" && targetErr == nil && identity.Adapter == "codex" {
+		text := strings.ReplaceAll(webassets.Translate(locale, "assistant.codexWelcome"), "{name}", identity.Name)
+		err := storage.Transaction(ctx, s.integrationDB, func(tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, "INSERT INTO agent_link_chat_sessions(link_id,assistant_id,id) VALUES(?,?,?) ON CONFLICT DO NOTHING", link, assistant, conversation)
+			if err != nil {
+				return err
+			}
+			result, err := tx.ExecContext(ctx, `INSERT INTO agent_link_chat(id,link_id,assistant_id,request_id,role,text,created_at) SELECT ?,?,?,?,'assistant',?,? WHERE NOT EXISTS(SELECT 1 FROM agent_link_chat WHERE link_id=? AND assistant_id=?) ON CONFLICT(id) DO NOTHING`, "welcome:"+conversation, link, assistant, "welcome:"+conversation, text, time.Now().UnixMilli(), link, assistant)
+			if err != nil {
+				return err
+			}
+			if n, _ := result.RowsAffected(); n != 0 {
+				_, err = tx.ExecContext(ctx, "UPDATE agent_link_chat_sessions SET revision=revision+1 WHERE link_id=? AND assistant_id=?", link, assistant)
+			}
+			return err
+		})
+		if err != nil {
+			return protocol.UIFrame{}, err
+		}
+	}
 
 	var cursor int64 = 1
 	err := s.integrationDB.QueryRowContext(ctx, "SELECT revision FROM agent_link_chat_sessions WHERE link_id=? AND assistant_id=?", link, assistant).Scan(&cursor)

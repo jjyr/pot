@@ -37,6 +37,9 @@ and delete actions. Deletion confirms removal; task and conversation history
 remain available. No separate binding wizard or task creation page is required.
 Provided assistants use their saved profile avatars, matching the chat directory;
 node headers keep the Pot or Codex brand icon.
+Agent Link directories carry the receiver's saved avatars. Codex assistants
+advertise a profile-only settings operation for names and avatars, independent
+of model configuration. Profile edits preserve routing and the original session.
 
 Chat, task controls, assistant settings and notifications use the selected
 assistant's versioned Agent Link capabilities. They never infer support from

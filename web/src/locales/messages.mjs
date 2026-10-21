@@ -13,6 +13,10 @@ export const messages = {
     'providers.cacheHelp':'Estimate how long this connection keeps the model prompt cache. Pot tries pre-compaction before expiry when recent usage reports cache activity; blank uses 15 minutes.',
 
     ...serverMessages.en,
+    'assistant.name':'Name',
+    'assistant.save':'Save',
+    'assistant.cancel':'Cancel',
+    'assistant.profileFailed':'Could not save this profile. Reopen settings to load the latest changes and try again.',
     'assistant.creating':'Creating assistant…',
     "assistantStart.firstTitle":"Add your first assistant",
     "assistantStart.title":"Add assistant",
@@ -720,6 +724,10 @@ export const messages = {
     'providers.cacheHelp':'此连接的模型缓存寿命估计。有近期缓存读写时，Pot 会在预计过期前尝试预压缩；留空默认 15 分钟。',
 
     ...serverMessages['zh-CN'],
+    'assistant.name':'名称',
+    'assistant.save':'保存',
+    'assistant.cancel':'取消',
+    'assistant.profileFailed':'无法保存资料。请重新打开设置，加载最新资料后重试。',
     'assistant.creating':'正在创建助手…',
     "assistantStart.firstTitle":"添加你的第一个助手",
     "assistantStart.title":"添加助手",

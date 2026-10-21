@@ -64,7 +64,7 @@ func (s *Service) Call(ctx context.Context, method, path, body string) (string, 
 	return string(encoded), marshalErr
 }
 func (s *Service) OpenMain() { s.tray.Hide(); s.main.Show(); s.main.Focus() }
-func (s *Service) Subscribe(space, owner string) (string, error) {
+func (s *Service) Subscribe(space, owner, locale string) (string, error) {
 	if _, err := s.spaces.Space(space); err != nil {
 		return "", err
 	}
@@ -81,7 +81,7 @@ func (s *Service) Subscribe(space, owner string) (string, error) {
 	}
 	s.subscriptions[token] = cancel
 	s.mu.Unlock()
-	go func() { defer s.Unsubscribe(token); s.streamSpace(ctx, space, owner) }()
+	go func() { defer s.Unsubscribe(token); s.streamSpace(ctx, space, owner, locale) }()
 
 	return token, nil
 }

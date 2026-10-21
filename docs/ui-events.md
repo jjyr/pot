@@ -58,7 +58,9 @@ Agent Link peer operations use their explicit connection identity.
 
 ## Main conversation streams
 
-`GET /api/v1/events?assistant_id=...` sends UI-only `conversation` frames.
+`GET /api/v1/events?assistant_id=...&locale=...` sends UI-only `conversation` frames.
+Snapshot reads and subscriptions carry the UI locale through the common endpoint
+so first-use introductions use the reader's language.
 The first frame has `kind: reset`; subsequent frames have `kind: delta` and a
 `base_cursor` matching the preceding frame's cursor. `view.state` carries Runtime
 boot identity, conversation cursor, turn, budget, assistant capabilities and the

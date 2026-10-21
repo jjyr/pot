@@ -8,8 +8,8 @@ import (
 )
 
 // Operation names describe behavior, never an adapter type or machine location.
-// Payloads use the existing typed chat/task DTOs. Owner operations are advertised
-// only by the authenticated operator's local adapter, never by a peer directory.
+// Payloads use typed operation DTOs. Execution configuration remains owner-only;
+// adapters may explicitly advertise presentation-only peer profile editing.
 type Operation string
 
 const (
@@ -49,6 +49,7 @@ const (
 )
 
 type Target struct {
+	Locale      string `json:"locale,omitempty"`
 	LinkID      string `json:"link_id,omitempty"`
 	AssistantID string `json:"assistant_id"`
 }

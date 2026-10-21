@@ -18,9 +18,11 @@ globalThis.fetch=async(url,options)=>{
  return new Response(JSON.stringify(value));
 };
 const client=await createProductionClient();client.assistants=projected;client.setScope({space:'local',owner:projected[0].id});
+client.uiLocale=()=> 'zh-CN';
 assert.equal((await client.snapshot()).owner_id,JSON.stringify(['local',projected[0].id]));
 let route=new URL(calls.at(-1).url,'http://fixture');
 assert.equal(route.pathname,'/api/v1/snapshot');assert.equal(route.searchParams.get('assistant_id'),projected[0].id,'The unified host port receives the exact assistant presentation key');
+assert.equal(route.searchParams.get('locale'),'zh-CN','Initial linked read receives the current UI locale');
 assert.equal(route.searchParams.get('link_id'),null,'The client does not choose a transport or an alternate business API');
 await client.send({request_id:'same-request',conversation_id:'mail-conversation',text:'Review this'});
 assert.deepEqual(JSON.parse(calls.at(-1).options.body),{request_id:'same-request',conversation_id:'mail-conversation',text:'Review this'});
@@ -36,7 +38,7 @@ globalThis.EventSource=class {
 for(const owner of ['main',projected[0].id]){
  client.setScope({space:'local',owner});
  let delivered;const stop=client.subscribe(value=>{delivered=value;});const source=sources.at(-1);
- const streamRoute=new URL(source.url,'http://fixture');assert.equal(streamRoute.pathname,'/api/v1/events');assert.equal(streamRoute.searchParams.get('assistant_id'),owner);
+ const streamRoute=new URL(source.url,'http://fixture');assert.equal(streamRoute.pathname,'/api/v1/events');assert.equal(streamRoute.searchParams.get('locale'),'zh-CN','Unified subscriptions carry the current locale');assert.equal(streamRoute.searchParams.get('assistant_id'),owner);
  const update={...frame,view:{...frame.view,replies:[{input_id:'input',state:'running'}]}};
  source.handlers.get('conversation')({data:JSON.stringify(update)});
  assert.equal(delivered.owner_id,JSON.stringify(['local',owner]),'Every endpoint retains its exact subscription owner');

@@ -295,7 +295,7 @@ func (s *Service) AgentLinks(ctx context.Context) (any, error) {
 				if err != nil {
 					return nil, err
 				}
-				assistants = append(assistants, map[string]any{"address": a.Address, "name": a.Name, "adapter": a.Adapter, "capabilities": capabilities, "reply_count": count, "reply_id": replyID, "preview": preview, "last_reply_at_ms": at})
+				assistants = append(assistants, map[string]any{"address": a.Address, "name": a.Name, "avatar": a.Avatar, "adapter": a.Adapter, "capabilities": capabilities, "reply_count": count, "reply_id": replyID, "preview": preview, "last_reply_at_ms": at})
 			}
 			peerName = c.Directory.Name
 		}

@@ -107,7 +107,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
     supports:(operation,options={})=>{const scope={...context,...options};return supportsCapability(client.assistants?.find(item=>item.id===scope.owner&&item.space_id===scope.space),operation);},
     snapshot: async options => {
       const scope = {...context,...options};
-      const value = await request('/api/v1/snapshot', scope);
+      const value = await request('/api/v1/snapshot?'+new URLSearchParams({locale:client.uiLocale?.()||'en'}), scope);
       return normalizeSnapshot(value, runtime, scope.owner, scope.space);
     },
     history: async (query, options = {}) => {const page=await request(`/api/v1/history?${new URLSearchParams(query)}`,options);return {...page,messages:page.messages.map(({message,...meta})=>({...message,...meta}))};},
@@ -198,12 +198,12 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
           const value=event.data;
           if(active&&value.space_id===scope.space&&value.owner===scope.owner)onStatus(value.status,value.error?new Error(value.error):undefined);
         });
-        invoke('Subscribe', scope.space, scope.owner).then(value => {
+        invoke('Subscribe', scope.space, scope.owner, client.uiLocale?.()||'en').then(value => {
           token = value; if (!active) invoke('Unsubscribe', value).catch(() => {}); else onStatus('connected');
         }).catch(reason => { if (active) onStatus('offline', reason); });
         return () => { active = false; stop(); stopStatus(); if (token) invoke('Unsubscribe', token).catch(() => {}); };
       }
-      const source = new EventSource(`${base}${scopedPath('/api/v1/events', scope)}`);
+      const source = new EventSource(`${base}${scopedPath('/api/v1/events?'+new URLSearchParams({locale:client.uiLocale?.()||'en'}), scope)}`);
       source.addEventListener('conversation', event => {
         let value;
         try { value = JSON.parse(event.data); }

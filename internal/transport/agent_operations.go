@@ -31,6 +31,9 @@ func (a *Application) agentOperation(ctx context.Context, method string, u *url.
 			op = agentlink.ChatCompletions
 		case "/api/v1/assistants/default-avatar":
 			op = agentlink.AssistantProfile
+		case "/api/v1/assistants/profile":
+			op = agentlink.AssistantProfile
+			call.Action = "get"
 		case "/api/v1/permissions":
 			if u.Query().Get("assistant_id") != "" {
 				op = agentlink.Approvals

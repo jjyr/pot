@@ -30,6 +30,7 @@ type hostRoundTripper func(*http.Request) (*http.Response, error)
 
 func (f hostRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 func TestAgentHostMCPDirectoryWithoutCompetingInboxReader(t *testing.T) {
+	t.Setenv("POT_CODEX_ASSISTANT_ID", "codex")
 	h, _ := testHost(t)
 	defer h.close()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -49,7 +50,7 @@ func TestAgentHostMCPDirectoryWithoutCompetingInboxReader(t *testing.T) {
 	}
 	defer session.Close()
 	listed, err := session.ListTools(ctx, nil)
-	if err != nil || len(listed.Tools) != 5 {
+	if err != nil || len(listed.Tools) != 6 {
 		t.Fatal(listed, err)
 	}
 	for _, tool := range listed.Tools {
@@ -64,6 +65,18 @@ func TestAgentHostMCPDirectoryWithoutCompetingInboxReader(t *testing.T) {
 	raw, _ := json.Marshal(result)
 	if !strings.Contains(string(raw), "default_assistant_id") || strings.Contains(string(raw), h.token) {
 		t.Fatal("bad directory result", string(raw))
+	}
+	updated, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "pot_update_profile", Arguments: map[string]any{"assistant_id": "codex", "name": "MCP assistant"}})
+	if err != nil || updated.IsError {
+		t.Fatal(updated, err)
+	}
+	saved, err := h.backend.resolve(ctx, "codex")
+	if err != nil || saved.Name != "MCP assistant" {
+		t.Fatal("MCP rename was not saved", err)
+	}
+	blocked, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "pot_update_profile", Arguments: map[string]any{"assistant_id": "another", "name": "Wrong identity"}})
+	if err != nil || !blocked.IsError {
+		t.Fatal("bound MCP server accepted a different assistant", blocked, err)
 	}
 	page, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "pot_open_connections", Arguments: map[string]any{}})
 	if err != nil || page.IsError {

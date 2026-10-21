@@ -44,11 +44,12 @@ func (s *Service) AgentCapabilities(ctx context.Context, owner string) (agentlin
 	return (agentPort{s}).Describe(ctx, target)
 }
 
-func (s *Service) SubscribeAgent(ctx context.Context, owner string) (agentlink.Subscription, error) {
+func (s *Service) SubscribeAgent(ctx context.Context, owner, locale string) (agentlink.Subscription, error) {
 	target, err := AgentTarget(owner)
 	if err != nil {
 		return agentlink.Subscription{}, err
 	}
+	target.Locale = locale
 	return (agentPort{s}).Subscribe(ctx, target)
 }
 
@@ -60,7 +61,7 @@ func (p agentPort) Subscribe(ctx context.Context, target agentlink.Target) (agen
 	if !d.Supports(agentlink.ChatSubscribe) {
 		return agentlink.Subscription{}, agentlink.ErrUnsupported
 	}
-	endpoint, err := p.chatEndpoint(ctx, target)
+	endpoint, err := p.chatEndpoint(ctx, target, target.Locale)
 	if err != nil {
 		return agentlink.Subscription{}, err
 	}
@@ -196,7 +197,7 @@ func (p agentPort) Call(ctx context.Context, target agentlink.Target, operation 
 		call.Body = json.RawMessage(`{}`)
 	}
 	if operation == agentlink.ChatRead || operation == agentlink.ChatSend || operation == agentlink.ChatReceipt {
-		endpoint, err := p.chatEndpoint(ctx, target)
+		endpoint, err := p.chatEndpoint(ctx, target, call.Query["locale"])
 		if err != nil {
 			return nil, err
 		}
@@ -324,6 +325,21 @@ func (p agentPort) Call(ctx context.Context, target agentlink.Target, operation 
 
 func (p agentPort) linkedCall(ctx context.Context, target agentlink.Target, op agentlink.Operation, call agentlink.Call) (any, error) {
 	s := p.s
+	if op == agentlink.AssistantProfile {
+		var input struct {
+			Name     *string `json:"name,omitempty"`
+			Avatar   *string `json:"avatar,omitempty"`
+			Revision uint64  `json:"revision"`
+		}
+		if err := protocol.DecodeStrict(call.Body, &input); err != nil {
+			return nil, err
+		}
+		action := call.Action
+		if action == "write" {
+			action = "update"
+		}
+		return s.agentLinks.service.Profile(ctx, target.LinkID, agentlink.ProfileRequest{From: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: linkChatID(target.LinkID, target.AssistantID)}, AssistantID: target.AssistantID, Action: action, Name: input.Name, Avatar: input.Avatar, Revision: input.Revision})
+	}
 	owner := linkChatID(target.LinkID, target.AssistantID)
 	if op == agentlink.TaskSubmit {
 		var input protocol.CreateTask

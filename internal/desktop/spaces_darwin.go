@@ -28,8 +28,8 @@ func (s *Service) call(ctx context.Context, method, path, body string) (string, 
 	data, err := s.spaces.Call(ctx, space, method, path, json.RawMessage(body))
 	return string(data), err
 }
-func (s *Service) streamSpace(ctx context.Context, space, owner string) {
-	path := "/api/v1/events?assistant_id=" + url.QueryEscape(owner)
+func (s *Service) streamSpace(ctx context.Context, space, owner, locale string) {
+	path := "/api/v1/events?assistant_id=" + url.QueryEscape(owner) + "&locale=" + url.QueryEscape(locale)
 	delay := 250 * time.Millisecond
 	for {
 		s.app.Event.Emit("pot:subscription", map[string]any{"space_id": space, "owner": owner, "status": "connecting"})

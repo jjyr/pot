@@ -32,7 +32,7 @@ func TestChatEndpointContract(t *testing.T) {
 			if err != nil || !capabilities.Supports(agentlink.ChatSubscribe) {
 				t.Fatal(capabilities, err)
 			}
-			sub, err := a.service.SubscribeAgent(ctx, owner)
+			sub, err := a.service.SubscribeAgent(ctx, owner, "")
 			if err != nil {
 				t.Fatal(err)
 			}
