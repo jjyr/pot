@@ -295,8 +295,11 @@ func Allowed(method, path string) bool {
 	if strings.ContainsAny(path, "\\%") || strings.Contains(path, "//") || strings.Contains(path, "/../") {
 		return false
 	}
-	if path == "/api/v1/agent-links" || path == "/api/v1/agent-links/chat" {
+	if path == "/api/v1/agent-links" {
 		return method == "GET" || method == "POST"
+	}
+	if path == "/api/v1/agent-links/capabilities" {
+		return method == "GET"
 	}
 	if path == "/api/v1/agent-links/invitation" {
 		return method == "POST"

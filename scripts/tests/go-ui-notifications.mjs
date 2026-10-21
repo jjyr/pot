@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {createNotificationProjection,taskOutcomeNotifications,viewingNotification,notificationText} from '../../web/src/state/notifications.mjs';
 import {createSystemNotifications,browserNotificationPermission} from '../../web/src/adapters/notifications.mjs';
 
-const owner={id:'alpha',space_id:'space-a',control_id:'control-a',name:'Alpha',reply_id:'old',reply_count:4};
+const owner={capabilities:{version:1,operations:['task.outcomes','approvals.manage']},id:'alpha',space_id:'space-a',control_id:'control-a',name:'Alpha',reply_id:'old',reply_count:4};
 const task=(phase,id='task')=>({id,title:'Build',phase});
 const approval=(id='approval',task='task')=>({id,request:{owner:'alpha',task,args:{secret:'never put this in notification'}}});
 const projection=createNotificationProjection();
@@ -95,15 +95,17 @@ nativeClick({...event,kind:'approval'});assert.equal(nativeOpened.length,0);
 nativeClient.assistants=[{...owner}];await native.directory();assert.equal(nativeOpened[0].task,'task');assert.equal(nativePrompts,0);
 await native.setEnabled(false);await native.setEnabled(true);assert.equal(storage.get('pot-system-notifications-browser-v1'),'false');native.dispose();
 
-// Linked assistants use the same reply notifications without querying local
-// execution or approval APIs under their synthetic directory identity.
+// Notification reads follow advertised capabilities, independent of location.
 const linkedAlerts=[],linkedReads=[];
-const linkedOwner={...owner,id:'agent-link:connection:review',name:'Reviewer',origin:{kind:'codex',link_id:'connection',assistant_id:'review'}};
+const linkedOwner={...owner,capabilities:{version:1,operations:['chat.read']},id:'agent-link:connection:review',name:'Reviewer',origin:{kind:'codex',link_id:'connection',assistant_id:'review'}};
 const linkedClient={...nativeClient,assistants:[linkedOwner],request:async path=>{linkedReads.push(path);throw Error('Unsupported local read');},notifySystem:async event=>linkedAlerts.push(event),onNotificationClick:undefined};
 const linkedManager=createSystemNotifications({client:linkedClient,surface:'main',view:()=>route,open:()=>{},locale:()=> 'en',host:host()});
-await linkedManager.directory();await linkedManager.refresh();assert.deepEqual(linkedReads,[],'Linked assistants never query local task outcomes or permissions');
+await linkedManager.directory();await linkedManager.refresh();assert.deepEqual(linkedReads,[],'Unadvertised task and approval reads stay disabled');
 linkedClient.assistants=[{...linkedOwner,reply_id:'remote-reply',reply_count:5}];await linkedManager.directory();
-assert.equal(linkedAlerts.length,1);assert.equal(linkedAlerts[0].kind,'reply');assert.equal(linkedAlerts[0].owner,linkedOwner.id,'Existing notification routing keeps the exact linked assistant');linkedManager.dispose();
+assert.equal(linkedAlerts.length,1);assert.equal(linkedAlerts[0].kind,'reply');assert.equal(linkedAlerts[0].owner,linkedOwner.id,'Existing notification routing keeps the exact linked assistant');
+linkedClient.assistants[0]={...linkedClient.assistants[0],capabilities:{version:1,operations:['chat.read','task.outcomes']}};
+linkedClient.request=async path=>{linkedReads.push(path);return {items:[],cursor:0,has_more:false};};
+await linkedManager.refresh();assert.deepEqual(linkedReads,['/api/v1/tasks/outcomes'],'An advertised remote task projection uses the same route without acquiring approval capability');linkedManager.dispose();
 
 // Distinct committed terminal transitions keep distinct event IDs even when
 // their timestamps coincide. Explicit cancellations remain silent.

@@ -2,6 +2,7 @@
 // HTTP/SSE responses are fixtures; no model or product data is used.
 async page => {
  const assert=(value,message)=>{if(!value)throw Error(message);};
+ const capabilities={version:1,scope:'owner',operations:['chat.read','chat.send','chat.subscribe','assistant.configure','assistant.usage','approvals.manage','task.read','task.list','task.cancel','task.interrupt','task.control','task.events','task.input','task.archive','task.outcomes','task.files','schedules.manage']};
  const errors=[],reads=[],posts=[];const onError=error=>errors.push(error.message);page.on('pageerror',onError);
  const goal='安装 GitHub CLI 并验证可用。先检查操作系统与当前安装状态，再报告安装结果。';
  let phase='running',archived=false,runID='run-one',paused=false,result=null,version=1,offline=false,rejectGuidance=false,failEvents=false,errorText='',pending=[];
@@ -25,6 +26,8 @@ async page => {
   }
   const data=path==='/api/v1/runtime'?{runtime_id:'fixture',boot_id:'boot'}:path==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Local',kind:'local',connected:true}]}:path==='/api/v1/assistants'?[{id:'alpha',name:'Pot',revision:1}]:path==='/api/v1/assistants/bootstrap'?{assistant:null}:path==='/api/v1/snapshot'?{cursor:1,boot_id:'boot',conversation_id:'alpha',messages:[],turn:null,agent:{phase:'ready'}}:path==='/api/v1/permissions'?{pending,policy:{machines:{}}}:path==='/api/v1/tasks/outcomes'?{items:[],cursor:0,has_more:false}:(path==='/api/v1/tasks/query'||path==='/api/v1/tasks/catalog')?{items:[{id:'task-proof',title:'安装 GitHub CLI 并验证可用',assistant_id:'alpha',machine_id:'fixture-runtime',phase}],total:1}:path==='/api/v1/tasks/task-proof'?{run_id:runID,info:{phase,archived,paused,machine_id:'fixture-runtime'},request:{text:goal},result,error:errorText,config:{model:'fixture-model'}}:path==='/api/v1/tasks/task-proof/messages'?inputs:path==='/api/v1/tasks/task-proof/events'?{events:events.filter(row=>row.sequence>Number(url.searchParams.get('after'))),cursor:events.at(-1)?.sequence||0,has_more:false,unavailable:offline}:path==='/api/v1/completions'?{items:[{token:'/skill:review',label:'Review',detail:'Review changes'}]}:{items:[]};
 
+  if(path==='/api/v1/assistants')for(const assistant of data)assistant.capabilities=capabilities;
+  if(path==='/api/v1/tasks/task-proof')data.capabilities=capabilities;
   await route.fulfill({json:data});
  };
  const access=route=>route.fulfill({json:{authenticated:true}});
@@ -32,6 +35,26 @@ async page => {
  const push=()=>page.evaluate(value=>window.__taskChanges(value),++version);
  const menu=()=>page.getByRole('button',{name:'任务操作',exact:true});
  const openTask=async()=>{await page.getByRole('button',{name:'任务',exact:true}).first().click();await page.getByRole('button',{name:'安装 GitHub CLI 并验证可用',exact:true}).click();await page.locator('.task-conversation').waitFor();};
+ const settle=()=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+ const scrollHistory=async delta=>{
+  await settle();
+  // Establish reader intent before moving the virtual history, as the cursor
+  // fixtures do. A bare scroll write represents layout, not user input.
+  await page.locator('.task-history').evaluate((history,delta)=>{history.dispatchEvent(new WheelEvent('wheel',{deltaY:delta,bubbles:true}));history.scrollTop+=delta;history.dispatchEvent(new Event('scroll'));},delta);
+  await page.locator('.task-composer-area .latest-button').waitFor({state:'visible'});
+  await page.waitForFunction(()=>{const history=document.querySelector('.task-history'),top=history.getBoundingClientRect().top;return [...history.querySelectorAll('article.message')].some(node=>{const box=node.getBoundingClientRect();return box.height&&box.bottom>top&&box.top<top+history.clientHeight;});});await settle();
+ };
+ const readingPosition=()=>page.locator('.task-history').evaluate(history=>{
+  const top=history.getBoundingClientRect().top,bottom=top+history.clientHeight;
+  const rows=[...history.querySelectorAll('article.message')].filter(node=>{const box=node.getBoundingClientRect();return box.height&&box.bottom>top&&box.top<bottom;});
+  const row=rows.findLast(node=>node.getBoundingClientRect().top<=top+4)||rows[0];
+  return row?{id:row.dataset.messageId,offset:row.getBoundingClientRect().top-top}:null;
+ });
+ const assertReading=async(position,message)=>{
+  assert(position,'A visible message anchors historical reading');await settle();
+  const offset=await page.locator('.task-history').evaluate((history,id)=>{const row=[...history.querySelectorAll('article.message')].find(node=>node.dataset.messageId===id);return row?row.getBoundingClientRect().top-history.getBoundingClientRect().top:null;},position.id);
+  assert(offset!==null&&Math.abs(offset-position.offset)<2,message+': '+JSON.stringify({position,offset}));
+ };
  try{
   await page.setViewportSize({width:1200,height:1000});await page.goto('http://127.0.0.1:17702/?theme=light&locale=zh-CN&conversation=alpha');await openTask();
   await page.locator('.task-transcript .reply-bubble').getByText('我先检查当前系统，以及 gh 是否已经安装。',{exact:true}).waitFor();
@@ -84,27 +107,29 @@ async page => {
   // Long history follows the bottom only until the reader scrolls upward.
   for(let index=0;index<25;index++){add('message_finished');add('message_started');add('text_delta',{text:`验证步骤 ${index+1}：工具返回了预期结果。`});}await push();
   await page.locator('.task-transcript').getByText('验证步骤 25：工具返回了预期结果。',{exact:true}).waitFor();
-  await page.locator('.task-history').evaluate(node=>{node.scrollTop=0;node.dispatchEvent(new Event('scroll'));});
-  add('text_delta',{text:' 新进展。'});await push();await page.waitForTimeout(80);
-  assert(await page.locator('.task-history').evaluate(node=>node.scrollTop)===0,'Reading history pauses following');
+  await scrollHistory(-650);const historical=await readingPosition();
+  const streamed=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/v1/tasks/task-proof/events');
+  add('text_delta',{text:' 新进展。'});await push();await streamed;
+  await assertReading(historical,'New output preserves the visible historical message');
+  assert(await page.locator('.task-composer-area .latest-button').isVisible(),'Reading history pauses following');
   await page.locator('.task-composer-area .latest-button').click();await page.locator('.task-transcript').getByText('验证步骤 25：工具返回了预期结果。 新进展。',{exact:true}).waitFor();assert(await page.locator('.task-history').evaluate(node=>node.scrollTop>0),'Latest action resumes following');
   const inputRect=await composer.boundingBox();assert(inputRect.y+inputRect.height<=1000,'Composer stays within viewport during long output');
   // Task guidance uses the same mobile focus/keyboard behavior as main Chat.
   const retainedDraft=await composer.inputValue();await page.setViewportSize({width:390,height:852});
   await composer.fill('Long mobile task guidance. '.repeat(50));await composer.evaluate(node=>node.blur());
-  await page.locator('.task-history').evaluate(node=>{node.scrollTop=120;node.dispatchEvent(new Event('scroll'));});
+  await scrollHistory(-360);
   const focusCDP=await page.context().newCDPSession(page);await focusCDP.send('Emulation.setTouchEmulationEnabled',{enabled:true});
   await page.bringToFront();await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   const touchRect=await composer.boundingBox();await focusCDP.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:touchRect.x+touchRect.width/2,y:touchRect.y+touchRect.height/2}]});await focusCDP.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
   await page.waitForFunction(()=>document.activeElement?.classList.contains('composer-input'));
-  const taskFocus=await composer.evaluate(node=>{node.setSelectionRange(30,40);node.scrollTop=40;return {history:document.querySelector('.task-history').scrollTop,inputScroll:node.scrollTop};});
+  const taskFocus=await composer.evaluate(node=>{node.setSelectionRange(30,40);node.scrollTop=40;return {inputScroll:node.scrollTop};}),keyboardReading=await readingPosition();
   for(const [height,top]of [[420,80],[420,110],[852,0]]){
     await page.evaluate(({height,top})=>{Object.defineProperties(window.visualViewport,{height:{configurable:true,value:height},offsetTop:{configurable:true,value:top}});window.visualViewport.dispatchEvent(new Event('resize'));window.visualViewport.dispatchEvent(new Event('scroll'));},{height,top});
     const bounds=await composer.boundingBox();
     assert(bounds.y>top+44&&bounds.y+bounds.height<=top+height,'Task composer stays above the keyboard after a tap');
     assert(await composer.evaluate(node=>document.activeElement===node&&node.selectionStart===30&&node.selectionEnd===40),'Task keyboard transitions retain native focus and selection: '+JSON.stringify(await composer.evaluate(node=>({focused:document.activeElement===node,active:document.activeElement?.tagName,selection:[node.selectionStart,node.selectionEnd]}))));
     assert(await composer.evaluate(node=>node.scrollTop)===taskFocus.inputScroll,'Task keyboard panning retains long-draft scrolling');
-    assert(await page.locator('.task-history').evaluate(node=>node.scrollTop)===taskFocus.history,'Task keyboard transitions retain history reading position');
+    await assertReading(keyboardReading,'Task keyboard transitions retain the historical message');
   }
   await page.evaluate(()=>{for(const key of ['height','offsetTop'])delete window.visualViewport[key];window.visualViewport.dispatchEvent(new Event('resize'));});
   await focusCDP.send('Emulation.setTouchEmulationEnabled',{enabled:false});await focusCDP.detach();
@@ -118,12 +143,12 @@ async page => {
   await page.getByText('已归档 · 发送追加要求可继续此任务。',{exact:true}).waitFor();
   await page.screenshot({path:'output/playwright/task-lifecycle/archived-desktop-after.png'});await page.setViewportSize({width:390,height:852});await page.screenshot({path:'output/playwright/task-lifecycle/archived-mobile-after.png'});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Archived follow-up fits mobile');await page.setViewportSize({width:1200,height:1000});
 
-  await page.locator('.task-history').evaluate(node=>{node.scrollTop=0;node.dispatchEvent(new Event('scroll'));});
+  await scrollHistory(-100000);const navigationReading=await readingPosition();
   await page.getByRole('button',{name:'返回',exact:true}).first().click();await page.getByRole('button',{name:'安装 GitHub CLI 并验证可用',exact:true}).click();await page.locator('.task-status').getByText('已完成',{exact:true}).waitFor();
   await page.waitForFunction(()=>document.querySelector('.task-goal')?.open&&document.querySelector('[data-call-id="probe"]')?.open);
   assert(await composer.inputValue()==='完成时也保留这条草稿 /skill:r','Navigation retains Task draft');
   assert(await page.locator('.task-goal').evaluate(node=>node.open)&&await tool.evaluate(node=>node.open),'Navigation restores disclosures');
-  assert(await page.locator('.task-history').evaluate(node=>node.scrollTop)===0,'Navigation restores reading position');
+  await assertReading(navigationReading,'Navigation restores the historical message');
   await menu().click();await page.getByRole('button',{name:'保留待跟进',exact:true}).click();assert(posts.at(-1).path==='/api/v1/tasks/dispositions'&&!posts.at(-1).body.decisions[0].archived,'Unarchive is separate from cancellation');
   await menu().click();await page.getByRole('button',{name:'归档任务',exact:true}).click();assert(posts.at(-1).body.decisions[0].archived,'Manual archive retains the run');
   offline=true;await push();await page.locator('.task-status').getByText('原执行机器离线 · 显示缓存执行输出',{exact:true}).waitFor();

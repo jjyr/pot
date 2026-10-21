@@ -9,25 +9,25 @@ import (
 // Directory describes the assistants and operations owned by an autonomous node.
 // DefaultAssistantID is persisted by the adapter and initially selects its first assistant.
 type Directory struct {
-	NodeID             string     `json:"node_id"`
-	Name               string     `json:"name"`
-	Adapter            string     `json:"adapter"`
-	Assistants         []Identity `json:"assistants"`
-	DefaultAssistantID string     `json:"default_assistant_id"`
-	Capabilities       []string   `json:"capabilities"`
+	NodeID             string                 `json:"node_id"`
+	Name               string                 `json:"name"`
+	Adapter            string                 `json:"adapter"`
+	Assistants         []Identity             `json:"assistants"`
+	DefaultAssistantID string                 `json:"default_assistant_id"`
+	Operations         map[string]Description `json:"operations"`
 }
 
 // TaskRequest is an immutable, idempotent delegation. From is authenticated by
 // Agent Link; the receiving adapter owns permissions, workspace and execution.
 type TaskRequest struct {
-	// Native is receiver-owned configuration passed only by the in-process port.
-	// It is never serialized or admitted from a remote node.
-	Native      *protocol.CreateTask `json:"-"`
-	RequestID   string               `json:"request_id"`
-	From        protocol.AgentRef    `json:"from"`
-	AssistantID string               `json:"assistant_id,omitempty"`
-	Text        string               `json:"text"`
-	Workspace   string               `json:"workspace,omitempty"`
+	// Configuration is an explicit task.configure operation. It uses the same
+	// serializable contract as ordinary tasks, but requires owner authority.
+	Configuration *protocol.CreateTask `json:"configuration,omitempty"`
+	RequestID     string               `json:"request_id"`
+	From          protocol.AgentRef    `json:"from"`
+	AssistantID   string               `json:"assistant_id,omitempty"`
+	Text          string               `json:"text"`
+	Workspace     string               `json:"workspace,omitempty"`
 }
 type Task struct {
 	ID        string    `json:"id"`
@@ -40,9 +40,10 @@ type Task struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Backend is the business port shared by in-process and remote adapters. Task
-// lookups are scoped to the originating node; adapters must durably deduplicate
-// requests before starting work, and fence interrupted work with unknown effects.
+// Backend is the receiver execution port shared by in-process and remote calls.
+// Adapters enforce per-assistant operations and original caller ownership. They
+// must resolve accepted retries before current-directory admission checks,
+// durably deduplicate new work, and fence interrupted work with unknown effects.
 type Backend interface {
 	Directory(context.Context) (Directory, error)
 	Observe(context.Context, string) (Observation, error)

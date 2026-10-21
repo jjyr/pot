@@ -30,7 +30,8 @@ func (b *testBackend) Observe(ctx context.Context, _ string) (Observation, error
 func (b *testBackend) Directory(ctx context.Context) (Directory, error) {
 	a, _ := b.f.service.options.Identity(ctx, "assistant")
 	other, _ := b.f.service.options.Identity(ctx, "other")
-	return Directory{NodeID: b.f.id, Name: b.f.id, Adapter: "pot", Assistants: []Identity{a, other}, DefaultAssistantID: "assistant", Capabilities: []string{"chat", "tasks"}}, nil
+	description := Description{Version: 1, Scope: "peer", Operations: []Operation{ChatRead, ChatSend, ChatReceipt, TaskSubmit, TaskRead}}
+	return Directory{NodeID: b.f.id, Name: b.f.id, Adapter: "pot", Assistants: []Identity{a, other}, DefaultAssistantID: "assistant", Operations: map[string]Description{a.Address.AgentID: description, other.Address.AgentID: description}}, nil
 }
 func (b *testBackend) Submit(ctx context.Context, r TaskRequest) (Task, error) {
 	b.submitted = r
@@ -41,7 +42,38 @@ func (b *testBackend) Status(context.Context, protocol.AgentRef, string) (Task, 
 	return Task{ID: "remote-task", State: "complete", Result: "done"}, nil
 }
 func (b *testBackend) Cancel(context.Context, protocol.AgentRef, string) (Task, error) {
-	panic("unsupported cancellation invoked")
+	return Task{}, ErrUnsupported
+}
+
+func TestTaskCallerKindsAndConfigurationAuthorityOnPeerTransport(t *testing.T) {
+	ctx := context.Background()
+	a, b := newFixture(t, "caller-a"), newFixture(t, "caller-b")
+	a.service.options.Backend = &testBackend{f: a}
+	backend := &testBackend{f: b}
+	b.service.options.Backend = backend
+	c := connect(t, a, b)
+	for _, kind := range []string{"user", "task", "assistant"} {
+		from := protocol.AgentRef{NodeID: a.id, Kind: kind, AgentID: "source"}
+		request := TaskRequest{From: from, RequestID: "request-" + kind, Text: "Work"}
+		if _, err := a.service.Submit(ctx, c.ID, request); err != nil || backend.submitted.From != from {
+			t.Fatal(kind, backend.submitted, err)
+		}
+	}
+	for _, kind := range []string{"node", "runtime"} {
+		if _, err := a.service.Submit(ctx, c.ID, TaskRequest{From: protocol.AgentRef{NodeID: a.id, Kind: kind, AgentID: "source"}, RequestID: "forged", Text: "Work"}); !errors.Is(err, ErrUnauthorized) {
+			t.Fatal(kind, err)
+		}
+	}
+	session, err := a.service.ensureSession(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuration := protocol.CreateTask{RequestID: "owner-config", Text: "Work"}
+	input := TaskRequest{From: protocol.AgentRef{NodeID: a.id, Kind: "assistant", AgentID: "source"}, RequestID: configuration.RequestID, Text: configuration.Text, Configuration: &configuration}
+	var result Task
+	if err = a.service.call(ctx, session, "task.submit", input, &result); !errors.Is(err, ErrUnsupported) {
+		t.Fatal("peer transport admitted owner configuration", err)
+	}
 }
 func TestNodeDirectoryRoutesAllAssistantsAndPreservesDefaultIntent(t *testing.T) {
 	ctx := context.Background()

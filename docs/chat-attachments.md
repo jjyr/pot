@@ -49,6 +49,9 @@ contents are unavailable; new incompatible input is rejected.
 Browser / macOS DOM File
          |  bounded byte chunks, captured Space + assistant
          v
+Agent Link operation port (chat.attachments, owner scope)
+         |
+         v
 Owning Control attachment store <----- preview / download chunks
          | immutable metadata + stable ID
          v
@@ -65,8 +68,11 @@ idempotent. Chunks are at most 192 KiB before base64 encoding, below the ordinar
 signature and image dimensions. Only finished, canonical metadata can enter a
 message. `GET /api/v1/attachments/{id}?offset=...` reads bounded, immutable
 chunks. Both APIs require the existing authenticated channel and assistant
-ownership. The Web publication explicitly allowlists these routes. Native remote
-Spaces route them through the selected Control, with no failure fallback to local
+ownership through the `chat.attachments` operation. The composer exposes uploads
+only when this capability is advertised; model image/PDF flags further restrict
+accepted formats. Peer adapters do not currently advertise attachment transfer.
+The Web publication explicitly allowlists these routes. Native remote Spaces
+route them through the selected Control, with no failure fallback to local
 storage. Client absolute paths are never accepted.
 
 Originals live in the Control's private `attachments/` directory. User messages,

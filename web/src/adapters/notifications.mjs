@@ -1,5 +1,6 @@
 import {claimNotificationOnboarding} from './notification-onboarding.mjs';
 import {createNotificationProjection,taskOutcomeNotifications,viewingNotification,notificationText} from '../state/notifications.mjs';
+import {supportsCapability} from '../state/agent-links.mjs';
 import {createRefreshQueue} from '../state/refresh.mjs';
 
 const preferenceKey='pot-system-notifications-browser-v1';
@@ -109,7 +110,7 @@ export function createSystemNotifications({client,surface,view,open,locale,host=
     const key=ownerKey(assistant),boot=bootOf(assistant);let entry=owners.get(key);
     if(entry&&entry.boot!==boot){stopOwner(entry);projection.reset(assistant.space_id,assistant.id,assistant.control_id);entry=null;}
     if(entry)return entry;
-    entry={key,boot,space:assistant.space_id,linked:!!assistant.origin,abort:new AbortController(),cursor:null};
+    entry={key,boot,space:assistant.space_id,abort:new AbortController(),cursor:null};
     const latest=()=>(client.assistants||[]).find(item=>ownerKey(item)===key);
     const current=()=>{
       const item=latest(),space=(client.spaces||[]).find(space=>space.id===entry.space);
@@ -126,11 +127,11 @@ export function createSystemNotifications({client,surface,view,open,locale,host=
         entry.cursor=page.cursor;more=page.has_more;
         if(after!==null)await send(taskOutcomeNotifications(latest(),page.items||[]));
       }while(more&&current());
-    },{active:current,onError:fail});
+    },{active:()=>current()&&supportsCapability(latest(),'task.outcomes'),onError:fail});
     entry.approvals=createRefreshQueue(async()=>{
       const approvals=await client.request('/api/v1/permissions',scope);
       if(current())await send(projection.observe(latest(),(approvals.pending||[]).filter(item=>item.request?.owner===assistant.id),boot));
-    },{active:current,onError:fail});
+    },{active:()=>current()&&supportsCapability(latest(),'approvals.manage'),onError:fail});
     entry.current=current;
     owners.set(key,entry);return entry;
   }
@@ -174,7 +175,7 @@ export function createSystemNotifications({client,surface,view,open,locale,host=
         return Promise.resolve();
       }
       const reads=[];
-      for(const entry of owners.values())if((!space||entry.space===space)&&!entry.linked){
+      for(const entry of owners.values())if((!space||entry.space===space)){
         if(!topics.length||topics.includes('task-outcomes'))reads.push(entry.tasks.run());
         if(!topics.length||topics.includes('permissions'))reads.push(entry.approvals.run());
       }
@@ -193,7 +194,7 @@ export function createSystemNotifications({client,surface,view,open,locale,host=
         }
         const existing=owners.get(key),entry=watch(item);
         for(const event of projection.observe(item,undefined,entry.boot))deliveries.push(deliver(event,entry.current).catch(fail));
-        if(existing!==entry&&!entry.linked)deliveries.push(entry.tasks.run(),entry.approvals.run());
+        if(existing!==entry)deliveries.push(entry.tasks.run(),entry.approvals.run());
       }
       return Promise.all(deliveries);
     },

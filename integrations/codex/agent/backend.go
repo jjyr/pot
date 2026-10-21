@@ -83,9 +83,11 @@ func (b *backend) identity(a assistant) agentlink.Identity {
 }
 func (b *backend) Directory(ctx context.Context) (agentlink.Directory, error) {
 	list, err := b.list(ctx)
-	d := agentlink.Directory{NodeID: b.nodeID, Name: "Codex", Adapter: "codex", Capabilities: []string{"chat", "tasks", "cancel", "observe"}, Assistants: []agentlink.Identity{}}
+	d := agentlink.Directory{NodeID: b.nodeID, Name: "Codex", Adapter: "codex", Assistants: []agentlink.Identity{}}
+	d.Operations = map[string]agentlink.Description{}
 	for _, a := range list {
 		d.Assistants = append(d.Assistants, b.identity(a))
+		d.Operations[a.ID] = agentlink.Description{Version: 1, Scope: "peer", Operations: agentlink.PeerOperations()}
 		if a.Default {
 			d.DefaultAssistantID = a.ID
 		}
@@ -148,7 +150,10 @@ func (b *backend) Submit(ctx context.Context, r agentlink.TaskRequest) (agentlin
 	return b.submit(ctx, r, nil)
 }
 func (b *backend) submit(ctx context.Context, r agentlink.TaskRequest, message *protocol.Envelope) (agentlink.Task, error) {
-	if !validID(r.RequestID) || r.From.NodeID == "" || (r.From.Kind != "assistant" && !(message != nil && r.From.Kind == "user")) || r.From.AgentID == "" || r.Text == "" || len(r.Text) > 65536 || message == nil && len(r.Text) > 24000 {
+	if r.Configuration != nil {
+		return agentlink.Task{}, agentlink.ErrUnsupported
+	}
+	if !validID(r.RequestID) || !r.From.Valid() || (r.From.Kind != "assistant" && r.From.Kind != "user" && r.From.Kind != "task") || r.Text == "" || len(r.Text) > 65536 || message == nil && len(r.Text) > 24000 {
 		return agentlink.Task{}, agentlink.ErrInvalid
 	}
 	payload := encoded(r)

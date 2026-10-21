@@ -1,5 +1,5 @@
 import {translate} from '../locales/messages.mjs';
-import {linkedAssistantTarget,linkedChatPath,agentFailureKey} from '../state/agent-links.mjs';
+import {supportsCapability,agentFailureKey} from '../state/agent-links.mjs';
 import {createResourceReads} from '../state/resource-cache.mjs';
 import {createTopicVersions} from '../state/changes.mjs';
 import {createFileImages} from '../state/file-images.mjs';
@@ -66,19 +66,9 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
   async function request(path, options = {}) {
     let {method = 'GET', body, signal} = options;
     const capturedScope={...context,...options};
-    const target=linkedAssistantTarget(capturedScope.owner);
-    if(target&&!path.startsWith('/api/v1/agent-links')){
-      const [route,query='']=path.split('?');
-      if(route==='/api/v1/snapshot'||route==='/api/v1/messages/receipt')path=linkedChatPath(target,Object.fromEntries(new URLSearchParams(query)));
-      else if(route==='/api/v1/messages'){
-        if(body.attachments?.length||body.references?.length)throw new APIError(422,{code:'agent_link_capability_unsupported',message:translate(client.uiLocale?.()||'en','agentLinks.capabilityUnavailable')});
-        path=linkedChatPath(target);body={request_id:body.request_id,text:body.text};
-      }
-      else if(route==='/api/v1/permissions')return {pending:[],policy:{machines:{}}};
-      else if(route==='/api/v1/completions')return {items:[]};
-      else throw new APIError(422,{code:'agent_link_capability_unsupported',message:translate(client.uiLocale?.()||'en','agentLinks.capabilityUnavailable')});
-      capturedScope.owner='';
-    }
+    // Every assistant uses the same product routes. Agent Link resolves its
+    // destination and authorization on the host; presentation IDs never choose
+    // an HTTP proxy or a local execution fallback.
     const fullPath = scopedPath(path, capturedScope);
     if (signal?.aborted) throw signal.reason;
     if (desktop) {
@@ -114,6 +104,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
     },
     acquireFileImage:createFileImages(request,()=>context),
     scope: () => ({...context}), setScope: value => Object.assign(context, value),
+    supports:(operation,options={})=>{const scope={...context,...options};return supportsCapability(client.assistants?.find(item=>item.id===scope.owner&&item.space_id===scope.space),operation);},
     snapshot: async options => {
       const scope = {...context,...options};
       const value = await request('/api/v1/snapshot', scope);
@@ -198,7 +189,7 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
         catch (reason) { onStatus('offline', reason); return; }
         onSnapshot(snapshot);
       };
-      if(linkedAssistantTarget(scope.owner)){
+      if(!client.supports('chat.subscribe',scope)){
         let timer,controller;
         const poll=async()=>{
           controller=new AbortController();

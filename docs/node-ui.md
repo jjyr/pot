@@ -38,6 +38,11 @@ remain available. No separate binding wizard or task creation page is required.
 Provided assistants use their saved profile avatars, matching the chat directory;
 node headers keep the Pot or Codex brand icon.
 
+Chat, task controls, assistant settings and notifications use the selected
+assistant's versioned Agent Link capabilities. They never infer support from
+local/remote placement or the Pot/Codex icon. Unsupported operations stay hidden
+or disabled; linked task results and their conversation keep their original route.
+
 Local machine permissions stay with the local node. Linked nodes own their
 models, credentials, workspaces and execution permissions. The UI provides no
 remote Control management, Runner membership or remote owner credential entry.

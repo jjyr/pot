@@ -101,17 +101,12 @@ func streamSnapshots(w http.ResponseWriter, r *http.Request, app *Application) {
 	if owner == "" {
 		owner = "main"
 	}
-	c, err := app.Control.Conversation(r.Context(), owner)
+	subscription, err := app.Control.SubscribeAgent(r.Context(), owner)
 	if err != nil {
 		writeError(w, http.StatusNotFound, protocol.APIError{Code: "owner_unavailable", Message: err.Error()})
 		return
 	}
-	updates, remove, err := c.SubscribeUI(r.Context())
-	if err != nil {
-		writeError(w, http.StatusConflict, protocol.APIError{Code: "subscription_unavailable", Message: err.Error()})
-		return
-	}
-	defer remove()
+	defer subscription.Close()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("X-Accel-Buffering", "no")
 	controller := http.NewResponseController(w)
@@ -130,11 +125,11 @@ func streamSnapshots(w http.ResponseWriter, r *http.Request, app *Application) {
 			if writeHeartbeat(controller, w) != nil {
 				return
 			}
-		case _, ok := <-updates:
+		case _, ok := <-subscription.Updates:
 			if !ok {
 				return
 			}
-			frame, err := c.UIFrame(r.Context(), cursor, initial)
+			frame, err := subscription.Frame(r.Context(), cursor, initial)
 			if err != nil {
 				return
 			}

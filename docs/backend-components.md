@@ -18,12 +18,12 @@ points; `internal/` contains product implementation. All packages share one root
 | `pkg/instance`, `pkg/modeldirectory` | Private data-root identity/locking and provider model metadata |
 | `internal/assistant` | Identities, rules, conversation Threads, chat driver and durable mailboxes/sessions |
 | `pkg/peer` | Shared TLS 1.3 TCP sessions, mutual identity proof, Yamux streams, CBOR/Zstd framing and service admission; no business authorization |
-| `pkg/agentlink` | Node-bound authenticated collaboration, assistant directories and durable request recovery |
+| `pkg/agentlink` | Product operation port, per-assistant capability contracts, node-bound collaboration and durable request recovery |
 | `internal/linkhost` | Agent Link adapters plus one host-owned peer service registry/listener |
 | `internal/gateway`, `internal/secrets` | Node-owned provider HTTP routes and encrypted credential references |
 | `pkg/integrations`, `pkg/integrations/github` | Independent service login, single-account connections and credential caching through injected account/Secrets stores; GitHub device authorization adapter |
 | `internal/usage` | Durable reservations, allowances, usage settlement, tools and compaction accounting |
-| `internal/control`, `internal/tasks`, `internal/schedule` | Product coordination, model selection, permissions, durable Tasks and schedules |
+| `internal/control`, `internal/tasks`, `internal/schedule` | Local/peer operation adapters, product coordination, model selection, permissions, durable Tasks and schedules |
 | `internal/nodeidentity` | Autonomous node signing identity and local machine labels |
 | `internal/runner` | Destination-local immutable Task launches, checkpoints, original command inputs/receipts and event logs |
 | `pkg/execution` | Shared destination Agent queue, concurrency, cancellation and uncertainty fences |
@@ -31,7 +31,7 @@ points; `internal/` contains product implementation. All packages share one root
 | `pkg/plugin` | Common Plugin manifests, discovery, confined asset access and tool-only snapshots |
 | `pkg/runtime` | Public complete-host facade, lifecycle and authenticated operator handler |
 | `internal/runtime` | Product composition, root ownership and component lifecycle behind the facade |
-| `internal/transport`, `internal/localui` | Private/native operator adapters and transient local UI projections |
+| `internal/transport`, `internal/localui` | Private/native request translation into the operation port, node operator services and transient local UI projections |
 | `internal/webui`, `internal/access`, `internal/tailnet` | Independent browser service, authentication, access operator and embedded Tailscale |
 | `internal/desktop`, `cmd/pot-app` | Wails v3 windows, tray, native dialogs and shared frontend bridge |
 | `web/` | Shared HTML/CSS/JS frontend, DOM state, themes, localization and host adapters |

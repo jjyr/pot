@@ -154,7 +154,7 @@ func (s *Service) LinkChat(ctx context.Context, link, assistant, request string)
 	if e = rows.Err(); e != nil {
 		return nil, e
 	}
-	return protocol.UIFrame{Kind: "reset", UISnapshot: protocol.UISnapshot{Snapshot: protocol.Snapshot{APIVersion: protocol.APIVersion, BootID: s.options.BootID, Cursor: cursor, ConversationID: conversation, Messages: []protocol.Message{}, Agent: protocol.AgentStatus{Phase: "idle", Model: ""}}, Messages: items}}, nil
+	return protocol.UIFrame{Kind: "reset", UISnapshot: protocol.UISnapshot{Snapshot: protocol.Snapshot{APIVersion: protocol.APIVersion, BootID: s.options.BootID, Cursor: cursor, ConversationID: conversation, Messages: []protocol.Message{}, Agent: protocol.AgentStatus{Phase: protocol.Ready, Model: ""}}, Messages: items}}, nil
 }
 
 func (s *Service) isLinkChatReply(ctx context.Context, m protocol.Envelope) (bool, error) {

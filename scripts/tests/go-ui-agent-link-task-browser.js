@@ -1,7 +1,7 @@
 async page=>{
  const assert=(value,message)=>{if(!value)throw Error(message);},errors=[];page.on('pageerror',error=>errors.push(error.message));
  await page.goto(new URL('/scripts/tests/fixtures/agent-link-task.html',page.url()).href);
- await page.getByText('This task runs on Codex. Updates and results appear here.',{exact:true}).waitFor();
+ await page.locator('.task-stage[data-phase="running"]').waitFor();
  assert(!await page.locator('.task-composer-area form').isVisible(),'Linked tasks do not offer unsupported live steering');
  await page.evaluate(()=>linkedTaskFixture.ui.openMenu());
  assert(!await page.getByRole('button',{name:'Pause task',exact:true}).count(),'Pause is not advertised by a linked task');

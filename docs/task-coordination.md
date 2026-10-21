@@ -7,6 +7,22 @@ for other Tasks. Task-result and plugin-notification handling retain the
 assistant's configured tools and current machine permissions. A batch with
 eligible failed work additionally exposes the bounded retry tool described below.
 
+## Agent Link interface
+
+Chat UI, task UI and model task tools use the Agent Link task interface for both
+local and linked execution. Location is presentation metadata; effective
+capabilities select supported controls. The local owner adapter supports explicit
+serialized task configuration without an unexported native-only request field.
+Only owner authority can select that configuration; peer callers retain the
+receiver-owned execution policy.
+
+An authenticated user conversation can submit linked work without any local
+assistant or Provider. Its durable session owns the directing receipt and result
+route; the receiving assistant owns execution. User task results return directly
+to the original conversation and task notifications. They do not become an
+assistant inbox event or acquire autonomous local processing. The aggregate task
+catalogue and original conversation use the same retained task reference.
+
 ## Linked execution
 
 `create_task` accepts `link_id` and an optional assistant `target` address.
@@ -14,8 +30,9 @@ Explicit targets select that assistant; otherwise the receiving node resolves it
 persisted default once. The receiver owns execution, model selection and local
 permissions. Local provider credentials and model snapshots are never forwarded.
 The directing node stores an idempotent delegation and remote reference rather
-than launching a local worker copy. Results notify the original directing
-assistant through the existing inbox and task-outcome projection.
+than launching a local worker copy. Assistant-directed results notify the
+original directing assistant through its inbox and task-outcome projection;
+user-directed results follow the conversation route described above.
 
 Linked tasks use the same lists and detail view, with a Codex or Pot source icon.
 Cancellation targets the original accepted task; local archive state is supported.
@@ -246,5 +263,6 @@ append-only page from the original Runner across all of the Task's Runs. Each it
 `sequence` plus its generation/turn-bound Agent event. The page returns `cursor`
 and `has_more`; clients advance only through contiguous sequences. Historical remote pages remain cached with `unavailable: true`; retired
 Control/Runner destinations cannot execute or fetch new output. Agent Link task
-details expose their canonical result and return an empty transcript until the
-adapter advertises transcript support. Changes wake the existing `tasks` invalidation stream.
+details expose their canonical result. Clients request transcripts only when
+the task advertises `task.events`; unsupported reads return a capability error.
+Changes wake the existing `tasks` invalidation stream.

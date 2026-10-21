@@ -233,6 +233,11 @@ subscription contract and configuration-boundary behavior.
 
 `control/0021_agent_link_addresses` records independently enabled Pot peer endpoints, preserving the existing configured endpoint. Startup restores listeners after migration without replaying agent work.
 
+`control/0022_agent_link_operations` converts cached Agent Link feature flags to
+versioned per-assistant peer operation descriptions and removes the old flags.
+It retains connection keys,
+caller identities, accepted tasks and request receipts without replay.
+
 Profile format 3 replaces idle-delay settings with `prompt_cache_minutes`, an
 estimated cache lifetime. Explicit durations and immutable save receipt hashes
 are preserved; retired field names are removed. Conversation migration 0005 adds

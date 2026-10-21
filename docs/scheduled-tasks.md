@@ -1,6 +1,15 @@
 # Scheduled tasks
 
-Control owns schedules in both local and remote modes. Schedules are persistent definitions; each trigger creates an independent background task/Agent session. Control owns triggering, deduplication, task admission and notifications. The destination Runtime manages actual Agent execution and local concurrency. Main Agent manages schedules through tools without a resident model or sleep/cron commands.
+Control owns persistent schedules, triggering, deduplication, task admission and
+notifications. Each trigger creates an independent local background task/Agent
+session. Main Agent manages schedules through tools without a resident model or
+sleep/cron commands.
+
+Assistant-scoped schedule UI/API calls enter the Agent Link operation port under
+`schedules.manage`. The current owner adapter advertises it; peer adapters do not.
+The existing scheduler and its occurrence transactions remain in-process. Linked
+task submission does not imply remote schedule management or cross-node occurrence
+dispatch. See [Agent Link](agent-links.md#product-operation-port).
 
 ```
 Chat / tasks -> schedules
@@ -89,22 +98,23 @@ and `spec.model`. Selection is autonomous and requires no routing approval or
 allowlist. Each occurrence resolves these fields anew; omitting both uses the
 owning assistant's active configuration. See [Task routing](task-coordination.md#autonomous-model-routing).
 
-Creation saves `spec.machine_id` (defaulting to the owning Control when omitted). Updates without
-`machine_id` preserve the selected machine. Every occurrence creates a new Task,
-which reads that machine's current execution policy at dispatch. No schedule
-selects or retains a container. Remote machine IDs restore while offline;
-execution requires the selected machine to be available.
+Creation saves `spec.machine_id` (defaulting to the owning node when omitted).
+Updates without `machine_id` preserve the saved selection. Every occurrence
+creates a new Task using the node's current execution policy. New work requires
+the owning node's local execution target. Historical remote machine IDs remain
+for history and recovery; they do not authorize new remote execution. No schedule
+selects or retains a container.
 
 ## Results and storage
 
-Worker writes `.pot-schedule-result.json`: `summary`, stable `fingerprint`, nonempty `evidence` array, optional relative-path `artifacts` array. Control reads the result from the task's immutable execution target through the bounded file transport, including remote machines. Results must be ordinary files no larger than 16 KiB. Missing, oversized or invalid results fail rather than count as unchanged. Editing a goal resets the comparison baseline; old runs cannot overwrite the new baseline. Silent unchanged runs do not wake main Agent but retain task/schedule history; each check may still incur model costs.
+Worker writes `.pot-schedule-result.json`: `summary`, stable `fingerprint`, nonempty `evidence` array, optional relative-path `artifacts` array. Control reads the result from the task's immutable local execution target through bounded file reads. Results must be ordinary files no larger than 16 KiB. Missing, oversized or invalid results fail rather than count as unchanged. Editing a goal resets the comparison baseline; old runs cannot overwrite the new baseline. Silent unchanged runs do not wake main Agent but retain task/schedule history; each check may still incur model costs.
 
 Each Task stores an explicit schedule/occurrence origin and each occurrence saves
 its notification policy at creation. Task coordination validates the report before
 publishing the final outcome. Task state, schedule history, baseline and the shared
 Agent inbox event commit together. A missing or invalid report produces one failed
-event. An unavailable remote transport keeps the Task active until its original
-result can be read; the Worker is not relaunched.
+event. Historical tasks with retired remote destinations retain their original
+references and recovery fences; the Worker is not relaunched locally.
 
 Scheduled and ordinary results use the same bounded summary batches and durable
 reply acknowledgment. Unchanged or policy-excluded outcomes remain in the inbox

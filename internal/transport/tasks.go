@@ -3,24 +3,23 @@ package transport
 import (
 	"context"
 	"errors"
-	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/schedule"
-	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 	"net/url"
 	"strconv"
-	"strings"
 )
 
+// Assistant-scoped task and schedule calls use the Agent Link operation port.
+// These node services only aggregate tasks, preview calendars or inspect mail.
 func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, owner string, r Request) (any, error, bool) {
 	s := a.Control
 	path := u.Path
-	if path != "/api/v1/tasks" && !strings.HasPrefix(path, "/api/v1/tasks/") && path != "/api/v1/schedules" && path != "/api/v1/schedules/preview" && path != protocol.AssistantMailAPI {
+	catalog := method == "GET" && path == "/api/v1/tasks/catalog"
+	if !catalog && path != "/api/v1/schedules/preview" && path != protocol.AssistantMailAPI {
 		return nil, nil, false
 	}
-	catalog := method == "GET" && path == "/api/v1/tasks/catalog"
-	if !catalog {
+	if path == protocol.AssistantMailAPI {
 		if _, err := s.Conversation(ctx, owner); err != nil {
 			return nil, err, true
 		}
@@ -35,24 +34,7 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 	var result any
 	var err error
 	switch {
-	case method == "POST" && path == "/api/v1/tasks/dispositions":
-		var request protocol.TaskDispositions
-		if err = decode(r.Body, &request); err == nil {
-			var items []protocol.TaskInfo
-			items, err = s.SetTaskDispositions(ctx, owner, request.Decisions)
-			result = map[string]any{"items": items}
-		}
-	case method == "GET" && path == "/api/v1/tasks/outcomes":
-		var after *uint64
-		if u.Query().Has("after") {
-			var cursor uint64
-			cursor, err = strconv.ParseUint(u.Query().Get("after"), 10, 64)
-			after = &cursor
-		}
-		if err == nil {
-			result, err = s.Tasks.Outcomes(ctx, owner, after)
-		}
-	case method == "GET" && (path == "/api/v1/tasks/query" || catalog):
+	case catalog:
 		var q protocol.TaskQuery
 		q.Scope = u.Query().Get("scope")
 		q.Q = u.Query().Get("q")
@@ -67,45 +49,14 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 			q.Phase = &p
 		}
 		if err == nil {
-			if catalog {
-				result, err = s.TaskPage(ctx, "", q)
-			} else {
-				result, err = s.TaskPage(ctx, owner, q)
-			}
-		}
-	case method == "POST" && path == "/api/v1/tasks":
-		var request protocol.CreateTask
-		if err = decode(r.Body, &request); err == nil {
-			result, err = s.CreateTask(ctx, owner, request)
+			result, err = s.TaskPage(ctx, "", q)
 		}
 	case path == "/api/v1/schedules/preview" && method == "POST":
 		var request schedule.PreviewRequest
 		if err = decode(r.Body, &request); err == nil {
 			result = schedule.Preview(request, storage.Now())
 		}
-	case path == "/api/v1/schedules" && method == "GET":
-		var q schedule.Query
-		q.Scope = u.Query().Get("scope")
-		q.Selected = u.Query().Get("selected")
-		q.Offset, err = integer("offset")
-		if err == nil {
-			q.RunsOffset, err = integer("runs_offset")
-		}
-		if err == nil {
-			q.Limit, err = integer("limit")
-		}
-		if err == nil {
-			result, err = s.Schedules.Page(ctx, owner, q)
-		}
-	case path == "/api/v1/schedules" && method == "POST":
-		var request schedule.Request
-		if err = decode(r.Body, &request); err == nil {
-			result, err = s.Schedules.Manage(ctx, owner, request, storage.Now())
-		}
-		if err == nil {
-			s.Changes.Notify("schedules")
-		}
-	case path == protocol.AssistantMailAPI && method == "POST":
+	case method == "POST" && path == protocol.AssistantMailAPI:
 		var request protocol.RelayRequest
 		if err = decode(r.Body, &request); err == nil {
 			switch request.Operation {
@@ -128,129 +79,7 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 			}
 		}
 	default:
-		relative := strings.TrimPrefix(path, "/api/v1/tasks/")
-		parts := strings.Split(relative, "/")
-		if len(parts) > 2 || !core.Identifier(parts[0]) {
-			return nil, errors.New("invalid Task path"), true
-		}
-		id := parts[0]
-		if len(parts) == 1 && method == "GET" {
-			result, err = s.GetTask(ctx, owner, id)
-			break
-		}
-		if len(parts) != 2 {
-			err = errors.New("Task route unavailable")
-			break
-		}
-		if s.LinkTask(ctx, owner, id) {
-			switch parts[1] {
-			case "events":
-				if method == "GET" {
-					return map[string]any{"events": []any{}, "cursor": 0, "has_more": false, "unavailable": false}, nil, true
-				}
-			case "messages":
-				if method == "GET" {
-					return []any{}, nil, true
-				}
-			case "cancel":
-				if method == "POST" {
-					err := s.StopTask(ctx, owner, id, "cancel")
-					return map[string]bool{"accepted": err == nil}, err, true
-				}
-			}
-			return nil, protocol.APIError{Code: "agent_link_capability_unsupported"}, true
-		}
-		switch parts[1] {
-		case "file":
-			if method != "GET" {
-				err = errors.New("GET required")
-				break
-			}
-			name := u.Query().Get("path")
-			var offset uint64
-			offset, err = integer("offset")
-			if err == nil {
-				result, err = s.ReadTaskFileChunk(ctx, owner, id, name, offset, u.Query().Get("revision"))
-			}
-
-		case "events":
-			if method != "GET" {
-				err = errors.New("GET required")
-				break
-			}
-			var after, limit uint64
-			after, err = integer("after")
-			if err == nil {
-				limit, err = integer("limit")
-			}
-			if err == nil {
-				result, err = s.TaskEvents(ctx, owner, id, after, limit)
-			}
-		case "messages":
-			if method == "GET" {
-				result, err = s.Tasks.Inputs(ctx, owner, id)
-			} else {
-				var input protocol.TaskInput
-				if err = decode(r.Body, &input); err == nil {
-					err = s.Tasks.SendMessage(ctx, owner, id, input.RequestID, protocol.AgentRef{NodeID: s.Tasks.ControlID(), Kind: "user", AgentID: owner}, input.Text)
-				}
-				result = map[string]bool{"accepted": err == nil}
-			}
-		case "interrupt", "cancel":
-			if method != "POST" {
-				err = errors.New("POST required")
-				break
-			}
-			var request struct {
-				ID string `json:"request_id" required:"true"`
-			}
-			if err = decode(r.Body, &request); err == nil {
-				err = s.StopTask(ctx, owner, id, parts[1])
-			}
-			result = map[string]bool{"accepted": err == nil}
-		case "control":
-			if method != "POST" {
-				err = errors.New("POST required")
-				break
-			}
-			var request struct {
-				RunID  string `json:"run_id" required:"true"`
-				Action string `json:"action" required:"true"`
-			}
-			if err = decode(r.Body, &request); err == nil {
-				err = s.Tasks.Control(ctx, owner, id, request.RunID, request.Action)
-			}
-			result = map[string]bool{"accepted": err == nil}
-		case "recovery":
-			if method != "POST" {
-				err = errors.New("POST required")
-				break
-			}
-			var request struct {
-				RunID  string `json:"run_id" required:"true"`
-				Action string `json:"action" required:"true"`
-			}
-			if err = decode(r.Body, &request); err == nil {
-				result, err = s.TaskRecovery(ctx, owner, id, request.RunID, request.Action)
-			}
-		case "resume":
-			if method != "POST" {
-				err = errors.New("POST required")
-				break
-			}
-			var command control.ResumeAllowanceCommand
-			if err = decode(r.Body, &command); err == nil {
-				if command.Scope != "" && command.Scope != id {
-					err = errors.New("Task allowance scope changed")
-				} else {
-					command.Scope = id
-					err = s.ResumeAllowance(ctx, owner, command)
-				}
-			}
-			result = map[string]bool{"accepted": err == nil}
-		default:
-			err = errors.New("Task route unavailable")
-		}
+		return nil, nil, false
 	}
 	return result, err, true
 }

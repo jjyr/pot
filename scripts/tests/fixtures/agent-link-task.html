@@ -2,7 +2,7 @@
 import {createTaskConversation} from '../../../web/src/components/task-conversation.mjs';
 import {createTaskTranscript} from '../../../web/src/state/task-transcript.mjs';
 const fixture=window.linkedTaskFixture={calls:[],language:'en'},source={node_id:'codex-node',kind:'codex',name:'Codex',link_id:'codex-link',assistant_id:'review'};
-fixture.record={info:{phase:'running',agent_link:source},request:{text:'Review the Agent Link implementation.'}};
+fixture.record={info:{phase:'running',agent_link:source},request:{text:'Review the Agent Link implementation.'},capabilities:{version:1,scope:'caller',operations:['task.read','task.cancel','task.archive']}};
 fixture.ui=createTaskConversation({root:document.querySelector('main'),task:{id:'linked-review',phase:'running',assistant_id:'pot',agent_link:source},record:fixture.record,locale:()=>fixture.language,client:{request:async()=>({items:[]})},scope:{space:'local',owner:'pot'},draft:'Retained earlier draft',onDraft:()=>{},downloadFile:()=>{},toolMemory:new Map(),approvalFor:()=>null,onDecision:()=>{},onSend:()=>fixture.calls.push('send'),onStop:()=>fixture.calls.push('stop'),onPause:()=>fixture.calls.push('pause'),onCancel:()=>fixture.calls.push('cancel'),onArchive:()=>fixture.calls.push('archive'),onUsage:()=>fixture.calls.push('usage'),onRefresh:()=>fixture.calls.push('retry'),onSettings:()=>fixture.calls.push('settings'),assistantName:'Pot'});
 fixture.state=createTaskTranscript();fixture.update=()=>fixture.ui.update({record:fixture.record,state:fixture.state,inputs:[],approvals:[]});fixture.update();fixture.ui.start();
 </script></html>

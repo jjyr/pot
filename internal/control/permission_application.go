@@ -61,3 +61,58 @@ func (s *Service) SaveCommandRule(ctx context.Context, owner string, r CommandRu
 	}
 	return s.Permissions.SaveRule(owner, r, oldID, revision)
 }
+
+func (s *Service) ApprovalView(ctx context.Context, assistantID string) map[string]any {
+	type pendingApproval struct {
+		Approval
+		TaskTitle string `json:"task_title,omitempty"`
+	}
+	pending := []pendingApproval{}
+	for _, approval := range s.Permissions.Pending(assistantID) {
+		item := pendingApproval{Approval: approval}
+		if approval.Request.Task != "" {
+			if task, err := s.Tasks.Get(ctx, assistantID, approval.Request.Task); err == nil && task != nil {
+				item.TaskTitle = task.Info.Title
+			}
+		}
+		pending = append(pending, item)
+	}
+	return map[string]any{"policy": s.Permissions.Snapshot(), "pending": pending}
+}
+
+func (s *Service) ManageApproval(ctx context.Context, assistantID string, body []byte) (any, error) {
+	var input struct {
+		ID               string         `json:"id,omitempty"`
+		Action           string         `json:"action" required:"true"`
+		MachineID        string         `json:"machine_id,omitempty"`
+		MachinePolicy    *MachinePolicy `json:"machine_policy,omitempty"`
+		Rule             *CommandRule   `json:"rule,omitempty"`
+		OldID            string         `json:"old_id,omitempty"`
+		ExpectedRevision uint64         `json:"expected_revision,omitempty"`
+	}
+	if err := protocol.DecodeStrict(body, &input); err != nil {
+		return nil, err
+	}
+	var err error
+	switch input.Action {
+	case "save_rule":
+		if input.Rule == nil {
+			return nil, errors.New("command rule required")
+		}
+		err = s.SaveCommandRule(ctx, "owner", *input.Rule, input.OldID, input.ExpectedRevision)
+	case "delete_rule":
+		err = s.Permissions.DeleteRule(input.MachineID, input.ID, input.ExpectedRevision)
+	case "remove_task_grant":
+		err = s.Permissions.RemoveGrant(input.ID)
+	case "retry":
+		err = s.Permissions.Retry(input.MachineID, input.ExpectedRevision)
+	case "configure":
+		if input.MachinePolicy == nil || input.MachinePolicy.Revision == 0 {
+			return nil, errors.New("machine policy required")
+		}
+		err = s.Permissions.Configure(input.MachineID, *input.MachinePolicy)
+	default:
+		err = s.Permissions.Decide(assistantID, input.ID, input.Action)
+	}
+	return map[string]bool{"accepted": err == nil}, err
+}

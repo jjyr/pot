@@ -6,19 +6,8 @@ status, cancellation and result notification. Each receiver owns its models,
 credentials, workspaces, permissions and execution supervision. A connection
 never grants owner HTTP APIs, model proxying or raw process launch access.
 
-```text
-Link view / assistant chat / task UI
-                     |
-          Pot collaboration coordinator
-                     |
-          pkg/agentlink.Backend
-            /                   \
-    local Pot adapter      TLS peer session
-            |                   |
-     local task journal     remote adapter
-                          /              \
-                    Pot assistants   Codex virtual assistants
-```
+The [architecture overview](architecture.md) shows the shared local/peer operation
+port and its execution adapters.
 
 ## Nodes and assistants
 
@@ -28,7 +17,7 @@ assistant IDs and execution IDs are distinct. Names and origin icons are display
 metadata. One machine can host several autonomous nodes.
 
 `Directory` advertises the current assistants, persisted default assistant ID
-and capabilities. Pot exposes real assistants. Codex exposes virtual assistants;
+and per-assistant operation descriptions. Pot exposes real assistants. Codex exposes virtual assistants;
 each owns one persistent Codex session. Chat and tasks for the same virtual
 assistant execute serially in that session. Additional assistants allow separate
 contexts and parallel work; using the same filesystem does not isolate files.
@@ -39,6 +28,54 @@ Exact retries return that original receipt even after the default changes or the
 assistant is removed. Removing the default does not silently select another:
 the directory advertises an empty default until the owner chooses a valid one.
 Accepted tasks retain their original owner and historical reference.
+
+## Product operation port
+
+`agentlink.Port` defines `Describe(Target)`, `Call(Target, Operation, params)`
+and capability-checked `Subscribe(Target)` for cursor-based chat frames.
+A target contains an assistant ID and an optional saved link ID. Both local and
+linked chat, task and assistant-scoped schedule routes use this port. HTTP and
+native adapters only translate typed requests; there is no separate linked-chat
+HTTP API or unexported native task payload. The local adapter remains in the
+current process; this change does not introduce an agent or scheduler plugin.
+
+`agentPort.Call` is the operation entry point. It uses the effective capabilities
+for admission and dispatches operations to their implementations. Owner and peer
+describe authorization scope; dispatch follows the requested capability and target.
+
+Directories advertise a version-1 operation description per assistant under
+`operations`, with explicit `peer` scope. The authenticated local operator sees
+an `owner` description. `GET /api/v1/agent-links/capabilities?assistant_id=...`
+returns the effective description; assistant catalogue rows carry the same data.
+The frontend chooses controls and subscription/polling from these descriptions.
+Source icons and location labels do not grant or remove functionality. Missing
+or unknown-version descriptions grant no operations. Directory refreshes replace
+cached capability descriptions; the receiver still enforces authorization at
+admission. Directory descriptions must cover every advertised assistant; a peer
+cannot publish an owner-scoped description. Upgrade connected adapters together.
+
+Chat capabilities distinguish send, receipt, history, subscription, attachments,
+references and individual turn controls. Task capabilities distinguish submit,
+read, list, cancel, input, events, files, archive and advanced owner controls.
+The existing local configuration, usage and approval interfaces remain owner
+capabilities; a peer invitation does not authorize remote operator management.
+A `task.submit` request may carry a serializable `configuration` only through
+the owner adapter's `task.configure` capability. Peer transport rejects that
+field before calling the receiver, even if its contents claim a local identity.
+`chat.references` and `task.configure` describe accepted input modifiers rather
+than independent commands; `chat.subscribe` uses the subscription method.
+Skills, model configuration, tool preparation and filesystem policy remain with
+the execution-side implementation; they are not transmitted through Agent Link.
+
+Linked task lists, archive choices and outcome cursors are projections of this
+caller's durable submissions, not access to the receiver's entire task catalogue.
+Task details include their effective operation description. Unsupported task
+transcripts or input controls are not queried or displayed.
+
+The current scheduler is retained behind the owning assistant's
+`schedules.manage` capability. It is not moved into a separate service or made a
+peer operator API. Its internal occurrence transactions and local execution
+remain receiver implementation details.
 
 ## Copy and paste admission
 
@@ -85,10 +122,14 @@ distributed execution services.
 ## Business contract and recovery
 
 `Backend` provides `Directory`, `Observe`, `Submit`, `Status` and `Cancel`. The same receiver
-implementation owns in-process calls and authenticated remote calls. Directory
-capabilities are truthful; unsupported operations return a specific error.
-Remote operations are scoped to the authenticated node and original assistant
-caller. Returned task IDs, request identity and assistant node are checked.
+implementation owns in-process calls and authenticated remote calls. The receiver
+enforces per-assistant operation support and caller ownership; unsupported
+operations return a specific error. Capability checks for new submissions must
+not prevent exact retries from returning an already accepted receipt. Legacy
+node-wide feature flags are replaced by the per-assistant descriptions.
+Remote operations are scoped to the authenticated node and original caller
+address, including its assistant, task or user kind. Returned task IDs, request
+identity and assistant node are checked.
 
 `observe` returns a live, payload-free node summary: hostname, per-assistant task
 counts (running, queued, waiting for approval or allowance), chat activity and
@@ -146,9 +187,15 @@ are atomically admitted as already consumed by the user conversation, so they
 cannot simultaneously trigger the local assistant's autonomous mail consumer.
 The existing unread tracking and notification paths display their replies.
 
-Remote task outcomes enter the existing durable background notification inbox
-for the original directing assistant. They retain receiver provenance. Source
-icons in assistant lists, chat titles and task rows identify Codex or another Pot.
+Assistant-originated remote task outcomes enter the existing durable background
+notification inbox for the original directing assistant. User-originated tasks
+instead retain a persisted user session for their source conversation and target.
+They need no local assistant: results enter that conversation and its task outcome
+projection without waking any local model. Restart and retries retain the original
+caller, request, task reference and result ID. A different user session or caller
+kind cannot inspect or cancel that accepted task. Retained conversation and task
+reads still work after deleting a link, without permitting new execution.
+Results retain receiver provenance. Source icons in assistant lists, chat titles and task rows identify Codex or another Pot.
 Task details expose cancellation and local archive state; unsupported local
 controls, steering and file access are unavailable. Neither current adapter
 advertises cross-node artifact access. Directory entries and exported capabilities
@@ -183,3 +230,7 @@ bindings remain unchanged. New chats persist their own user session identity.
 Tasks migration `0012_agent_link_direct_chat` records the typed user message
 contract and indexes delivery routes without rewriting old immutable envelopes.
 Upgrade Pot and its Codex plugin together; old wire versions are not accepted.
+
+Control migration `0022_agent_link_operations` expands cached node feature flags
+into per-assistant peer operation descriptions. It preserves peer pins, routes,
+accepted task payloads and immutable receipts and never replays execution.

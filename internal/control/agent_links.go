@@ -274,7 +274,11 @@ func (s *Service) AgentLinks(ctx context.Context) (any, error) {
 				if e != nil && !errors.Is(e, sql.ErrNoRows) {
 					return nil, e
 				}
-				assistants = append(assistants, map[string]any{"address": a.Address, "name": a.Name, "adapter": a.Adapter, "reply_count": count, "reply_id": replyID, "preview": preview, "last_reply_at_ms": at})
+				capabilities, err := s.AgentCapabilities(ctx, "agent-link:"+c.ID+":"+a.Address.AgentID)
+				if err != nil {
+					return nil, err
+				}
+				assistants = append(assistants, map[string]any{"address": a.Address, "name": a.Name, "adapter": a.Adapter, "capabilities": capabilities, "reply_count": count, "reply_id": replyID, "preview": preview, "last_reply_at_ms": at})
 			}
 			peerName = c.Directory.Name
 		}

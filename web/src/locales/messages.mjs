@@ -148,6 +148,7 @@ export const messages = {
     'resource.image':'Image', 'resource.audio':'Audio', 'resource.video':'Video', 'resource.pdf':'PDF', 'resource.html':'Interactive', 'resource.text':'Text', 'resource.file':'File',
     'resource.download':'Download', 'resource.downloadName':'Download {name}', 'resource.expand':'Expand', 'resource.collapse':'Collapse',
     'resource.loading':'Loading preview…', 'resource.unavailable':'Preview unavailable. You can try downloading the original.',
+    'chat.pause':'Pause turn', 'chat.resume':'Resume turn',
     'resource.pause':'Pause animation', 'resource.resume':'Play animation',
 
     "extensions.authorizationRequired": "Authorization required",
@@ -314,7 +315,6 @@ export const messages = {
     "agentLinks.verifyFirst": "Wait for the Agent identity to be verified before adding it.",
     "agentLinks.addHeading": "Add an Agent",
     "agentLinks.nodeScope": "Chat and delegate tasks to assistants on this node. Each node keeps its own tools and approval rules.",
-    "agentLinks.remoteTaskHint": "This task runs on {name}. Updates and results appear here.",
     "agentLinks.executionSource": "Runs on",
     "agentLinks.delete": "Delete connection",
     "agentLinks.deleteTitle": "Delete this connection?",
@@ -863,6 +863,7 @@ export const messages = {
     'resource.image':'图片', 'resource.audio':'音频', 'resource.video':'视频', 'resource.pdf':'PDF', 'resource.html':'交互组件', 'resource.text':'文本', 'resource.file':'文件',
     'resource.download':'下载', 'resource.downloadName':'下载 {name}', 'resource.expand':'展开', 'resource.collapse':'收起',
     'resource.loading':'正在加载预览……', 'resource.unavailable':'预览暂不可用，可以尝试下载原文件。',
+    'chat.pause':'暂停回复', 'chat.resume':'恢复回复',
     'resource.pause':'暂停动图', 'resource.resume':'播放动图',
 
     "extensions.authorizationRequired": "需要授权",
@@ -1029,7 +1030,6 @@ export const messages = {
     "agentLinks.verifyFirst": "请等待对方身份验证完成后再添加。",
     "agentLinks.addHeading": "添加一个 Agent",
     "agentLinks.nodeScope": "与此节点的助手聊天或委派任务。每个节点继续使用自身的工具与审批规则。",
-    "agentLinks.remoteTaskHint": "此任务由 {name} 执行，进展与结果会显示在这里。",
     "agentLinks.executionSource": "执行方",
     "agentLinks.delete": "删除连接",
     "agentLinks.deleteTitle": "删除此连接？",
