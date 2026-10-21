@@ -152,7 +152,7 @@ func Validate(directory string) (Report, error) {
 				if e.Update.Outcome.Kind != "success" {
 					report.Errors = append(report.Errors, "Turn outcome: "+e.Update.Outcome.Kind)
 				}
-			case "compaction_observed":
+			case "compaction", "compaction_observed":
 			default:
 				return report, fmt.Errorf("unknown Agent update %s", e.Update.Type)
 			}

@@ -23,7 +23,7 @@ import (
 
 // StorageFormat versions non-SQL persisted contracts. The build additionally pins
 // the centralized SQL migration fingerprint; automatic schema changes are rejected.
-const StorageFormat = "pot-go-2026-10-1"
+const StorageFormat = "pot-go-2026-10-2"
 const releaseOrigin = "https://github.com/jjyr/pot/releases/download/"
 
 var versionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)

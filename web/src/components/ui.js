@@ -1,3 +1,4 @@
+import {createCompaction} from './compaction.mjs';
 import {projectLinkedAssistants} from '../state/agent-links.mjs';
 import {agentSource} from './connection-visuals.mjs';
 import {createUpdates} from './updates.mjs';
@@ -597,6 +598,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function nearBottom() { return history.scrollHeight - history.clientHeight - history.scrollTop < 80; }
   function atBottom() { return history.scrollHeight - history.clientHeight - history.scrollTop <= 1; }
   let following=true,renderFrame=0,lastAnchor=null,resizeAnchor=false,lastScrollTop=0,upwardIntent=false;
+  let historyWidth=0,historyHeight=0;
+  // A shell redraw may precede ResizeObserver. Retain the pre-reflow anchor
+  // until the new viewport has been measured and positioned.
+  const historyResized=()=>historyWidth>0&&(history.clientWidth!==historyWidth||history.clientHeight!==historyHeight);
   function currentChatPosition(ticket){return !disposed&&ticket.generation===chatNavigation&&ticket.key===snapshotKey();}
   function cancelChatPosition(){chatNavigation++;chatPosition=null;}
   function positionChat(intent){
@@ -640,6 +645,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   });
   history.addEventListener('scroll', () => {
     if(!chatShown)return;
+    if(historyResized()){requestMessageRender(true);return;}
     const focus=document.activeElement;
     if(chatPosition?.kind==='message'&&chatPosition.resolved&&focus instanceof HTMLIFrameElement&&history.contains(focus)){
       // Native embedded viewers can focus themselves while loading in overscan.
@@ -717,7 +723,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const {row, bubble} = record;
     row.dataset.messageId=message.id;row.dataset.sequence=message.sequence||'';
     bubble.dataset.scrollAnchor=`message:${message.viewKey}`;
-    if(message.role==='tool'&&message.tool){
+    if(message.compaction){
+ if(!record.compact){record.compact=createCompaction({locale:()=>locale});bubble.append(record.compact.element);}
+ record.compact.update(message);
+ }else if(message.role==='tool'&&message.tool){
       const scope=client.scope?.()||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
       if(!record.tool){record.tool=createToolCall({memory:toolMemory,key,locale:()=>locale,onDecision:(approval,action)=>pages.decideApproval(approval,action),...markdownFiles(scope)});bubble.append(record.tool.element);}
       record.tool.update(message,{offline:connection==='offline'||disconnected,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
@@ -777,9 +786,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   function renderMessagesNow() {
     if(!chatShown)return;
     const navigation=chatPosition?.key===snapshotKey()?chatPosition:null;
-    const follow=following||pendingFollow,resized=resizeAnchor;
+    const follow=following||pendingFollow,resized=resizeAnchor||historyResized();
     const taskReading=pendingReadingPosition||(resized&&lastTaskReadingPosition)||captureReadingPosition(history);
-    const anchor=navigation?.kind==='restore'?navigation.position?.anchor:resizeAnchor?lastAnchor:readingAnchor(history);resizeAnchor=false;
+    const anchor=navigation?.kind==='restore'?navigation.position?.anchor:resized?lastAnchor:readingAnchor(history);resizeAnchor=false;
     const snapshot=state.snapshot||(client.production&&selectedAssistant?cachedSnapshots.get(snapshotKey(selectedAssistant.space_id||'',selectedAssistant.id)):null);
     const sending=state.sends.get(editorOwner||(snapshot&&ownerKey(snapshot)));
     const activeTurn=snapshot?.running?(snapshot.messages.find(message=>message.id===snapshot.turn_id)?.request_id||snapshot.turn_id):null;
@@ -836,6 +845,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     }
     if(snapshot&&!snapshot.history?.has_more&&!snapshot.history?.has_newer&&history.scrollHeight<=history.clientHeight+1)scrollBottom();
     lastTaskReadingPosition=captureReadingPosition(history);
+    historyWidth=history.clientWidth;historyHeight=history.clientHeight;
     lastScrollTop=history.scrollTop;
     lastAnchor=readingAnchor(history);if(!following)state.uiAnchor=selectedSequence()||lastAnchor?.sequence||null;
     if(following)state.uiAnchor=null;

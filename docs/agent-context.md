@@ -121,12 +121,38 @@ for one profile on demand; `models` and
 
 ### Compaction and continuation
 
-Compaction runs only with settled tool calls. It summarizes conversation items,
-including the latest completed tool effects and any earlier continuation summary;
-runtime context sections are excluded and regenerated from current sources.
-The summary must preserve goals, user constraints, confirmed effects, artifact
-paths, failures and unfinished work. Tool schemas are not offered to the summary
-request. Empty summaries and summaries containing tool calls are rejected.
+Both window pressure and idle maintenance use one append-only compaction path.
+The stable system protocol is present from normal chat onward. Compaction retains
+the same system, tool definitions, resolved references, attachments, ordered
+runtime/history and native replay, then appends a temporary compact request.
+Native `tool_choice: none` (Gemini `NONE`) disables calls without removing schemas;
+no proposed call is dispatched. Empty, truncated, non-reducing or tool-producing
+summaries are rejected. The summary preserves concrete goals, prohibitions,
+authorization boundaries, confirmed effects, failures and pending work. Regenerable
+runtime context and temporary compact controls must not become persistent rules.
+
+```text
+normal:  [stable system | tools | runtime + full history]
+compact: [same prefix                               | compact request]
+resume:  [stable system | tools | current runtime | summary | last user batch]
+```
+
+Window pressure reserves space for the full appended instruction and summary
+output. Idle maintenance checks at the connection's configured delay (15
+minutes by default, never early), with context above 30%. It requires settled
+current work, no queued user input and no completed-but-unprocessed Task results.
+Unfinished background Tasks do not block it. The canonical Task completion writer
+boundary and the conversation lane serialize the final start check. Results or
+user input arriving after start remain queued until compaction finishes.
+
+The last successful ordinary model request anchors the persisted timer. Timing
+edits recalculate from that anchor; routing changes discard the old timer until a
+new request completes. No new conversation work means no self-compaction, and an
+unchanged history gets only one idle attempt. Restart abandons interrupted idle
+sampling without replaying tools; failed maintenance retains the original history
+and releases queued input. Idle allowance refusal leaves no resumable foreground
+wait; the next real user turn is checked independently. Idle summaries must save
+at least 1,024 estimated tokens.
 
 The next request has this exact logical layout:
 
@@ -134,11 +160,11 @@ The next request has this exact logical layout:
 base instructions + current tool schemas
 current nonempty context sections (one full injection in stable key order)
 continuation summary
-last real user message, including its original attachments
+last real user batch, including original attachments and references
 ```
 
 Old assistant/tool messages and obsolete section versions are replaced by the
-summary. The last real user message is retained exactly; a context update or old
+summary. The last real user batch is retained exactly; a context update or old
 summary cannot be mistaken for it. This also permits compacting a long single
 user turn after its tools settle. Later requests append replies, actual section
 changes and new real input, without adding a second full injection.
@@ -148,7 +174,17 @@ establishes its own section baseline and clears the old usage anchor. Failed
 sampling or checkpoint persistence leaves the previous history intact. The
 ordinary input/output-window guard applies before continuation sampling; a
 summary is not assumed to fit merely because its byte size decreased. The UI
-transcript remains separate from the replaced model history.
+transcript remains separate from the replaced model history. Compact controls are never
+saved in the checkpoint; normal requests restore ordinary tool policy. No cache
+flush is sent: replacing history changes the prefix, so the next normal request
+builds a smaller cache. Actual provider usage determines cache hits.
+
+The transcript displays the compact operation as a plain line of text, without a
+bubble or disclosure control.
+It includes trigger, status, elapsed time and estimated before/after size. Its
+private diagnostic record retains request/response evidence and links to the
+actual metered attempts for investigation; usage is never added twice. Chat and
+usage pages do not expose a download action.
 
 ## Assistant tools
 

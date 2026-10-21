@@ -224,3 +224,88 @@ func TestModelManualWaitGateSurvivesLateTaskResumeAndMailInvocation(t *testing.T
 		})
 	}
 }
+
+func TestCompactionEvidenceCapturesFinalWireBodyWithoutCredential(t *testing.T) {
+	var sent []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+	session := modelSession(t, server.URL)
+	session.Spec.Params.MaxOutputTokens = 20
+	if err := session.Spec.Rehash(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	id := "compact-wire"
+	if err := session.Usage.Compaction(ctx, "main", "turn", usage.CompactionEvent{ID: id, Action: "start", Reason: "idle"}, 1); err != nil {
+		t.Fatal(err)
+	}
+	r := request("wire-model")
+	r.CompactionID = &id
+	stream, err := session.Model(ctx, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.ReadAll(stream)
+	stream.Close()
+	record, err := session.Usage.CompactionRecord(ctx, "main", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, raw := range record["evidence"].([]json.RawMessage) {
+		var report core.CompactionReport
+		if err = json.Unmarshal(raw, &report); err != nil {
+			t.Fatal(err)
+		}
+		var evidence struct {
+			Body json.RawMessage `json:"wire_request_body"`
+		}
+		json.Unmarshal(report.Evidence, &evidence)
+		if len(evidence.Body) > 0 {
+			found = true
+			left, _ := core.CanonicalJSON(evidence.Body)
+			right, _ := core.CanonicalJSON(json.RawMessage(sent))
+			if string(left) != string(right) {
+				t.Fatalf("recorded body differs from wire: recorded=%s sent=%s", evidence.Body, sent)
+			}
+		}
+		if strings.Contains(string(raw), "private-test") {
+			t.Fatal("credential leaked")
+		}
+	}
+	if !found || strings.Contains(string(sent), `"max_tokens":100`) {
+		t.Fatal("missing clamped wire request", string(sent))
+	}
+}
+
+func TestIdleCompactionAllowanceDoesNotLeaveOrphanForegroundWait(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "data: [DONE]\n\n") }))
+	defer server.Close()
+	s := modelSession(t, server.URL)
+	ctx := context.Background()
+	s.IdleMaintenance = true
+	if err := s.Usage.SetPolicy(ctx, usage.Policy{Period: "day", Limit: 10, Timezone: "UTC", AutoResume: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Model(ctx, request("idle-budget")); err == nil {
+		t.Fatal("maintenance bypassed allowance")
+	}
+	if waiting, err := s.Usage.Waiting(ctx, "main"); err != nil || waiting != nil {
+		t.Fatal("maintenance left an orphan foreground wait", waiting, err)
+	}
+	if err := s.Usage.SetPolicy(ctx, usage.Policy{Period: "day", Limit: 10000, Timezone: "UTC", AutoResume: true}); err != nil {
+		t.Fatal(err)
+	}
+	s.IdleMaintenance = false
+	s.Turn = "next-user"
+	stream, err := s.Model(ctx, request("next-model"))
+	if err != nil {
+		t.Fatal("next user inherited maintenance wait", err)
+	}
+	io.ReadAll(stream)
+	stream.Close()
+}

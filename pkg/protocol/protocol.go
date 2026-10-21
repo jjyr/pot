@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	APIVersion          = 5
+	APIVersion          = 6
 	RuntimePort         = 17700
 	RuntimeEndpointFile = "runtime.json"
 	PathSnapshot        = "/api/v1/snapshot"
@@ -70,7 +70,17 @@ const (
 	MessageCancelled MessageStatus = "cancelled"
 )
 
+type Compaction struct {
+	ID           string `json:"id"`
+	Reason       string `json:"reason"`
+	State        string `json:"state"`
+	Before       uint64 `json:"before"`
+	After        uint64 `json:"after"`
+	FinishedAtMS int64  `json:"finished_at_ms,omitempty"`
+}
 type Message struct {
+	Compaction *Compaction `json:"compaction,omitempty"`
+
 	Presentation      *core.ResourcePresentation `json:"presentation,omitempty"`
 	References        []core.MessageReference    `json:"references,omitempty"`
 	Attachments       []core.Attachment          `json:"attachments,omitempty"`
@@ -91,6 +101,10 @@ type Message struct {
 }
 
 func (m Message) Validate() error {
+	if m.Compaction != nil && (m.Role != System || !core.Identifier(m.Compaction.ID) || m.Compaction.Before > core.MaxSafeInteger || m.Compaction.After > core.MaxSafeInteger || !slices.Contains([]string{"running", "complete", "failed", "interrupted"}, m.Compaction.State) || !slices.Contains([]string{"threshold", "idle"}, m.Compaction.Reason)) {
+		return fmt.Errorf("invalid compaction projection")
+	}
+
 	if m.Presentation != nil {
 		if m.Role != Assistant || m.Status != Complete {
 			return fmt.Errorf("resource presentation requires completed assistant role")

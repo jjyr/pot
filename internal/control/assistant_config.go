@@ -152,7 +152,7 @@ func (s *Service) configurationView(state assistant.ConfigurationState) (Assista
 	} else if state.Config != nil {
 		view.Selection = AssistantSelection{ProfileID: state.Config.SourceProfileID, ProfileRevision: state.Config.SourceProfileRevision, Model: state.Config.Model}
 	} else {
-		profiles := s.Profiles.Snapshot()
+		profiles := s.Profiles.savedSnapshot()
 		for _, profile := range profiles.Profiles {
 			if profile.ID == profiles.DefaultProviderID {
 				view.Selection = AssistantSelection{ProfileID: profile.ID, ProfileRevision: profile.Revision, Model: profile.Model}
@@ -218,14 +218,17 @@ func (s *Service) refreshAssistantConfiguration(ctx context.Context, current cor
 	}
 	// A changed saved Provider revision affects future explicit selections only.
 	// Public metadata may refresh concrete defaults for the same immutable intent.
-	profiles := s.Profiles.Snapshot()
+	// This boundary only checks immutable selection identity. Building the UI's
+	// entire model directory here delays queued input and result processing.
 	sameRevision := false
-	for _, profile := range profiles.Profiles {
+	s.Profiles.mu.Lock()
+	for _, profile := range s.Profiles.state.Profiles {
 		if profile.ID == selection.ProfileID && profile.Revision == selection.ProfileRevision {
 			sameRevision = true
 			break
 		}
 	}
+	s.Profiles.mu.Unlock()
 	if !sameRevision {
 		if err := s.Profiles.sourceAvailable(ctx, current.Config.Provider); err != nil {
 			return nil, err
@@ -284,7 +287,7 @@ func (s *Service) BootstrapAssistant(ctx context.Context, locale string) (map[st
 	if err != nil {
 		return nil, err
 	}
-	if history || s.Profiles.Snapshot().DefaultProviderID == "" {
+	if history || s.Profiles.savedSnapshot().DefaultProviderID == "" {
 		return map[string]any{"assistant": nil, "initialized": history}, nil
 	}
 	definition, err := s.createAssistant(ctx, CreateAssistant{RequestID: storage.ID(), Locale: locale}, true)
@@ -321,7 +324,7 @@ func (s *Service) createAssistant(ctx context.Context, request CreateAssistant, 
 				spec, err := s.Profiles.ResolveAssistant(*request.Selection)
 				return &spec, err
 			}
-			if s.Profiles.Snapshot().DefaultProviderID == "" {
+			if s.Profiles.savedSnapshot().DefaultProviderID == "" {
 				return nil, nil
 			}
 			spec, err := s.Profiles.Resolve("")

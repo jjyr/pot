@@ -24,17 +24,20 @@ const MaxModelBody = 96 * 1024 * 1024
 // cancelled/replaced turns and enforce lifetime/per-turn request counts. Returning
 // an error means no network attempt occurred. It must not recursively call Model.
 type ModelSession struct {
-	Registry     *gateway.Registry
-	Usage        *usage.Ledger
-	Spec         core.ResolvedSpec
-	Scope, Turn  string
-	WaitScope    string
-	Generation   uint64
-	Role         string
-	Claim        func(context.Context, string) error
-	Clock        func() time.Time
-	mu           sync.Mutex
-	requestTimes map[string]int64
+	// Idle maintenance has no resumable foreground turn. Respect allowance limits
+	// without leaving an orphan wait that would block the next real user turn.
+	IdleMaintenance bool
+	Registry        *gateway.Registry
+	Usage           *usage.Ledger
+	Spec            core.ResolvedSpec
+	Scope, Turn     string
+	WaitScope       string
+	Generation      uint64
+	Role            string
+	Claim           func(context.Context, string) error
+	Clock           func() time.Time
+	mu              sync.Mutex
+	requestTimes    map[string]int64
 }
 
 func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (stream io.ReadCloser, modelErr error) {
@@ -136,8 +139,10 @@ func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (stream i
 		return nil, err
 	}
 	if reservation == nil {
-		if err = s.Usage.Wait(ctx, usage.WaitRequest{Scope: waitScope, Turn: s.Turn, Provider: provider.ID, AtMS: atMS, Required: request.InputEstimate + 1}); err != nil {
-			return nil, err
+		if !s.IdleMaintenance {
+			if err = s.Usage.Wait(ctx, usage.WaitRequest{Scope: waitScope, Turn: s.Turn, Provider: provider.ID, AtMS: atMS, Required: request.InputEstimate + 1}); err != nil {
+				return nil, err
+			}
 		}
 		return nil, protocol.APIError{Code: "pot_token_limit", Message: "Pot token allowance is unavailable; this turn is paused before sending the model request"}
 	}
@@ -171,6 +176,16 @@ func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (stream i
 	if err = s.Claim(ctx, r.ID); err != nil {
 		s.Usage.Rejected(ctx, r.ID)
 		return nil, err
+	}
+	// Capture the final body after output allowance clamping/provider adaptation.
+	// Credentials and headers never enter the diagnostic record.
+	if r.CompactionID != nil && *r.CompactionID != "conversation" {
+		evidence, _ := json.Marshal(map[string]any{"request_id": r.ID, "wire_request_body": json.RawMessage(body), "protocol": provider.Protocol, "prepared_at_ms": time.Now().UnixMilli()})
+		report, _ := json.Marshal(core.CompactionReport{ID: *r.CompactionID, Action: "evidence", Evidence: evidence})
+		if err = s.Usage.RecordCompaction(ctx, s.Scope, s.Turn, *r.CompactionID, report); err != nil {
+			s.Usage.Rejected(ctx, r.ID)
+			return nil, err
+		}
 	}
 	claimed, err := s.Usage.Claim(ctx, r.ID)
 	if err != nil {

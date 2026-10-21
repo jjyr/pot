@@ -2,6 +2,16 @@ import serverMessages from './server.json' with {type:'json'};
 
 export const messages = {
   en: {
+    'compact.title':'Context compaction',
+    'compact.running':'Running',
+    'compact.complete':'Complete',
+    'compact.failed':'Failed',
+    'compact.interrupted':'Interrupted',
+    'compact.idle':'Idle timeout',
+    'compact.threshold':'Context window pressure',
+    'providers.idleMinutes':'Automatically compact context when idle (minutes)',
+    'providers.idleHelp':'Wait this long after the last model response before checking whether compaction is needed. Applies to all models on this connection; blank uses 15 minutes.',
+
     ...serverMessages.en,
     'assistant.creating':'Creating assistant…',
     'assistant.createFailed':'Could not create the assistant. Try again.',
@@ -652,6 +662,16 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'compact.title':'上下文压缩',
+    'compact.running':'进行中',
+    'compact.complete':'已完成',
+    'compact.failed':'失败',
+    'compact.interrupted':'已中断',
+    'compact.idle':'空闲超时',
+    'compact.threshold':'上下文接近上限',
+    'providers.idleMinutes':'空闲时自动压缩上下文（分钟）',
+    'providers.idleHelp':'最后一次模型响应后，空闲达到此时长再检查是否需要压缩。适用于此连接的所有模型，留空默认 15 分钟。',
+
     ...serverMessages['zh-CN'],
     'assistant.creating':'正在创建助手…',
     'assistant.createFailed':'无法创建助手，请重试。',

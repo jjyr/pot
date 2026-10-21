@@ -45,7 +45,7 @@ func (s *Service) selectTask(ctx context.Context, owner string, r protocol.Creat
 			profileID = *r.Profile
 		}
 		var chosen *core.Profile
-		for _, profile := range s.Profiles.Snapshot().Profiles {
+		for _, profile := range s.Profiles.savedSnapshot().Profiles {
 			if profile.ID == profileID {
 				copy := profile
 				chosen = &copy
@@ -95,7 +95,7 @@ func (s *Service) currentTaskResource(ctx context.Context, l runner.Launch) (tas
 		return taskResource{}, err
 	}
 	var profile *core.Profile
-	for _, candidate := range s.Profiles.Snapshot().Profiles {
+	for _, candidate := range s.Profiles.savedSnapshot().Profiles {
 		if candidate.ID == l.Config.SourceProfileID {
 			copy := candidate
 			profile = &copy

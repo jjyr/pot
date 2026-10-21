@@ -224,6 +224,8 @@ func (s *Service) Conversation(ctx context.Context, id string) (*assistant.Conve
 	options := assistant.ConversationOptions{InitialWelcome: welcome, InitialIntent: intent, Context: s.ctx, Owner: id, RuntimeID: s.options.RuntimeID, BootID: s.options.BootID, Manager: s.options.Manager, InitialSpec: initial, InitialRules: rules, RefreshConfiguration: s.refreshAssistantConfiguration, OnFinished: func(ctx context.Context, r protocol.SendMessage, result execution.Result) error {
 		return s.finishAgentDelivery(ctx, id, r, result)
 	}}
+	options.IdlePolicy = s.idleCompactPolicy
+	options.CompactGate = s.compactGate(id)
 	options.ValidateAttachments = func(ctx context.Context, spec core.ResolvedSpec, items []core.Attachment) error {
 		return s.Attachments.Validate(id, items, spec.AttachmentCapabilities())
 	}
@@ -326,30 +328,11 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 	if thread.Owner != principal {
 		waitScope = thread.Owner
 	}
-	model := &ModelSession{WaitScope: waitScope, Registry: s.Providers, Usage: s.Usage, Spec: thread.Config, Scope: principal, Turn: request.RequestID, Generation: thread.Generation, Role: modelRole(request.RequestID), Claim: func(ctx context.Context, id string) error {
+	model := &ModelSession{IdleMaintenance: strings.HasPrefix(request.RequestID, "pot-compact-"), WaitScope: waitScope, Registry: s.Providers, Usage: s.Usage, Spec: thread.Config, Scope: principal, Turn: request.RequestID, Generation: thread.Generation, Role: modelRole(request.RequestID), Claim: func(ctx context.Context, id string) error {
 		return c.ClaimModel(ctx, request.RequestID, thread.Generation, id)
 	}}
 	ports := &executionPorts{model: model, compaction: func(ctx context.Context, raw json.RawMessage) error {
-		var report struct {
-			ID     string `json:"id"`
-			Action string `json:"action"`
-			Tokens uint64 `json:"tokens"`
-		}
-		if err := core.DecodeJSON(raw, &report); err != nil {
-			return err
-		}
-		if report.Tokens > core.MaxSafeInteger {
-			return errors.New("compaction token count exceeds supported precision")
-		}
-		event := usage.CompactionEvent{ID: report.ID, Action: report.Action}
-		tokens := int64(report.Tokens)
-		if report.Action == "start" {
-			event.Reason = "threshold"
-			event.TokensBefore = &tokens
-		} else if report.Action == "complete" {
-			event.TokensAfter = &tokens
-		}
-		return s.Usage.Compaction(ctx, principal, request.RequestID, event, storage.Now())
+		return s.recordCompaction(ctx, principal, request.RequestID, raw)
 	}}
 	definitions := []modelprotocol.ToolDefinition{}
 	for _, raw := range core.ExecutionTools(thread.Config.Params.Agent.Shell) {
