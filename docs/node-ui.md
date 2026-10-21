@@ -40,6 +40,10 @@ node headers keep the Pot or Codex brand icon.
 Agent Link directories carry the receiver's saved avatars. Codex assistants
 advertise a profile-only settings operation for names and avatars, independent
 of model configuration. Profile edits preserve routing and the original session.
+The authenticated browser service publishes the same profile read, update and
+default-avatar operations as the native UI. Settings loading and retries retain
+the selected assistant's full identity. A failed load replaces the loading state
+with a localized error and retry action; leaving cancels the pending read.
 
 Chat, task controls, assistant settings and notifications use the selected
 assistant's versioned Agent Link capabilities. They never infer support from

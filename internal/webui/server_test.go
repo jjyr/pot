@@ -241,6 +241,15 @@ func TestAgentLinkPublicationAllowlist(t *testing.T) {
 		method, path string
 		allowed      bool
 	}{
+		{"GET", "/api/v1/assistants/profile", true},
+		{"GET", "/api/v1/assistants/default-avatar", true},
+		{"GET", "/api/v1/assistants/profile/extra", false},
+		{"GET", "/api/v1/assistants/default-avatar/extra", false},
+		{"POST", "/api/v1/assistants/agent-link:peer:codex", true},
+		{"POST", "/api/v1/assistants/agent-link:peer:codex/extra", false},
+		{"POST", "/api/v1/assistants/agent-link:peer:", false},
+		{"POST", "/api/v1/assistants/agent-link:peer:codex:extra", false},
+		{"POST", "/api/v1/assistants/agent-link:..:codex", false},
 		{"GET", "/api/v1/agent-links", true},
 		{"POST", "/api/v1/agent-links", true},
 		{"POST", "/api/v1/agent-links/invitation", true},
