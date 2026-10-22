@@ -86,6 +86,10 @@ func TestCorrespondenceUsesAssistantHistoryAndCanReportToUser(t *testing.T) {
 					if !found {
 						t.Fatal("incoming mail was not projected as reference metadata")
 					}
+					var sessions int
+					if err := s.Tasks.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM assistant_mail_sessions").Scan(&sessions); err != nil || sessions != 0 {
+						t.Fatal("correspondence created a separate model context", sessions, err)
+					}
 					return
 				}
 			}
