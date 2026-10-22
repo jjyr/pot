@@ -71,19 +71,12 @@ func (b *backend) awaitReview(ctx context.Context, j job, method string, params 
 func (b *backend) Review(ctx context.Context, r agentlink.ReviewRequest) (agentlink.ReviewState, error) {
 	host, _ := os.Hostname()
 	result := agentlink.ReviewState{NodeID: b.nodeID, Host: host, Pending: []agentlink.ExecutionApproval{}}
-	if r.From.Kind != "user" || !r.From.Valid() || r.Caller.NodeID != r.From.NodeID || !r.Caller.Valid() || (r.Caller.Kind != "assistant" && r.Caller.Kind != "task" && r.Caller.Kind != "user") {
-		return result, agentlink.ErrUnauthorized
-	}
-	if r.Caller.Kind != "assistant" {
+	if r.From.Kind != "user" || !r.From.Valid() || r.Caller.NodeID != r.From.NodeID || !r.Caller.Valid() || r.Caller.Kind != "assistant" {
 		return result, agentlink.ErrUnauthorized
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	result.CanDecide = true
 	if r.Action != "read" {
-		if !result.CanDecide {
-			return result, agentlink.ErrUnauthorized
-		}
 		if r.Action != "allow_once" && r.Action != "deny" {
 			return result, agentlink.ErrInvalid
 		}

@@ -70,10 +70,8 @@ def main():
               await page.getByRole('button',{name:'Deny',exact:true}).click();
               await page.locator('.chat-approvals').waitFor({state:'hidden'});
               if(await page.locator('.approval-actions button').count())throw Error('Stale decision remains');
-              await page.evaluate(()=>window.linkedApprovalFixture.reset({allowed:false}));
-              await page.locator('.approval-card summary').click();
-              if(!await page.getByRole('button',{name:'Allow once',exact:true}).isDisabled())throw Error('Out-of-scope operation can approve');
               await page.evaluate(()=>window.linkedApprovalFixture.reset());
+              await page.locator('.approval-card summary').click();
               await page.getByRole('button',{name:'Allow once',exact:true}).click();
               await page.waitForFunction(()=>!window.linkedApprovalFixture.pending);
               const state=await page.evaluate(()=>({calls:window.linkedApprovalFixture.calls,errors:window.linkedApprovalFixture.errors}));
@@ -82,7 +80,7 @@ def main():
             }""",
             )
             print(
-                f"Linked approvals: {width}, {locale}, live locale, resolved request removal, owner scope and one-shot approval passed",
+                f"Linked approvals: {width}, {locale}, live locale, resolved request removal and one-shot approval passed",
                 flush=True,
             )
     finally:

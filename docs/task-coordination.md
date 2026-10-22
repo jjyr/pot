@@ -81,7 +81,7 @@ resolve T1's exact pending command/file request with `allow_once` or `deny`.
 Decisions bind the original caller, task, thread and turn, and expire with that
 execution. There is no additional node grant and no model approval tool.
 Assistant messages follow B's receiver policy: operations within its authority
-may run; additional approval is declined and returned as a failure to A. Neither
+may run; requests for human approval are declined and returned as a failure to A. Neither
 A nor B opens user approvals because of a message. Message text cannot change
 this boundary or upgrade a message into a user-approved delegated task.
 

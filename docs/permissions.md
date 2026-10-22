@@ -173,12 +173,3 @@ record updater/time; credential values never enter rules or durable receipts.
 
 Sources: `internal/control/permissions.go`, `permission_application.go` and
 `dispatch.go`. Protocol/lifetime rules remain in [Task coordination](task-coordination.md).
-
-### Explicit Codex tasks
-
-The current assistant's authenticated user may allow once or deny exact operations
-for tasks it directly delegates with `executor: "codex"`. Pending cards bind the
-original task, thread and turn. Models and other assistants cannot approve them.
-There is no persisted peer approval grant. Ordinary assistant messages never
-request user approval; the receiver declines operations needing additional
-permission and reports the denial. See [Codex execution](task-coordination.md#codex-execution).

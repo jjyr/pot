@@ -44,3 +44,16 @@ func TestChatStatusValidatesEveryExecutionAdapter(t *testing.T) {
 		}
 	}
 }
+
+func TestChatStatusRequiresChatBackend(t *testing.T) {
+	ctx := context.Background()
+	a, b := newFixture(t, "no-chat-a"), newFixture(t, "no-chat-b")
+	a.service.options.Backend, b.service.options.Backend = &testBackend{f: a}, &testBackend{f: b}
+	link := connect(t, a, b)
+	query := ChatLookup{From: protocol.AgentRef{NodeID: a.id, Kind: "user", AgentID: "session"}, AssistantID: "assistant", MessageID: "input"}
+	for _, target := range []string{"", link.ID} {
+		if _, err := a.service.ChatStatus(ctx, target, query); !errors.Is(err, ErrUnsupported) {
+			t.Fatal(target, err)
+		}
+	}
+}

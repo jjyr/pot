@@ -10,12 +10,13 @@ import (
 	"fmt"
 
 	"github.com/jjyr/pot/internal/inbox"
+	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 )
 
 // hostMailbox uses the product's existing inbox schema. Transport receipts and
-// Codex's explicit read/processed acknowledgments are deliberately separate.
+// Admission and automatic session processing acknowledgments are separate.
 type hostMailbox struct {
 	db      *sql.DB
 	local   protocol.AgentRef
@@ -43,6 +44,9 @@ func (m *hostMailbox) PendingNode(ctx context.Context, local, peer string) ([]pr
 	return out, rows.Err()
 }
 func (m *hostMailbox) Deliver(ctx context.Context, e protocol.Envelope) (protocol.Receipt, error) {
+	if e.From.Kind != "assistant" && e.From.Kind != "task" {
+		return protocol.Receipt{}, agentlink.ErrUnsupported
+	}
 	if e.Kind != "message" || e.To.Kind != "assistant" || e.To.NodeID != m.local.NodeID {
 		return protocol.Receipt{}, errors.New("agent_link_target_mismatch")
 	}
@@ -73,9 +77,6 @@ func (m *hostMailbox) Acknowledge(ctx context.Context, r protocol.Receipt) error
 		return errors.New("agent_link_receipt_mismatch")
 	}
 	return nil
-}
-func (m *hostMailbox) send(ctx context.Context, peer protocol.AgentRef, requestID, text string) (protocol.Envelope, error) {
-	return m.sendFrom(ctx, m.local, peer, requestID, text, "")
 }
 func (m *hostMailbox) sendFrom(ctx context.Context, from, peer protocol.AgentRef, requestID, text, executionID string) (protocol.Envelope, error) {
 	if !validID(requestID) {
@@ -129,30 +130,4 @@ func (m *hostMailbox) sendFrom(ctx context.Context, from, peer protocol.AgentRef
 		return inbox.EnqueueTx(ctx, tx, e, "outgoing", "queued")
 	})
 	return e, err
-}
-
-func (m *hostMailbox) messages(ctx context.Context) ([]protocol.MailRecord, error) {
-	rows, err := m.db.QueryContext(ctx, "SELECT sequence,envelope,state,detail FROM agent_messages WHERE direction='incoming' AND state IN ('queued','read') ORDER BY sequence LIMIT 8")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []protocol.MailRecord{}
-	bytes := 0
-	for rows.Next() {
-		var r protocol.MailRecord
-		var raw string
-		if err = rows.Scan(&r.Sequence, &raw, &r.State, &r.Detail); err != nil {
-			return nil, err
-		}
-		if bytes+len(raw) > inbox.MaxBatchBytes {
-			break
-		}
-		bytes += len(raw)
-		if err = json.Unmarshal([]byte(raw), &r.Message); err != nil {
-			return nil, err
-		}
-		items = append(items, r)
-	}
-	return items, rows.Err()
 }

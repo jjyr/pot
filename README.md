@@ -57,10 +57,12 @@ See the [documentation](docs/README.md) for details.
 ## Codex integration
 
 Connect Codex through Agent Link by copying a connection segment and pasting it
-into **Add Agent**. Pot discovers the Codex plugin's virtual assistants and uses
-the existing chat and delegation interfaces. Each virtual assistant owns one
-persistent Codex session, shared by its serialized chat and task queue. Codex
-keeps its own login, model settings, workspace and permissions. See the
+into **Add Agent**. Your Pot assistant can select Codex for an explicit task,
+which owns an independent persistent Codex session and returns pending human
+approvals to that assistant's existing UI. Codex virtual assistants also accept
+assistant-to-assistant messages under their own execution policy, without
+forwarding user approvals. Default task routing is unchanged. Codex keeps its
+own login, model settings, workspace, permissions and automatic reviewer. See the
 [installation and connection guide](integrations/codex/README.md).
 
 From a checkout containing the integration:

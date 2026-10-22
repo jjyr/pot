@@ -75,7 +75,7 @@ func awaitTask(t *testing.T, b *backend, from protocol.AgentRef, id string, want
 	t.Fatal("task did not reach " + want)
 	return agentlink.Task{}
 }
-func TestPersistentSessionSerializesChatAndTasks(t *testing.T) {
+func TestMessageInputsReuseTheirAssistantSession(t *testing.T) {
 	b := testBackend(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -95,7 +95,7 @@ func TestPersistentSessionSerializesChatAndTasks(t *testing.T) {
 	if err != nil || original.ThreadID == "" {
 		t.Fatal(original, err)
 	}
-	// A direct message joins the same assistant queue and resumes its thread.
+	// The next assistant message resumes the same serialized session.
 	parent := protocol.Envelope{ID: "incoming-one", Kind: "message", From: from, To: originalIdentity(b, original), ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: "continue"}
 	mailbox := &hostMailbox{db: b.db, local: originalIdentity(b, original), backend: b}
 	if _, err = mailbox.Deliver(ctx, parent); err != nil {
@@ -237,7 +237,7 @@ func TestUnsuccessfulMessageRepliesIncludeOutcome(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				parent := protocol.Envelope{ID: "failed-message", Kind: "message", From: protocol.AgentRef{NodeID: "pot", Kind: "user", AgentID: "user-session"}, To: b.identity(a).Address, ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: "request"}
+				parent := protocol.Envelope{ID: "failed-message", Kind: "message", From: protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}, To: b.identity(a).Address, ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: "request"}
 				mailbox := &hostMailbox{db: b.db, local: parent.To, backend: b}
 				if _, err = mailbox.Deliver(ctx, parent); err != nil {
 					t.Fatal(err)
@@ -250,11 +250,6 @@ func TestUnsuccessfulMessageRepliesIncludeOutcome(t *testing.T) {
 					return nil
 				}); err != nil {
 					t.Fatal(err)
-				}
-				query := agentlink.ChatLookup{From: parent.From, AssistantID: a.ID, MessageID: parent.ID}
-				before, err := b.ChatStatus(ctx, query)
-				if err != nil || len(before.Messages) != 1 {
-					t.Fatal("terminal status omitted the failure envelope", before, err)
 				}
 				for i := 0; i < 2; i++ {
 					if err = b.publishMessages(ctx); err != nil {
@@ -269,15 +264,12 @@ func TestUnsuccessfulMessageRepliesIncludeOutcome(t *testing.T) {
 				if err = json.Unmarshal([]byte(replies[0].Text), &outcome); err != nil || outcome["state"] != state || outcome["error"] != "codex_jsonl_read_failed_outcome_unknown" || outcome["partial_output"] != tc.want {
 					t.Fatal("failure concealed by partial text", replies[0], err)
 				}
-				after, err := b.ChatStatus(ctx, query)
-				if err != nil || len(after.Messages) != 1 || encoded(before.Messages[0]) != encoded(replies[0]) || encoded(before.Messages[0]) != encoded(after.Messages[0]) {
-					t.Fatalf("status and publisher returned different immutable envelopes: before=%d published=%d after=%d err=%v", len(before.Messages), len(replies), len(after.Messages), err)
-				}
+
 			})
 		}
 	}
 }
-func TestDefaultRetryBindingAndCallerScope(t *testing.T) {
+func TestMessageRetriesRetainExplicitRecipientAndCallerScope(t *testing.T) {
 	b := testBackend(t)
 	ctx := context.Background()
 	from := protocol.AgentRef{NodeID: "pot-sender", Kind: "assistant", AgentID: "main"}
@@ -293,12 +285,12 @@ func TestDefaultRetryBindingAndCallerScope(t *testing.T) {
 	if err != nil || retry.ID != first.ID || retry.Assistant.Address.AgentID != "codex" {
 		t.Fatal("retry moved to changed default", retry, err)
 	}
-	r.RequestID = "new"
+	r.RequestID, r.AssistantID = "new", "second"
 	second, err := submitMessageFixture(b, ctx, r)
 	if err != nil || second.Assistant.Address.AgentID != "second" {
 		t.Fatal(second, err)
 	}
-	r.RequestID = "same"
+	r.RequestID, r.AssistantID = "same", "codex"
 	r.Text = "changed"
 	if _, err = submitMessageFixture(b, ctx, r); !errors.Is(err, agentlink.ErrConflict) {
 		t.Fatal("changed retry accepted", err)
@@ -476,7 +468,7 @@ func TestVirtualAssistantSendKeepsActiveMessageParent(t *testing.T) {
 	}
 	from := protocol.AgentRef{NodeID: "peer-node", Kind: "assistant", AgentID: "remote"}
 	parent := protocol.Envelope{ID: "parent-message", Kind: "message", From: from, To: b.identity(a).Address, ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: "reference", Hops: 7}
-	task, err := b.submit(ctx, agentlink.TaskRequest{RequestID: "message-parent", From: from, AssistantID: a.ID, Text: parent.Text}, &parent)
+	task, err := b.submitMessage(ctx, agentlink.TaskRequest{RequestID: "message-parent", From: from, AssistantID: a.ID, Text: parent.Text}, parent)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,7 +20,7 @@ func TestObservationSeparatesTaskLoadChatAndCleanupFence(t *testing.T) {
 	if _, err = b.Submit(ctx, agentlink.TaskRequest{Executor: "codex", From: from, RequestID: "queued", Text: "secret queued text"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = b.submit(ctx, agentlink.TaskRequest{From: from, RequestID: "chat", Text: "secret chat text"}, &protocol.Envelope{ID: "private-message"}); err != nil {
+	if _, err = submitMessageFixture(b, ctx, agentlink.TaskRequest{From: from, RequestID: "chat", Text: "secret chat text"}); err != nil {
 		t.Fatal(err)
 	}
 	if err = b.update(ctx, running.ID, func(j *job) error { j.Task.State = "running"; return nil }); err != nil {

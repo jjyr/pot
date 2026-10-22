@@ -13,11 +13,10 @@ import (
 )
 
 type linkedReview struct {
-	LinkID string            `json:"link_id"`
-	Name   string            `json:"name"`
-	Caller protocol.AgentRef `json:"-"`
+	LinkID string
+	Name   string
+	Caller protocol.AgentRef
 	agentlink.ReviewState
-	Error string `json:"error,omitempty"`
 }
 
 // The owner UI reviews only this assistant's directly delegated tasks.
@@ -57,12 +56,12 @@ func (s *Service) linkedReviews(ctx context.Context, owner string) []linkedRevie
 			readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			defer cancel()
 			state, err := s.agentLinks.service.Review(readCtx, item.LinkID, agentlink.ReviewRequest{From: s.reviewUser(item.LinkID), Caller: item.Caller, Action: "read"})
+			if err != nil {
+				return
+			}
 			item.ReviewState = state
 			if state.Host != "" {
 				item.Name += " · " + state.Host
-			}
-			if err != nil {
-				item.Error = err.Error()
 			}
 		}(&result[i])
 	}
@@ -111,7 +110,7 @@ func (s *Service) reviewView(ctx context.Context, owner string, policy any, pend
 			}
 			args["cmd"] = args["command"]
 			args["justification"] = args["reason"]
-			pending = append(pending, map[string]any{"id": linkedApprovalID(item, p.ID), "once_only": true, "can_decide": item.CanDecide, "source": item.Name, "details": p.Params, "request": map[string]any{"owner": owner, "task": task, "tool": p.Method, "args": args, "call_id": p.ID, "turn": p.JobID, "machine_id": item.Name}})
+			pending = append(pending, map[string]any{"id": linkedApprovalID(item, p.ID), "once_only": true, "source": item.Name, "details": p.Params, "request": map[string]any{"owner": owner, "task": task, "tool": p.Method, "args": args, "call_id": p.ID, "turn": p.JobID, "machine_id": item.Name}})
 		}
 	}
 	return map[string]any{"policy": policy, "pending": pending}

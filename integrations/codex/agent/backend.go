@@ -36,7 +36,7 @@ type job struct {
 }
 
 // backend owns accepted work independently of link lifecycle. Its work queue is
-// shared by direct messages and delegated tasks and serialized per assistant.
+// independent for explicit tasks and serialized per assistant for messages.
 type backend struct {
 	db             *sql.DB
 	nodeID, binary string
@@ -202,26 +202,28 @@ func jobID(from protocol.AgentRef, request string) string {
 	return hex.EncodeToString(sum[:])
 }
 func (b *backend) Submit(ctx context.Context, r agentlink.TaskRequest) (agentlink.Task, error) {
-	if r.Executor != "codex" {
+	if r.Executor != "codex" || r.Configuration != nil {
 		return agentlink.Task{}, agentlink.ErrUnsupported
 	}
-	return b.submit(ctx, r, nil)
-}
-func (b *backend) submit(ctx context.Context, r agentlink.TaskRequest, message *protocol.Envelope) (agentlink.Task, error) {
-	if r.Configuration != nil {
-		return agentlink.Task{}, agentlink.ErrUnsupported
-	}
-	if !validID(r.RequestID) || !r.From.Valid() || (r.From.Kind != "assistant" && r.From.Kind != "user" && r.From.Kind != "task") || r.Text == "" || len(r.Text) > 65536 || message == nil && len(r.Text) > 24000 {
+	if !validID(r.RequestID) || !r.From.Valid() || r.Text == "" || len(r.Text) > 24000 {
 		return agentlink.Task{}, agentlink.ErrInvalid
 	}
-	if r.Executor == "codex" && message == nil {
-		return b.submitTask(ctx, r)
-	}
-	if r.Executor != "" {
+	return b.submitTask(ctx, r)
+}
+
+// submitMessage admits one addressed inbox envelope. It never resolves a node
+// default or accepts task workspace/configuration overrides.
+func (b *backend) submitMessage(ctx context.Context, r agentlink.TaskRequest, message protocol.Envelope) (agentlink.Task, error) {
+	if r.Executor != "" || r.Configuration != nil || r.Workspace != "" {
 		return agentlink.Task{}, agentlink.ErrUnsupported
 	}
+	if !validID(r.RequestID) || message.Validate() != nil || message.Kind != "message" ||
+		(message.From.Kind != "assistant" && message.From.Kind != "task") || message.To.NodeID != b.nodeID || message.To.Kind != "assistant" ||
+		message.From != r.From || message.To.AgentID != r.AssistantID || message.Text != r.Text {
+		return agentlink.Task{}, agentlink.ErrInvalid
+	}
 	payload := encoded(r)
-	// Exact retries retain the original assistant even if the node default changes.
+	// Exact retries retain their accepted explicit recipient.
 	var oldPayload, oldData string
 	priorErr := b.db.QueryRowContext(ctx, "SELECT payload,data FROM codex_link_jobs WHERE caller=? AND request_id=?", callerKey(r.From), r.RequestID).Scan(&oldPayload, &oldData)
 	if priorErr == nil {
@@ -240,9 +242,6 @@ func (b *backend) submit(ctx context.Context, r agentlink.TaskRequest, message *
 	a, err := b.resolve(ctx, r.AssistantID)
 	if err != nil {
 		return agentlink.Task{}, err
-	}
-	if r.Workspace != "" && r.Workspace != a.ID {
-		return agentlink.Task{}, agentlink.ErrInvalid
 	}
 	var accepted job
 	err = storage.Transaction(ctx, b.db, func(tx *sql.Tx) error {
@@ -280,7 +279,7 @@ func (b *backend) submit(ctx context.Context, r agentlink.TaskRequest, message *
 			return agentlink.ErrFenced
 		}
 		now := time.Now().UTC()
-		accepted = job{Task: agentlink.Task{ID: jobID(r.From, r.RequestID), RequestID: r.RequestID, Assistant: b.identity(a), State: "queued", CreatedAt: now, UpdatedAt: now}, Request: r, Message: message}
+		accepted = job{Task: agentlink.Task{ID: jobID(r.From, r.RequestID), RequestID: r.RequestID, Assistant: b.identity(a), State: "queued", CreatedAt: now, UpdatedAt: now}, Request: r, Message: &message}
 		_, err = tx.ExecContext(ctx, "INSERT INTO codex_link_jobs(id,caller,request_id,assistant_id,payload,data) VALUES(?,?,?,?,?,?)", accepted.Task.ID, callerKey(r.From), r.RequestID, a.ID, payload, encoded(accepted))
 		return err
 	})
@@ -511,14 +510,6 @@ func (b *backend) executeSession(ctx context.Context, selected job, session Sess
 		Started: func(turn string) error {
 			return b.update(context.Background(), selected.Task.ID, func(j *job) error { j.TurnID = turn; return nil })
 		},
-		Approval: func() {
-			_ = b.update(context.Background(), selected.Task.ID, func(j *job) error {
-				if j.Task.State != "cancelling" {
-					j.Task.State = "waiting_approval"
-				}
-				return nil
-			})
-		},
 		Review: func(ctx context.Context, method string, params json.RawMessage) (string, error) {
 			if selected.Message != nil {
 				return "deny", nil
@@ -538,7 +529,7 @@ func (b *backend) executeSession(ctx context.Context, selected job, session Sess
 	})
 }
 
-// receiveMessages admits each durable message to the same queue as tasks. A
+// receiveMessages admits each durable message to its assistant queue. A
 // message ID is its immutable request identity, including after a host restart.
 func (b *backend) receiveMessages(ctx context.Context) error {
 	rows, err := b.db.QueryContext(ctx, "SELECT envelope FROM agent_messages WHERE direction='incoming' AND state='queued' ORDER BY sequence LIMIT 32")
@@ -573,7 +564,7 @@ func (b *backend) receiveMessages(ctx context.Context) error {
 			sum := sha256.Sum256([]byte(e.ID))
 			request = "mail:" + hex.EncodeToString(sum[:])
 		}
-		_, err = b.submit(ctx, agentlink.TaskRequest{RequestID: request, From: e.From, AssistantID: e.To.AgentID, Text: e.Text}, &e)
+		_, err = b.submitMessage(ctx, agentlink.TaskRequest{RequestID: request, From: e.From, AssistantID: e.To.AgentID, Text: e.Text}, e)
 		if err != nil {
 			return err
 		}
@@ -584,7 +575,7 @@ func (b *backend) receiveMessages(ctx context.Context) error {
 	return nil
 }
 
-// Status reads and outbox delivery must construct the same immutable envelope.
+// Terminal messages publish one immutable reply to their original sender.
 func messageReply(j job) *protocol.Envelope {
 	parent := j.Message
 	if parent == nil || parent.Hops >= protocol.MaxMailHops {

@@ -260,8 +260,10 @@ existing conversation restores its draft and reading position without stopping
 background execution. Narrow layouts use the same content full-width with Back.
 Connecting Pot or Codex uses the same invitation editor, with source-specific
 instructions, without a detour through the topology. The receiver's sole or
-default assistant opens after connection; multiple assistants without a default
-offer a choice. An empty remote directory remains connected and offers refresh.
+default chat-capable assistant opens after connection; multiple chat-capable
+assistants without a default offer a choice. Codex executor connections explain
+that tasks are delegated by the current assistant instead of opening a direct
+chat. An empty remote chat directory remains connected and offers refresh.
 Directory failures offer retry; disconnected conversations remain visible with
 reconnection controls. Deleting the last assistant returns to Add assistant and
 never automatically creates a replacement.

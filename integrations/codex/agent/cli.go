@@ -8,8 +8,7 @@ import (
 	"io"
 )
 
-// Main exposes only the Agent Link host. Legacy pair, serve, and remote MCP/SSE
-// commands have been removed; connecting a node uses the shared invitation.
+// Main exposes local host management and owner-selected execution scopes.
 func Main(args []string, in io.Reader, out io.Writer) error {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		fmt.Fprintln(out, "usage: pot-codex-agent host|connections --root PRIVATE_DIRECTORY; assistant --root PRIVATE_DIRECTORY --id ID --workspace DIRECTORY [--name NAME] [--mode read-only|workspace-write] [--default]; executor --root PRIVATE_DIRECTORY --workspace DIRECTORY [--mode read-only|workspace-write]")

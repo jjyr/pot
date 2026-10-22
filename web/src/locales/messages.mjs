@@ -8,7 +8,6 @@ export const messages = {
     'agentLinks.reviewNetwork':'Allow network access',
     'agentLinks.reviewFiles':'Apply file changes',
     'agentLinks.reviewConsent':'Approve only this operation on the receiving host. Other operations require separate approval.',
-    'agentLinks.reviewUnavailable':'This operation is outside the current assistant’s delegated task scope.',
     'agentLinks.reviewDenied':'Execution could not complete because an approval was denied.',
 
     'compact.title':'Context compaction',
@@ -736,7 +735,6 @@ export const messages = {
     'agentLinks.reviewNetwork':'允许网络访问',
     'agentLinks.reviewFiles':'应用文件修改',
     'agentLinks.reviewConsent':'仅批准接收主机上的本次操作；其他操作需要分别审批。',
-    'agentLinks.reviewUnavailable':'此操作不属于当前助手直接派发的任务，无法在此审批。',
     'agentLinks.reviewDenied':'审批被拒绝，执行未能完成。',
 
     'compact.title':'上下文压缩',

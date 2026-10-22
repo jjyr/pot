@@ -24,10 +24,9 @@ type ExecutionApproval struct {
 }
 
 type ReviewState struct {
-	NodeID    string              `json:"node_id"`
-	Host      string              `json:"host"`
-	CanDecide bool                `json:"can_decide"`
-	Pending   []ExecutionApproval `json:"pending"`
+	NodeID  string              `json:"node_id"`
+	Host    string              `json:"host"`
+	Pending []ExecutionApproval `json:"pending"`
 }
 
 type ReviewBackend interface {
@@ -36,7 +35,7 @@ type ReviewBackend interface {
 
 func validReview(r ReviewRequest, node string) bool {
 	return r.From.Valid() && r.From.Kind == "user" && r.From.NodeID == node &&
-		r.Caller.Valid() && r.Caller.NodeID == node && taskCaller(r.Caller) &&
+		r.Caller.Valid() && r.Caller.NodeID == node &&
 		r.Caller.Kind == "assistant" && ((r.Action == "read" && r.ID == "") ||
 		((r.Action == "allow_once" || r.Action == "deny") && core.Identifier(r.ID)))
 }

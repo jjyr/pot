@@ -87,6 +87,8 @@ wide windows; narrow windows use a full-width page with Back. Returning to a
 conversation preserves its draft and reading position. API creation uses the
 local default Provider/model or opens the shared Provider editor first. Linked
 assistants come from the receiver directory; adding a node does not create a
-local assistant. One received assistant, or the receiver's default, opens
-automatically; otherwise the page offers a choice. Empty remote directories
-offer refresh, and failed directory reads offer recovery rather than API setup.
+local assistant. A sole chat-capable assistant, or the receiver's chat-capable
+default, opens automatically; otherwise the page offers a choice. A connected
+Codex task executor returns to a connection confirmation explaining how the
+current assistant can delegate a task; it does not open a Codex chat. Empty remote
+chat directories offer refresh, and failed directory reads offer recovery.

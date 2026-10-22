@@ -295,3 +295,19 @@ revisions. Existing text, request identities and sender bindings survive. Earlie
 assistant-bound inputs retain unknown outcomes; polling never replays them.
 `tasks/0016_chat_reply_routes` indexes caller-bound correlated reply reads without
 rewriting immutable envelopes or receipts.
+
+## Codex task and message separation
+
+`tasks/0020_codex_task_sessions` removes the node approval grants introduced by
+`0019`, and records independent task workspace/mode/thread bindings and input
+history. Assistant message threads and accepted job payloads remain unchanged.
+`control/0026_codex_task_execution` refreshes cached Codex capabilities;
+`0027_codex_task_run_projection` clears invalid local run projections for
+reconciliation without replaying or renotifying remote execution.
+
+`tasks/0021_codex_assistant_messages` settles pending direct user inbox entries
+and unstarted user-chat jobs because Codex no longer exposes that execution
+path. It preserves immutable envelopes, accepted payloads, saved thread IDs and
+completed results. Assistant/task messages and independent Codex tasks remain
+eligible for their normal execution paths. Started work still follows the host's
+uncertain-outcome recovery; migration never resumes or replaces a Codex thread.

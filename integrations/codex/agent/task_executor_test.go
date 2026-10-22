@@ -11,15 +11,11 @@ import (
 
 // Assistant session tests admit inbox work without using the explicit task port.
 func submitMessageFixture(b *backend, ctx context.Context, r agentlink.TaskRequest) (agentlink.Task, error) {
-	if prior, err := b.read(ctx, r.From, jobID(r.From, r.RequestID)); err == nil {
-		return b.submit(ctx, r, prior.Message)
+	if r.AssistantID == "" {
+		r.AssistantID = "codex"
 	}
-	a, err := b.resolve(ctx, r.AssistantID)
-	if err != nil {
-		return agentlink.Task{}, err
-	}
-	parent := protocol.Envelope{ID: "fixture-" + r.RequestID, Kind: "message", From: r.From, To: b.identity(a).Address, ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: r.Text}
-	return b.submit(ctx, r, &parent)
+	parent := protocol.Envelope{ID: "fixture-" + r.RequestID, Kind: "message", From: r.From, To: protocol.AgentRef{NodeID: b.nodeID, Kind: "assistant", AgentID: r.AssistantID}, ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: r.Text}
+	return b.submitMessage(ctx, r, parent)
 }
 
 func TestDirectTasksOwnIndependentPersistentSessions(t *testing.T) {

@@ -98,8 +98,8 @@ func (h *agentHost) tool(ctx context.Context, in hostToolInput) (any, error) {
 		}
 		return nil, errors.New("agent_link_not_found")
 	case "receipt":
-		var raw, state string
-		err := h.tasks.QueryRowContext(ctx, "SELECT envelope,state FROM agent_messages WHERE id=? AND direction='outgoing'", in.MessageID).Scan(&raw, &state)
+		var state string
+		err := h.tasks.QueryRowContext(ctx, "SELECT state FROM agent_messages WHERE id=? AND direction='outgoing'", in.MessageID).Scan(&state)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errors.New("message_not_found")
 		}

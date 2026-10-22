@@ -192,7 +192,9 @@ func TestAutomaticReviewDoesNotPublishApprovalHistory(t *testing.T) {
 	rawReview, _ := json.Marshal(remoteReview)
 	var reviewFields map[string]json.RawMessage
 	_ = json.Unmarshal(rawReview, &reviewFields)
-	if _, found := reviewFields["work"]; found {
-		t.Fatal("Agent Link transmitted execution history", string(rawReview))
+	for _, field := range []string{"work", "can_decide"} {
+		if _, found := reviewFields[field]; found {
+			t.Fatal("Agent Link exposed obsolete review state", field, string(rawReview))
+		}
 	}
 }

@@ -49,10 +49,9 @@ type TurnResult struct {
 }
 
 type turnEvents struct {
-	Thread   func(string) error
-	Started  func(string) error
-	Approval func()
-	Review   func(context.Context, string, json.RawMessage) (string, error)
+	Thread  func(string) error
+	Started func(string) error
+	Review  func(context.Context, string, json.RawMessage) (string, error)
 }
 
 type rpcMessage struct {
@@ -267,9 +266,6 @@ func (a *appTurn) approval(m rpcMessage) {
 	a.denied = true
 	a.approvalError = "codex_approval_requires_local_review"
 	a.mu.Unlock()
-	if a.events.Approval != nil {
-		a.events.Approval()
-	}
 	switch m.Method {
 	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
 		_ = a.send(map[string]any{"id": m.ID, "result": map[string]string{"decision": "decline"}})

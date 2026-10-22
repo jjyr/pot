@@ -46,7 +46,7 @@ func TestLinkedCodexDeletionThroughAuthenticatedBrowser(t *testing.T) {
 	if !bytes.Contains(w.Body.Bytes(), []byte("assistant_changed")) {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	work, err := submitMessageFixture(h.backend, ctx, agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "sender", Kind: "user", AgentID: "user"}, RequestID: "busy", Text: "task"})
+	work, err := submitMessageFixture(h.backend, ctx, agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "sender", Kind: "assistant", AgentID: "main"}, RequestID: "busy", Text: "task"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestAssistantRetirementPreservesHistoryAndCannotResurrect(t *testing.T) {
 	if err = b.ownerConfigure(ctx, assistant{ID: "other", Workspace: t.TempDir(), Mode: "read-only"}); err != nil {
 		t.Fatal(err)
 	}
-	r := agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "peer", Kind: "user", AgentID: "user"}, RequestID: "history", AssistantID: a.ID, Text: "task"}
+	r := agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "peer", Kind: "assistant", AgentID: "main"}, RequestID: "history", AssistantID: a.ID, Text: "task"}
 	j, err := submitMessageFixture(b, ctx, r)
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +125,7 @@ func TestAssistantRetirementPreservesHistoryAndCannotResurrect(t *testing.T) {
 	}
 	r.RequestID = "new"
 	if _, err = submitMessageFixture(b, ctx, r); !errors.Is(err, agentlink.ErrNotFound) {
-		t.Fatal("new task admitted", err)
+		t.Fatal("new message admitted", err)
 	}
 	var after, thread string
 	b.db.QueryRow("SELECT data FROM codex_link_jobs WHERE id=?", j.ID).Scan(&after)
@@ -150,7 +150,7 @@ func TestAssistantRetirementRejectsActiveAndUncertainWork(t *testing.T) {
 			b := testBackend(t)
 			ctx := context.Background()
 			a, _ := b.resolve(ctx, "codex")
-			j, err := submitMessageFixture(b, ctx, agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "peer", Kind: "user", AgentID: "user"}, RequestID: "busy", Text: "task"})
+			j, err := submitMessageFixture(b, ctx, agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "peer", Kind: "assistant", AgentID: "main"}, RequestID: "busy", Text: "task"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -169,7 +169,7 @@ func TestAssistantRetirementBlocksPendingMailAndRetainsReceipts(t *testing.T) {
 	ctx := context.Background()
 	a, _ := b.resolve(ctx, "codex")
 	m := hostMailbox{db: b.db, backend: b, local: protocol.AgentRef{NodeID: b.nodeID, Kind: "assistant", AgentID: a.ID}}
-	e := protocol.Envelope{ID: "mail", Kind: "message", From: protocol.AgentRef{NodeID: "peer", Kind: "user", AgentID: "user"}, To: m.local, ConversationID: "00000000-0000-4000-8000-000000000001", Text: "pending reference"}
+	e := protocol.Envelope{ID: "mail", Kind: "message", From: protocol.AgentRef{NodeID: "peer", Kind: "assistant", AgentID: "main"}, To: m.local, ConversationID: "00000000-0000-4000-8000-000000000001", Text: "pending reference"}
 	if _, err := m.Deliver(ctx, e); err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestAssistantRetirementBlocksPendingMailAndRetainsReceipts(t *testing.T) {
 	}
 }
 
-func TestAssistantRetirementRacesNewTaskAdmission(t *testing.T) {
+func TestAssistantRetirementRacesNewMessageAdmission(t *testing.T) {
 	for range 6 {
 		b := testBackend(t)
 		ctx := context.Background()
@@ -206,7 +206,7 @@ func TestAssistantRetirementRacesNewTaskAdmission(t *testing.T) {
 		}()
 		go func() {
 			<-start
-			_, err := submitMessageFixture(b, ctx, agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "peer", Kind: "user", AgentID: "user"}, RequestID: "racing", Text: "new task"})
+			_, err := submitMessageFixture(b, ctx, agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "peer", Kind: "assistant", AgentID: "main"}, RequestID: "racing", Text: "new message"})
 			submitted <- err
 		}()
 		close(start)

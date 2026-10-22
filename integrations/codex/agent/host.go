@@ -230,14 +230,6 @@ func (h *agentHost) handler() http.Handler {
 			writeJSON(w, 200, map[string]bool{"accepted": true})
 			return
 		}
-		if r.URL.Path == "/api/v1/agent-host/messages" && r.Method == "GET" {
-			items, err := h.mailbox.messages(r.Context())
-			if handleError(w, err) {
-				return
-			}
-			writeJSON(w, 200, map[string]any{"items": items})
-			return
-		}
 		if r.URL.Path == "/api/v1/agent-host/tool" && r.Method == "POST" {
 			var input hostToolInput
 			if !body(w, r, &input) {
