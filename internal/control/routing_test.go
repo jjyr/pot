@@ -36,7 +36,7 @@ func TestRoutingCASQuotaFencesAndCompleteCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := tasks.Record{Launch: &tasks.Launch{}, Config: spec}
+	record := tasks.Record{Launch: &tasks.Launch{}, Config: &spec}
 	raw, _ := json.Marshal(record)
 	if _, err = s.Tasks.DB().ExecContext(ctx, "INSERT INTO tasks VALUES('main','unknown','waiting',0,?)", string(raw)); err != nil {
 		t.Fatal(err)
@@ -90,15 +90,15 @@ func TestTaskAdmissionStaysLocalAndKeepsOriginalReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer service.Close()
-	if _, err := service.Create(ctx, "main", protocol.CreateTask{RequestID: "remote", MachineID: "remote", Text: "Work"}); err == nil || calls != 0 {
+	if _, err := service.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "remote", MachineID: "remote", Text: "Work"}); err == nil || calls != 0 {
 		t.Fatal("remote machine reached model selection", err, calls)
 	}
 	request := protocol.CreateTask{RequestID: "admit", Text: "Work"}
-	first, err := service.Create(ctx, "main", request)
+	first, err := service.AcceptLocal(ctx, "main", request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := service.Create(ctx, "main", request)
+	second, err := service.AcceptLocal(ctx, "main", request)
 	if err != nil || first.Info.ID != second.Info.ID || second.Request.MachineID != "local" || calls != 1 {
 		t.Fatal(first, second, calls, err)
 	}

@@ -97,7 +97,7 @@ func TestOriginalStartTimeFromDelayedReceiptsSurvivesRestart(t *testing.T) {
 		t.Run(string(phase), func(t *testing.T) {
 			ctx := context.Background()
 			s, p, path := fixture(t)
-			record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "clock", Text: "work"})
+			record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "clock", Text: "work"})
 			if err != nil || record.Info.StartedAtMS != 0 {
 				t.Fatal("queued Task must not start the clock", record, err)
 			}
@@ -143,7 +143,7 @@ func TestTasksOnSameMachineLaunchIndependently(t *testing.T) {
 	ctx := context.Background()
 	s, p, _ := fixture(t)
 	for _, requestID := range []string{"first", "second"} {
-		if _, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: requestID, Text: "work"}); err != nil {
+		if _, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: requestID, Text: "work"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -157,7 +157,7 @@ func TestTasksOnSameMachineLaunchIndependently(t *testing.T) {
 func TestUnconfirmedLocalLaunchInspectsOriginalAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 	s, p, path := fixture(t)
-	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "create", Text: "work"})
+	record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "create", Text: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,16 +194,16 @@ func TestIdempotencyOwnershipGuidanceReferencesAndStop(t *testing.T) {
 	ctx := context.Background()
 	s, p, _ := fixture(t)
 	request := protocol.CreateTask{RequestID: "create", Text: "work"}
-	record, err := s.Create(ctx, "assistant", request)
+	record, err := s.AcceptLocal(ctx, "assistant", request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := s.Create(ctx, "assistant", request)
+	again, err := s.AcceptLocal(ctx, "assistant", request)
 	if err != nil || again.Info.ID != record.Info.ID {
 		t.Fatal(again, err)
 	}
 	request.Text = "changed"
-	if _, err := s.Create(ctx, "assistant", request); err == nil {
+	if _, err := s.AcceptLocal(ctx, "assistant", request); err == nil {
 		t.Fatal("changed identity accepted")
 	}
 	if other, err := s.Get(ctx, "other", record.Info.ID); err != nil || other != nil {
@@ -267,7 +267,7 @@ func TestIdempotencyOwnershipGuidanceReferencesAndStop(t *testing.T) {
 func TestTaskWaitCursorSuppressesUnchangedAndWakesOnCompletion(t *testing.T) {
 	ctx := context.Background()
 	s, p, _ := fixture(t)
-	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "create", Text: "work"})
+	record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "create", Text: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +314,7 @@ func TestTaskWaitCursorSuppressesUnchangedAndWakesOnCompletion(t *testing.T) {
 func TestTaskApprovalStateWakesWaitAndResumesOriginalRun(t *testing.T) {
 	ctx := context.Background()
 	s, p, _ := fixture(t)
-	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "approval", Text: "work"})
+	record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "approval", Text: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +364,7 @@ func TestCreateRollbackDoesNotLeaveReceiptOrInput(t *testing.T) {
 	if _, err := s.db.Exec(`CREATE TRIGGER fail_tasks BEFORE INSERT ON tasks BEGIN SELECT RAISE(ABORT,'disk fixture');END`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Create(context.Background(), "assistant", protocol.CreateTask{RequestID: "create", Text: "work"}); err == nil {
+	if _, err := s.AcceptLocal(context.Background(), "assistant", protocol.CreateTask{RequestID: "create", Text: "work"}); err == nil {
 		t.Fatal("failure hidden")
 	}
 	for _, table := range []string{"tasks", "task_writes", "task_inputs"} {

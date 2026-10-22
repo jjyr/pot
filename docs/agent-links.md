@@ -190,7 +190,9 @@ timestamp remains unknown. Aggregates cover the entire node route rather than a
 bounded delivery page.
 
 The receiver durably deduplicates the complete task request before executing.
-The sender stores a delegation and remote reference, never a local worker copy.
+The sender stores a Task and original execution reference in its shared Task
+catalogue. The receiver owns the actual execution. Local and peer submissions
+share the same task operations; caller-side receipt caching does not run a worker.
 A lost submission response retries the same request ID; it cannot create another
 execution. A disconnected or uncertain request remains unresolved. Definitive
 admission failures surface in the original task list and notification route.

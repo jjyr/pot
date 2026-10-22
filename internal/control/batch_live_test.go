@@ -246,7 +246,7 @@ func TestDeepSeekCategoryBatchesLive(t *testing.T) {
 	}
 	var taskIDs []string
 	for i, goal := range goals {
-		r, e := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: fmt.Sprintf("task-%d", i), Text: goal})
+		r, e := s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: fmt.Sprintf("task-%d", i), Text: goal})
 		if e != nil {
 			t.Fatal(e)
 		}

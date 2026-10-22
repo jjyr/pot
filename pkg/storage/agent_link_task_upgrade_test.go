@@ -50,7 +50,7 @@ func TestAgentLinkTaskUpgradePreservesRunsEffectsAndReceipts(t *testing.T) {
 		if e = db.QueryRow("SELECT body FROM " + table).Scan(&raw); e != nil {
 			t.Fatal(e)
 		}
-		for _, fact := range []string{`"run_id":"original-run"`, `"schema_version":11`, `"phase":"interrupted"`, `"effects_unknown"`, `"link_id":""`, `"target":null`, `"agent_link":null`} {
+		for _, fact := range []string{`"run_id":"original-run"`, `"schema_version":12`, `"phase":"interrupted"`, `"effects_unknown"`, `"link_id":""`, `"target":null`, `"agent_link":null`} {
 			if !strings.Contains(raw, fact) {
 				t.Fatal(table, fact, raw)
 			}

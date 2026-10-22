@@ -53,7 +53,7 @@ func TestAgentLinkNodeUpgradeRequiresExplicitAuthorityWithoutReplayingWork(t *te
 	if e = db.QueryRow("SELECT expires_at FROM agent_link_invitations WHERE id='invite'").Scan(&expiry); e != nil || expiry != 0 {
 		t.Fatal(expiry, e)
 	}
-	if e = db.QueryRow("SELECT COUNT(*) FROM agent_link_delegations").Scan(&count); e != nil || count != 0 {
+	if e = db.QueryRow("SELECT COUNT(*) FROM retired_task_submissions").Scan(&count); e != nil || count != 0 {
 		t.Fatal("migration launched delegation", count, e)
 	}
 }

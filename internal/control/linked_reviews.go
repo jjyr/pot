@@ -39,7 +39,7 @@ func (s *Service) linkedReviews(ctx context.Context, owner string) []linkedRevie
 			continue
 		}
 		var delegated bool
-		_ = s.integrationDB.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_link_delegations WHERE owner=? AND link_id=?)", owner, c.ID).Scan(&delegated)
+		_ = s.Tasks.DB().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM tasks WHERE assistant_id=? AND json_extract(body,'$.info.agent_link.link_id')=?)", owner, c.ID).Scan(&delegated)
 		if !delegated {
 			continue
 		}
@@ -99,7 +99,7 @@ func (s *Service) reviewView(ctx context.Context, owner string, policy any, pend
 	for _, item := range linked {
 		for _, p := range item.Pending {
 			var task string
-			_ = s.integrationDB.QueryRowContext(ctx, "SELECT id FROM agent_link_delegations WHERE owner=? AND link_id=? AND remote_id=?", owner, item.LinkID, p.JobID).Scan(&task)
+			_ = s.Tasks.DB().QueryRowContext(ctx, "SELECT id FROM tasks WHERE assistant_id=? AND json_extract(body,'$.info.agent_link.link_id')=? AND json_extract(body,'$.execution.receipt.id')=?", owner, item.LinkID, p.JobID).Scan(&task)
 			if task == "" {
 				continue
 			}

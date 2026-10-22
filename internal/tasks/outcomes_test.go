@@ -18,7 +18,7 @@ func TestOutcomeCursorSkipsArchiveAndReadsBoundedOwnerTransitions(t *testing.T) 
 	config := selection(t).Config
 	if err := storage.Transaction(ctx, s.db, func(tx *sql.Tx) error {
 		for i := range 1000 {
-			r := Record{SchemaVersion: 11, Origin: protocol.TaskOrigin{Kind: "manual"}, AssistantID: "assistant", Config: config, Plugins: []string{}, RunID: fmt.Sprint("run", i), Generation: 1,
+			r := Record{SchemaVersion: 12, Origin: protocol.TaskOrigin{Kind: "manual"}, AssistantID: "assistant", Config: &config, Plugins: []string{}, RunID: fmt.Sprint("run", i), Generation: 1,
 				Info:    protocol.TaskInfo{ID: fmt.Sprint("task", i), AssistantID: "assistant", Title: "History", Phase: protocol.TaskComplete, RunID: fmt.Sprint("run", i), Archived: true},
 				Request: protocol.CreateTask{Text: "private task goal"}}
 			if err := write(ctx, tx, &r); err != nil {
@@ -45,7 +45,7 @@ func TestOutcomeCursorSkipsArchiveAndReadsBoundedOwnerTransitions(t *testing.T) 
 		t.Fatal(err)
 	}
 	for i := range 105 {
-		r, err := s.Create(ctx, "other", protocol.CreateTask{RequestID: fmt.Sprint(i), Text: "Other owner"})
+		r, err := s.AcceptLocal(ctx, "other", protocol.CreateTask{RequestID: fmt.Sprint(i), Text: "Other owner"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -90,7 +90,7 @@ func TestOutcomeCursorSkipsArchiveAndReadsBoundedOwnerTransitions(t *testing.T) 
 func TestOutcomeInsertRollsBackTaskAndDoesNotRepeatSamePhase(t *testing.T) {
 	ctx := context.Background()
 	s, _, _ := fixture(t)
-	r, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "work", Text: "Work"})
+	r, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "work", Text: "Work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestPreparedOutcomePublishesOnlyFinalUnsuppressedPhase(t *testing.T) {
 		t.Run(fmt.Sprint(suppressed), func(t *testing.T) {
 			ctx := context.Background()
 			s, _, _ := fixture(t)
-			r, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "prepared", Text: "Prepared work"})
+			r, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "prepared", Text: "Prepared work"})
 			if err != nil {
 				t.Fatal(err)
 			}

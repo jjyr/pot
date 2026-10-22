@@ -29,7 +29,7 @@ func TestTerminalHooksCoverAllOutcomesAndPreserveFailure(t *testing.T) {
 		t.Run(string(scenario.kind), func(t *testing.T) {
 			ctx := context.Background()
 			s, port, _ := fixture(t)
-			record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "work", Text: "actual work"})
+			record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "work", Text: "actual work"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -84,7 +84,7 @@ func TestStartedHookRequiresRunnerStartAndIsUIOnlyAcrossRestart(t *testing.T) {
 	var events []hooks.Event
 	s.options.PublishHook = func(event hooks.Event) { events = append(events, event) }
 	port.lose = true
-	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "start", Text: "work"})
+	record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "start", Text: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestStartedHookRequiresRunnerStartAndIsUIOnlyAcrossRestart(t *testing.T) {
 func TestPreparedOutcomeCannotCommitAfterConcurrentTaskChange(t *testing.T) {
 	ctx := context.Background()
 	s, port, _ := fixture(t)
-	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "stale", Text: "work"})
+	record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "stale", Text: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestTaskStoreRejectsPreviousSchema(t *testing.T) {
 func TestOutcomePreparationFailureLeavesTaskActive(t *testing.T) {
 	ctx := context.Background()
 	s, _, _ := fixture(t)
-	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "blocked", Text: "work"})
+	record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "blocked", Text: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestOutcomeProcessorCannotRebindTaskOrReopenExecution(t *testing.T) {
 		t.Run(field, func(t *testing.T) {
 			ctx := context.Background()
 			s, _, _ := fixture(t)
-			record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "binding", Text: "work"})
+			record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "binding", Text: "work"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -248,7 +248,7 @@ func TestPredispatchStopHookIsAtomicAndNotRepeatedByArchive(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx := context.Background()
 			s, _, _ := fixture(t)
-			record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "work", Text: "queued work"})
+			record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "work", Text: "queued work"})
 			if err != nil {
 				t.Fatal(err)
 			}

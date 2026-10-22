@@ -81,8 +81,8 @@ func (s *Service) page(ctx context.Context, assistant string, query protocol.Tas
 		if err != nil {
 			return page, err
 		}
-		where += " AND json_extract(body,'$.info.execution_target')=?"
-		args = append(args, string(raw))
+		where += " AND (json_extract(body,'$.info.execution_target')=? OR json_extract(body,'$.info.agent_link.node_id')=?)"
+		args = append(args, string(raw), target.RuntimeID)
 	}
 	// One read transaction keeps counts, clamped offsets and rows consistent.
 	tx, err := s.db.BeginTx(ctx, nil)

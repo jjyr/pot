@@ -156,11 +156,11 @@ func TestTaskArchiveBatchAndContinuedWorkspace(t *testing.T) {
 	fixtureGit(t, project, "add", ".")
 	fixtureGit(t, project, "commit", "-m", "base")
 	fixtureGit(t, project, "push", "origin", "trunk")
-	a, err := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: "a", Text: "Task A\nWrite result.txt; original nonce KEEP_42.", Workspace: protocol.TaskWorkspace{Kind: "worktree", ProjectDir: project}})
+	a, err := s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "a", Text: "Task A\nWrite result.txt; original nonce KEEP_42.", Workspace: protocol.TaskWorkspace{Kind: "worktree", ProjectDir: project}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: "b", Text: "Task B\nReturn READY_B."})
+	b, err := s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "b", Text: "Task B\nReturn READY_B."})
 	if err != nil {
 		t.Fatal(err)
 	}

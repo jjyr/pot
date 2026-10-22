@@ -104,7 +104,7 @@ func TestCronSchedulesUpgrade(t *testing.T) {
 					t.Fatal(taskBody, err)
 				}
 				var taskRecord map[string]any
-				if err = json.Unmarshal([]byte(taskBody), &taskRecord); err != nil || taskRecord["schema_version"] != float64(11) || taskRecord["state"] != "running" || (!skip && taskBody != strings.Replace(taskJSON, `"schema_version":10`, `"schema_version":11`, 1)) {
+				if err = json.Unmarshal([]byte(taskBody), &taskRecord); err != nil || taskRecord["schema_version"] != float64(12) || taskRecord["state"] != "running" || (!skip && taskBody != strings.Replace(taskJSON, `"schema_version":10`, `"schema_version":12`, 1)) {
 					t.Fatal("migration changed active Task", taskBody, err)
 				}
 				if err = db.QueryRow("SELECT digest,reply FROM schedule_writes WHERE request_id='run'").Scan(&receiptDigest, &receipt); err != nil || receiptDigest != "run-digest" || receipt != `{"task_id":"task"}` {

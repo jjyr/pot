@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/pkg/agent"
+	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
+	"strconv"
 	"strings"
 )
 
@@ -144,7 +146,7 @@ func (s *Service) productCall(ctx context.Context, owner, id, name string, args 
 		if len(brief) != 2 || strings.TrimSpace(brief[1]) == "" {
 			return nil, errors.New("Task brief must include a concise title on the first line and complete execution instructions on following lines; the worker cannot see this chat. Include the user's exact commands and constraints.")
 		}
-		info, err := s.CreateTask(ctx, owner, request)
+		info, err := s.CallAgent(ctx, owner, agentlink.TaskSubmit, agentlink.Call{Body: inject()})
 		if err == nil {
 			s.wakeTasks()
 		}
@@ -154,31 +156,30 @@ func (s *Service) productCall(ctx context.Context, owner, id, name string, args 
 		if err := core.DecodeJSON(args, &q); err != nil {
 			return nil, err
 		}
-		return s.TaskPage(ctx, owner, q)
+		query := map[string]string{"scope": q.Scope, "q": q.Q, "execution_target": q.ExecutionTarget, "selected": q.Selected, "offset": strconv.FormatUint(q.Offset, 10), "limit": strconv.FormatUint(q.Limit, 10)}
+		if q.Phase != nil {
+			query["phase"] = string(*q.Phase)
+		}
+		return s.CallAgent(ctx, owner, agentlink.TaskList, agentlink.Call{Query: query})
 	case "get_task":
-		if d, e := s.linkDelegation(ctx, owner, field("task_id")); e == nil {
-			return map[string]any{"task": d.Info, "error": d.Remote.Error, "result": d.Remote.Result}, nil
-		}
-		r, err := s.Tasks.Get(ctx, owner, field("task_id"))
-		if err != nil || r == nil {
-			return nil, errors.New("Task missing")
-		}
-		return map[string]any{"task": r.Info, "error": r.Error, "result": r.Outcome}, nil
-	case "set_task_dispositions":
-		var request protocol.TaskDispositions
-		if err := core.DecodeJSON(args, &request); err != nil {
+		value, err := s.CallAgent(ctx, owner, agentlink.TaskRead, agentlink.Call{ID: field("task_id")})
+		if err != nil {
 			return nil, err
 		}
-		items, err := s.SetTaskDispositions(ctx, owner, request.Decisions)
-		return map[string]any{"items": items}, err
-	case "interrupt", "cancel_task":
-		mode := "cancel"
-		if name == "interrupt" {
-			mode = "interrupt"
+		record, ok := value.(map[string]any)
+		if !ok || record == nil {
+			return nil, errors.New("Task missing")
 		}
-		err := s.StopTask(ctx, owner, field("task_id"), mode)
-		s.wakeTasks()
-		return map[string]bool{"accepted": err == nil}, err
+		return map[string]any{"task": record["info"], "error": record["error"], "result": record["outcome"]}, nil
+	case "set_task_dispositions":
+		return s.CallAgent(ctx, owner, agentlink.TaskArchive, agentlink.Call{Body: args})
+	case "interrupt", "cancel_task":
+		op := agentlink.TaskCancel
+		if name == "interrupt" {
+			op = agentlink.TaskInterrupt
+		}
+		body, _ := json.Marshal(map[string]string{"request_id": id})
+		return s.CallAgent(ctx, owner, op, agentlink.Call{ID: field("task_id"), Body: body})
 	case "list_schedules":
 		var q struct {
 			Scope  string `json:"scope"`

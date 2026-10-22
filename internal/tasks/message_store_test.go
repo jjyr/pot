@@ -11,7 +11,7 @@ import (
 func TestForwardedPeerMessageRemainsReferenceAcrossLongChains(t *testing.T) {
 	ctx := context.Background()
 	s, _, _ := fixture(t)
-	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "create", Text: "work"})
+	record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "create", Text: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestForwardedPeerMessageRemainsReferenceAcrossLongChains(t *testing.T) {
 func TestNodeIdentityUpgradeRetainsInputHashWithoutStoredParent(t *testing.T) {
 	ctx := context.Background()
 	s, _, path := fixture(t)
-	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "create-upgrade", Text: "original work"})
+	record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "create-upgrade", Text: "original work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ ALTER TABLE plugin_background DROP COLUMN diagnostic;
 DROP INDEX agent_plugin_instance_state;
 ALTER TABLE plugin_background DROP COLUMN plugin_id;
 ALTER TABLE plugin_background DROP COLUMN connection_id;
-DROP TABLE run_workspaces; DROP TABLE task_runs; DROP TABLE task_events; DROP TABLE retired_execution_receipts; DROP TABLE journal_file_import; DROP TABLE task_node; ALTER TABLE retired_task_authority RENAME TO task_authority; DELETE FROM pot_migrations WHERE id >= '0006_';`, legacyHash)
+DROP TABLE run_workspaces; DROP TABLE task_runs; DROP TABLE task_events; DROP TABLE retired_execution_receipts; DROP TABLE journal_file_import; DROP TABLE task_submission_import; DROP INDEX task_outcomes_run; ALTER TABLE task_outcomes DROP COLUMN run_id; DROP TABLE task_node; ALTER TABLE retired_task_authority RENAME TO task_authority; DELETE FROM pot_migrations WHERE id >= '0006_';`, legacyHash)
 	if err != nil {
 		t.Fatal(err)
 	}

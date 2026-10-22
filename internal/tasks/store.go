@@ -102,9 +102,9 @@ func write(ctx context.Context, tx *sql.Tx, r *Record) error {
 		if r.Outcome != nil && r.Outcome.SuppressionReason != "" {
 			break
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO task_outcomes(assistant_id,task_id,title,phase,updated_at_ms)
-		 SELECT ?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM tasks WHERE assistant_id=? AND id=? AND phase=?)`,
-			r.AssistantID, r.Info.ID, r.Info.Title, r.Info.Phase, r.Info.UpdatedAtMS, r.AssistantID, r.Info.ID, r.Info.Phase)
+		_, err = tx.ExecContext(ctx, `INSERT INTO task_outcomes(assistant_id,task_id,title,phase,updated_at_ms,run_id)
+ VALUES(?,?,?,?,?,?) ON CONFLICT(assistant_id,task_id,run_id,phase) WHERE run_id!='' DO NOTHING`,
+			r.AssistantID, r.Info.ID, r.Info.Title, r.Info.Phase, r.Info.UpdatedAtMS, r.RunID)
 		if err != nil {
 			return err
 		}
@@ -127,11 +127,20 @@ func (s *Service) validateStored(ctx context.Context) error {
 		if err := core.DecodeJSON([]byte(raw), &r); err != nil {
 			return err
 		}
-		if r.SchemaVersion != 11 || r.AssistantID != assistant || r.Info.AssistantID != assistant || r.Info.ID != id || r.Info.RunID != r.RunID || !core.Identifier(assistant) || !core.Identifier(id) {
+		if r.SchemaVersion != 12 || r.AssistantID != assistant || r.Info.AssistantID != assistant || r.Info.ID != id || r.Info.RunID != r.RunID || !core.Identifier(assistant) || !core.Identifier(id) {
 			return fmt.Errorf("invalid stored Task ownership/schema")
 		}
 		if err := r.Origin.Validate(); err != nil {
 			return err
+		}
+		if r.Execution != nil {
+			if r.Info.AgentLink == nil || !r.Execution.Request.From.Valid() || r.Launch != nil {
+				return fmt.Errorf("invalid Agent Link Task binding")
+			}
+			continue
+		}
+		if r.Config == nil {
+			return fmt.Errorf("local Task has no model snapshot")
 		}
 		if err := r.Config.Validate(); err != nil {
 			return err
@@ -156,7 +165,7 @@ func (s *Service) GetTx(ctx context.Context, tx *sql.Tx, assistant, id string) (
 
 func (s *Service) Prepare(ctx context.Context, assistant string, request protocol.CreateTask) (Selection, error) {
 	if request.Executor != "" {
-		return Selection{}, fmt.Errorf("explicit executor must use the task delegation port")
+		return Selection{}, fmt.Errorf("explicit executor must use Agent Link submission")
 	}
 	if !core.Identifier(assistant) {
 		return Selection{}, fmt.Errorf("invalid assistant identity")
@@ -186,7 +195,10 @@ func (s *Service) Prepare(ctx context.Context, assistant string, request protoco
 	}
 	return selection, nil
 }
-func (s *Service) Create(ctx context.Context, assistant string, request protocol.CreateTask) (Record, error) {
+
+// AcceptLocal is called only by the local Pot receiving adapter. Caller-side
+// submissions enter through Agent Link, regardless of execution location.
+func (s *Service) AcceptLocal(ctx context.Context, assistant string, request protocol.CreateTask) (Record, error) {
 	hash, err := core.HashJSON([]any{request, protocol.TaskOrigin{Kind: "manual"}})
 	if err != nil {
 		return Record{}, err
@@ -291,7 +303,7 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	if len(runes) > 80 {
 		title = string(runes[:80])
 	}
-	record := Record{SchemaVersion: 11, Origin: origin, AssistantID: assistant, Info: protocol.TaskInfo{Address: &protocol.AgentRef{NodeID: s.options.NodeID, Kind: "task", AgentID: id}, ID: id, AssistantID: assistant, Title: title, Phase: protocol.TaskQueued, CreatedAtMS: at, UpdatedAtMS: at, Routing: &protocol.TaskRouting{Profile: selection.Config.SourceProfileID, Revision: selection.Config.SourceProfileRevision, Provider: selection.Config.Provider, Reason: "assistant selection", SelectionReason: request.SelectionReason}}, Request: request, Config: selection.Config, Plugins: plugins, RunID: runID, Generation: 1}
+	record := Record{SchemaVersion: 12, Origin: origin, AssistantID: assistant, Info: protocol.TaskInfo{Address: &protocol.AgentRef{NodeID: s.options.NodeID, Kind: "task", AgentID: id}, ID: id, AssistantID: assistant, Title: title, Phase: protocol.TaskQueued, CreatedAtMS: at, UpdatedAtMS: at, Routing: &protocol.TaskRouting{Profile: selection.Config.SourceProfileID, Revision: selection.Config.SourceProfileRevision, Provider: selection.Config.Provider, Reason: "assistant selection", SelectionReason: request.SelectionReason}}, Request: request, Config: &selection.Config, Plugins: plugins, RunID: runID, Generation: 1}
 	record.Info.MachineID = request.MachineID
 	record.Info.RunID = runID
 	if err := write(ctx, tx, &record); err != nil {

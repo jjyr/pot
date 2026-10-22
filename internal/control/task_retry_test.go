@@ -88,7 +88,7 @@ func TestFailedTaskRecoveryIsSilentAndReplacementReportsOnce(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			original, err := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: "recover", Text: "Read upstream\nPreserve original constraints."})
+			original, err := s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "recover", Text: "Read upstream\nPreserve original constraints."})
 			if err != nil {
 				t.Fatal(err)
 			}

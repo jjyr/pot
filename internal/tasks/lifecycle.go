@@ -12,9 +12,6 @@ import (
 // Tick reconciles local runs. It starts each launch once after committing its
 // intent; an uncertain outcome is inspected only under that same identity.
 func (s *Service) Tick(ctx context.Context) error {
-	if s.options.Executor == nil {
-		return fmt.Errorf("local Task executor unavailable")
-	}
 	rows, err := s.db.QueryContext(ctx, "SELECT assistant_id,id FROM tasks WHERE phase IN ('queued','running','waiting','waiting_approval') OR EXISTS(SELECT 1 FROM task_inputs i WHERE i.assistant_id=tasks.assistant_id AND i.task_id=tasks.id AND i.state='pending' AND i.kind IN ('guidance','user_guidance')) ORDER BY created,id")
 	if err != nil {
 		return err
@@ -44,6 +41,12 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 	record, err := s.Get(ctx, assistant, id)
 	if err != nil || record == nil {
 		return err
+	}
+	if record.Execution != nil {
+		return nil
+	}
+	if s.options.Executor == nil {
+		return fmt.Errorf("local Task executor unavailable")
 	}
 	if record.Info.Phase.Scope() != "active" {
 		if err := s.continuePending(ctx, assistant, id); err != nil {
@@ -75,7 +78,7 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 				return nil
 			}
 			if s.options.AdmitModel != nil {
-				admitted, err := s.options.AdmitModel(ctx, tx, current.Config)
+				admitted, err := s.options.AdmitModel(ctx, tx, *current.Config)
 				if err != nil {
 					return err
 				}
@@ -83,7 +86,7 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 					return nil
 				}
 			}
-			launch := Launch{ControlID: s.options.NodeID, AssistantID: assistant, RuntimeID: target.RuntimeID, TaskID: id, RunID: current.RunID, Generation: current.Generation, ExecutionTarget: target, Config: current.Config, Plugins: current.Plugins, Skills: current.Request.Skills, Workspace: current.Request.Workspace, Text: current.Request.Text, InputID: current.RunInputID}
+			launch := Launch{ControlID: s.options.NodeID, AssistantID: assistant, RuntimeID: target.RuntimeID, TaskID: id, RunID: current.RunID, Generation: current.Generation, ExecutionTarget: target, Config: *current.Config, Plugins: current.Plugins, Skills: current.Request.Skills, Workspace: current.Request.Workspace, Text: current.Request.Text, InputID: current.RunInputID}
 			if current.RunInputID != "" {
 				launch.Text = current.RunText
 			}

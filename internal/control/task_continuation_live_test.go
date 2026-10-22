@@ -157,11 +157,11 @@ func TestConfiguredModelTaskLifecycleLive(t *testing.T) {
 	fixtureGit(t, project, "add", ".")
 	fixtureGit(t, project, "commit", "-m", "base")
 	fixtureGit(t, project, "push", "origin", "trunk")
-	a, err := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: "a", Text: "本地文本交付\n在当前目录创建 result.txt，内容为 INITIAL。只需本地文件，不要提交或推送；文件写好就完成了这次要求。另外记住标记 CONTEXT_42，暂时不要把这个标记写入文件。", Workspace: protocol.TaskWorkspace{Kind: "worktree", ProjectDir: project}})
+	a, err := s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "a", Text: "本地文本交付\n在当前目录创建 result.txt，内容为 INITIAL。只需本地文件，不要提交或推送；文件写好就完成了这次要求。另外记住标记 CONTEXT_42，暂时不要把这个标记写入文件。", Workspace: protocol.TaskWorkspace{Kind: "worktree", ProjectDir: project}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: "b", Text: "待用户补充\n请让我选择红色或蓝色，在得到我的选择之前不要替我决定。"})
+	b, err := s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "b", Text: "待用户补充\n请让我选择红色或蓝色，在得到我的选择之前不要替我决定。"})
 	if err != nil {
 		t.Fatal(err)
 	}

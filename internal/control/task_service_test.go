@@ -76,7 +76,7 @@ func TestLocalTaskUsesRunnerSharedCapacityControlModelAndSummary(t *testing.T) {
 	if err = s.Permissions.Configure("local", MachinePolicy{ExecutionAccess: "allow"}); err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: "task-create", Text: "Write one artifact", MachineID: "local"})
+	accepted, err := s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "task-create", Text: "Write one artifact", MachineID: "local"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestLocalTaskUsesRunnerSharedCapacityControlModelAndSummary(t *testing.T) {
 	if len(notices) != 0 {
 		t.Fatal("acknowledged result still pending")
 	}
-	again, err := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: "task-create", Text: "Write one artifact", MachineID: "local"})
+	again, err := s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "task-create", Text: "Write one artifact", MachineID: "local"})
 	if err != nil || again.Info.ID != accepted.Info.ID {
 		t.Fatal("duplicate task admission changed identity")
 	}

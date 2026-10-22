@@ -12,7 +12,7 @@ import (
 func TestLegacyTaskMigrationPreservesAcceptedRun(t *testing.T) {
 	ctx := context.Background()
 	s, port, path := fixture(t)
-	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "migration", Text: "keep the original execution"})
+	record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "migration", Text: "keep the original execution"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestLegacyTaskMigrationPreservesAcceptedRun(t *testing.T) {
 	if _, err := s.DB().Exec(`DROP INDEX agent_messages_outbox_route; ALTER TABLE agent_messages DROP COLUMN accepted_at_ms; ALTER TABLE assistant_mail_identity RENAME COLUMN node_id TO control_id; ALTER TABLE assistant_contacts RENAME COLUMN node TO control; DROP TABLE plugin_background_writes; DROP TABLE task_input_digest_formats; DROP TABLE codex_mail_consumers; DROP TABLE codex_task_inputs; DROP TABLE codex_task_sessions; DROP TABLE codex_task_executor; DROP TABLE codex_link_jobs; DROP TABLE codex_link_assistants; DROP INDEX agent_link_user_chat_routes; DROP INDEX agent_chat_replies; ALTER TABLE plugin_background DROP COLUMN diagnostic;
 DROP INDEX agent_plugin_instance_state;
 ALTER TABLE plugin_background DROP COLUMN plugin_id;
-ALTER TABLE plugin_background DROP COLUMN connection_id; DROP TABLE pot_migrations; DROP TABLE run_workspaces; DROP TABLE task_runs; DROP TABLE task_events; DROP TABLE retired_execution_receipts; DROP TABLE journal_file_import; DROP TABLE task_node; ALTER TABLE retired_task_authority RENAME TO task_authority;
+ALTER TABLE plugin_background DROP COLUMN connection_id; DROP TABLE pot_migrations; DROP TABLE run_workspaces; DROP TABLE task_runs; DROP TABLE task_events; DROP TABLE retired_execution_receipts; DROP TABLE journal_file_import; DROP TABLE task_submission_import; DROP INDEX task_outcomes_run; ALTER TABLE task_outcomes DROP COLUMN run_id; DROP TABLE task_node; ALTER TABLE retired_task_authority RENAME TO task_authority;
 CREATE TABLE task_schema(version INTEGER NOT NULL); INSERT INTO task_schema VALUES(8);
 CREATE TABLE schedule_schema(version INTEGER NOT NULL); INSERT INTO schedule_schema VALUES(2);`); err != nil {
 		t.Fatal(err)

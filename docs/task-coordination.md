@@ -16,12 +16,19 @@ serialized task configuration without an unexported native-only request field.
 Only owner authority can select that configuration; peer callers retain the
 receiver-owned execution policy.
 
-The local Task service has one node identity and a direct local execution
-interface. A new `machine_id` must be omitted or identify this node; another
-machine is rejected before model selection or insertion. Already prepared
-schedule/retry requests obey the same local admission rule. Cross-node work
-requires an Agent Link delegation rather than a local Task with a remote target.
-Exact retries of historical submissions still return their original receipt.
+Task is independent of execution location. Local Pot, peer Pot and Codex tasks
+share one durable catalogue, request receipt, outcome cursor and archive batch.
+Every submission calls Agent Link; the local adapter stays in-process. The Pot
+receiving adapter accepts a local model configuration through owner-only
+`task.configure`, and keeps run/checkpoint/workspace state internally. Linked
+Tasks store their original caller-bound execution reference and last observation,
+without requiring a local Provider or a Pot model snapshot. Exact retries return
+the original Task before consulting mutable directories or defaults.
+
+A `machine_id` in a local Pot configuration must be omitted or identify its own
+node. Scheduled and retry admissions obey the same receiving-adapter rule.
+Historical raw remote launches retain their original recovery fences and cannot
+be converted into a new local execution.
 
 An authenticated user conversation can submit linked work without any local
 assistant or Provider. Its durable session owns the directing receipt and result
@@ -36,7 +43,7 @@ catalogue and original conversation use the same retained task reference.
 Explicit targets select that assistant; otherwise the receiving node resolves its
 persisted default once. The receiver owns execution, model selection and local
 permissions. Local provider credentials and model snapshots are never forwarded.
-The directing node stores an idempotent delegation and remote reference rather
+The directing node stores an idempotent Task and execution reference rather
 than launching a local worker copy. Assistant-directed results notify the
 original directing assistant through its inbox and task-outcome projection;
 user-directed results follow the conversation route described above.
@@ -286,7 +293,7 @@ silently selecting another directory or destination. A previous run with uncerta
 effects must be reconciled before a continuation can execute. Subsequent tools
 always use the machine's current execution authorization.
 
-Task and execution record payloads use schema versions 11 and 7. Database schemas and
+Task and execution record payloads use schema versions 12 and 7. Database schemas and
 automatic upgrades are owned by the [DB migration layer](database-migrations.md).
 Development builds use an independent data root; unsupported pre-migration formats
 are rejected.

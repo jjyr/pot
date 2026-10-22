@@ -47,12 +47,15 @@ Every product Agent invocation, including mail and summary sessions, passes
 through the destination's shared execution manager. The owning node manages provider keys,
 approvals, accounting and global resources. Workers run on their owning node and use its local execution services.
 
-Local Task coordination accepts one `NodeID` and a `LocalExecutor`. It binds new
-work to that node before model resolution and durable admission, and calls the
-executor directly. Agent Link owns cross-node delegations separately; there is
-no destination router, coordinator/Runner identity pair or remote model service
-in the local execution interface. Historical remote records remain inspectable
-as retained evidence and cannot enter the local executor.
+Task operations and model task tools enter the same Agent Link operation port.
+The local Pot adapter accepts owner-authorized configuration through `AcceptLocal`;
+peer Pot and Codex adapters own their execution policy. All caller-facing Tasks,
+including linked submissions, share the Task database, list query, request
+receipts, outcome index and archive transaction. There is no parallel live
+Delegation catalogue in Control. Linked Tasks carry an execution binding instead
+of a local configuration or launch. The Pot adapter's local execution manager,
+run journal and cleanup proof remain receiver implementation details.
+Historical remote run records cannot enter local execution.
 
 Builtin packages ship as runtime resources. User packages and Skills live in
 `~/.pot/plugins/<name>` and `~/.pot/skills/<name>`. File settings are read by the

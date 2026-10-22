@@ -29,7 +29,7 @@ func TestLocalTaskNodeUpgradePreservesOriginalAuthorityAndWork(t *testing.T) {
 		if err := db.QueryRow("SELECT control_id,runtime_id FROM retired_task_authority").Scan(&coordinator, &runtime); err != nil || coordinator != "owner" || runtime != "old-runtime" {
 			t.Fatal(coordinator, runtime, err)
 		}
-		if err := db.QueryRow("SELECT body FROM tasks").Scan(&body); err != nil || body != `{"schema_version":11,"run_id":"original-run","launch":{"control_id":"owner","runtime_id":"retired-runner"}}` {
+		if err := db.QueryRow("SELECT body FROM tasks").Scan(&body); err != nil || body != `{"schema_version":12,"run_id":"original-run","launch":{"control_id":"owner","runtime_id":"retired-runner"}}` {
 			t.Fatal("execution identity changed", body, err)
 		}
 		if err := db.QueryRow("SELECT body FROM schedules").Scan(&plan); err != nil || plan != schedule {

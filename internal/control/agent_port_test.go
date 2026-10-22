@@ -51,7 +51,7 @@ func TestAgentPortEmptyNodeUserTaskResultAndRetrySurviveRestart(t *testing.T) {
 	}
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		a.service.syncLinkDelegations(ctx)
+		a.service.syncTaskExecutions(ctx)
 		frame, e := a.service.LinkChat(ctx, c.ID, "main")
 		if e != nil {
 			t.Fatal(e)
@@ -61,12 +61,21 @@ func TestAgentPortEmptyNodeUserTaskResultAndRetrySurviveRestart(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("task result did not reach user conversation", frame)
+			record, readErr := a.service.Tasks.Get(ctx, linkChatID(c.ID, "main"), info.ID)
+			t.Fatalf("task result did not reach user conversation: frame=%+v record=%+v execution=%+v err=%v", frame, record, nil, readErr)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	delegation, err := a.service.linkDelegation(ctx, linkChatID(c.ID, "main"), info.ID)
-	if err != nil || delegation.Request.From.Kind != "user" {
+	detail, err := a.service.CallAgent(ctx, owner, agentlink.TaskRead, agentlink.Call{ID: info.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	details := detail.(map[string]any)
+	if details["info"].(map[string]any)["assistant_id"] != owner || details["result"].(map[string]any)["text"] != "remote-user-task-result" {
+		t.Fatal("detail lost directing conversation or result", detail)
+	}
+	delegation, err := a.service.taskExecution(ctx, linkChatID(c.ID, "main"), info.ID)
+	if err != nil || delegation.Execution.Request.From.Kind != "user" {
 		t.Fatal(delegation, err)
 	}
 	var autonomous int
@@ -97,7 +106,7 @@ func TestAgentPortEmptyNodeUserTaskResultAndRetrySurviveRestart(t *testing.T) {
 	if err != nil || repeated.(protocol.TaskInfo).ID != info.ID {
 		t.Fatal(repeated, err)
 	}
-	a.service.syncLinkDelegations(ctx)
+	a.service.syncTaskExecutions(ctx)
 	frame, err := a.service.LinkChat(ctx, c.ID, "main")
 	if err != nil || len(frame.Messages) != 1 {
 		t.Fatal("result duplicated after restart", frame, err)

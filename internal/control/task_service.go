@@ -37,6 +37,9 @@ func (s *Service) openTasks() error {
 	if err = storage.ImportLocalRuns(s.options.Root); err != nil {
 		return err
 	}
+	if err = storage.ImportTaskSubmissions(s.options.Root); err != nil {
+		return err
+	}
 	s.RunJournal, err = tasks.OpenJournal(filepath.Join(s.options.Root, "tasks.sqlite"), s.options.RuntimeID, s.options.BootID)
 	if err != nil {
 		return err

@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -114,6 +115,14 @@ func checkShape(value any, t reflect.Type, path string) error {
 	}
 	if value == nil {
 		return fmt.Errorf("%s cannot be null", path)
+	}
+	// Standard timestamps have a string JSON contract; encoding/json validates
+	// their syntax after this structural check.
+	if t == reflect.TypeFor[time.Time]() {
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("%s must be a timestamp string", path)
+		}
+		return nil
 	}
 	switch t.Kind() {
 	case reflect.Struct:

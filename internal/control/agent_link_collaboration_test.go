@@ -103,12 +103,12 @@ func TestPotLinkDelegationOwnsTaskOnReceiverAndNotifiesOriginalAssistant(t *test
 		t.Fatal(e)
 	}
 	for {
-		d, e := a.service.linkDelegation(ctx, "main", info.ID)
+		d, e := a.service.taskExecution(ctx, "main", info.ID)
 		if e != nil {
 			t.Fatal(e)
 		}
-		if terminalLinkTask(d.Remote.State) {
-			if d.Remote.Result != "receiver-result" || d.Remote.Assistant.Address.NodeID != "receiver" {
+		if terminalLinkTask(d.Execution.Receipt.State) {
+			if d.Execution.Receipt.Result != "receiver-result" || d.Execution.Receipt.Assistant.Address.NodeID != "receiver" {
 				t.Fatal(d)
 			}
 			break

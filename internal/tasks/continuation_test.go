@@ -28,7 +28,7 @@ func TestOwnerBatchArchiveAndContinuationPreserveTaskAndReceipts(t *testing.T) {
 	var records []Record
 	var decisions []protocol.TaskDisposition
 	for _, id := range []string{"a", "b"} {
-		r, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: id, Text: "original instructions", Workspace: protocol.TaskWorkspace{Kind: "worktree", ProjectDir: "/project"}})
+		r, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: id, Text: "original instructions", Workspace: protocol.TaskWorkspace{Kind: "worktree", ProjectDir: "/project"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -103,7 +103,7 @@ func TestStopEndedTaskDiscardsQueuedFollowupWithoutChangingResult(t *testing.T) 
 		t.Run(mode, func(t *testing.T) {
 			ctx := context.Background()
 			s, p, _ := fixture(t)
-			r, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "original", Text: "work"})
+			r, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "original", Text: "work"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -128,7 +128,7 @@ func TestStopEndedTaskDiscardsQueuedFollowupWithoutChangingResult(t *testing.T) 
 func TestFinalizingGuidanceStartsNextRunButReferencesDoNot(t *testing.T) {
 	ctx := context.Background()
 	s, p, _ := fixture(t)
-	r, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "work", Text: "original"})
+	r, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "work", Text: "original"})
 	if err != nil {
 		t.Fatal(err)
 	}

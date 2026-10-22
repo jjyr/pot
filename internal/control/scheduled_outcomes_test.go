@@ -111,7 +111,7 @@ func TestScheduledAndManualOutcomesShareSummaryDelivery(t *testing.T) {
 			if err := json.Unmarshal(raw, &accepted); err != nil || accepted.TaskID == "" {
 				t.Fatal(string(raw), err)
 			}
-			manual, err := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: "manual-task", Text: "Manual task\nFinish the manual work"})
+			manual, err := s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "manual-task", Text: "Manual task\nFinish the manual work"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -205,7 +205,7 @@ func TestScheduledAndManualOutcomesShareSummaryDelivery(t *testing.T) {
 func TestGetTaskReturnsFinalizedOutcome(t *testing.T) {
 	ctx := context.Background()
 	s, _ := batchService(t, func(w http.ResponseWriter, r *http.Request) { http.Error(w, "execution failed", http.StatusBadRequest) }, 1)
-	record, err := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: "query", Text: "Inspect outcome\nDo the work"})
+	record, err := s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "query", Text: "Inspect outcome\nDo the work"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,5 +1,5 @@
-// Package tasks owns durable local Task coordination. Cross-node work belongs
-// to Agent Link delegation, never to this execution service.
+// Package tasks owns the durable Task catalogue for all Agent Link targets.
+// The receiving Pot adapter additionally stores its local execution state here.
 package tasks
 
 import (
@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jjyr/pot/internal/hooks"
+	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 	"sync"
@@ -52,12 +53,24 @@ type Input struct {
 	State     string `json:"state"`
 	Sequence  uint64 `json:"sequence"`
 }
+
+// Execution binds a caller-owned Task to the original Agent Link execution.
+// Local Pot execution details remain private to the receiving adapter.
+type Execution struct {
+	ObservedAtMS  int64                 `json:"observed_at_ms"`
+	Request       agentlink.TaskRequest `json:"request"`
+	Receipt       agentlink.Task        `json:"receipt"`
+	Notified      bool                  `json:"notified"`
+	StopRequested bool                  `json:"stop_requested"`
+}
+
 type Record struct {
+	Execution     *Execution                `json:"execution,omitempty"`
 	SchemaVersion uint32                    `json:"schema_version"`
 	AssistantID   string                    `json:"assistant_id"`
 	Info          protocol.TaskInfo         `json:"info"`
 	Request       protocol.CreateTask       `json:"request"`
-	Config        core.ResolvedSpec         `json:"config"`
+	Config        *core.ResolvedSpec        `json:"config,omitempty"`
 	Plugins       []string                  `json:"plugins"`
 	RunID         string                    `json:"run_id"`
 	PreviousRunID string                    `json:"previous_run_id,omitempty"`

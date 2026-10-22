@@ -94,7 +94,7 @@ func TestTaskResultExecutesCommandAndImportsTaskAvatar(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: "avatar", Text: "Generate avatar\nCreate avatar.png for my profile."}); err != nil {
+	if _, err = s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "avatar", Text: "Generate avatar\nCreate avatar.png for my profile."}); err != nil {
 		t.Fatal(err)
 	}
 	final := awaitConversationContext(t, ctx, c, func(snapshot protocol.Snapshot) bool {

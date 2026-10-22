@@ -14,7 +14,7 @@ import (
 func TestTaskNodeIdentitySurvivesReopenAndRejectsAnotherNode(t *testing.T) {
 	s, _, path := fixture(t)
 	ctx := context.Background()
-	r, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "original", Text: "work"})
+	r, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "original", Text: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestHistoricalRemoteTaskCannotUseLocalExecutorAfterRestart(t *testing.T) {
 			s, executor, path := fixture(t)
 			ctx := context.Background()
 			request := protocol.CreateTask{RequestID: "original", Text: "work"}
-			r, err := s.Create(ctx, "assistant", request)
+			r, err := s.AcceptLocal(ctx, "assistant", request)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -119,7 +119,7 @@ func TestHistoricalRemoteTaskCannotUseLocalExecutorAfterRestart(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			retained, err := s.Create(ctx, "assistant", request)
+			retained, err := s.AcceptLocal(ctx, "assistant", request)
 			if err != nil || retained.RunID != r.RunID || retained.Request.MachineID != "retired-runner" || retained.Info.Phase != protocol.TaskWaiting {
 				t.Fatal("historical retry changed original destination or outcome", retained, err)
 			}
@@ -137,7 +137,7 @@ func TestHistoricalRemoteTaskCannotUseLocalExecutorAfterRestart(t *testing.T) {
 func TestTaskAdmissionAndRunCreationRollbackTogether(t *testing.T) {
 	s, _, path := fixture(t)
 	ctx := context.Background()
-	r, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "atomic", Text: "work"})
+	r, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "atomic", Text: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}

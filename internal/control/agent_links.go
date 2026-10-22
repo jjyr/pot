@@ -124,7 +124,7 @@ func (s *Service) openAgentLinks() error {
 			case <-s.ctx.Done():
 				return
 			case <-ticker.C:
-				s.syncLinkDelegations(s.ctx)
+				s.syncTaskExecutions(s.ctx)
 			}
 		}
 	}()

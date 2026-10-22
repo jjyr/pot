@@ -31,7 +31,7 @@ belongs to the complete database, including tables used by other components:
 | Kind | Product location | Contents |
 |---|---|---|
 | `control` | `control.sqlite` | Assistant registry, providers, encrypted secrets, integration accounts, Agent Link connections and host access configuration |
-| `tasks` | `tasks.sqlite` | Tasks, runs, execution checkpoints/events/workspaces, schedules, inbox, mailbox and plugin checkpoints |
+| `tasks` | `tasks.sqlite` | Local/linked Tasks, request receipts, runs, execution checkpoints/events/workspaces, schedules, inbox, mailbox and plugin checkpoints |
 | `runner` | Retired `runner.sqlite` | Upgrade input only; imported into Tasks and local resource files |
 | `conversation` | Each conversation database | Messages, context, configuration, steering and instruction updates |
 | `machines` | `machines.sqlite` | Autonomous signing identity, local labels and archived membership records |
@@ -338,3 +338,20 @@ command tables. New effects use only `operations.sqlite`.
 the SQL bodies. File checksums and original run identity bind recovery. Neither
 conversion invokes tools or replays work. Interrupted exports retry under the
 exclusive node-root lock; conflicting existing files stop startup.
+
+## Unified Agent Link Tasks
+
+`control/0029_unified_tasks` retires the separate delegation table as upgrade
+input. `tasks/0024_unified_tasks` upgrades Task payloads to schema 12 and records
+a pending import. Before receivers start, the importer consolidates original
+linked Tasks into `tasks.sqlite`, preserving task/request IDs, caller identity,
+execution and run references, cancellation intent and notification state. It
+commits the import receipt with all Task and request rows; conflicts roll back
+without overwriting existing work. Subsequent starts never restore archived
+submissions or submit executions during migration.
+
+All targets now share Task listing, archive transactions and outcome indexing.
+Outcome receipts include the original run ID so fast completed continuations
+remain distinct and repeated observations cannot advance the cursor twice.
+Local model snapshots are optional and present only for Pot-owned execution.
+The original control rows remain archived evidence, never a live task store.

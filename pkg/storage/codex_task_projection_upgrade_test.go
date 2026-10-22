@@ -37,7 +37,7 @@ func TestCodexRunProjectionUpgradePreservesAcceptedExecution(t *testing.T) {
 	var payload, remote, run, result string
 	var notified int
 	var projection any
-	err = db.QueryRow(`SELECT payload,remote_id,json_extract(body,'$.remote.run_id'),json_extract(body,'$.remote.result'),json_extract(body,'$.info.run_id'),notified FROM agent_link_delegations WHERE id='task'`).Scan(&payload, &remote, &run, &result, &projection, &notified)
+	err = db.QueryRow(`SELECT payload,remote_id,json_extract(body,'$.remote.run_id'),json_extract(body,'$.remote.result'),json_extract(body,'$.info.run_id'),notified FROM retired_task_submissions WHERE id='task'`).Scan(&payload, &remote, &run, &result, &projection, &notified)
 	if err != nil || payload != "original-request" || remote != "remote" || run != opaque || result != "saved-result" || projection != nil || notified != 0 {
 		t.Fatal(payload, remote, run, result, projection, notified, err)
 	}

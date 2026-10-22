@@ -75,7 +75,7 @@ func TestTaskMessageAutomaticallyBindsGuidanceAndPeerReference(t *testing.T) {
 	if err = c.Configure(ctx, spec, 0); err != nil {
 		t.Fatal(err)
 	}
-	record, err := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: "create", Text: "CI rules\nAwait guidance."})
+	record, err := s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "create", Text: "CI rules\nAwait guidance."})
 	if err != nil {
 		t.Fatal(err)
 	}

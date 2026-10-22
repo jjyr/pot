@@ -79,7 +79,7 @@ func (b potLinkBackend) Submit(ctx context.Context, r agentlink.TaskRequest) (ag
 		if r.From.NodeID != b.s.options.RuntimeID || r.From.Kind != "assistant" || r.AssistantID != r.From.AgentID || r.Configuration.RequestID != r.RequestID || r.Configuration.Text != r.Text || r.Configuration.Target != nil || r.Configuration.LinkID != "" {
 			return agentlink.Task{}, agentlink.ErrUnauthorized
 		}
-		record, err := b.s.Tasks.Create(ctx, r.AssistantID, *r.Configuration)
+		record, err := b.s.Tasks.AcceptLocal(ctx, r.AssistantID, *r.Configuration)
 		if err != nil {
 			return agentlink.Task{}, err
 		}
@@ -130,7 +130,7 @@ func (b potLinkBackend) Submit(ctx context.Context, r agentlink.TaskRequest) (ag
 	if r.Workspace != "" {
 		request.Workspace = protocol.TaskWorkspace{Kind: "directory", ProjectDir: r.Workspace}
 	}
-	record, e := b.s.Tasks.Create(ctx, owner, request)
+	record, e := b.s.Tasks.AcceptLocal(ctx, owner, request)
 	if e != nil {
 		return agentlink.Task{}, e
 	}

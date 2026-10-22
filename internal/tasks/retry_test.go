@@ -33,7 +33,7 @@ func TestRetryPreservesScopeAndHasOneDurableReplacementPerSource(t *testing.T) {
 	ctx := context.Background()
 	s, p, path := fixture(t)
 	skills := []string{"research"}
-	original, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "original", Text: "Research\nKeep the original constraints.", Skills: &skills, Requirements: protocol.TaskRequirements{Tools: true}})
+	original, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "original", Text: "Research\nKeep the original constraints.", Skills: &skills, Requirements: protocol.TaskRequirements{Tools: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestRetryPreservesScopeAndHasOneDurableReplacementPerSource(t *testing.T) {
 func TestRetryRejectsActiveAndStoppedTasks(t *testing.T) {
 	s, _, _ := fixture(t)
 	ctx := context.Background()
-	r, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "active", Text: "Work\nDo it."})
+	r, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "active", Text: "Work\nDo it."})
 	if err != nil {
 		t.Fatal(err)
 	}

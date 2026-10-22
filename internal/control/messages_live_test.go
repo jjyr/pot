@@ -137,7 +137,7 @@ func TestDeepSeekTaskGuidanceLive(t *testing.T) {
 			return tasks.Prepared{}, ctx.Err()
 		}
 	}
-	record, err := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: "existing-task", Text: "CI 触发规则调整\n这是隔离测试，不修改文件、不执行命令或工具。读取已收到的补充规则，在最终答复中逐项复述；不要自行假定触发条件。"})
+	record, err := s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "existing-task", Text: "CI 触发规则调整\n这是隔离测试，不修改文件、不执行命令或工具。读取已收到的补充规则，在最终答复中逐项复述；不要自行假定触发条件。"})
 	if err != nil {
 		t.Fatal(err)
 	}

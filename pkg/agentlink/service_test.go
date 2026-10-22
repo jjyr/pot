@@ -502,7 +502,7 @@ ALTER TABLE codex_agent_host RENAME COLUMN node_id TO control_id;
 DROP TABLE node_identity_secret_migration;
 DROP TABLE agent_link_claim_digest_formats;
 DROP TABLE agent_link_node_settings;
-DROP TABLE agent_link_delegations;
+DROP TABLE retired_task_submissions;
 DROP TABLE agent_link_received_tasks;
 DROP TABLE agent_link_chat;
 DROP TABLE agent_link_chat_sessions;
@@ -622,7 +622,7 @@ ALTER TABLE agent_link_chat DROP COLUMN reply_state;
 ALTER TABLE agent_link_chat DROP COLUMN reply_error;
 ALTER TABLE agent_link_chat DROP COLUMN reply_uncertain;
 ALTER TABLE agent_link_chat DROP COLUMN checked_at;
-DROP TABLE agent_link_chat_sessions; DROP TABLE agent_link_endpoints; ALTER TABLE agent_link_chat DROP COLUMN sender_kind; ALTER TABLE retired_extension_settings RENAME TO extension_settings; ALTER TABLE retired_mcp_servers RENAME TO mcp_servers; DROP TABLE extension_file_export; DELETE FROM pot_migrations WHERE id >= '0020_'`); err != nil {
+DROP TABLE agent_link_chat_sessions; DROP TABLE agent_link_endpoints; ALTER TABLE agent_link_chat DROP COLUMN sender_kind; ALTER TABLE retired_extension_settings RENAME TO extension_settings; ALTER TABLE retired_mcp_servers RENAME TO mcp_servers; DROP TABLE extension_file_export; ALTER TABLE retired_task_submissions RENAME TO agent_link_delegations; DELETE FROM pot_migrations WHERE id >= '0020_'`); err != nil {
 			t.Fatal(err)
 		}
 		side.close()

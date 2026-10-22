@@ -48,7 +48,8 @@ assistant. Message requests use receiver policy and never forward user approvals
 Other linked tasks resolve their explicit target or the receiving default once.
 
 The receiver owns accepted tasks and execution facts. The sender stores a durable
-delegation and original remote reference. Status, results, cancellation and
+Task and its original execution reference in the same catalogue used for local
+work. Status, results, cancellation and
 notifications address that original identity. Unsupported operations fail
 explicitly. Accepted cancellation does not prove execution stopped.
 
@@ -68,25 +69,42 @@ and the [Codex adapter](../integrations/codex/README.md).
 
 ## Execution and recovery
 
-Local execution targets stay local; remote work uses Agent Link delegation.
+Every Agent invocation enters the Agent Link abstraction, including local work.
+Local adapters call in-process; peer adapters use authenticated transport. A Task
+can target a local Pot assistant, a peer Pot assistant or a Codex executor.
 The receiver selects models, prepares resources and enforces permissions on its
 own filesystem. Agent receives injected execution services rather than discovering
 product or machine infrastructure. Main and Worker instruction boundaries are
 defined in [Agent context](agent-context.md).
 
-`internal/control` coordinates the local product; `internal/tasks` owns local
-task admission, execution, checkpoints, workspaces and event logs. Admission and
-run creation commit together in `tasks.sqlite`. Tool side effects have one
+`internal/control` supplies Agent Link operation adapters and product services.
+`internal/tasks` owns one durable Task catalogue, request receipts, outcome cursor
+and archive transactions for all targets in `tasks.sqlite`. A linked Task stores
+its immutable submission and original execution reference, without a local model
+snapshot or launch. Its last receipt and observation time remain available while
+disconnected; lack of observation never proves execution stopped.
+
+The receiving Pot adapter additionally owns local runs, checkpoints, workspaces
+and event logs. Local admission and run creation commit together. Tool side
+effects have one
 receipt authority in `operations.sqlite`; there is no second command journal.
 Plugin packages, Skills and MCP definitions belong to the local filesystem.
-Every product Agent invocation passes through the shared execution manager.
+Every local Pot Agent invocation passes through the shared execution manager.
 See [Backend components](backend-components.md),
 [Executor](executor.md) and [Permissions](permissions.md).
 
 ```text
-Pot node A                         Pot node B
-  task -> local execution            task -> local execution
-  delegation ---- Agent Link ------> receiver-owned task
+UI / API / Agent tools / schedules
+                  |
+          Agent Link operation port
+                  |
+          +-------+--------+
+          |                |
+     local adapter     peer adapter
+          |                |
+     Pot execution     Pot / Codex execution
+
+Tasks: one caller catalogue; execution facts belong to the receiving adapter.
 ```
 
 There are no Control/Runner deployment roles or centrally configured remote

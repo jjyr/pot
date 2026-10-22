@@ -113,16 +113,16 @@ func (s *Service) CallAgent(ctx context.Context, owner string, operation agentli
 		if s.LinkTask(ctx, owner, call.ID) {
 			scope = "caller"
 			ops = []agentlink.Operation{agentlink.TaskRead, agentlink.TaskArchive}
-			if d, err := s.linkDelegation(ctx, owner, call.ID); err == nil && d.Info.AgentLink != nil {
+			if d, err := s.taskExecution(ctx, owner, call.ID); err == nil && d.Info.AgentLink != nil {
 				link := d.Info.AgentLink.LinkID
 				if link == "local" {
 					ops = append(ops, agentlink.TaskCancel)
-					if d.Request.Executor == "codex" {
+					if d.Execution.Request.Executor == "codex" {
 						ops = append(ops, agentlink.TaskInput)
 					}
-				} else if connection, err := s.agentLinks.service.Get(ctx, link); err == nil && connection.State != "revoked" && connection.Directory != nil && ((d.Request.Executor == "codex" && connection.Directory.TaskExecutor != nil && connection.Directory.TaskExecutor.Supports(agentlink.TaskCancel)) || connection.Directory.Operations[d.Info.AgentLink.AssistantID].Supports(agentlink.TaskCancel)) {
+				} else if connection, err := s.agentLinks.service.Get(ctx, link); err == nil && connection.State != "revoked" && connection.Directory != nil && ((d.Execution.Request.Executor == "codex" && connection.Directory.TaskExecutor != nil && connection.Directory.TaskExecutor.Supports(agentlink.TaskCancel)) || connection.Directory.Operations[d.Info.AgentLink.AssistantID].Supports(agentlink.TaskCancel)) {
 					ops = append(ops, agentlink.TaskCancel)
-					if d.Request.Executor == "codex" {
+					if d.Execution.Request.Executor == "codex" {
 						ops = append(ops, agentlink.TaskInput)
 					}
 				}
@@ -185,7 +185,7 @@ func (p agentPort) Call(ctx context.Context, target agentlink.Target, operation 
 			return nil, err
 		}
 		var accepted bool
-		if err := p.s.integrationDB.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_link_delegations WHERE owner=? AND request_id=?)", linkChatID(target.LinkID, target.AssistantID), request.RequestID).Scan(&accepted); err != nil {
+		if err := p.s.Tasks.DB().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM task_writes WHERE assistant_id=? AND request_id=?)", linkChatID(target.LinkID, target.AssistantID), request.RequestID).Scan(&accepted); err != nil {
 			return nil, err
 		}
 		if accepted {
@@ -614,7 +614,7 @@ func (p agentPort) taskCall(ctx context.Context, owner string, op agentlink.Oper
 			if err := protocol.DecodeStrict(call.Body, &input); err != nil {
 				return nil, err
 			}
-			return s.guideLinkTask(ctx, owner, call.ID, input)
+			return s.guideTaskExecution(ctx, owner, call.ID, input)
 		}
 		if op == agentlink.TaskInput && call.Action == "read" {
 			return []any{}, nil
