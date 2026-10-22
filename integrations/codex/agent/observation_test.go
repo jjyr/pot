@@ -13,11 +13,11 @@ func TestObservationSeparatesTaskLoadChatAndCleanupFence(t *testing.T) {
 	b := testBackend(t)
 	ctx := context.Background()
 	from := protocol.AgentRef{NodeID: "peer", Kind: "assistant", AgentID: "main"}
-	running, err := b.Submit(ctx, agentlink.TaskRequest{From: from, RequestID: "running", Text: "secret task text"})
+	running, err := b.Submit(ctx, agentlink.TaskRequest{Executor: "codex", From: from, RequestID: "running", Text: "secret task text"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = b.Submit(ctx, agentlink.TaskRequest{From: from, RequestID: "queued", Text: "secret queued text"}); err != nil {
+	if _, err = b.Submit(ctx, agentlink.TaskRequest{Executor: "codex", From: from, RequestID: "queued", Text: "secret queued text"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = b.submit(ctx, agentlink.TaskRequest{From: from, RequestID: "chat", Text: "secret chat text"}, &protocol.Envelope{ID: "private-message"}); err != nil {
@@ -31,7 +31,7 @@ func TestObservationSeparatesTaskLoadChatAndCleanupFence(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := value.Assistants[0]
-	if a.Running != 1 || a.Queued != 1 || a.ChatState != "queued" || a.Fenced {
+	if value.Executor == nil || value.Executor.Running != 1 || value.Executor.Queued != 1 || a.Running != 0 || a.Queued != 0 || a.ChatState != "queued" || a.Fenced {
 		t.Fatalf("incorrect task/chat split: %+v", a)
 	}
 	if err = b.update(ctx, running.ID, func(j *job) error { j.Task.State = "failed"; j.CleanupUncertain = true; return nil }); err != nil {
@@ -41,7 +41,7 @@ func TestObservationSeparatesTaskLoadChatAndCleanupFence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !value.Assistants[0].Fenced || value.Assistants[0].Running != 0 {
+	if !value.Executor.Fenced || value.Executor.Running != 0 || value.Assistants[0].Fenced {
 		t.Fatal(value)
 	}
 	raw, _ := json.Marshal(value)

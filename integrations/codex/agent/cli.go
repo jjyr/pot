@@ -12,7 +12,7 @@ import (
 // commands have been removed; connecting a node uses the shared invitation.
 func Main(args []string, in io.Reader, out io.Writer) error {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fmt.Fprintln(out, "usage: pot-codex-agent host|connections --root PRIVATE_DIRECTORY; assistant --root PRIVATE_DIRECTORY --id ID --workspace DIRECTORY [--name NAME] [--mode read-only|workspace-write] [--default]")
+		fmt.Fprintln(out, "usage: pot-codex-agent host|connections --root PRIVATE_DIRECTORY; assistant --root PRIVATE_DIRECTORY --id ID --workspace DIRECTORY [--name NAME] [--mode read-only|workspace-write] [--default]; executor --root PRIVATE_DIRECTORY --workspace DIRECTORY [--mode read-only|workspace-write]")
 		return nil
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
@@ -30,6 +30,14 @@ func Main(args []string, in io.Reader, out io.Writer) error {
 		return errors.New("host_root_required")
 	}
 	switch args[0] {
+	case "executor":
+		client, err := ensureAgentHost(*root)
+		if err != nil {
+			return err
+		}
+		defer client.client.CloseIdleConnections()
+		var result any
+		return client.call(context.Background(), "/api/v1/agent-host/executor", map[string]any{"workspace": *workspace, "mode": *mode}, &result)
 	case "agent-serve":
 		return agentServe(*root)
 	case "host":

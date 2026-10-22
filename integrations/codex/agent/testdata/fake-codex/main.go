@@ -47,7 +47,8 @@ func main() {
 				} `json:"capabilities"`
 				Cwd          string                        `json:"cwd"`
 				Sandbox      string                        `json:"sandbox"`
-				Approval     string                        `json:"approvalPolicy"`
+				Approval     json.RawMessage               `json:"approvalPolicy"`
+				Reviewer     json.RawMessage               `json:"approvalsReviewer"`
 				ThreadID     string                        `json:"threadId"`
 				ExcludeTurns bool                          `json:"excludeTurns"`
 				TurnID       string                        `json:"turnId"`
@@ -67,7 +68,7 @@ func main() {
 			for _, method := range m.Params.Capabilities.OptOut {
 				muted[method] = true
 			}
-			if !muted["item/commandExecution/outputDelta"] || !muted["item/agentMessage/delta"] || muted["item/completed"] || muted["turn/completed"] || muted["turn/started"] {
+			if !muted["item/commandExecution/outputDelta"] || !muted["item/agentMessage/delta"] || muted["item/completed"] || muted["turn/completed"] || muted["turn/started"] || !muted["item/autoApprovalReview/started"] || !muted["item/autoApprovalReview/completed"] {
 				os.Exit(22)
 			}
 			reply(m.ID, map[string]any{"userAgent": "fake-codex/0.163.0"})
@@ -77,7 +78,7 @@ func main() {
 			}
 			state = 2
 		case "thread/start", "thread/resume":
-			if state != 2 || m.Params.Cwd == "" || m.Params.Approval != "on-request" || (m.Params.Sandbox != "read-only" && m.Params.Sandbox != "workspace-write") {
+			if state != 2 || m.Params.Cwd == "" || len(m.Params.Approval) != 0 || len(m.Params.Reviewer) != 0 || (m.Params.Sandbox != "read-only" && m.Params.Sandbox != "workspace-write") {
 				os.Exit(16)
 			}
 			if m.Params.ThreadID == "busy-thread" {
@@ -106,9 +107,13 @@ func main() {
 			reply(m.ID, map[string]any{"turn": map[string]string{"id": "turn-1", "status": "inProgress"}})
 			notification("turn/started", map[string]any{"threadId": threadID, "turn": map[string]string{"id": "turn-1", "status": "inProgress"}})
 			notification("item/started", map[string]any{"threadId": threadID, "item": map[string]string{"id": "command-1", "type": "commandExecution", "command": "fixture only"}})
-			if prompt == "approve" {
+			if prompt == "approve" || strings.HasPrefix(prompt, "approve\n") {
 				send(map[string]any{"id": "approval-1", "method": "item/commandExecution/requestApproval", "params": map[string]any{"threadId": threadID, "turnId": "turn-1", "itemId": "command-1", "command": "untrusted"}})
 				continue
+			}
+			if prompt == "auto-review" || strings.HasPrefix(prompt, "auto-review\n") {
+				notification("item/autoApprovalReview/started", map[string]any{"threadId": threadID, "turnId": "turn-1", "itemId": "command-1"})
+				notification("item/autoApprovalReview/completed", map[string]any{"threadId": threadID, "turnId": "turn-1", "itemId": "command-1", "review": map[string]string{"status": "approved", "rationale": "private automatic review"}})
 			}
 			if prompt == "hang" {
 				continue
@@ -146,7 +151,12 @@ func main() {
 			notification("turn/completed", map[string]any{"threadId": threadID, "turn": map[string]string{"id": "turn-1", "status": "interrupted"}})
 		case "":
 			if m.ID == "approval-1" {
-				if m.Result["decision"] != "decline" {
+				if m.Result["decision"] == "accept" {
+					if os.WriteFile(filepath.Join(workspace, "approval-executed"), []byte("approved once"), 0600) != nil {
+						os.Exit(24)
+					}
+					notification("item/completed", map[string]any{"threadId": threadID, "item": map[string]string{"type": "agentMessage", "phase": "final_answer", "text": "approved operation completed"}})
+				} else if m.Result["decision"] != "decline" {
 					os.Exit(19)
 				}
 				notification("turn/completed", map[string]any{"threadId": threadID, "turn": map[string]string{"id": "turn-1", "status": "completed"}})

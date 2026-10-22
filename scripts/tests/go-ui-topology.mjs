@@ -94,3 +94,5 @@ machineClient.spaces[0].control_id='replacement-owner';
 assert.equal(presentation.label('same-id',{space:'local'},'zh-CN'),'机器信息不可用','A replacement node never inherits another machine label');
 machineClient.assistants=[{id:'linked',space_id:'other',origin:{host:'remote-host · 100.88.0.8:8793'}}];
 assert.equal(presentation.label('same-id',{space:'other',owner:'linked'},'en'),'remote-host · 100.88.0.8:8793','Linked execution never borrows local inventory');
+
+assert.deepEqual(nodeObservation({observed_at_ms:Date.now(),value:{assistants:[],executor:{running:2,queued:1,waiting_approval:1,waiting_allowance:0}}},'connected').counts,{running:2,queued:1,waiting_approval:1,waiting_allowance:0},'Independent executor tasks contribute to node load without fictional assistants');

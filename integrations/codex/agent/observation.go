@@ -14,6 +14,7 @@ func (b *backend) Observe(ctx context.Context, peerNode string) (agentlink.Obser
 		return value, err
 	}
 	value.Hostname, _ = os.Hostname()
+	value.Executor = &agentlink.Activity{ChatState: "idle"}
 	value.Outbox.Pending, value.Outbox.OldestAtMS, err = inbox.OutboxStats(ctx, b.db, "outgoing", b.nodeID, peerNode)
 	if err != nil {
 		return value, err
@@ -25,7 +26,7 @@ func (b *backend) Observe(ctx context.Context, peerNode string) (agentlink.Obser
 	for index := range value.Assistants {
 		byID[value.Assistants[index].AssistantID] = &value.Assistants[index]
 	}
-	rows, err := b.db.QueryContext(ctx, `SELECT assistant_id,json_extract(data,'$.task.state'),COALESCE(json_type(data,'$.message')='object',0),COALESCE(json_extract(data,'$.cleanup_uncertain'),0),COUNT(*) FROM codex_link_jobs WHERE json_extract(data,'$.task.state') IN ('queued','running','cancelling','waiting_approval') OR json_extract(data,'$.cleanup_uncertain')=1 GROUP BY 1,2,3,4`)
+	rows, err := b.db.QueryContext(ctx, `SELECT COALESCE(assistant_id,''),json_extract(data,'$.task.state'),COALESCE(json_type(data,'$.message')='object',0),COALESCE(json_extract(data,'$.cleanup_uncertain'),0),COUNT(*) FROM codex_link_jobs WHERE json_extract(data,'$.task.state') IN ('queued','running','cancelling','waiting_approval') OR json_extract(data,'$.cleanup_uncertain')=1 GROUP BY 1,2,3,4`)
 	if err != nil {
 		return value, err
 	}
@@ -38,6 +39,9 @@ func (b *backend) Observe(ctx context.Context, peerNode string) (agentlink.Obser
 			return value, err
 		}
 		a := byID[id]
+		if id == "" {
+			a = value.Executor
+		}
 		if a == nil {
 			continue
 		}

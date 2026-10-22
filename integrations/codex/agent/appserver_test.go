@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,71 @@ import (
 	"testing"
 	"testing/iotest"
 )
+
+func TestApprovalPreservesExactFileAndNetworkScope(t *testing.T) {
+	for _, method := range []string{"item/fileChange/requestApproval", "item/commandExecution/requestApproval"} {
+		t.Run(method, func(t *testing.T) {
+			var output bytes.Buffer
+			a := &appTurn{input: nopWriteCloser{&output}, ctx: context.Background(), done: make(chan struct{}), reviews: map[string]context.CancelFunc{}, result: TurnResult{ThreadID: "thread", TurnID: "turn"}}
+			if method == "item/fileChange/requestApproval" {
+				a.notification(rpcMessage{Method: "item/started", Params: json.RawMessage(`{"threadId":"thread","item":{"id":"item","type":"fileChange","changes":[{"path":"/work/config","diff":"+setting"}]}}`)})
+			}
+			a.events.Review = func(ctx context.Context, got string, raw json.RawMessage) (string, error) {
+				var params map[string]json.RawMessage
+				if err := json.Unmarshal(raw, &params); err != nil {
+					t.Error(err)
+				}
+				if got != method {
+					t.Error(got)
+				}
+				if method == "item/fileChange/requestApproval" && !bytes.Contains(params["proposedChanges"], []byte("+setting")) {
+					t.Error("proposed file diff omitted")
+				}
+				if method == "item/commandExecution/requestApproval" && !bytes.Contains(params["networkApprovalContext"], []byte("example.com")) {
+					t.Error("network scope omitted")
+				}
+				return "allow_once", nil
+			}
+			a.approval(rpcMessage{ID: json.RawMessage(`"request"`), Method: method, Params: json.RawMessage(`{"threadId":"thread","turnId":"turn","itemId":"item","networkApprovalContext":{"host":"example.com","protocol":"https"},"availableDecisions":["accept","decline"]}`)})
+			a.reviewWG.Wait()
+			if !strings.Contains(output.String(), `"decision":"accept"`) {
+				t.Fatal(output.String())
+			}
+		})
+	}
+}
+
+// Even if an older server emits automatic-review events despite opt-out, they
+// must never become human requests or leak review rationale into the task reply.
+func TestAutomaticReviewNotificationsStayInsideCodex(t *testing.T) {
+	for _, status := range []string{"approved", "denied", "timedOut"} {
+		t.Run(status, func(t *testing.T) {
+			a := &appTurn{done: make(chan struct{}), readerDone: make(chan struct{}), pending: map[int]chan rpcMessage{}, result: TurnResult{ThreadID: "thread"}, events: turnEvents{Review: func(context.Context, string, json.RawMessage) (string, error) {
+				t.Fatal("automatic review requested human approval")
+				return "", nil
+			}}}
+			var stream strings.Builder
+			enc := json.NewEncoder(&stream)
+			for _, method := range []string{"item/autoApprovalReview/started", "item/autoApprovalReview/completed"} {
+				if err := enc.Encode(map[string]any{"method": method, "params": map[string]any{"threadId": "thread", "turnId": "turn", "review": map[string]string{"status": status, "rationale": "private automatic review"}}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, event := range []map[string]any{
+				{"method": "item/completed", "params": map[string]any{"threadId": "thread", "item": map[string]string{"type": "agentMessage", "phase": "final_answer", "text": "task result"}}},
+				{"method": "turn/completed", "params": map[string]any{"threadId": "thread", "turn": map[string]string{"id": "turn", "status": "completed"}}},
+			} {
+				if err := enc.Encode(event); err != nil {
+					t.Fatal(err)
+				}
+			}
+			a.read(strings.NewReader(stream.String()))
+			if a.result.Status != "completed" || a.result.Text != "task result\n" || a.denied {
+				t.Fatal(a.result)
+			}
+		})
+	}
+}
 
 func TestThreadOpenFailureRetainsRPCDiagnostic(t *testing.T) {
 	for _, tc := range []struct{ name, method, thread, code, detail string }{

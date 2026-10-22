@@ -16,6 +16,9 @@ var ErrUnsupported = errors.New("agent_link_capability_unsupported")
 var ErrDisconnected = errors.New("agent_link_disconnected")
 
 func validateDirectory(d Directory, node string) error {
+	if d.TaskExecutor != nil && (d.Adapter != "codex" || d.TaskExecutor.Version != 1 || d.TaskExecutor.Scope != "caller" || !d.TaskExecutor.Supports(TaskSubmit)) {
+		return ErrConflict
+	}
 	if d.NodeID != node || len(d.Assistants) > 256 || len(d.Operations) != len(d.Assistants) || d.Name == "" || (d.Adapter != "pot" && d.Adapter != "codex") {
 		return ErrConflict
 	}
@@ -182,6 +185,16 @@ func (s *Service) business(ctx context.Context, c Connection, remote peer.Identi
 	}
 	var result any
 	switch r.Method {
+	case "execution.review":
+		var input ReviewRequest
+		if decodeJSON(r.Params, &input) != nil || !validReview(input, remote.NodeID) {
+			return nil, ErrUnauthorized
+		}
+		backend, ok := s.options.Backend.(ReviewBackend)
+		if !ok || d.TaskExecutor == nil || !d.TaskExecutor.Supports(Approvals) {
+			return nil, ErrUnsupported
+		}
+		result, e = backend.Review(ctx, input)
 	case "chat.status":
 		result, e = s.chatBusiness(ctx, remote.NodeID, r.Params)
 	case "observe":
@@ -227,6 +240,16 @@ func (s *Service) business(ctx context.Context, c Connection, remote peer.Identi
 		}
 
 		result, e = s.options.Backend.Submit(ctx, input)
+	case "task.input":
+		var input TaskGuidance
+		if decodeJSON(r.Params, &input) != nil || !validGuidance(input, remote.NodeID) {
+			return nil, ErrInvalid
+		}
+		backend, ok := s.options.Backend.(TaskInputBackend)
+		if !ok || d.TaskExecutor == nil || !d.TaskExecutor.Supports(TaskInput) {
+			return nil, ErrUnsupported
+		}
+		result, e = backend.Input(ctx, input)
 	case "task.status", "task.cancel":
 		var input taskLookup
 		if decodeJSON(r.Params, &input) != nil || !taskCaller(input.From) || input.From.NodeID != remote.NodeID || input.ID == "" {
@@ -298,7 +321,8 @@ func (s *Service) Reconnect(ctx context.Context, id string) error {
 func (s *Service) Delete(ctx context.Context, id string) error { return s.Revoke(ctx, id) }
 
 func validateTask(t Task, node, id, request string) error {
-	if t.ID == "" || len(t.ID) > 256 || !validIdentity(t.Assistant) || t.Assistant.Address.Kind != "assistant" || t.Assistant.Address.NodeID != node || id != "" && t.ID != id || request != "" && t.RequestID != request || len(t.Result) > 1024*1024 || len(t.Error) > 65536 {
+	receiver := t.Receiver()
+	if t.ID == "" || len(t.ID) > 256 || !validIdentity(receiver) || (t.Execution == nil && receiver.Address.Kind != "assistant") || (t.Execution != nil && (receiver.Address.Kind != "task" || receiver.Address.AgentID != t.ID || receiver.Adapter != "codex")) || receiver.Address.NodeID != node || id != "" && t.ID != id || request != "" && t.RequestID != request || len(t.Result) > 1024*1024 || len(t.Error) > 65536 {
 		return ErrConflict
 	}
 	switch t.State {

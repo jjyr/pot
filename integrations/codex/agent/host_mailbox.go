@@ -75,9 +75,9 @@ func (m *hostMailbox) Acknowledge(ctx context.Context, r protocol.Receipt) error
 	return nil
 }
 func (m *hostMailbox) send(ctx context.Context, peer protocol.AgentRef, requestID, text string) (protocol.Envelope, error) {
-	return m.sendFrom(ctx, m.local, peer, requestID, text)
+	return m.sendFrom(ctx, m.local, peer, requestID, text, "")
 }
-func (m *hostMailbox) sendFrom(ctx context.Context, from, peer protocol.AgentRef, requestID, text string) (protocol.Envelope, error) {
+func (m *hostMailbox) sendFrom(ctx context.Context, from, peer protocol.AgentRef, requestID, text, executionID string) (protocol.Envelope, error) {
 	if !validID(requestID) {
 		return protocol.Envelope{}, errors.New("invalid_request_id")
 	}
@@ -105,13 +105,14 @@ func (m *hostMailbox) sendFrom(ctx context.Context, from, peer protocol.AgentRef
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		// App Server inherits its virtual assistant identity. Bind peer sends to the
-		// currently executing incoming message, preserving that session's causal bound.
-		var raw string
-		err = tx.QueryRowContext(ctx, `SELECT data FROM codex_link_jobs WHERE assistant_id=? AND json_extract(data,'$.task.state') IN ('running','cancelling','waiting_approval') ORDER BY sequence LIMIT 1`, from.AgentID).Scan(&raw)
-		if err == nil {
+		// Bind the exact executing message, never another concurrent job.
+		if executionID != "" {
+			var raw string
+			if err := tx.QueryRowContext(ctx, `SELECT data FROM codex_link_jobs WHERE id=? AND assistant_id=? AND json_extract(data,'$.task.state') IN ('running','waiting_approval')`, executionID, from.AgentID).Scan(&raw); err != nil {
+				return err
+			}
 			var current job
-			if err = json.Unmarshal([]byte(raw), &current); err != nil {
+			if err := json.Unmarshal([]byte(raw), &current); err != nil {
 				return err
 			}
 			if parent := current.Message; parent != nil {
@@ -124,8 +125,6 @@ func (m *hostMailbox) sendFrom(ctx context.Context, from, peer protocol.AgentRef
 					e.ConversationID = parent.ConversationID
 				}
 			}
-		} else if !errors.Is(err, sql.ErrNoRows) {
-			return err
 		}
 		return inbox.EnqueueTx(ctx, tx, e, "outgoing", "queued")
 	})

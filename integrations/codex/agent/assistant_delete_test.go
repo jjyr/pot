@@ -46,7 +46,7 @@ func TestLinkedCodexDeletionThroughAuthenticatedBrowser(t *testing.T) {
 	if !bytes.Contains(w.Body.Bytes(), []byte("assistant_changed")) {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	work, err := h.backend.Submit(ctx, agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "sender", Kind: "user", AgentID: "user"}, RequestID: "busy", Text: "task"})
+	work, err := submitMessageFixture(h.backend, ctx, agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "sender", Kind: "user", AgentID: "user"}, RequestID: "busy", Text: "task"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestAssistantRetirementPreservesHistoryAndCannotResurrect(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "peer", Kind: "user", AgentID: "user"}, RequestID: "history", AssistantID: a.ID, Text: "task"}
-	j, err := b.Submit(ctx, r)
+	j, err := submitMessageFixture(b, ctx, r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,11 +120,11 @@ func TestAssistantRetirementPreservesHistoryAndCannotResurrect(t *testing.T) {
 	if _, err = b.Profile(ctx, agentlink.ProfileRequest{AssistantID: a.ID, Action: "get"}); !errors.Is(err, agentlink.ErrNotFound) {
 		t.Fatal("retired profile reopened", err)
 	}
-	if _, err = b.Submit(ctx, r); err != nil {
+	if _, err = submitMessageFixture(b, ctx, r); err != nil {
 		t.Fatal("original receipt lost", err)
 	}
 	r.RequestID = "new"
-	if _, err = b.Submit(ctx, r); !errors.Is(err, agentlink.ErrNotFound) {
+	if _, err = submitMessageFixture(b, ctx, r); !errors.Is(err, agentlink.ErrNotFound) {
 		t.Fatal("new task admitted", err)
 	}
 	var after, thread string
@@ -150,7 +150,7 @@ func TestAssistantRetirementRejectsActiveAndUncertainWork(t *testing.T) {
 			b := testBackend(t)
 			ctx := context.Background()
 			a, _ := b.resolve(ctx, "codex")
-			j, err := b.Submit(ctx, agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "peer", Kind: "user", AgentID: "user"}, RequestID: "busy", Text: "task"})
+			j, err := submitMessageFixture(b, ctx, agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "peer", Kind: "user", AgentID: "user"}, RequestID: "busy", Text: "task"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -206,7 +206,7 @@ func TestAssistantRetirementRacesNewTaskAdmission(t *testing.T) {
 		}()
 		go func() {
 			<-start
-			_, err := b.Submit(ctx, agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "peer", Kind: "user", AgentID: "user"}, RequestID: "racing", Text: "new task"})
+			_, err := submitMessageFixture(b, ctx, agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "peer", Kind: "user", AgentID: "user"}, RequestID: "racing", Text: "new task"})
 			submitted <- err
 		}()
 		close(start)

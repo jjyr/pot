@@ -775,7 +775,8 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
         if(disposed||editor!==currentEditor||host.firstElementChild!==currentRoot)return;
         const link=(snapshot.items||[]).find(item=>item.id===connectedID);
         if(!link)throw Error(translate(locale(),'agentLinks.failed'));
-        const assistants=link.assistants||link.directory?.assistants||[],defaultID=link.directory?.default_assistant_id;
+        const assistants=(link.assistants||link.directory?.assistants||[]).filter(item=>(item.capabilities||link.directory?.operations?.[item.address?.agent_id||item.id])?.operations?.includes('chat.read')),defaultID=link.directory?.default_assistant_id;
+        if(!assistants.length&&link.directory?.task_executor){await leave();route='add-assistant';const list=body();list.append(n('h1','',t('executorTitle')),n('p','hint',t('executorDescription')),action(t('back'),()=>show('add-assistant',{force:true})));return;}
         const chosen=assistants.length===1?assistants[0]:assistants.find(item=>(item.address?.agent_id||item.id)===defaultID);
         const open=assistant=>openChat({space:captured.space,owner:'agent-link:'+connectedID+':'+(assistant.address?.agent_id||assistant.id)});
         if(chosen){await leave();await open(chosen);return;}
@@ -852,6 +853,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
           const activity=node.activities?.get(remoteID),state=node.observation?.fresh?assistantActivityState(activity):'unknown';
           open.append(n('span','topology-assistant-state state-'+state,t('topology.activity.'+state)));
           if(remoteID===(node.link?.default_assistant_id||node.link?.directory?.default_assistant_id))open.append(n('span','hint',t('agentLinks.defaultAssistant')));
+          if(node.link&&!(assistant.capabilities||node.link.directory?.operations?.[remoteID])?.operations?.includes('chat.read'))open.disabled=true;
           open.setAttribute('aria-label',t('agentLinks.openChat')+' · '+(assistant.name||remoteID));directory.append(open);
         }
         view.inspector.append(directory);
@@ -943,6 +945,9 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       },{active:current,onError:reason=>notify(reason.message)});
     }return approvalQueue.run();
   }
+  // Linked approval requests arrive independently of the local conversation.
+  // Read while visible; the receiver revalidates every decision at execution.
+  const approvalTimer=setInterval(()=>{if(!disposed&&!document.hidden&&(chatVisible()||taskView))permissions();},2500);
   async function show(next,{keepUsageOwner=false,force=false}={}) {
     if(editor)return;
  if(extensionUI&&next==='extensions')return extensionUI.refresh();extensionUI?.dispose();extensionUI=null;
@@ -981,6 +986,6 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       if(taskView)return refreshTaskEvents();
 
     },
-    dispose(){extensionUI?.dispose();stopResources?.();notificationSettings?.dispose();for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle?.dispose?.();disposed=true;closeTaskList();closeTaskView();approvalQueue?.close();pageView?.queue.close();gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
+    dispose(){extensionUI?.dispose();stopResources?.();notificationSettings?.dispose();for(const value of [...editorParents,...(editor?[editor]:[])])value.lifecycle?.dispose?.();disposed=true;clearInterval(approvalTimer);closeTaskList();closeTaskView();approvalQueue?.close();pageView?.queue.close();gate.close();approvalGate.close();window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('pot:locale',preference);},
   };
 }

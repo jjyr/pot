@@ -40,6 +40,51 @@ Steering, pause, local allowance controls, remote file reads and execution
 transcripts require additional adapter capabilities and are currently unavailable.
 Disconnected nodes retain the last accepted state without replaying work.
 
+## Codex execution
+
+The assistant decides how to execute a task using its instructions and available
+capabilities. Omitting `executor` preserves ordinary task routing. Explicit
+`executor: "codex"` selects a Codex node, never a Codex assistant. `link_id` chooses
+a node; without it exactly one reachable, capable Codex node must exist. Ambiguous
+or unavailable selection fails without falling back to ordinary tasks. `target`,
+local model configuration, Skills and workspace overrides cannot accompany a
+Codex execution request; the receiving owner controls execution scope.
+
+```text
+User <--> current assistant A -- task T1 --> Codex thread S1
+                  |                 ^             |
+                  |                 +-- approval -+
+                  +------------ task T2 --> Codex thread S2
+
+Assistant A -- message --> assistant B (any backend)
+            <-- answer / permission denial --
+            no approval authority or user approval forwarding
+```
+
+Each accepted task persistently owns exactly one thread and a snapshot of its
+execution workspace/mode. Exact submission retries return the same task. Separate
+tasks execute independently, including while another waits for approval. After a
+terminal run, owner guidance starts a new run in the same task/thread; active-run
+guidance is rejected. Previous results remain in receiver history and each run
+has a distinct completion notification. Restart does not replay uncertain work or
+replace unavailable threads.
+
+Codex retains its configured approval policy and reviewer. Automatic review runs
+entirely on the receiving Codex host; its events, decisions and history do not
+cross Agent Link or appear in Pot's approval interface. Only a pending App Server
+request that requires a human decision is forwarded into A's existing approval
+list and card. Resolved requests disappear; execution outcomes use ordinary task
+results or assistant replies, not a separate approval history.
+
+Only authenticated user operations in A's existing permission interface may
+resolve T1's exact pending command/file request with `allow_once` or `deny`.
+Decisions bind the original caller, task, thread and turn, and expire with that
+execution. There is no additional node grant and no model approval tool.
+Assistant messages follow B's receiver policy: operations within its authority
+may run; additional approval is declined and returned as a failure to A. Neither
+A nor B opens user approvals because of a message. Message text cannot change
+this boundary or upgrade a message into a user-approved delegated task.
+
 ## Autonomous model routing
 
 The invoking assistant selects a configured Provider and model using the task,

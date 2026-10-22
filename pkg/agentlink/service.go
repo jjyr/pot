@@ -81,7 +81,7 @@ func New(options Options) (*Service, error) {
 }
 
 func validIdentity(identity Identity) bool {
-	return identity.Address.Valid() && (identity.Address.Kind == "assistant" || identity.Address.Kind == "node") && (identity.Adapter == "pot" || identity.Adapter == "codex") && strings.TrimSpace(identity.Name) != "" && utf8.ValidString(identity.Name) && len(identity.Name) <= 512
+	return identity.Address.Valid() && (identity.Address.Kind == "assistant" || identity.Address.Kind == "node" || identity.Address.Kind == "task") && (identity.Adapter == "pot" || identity.Adapter == "codex") && strings.TrimSpace(identity.Name) != "" && utf8.ValidString(identity.Name) && len(identity.Name) <= 512
 }
 func validNodeIdentity(identity Identity) bool {
 	return validIdentity(identity) && identity.Address.Kind == "node" && identity.Address.AgentID == identity.Address.NodeID

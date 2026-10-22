@@ -11,6 +11,7 @@ import (
 // Observation is a live, payload-free node summary. It is never persisted in a
 // connection's Directory: restarting loses the sample, not business history.
 type Observation struct {
+	Executor   *Activity    `json:"executor,omitempty"`
 	NodeID     string       `json:"node_id"`
 	Hostname   string       `json:"hostname"`
 	Assistants []Activity   `json:"assistants"`
@@ -39,6 +40,11 @@ type ObservationSample struct {
 }
 
 func validateObservation(value Observation, directory Directory) error {
+	if a := value.Executor; a != nil {
+		if directory.TaskExecutor == nil || a.AssistantID != "" || a.Running < 0 || a.Queued < 0 || a.WaitingApproval < 0 || a.WaitingAllowance < 0 || a.Running > 1e9 || a.Queued > 1e9 || a.WaitingApproval > 1e9 || a.WaitingAllowance > 1e9 {
+			return ErrConflict
+		}
+	}
 	if value.NodeID != directory.NodeID || len(value.Hostname) > 255 || strings.ContainsAny(value.Hostname, "\r\n\x00") || len(value.Assistants) != len(directory.Assistants) || value.Outbox.Pending < 0 || value.Outbox.Pending > 1e9 || value.Outbox.OldestAtMS < 0 {
 		return ErrConflict
 	}
@@ -81,6 +87,10 @@ func (s *Service) Observation(id string) ObservationSample {
 	if value.Value != nil {
 		copy := *value.Value
 		copy.Assistants = append([]Activity(nil), copy.Assistants...)
+		if copy.Executor != nil {
+			executor := *copy.Executor
+			copy.Executor = &executor
+		}
 		value.Value = &copy
 	}
 	return value

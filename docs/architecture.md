@@ -42,8 +42,10 @@ and [Secrets](secrets.md).
 
 Agent Links identify nodes and advertise assistant directories, persisted defaults
 and supported capabilities. Pot exposes real assistants. The Codex adapter exposes
-virtual assistants bound to persistent sessions. An explicit target wins; omission
-resolves the receiving node's default once. Retries retain the accepted assistant.
+virtual assistants for message communication. Explicit Codex tasks bypass assistants:
+one task binds one persistent thread and returns approvals to the directing
+assistant. Message requests use receiver policy and never forward user approvals.
+Other linked tasks resolve their explicit target or the receiving default once.
 
 The receiver owns accepted tasks and execution facts. The sender stores a durable
 delegation and original remote reference. Status, results, cancellation and

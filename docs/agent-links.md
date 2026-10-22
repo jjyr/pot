@@ -6,6 +6,13 @@ status, cancellation and result notification. Each receiver owns its models,
 credentials, workspaces, permissions and execution supervision. A connection
 never grants owner HTTP APIs, model proxying or raw process launch access.
 
+A Codex node advertises a caller-scoped `task_executor` independently of its
+assistant directory. Explicit tasks map directly to independent Codex threads.
+Only their original directing assistant's authenticated user may approve their
+operations. Assistant messages never carry approval authority or request user
+approval; the receiving assistant declines operations outside its permissions and
+reports the denial. See [Codex execution](task-coordination.md#codex-execution).
+
 The [architecture overview](architecture.md) shows the shared local/peer operation
 port and its execution adapters.
 
@@ -17,10 +24,12 @@ assistant IDs and execution IDs are distinct. Names and origin icons are display
 metadata. One machine can host several autonomous nodes.
 
 `Directory` advertises the current assistants, persisted default assistant ID
-and per-assistant operation descriptions. Pot exposes real assistants. Codex exposes virtual assistants;
-each owns one persistent Codex session. Chat and tasks for the same virtual
-assistant execute serially in that session. Additional assistants allow separate
-contexts and parallel work; using the same filesystem does not isolate files.
+and per-assistant operation descriptions. Pot exposes real assistants. Codex exposes
+virtual assistants for assistant messaging and presentation management; each owns
+one persistent message context. Its node-level `task_executor` advertises explicit
+task submit/read/cancel/input and human review, separately from assistant controls.
+One task owns one persistent Codex thread, without an assistant target. Task and
+message sessions do not share context; shared workspaces still share files.
 
 An explicit target wins. An omitted target uses the receiver's persisted default,
 initially its first assistant. Resolution occurs once at durable acceptance.

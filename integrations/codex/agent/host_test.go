@@ -376,6 +376,12 @@ func TestAgentHostPeerDeliveryRemainsUnreadUntilCodexReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Settle both session-close projections while their databases still exist.
+	// Otherwise the asynchronous offline write races TempDir removal.
+	defer func() {
+		_ = a.links.Disconnect(ctx, connection.ID)
+		_ = b.links.Disconnect(ctx, connection.ID)
+	}()
 	get := httptest.NewRequest(http.MethodGet, "http://"+hostListen+"/api/v1/agent-links", nil)
 	get.Host = hostListen
 	get.RemoteAddr = "127.0.0.1:12345"

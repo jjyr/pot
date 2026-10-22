@@ -136,6 +136,7 @@ func (w TaskWorkspace) Validate() error {
 }
 
 type CreateTask struct {
+	Executor  string        `json:"executor,omitempty"`
 	LinkID    string        `json:"link_id,omitempty"`
 	Target    *AgentRef     `json:"target,omitempty"`
 	Workspace TaskWorkspace `json:"workspace"`
@@ -151,6 +152,9 @@ type CreateTask struct {
 }
 
 func (t CreateTask) Validate() error {
+	if t.Executor != "" && t.Executor != "codex" || t.Executor != "" && t.Target != nil {
+		return fmt.Errorf("invalid task executor")
+	}
 	if t.LinkID != "" && !core.Identifier(t.LinkID) || t.Target != nil && (!t.Target.Valid() || t.Target.Kind != "assistant") {
 		return fmt.Errorf("invalid agent link target")
 	}

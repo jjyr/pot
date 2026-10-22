@@ -29,6 +29,7 @@ const (
 // Codex thread. Restarting App Server resumes that thread; it never starts over
 // when a persisted thread cannot be resumed.
 type Session struct {
+	JobID       string
 	AssistantID string
 	Binary      string
 	Workspace   string
@@ -51,6 +52,7 @@ type turnEvents struct {
 	Thread   func(string) error
 	Started  func(string) error
 	Approval func()
+	Review   func(context.Context, string, json.RawMessage) (string, error)
 }
 
 type rpcMessage struct {
@@ -62,18 +64,23 @@ type rpcMessage struct {
 }
 
 type appTurn struct {
-	input      io.WriteCloser
-	writing    sync.Mutex
-	mu         sync.Mutex
-	seq        int
-	pending    map[int]chan rpcMessage
-	done       chan struct{}
-	readerDone chan struct{}
-	once       sync.Once
-	result     TurnResult
-	workspace  string
-	denied     bool
-	events     turnEvents
+	input         io.WriteCloser
+	writing       sync.Mutex
+	mu            sync.Mutex
+	seq           int
+	pending       map[int]chan rpcMessage
+	done          chan struct{}
+	readerDone    chan struct{}
+	once          sync.Once
+	result        TurnResult
+	workspace     string
+	denied        bool
+	approvalError string
+	ctx           context.Context
+	reviews       map[string]context.CancelFunc
+	reviewWG      sync.WaitGroup
+	fileChanges   map[string]json.RawMessage
+	events        turnEvents
 }
 
 func (a *appTurn) send(v any) error {
@@ -174,8 +181,91 @@ func (a *appTurn) read(output io.Reader) {
 	a.finish("failed", "codex_process_ended_outcome_unknown")
 }
 func (a *appTurn) approval(m rpcMessage) {
+	if a.events.Review != nil && (m.Method == "item/commandExecution/requestApproval" || m.Method == "item/fileChange/requestApproval") {
+		var binding struct {
+			ThreadID string `json:"threadId"`
+			TurnID   string `json:"turnId"`
+		}
+		a.mu.Lock()
+		valid := json.Unmarshal(m.Params, &binding) == nil && binding.ThreadID == a.result.ThreadID && binding.TurnID != "" && binding.TurnID == a.result.TurnID
+		a.mu.Unlock()
+		if !valid {
+			a.finish("failed", "codex_approval_binding_mismatch")
+			a.interrupt()
+			return
+		}
+		var params map[string]json.RawMessage
+		_ = json.Unmarshal(m.Params, &params)
+		if available := params["availableDecisions"]; len(available) > 0 && string(available) != "null" {
+			var decisions []json.RawMessage
+			_ = json.Unmarshal(available, &decisions)
+			accept := false
+			for _, decision := range decisions {
+				if string(decision) == `"accept"` {
+					accept = true
+				}
+			}
+			if !accept {
+				a.finish("failed", "codex_approval_requires_local_review")
+				a.interrupt()
+				return
+			}
+		}
+		if m.Method == "item/fileChange/requestApproval" {
+			var id string
+			_ = json.Unmarshal(params["itemId"], &id)
+			a.mu.Lock()
+			proposed := a.fileChanges[id]
+			a.mu.Unlock()
+			if len(proposed) == 0 {
+				a.finish("failed", "codex_approval_requires_local_review")
+				a.interrupt()
+				return
+			}
+			params["proposedChanges"] = proposed
+			m.Params, _ = json.Marshal(params)
+		}
+		ctx, cancel := context.WithCancel(a.ctx)
+		a.mu.Lock()
+		a.reviews[string(m.ID)] = cancel
+		a.mu.Unlock()
+		a.reviewWG.Add(1)
+		go func() {
+			defer a.reviewWG.Done()
+			defer cancel()
+			go func() {
+				select {
+				case <-a.done:
+					cancel()
+				case <-ctx.Done():
+				}
+			}()
+			action, err := a.events.Review(ctx, m.Method, m.Params)
+			a.mu.Lock()
+			delete(a.reviews, string(m.ID))
+			if ctx.Err() != nil {
+				a.mu.Unlock()
+				return
+			}
+			decision := "accept"
+			if err != nil || action != "allow_once" {
+				decision = "decline"
+				a.denied = true
+				a.approvalError = "codex_approval_denied"
+				if err != nil {
+					a.approvalError = "codex_approval_requires_local_review"
+				}
+			}
+			a.mu.Unlock()
+			if ctx.Err() == nil {
+				_ = a.send(map[string]any{"id": m.ID, "result": map[string]string{"decision": decision}})
+			}
+		}()
+		return
+	}
 	a.mu.Lock()
 	a.denied = true
+	a.approvalError = "codex_approval_requires_local_review"
 	a.mu.Unlock()
 	if a.events.Approval != nil {
 		a.events.Approval()
@@ -191,6 +281,45 @@ func (a *appTurn) approval(m rpcMessage) {
 	}
 }
 func (a *appTurn) notification(m rpcMessage) {
+	if m.Method == "item/started" {
+		var p struct {
+			ThreadID string          `json:"threadId"`
+			Item     json.RawMessage `json:"item"`
+		}
+		var item struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(m.Params, &p) == nil && json.Unmarshal(p.Item, &item) == nil && item.Type == "fileChange" && len(p.Item) <= maxBody {
+			a.mu.Lock()
+			if p.ThreadID == a.result.ThreadID {
+				if a.fileChanges == nil {
+					a.fileChanges = map[string]json.RawMessage{}
+				}
+				if len(a.fileChanges) < 32 {
+					a.fileChanges[item.ID] = p.Item
+				}
+			}
+			a.mu.Unlock()
+		}
+		return
+	}
+	if m.Method == "serverRequest/resolved" {
+		var p struct {
+			ThreadID  string          `json:"threadId"`
+			RequestID json.RawMessage `json:"requestId"`
+		}
+		if json.Unmarshal(m.Params, &p) == nil {
+			a.mu.Lock()
+			if p.ThreadID == a.result.ThreadID {
+				if cancel := a.reviews[string(p.RequestID)]; cancel != nil {
+					cancel()
+				}
+			}
+			a.mu.Unlock()
+		}
+		return
+	}
 	switch m.Method {
 	case "turn/started", "turn/completed", "item/completed":
 	default:
@@ -245,10 +374,11 @@ func (a *appTurn) notification(m rpcMessage) {
 		}
 		a.mu.Lock()
 		denied := a.denied
+		approvalError := a.approvalError
 		a.mu.Unlock()
 		if denied {
 			status = "failed"
-			diagnostic = "codex_approval_requires_local_review"
+			diagnostic = approvalError
 		}
 		a.finish(status, diagnostic)
 	case "item/completed":
@@ -310,7 +440,7 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 	defer cancel()
 	cmd := exec.CommandContext(processCtx, binary, "app-server", "--listen", "stdio://")
 	cmd.Dir = s.Workspace
-	cmd.Env = append(os.Environ(), "POT_CODEX_ASSISTANT_ID="+s.AssistantID)
+	cmd.Env = append(os.Environ(), "POT_CODEX_ASSISTANT_ID="+s.AssistantID, "POT_CODEX_JOB_ID="+s.JobID)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stderr = io.Discard
 	input, err := cmd.StdinPipe()
@@ -346,14 +476,17 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 		}
 		return
 	}
-	a := &appTurn{input: input, pending: map[int]chan rpcMessage{}, done: make(chan struct{}), readerDone: make(chan struct{}), workspace: s.Workspace, events: events}
+	reviewCtx, cancelReviews := context.WithCancel(ctx)
+	a := &appTurn{input: input, pending: map[int]chan rpcMessage{}, done: make(chan struct{}), readerDone: make(chan struct{}), workspace: s.Workspace, events: events, ctx: reviewCtx, reviews: map[string]context.CancelFunc{}}
 	a.result.ThreadID = s.ThreadID
 	go a.read(output)
 	defer func() {
+		cancelReviews()
 		_ = scope.Stop(cmd.Process.Pid)
 		_ = cmd.Wait()
 		_ = input.Close()
 		<-a.readerDone
+		a.reviewWG.Wait()
 		a.mu.Lock()
 		result = a.result
 		a.mu.Unlock()
@@ -370,7 +503,6 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 			// item/completed must remain enabled: it carries both tool results
 			// and authoritative final answers. Approval requests are not muted.
 			"optOutNotificationMethods": []string{
-				"item/started",
 				"item/agentMessage/delta",
 				"item/plan/delta",
 				"item/reasoning/summaryTextDelta",
@@ -381,6 +513,8 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 				"turn/diff/updated",
 				"turn/plan/updated",
 				"thread/tokenUsage/updated",
+				"item/autoApprovalReview/started",
+				"item/autoApprovalReview/completed",
 			},
 		},
 	}); err != nil {
@@ -391,7 +525,9 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 		a.finish("failed", "codex_initialize_failed")
 		return
 	}
-	params := map[string]any{"cwd": s.Workspace, "approvalPolicy": "on-request", "approvalsReviewer": "user", "sandbox": s.Mode}
+	// Preserve the receiving Codex configuration, including its automatic
+	// reviewer. Only server requests for a human decision enter Agent Link.
+	params := map[string]any{"cwd": s.Workspace, "sandbox": s.Mode}
 	method := "thread/start"
 	if s.ThreadID != "" {
 		method = "thread/resume"
