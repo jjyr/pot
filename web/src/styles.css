@@ -631,6 +631,12 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 
 /* Browser anchoring and the measured windows must not both compensate a resize. */
 .history { overflow-anchor: none; }
+.history, .task-history { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted) 42%, transparent) transparent; scrollbar-gutter: stable; }
+.history:hover, .task-history:hover { scrollbar-color: color-mix(in srgb, var(--muted) 68%, transparent) transparent; }
+.history::-webkit-scrollbar, .task-history::-webkit-scrollbar { width: 8px; }
+.history::-webkit-scrollbar-thumb, .task-history::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 8px; background: color-mix(in srgb, var(--muted) 42%, transparent); background-clip: padding-box; }
+.history:hover::-webkit-scrollbar-thumb, .task-history:hover::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--muted) 68%, transparent); }
+@media (forced-colors: active) { .history, .task-history { scrollbar-color: auto; } }
 .message-window-spacer { flex: none; width: 100%; pointer-events: none; }
 .history-page-status { display: block; margin: 8px auto 20px; font-size: 12px; }
 .history-page-status:disabled { opacity: .65; cursor: default; }

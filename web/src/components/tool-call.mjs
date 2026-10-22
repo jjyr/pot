@@ -17,16 +17,17 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',machine
   const title=n('span','tool-title'),excerpt=n('span','tool-excerpt'),status=n('span','tool-status'),duration=n('span','tool-duration');summary.append(title,excerpt,status,duration);
   const context=n('div','tool-context'),failure=n('p','tool-failure'),body=n('div','tool-body'),metadata=n('dl','tool-metadata'),approval=n('div','tool-approval'),children=n('div','tool-children'),sections=n('div'),raw=n('details','tool-raw'),rawTitle=n('summary'),rawBody=n('div');raw.append(rawTitle,rawBody);body.append(failure,metadata,approval,children,sections,raw);summary.append(context);root.append(summary,body);
   let current,options={},signature='',approvalID='',approvalCard=null,rawSignature='',autoOpened=false,building=false,refreshStatus=()=>{};
+  let bodyVersion=[];
   const sectionsByKey=new Map();
   root.open=memory.get(key)?.open||false;raw.open=memory.get(key)?.raw||false;
-  const remember=()=>{if(!building)memory.set(key,{...memory.get(key),open:root.open,raw:raw.open});};root.addEventListener('toggle',()=>{remember();refreshStatus();});raw.addEventListener('toggle',remember);
+  const remember=()=>{if(!building)memory.set(key,{...memory.get(key),open:root.open,raw:raw.open});};root.addEventListener('toggle',()=>{remember();refreshStatus();if(current)update(current,options);});raw.addEventListener('toggle',()=>{remember();if(current)update(current,options);});
   function copyButton(label,get){const button=n('button','tool-action',label);button.type='button';button.onclick=async()=>{try{await navigator.clipboard.writeText(get());button.textContent=t('copied');}catch{button.textContent=t('copyFailed');}};return button;}
   function section(id,label,value,{output=false,markdown=false}={}){
     let item=sectionsByKey.get(id);
     if(!item){const box=n('section','tool-section'),head=n('div','tool-section-heading'),heading=n('strong'),pre=n('pre','tool-code');const copy=copyButton(t('copy'),()=>item.value);head.append(heading,copy);let follow;
       if(output){follow=n('button','tool-action');follow.type='button';head.append(follow);}
       const truncated=n('p','tool-truncated');box.append(head,pre,truncated);item={box,heading,copy,pre,truncated,value:'',following:true,follow};sectionsByKey.set(id,item);sections.append(box);
-      if(output){pre.addEventListener('scroll',()=>{item.following=pre.scrollHeight-pre.clientHeight-pre.scrollTop<24;follow.textContent=t(item.following?'following':'latest');});follow.onclick=()=>{item.following=true;update(current,options);pre.scrollTop=pre.scrollHeight;follow.textContent=t('following');};}
+      if(output){pre.addEventListener('scroll',()=>{item.following=pre.scrollHeight-pre.clientHeight-pre.scrollTop<24;follow.textContent=t(item.following?'following':'latest');});follow.onclick=()=>{item.following=true;bodyVersion=[];update(current,options);pre.scrollTop=pre.scrollHeight;follow.textContent=t('following');};}
     }
     item.heading.textContent=label;item.copy.textContent=t('copy');item.box.hidden=false;
     const text=pretty(value);item.value=text;
@@ -84,6 +85,12 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',machine
     if((pending||next.approvalDescendant)&&!autoOpened){building=true;root.open=true;autoOpened=true;building=false;remember();queueMicrotask(()=>{for(let parent=root.parentElement?.closest('details.tool-call');parent;parent=parent.parentElement?.closest('details.tool-call'))parent.open=true;});}
     if(!pending&&!next.approvalDescendant)autoOpened=false;
     if(activeTool(tool))scheduleClock(tick);
+    // Collapsed cards need only their summary and approval identity. Defer
+    // output Markdown, media and raw JSON until the reader asks to see them.
+    if(!root.open)return;
+    const version=[tool,tool.phase,tool.args,tool.result,tool.output?.length,tool.output?.at(-1)?.text,script?.output,tool.process?.result,locale(),pending,raw.open];
+    if(version.every((value,index)=>value===bodyVersion[index]))return;
+    bodyVersion=version;
     for(const item of sectionsByKey.values())item.box.hidden=true;
     if(isGroup)return;
     const args=tool.args||{};
@@ -115,7 +122,8 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',machine
         if(media.result!==result){media.result=result;media.box.replaceChildren();for(const block of images){const img=n('img');img.alt=t('image');img.loading='lazy';img.src=`data:${block.mimeType};base64,${block.data}`;media.box.append(img);}}
       }else section('result',t('result'),result);
     }
-    rawTitle.textContent=t('raw');const calls=tool.process?.calls||script?.calls||[tool],rawValue=JSON.stringify([locale(),calls]);
+    rawTitle.textContent=t('raw');if(!raw.open)return;
+    const calls=tool.process?.calls||script?.calls||[tool],rawValue=JSON.stringify([locale(),calls]);
     if(rawSignature!==rawValue){rawSignature=rawValue;rawBody.replaceChildren();for(const call of calls){rawBody.append(n('p','tool-call-id',script||tool.process?`${call.name} · ${call.id}`:call.id),n('p','tool-call-time',call.started_at_ms?new Date(call.started_at_ms).toLocaleString(locale()):''));for(const [label,value]of [[t('arguments'),call.args],[t('result'),call.result]])if(value!==undefined){const text=pretty(value),head=n('div','tool-section-heading');head.append(n('strong','',label),copyButton(t('copyJSON'),()=>text));rawBody.append(head,n('pre','tool-code',text.slice(0,LIMIT)));if(text.length>LIMIT)rawBody.append(n('p','tool-truncated',t('displayTruncated')));}}}
   }
   function tick(){if(!root.isConnected||!activeTool(current?.tool))return false;if(document.hidden)return true;const tool=current.tool,waiting=options.approval||tool.phase==='waiting_approval',start=tool.script?tool.started_at_ms:waiting?(tool.waiting_at_ms||tool.started_at_ms):tool.running_at_ms||tool.started_at_ms;if(start)duration.textContent=`${waiting&&!tool.script?t('waited')+' ':''}${Math.max(0,Math.floor((Date.now()-start)/1000))}s`;return true;}

@@ -11,9 +11,14 @@ export function applyToolUpdate(tool,update){
   }
   return tool;
 }
+const parsedResults=new WeakMap();
 export function toolResult(tool){
   let result=tool?.result;
-  if(typeof result==='string'){try{return JSON.parse(result);}catch{return result;}}
+  if(typeof result==='string'){
+    const cached=parsedResults.get(tool);if(cached?.source===result)return cached.value;
+    let value;try{value=JSON.parse(result);}catch{value=result;}
+    parsedResults.set(tool,{source:result,value});return value;
+  }
   return result;
 }
 export function toolSummary(tool){

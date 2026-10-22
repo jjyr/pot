@@ -5,6 +5,7 @@ import {createProductionClient,APIError} from '/web/src/adapters/production.mjs'
 const metrics={frames:[],pages:[],errors:[]};window.addEventListener('error',event=>metrics.errors.push(event.message));window.addEventListener('unhandledrejection',event=>metrics.errors.push(event.reason?.stack||String(event.reason)));
 const NativeSource=EventSource,sources=new Set();window.EventSource=class extends NativeSource{constructor(url){super(url);sources.add(this);this.addEventListener('conversation',event=>{const frame=JSON.parse(event.data);metrics.frames.push({kind:frame.kind,bytes:new TextEncoder().encode(event.data).length,count:frame.view.messages.length,cursor:frame.view.state.cursor});});}close(){sources.delete(this);super.close();}};
 const client=await createProductionClient();const history=client.history;let failPage=false;
+localStorage.setItem('pot-system-notifications-browser-v1','false');
 const subscribe=client.subscribe,shortMode=new URLSearchParams(location.search).get('short');let shortReset=shortMode!==null;
 client.subscribe=(receive,...args)=>subscribe((snapshot,...rest)=>{
   if(shortReset&&snapshot.kind==='reset'){shortReset=false;let messages=snapshot.messages.filter(message=>!message.context_only).slice(-2);if(shortMode==='complete')messages=messages.map((message,index)=>({...message,sequence:String(index+1)}));snapshot={...snapshot,messages,history:{...snapshot.history,before:messages[0].sequence,after:messages.at(-1).sequence}};}
