@@ -150,6 +150,15 @@ at desktop and phone widths; `locale=zh-CN&theme=dark` exercises the other local
 and theme. Add `capture-navigation=1` to pause at the multiline-draft return
 scenario; `window.navigationCaptureContinue()` resumes the checks.
 
+For scrolling and disclosure regressions, open
+`/scripts/tests/fixtures/chat-scroll.html?conversation=alpha&locale=en&theme=light`
+on the same loopback server. Run scrolling checks to exercise rapid reversals,
+sample viewport coverage and frame intervals, traverse beyond the data window,
+prefetch newer history with delayed reads, and inspect deferred tool/raw details.
+Run at desktop and phone widths, including `locale=zh-CN&theme=dark`. Capture
+reading position leaves a synthetic conversation available for manual wheel,
+touchpad, keyboard and scrollbar checks.
+
 For the resource tool and component fixture, run
 `POT_RESOURCE_FIXTURE_URL_FILE=/tmp/pot-resource-url mise exec -- go test
 ./internal/transport -run '^TestResourceBrowserFixture$' -v -count=1 -timeout=35m`.

@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import {projectScriptRuns} from '../../web/src/state/script-runs.mjs';
-import {toolForest} from '../../web/src/state/tool-calls.mjs';
+import {toolForest,toolResult} from '../../web/src/state/tool-calls.mjs';
+
+const serialized={result:'{"output":"first"}'};
+assert.equal(toolResult(serialized),toolResult(serialized),'Repeated reads reuse a parsed receipt');
+serialized.result='{"output":"updated"}';
+assert.equal(toolResult(serialized).output,'updated','Replacing a serialized receipt invalidates its parsed result');
+serialized.result='raw output';assert.equal(toolResult(serialized),'raw output');
 
 const call=(id,name,args={},extra={})=>({id:`message-${id}`,viewKey:`view-${id}`,role:'tool',tool:{id,turn_id:'turn',name,args,phase:'completed',started_at_ms:100,finished_at_ms:200,...extra}});
 const exec=(id,extra={})=>call(id,'exec',{code:'await work()'},{result:{completed:false,exec_id:`job-${id}`,output:'start\n'},...extra});
