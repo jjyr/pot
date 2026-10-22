@@ -1,3 +1,5 @@
+//go:build darwin || linux
+
 // Package processscope supervises descendants in a separate trusted process.
 // Linux uses a child subreaper; macOS uses original process identities and OS sandbox membership. A parent exit without a cleanup receipt never proves containment.
 package processscope

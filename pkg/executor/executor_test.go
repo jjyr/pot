@@ -253,7 +253,7 @@ func TestTimeoutIdleCancellationAndNoDescendants(t *testing.T) {
 	var pid int
 	fmt.Sscanf(string(data), "%d", &pid)
 	for range 100 {
-		if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
+		if errors.Is(testProcessSignal(pid), syscall.ESRCH) {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

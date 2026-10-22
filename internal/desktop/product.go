@@ -1,4 +1,4 @@
-//go:build darwin || (linux && desktop)
+//go:build darwin || windows || (linux && desktop)
 
 package desktop
 
@@ -172,7 +172,7 @@ func runProduct(parent context.Context, root string) (result error) {
 	service.spaces = manager
 	files := service.resourceAssets(application.AssetFileServerFS(assets.FS()))
 
-	app := application.New(application.Options{Name: "Pot", Description: "Pot " + buildinfo.Version, Icon: appIcon, Services: []application.Service{application.NewService(service), application.NewService(notifier)}, Assets: application.AssetOptions{Handler: files}, Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false}, OnShutdown: func() {
+	app := application.New(application.Options{Windows: application.WindowsOptions{WebviewUserDataPath: filepath.Join(runtime.Root.Path, "webview2")}, Name: "Pot", Description: "Pot " + buildinfo.Version, Icon: appIcon, Services: []application.Service{application.NewService(service), application.NewService(notifier)}, Assets: application.AssetOptions{Handler: files}, Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false}, OnShutdown: func() {
 		stop()
 		service.mu.Lock()
 		for _, cancel := range service.subscriptions {

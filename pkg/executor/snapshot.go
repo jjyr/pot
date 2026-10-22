@@ -64,11 +64,7 @@ func (s *snapshots) command(ctx context.Context, shell, cwd, home, source string
 	command.Env = append(os.Environ(), "HOME="+home)
 	name := filepath.Base(shell)
 	if !login || !enabled || (name != "bash" && name != "zsh") {
-		flag := "-c"
-		if login {
-			flag = "-lc"
-		}
-		command.Args = append(command.Args, flag, source)
+		command.Args = append(command.Args, commandArgs(shell, source, login)...)
 		return command, nil
 	}
 	s.mu.Lock()

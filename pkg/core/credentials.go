@@ -2,6 +2,7 @@ package core
 
 import (
 	"errors"
+	"runtime"
 	"strings"
 )
 
@@ -35,6 +36,13 @@ func (b CredentialBindings) Validate() error {
 }
 
 func CredentialEnvironmentName(name string) bool {
+	if runtime.GOOS == "windows" {
+		switch name {
+		case "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "PSMODULEPATH", "PSEXECUTIONPOLICYPREFERENCE", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMFILES", "PROGRAMDATA", "TEMP", "TMP":
+			return false
+		}
+	}
+
 	if strings.HasPrefix(name, "POT_") || strings.HasPrefix(name, "DYLD_") || strings.HasPrefix(name, "LD_") {
 		return false
 	}

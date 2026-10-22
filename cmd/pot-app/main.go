@@ -1,4 +1,4 @@
-//go:build darwin || (linux && desktop)
+//go:build darwin || windows || (linux && desktop)
 
 package main
 

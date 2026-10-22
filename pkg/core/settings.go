@@ -3,6 +3,9 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -19,7 +22,13 @@ type ShellSettings struct {
 }
 
 func DefaultShellSettings() ShellSettings {
-	return ShellSettings{"/bin/bash", true, true, 1800000, 16384, 65536, 8, 10000, 30000}
+	shell, login, snapshot := "/bin/bash", true, true
+	if runtime.GOOS == "windows" {
+		shell = filepath.Join(os.Getenv("SystemRoot"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+		login = false
+		snapshot = false
+	}
+	return ShellSettings{shell, login, snapshot, 1800000, 16384, 65536, 8, 10000, 30000}
 }
 func (s *ShellSettings) UnmarshalJSON(data []byte) error {
 	type plain ShellSettings

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a complete native Linux desktop package (no release publication)."""
+"""Build a complete desktop package (no release publication)."""
 
 import argparse
 import os
@@ -10,6 +10,8 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import sys
+import zipfile
 
 from go_packaging import BUILD, ROOT, call, digest, go_build, linker_flags, prepare_resources
 
@@ -44,15 +46,71 @@ def write_deb(staged, work, archive, version, arch, binary):
     )
 
 
+def build_windows(archive, target):
+    with tempfile.TemporaryDirectory(prefix=".windows-desktop-", dir=BUILD) as temporary:
+        work = Path(temporary)
+        install = work / "Pot"
+        resources = install / "Resources"
+        prepare_resources(resources, target)
+        binary = install / "bin/pot-app.exe"
+        binary.parent.mkdir(parents=True)
+        call(
+            [
+                "go",
+                "build",
+                "-mod=readonly",
+                "-trimpath",
+                "-tags=production,desktop",
+                "-ldflags=" + linker_flags() + " -H=windowsgui",
+                "-o",
+                binary,
+                "./cmd/pot-app",
+            ],
+            env={**os.environ, "GOOS": "windows", "GOARCH": "amd64", "CGO_ENABLED": "0"},
+        )
+        go_build("./cmd/pot", install / "bin/pot.exe", target)
+        call(
+            [
+                sys.executable,
+                ROOT / "scripts/go-notices",
+                "--output",
+                resources / "GoDependencyLicenses.txt",
+                "./cmd/pot-app",
+                "./cmd/pot",
+            ],
+            env={
+                **os.environ,
+                "GOOS": "windows",
+                "GOARCH": "amd64",
+                "CGO_ENABLED": "0",
+                "GOFLAGS": "-tags=desktop",
+            },
+        )
+        # Keep launching independent of cwd and avoid executable replacement while running.
+        shutil.copy2(ROOT / "packaging/desktop/Pot.cmd", install / "Pot.cmd")
+        shutil.copy2(ROOT / "docs/desktop-installation.md", install / "INSTALLATION.md")
+        # No update.json: portable packages are replaced as a whole while stopped.
+        staged = work / archive.name
+        with zipfile.ZipFile(staged, "w", compression=zipfile.ZIP_DEFLATED) as package:
+            for item in sorted(install.rglob("*")):
+                if item.is_file():
+                    package.write(item, item.relative_to(work).as_posix())
+        staged.replace(archive)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--platform", required=True, choices=("linux-amd64", "linux-arm64"))
+    parser.add_argument(
+        "--platform", required=True, choices=("linux-amd64", "linux-arm64", "windows-amd64")
+    )
     parser.add_argument("--output", type=Path, default=BUILD / "dist")
     args = parser.parse_args()
     native = "linux-" + {"x86_64": "amd64", "aarch64": "arm64"}.get(
         platform.machine(), "unsupported"
     )
-    if platform.system() != "Linux" or args.platform != native:
+    if args.platform.startswith("linux-") and (
+        platform.system() != "Linux" or args.platform != native
+    ):
         parser.error(
             "Linux desktop packages require a native Linux runner of the target architecture"
         )
@@ -62,7 +120,13 @@ def main():
     BUILD.mkdir(parents=True, exist_ok=True)
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    archive = output / f"pot-desktop_{version}_{args.platform.replace('-', '_')}.deb"
+    suffix = ".zip" if args.platform.startswith("windows-") else ".deb"
+    archive = output / f"pot-desktop_{version}_{args.platform.replace('-', '_')}{suffix}"
+    if args.platform.startswith("windows-"):
+        build_windows(archive, args.platform)
+        archive.with_suffix(suffix + ".sha256").write_text(f"{digest(archive)}  {archive.name}\n")
+        print(archive)
+        return
     with tempfile.TemporaryDirectory(prefix=".desktop-", dir=BUILD) as temporary:
         work = Path(temporary)
         staged = work / "package"
@@ -88,7 +152,7 @@ def main():
         go_build("./cmd/pot", install / "bin/pot", args.platform)
         call(
             [
-                "python3",
+                sys.executable,
                 ROOT / "scripts/go-notices",
                 "--output",
                 resources / "GoDependencyLicenses.txt",

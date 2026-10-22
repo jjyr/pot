@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/jjyr/pot/pkg/instance"
@@ -23,6 +22,9 @@ type Job struct {
 }
 
 func Worker(path string) (result error) {
+	if !updatesSupported() {
+		return errors.New("Windows portable packages require manual upgrades")
+	}
 	var job Job
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -37,7 +39,7 @@ func Worker(path string) (result error) {
 	if err = privateDirectory(job.Directory); err != nil {
 		return err
 	}
-	lock, err := openLock(filepath.Join(job.Directory, "update.lock"), syscall.LOCK_EX|syscall.LOCK_NB)
+	lock, err := openLock(filepath.Join(job.Directory, "update.lock"), lockExclusive|lockNonblock)
 	if err != nil {
 		return err
 	}
@@ -110,7 +112,7 @@ func Worker(path string) (result error) {
 			return fmt.Errorf("cannot stop local host: %w", err)
 		}
 	}
-	exclusive, err := openLock(filepath.Join(job.Directory, "installation.lock"), syscall.LOCK_EX|syscall.LOCK_NB)
+	exclusive, err := openLock(filepath.Join(job.Directory, "installation.lock"), lockExclusive|lockNonblock)
 	if err != nil {
 		return errors.New("another host still owns the installation")
 	}
@@ -163,7 +165,7 @@ func Worker(path string) (result error) {
 			return errors.Join(err, errors.New("rollback blocked: new host cleanup unconfirmed"))
 		}
 	}
-	exclusive, lockErr := openLock(filepath.Join(job.Directory, "installation.lock"), syscall.LOCK_EX|syscall.LOCK_NB)
+	exclusive, lockErr := openLock(filepath.Join(job.Directory, "installation.lock"), lockExclusive|lockNonblock)
 	if lockErr != nil {
 		state.Phase = "blocked"
 		return errors.Join(err, lockErr)

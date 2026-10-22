@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+"""Run Windows native ownership, credential, IPC, PTY and cleanup contracts."""
+
+import os
+from pathlib import Path
+import subprocess
+
+if os.name != "nt":
+    raise SystemExit(
+        "test-windows requires a native Windows runner; cross compilation is not execution"
+    )
+root = Path(__file__).resolve().parents[1]
+subprocess.run(
+    [
+        "go",
+        "test",
+        "-mod=readonly",
+        "-count=1",
+        "-timeout=3m",
+        "-run=Windows",
+        "./pkg/core",
+        "./pkg/privatefs",
+        "./pkg/localipc",
+        "./pkg/instance",
+        "./pkg/processscope",
+        "./pkg/terminal",
+        "./pkg/executor",
+        "./pkg/pluginhost",
+        "./internal/secrets",
+    ],
+    cwd=root,
+    check=True,
+)
+subprocess.run(
+    ["go", "test", "-mod=readonly", "-count=1", "-timeout=3m", "./pkg/composition"],
+    cwd=root,
+    check=True,
+)

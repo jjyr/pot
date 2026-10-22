@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/jjyr/pot/pkg/core"
@@ -110,7 +109,7 @@ func runBackground(ctx context.Context, node string, p plugin.Package, input cor
 		return result, err
 	}
 	cmd.Stderr = io.Discard
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = processAttributes()
 	supervisor, err := processscope.Prepare(cmd, worker, processscope.Markers{})
 	if err != nil {
 		return result, err

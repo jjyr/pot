@@ -7,12 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"runtime"
 	"runtime/debug"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -98,16 +96,7 @@ func (r ProcessRunner) Run(ctx context.Context, code string, tools map[string]To
 	ctx, cancel := context.WithTimeoutCause(ctx, limits.WallTime, ErrWallTimeLimit)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	// Do not inherit provider keys, user configuration or language runtime paths.
-	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C.UTF-8"}
-	cmd.Cancel = func() error {
-		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		if err == syscall.ESRCH {
-			return os.ErrProcessDone
-		}
-		return err
-	}
+	configureWorker(cmd)
 	cmd.WaitDelay = 2 * time.Second
 	input, err := cmd.StdinPipe()
 	if err != nil {

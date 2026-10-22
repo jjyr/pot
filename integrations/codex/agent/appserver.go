@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/jjyr/pot/pkg/processscope"
@@ -437,7 +436,7 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 	cmd := exec.CommandContext(processCtx, binary, "app-server", "--listen", "stdio://")
 	cmd.Dir = s.Workspace
 	cmd.Env = append(os.Environ(), "POT_CODEX_ASSISTANT_ID="+s.AssistantID, "POT_CODEX_JOB_ID="+s.JobID)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = childAttributes()
 	cmd.Stderr = io.Discard
 	input, err := cmd.StdinPipe()
 	if err != nil {

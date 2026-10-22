@@ -15,7 +15,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/jjyr/pot/internal/buildinfo"
@@ -65,36 +64,13 @@ type Host struct {
 type hostKey struct{}
 
 func FromContext(ctx context.Context) *Host { h, _ := ctx.Value(hostKey{}).(*Host); return h }
-func privateDirectory(path string) error {
-	if err := os.MkdirAll(path, 0700); err != nil {
-		return err
-	}
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || !info.IsDir() || info.Mode().Perm()&0077 != 0 || stat.Uid != uint32(os.Geteuid()) {
-		return errors.New("update directory must be private and owned")
-	}
-	return nil
-}
-func openLock(path string, how int) (*os.File, error) {
-	fd, err := syscall.Open(path, syscall.O_CREAT|syscall.O_RDWR|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0600)
-	if err != nil {
-		return nil, err
-	}
-	f := os.NewFile(uintptr(fd), path)
-	if err = syscall.Flock(fd, how); err != nil {
-		f.Close()
-		return nil, err
-	}
-	return f, nil
-}
 
 // OpenHost recognizes only complete, signed product installations. It registers
 // long-lived hosts, never transient CLI commands or arbitrary executables.
 func OpenHost() (*Host, error) {
+	if !updatesSupported() {
+		return nil, nil
+	}
 	if buildinfo.UpdatePublicKey == "" {
 		return nil, nil
 	}
@@ -134,7 +110,7 @@ func OpenHost() (*Host, error) {
 		}
 		return nil, err
 	}
-	lock, err := openLock(filepath.Join(directory, "installation.lock"), syscall.LOCK_SH)
+	lock, err := openLock(filepath.Join(directory, "installation.lock"), lockShared)
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +243,7 @@ func (h *Host) Run(ctx context.Context, run func(context.Context) error) error {
 	case <-h.resume:
 		// Keep the supervisor's original PID and original argv/environment. Services
 		// restart in place, without duplicate daemons or privileged service commands.
-		return syscall.Exec(h.Executable, os.Args, os.Environ())
+		return restartHost(h.Executable)
 	case <-ctx.Done():
 		return h.result
 	}
@@ -293,7 +269,7 @@ func participants(directory string) ([]Participant, error) {
 		err = localCall(context.Background(), p.Socket, "GET", "/status", &p)
 		if err != nil { // Only a missing/refused socket proves a stale registration.
 			var op *net.OpError
-			if errors.As(err, &op) && (errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, os.ErrNotExist)) {
+			if errors.As(err, &op) && (errors.Is(err, connectionRefused) || errors.Is(err, os.ErrNotExist)) {
 				_ = os.Remove(filepath.Join(directory, entry.Name()))
 				continue
 			}

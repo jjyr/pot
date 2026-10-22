@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/privatefs"
 	"os"
 	"path/filepath"
-	"syscall"
 )
 
 type Identity struct {
@@ -38,17 +38,17 @@ func Open(path string) (*Root, error) {
 	if err != nil {
 		return nil, err
 	}
-	if abs == "/" {
+	if filepath.Dir(abs) == abs {
 		return nil, errors.New("invalid data root")
 	}
-	if err = os.MkdirAll(abs, 0700); err != nil {
+	if err = privatefs.Mkdir(abs); err != nil {
 		return nil, err
 	}
 	info, err := os.Lstat(abs)
 	if err != nil {
 		return nil, err
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || privatefs.Check(abs) != nil {
 		return nil, errors.New("Go data root must be a private directory")
 	}
 	// Resolve parent aliases such as macOS /tmp before deriving machine ownership
@@ -57,15 +57,11 @@ func Open(path string) (*Root, error) {
 	if err != nil {
 		return nil, err
 	}
-	fd, err := syscall.Open(filepath.Join(abs, "runtime.lock"), syscall.O_CREAT|syscall.O_RDWR|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0600)
+	lock, err := privatefs.Lock(filepath.Join(abs, "runtime.lock"), false, true)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("data root already belongs to a running Runtime or lock is not private: " + err.Error())
 	}
-	lock := os.NewFile(uintptr(fd), "runtime.lock")
 	fail := func(err error) (*Root, error) { lock.Close(); return nil, err }
-	if err = syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		return fail(errors.New("data root already belongs to a running Runtime"))
-	}
 	file := filepath.Join(abs, "identity.json")
 	body, err := os.ReadFile(file)
 	var identity Identity
@@ -112,7 +108,7 @@ func WriteJSON(path string, value any) error {
 	if err = os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
-	file, err := os.CreateTemp(dir, ".pot-state-*")
+	file, err := privatefs.CreateTemp(dir, ".pot-state-")
 	if err != nil {
 		return err
 	}
@@ -131,13 +127,8 @@ func WriteJSON(path string, value any) error {
 	if closeErr != nil {
 		return closeErr
 	}
-	if err = os.Rename(name, path); err != nil {
+	if err = privatefs.Replace(name, path); err != nil {
 		return err
 	}
-	parent, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer parent.Close()
-	return parent.Sync()
+	return privatefs.SyncDir(dir)
 }

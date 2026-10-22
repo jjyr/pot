@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/jjyr/pot/pkg/core"
@@ -88,7 +87,7 @@ func RunModelProvider(ctx context.Context, node string, p plugin.Package, input 
 		return result, errors.New("model provider process unavailable")
 	}
 	cmd.Stderr = io.Discard
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = processAttributes()
 	supervisor, err := processscope.Prepare(cmd, worker, processscope.Markers{})
 	if err != nil {
 		return result, errors.New("model provider supervisor unavailable")

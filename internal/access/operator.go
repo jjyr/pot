@@ -9,12 +9,13 @@ import (
 	"errors"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/instance"
+	"github.com/jjyr/pot/pkg/localipc"
+	"github.com/jjyr/pot/pkg/privatefs"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 )
 
@@ -30,22 +31,8 @@ type OperatorServer struct {
 
 func StartOperator(root string, manager *Manager) (*OperatorServer, error) {
 	path := filepath.Join(root, "browser-operator.sock")
-	if info, err := os.Lstat(path); err == nil {
-		if info.Mode()&os.ModeSocket == 0 {
-			return nil, errors.New("operator socket path is occupied")
-		}
-		if err = os.Remove(path); err != nil {
-			return nil, err
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, err
-	}
-	listener, err := net.Listen("unix", path)
+	listener, err := localipc.Listen(path)
 	if err != nil {
-		return nil, err
-	}
-	if err = os.Chmod(path, 0600); err != nil {
-		listener.Close()
 		return nil, err
 	}
 	endpoint := Operator{Socket: path, Token: rand.Text()}
@@ -85,7 +72,7 @@ func (s *OperatorServer) Close() error { err := s.server.Close(); os.Remove(s.pa
 func ReadOperator(root string) (Operator, error) {
 	var endpoint Operator
 	path := filepath.Join(root, "browser-operator.json")
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	f, err := privatefs.Open(path, os.O_RDONLY)
 	if err != nil {
 		return endpoint, err
 	}
@@ -94,8 +81,7 @@ func ReadOperator(root string) (Operator, error) {
 	if err != nil {
 		return endpoint, err
 	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != uint32(os.Geteuid()) || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > 8192 {
+	if privatefs.CheckFile(f) != nil || !info.Mode().IsRegular() || info.Size() > 8192 {
 		return endpoint, errors.New("private browser operator descriptor required")
 	}
 	data, err := io.ReadAll(io.LimitReader(f, 8193))
@@ -126,7 +112,7 @@ func CallOperator(ctx context.Context, endpoint Operator, action string) (map[st
 		}
 	}
 	tr := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", endpoint.Socket)
+		return localipc.Dial(ctx, endpoint.Socket)
 	}}
 	defer tr.CloseIdleConnections()
 	client := &http.Client{Transport: tr, Timeout: 40 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}

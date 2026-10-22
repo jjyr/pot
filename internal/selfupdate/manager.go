@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/jjyr/pot/internal/buildinfo"
@@ -123,7 +122,7 @@ func (m *Manager) check() {
 	defer m.mu.Unlock()
 	phase := m.state().Phase
 	if !m.busy && phase == "downloading" {
-		download, err := openLock(filepath.Join(m.Host.Directory, "download.lock"), syscall.LOCK_EX|syscall.LOCK_NB)
+		download, err := openLock(filepath.Join(m.Host.Directory, "download.lock"), lockExclusive|lockNonblock)
 		if err != nil {
 			return
 		}
@@ -190,7 +189,7 @@ func (m *Manager) Call(ctx context.Context, method string, body json.RawMessage)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	operation, err := openLock(filepath.Join(m.Host.Directory, "operation.lock"), syscall.LOCK_EX|syscall.LOCK_NB)
+	operation, err := openLock(filepath.Join(m.Host.Directory, "operation.lock"), lockExclusive|lockNonblock)
 	if err != nil {
 		return nil, protocol.APIError{Code: "update_busy"}
 	}
@@ -216,7 +215,7 @@ func (m *Manager) Call(ctx context.Context, method string, body json.RawMessage)
 		if err != nil {
 			return nil, err
 		}
-		downloadLock, err := openLock(filepath.Join(m.Host.Directory, "download.lock"), syscall.LOCK_EX|syscall.LOCK_NB)
+		downloadLock, err := openLock(filepath.Join(m.Host.Directory, "download.lock"), lockExclusive|lockNonblock)
 		if err != nil {
 			return nil, protocol.APIError{Code: "update_busy"}
 		}
@@ -239,7 +238,7 @@ func (m *Manager) Call(ctx context.Context, method string, body json.RawMessage)
 			}
 			_ = m.save(s)
 			if err == nil {
-				operation, e := openLock(filepath.Join(m.Host.Directory, "operation.lock"), syscall.LOCK_EX)
+				operation, e := openLock(filepath.Join(m.Host.Directory, "operation.lock"), lockExclusive)
 				if e != nil {
 					return
 				}
@@ -372,7 +371,7 @@ func (m *Manager) install(command Command, s State) error {
 		executable = filepath.Join(m.Host.Install, "Contents/MacOS/pot")
 	}
 	worker := exec.Command(executable, "_update-worker", path)
-	worker.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	worker.SysProcAttr = detachedProcess()
 	log, err := os.OpenFile(filepath.Join(m.Host.Directory, "worker.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err == nil {
 		defer log.Close()

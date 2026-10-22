@@ -7,13 +7,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/jjyr/pot/pkg/privatefs"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/jjyr/pot/internal/access"
@@ -30,8 +30,7 @@ func privateText(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != uint32(os.Geteuid()) || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > 8192 {
+	if privatefs.Check(path) != nil || !info.Mode().IsRegular() || info.Size() > 8192 {
 		return "", errors.New("credential must be a private current-user regular file")
 	}
 	data, err := os.ReadFile(path)
@@ -68,25 +67,21 @@ func browserCommand(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err = os.MkdirAll(directory, 0700); err != nil {
+	if err = privatefs.Mkdir(directory); err != nil {
 		return err
 	}
 	info, err := os.Lstat(directory)
 	if err != nil {
 		return err
 	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != uint32(os.Geteuid()) || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
+	if privatefs.Check(directory) != nil || !info.IsDir() {
 		return errors.New("browser data root must be private and owned")
 	}
-	lock, err := os.OpenFile(filepath.Join(directory, "web-ui-server.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := privatefs.Lock(filepath.Join(directory, "web-ui-server.lock"), false, true)
 	if err != nil {
 		return err
 	}
 	defer lock.Close()
-	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		return errors.New("browser data root already in use")
-	}
 	path := filepath.Join(directory, "browser-access.json")
 	if _, err := os.Lstat(path); os.IsNotExist(err) {
 		entries, e := os.ReadDir(directory)
