@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""Add immutable assets for one qualified channel to the version's GitHub Release."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+
+from release_contract import checksum, checksum_name, release_assets, version_number
+
+
+def publish(version, output, channel):
+    version = version_number(version)
+    repository = os.environ["GITHUB_REPOSITORY"]
+    tag = "v" + version
+    sha = subprocess.check_output(
+        ["gh", "api", f"repos/{repository}/commits/refs/tags/{tag}", "--jq", ".sha"], text=True
+    ).strip()
+    if sha != os.environ["RELEASE_SHA"]:
+        raise ValueError("Release tag moved after validation")
+    subprocess.run(["sha256sum", "--check", checksum_name(channel)], cwd=output, check=True)
+    assets = [output / name for name in release_assets(version, channel)]
+    for path in assets:
+        if not path.is_file():
+            raise ValueError(f"missing channel asset: {path.name}")
+
+    def get_release():
+        result = subprocess.run(
+            ["gh", "api", f"repos/{repository}/releases/tags/{tag}"], capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            return json.loads(result.stdout)
+        if result.stdout and json.loads(result.stdout).get("status") in (404, "404"):
+            return None
+        raise RuntimeError("Cannot read release metadata: " + result.stderr)
+
+    def identical(path, release):
+        asset = next((a for a in release["assets"] if a["name"] == path.name), None)
+        if asset is None:
+            return False
+        if (
+            asset.get("digest") != "sha256:" + checksum(path)
+            or asset["size"] != path.stat().st_size
+        ):
+            raise ValueError(f"Refusing to replace existing release asset: {path.name}")
+        return True
+
+    release = get_release()
+    if release is None:
+        # Concurrent channels may create the same release. Re-read after the
+        # attempt, then require the same commit before adding any assets.
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md") as notes:
+            notes.write(
+                "Artifacts are added per channel after its checks and applicable signing pass. "
+                "Only listed assets are available. Windows desktop packages are not available yet.\n"
+            )
+            notes.flush()
+            result = subprocess.run(
+                [
+                    "gh",
+                    "release",
+                    "create",
+                    tag,
+                    "--repo",
+                    repository,
+                    "--verify-tag",
+                    "--target",
+                    sha,
+                    "--draft",
+                    "--generate-notes",
+                    "--notes-file",
+                    notes.name,
+                ],
+                capture_output=True,
+                text=True,
+            )
+        release = get_release()
+        if release is None:
+            raise RuntimeError("Unable to create release: " + result.stderr)
+    if release["target_commitish"] != sha:
+        raise ValueError("Existing release targets a different commit")
+    # Establish all existing digests before the first upload; never clobber.
+    missing = [path for path in assets if not identical(path, release)]
+    for path in missing:
+        result = subprocess.run(
+            ["gh", "release", "upload", tag, "--repo", repository, str(path)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode:
+            # Another qualified channel may have added the identical shared CLI
+            # asset while this one was running. A different digest still fails.
+            latest = get_release()
+            if latest is None or not identical(path, latest):
+                raise RuntimeError("Unable to upload channel asset: " + result.stderr)
+    latest = get_release()
+    if latest is None:
+        raise RuntimeError("Release disappeared before channel completion")
+    if latest["draft"]:
+        subprocess.run(
+            ["gh", "release", "edit", tag, "--repo", repository, "--draft=false"], check=True
+        )
+    print(f"Published {channel} assets for {tag}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("version")
+    parser.add_argument("output", type=Path)
+    parser.add_argument("--channel", required=True, choices=["server", "desktop", "macos"])
+    args = parser.parse_args()
+    publish(args.version, args.output.resolve(), args.channel)
