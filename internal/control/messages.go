@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jjyr/pot/internal/inbox"
+	"github.com/jjyr/pot/pkg/agentlink"
 	"strings"
 
 	"github.com/jjyr/pot/pkg/core"
@@ -45,6 +46,12 @@ func (s *Service) sendAgentMessage(ctx context.Context, id, owner string, sender
 				return nil, errors.New("message parent sender differs")
 			}
 			parent = &value
+		}
+		if s.LinkTask(ctx, owner, send.To.AgentID) {
+			if sender.Kind != "assistant" || sender.AgentID != owner {
+				return nil, agentlink.ErrUnauthorized
+			}
+			return s.guideLinkTask(ctx, owner, send.To.AgentID, protocol.TaskInput{RequestID: id, Text: send.Text})
 		}
 		if err := s.Tasks.SendMessageWithParent(ctx, owner, send.To.AgentID, id, sender, send.Text, parent); err != nil {
 			return nil, err

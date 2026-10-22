@@ -385,19 +385,17 @@ connection instructions, remote default/explicit selection, empty-directory
 refresh and directory-load failure recovery. Screenshots stay under ignored
 `output/playwright/`.
 
-`TestCodexDirectChatFromEmptyPot` runs a real Agent Link transport and supervised
-App Server protocol fixture between an assistant-free Pot and the Codex adapter.
-It checks two turns in one persistent thread, exact retries, explicit proactive
-recipients and rejection after recipient deletion. For the same chat path using
-the locally authenticated real Codex CLI, opt in with:
+The Codex integration tests use a real Agent Link transport and a supervised
+App Server protocol fixture. Run the task/approval and automatic-review boundary
+coverage without model credentials:
 
 ```sh
-POT_CODEX_LIVE=1 mise exec -- go test ./integrations/codex/agent \
-  -run '^TestCodexDirectChatRealLive$' -count=1 -v -timeout=3m
+mise exec -- go test -race ./integrations/codex/agent \
+  -run 'Test(CodexTaskAndPeerApprovalFromPot|AutomaticReviewDoesNotPublishApprovalHistory|DirectTasksOwnIndependentPersistentSessions)'
 ```
 
-This makes two read-only Codex turns with an exact marker response, using a
-private host root and workspace. It does not qualify arbitrary existing Codex App
-chats or remote approval handling. `TestConfiguredModelAgentLinksLive` also checks
-a user-only Pot receiving a reply from the machine's configured real model with
-no local assistant or Provider; its existing total request/output caps still apply.
+The fixture exercises caller-owned manual decisions, independent task sessions,
+same-task continuation and normal outcome delivery. Direct user chat is a Pot
+adapter capability; Codex task and message adapters do not implement it.
+`TestConfiguredModelAgentLinksLive` separately covers user-only Pot-to-Pot replies
+using the machine's configured model, under its existing request/output caps.

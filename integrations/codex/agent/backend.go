@@ -36,7 +36,7 @@ type job struct {
 }
 
 // backend owns accepted work independently of link lifecycle. Its work queue is
-// shared by direct messages and delegated tasks and serialized per assistant.
+// independent for explicit tasks and serialized per assistant for messages.
 type backend struct {
 	db             *sql.DB
 	nodeID, binary string
@@ -44,6 +44,7 @@ type backend struct {
 	mu             sync.Mutex
 	active         map[string]context.CancelFunc
 	workers        map[string]bool
+	reviews        map[string]*pendingReview
 }
 
 func newBackend(db *sql.DB, nodeID, root string) (*backend, error) {
@@ -52,7 +53,7 @@ func newBackend(db *sql.DB, nodeID, root string) (*backend, error) {
 	if err != nil {
 		return nil, err
 	}
-	b := &backend{db: db, nodeID: nodeID, binary: binary, worker: []string{worker}, active: map[string]context.CancelFunc{}, workers: map[string]bool{}}
+	b := &backend{db: db, nodeID: nodeID, binary: binary, worker: []string{worker}, active: map[string]context.CancelFunc{}, workers: map[string]bool{}, reviews: map[string]*pendingReview{}}
 	// Fresh installations have an isolated local read-only workspace. Owners can
 	// add assistants pointing at their own directories through the local command.
 	workspace := filepath.Join(root, "workspace")
@@ -67,6 +68,9 @@ func newBackend(db *sql.DB, nodeID, root string) (*backend, error) {
 	}
 	_, err = db.Exec(`INSERT INTO codex_link_assistants(id,name,workspace,mode,is_default,avatar,character) SELECT 'codex',?,?,'read-only',1,?,? WHERE NOT EXISTS(SELECT 1 FROM codex_link_assistants)`, name, workspace, avatar, character)
 	if err != nil {
+		return nil, err
+	}
+	if _, err = db.Exec("INSERT INTO codex_task_executor(singleton,workspace,mode) VALUES(1,?,'read-only') ON CONFLICT DO NOTHING", workspace); err != nil {
 		return nil, err
 	}
 	return b, nil
@@ -94,11 +98,12 @@ func (b *backend) Directory(ctx context.Context) (agentlink.Directory, error) {
 	list, err := b.list(ctx)
 	d := agentlink.Directory{NodeID: b.nodeID, Name: "Codex", Adapter: "codex", Assistants: []agentlink.Identity{}}
 	d.Operations = map[string]agentlink.Description{}
+	d.TaskExecutor = &agentlink.Description{Version: 1, Scope: "caller", Operations: []agentlink.Operation{agentlink.TaskSubmit, agentlink.TaskRead, agentlink.TaskCancel, agentlink.TaskInput, agentlink.Approvals}}
 	for _, a := range list {
 		identity := b.identity(a)
 		identity.Avatar = a.Avatar
 		d.Assistants = append(d.Assistants, identity)
-		d.Operations[a.ID] = agentlink.Description{Version: 1, Scope: "peer", Operations: append(agentlink.PeerOperations(), agentlink.AssistantProfile, agentlink.AssistantDelete)}
+		d.Operations[a.ID] = agentlink.Description{Version: 1, Scope: "peer", Operations: []agentlink.Operation{agentlink.AssistantProfile, agentlink.AssistantDelete}}
 		if a.Default {
 			d.DefaultAssistantID = a.ID
 		}
@@ -197,17 +202,28 @@ func jobID(from protocol.AgentRef, request string) string {
 	return hex.EncodeToString(sum[:])
 }
 func (b *backend) Submit(ctx context.Context, r agentlink.TaskRequest) (agentlink.Task, error) {
-	return b.submit(ctx, r, nil)
-}
-func (b *backend) submit(ctx context.Context, r agentlink.TaskRequest, message *protocol.Envelope) (agentlink.Task, error) {
-	if r.Configuration != nil {
+	if r.Executor != "codex" || r.Configuration != nil {
 		return agentlink.Task{}, agentlink.ErrUnsupported
 	}
-	if !validID(r.RequestID) || !r.From.Valid() || (r.From.Kind != "assistant" && r.From.Kind != "user" && r.From.Kind != "task") || r.Text == "" || len(r.Text) > 65536 || message == nil && len(r.Text) > 24000 {
+	if !validID(r.RequestID) || !r.From.Valid() || r.Text == "" || len(r.Text) > 24000 {
+		return agentlink.Task{}, agentlink.ErrInvalid
+	}
+	return b.submitTask(ctx, r)
+}
+
+// submitMessage admits one addressed inbox envelope. It never resolves a node
+// default or accepts task workspace/configuration overrides.
+func (b *backend) submitMessage(ctx context.Context, r agentlink.TaskRequest, message protocol.Envelope) (agentlink.Task, error) {
+	if r.Executor != "" || r.Configuration != nil || r.Workspace != "" {
+		return agentlink.Task{}, agentlink.ErrUnsupported
+	}
+	if !validID(r.RequestID) || message.Validate() != nil || message.Kind != "message" ||
+		(message.From.Kind != "assistant" && message.From.Kind != "task") || message.To.NodeID != b.nodeID || message.To.Kind != "assistant" ||
+		message.From != r.From || message.To.AgentID != r.AssistantID || message.Text != r.Text {
 		return agentlink.Task{}, agentlink.ErrInvalid
 	}
 	payload := encoded(r)
-	// Exact retries retain the original assistant even if the node default changes.
+	// Exact retries retain their accepted explicit recipient.
 	var oldPayload, oldData string
 	priorErr := b.db.QueryRowContext(ctx, "SELECT payload,data FROM codex_link_jobs WHERE caller=? AND request_id=?", callerKey(r.From), r.RequestID).Scan(&oldPayload, &oldData)
 	if priorErr == nil {
@@ -226,9 +242,6 @@ func (b *backend) submit(ctx context.Context, r agentlink.TaskRequest, message *
 	a, err := b.resolve(ctx, r.AssistantID)
 	if err != nil {
 		return agentlink.Task{}, err
-	}
-	if r.Workspace != "" && r.Workspace != a.ID {
-		return agentlink.Task{}, agentlink.ErrInvalid
 	}
 	var accepted job
 	err = storage.Transaction(ctx, b.db, func(tx *sql.Tx) error {
@@ -266,7 +279,7 @@ func (b *backend) submit(ctx context.Context, r agentlink.TaskRequest, message *
 			return agentlink.ErrFenced
 		}
 		now := time.Now().UTC()
-		accepted = job{Task: agentlink.Task{ID: jobID(r.From, r.RequestID), RequestID: r.RequestID, Assistant: b.identity(a), State: "queued", CreatedAt: now, UpdatedAt: now}, Request: r, Message: message}
+		accepted = job{Task: agentlink.Task{ID: jobID(r.From, r.RequestID), RequestID: r.RequestID, Assistant: b.identity(a), State: "queued", CreatedAt: now, UpdatedAt: now}, Request: r, Message: &message}
 		_, err = tx.ExecContext(ctx, "INSERT INTO codex_link_jobs(id,caller,request_id,assistant_id,payload,data) VALUES(?,?,?,?,?,?)", accepted.Task.ID, callerKey(r.From), r.RequestID, a.ID, payload, encoded(accepted))
 		return err
 	})
@@ -384,6 +397,35 @@ func (b *backend) run(ctx context.Context) {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	for {
+		rows, queryErr := b.db.QueryContext(ctx, `SELECT data FROM codex_link_jobs WHERE assistant_id IS NULL AND json_extract(data,'$.task.state')='queued'`)
+		var direct []job
+		if queryErr == nil {
+			for rows.Next() {
+				var raw string
+				var j job
+				if rows.Scan(&raw) == nil && json.Unmarshal([]byte(raw), &j) == nil {
+					direct = append(direct, j)
+				}
+			}
+			rows.Close()
+		}
+		for _, j := range direct {
+			key := "task:" + j.Task.ID
+			b.mu.Lock()
+			running := b.workers[key]
+			if !running {
+				b.workers[key] = true
+			}
+			b.mu.Unlock()
+			if !running {
+				wg.Add(1)
+				go func(j job, key string) {
+					defer wg.Done()
+					defer func() { b.mu.Lock(); delete(b.workers, key); b.mu.Unlock() }()
+					b.runTask(ctx, j)
+				}(j, key)
+			}
+		}
 		list, err := b.list(ctx)
 		if err == nil {
 			for _, a := range list {
@@ -436,8 +478,15 @@ func (b *backend) execute(ctx context.Context, selected job) {
 	if err != nil {
 		return
 	}
+	b.executeSession(ctx, selected, Session{AssistantID: a.ID, JobID: selected.Task.ID, Binary: b.binary, Workspace: a.Workspace, Mode: a.Mode, ThreadID: a.ThreadID, Worker: b.worker}, selected.Request.Text, func(thread string) error {
+		_, err := b.db.ExecContext(context.Background(), "UPDATE codex_link_assistants SET thread_id=? WHERE id=? AND (thread_id='' OR thread_id=?)", thread, a.ID, thread)
+		return err
+	})
+}
+
+func (b *backend) executeSession(ctx context.Context, selected job, session Session, text string, bind func(string) error) {
 	var launch bool
-	err = b.update(ctx, selected.Task.ID, func(j *job) error {
+	err := b.update(ctx, selected.Task.ID, func(j *job) error {
 		if j.Task.State == "queued" {
 			j.Task.State = "running"
 			launch = true
@@ -456,21 +505,16 @@ func (b *backend) execute(ctx context.Context, selected job) {
 	if current, e := b.read(ctx, selected.Request.From, selected.Task.ID); e != nil || current.Task.State == "cancelling" {
 		cancel()
 	}
-	result := runTurn(turnCtx, Session{AssistantID: a.ID, Binary: b.binary, Workspace: a.Workspace, Mode: a.Mode, ThreadID: a.ThreadID, Worker: b.worker}, selected.Request.Text, turnEvents{
-		Thread: func(thread string) error {
-			_, err := b.db.ExecContext(context.Background(), "UPDATE codex_link_assistants SET thread_id=? WHERE id=? AND (thread_id='' OR thread_id=?)", thread, a.ID, thread)
-			return err
-		},
+	result := runTurn(turnCtx, session, text, turnEvents{
+		Thread: bind,
 		Started: func(turn string) error {
 			return b.update(context.Background(), selected.Task.ID, func(j *job) error { j.TurnID = turn; return nil })
 		},
-		Approval: func() {
-			_ = b.update(context.Background(), selected.Task.ID, func(j *job) error {
-				if j.Task.State != "cancelling" {
-					j.Task.State = "waiting_approval"
-				}
-				return nil
-			})
+		Review: func(ctx context.Context, method string, params json.RawMessage) (string, error) {
+			if selected.Message != nil {
+				return "deny", nil
+			}
+			return b.awaitReview(ctx, selected, method, params)
 		},
 	})
 	_ = b.update(context.Background(), selected.Task.ID, func(j *job) error {
@@ -485,7 +529,7 @@ func (b *backend) execute(ctx context.Context, selected job) {
 	})
 }
 
-// receiveMessages admits each durable message to the same queue as tasks. A
+// receiveMessages admits each durable message to its assistant queue. A
 // message ID is its immutable request identity, including after a host restart.
 func (b *backend) receiveMessages(ctx context.Context) error {
 	rows, err := b.db.QueryContext(ctx, "SELECT envelope FROM agent_messages WHERE direction='incoming' AND state='queued' ORDER BY sequence LIMIT 32")
@@ -520,7 +564,7 @@ func (b *backend) receiveMessages(ctx context.Context) error {
 			sum := sha256.Sum256([]byte(e.ID))
 			request = "mail:" + hex.EncodeToString(sum[:])
 		}
-		_, err = b.submit(ctx, agentlink.TaskRequest{RequestID: request, From: e.From, AssistantID: e.To.AgentID, Text: e.Text}, &e)
+		_, err = b.submitMessage(ctx, agentlink.TaskRequest{RequestID: request, From: e.From, AssistantID: e.To.AgentID, Text: e.Text}, e)
 		if err != nil {
 			return err
 		}
@@ -531,7 +575,7 @@ func (b *backend) receiveMessages(ctx context.Context) error {
 	return nil
 }
 
-// Status reads and outbox delivery must construct the same immutable envelope.
+// Terminal messages publish one immutable reply to their original sender.
 func messageReply(j job) *protocol.Envelope {
 	parent := j.Message
 	if parent == nil || parent.Hops >= protocol.MaxMailHops {

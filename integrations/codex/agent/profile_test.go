@@ -180,7 +180,7 @@ func profileBrowserHandler(t *testing.T, app *transport.Application) (http.Handl
 	return handler, cookie
 }
 
-func TestCodexProfileThroughPotBrowserKeepsThreadAndWelcome(t *testing.T) {
+func TestCodexProfileThroughPotBrowserKeepsMessageSessionScope(t *testing.T) {
 	h, app, owner := profileApplication(t)
 	ctx := context.Background()
 	original, err := h.backend.resolve(ctx, "codex")
@@ -210,10 +210,7 @@ func TestCodexProfileThroughPotBrowserKeepsThreadAndWelcome(t *testing.T) {
 		}
 		return w.Body.Bytes()
 	}
-	welcome := call("GET", "/api/v1/snapshot", nil, 200)
-	if !strings.Contains(string(welcome), "运行在 Codex") || !strings.Contains(string(welcome), original.Name) {
-		t.Fatal(string(welcome))
-	}
+	call("GET", "/api/v1/snapshot", nil, 409)
 	read := func() agentlink.Profile {
 		var p agentlink.Profile
 		if err := json.Unmarshal(call("GET", "/api/v1/assistants/profile", nil, 200), &p); err != nil {
@@ -248,9 +245,6 @@ func TestCodexProfileThroughPotBrowserKeepsThreadAndWelcome(t *testing.T) {
 	current, _ := h.backend.resolve(ctx, "codex")
 	if current.ThreadID != "same-thread" || current.Workspace != original.Workspace || current.Mode != original.Mode {
 		t.Fatal("profile edit changed execution scope")
-	}
-	if !bytes.Equal(welcome, call("GET", "/api/v1/snapshot", nil, 200)) {
-		t.Fatal("welcome was rewritten after rename or duplicated")
 	}
 	var count int
 	h.tasks.QueryRow("SELECT count(*) FROM codex_link_jobs").Scan(&count)
@@ -318,24 +312,15 @@ func TestCodexProfileBrowserFixture(t *testing.T) {
 	}
 }
 
-func TestCodexSubscriptionPersistsFirstWelcomeLocale(t *testing.T) {
+func TestCodexAssistantDoesNotExposeUserChatOrTaskSubmission(t *testing.T) {
 	_, app, owner := profileApplication(t)
 	ctx := context.Background()
-	sub, err := app.Control.SubscribeAgent(ctx, owner, "zh-CN")
-	if err != nil {
-		t.Fatal(err)
+	if _, err := app.Control.SubscribeAgent(ctx, owner, "zh-CN"); err == nil {
+		t.Fatal("Codex exposed a direct user conversation")
 	}
-	defer sub.Close()
-	first, err := sub.Frame(ctx, 0, true)
-	if err != nil || len(first.Messages) != 1 || !strings.Contains(first.Messages[0].Text, "Codex") || !strings.Contains(first.Messages[0].Text, "我") {
-		t.Fatal(first, err)
-	}
-	again, err := app.Control.CallAgent(ctx, owner, agentlink.ChatRead, agentlink.Call{Query: map[string]string{"locale": "en"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	saved := again.(protocol.UIFrame)
-	if len(saved.Messages) != 1 || saved.Messages[0].Text != first.Messages[0].Text || saved.Cursor != first.Cursor || len(saved.Replies) != 0 {
-		t.Fatal("welcome was duplicated, relocalized or treated as execution", saved)
+	for _, operation := range []agentlink.Operation{agentlink.ChatRead, agentlink.ChatSend, agentlink.TaskSubmit, agentlink.Approvals} {
+		if _, err := app.Control.CallAgent(ctx, owner, operation, agentlink.Call{}); err == nil {
+			t.Fatal("assistant exposed executor control", operation)
+		}
 	}
 }

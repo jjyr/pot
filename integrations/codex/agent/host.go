@@ -29,7 +29,7 @@ import (
 	webassets "github.com/jjyr/pot/web"
 )
 
-const hostVersion = "7"
+const hostVersion = "10"
 const hostListen = "127.0.0.1:8792"
 const hostPeerListen = "127.0.0.1:8793"
 
@@ -216,12 +216,18 @@ func (h *agentHost) handler() http.Handler {
 			writeJSON(w, 200, directory)
 			return
 		}
-		if r.URL.Path == "/api/v1/agent-host/messages" && r.Method == "GET" {
-			items, err := h.mailbox.messages(r.Context())
-			if handleError(w, err) {
+		if r.URL.Path == "/api/v1/agent-host/executor" && r.Method == "POST" {
+			var in struct {
+				Workspace string `json:"workspace"`
+				Mode      string `json:"mode"`
+			}
+			if !body(w, r, &in) {
 				return
 			}
-			writeJSON(w, 200, map[string]any{"items": items})
+			if err := h.backend.ownerExecutor(r.Context(), in.Workspace, in.Mode); handleError(w, err) {
+				return
+			}
+			writeJSON(w, 200, map[string]bool{"accepted": true})
 			return
 		}
 		if r.URL.Path == "/api/v1/agent-host/tool" && r.Method == "POST" {

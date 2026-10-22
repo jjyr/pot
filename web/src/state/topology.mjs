@@ -19,7 +19,7 @@ export function assistantActivityState(value){
 export function nodeObservation(sample,status,now=Date.now()){
   const value=sample?.value,counts={running:0,queued:0,waiting_approval:0,waiting_allowance:0};
   const fresh=status==='connected'&&!!value&&!sample.error&&Number.isSafeInteger(sample.observed_at_ms)&&now-sample.observed_at_ms<30000&&sample.observed_at_ms<=now+1000;
-  for(const activity of value?.assistants||[])for(const key of Object.keys(counts))if(Number.isSafeInteger(activity[key])&&activity[key]>=0)counts[key]+=activity[key];
+  for(const activity of [...(value?.assistants||[]),...(value?.executor?[value.executor]:[])])for(const key of Object.keys(counts))if(Number.isSafeInteger(activity[key])&&activity[key]>=0)counts[key]+=activity[key];
   return {value,counts,fresh,observedAt:sample?.observed_at_ms||0};
 }
 
@@ -40,7 +40,7 @@ export function projectTopology(spaces,machines,linkPages=[]) {
       node.observation=nodeObservation(node.self?self?.observation:node.link?.observation,node.status);
       node.activities=new Map((node.observation.value?.assistants||[]).map(activity=>[activity.assistant_id,activity]));
       node.issue=node.status==='disconnected'?'':node.link?.last_error==='agent_link_reconnect_required'?'reconnect':node.status!=='connected'?'offline':!node.observation.fresh?'stale':'';
-      if(node.observation.fresh){for(const reason of ['fenced','approval','allowance','failed'])if([...node.activities.values()].some(activity=>assistantActivityState(activity)===reason)){node.issue=reason;break;}}
+      if(node.observation.fresh){for(const reason of ['fenced','approval','allowance','failed'])if([...node.activities.values(),...(node.observation.value?.executor?[node.observation.value.executor]:[])].some(activity=>assistantActivityState(activity)===reason)){node.issue=reason;break;}}
     }
   }
   const agents=nodes.filter(node=>node.kind!=='machine'),counts={running:0,queued:0};

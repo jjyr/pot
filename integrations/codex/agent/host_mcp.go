@@ -13,6 +13,7 @@ import (
 )
 
 type hostToolInput struct {
+	JobID           string  `json:"job_id,omitempty"`
 	Operation       string  `json:"operation"`
 	ConnectionID    string  `json:"connection_id,omitempty"`
 	RequestID       string  `json:"request_id,omitempty"`
@@ -66,6 +67,9 @@ func (h *agentHost) tool(ctx context.Context, in hostToolInput) (any, error) {
 		}
 		return h.backend.Profile(ctx, r)
 	case "send":
+		if in.JobID != "" && in.FromAssistantID == "" {
+			return nil, agentlink.ErrUnauthorized
+		}
 		if in.AssistantID == "" {
 			return nil, errors.New("agent_link_target_required")
 		}
@@ -86,7 +90,7 @@ func (h *agentHost) tool(ctx context.Context, in hostToolInput) (any, error) {
 				target := in.AssistantID
 				for _, a := range directory.Assistants {
 					if a.Address.AgentID == target {
-						return h.mailbox.sendFrom(ctx, h.backend.identity(from).Address, a.Address, in.RequestID, in.Text)
+						return h.mailbox.sendFrom(ctx, h.backend.identity(from).Address, a.Address, in.RequestID, in.Text, in.JobID)
 					}
 				}
 				return nil, errors.New("agent_link_not_found")
@@ -94,8 +98,8 @@ func (h *agentHost) tool(ctx context.Context, in hostToolInput) (any, error) {
 		}
 		return nil, errors.New("agent_link_not_found")
 	case "receipt":
-		var raw, state string
-		err := h.tasks.QueryRowContext(ctx, "SELECT envelope,state FROM agent_messages WHERE id=? AND direction='outgoing'", in.MessageID).Scan(&raw, &state)
+		var state string
+		err := h.tasks.QueryRowContext(ctx, "SELECT state FROM agent_messages WHERE id=? AND direction='outgoing'", in.MessageID).Scan(&state)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errors.New("message_not_found")
 		}
@@ -121,11 +125,12 @@ func hostMCP(in io.Reader, out io.Writer, root string) error {
 }
 func hostMCPServer(client hostClient) *mcp.Server {
 	assistantID := os.Getenv("POT_CODEX_ASSISTANT_ID")
+	jobID := os.Getenv("POT_CODEX_JOB_ID")
 	server := mcp.NewServer(&mcp.Implementation{Name: "pot-agent-link", Version: hostVersion}, nil)
 	tools := []*mcp.Tool{
 		{Name: "pot_open_connections", Description: "Prepare the local Pot connections page. Open the returned temporary URL in the Codex in-app browser using open_in_codex (target type browser). Do not print or share the URL. It grants short-lived connection-page access, never the durable owner credential. Invitations stay in the connection page and are never returned to this tool.", InputSchema: toolSchema(map[string]any{})},
 		{Name: "pot_connections", Description: "List established Agent Link nodes and their available assistants and capabilities. Receiver-owned task execution uses the same authenticated connection; owner administration remains local.", InputSchema: toolSchema(map[string]any{})},
-		{Name: "pot_assistants", Description: "List this node's persistent virtual assistants and its default. Each assistant owns one serialized chat/task session.", InputSchema: toolSchema(map[string]any{})},
+		{Name: "pot_assistants", Description: "List this node's persistent virtual assistants and its default. Each assistant owns its message session. Explicit Codex tasks own separate sessions.", InputSchema: toolSchema(map[string]any{})},
 		{Name: "pot_update_profile", Description: "Read or update this Pot assistant's saved name and avatar when the user requests it. A running virtual assistant is bound to its own identity; outside one, supply an explicit assistant_id from pot_assistants. Omit all edits to read. avatar_path is a workspace-relative PNG, JPEG or WebP file up to 8 MiB; reset_avatar restores the original character. Changes retain the Codex thread and appear in connected Pot directories.", InputSchema: toolSchema(map[string]any{"assistant_id": idSchema(), "name": textSchema(80), "avatar_path": textSchema(4096), "reset_avatar": map[string]any{"type": "boolean"}})},
 		{Name: "pot_send", Description: "Send an explicitly authorized peer message to an explicit assistant_id from the connection directory. No default recipient is selected. The host binds the processing parent from this virtual assistant's active message, preserving its conversation and causal bound. Reuse request_id only for an identical retry. Durable acceptance is not remote assistant completion.", InputSchema: toolSchema(map[string]any{"connection_id": idSchema(), "assistant_id": idSchema(), "request_id": idSchema(), "text": textSchema(65536)}, "connection_id", "assistant_id", "request_id", "text")},
 		{Name: "pot_message_receipt", Description: "Inspect an outgoing message's transport receipt. Received means durable remote inbox acceptance, not remote processing or task execution.", InputSchema: toolSchema(map[string]any{"message_id": idSchema()}, "message_id")},
@@ -144,6 +149,7 @@ func hostMCPServer(client hostClient) *mcp.Server {
 				return toolResult(nil, "invalid_payload"), nil, nil
 			}
 			data.FromAssistantID = assistantID
+			data.JobID = jobID
 			operations := map[string]string{"pot_connections": "connections", "pot_assistants": "assistants", "pot_update_profile": "profile", "pot_send": "send", "pot_message_receipt": "receipt"}
 			data.Operation = operations[tool.Name]
 			var value any

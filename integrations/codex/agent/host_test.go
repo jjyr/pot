@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -170,15 +172,15 @@ func TestAgentHostRestartStableIdentityAndMailbox(t *testing.T) {
 	h, root := testHost(t)
 	identity, owner := h.identity, h.token
 	peer := protocol.AgentRef{NodeID: "peer", Kind: "assistant", AgentID: "helper"}
-	outgoing, err := h.mailbox.send(ctx, peer, "request-1", "reference")
+	outgoing, err := h.mailbox.sendFrom(ctx, h.identity.Address, peer, "request-1", "reference", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	retry, err := h.mailbox.send(ctx, peer, "request-1", "reference")
+	retry, err := h.mailbox.sendFrom(ctx, h.identity.Address, peer, "request-1", "reference", "")
 	if err != nil || outgoing.ID != retry.ID {
 		t.Fatal(retry, err)
 	}
-	if _, err = h.mailbox.send(ctx, peer, "request-1", "changed"); err == nil {
+	if _, err = h.mailbox.sendFrom(ctx, h.identity.Address, peer, "request-1", "changed", ""); err == nil {
 		t.Fatal("conflicting retry accepted")
 	}
 	incoming := outgoing
@@ -216,17 +218,11 @@ func TestAgentHostRestartStableIdentityAndMailbox(t *testing.T) {
 	if h.identity != identity || h.token != owner {
 		t.Fatal("identity changed")
 	}
-	messages, err := h.mailbox.messages(ctx)
-	if err != nil || len(messages) != 1 || messages[0].State != "queued" {
-		t.Fatal(messages, err)
-	}
+	assertIncomingEnvelope(t, h.tasks, incoming, "queued")
 	if err = h.backend.receiveMessages(ctx); err != nil {
 		t.Fatal(err)
 	}
-	messages, err = h.mailbox.messages(ctx)
-	if err != nil || messages[0].State != "read" {
-		t.Fatal(messages, err)
-	}
+	assertIncomingEnvelope(t, h.tasks, incoming, "read")
 	if _, err = h.tool(ctx, hostToolInput{Operation: "acknowledge", MessageID: incoming.ID}); err == nil {
 		t.Fatal("manual consumer can steal a session message")
 	}
@@ -376,6 +372,12 @@ func TestAgentHostPeerDeliveryRemainsUnreadUntilCodexReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Settle both session-close projections while their databases still exist.
+	// Otherwise the asynchronous offline write races TempDir removal.
+	defer func() {
+		_ = a.links.Disconnect(ctx, connection.ID)
+		_ = b.links.Disconnect(ctx, connection.ID)
+	}()
 	get := httptest.NewRequest(http.MethodGet, "http://"+hostListen+"/api/v1/agent-links", nil)
 	get.Host = hostListen
 	get.RemoteAddr = "127.0.0.1:12345"
@@ -404,35 +406,27 @@ func TestAgentHostPeerDeliveryRemainsUnreadUntilCodexReads(t *testing.T) {
 	if item.DefaultAssistantID != "codex" || len(item.Assistants) != 1 || item.Assistants[0].Address != a.identity.Address || item.Revision != connection.CreatedAt.UnixMilli() || item.Peer.NodeID != a.identity.Address.NodeID || item.Peer.Address != endpoint {
 		t.Fatal("connected node directory mismatch", w.Body.String())
 	}
-	outgoing, err := a.mailbox.send(ctx, b.identity.Address, "from-a", "peer reference")
+	outgoing, err := a.mailbox.sendFrom(ctx, a.identity.Address, b.identity.Address, "from-a", "peer reference", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = a.links.Sync(ctx, connection.ID); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := b.mailbox.messages(ctx)
-	if err != nil || len(messages) != 1 || messages[0].Message.ID != outgoing.ID || messages[0].State != "queued" {
-		t.Fatal(messages, err)
-	}
-	// Durable transport delivery must not pretend that a Codex model read it.
+	assertIncomingEnvelope(t, b.tasks, outgoing, "queued")
+	// Durable delivery is distinct from admission by the assistant session.
 	if err = b.backend.receiveMessages(ctx); err != nil {
 		t.Fatal(err)
 	}
-	messages, err = b.mailbox.messages(ctx)
-	if err != nil || messages[0].State != "read" {
-		t.Fatal(messages, err)
-	}
-	if _, err = b.mailbox.send(ctx, a.identity.Address, "from-b", "authorized reply"); err != nil {
+	assertIncomingEnvelope(t, b.tasks, outgoing, "read")
+	reply, err := b.mailbox.sendFrom(ctx, b.identity.Address, a.identity.Address, "from-b", "authorized reply", "")
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err = b.links.Sync(ctx, connection.ID); err != nil {
 		t.Fatal(err)
 	}
-	messages, err = a.mailbox.messages(ctx)
-	if err != nil || len(messages) != 1 || messages[0].Message.Text != "authorized reply" {
-		t.Fatal(messages, err)
-	}
+	assertIncomingEnvelope(t, a.tasks, reply, "queued")
 }
 
 func TestAgentHostConfigurePinsTCPIdentity(t *testing.T) {
@@ -483,6 +477,44 @@ func TestAgentHostConfigurePinsTCPIdentity(t *testing.T) {
 		var saved string
 		if err = h.db.QueryRow("SELECT endpoint FROM codex_agent_host").Scan(&saved); err != nil || saved != endpoint {
 			t.Fatal("invalid peer replaced verified address", saved, err)
+		}
+	}
+}
+
+func assertIncomingEnvelope(t *testing.T, db *sql.DB, envelope protocol.Envelope, want string) {
+	t.Helper()
+	var raw, state string
+	if err := db.QueryRow("SELECT envelope,state FROM agent_messages WHERE id=? AND direction='incoming'", envelope.ID).Scan(&raw, &state); err != nil {
+		t.Fatal(err)
+	}
+	if raw != encoded(envelope) || state != want {
+		t.Fatal("incoming envelope/state changed", raw, state, want)
+	}
+}
+
+func TestCodexMailboxRejectsDirectUserInputs(t *testing.T) {
+	h, _ := testHost(t)
+	defer h.close()
+	e := protocol.Envelope{ID: "user-input", Kind: "message", From: protocol.AgentRef{NodeID: "pot", Kind: "user", AgentID: "user-session"}, To: h.identity.Address, ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: "direct chat"}
+	if _, err := h.mailbox.Deliver(context.Background(), e); !errors.Is(err, agentlink.ErrUnsupported) {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://"+hostListen+"/api/v1/agent-host/messages", nil)
+	request.RemoteAddr = "127.0.0.1:12345"
+	request.Header.Set("Authorization", "Bearer "+h.token)
+	response := httptest.NewRecorder()
+	h.handler().ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatal("manual inbox API remains exposed", response.Code, response.Body.String())
+	}
+	var count int
+	if err := h.tasks.QueryRow("SELECT COUNT(*) FROM agent_messages").Scan(&count); err != nil || count != 0 {
+		t.Fatal("direct user input was accepted", count, err)
+	}
+	for _, kind := range []string{"assistant", "task"} {
+		e.ID, e.From.Kind = "input-"+kind, kind
+		if _, err := h.mailbox.Deliver(context.Background(), e); err != nil {
+			t.Fatal(kind, err)
 		}
 	}
 }

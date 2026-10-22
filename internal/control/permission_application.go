@@ -67,7 +67,7 @@ func (s *Service) ApprovalView(ctx context.Context, assistantID string) map[stri
 		Approval
 		TaskTitle string `json:"task_title,omitempty"`
 	}
-	pending := []pendingApproval{}
+	pending := []any{}
 	for _, approval := range s.Permissions.Pending(assistantID) {
 		item := pendingApproval{Approval: approval}
 		if approval.Request.Task != "" {
@@ -77,7 +77,7 @@ func (s *Service) ApprovalView(ctx context.Context, assistantID string) map[stri
 		}
 		pending = append(pending, item)
 	}
-	return map[string]any{"policy": s.Permissions.Snapshot(), "pending": pending}
+	return s.reviewView(ctx, assistantID, s.Permissions.Snapshot(), pending)
 }
 
 func (s *Service) ManageApproval(ctx context.Context, assistantID string, body []byte) (any, error) {
@@ -92,6 +92,10 @@ func (s *Service) ManageApproval(ctx context.Context, assistantID string, body [
 	}
 	if err := protocol.DecodeStrict(body, &input); err != nil {
 		return nil, err
+	}
+	if isLinkedApproval(input.ID) {
+		err := s.decideLinkedApproval(ctx, assistantID, input.ID, input.Action)
+		return map[string]bool{"accepted": err == nil}, err
 	}
 	var err error
 	switch input.Action {

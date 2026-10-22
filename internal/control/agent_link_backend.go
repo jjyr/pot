@@ -72,6 +72,9 @@ func (b potLinkBackend) Directory(ctx context.Context) (agentlink.Directory, err
 
 func callerKey(a protocol.AgentRef) string { raw, _ := json.Marshal(a); return string(raw) }
 func (b potLinkBackend) Submit(ctx context.Context, r agentlink.TaskRequest) (agentlink.Task, error) {
+	if r.Executor != "" {
+		return agentlink.Task{}, agentlink.ErrUnsupported
+	}
 	if r.Configuration != nil {
 		if r.From.NodeID != b.s.options.RuntimeID || r.From.Kind != "assistant" || r.AssistantID != r.From.AgentID || r.Configuration.RequestID != r.RequestID || r.Configuration.Text != r.Text || r.Configuration.Target != nil || r.Configuration.LinkID != "" {
 			return agentlink.Task{}, agentlink.ErrUnauthorized

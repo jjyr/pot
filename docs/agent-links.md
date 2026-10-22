@@ -6,6 +6,13 @@ status, cancellation and result notification. Each receiver owns its models,
 credentials, workspaces, permissions and execution supervision. A connection
 never grants owner HTTP APIs, model proxying or raw process launch access.
 
+A Codex node advertises a caller-scoped `task_executor` independently of its
+assistant directory. Explicit tasks map directly to independent Codex threads.
+Only their original directing assistant's authenticated user may approve their
+operations. Assistant messages never carry approval authority or request user
+approval; the receiving assistant declines operations outside its permissions and
+reports the denial. See [Codex execution](task-coordination.md#codex-execution).
+
 The [architecture overview](architecture.md) shows the shared local/peer operation
 port and its execution adapters.
 
@@ -17,13 +24,15 @@ assistant IDs and execution IDs are distinct. Names and origin icons are display
 metadata. One machine can host several autonomous nodes.
 
 `Directory` advertises the current assistants, persisted default assistant ID
-and per-assistant operation descriptions. Pot exposes real assistants. Codex exposes virtual assistants;
-each owns one persistent Codex session. Chat and tasks for the same virtual
-assistant execute serially in that session. Additional assistants allow separate
-contexts and parallel work; using the same filesystem does not isolate files.
+and per-assistant operation descriptions. Pot exposes real assistants. Codex exposes
+virtual assistants for assistant messaging and presentation management; each owns
+one persistent message context. Its node-level `task_executor` advertises explicit
+task submit/read/cancel/input and human review, separately from assistant controls.
+One task owns one persistent Codex thread, without an assistant target. Task and
+message sessions do not share context; shared workspaces still share files.
 
-An explicit target wins. An omitted target uses the receiver's persisted default,
-initially its first assistant. Resolution occurs once at durable acceptance.
+For ordinary Pot task routing, an explicit target wins. An omitted target uses
+the receiver's persisted default, initially its first assistant. Resolution occurs once at durable acceptance.
 Exact retries return that original receipt even after the default changes or the
 assistant is removed. Removing the default does not silently select another:
 the directory advertises an empty default until the owner chooses a valid one.
@@ -145,8 +154,10 @@ distributed execution services.
 implementation owns in-process calls and authenticated remote calls. The receiver
 enforces per-assistant operation support and caller ownership; unsupported
 operations return a specific error. Capability checks for new submissions must
-not prevent exact retries from returning an already accepted receipt. Legacy
-node-wide feature flags are replaced by the per-assistant descriptions.
+not prevent exact retries from returning an already accepted receipt. Optional
+`ChatBackend`, `TaskInputBackend` and `ReviewBackend` interfaces supply only the
+operations that an adapter implements. Codex implements task input and human
+review; direct user chat is provided by Pot adapters.
 Remote operations are scoped to the authenticated node and original caller
 address, including its assistant, task or user kind. Returned task IDs, request
 identity and assistant node are checked.
@@ -186,8 +197,8 @@ admission failures surface in the original task list and notification route.
 Cancellation never fabricates completion; before the remote reference arrives,
 a durable cancellation intent waits for acceptance and then targets that task.
 
-Direct user chats use a persisted user session address per connection and target
-assistant, rather than the local default assistant. User requests address an
+Direct user chats with another Pot use a persisted user session address per
+connection and target assistant, rather than the local default assistant. User requests address an
 assistant; assistant replies to user addresses require the original request,
 conversation and full sender/recipient binding. They enter the durable user
 projection without autonomous local processing. Session addresses survive default
@@ -196,7 +207,7 @@ receiver-owned execution policy; a user session address grants no remote owner
 API access. Proactive messages still address a real assistant explicitly. A
 Codex sender discovers the current directory and supplies assistant_id; omission
 or a removed target fails without selecting another recipient. Task delegation
-retains its separate receiver-default contract.
+uses the explicit executor or ordinary Pot routing contract.
 
 The existing mailbox owns messages and immutable delivery receipts. Pending
 selection filters both node IDs before applying the page bound, preserving
@@ -238,8 +249,8 @@ ends remains intermediate output.
 
 The [UI event contract](ui-events.md#main-conversation-streams) defines wire fields and
 states. See [database migrations](database-migrations.md) for persisted projection
-upgrades and the [Codex adapter](../integrations/codex/README.md) for job projection
-and output timing. Upgrade Pot and its Codex plugin together for this contract.
+upgrades. This chat execution projection applies to receivers that implement
+`ChatBackend`; it is separate from Codex tasks and assistant messaging.
 
 ## Lifecycle and upgrades
 
@@ -249,28 +260,9 @@ connection and removes its active directory projection; a minimal authenticated
 tombstone fences a stale peer. Messages, tasks, results and receipts remain.
 Neither action silently cancels receiver-owned execution.
 
-Control migration `0017_agent_link_nodes` fences previous assistant-scoped links
-and expires their invitations. Re-copy an invitation to authorize node-wide
-collaboration. Old mailbox history, IDs, keys and encrypted receipts are retained;
-upgrading never replays execution. `0018_agent_link_delegation_stop` persists
-cancellation intent and direct-chat sender binding. Tasks migration
-`0011_agent_link_task_targets` explicitly introduces optional target/source fields
-without changing existing run identity or uncertain-effect receipts.
-
-The old Bridge pairing, independent HTTP/MCP/SSE delegation channel and Pot-side
-`codex_*` plugin are removed. See the [Codex adapter](../integrations/codex/README.md)
-for installation, virtual assistant configuration and conservative restart fences.
-See [database migrations](database-migrations.md) for upgrade and backup rules.
-
-Control migration `0020_agent_link_direct_chat` upgrades established version-4
-connection presentation anchors to version-5 node identities, preserving node
-pins, connection IDs, histories and receipts. Unfinished admissions remain fenced
-and need a fresh invitation; old invitations expire. Historical chat sender
-bindings remain unchanged. New chats persist their own user session identity.
-Tasks migration `0012_agent_link_direct_chat` records the typed user message
-contract and indexes delivery routes without rewriting old immutable envelopes.
-Upgrade Pot and its Codex plugin together; old wire versions are not accepted.
-
-Control migration `0022_agent_link_operations` expands cached node feature flags
-into per-assistant peer operation descriptions. It preserves peer pins, routes,
-accepted task payloads and immutable receipts and never replays execution.
+Persisted schemas and upgrade procedures are documented in
+[database migrations](database-migrations.md). Upgrade connected Pot and Codex
+adapters together. Admission requiring a new invitation stays fenced until the
+user reconnects; upgrades never replay unfinished execution. See the
+[Codex adapter](../integrations/codex/README.md) for installation, local execution
+scope and conservative restart behavior.

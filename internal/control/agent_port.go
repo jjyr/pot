@@ -117,8 +117,14 @@ func (s *Service) CallAgent(ctx context.Context, owner string, operation agentli
 				link := d.Info.AgentLink.LinkID
 				if link == "local" {
 					ops = append(ops, agentlink.TaskCancel)
-				} else if connection, err := s.agentLinks.service.Get(ctx, link); err == nil && connection.State != "revoked" && connection.Directory != nil && connection.Directory.Operations[d.Info.AgentLink.AssistantID].Supports(agentlink.TaskCancel) {
+					if d.Request.Executor == "codex" {
+						ops = append(ops, agentlink.TaskInput)
+					}
+				} else if connection, err := s.agentLinks.service.Get(ctx, link); err == nil && connection.State != "revoked" && connection.Directory != nil && ((d.Request.Executor == "codex" && connection.Directory.TaskExecutor != nil && connection.Directory.TaskExecutor.Supports(agentlink.TaskCancel)) || connection.Directory.Operations[d.Info.AgentLink.AssistantID].Supports(agentlink.TaskCancel)) {
 					ops = append(ops, agentlink.TaskCancel)
+					if d.Request.Executor == "codex" {
+						ops = append(ops, agentlink.TaskInput)
+					}
 				}
 			}
 		}
@@ -337,6 +343,23 @@ func (p agentPort) Call(ctx context.Context, target agentlink.Target, operation 
 
 func (p agentPort) linkedCall(ctx context.Context, target agentlink.Target, op agentlink.Operation, call agentlink.Call) (any, error) {
 	s := p.s
+	if op == agentlink.Approvals {
+		owner := "agent-link:" + target.LinkID + ":" + target.AssistantID
+		if call.Action == "read" {
+			return s.reviewView(ctx, owner, nil, []any{}), nil
+		}
+		var input struct {
+			ID     string `json:"id"`
+			Action string `json:"action"`
+		}
+		if err := protocol.DecodeStrict(call.Body, &input); err != nil {
+			return nil, err
+		}
+		if !isLinkedApproval(input.ID) {
+			return nil, agentlink.ErrInvalid
+		}
+		return s.ManageApproval(ctx, owner, call.Body)
+	}
 	if op == agentlink.AssistantDelete {
 		var input struct {
 			Revision uint64 `json:"revision" required:"true"`
@@ -585,6 +608,13 @@ func (p agentPort) taskCall(ctx context.Context, owner string, op agentlink.Oper
 	if s.LinkTask(ctx, owner, call.ID) {
 		if op == agentlink.TaskEvents {
 			return map[string]any{"events": []any{}, "cursor": 0, "has_more": false, "unavailable": true}, nil
+		}
+		if op == agentlink.TaskInput && call.Action == "write" {
+			var input protocol.TaskInput
+			if err := protocol.DecodeStrict(call.Body, &input); err != nil {
+				return nil, err
+			}
+			return s.guideLinkTask(ctx, owner, call.ID, input)
 		}
 		if op == agentlink.TaskInput && call.Action == "read" {
 			return []any{}, nil

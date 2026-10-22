@@ -157,6 +157,9 @@ func (s *Service) GetTx(ctx context.Context, tx *sql.Tx, assistant, id string) (
 }
 
 func (s *Service) Prepare(ctx context.Context, assistant string, request protocol.CreateTask) (Selection, error) {
+	if request.Executor != "" {
+		return Selection{}, fmt.Errorf("explicit executor must use the task delegation port")
+	}
 	if !core.Identifier(assistant) {
 		return Selection{}, fmt.Errorf("invalid assistant identity")
 	}

@@ -46,7 +46,9 @@ caller-owned database. `CredentialResolver` provides scoped reads for execution
 callers. `pkg/integrations/github` implements GitHub browser device authorization.
 Codex is an autonomous Agent Link adapter in `integrations/codex/agent`,
 with executable `cmd/pot-codex-agent`. It exposes persistent virtual assistants
-and receiver-owned execution through `pkg/agentlink.Backend`; it is not an
+for messages and an independent task executor through `pkg/agentlink.Backend`.
+Direct user chat is an optional `ChatBackend` capability implemented by Pot
+adapters. Codex is not an
 OAuth account or a separate Bridge service. See the
 [integration guide](../integrations/codex/README.md) and [Integrations](credentials.md) for API and lifecycle contracts.
 

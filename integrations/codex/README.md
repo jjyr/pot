@@ -2,10 +2,10 @@
 
 Codex joins Pot through the same Agent Link invitation and TLS 1.3 TCP transport
 as another Pot node. The local plugin owns a directory of virtual assistants.
-Each virtual assistant maps to one persistent Codex App Server thread. Direct
-chat and delegated tasks use that same thread, in one queue per assistant.
-Separate assistants can run in parallel and retain separate conversation context.
-Assistants pointing at the same directory still share those files.
+Each virtual assistant owns its persistent message context. Explicit Codex tasks
+bypass assistants: each task owns one independent persistent App Server thread.
+Task continuations resume that thread; unrelated tasks can execute in parallel.
+Workspaces remain receiver-owned and shared directories do not isolate files.
 
 The local MCP stdio surface uses [the shared MCP component](../../docs/mcp.md)
 and its official Go SDK server. Agent Link and Codex App Server JSONL retain
@@ -18,13 +18,12 @@ in reported task counts. Directional pending-message summaries are scoped to the
 authenticated peer. Pot displays these summaries in the existing icon topology.
 
 ```text
-Pot chat / task tools
-        |
-   Agent Link (directory, messages, profile, submit, status, cancel)
-        | TLS 1.3 / Yamux / CBOR + optional Zstd
-Codex Agent Link host
-        +-- assistant A -- serial chat/task queue -- persistent Codex thread A
-        +-- assistant B -- serial chat/task queue -- persistent Codex thread B
+Pot assistant -- create_task(executor=codex) --> task T --> Codex thread T
+      ^                    | approval / result                 |
+      +--------------------+-----------------------------------+
+Pot assistant -- send_message --> Codex assistant --> message thread
+      ^                              | extra approval: decline
+      +--------- result / denial ----+
 ```
 
 Online users may retire an idle virtual assistant through the separate
@@ -35,12 +34,11 @@ restart and owner configuration cannot resurrect that ID. Removing the default
 leaves the default unset. This does not delete the underlying Codex thread or
 workspace files, and other assistants and the node connection remain available.
 
-The receiving host chooses its local Codex login, model configuration, workspace
-and sandbox mode. Remote requests cannot select arbitrary paths, change sandbox
-permissions or approve an interactive request. The host declines approvals and
-reports that local review is required. File references remain workspace-relative
-on the receiving machine; the adapter does not advertise artifact downloads.
-
+The receiving host chooses the Codex login, model, workspace and sandbox mode.
+Only the user in the directing assistant can approve that assistant's explicitly
+delegated Codex task operations. Assistant messages carry no approval authority;
+requests needing a human decision are declined and reported to the sender.
+See [task and approval contract](../../docs/task-coordination.md#codex-execution).
 ## Install and connect
 
 Install from the same revision as Pot:
@@ -92,23 +90,15 @@ still prevent access; discovery does not prove remote reachability.
 
 Copy the connection segment on one side and paste it into **Add Agent** on the
 other side. Only one side needs a reachable address; the same connection carries
-traffic in both directions. The node directory supplies available assistants. Pot can connect and chat with
-Codex and submit tasks without any local assistant or API. The directory
-advertises versioned `peer` operation descriptions per assistant; Pot uses them
-for controls and queries. Node identity owns connection admission. Task callers
-can be authenticated assistants, tasks or user sessions; the original caller
-owns receipts and result routing. A persistent user session address owns direct
-chat and its correlated replies. Peer task submission cannot supply owner-only
-configuration, model credentials or Skills. An explicitly
-selected assistant handles the work; otherwise the receiver uses its persisted
-default, initially its first assistant. An accepted task keeps its original
-assistant even when the default subsequently changes.
+traffic in both directions. The directory advertises assistant profile/deletion
+controls and a separate caller-scoped task executor. A local Pot assistant owns
+its explicit Codex task receipts, results and pending human approvals. Messages
+address a real assistant explicitly. Peer submissions cannot select owner-only
+configuration, model credentials or Skills.
 
 The initial `codex` assistant uses an isolated read-only directory under the host
 root. New assistants receive the same random kitchen name and saved character
 avatar as ordinary Pot assistants; an explicit name overrides the random name.
-Pot saves an introduction in the first reader's UI language when opening an empty
-Codex conversation. This does not start a Codex turn or alter existing history.
 Create another assistant for an owner-selected workspace:
 
 ```sh
@@ -145,24 +135,59 @@ communication. The TCP endpoint never exposes the owner HTTP API. Identity keys
 and owner credentials are encrypted; the host root must be owner-only.
 
 The detached host keeps receiving work after an MCP chat closes. Subsequent
-plugin processes verify and reuse that host. Version 7 requires stopping an old
-message host before upgrading. Stable node identity, message IDs and history
-survive the database migration. The old independent Bridge pairing, HTTP/SSE
-channel, `codex_*` tools and Pot-side Codex integration plugin have been removed.
-Old configuration/history files are not silently deleted or replayed.
+plugin processes verify and reuse that host. Stop the host before an upgrade;
+an incompatible running version is rejected without rewriting its databases.
+Stable node identity, message IDs, sessions and history survive migrations.
+See [database migrations](../../docs/database-migrations.md) for backup and
+upgrade rules.
 
 ## Execution and recovery
 
-The receiver durably admits each request before execution. Exact retries return
-the same task; a changed request with the same identity conflicts. Direct incoming
-messages enter the same assistant queue as tasks, and final replies retain their
-original peer, assistant, conversation and causal parent. Durable inbox acceptance
-remains distinct from completed execution.
+### Human approvals in Pot
+
+`create_task({executor:"codex", text:"Title\nInstructions"})` chooses the sole
+available Codex node; set `link_id` to choose explicitly when several are connected.
+Do not supply an assistant target. Omission of `executor` retains existing task
+execution. Unavailable or ambiguous Codex selection fails without fallback.
+
+The host's independent task execution scope initially uses its isolated read-only
+workspace. Configure future tasks locally with:
+
+```sh
+~/.codex/plugins/pot/bin/pot-codex-agent executor \
+  --root ~/.config/pot-codex/agent --workspace /absolute/path --mode workspace-write
+```
+
+Accepted tasks retain their workspace and mode. Their thread binding is persisted
+before the first effective turn. Completed/cancelled tasks accept idempotent owner
+guidance through `task.input` / `send_message` to the task address, starting a new
+run in the same thread. Guidance during an active run is rejected; callers wait
+for its outcome. Unknown cleanup fences that task's continuation, not unrelated
+tasks. Restart never replays unfinished accepted work.
+
+Codex retains its configured approval policy and reviewer; the adapter does not
+force a human reviewer. Automatic review stays on Codex: its lifecycle events
+are muted and its decisions/history are never sent over Agent Link. Only
+pending requests for a human decision enter the directing assistant's existing
+approval list and card, which show exact command, cwd, reason,
+file changes and network scope. **Allow once** sends App Server `accept` for the
+single request; **Deny** sends `decline`. Models cannot approve. Caller identity,
+task, thread and turn are checked; a different assistant cannot decide. No
+session-wide approval or policy amendment is offered. Cancellation, completion,
+server resolution and host shutdown invalidate pending requests. Decisions do
+not create a persisted grant.
+
+Ordinary messages execute in the receiving assistant's message context. They
+never request approval in either assistant's UI: human approval requests are declined
+and the original sender receives a failure reply. Execution outcomes use the
+normal task-result/message paths, without a separate approval outcome panel.
+Resolved requests disappear from the existing pending approval list. Unsupported interactive
+requests fail visibly; they do not open another approval path.
 
 Normal completion waits for `turn/completed` and supervised process cleanup
 before making the reply eligible for delivery to Pot. Successful replies contain the
 final answer, excluding commentary and explicitly marked intermediate answers.
-Command output, reasoning and progress notifications are disabled on this
+Command output, reasoning, automatic-review and progress notifications are disabled on this
 connection; remaining tool items are discarded after reading and never included
 in replies. Approval requests and turn lifecycle notifications remain enabled.
 Resuming a thread excludes its history from the response without changing Codex's
@@ -170,11 +195,8 @@ persistent conversation context.
 
 Failed and cancelled message replies carry `state`, `error` and `partial_output`
 as JSON text, including when no model output was produced. The original reply
-route and receipt behavior apply to these outcomes as well. Status reads and
-outbox delivery return the identical envelope. The chat view shows only
-`partial_output` as prose when the receiver's lifecycle confirms the same
-terminal outcome and diagnostic; the localized failure and raw diagnostic stay
-in the reply status. Successful JSON answers remain verbatim. Thread-open
+route and receipt behavior apply to these outcomes as well. The outbox publisher
+commits each terminal reply exactly once. Thread-open
 failures retain the RPC method, rejection code and bounded server diagnostic,
 so a resume failure can be investigated without replacing its saved thread.
 App Server JSONL
@@ -186,7 +208,7 @@ Disconnect pauses transport and preserves configuration. Reconnect resumes it.
 Delete removes the saved connection and directory entries. Neither operation
 silently cancels accepted work or removes its history.
 
-The host starts or resumes the assistant's persistent App Server thread and
+The host starts or resumes the task's or message assistant's App Server thread and
 persists the thread ID before starting a turn. Failure to resume never silently
 creates a replacement context. A thread has one App Server writer, including
 while that writer is idle. Opening the adapter's thread in Codex desktop or
@@ -204,37 +226,29 @@ Cancellation requests interruption; cancellation
 is final only after a confirmed interrupted turn and supervised process cleanup.
 Restart never replays unfinished work: queued tasks fail before execution and
 started tasks fail with unknown outcome. Unknown cleanup fences new admission
-for that assistant and requires local reconciliation; inspect the original
-process/workspace and use a new assistant only after confirming it stopped.
+for that task or message assistant and requires local reconciliation; inspect the
+original process/workspace before creating replacement work.
 
 The JSONL protocol follows Codex CLI 0.163.0 App Server v2 (`initialize`,
 `thread/start`, `thread/resume`, `turn/start`, `turn/interrupt`). Authentication and
-model configuration remain local to Codex. Deterministic tests use a supervised
-fixture and do not claim live paid model or two-machine Tailscale qualification.
+model configuration remain local to Codex. The protocol fixture runs without
+model credentials; see [development](../../docs/development.md) for its commands.
 
 ```sh
 mise exec -- go test -race ./integrations/codex/agent
 mise exec -- python3 integrations/codex/install_test.py
 ```
 
-## Explicit message recipients
-
-Plugin 0.8.0 / host version 7 uses Agent Link invitation version 5. Upgrade it with
-Pot from the same revision. Established connections retain their node pins and
-IDs after migration; unfinished admissions need a fresh invitation. Existing
-virtual assistants, Codex threads and mailbox history remain intact.
+## Assistant messages
 
 `pot_connections` exposes connected nodes and their assistant directories.
 `pot_send` requires `connection_id`, `assistant_id`, `request_id` and `text`.
-Codex chooses a real recipient from the directory. Missing or deleted targets
-fail instead of selecting the receiver default. This does not change task
-submission's persisted default behavior. Direct chat results return through the
-original request to the Pot user's conversation even when that Pot has no local
-assistants. Local owner configuration is not a recipient binding UI.
+Codex chooses an explicit recipient from the directory. Missing or deleted
+recipients fail without choosing a default. The runtime binds the executing
+message parent; a task cannot impersonate an assistant to send peer messages.
 
-The Codex adapter implements the shared [chat endpoint contract](../../docs/agent-links.md#chat-execution-projection).
-Its authenticated `chat.status` read projects the original caller-owned job and
-returns the durable final reply even before the ordinary outbox publisher wakes;
-subsequent delivery deduplicates that identical envelope. Cleanup uncertainty
-remains unknown. Codex text is currently published at turn completion; this
-adapter does not advertise incremental text or tool events.
+Incoming assistant and task references enter the addressed assistant's durable
+queue. The host admits, runs and acknowledges them automatically, then publishes
+one terminal reply through the ordinary Agent Link mailbox. The adapter does not
+offer direct user chat or a manual inbox consumer. Explicit Codex task execution
+uses the independent node executor described above.

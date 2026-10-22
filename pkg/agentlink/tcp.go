@@ -93,7 +93,7 @@ func (s *Service) handler(id string, remote peer.Identity) peer.Handler {
 				return nil, ErrInvalid
 			}
 			result = connection
-		case "directory", "observe", "task.submit", "task.status", "task.cancel", "chat.status", "assistant.profile", "assistant.delete":
+		case "directory", "observe", "task.submit", "task.status", "task.cancel", "task.input", "chat.status", "assistant.profile", "assistant.delete", "execution.review":
 			return s.business(ctx, connection, remote, request)
 		case "exchange":
 			var input exchangeRequest

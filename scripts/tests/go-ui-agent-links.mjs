@@ -56,3 +56,5 @@ assert.equal(agentFailureKey('prefix: original_execution_unavailable'),'agentLin
 assert.equal(agentFailureKey('arbitrary provider diagnostic'),null);
 assert.equal(agentFailureKey('codex_thread_in_use: codex_rpc_rejected_thread_resume (-32600): thread busy-thread already has an active writer'),'agentLinks.codexSessionInUse');
 assert.equal(agentFailureKey('codex_thread_open_failed: codex_rpc_rejected_thread_resume (-32600): session unavailable'),'agentLinks.codexSessionFailed','Other resume failures do not claim another client owns the conversation');
+
+assert.equal(projectLinkedAssistants({items:[{id:'executor',peer:{node_id:'codex',kind:'codex'},status:'connected',directory:{assistants:[{address:{agent_id:'worker'},name:'Worker'}],operations:{worker:{version:1,scope:'peer',operations:['assistant.profile','assistant.delete']}},task_executor:{version:1,scope:'caller',operations:['task.submit']}}}]},space).length,0,'A message-only assistant is not a direct user chat');

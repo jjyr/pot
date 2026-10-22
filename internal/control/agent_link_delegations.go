@@ -55,7 +55,7 @@ func (s *Service) createTaskFrom(ctx context.Context, owner string, from protoco
 	if request.Target != nil && request.LinkID == "" && request.Target.NodeID == s.options.RuntimeID && request.Target.AgentID == owner {
 		request.Target = nil
 	}
-	if request.LinkID == "" && request.Target == nil {
+	if request.LinkID == "" && request.Target == nil && request.Executor == "" {
 		accepted, e := s.agentLinks.service.Submit(ctx, "", agentlink.TaskRequest{Configuration: &request, RequestID: request.RequestID, From: from, AssistantID: owner, Text: request.Text})
 		if e != nil {
 			return protocol.TaskInfo{}, e
@@ -76,6 +76,26 @@ func (s *Service) createTaskFrom(ctx context.Context, owner string, from protoco
 	links, e := s.agentLinks.service.List(ctx)
 	if e != nil {
 		return protocol.TaskInfo{}, e
+	}
+	if request.Executor == "codex" && request.LinkID == "" {
+		chosen := ""
+		for _, c := range links {
+			if c.State == "revoked" || c.Peer.Adapter != "codex" {
+				continue
+			}
+			directory, err := s.agentLinks.service.Directory(ctx, c.ID)
+			if err != nil || directory.TaskExecutor == nil || !directory.TaskExecutor.Supports(agentlink.TaskSubmit) {
+				continue
+			}
+			if chosen != "" {
+				return protocol.TaskInfo{}, agentlink.ErrConflict
+			}
+			chosen = c.ID
+		}
+		request.LinkID = chosen
+		if chosen == "" {
+			return protocol.TaskInfo{}, agentlink.ErrNotFound
+		}
 	}
 	var selected *agentlink.Connection
 	if request.LinkID == "" && request.Target != nil && request.Target.NodeID == s.options.RuntimeID {
@@ -102,17 +122,31 @@ func (s *Service) createTaskFrom(ctx context.Context, owner string, from protoco
 	if request.Target != nil && selected.PeerHost.NodeID != request.Target.NodeID {
 		return protocol.TaskInfo{}, agentlink.ErrConflict
 	}
+	if request.Executor == "codex" {
+		if from.Kind != "assistant" || selected.Peer.Adapter != "codex" || request.Target != nil {
+			return protocol.TaskInfo{}, agentlink.ErrUnsupported
+		}
+		directory, err := s.agentLinks.service.Directory(ctx, selected.ID)
+		if err != nil {
+			return protocol.TaskInfo{}, err
+		}
+		if directory.TaskExecutor == nil || !directory.TaskExecutor.Supports(agentlink.TaskSubmit) {
+			return protocol.TaskInfo{}, agentlink.ErrUnsupported
+		}
+	} else if selected.Peer.Adapter == "codex" {
+		return protocol.TaskInfo{}, agentlink.ErrUnsupported
+	}
 	// Models and permissions belong to the receiver; never forward local secrets,
 	// provider profiles or executable model settings to a connected node.
 	if request.Profile != nil || request.Model != nil || request.Skills != nil || request.Workspace.Mode() == "worktree" || request.Requirements.Desktop || request.Requirements.ExactBudget || request.Requirements.LiveSteering {
 		return protocol.TaskInfo{}, agentlink.ErrUnsupported
 	}
-	r := agentlink.TaskRequest{RequestID: request.RequestID, From: from, Text: request.Text, Workspace: request.Workspace.ProjectDir}
+	r := agentlink.TaskRequest{Executor: request.Executor, RequestID: request.RequestID, From: from, Text: request.Text, Workspace: request.Workspace.ProjectDir}
 	if request.Target != nil {
 		r.AssistantID = request.Target.AgentID
 	}
 	id, _ := core.HashJSON([]string{"agent-link-task", owner, request.RequestID})
-	payload, _ := json.Marshal(request)
+	payload := encodedRequest
 	var written bool
 	if err := s.Tasks.DB().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM task_writes WHERE assistant_id=? AND request_id=?)", owner, request.RequestID).Scan(&written); err != nil {
 		return protocol.TaskInfo{}, err
@@ -155,6 +189,38 @@ func (s *Service) GetTask(ctx context.Context, owner, id string) (any, error) {
 	}
 	return s.Tasks.Get(ctx, owner, id)
 }
+func (s *Service) guideLinkTask(ctx context.Context, owner, id string, input protocol.TaskInput) (any, error) {
+	s.linkMu.Lock()
+	defer s.linkMu.Unlock()
+	d, err := s.linkDelegation(ctx, owner, id)
+	if err != nil {
+		return nil, err
+	}
+	if d.Request.Executor != "codex" || d.Request.From.Kind != "assistant" || d.Request.From.AgentID != owner || d.Remote.ID == "" {
+		return nil, agentlink.ErrUnsupported
+	}
+	remote, err := s.agentLinks.service.Input(ctx, d.Info.AgentLink.LinkID, agentlink.TaskGuidance{From: d.Request.From, ID: d.Remote.ID, RequestID: input.RequestID, Text: input.Text})
+	if err != nil {
+		return nil, err
+	}
+	if remote.RunID == d.Remote.RunID {
+		return remote, nil
+	}
+	d.Remote = remote
+	d.Info.Phase = protocol.TaskPhase(remote.State)
+	d.Info.RunID = linkRunID(remote.RunID)
+	d.Info.Archived = false
+	d.Info.ArchiveReason = ""
+	d.Info.UpdatedAtMS = remote.UpdatedAt.UnixMilli()
+	raw, _ := json.Marshal(d)
+	_, err = s.integrationDB.ExecContext(ctx, "UPDATE agent_link_delegations SET body=?,notified=0,stop_requested=0 WHERE id=? AND owner=?", string(raw), id, owner)
+	if err == nil {
+		s.wakeTasks()
+		s.Changes.Notify("tasks")
+	}
+	return remote, err
+}
+
 func (s *Service) StopTask(ctx context.Context, owner, id, mode string) error {
 	d, e := s.linkDelegation(ctx, owner, id)
 	if errors.Is(e, sql.ErrNoRows) {
@@ -230,11 +296,14 @@ func (s *Service) syncLinkDelegations(ctx context.Context) {
 				remote = cancelled
 			}
 		}
-		if d.Remote.ID != "" && (d.Remote.ID != remote.ID || d.Remote.RequestID != remote.RequestID || d.Remote.Assistant.Address != remote.Assistant.Address) {
+		if d.Remote.ID != "" && (d.Remote.ID != remote.ID || d.Remote.RequestID != remote.RequestID || d.Remote.Receiver().Address != remote.Receiver().Address) {
 			continue
 		}
 		d.Remote = remote
 		d.Info.RunID = linkRunID(it.id)
+		if remote.RunID != "" {
+			d.Info.RunID = linkRunID(remote.RunID)
+		}
 		d.Info.Phase = protocol.TaskPhase(remote.State)
 		if remote.State == "completed" {
 			d.Info.Phase = protocol.TaskComplete
@@ -247,12 +316,18 @@ func (s *Service) syncLinkDelegations(ctx context.Context) {
 		if d.Info.UpdatedAtMS <= 0 {
 			d.Info.UpdatedAtMS = d.Info.CreatedAtMS
 		}
-		if remote.Assistant.Address.Valid() {
-			d.Info.AgentLink.AssistantID = remote.Assistant.Address.AgentID
-			d.Info.AgentLink.Name = remote.Assistant.Name
+		if remote.Receiver().Address.Valid() {
+			if remote.Execution == nil {
+				d.Info.AgentLink.AssistantID = remote.Assistant.Address.AgentID
+			}
+			d.Info.AgentLink.Name = remote.Receiver().Name
 		}
 		s.linkMu.Lock()
 		if current, err := s.linkDelegation(ctx, it.owner, it.id); err == nil {
+			if current.Remote.RunID != it.d.Remote.RunID {
+				s.linkMu.Unlock()
+				continue
+			}
 			d.Info.Archived = current.Info.Archived
 			d.Info.ArchiveReason = current.Info.ArchiveReason
 		}
@@ -267,7 +342,7 @@ func (s *Service) syncLinkDelegations(ctx context.Context) {
 		if terminalLinkTask(remote.State) && it.notified == 0 {
 			if e = s.linkTaskNotification(ctx, it.id, it.owner, d); e == nil {
 				s.wakeTasks()
-				_, _ = s.integrationDB.ExecContext(ctx, "UPDATE agent_link_delegations SET notified=1 WHERE id=?", it.id)
+				_, _ = s.integrationDB.ExecContext(ctx, "UPDATE agent_link_delegations SET notified=1 WHERE id=? AND COALESCE(json_extract(body,'$.remote.run_id'),'')=?", it.id, remote.RunID)
 			}
 		}
 	}
@@ -278,15 +353,22 @@ func (s *Service) linkTaskNotification(ctx context.Context, id, owner string, d 
 	}
 	// Receiver-owned task outcomes enter the same durable notification inbox as
 	// local outcomes. IDs and routing are fixed at submission, even if defaults change.
-	run := linkRunID(id)
+	run := d.Info.RunID
+	if run == "" {
+		run = linkRunID(id)
+	}
+	eventID := id
+	if d.Request.Executor == "codex" {
+		eventID, _ = core.HashJSON([]string{id, run})
+	}
 	result := protocol.TaskResultEvent{TaskID: id, RunID: run, Title: d.Info.Title, Phase: d.Info.Phase, Text: d.Remote.Result, Error: d.Remote.Error, Origin: protocol.TaskOrigin{Kind: "manual"}}
-	envelope := protocol.Envelope{ID: id, Kind: "task_result", From: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "runtime", AgentID: "agent-link"}, To: d.Request.From, ConversationID: run, Text: d.Remote.Result, Result: &result}
+	envelope := protocol.Envelope{ID: eventID, Kind: "task_result", From: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "runtime", AgentID: "agent-link"}, To: d.Request.From, ConversationID: run, Text: d.Remote.Result, Result: &result}
 	if envelope.Text == "" {
 		envelope.Text = d.Info.Title
 	}
 	err := storage.Transaction(ctx, s.Tasks.DB(), func(tx *sql.Tx) error {
 		var exists bool
-		if e := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_messages WHERE id=?)", id).Scan(&exists); e != nil {
+		if e := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_messages WHERE id=?)", eventID).Scan(&exists); e != nil {
 			return e
 		}
 		if exists {

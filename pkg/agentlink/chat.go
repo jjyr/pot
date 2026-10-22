@@ -12,6 +12,12 @@ import (
 type ChatLookup = protocol.ChatLookup
 type ChatStatus = protocol.ChatStatus
 
+// ChatBackend is implemented only by receivers that offer direct user chats.
+// Assistant messages and delegated tasks do not require this operation.
+type ChatBackend interface {
+	ChatStatus(context.Context, ChatLookup) (ChatStatus, error)
+}
+
 func (s *Service) ChatStatus(ctx context.Context, link string, query ChatLookup) (ChatStatus, error) {
 	if !query.From.Valid() || query.From.Kind != "user" || query.From.NodeID != s.options.HostIdentity.NodeID || !core.Identifier(query.AssistantID) || !core.Identifier(query.MessageID) {
 		return ChatStatus{}, ErrUnauthorized
@@ -21,10 +27,11 @@ func (s *Service) ChatStatus(ctx context.Context, link string, query ChatLookup)
 	node := s.options.HostIdentity.NodeID
 	var err error
 	if link == "" {
-		if s.options.Backend == nil {
+		backend, ok := s.options.Backend.(ChatBackend)
+		if !ok {
 			return result, ErrUnsupported
 		}
-		result, err = s.options.Backend.ChatStatus(ctx, query)
+		result, err = backend.ChatStatus(ctx, query)
 	} else {
 		c, e := s.Get(ctx, link)
 		if e != nil {
@@ -62,7 +69,11 @@ func (s *Service) chatBusiness(ctx context.Context, caller string, raw json.RawM
 	if decodeJSON(raw, &query) != nil || !query.From.Valid() || query.From.Kind != "user" || query.From.NodeID != caller || !core.Identifier(query.MessageID) || !core.Identifier(query.AssistantID) {
 		return ChatStatus{}, ErrUnauthorized
 	}
-	result, err := s.options.Backend.ChatStatus(ctx, query)
+	backend, ok := s.options.Backend.(ChatBackend)
+	if !ok {
+		return ChatStatus{}, ErrUnsupported
+	}
+	result, err := backend.ChatStatus(ctx, query)
 	if err != nil {
 		return result, err
 	}

@@ -1,4 +1,5 @@
 import {node as n} from './primitives.mjs';
+import {translate} from '../locales/messages.mjs';
 
 // A transient UI projection, deliberately separate from conversation messages.
 export function createChatApprovals({host,locale,visible}) {
@@ -9,13 +10,14 @@ export function createChatApprovals({host,locale,visible}) {
   const observed=new Map();
   function update(context,entries) {
     host.hidden=!entries.length;
-    host.setAttribute('aria-label',locale()==='zh-CN'?'待授权操作':'Pending approvals');
-    const text=locale()==='zh-CN'?`有 ${entries.length} 项操作等待你的授权`:`${entries.length} operation(s) are waiting for your approval`;
+    host.setAttribute('aria-label',translate(locale(),'tool.pendingApprovals'));
+    const text=translate(locale(),'tool.pendingApprovalCount').replace('{count}',String(entries.length));
     if(notice.textContent!==text)notice.textContent=text;
     const nodes=entries.map(entry=>entry.element);
     for(const node of [...cards.childNodes])if(!nodes.includes(node))node.remove();
     nodes.forEach((node,index)=>{if(cards.childNodes[index]!==node)cards.insertBefore(node,cards.childNodes[index]||null);});
     const seen=observed.get(context)||new Set(),fresh=entries.filter(entry=>!seen.has(entry.id));
+    if(announcer.textContent&&entries.length)announcer.textContent=text;
     if(fresh.length&&visible()&&host.isConnected) {
       announcer.textContent=text;
       host.dataset.noticeVersion=String(Number(host.dataset.noticeVersion||0)+1);

@@ -4,6 +4,13 @@ Each autonomous node owns its local execution policy. Agent Link does not grant
 host execution or policy administration on a peer. Main and Tasks run on their
 owning node; remote work is delegated to that node's assistant and policy.
 
+Explicit Codex tasks return only pending human operation approvals to the
+directing assistant's existing approval UI. Codex's own approval policy and
+automatic reviewer remain effective on the receiving host; automatic review
+events and decisions are neither transmitted through Agent Link nor shown in
+Pot. Assistant messages never carry approval authority or forward user approvals.
+See [Codex execution](task-coordination.md#codex-execution).
+
 ## Machine defaults and command rules
 
 | Machine setting | Behavior |
