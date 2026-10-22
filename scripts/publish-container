@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""Publish the checked multiarchitecture OCI artifact to its immutable GHCR version tag."""
+
+import argparse
+import base64
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+
+from release_contract import checksum_name, version_number, verify_oci
+
+
+def publish(version, output):
+    version = version_number(version)
+    repository = os.environ["GITHUB_REPOSITORY"]
+    sha = subprocess.check_output(
+        ["gh", "api", f"repos/{repository}/commits/refs/tags/v{version}", "--jq", ".sha"], text=True
+    ).strip()
+    if sha != os.environ["POT_BUILD_REVISION"]:
+        raise ValueError("Release tag moved after validation")
+    verify_oci(
+        output / f"pot-container-{version}.oci.tar", version, os.environ["POT_BUILD_REVISION"]
+    )
+    subprocess.run(["sha256sum", "--check", checksum_name("container")], cwd=output, check=True)
+    image = f"ghcr.io/{repository.lower()}:{version}"
+    source = "oci-archive:" + str(output / f"pot-container-{version}.oci.tar")
+    # Linux publisher only: no persistent auth store and no token in argv.
+    with os.fdopen(os.memfd_create("pot-registry-auth"), "w+b") as auth:
+        credential = base64.b64encode(
+            f"{os.environ['GITHUB_ACTOR']}:{os.environ['GH_TOKEN']}".encode()
+        ).decode()
+        auth.write(json.dumps({"auths": {"ghcr.io": {"auth": credential}}}).encode())
+        auth.flush()
+        auth.seek(0)
+        options = {
+            "env": dict(os.environ, REGISTRY_AUTH_FILE=f"/proc/self/fd/{auth.fileno()}"),
+            "pass_fds": (auth.fileno(),),
+        }
+        remote = subprocess.run(
+            ["skopeo", "inspect", "--raw", "docker://" + image], capture_output=True, **options
+        )
+        local = subprocess.check_output(["skopeo", "inspect", "--raw", source], **options)
+        if remote.returncode == 0:
+            if hashlib.sha256(remote.stdout).digest() != hashlib.sha256(local).digest():
+                raise ValueError("Refusing to replace an existing image version")
+        elif (
+            b"manifest unknown" not in remote.stderr.lower()
+            and b"name unknown" not in remote.stderr.lower()
+        ):
+            raise RuntimeError("Cannot establish registry version state: " + remote.stderr.decode())
+        subprocess.run(
+            ["skopeo", "copy", "--all", "--preserve-digests", source, "docker://" + image],
+            check=True,
+            **options,
+        )
+    print(f"Published {image}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("version")
+    parser.add_argument("output", type=Path)
+    args = parser.parse_args()
+    publish(args.version, args.output.resolve())
