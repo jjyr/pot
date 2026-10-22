@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/jjyr/pot/pkg/mcp"
@@ -87,7 +86,7 @@ func RunMCP(ctx context.Context, node string, p plugin.Package, env map[string]s
 		cmd.Env = append(cmd.Env, key+"="+value)
 	}
 	cmd.Env = append(cmd.Env, "POT_MCP_RUNTIME="+(&url.URL{Scheme: "file", Path: runtimePath}).String())
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = processAttributes()
 	cmd.Stderr = io.Discard
 	input, err := cmd.StdinPipe()
 	if err != nil {

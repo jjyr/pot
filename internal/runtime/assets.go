@@ -4,6 +4,7 @@ import (
 	"github.com/jjyr/pot/internal/control"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // prepareAssets locates trusted tool and Skill packages without starting processes.
@@ -32,6 +33,9 @@ func (r *Runtime) prepareAssets(options Options, config *control.Options) error 
 	}
 	if config.Node == "" {
 		candidate := filepath.Join(resources, "node/bin/node")
+		if runtime.GOOS == "windows" {
+			candidate = filepath.Join(resources, "node/node.exe")
+		}
 		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
 			config.Node = candidate
 		}

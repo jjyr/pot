@@ -20,7 +20,13 @@ under service `pot.control.secrets` with account `go/<Runtime ID>`.
 The item is created on the first secret write. A locked or unavailable Keychain
 fails the operation; it never falls back to plaintext storage.
 
-On other platforms, Pot automatically creates `~/.pot/secrets/master.key`
+On Windows, Pot stores its key as a current-user Generic credential in Windows
+Credential Manager under `pot.control.secrets/go/<Runtime ID>`. It uses a named
+mutex to serialize initial creation; unavailable storage and missing keys with
+existing ciphertext fail. Windows explicit key files require a private DACL
+allowing only the current user and SYSTEM. See [Desktop installation](desktop-installation.md).
+
+On Linux, Pot automatically creates `~/.pot/secrets/master.key`
 on the first secret write. New directories use mode `0700` and the key uses
 `0600`. The complete random key is published atomically without overwriting an
 existing key, including when multiple node processes initialize concurrently.

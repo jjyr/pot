@@ -1,4 +1,4 @@
-//go:build darwin || linux
+//go:build darwin || linux || windows
 
 // Package pluginhost drives a retained Node plugin in an authorized Host process
 // group. Plugins run with the user's privileges; this is not an isolation boundary.
@@ -23,7 +23,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -203,7 +202,7 @@ func New(config Config) (*Client, error) {
 			_ = finish()
 		}
 	}()
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = processAttributes()
 	input, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -214,7 +213,7 @@ func New(config Config) (*Client, error) {
 		return nil, err
 	}
 	var supervisor *processscope.Scope
-	if len(config.ProcessWorker) > 0 {
+	if processscope.Required || len(config.ProcessWorker) > 0 {
 		markers := processscope.Markers{}
 		if config.Markers != nil {
 			markers = *config.Markers
@@ -244,7 +243,7 @@ func New(config Config) (*Client, error) {
 	}
 	if supervisor != nil {
 		if err = supervisor.Started(); err != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			_ = killProcess(cmd.Process.Pid)
 			_ = cmd.Wait()
 			return nil, err
 		}
@@ -269,7 +268,11 @@ func safePath(name string) bool {
 
 func hostEnvironment(directory string) []string {
 	var env []string
-	for _, key := range []string{"PATH", "HOME", "TEMP", "TMP", "LANG", "LC_ALL", "POT_BROWSER_EXECUTABLE"} {
+	keys := []string{"PATH", "HOME", "TEMP", "TMP", "LANG", "LC_ALL", "POT_BROWSER_EXECUTABLE"}
+	if processscope.Required {
+		keys = append(keys, "SystemRoot", "WINDIR", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)", "ProgramData", "ComSpec")
+	}
+	for _, key := range keys {
 		if value, ok := os.LookupEnv(key); ok {
 			env = append(env, key+"="+value)
 		}
@@ -433,7 +436,7 @@ func (c *Client) stop(force bool) error {
 		if c.supervisor != nil {
 			_ = c.supervisor.Stop(c.cmd.Process.Pid)
 		} else {
-			_ = syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
+			_ = killProcess(c.cmd.Process.Pid)
 		}
 	}
 	timer := time.NewTimer(5 * time.Second)
@@ -441,7 +444,7 @@ func (c *Client) stop(force bool) error {
 	select {
 	case <-c.wait:
 	case <-timer.C:
-		_ = syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
+		_ = killProcess(c.cmd.Process.Pid)
 		select {
 		case <-c.wait:
 		case <-time.After(time.Second):
@@ -457,9 +460,19 @@ func (c *Client) stop(force bool) error {
 			return err
 		}
 	}
+	if processscope.Required && c.supervisor != nil {
+		if c.finishSandbox != nil {
+			if err := c.finishSandbox(); err != nil {
+				c.cleanupErr = err
+				return err
+			}
+		}
+		c.cleanupErr = os.RemoveAll(c.directory)
+		return c.cleanupErr
+	}
 	for range 100 {
-		err := syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
+		err := killProcess(c.cmd.Process.Pid)
+		if errors.Is(err, processMissing) {
 			if c.finishSandbox != nil {
 				c.cleanupErr = c.finishSandbox()
 				if c.cleanupErr != nil {

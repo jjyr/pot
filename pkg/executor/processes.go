@@ -3,21 +3,18 @@ package executor
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unicode/utf8"
 
-	"github.com/creack/pty"
 	"github.com/jjyr/pot/pkg/processscope"
 	"github.com/jjyr/pot/pkg/sandbox"
-	"golang.org/x/sys/unix"
 )
 
 type process struct {
@@ -32,6 +29,7 @@ type process struct {
 	cmd            *exec.Cmd
 	input          *os.File
 	terminal       *os.File
+	native         *nativeTerminal
 	stdout, stderr []byte
 	truncated      bool
 	changed        chan struct{}
@@ -87,7 +85,7 @@ func (p *process) drain(reader *os.File, stderr bool, done chan<- error) {
 			p.notify()
 		}
 		if err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, syscall.EIO) || errors.Is(err, os.ErrClosed) {
+			if errors.Is(err, io.EOF) || terminalEOF(err) || errors.Is(err, os.ErrClosed) {
 				done <- nil
 			} else {
 				done <- err
@@ -95,26 +93,6 @@ func (p *process) drain(reader *os.File, stderr bool, done chan<- error) {
 			return
 		}
 	}
-}
-func killGroup(pid int) error {
-	err := syscall.Kill(-pid, syscall.SIGKILL)
-	if errors.Is(err, syscall.ESRCH) {
-		return nil
-	}
-	return err
-}
-func confirmGroupGone(pid int, deadline time.Time) error {
-	for time.Now().Before(deadline) {
-		err := syscall.Kill(-pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
-			return nil
-		}
-		if err != nil {
-			return errors.Join(ErrCleanupUnconfirmed, err)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return fmt.Errorf("%w: process group %d remains", ErrCleanupUnconfirmed, pid)
 }
 func (p *process) run(idle time.Duration) {
 	waited := make(chan error, 1)
@@ -150,8 +128,10 @@ waiting:
 		}
 	}
 	var cleanupErr error
-	if p.supervisor != nil && !exited {
-		cleanupErr = p.supervisor.Stop(p.cmd.Process.Pid)
+	if p.supervisor != nil {
+		if !exited {
+			cleanupErr = p.supervisor.Stop(p.cmd.Process.Pid)
+		}
 	} else {
 		cleanupErr = killGroup(p.cmd.Process.Pid)
 	}
@@ -166,7 +146,12 @@ waiting:
 	if p.supervisor != nil {
 		cleanupErr = errors.Join(cleanupErr, p.supervisor.Finish())
 	}
-	cleanupErr = errors.Join(cleanupErr, confirmGroupGone(p.cmd.Process.Pid, deadline))
+	if p.native != nil {
+		p.closeNative()
+	}
+	if !processscope.Required {
+		cleanupErr = errors.Join(cleanupErr, confirmGroupGone(p.cmd.Process.Pid, deadline))
+	}
 	for range p.readers {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
@@ -226,14 +211,11 @@ func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process,
 	if value, ok := r.Args["shell"].(string); ok {
 		shell = value
 	}
-	if !strings.HasPrefix(shell, "/") || strings.ContainsRune(shell, 0) {
+	if !filepath.IsAbs(shell) || strings.ContainsRune(shell, 0) {
 		return "", nil, errors.New("shell must be absolute")
 	}
-	parts := strings.Split(shell, "/")
-	switch parts[len(parts)-1] {
-	case "sh", "bash", "zsh", "dash":
-	default:
-		return "", nil, errors.New("unsupported shell; use sh/bash/zsh")
+	if !supportedShell(shell) {
+		return "", nil, errors.New("unsupported command shell")
 	}
 	login := policy.AllowLoginShell
 	if value, ok := r.Args["login"].(bool); ok {
@@ -259,11 +241,7 @@ func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process,
 	}
 	var command *exec.Cmd
 	if r.Mode == "sandbox" || e.options.Admit != nil {
-		flag := "-c"
-		if login {
-			flag = "-lc"
-		}
-		command = exec.Command(shell, flag, r.Args["cmd"].(string))
+		command = exec.Command(shell, commandArgs(shell, r.Args["cmd"].(string), login)...)
 		command.Dir = workdir
 		command.Env = sandbox.Environment()
 		if r.Mode == "host" {
@@ -289,7 +267,7 @@ func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process,
 			return "", nil, &PreparationError{Cause: err}
 		}
 	}
-	if len(e.options.ProcessWorker) > 0 {
+	if processscope.Required || len(e.options.ProcessWorker) > 0 {
 		p.supervisor, err = processscope.Prepare(command, e.options.ProcessWorker, p.markers)
 		if err != nil {
 			if p.finishSandbox != nil {
@@ -341,31 +319,10 @@ func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process,
 	}
 	tty, _ := r.Args["tty"].(bool)
 	if tty {
-		terminal, err := pty.StartWithSize(command, &pty.Winsize{Rows: 24, Cols: 80})
-		if err != nil {
+		if err := p.startTTY(command); err != nil {
 			return "", nil, err
 		}
-		// creack/pty's master starts in blocking mode. Rewrap a nonblocking
-		// duplicate so Go's poller can interrupt blocked reads/writes on cleanup.
-		fd, err := unix.Dup(int(terminal.Fd()))
-		if err == nil {
-			unix.CloseOnExec(fd)
-			err = unix.SetNonblock(fd, true)
-		}
-		if err != nil {
-			if fd >= 0 {
-				unix.Close(fd)
-			}
-			terminal.Close()
-			killGroup(command.Process.Pid)
-			command.Wait()
-			return "", nil, err
-		}
-		master := os.NewFile(uintptr(fd), terminal.Name())
-		terminal.Close()
-		p.terminal = master
-		p.input = master
-		p.readers = []*os.File{master}
+
 	} else {
 		stdinRead, stdinWrite, err := os.Pipe()
 		if err != nil {
@@ -388,7 +345,7 @@ func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process,
 		command.Stdin = stdinRead
 		command.Stdout = stdoutWrite
 		command.Stderr = stderrWrite
-		command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		configureProcess(command)
 		err = command.Start()
 		stdinRead.Close()
 		stdoutWrite.Close()
@@ -454,16 +411,7 @@ func (e *Engine) executeProcess(ctx context.Context, r Request, emit func(Event)
 			p.terminate()
 		}
 		if r.Args["interrupt"] == true || r.Args["chars"] == "\x03" {
-			group := p.cmd.Process.Pid
-			if p.terminal != nil {
-				var foreground int
-				err := p.terminalControl(func(fd int) error { var err error; foreground, err = unix.IoctlGetInt(fd, unix.TIOCGPGRP); return err })
-				if err != nil {
-					return nil, err
-				}
-				group = foreground
-			}
-			if err := syscall.Kill(-group, syscall.SIGINT); err != nil && !errors.Is(err, syscall.ESRCH) {
+			if err := p.interrupt(); err != nil {
 				return nil, err
 			}
 		}
@@ -471,25 +419,11 @@ func (e *Engine) executeProcess(ctx context.Context, r Request, emit func(Event)
 			if p.terminal == nil {
 				return nil, errors.New("resize requires a PTY")
 			}
-			err := p.terminalControl(func(fd int) error {
-				size, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
-				if err != nil {
-					return err
-				}
-				if value, ok := r.Args["rows"]; ok {
-					n, _ := integer(value)
-					size.Row = uint16(n)
-				}
-				if value, ok := r.Args["cols"]; ok {
-					n, _ := integer(value)
-					size.Col = uint16(n)
-				}
-				return unix.IoctlSetWinsize(fd, unix.TIOCSWINSZ, size)
-			})
-			if err != nil {
+			if err := p.resize(r.Args); err != nil {
 				return nil, err
 			}
 		}
+
 		if chars, ok := r.Args["chars"].(string); ok && chars != "" && chars != "\x03" {
 			if p.mode == "host" && !p.interactive {
 				return nil, errors.New("host stdin requires an explicitly authorized interactive session")

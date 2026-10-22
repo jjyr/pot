@@ -13,6 +13,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
+import zipfile
 
 
 def native_smoke(command, base, environment):
@@ -71,27 +72,46 @@ def extract_deb(archive, destination):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--archive", type=Path, required=True)
-    parser.add_argument("--platform", choices=("linux-amd64", "linux-arm64"), required=True)
-    args = parser.parse_args()
-    native = "linux-" + {"x86_64": "amd64", "aarch64": "arm64"}.get(
-        platform.machine(), "unsupported"
+    parser.add_argument(
+        "--platform", choices=("linux-amd64", "linux-arm64", "windows-amd64"), required=True
     )
-    if platform.system() != "Linux" or args.platform != native:
-        parser.error("smoke requires the target native Linux runner")
+    args = parser.parse_args()
+    native = ("windows-" if platform.system() == "Windows" else "linux-") + {
+        "AMD64": "amd64",
+        "x86_64": "amd64",
+        "aarch64": "arm64",
+    }.get(platform.machine(), "unsupported")
+    if platform.system() not in ("Linux", "Windows") or args.platform != native:
+        parser.error("smoke requires the target native desktop runner")
     archive = args.archive.resolve()
     with tempfile.TemporaryDirectory(prefix="pot-desktop-smoke-") as temporary:
         base = Path(temporary)
         relocated = base / "relocated package"
         relocated.mkdir()
-        extract_deb(archive, relocated)
-        install = relocated / "opt/pot-desktop"
+        windows = args.platform.startswith("windows-")
+        if windows:
+            with zipfile.ZipFile(archive) as source:
+                for entry in source.infolist():
+                    path = Path(entry.filename)
+                    if path.is_absolute() or ".." in path.parts or "\\" in entry.filename:
+                        raise ValueError("unsafe ZIP member")
+                source.extractall(relocated)
+        else:
+            extract_deb(archive, relocated)
+        install = relocated / ("Pot" if windows else "opt/pot-desktop")
+        node = install / ("Resources/node/node.exe" if windows else "Resources/node/bin/node")
+        npm = install / (
+            "Resources/node/node_modules/npm/bin/npm-cli.js"
+            if windows
+            else "Resources/node/bin/npm"
+        )
+        cli = install / ("bin/pot.exe" if windows else "bin/pot")
+        app = install / ("bin/pot-app.exe" if windows else "bin/pot-app")
         resources = install / "Resources"
         for required in (
             "skills",
             "plugins",
             "sandbox/launcher.mjs",
-            "node/bin/node",
-            "node/bin/npm",
             "LICENSE.txt",
             "GoDependencyLicenses.txt",
             "FrontendFontLicense.txt",
@@ -102,9 +122,10 @@ def main():
             key: value for key, value in os.environ.items() if not key.startswith("POT_")
         }
         home = base / "home"
-        home.mkdir(mode=0o700)
         root = home / "root"
-        root.mkdir(mode=0o700)
+        if not windows:
+            home.mkdir(mode=0o700)
+            root.mkdir(mode=0o700)
         environment.update(
             {
                 "HOME": str(home),
@@ -113,18 +134,38 @@ def main():
                 "XDG_CACHE_HOME": str(home / ".cache"),
             }
         )
+        if windows:
+            environment.update(
+                {
+                    "USERPROFILE": str(home),
+                    "APPDATA": str(home / "AppData/Roaming"),
+                    "LOCALAPPDATA": str(home / "AppData/Local"),
+                }
+            )
+            # The CLI creates the home with a protected DACL; child test roots
+            # inherit it, instead of relying on Python's Unix mode argument.
+            subprocess.run(
+                [cli, "init", "-root", home], cwd=base, env=environment, check=True, timeout=30
+            )
+            root.mkdir()
+            for child in ("AppData/Roaming", "AppData/Local"):
+                (home / child).mkdir(parents=True, exist_ok=True)
         for command in (
-            [resources / "node/bin/node", "--version"],
-            [resources / "node/bin/node", resources / "node/bin/npm", "--version"],
-            [install / "bin/pot", "init", "-root", home / "cli-root"],
+            [node, "--version"],
+            [node, npm, "--version"],
+            [cli, "init", "-root", home / "cli-root"],
         ):
             subprocess.run(command, cwd=base, env=environment, check=True, timeout=30)
-        command = [str(install / "bin/pot-app"), "-root", str(root), "-smoke-test"]
+        command = [str(app), "-root", str(root), "-smoke-test"]
         # A private session bus prevents notification/tray tests touching the
         # caller's desktop session. The runner supplies Xvfb when headless.
-        if shutil.which("dbus-run-session"):
+        if not windows and shutil.which("dbus-run-session"):
             command = ["dbus-run-session", "--", *command]
-        code, output = native_smoke(command, base, environment)
+        if windows:
+            from desktop_smoke_windows import native_smoke as run_native
+        else:
+            run_native = native_smoke
+        code, output = run_native(command, base, environment)
         if code or "POT_DESKTOP_SMOKE_OK" not in output:
             print(output[:10000])
             if len(output) > 10000:
@@ -137,7 +178,7 @@ def main():
         # Reopening the same root proves the native shutdown released ownership.
         # Master keys are created lazily on the first encrypted credential write.
         reopened = subprocess.check_output(
-            [install / "bin/pot", "init", "-root", root],
+            [cli, "init", "-root", root],
             cwd=base,
             env=environment,
             text=True,

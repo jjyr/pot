@@ -5,10 +5,10 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"github.com/jjyr/pot/pkg/privatefs"
 	"io"
 	"os"
 	"path/filepath"
-	"syscall"
 )
 
 // FileKey accepts an explicit owner-only raw key file. Creation is opt-in and is
@@ -33,14 +33,14 @@ func (k FileKey) Key(ctx context.Context, allowCreate bool) ([]byte, error) {
 		return nil, errors.New("secret master key is missing; restore the original key")
 	}
 	parent := filepath.Dir(k.Path)
-	if err := os.MkdirAll(parent, 0700); err != nil {
+	if err := privatefs.Mkdir(parent); err != nil {
 		return nil, err
 	}
 	info, err := os.Stat(parent)
 	if err != nil {
 		return nil, err
 	}
-	if !info.IsDir() || info.Mode().Perm()&0077 != 0 {
+	if !info.IsDir() || privatefs.Check(parent) != nil {
 		return nil, errors.New("secret key directory must be owner-only")
 	}
 	key = make([]byte, 32)
@@ -67,33 +67,26 @@ func (k FileKey) Key(ctx context.Context, allowCreate bool) ([]byte, error) {
 	if err = os.Link(temporary.Name(), k.Path); err != nil && !errors.Is(err, os.ErrExist) {
 		return nil, err
 	}
-	directory, err := os.Open(parent)
-	if err != nil {
-		return nil, err
-	}
-	err = directory.Sync()
-	directory.Close()
-	if err != nil {
+	if err = privatefs.SyncDir(parent); err != nil {
 		return nil, err
 	}
 	return readFile(k.Path)
 }
 func readFile(path string) ([]byte, error) {
-	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	file, err := privatefs.Open(path, os.O_RDONLY)
 	if err != nil {
 		return nil, err
 	}
-	file := os.NewFile(uintptr(fd), path)
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
-		return nil, errors.New("secret key file must be a regular owner-only file")
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("secret key file must be regular")
 	}
-	if stat, ok := info.Sys().(*syscall.Stat_t); !ok || int(stat.Uid) != os.Geteuid() {
-		return nil, errors.New("secret key file must belong to current user")
+	if err = privatefs.CheckFile(file); err != nil {
+		return nil, err
 	}
 	key, err := io.ReadAll(io.LimitReader(file, 33))
 	if err != nil {

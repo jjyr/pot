@@ -14,7 +14,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -24,6 +23,7 @@ import (
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/peer"
+	"github.com/jjyr/pot/pkg/privatefs"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 	webassets "github.com/jjyr/pot/web"
@@ -61,11 +61,11 @@ func openAgentHost(root string) (*agentHost, error) {
 	if !filepath.IsAbs(root) {
 		return nil, errors.New("absolute_host_root_required")
 	}
-	if err := os.MkdirAll(root, 0700); err != nil {
+	if err := privatefs.Mkdir(root); err != nil {
 		return nil, err
 	}
-	info, err := os.Stat(root)
-	if err != nil || info.Mode().Perm()&0077 != 0 {
+	_, err := os.Stat(root)
+	if err != nil || privatefs.Check(root) != nil {
 		return nil, errors.New("host_root_must_be_owner_only")
 	}
 	db, err := storage.OpenDatabase(filepath.Join(root, "control.sqlite"), storage.ControlDatabase)
@@ -392,18 +392,18 @@ func (h *agentHost) probeEndpoint(ctx context.Context, endpoint string) error {
 }
 
 func agentServe(root string) error {
-	if err := os.MkdirAll(root, 0700); err != nil {
+	if err := privatefs.Mkdir(root); err != nil {
 		return err
 	}
-	lock, err := os.OpenFile(filepath.Join(root, "daemon.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := privatefs.Open(filepath.Join(root, "daemon.lock"), os.O_CREATE|os.O_RDWR)
 	if err != nil {
 		return err
 	}
 	defer lock.Close()
-	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err = privatefs.LockFile(lock, true); err != nil {
 		return errors.New("agent_host_already_running")
 	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	defer privatefs.UnlockFile(lock)
 	h, err := openAgentHost(root)
 	if err != nil {
 		return err
@@ -488,29 +488,29 @@ func ensureAgentHost(root string) (hostClient, error) {
 	if !filepath.IsAbs(root) {
 		return c, errors.New("absolute_host_root_required")
 	}
-	if err := os.MkdirAll(root, 0700); err != nil {
+	if err := privatefs.Mkdir(root); err != nil {
 		return c, err
 	}
 	info, err := os.Stat(root)
-	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
+	if err != nil || !info.IsDir() || privatefs.Check(root) != nil {
 		return c, errors.New("host_root_must_be_owner_only")
 	}
-	lock, err := os.OpenFile(filepath.Join(root, "start.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := privatefs.Open(filepath.Join(root, "start.lock"), os.O_CREATE|os.O_RDWR)
 	if err != nil {
 		return c, err
 	}
 	defer lock.Close()
-	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+	if err = privatefs.LockFile(lock, false); err != nil {
 		return c, err
 	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	daemon, err := os.OpenFile(filepath.Join(root, "daemon.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	defer privatefs.UnlockFile(lock)
+	daemon, err := privatefs.Open(filepath.Join(root, "daemon.lock"), os.O_CREATE|os.O_RDWR)
 	if err != nil {
 		return c, err
 	}
 	defer daemon.Close()
-	if err = syscall.Flock(int(daemon.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+	if err = privatefs.LockFile(daemon, true); err != nil {
+		if !privatefs.LockBusy(err) {
 			return c, err
 		}
 		c, err = existingAgentHostClient(root)
@@ -522,7 +522,7 @@ func ensureAgentHost(root string) (hostClient, error) {
 		}
 		return c, errors.New("agent_host_port_in_use_or_version_mismatch")
 	}
-	defer syscall.Flock(int(daemon.Fd()), syscall.LOCK_UN)
+	defer privatefs.UnlockFile(daemon)
 	// Refuse a foreign listener before opening or migrating this root's data.
 	if conn, e := net.DialTimeout("tcp", hostListen, 300*time.Millisecond); e == nil {
 		conn.Close()
@@ -547,10 +547,10 @@ func ensureAgentHost(root string) (hostClient, error) {
 	cmd.Stdin = nil
 	cmd.Stdout = log
 	cmd.Stderr = log
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.SysProcAttr = daemonAttributes()
 	// start.lock remains held until the child reports healthy. The child must
 	// acquire daemon.lock itself before opening any databases.
-	if err = syscall.Flock(int(daemon.Fd()), syscall.LOCK_UN); err != nil {
+	if err = privatefs.UnlockFile(daemon); err != nil {
 		return c, err
 	}
 	if err = cmd.Start(); err != nil {
@@ -565,13 +565,4 @@ func ensureAgentHost(root string) (hostClient, error) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	return c, errors.New("agent_host_start_failed_check_local_log")
-}
-func openExternalURL(address string) error {
-	var cmd *exec.Cmd
-	if runtime.GOOS == "darwin" {
-		cmd = exec.Command("open", address)
-	} else {
-		cmd = exec.Command("xdg-open", address)
-	}
-	return cmd.Run()
 }

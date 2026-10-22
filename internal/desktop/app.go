@@ -1,4 +1,4 @@
-//go:build darwin || (linux && desktop)
+//go:build darwin || windows || (linux && desktop)
 
 // Package desktop is the only Go layer that depends on Wails. The CLI and guest
 // executor must never import this package or require desktop frameworks.

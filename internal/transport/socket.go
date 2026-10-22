@@ -7,6 +7,8 @@ import (
 	"errors"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/instance"
+	"github.com/jjyr/pot/pkg/localipc"
+	"github.com/jjyr/pot/pkg/privatefs"
 	"net"
 	"net/http"
 	"os"
@@ -33,22 +35,8 @@ type SocketServer struct {
 
 func StartSocket(ctx context.Context, root string, app *Application) (*SocketServer, error) {
 	path := filepath.Join(root, "runtime.sock")
-	if info, err := os.Lstat(path); err == nil {
-		if info.Mode()&os.ModeSocket == 0 {
-			return nil, errors.New("Runtime socket path contains a non-socket file")
-		}
-		if err = os.Remove(path); err != nil {
-			return nil, err
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, err
-	}
-	listener, err := net.Listen("unix", path)
+	listener, err := localipc.Listen(path)
 	if err != nil {
-		return nil, err
-	}
-	if err = os.Chmod(path, 0600); err != nil {
-		listener.Close()
 		return nil, err
 	}
 	endpoint := Endpoint{3, app.RuntimeID, app.BootID, path, rand.Text()}
@@ -88,7 +76,7 @@ func ReadEndpoint(root string) (Endpoint, error) {
 	if err != nil {
 		return endpoint, err
 	}
-	if !info.IsDir() || info.Mode().Perm()&0077 != 0 {
+	if !info.IsDir() || privatefs.Check(root) != nil {
 		return endpoint, errors.New("Runtime root is not private")
 	}
 	path := filepath.Join(root, "runtime.json")
@@ -96,7 +84,7 @@ func ReadEndpoint(root string) (Endpoint, error) {
 	if err != nil {
 		return endpoint, err
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+	if !info.Mode().IsRegular() || privatefs.Check(path) != nil {
 		return endpoint, errors.New("Runtime endpoint is not a private regular file")
 	}
 	body, err := os.ReadFile(path)
@@ -113,7 +101,7 @@ func ReadEndpoint(root string) (Endpoint, error) {
 }
 func (e Endpoint) Client() *http.Client {
 	return &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", e.Socket)
+		return localipc.Dial(ctx, e.Socket)
 	}}, Timeout: time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 func (e Endpoint) MarshalJSON() ([]byte, error) { type plain Endpoint; return json.Marshal(plain(e)) }

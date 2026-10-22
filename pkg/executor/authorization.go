@@ -26,9 +26,7 @@ func (c CommandContext) Validate() error {
 	if c.Command == "" || len(c.Command) > 1024*1024 || strings.ContainsRune(c.Command, 0) || !filepath.IsAbs(c.Directory) || filepath.Clean(c.Directory) != c.Directory || !filepath.IsAbs(c.Shell) {
 		return errors.New("invalid exact command context")
 	}
-	switch filepath.Base(c.Shell) {
-	case "sh", "bash", "zsh", "dash":
-	default:
+	if !supportedShell(c.Shell) {
 		return errors.New("unsupported command shell")
 	}
 	if len(c.Credentials) > 0 {

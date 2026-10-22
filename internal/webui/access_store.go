@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/privatefs"
 	"io"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 )
 
@@ -19,28 +19,16 @@ func (s AccessStore) locked(fn func() error) error {
 	if err := os.MkdirAll(filepath.Dir(s.Path), 0700); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(s.Path+".lock", os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0600)
+	f, err := privatefs.Lock(s.Path+".lock", false, false)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	stat, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	owned, ok := stat.Sys().(*syscall.Stat_t)
-	if !ok || owned.Uid != uint32(os.Geteuid()) || !stat.Mode().IsRegular() || stat.Mode().Perm()&0077 != 0 {
-		return errors.New("access lock must be private")
-	}
-	if err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		return err
-	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 	return fn()
 }
 func (s AccessStore) read() (Config, error) {
 	var c Config
-	f, err := os.OpenFile(s.Path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	f, err := privatefs.Open(s.Path, os.O_RDONLY)
 	if err != nil {
 		return c, err
 	}
@@ -49,8 +37,7 @@ func (s AccessStore) read() (Config, error) {
 	if err != nil {
 		return c, err
 	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != uint32(os.Geteuid()) || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > 4<<20 {
+	if privatefs.CheckFile(f) != nil || !info.Mode().IsRegular() || info.Size() > 4<<20 {
 		return c, errors.New("access configuration must be a private owned regular file below 4 MiB")
 	}
 	data, err := io.ReadAll(io.LimitReader(f, 4<<20+1))

@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/jjyr/pot/pkg/privatefs"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
-	"syscall"
 	"testing"
 
 	"github.com/jjyr/pot/internal/secrets"
@@ -44,10 +44,10 @@ func TestAgentHostRunningDaemonNeverMigrates(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer lock.Close()
-			if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+			if err = privatefs.LockFile(lock, true); err != nil {
 				t.Fatal(err)
 			}
-			defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+			defer privatefs.UnlockFile(lock)
 			var authenticated atomic.Int32
 			server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/api/v1/agent-host/health" || r.Header.Get("Authorization") != "Bearer "+token {

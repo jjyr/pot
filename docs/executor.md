@@ -89,6 +89,13 @@ launch. It does not capture/replay an unsandboxed login snapshot before entering
 a protected shell. The configured snapshot flag remains part of command identity;
 standalone trusted executor hosts can use the bounded snapshot cache explicitly.
 
+On Windows, execution shells are absolute `powershell.exe` or `pwsh.exe` paths;
+commands use PowerShell syntax. New Windows configurations disable profile loading
+and shell snapshots. ConPTY supplies PTYs; pipe-mode interrupt terminates the
+command Job rather than sending Unix SIGINT. Protected execution fails before
+launch on Windows; explicit Host authorization still follows machine policy.
+See [Windows desktop installation](desktop-installation.md#windows).
+
 Commands wait up to `yield_time_ms` (10 seconds by default; the default maximum
 is 30 seconds), then return a live session when still running. This bounds the
 response wait, not the command lifetime. `timeout_ms` is not accepted. Use
@@ -152,6 +159,11 @@ subreaper to reap detached descendants. macOS uses stable original process
 identities and per-sandbox policy membership probes, including detached members;
 these native interfaces are qualified by the real sandbox suite. Host authority
 is broader than this protection and is not an OS isolation guarantee.
+
+Windows starts workloads suspended, assigns a non-inheritable kill-on-close Job
+Object, then resumes them. Job termination and zero active-process accounting
+provide cleanup proof, including detached descendants. Missing Unix supervisor
+configuration cannot disable Windows tracking.
 
 Cancellation/timeout stops the original execution and drains descendants, terminal
 handles, plugin/browser sessions and SDK helpers. Missing/failed cleanup receipts

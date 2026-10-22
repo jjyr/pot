@@ -16,7 +16,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -43,6 +42,9 @@ func within(path, root string) bool {
 // Prepare changes only argv/environment. Caller retains stdio, PTY, process
 // ownership and cleanup. Finish must run only after workload cleanup is proven.
 func (l Launcher) Prepare(ctx context.Context, command *exec.Cmd, workspace string, read, write []string, tty bool) (finish func() error, err error) {
+	if runtime.GOOS == "windows" {
+		return nil, errors.New("Protected execution is unavailable on Windows; explicitly request authorized Host execution")
+	}
 	if l.Directory == "" || l.Node == "" {
 		return nil, errors.New("sandbox unavailable: packaged SRT and Node are required; request host execution explicitly")
 	}
@@ -178,7 +180,7 @@ func (l Launcher) Prepare(ctx context.Context, command *exec.Cmd, workspace stri
 	helper := exec.Command(l.Node, filepath.Join(l.Directory, "launcher.mjs"))
 	helper.Dir = cwd
 	helper.Env = append(Environment(), "CLAUDE_CODE_TMPDIR="+filepath.Join(private, "tmp"))
-	helper.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	helper.SysProcAttr = processAttributes()
 	input, e := helper.StdinPipe()
 	if e != nil {
 		return nil, e
@@ -204,7 +206,7 @@ func (l Launcher) Prepare(ctx context.Context, command *exec.Cmd, workspace stri
 			select {
 			case endErr = <-wait:
 			case <-time.After(5 * time.Second):
-				_ = syscall.Kill(-helper.Process.Pid, syscall.SIGKILL)
+				_ = killProcess(helper.Process.Pid)
 				endErr = errors.New("sandbox helper cleanup unconfirmed")
 			}
 			output.Close()
@@ -274,7 +276,11 @@ func (l Launcher) Prepare(ctx context.Context, command *exec.Cmd, workspace stri
 // Environment excludes ambient application secrets and startup-code variables.
 func Environment() []string {
 	values := map[string]string{"PATH": defaultExecutablePath(runtime.GOOS), "LANG": "C.UTF-8"}
-	for _, key := range []string{"PATH", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR"} {
+	keys := []string{"PATH", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR"}
+	if runtime.GOOS == "windows" {
+		keys = append(keys, "SystemRoot", "WINDIR", "TEMP", "TMP", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "ProgramData", "ProgramFiles", "ProgramFiles(x86)", "ComSpec")
+	}
+	for _, key := range keys {
 		if value := os.Getenv(key); value != "" {
 			values[key] = value
 		}
@@ -283,6 +289,9 @@ func Environment() []string {
 }
 
 func defaultExecutablePath(goos string) string {
+	if goos == "windows" {
+		return filepath.Join(os.Getenv("SystemRoot"), "System32")
+	}
 	path := "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 	if goos == "darwin" {
 		return "/opt/homebrew/bin:" + path

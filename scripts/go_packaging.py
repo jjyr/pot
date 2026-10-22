@@ -9,12 +9,15 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import sys
+import zipfile
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / ".local/go"
 NODE_VERSION = "24.21.0"
 NODE_HASHES = {
+    "windows-amd64": "158f7685b44de51f6c0df1d153526cbcd3e1bc739a8dfc607721cef75de9e541",
     "darwin-arm64": "bed7eea5325e1108f32ce5228ddd6a5f0f08a499ee42aa7442aea583702f6057",
     "linux-arm64": "724282c3b43aec998aa9527380465b45d229e021b58035f5f4f63095eabfe5d5",
     "linux-amd64": "6e1db87ef58b8819e5d5402eff1536491b18edd8eb7bee5ef7897876e88dc5ff",
@@ -55,6 +58,14 @@ def download(url, destination, expected):
 
 def extract(archive, destination):
     destination.mkdir(parents=True, exist_ok=True)
+    if archive.suffix == ".zip":
+        with zipfile.ZipFile(archive) as source:
+            for item in source.infolist():
+                name = Path(item.filename)
+                if name.is_absolute() or ".." in name.parts or "\\" in item.filename:
+                    raise ValueError("unsafe ZIP member")
+            source.extractall(destination)
+        return
     with tarfile.open(archive) as source:
         source.extractall(destination, filter="data")
 
@@ -149,26 +160,35 @@ def copy_tree(source, destination, *, symlinks=False):
     )
 
 
+def node_name(platform):
+    return f"node-v{NODE_VERSION}-{platform.replace('windows-', 'win-').replace('amd64', 'x64')}"
+
+
 def node_archive(platform):
     if platform not in NODE_HASHES:
         raise ValueError(f"Unsupported Node platform: {platform}")
-    name = f"node-v{NODE_VERSION}-{platform.replace('amd64', 'x64')}"
+    name = node_name(platform)
+    suffix = ".zip" if platform.startswith("windows-") else ".tar.gz"
     return download(
-        f"https://nodejs.org/dist/v{NODE_VERSION}/{name}.tar.gz",
-        BUILD / "downloads" / f"{name}.tar.gz",
+        f"https://nodejs.org/dist/v{NODE_VERSION}/{name}{suffix}",
+        BUILD / "downloads" / f"{name}{suffix}",
         NODE_HASHES[platform],
     )
 
 
 def node(platform):
-    name = f"node-v{NODE_VERSION}-{platform.replace('amd64', 'x64')}"
+    name = node_name(platform)
     archive = node_archive(platform)
     target = BUILD / "node" / platform
     stamp = target / ".pot-archive-sha256"
     if (
         not stamp.exists()
         or stamp.read_text() != NODE_HASHES[platform]
-        or not (target / "bin/npm").is_symlink()
+        or not (
+            (target / "npm.cmd").is_file()
+            if platform.startswith("windows-")
+            else (target / "bin/npm").is_symlink()
+        )
     ):
         with tempfile.TemporaryDirectory(dir=BUILD) as temporary:
             extract(archive, Path(temporary))
@@ -261,7 +281,7 @@ def prepare_resources(destination, platform):
     prepare_plugins(destination / "plugins", platform)
     call(
         [
-            "python3",
+            sys.executable,
             ROOT / "scripts/go-notices",
             "--output",
             destination / "GoDependencyLicenses.txt",
@@ -339,9 +359,17 @@ def prepare_sandbox(destination):
         cached.mkdir(parents=True, exist_ok=True)
         for name in ("package.json", "package-lock.json"):
             shutil.copy2(source / name, cached / name)
+        # Run npm's JS entry directly on Windows. No cmd.exe quoting or batch
+        # shim is involved, including for build paths containing spaces or &.
+        native_node = node("windows-amd64") / "node.exe" if os.name == "nt" else "node"
+        installer = (
+            [native_node, native_node.parent / "node_modules/npm/bin/npm-cli.js"]
+            if os.name == "nt"
+            else ["npm"]
+        )
         call(
             [
-                "npm",
+                *installer,
                 "ci",
                 "--prefix",
                 cached,
@@ -351,7 +379,7 @@ def prepare_sandbox(destination):
                 "--no-fund",
             ]
         )
-        call(["node", source / "patch-sdk.mjs", cached])
+        call([native_node, source / "patch-sdk.mjs", cached])
         stamp.write_text(expected)
     copy_tree(cached, destination)
     shutil.copy2(source / "launcher.mjs", destination / "launcher.mjs")

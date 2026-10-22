@@ -240,7 +240,7 @@ export function createPlugin({emit}) {return {async execute({input}){
 	if _, err = c.Execute(context.Background(), "fixture", map[string]any{}); !errors.Is(err, ErrSessionEnded) {
 		t.Fatalf("cancelled session reusable: %v", err)
 	}
-	if err = syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+	if err = testProcessSignal(pid); !errors.Is(err, syscall.ESRCH) {
 		t.Fatalf("descendant survived cancellation: %v", err)
 	}
 	if _, err = os.Stat(c.directory); !os.IsNotExist(err) {

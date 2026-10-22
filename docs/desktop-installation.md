@@ -2,7 +2,8 @@
 
 Pot's native desktop hosts the shared UI, a local Control and Runtime, and Agent
 Link connections in one application. macOS uses WKWebView; Linux uses GTK3 and
-WebKitGTK 4.1 through Wails v3. The Linux desktop is enabled explicitly with the
+WebKitGTK 4.1; Windows uses the installed Microsoft WebView2 Runtime through
+Wails v3. The Linux desktop is enabled explicitly with the
 `desktop` Go build tag. Headless CLI builds do not require Wails or GTK.
 
 ```text
@@ -109,12 +110,107 @@ called. It does not qualify a display server, window manager, notifications daem
 or sandbox implementation beyond the environment in which it runs. For executor
 and sandbox qualification, use the separate suites in [Development](development.md).
 
-## Windows status
+## Windows
 
-A complete Windows local desktop package is not available yet. The current
-Runtime's PTY, process supervision, file locks, private-file ownership checks,
-sandbox launcher and updater contain Unix-only implementations. Building a Wails
-window alone cannot supply those capabilities. There is no Windows installer or
-portable archive advertised by these scripts. A Windows port must implement and
-validate those boundaries, retain approval and cleanup guarantees, bundle Windows
-Node and plugins, and verify WebView2 before enabling a Windows release target.
+The initial Windows package is an amd64 portable ZIP for Windows 10 version 1809
+or later and Windows 11. Extract the **complete** `Pot` directory into a user-owned
+location and launch `Pot.cmd`, or `bin\pot-app.exe`. Microsoft Edge WebView2
+Evergreen Runtime must already be installed; download it from
+[Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/). The package
+uses the system WebView2 installation and the Wails embedded loader. It does not
+install a browser engine, drivers, services or administrator components. No
+administrator privileges are needed to run Pot.
+
+```powershell
+Get-FileHash .\pot-desktop_VERSION_windows_amd64.zip -Algorithm SHA256
+Expand-Archive .\pot-desktop_VERSION_windows_amd64.zip -DestinationPath .\Pot-install
+& .\Pot-install\Pot\bin\pot-app.exe
+```
+
+Compare the SHA-256 value with the adjacent `.zip.sha256` before extraction. Paths
+containing spaces work; resources are resolved from `bin\..\Resources`, never
+from the shell's current directory. The ZIP includes the native app, CLI, pinned
+Windows Node/npm/npx distribution, plugins, Skills, sandbox SDK assets and license
+notices. Install Git and project toolchains separately. Browser tools need a
+separate supported Chromium browser configured with `POT_BROWSER_EXECUTABLE`;
+WebView2 is the application's UI engine, not the computer-use browser.
+
+The default data root is `%USERPROFILE%\.pot-go`. To isolate another instance,
+pass `-root C:\absolute\private-root`. Pot creates missing data roots with a
+protected current-user/SYSTEM DACL and rejects an existing root that grants other
+principals access. `chmod` is not used as proof of Windows privacy. Keep runtime
+state on a local filesystem supporting Windows ACLs and file locks. A byte-range
+lock prevents two local Runtimes from owning the same root. Local HTTP bridges use
+current-user/SYSTEM named pipes, retaining the existing per-boot bearer token.
+The browser engine's user data is stored under the selected root's `webview2`
+directory. Closing the main window exits the local app; a tray icon is also
+available. Notifications follow the user's Windows notification preferences and
+may be suppressed by Focus Assist or system policy. Toast delivery and activation
+require the Windows desktop shell and should be qualified on the target runner.
+
+Windows secrets use Generic credentials in Windows Credential Manager, scoped to
+the logged-on user, with target `pot.control.secrets/go/<Runtime ID>`. The database
+contains only AES-GCM ciphertext. A missing credential with existing encrypted
+secrets fails; it is never replaced automatically. An explicit `POT_SECRET_KEY_FILE`
+still requires a 32-byte regular file with a private current-user/SYSTEM DACL.
+Preserve the Windows user credential store alongside backups; copying SQLite or
+the installation directory alone cannot restore encrypted credentials on another
+account. Data roots and key sources are not portable between operating systems.
+
+Execution defaults to Windows PowerShell 5.1 with `-NoProfile`; an installed
+absolute `pwsh.exe` path can be selected in shell settings. `login:true` means
+loading the selected PowerShell profile and requires the existing login policy.
+POSIX shell paths and `cmd.exe` are not supported Windows execution shells. Shell
+commands use PowerShell syntax; there is no implicit WSL, Git Bash or POSIX path
+translation. User terminals also use PowerShell without persistent PSReadLine
+history. ConPTY supports interactive input, resize and Ctrl+C. For commands with
+pipes, `interrupt` terminates the Job Object; it does not emulate Unix SIGINT.
+
+Every Windows command, retained Node plugin and user terminal enters a
+kill-on-close Job Object before workload code executes. Descendants cannot opt
+out of that Job. Cancellation terminates the Job and confirms zero active
+processes before cleanup succeeds. The initial process starts suspended, is
+assigned to the Job, and is resumed through `NtResumeProcess`. Admission failure
+keeps it suspended and kills it. Embedders cannot disable this tracking by
+omitting a Unix supervisor command. This controls process lifetime, not filesystem
+or network authority.
+
+**Protected execution is unavailable on Windows.** Such launches fail before
+running a workload, including patches and sandboxed plugins. Pot preserves the
+machine's default policy; it never silently converts Protected to Host. Local
+chat, Agent Link and tasks remain local. A user can explicitly authorize Host
+execution according to the machine policy, or select Trusted in machine settings.
+Host execution has the account's privileges and is not an OS sandbox.
+
+Windows portable packages use manual upgrades. Quit every process using the
+installation, back up the data root and credential store, and replace the whole
+`Pot` directory. No signed in-app updater metadata is installed. The archive is
+unsigned; Windows reputation checks may warn before first launch. Removing the
+installation leaves user state and credentials intact.
+
+## Building and checking Windows packages
+
+Use Go 1.27.2, Node 24.21.0 and Python 3.12 from `mise.toml`. A CGO compiler, Swift,
+GTK and a Wails CLI installation are not needed. The script can cross-build the
+Windows archive on Linux; only a native graphical Windows runner can qualify the
+WebView, ConPTY, credential and Job Object behavior.
+
+```powershell
+$env:POT_APP_VERSION = "0.1.0"
+$env:POT_BUILD_REVISION = "local"
+python scripts/build-desktop --platform windows-amd64 --output .local/go/dist
+python scripts/test-windows
+python scripts/smoke-desktop --platform windows-amd64 --archive .local/go/dist/pot-desktop_0.1.0_windows_amd64.zip
+```
+
+The artifact contract is `pot-desktop_VERSION_windows_amd64.zip` and its adjacent
+`.zip.sha256`, using the same version/revision linker inputs as Linux. The native
+tests check shell authority, Protected refusal, current-user DACLs, root locks and
+identity reuse, Credential Manager restart, private IPC, Job admission and detached
+child cleanup, ConPTY and Node plugins. The package smoke extracts into a path
+containing spaces, runs bundled Node/npm/CLI, starts the actual app with fresh
+private state, waits for the WebView's native bridge callback, and reopens the
+same Runtime identity after shutdown. Its own Job Object contains the app and
+WebView2 children. Run it in a disposable Windows user session with WebView2;
+notification registration is scoped to that test account. No model is configured
+or called. Compilation alone does not qualify these native behaviors.

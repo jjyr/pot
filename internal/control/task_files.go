@@ -55,7 +55,7 @@ func (s *Service) localTaskFileChunk(ctx context.Context, target core.ExecutionT
 	if !before.Mode().IsRegular() || before.Size() < 0 || uint64(before.Size()) > TaskFileSizeLimit {
 		return result, errors.New("Task download requires a regular file at most 1 GiB")
 	}
-	current, err := taskFileRevision(before)
+	current, err := taskFileRevision(file, before)
 	if err != nil {
 		return result, err
 	}
@@ -77,7 +77,7 @@ func (s *Service) localTaskFileChunk(ctx context.Context, target core.ExecutionT
 	if err != nil {
 		return result, err
 	}
-	next, err := taskFileRevision(after)
+	next, err := taskFileRevision(file, after)
 	if err != nil {
 		return result, err
 	}

@@ -74,7 +74,7 @@ func TestBackgroundCancellationUsesSupervisorForDetachedDescendants(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+	if err = testProcessSignal(pid); !errors.Is(err, syscall.ESRCH) {
 		t.Fatal("supervised background descendant survived", pid, err)
 	}
 }

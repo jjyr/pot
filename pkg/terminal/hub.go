@@ -8,12 +8,9 @@ import (
 	"errors"
 	"os"
 	"os/exec"
-	"sync"
-	"syscall"
-	"time"
 
-	"github.com/creack/pty"
-	"golang.org/x/sys/unix"
+	"sync"
+	"time"
 )
 
 const HistoryLimit = 65536
@@ -56,6 +53,7 @@ type Session struct {
 	owner, id, purpose string
 	master             *os.File
 	fd                 int
+	native             *nativeTerminal
 	closed             bool
 	cmd                *exec.Cmd
 	history            []byte
@@ -66,6 +64,7 @@ type Session struct {
 	exit               *int
 	done               chan struct{}
 	stop               sync.Once
+	cleanupErr         error
 }
 
 func (h *Hub) Create(owner, cwd string, r Create) (Info, error) {
@@ -95,37 +94,24 @@ func (h *Hub) Create(owner, cwd string, r Create) (Info, error) {
 	if count >= 8 {
 		return Info{}, errors.New("close an existing terminal first")
 	}
-	cmd := exec.Command("/bin/bash", "--noprofile", "--norc", "-i")
-	cmd.Dir = cwd
-	cmd.Env = append(os.Environ(), "HISTFILE=/dev/null", "TERM=xterm-256color")
-	f, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: r.Cols, Rows: r.Rows})
+	cmd, f, fd, native, err := startTerminal(cwd, r)
 	if err != nil {
 		return Info{}, err
 	}
-	fd, err := unix.Dup(int(f.Fd()))
-	if err == nil {
-		unix.CloseOnExec(fd)
-		err = unix.SetNonblock(fd, true)
-	}
-	if err != nil {
-		if fd >= 0 {
-			unix.Close(fd)
-		}
-		f.Close()
-		killSession(cmd.Process.Pid)
-		cmd.Wait()
-		return Info{}, err
-	}
-	master := os.NewFile(uintptr(fd), f.Name())
-	f.Close()
-	f = master
-	s := &Session{owner: owner, id: rand.Text(), purpose: r.Purpose, master: f, fd: fd, cmd: cmd, done: make(chan struct{})}
+	s := &Session{owner: owner, id: rand.Text(), purpose: r.Purpose, master: f, fd: fd, native: native, cmd: cmd, done: make(chan struct{})}
 	h.sessions[s.id] = s
 	readDone := make(chan struct{})
 	go func() { defer close(readDone); s.read() }()
 	go func() {
 		err := cmd.Wait()
 		s.kill()
+		s.mu.Lock()
+		s.closed = true
+		s.mu.Unlock()
+		cleanupErr := s.finishNative()
+		if cleanupErr != nil {
+			err = cleanupErr
+		}
 		select {
 		case <-readDone:
 		case <-time.After(time.Second):
@@ -143,6 +129,7 @@ func (h *Hub) Create(owner, cwd string, r Create) (Info, error) {
 			}
 		}
 		s.mu.Lock()
+		s.cleanupErr = cleanupErr
 		s.exit = &code
 		close(s.done)
 		s.mu.Unlock()
@@ -250,10 +237,10 @@ func (s *Session) Done() <-chan struct{} { return s.done }
 func (s *Session) Write(data []byte) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	s.master.SetWriteDeadline(time.Now().Add(15 * time.Second))
-	defer s.master.SetWriteDeadline(time.Time{})
+	s.input().SetWriteDeadline(time.Now().Add(15 * time.Second))
+	defer s.input().SetWriteDeadline(time.Time{})
 	for len(data) > 0 {
-		n, err := s.master.Write(data)
+		n, err := s.input().Write(data)
 		if err != nil {
 			return err
 		}
@@ -270,25 +257,20 @@ func (s *Session) Resize(size Size) error {
 	if s.closed {
 		return errors.New("terminal closed")
 	}
-	return unix.IoctlSetWinsize(s.fd, unix.TIOCSWINSZ, &unix.Winsize{Col: size.Cols, Row: size.Rows})
+	return s.resize(size)
 }
 func (s *Session) kill() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
-		return
+	if !s.closed {
+		s.killNative()
 	}
-	// Foreground jobs use a different process group from the interactive shell.
-	if group, err := unix.IoctlGetInt(s.fd, unix.TIOCGPGRP); err == nil && group > 0 {
-		syscall.Kill(-group, syscall.SIGKILL)
-	}
-	killSession(s.cmd.Process.Pid)
 }
 func (s *Session) Close(ctx context.Context) error {
 	s.stop.Do(s.kill)
 	select {
 	case <-s.done:
-		return nil
+		return s.cleanupErr
 	case <-ctx.Done():
 		return ctx.Err()
 	}

@@ -202,7 +202,7 @@ func (s *Service) prepareTaskWorkspace(ctx context.Context, l runner.Launch, pol
 		if statErr != nil {
 			return nil, statErr
 		}
-		id, idErr := taskDirectoryIdentity(info)
+		id, idErr := taskDirectoryIdentity(saved.Path, info)
 		if idErr != nil || id != saved.DirectoryID {
 			return nil, errors.New("original workspace directory identity changed")
 		}
@@ -438,7 +438,7 @@ func (s *Service) prepareTaskWorkspace(ctx context.Context, l runner.Launch, pol
 	if statErr != nil {
 		return nil, statErr
 	}
-	w.DirectoryID, err = taskDirectoryIdentity(info)
+	w.DirectoryID, err = taskDirectoryIdentity(w.Path, info)
 	if err != nil {
 		return nil, err
 	}
@@ -490,7 +490,7 @@ func (s *Service) openTaskWorkspace(ctx context.Context, task string) (*os.Root,
 	info, err := root.Stat(".")
 	if err == nil {
 		var id string
-		id, err = taskDirectoryIdentity(info)
+		id, err = taskDirectoryIdentity(w.Path, info)
 		if err == nil && id != w.DirectoryID {
 			err = errors.New("workspace directory identity changed")
 		}
