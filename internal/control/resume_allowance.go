@@ -6,24 +6,6 @@ import (
 	"github.com/jjyr/pot/internal/usage"
 )
 
-func (s *Service) MailAllowanceWaits(ctx context.Context, owner string) ([]usage.Waiting, error) {
-	values, err := s.Mailbox.WaitingMessages(ctx, owner)
-	if err != nil {
-		return nil, err
-	}
-	result := []usage.Waiting{}
-	for _, message := range values {
-		wait, err := s.Usage.Waiting(ctx, mailExecutionOwner(message))
-		if err != nil {
-			return nil, err
-		}
-		if wait != nil && wait.Turn == message.ID {
-			result = append(result, *wait)
-		}
-	}
-	return result, nil
-}
-
 type ResumeAllowanceCommand struct {
 	RequestID string `json:"request_id" required:"true"`
 	Turn      string `json:"turn" required:"true"`
@@ -78,20 +60,7 @@ func (s *Service) ResumeAllowance(ctx context.Context, owner string, q ResumeAll
 		if task != nil && task.RunID == q.Turn {
 			isTask = true
 		} else {
-			waits, e := s.MailAllowanceWaits(ctx, owner)
-			if e != nil {
-				return e
-			}
-			found := false
-			for _, value := range waits {
-				if value.Scope == scope && value.Turn == q.Turn {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return errors.New("allowance wait belongs to another owner or original run")
-			}
+			return errors.New("allowance wait belongs to another owner or original run")
 		}
 	}
 	receipt, err = s.Usage.AdmitWaitRelease(ctx, owner, q.RequestID, *waiting)

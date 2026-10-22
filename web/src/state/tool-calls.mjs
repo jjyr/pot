@@ -23,6 +23,7 @@ export function toolResult(tool){
 }
 export function toolSummary(tool){
   const args=tool?.args||{};
+  if(tool?.name==='receive_message')return (args.messages||[]).map(message=>message.from?.agent_id).filter(Boolean).filter((value,index,all)=>all.indexOf(value)===index).join(', ');
   if(tool?.name==='write_stdin')return '';
   if(['exec','cua_repl'].includes(tool?.name))return `${args.code||''}`.trim().split('\n')[0]||'exec';
   if(tool?.name==='apply_patch')return String(args.patch||args.input||'').split('\n').find(line=>/^\*\*\* (Add|Update|Delete) File:/.test(line))?.replace(/^\*\*\* /,'')||'apply_patch';

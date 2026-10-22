@@ -179,22 +179,22 @@ func TestQueuedUserAndTaskOutcomesUseSeparateAggregatedModelTurns(t *testing.T) 
 	}
 }
 
-func TestAgentCommunicationBatchesBySenderNotWireConversation(t *testing.T) {
+func TestAgentCommunicationBatchesBySenderInSharedAssistantHistory(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 	var calls atomic.Int32
 	s, _ := batchService(t, func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		body := string(raw)
-		calls.Add(1)
-		if strings.Contains(body, "alpha-first") {
+		call := calls.Add(1)
+		if call == 1 {
 			if !strings.Contains(body, "alpha-second") || strings.Contains(body, "beta-only") {
 				t.Error("peer group split or mixed", body)
 			}
-		} else if !strings.Contains(body, "beta-only") || strings.Contains(body, "alpha-second") {
-			t.Error("peer context mixed", body)
+		} else if !strings.Contains(body, "beta-only") || !strings.Contains(body, "alpha-second") {
+			t.Error("assistant lost prior correspondence history", body)
 		}
-		batchReply(w, "private peer result")
+		batchReply(w, "assistant report")
 	}, 2)
 	// Atomic enqueue ensures the receiver observes all messages at one boundary.
 	c, _ := s.Conversation(ctx, "main")
@@ -236,8 +236,8 @@ func TestAgentCommunicationBatchesBySenderNotWireConversation(t *testing.T) {
 				t.Fatal("agent grouping did not reduce turns", calls.Load())
 			}
 			snapshot, _ := c.Snapshot(ctx)
-			if len(snapshot.Messages) != 0 {
-				t.Fatal("peer batch entered user chat")
+			if len(snapshot.Messages) == 0 {
+				t.Fatal("peer batch missing from assistant history")
 			}
 			return
 		}

@@ -159,6 +159,13 @@ Run at desktop and phone widths, including `locale=zh-CN&theme=dark`. Capture
 reading position leaves a synthetic conversation available for manual wheel,
 touchpad, keyboard and scrollbar checks.
 
+For incoming correspondence disclosure checks, open
+`/scripts/tests/fixtures/correspondence.html?locale=en&theme=light` on the loopback
+server and run `await window.correspondenceFixture.verify()` in the browser.
+At phone widths, select Pot from the assistant list first. Repeat with
+`locale=zh-CN`; `before=1` shows the previous private-correspondence presentation
+for comparison. This fixture uses production Chat components and synthetic data.
+
 For the resource tool and component fixture, run
 `POT_RESOURCE_FIXTURE_URL_FILE=/tmp/pot-resource-url mise exec -- go test
 ./internal/transport -run '^TestResourceBrowserFixture$' -v -count=1 -timeout=35m`.

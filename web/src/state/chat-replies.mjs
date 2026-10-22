@@ -40,9 +40,15 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
     if(input)anchors.set(input,Math.max(anchors.get(input)??-1,positions.get(message.id)));
   }
   for(const message of messages){
-    if(message.context_only&&message.role!=='tool' || message.role==='system'&&message.request_id?.startsWith('pot-result-'))continue;
+    if(message.context_only&&message.role!=='tool')continue;
+    if(message.role==='system'&&message.request_id?.startsWith('pot-result-')&&!message.correspondence?.length)continue;
     if(routineTaskDisposition(message))continue;
     const row={...message,viewKey:message.request_id?`input:${message.request_id}`:message.id};
+    if(message.role==='system'&&message.correspondence?.length){
+      // Receipt details are a disclosure row, never ordinary user/assistant prose.
+      // The authoritative system input stays unchanged in the model transcript.
+      row.role='tool';row.text='';row.tool={id:message.id,turn_id:message.request_id,name:'receive_message',args:{messages:message.correspondence},phase:'completed',started_at_ms:message.created_at_ms,finished_at_ms:message.created_at_ms};
+    }
     if(message.role==='assistant'){
       const input=inputs.get(replyInputs.get(message.id));
       // Tool-only model rounds have no prose to keep. The next output adopts

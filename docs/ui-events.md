@@ -68,6 +68,11 @@ original continuation boundary. Continuation survives bounded reset/delta reads
 even when its original input is outside the loaded message window.
 `view.messages` contains message envelopes (`message`, decimal-string `sequence`,
 `version`, optional `context_only`); `view.history` describes the loaded interval.
+Correspondence inputs also carry UI-only `correspondence` envelopes read from
+the original inbox batch journal. Snapshot, delta and history reads project the
+same incoming-message disclosure record. This metadata is not persisted into the
+conversation message or used as model history; the system reference input is
+already part of the owning assistant's transcript.
 `view.replies` describes per-input execution using `input_id`, `state`, optional
 `error` and `uncertain`. States are pending, queued, running, waiting, paused,
 cancelling, completed, failed, cancelled and unknown. Pending means a locally
