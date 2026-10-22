@@ -50,8 +50,9 @@ Start from source today; packaged distribution is pending.
 | macOS desktop / Homebrew | [Build guide](docs/development.md#toolchains-and-workflow) · [Downloads](https://github.com/jjyr/pot/releases) | Apple Silicon, macOS 26+. Homebrew distribution is pending. |
 | Linux server / Web UI | [Quick start](#linux-server--web-ui) · [Deployment guide](docs/deployment.md) | Available from source on a glibc-based amd64 or arm64 host. |
 | Docker | [Server deployment guide](docs/deployment.md) · [Releases](https://github.com/jjyr/pot/releases) | Image not yet published. |
-| Linux desktop | [Downloads](https://github.com/jjyr/pot/releases) · [Web UI setup](#linux-server--web-ui) | No published desktop package yet; use the Web UI meanwhile. |
-| Windows desktop | [Downloads](https://github.com/jjyr/pot/releases) · [Web UI setup](#linux-server--web-ui) | Native desktop support is pending; use a server's Web UI meanwhile. |
+| Linux desktop (Experimental) | [Releases](https://github.com/jjyr/pot/releases) | Native `.deb` packaging is experimental; no desktop package is published yet. |
+
+Windows is currently unsupported.
 
 ## Quick start
 
