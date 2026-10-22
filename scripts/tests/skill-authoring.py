@@ -63,6 +63,18 @@ class Authoring(unittest.TestCase):
         self.assertEqual((home / ".pot").stat().st_mode & 0o777, 0o700)
         self.assertEqual(list(target.parent.iterdir()), [target])
 
+    def test_explicit_node_directory_ignores_private_execution_home(self):
+        private_home = self.base / "private-execution-home"
+        node_root = self.base / "custom-node"
+        node_root.mkdir(mode=0o700)
+        destination = node_root / "skills"
+        with patch.dict(os.environ, {"HOME": str(private_home)}):
+            self.assertEqual(
+                installer.main(["--local", str(self.bundle), "--dest", str(destination)]), 0
+            )
+        self.assertTrue(validator.validate_skill(destination / "example")[0])
+        self.assertFalse(private_home.exists())
+
     def test_authoring_constraints_and_cli_exit_status(self):
         for text in [
             "---\ndescription: useful\n---\n",

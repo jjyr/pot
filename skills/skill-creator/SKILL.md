@@ -67,9 +67,11 @@ prove that the instructions produce good decisions. Run new or changed scripts
 with representative inputs and inspect their output when appropriate.
 
 For a new global skill, publish the validated bundle with the installer helper:
+Pass the owning node's absolute global Skill directory as `--dest`, including
+when using a custom node root. The execution process's `HOME` may be private.
 
 ```sh
-python3 <injected-skill-installer-path>/scripts/install_skill.py --local /data/workspace/draft/example-skill
+python3 <injected-skill-installer-path>/scripts/install_skill.py --local /data/workspace/draft/example-skill --dest /absolute/node-root/skills
 ```
 
 For an update, use the same command with `--replace` after reviewing the existing

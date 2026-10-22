@@ -21,15 +21,18 @@ curated catalog.
 Resolve helper paths from the injected catalog, relative to the relevant SKILL.md.
 Global commands run on the owning node through its main agent. Task agents use
 only explicit project `--dest` paths. Do not write into the supplied cache.
+Pass the owning node's absolute global Skill directory as `--dest`; a custom
+node root has its own directory. Do not derive it from the process's `HOME`,
+which may be private to that execution.
 
 Use the helper through exec_command. It validates the complete bundle, preserves
 resources and executable script permissions, prepares a sibling staging directory,
 and publishes only after validation succeeds.
 
 ```sh
-python3 <injected-skill-installer-path>/scripts/install_skill.py --local /data/workspace/downloads/example-skill
-python3 <injected-skill-installer-path>/scripts/install_skill.py --repo owner/repo --path path/to/example-skill --ref main
-python3 <injected-skill-installer-path>/scripts/install_skill.py --url https://github.com/owner/repo/tree/main/path/to/example-skill
+python3 <injected-skill-installer-path>/scripts/install_skill.py --local /data/workspace/downloads/example-skill --dest /absolute/node-root/skills
+python3 <injected-skill-installer-path>/scripts/install_skill.py --repo owner/repo --path path/to/example-skill --ref main --dest /absolute/node-root/skills
+python3 <injected-skill-installer-path>/scripts/install_skill.py --url https://github.com/owner/repo/tree/main/path/to/example-skill --dest /absolute/node-root/skills
 ```
 
 For branch names containing slashes, prefer `--repo`, `--path` and `--ref`.
