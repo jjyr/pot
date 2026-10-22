@@ -91,6 +91,11 @@ caller's durable submissions, not access to the receiver's entire task catalogue
 Task details include their effective operation description. Unsupported task
 transcripts or input controls are not queried or displayed.
 
+Owner-authorized failed-task retry and task guidance enter the same operation
+port. Assistant-originated guidance retains its authenticated sender and parent;
+using the port never converts it into user authority. Retry delivery authorization
+is checked before calling the owner-only `task.retry` operation.
+
 The current scheduler is retained behind the owning assistant's
 `schedules.manage` capability. It is not moved into a separate service or made a
 peer operator API. Its internal occurrence transactions and local execution

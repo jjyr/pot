@@ -13,6 +13,8 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
+type taskInputSenderKey struct{}
+
 // sendAgentMessage receives sender only from an authenticated execution binding.
 // Tool arguments describe a recipient and content, never authority or provenance.
 func (s *Service) sendAgentMessage(ctx context.Context, id, owner string, sender protocol.AgentRef, send protocol.SendMail) (any, error) {
@@ -40,20 +42,9 @@ func (s *Service) sendAgentMessage(ctx context.Context, id, owner string, sender
 		if send.To.NodeID != s.options.RuntimeID {
 			return nil, errors.New("address the Task through its owning Control")
 		}
-		var parent *protocol.Envelope
-		if value, ok := ctx.Value(mailParentKey{}).(protocol.Envelope); ok {
-			if value.To != sender {
-				return nil, errors.New("message parent sender differs")
-			}
-			parent = &value
-		}
-		if s.LinkTask(ctx, owner, send.To.AgentID) {
-			if sender.Kind != "assistant" || sender.AgentID != owner {
-				return nil, agentlink.ErrUnauthorized
-			}
-			return s.guideTaskExecution(ctx, owner, send.To.AgentID, protocol.TaskInput{RequestID: id, Text: send.Text})
-		}
-		if err := s.Tasks.SendMessageWithParent(ctx, owner, send.To.AgentID, id, sender, send.Text, parent); err != nil {
+		body, _ := json.Marshal(protocol.TaskInput{RequestID: id, Text: send.Text})
+		ctx = context.WithValue(ctx, taskInputSenderKey{}, sender)
+		if _, err := s.CallAgent(ctx, owner, agentlink.TaskInput, agentlink.Call{ID: send.To.AgentID, Action: "write", Body: body}); err != nil {
 			return nil, err
 		}
 

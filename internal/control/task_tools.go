@@ -5,13 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/protocol"
-	"github.com/jjyr/pot/pkg/storage"
 	"strconv"
 	"strings"
 )
@@ -189,7 +187,7 @@ func (s *Service) productCall(ctx context.Context, owner, id, name string, args 
 		if err := core.DecodeJSON(args, &q); err != nil {
 			return nil, err
 		}
-		return s.Schedules.Page(ctx, owner, schedule.Query{Scope: q.Scope, Offset: q.Offset, Limit: q.Limit})
+		return s.CallAgent(ctx, owner, agentlink.Schedules, agentlink.Call{Action: "read", Query: map[string]string{"scope": q.Scope, "offset": strconv.FormatUint(q.Offset, 10), "limit": strconv.FormatUint(q.Limit, 10)}})
 	case "get_schedule":
 		var q struct {
 			ID     string `json:"schedule_id"`
@@ -199,18 +197,9 @@ func (s *Service) productCall(ctx context.Context, owner, id, name string, args 
 		if err := core.DecodeJSON(args, &q); err != nil {
 			return nil, err
 		}
-		return s.Schedules.Page(ctx, owner, schedule.Query{Selected: q.ID, RunsOffset: q.Offset, Limit: q.Limit})
+		return s.CallAgent(ctx, owner, agentlink.Schedules, agentlink.Call{Action: "read", Query: map[string]string{"selected": q.ID, "runs_offset": strconv.FormatUint(q.Offset, 10), "limit": strconv.FormatUint(q.Limit, 10)}})
 	case "manage_schedule":
-		var request schedule.Request
-		if err := core.DecodeJSON(inject(), &request); err != nil {
-			return nil, err
-		}
-		result, err := s.Schedules.Manage(ctx, owner, request, storage.Now())
-		if err == nil {
-			s.wakeTasks()
-			s.Changes.Notify("schedules")
-		}
-		return result, err
+		return s.CallAgent(ctx, owner, agentlink.Schedules, agentlink.Call{Action: "write", Body: inject()})
 	case "list_execution_targets":
 		policy, _, err := s.Permissions.Policy(s.options.RuntimeID)
 		if err != nil {

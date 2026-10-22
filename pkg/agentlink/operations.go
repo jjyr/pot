@@ -43,6 +43,7 @@ const (
 	TaskFiles          Operation = "task.files"
 	TaskRecovery       Operation = "task.recovery"
 	TaskResume         Operation = "task.resume"
+	TaskRetry          Operation = "task.retry"
 	TaskArchive        Operation = "task.archive"
 	TaskOutcomes       Operation = "task.outcomes"
 	TaskConfigure      Operation = "task.configure"
@@ -100,6 +101,6 @@ func OwnerOperations() []Operation {
 		ChatCancel, ChatSteer, ChatControl, ChatRetry, ChatContinue, ChatAttachments,
 		ChatReferences, ChatCompletions, AssistantConfigure, AssistantRules, AssistantProfile, AssistantDelete, AssistantUsage, Approvals,
 		TaskSubmit, TaskRead, TaskList, TaskCancel, TaskInterrupt, TaskControl, TaskInput,
-		TaskEvents, TaskFiles, TaskRecovery, TaskResume, TaskArchive, TaskOutcomes,
+		TaskEvents, TaskFiles, TaskRecovery, TaskResume, TaskRetry, TaskArchive, TaskOutcomes,
 		TaskConfigure, Schedules}
 }

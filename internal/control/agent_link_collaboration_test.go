@@ -120,7 +120,7 @@ func TestPotLinkDelegationOwnsTaskOnReceiverAndNotifiesOriginalAssistant(t *test
 		}
 	}
 	var count int
-	if e = a.service.Tasks.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks WHERE id=?", info.ID).Scan(&count); e != nil || count != 0 {
+	if e = a.service.Tasks.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM task_runs WHERE task_id=?", info.ID).Scan(&count); e != nil || count != 0 {
 		t.Fatal("sender launched remote task locally", count, e)
 	}
 	for {

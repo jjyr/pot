@@ -653,8 +653,34 @@ func (p agentPort) taskCall(ctx context.Context, owner string, op agentlink.Oper
 		}
 		var input protocol.TaskInput
 		if err = protocol.DecodeStrict(call.Body, &input); err == nil {
-			err = s.Tasks.SendMessage(ctx, owner, call.ID, input.RequestID, protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: owner}, input.Text)
+			sender := protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: owner}
+			if from, ok := ctx.Value(taskInputSenderKey{}).(protocol.AgentRef); ok {
+				if from.NodeID != s.options.RuntimeID || from.Kind != "assistant" || from.AgentID != owner {
+					return nil, agentlink.ErrUnauthorized
+				}
+				sender = from
+			}
+			var parent *protocol.Envelope
+			if value, ok := ctx.Value(mailParentKey{}).(protocol.Envelope); ok {
+				if value.To != sender {
+					return nil, agentlink.ErrUnauthorized
+				}
+				parent = &value
+			}
+			err = s.Tasks.SendMessageWithParent(ctx, owner, call.ID, input.RequestID, sender, input.Text, parent)
 		}
+	case agentlink.TaskRetry:
+		var input struct {
+			Instructions string `json:"instructions" required:"true"`
+		}
+		if err = protocol.DecodeStrict(call.Body, &input); err != nil {
+			return nil, err
+		}
+		record, err := s.Tasks.Retry(ctx, owner, call.ID, input.Instructions)
+		if err == nil {
+			s.wakeTasks()
+		}
+		return record.Info, err
 	case agentlink.TaskControl, agentlink.TaskRecovery:
 		var input struct {
 			RunID  string `json:"run_id" required:"true"`

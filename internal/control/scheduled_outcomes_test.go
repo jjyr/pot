@@ -234,8 +234,12 @@ func TestGetTaskReturnsFinalizedOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, ok := value.(map[string]any)["result"].(*protocol.TaskResultEvent)
-	if !ok || result.Origin.Kind != "manual" || result.TaskID != record.Info.ID {
+	raw, _ := json.Marshal(value.(map[string]any)["result"])
+	var result protocol.TaskResultEvent
+	if err = json.Unmarshal(raw, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Origin.Kind != "manual" || result.TaskID != record.Info.ID {
 		t.Fatal(value)
 	}
 }
