@@ -67,7 +67,7 @@ func TestConfiguredModelTaskRecoveryLive(t *testing.T) {
 		{"single", "请创建一个后台任务：只返回 READY_SINGLE，不需要查资料或执行命令。", 1, 0, false},
 		{"multiple", "请分别创建两个独立后台任务：任务 A 只返回 READY_ALPHA；任务 B 只返回 READY_BETA。它们都不需要查资料或执行命令。", 2, 0, false},
 		{"recover", "请创建一个后台任务：只返回 READY_RECOVER，不需要查资料或执行命令。", 1, 1, false},
-		{"exhausted", "请创建一个后台任务：只返回 READY_EXHAUSTED，不需要查资料或执行命令。", 1, 2, false},
+		{"repeated-recovery", "请创建一个后台任务：只返回 READY_RECOVER，不需要查资料或执行命令。", 1, 2, false},
 	}
 	if os.Getenv("POT_BASELINE_MAIN_PROMPT_FILE") != "" {
 		cases = append(cases, struct {
@@ -258,7 +258,7 @@ func TestConfiguredModelTaskRecoveryLive(t *testing.T) {
 			if err = s.Tasks.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM task_retries").Scan(&retries); err != nil {
 				t.Fatal(err)
 			}
-			if scenario.failures > 0 && (retries != 1 || attempts.Load() != 2) {
+			if scenario.failures > 0 && (retries != scenario.failures || int(attempts.Load()) != scenario.failures+1) {
 				t.Fatalf("recovery attempts=%d replacements=%d", attempts.Load(), retries)
 			}
 			if scenario.failures == 0 && (retries != 0 || int(attempts.Load()) != scenario.count) {
@@ -272,9 +272,6 @@ func TestConfiguredModelTaskRecoveryLive(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantComplete, wantFailed := scenario.count, scenario.failures
-			if scenario.failures == 2 {
-				wantComplete = 0
-			}
 			if completed != wantComplete || failed != wantFailed {
 				t.Fatalf("unexpected terminal outcomes: complete=%d failed=%d", completed, failed)
 			}

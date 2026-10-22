@@ -15,8 +15,8 @@ import (
 )
 
 func TestFailedTaskRecoveryIsSilentAndReplacementReportsOnce(t *testing.T) {
-	for _, failAgain := range []bool{false, true} {
-		t.Run(fmt.Sprintf("replacement-fails=%v", failAgain), func(t *testing.T) {
+	for _, failures := range []int32{1, 3} {
+		t.Run(fmt.Sprintf("transient-failures=%d", failures), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			var workers, recoveryRounds, reports atomic.Int32
@@ -45,7 +45,7 @@ func TestFailedTaskRecoveryIsSilentAndReplacementReportsOnce(t *testing.T) {
 								t.Error("result handling lost assistant tool", name)
 							}
 						}
-						if recoveryRounds.Add(1) == 1 {
+						if recoveryRounds.Add(1)%2 == 1 {
 							var payload []struct {
 								TaskID   string `json:"artifact_task_id"`
 								Allowed  bool   `json:"retry_allowed"`
@@ -70,15 +70,11 @@ func TestFailedTaskRecoveryIsSilentAndReplacementReportsOnce(t *testing.T) {
 						batchReply(w, "")
 						return
 					}
-					if failAgain {
-						batchReply(w, "Still blocked after recovery; user decision needed.")
-					} else {
-						batchReply(w, "Recovered result delivered.")
-					}
+					batchReply(w, "Recovered result delivered.")
 					reports.Add(1)
 					return
 				}
-				if workers.Add(1) == 1 || failAgain {
+				if workers.Add(1) <= failures {
 					http.Error(w, "transient read failure", http.StatusBadRequest)
 					return
 				}
@@ -97,7 +93,7 @@ func TestFailedTaskRecoveryIsSilentAndReplacementReportsOnce(t *testing.T) {
 				t.Fatal(err)
 			}
 			awaitConversationContext(t, ctx, c, func(snapshot protocol.Snapshot) bool { return snapshot.Turn == nil && reports.Load() == 1 })
-			if workers.Load() != 2 || recoveryRounds.Load() != 2 {
+			if workers.Load() != failures+1 || recoveryRounds.Load() != 2*failures {
 				t.Fatal("unexpected recovery loop", workers.Load(), recoveryRounds.Load())
 			}
 			catalogue, err := c.Catalogue(ctx)

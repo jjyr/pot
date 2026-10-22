@@ -480,11 +480,14 @@ func TestVirtualAssistantSendKeepsActiveMessageParent(t *testing.T) {
 	if err != nil || reply.Hops != 8 || reply.ReplyTo == nil || *reply.ReplyTo != parent.ID || reply.ConversationID != parent.ConversationID {
 		t.Fatal(reply, err)
 	}
-	if err = b.update(ctx, task.ID, func(j *job) error { j.Message.Hops = protocol.MaxMailHops; return nil }); err != nil {
+	if err = b.update(ctx, task.ID, func(j *job) error { j.Message.Hops = 130; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = mailbox.sendFrom(ctx, parent.To, from, "bypass", "response", task.ID); err == nil {
-		t.Fatal("virtual session bypassed causal limit")
+	if reply, err = mailbox.sendFrom(ctx, parent.To, from, "continue", "response", task.ID); err != nil || reply.Hops != 131 || reply.ReplyTo == nil || *reply.ReplyTo != parent.ID {
+		t.Fatal("long virtual session lost continuation or parent", reply, err)
+	}
+	if terminal := messageReply(job{Message: &protocol.Envelope{ID: parent.ID, From: from, ConversationID: parent.ConversationID, Hops: 130}, Task: agentlink.Task{ID: task.ID, State: "completed", Result: "done"}}); terminal == nil || terminal.Hops != 131 {
+		t.Fatal("long correspondence suppressed terminal reply", terminal)
 	}
 }
 

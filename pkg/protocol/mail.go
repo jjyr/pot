@@ -12,7 +12,6 @@ const (
 	AssistantMailAPI = "/api/v1/assistant-mail"
 	MaxMailText      = 65536
 	MailPageSize     = 32
-	MaxMailHops      = 16
 )
 
 type AgentRef struct {
@@ -48,6 +47,15 @@ type Envelope struct {
 	ReplyTo        *string             `json:"reply_to"`
 	Text           string              `json:"text" required:"true"`
 	Hops           uint32              `json:"hops" required:"true"`
+}
+
+// NextMailHop preserves causal depth without imposing a conversation-length
+// quota. Reject only an increment that cannot fit the wire representation.
+func NextMailHop(hops uint32) (uint32, error) {
+	if hops == ^uint32(0) {
+		return 0, fmt.Errorf("agent message causal depth overflow")
+	}
+	return hops + 1, nil
 }
 
 func (e Envelope) Validate() error {
@@ -95,7 +103,7 @@ func (e Envelope) Validate() error {
 	if e.Kind == "plugin_event" {
 		validText = e.Text == ""
 	}
-	if !mailID(e.ID) || !e.From.Valid() || !e.To.Valid() || !validUUID(e.ConversationID) || e.ReplyTo != nil && !mailID(*e.ReplyTo) || !validText || e.Hops > MaxMailHops {
+	if !mailID(e.ID) || !e.From.Valid() || !e.To.Valid() || !validUUID(e.ConversationID) || e.ReplyTo != nil && !mailID(*e.ReplyTo) || !validText {
 		return fmt.Errorf("invalid assistant mail envelope")
 	}
 	return nil

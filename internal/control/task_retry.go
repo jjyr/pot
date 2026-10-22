@@ -12,7 +12,7 @@ import (
 
 var retryTaskTool = modelprotocol.ToolDefinition{
 	Name:        "retry_task",
-	Description: "Continue a delivered failed task once, after diagnosing its failure. Supply a repair approach within the original goal and authority. Runtime preserves the original instructions, additional guidance, machine, model, skills and requirements. A new workspace is used; previous files are not imported. Inspect uncertainty and partial effects first. Never retry an owner-denied operation or cancelled/interrupted work. Repeated calls return the same replacement. A replacement cannot be automatically retried again. Remain silent after acceptance unless other delivered outcomes need a substantive reply.",
+	Description: "Continue a delivered failed task after diagnosing its failure. Supply a repair approach within the original goal and authority. Runtime preserves the original instructions, additional guidance, machine, model, skills and requirements. A new workspace is used; previous files are not imported. Inspect uncertainty and partial effects first. Never retry an owner-denied operation or cancelled/interrupted work. Repeated calls for the same source return the same replacement. A failed replacement can be recovered after its own result is delivered. Remain silent after acceptance unless other delivered outcomes need a substantive reply.",
 	InputSchema: json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"instructions":{"type":"string","minLength":1,"maxLength":8192}},"required":["task_id","instructions"],"additionalProperties":false}`),
 }
 

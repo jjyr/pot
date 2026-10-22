@@ -389,7 +389,7 @@ func (s *Store) SaveInstructions(ctx context.Context, text, revision string) (Ru
 }
 
 // Mail methods implement generic durable scoped receipts only. Assistant routing,
-// envelope validation, participants and automatic hop limits belong to Assistant.
+// envelope validation and participants belong to Assistant.
 type Mail struct {
 	Sequence int64           `json:"sequence,string"`
 	Scope    string          `json:"scope"`

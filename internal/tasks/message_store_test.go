@@ -8,7 +8,7 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
-func TestForwardedPeerMessageRemainsReferenceAndRetainsHopBound(t *testing.T) {
+func TestForwardedPeerMessageRemainsReferenceAcrossLongChains(t *testing.T) {
 	ctx := context.Background()
 	s, _, _, _ := fixture(t)
 	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "create", Text: "work"})
@@ -16,12 +16,7 @@ func TestForwardedPeerMessageRemainsReferenceAndRetainsHopBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	sender := protocol.AgentRef{NodeID: s.ControlID(), Kind: "assistant", AgentID: "assistant"}
-	parent := protocol.Envelope{ID: "peer-parent", Kind: "message", From: protocol.AgentRef{NodeID: s.ControlID(), Kind: "assistant", AgentID: "peer"}, To: sender, ConversationID: record.RunID, Text: "reference", Hops: protocol.MaxMailHops}
-	if err = s.SendMessageWithParent(ctx, "assistant", record.Info.ID, "bounded", sender, "forwarded data", &parent); err == nil {
-		t.Fatal("Task forwarding reset the automatic hop bound")
-	}
-	parent.ID = "valid-parent"
-	parent.Hops = 3
+	parent := protocol.Envelope{ID: "peer-parent", Kind: "message", From: protocol.AgentRef{NodeID: s.ControlID(), Kind: "assistant", AgentID: "peer"}, To: sender, ConversationID: record.RunID, Text: "reference", Hops: 130}
 	if err = s.SendMessageWithParent(ctx, "assistant", record.Info.ID, "reference", sender, "forwarded data", &parent); err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +32,7 @@ func TestForwardedPeerMessageRemainsReferenceAndRetainsHopBound(t *testing.T) {
 	if err = json.Unmarshal(body, &stored); err != nil {
 		t.Fatal(err)
 	}
-	if stored.From != sender || stored.Hops != 4 || stored.ReplyTo == nil || *stored.ReplyTo != parent.ID {
+	if stored.From != sender || stored.Hops != 131 || stored.ReplyTo == nil || *stored.ReplyTo != parent.ID {
 		t.Fatal("message provenance or causation was lost", stored)
 	}
 }

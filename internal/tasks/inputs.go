@@ -79,7 +79,10 @@ func (s *Service) input(ctx context.Context, assistant, task, requestID, text, k
 		messageID, _ := core.HashJSON([]string{task, requestID})
 		message := protocol.Envelope{ID: messageID, Kind: kind, Owner: assistant, RequestID: requestID, Digest: hash, From: sender, To: protocol.AgentRef{NodeID: s.options.ControlID, Kind: "task", AgentID: task}, ConversationID: record.RunID, Text: text}
 		if parent != nil {
-			message.Hops = parent.Hops + 1
+			message.Hops, err = protocol.NextMailHop(parent.Hops)
+			if err != nil {
+				return err
+			}
 			reply := parent.ID
 			message.ReplyTo = &reply
 		}
