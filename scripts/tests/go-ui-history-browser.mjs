@@ -1,12 +1,14 @@
 // Interactive fixture using production DOM, HTTP history and SSE with a local
 // deterministic provider. Run through computer-use, without browser automation dependencies.
 const frame=document.querySelector('iframe'),results=document.querySelector('#results');
-const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+// Background browser tabs can defer scroll/animation work past a timer. Sample
+// only after the iframe has painted the requested projection.
+const pause=ms=>new Promise(resolve=>setTimeout(()=>frame.contentWindow.requestAnimationFrame(()=>frame.contentWindow.requestAnimationFrame(resolve)),ms));
 const wait=async(test,label)=>{for(let i=0;i<300;i++){if(test())return;await pause(20);}throw Error('Timed out: '+label);};
 const check=(value,label)=>{if(!value)throw Error(label);results.textContent+='PASS '+label+'\n';};
-function userScroll(history,top){const w=history.ownerDocument.defaultView;history.dispatchEvent(new w.WheelEvent('wheel',{deltaY:top-history.scrollTop||1,bubbles:true}));history.scrollTop=top;}
+function userScroll(history,top){const w=history.ownerDocument.defaultView;history.dispatchEvent(new w.WheelEvent('wheel',{deltaY:top-history.scrollTop||1,bubbles:true}));history.scrollTop=top;history.dispatchEvent(new w.Event('scroll'));}
 const app=()=>frame.contentWindow,doc=()=>frame.contentDocument;
-const anchor=()=>{const history=doc().querySelector('.history'),top=history.getBoundingClientRect().top;const row=[...doc().querySelectorAll('article.message')].find(row=>{const box=row.getBoundingClientRect();return box.height&&box.top<=top+4&&box.bottom>top;})||[...doc().querySelectorAll('article.message')].find(row=>row.getBoundingClientRect().top>top);return {id:row?.dataset.messageId,offset:row?.getBoundingClientRect().top-top};};
+const anchor=()=>{const history=doc().querySelector('.history'),top=history.getBoundingClientRect().top;const row=[...doc().querySelectorAll('article.message')].find(row=>{const box=row.getBoundingClientRect();return box.height&&box.top<=top+4&&box.bottom>top;})||[...doc().querySelectorAll('article.message')].find(row=>{const box=row.getBoundingClientRect();return box.height&&box.top>top&&box.top<top+history.clientHeight;});return {id:row?.dataset.messageId,offset:row?.getBoundingClientRect().top-top};};
 const position=id=>{const history=doc().querySelector('.history'),row=[...doc().querySelectorAll('article.message')].find(row=>row.dataset.messageId===id);return row?.getBoundingClientRect().top-history.getBoundingClientRect().top;};
 async function run(mobile){
  results.textContent='Running '+(mobile?'mobile 390×700':'desktop 1100×650')+' checks…\n';
@@ -22,13 +24,13 @@ async function run(mobile){
   const smallScroll=anchor(),smallFrames=metrics.frames.length;
   await client.send({request_id:'small-scroll-'+Date.now(),conversation_id:'main',text:'Small-scroll reading fixture'});
   await wait(()=>metrics.frames.slice(smallFrames).some(value=>value.kind==='delta'),'update near bottom');await pause(800);
-  check(Math.abs(position(smallScroll.id)-smallScroll.offset)<5,'streaming within 80px of bottom preserves paused reading');
+  check(Math.abs(position(smallScroll.id)-smallScroll.offset)<5,`streaming within 80px of bottom preserves paused reading (${smallScroll.id}: ${smallScroll.offset} → ${position(smallScroll.id)})`);
   doc().querySelector('.latest-button').click();await pause(200);
   userScroll(history,Math.max(300,history.scrollHeight/2));history.dispatchEvent(new Event('scroll'));await pause(300);
   const before=anchor(),pages=metrics.pages.length;doc().querySelector('.history-page-status').click();
   await wait(()=>metrics.pages.length>pages,'older page');await pause(800);
   const error=Math.abs(position(before.id)-before.offset);
-  check(error<5,'prepend reading anchor drift: '+error.toFixed(2)+' px');
+  check(error<5,`prepend reading anchor ${before.id}: ${before.offset} → ${position(before.id)} (${error.toFixed(2)} px drift)`);
   // Delayed images and disclosure resizes above the reader retain their anchor.
   const beforeResize=anchor();const image=doc().querySelector('.sent-image img');if(image){image.style.height='310px';await pause(250);check(Math.abs(position(beforeResize.id)-beforeResize.offset)<5,'delayed image height preserves anchor');}
   const detail=doc().querySelector('details.tool-call');if(detail){detail.open=true;await pause(300);check(doc().querySelectorAll('article.message').length<90,'expanded tool sublist remains windowed');detail.open=false;}

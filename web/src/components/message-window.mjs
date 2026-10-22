@@ -1,8 +1,30 @@
 // Measured DOM windows share the chat scroller, including nested tool lists.
 // Data, disclosure memory and send lifecycle live outside recycled DOM nodes.
 export function createMessageWindow({scroller, host, render, dispose, requestRender, compensate, heights = new Map()}) {
-  let rows = [], mounted = new Map(), closed = false;
+  let rows = [], mounted = new Map(), closed = false, previousTop = 0, previousTime = 0, previousFrame = -1, travel = 0;
+  const cached = new Map();
+  const sources = new WeakMap(), weights = new WeakMap();
+  let cachedBytes = 0;
   const spacers = [];
+  function retainedBytes(record) {
+    const source = sources.get(record);
+    let bytes = weights.get(source);
+    if (bytes === undefined) {
+      bytes = 512;
+      const pending = [source], seen = new Set();
+      while (pending.length && bytes <= 2 * 1024 * 1024) {
+        const value = pending.pop();
+        if (typeof value === 'string') bytes += value.length * 2;
+        else if (value && typeof value === 'object' && !seen.has(value)) {
+          seen.add(value); bytes += 64;
+          if (Array.isArray(value)) bytes += value.length * 8;
+          if (bytes <= 2 * 1024 * 1024) for (const child of Object.values(value)) pending.push(child);
+        }
+      }
+      weights.set(source, bytes);
+    }
+    return bytes + record.row.textContent.length * 2;
+  }
   function measure() {
     let changed = false;
     for (const [key, record] of mounted) {
@@ -33,6 +55,15 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     rows = next;
     const viewport = scroller.getBoundingClientRect(), box = host.getBoundingClientRect();
     let start = viewport.top - box.top + shift;
+    const now = performance.now(), stamp = document.timeline?.currentTime ?? now;
+    // All measurement passes in one frame share the same look-ahead. Anchor
+    // compensation must not replace the reader's direction mid-layout.
+    if (stamp !== previousFrame) {
+      const elapsed = now - previousTime;
+      travel = elapsed > 0 && elapsed < 200 ? (scroller.scrollTop - previousTop) / elapsed * 120 : 0;
+      previousTop = scroller.scrollTop; previousTime = now; previousFrame = stamp;
+    }
+    if (!rows.length) { previousTime = 0; previousFrame = -1; travel = 0; }
     if (target) {
       let offset = 0;
       for (const item of rows) {
@@ -41,8 +72,10 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       }
       if (target.end) start = Math.max(0, offset - scroller.clientHeight);
     }
-    const end = start + scroller.clientHeight + 600;
-    start -= 600;
+    const overscan = Math.max(600, scroller.clientHeight * 2);
+    const ahead = Math.min(scroller.clientHeight * 2, Math.abs(travel));
+    const end = start + scroller.clientHeight + overscan + (travel > 0 ? ahead : 0);
+    start -= overscan + (travel < 0 ? ahead : 0);
     let offset = 0, gap = 0, spacerIndex = 0;
     const selected = new Set(), layout = [];
     const selection = getSelection();
@@ -57,7 +90,27 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       offset += height;
     }
     if (gap) layout.push({gap});
-    for (const [key, record] of mounted) if (!selected.has(key)) { observer.unobserve(record.row); dispose(record); mounted.delete(key); }
+    // Prepare incoming rows before retiring the old window. A nearby return
+    // reuses its prose/disclosures; disconnected media release their own leases.
+    for (const part of layout) if (part.item) {
+      const key = part.item.viewKey, retained = cached.get(key);
+      if (retained) { cached.delete(key); cachedBytes -= retained.bytes; }
+      part.record = render(part.item, mounted.get(key) || retained?.record);
+      sources.set(part.record, part.item);
+    }
+    const available = new Set(rows.map(item => item.viewKey));
+    for (const [key, record] of mounted) if (!selected.has(key)) {
+      observer.unobserve(record.row); record.row.remove(); mounted.delete(key);
+      if (available.has(key)) {
+        const bytes = retainedBytes(record);
+        cached.set(key, {record, bytes}); cachedBytes += bytes;
+      } else dispose(record);
+    }
+    for (const [key, value] of cached) if (!available.has(key)) { cached.delete(key); cachedBytes -= value.bytes; dispose(value.record); }
+    while (cached.size > 32 || cachedBytes > 2 * 1024 * 1024) {
+      const [key, value] = cached.entries().next().value;
+      cached.delete(key); cachedBytes -= value.bytes; dispose(value.record);
+    }
     let index = 0;
     for (const part of layout) {
       let element;
@@ -67,7 +120,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
         spacerIndex++; element.style.height = `${part.gap}px`;
       } else {
         const key = part.item.viewKey;
-        const record = render(part.item, mounted.get(key));
+        const record = part.record;
         mounted.set(key, record); element = record.row; element.dataset.windowKey = key; observer.observe(element);
       }
       if (host.children[index] !== element) host.insertBefore(element, host.children[index] || null);
@@ -88,5 +141,5 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       if (!changed && Math.abs(scroller.scrollTop - top) < .5) break;
       top = scroller.scrollTop;
     }
-  }, close() { closed = true; observer.disconnect(); for (const record of mounted.values()) dispose(record); mounted.clear(); for (const spacer of spacers) spacer.remove(); }};
+  }, close() { closed = true; observer.disconnect(); for (const record of mounted.values()) dispose(record); for (const value of cached.values()) dispose(value.record); mounted.clear(); cached.clear(); cachedBytes = 0; for (const spacer of spacers) spacer.remove(); }};
 }

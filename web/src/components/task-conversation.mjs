@@ -37,7 +37,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   root.classList.add('task-conversation');root.append(stage,history,composerArea);
   const dialog=n('dialog','preferences product-actions task-actions');dialog.setAttribute('aria-label',tr('Task actions','任务操作'));root.append(dialog);
   let record=initial,state,inputs=[],approvals=[],unavailable=false,connectionError='',busy=false,disposed=false,restored=false,frame=0,menuMode='actions',menuSignature='',fileSignature='',draftVersion=0;
-  let forest,restoringPosition=false;
+  let forest,projection,restoringPosition=false;
   const reading=createReadingCursor(history,{active:()=>!disposed&&root.isConnected&&!!history.clientHeight,requestRender:scheduleFollow,changed:()=>{latest.hidden=reading.following;}});
   const editor=bindComposer(input,{layout:work=>reading.layout(work),onInput:text=>{draftVersion++;onDraft(text);updateComposer();},onSend:submit,onCompositionEnd:updateComposer});
   const completion=bindCompletions(input,{client:{scope:()=>scope,request:(path,options)=>client.request(path,options)},host:composerArea,locale,mobile:editor.mobile,id:`pot-task-${task.id}-completions`});
@@ -124,7 +124,8 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   let destinations=new Map();
   function renderTranscript(){
     if(!state)return;
-    const rows=projectScriptRuns(projectTaskMessages(state,inputs,record,{offline:unavailable||!!connectionError}),{activeTurn:active()?[...state.tools.values()].at(-1)?.tool.turn_id:null});forest=toolForest(rows);
+    if(!projection){const rows=projectScriptRuns(projectTaskMessages(state,inputs,record,{offline:unavailable||!!connectionError}),{activeTurn:active()?[...state.tools.values()].at(-1)?.tool.turn_id:null});projection={rows,forest:toolForest(rows)};}
+    const {rows}=projection;forest=projection.forest;
     reading.flush();
     destinations=new Map();let destination=rows.find(message=>message.id===(reading.destination?.id||reading.anchor?.id));
     const seen=new Set();
@@ -162,6 +163,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     transcript,history,input,approvalHost,
     update(next){
       if(disposed)return;
+      projection=null;
       if(next.record)record=next.record;if(next.state)state=next.state;if(next.inputs)inputs=next.inputs;if(next.approvals)approvals=next.approvals;if(next.unavailable!==undefined)unavailable=next.unavailable;if(next.connectionError!==undefined)connectionError=next.connectionError;
       renderStage();renderTranscript();scheduleFollow();updateComposer();renderMenu();
       const signature=JSON.stringify(record.files||[]);if(fileSignature!==signature){fileSignature=signature;files.replaceChildren();for(const file of record.files||[]){const link=action(file.name||file.path,()=>downloadFile({task:task.id,path:file.path}));files.append(link);}}
