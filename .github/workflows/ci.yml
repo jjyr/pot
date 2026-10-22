@@ -175,7 +175,7 @@ jobs:
 
   desktop:
     needs: [source, product]
-    name: Native Linux desktop
+    name: Experimental Linux desktop
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:

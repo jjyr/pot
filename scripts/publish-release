@@ -54,7 +54,7 @@ def publish(version, output, channel):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md") as notes:
             notes.write(
                 "Artifacts are added per channel after its checks and applicable signing pass. "
-                "Only listed assets are available. Windows desktop packages are not available yet.\n"
+                "Only listed assets are available. Linux desktop packages are experimental. Windows is unsupported.\n"
             )
             notes.flush()
             result = subprocess.run(

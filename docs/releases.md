@@ -1,11 +1,9 @@
 # Releases and installation channels
 
-CI builds and publishes each implemented delivery channel independently after
-shared product checks pass. A macOS signing failure or unavailable Windows port
-does not block Docker, Linux server or Linux desktop publication. A channel's own
-failed build, smoke, checksum or signing gate prevents that channel from publishing.
-A green validation run covers the implemented targets only; it does not establish
-Windows support.
+CI builds and publishes each delivery channel independently after shared product
+checks pass. Docker, Linux server and the experimental Linux desktop do not depend
+on macOS signing. Each channel requires its own build, smoke, checksum and
+applicable signing gates. Windows is currently unsupported.
 
 Source builds remain the installation path until public artifacts exist. The
 public `jjyr/homebrew-tap` repository exists, but does not currently contain a Pot
@@ -15,11 +13,16 @@ These workflows never modify the tap or registry visibility.
 | Channel | Versioned distribution | Publication boundary |
 |---|---|---|
 | Linux server, amd64/arm64 | `pot-go-VERSION-linux-ARCH.tar.gz` | Both native CLI builds and extracted-package smoke; GitHub Release assets |
-| Linux desktop, amd64 | `pot-desktop_VERSION_linux_amd64.deb` | Native GTK/WebKit build and real WebView smoke; GitHub Release assets; manual upgrades |
+| Linux desktop (Experimental), amd64 | `pot-desktop_VERSION_linux_amd64.deb` | Native GTK/WebKit build and real WebView smoke; GitHub Release assets; manual upgrades |
 | macOS 26+, Apple Silicon | `Pot-VERSION-arm64.zip`, `pot-go-VERSION-darwin-arm64.tar.gz` | Native App/CLI smoke, Developer ID signing and notarization; GitHub assets, cask and signed update feed |
 | Container, Linux amd64/arm64 | `pot-container-VERSION.oci.tar`, `ghcr.io/jjyr/pot:VERSION` | Native image build/smoke on both architectures, OCI integrity and metadata verification; GHCR |
 | Homebrew | Generated `pot.rb` macOS release asset | Local cask installation after a release exists; public tap inclusion is a separate reviewed change |
-| Windows desktop | Unavailable | No native runtime/package/smoke target is enabled; does not block other channels |
+
+The experimental designation applies only to the new Linux native desktop `.deb`.
+Its amd64 build and native WebView smoke have been exercised locally; native
+arm64, Wayland and actual apt installation have not been fully validated. Desktop
+upgrades replace the complete package manually. Linux server CLI/Web UI and Docker
+are separate channels.
 
 See [Desktop installation](desktop-installation.md) and [Docker](docker.md) for
 platform requirements, installation boundaries and source-build instructions.
@@ -119,7 +122,7 @@ a failure in one publication channel does not prevent another qualified channel
 from running. Existing assets must have the same byte size and GitHub SHA-256
 digest to be reused. Missing assets may be added; different existing bytes are
 never clobbered. The initial release notes explain that availability is per channel
-and Windows desktop is unavailable. The publisher also handles identical asset
+and the Linux desktop is experimental. The publisher also handles identical asset
 creation races safely.
 
 Every archive has a standard `NAME.sha256` sidecar. Each channel owns a distinct
@@ -133,8 +136,7 @@ internal installation directory `pot-go-PLATFORM`.
 Channel publication is intentionally independent, not a transaction across GitHub
 and GHCR. An environment refusal, registry error or platform failure may leave
 other successful channels publicly available. Inspect actual assets and channel
-job results before retrying. Missing signing credentials affect only macOS; a
-missing Windows port is accurately documented and has no placeholder job.
+job results before retrying. Missing signing credentials affect only macOS.
 
 ## Environment, permissions and signing setup
 
@@ -173,13 +175,6 @@ published when the macOS signed-update channel succeeds; Linux releases remain
 manually installable if that feed is not yet available. Linux desktop and container
 upgrades are explicit operations. See [Updates](updates.md) for trust bootstrap
 and storage-format restrictions.
-
-Windows needs an actual runtime port, native Windows package/smoke gate and
-WebView2 qualification before a release target is enabled. The unenabled
-`sign-windows-release.ps1` helper describes PFX-based Authenticode signing with
-`WINDOWS_CERTIFICATE_PFX` and `WINDOWS_CERTIFICATE_PASSWORD`; it is not evidence
-of a working Windows package or runner validation. Hardware-backed signing needs
-a separately reviewed adapter.
 
 Runner availability, pinned toolchains, package repositories, upstream downloads
 and standard Actions minutes/billing remain execution prerequisites. A job refused
