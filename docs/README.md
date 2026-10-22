@@ -6,6 +6,7 @@ Code defines actual behavior.
 | Topic | Read |
 |---|---|
 | Deployment, resource APIs and web-ui-server | [Deployment](deployment.md) |
+| Linux server image, persistent volumes and Docker isolation | [Docker](docker.md) |
 | Local updates, interruption confirmation and release signing | [Updates](updates.md) |
 | Database schemas, version history and automatic upgrades | [Database migrations](database-migrations.md) |
 | Build, test and release | [Development](development.md) |
