@@ -8,29 +8,50 @@
 
 Pot turns conversations into completed work. Ask your assistant to research,
 work with files or automate recurring tasks. **Agent Link** connects Pot,
-Codex and compatible agents to exchange messages and delegate work across computers.
+Codex and other agents through compatible adapters to exchange messages and
+delegate work across computers.
 
 [Documentation](docs/README.md) · [Codex setup](integrations/codex/README.md) · [Releases](https://github.com/jjyr/pot/releases)
 
 ## Main features
 
-- **Personal assistants** — chat, share files and images, and work in persistent workspaces.
-- **Agent Link** — collaborate across assistants, each with its own workspace and permissions.
-- **Background tasks** — delegate work, follow progress and receive results. Codex tasks have independent persistent threads and can run in parallel.
-- **Automation** — schedule recurring work and receive notifications.
-- **Models and extensions** — choose providers and add plugins, MCP servers and Skills.
+### Assistants
+
+Give an assistant an ongoing goal: research a topic, follow a project or keep
+track of changes. It can break work into background tasks, dispatch them, receive
+progress and results, and follow up in your conversation. Files and workspaces
+persist between tasks, so research can build on earlier work.
+
+Assistants can also respond to events from enabled plugins, including your
+[GitHub personal notifications](docs/plugins.md#github-notifications), and
+receive task updates automatically. Ask for [scheduled research](docs/scheduled-tasks.md)
+or recurring checks to keep following a topic while Pot is running. Choose your
+model providers and extend assistants with plugins, MCP servers and Skills.
+
+### Agent Link
+
+Work with the agents you already use—**Claude, Codex, Grok bot, Pi** and
+others—through Agent Link adapters. Connected assistants can exchange messages
+and delegate tasks across computers, while each agent keeps its own models,
+credentials, workspace and permissions.
+
+Pot-to-Pot connections and a [Codex adapter](integrations/codex/README.md) are
+included. Claude, Grok bot and Pi require their own compatible adapters; this
+repository does not bundle them. Explicit Codex tasks each have an independent
+persistent thread and can run in parallel. See [Agent Link](docs/agent-links.md)
+for the collaboration protocol and supported capabilities.
 
 ## Install
 
 Start from source today; packaged distribution is pending.
 
-| Platform | Installation |
-|---|---|
-| macOS desktop | Apple Silicon, macOS 26+. [Build from source](docs/development.md#toolchains-and-workflow); Homebrew distribution is pending. |
-| Linux server / Web UI | [Start from source](#linux-server--web-ui) on a glibc-based amd64 or arm64 host. |
-| Docker | Image not yet published. See [server deployment](docs/deployment.md). |
-| Linux desktop | No published desktop package yet. Use the server's Web UI in your browser. |
-| Windows desktop | No published desktop package yet. Connect to a server's Web UI in your browser. |
+| Platform | Install / download | Availability |
+|---|---|---|
+| macOS desktop / Homebrew | [Build guide](docs/development.md#toolchains-and-workflow) · [Downloads](https://github.com/jjyr/pot/releases) | Apple Silicon, macOS 26+. Homebrew distribution is pending. |
+| Linux server / Web UI | [Quick start](#linux-server--web-ui) · [Deployment guide](docs/deployment.md) | Available from source on a glibc-based amd64 or arm64 host. |
+| Docker | [Server deployment guide](docs/deployment.md) · [Releases](https://github.com/jjyr/pot/releases) | Image not yet published. |
+| Linux desktop | [Downloads](https://github.com/jjyr/pot/releases) · [Web UI setup](#linux-server--web-ui) | No published desktop package yet; use the Web UI meanwhile. |
+| Windows desktop | [Downloads](https://github.com/jjyr/pot/releases) · [Web UI setup](#linux-server--web-ui) | Native desktop support is pending; use a server's Web UI meanwhile. |
 
 ## Quick start
 
