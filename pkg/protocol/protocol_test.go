@@ -29,7 +29,7 @@ func TestWireNullUnknownAndEventShape(t *testing.T) {
 	if err := DecodeStrict([]byte(`{"title":"build","goal":"build","kind":"interval","every_minutes":60}`), &spec); err != nil {
 		t.Fatal(err)
 	}
-	if spec.Timezone != "" || !spec.Enabled || spec.Notify != "changes" {
+	if spec.Timezone != "" || !spec.Enabled || spec.Notify != "all" {
 		t.Fatal(spec)
 	}
 }

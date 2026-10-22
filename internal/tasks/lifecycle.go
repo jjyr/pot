@@ -35,7 +35,7 @@ func (s *Service) Tick(ctx context.Context) error {
 	}
 	rows.Close()
 	for _, pair := range pairs {
-		if err := s.reconcile(ctx, pair[0], pair[1]); err != nil && !errors.Is(err, ErrResultPending) && !errors.Is(err, errOutcomeChanged) {
+		if err := s.reconcile(ctx, pair[0], pair[1]); err != nil && !errors.Is(err, errOutcomeChanged) {
 			return err
 		}
 	}

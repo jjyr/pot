@@ -19,10 +19,10 @@ Control scheduler -> SQLite tasks.sqlite (schedules + triggers + task queue)
              | Due: create one run transactionally
              ▼
 Shared task queue (default concurrency 8) -> independent Task / current machine execution policy
-             │ .pot-schedule-result.json
+             │ final reply + .pot-artifacts/ files
              ▼
-Task outcome preparation -> validate result -> compare fingerprint
-             | Atomic: final Task + history + baseline + policy + outcome hook
+Ordinary Task outcome preparation -> collect optional artifacts
+             | Atomic: final Task + history + policy + outcome hook
              v
 Shared Agent inbox -> eligible outcomes -> shared main chat summary
 ```
@@ -57,7 +57,7 @@ retry.
   requires an explicit IANA zone; there is no silent Shanghai/UTC fallback.
   Linux and macOS zoneinfo layouts are supported; other OS layouts may require
   explicit zones.
-- Notifications: changes/failures by default; optionally every run or failures only. First successful observation counts as changed. Failures include execution interruption; cancellation is reported only with every-run notifications. Skipped triggers only enter history.
+- Report to assistant: every completion by default, or failures only. Failures include execution interruption; cancellation is reported only with every-completion delivery. Skipped triggers only enter history. The owning assistant decides whether the result needs a user-facing reply; change detection belongs to the task rather than the scheduler.
 - Missed triggers: coalesce into one catch-up by default; with skip, triggers at least 60 seconds late only enter history.
 
 Pause/delete stops future triggers; queued/running tasks continue and can be interrupted on the task page. Paused schedules can run now. Skip a trigger while its previous run is queued/running to prevent backlog. Delete preserves history; APIs hide deleted definitions by default.
@@ -87,11 +87,10 @@ transport carries this same endpoint.
 
 The tasks database migration converts persisted daily/weekly definitions and
 management response snapshots to Cron, removing the old clock/weekday fields.
-It preserves explicit time zones, next due instants, generation, baseline,
+It preserves explicit time zones, next due instants, generation,
 policies, model/Runtime selections, run history and write receipt digests.
 Once and elapsed interval definitions remain intact (90 minutes remains an
-elapsed 90-minute interval). All definition updates fence old in-flight results
-from updating the new generation's comparison baseline.
+elapsed 90-minute interval). Definition edits preserve each in-flight occurrence's original notification policy.
 
 Model selection uses optional `spec.profile` (configured Provider connection ID)
 and `spec.model`. Selection is autonomous and requires no routing approval or
@@ -107,20 +106,31 @@ selects or retains a container.
 
 ## Results and storage
 
-Worker writes `.pot-schedule-result.json`: `summary`, stable `fingerprint`, nonempty `evidence` array, optional relative-path `artifacts` array. Control reads the result from the task's immutable local execution target through bounded file reads. Results must be ordinary files no larger than 16 KiB. Missing, oversized or invalid results fail rather than count as unchanged. Editing a goal resets the comparison baseline; old runs cannot overwrite the new baseline. Silent unchanged runs do not wake main Agent but retain task/schedule history; each check may still incur model costs.
+Scheduled and manual Tasks share one result contract: the worker's final reply is
+the summary, and optional deliverable files go in `.pot-artifacts/` under the
+original Task workspace. There is no result JSON, required evidence field or
+scheduler fingerprint. Evidence and limitations belong in the reply or attached
+report. See [Task results](task-coordination.md#results-and-artifacts) for file
+collection limits and delivery diagnostics.
 
 Each Task stores an explicit schedule/occurrence origin and each occurrence saves
-its notification policy at creation. Task coordination validates the report before
-publishing the final outcome. Task state, schedule history, baseline and the shared
-Agent inbox event commit together. A missing or invalid report produces one failed
-event. Historical tasks with retired remote destinations retain their original
-references and recovery fences; the Worker is not relaunched locally.
+its notification policy at creation. Task state, schedule history and the shared
+Agent inbox event commit together. Artifact collection errors retain the reply
+and execution status; they do not turn a completed check into a failed Task.
+Historical Tasks with retired remote destinations retain their original references
+and recovery fences; the Worker is not relaunched locally.
 
 Scheduled and ordinary results use the same bounded summary batches and durable
-reply acknowledgment. Unchanged or policy-excluded outcomes remain in the inbox
-as `suppressed` without a model call. Accepted summary execution alone does not
-acknowledge an outcome. See [Hooks](hooks.md) and
-[Agent messages](assistant-messages.md#completion-events).
+reply acknowledgment. Policy-excluded outcomes remain in the inbox as `suppressed`
+without a model call. Accepted summary execution alone does not acknowledge an
+outcome. See [Hooks](hooks.md) and [Agent messages](assistant-messages.md#completion-events).
+
+Workers execute independently. They may message their owner when coordination is
+useful, and the owner may inspect or guide a Task on demand. Model/tool rounds do
+not automatically send progress messages to the owner. Terminal outcomes retain
+the existing automatic delivery; this does not introduce periodic polling or an
+idle assistant wakeup. Task-specific change detection and business checkpoints
+follow the goal's own storage and reporting instructions.
 
 At most 100 undeleted definitions, with the latest 100 ended/skipped records per schedule; unfinished runs remain. Tasks retain existing total limits. Queue/schedules persist as `tasks.sqlite`. Old task metadata is not imported.
 

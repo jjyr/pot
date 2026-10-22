@@ -430,9 +430,9 @@
               ]
             },
             "notify": {
+              "description": "Terminal outcomes delivered to the owning assistant: all (default) or failures. The assistant decides whether to notify the user from the final reply and task instructions.",
               "type": "string",
               "enum": [
-                "changes",
                 "all",
                 "failures"
               ]

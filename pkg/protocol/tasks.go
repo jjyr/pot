@@ -235,7 +235,7 @@ type ScheduleSpec struct {
 
 func (s *ScheduleSpec) UnmarshalJSON(data []byte) error {
 	type plain ScheduleSpec
-	value := plain{Misfire: "coalesce", Notify: "changes", Enabled: true}
+	value := plain{Misfire: "coalesce", Notify: "all", Enabled: true}
 	if err := core.DecodeJSON(data, &value); err != nil {
 		return err
 	}
@@ -289,7 +289,6 @@ type ScheduleInfo struct {
 	NextLabel   string       `json:"next_label"`
 	Deleted     bool         `json:"deleted"`
 	LastError   string       `json:"last_error"`
-	Baseline    *string      `json:"baseline"`
 	CreatedAtMS int64        `json:"created_at_ms"`
 }
 type ScheduleRun struct {
@@ -300,7 +299,6 @@ type ScheduleRun struct {
 	TaskID         *string `json:"task_id"`
 	State          string  `json:"state"`
 	Summary        string  `json:"summary"`
-	Changed        *bool   `json:"changed"`
 	FinishedAtMS   *int64  `json:"finished_at_ms"`
 	Notify         string  `json:"notify"`
 }

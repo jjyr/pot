@@ -9,7 +9,7 @@ PermissionStore --> approval hook --> UI invalidation --> cards + user reminder
 
 Ordinary / scheduled result --> prepare --> terminal transaction
                                                |  final Task + outcome hook
-                                               |  schedule history + baseline + policy
+                                               |  schedule history + policy
                                                +--> shared Agent inbox --> assistant report
                                                +--> UI invalidation --> current Task status
 ```
@@ -55,12 +55,12 @@ an assistant summary or inbox entry.
 ## Task outcomes
 
 Task coordination prepares the outcome before its first active-to-terminal
-transition. Control supplies a domain result processor: ordinary results need no
-additional preparation; scheduled results validate their structured report and
-apply schedule policy. File transport runs outside the transaction. The original
+transition. Control collects optional `.pot-artifacts/` deliverables for both
+ordinary and scheduled Tasks; scheduled results additionally apply the saved
+occurrence policy. File collection runs outside the transaction. The original
 Task/run, generation and record revision fence the prepared result at commit.
-An unavailable remote report leaves the Task active for reconciliation without
-restarting its Worker or publishing a premature outcome.
+Collection errors are attachment metadata and retain the original final reply,
+execution status and diagnostics.
 
 The Task state-change transaction detects the first active-to-terminal transition
 and atomically enqueues its hook as a Runtime result envelope in `agent_messages`.
@@ -68,14 +68,13 @@ The ID binds the Task and original run. This covers all terminal outcomes,
 including cancellation or interruption before dispatch. Failure reports preserve
 the actual execution error alongside available text; an empty result still has
 a concrete terminal status. Hook insertion failure rolls back the state change,
-schedule history and baseline.
-Missing or invalid mandatory reports therefore produce only a failed outcome,
-never an earlier successful hook followed by a status correction.
+schedule history. No mandatory result report or scheduler format validation can
+turn completed execution into failure.
 
 Task records carry Control-assigned `manual` or `schedule` origins. Scheduled
 origins bind the schedule and occurrence explicitly; request ID prefixes have no
-routing meaning. Result envelopes preserve the final error, evidence, artifact
-paths and notification suppression reason. Silent schedule outcomes enter the
+routing meaning. Result envelopes preserve the final reply, execution error, artifact
+paths, collection diagnostics and notification suppression reason. Silent schedule outcomes enter the
 same inbox as `suppressed`, retain their history and do not wake a model.
 
 After commit, UI invalidations wake the current projections. The existing assistant

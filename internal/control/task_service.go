@@ -50,12 +50,12 @@ func (s *Service) openTasks() error {
 		}
 		return nil
 	}, ControlID: s.options.RuntimeID, RuntimeID: s.options.RuntimeID, Port: taskRouter{s}, ResolveModel: s.selectTask, ResolveTarget: s.taskTarget, ResolveMachine: s.selectTaskMachine, ValidateTarget: s.validateTaskTarget, AdmitModel: s.admitTaskModel, AwaitingApproval: s.taskAwaitingApproval, PublishHook: s.publishHook, OutcomesChanged: func() { s.Changes.Notify("task-outcomes") }, PrepareOutcome: func(ctx context.Context, record tasks.Record, event protocol.TaskResultEvent) (tasks.OutcomeCommit, error) {
-		return s.Schedules.PrepareOutcome(ctx, record, event)
+		return s.prepareTaskOutcome(ctx, record, event)
 	}})
 	if err != nil {
 		return err
 	}
-	s.Schedules, err = schedule.New(schedule.Options{Tasks: s.Tasks, Ready: s.taskReady, Results: taskFiles{s}})
+	s.Schedules, err = schedule.New(schedule.Options{Tasks: s.Tasks, Ready: s.taskReady})
 	if err != nil {
 		return err
 	}
@@ -469,7 +469,7 @@ func (f *taskFeedback) Settle(ctx context.Context) error {
 
 type taskFiles struct{ s *Service }
 
-func (f taskFiles) ReadResult(ctx context.Context, target core.ExecutionTarget, task, path string, limit int64) (json.RawMessage, error) {
+func (f taskFiles) ReadFile(ctx context.Context, target core.ExecutionTarget, task, path string, limit int64) ([]byte, error) {
 	if target.RuntimeID != f.s.options.RuntimeID {
 		return nil, protocol.APIError{Code: "original_execution_unavailable"}
 	}
@@ -507,5 +507,5 @@ func (s *Service) ReadTaskFile(ctx context.Context, owner, task, path string, li
 	if r == nil || r.Launch == nil {
 		return nil, errors.New("Task has no fixed execution target")
 	}
-	return (taskFiles{s}).ReadResult(ctx, r.Launch.ExecutionTarget, task, path, limit)
+	return (taskFiles{s}).ReadFile(ctx, r.Launch.ExecutionTarget, task, path, limit)
 }

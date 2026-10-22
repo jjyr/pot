@@ -3,7 +3,6 @@ package schedule
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 
@@ -71,32 +70,19 @@ func taskEnvelope(t *testing.T, f fixture, task string) (protocol.Envelope, stri
 }
 
 func TestScheduledOutcomesUseSharedInboxAndPolicy(t *testing.T) {
-	for _, policy := range []string{"changes", "all", "failures"} {
-		for _, scenario := range []string{"first", "unchanged", "changed", "failed", "invalid", "interrupted", "cancelled"} {
+	for _, policy := range []string{"all", "failures"} {
+		for _, scenario := range []string{"complete", "failed", "interrupted", "cancelled"} {
 			t.Run(policy+"/"+scenario, func(t *testing.T) {
 				ctx := context.Background()
 				f := setup(t)
 				spec := defaultSpec()
 				spec.Notify = policy
 				info, task := scheduledTask(t, f, spec)
-				if scenario == "unchanged" || scenario == "changed" {
-					baseline := "facts-v1"
-					if scenario == "changed" {
-						baseline = "older-facts"
-					}
-					if _, err := f.tasks.DB().Exec(`UPDATE schedules SET body=json_set(body,'$.info.baseline',?) WHERE id=?`, baseline, info.ID); err != nil {
-						t.Fatal(err)
-					}
-				}
 				phase := protocol.TaskComplete
 				switch scenario {
 				case "failed":
 					phase = protocol.TaskFailed
 					finishScheduled(t, f, task, runner.Failed)
-				case "invalid":
-					phase = protocol.TaskFailed
-					f.reader.body = json.RawMessage(`{"summary":"bad","fingerprint":"x","evidence":[]}`)
-					finishScheduled(t, f, task, runner.Complete)
 				case "interrupted", "cancelled":
 					mode := "interrupt"
 					phase = protocol.TaskInterrupted
@@ -107,11 +93,10 @@ func TestScheduledOutcomesUseSharedInboxAndPolicy(t *testing.T) {
 						t.Fatal(err)
 					}
 				default:
-					f.reader.body = json.RawMessage(`{"summary":"Observed facts","fingerprint":"facts-v1","evidence":["https://example.com/source"],"artifacts":["report.txt"]}`)
 					finishScheduled(t, f, task, runner.Complete)
 				}
 				event, state := taskEnvelope(t, f, task.Info.ID)
-				notify := policy == "all" || (phase == protocol.TaskFailed || phase == protocol.TaskInterrupted) || policy == "changes" && scenario != "unchanged" && scenario != "cancelled"
+				notify := policy == "all" || (phase == protocol.TaskFailed || phase == protocol.TaskInterrupted)
 				if (state == "queued") != notify || !notify && (state != "suppressed" || event.Result.SuppressionReason == "") {
 					t.Fatal(state, event)
 				}
@@ -129,12 +114,10 @@ func TestScheduledOutcomesUseSharedInboxAndPolicy(t *testing.T) {
 				if scenario == "failed" && !strings.Contains(event.Text, "actual execution failure") {
 					t.Fatal(event)
 				}
-				if scenario == "invalid" && !strings.Contains(event.Text, "Structured result missing or invalid") {
+				if phase == protocol.TaskComplete && event.Result.Text != "partial output" {
 					t.Fatal(event)
 				}
-				if phase == protocol.TaskComplete && (len(event.Result.Evidence) != 1 || len(event.Result.Artifacts) != 1) {
-					t.Fatal(event)
-				}
+
 				terminal, started := 0, 0
 				for _, hook := range *f.events {
 					if hook.Kind == hooks.TaskStarted {
@@ -173,7 +156,7 @@ func TestScheduledOutcomesUseSharedInboxAndPolicy(t *testing.T) {
 	}
 }
 
-func TestScheduledOutcomeAndBaselineRollbackWithHook(t *testing.T) {
+func TestScheduledOutcomeAndHistoryRollbackWithHook(t *testing.T) {
 	ctx := context.Background()
 	f := setup(t)
 	info, task := scheduledTask(t, f, defaultSpec())
@@ -189,7 +172,7 @@ func TestScheduledOutcomeAndBaselineRollbackWithHook(t *testing.T) {
 	}
 	stored, _ := f.tasks.Get(ctx, "assistant", task.Info.ID)
 	page, _ := f.schedule.Page(ctx, "assistant", Query{Selected: info.ID})
-	if stored.Info.Phase.Scope() != "active" || stored.Outcome != nil || page.Selected.Baseline != nil || page.Runs[0].FinishedAtMS != nil {
+	if stored.Info.Phase.Scope() != "active" || stored.Outcome != nil || page.Runs[0].FinishedAtMS != nil {
 		t.Fatal(stored, page)
 	}
 	for _, event := range *f.events {
@@ -209,56 +192,15 @@ func TestScheduledOutcomeAndBaselineRollbackWithHook(t *testing.T) {
 	}
 }
 
-func TestPendingScheduledResultRecoversWithoutPrematureHook(t *testing.T) {
-	ctx := context.Background()
-	f := setup(t)
-	info, task := scheduledTask(t, f, defaultSpec())
-	f.reader.err = tasks.ErrResultPending
-	finishScheduled(t, f, task, runner.Complete)
-	stored, _ := f.tasks.Get(ctx, "assistant", task.Info.ID)
-	page, _ := f.schedule.Page(ctx, "assistant", Query{Selected: info.ID})
-	if stored.Info.Phase.Scope() != "active" || page.Runs[0].FinishedAtMS != nil {
-		t.Fatal(stored, page)
-	}
-	for _, event := range *f.events {
-		if event.Result != nil {
-			t.Fatal("premature outcome", event)
-		}
-	}
-	f.reader.err = nil
-	if err := f.tasks.Tick(ctx); err != nil {
-		t.Fatal(err)
-	}
-	event, _ := taskEnvelope(t, f, task.Info.ID)
-	if event.Result.Phase != protocol.TaskComplete || f.destination.launches != 1 {
-		t.Fatal(event, f.destination.launches)
-	}
-}
-
-func TestMissingScheduledReportEmitsOnlyFailure(t *testing.T) {
-	f := setup(t)
-	_, task := scheduledTask(t, f, defaultSpec())
-	f.reader.err = errors.New("report does not exist")
-	finishScheduled(t, f, task, runner.Complete)
-	for _, event := range *f.events {
-		if event.Result != nil && event.Kind != hooks.TaskFailed {
-			t.Fatal(event)
-		}
-	}
-	event, _ := taskEnvelope(t, f, task.Info.ID)
-	if !strings.Contains(event.Result.Error, "report does not exist") {
-		t.Fatal(event)
-	}
-}
-
-func TestScheduledPolicySnapshotAndPendingResultSurviveRestart(t *testing.T) {
+func TestScheduledPolicySnapshotSurvivesRestart(t *testing.T) {
 	ctx := context.Background()
 	f := setup(t)
 	spec := defaultSpec()
 	spec.Notify = "all"
 	info, task := scheduledTask(t, f, spec)
-	f.reader.err = tasks.ErrResultPending
-	finishScheduled(t, f, task, runner.Complete)
+	if err := f.tasks.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
 	// Editing a definition changes its generation and policy, not this occurrence.
 	spec.Notify, spec.Goal = "failures", "A new observation goal"
 	if _, err := f.schedule.Manage(ctx, "assistant", Request{RequestID: "edit", Action: "update", ScheduleID: info.ID, Spec: &spec}, millis("2026-10-16T00:02:00Z")); err != nil {
@@ -283,12 +225,12 @@ func TestScheduledPolicySnapshotAndPendingResultSurviveRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restored.Close()
-	schedules, err = New(Options{Tasks: restored, Ready: func(context.Context, string) (bool, error) { return true, nil }, Results: f.reader})
+	schedules, err = New(Options{Tasks: restored, Ready: func(context.Context, string) (bool, error) { return true, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.tasks, f.schedule = restored, schedules
-	f.reader.err = nil
+	f.destination.complete(task.Info.ID)
 	if err := restored.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +239,7 @@ func TestScheduledPolicySnapshotAndPendingResultSurviveRestart(t *testing.T) {
 		t.Fatal("occurrence policy changed after edit/restart", state, event)
 	}
 	page, err := schedules.Page(ctx, "assistant", Query{Selected: info.ID})
-	if err != nil || page.Selected.Baseline != nil || page.Runs[0].Notify != "all" || f.destination.launches != 1 {
+	if err != nil || page.Runs[0].Notify != "all" || f.destination.launches != 1 {
 		t.Fatal(page, err, f.destination.launches)
 	}
 }

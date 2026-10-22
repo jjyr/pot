@@ -158,7 +158,7 @@ func testTaskWorkspaceProjectTools(t *testing.T, protected bool) {
 	if err != nil || same.Path != w.Path || same.Commit != fresh {
 		t.Fatal(same, err)
 	}
-	file, err := (taskFiles{s}).ReadResult(ctx, l.ExecutionTarget, l.TaskID, "patched.txt", 1024)
+	file, err := (taskFiles{s}).ReadFile(ctx, l.ExecutionTarget, l.TaskID, "patched.txt", 1024)
 	if err != nil || string(file) != "proof\n" {
 		t.Fatalf("download binding: %q %v", file, err)
 	}

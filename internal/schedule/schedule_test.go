@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/jjyr/pot/internal/hooks"
 	"github.com/jjyr/pot/internal/runner"
@@ -13,6 +12,7 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -26,7 +26,7 @@ func millis(value string) int64 {
 	return instant.UnixMilli()
 }
 func defaultSpec() protocol.ScheduleSpec {
-	return protocol.ScheduleSpec{MachineID: "machine", Title: "Monitor", Goal: "Check source", Timezone: "Asia/Shanghai", Kind: "interval", EveryMinutes: 1, Misfire: "coalesce", Notify: "changes", Enabled: true}
+	return protocol.ScheduleSpec{MachineID: "machine", Title: "Monitor", Goal: "Check source", Timezone: "Asia/Shanghai", Kind: "interval", EveryMinutes: 1, Misfire: "coalesce", Notify: "all", Enabled: true}
 }
 func TestCalendarDSTEarlierOccurrenceGapsAndWeekdays(t *testing.T) {
 	for _, test := range []struct{ kind, zone, clock, at, after, want string }{{"cron", "America/New_York", "02:30", "", "2026-03-07T08:00:00Z", "2026-03-09T06:30:00Z"}, {"cron", "America/New_York", "01:30", "", "2026-11-01T05:00:00Z", "2026-11-01T05:30:00Z"}, {"cron", "America/New_York", "01:30", "", "2026-11-01T05:31:00Z", "2026-11-02T06:30:00Z"}, {"once", "America/New_York", "", "2026-11-01 01:30", "2026-10-31T00:00:00Z", "2026-11-01T05:30:00Z"}, {"cron", "Asia/Shanghai", "09:00", "", "2026-10-16T02:00:00Z", "2026-10-19T01:00:00Z"}} {
@@ -86,23 +86,10 @@ func (d *destination) complete(task string) {
 	}
 }
 
-type resultReader struct {
-	body json.RawMessage
-	err  error
-}
-
-func (r *resultReader) ReadResult(_ context.Context, target core.ExecutionTarget, task, path string, limit int64) (json.RawMessage, error) {
-	if target.RuntimeID != "machine" || path != ".pot-schedule-result.json" || limit != 16384 {
-		return nil, fmt.Errorf("wrong result target/bounds")
-	}
-	return r.body, r.err
-}
-
 type fixture struct {
 	schedule    *Service
 	tasks       *tasks.Service
 	destination *destination
-	reader      *resultReader
 	ready       *bool
 	modelReads  *int
 	events      *[]hooks.Event
@@ -136,12 +123,11 @@ func setup(t *testing.T) fixture {
 	}
 	t.Cleanup(func() { queue.Close() })
 	ready := true
-	reader := &resultReader{body: json.RawMessage(`{"summary":"Observed facts","fingerprint":"facts-v1","evidence":["https://example.com/source"]}`)}
-	service, err = New(Options{Tasks: queue, Ready: func(context.Context, string) (bool, error) { return ready, nil }, Results: reader})
+	service, err = New(Options{Tasks: queue, Ready: func(context.Context, string) (bool, error) { return ready, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return fixture{service, queue, port, reader, &ready, &reads, &events}
+	return fixture{service, queue, port, &ready, &reads, &events}
 }
 func create(t *testing.T, f fixture, spec protocol.ScheduleSpec, at int64) protocol.ScheduleInfo {
 	t.Helper()
@@ -202,78 +188,35 @@ func TestReadinessCoalescingSkipAndOverlap(t *testing.T) {
 		t.Fatal(history, *f.modelReads, err)
 	}
 }
-func TestStructuredResultsBaselineQuietRepeatAndGenerationFence(t *testing.T) {
+func TestEachScheduledCompletionUsesFinalReply(t *testing.T) {
 	ctx := context.Background()
 	f := setup(t)
 	at := millis("2026-10-16T00:00:00Z")
 	info := create(t, f, defaultSpec(), at)
-	if err := f.schedule.Tick(ctx, at+60000); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.tasks.Tick(ctx); err != nil {
-		t.Fatal(err)
-	}
-	history, _ := f.schedule.Page(ctx, "assistant", Query{Selected: info.ID})
-	task := *history.Runs[0].TaskID
-	f.destination.complete(task)
-	if err := f.tasks.Tick(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.schedule.Tick(ctx, at+61000); err != nil {
-		t.Fatal(err)
-	}
-	notices, _ := f.tasks.Notifications(ctx, "assistant")
-	if len(notices) != 1 {
-		t.Fatal(notices)
-	}
-	if err := f.tasks.AcknowledgeNotification(ctx, "assistant", notices[0].ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.schedule.Tick(ctx, at+120000); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.tasks.Tick(ctx); err != nil {
-		t.Fatal(err)
-	}
-	history, _ = f.schedule.Page(ctx, "assistant", Query{Selected: info.ID})
-	task = *history.Runs[0].TaskID
-	f.destination.complete(task)
-	if err := f.tasks.Tick(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.schedule.Tick(ctx, at+121000); err != nil {
-		t.Fatal(err)
-	}
-	notices, _ = f.tasks.Notifications(ctx, "assistant")
-	if len(notices) != 0 {
-		t.Fatal("unchanged result notified", notices)
-	}
-	plan, _ := f.schedule.Get(ctx, "assistant", info.ID)
-	if plan.Info.Baseline == nil || *plan.Info.Baseline != "facts-v1" {
-		t.Fatal(plan)
-	}
-	if err := f.schedule.Tick(ctx, at+180000); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.tasks.Tick(ctx); err != nil {
-		t.Fatal(err)
-	}
-	changed := plan.Info.Spec
-	changed.Goal = "different goal"
-	if _, err := f.schedule.Manage(ctx, "assistant", Request{RequestID: "edit", Action: "update", ScheduleID: info.ID, Spec: &changed}, at+180001); err != nil {
-		t.Fatal(err)
-	}
-	history, _ = f.schedule.Page(ctx, "assistant", Query{Selected: info.ID})
-	f.destination.complete(*history.Runs[0].TaskID)
-	if err := f.tasks.Tick(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.schedule.Tick(ctx, at+181000); err != nil {
-		t.Fatal(err)
-	}
-	plan, _ = f.schedule.Get(ctx, "assistant", info.ID)
-	if plan.Info.Baseline != nil {
-		t.Fatal("old generation overwrote baseline", plan)
+	for i := int64(1); i <= 2; i++ {
+		if err := f.schedule.Tick(ctx, at+i*60000); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.tasks.Tick(ctx); err != nil {
+			t.Fatal(err)
+		}
+		history, _ := f.schedule.Page(ctx, "assistant", Query{Selected: info.ID})
+		task := *history.Runs[0].TaskID
+		record, _ := f.tasks.Get(ctx, "assistant", task)
+		if strings.Contains(record.Request.Text, "fingerprint") || strings.Contains(record.Request.Text, ".pot-schedule-result.json") {
+			t.Fatal(record.Request.Text)
+		}
+		f.destination.complete(task)
+		if err := f.tasks.Tick(ctx); err != nil {
+			t.Fatal(err)
+		}
+		notices, err := f.tasks.Notifications(ctx, "assistant")
+		if err != nil || len(notices) != 1 || notices[0].Text != "observed" {
+			t.Fatal(notices, err)
+		}
+		if err := f.tasks.AcknowledgeNotification(ctx, "assistant", notices[0].ID); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 func TestOccurrenceAndQueueRollbackTogetherAndWritesAreIdempotent(t *testing.T) {
@@ -321,44 +264,21 @@ func TestOccurrenceAndQueueRollbackTogetherAndWritesAreIdempotent(t *testing.T) 
 		t.Fatal(page)
 	}
 }
-func TestInvalidResultFailsTaskAndHistoryRetentionKeepsUnfinished(t *testing.T) {
+func TestHistoryRetentionKeepsUnfinished(t *testing.T) {
 	ctx := context.Background()
 	f := setup(t)
 	at := millis("2026-10-16T00:00:00Z")
 	info := create(t, f, defaultSpec(), at)
-	if err := f.schedule.Tick(ctx, at+60000); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.tasks.Tick(ctx); err != nil {
-		t.Fatal(err)
-	}
-	history, _ := f.schedule.Page(ctx, "assistant", Query{Selected: info.ID})
-	taskID := *history.Runs[0].TaskID
-	f.destination.complete(taskID)
-	f.reader.err = errors.New("missing report")
-	if err := f.tasks.Tick(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.schedule.Tick(ctx, at+61000); err != nil {
-		t.Fatal(err)
-	}
-	task, _ := f.tasks.Get(ctx, "assistant", taskID)
-	if task.Info.Phase != protocol.TaskFailed {
-		t.Fatal(task)
-	}
-	if _, err := ParseResult([]byte(`{"summary":"ok","fingerprint":"x","evidence":[],"artifacts":[]}`)); err == nil {
-		t.Fatal("empty evidence accepted")
-	}
 	err := storage.Transaction(ctx, f.tasks.DB(), func(tx *sql.Tx) error {
 		for i := range 105 {
 			finished := at + int64(i)
-			run := protocol.ScheduleRun{ID: fmt.Sprint(i), ScheduledForMS: finished, State: "skipped", FinishedAtMS: &finished, Notify: "changes"}
+			run := protocol.ScheduleRun{ID: fmt.Sprint(i), ScheduledForMS: finished, State: "skipped", FinishedAtMS: &finished, Notify: "all"}
 			if err := writeRun(ctx, tx, "assistant", info.ID, run); err != nil {
 				return err
 			}
 		}
 		for i := range 2 {
-			run := protocol.ScheduleRun{ID: fmt.Sprintf("unfinished%d", i), ScheduledForMS: at, State: "queued", Notify: "changes"}
+			run := protocol.ScheduleRun{ID: fmt.Sprintf("unfinished%d", i), ScheduledForMS: at, State: "queued", Notify: "all"}
 			if err := writeRun(ctx, tx, "assistant", info.ID, run); err != nil {
 				return err
 			}

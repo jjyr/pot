@@ -133,6 +133,36 @@ An explicit result query and the automatic notification share result-report stat
 so the same outcome is not reported twice. `wait` collects JavaScript composition
 results; `write_stdin` manages a worker's command session.
 
+## Results and artifacts
+
+Manual and scheduled Tasks use their final assistant reply as the summary.
+Workers need no structured result file. Evidence and limitations can be ordinary
+reply text or part of a deliverable.
+
+Put optional deliverables in `.pot-artifacts/` under the Task workspace. Control
+collects nested regular-file paths when the run ends and carries them in the
+ordinary outcome's `artifacts` list. Missing/empty directories mean no attachments.
+Collection is bounded to 64 files, 64 MiB total, 256 directory entries and 16 nested
+directory levels; paths must be valid workspace-relative paths of at most 1000
+bytes. Symlinks and special files are excluded. Files elsewhere in the workspace
+remain working files. Collection uses the original, identity-checked workspace;
+it never falls back to another directory or machine. Existing files in a continued
+Task's artifact directory are included in the next result; workers should keep
+that directory limited to the intended deliverables.
+
+Collection problems are separate `artifacts_error` metadata. Valid attachments,
+final reply, execution status and execution diagnostics survive; an attachment
+problem never reruns or changes the success/failure of the work. The task view
+shows the delivery diagnostic separately. Attachment paths do not snapshot bytes;
+subsequent downloads retain the original workspace and file revision checks.
+The owning assistant can use `register_resource` and `present_resource` to import
+and deliver an actual attachment through the durable resource store.
+
+During execution, workers may send an owner message when useful. The owner may
+inspect or guide a Task during its own turns, with no required polling cadence.
+Only explicit worker communication and terminal results enter the owner inbox;
+ordinary model/tool rounds do not automatically push progress updates.
+
 ### Automatic failure recovery
 
 A delivered failed manual Task may receive a model-directed replacement through
