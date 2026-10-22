@@ -352,7 +352,7 @@ class GitHubPublication(AssetsFixture, unittest.TestCase):
         publish = runpy.run_path(str(ROOT / "scripts/publish-release"))["publish"]
         self.calls = []
         sentinel = {"name": "SHA256SUMS-macos", "digest": "sha256:" + "f" * 64, "size": 7}
-        release = {"target_commitish": SHA, "draft": False, "assets": [sentinel.copy()]}
+        release = {"target_commitish": "main", "draft": False, "assets": [sentinel.copy()]}
         real_run = subprocess.run
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

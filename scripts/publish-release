@@ -79,8 +79,13 @@ def publish(version, output, channel):
         release = get_release()
         if release is None:
             raise RuntimeError("Unable to create release: " + result.stderr)
-    if release["target_commitish"] != sha:
-        raise ValueError("Existing release targets a different commit")
+    # target_commitish is only a tag-creation hint and may name the default
+    # branch even for an existing stable tag. Recheck the canonical tag instead.
+    current_sha = subprocess.check_output(
+        ["gh", "api", f"repos/{repository}/commits/refs/tags/{tag}", "--jq", ".sha"], text=True
+    ).strip()
+    if current_sha != sha:
+        raise ValueError("Release tag moved before asset upload")
     # Establish all existing digests before the first upload; never clobber.
     missing = [path for path in assets if not identical(path, release)]
     for path in missing:
