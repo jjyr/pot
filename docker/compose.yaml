@@ -1,0 +1,17 @@
+services:
+  pot:
+    image: ${POT_IMAGE:-pot-server:local}
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      POT_WEB_ORIGIN: ${POT_WEB_ORIGIN:-http://localhost:17703}
+    ports:
+      - "127.0.0.1:17703:17703"
+    volumes:
+      - pot-home:/home/pot
+    restart: unless-stopped
+    stop_grace_period: 45s
+
+volumes:
+  pot-home:
