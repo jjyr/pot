@@ -1,0 +1,41 @@
+<!doctype html><html lang="en" data-platform="browser" data-theme="light"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Task disposition chat fixture</title><link rel="stylesheet" href="../../../web/src/styles.css">
+<div id="app"></div><aside style="position:fixed;bottom:8px;left:8px;z-index:10000;background:var(--surface,#fff);padding:8px" aria-label="Fixture controls"></aside>
+<script type="module">
+import {mountApp} from '../../../web/src/components/ui.js';
+const params=new URLSearchParams(location.search),owner='main';
+const space={id:'local',control_id:'fixture-node',name:'Fixture',kind:'local',connected:true};
+let scope={owner,space:'local'},version=1,phase=params.get('phase')||'completed';
+const listeners=new Set(),at=1700000000000;
+const tool=(id,name,extra={})=>({id,role:'tool',text:'',status:'complete',tool:{id,turn_id:'request',name,args:{},phase:'completed',started_at_ms:at,finished_at_ms:at+100,...extra}});
+const messages=()=>[
+  {id:'input',request_id:'request',role:'user',text:'请整理本周任务，并归档已完成的工作。',status:'complete'},
+  tool('list','list_tasks',{args:{scope:'all'},result:{items:[]}}),
+  {id:'reply',reply_to:'input',role:'assistant',text:'本周的文档更新已完成，相关文件已交付。',status:'complete'},
+  tool('archive','set_task_dispositions',{args:{decisions:[{task_id:'fixture-task',run_id:'fixture-run',archived:true,reason:'Delivered'}]},phase,
+    result:phase==='completed'?{items:[{id:'fixture-task',archived:true}]}:phase==='failed'?{error:'Task missing'}:undefined,
+    diagnostic:phase==='unknown'?'Execution outcome unconfirmed':'',finished_at_ms:['running','preparing'].includes(phase)?undefined:at+100}),
+];
+const frame=()=>({runtime_id:'fixture-node',boot_id:'fixture',owner_id:JSON.stringify(['local',owner]),conversation_id:'fixture-chat',cursor:String(version),running:['running','preparing'].includes(phase),turn_id:['running','preparing'].includes(phase)?'input':null,messages:messages(),replies:[{input_id:'input',state:['running','preparing'].includes(phase)?'running':'completed'}]});
+const publish=()=>{version++;for(const receive of listeners)receive(frame());};
+const capabilities={version:1,scope:'caller',operations:['chat.read','chat.send','chat.receipt','chat.subscribe']};
+const client={production:true,runtime:{runtime_id:'fixture-node',boot_id:'fixture'},spaces:[space],scope:()=>({...scope}),setScope:value=>scope={...value},
+  request:async path=>{
+    const name=new URL(path,location.href).pathname;
+    if(name==='/api/v1/spaces')return {items:[space],active_space_id:'local'};
+    if(name==='/api/v1/assistants')return [{id:owner,name:'Pot',phase:'ready',capabilities}];
+    if(name==='/api/v1/permissions')return {pending:[],policy:{machines:{}}};
+    if(name==='/api/v1/tasks/query'||name==='/api/v1/tasks/catalog')return {items:[],counts:{},total:0};
+    if(name==='/api/v1/tasks/outcomes')return {items:[],cursor:0,has_more:false};
+    return {items:[]};
+  },snapshot:async()=>frame(),changes:()=>()=>{},
+  subscribe(receive,status){listeners.add(receive);queueMicrotask(()=>{status('connected');receive(frame());});return ()=>listeners.delete(receive);}
+};
+mountApp(document.querySelector('#app'),client);
+const controls=document.querySelector('aside[aria-label="Fixture controls"]');controls.hidden=params.has('capture');
+for(const value of ['preparing','running','completed','failed','denied','unknown','stopped']){
+  const button=document.createElement('button');button.textContent=value;button.onclick=()=>{phase=value;publish();};controls.append(button);
+}
+for(const value of ['en','zh-CN']){
+  const button=document.createElement('button');button.textContent=value;button.onclick=()=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-go-preview-locale',value}}));controls.append(button);
+}
+</script></html>

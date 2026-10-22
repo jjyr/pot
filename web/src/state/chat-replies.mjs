@@ -1,4 +1,13 @@
-import {activeTool} from './tool-calls.mjs';
+import {activeTool,toolFailure} from './tool-calls.mjs';
+
+// Archive bookkeeping stays in model history; only its exceptional outcomes
+// need a chat card. Unknown/interrupted calls and approval requests stay visible.
+function routineTaskDisposition(message) {
+  const tool=message.tool;
+  return message.role==='tool'&&tool?.name==='set_task_dispositions'&&
+    ['preparing','running','completed'].includes(tool.phase)&&
+    !['failed','cancelled'].includes(message.status)&&!message.error&&!toolFailure(tool);
+}
 
 // Outcome envelopes are protocol data only when the receiver independently
 // confirms the same terminal state and diagnostic for this exact input.
@@ -32,6 +41,7 @@ export function projectChatReplies(snapshot, send, {offline=false}={}) {
   }
   for(const message of messages){
     if(message.context_only&&message.role!=='tool' || message.role==='system'&&message.request_id?.startsWith('pot-result-'))continue;
+    if(routineTaskDisposition(message))continue;
     const row={...message,viewKey:message.request_id?`input:${message.request_id}`:message.id};
     if(message.role==='assistant'){
       const input=inputs.get(replyInputs.get(message.id));
