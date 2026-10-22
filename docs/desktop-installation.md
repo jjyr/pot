@@ -23,7 +23,15 @@ from the project's release channel. See [Development](development.md) and
 [Updates](updates.md) for macOS packaging and signed updates. This Linux adaptation
 does not change macOS window, tray, Keychain or notification behavior.
 
-## Linux
+## Linux (Experimental)
+
+The native Linux desktop `.deb` is experimental. This status applies only to the
+new desktop package; Linux server CLI/Web UI and Docker keep their own support
+status. The amd64 package has passed a local native build and WebView smoke on
+Arch Linux. Native arm64, Wayland and installation through `apt` have not been
+fully validated; notification click behavior and Protected sandbox execution also
+need qualification on the target host. Upgrades require manual replacement of the
+complete package. No Linux desktop package has been published yet.
 
 The initial package format is a `.deb` for glibc-based Debian/Ubuntu systems,
 available for amd64 and arm64 when built on a matching native runner. It installs
@@ -111,10 +119,5 @@ and sandbox qualification, use the separate suites in [Development](development.
 
 ## Windows status
 
-A complete Windows local desktop package is not available yet. The current
-Runtime's PTY, process supervision, file locks, private-file ownership checks,
-sandbox launcher and updater contain Unix-only implementations. Building a Wails
-window alone cannot supply those capabilities. There is no Windows installer or
-portable archive advertised by these scripts. A Windows port must implement and
-validate those boundaries, retain approval and cleanup guarantees, bundle Windows
-Node and plugins, and verify WebView2 before enabling a Windows release target.
+Windows is currently unsupported. There is no Windows installation or release
+channel.
