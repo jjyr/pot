@@ -136,6 +136,9 @@ results; `write_stdin` manages a worker's command session.
 ## Results and artifacts
 
 Manual and scheduled Tasks use their final assistant reply as the summary.
+Earlier model replies and execution commentary remain in the transcript rather
+than being concatenated into that summary. An empty final reply does not reuse
+earlier commentary; ordinary terminal status reporting still applies.
 Workers need no structured result file. Evidence and limitations can be ordinary
 reply text or part of a deliverable.
 

@@ -197,6 +197,29 @@ func TestConfiguredModelTaskResultsLive(t *testing.T) {
 			if record.Outcome.Text != record.Result.Text || !strings.Contains(record.Outcome.Text, scenario.marker) {
 				t.Fatal("final reply changed or lost marker", record.Outcome)
 			}
+			var cursor uint64
+			var finalReply string
+			var assistantMessages int
+			for {
+				page, err := s.TaskEvents(ctx, "main", id, cursor, 100)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, event := range page.Events {
+					if event.Event.Update.Type == "message_finished" {
+						finalReply = event.Event.Update.Text
+						assistantMessages++
+					}
+				}
+				if !page.HasMore {
+					break
+				}
+				cursor = page.Cursor
+			}
+			if assistantMessages == 0 || record.Outcome.Text != finalReply {
+				t.Fatal("summary includes earlier assistant replies", record.Outcome.Text, finalReply)
+			}
+			observation["assistant_messages"], observation["final_reply_matches_transcript"] = assistantMessages, true
 			if (len(record.Outcome.Artifacts) != 0) != scenario.attachment || (record.Outcome.ArtifactsError != "") != scenario.artifactError {
 				t.Fatal("wrong delivery metadata", record.Outcome)
 			}
