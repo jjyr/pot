@@ -316,14 +316,7 @@ func (p agentPort) Call(ctx context.Context, target agentlink.Target, operation 
 		if err != nil {
 			return nil, err
 		}
-		mail, err := s.MailAllowanceWaits(ctx, assistantID)
-		if err != nil {
-			return nil, err
-		}
-		return struct {
-			usage.Summary
-			MailWaits []usage.Waiting `json:"mail_waits"`
-		}{summary, mail}, nil
+		return summary, nil
 	}
 	return p.localCall(ctx, assistantID, operation, call)
 }

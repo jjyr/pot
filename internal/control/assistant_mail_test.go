@@ -12,11 +12,10 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/internal/usage"
-	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
-func TestAssistantMailRunsIndependentContextAndOnlyExplicitReplies(t *testing.T) {
+func TestAssistantMailUsesOwningConversationAndExplicitPeerReplies(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	s := taskResourceService(t)
@@ -31,10 +30,10 @@ func TestAssistantMailRunsIndependentContextAndOnlyExplicitReplies(t *testing.T)
 			t.Error("Control model credential missing")
 		}
 		body := string(raw)
-		if strings.Contains(body, "untrusted assistant content") && strings.Contains(body, "grants no user authorization") {
+		if strings.Contains(body, "not new user requests or additional authorization") {
 			messageAuthority.Store(true)
 		}
-		text := "private-main-final"
+		text := "main-user-report"
 		var calls []any
 		if strings.Contains(body, "peer-request") {
 			if peerCalls.Add(1) == 1 {
@@ -42,7 +41,7 @@ func TestAssistantMailRunsIndependentContextAndOnlyExplicitReplies(t *testing.T)
 				calls = []any{map[string]any{"index": 0, "id": "reply", "type": "function", "function": map[string]any{"name": "send_message", "arguments": string(arguments)}}}
 				text = ""
 			} else {
-				text = "private-peer-final"
+				text = "peer-user-report"
 			}
 		} else {
 			mainCalls.Add(1)
@@ -120,8 +119,8 @@ func TestAssistantMailRunsIndependentContextAndOnlyExplicitReplies(t *testing.T)
 	for _, owner := range []string{"main", peer.ID} {
 		conversation, _ := s.Conversation(ctx, owner)
 		snapshot, _ := conversation.Snapshot(ctx)
-		if len(snapshot.Messages) != 0 || snapshot.Turn != nil {
-			t.Fatalf("peer message contaminated user chat: %+v", snapshot)
+		if len(snapshot.Messages) == 0 || snapshot.Turn != nil {
+			t.Fatalf("correspondence did not enter the owning conversation: %+v", snapshot)
 		}
 	}
 	if _, err = s.sendAssistantMail(ctx, "bad-destination", "main", protocol.SendMail{To: protocol.AgentRef{NodeID: "local", Kind: "assistant", AgentID: "missing"}, Text: "hello"}); err == nil {
@@ -129,138 +128,60 @@ func TestAssistantMailRunsIndependentContextAndOnlyExplicitReplies(t *testing.T)
 	}
 }
 
-func TestAssistantMailAllowanceWaitResumesSameEnvelopeWithoutMainWaitOrReplay(t *testing.T) {
+func TestAssistantMailAllowanceUsesOwningConversation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
-	s := taskResourceService(t)
-	if err := s.Permissions.Configure("local", MachinePolicy{ExecutionAccess: "allow"}); err != nil {
-		t.Fatal(err)
-	}
 	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s, _ := batchService(t, func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		w.Header().Set("Content-Type", "text/event-stream")
-		io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"private final\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\ndata: [DONE]\n\n")
-	}))
-	defer server.Close()
-	s.Registry.Create(ctx, "create-main", "Main")
-	peer, err := s.Registry.Create(ctx, "create-peer", "Peer")
+		batchReply(w, "user report")
+	}, 2)
+	if err := s.Usage.SetPolicy(ctx, usage.Policy{Period: "day", Limit: 1, Timezone: "UTC", AutoResume: false}); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := s.Conversation(ctx, "main")
+	message, err := s.Mailbox.Send(ctx, "mail", protocol.AgentRef{NodeID: "local", Kind: "assistant", AgentID: "tony"}, protocol.SendMail{To: protocol.AgentRef{NodeID: "local", Kind: "assistant", AgentID: "main"}, Text: "assessment ready"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "fixture", Name: "Fixture", Model: "fixture", Endpoint: server.URL, Protocol: "openai_chat", APIKey: "fixture", MaxOutputTokens: 100})
-	if err != nil {
-		t.Fatal(err)
-	}
-	spec, err := s.Profiles.Resolve(profile.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, owner := range []string{"main", peer.ID} {
-		c, err := s.Conversation(ctx, owner)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err = c.Configure(ctx, spec, 0); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err = s.Usage.SetPolicy(ctx, usage.Policy{Period: "day", Limit: 1, Timezone: "UTC", AutoResume: false}); err != nil {
-		t.Fatal(err)
-	}
-	changed := s.Mailbox.Changes.Subscribe()
-	defer changed.Close()
-	message, err := s.sendAssistantMail(ctx, "mail", "main", protocol.SendMail{To: protocol.AgentRef{NodeID: "local", Kind: "assistant", AgentID: peer.ID}, Text: "wait before this correspondence samples"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitState := func(want string) {
-		t.Helper()
-		for {
-			history, err := s.Mailbox.History(ctx, peer.ID, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, record := range history {
-				if record.Message.ID == message.ID {
-					if record.State == want {
-						return
-					}
-					if record.State == "failed" || record.State == "interrupted" {
-						t.Fatal("mail did not preserve safe wait", record, *record.Detail)
-					}
-				}
-			}
-			if _, err = changed.Next(ctx); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	waitState("waiting")
+	awaitConversation(t, c, func(snapshot protocol.Snapshot) bool { return snapshot.Turn != nil && snapshot.Turn.State == "waiting" })
 	if calls.Load() != 0 {
-		t.Fatal("budget-blocked mail sampled model")
+		t.Fatal("budget-blocked correspondence sampled model")
 	}
-	waits, err := s.MailAllowanceWaits(ctx, peer.ID)
-	if err != nil || len(waits) != 1 || waits[0].Scope != mailExecutionOwner(message) {
-		t.Fatal(waits, err)
+	wait, err := s.Usage.Waiting(ctx, "main")
+	if err != nil || wait == nil || wait.Turn != "pot-result-"+message.ID {
+		t.Fatal(wait, err)
 	}
-	if waiting, err := s.Usage.Waiting(ctx, peer.ID); err != nil || waiting != nil {
-		t.Fatal("mail overwrote Main wait", waiting, err)
-	}
-	if err = s.ResumeAllowance(ctx, "main", ResumeAllowanceCommand{RequestID: "wrong-owner", Scope: waits[0].Scope, Turn: waits[0].Turn, Since: waits[0].Since}); err == nil {
-		t.Fatal("another assistant released correspondence")
-	}
-	if err = s.Usage.SetPolicy(ctx, usage.Policy{Period: "day", Limit: 100000, Timezone: "UTC", AutoResume: false}); err != nil {
+	if err := s.Usage.SetPolicy(ctx, usage.Policy{Period: "day", Limit: 100000, Timezone: "UTC", AutoResume: false}); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.ResumeAllowance(ctx, peer.ID, ResumeAllowanceCommand{RequestID: "resume-mail", Scope: waits[0].Scope, Turn: waits[0].Turn, Since: waits[0].Since}); err != nil {
+	q := ResumeAllowanceCommand{RequestID: "resume", Turn: wait.Turn, Since: wait.Since}
+	if err := s.ResumeAllowance(ctx, "main", q); err != nil {
 		t.Fatal(err)
 	}
-	waitState("processed")
+	awaitConversation(t, c, func(snapshot protocol.Snapshot) bool {
+		return snapshot.Turn == nil && len(snapshot.Messages) > 1
+	})
+	if err := s.ResumeAllowance(ctx, "main", q); err != nil {
+		t.Fatal("exact resume receipt lost", err)
+	}
 	if calls.Load() != 1 {
-		t.Fatal("mail replayed model", calls.Load())
+		t.Fatal("correspondence replayed", calls.Load())
 	}
-	// A completed resume receipt remains tied to the old envelope when the same
-	// correspondence later has a different wait.
-	if err = s.Usage.Wait(ctx, usage.WaitRequest{Scope: waits[0].Scope, Turn: "later-envelope", AtMS: time.Now().UnixMilli() + 1, Required: 1}); err != nil {
-		t.Fatal(err)
-	}
-	if err = s.ResumeAllowance(ctx, peer.ID, ResumeAllowanceCommand{RequestID: "resume-mail", Scope: waits[0].Scope, Turn: waits[0].Turn, Since: waits[0].Since}); err != nil {
-		t.Fatal(err)
-	}
-	if err = s.ResumeAllowance(ctx, peer.ID, ResumeAllowanceCommand{RequestID: "stale-mail", Scope: waits[0].Scope, Turn: waits[0].Turn, Since: waits[0].Since}); err == nil {
-		t.Fatal("stale correspondence action released later envelope")
-	}
-	if later, e := s.Usage.Waiting(ctx, waits[0].Scope); e != nil || later == nil || later.Released {
-		t.Fatal(later, e)
-	}
-	if err = s.Usage.ClearWaitForTurn(ctx, waits[0].Scope, "later-envelope"); err != nil {
-		t.Fatal(err)
-	}
-
-	_, raw, err := s.Mailbox.Session(ctx, message, spec)
+	frame, err := c.UIFrame(ctx, 0, true)
 	if err != nil {
-		t.Fatal(err)
-	}
-	var checkpoint agent.Checkpoint
-	if err = json.Unmarshal(raw, &checkpoint); err != nil {
 		t.Fatal(err)
 	}
 	inputs := 0
-	for _, m := range checkpoint.Messages {
-		if m.Role == "user" && strings.HasPrefix(m.Text, "Process all incoming messages from this one agent together,") {
+	for _, m := range frame.Messages {
+		if m.RequestID != nil && *m.RequestID == wait.Turn {
 			inputs++
+			if len(m.Correspondence) != 1 || m.Correspondence[0].ID != message.ID {
+				t.Fatal("missing incoming receipt", m)
+			}
 		}
 	}
 	if inputs != 1 {
-		t.Fatal("allowance resume duplicated envelope input", inputs)
-	}
-	c, _ := s.Conversation(ctx, peer.ID)
-	snapshot, _ := c.Snapshot(ctx)
-	if len(snapshot.Messages) != 0 {
-		t.Fatal("mail entered Main transcript")
-	}
-	if waiting, err := s.Usage.Waiting(ctx, waits[0].Scope); err != nil || waiting != nil {
-		t.Fatal("completed correspondence retained wait", waiting, err)
+		t.Fatal("resume duplicated correspondence input", inputs)
 	}
 }

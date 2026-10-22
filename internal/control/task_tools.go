@@ -96,6 +96,24 @@ func (s *Service) productDispatchBound(owner, executionOwner, turn string, gener
 				if worker {
 					sender.Kind = "task"
 					sender.AgentID = executionOwner
+				} else {
+					mail, err := s.Mailbox.DeliveryMail(ctx, owner, turn)
+					if err != nil {
+						return nil, err
+					}
+					var parent *protocol.Envelope
+					for i := range mail {
+						candidate := &mail[i]
+						if parent == nil || candidate.Hops > parent.Hops {
+							parent = candidate
+						}
+					}
+					if parent != nil {
+						if err := s.Mailbox.Processing(ctx, *parent); err != nil {
+							return nil, err
+						}
+						ctx = context.WithValue(ctx, mailParentKey{}, *parent)
+					}
 				}
 				result, err := s.sendAgentMessage(ctx, id, owner, sender, send)
 				if err != nil {

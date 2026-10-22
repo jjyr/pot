@@ -60,9 +60,10 @@ port for local and linked assistants. UI controls follow versioned operation
 descriptions, never adapter type or location. Local owner-only configuration
 remains an explicit capability; peer authentication does not grant it.
 
-Direct conversations have durable independent contexts. Incoming peer text is
-reference data, not user authority. Explicit messaging tools send replies; final
-model text is not automatically forwarded. Assistant-directed task results enter
+Each assistant has one durable conversation context, including incoming
+correspondence as reference data, never new user authority. The UI shows
+correspondence in collapsed receipt records. Explicit messaging tools reply to
+peers; final model text can report to the user and is not automatically forwarded. Assistant-directed task results enter
 the original assistant's inbox. User-directed task results return to their
 original conversation and task notifications without a local assistant.
 See [Agent Links](agent-links.md),

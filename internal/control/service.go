@@ -226,6 +226,19 @@ func (s *Service) Conversation(ctx context.Context, id string) (*assistant.Conve
 		return s.finishAgentDelivery(ctx, id, r, result)
 	}}
 	options.IdlePolicy = s.idleCompactPolicy
+	options.ProjectUI = func(ctx context.Context, messages []protocol.UIMessage) error {
+		for i := range messages {
+			m := &messages[i]
+			if m.Role == protocol.System && m.RequestID != nil {
+				mail, err := s.Mailbox.DeliveryMail(ctx, id, *m.RequestID)
+				if err != nil {
+					return err
+				}
+				m.Correspondence = mail
+			}
+		}
+		return nil
+	}
 	options.CompactGate = s.compactGate(id)
 	options.ValidateAttachments = func(ctx context.Context, spec core.ResolvedSpec, items []core.Attachment) error {
 		return s.Attachments.Validate(id, items, spec.AttachmentCapabilities())

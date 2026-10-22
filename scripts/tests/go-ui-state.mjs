@@ -265,6 +265,16 @@ const composition={...archiveCall,id:'composition-message',tool:{id:'composition
 assert.deepEqual(projectChatReplies({...archiveSnapshot,messages:[chatInput,composition,nestedArchive]}).map(row=>row.id),['input','composition-message'],'Only the routine child is hidden inside a composition');
 const backgroundArchive={...archiveSnapshot,messages:[{id:'background',request_id:'pot-result-task',role:'system',text:'Task complete'},archiveCall]};
 assert.deepEqual(projectChatReplies(backgroundArchive),[],'Silent background bookkeeping leaves no standalone card');
+const receivedMail={id:'received',request_id:'pot-result-mail',role:'system',text:'Runtime reference input',status:'complete',created_at_ms:123,correspondence:[{id:'mail',from:{node_id:'remote',kind:'assistant',agent_id:'tony'},to:{node_id:'local',kind:'assistant',agent_id:'main'},text:'<script>not executable</script> assessment ready'}]};
+const mailSnapshot={...archiveSnapshot,messages:[receivedMail,{id:'public-report',role:'assistant',reply_to:'received',text:'The assessment is ready',status:'complete'}],replies:[{input_id:'received',state:'completed'}]};
+const mailRows=projectChatReplies(mailSnapshot);
+assert.deepEqual(mailRows.map(row=>row.role),['tool','assistant'],'Incoming correspondence is a disclosure record, followed by the assistant report');
+assert.equal(mailRows[0].tool.name,'receive_message');
+assert.equal(mailRows[0].tool.args.messages[0].text,receivedMail.correspondence[0].text);
+assert.equal(mailRows[0].text,'','Raw correspondence never becomes normal chat prose');
+assert.equal(mailSnapshot.messages[0].role,'system','Presentation does not rewrite the authoritative transcript');
+assert.equal(mailRows[0].viewKey,'input:pot-result-mail','Receipt identity survives history refreshes');
+assert.equal(projectChatReplies({...mailSnapshot,messages:[{...receivedMail,context_only:true}]}).length,0,'History dependencies do not duplicate receipt cards');
 assert.equal(projectChatReplies(waiting,null,{offline:true})[1].phase,'reconnecting','Connection loss does not declare execution failed');
 const failed=projectChatReplies({...waiting,running:false,turn_id:null,replies:[{input_id:'input',state:'failed',error:'HTTP 404'}],messages:[chatInput,{...chatReply,text:'Partial',status:'failed',error:'HTTP 404'}]});
 assert.equal(failed.filter(row=>row.phase==='failed').length,1,'Only one failed reply is displayed');

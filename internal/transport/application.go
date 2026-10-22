@@ -240,14 +240,7 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			mailWaits, err := s.MailAllowanceWaits(ctx, owner)
-			if err != nil {
-				return nil, err
-			}
-			return struct {
-				usage.Summary
-				MailWaits []usage.Waiting `json:"mail_waits"`
-			}{summary, mailWaits}, nil
+			return summary, nil
 		case "/api/v1/providers/allowances":
 			return s.ConnectionAllowances(ctx, u.Query().Get("profile_id"))
 		case "/api/v1/spaces":

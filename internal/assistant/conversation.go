@@ -35,6 +35,7 @@ type RunOptions struct {
 	Settle             func(context.Context) error
 }
 type ConversationOptions struct {
+	ProjectUI   func(context.Context, []protocol.UIMessage) error
 	IdlePolicy  func(context.Context, core.Thread) (IdleCompactionPolicy, error)
 	CompactGate func(context.Context, func() error) error
 

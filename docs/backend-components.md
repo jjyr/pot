@@ -16,7 +16,7 @@ points; `internal/` contains product implementation. All packages share one root
 | `pkg/executor`, `pkg/pluginhost` | Commands, patches, tool process sessions and node-local background/metadata readers |
 | `pkg/storage` | SQLite transactions, messages, events and context persistence |
 | `pkg/instance`, `pkg/modeldirectory` | Private data-root identity/locking and provider model metadata |
-| `internal/assistant` | Identities, rules, conversation Threads, chat driver and durable mailboxes/sessions |
+| `internal/assistant` | Identities, rules, conversation Threads, chat driver and durable mailboxes |
 | `pkg/peer` | Shared TLS 1.3 TCP sessions, mutual identity proof, Yamux streams, CBOR/Zstd framing and service admission; no business authorization |
 | `pkg/agentlink` | Product operation port, per-assistant capability contracts, node-bound collaboration and durable request recovery |
 | `internal/linkhost` | Agent Link adapters plus one host-owned peer service registry/listener |
@@ -43,8 +43,9 @@ Agent and task execution receive injected services. They neither import Control/
 nor acquire provider credentials. Runtime composes components through their APIs;
 HTTP adapters and databases stay with their owning components.
 
-Every local Pot Agent invocation, including mail and summary sessions, passes
-through its shared execution manager. The owning node manages provider keys,
+Every local Pot Agent invocation, including correspondence and result handling in
+its owning conversation, passes through the shared execution manager. The owning
+node manages provider keys,
 approvals, accounting and global resources. Workers run on their owning node and use its local execution services.
 
 Task operations and model task tools enter the same Agent Link operation port.

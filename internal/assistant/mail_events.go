@@ -11,7 +11,7 @@ import (
 )
 
 // Notifications reads both trusted notification sources in inbox receipt order.
-// Peer correspondence stays in its private context and never enters user chat.
+// Correspondence uses its sender batch but shares the same owning conversation.
 func (m *Mailbox) Notifications(ctx context.Context, owner string) ([]protocol.Envelope, error) {
 	events, err := m.envelopes(ctx, `SELECT envelope FROM agent_messages WHERE recipient=? AND direction='in' AND state='queued' AND json_extract(envelope,'$.kind') IN ('task_result','plugin_event') ORDER BY sequence LIMIT ?`, owner, inbox.MaxBatchMessages)
 	if err != nil {
@@ -45,7 +45,7 @@ func (m *Mailbox) ClaimEvent(ctx context.Context, owner, id string) error {
 }
 func (m *Mailbox) ReleaseEvent(ctx context.Context, id string) error {
 	return storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, "UPDATE agent_messages SET state='queued' WHERE (id=? OR id IN (SELECT message FROM agent_delivery_items WHERE batch=?)) AND state='processing' AND json_extract(envelope,'$.kind') IN ('task_result','plugin_event')", id, id); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE agent_messages SET state='queued' WHERE (id=? OR id IN (SELECT message FROM agent_delivery_items WHERE batch=?)) AND state='processing' AND json_extract(envelope,'$.kind') IN ('task_result','plugin_event','message')", id, id); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, "DELETE FROM agent_delivery_items WHERE batch=?", id)
@@ -68,7 +68,7 @@ func (m *Mailbox) FinishChat(ctx context.Context, owner, turn, event string, suc
 			if success {
 				state = "processed"
 			}
-			_, err := tx.ExecContext(ctx, "UPDATE agent_messages SET state=? WHERE (id=? OR id IN (SELECT message FROM agent_delivery_items WHERE batch=?)) AND recipient=? AND state='processing' AND json_extract(envelope,'$.kind') IN ('task_result','plugin_event')", state, event, event, owner)
+			_, err := tx.ExecContext(ctx, "UPDATE agent_messages SET state=? WHERE (id=? OR id IN (SELECT message FROM agent_delivery_items WHERE batch=?)) AND recipient=? AND state='processing' AND json_extract(envelope,'$.kind') IN ('task_result','plugin_event','message')", state, event, event, owner)
 			return err
 		}
 		return nil
