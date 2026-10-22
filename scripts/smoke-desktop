@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""Extract and launch a desktop package using isolated, disposable user data."""
+
+import argparse
+import ctypes
+import json
+import os
+from pathlib import Path
+import platform
+import shutil
+import signal
+import subprocess
+import tarfile
+import tempfile
+import time
+
+
+def native_smoke(command, base, environment):
+    # This test process alone becomes a subreaper. WebKit and D-Bus can fork
+    # subprocesses; neither a timeout nor successful window close may leak them.
+    if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
+        raise OSError(ctypes.get_errno(), "cannot establish smoke test subreaper")
+    process = subprocess.Popen(
+        command,
+        cwd=base,
+        env=environment,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    try:
+        output, _ = process.communicate(timeout=65)
+        return process.returncode, output
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                while os.waitpid(-1, os.WNOHANG)[0]:
+                    pass
+            except ChildProcessError:
+                break
+            children = Path(f"/proc/self/task/{os.getpid()}/children").read_text().split()
+            for pid in children:
+                try:
+                    os.kill(int(pid), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if time.monotonic() >= deadline:
+                raise RuntimeError("smoke test descendants did not exit")
+            time.sleep(0.01)
+
+
+def extract_deb(archive, destination):
+    members = subprocess.check_output(["ar", "t", archive], text=True).splitlines()
+    if members != ["debian-binary", "control.tar.gz", "data.tar.gz"]:
+        raise ValueError("unexpected Debian package members")
+    data = destination / "data.tar.gz"
+    with data.open("wb") as target:
+        subprocess.run(["ar", "p", archive, "data.tar.gz"], stdout=target, check=True)
+    with tarfile.open(data) as source:
+        source.extractall(destination, filter="data")
+    data.unlink()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--archive", type=Path, required=True)
+    parser.add_argument("--platform", choices=("linux-amd64", "linux-arm64"), required=True)
+    args = parser.parse_args()
+    native = "linux-" + {"x86_64": "amd64", "aarch64": "arm64"}.get(
+        platform.machine(), "unsupported"
+    )
+    if platform.system() != "Linux" or args.platform != native:
+        parser.error("smoke requires the target native Linux runner")
+    archive = args.archive.resolve()
+    with tempfile.TemporaryDirectory(prefix="pot-desktop-smoke-") as temporary:
+        base = Path(temporary)
+        relocated = base / "relocated package"
+        relocated.mkdir()
+        extract_deb(archive, relocated)
+        install = relocated / "opt/pot-desktop"
+        resources = install / "Resources"
+        for required in (
+            "skills",
+            "plugins",
+            "sandbox/launcher.mjs",
+            "node/bin/node",
+            "node/bin/npm",
+            "LICENSE.txt",
+            "GoDependencyLicenses.txt",
+            "FrontendFontLicense.txt",
+        ):
+            if not (resources / required).exists():
+                raise ValueError(f"incomplete package: {required}")
+        environment = {
+            key: value for key, value in os.environ.items() if not key.startswith("POT_")
+        }
+        home = base / "home"
+        home.mkdir(mode=0o700)
+        root = home / "root"
+        root.mkdir(mode=0o700)
+        environment.update(
+            {
+                "HOME": str(home),
+                "XDG_CONFIG_HOME": str(home / ".config"),
+                "XDG_DATA_HOME": str(home / ".local/share"),
+                "XDG_CACHE_HOME": str(home / ".cache"),
+            }
+        )
+        for command in (
+            [resources / "node/bin/node", "--version"],
+            [resources / "node/bin/node", resources / "node/bin/npm", "--version"],
+            [install / "bin/pot", "init", "-root", home / "cli-root"],
+        ):
+            subprocess.run(command, cwd=base, env=environment, check=True, timeout=30)
+        command = [str(install / "bin/pot-app"), "-root", str(root), "-smoke-test"]
+        # A private session bus prevents notification/tray tests touching the
+        # caller's desktop session. The runner supplies Xvfb when headless.
+        if shutil.which("dbus-run-session"):
+            command = ["dbus-run-session", "--", *command]
+        code, output = native_smoke(command, base, environment)
+        if code or "POT_DESKTOP_SMOKE_OK" not in output:
+            print(output[:10000])
+            if len(output) > 10000:
+                print(output[-4000:])
+            raise SystemExit(f"native desktop smoke failed (exit {code})")
+        print("POT_DESKTOP_SMOKE_OK")
+        identity = json.loads((root / "identity.json").read_text())
+        if not identity.get("runtime_id"):
+            raise SystemExit("native Runtime did not initialize its identity")
+        # Reopening the same root proves the native shutdown released ownership.
+        # Master keys are created lazily on the first encrypted credential write.
+        reopened = subprocess.check_output(
+            [install / "bin/pot", "init", "-root", root],
+            cwd=base,
+            env=environment,
+            text=True,
+            timeout=30,
+        )
+        if json.loads(reopened)["runtime_id"] != identity["runtime_id"]:
+            raise SystemExit("native Runtime identity changed after shutdown")
+    print("Desktop package relocation, bundled Node/npm, Runtime and native WebView bridge passed")
+
+
+if __name__ == "__main__":
+    main()

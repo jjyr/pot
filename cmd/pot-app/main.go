@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin || (linux && desktop)
 
 package main
 
@@ -32,9 +32,12 @@ func main() {
 	}
 	root := flag.String("root", "", "private Go data root")
 	preview := flag.Bool("preview", false, "disposable fixture UI")
+	smoke := flag.Bool("smoke-test", false, "test native UI with a fresh private root")
 	flag.Parse()
 	var err error
-	if *preview {
+	if *smoke {
+		err = desktop.RunSmoke(*root)
+	} else if *preview {
 		err = desktop.RunPreview()
 	} else {
 		err = desktop.Run(*root)

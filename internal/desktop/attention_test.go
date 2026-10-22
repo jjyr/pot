@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin || (linux && desktop)
 
 package desktop
 

@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin || (linux && desktop)
 
 // Package desktop is the only Go layer that depends on Wails. The CLI and guest
 // executor must never import this package or require desktop frameworks.
@@ -71,8 +71,7 @@ func RunPreview() error {
 		},
 	})
 	main.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
-		main.Hide()
-		event.Cancel()
+		closeMain(app, main, event)
 	})
 	tray := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name: "pot-tray", Title: "Pot", Width: 380, Height: 560,
@@ -88,11 +87,7 @@ func RunPreview() error {
 	status.SetTemplateIcon(trayIcon)
 	status.SetTooltip("Pot — UI preview")
 	status.AttachWindow(tray).WindowOffset(5)
-	menu := app.NewMenu()
-	menu.AddRole(application.AppMenu)
-	menu.AddRole(application.EditMenu)
-	menu.AddRole(application.WindowMenu)
-	app.Menu.Set(menu)
+	configureMenu(app)
 	trayMenu := app.NewMenu()
 	trayMenu.Add("Open Pot").OnClick(func(*application.Context) { service.OpenMain() })
 	trayMenu.AddSeparator()
