@@ -133,7 +133,7 @@ permission error.
 
 | Container path | Durable contents |
 |---|---|
-| `/home/pot/.pot-go` | Runtime identity, databases, encrypted provider/service credentials, permissions and task state |
+| `/home/pot/.pot` | Runtime identity, databases, encrypted provider/service credentials, permissions and task state |
 | `/home/pot/.pot-web` | Browser binding, access token, session signing key and revocations |
 | `/home/pot/.pot/secrets/master.key` | Automatically generated Linux credential master key, created on first secret write |
 | `/home/pot/workspaces` | Default assistant workspaces and managed task worktrees |
@@ -172,7 +172,7 @@ published; Agent Link listeners are not published by this recipe.
 ```sh
 docker compose -f docker/compose.yaml ps
 docker compose -f docker/compose.yaml logs --tail=100 pot
-docker compose -f docker/compose.yaml exec pot pot status -root /home/pot/.pot-go
+docker compose -f docker/compose.yaml exec pot pot status -root /home/pot/.pot
 docker compose -f docker/compose.yaml restart
 docker compose -f docker/compose.yaml down
 ```

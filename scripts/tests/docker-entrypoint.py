@@ -1,19 +1,40 @@
 #!/usr/bin/env python3
 """Exercise the container supervisor with real disposable child processes."""
 
+import importlib.util
+import io
 import os
 from pathlib import Path
+import runpy
 import signal
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 class EntrypointTest(unittest.TestCase):
+    def test_healthcheck_uses_the_supervisors_runtime_root(self):
+        spec = importlib.util.spec_from_file_location("entry", ROOT / "docker/entrypoint.py")
+        entry = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(entry)
+        response = io.BytesIO(b'{"scope":"control"}')
+        response.status = 200
+        connection = Mock()
+        connection.getresponse.return_value = response
+        with (
+            patch("subprocess.run") as status,
+            patch("http.client.HTTPConnection", return_value=connection),
+            patch.dict(os.environ, {"POT_WEB_ORIGIN": "http://localhost:17703"}),
+        ):
+            runpy.run_path(str(ROOT / "docker/healthcheck.py"))
+        self.assertEqual(status.call_args.args[0], [entry.POT, "status", "-root", entry.ROOT])
+        connection.close.assert_called_once()
+
     def run_service(self, exit_role=None):
         temporary = tempfile.TemporaryDirectory(prefix="pot-entrypoint-")
         self.addCleanup(temporary.cleanup)
@@ -23,6 +44,8 @@ class EntrypointTest(unittest.TestCase):
             f"#!{sys.executable}\n"
             "import os, pathlib, signal, sys, time\n"
             "home=pathlib.Path(os.environ['FAKE_HOME']); role=sys.argv[1]\n"
+            "flag='-control-root' if role=='web-ui-server' else '-root'\n"
+            "assert sys.argv[sys.argv.index(flag)+1]==str(home/'.pot')\n"
             "if role=='status': sys.exit(0 if (home/'serve.pid').exists() else 1)\n"
             "(home/(role+'.pid')).write_text(str(os.getpid()))\n"
             "if role==os.environ.get('FAKE_EXIT'): sys.exit(0)\n"
@@ -35,7 +58,7 @@ class EntrypointTest(unittest.TestCase):
             "spec=importlib.util.spec_from_file_location('entry',sys.argv[1]); "
             "entry=importlib.util.module_from_spec(spec); spec.loader.exec_module(entry); "
             "home=Path(sys.argv[2]); entry.POT=str(home/'pot'); entry.HOME=str(home); "
-            "entry.ROOT=str(home/'runtime'); entry.BROWSER=str(home/'browser'); "
+            "entry.ROOT=str(home/'.pot'); entry.BROWSER=str(home/'browser'); "
             "entry.WORKSPACE=str(home/'work'); sys.argv=['entry','server']; "
             "sys.exit(entry.main())"
         )

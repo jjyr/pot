@@ -7,7 +7,7 @@ import subprocess
 from urllib.parse import urlsplit
 
 subprocess.run(
-    ["/opt/pot/bin/pot", "status", "-root", "/home/pot/.pot-go"],
+    ["/opt/pot/bin/pot", "status", "-root", "/home/pot/.pot"],
     check=True,
     timeout=4,
     stdout=subprocess.DEVNULL,

@@ -62,7 +62,7 @@ Notifications use the session's freedesktop notification daemon and are reported
 unavailable when that daemon is absent. There is no macOS-style Linux permission
 prompt; notification delivery and click actions depend on that daemon.
 
-The default data root is `~/.pot-go`. An independent instance can use
+The default data root is `~/.pot`. An independent instance can use
 `pot-desktop -root /absolute/private/root`. Do not run the bundled CLI's `serve`
 command against a root already owned by the desktop app. Linux stores its master
 key at `~/.pot/secrets/master.key` with owner-only access; preserve that key along
