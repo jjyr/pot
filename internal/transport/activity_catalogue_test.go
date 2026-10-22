@@ -9,13 +9,15 @@ import (
 	"github.com/jjyr/pot/internal/control"
 	product "github.com/jjyr/pot/internal/runtime"
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/tasks"
+	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
-func TestAssistantCatalogueProjectsOwnerScopedTaskExecution(t *testing.T) {
+func TestAssistantCatalogueProjectsLocalOwnerScopedTaskExecution(t *testing.T) {
 	ctx := context.Background()
 	keys, _ := secrets.NewMemoryKey(make([]byte, 32))
-	runtime, err := product.Open(ctx, product.Options{Root: filepath.Join(t.TempDir(), "runtime"), DisableMetadataRefresh: true, Control: control.Options{Keys: keys}})
+	runtime, err := product.Open(ctx, product.Options{Root: filepath.Join(t.TempDir(), "runtime"), DisableMetadataRefresh: true, Control: control.Options{Keys: keys, Maintenance: func() bool { return true }}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,17 +30,24 @@ func TestAssistantCatalogueProjectsOwnerScopedTaskExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := json.Marshal(map[string]any{"info": protocol.TaskInfo{ID: "activity", AssistantID: first.ID, Phase: protocol.TaskQueued}})
+	body, _ := json.Marshal(tasks.Record{SchemaVersion: 12, AssistantID: first.ID, Plugins: []string{}, Origin: protocol.TaskOrigin{Kind: "manual"}, Request: protocol.CreateTask{MachineID: runtime.Control.Tasks.NodeID(), RequestID: "activity-request", Text: "Activity"}, Info: protocol.TaskInfo{ID: "activity", AssistantID: first.ID, Phase: protocol.TaskQueued}})
 	_, err = runtime.Control.Tasks.DB().ExecContext(ctx, "INSERT INTO tasks(assistant_id,id,phase,created,body) VALUES(?,?,'queued',1,?)", first.ID, "activity", string(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	app := &Application{Control: runtime.Control, RuntimeID: runtime.Root.Identity.RuntimeID, BootID: runtime.BootID}
 	for _, test := range []struct {
-		phase                       string
-		paused, archived, executing bool
-	}{{"queued", false, false, false}, {"waiting", false, false, false}, {"waiting_approval", false, false, false}, {"running", false, false, true}, {"running", true, false, false}, {"complete", false, false, false}, {"running", false, true, false}} {
-		_, err := runtime.Control.Tasks.DB().ExecContext(ctx, `UPDATE tasks SET phase=?,body=json_set(body,'$.info.phase',?,'$.info.paused',json(?),'$.info.archived',json(?)) WHERE assistant_id=? AND id=?`, test.phase, test.phase, boolJSON(test.paused), boolJSON(test.archived), first.ID, "activity")
+		phase                               string
+		paused, archived, linked, executing bool
+	}{{"queued", false, false, false, false}, {"waiting", false, false, false, false}, {"waiting_approval", false, false, false, false}, {"running", false, false, false, true}, {"running", true, false, false, false}, {"complete", false, false, false, false}, {"running", false, true, false, false}, {"running", false, false, true, false}} {
+		execution, origin := "null", "null"
+		if test.linked {
+			data, _ := json.Marshal(tasks.Execution{Request: agentlink.TaskRequest{From: protocol.AgentRef{NodeID: runtime.Control.Tasks.NodeID(), Kind: "assistant", AgentID: first.ID}}, Receipt: agentlink.Task{ID: "remote-activity", State: "running"}})
+			execution = string(data)
+			data, _ = json.Marshal(protocol.AgentLinkOrigin{LinkID: "activity-peer", NodeID: "peer", AssistantID: "remote"})
+			origin = string(data)
+		}
+		_, err := runtime.Control.Tasks.DB().ExecContext(ctx, `UPDATE tasks SET phase=?,body=json_set(body,'$.info.phase',?,'$.info.paused',json(?),'$.info.archived',json(?),'$.execution',json(?),'$.info.agent_link',json(?)) WHERE assistant_id=? AND id=?`, test.phase, test.phase, boolJSON(test.paused), boolJSON(test.archived), execution, origin, first.ID, "activity")
 		if err != nil {
 			t.Fatal(err)
 		}
