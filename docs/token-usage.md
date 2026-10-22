@@ -127,10 +127,10 @@ Lifetime request, per-turn request, and per-request output caps remain independe
 ## Waiting and recovery
 
 Task model, tool and compaction records use the Task ID as their ledger scope.
-Main requests and automatic result summaries use the owning assistant ID. Mail
-usage belongs to the recipient assistant, with a separate correspondence wait
-scope so it cannot overwrite Main or Task waits. The summary’s `mail_waits` list
-exposes the selected assistant’s resumable correspondence waits. Unknown model
+Main requests, automatic result summaries and correspondence use the owning
+assistant ID and the same serial conversation allowance wait. Correspondence
+resumes through the assistant conversation; there is no separate mail wait scope
+or `mail_waits` API field. Unknown model
 reservations remain conservative even when a completed wait record is cleared.
 
 

@@ -46,7 +46,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',machine
 
     const phase=pending?'waiting_approval':tool.phase;
     const names={exec_command:'command',write_stdin:'session',apply_patch:'patch',exec:'script',wait:'wait',cua_repl:'computer',create_task:'createTask',set_task_dispositions:'setTaskDispositions',get_task:'getTask',wait_task:'waitTask',update_agent_profile:'updateProfile',register_resource:'registerResource',present_resource:'presentResource'};
-    title.textContent=names[tool.name]?t(names[tool.name]):tool.name;
+    title.textContent=tool.name==='receive_message'?t('receiveMessage'):names[tool.name]?t(names[tool.name]):tool.name;
     const preview=toolSummary(tool);
     excerpt.textContent=preview===tool.name||preview===title.textContent?'':preview;excerpt.title=excerpt.textContent;excerpt.hidden=!excerpt.textContent;
     const childTools=(next.children||[]).map(child=>child.tool);
@@ -95,6 +95,12 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',machine
     if(isGroup)return;
     const args=tool.args||{};
     if(pending){/* The exact approval arguments above are the operation preview. */}
+    else if(tool.name==='receive_message'){
+      for(const [index,message] of (args.messages||[]).entries()){
+        section(`sender-${index}`,t('sender'),message.from);
+        section(`message-${index}`,t('message'),message.text||'');
+      }
+    }
     else if(tool.name==='exec_command')section('input',t('command'),args.cmd||'');
     else if(['exec','cua_repl'].includes(tool.name))section('input',t('code'),args.code||'');
     else if(tool.name==='apply_patch'){

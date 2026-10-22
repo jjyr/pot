@@ -65,6 +65,11 @@ func (c *Conversation) uiContextLocked(ctx context.Context, messages []protocol.
 	for i := range messages {
 		messages[i].Version = c.cursor
 	}
+	if c.options.ProjectUI != nil {
+		if err := c.options.ProjectUI(ctx, messages); err != nil {
+			return nil, err
+		}
+	}
 	return messages, nil
 }
 

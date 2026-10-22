@@ -4,7 +4,7 @@ const CACHE_BYTES = 16 * 1024 * 1024;
 const sequence = message => BigInt(message.sequence || 0);
 const weights = new WeakMap();
 function weight(message) {
-  if (!weights.has(message)) weights.set(message, message.text.length * 2 + (message.tool ? JSON.stringify(message.tool).length * 2 : 0) + 512);
+  if (!weights.has(message)) weights.set(message, message.text.length * 2 + (message.tool ? JSON.stringify(message.tool).length * 2 : 0) + (message.correspondence ? JSON.stringify(message.correspondence).length * 2 : 0) + 512);
   return weights.get(message);
 }
 function bounded(messages, anchor) {
