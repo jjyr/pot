@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-func TestLocalTaskUsesRunnerSharedCapacityControlModelAndSummary(t *testing.T) {
+func TestLocalTaskUsesSharedCapacityOwnerModelAndSummary(t *testing.T) {
 	var calls atomic.Int32
 	var summaryCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

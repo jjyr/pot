@@ -201,8 +201,10 @@ share the same task operations; caller-side receipt caching does not run a worke
 A lost submission response retries the same request ID; it cannot create another
 execution. A disconnected or uncertain request remains unresolved. Definitive
 admission failures surface in the original task list and notification route.
-Cancellation never fabricates completion; before the remote reference arrives,
-a durable cancellation intent waits for acceptance and then targets that task.
+Cancellation intent is persisted before any attempt to send it. Before acceptance
+is observed it waits for the original reference; afterward it always targets that
+reference. Disconnect and restart retain the intent for retry. Cancellation never
+fabricates completion or proves that execution stopped.
 
 Direct user chats with another Pot use a persisted user session address per
 connection and target assistant, rather than the local default assistant. User requests address an
@@ -234,8 +236,9 @@ caller, request, task reference and result ID. A different user session or calle
 kind cannot inspect or cancel that accepted task. Retained conversation and task
 reads still work after deleting a link, without permitting new execution.
 Results retain receiver provenance. Source icons in assistant lists, chat titles and task rows identify Codex or another Pot.
-Task details expose cancellation and local archive state; unsupported local
-controls, steering and file access are unavailable. Neither current adapter
+Task details expose local archive state and controls advertised by the receiving
+adapter. Codex supports terminal-run continuation; live steering and remote file
+access are unavailable. Neither current adapter
 advertises cross-node artifact access. Directory entries and exported capabilities
 must be implemented before additional controls are exposed.
 

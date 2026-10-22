@@ -38,14 +38,40 @@ func (s *Service) Catalog(ctx context.Context, query protocol.TaskQuery) (protoc
 	return s.page(ctx, "", query)
 }
 
-// Executing reports actual owner-scoped activity without loading Task histories.
+// LocalActive enumerates work owned by this Pot executor, including retired
+// assistants. Linked submissions and historical remote launches cannot be
+// interrupted or counted as local work during node maintenance.
+func (s *Service) LocalActive(ctx context.Context) ([]protocol.TaskInfo, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT body FROM tasks WHERE json_extract(body,'$.execution') IS NULL AND phase IN ('queued','waiting','running','waiting_approval') ORDER BY created,id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []protocol.TaskInfo{}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var record Record
+		if err := core.DecodeJSON([]byte(raw), &record); err != nil {
+			return nil, err
+		}
+		if record.local(s.options.NodeID) {
+			items = append(items, record.Info)
+		}
+	}
+	return items, rows.Err()
+}
+
+// Executing reports local owner-scoped execution without loading Task histories.
 func (s *Service) Executing(ctx context.Context, assistant string) (bool, error) {
 	if !core.Identifier(assistant) {
 		return false, fmt.Errorf("invalid assistant identity")
 	}
 	var executing bool
-	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE assistant_id=? AND phase='running'
-		AND json_extract(body,'$.info.archived') IS NOT TRUE AND json_extract(body,'$.info.paused') IS NOT TRUE)`, assistant).Scan(&executing)
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE assistant_id=? AND json_extract(body,'$.execution') IS NULL AND json_extract(body,'$.request.machine_id')=? AND phase='running'
+		AND json_extract(body,'$.info.archived') IS NOT TRUE AND json_extract(body,'$.info.paused') IS NOT TRUE)`, assistant, s.options.NodeID).Scan(&executing)
 	return executing, err
 }
 

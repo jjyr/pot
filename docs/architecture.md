@@ -5,20 +5,23 @@ Wails App. App, tray and browser share the HTML/CSS/JS frontend. Each installati
 is an autonomous node; Agent Link supplies collaboration between nodes.
 
 ```text
-Chat / tasks / current scheduler / agent tools
-                       |
-             Agent Link operation port
-          capability discovery + authorization
-                       |
-              +--------+--------+
-              |                 |
-        local owner adapter    authenticated peer adapter
-              |                 |
-        current Pot agent    Pot / Codex agent
-        current executor     receiver-owned task execution
-              |
-        local tools / Skills / model configuration
+Chat / tasks / schedules / agent tools
+                  |
+      Agent Link operation port
+   capability discovery + authorization
+                  |
+       +----------+----------+
+       |                     |
+ local owner adapter   authenticated peer adapter
+       |                     |
+ local Pot execution   Pot / Codex execution
+       |                     |
+       +----------+----------+
+                  |
+     receiver-owned execution policy,
+     models, resources and permissions
 ```
+
 
 ## Ownership
 
@@ -31,8 +34,8 @@ collaboration capabilities, never remote operator access or credentials.
 Fresh roots contain no assistants. First-use Chat and the directory + action
 open the same Add assistant page, ordered API, another Pot, then Codex. Only an
 explicit API creation action creates a kitchen-named local assistant. Linked
-assistants and user-originated linked tasks need neither a local Provider nor a local assistant. Provider storage
-alone creates no assistant. Each root retains
+assistants and user-originated linked tasks need neither a local Provider nor a
+local assistant. Provider storage alone creates no assistant. Each root retains
 its stable signing identity and secret master key. App and standalone Runtime
 cannot open the same root concurrently. Closing an App window keeps background
 work running; quitting stops local executions. See [Deployment](deployment.md)
@@ -49,9 +52,8 @@ Other linked tasks resolve their explicit target or the receiving default once.
 
 The receiver owns accepted tasks and execution facts. The sender stores a durable
 Task and its original execution reference in the same catalogue used for local
-work. Status, results, cancellation and
-notifications address that original identity. Unsupported operations fail
-explicitly. Accepted cancellation does not prove execution stopped.
+work. Status, results, cancellation and notifications address that original
+identity. Unsupported operations fail explicitly. Accepted cancellation does not prove execution stopped.
 
 Chat and assistant-scoped task/schedule operations enter the same Agent Link
 port for local and linked assistants. UI controls follow versioned operation
@@ -86,26 +88,12 @@ disconnected; lack of observation never proves execution stopped.
 
 The receiving Pot adapter additionally owns local runs, checkpoints, workspaces
 and event logs. Local admission and run creation commit together. Tool side
-effects have one
-receipt authority in `operations.sqlite`; there is no second command journal.
+effects have one receipt authority in `operations.sqlite`; there is no second command journal.
 Plugin packages, Skills and MCP definitions belong to the local filesystem.
 Every local Pot Agent invocation passes through the shared execution manager.
+Node shutdown and updates interrupt only this local execution; linked Tasks retain their receiver-owned state.
 See [Backend components](backend-components.md),
 [Executor](executor.md) and [Permissions](permissions.md).
-
-```text
-UI / API / Agent tools / schedules
-                  |
-          Agent Link operation port
-                  |
-          +-------+--------+
-          |                |
-     local adapter     peer adapter
-          |                |
-     Pot execution     Pot / Codex execution
-
-Tasks: one caller catalogue; execution facts belong to the receiving adapter.
-```
 
 There are no Control/Runner deployment roles or centrally configured remote
 Runners. Each execution node owns its model configuration, credentials, resources

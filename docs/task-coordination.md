@@ -50,8 +50,10 @@ user-directed results follow the conversation route described above.
 
 Linked tasks use the same lists and detail view, with a Codex or Pot source icon.
 Cancellation targets the original accepted task; local archive state is supported.
-Steering, pause, local allowance controls, remote file reads and execution
-transcripts require additional adapter capabilities and are currently unavailable.
+Additional controls follow the receiving adapter's advertised operations. Codex
+accepts guidance after a terminal run to continue the same task; live steering,
+pause, local allowance controls, remote file reads and execution transcripts are
+currently unavailable across nodes.
 Disconnected nodes retain the last accepted state without replaying work.
 
 ## Codex execution

@@ -10,15 +10,6 @@ import (
 	"strings"
 )
 
-func (s *Service) ControlOrigin() string {
-	if s.agentLinks == nil {
-		return ""
-	}
-	s.agentLinks.mu.Lock()
-	defer s.agentLinks.mu.Unlock()
-	return s.agentLinks.config.Endpoint
-}
-
 func (s *Service) localMachine(_ context.Context) (map[string]any, error) {
 	policy, _, err := s.Permissions.Policy(s.options.RuntimeID)
 	if err != nil {

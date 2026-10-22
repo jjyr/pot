@@ -245,11 +245,7 @@ func (s *Service) business(ctx context.Context, c Connection, remote peer.Identi
 		if decodeJSON(r.Params, &input) != nil || !validGuidance(input, remote.NodeID) {
 			return nil, ErrInvalid
 		}
-		backend, ok := s.options.Backend.(TaskInputBackend)
-		if !ok || d.TaskExecutor == nil || !d.TaskExecutor.Supports(TaskInput) {
-			return nil, ErrUnsupported
-		}
-		result, e = backend.Input(ctx, input)
+		result, e = s.input(ctx, d, input)
 	case "task.status", "task.cancel":
 		var input taskLookup
 		if decodeJSON(r.Params, &input) != nil || !taskCaller(input.From) || input.From.NodeID != remote.NodeID || input.ID == "" {

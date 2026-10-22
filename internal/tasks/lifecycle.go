@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 )
@@ -31,7 +32,7 @@ func (s *Service) Tick(ctx context.Context) error {
 	}
 	rows.Close()
 	for _, pair := range pairs {
-		if err := s.reconcile(ctx, pair[0], pair[1]); err != nil && !errors.Is(err, ErrResultPending) && !errors.Is(err, errOutcomeChanged) {
+		if err := s.reconcile(ctx, pair[0], pair[1]); err != nil && !errors.Is(err, errOutcomeChanged) {
 			return err
 		}
 	}
@@ -229,6 +230,12 @@ func (s *Service) Stop(ctx context.Context, assistant, id, mode string) error {
 		if record == nil {
 			return fmt.Errorf("task missing")
 		}
+		if record.Execution != nil {
+			return agentlink.ErrUnsupported
+		}
+		if !record.local(s.options.NodeID) {
+			return s.markWaiting(ctx, assistant, id, protocol.APIError{Code: "original_execution_unavailable"})
+		}
 		if record.Info.Phase.Scope() != "active" || record.Launch != nil {
 			break
 		}
@@ -288,7 +295,7 @@ func (s *Service) Stop(ctx context.Context, assistant, id, mode string) error {
 
 func (r Record) local(node string) bool {
 	target := core.RuntimeTarget(node)
-	return r.Request.MachineID == node &&
+	return r.Execution == nil && r.Request.MachineID == node &&
 		(r.Info.ExecutionTarget == nil || *r.Info.ExecutionTarget == target) &&
 		(r.Launch == nil || (r.Launch.ControlID == node && r.Launch.RuntimeID == node && r.Launch.ExecutionTarget == target))
 }

@@ -160,3 +160,56 @@ func TestIncomingConnectionReconnectAcceptsResumeWithoutCallbackEndpoint(t *test
 		time.Sleep(time.Millisecond)
 	}
 }
+
+type guidanceBackend struct {
+	*testBackend
+	supportsInput atomic.Bool
+	inputs        atomic.Int64
+}
+
+func (b *guidanceBackend) Directory(ctx context.Context) (Directory, error) {
+	d, err := b.testBackend.Directory(ctx)
+	if b.supportsInput.Load() {
+		description := d.Operations["other"]
+		description.Operations = append(description.Operations, TaskInput)
+		d.Operations["other"] = description
+	}
+	return d, err
+}
+func (b *guidanceBackend) Status(ctx context.Context, from protocol.AgentRef, id string) (Task, error) {
+	assistant, _ := b.f.service.options.Identity(ctx, "other")
+	return Task{ID: id, Assistant: assistant, State: "complete"}, nil
+}
+func (b *guidanceBackend) Input(ctx context.Context, r TaskGuidance) (Task, error) {
+	b.inputs.Add(1)
+	assistant, _ := b.f.service.options.Identity(ctx, "other")
+	return Task{ID: r.ID, RequestID: "original", Assistant: assistant, State: "running"}, nil
+}
+func TestTaskInputUsesSameCapabilitiesForLocalAndPeerAdapters(t *testing.T) {
+	ctx := context.Background()
+	a, b := newFixture(t, "input-a"), newFixture(t, "input-b")
+	local := &guidanceBackend{testBackend: &testBackend{f: a}}
+	remote := &guidanceBackend{testBackend: &testBackend{f: b}}
+	a.service.options.Backend, b.service.options.Backend = local, remote
+	connection := connect(t, a, b)
+	guidance := TaskGuidance{From: protocol.AgentRef{NodeID: a.id, Kind: "assistant", AgentID: "assistant"}, ID: "original-task", RequestID: "guidance", Text: "Continue this task"}
+	for _, link := range []string{"", connection.ID} {
+		backend := local
+		if link != "" {
+			backend = remote
+		}
+		if _, err := a.service.Input(ctx, link, guidance); !errors.Is(err, ErrUnsupported) || backend.inputs.Load() != 0 {
+			t.Fatal("unadvertised input dispatched", link, backend.inputs.Load(), err)
+		}
+		backend.supportsInput.Store(true)
+		result, err := a.service.Input(ctx, link, guidance)
+		if err != nil || result.ID != guidance.ID || result.State != "running" || backend.inputs.Load() != 1 {
+			t.Fatal(link, result, backend.inputs.Load(), err)
+		}
+		forged := guidance
+		forged.From.NodeID = b.id
+		if _, err := a.service.Input(ctx, link, forged); !errors.Is(err, ErrInvalid) || backend.inputs.Load() != 1 {
+			t.Fatal("foreign local caller admitted", link, err)
+		}
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -139,4 +140,27 @@ func TestPotLinkBackendDeletedDefaultDoesNotRetargetOrHideHistory(t *testing.T) 
 }
 func acceptedFrom() protocol.AgentRef {
 	return protocol.AgentRef{NodeID: "peer", Kind: "assistant", AgentID: "sender"}
+}
+
+func TestLocalBackendCannotClaimLinkedExecution(t *testing.T) {
+	b, _ := linkBackendFixture(t)
+	ctx := context.Background()
+	from := protocol.AgentRef{NodeID: "node", Kind: "assistant", AgentID: "main"}
+	record := tasks.Record{AssistantID: "main", Request: protocol.CreateTask{RequestID: "linked-request", Text: "Remote work"}, Info: protocol.TaskInfo{ID: "linked-task", AssistantID: "main", Phase: protocol.TaskRunning, AgentLink: &protocol.AgentLinkOrigin{LinkID: "peer-link", NodeID: "peer"}}, Execution: &tasks.Execution{Request: agentlink.TaskRequest{From: from}, Receipt: agentlink.Task{ID: "remote-task", RunID: "remote-run", State: "running"}}}
+	if err := b.s.Tasks.AcceptExecution(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Status(ctx, from, record.Info.ID); !errors.Is(err, agentlink.ErrNotFound) {
+		t.Fatal("local adapter claimed remote execution", err)
+	}
+	if _, err := b.Cancel(ctx, from, record.Info.ID); !errors.Is(err, agentlink.ErrNotFound) {
+		t.Fatal("local adapter cancelled remote execution", err)
+	}
+	if err := b.s.Tasks.Stop(ctx, "main", record.Info.ID, "interrupt"); !errors.Is(err, agentlink.ErrUnsupported) {
+		t.Fatal("local lifecycle mutated linked task", err)
+	}
+	stored, err := b.s.Tasks.Get(ctx, "main", record.Info.ID)
+	if err != nil || stored.Info.Phase != protocol.TaskRunning || stored.Result != nil || stored.Execution.StopRequested {
+		t.Fatal(stored, err)
+	}
 }

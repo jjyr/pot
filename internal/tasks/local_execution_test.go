@@ -115,9 +115,12 @@ func TestHistoricalRemoteTaskCannotUseLocalExecutorAfterRestart(t *testing.T) {
 				if err := s.ResumeWaiting(ctx, "assistant", r.Info.ID); err == nil {
 					t.Fatal("resumed retired execution")
 				}
-				if err := s.Stop(ctx, "assistant", r.Info.ID, "cancel"); err != nil {
-					t.Fatal(err)
-				}
+			}
+			if local, err := s.LocalActive(ctx); err != nil || len(local) != 0 {
+				t.Fatal("historical execution counted as local", local, err)
+			}
+			if err := s.Stop(ctx, "assistant", r.Info.ID, "cancel"); err != nil {
+				t.Fatal(err)
 			}
 			retained, err := s.AcceptLocal(ctx, "assistant", request)
 			if err != nil || retained.RunID != r.RunID || retained.Request.MachineID != "retired-runner" || retained.Info.Phase != protocol.TaskWaiting {

@@ -208,32 +208,6 @@ func TestScheduledOutcomeAndBaselineRollbackWithHook(t *testing.T) {
 	}
 }
 
-func TestPendingScheduledResultRecoversWithoutPrematureHook(t *testing.T) {
-	ctx := context.Background()
-	f := setup(t)
-	info, task := scheduledTask(t, f, defaultSpec())
-	f.reader.err = tasks.ErrResultPending
-	finishScheduled(t, f, task, tasks.Complete)
-	stored, _ := f.tasks.Get(ctx, "assistant", task.Info.ID)
-	page, _ := f.schedule.Page(ctx, "assistant", Query{Selected: info.ID})
-	if stored.Info.Phase.Scope() != "active" || page.Runs[0].FinishedAtMS != nil {
-		t.Fatal(stored, page)
-	}
-	for _, event := range *f.events {
-		if event.Result != nil {
-			t.Fatal("premature outcome", event)
-		}
-	}
-	f.reader.err = nil
-	if err := f.tasks.Tick(ctx); err != nil {
-		t.Fatal(err)
-	}
-	event, _ := taskEnvelope(t, f, task.Info.ID)
-	if event.Result.Phase != protocol.TaskComplete || f.destination.launches != 1 {
-		t.Fatal(event, f.destination.launches)
-	}
-}
-
 func TestMissingScheduledReportEmitsOnlyFailure(t *testing.T) {
 	f := setup(t)
 	_, task := scheduledTask(t, f, defaultSpec())
@@ -250,14 +224,22 @@ func TestMissingScheduledReportEmitsOnlyFailure(t *testing.T) {
 	}
 }
 
-func TestScheduledPolicySnapshotAndPendingResultSurviveRestart(t *testing.T) {
+func TestScheduledPolicySnapshotAndUncommittedOutcomeSurviveRestart(t *testing.T) {
 	ctx := context.Background()
 	f := setup(t)
 	spec := defaultSpec()
 	spec.Notify = "all"
 	info, task := scheduledTask(t, f, spec)
-	f.reader.err = tasks.ErrResultPending
-	finishScheduled(t, f, task, tasks.Complete)
+	if err := f.tasks.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.destination.complete(task.Info.ID)
+	if _, err := f.tasks.DB().Exec(`CREATE TRIGGER reject_outcome BEFORE INSERT ON agent_messages WHEN json_extract(NEW.envelope,'$.kind')='task_result' BEGIN SELECT RAISE(ABORT,'reject outcome'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.tasks.Tick(ctx); err == nil {
+		t.Fatal("outcome failure did not roll back")
+	}
 	// Editing a definition changes its generation and policy, not this occurrence.
 	spec.Notify, spec.Goal = "failures", "A new observation goal"
 	if _, err := f.schedule.Manage(ctx, "assistant", Request{RequestID: "edit", Action: "update", ScheduleID: info.ID, Spec: &spec}, millis("2026-10-16T00:02:00Z")); err != nil {
@@ -286,7 +268,9 @@ func TestScheduledPolicySnapshotAndPendingResultSurviveRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.tasks, f.schedule = restored, schedules
-	f.reader.err = nil
+	if _, err := restored.DB().Exec("DROP TRIGGER reject_outcome"); err != nil {
+		t.Fatal(err)
+	}
 	if err := restored.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}

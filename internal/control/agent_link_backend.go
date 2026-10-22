@@ -150,7 +150,7 @@ func (b potLinkBackend) task(ctx context.Context, from protocol.AgentRef, id str
 			if err != nil {
 				return agentlink.Task{}, err
 			}
-			if record != nil {
+			if record != nil && record.Execution == nil {
 				identity, err := b.s.agentLinkIdentity(ctx, from.AgentID)
 				if err != nil {
 					return agentlink.Task{}, err
@@ -174,7 +174,7 @@ func (b potLinkBackend) task(ctx context.Context, from protocol.AgentRef, id str
 	if e != nil {
 		return agentlink.Task{}, e
 	}
-	if record == nil {
+	if record == nil || record.Execution != nil {
 		return agentlink.Task{}, agentlink.ErrNotFound
 	}
 	assistant, e := b.s.agentLinkIdentity(ctx, owner)

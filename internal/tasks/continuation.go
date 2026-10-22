@@ -12,7 +12,7 @@ import (
 	"github.com/jjyr/pot/pkg/storage"
 )
 
-// Run reads a previous immutable Control receipt or the current run.
+// Run reads a previous immutable local run receipt or the current run.
 func (s *Service) Run(ctx context.Context, owner, task, run string) (*Record, error) {
 	current, err := s.Get(ctx, owner, task)
 	if err != nil || current == nil || current.RunID == run {

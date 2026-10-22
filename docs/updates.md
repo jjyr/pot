@@ -9,8 +9,9 @@ Clicking downloads and verifies the complete package while work continues. Once
 prepared, the backend continues installation without requiring an open browser.
 If work is active, installation remains prepared until the initiating UI confirms
 **Interrupt and upgrade**. Cancellation retains the package and leaves work
-running. Confirmation covers the installation's active Tasks, replies and terminal
-sessions. Interrupted work is never automatically replayed.
+running. Confirmation covers the installation's local executions, replies and terminal
+sessions. Linked Tasks keep their receiver-owned state and are not cancelled by
+updating the directing node. Interrupted local work is never automatically replayed.
 
 ## Installation boundary
 

@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// During cancellation a command already sent receives a bounded chance to return
-// its original cleanup receipt. No replacement command is issued.
+// Allow an in-flight local operation a bounded cleanup interval after its
+// caller is cancelled. Settlement retains the original operation identity.
 func settlementContext(parent context.Context) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	var mu sync.Mutex

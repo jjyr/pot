@@ -43,8 +43,8 @@ Agent and task execution receive injected services. They neither import Control/
 nor acquire provider credentials. Runtime composes components through their APIs;
 HTTP adapters and databases stay with their owning components.
 
-Every product Agent invocation, including mail and summary sessions, passes
-through the destination's shared execution manager. The owning node manages provider keys,
+Every local Pot Agent invocation, including mail and summary sessions, passes
+through its shared execution manager. The owning node manages provider keys,
 approvals, accounting and global resources. Workers run on their owning node and use its local execution services.
 
 Task operations and model task tools enter the same Agent Link operation port.

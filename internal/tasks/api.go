@@ -6,15 +6,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"github.com/jjyr/pot/internal/hooks"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 	"sync"
 )
-
-var ErrResultPending = errors.New("original target result transport unavailable")
 
 type Selection struct {
 	Config  core.ResolvedSpec

@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -108,27 +109,13 @@ func (s *Service) CallAgent(ctx context.Context, owner string, operation agentli
 		if target.LinkID != "" {
 			owner = linkChatID(target.LinkID, target.AssistantID)
 		}
-		ops := agentlink.OwnerOperations()
-		scope := "owner"
-		if s.LinkTask(ctx, owner, call.ID) {
-			scope = "caller"
-			ops = []agentlink.Operation{agentlink.TaskRead, agentlink.TaskArchive}
-			if d, err := s.taskExecution(ctx, owner, call.ID); err == nil && d.Info.AgentLink != nil {
-				link := d.Info.AgentLink.LinkID
-				if link == "local" {
-					ops = append(ops, agentlink.TaskCancel)
-					if d.Execution.Request.Executor == "codex" {
-						ops = append(ops, agentlink.TaskInput)
-					}
-				} else if connection, err := s.agentLinks.service.Get(ctx, link); err == nil && connection.State != "revoked" && connection.Directory != nil && ((d.Execution.Request.Executor == "codex" && connection.Directory.TaskExecutor != nil && connection.Directory.TaskExecutor.Supports(agentlink.TaskCancel)) || connection.Directory.Operations[d.Info.AgentLink.AssistantID].Supports(agentlink.TaskCancel)) {
-					ops = append(ops, agentlink.TaskCancel)
-					if d.Execution.Request.Executor == "codex" {
-						ops = append(ops, agentlink.TaskInput)
-					}
-				}
-			}
+		capabilities := agentlink.Description{Version: 1, Scope: "owner", Operations: agentlink.OwnerOperations()}
+		if d, err := s.taskExecution(ctx, owner, call.ID); err == nil {
+			capabilities = s.taskExecutionCapabilities(ctx, d)
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
 		}
-		record["capabilities"] = agentlink.Description{Version: 1, Scope: scope, Operations: ops}
+		record["capabilities"] = capabilities
 		return record, nil
 	}
 	return value, nil

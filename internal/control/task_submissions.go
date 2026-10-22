@@ -168,23 +168,15 @@ func (s *Service) guideTaskExecution(ctx context.Context, owner, id string, inpu
 	if err != nil {
 		return nil, err
 	}
-	if d.Execution.Request.Executor != "codex" || d.Execution.Request.From.Kind != "assistant" || d.Execution.Request.From.AgentID != owner || d.Execution.Receipt.ID == "" {
+	if !s.taskExecutionCapabilities(ctx, d).Supports(agentlink.TaskInput) || d.Execution.Receipt.ID == "" {
 		return nil, agentlink.ErrUnsupported
 	}
-	remote, err := s.agentLinks.service.Input(ctx, d.Info.AgentLink.LinkID, agentlink.TaskGuidance{From: d.Execution.Request.From, ID: d.Execution.Receipt.ID, RequestID: input.RequestID, Text: input.Text})
+	remote, err := s.agentLinks.service.Input(ctx, taskLinkID(d.Info.AgentLink.LinkID), agentlink.TaskGuidance{From: d.Execution.Request.From, ID: d.Execution.Receipt.ID, RequestID: input.RequestID, Text: input.Text})
 	if err != nil {
 		return nil, err
 	}
-	if remote.RunID == d.Execution.Receipt.RunID {
-		return remote, nil
-	}
 	linkRun := d.Execution.Receipt.RunID
-	d.Execution.Receipt = remote
-	d.Info.Phase = protocol.TaskPhase(remote.State)
-	d.Info.RunID = linkRunID(remote.RunID)
-	d.Info.Archived = false
-	d.Info.ArchiveReason = ""
-	d.Info.UpdatedAtMS = remote.UpdatedAt.UnixMilli()
+	projectTaskReceipt(d, remote)
 	_, err = s.Tasks.UpdateExecution(ctx, *d, linkRun)
 	if err == nil {
 		s.wakeTasks()
@@ -204,13 +196,14 @@ func (s *Service) StopTask(ctx context.Context, owner, id, mode string) error {
 	if mode != "cancel" {
 		return agentlink.ErrUnsupported
 	}
-	if d.Execution.Receipt.ID == "" {
-		e = s.Tasks.StopExecution(ctx, owner, id)
-		s.wakeTasks()
+	if e = s.Tasks.StopExecution(ctx, owner, id); e != nil {
 		return e
 	}
+	defer s.wakeTasks()
+	if d.Execution.Receipt.ID == "" {
+		return nil
+	}
 	_, e = s.cancelLinkTask(ctx, d.Info.AgentLink.LinkID, d.Execution.Request.From, d.Execution.Receipt.ID)
-	s.wakeTasks()
 	return e
 }
 func (s *Service) syncTaskExecutions(ctx context.Context) {
@@ -280,29 +273,7 @@ func (s *Service) syncTaskExecutions(ctx context.Context) {
 		if d.Execution.Receipt.ID != "" && (d.Execution.Receipt.ID != remote.ID || d.Execution.Receipt.RequestID != remote.RequestID || d.Execution.Receipt.Receiver().Address != remote.Receiver().Address) {
 			continue
 		}
-		d.Execution.Receipt = remote
-		d.Info.RunID = linkRunID(it.id)
-		if remote.RunID != "" {
-			d.Info.RunID = linkRunID(remote.RunID)
-		}
-		d.Info.Phase = protocol.TaskPhase(remote.State)
-		if remote.State == "completed" {
-			d.Info.Phase = protocol.TaskComplete
-		}
-		if remote.State == "unknown" {
-			d.Info.Phase = protocol.TaskInterrupted
-		}
-		d.Info.RemoteWaiting = false
-		d.Info.UpdatedAtMS = remote.UpdatedAt.UnixMilli()
-		if d.Info.UpdatedAtMS <= 0 {
-			d.Info.UpdatedAtMS = d.Info.CreatedAtMS
-		}
-		if remote.Receiver().Address.Valid() {
-			if remote.Execution == nil {
-				d.Info.AgentLink.AssistantID = remote.Assistant.Address.AgentID
-			}
-			d.Info.AgentLink.Name = remote.Receiver().Name
-		}
+		projectTaskReceipt(d, remote)
 		changed, err := s.Tasks.UpdateExecution(ctx, *d, expectedRun)
 		if err != nil || !changed {
 			continue
@@ -418,20 +389,90 @@ func (s *Service) LinkTask(ctx context.Context, owner, id string) bool {
 }
 
 func (s *Service) submitLinkTask(ctx context.Context, link string, r agentlink.TaskRequest) (agentlink.Task, error) {
-	if link == "local" {
-		link = ""
-	}
-	return s.agentLinks.service.Submit(ctx, link, r)
+	return s.agentLinks.service.Submit(ctx, taskLinkID(link), r)
 }
 func (s *Service) statusLinkTask(ctx context.Context, link string, from protocol.AgentRef, id string) (agentlink.Task, error) {
-	if link == "local" {
-		link = ""
-	}
-	return s.agentLinks.service.Status(ctx, link, from, id)
+	return s.agentLinks.service.Status(ctx, taskLinkID(link), from, id)
 }
 func (s *Service) cancelLinkTask(ctx context.Context, link string, from protocol.AgentRef, id string) (agentlink.Task, error) {
+	return s.agentLinks.service.Cancel(ctx, taskLinkID(link), from, id)
+}
+
+func taskLinkID(link string) string {
 	if link == "local" {
-		link = ""
+		return ""
 	}
-	return s.agentLinks.service.Cancel(ctx, link, from, id)
+	return link
+}
+
+// Caller-side controls are the intersection of the Task contract and the
+// original receiver's advertised operations. Never infer controls from its type.
+func (s *Service) taskExecutionCapabilities(ctx context.Context, record *tasks.Record) agentlink.Description {
+	result := agentlink.Description{Version: 1, Scope: "caller", Operations: []agentlink.Operation{agentlink.TaskRead, agentlink.TaskArchive}}
+	if record == nil || record.Execution == nil || record.Info.AgentLink == nil {
+		return result
+	}
+	var directory *agentlink.Directory
+	link := taskLinkID(record.Info.AgentLink.LinkID)
+	if link == "" {
+		if d, err := s.agentLinks.service.Directory(ctx, ""); err == nil {
+			directory = &d
+		}
+	} else if c, err := s.agentLinks.service.Get(ctx, link); err == nil && c.State != "revoked" {
+		directory = c.Directory
+	}
+	if directory == nil {
+		return result
+	}
+	var advertised agentlink.Description
+	if record.Execution.Request.Executor != "" {
+		if directory.TaskExecutor != nil {
+			advertised = *directory.TaskExecutor
+		}
+	} else {
+		assistant := record.Info.AgentLink.AssistantID
+		if receiver := record.Execution.Receipt.Receiver(); receiver.Address.Valid() {
+			assistant = receiver.Address.AgentID
+		}
+		if assistant == "" {
+			assistant = directory.DefaultAssistantID
+		}
+		advertised = directory.Operations[assistant]
+	}
+	for _, op := range []agentlink.Operation{agentlink.TaskCancel, agentlink.TaskInput} {
+		if advertised.Supports(op) {
+			result.Operations = append(result.Operations, op)
+		}
+	}
+	return result
+}
+
+// Adapt receiver state into the shared catalogue once, for both polling and
+// continuation receipts. Cancellation in progress remains active until confirmed.
+func projectTaskReceipt(record *tasks.Record, receipt agentlink.Task) {
+	record.Execution.Receipt = receipt
+	record.Info.RunID = linkRunID(record.Info.ID)
+	if receipt.RunID != "" {
+		record.Info.RunID = linkRunID(receipt.RunID)
+	}
+	record.Info.Phase = protocol.TaskPhase(receipt.State)
+	switch receipt.State {
+	case "completed":
+		record.Info.Phase = protocol.TaskComplete
+	case "unknown":
+		record.Info.Phase = protocol.TaskInterrupted
+	case "cancelling":
+		record.Info.Phase = protocol.TaskWaiting
+	}
+	record.Info.RemoteWaiting = false
+	record.Info.UpdatedAtMS = receipt.UpdatedAt.UnixMilli()
+	if record.Info.UpdatedAtMS <= 0 {
+		record.Info.UpdatedAtMS = record.Info.CreatedAtMS
+	}
+	if receiver := receipt.Receiver(); receiver.Address.Valid() {
+		if receipt.Execution == nil {
+			record.Info.AgentLink.AssistantID = receiver.Address.AgentID
+		}
+		record.Info.AgentLink.Name = receiver.Name
+	}
 }
