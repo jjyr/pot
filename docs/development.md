@@ -264,6 +264,7 @@ The test preserves the configured model, protocol and reasoning effort, caps
 output at 2048 tokens and real requests at 32, and exposes only coordination
 tools. Single/multiple dispatch must be silent; injected pre-execution failures
 exercise recovery after single and repeated transient failures.
+
 `POT_LIVE_OUTPUT` optionally retains private transcript evidence outside the repo.
 `POT_BASELINE_MAIN_PROMPT_FILE` optionally adds a creation-confirmation comparison
 using an explicitly supplied earlier prompt. For example:
@@ -273,6 +274,18 @@ POT_LIVE=1 POT_CONFIGURED_LIVE_ROOT=/absolute/control/root \
   mise exec -- go test -v ./internal/control \
   -run '^TestConfiguredModelTaskRecoveryLive$' -count=1 -timeout=9m
 ```
+
+`TestConfiguredModelTaskResultsLive` uses the same configured-root/key selectors
+to qualify final replies and artifact delivery with the real model. It covers a
+plain Task, a scheduled report without a result-file schema, partial attachment
+delivery with a symlink diagnostic, and optional worker-to-owner communication.
+The model creates all files itself; owner resource previews are checked against
+their actual contents. It retains production prompts, caps the whole run at 48
+requests and 2048 output tokens per request, and uses disposable stores and Task
+workspaces. Run it with `POT_LIVE=1`, `POT_CONFIGURED_LIVE_ROOT` and the machine's
+existing key selector, using `-run '^TestConfiguredModelTaskResultsLive$' -count=1
+-v -timeout=10m`. Optional `POT_LIVE_OUTPUT` saves non-secret result evidence
+outside the repository. No installed service or production data is modified.
 
 For a machine's existing configured model, the opt-in
 `TestConfiguredModelMessageReferencesLive` test accepts
