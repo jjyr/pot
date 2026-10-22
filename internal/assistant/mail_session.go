@@ -90,13 +90,6 @@ func (m *Mailbox) ClaimModel(ctx context.Context, message protocol.Envelope, id 
 		if state != "processing" || parsed.ModelRequestID == nil || *parsed.ModelRequestID != id {
 			return errors.New("mail model not durably checkpointed")
 		}
-		var count uint64
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM assistant_mail_models WHERE message=?", message.ID).Scan(&count); err != nil {
-			return err
-		}
-		if count >= 128 {
-			return errors.New("mail turn model request limit reached")
-		}
 		_, err := tx.ExecContext(ctx, "INSERT INTO assistant_mail_models(message,request)VALUES(?,?)", message.ID, id)
 		return err
 	})

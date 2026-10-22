@@ -255,7 +255,7 @@ outside the repository. Production conversations, profiles and services are not
 modified. Run with `POT_LIVE=1 mise exec -- go test ./internal/control -run
 '^TestConfiguredModelAgentProfileLive$' -count=1 -v -timeout=6m`.
 
-For quiet task dispatch and bounded automatic recovery, run
+For quiet task dispatch and model-directed automatic recovery, run
 `TestConfiguredModelTaskRecoveryLive` with `POT_LIVE=1`,
 `POT_CONFIGURED_LIVE_ROOT` pointing to the selected machine's existing Control
 root, and its existing `POT_SECRET_KEY_FILE` when applicable. Configuration and
@@ -263,7 +263,7 @@ credentials are read on that machine; all Runtime writes use private test roots.
 The test preserves the configured model, protocol and reasoning effort, caps
 output at 2048 tokens and real requests at 32, and exposes only coordination
 tools. Single/multiple dispatch must be silent; injected pre-execution failures
-exercise successful recovery and exhaustion of the one-replacement budget.
+exercise recovery after single and repeated transient failures.
 `POT_LIVE_OUTPUT` optionally retains private transcript evidence outside the repo.
 `POT_BASELINE_MAIN_PROMPT_FILE` optionally adds a creation-confirmation comparison
 using an explicitly supplied earlier prompt. For example:

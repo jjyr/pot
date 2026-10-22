@@ -160,10 +160,13 @@ func TestLocalMailReplyParticipantsAndAutomaticHopBound(t *testing.T) {
 	if _, err := m.Send(ctx, "one", alice, protocol.SendMail{To: bob, Text: "changed"}, nil); err == nil {
 		t.Fatal("conflicting message ID accepted")
 	}
-	remote := protocol.Envelope{Kind: "message", ID: "hop-limit", From: address("remote", "peer"), To: bob, ConversationID: newConversation(), Text: "last allowed hop", Hops: protocol.MaxMailHops}
+	remote := protocol.Envelope{Kind: "message", ID: "long-chain", From: address("remote", "peer"), To: bob, ConversationID: newConversation(), Text: "continuing work", Hops: 130}
 	deliver(t, m, remote)
-	if _, err := m.Send(ctx, "escape", bob, protocol.SendMail{To: alice, Text: "new conversation"}, &remote); err == nil {
-		t.Fatal("new conversation escaped automatic hop bound")
+	if forwarded, err := m.Send(ctx, "continue", bob, protocol.SendMail{To: alice, Text: "new conversation"}, &remote); err != nil || forwarded.Hops != 131 || forwarded.ReplyTo != nil {
+		t.Fatal("long chain lost continuation or provenance", forwarded, err)
+	}
+	if reply, err := m.Send(ctx, "long-reply", bob, protocol.SendMail{To: remote.From, Text: "reply"}, &remote); err != nil || reply.Hops != 131 || reply.ReplyTo == nil || *reply.ReplyTo != remote.ID || reply.ConversationID != remote.ConversationID {
+		t.Fatal("long reply lost parent binding", reply, err)
 	}
 	history, err := m.Conversation(ctx, "charlie", initial.ConversationID)
 	if err != nil || len(history) != 0 {

@@ -30,7 +30,7 @@ func failRetryTask(t *testing.T, s *Service, p *fakePort, record Record) {
 	}
 }
 
-func TestRetryPreservesScopeAndHasOneDurableReplacement(t *testing.T) {
+func TestRetryPreservesScopeAndHasOneDurableReplacementPerSource(t *testing.T) {
 	ctx := context.Background()
 	s, p, _, path := fixture(t)
 	skills := []string{"research"}
@@ -55,7 +55,8 @@ func TestRetryPreservesScopeAndHasOneDurableReplacement(t *testing.T) {
 	if retry.Info.ID == original.Info.ID || retry.Request.MachineID != original.Request.MachineID || !reflect.DeepEqual(retry.Config, original.Config) || !reflect.DeepEqual(retry.Request.Skills, original.Request.Skills) || retry.Request.Requirements != original.Request.Requirements || !strings.Contains(retry.Request.Text, original.Request.Text) || !strings.Contains(retry.Request.Text, "Preserve this additional constraint.") {
 		t.Fatal("replacement lost original scope", retry)
 	}
-	// Reopening storage cannot reset the receipt or the automatic retry budget.
+	// Reopening storage retains the original receipt without consuming recovery
+	// opportunities for later failed replacements.
 	reopened, err := Open(filepath.Clean(path), s.options)
 	if err != nil {
 		t.Fatal(err)
@@ -65,12 +66,20 @@ func TestRetryPreservesScopeAndHasOneDurableReplacement(t *testing.T) {
 	if err != nil || again.Info.ID != retry.Info.ID {
 		t.Fatal(again, err)
 	}
-	failRetryTask(t, reopened, p, retry)
-	if allowed, err := reopened.CanRetry(ctx, "assistant", retry.Info.ID); err != nil || allowed {
-		t.Fatal(allowed, err)
-	}
-	if _, err := reopened.Retry(ctx, "assistant", retry.Info.ID, "Try forever."); err == nil {
-		t.Fatal("retry chain bypassed budget")
+	for range 3 {
+		failRetryTask(t, reopened, p, retry)
+		if allowed, err := reopened.CanRetry(ctx, "assistant", retry.Info.ID); err != nil || !allowed {
+			t.Fatal("failed replacement lost recovery eligibility", allowed, err)
+		}
+		next, err := reopened.Retry(ctx, "assistant", retry.Info.ID, "Diagnose the next transient failure.")
+		if err != nil || next.Info.ID == retry.Info.ID || next.Request.MachineID != original.Request.MachineID || !reflect.DeepEqual(next.Config, original.Config) {
+			t.Fatal("recovery chain stopped or changed scope", next, err)
+		}
+		again, err := reopened.Retry(ctx, "assistant", retry.Info.ID, "Repeat the same receipt.")
+		if err != nil || again.Info.ID != next.Info.ID {
+			t.Fatal("duplicate recovery created another replacement", again, err)
+		}
+		retry = next
 	}
 	if _, err := reopened.Retry(ctx, "other", original.Info.ID, "Cross-owner retry."); err == nil {
 		t.Fatal("cross-owner retry accepted")

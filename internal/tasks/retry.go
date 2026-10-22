@@ -11,8 +11,8 @@ import (
 	"github.com/jjyr/pot/pkg/storage"
 )
 
-// Automatic retries have a durable one-to-one receipt. A replacement cannot
-// itself be retried automatically, even after a restart or another delivery.
+// Automatic retries have a durable one-to-one receipt per source Task. A failed
+// replacement may receive its own recovery after its result is delivered.
 func (s *Service) CanRetry(ctx context.Context, assistant, task string) (bool, error) {
 	r, err := s.Get(ctx, assistant, task)
 	if err != nil || r == nil {
@@ -22,7 +22,7 @@ func (s *Service) CanRetry(ctx context.Context, assistant, task string) (bool, e
 		return false, nil
 	}
 	var used bool
-	err = s.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM task_retries WHERE assistant_id=? AND (source_task=? OR task_id=?))", assistant, task, task).Scan(&used)
+	err = s.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM task_retries WHERE assistant_id=? AND source_task=?)", assistant, task).Scan(&used)
 	return !used, err
 }
 
@@ -78,13 +78,6 @@ func (s *Service) Retry(ctx context.Context, assistant, source, instructions str
 		}
 		if current == nil || current.Info.Phase != protocol.TaskFailed || current.StopMode != "" {
 			return fmt.Errorf("original task no longer permits recovery")
-		}
-		var used bool
-		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM task_retries WHERE assistant_id=? AND task_id=?)", assistant, source).Scan(&used); err != nil {
-			return err
-		}
-		if used {
-			return fmt.Errorf("automatic retry budget exhausted")
 		}
 		record, err = s.EnqueueTx(ctx, tx, assistant, request, selection, protocol.TaskOrigin{Kind: "manual"}, storage.Now())
 		if err != nil {

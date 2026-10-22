@@ -117,10 +117,10 @@ func (m *hostMailbox) sendFrom(ctx context.Context, from, peer protocol.AgentRef
 				return err
 			}
 			if parent := current.Message; parent != nil {
-				if parent.Hops >= protocol.MaxMailHops {
-					return errors.New("agent_message_hop_limit")
+				e.Hops, err = protocol.NextMailHop(parent.Hops)
+				if err != nil {
+					return err
 				}
-				e.Hops = parent.Hops + 1
 				if parent.From == peer {
 					e.ReplyTo = &parent.ID
 					e.ConversationID = parent.ConversationID

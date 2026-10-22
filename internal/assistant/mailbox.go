@@ -168,7 +168,10 @@ func (m *Mailbox) Send(ctx context.Context, id string, from protocol.AgentRef, s
 			if stored == nil || !sameEnvelope(*stored, *parent) || parent.To != from {
 				return errors.New("invalid processing parent binding")
 			}
-			hops = parent.Hops + 1
+			hops, err = protocol.NextMailHop(parent.Hops)
+			if err != nil {
+				return err
+			}
 			if replyTo != nil {
 				conversation = parent.ConversationID
 			}

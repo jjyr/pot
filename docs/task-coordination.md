@@ -5,7 +5,7 @@ see [Agent messages](assistant-messages.md). Main manages Tasks. Workers can
 message only their owning assistant; they cannot create, inspect, stop or wait
 for other Tasks. Task-result and plugin-notification handling retain the
 assistant's configured tools and current machine permissions. A batch with
-eligible failed work additionally exposes the bounded retry tool described below.
+eligible failed work additionally exposes the retry tool described below.
 
 ## Agent Link interface
 
@@ -135,7 +135,7 @@ results; `write_stdin` manages a worker's command session.
 
 ### Automatic failure recovery
 
-A delivered failed manual Task may receive one model-directed replacement through
+A delivered failed manual Task may receive a model-directed replacement through
 `retry_task({task_id, instructions})`. Runtime binds the source to the owner's
 currently claimed result batch. The assistant retains its ordinary configured
 tools, including commands, messaging, scheduling and task creation. `get_task`
@@ -151,8 +151,9 @@ decision is reported to the user. Accepted recovery is silent; completion is
 processed through the replacement's normal result event under the same reply policy.
 
 The replacement and its retry receipt commit atomically. Repeated calls return
-the same Task, and a replacement cannot itself be retried automatically, including
-after restart. Result handling admits at most eight model requests per delivery.
+the same Task for that source, including after restart. If the replacement also
+fails, its own delivered result may receive another model-directed recovery.
+Neither the recovery chain nor result handling has a fixed attempt-count limit.
 Cancelled/interrupted Tasks are not restarted. Scheduled failures retain their
 existing occurrence and notification policy rather than launching a manual copy.
 
@@ -164,7 +165,8 @@ resolves the request.
 
 The Agent continues model/tool rounds until it produces a final response without
 pending tool calls or guidance. There is no fixed model-round count limit.
-Main conversations also have no default per-turn model-request count limit.
+Main conversations, automatic result handling and Agent correspondence also have
+no implicit per-turn model-request count limit.
 Cancellation, configured request/token allowances, context limits and individual
 operation deadlines still apply; context compaction preserves continuation.
 

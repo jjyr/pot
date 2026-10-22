@@ -114,9 +114,10 @@ func TestTaskMessageAutomaticallyBindsGuidanceAndPeerReference(t *testing.T) {
 	if reference.Kind != "reference" || reference.ReplyTo == nil || *reference.ReplyTo != parent.ID || reference.Hops != 4 || reference.ConversationID != record.RunID {
 		t.Fatal("forward lost provenance, causation or run", reference)
 	}
-	parent.Hops = protocol.MaxMailHops
-	if _, err := dispatch(context.WithValue(ctx, mailParentKey{}, parent), core.ExecutionContext{Owner: "main"}, modelprotocol.ToolCall{ID: "hop-limit", Name: "send_message", Arguments: args}, func(core.Update) error { return nil }); err == nil {
-		t.Fatal("forward bypassed automatic hop limit")
+	parent.Hops = 130
+	reference = call(context.WithValue(ctx, mailParentKey{}, parent), "long-chain")
+	if reference.Hops != 131 || reference.Kind != "reference" || reference.ReplyTo == nil || *reference.ReplyTo != parent.ID {
+		t.Fatal("long forwarding chain lost continuation or provenance", reference)
 	}
 }
 

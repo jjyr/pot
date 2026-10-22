@@ -126,3 +126,15 @@ func TestSendMessageToolAddressSchemaMatchesDecoder(t *testing.T) {
 		}
 	}
 }
+
+func TestMailCausalDepthContinuesWithoutWrapping(t *testing.T) {
+	for _, hops := range []uint32{0, 16, 130, ^uint32(0) - 1} {
+		next, err := NextMailHop(hops)
+		if err != nil || next != hops+1 {
+			t.Fatal(hops, next, err)
+		}
+	}
+	if _, err := NextMailHop(^uint32(0)); err == nil {
+		t.Fatal("causal depth wrapped to an unrelated root message")
+	}
+}

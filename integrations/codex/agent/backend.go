@@ -578,7 +578,11 @@ func (b *backend) receiveMessages(ctx context.Context) error {
 // Terminal messages publish one immutable reply to their original sender.
 func messageReply(j job) *protocol.Envelope {
 	parent := j.Message
-	if parent == nil || parent.Hops >= protocol.MaxMailHops {
+	if parent == nil {
+		return nil
+	}
+	hops, err := protocol.NextMailHop(parent.Hops)
+	if err != nil {
 		return nil
 	}
 	text := j.Task.Result
@@ -590,7 +594,7 @@ func messageReply(j job) *protocol.Envelope {
 	if text == "" {
 		return nil
 	}
-	return &protocol.Envelope{ID: "codex-reply-" + j.Task.ID, Kind: "message", From: j.Task.Assistant.Address, To: parent.From, ConversationID: parent.ConversationID, ReplyTo: &parent.ID, Hops: parent.Hops + 1, Text: trimBytes(text, 65536)}
+	return &protocol.Envelope{ID: "codex-reply-" + j.Task.ID, Kind: "message", From: j.Task.Assistant.Address, To: parent.From, ConversationID: parent.ConversationID, ReplyTo: &parent.ID, Hops: hops, Text: trimBytes(text, 65536)}
 }
 
 // publishMessages commits a reply and marks processing in one transaction.

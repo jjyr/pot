@@ -109,7 +109,7 @@ produces one concise report using each Task title and actual outcome. Ordinary
 and scheduled outcomes share this batch, delivery journal and acknowledgment
 path with host-accepted [plugin
 notifications](plugins.md#background-services-and-assistant-notifications).
-Failed manual Tasks can enter [bounded
+Failed manual Tasks can enter [model-directed
 recovery](task-coordination.md#automatic-failure-recovery) before a report.
 Successfully accepted recovery needs no user-facing text. Each source keeps its
 own payload format; plugins never impersonate a Task or an assistant peer. The
@@ -155,9 +155,10 @@ Deletion removes the active directory entry and fences the old connection.
 Neither silently cancels receiver-owned tasks or deletes delivery receipts.
 
 Messages are bounded to 64 KiB. Files and permissions are not transferred by
-sending text or a path. Automatic peer chains retain a 16-hop bound, including
-new conversations created while handling a received message. Agents reply only
-when useful and avoid acknowledgement loops.
+sending text or a path. Peer chains retain causal hop counts across replies and
+new conversations without a fixed hop-count quota. Agents reply only when useful
+and avoid acknowledgement loops. Correspondence has no fixed model-request count
+limit; cancellation and configured token allowances still apply.
 
 ## API and recovery
 
