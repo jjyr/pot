@@ -39,6 +39,13 @@ func (s *Service) AcceptExecution(ctx context.Context, record Record) error {
 		if exists {
 			return agentlink.ErrConflict
 		}
+		var count int
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks WHERE assistant_id=?", record.AssistantID).Scan(&count); err != nil {
+			return err
+		}
+		if count >= s.options.MaxTasks {
+			return fmt.Errorf("task total limit reached")
+		}
 		hash, err := core.HashJSON([]any{record.Request, record.Origin})
 		if err != nil {
 			return err

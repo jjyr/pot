@@ -25,6 +25,13 @@ func TestTaskCatalogueSharesLocalAndAgentLinkLifecycle(t *testing.T) {
 	if err != nil || stored.Config != nil || stored.Execution == nil {
 		t.Fatal(stored, err)
 	}
+	s.options.MaxTasks = 2
+	extra := linked
+	extra.Info.ID = "extra-task"
+	extra.Request.RequestID = "extra-request"
+	if err = s.AcceptExecution(ctx, extra); err == nil {
+		t.Fatal("linked task bypassed shared catalogue limit")
+	}
 	page, err := s.Page(ctx, "assistant", protocol.TaskQuery{Scope: "all"})
 	if err != nil || len(page.Items) != 2 {
 		t.Fatal(page, err)
