@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise release ZIP metadata and checksum generation without a build or VM."""
+"""Exercise release ZIP metadata and checksum generation without building the App."""
 
 import hashlib
 from pathlib import Path

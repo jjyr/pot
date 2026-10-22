@@ -16,9 +16,9 @@ mise run build
 mise run open
 ```
 
-`prepare` supplies pinned Node, tool plugins, Skills and license assets. It starts
-no execution environment. `build`/`bundle` create `.local/go/PotGoPreview.app`, an
-independent development bundle with ID `dev.pot.go-preview`. Release packaging
+`prepare` supplies pinned Node, tool plugins, Skills and license assets.
+`build`/`bundle` create `.local/go/PotGoPreview.app`, an independent development
+bundle with ID `dev.pot.go-preview`. Release packaging
 uses the production identity. Do not replace a running product's files implicitly.
 
 ## Builds and packaging
@@ -34,9 +34,8 @@ uses the production identity. Do not replace a running product's files implicitl
 | `mise run release -- VERSION` | App/CLI archives, checksums, cask and configured signed update feed; publishing is separate |
 
 `scripts/build-go-app`, `scripts/build-go-cli` and `scripts/go_packaging.py` own
-layout and checksums. Packages include no VM engines, images, guest bootstrap,
-remote desktop viewer or guest execution subprocess. Standalone and embedded
-Runtime locate trusted tool assets independently of workspace preparation.
+layout and checksums. Standalone and embedded Runtime locate trusted tool assets
+independently of workspace preparation.
 
 For cross-platform tool packages:
 
@@ -220,8 +219,8 @@ for versioning, startup upgrades and required upgrade coverage.
 | `scripts/` | Build, release, source checks and fixtures |
 | `eval/` | Deterministic and explicit live evaluation |
 
-`resources/app/PotIcon.swift` remains the vector artwork master used by icon and
-tray generation; removing the VM Helper does not remove brand generation.
+`resources/app/PotIcon.swift` is the vector artwork master for app icons and tray
+atlases. `mise run icons` generates these assets; App packaging includes `Pot.icns`.
 
 Paid tests require an explicit `POT_LIVE=1` in the calling process.
 

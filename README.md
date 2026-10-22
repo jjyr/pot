@@ -9,7 +9,7 @@ Pot is an open-source implementation of the Dot experience.
 Pot runs assistants and background tasks on autonomous Go nodes. Agent Link
 connects Pot, Codex and compatible agents for conversation and task delegation.
 Each node owns its models, credentials, workspace and authorized local execution.
-Runtime manages no VMs or containers.
+See [Executor](docs/executor.md) for execution and isolation boundaries.
 
 ## Install
 

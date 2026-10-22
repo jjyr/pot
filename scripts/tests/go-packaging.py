@@ -45,14 +45,31 @@ class GoPackaging(unittest.TestCase):
         for platform in ("linux-amd64", "darwin-arm64"):
             with tempfile.TemporaryDirectory() as temporary:
                 installed = Path(temporary)
-                (installed / "podman").mkdir()
-                (installed / "apple-vm").mkdir()
+                (installed / "retired-plugin").mkdir()
+                (installed / "stale-file").write_text("generated")
                 with mock.patch.object(
                     go_packaging,
                     "go_build",
-                    side_effect=AssertionError("tool packages must not build VM binaries"),
+                    side_effect=AssertionError("Node plugin packages must not build Go binaries"),
                 ):
                     go_packaging.prepare_plugins(installed, platform)
+                    current = {
+                        str(p.relative_to(installed)): p.read_bytes()
+                        for p in installed.rglob("*")
+                        if p.is_file()
+                    }
+                    package = next(installed.iterdir())
+                    (package / "undeclared-file").write_text("stale")
+                    (installed / "another-retired-plugin").mkdir()
+                    go_packaging.prepare_plugins(installed, platform)
+                    self.assertEqual(
+                        current,
+                        {
+                            str(p.relative_to(installed)): p.read_bytes()
+                            for p in installed.rglob("*")
+                            if p.is_file()
+                        },
+                    )
                 self.assertEqual(
                     sorted(p.name for p in installed.iterdir()),
                     sorted(p.parent.name for p in (ROOT / "plugins").glob("*/plugin.json")),
@@ -89,6 +106,79 @@ class GoPackaging(unittest.TestCase):
                             }
                         ),
                     )
+
+    def test_plugin_sync_confines_cleanup_to_generated_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            outside = root / "user-installed"
+            outside.mkdir()
+            sentinel = outside / "keep.txt"
+            sentinel.write_text("user data")
+            output = root / "generated"
+            output.symlink_to(outside, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                go_packaging.prepare_plugins(output, "linux-amd64")
+            output.unlink()
+            output.mkdir()
+            # Both obsolete and current package links must be unlinked, not traversed.
+            (output / "retired-plugin").symlink_to(outside, target_is_directory=True)
+            current = next((ROOT / "plugins").glob("*/plugin.json")).parent.name
+            (output / current).symlink_to(outside, target_is_directory=True)
+            (output / "dangling").symlink_to(root / "missing")
+            go_packaging.prepare_plugins(output, "linux-amd64")
+            self.assertFalse((output / "retired-plugin").exists())
+            self.assertFalse((output / current).is_symlink())
+            self.assertFalse((output / "dangling").is_symlink())
+            self.assertEqual(sentinel.read_text(), "user data")
+            self.assertEqual(list(outside.iterdir()), [sentinel])
+
+    def test_plugin_sync_rejects_source_overlap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "plugins/example"
+            source.mkdir(parents=True)
+            sentinel = source / "plugin.json"
+            sentinel.write_text("source")
+            with mock.patch.object(go_packaging, "ROOT", root):
+                for output in (root.parent, root, root / "plugins", source, source / "output"):
+                    with self.subTest(output=output):
+                        with self.assertRaisesRegex(ValueError, "overlap"):
+                            go_packaging.prepare_plugins(output, "linux-amd64")
+                alias = root / "source-alias"
+                alias.symlink_to(root / "plugins", target_is_directory=True)
+                with self.assertRaisesRegex(ValueError, "overlap"):
+                    go_packaging.prepare_plugins(alias / "example", "linux-amd64")
+            self.assertEqual(sentinel.read_text(), "source")
+
+    def test_plugin_sync_preserves_output_when_source_is_unsafe(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "plugins/example"
+            source.mkdir(parents=True)
+            outside = root / "private"
+            outside.mkdir()
+            (outside / "entry.mjs").write_text("private")
+            output = root / "generated"
+            output.mkdir()
+            sentinel = output / "previous-package"
+            sentinel.write_text("previous output")
+            declaration = {
+                "runtime": "node",
+                "execution": "runtime",
+                "files": [],
+            }
+            (source / "linked").symlink_to(outside, target_is_directory=True)
+            for name in ("../private/entry.mjs", str(outside / "entry.mjs"), "linked/entry.mjs"):
+                declaration["files"] = [name]
+                (source / "plugin.json").write_text(
+                    json.dumps({"contributes": {"tools": declaration}})
+                )
+                with self.subTest(file=name), mock.patch.object(go_packaging, "ROOT", root):
+                    with self.assertRaisesRegex(ValueError, "unsafe plugin file"):
+                        go_packaging.prepare_plugins(output, "linux-amd64")
+                self.assertEqual(sentinel.read_text(), "previous output")
+                self.assertEqual(list(output.iterdir()), [sentinel])
+            self.assertEqual((outside / "entry.mjs").read_text(), "private")
 
     def test_model_provider_packages_preserve_only_adapter_files(self):
         with tempfile.TemporaryDirectory() as temporary:

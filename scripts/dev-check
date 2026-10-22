@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared local/hook checks. Never boot a VM or call a model."""
+"""Shared local/hook checks without model calls."""
 
 import ast
 import os
@@ -46,7 +46,7 @@ def doctor():
             raise SystemExit(f"Missing {binary}; run mise install.")
     run("go", "version")
     run("node", "--version")
-    print("Development prerequisites OK. No downloads, VM or model calls performed.")
+    print("Development prerequisites OK. No downloads or model calls performed.")
 
 
 def sources(args):

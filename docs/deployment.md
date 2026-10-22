@@ -18,9 +18,9 @@ mise run build:cli
 
 CLI archives include the target Go CLI, pinned Node, tool plugins and Skills.
 Linux Node requires a glibc-based host. Install any tools required by your selected
-plugins, including Chrome/Chromium for browser execution. Runtime creates no VMs
-or containers. Keep private data roots on a local filesystem supporting Unix
-sockets and file locks. See [Development](development.md) for packaging.
+plugins, including Chrome/Chromium for browser execution. Keep private data roots
+on a local filesystem supporting Unix sockets and file locks. See
+[Development](development.md) for packaging.
 Upgrade each node independently from a compatible protocol revision. Manual upgrades can
 apply pending [database migrations](database-migrations.md); stop the old
 processes and back up the complete data root before schema-changing upgrades.
@@ -109,7 +109,6 @@ Old native remote Space credentials are no longer read or used for connections.
 command receipts. The POST interface supports only `action: "create"`,
 `kind: "assistant"`, a stable `request_id`, and assistant creation fields.
 Machine authorization uses [Permissions](permissions.md), not resource creation.
-VM definitions, mappings, image preparation and lifecycle commands are absent.
 Unknown commands and obsolete fields fail without modifying stored data.
 
 ## Independent browser service
@@ -181,7 +180,7 @@ Provider. Routing stores only profile/provider concurrency limits.
 macOS or Linux. Install writes a reviewable definition without overwriting an
 existing one. Start/stop act on that definition, and the recorded root must match.
 Use the same account/root when restarting after upgrades. Neither building nor
-installing an archive starts a VM or installs a user service.
+installing an archive installs a user service.
 
 ## Agent Link access
 

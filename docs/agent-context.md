@@ -45,8 +45,8 @@ Only `AGENTS.md` is read. `AGENTS.override.md` and fallback filenames are ignore
 
 Main contexts load global instructions, assistant rules and applicable project directory instructions. Worker contexts load only applicable project directory instructions: workers have no assistant AGENTS.md and inherit neither assistant rules nor global Agent-home rules. The delegating assistant must include relevant constraints in the task brief. Project AGENTS.md files remain ordinary directory policies, separate from the assistant's own rule record. Assistant rules are snapshotted for each execution and never grant permissions. Deeper directory guidance takes precedence on conflicts, and explicit user instructions take precedence over file instructions. There is no instruction-file size cap or truncation; normal model context limits still apply. Empty/whitespace-only contents are omitted; invalid UTF-8 is decoded lossily.
 
-Instruction discovery reads the destination Runtime's local filesystem. It does
-not start an execution process or translate paths through a guest namespace.
+Instruction discovery reads the destination Runtime's local filesystem without
+starting an execution process.
 
 ## Refresh and injection
 
@@ -332,7 +332,7 @@ translation is performed. Project Skills remain independently discovered.
 
 Skills grant no execution authority. Instructions and Skills use the same local
 filesystem rules for execution on the owning node. Runtime asset
-paths are set by host composition and remain independent of guest management.
+paths are set by host composition.
 See [Permissions](permissions.md) and [Executor](executor.md).
 
 ## Injection and task selection
