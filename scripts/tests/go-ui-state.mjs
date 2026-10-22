@@ -235,6 +235,36 @@ for(const text of ['',' \n\t'])for(const status of ['streaming','complete']){
 const silentAfterProse=projectChatReplies({...waiting,replies:[{input_id:'input',state:'completed'}],messages:[chatInput,{...chatReply,text:'A useful update',status:'complete'},{...chatReply,id:'empty-final',text:'',status:'streaming'}]});
 assert.deepEqual(silentAfterProse.filter(row=>row.role==='assistant').map(row=>[row.text,row.phase]),[['A useful update','complete']],'Silent final completion preserves earlier agent-authored prose without adding another bubble');
 assert.equal(toolRound.find(row=>row.role==='assistant').viewKey,afterTool.at(-1).viewKey,'Output after a tool round adopts the waiting bubble');
+const archiveCall={id:'archive',role:'tool',text:'',status:'complete',tool:{id:'archive-call',turn_id:'request',name:'set_task_dispositions',phase:'completed',result:{items:[{id:'task',archived:true}]}}};
+const archiveSnapshot={...waiting,running:false,turn_id:null,replies:[{input_id:'input',state:'completed'}],messages:[chatInput,toolInput,archiveCall]};
+const archiveOriginal=structuredClone(archiveSnapshot);
+assert.deepEqual(projectChatReplies(archiveSnapshot).map(row=>row.id),['input'],'Successful archive bookkeeping leaves neither a tool card nor an empty reply');
+assert.deepEqual(archiveSnapshot,archiveOriginal,'Filtering preserves persisted archive receipts and model history');
+for(const phase of ['preparing','running','completed']){
+  const messages=[chatInput,{...archiveCall,tool:{...archiveCall.tool,phase}}];
+  assert.equal(projectChatReplies({...waiting,messages}).some(row=>row.id==='archive'),false,'Routine archive calls stay hidden while streaming and on history replay');
+}
+for(const phase of ['waiting_approval','failed','denied','unknown','stopped']){
+  const messages=[chatInput,{...archiveCall,tool:{...archiveCall.tool,phase}}];
+  assert.equal(projectChatReplies({...archiveSnapshot,messages}).some(row=>row.id==='archive'),true,`${phase} archive calls remain inspectable`);
+}
+for(const extra of [{diagnostic:'Unconfirmed write'},{result:{error:'Task missing'}},{result:JSON.stringify({error:'Task missing'})}]){
+  const messages=[chatInput,{...archiveCall,tool:{...archiveCall.tool,...extra}}];
+  assert.equal(projectChatReplies({...archiveSnapshot,messages}).some(row=>row.id==='archive'),true,'Diagnostics remain visible even with a completed phase');
+}
+for(const extra of [{status:'failed'},{status:'cancelled'},{error:'Archive update failed'}]){
+  const messages=[chatInput,{...archiveCall,...extra}];
+  assert.equal(projectChatReplies({...archiveSnapshot,messages}).some(row=>row.id==='archive'),true,'Message-level failures and cancellation remain inspectable');
+}
+for(const name of ['list_tasks','get_task','cancel_task','exec_command']){
+  const messages=[chatInput,{...archiveCall,tool:{...archiveCall.tool,name}}];
+  assert.equal(projectChatReplies({...archiveSnapshot,messages}).some(row=>row.id==='archive'),true,'Unrelated tool cards remain visible');
+}
+const nestedArchive={...archiveCall,tool:{...archiveCall.tool,parent_id:'composition'}};
+const composition={...archiveCall,id:'composition-message',tool:{id:'composition',turn_id:'request',name:'exec',phase:'completed'}};
+assert.deepEqual(projectChatReplies({...archiveSnapshot,messages:[chatInput,composition,nestedArchive]}).map(row=>row.id),['input','composition-message'],'Only the routine child is hidden inside a composition');
+const backgroundArchive={...archiveSnapshot,messages:[{id:'background',request_id:'pot-result-task',role:'system',text:'Task complete'},archiveCall]};
+assert.deepEqual(projectChatReplies(backgroundArchive),[],'Silent background bookkeeping leaves no standalone card');
 assert.equal(projectChatReplies(waiting,null,{offline:true})[1].phase,'reconnecting','Connection loss does not declare execution failed');
 const failed=projectChatReplies({...waiting,running:false,turn_id:null,replies:[{input_id:'input',state:'failed',error:'HTTP 404'}],messages:[chatInput,{...chatReply,text:'Partial',status:'failed',error:'HTTP 404'}]});
 assert.equal(failed.filter(row=>row.phase==='failed').length,1,'Only one failed reply is displayed');

@@ -246,6 +246,11 @@ rejects the batch without partial changes. Result handling uses the same
 owner-scoped archive operation as user chat. Workers cannot make archive
 decisions. Explicit cancellation archives after confirmed cleanup.
 
+Chat omits routine `set_task_dispositions` tool cards while preparing, running or
+successfully completed. Failed, denied, interrupted, unconfirmed or diagnostic
+receipts remain inspectable. This presentation rule leaves model history,
+persisted tool results and the task list's archive status intact.
+
 The owning assistant judges whether delivery is complete or feedback is needed.
 Runtime imposes no Git cleanliness, commit, push, PR or merge requirement. Archive
 retains files, model context and history; it never deletes a workspace or reclaims
