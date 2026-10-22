@@ -64,6 +64,10 @@ func TestFileLinksReferencesAndRouting(t *testing.T) {
 	if !ok || start != 7 || q != "desk" {
 		t.Fatal(start, q, ok)
 	}
+	start, q, ok = CompletionQuery("中文 @研究", len("中文 @研究"))
+	if !ok || start != len("中文 ") || q != "研究" {
+		t.Fatal(start, q, ok)
+	}
 }
 func TestSSEChunksAndBounds(t *testing.T) {
 	decoder := SSEDecoder{}

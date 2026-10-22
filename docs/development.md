@@ -385,6 +385,15 @@ connection instructions, remote default/explicit selection, empty-directory
 refresh and directory-load failure recovery. Screenshots stay under ignored
 `output/playwright/`.
 
+The composer selector browser fixture is also part of `test:ui-http-integration`:
+`mise exec -- python scripts/tests/go-ui-composer-selectors-browser.py`.
+It exercises the shared Chat DOM with synthetic skill/assistant directories,
+saved avatars and receipts at desktop/phone widths in both languages and themes.
+It covers query boundaries, compact rows, keyboard/IME selection, unavailable
+assistants, owner-scoped drafts, late lookups, failed sends and unchanged send
+destinations. It makes no model calls and saves screenshots under ignored
+`output/playwright/`.
+
 The Codex integration tests use a real Agent Link transport and a supervised
 App Server protocol fixture. Run the task/approval and automatic-review boundary
 coverage without model credentials:

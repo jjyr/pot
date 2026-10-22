@@ -9,23 +9,25 @@ async (page, {base='http://127.0.0.1:18729',captureOnly=false}={}) => {
     const context=await browser.newContext({viewport:{width:mobile?393:1200,height:852},locale:'en',
       ...(mobile?{isMobile:true,hasTouch:true,userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1'}:{hasTouch:true})});
     const tab=await context.newPage(),errors=[],sends=[];
+    const capabilities={version:1,scope:'owner',operations:['chat.read','chat.send','chat.subscribe','chat.completions','chat.attachments','chat.steer','task.list','task.read','task.events','task.input','task.interrupt','task.outcomes','approvals.manage']};
     tab.on('pageerror',error=>errors.push(error.message));
     let running=false,rejectNext=false;
     const snapshot=()=>({cursor:running?2:1,boot_id:'fixture-boot',conversation_id:'alpha',messages:[],turn:running?{user_message_id:'active-turn'}:null,agent:{phase:'ready',attachments:{image:true,pdf:true}}});
     await context.addInitScript(()=>{
+      const frame=value=>({kind:'reset',base_cursor:0,view:{state:{...value,messages:[]},replies:[],messages:value.messages.map((message,index)=>({message,sequence:String(index+1),version:value.cursor})),history:{has_more:false,has_newer:false}}});
       const sources=new Set();
       window.EventSource=class extends EventTarget{
-        constructor(url){super();this.url=String(url);sources.add(this);queueMicrotask(async()=>{this.onopen?.({});if(this.url.includes('/events')){const target=new URL(this.url,location.href);target.pathname=target.pathname.replace(/\/events$/,'/snapshot');const snapshot=await(await fetch(target)).json();if(sources.has(this))this.dispatchEvent(new MessageEvent('snapshot',{data:JSON.stringify(snapshot)}));}});}
+        constructor(url){super();this.url=String(url);sources.add(this);queueMicrotask(async()=>{this.onopen?.({});if(this.url.includes('/events')){const target=new URL(this.url,location.href);target.pathname=target.pathname.replace(/\/events$/,'/snapshot');const snapshot=await(await fetch(target)).json();if(sources.has(this))this.dispatchEvent(new MessageEvent('conversation',{data:JSON.stringify(frame(snapshot))}));}});}
         close(){sources.delete(this);}
       };
-      window.__pushEnterSnapshot=value=>{for(const source of sources)if(source.url.includes('/events'))source.dispatchEvent(new MessageEvent('snapshot',{data:JSON.stringify(value)}));};
+      window.__pushEnterSnapshot=value=>{for(const source of sources)if(source.url.includes('/events'))source.dispatchEvent(new MessageEvent('conversation',{data:JSON.stringify(frame(value))}));};
     });
     await context.route('**/access/status',route=>route.fulfill({json:{authenticated:true}}));
     await context.route('**/api/v1/**',async route=>{
       const path=new URL(route.request().url()).pathname;
       if(route.request().method()==='POST'&&(path==='/api/v1/messages'||path==='/api/v1/turn/steer'||path.endsWith('/task-enter/messages'))){
         sends.push({path,body:route.request().postDataJSON()});
-        if(rejectNext){rejectNext=false;await route.fulfill({status:503,json:{message:'Fixture network failure'}});return;}
+        if(rejectNext){rejectNext=false;await route.fulfill({status:400,json:{message:'Fixture explicit rejection'}});return;}
         await route.fulfill({json:{message_id:'accepted',duplicate:false}});return;
       }
       if(path==='/api/v1/attachments'&&route.request().method()==='POST'){
@@ -33,13 +35,13 @@ async (page, {base='http://127.0.0.1:18729',captureOnly=false}={}) => {
       }
       const data=path==='/api/v1/runtime'?{runtime_id:'enter-fixture',boot_id:'fixture-boot'}:
         path==='/api/v1/spaces'?{active_space_id:'local',items:[{id:'local',name:'Local',kind:'local',connected:true}]}:
-        path==='/api/v1/assistants'?[{id:'alpha',name:'Pot',revision:1}]:
+        path==='/api/v1/assistants'?[{id:'alpha',name:'Pot',revision:1,capabilities}]:
         path==='/api/v1/assistants/bootstrap'?{assistant:null}:
         path==='/api/v1/snapshot'?snapshot():
         path==='/api/v1/permissions'?{pending:[],policy:{machines:{}}}:
         path==='/api/v1/tasks/outcomes'?{items:[],cursor:0,has_more:false}:
         (path==='/api/v1/tasks/query'||path==='/api/v1/tasks/catalog')?{items:[{id:'task-enter',title:'Enter fixture task',assistant_id:'alpha',phase:'running'}],total:1}:
-        path==='/api/v1/tasks/task-enter'?{run_id:'task-run',info:{phase:'running'},request:{text:'Fixture task goal'},config:{model:'fixture'}}:
+        path==='/api/v1/tasks/task-enter'?{run_id:'task-run',info:{phase:'running'},request:{text:'Fixture task goal'},config:{model:'fixture'},capabilities}:
         path==='/api/v1/tasks/task-enter/messages'?[]:
         path==='/api/v1/tasks/task-enter/events'?{events:[],cursor:0,has_more:false}:
         path==='/api/v1/completions'?{items:[{token:'/skill:review',label:'Review',detail:'Review changes'}]}:{items:[]};
@@ -94,7 +96,7 @@ async (page, {base='http://127.0.0.1:18729',captureOnly=false}={}) => {
         await input.fill('/skill:r');await tab.locator('.completion-option').first().waitFor();await input.press('Enter');
         assert(await input.inputValue()==='/skill:r\n'&&sends.length===0,'Open completion cannot consume mobile Enter');
         await input.fill('/skill:r');await tab.locator('.completion-option').first().click();
-        assert(await input.inputValue()==='/skill:review ','Completion remains selectable by button');
+        assert(await input.inputValue()===''&&await tab.locator('.composer-selector').count()===1,'Completion remains selectable by button');await tab.getByRole('button',{name:'Remove Review',exact:true}).click();
         await input.fill('First line');await input.press('End');await input.press('Enter');await shot('after');
         const payload=await input.inputValue(),before=sends.length;
         await send.click();await tab.waitForFunction(()=>document.querySelector('#pot-composer').value==='');
@@ -126,7 +128,7 @@ async (page, {base='http://127.0.0.1:18729',captureOnly=false}={}) => {
         assert(sends.length===before+1&&sends.at(-1).body.text==='Desktop send','Desktop Enter sends once');
         await input.fill('Next desktop draft');await shot('after');
         await input.fill('/skill:r');await tab.locator('.completion-option').first().waitFor();const completionBefore=sends.length;await input.press('Enter');
-        assert(await input.inputValue()==='/skill:review '&&sends.length===completionBefore,'Desktop Enter still selects completion');
+        assert(await input.inputValue()===''&&await tab.locator('.composer-selector').count()===1&&sends.length===completionBefore,'Desktop Enter still selects completion');await tab.getByRole('button',{name:'Remove Review',exact:true}).click();
         await tab.setViewportSize({width:393,height:852});await input.fill('Narrow desktop');await input.press('Enter');
         await tab.waitForFunction(()=>document.querySelector('#pot-composer').value==='');
         assert(sends.at(-1).body.text==='Narrow desktop','Touch desktop narrow viewport still sends with Enter');
@@ -150,7 +152,7 @@ async (page, {base='http://127.0.0.1:18729',captureOnly=false}={}) => {
       await tab.waitForFunction(()=>document.querySelector('.task-composer-area textarea').value==='');
       assert(sends.length===taskBefore+1&&sends.at(-1).body.text===(mobile?'Task line\n':'Task line'),'Task sends once through the expected action');
       assert(errors.length===0,errors.join('\n'));results.push({mobile,sends:sends.length,errors});
-    }finally{await context.close();}
+    }catch(reason){throw Error(JSON.stringify({mobile,error:reason.message,url:tab.url(),draft:await tab.locator('#pot-composer').inputValue().catch(()=>''),text:(await tab.locator('body').innerText()).slice(-1800),errors}));}finally{await context.close();}
   }
   return results;
 }

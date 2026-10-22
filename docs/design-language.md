@@ -67,6 +67,14 @@ references and attachments expand above it and multiline input grows naturally.
 Desktop copy actions appear beside messages on hover or keyboard focus without
 reserving an extra row; touch actions stay visible. Copy success acknowledges in
 place for 1.6 seconds, retaining the current language.
+Chat and Task composers share compact floating selectors above the input.
+`/` lists Skills without icons; `@` lists assistant avatars, names and sources.
+Rows are 28 px on desktop and at least 44 px on narrow/touch surfaces. Names and
+truncated descriptions share one line, with full details on hover. Assistant
+avatars are 20 px. Menus are at most 440 px wide and
+their candidates scroll within the available viewport. Selected references are
+removable chips above the native textarea; the compact attachment, selector and
+send actions share its bottom row.
 Keep copy concise; put detailed operating explanations behind disclosures or in
 field help.
 

@@ -212,7 +212,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   reducedMotion.addEventListener('change',reducedChanged);window.addEventListener('focus',focusRead);document.addEventListener('visibilitychange',focusRead);window.addEventListener('storage',readStorage);
   const editor = bindComposer(input, {
     layout:work=>reading.layout(work),
-    onInput: text => { setDraft(state, text, editorOwner); updateControls(); },
+    onInput: text => { setDraft(state, completions?.value()??text, editorOwner); updateControls(); },
     onSend: submit,
     onCompositionEnd: () => { syncEditor(); updateControls(); },
   });
@@ -283,7 +283,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     restoredAttachmentFailures.add(key);
     if(!draft(state)&&!attachmentUI.items().length&&!draftReferences(state).length){setDraft(state,failed.input.text);setDraftReferences(state,failed.input.references||[]);attachmentUI.restore(editorOwner,failed.input.attachments||[],{...client.scope()});syncEditor();}
   }
-  const completions=client.production?bindCompletions(input,{client,host:composerArea,locale:()=>locale,mobile:editor.mobile}):null;
+  const completions=client.production?bindCompletions(input,{client,host:composerArea,locale:()=>locale,mobile:editor.mobile,setText:text=>editor.setValue(text)}):null;
   function syncEditor() {
     if (!state.snapshot) return;
     const nextOwner = ownerKey(state.snapshot);
@@ -292,7 +292,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if (editor.composing && editorOwner !== nextOwner) return;
     if(editorOwner!==nextOwner)referenceNotice='';
     editorOwner = nextOwner;
-    editor.setValue(draft(state, editorOwner));
+    if(completions)completions.setValue(draft(state,editorOwner));else editor.setValue(draft(state, editorOwner));
   }
   function requestID() { return crypto.randomUUID(); }
   const confirmations=createSendConfirmation({state,client,
@@ -338,6 +338,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     attachmentUI?.update();
     updateReferenceDraft();
     input.disabled = !snapshot && !editorOwner;
+    completions?.refresh();
     const status=titlebar.querySelector('.connection-status');
     if(status)reconcile(status,connectionStatus());
     renderMessages();
@@ -544,7 +545,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(!client.production||route==='chat')titlebar.append(more);
     if(route==='tasks'&&pages?.taskOwner){const actions=button('more',locale==='zh-CN'?'任务操作':'Task actions');actions.setAttribute('aria-haspopup','dialog');actions.onclick=()=>pages.taskMenu();titlebar.append(actions);}
     notice.textContent = client.production ? '' : t('notice');
-    input.placeholder = t('composer');
+    input.placeholder = t(client.production?'completions.placeholder':'composer');
     input.setAttribute('aria-label', t('composer'));
     history.setAttribute('aria-label', t('chat'));
     latest.title = t('latest');

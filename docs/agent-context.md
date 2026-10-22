@@ -355,19 +355,38 @@ The installer uses the adjacent creator validator. It accepts a local bundle, Gi
 
 apply_patch remains workspace-scoped. Global installation/update is performed on the owning node. Tasks cannot modify supplied global bundles. Use injected bundle paths for helper scripts, and `--dest PROJECT/.agents/skills` for project installation.
 
-## Message references and machine labels
+## Message references, Skills and assistant mentions
 
 Selected Chat excerpts use structured message IDs and quote data, independently
 of the slash selectors below. Main can read referenced original messages by ID
 after compaction. See [Chat references](chat-references.md).
 
-App and Web autocomplete standalone `/` words at the caret using authenticated,
-assistant-scoped `/api/v1/completions` metadata. Candidates include the local
-machine, node-managed labels, and the assistant's current global Skill catalog. Project Skills are discovered by the
-task and are not offered as global selectors.
-References are editable message text: `/machine:RUNTIME_ID`, `/tag:desktop`,
-`/skill:skill-creator`. Their identifiers survive drafts, retries and history.
-Use spaces around tokens; backtick-quoted examples are not selectors.
+App and Web autocomplete standalone `/` and `@` words at the caret using
+authenticated, assistant-scoped `/api/v1/completions` metadata. `/` offers only
+the assistant's current global Skill catalog. Project Skills are discovered by
+the task and are not offered as global selectors. Skills have no icons.
+`@` offers the other local assistants and the connected node directories, with
+saved avatars, names and sources. Cached offline assistants are visible but
+cannot be selected. Opening the picker reads snapshots without connecting to peers.
+
+Selections appear as removable composer chips. They remain ordinary message
+text internally: `/skill:skill-creator` and
+`[@Display name](pot-assistant:NODE_ID/AGENT_ID)`. The selected prefix is followed
+by a newline and the typed message. Full assistant identity survives duplicate
+display names, drafts, retries and history; mention links are displayed as
+non-navigable names. They identify collaborators to the current assistant and
+never change the receiving conversation or automatically send peer messages.
+The existing `list_assistants` and `send_message` tools handle collaboration.
+There are no added prompt instructions or model-side lookup tools.
+
+Desktop arrows select candidates and Enter inserts one; Escape dismisses the
+picker. Mobile Enter remains a newline and candidates are selected by touch.
+IME candidate confirmation never selects or sends. URLs, paths and email
+addresses do not open the pickers. The menus, chips and hints follow UI locale.
+
+Machine references `/machine:RUNTIME_ID` and `/tag:desktop` are not autocomplete
+candidates. Use spaces around textual tokens; backtick-quoted examples are not
+selectors.
 
 A message may specify one machine and multiple labels (AND). A machine plus labels
 must satisfy both; conflicting explicit tool destinations are rejected. Absent

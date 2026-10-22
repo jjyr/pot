@@ -62,9 +62,12 @@ func ParseReferences(text string) (References, error) {
 }
 
 type Completion struct {
-	Token  string `json:"token"`
-	Label  string `json:"label"`
-	Detail string `json:"detail"`
+	Token   string `json:"token"`
+	Label   string `json:"label"`
+	Detail  string `json:"detail"`
+	Avatar  string `json:"avatar,omitempty"`
+	Offline bool   `json:"offline,omitempty"`
+	Local   bool   `json:"local,omitempty"`
 }
 
 func CompletionQuery(text string, caret int) (int, string, bool) {
@@ -79,8 +82,11 @@ func CompletionQuery(text string, caret int) (int, string, bool) {
 		}
 	}
 	word := prefix[start:]
-	query, ok := strings.CutPrefix(word, "/")
-	return start, query, ok && !strings.Contains(query, "/")
+	if len(word) == 0 || word[0] != '/' && word[0] != '@' {
+		return start, "", false
+	}
+	query := word[1:]
+	return start, query, !strings.ContainsAny(query, "/@")
 }
 func (c Completion) Matches(query string) bool {
 	query = strings.ToLower(query)
