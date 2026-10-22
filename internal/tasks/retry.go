@@ -68,7 +68,7 @@ func (s *Service) Retry(ctx context.Context, assistant, source, instructions str
 	if err := request.Validate(); err != nil {
 		return Record{}, err
 	}
-	selection := Selection{MachineID: request.MachineID, Config: original.Config, Plugins: original.Plugins}
+	selection := Selection{Config: original.Config, Plugins: original.Plugins}
 	var record Record
 	err = storage.Transaction(ctx, s.db, func(tx *sql.Tx) error {
 		// Check again under the same transaction that creates the replacement.

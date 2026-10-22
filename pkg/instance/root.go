@@ -28,7 +28,7 @@ func DefaultPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".pot-go"), nil
+	return filepath.Join(home, ".pot"), nil
 }
 func Open(path string) (*Root, error) {
 	if path == "" {
@@ -75,7 +75,9 @@ func Open(path string) (*Root, error) {
 			return fail(err)
 		}
 		for _, entry := range entries {
-			if entry.Name() != "runtime.lock" {
+			switch entry.Name() {
+			case "runtime.lock", "skills", "plugins", "extensions.json", "mcp.json", "AGENTS.md":
+			default:
 				return fail(errors.New("unrecognized data root; choose an empty directory for the Go release"))
 			}
 		}

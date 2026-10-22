@@ -14,11 +14,11 @@ import (
 
 func TestOutcomeCursorSkipsArchiveAndReadsBoundedOwnerTransitions(t *testing.T) {
 	ctx := context.Background()
-	s, _, _, path := fixture(t)
+	s, _, path := fixture(t)
 	config := selection(t).Config
 	if err := storage.Transaction(ctx, s.db, func(tx *sql.Tx) error {
 		for i := range 1000 {
-			r := Record{SchemaVersion: 10, Origin: protocol.TaskOrigin{Kind: "manual"}, AssistantID: "assistant", Config: config, Plugins: []string{}, RunID: fmt.Sprint("run", i), Generation: 1,
+			r := Record{SchemaVersion: 11, Origin: protocol.TaskOrigin{Kind: "manual"}, AssistantID: "assistant", Config: config, Plugins: []string{}, RunID: fmt.Sprint("run", i), Generation: 1,
 				Info:    protocol.TaskInfo{ID: fmt.Sprint("task", i), AssistantID: "assistant", Title: "History", Phase: protocol.TaskComplete, RunID: fmt.Sprint("run", i), Archived: true},
 				Request: protocol.CreateTask{Text: "private task goal"}}
 			if err := write(ctx, tx, &r); err != nil {
@@ -89,7 +89,7 @@ func TestOutcomeCursorSkipsArchiveAndReadsBoundedOwnerTransitions(t *testing.T) 
 
 func TestOutcomeInsertRollsBackTaskAndDoesNotRepeatSamePhase(t *testing.T) {
 	ctx := context.Background()
-	s, _, _, _ := fixture(t)
+	s, _, _ := fixture(t)
 	r, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "work", Text: "Work"})
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func TestPreparedOutcomePublishesOnlyFinalUnsuppressedPhase(t *testing.T) {
 	for _, suppressed := range []bool{false, true} {
 		t.Run(fmt.Sprint(suppressed), func(t *testing.T) {
 			ctx := context.Background()
-			s, _, _, _ := fixture(t)
+			s, _, _ := fixture(t)
 			r, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "prepared", Text: "Prepared work"})
 			if err != nil {
 				t.Fatal(err)

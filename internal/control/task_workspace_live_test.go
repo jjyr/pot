@@ -225,7 +225,7 @@ func TestConfiguredModelTaskWorkspacesLive(t *testing.T) {
 					t.Fatal(e)
 				}
 			}
-			w, err := service.RunnerJournal.TaskWorkspace(ctx, task.Info.ID)
+			w, err := service.RunJournal.TaskWorkspace(ctx, task.Info.ID)
 			if err != nil || w == nil {
 				t.Fatal(w, err)
 			}

@@ -65,7 +65,7 @@ or disabled; linked task results and their conversation keep their original rout
 
 Local machine permissions stay with the local node. Linked nodes own their
 models, credentials, workspaces and execution permissions. The UI provides no
-remote Control management, Runner membership or remote owner credential entry.
+remote operator configuration or owner credential entry.
 Settings and native operator routes address the local installation.
 
 The native `internal/localui` adapter provides a transient local presentation

@@ -58,8 +58,9 @@ class Authoring(unittest.TestCase):
         home = self.base / "execution-home"
         with patch.dict(os.environ, {"HOME": str(home)}):
             self.assertEqual(installer.main(["--local", str(self.bundle)]), 0)
-        target = home / ".pot/agent/skills/example"
+        target = home / ".pot/skills/example"
         self.assertTrue(validator.validate_skill(target)[0])
+        self.assertEqual((home / ".pot").stat().st_mode & 0o777, 0o700)
         self.assertEqual(list(target.parent.iterdir()), [target])
 
     def test_authoring_constraints_and_cli_exit_status(self):

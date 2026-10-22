@@ -74,7 +74,7 @@ func TestCompletedTaskDownloadStreamsBeyondOldProxyLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	workspace, err := s.RunnerJournal.TaskWorkspace(ctx, task.Info.ID)
+	workspace, err := s.RunJournal.TaskWorkspace(ctx, task.Info.ID)
 	if err != nil || workspace == nil {
 		t.Fatal(workspace, err)
 	}

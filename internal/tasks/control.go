@@ -13,7 +13,7 @@ func (s *Service) Control(ctx context.Context, assistant, task, run, action stri
 		return fmt.Errorf("invalid Task control")
 	}
 	return s.change(ctx, assistant, task, func(_ *sql.Tx, r *Record) error {
-		if r.RunID != run || r.Launch == nil || r.Info.Phase.Scope() != "active" || r.StopMode != "" || r.Finalizing {
+		if !r.local(s.options.NodeID) || r.RunID != run || r.Launch == nil || r.Info.Phase.Scope() != "active" || r.StopMode != "" || r.Finalizing {
 			return fmt.Errorf("original Task run ended or is stopping")
 		}
 		r.Info.Paused = action == "pause"

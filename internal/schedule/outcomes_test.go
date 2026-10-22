@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/jjyr/pot/internal/hooks"
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -33,7 +32,7 @@ func scheduledTask(t *testing.T, f fixture, spec protocol.ScheduleSpec) (protoco
 	return info, *task
 }
 
-func finishScheduled(t *testing.T, f fixture, task tasks.Record, phase runner.Phase) {
+func finishScheduled(t *testing.T, f fixture, task tasks.Record, phase tasks.Phase) {
 	t.Helper()
 	ctx := context.Background()
 	if err := f.tasks.Tick(ctx); err != nil {
@@ -44,8 +43,8 @@ func finishScheduled(t *testing.T, f fixture, task tasks.Record, phase runner.Ph
 			continue
 		}
 		run.Phase, run.CleanupConfirmed = phase, true
-		run.Result = &runner.Terminal{Outcome: core.Success, Text: "partial output"}
-		if phase == runner.Failed {
+		run.Result = &tasks.Terminal{Outcome: core.Success, Text: "partial output"}
+		if phase == tasks.Failed {
 			run.Result.Outcome = core.Outcome{Kind: "failed", Error: "actual execution failure"}
 		}
 		f.destination.runs[id] = run
@@ -92,11 +91,11 @@ func TestScheduledOutcomesUseSharedInboxAndPolicy(t *testing.T) {
 				switch scenario {
 				case "failed":
 					phase = protocol.TaskFailed
-					finishScheduled(t, f, task, runner.Failed)
+					finishScheduled(t, f, task, tasks.Failed)
 				case "invalid":
 					phase = protocol.TaskFailed
 					f.reader.body = json.RawMessage(`{"summary":"bad","fingerprint":"x","evidence":[]}`)
-					finishScheduled(t, f, task, runner.Complete)
+					finishScheduled(t, f, task, tasks.Complete)
 				case "interrupted", "cancelled":
 					mode := "interrupt"
 					phase = protocol.TaskInterrupted
@@ -108,7 +107,7 @@ func TestScheduledOutcomesUseSharedInboxAndPolicy(t *testing.T) {
 					}
 				default:
 					f.reader.body = json.RawMessage(`{"summary":"Observed facts","fingerprint":"facts-v1","evidence":["https://example.com/source"],"artifacts":["report.txt"]}`)
-					finishScheduled(t, f, task, runner.Complete)
+					finishScheduled(t, f, task, tasks.Complete)
 				}
 				event, state := taskEnvelope(t, f, task.Info.ID)
 				notify := policy == "all" || (phase == protocol.TaskFailed || phase == protocol.TaskInterrupted) || policy == "changes" && scenario != "unchanged" && scenario != "cancelled"
@@ -214,7 +213,7 @@ func TestPendingScheduledResultRecoversWithoutPrematureHook(t *testing.T) {
 	f := setup(t)
 	info, task := scheduledTask(t, f, defaultSpec())
 	f.reader.err = tasks.ErrResultPending
-	finishScheduled(t, f, task, runner.Complete)
+	finishScheduled(t, f, task, tasks.Complete)
 	stored, _ := f.tasks.Get(ctx, "assistant", task.Info.ID)
 	page, _ := f.schedule.Page(ctx, "assistant", Query{Selected: info.ID})
 	if stored.Info.Phase.Scope() != "active" || page.Runs[0].FinishedAtMS != nil {
@@ -239,7 +238,7 @@ func TestMissingScheduledReportEmitsOnlyFailure(t *testing.T) {
 	f := setup(t)
 	_, task := scheduledTask(t, f, defaultSpec())
 	f.reader.err = errors.New("report does not exist")
-	finishScheduled(t, f, task, runner.Complete)
+	finishScheduled(t, f, task, tasks.Complete)
 	for _, event := range *f.events {
 		if event.Result != nil && event.Kind != hooks.TaskFailed {
 			t.Fatal(event)
@@ -258,7 +257,7 @@ func TestScheduledPolicySnapshotAndPendingResultSurviveRestart(t *testing.T) {
 	spec.Notify = "all"
 	info, task := scheduledTask(t, f, spec)
 	f.reader.err = tasks.ErrResultPending
-	finishScheduled(t, f, task, runner.Complete)
+	finishScheduled(t, f, task, tasks.Complete)
 	// Editing a definition changes its generation and policy, not this occurrence.
 	spec.Notify, spec.Goal = "failures", "A new observation goal"
 	if _, err := f.schedule.Manage(ctx, "assistant", Request{RequestID: "edit", Action: "update", ScheduleID: info.ID, Spec: &spec}, millis("2026-10-16T00:02:00Z")); err != nil {
@@ -273,8 +272,7 @@ func TestScheduledPolicySnapshotAndPendingResultSurviveRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	var schedules *Service
-	restored, err := tasks.Open(path, tasks.Options{ControlID: "control", RuntimeID: "machine", Port: f.destination,
-		ResolveTarget: func(context.Context, string) (core.ExecutionTarget, error) { return core.RuntimeTarget("machine"), nil },
+	restored, err := tasks.Open(path, tasks.Options{NodeID: "machine", Executor: f.destination,
 		PrepareOutcome: func(ctx context.Context, task tasks.Record, event protocol.TaskResultEvent) (tasks.OutcomeCommit, error) {
 			return schedules.PrepareOutcome(ctx, task, event)
 		},

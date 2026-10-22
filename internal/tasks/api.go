@@ -1,5 +1,5 @@
-// Package tasks owns durable Control-side Task coordination. Destination Runner
-// ports own execution; observing remote work never acquires a local Agent slot.
+// Package tasks owns durable local Task coordination. Cross-node work belongs
+// to Agent Link delegation, never to this execution service.
 package tasks
 
 import (
@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jjyr/pot/internal/hooks"
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 	"sync"
@@ -17,27 +16,22 @@ import (
 var ErrResultPending = errors.New("original target result transport unavailable")
 
 type Selection struct {
-	MachineID string
-	Config    core.ResolvedSpec
-	Plugins   []string
+	Config  core.ResolvedSpec
+	Plugins []string
 }
 type ResolveModel func(context.Context, string, protocol.CreateTask) (Selection, error)
-type ResolveTarget func(context.Context, string) (core.ExecutionTarget, error)
 type Options struct {
-	OwnerAvailable   func(context.Context, string) error
-	ControlID        string
-	RuntimeID        string
-	Port             runner.Port
-	ResolveModel     ResolveModel
-	ResolveMachine   func(context.Context, string) (string, error)
-	ResolveTarget    ResolveTarget
-	AdmitModel       func(context.Context, *sql.Tx, core.ResolvedSpec) (bool, error)
-	AwaitingApproval func(assistant, task, run string, generation uint64) bool
-	ValidateTarget   func(context.Context, core.ExecutionTarget, protocol.TaskRequirements) error
-	MaxTasks         int
-	PublishHook      hooks.Publish
-	OutcomesChanged  func()
-	PrepareOutcome   func(context.Context, Record, protocol.TaskResultEvent) (OutcomeCommit, error)
+	OwnerAvailable       func(context.Context, string) error
+	NodeID               string
+	Executor             LocalExecutor
+	ResolveModel         ResolveModel
+	AdmitModel           func(context.Context, *sql.Tx, core.ResolvedSpec) (bool, error)
+	AwaitingApproval     func(assistant, task, run string, generation uint64) bool
+	ValidateRequirements func(context.Context, protocol.TaskRequirements) error
+	MaxTasks             int
+	PublishHook          hooks.Publish
+	OutcomesChanged      func()
+	PrepareOutcome       func(context.Context, Record, protocol.TaskResultEvent) (OutcomeCommit, error)
 }
 
 // OutcomeCommit applies domain result policy in the Task's terminal transaction.
@@ -70,12 +64,11 @@ type Record struct {
 	RunText       string                    `json:"run_text,omitempty"`
 	RunInputID    string                    `json:"run_input_id,omitempty"`
 	Generation    uint64                    `json:"generation"`
-	Launch        *runner.Launch            `json:"launch"`
-	LaunchSent    bool                      `json:"launch_sent"`
+	Launch        *Launch                   `json:"launch"`
 	StopMode      string                    `json:"stop_mode"`
 	Finalizing    bool                      `json:"finalizing"`
 	Error         string                    `json:"error"`
-	Result        *runner.Terminal          `json:"result"`
+	Result        *Terminal                 `json:"result"`
 	Revision      uint64                    `json:"revision"`
 	Origin        protocol.TaskOrigin       `json:"origin"`
 	Outcome       *protocol.TaskResultEvent `json:"outcome,omitempty"`
@@ -94,7 +87,12 @@ type Notification struct {
 	AssistantID string
 	protocol.TaskResultEvent
 }
-type Resumer interface {
+
+// LocalExecutor runs work inside this node. It is not a remote transport.
+type LocalExecutor interface {
+	Launch(context.Context, Launch) (Run, error)
+	Inspect(context.Context, string, string, string) (*Run, error)
+	Stop(context.Context, string, string, string, string) error
 	Resume(context.Context, string, string, string) error
 }
 type Enqueue interface {

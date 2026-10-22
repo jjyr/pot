@@ -11,7 +11,6 @@ import (
 	"github.com/jjyr/pot/internal/linkhost"
 	"github.com/jjyr/pot/internal/nodeidentity"
 	"github.com/jjyr/pot/internal/resources"
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/internal/tasks"
@@ -40,8 +39,8 @@ type Options struct {
 	Root, RuntimeID, BootID, Workspace, AgentHome, BuiltinSkills, PluginRoot string
 	Manager                                                                  *execution.Manager
 	Keys                                                                     secrets.KeySource
-	Target                                                                   TargetDispatch
-	CleanupTarget                                                            func(context.Context, string, bool) error
+
+	CleanupTarget func(context.Context, string, bool) error
 
 	WorkspaceHome       string // Optional destination home override for embedded/test hosts.
 	PeerListen          string // Explicit TCP peer bind address; owner HTTP remains separate.
@@ -85,8 +84,8 @@ type Service struct {
 	instructions        InstructionSources
 	closed              bool
 	Machines            *nodeidentity.Directory
-	RunnerJournal       *runner.Journal
-	Runner              *runner.Executor
+	RunJournal          *tasks.Journal
+	TaskRuns            *tasks.Executor
 	Tasks               *tasks.Service
 	Schedules           *schedule.Service
 	Mailbox             *assistant.Mailbox
@@ -105,7 +104,7 @@ func Open(options Options) (*Service, error) {
 		options.Keys = secrets.SystemKey{Account: "go/" + options.RuntimeID}
 	}
 	if options.AgentHome == "" {
-		options.AgentHome = filepath.Join(options.Root, "agent")
+		options.AgentHome = options.Root
 	}
 	if options.Workspace == "" {
 		options.Workspace = filepath.Join(options.Root, "agent-workspace")
@@ -266,7 +265,7 @@ func (s *Service) host(owner string, generation uint64) (*executor.Engine, error
 			return nil, err
 		}
 		options := executor.Options{ProcessWorker: []string{worker}, Admit: s.executionAdmission, Node: s.options.Node, Home: s.options.AgentHome, SandboxDirectory: s.options.SandboxDirectory, ProtectedPaths: []string{s.options.Root}}
-		workspace, workspaceErr := s.RunnerJournal.TaskWorkspace(s.ctx, owner)
+		workspace, workspaceErr := s.RunJournal.TaskWorkspace(s.ctx, owner)
 		if workspaceErr != nil {
 			return nil, workspaceErr
 		}
@@ -325,7 +324,7 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 	if err != nil {
 		return assistant.RunOptions{}, err
 	}
-	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: thread.Owner, Turn: request.RequestID, Generation: thread.Generation, DefaultTarget: target, Spec: thread.Config, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, ApprovalOwner: principal, HostWorkspace: hostWorkspace, Usage: s.Usage, UsageScope: principal, Credentials: s, Product: s.productDispatchBound(principal, thread.Owner, request.RequestID, thread.Generation, false)}
+	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: thread.Owner, Turn: request.RequestID, Generation: thread.Generation, DefaultTarget: target, Spec: thread.Config, Permissions: s.Permissions, Operations: s.Operations, Host: engine, ApprovalOwner: principal, HostWorkspace: hostWorkspace, Usage: s.Usage, UsageScope: principal, Credentials: s, Product: s.productDispatchBound(principal, thread.Owner, request.RequestID, thread.Generation, false)}
 	waitScope := principal
 	if thread.Owner != principal {
 		waitScope = thread.Owner
@@ -431,9 +430,9 @@ func (s *Service) Close() error {
 	if s.taskLife != nil {
 		s.taskLife.wg.Wait()
 	}
-	if s.Runner != nil {
+	if s.TaskRuns != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		result = errors.Join(result, s.Runner.Close(ctx))
+		result = errors.Join(result, s.TaskRuns.Close(ctx))
 		cancel()
 	}
 	for _, c := range conversations {
@@ -445,8 +444,8 @@ func (s *Service) Close() error {
 	if s.Machines != nil {
 		result = errors.Join(result, s.Machines.Close())
 	}
-	if s.RunnerJournal != nil {
-		result = errors.Join(result, s.RunnerJournal.Close())
+	if s.RunJournal != nil {
+		result = errors.Join(result, s.RunJournal.Close())
 	}
 	if s.Tasks != nil {
 		result = errors.Join(result, s.Tasks.Close())

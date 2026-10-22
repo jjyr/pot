@@ -46,7 +46,7 @@ See [Permissions](permissions.md) and [UI events](ui-events.md).
 
 ## Task execution start
 
-`task_started` is published once when Control first observes the original Runner's
+`task_started` is published once when the local task service first observes the original run's
 nonzero execution start time. Enqueueing or accepting a queued launch does not
 emit it. The start time commits before publication and prevents repeats across
 reconciliation and restart. This hook only invalidates Task UI; it never creates

@@ -94,10 +94,10 @@ INSERT INTO plugin_background VALUES('fixture',1,'main','{"control_id":"config",
 	if err = db.QueryRow("SELECT conversation FROM assistant_mail_sessions WHERE assistant='main'").Scan(&session); err != nil || session != newKey {
 		t.Fatal("peer context lost its migrated route", session, err)
 	}
-	if err = db.QueryRow("SELECT control_id,runtime_id FROM task_authority").Scan(&control, &runtime); err != nil || control != "actual-control" || runtime != "runner" {
+	if err = db.QueryRow("SELECT control_id,runtime_id FROM retired_task_authority").Scan(&control, &runtime); err != nil || control != "actual-control" || runtime != "runner" {
 		t.Fatal(control, runtime, err)
 	}
-	if err = db.QueryRow("SELECT body FROM tasks").Scan(&raw); err != nil || !strings.Contains(raw, `"schema_version":10`) || !strings.Contains(raw, `"node_id":"local"`) || !strings.Contains(raw, `"control_id":"actual-control"`) || !strings.Contains(raw, `"run_id":"original-run"`) {
+	if err = db.QueryRow("SELECT body FROM tasks").Scan(&raw); err != nil || !strings.Contains(raw, `"schema_version":11`) || !strings.Contains(raw, `"node_id":"local"`) || !strings.Contains(raw, `"control_id":"actual-control"`) || !strings.Contains(raw, `"run_id":"original-run"`) {
 		t.Fatal(raw, err)
 	}
 	if err = db.QueryRow("SELECT config,state FROM plugin_background").Scan(&config, &checkpoint); err != nil || config != `{"control_id":"config","kind":"assistant","agent_id":"business"}` || checkpoint != `{"id":"plugin-state","public_key":"ordinary"}` {

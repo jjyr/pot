@@ -13,11 +13,11 @@ output; omit unused directories and scaffolds.
 
 ## Location
 
-Create global skills at `~/.pot/agent/skills/<name>`, or use
+Create global skills at `~/.pot/skills/<name>`, or use
 `<project>/.agents/skills/<name>` when the user requests a project-specific skill.
-Control owns global installation/updates; connected tasks consume fixed read-only
-bundles. Independent local mode uses its own catalog. Project skills take priority
-over user global skills. Inspect an existing bundle before editing it.
+Each node owns global installation and updates; task agents consume fixed
+read-only bundles. Project skills take priority over user global skills.
+Inspect an existing bundle before editing it.
 
 ## Format
 
@@ -52,7 +52,7 @@ restating enforced permissions, and provide concrete steps only where useful.
 ## Prepare and validate
 
 Resolve helper paths from the injected catalog, relative to SKILL.md. Global
-publication runs on Control (or independent local owner), never a connected task.
+publication runs on the owning node through its main agent, never a task agent.
 Project edits use the actual workspace and its applicable permissions.
 
 Use apply_patch to prepare or edit a bundle in the workspace. Validate it with:

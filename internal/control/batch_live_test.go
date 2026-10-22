@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
@@ -196,8 +196,8 @@ func TestDeepSeekCategoryBatchesLive(t *testing.T) {
 	}
 	// Inject a model-service failure after the real model requests the harmless
 	// command. Main/Summary and peer services are retained.
-	prepare := s.Runner.Prepare
-	s.Runner.Prepare = func(ctx context.Context, r runner.Run) (runner.Prepared, error) {
+	prepare := s.TaskRuns.Prepare
+	s.TaskRuns.Prepare = func(ctx context.Context, r tasks.Run) (tasks.Prepared, error) {
 		p, e := prepare(ctx, r)
 		if e == nil && strings.HasPrefix(r.Launch.Text, "TASK_BETA") {
 			p.Agent.Services = &liveBatchFailingContinuation{Services: p.Agent.Services}

@@ -1,4 +1,4 @@
-package runner
+package tasks
 
 import (
 	"context"
@@ -20,8 +20,8 @@ type Prepared struct {
 	ResourceDigest string
 }
 
-// Prepare synchronizes and pins resources at original execution, then returns only
-// run-bound Control/model/approval/tool ports. No local model fallback exists.
+// Prepare pins local resources at original execution, then returns only
+// run-bound model/approval/tool services owned by this node.
 type Prepare func(context.Context, Run) (Prepared, error)
 type Executor struct {
 	Journal    *Journal
@@ -43,15 +43,26 @@ func (e *Executor) Launch(ctx context.Context, launch Launch) (Run, error) {
 	stopped := e.stopped
 	e.mu.Unlock()
 	if stopped {
-		return Run{}, fmt.Errorf("Runner stopped")
+		return Run{}, fmt.Errorf("local task executor stopped")
 	}
 	if e.Journal == nil || e.Executions == nil || e.Prepare == nil || e.Context == nil {
-		return Run{}, fmt.Errorf("Runner requires explicit destination services")
+		return Run{}, fmt.Errorf("task executor requires local execution services")
 	}
-	run, err := e.Journal.Accept(ctx, launch)
+	if launch.ControlID != e.Journal.NodeID {
+		return Run{}, protocol.APIError{Code: "remote_execution_removed"}
+	}
+	record, err := e.Journal.Inspect(ctx, launch.ControlID, launch.TaskID, launch.RunID)
 	if err != nil {
 		return Run{}, err
 	}
+	if record == nil {
+		return Run{}, fmt.Errorf("task run was not admitted")
+	}
+	hash, err := launch.Digest()
+	if err != nil || hash != record.LaunchDigest {
+		return Run{}, fmt.Errorf("task run differs from committed admission")
+	}
+	run := *record
 	if run.Phase == Accepted {
 		go func() { _, _ = e.Execute(e.Context, launch.ControlID, launch.TaskID, launch.RunID) }()
 	}
@@ -61,8 +72,11 @@ func (e *Executor) Inspect(ctx context.Context, control, task, run string) (*Run
 	return e.Journal.Inspect(ctx, control, task, run)
 }
 func (e *Executor) Resume(ctx context.Context, control, task, run string) error {
+	if e.Journal == nil || control != e.Journal.NodeID {
+		return protocol.APIError{Code: "original_execution_unavailable"}
+	}
 	if e.Context == nil {
-		return fmt.Errorf("Runner lifecycle context unavailable")
+		return fmt.Errorf("local task lifecycle context unavailable")
 	}
 	if err := e.Journal.Resume(ctx, control, task, run); err != nil {
 		return err
@@ -71,6 +85,9 @@ func (e *Executor) Resume(ctx context.Context, control, task, run string) error 
 	return nil
 }
 func (e *Executor) Stop(ctx context.Context, control, task, run, mode string) error {
+	if e.Journal == nil || control != e.Journal.NodeID {
+		return protocol.APIError{Code: "original_execution_unavailable"}
+	}
 	if mode != "interrupt" && mode != "cancel" {
 		return fmt.Errorf("invalid stop mode")
 	}
@@ -115,10 +132,13 @@ func (e *Executor) Stop(ctx context.Context, control, task, run, mode string) er
 	return nil
 }
 func (e *Executor) Execute(ctx context.Context, control, task, runID string) (terminal *Terminal, result error) {
+	if e.Journal == nil || control != e.Journal.NodeID {
+		return nil, protocol.APIError{Code: "original_execution_unavailable"}
+	}
 	e.mu.Lock()
 	if e.stopped {
 		e.mu.Unlock()
-		return nil, fmt.Errorf("Runner stopped")
+		return nil, fmt.Errorf("local task executor stopped")
 	}
 	e.wg.Add(1)
 	e.mu.Unlock()
@@ -130,7 +150,7 @@ func (e *Executor) Execute(ctx context.Context, control, task, runID string) (te
 	if record == nil {
 		return nil, fmt.Errorf("task launch not accepted")
 	}
-	if err := record.Launch.Validate(e.Journal.RuntimeID); err != nil {
+	if err := record.Launch.Validate(e.Journal.NodeID); err != nil {
 		return nil, err
 	}
 	claimed, err := e.Journal.Claim(ctx, control, task, runID)
@@ -238,7 +258,6 @@ func (e *Executor) Execute(ctx context.Context, control, task, runID string) (te
 			return e.Journal.RecordCleanup(ctx, control, task, runID)
 		}
 		engine := wrapped
-		engine.Feedback = &runFeedback{journal: e.Journal, control: control, task: task, run: runID, upstream: engine.Feedback}
 		dispatch := engine.Dispatch
 		engine.Dispatch = func(ctx context.Context, execution core.ExecutionContext, call m.ToolCall, emit func(core.Update) error) (json.RawMessage, error) {
 			if err := e.checkCurrent(ctx, control, task, runID); err != nil {

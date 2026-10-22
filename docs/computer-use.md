@@ -84,7 +84,7 @@ private files. Browser actions are never retried as part of shutdown.
 
 ## Plugin contract and lifecycle
 
-Packages own instructions, schemas and implementation. The schema-2
+Packages own instructions, schemas and implementation. The schema-3
 `contributes.tools` contract requires `runtime: "node"`, `execution: "runtime"`,
 confined package paths and unique tool names. Bundles contain only declared files
 and are limited to 32 files / 512 KiB. See [Plugin packages](plugins.md).

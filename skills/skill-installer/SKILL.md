@@ -5,10 +5,11 @@ description: Install skills from a local directory or GitHub, inspect installed 
 
 # Install and manage user skills
 
-Global skills are installed at `~/.pot/agent/skills/<name>`. Control owns global skill installation and updates for connected execution.
+Global skills are installed at `~/.pot/skills/<name>`. Each node owns its global
+skill installation and updates.
 Task Agents receive fixed read-only bundles and cannot install/update global skills.
-Independent App local mode uses its own global catalog. Use `--dest <project>/.agents/skills` when the user
-requests a project-specific installation.
+Use `--dest <project>/.agents/skills` when the user requests a project-specific
+installation.
 
 List installed bundles by reading SKILL.md metadata in these directories.
 Project bundles take priority over user global bundles. When listing remote
@@ -18,8 +19,8 @@ curated catalog.
 ## Install
 
 Resolve helper paths from the injected catalog, relative to the relevant SKILL.md.
-Global commands must run on Control (or the independent local owner); on execution
-nodes use only explicit project `--dest` paths. Do not write into the supplied cache.
+Global commands run on the owning node through its main agent. Task agents use
+only explicit project `--dest` paths. Do not write into the supplied cache.
 
 Use the helper through exec_command. It validates the complete bundle, preserves
 resources and executable script permissions, prepares a sibling staging directory,
@@ -47,7 +48,7 @@ user's task.
 The shared format validator is available at:
 
 ```sh
-python3 <injected-skill-creator-path>/scripts/quick_validate.py ~/.pot/agent/skills/example-skill
+python3 <injected-skill-creator-path>/scripts/quick_validate.py ~/.pot/skills/example-skill
 ```
 
 It checks structure and metadata, not instruction quality or script behavior.

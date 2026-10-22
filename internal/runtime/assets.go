@@ -22,7 +22,7 @@ func (r *Runtime) prepareAssets(options Options, config *control.Options) error 
 	r.AssetDirectory = resources
 	config.SandboxDirectory = filepath.Join(resources, "sandbox")
 	if config.AgentHome == "" {
-		config.AgentHome = filepath.Join(r.Root.Path, "agent")
+		config.AgentHome = r.Root.Path
 	}
 	if config.BuiltinSkills == "" {
 		config.BuiltinSkills = filepath.Join(resources, "skills")
@@ -35,9 +35,6 @@ func (r *Runtime) prepareAssets(options Options, config *control.Options) error 
 		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
 			config.Node = candidate
 		}
-	}
-	if err := os.MkdirAll(filepath.Join(config.AgentHome, "skills"), 0700); err != nil {
-		return err
 	}
 	return nil
 }

@@ -55,7 +55,7 @@ type Options struct {
 	Composer agent.Composer
 	// Embedded fixes this host's control role and disables joining another host.
 	Embedded bool
-	// PeerListen optionally binds the authenticated TCP Agent/Runner listener.
+	// PeerListen optionally binds the authenticated Agent Link TCP listener.
 	PeerListen string
 	// DisableMetadataRefresh prevents background provider metadata refresh.
 	DisableMetadataRefresh bool

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 )
@@ -20,9 +19,9 @@ func failRetryTask(t *testing.T, s *Service, p *fakePort, record Record) {
 	}
 	p.mu.Lock()
 	run := p.runs[record.RunID]
-	run.Phase = runner.Failed
+	run.Phase = Failed
 	run.CleanupConfirmed = true
-	run.Result = &runner.Terminal{Outcome: core.Outcome{Kind: "failed", Error: "temporary upstream failure"}}
+	run.Result = &Terminal{Outcome: core.Outcome{Kind: "failed", Error: "temporary upstream failure"}}
 	p.runs[record.RunID] = run
 	p.mu.Unlock()
 	if err := s.Tick(ctx); err != nil {
@@ -32,13 +31,13 @@ func failRetryTask(t *testing.T, s *Service, p *fakePort, record Record) {
 
 func TestRetryPreservesScopeAndHasOneDurableReplacementPerSource(t *testing.T) {
 	ctx := context.Background()
-	s, p, _, path := fixture(t)
+	s, p, path := fixture(t)
 	skills := []string{"research"}
 	original, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "original", Text: "Research\nKeep the original constraints.", Skills: &skills, Requirements: protocol.TaskRequirements{Tools: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SendMessage(ctx, "assistant", original.Info.ID, "guidance", protocol.AgentRef{NodeID: "control", Kind: "assistant", AgentID: "assistant"}, "Preserve this additional constraint."); err != nil {
+	if err := s.SendMessage(ctx, "assistant", original.Info.ID, "guidance", protocol.AgentRef{NodeID: "machine", Kind: "assistant", AgentID: "assistant"}, "Preserve this additional constraint."); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Tick(ctx); err != nil {
@@ -87,7 +86,7 @@ func TestRetryPreservesScopeAndHasOneDurableReplacementPerSource(t *testing.T) {
 }
 
 func TestRetryRejectsActiveAndStoppedTasks(t *testing.T) {
-	s, _, _, _ := fixture(t)
+	s, _, _ := fixture(t)
 	ctx := context.Background()
 	r, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "active", Text: "Work\nDo it."})
 	if err != nil {

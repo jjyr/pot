@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -128,13 +128,13 @@ func TestDeepSeekTaskGuidanceLive(t *testing.T) {
 	var gate sync.Once
 	openGate := func() { gate.Do(func() { close(release) }) }
 	defer openGate()
-	prepare := s.Runner.Prepare
-	s.Runner.Prepare = func(ctx context.Context, run runner.Run) (runner.Prepared, error) {
+	prepare := s.TaskRuns.Prepare
+	s.TaskRuns.Prepare = func(ctx context.Context, run tasks.Run) (tasks.Prepared, error) {
 		select {
 		case <-release:
 			return prepare(ctx, run)
 		case <-ctx.Done():
-			return runner.Prepared{}, ctx.Err()
+			return tasks.Prepared{}, ctx.Err()
 		}
 	}
 	record, err := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: "existing-task", Text: "CI 触发规则调整\n这是隔离测试，不修改文件、不执行命令或工具。读取已收到的补充规则，在最终答复中逐项复述；不要自行假定触发条件。"})

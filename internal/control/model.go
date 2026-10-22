@@ -166,7 +166,7 @@ func (s *ModelSession) Model(ctx context.Context, r core.ModelRequest) (stream i
 		}
 	}
 	// Resolve the credential before claiming: missing keys cannot consume a model
-	// attempt. Never pass this key through Agent/Runner services or error messages.
+	// attempt. Never pass this key through agent execution services or error messages.
 	key, err := s.Registry.Credential(ctx, provider)
 	if err != nil {
 		s.Usage.Rejected(ctx, r.ID)

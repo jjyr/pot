@@ -167,7 +167,7 @@ func TestTaskArchiveBatchAndContinuedWorkspace(t *testing.T) {
 	for _, id := range []string{a.Info.ID, b.Info.ID} {
 		awaitLifecycleTask(t, ctx, s, id, func(r *tasks.Record) bool { return r.Info.Phase == protocol.TaskComplete })
 	}
-	before, err := s.RunnerJournal.TaskWorkspace(ctx, a.Info.ID)
+	before, err := s.RunJournal.TaskWorkspace(ctx, a.Info.ID)
 	if err != nil || before == nil {
 		t.Fatal(before, err)
 	}
@@ -202,11 +202,11 @@ func TestTaskArchiveBatchAndContinuedWorkspace(t *testing.T) {
 	if !strings.Contains(fixtureGit(t, before.Path, "status", "--porcelain"), "result.txt") {
 		t.Fatal("fixture has no uncommitted changes")
 	}
-	if err = s.Tasks.SendMessage(ctx, "main", a.Info.ID, "followup", protocol.AgentRef{NodeID: s.Tasks.ControlID(), Kind: "user", AgentID: "main"}, "FOLLOWUP: append to the existing result; retain KEEP_42."); err != nil {
+	if err = s.Tasks.SendMessage(ctx, "main", a.Info.ID, "followup", protocol.AgentRef{NodeID: s.Tasks.NodeID(), Kind: "user", AgentID: "main"}, "FOLLOWUP: append to the existing result; retain KEEP_42."); err != nil {
 		t.Fatal(err)
 	}
 	next := awaitLifecycleTask(t, ctx, s, a.Info.ID, func(r *tasks.Record) bool { return r.RunID != a.RunID && r.Info.Phase == protocol.TaskComplete })
-	after, err := s.RunnerJournal.TaskWorkspace(ctx, a.Info.ID)
+	after, err := s.RunJournal.TaskWorkspace(ctx, a.Info.ID)
 	if err != nil || after.Path != before.Path || after.Branch != before.Branch || after.Commit != before.Commit {
 		t.Fatal("workspace changed", before, after, err)
 	}

@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/internal/assistant"
-	"github.com/jjyr/pot/internal/runner"
+	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
@@ -82,8 +82,8 @@ func TestTaskResultExecutesCommandAndImportsTaskAvatar(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := profileImage(t)
-	prepare := s.Runner.Prepare
-	s.Runner.Prepare = func(ctx context.Context, run runner.Run) (runner.Prepared, error) {
+	prepare := s.TaskRuns.Prepare
+	s.TaskRuns.Prepare = func(ctx context.Context, run tasks.Run) (tasks.Prepared, error) {
 		prepared, err := prepare(ctx, run)
 		if err == nil {
 			err = os.WriteFile(filepath.Join(prepared.Context.Workspace, "avatar.png"), source, 0600)

@@ -97,7 +97,7 @@ type PermissionStore struct {
 	pending map[string]*hostDecision
 	grants  map[string]TaskGrant
 	applied map[string]ApplyState
-	// Apply drains affected execution and synchronizes Runner admission. Failed
+	// Apply drains affected execution and fences local execution admission. Failed
 	// application leaves admission fenced and is visible to owner settings.
 	Apply   func(string, uint64) error
 	Changes core.Changes

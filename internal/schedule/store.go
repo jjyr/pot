@@ -121,7 +121,7 @@ func (s *Service) Manage(ctx context.Context, assistant string, request Request,
 		spec := *request.Spec
 		if spec.MachineID == "" {
 			if request.Action == "create" {
-				spec.MachineID, err = s.options.Tasks.ResolveMachine(ctx, "")
+				spec.MachineID, err = s.options.Tasks.LocalMachine(ctx, "")
 				if err != nil {
 					return nil, err
 				}

@@ -10,7 +10,7 @@ import (
 func TestTaskPauseGateBindsOriginalRunAndCancellationWakesIt(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	s, _, _, _ := fixture(t)
+	s, _, _ := fixture(t)
 	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "create", Text: "work"})
 	if err != nil {
 		t.Fatal(err)

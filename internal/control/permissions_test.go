@@ -345,13 +345,13 @@ func TestApplicationReceiptSaveFailureRetainsDurableFence(t *testing.T) {
 func TestExecutionAndPermissionTargetsRemainLocal(t *testing.T) {
 	s := taskControl(t, "node", "")
 	ctx := context.Background()
-	if _, err := s.taskTarget(ctx, "remote"); err == nil {
+	if _, err := s.Tasks.LocalMachine(ctx, "remote"); err == nil {
 		t.Fatal("distributed execution target accepted")
 	}
 	if err := s.applyPermissionRevision("remote", 1); err == nil {
 		t.Fatal("remote permission revision forwarded")
 	}
-	if target, err := s.taskTarget(ctx, ""); err != nil || target.RuntimeID != "node" {
+	if target, err := s.Tasks.LocalMachine(ctx, ""); err != nil || target != "node" {
 		t.Fatal(target, err)
 	}
 }

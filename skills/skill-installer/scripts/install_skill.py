@@ -125,10 +125,13 @@ def main(argv=None):
     source.add_argument("--url")
     parser.add_argument("--path")
     parser.add_argument("--ref", default="main")
-    parser.add_argument("--dest", type=Path, default=Path.home() / ".pot/agent/skills")
+    parser.add_argument("--dest", type=Path, default=Path.home() / ".pot/skills")
     parser.add_argument("--replace", action="store_true")
     args = parser.parse_args(argv)
     args.dest = args.dest.expanduser()
+    if args.dest == Path.home() / ".pot/skills":
+        # Preinstallation must leave a private root that Pot can initialize.
+        args.dest.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if args.local:
         args.local = args.local.expanduser()
     try:

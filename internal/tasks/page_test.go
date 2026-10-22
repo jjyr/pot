@@ -8,7 +8,7 @@ import (
 )
 
 func TestCatalogPaginatesAcrossOwnersWithoutLeakingAgentPages(t *testing.T) {
-	s, _, _, _ := fixture(t)
+	s, _, _ := fixture(t)
 	ctx := context.Background()
 	for i := 0; i < 120; i++ {
 		owner := "alpha"

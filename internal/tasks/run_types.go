@@ -1,9 +1,7 @@
-// Package runner owns immutable destination-local Task Agent launches and their
-// durable receipts, checkpoints and recovery evidence on the owning node.
-package runner
+// Local task execution retains immutable launches, checkpoints and recovery evidence.
+package tasks
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -14,6 +12,9 @@ import (
 	"strings"
 )
 
+// Launch is the immutable execution snapshot. The persisted control_id/runtime_id
+// names retain original identity and digest evidence; new executions bind both to
+// the same local node. They do not configure separate deployment roles.
 type Launch struct {
 	Workspace       protocol.TaskWorkspace `json:"workspace"`
 	ControlID       string                 `json:"control_id" required:"true"`
@@ -150,18 +151,4 @@ type Run struct {
 	WaitDetail       string          `json:"wait_detail"`
 	StopRequested    string          `json:"stop_requested"`
 	Finalizing       bool            `json:"finalizing"`
-}
-type Command struct {
-	ID     string          `json:"id"`
-	Digest string          `json:"digest"`
-	Phase  string          `json:"phase"`
-	Reply  json.RawMessage `json:"reply,omitempty"`
-}
-
-// Port is implemented by an authenticated destination transport. Inspect always
-// addresses the original identity; network failure never chooses another target.
-type Port interface {
-	Launch(context.Context, Launch) (Run, error)
-	Inspect(context.Context, string, string, string) (*Run, error)
-	Stop(context.Context, string, string, string, string) error
 }

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/internal/assistant"
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/core"
@@ -95,8 +94,8 @@ func TestConfiguredModelTaskLifecycleLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	var requests atomic.Int32
-	originalPrepare := s.Runner.Prepare
-	s.Runner.Prepare = func(ctx context.Context, run runner.Run) (runner.Prepared, error) {
+	originalPrepare := s.TaskRuns.Prepare
+	s.TaskRuns.Prepare = func(ctx context.Context, run tasks.Run) (tasks.Prepared, error) {
 		prepared, err := originalPrepare(ctx, run)
 		if err == nil {
 			prepared.Agent.Services = recoveryLiveServices{prepared.Agent.Services.(core.ExecutionServices), &requests, false}
@@ -193,7 +192,7 @@ func TestConfiguredModelTaskLifecycleLive(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	before, err := s.RunnerJournal.TaskWorkspace(ctx, a.Info.ID)
+	before, err := s.RunJournal.TaskWorkspace(ctx, a.Info.ID)
 	if err != nil || before == nil {
 		t.Fatal(before, err)
 	}
@@ -220,7 +219,7 @@ func TestConfiguredModelTaskLifecycleLive(t *testing.T) {
 	if next.Info.Phase != protocol.TaskComplete {
 		t.Fatal("continuation failed", next.Error)
 	}
-	after, err := s.RunnerJournal.TaskWorkspace(ctx, a.Info.ID)
+	after, err := s.RunJournal.TaskWorkspace(ctx, a.Info.ID)
 	if err != nil || after.Path != before.Path || after.Branch != before.Branch {
 		t.Fatal("continuation changed worktree", after, err)
 	}

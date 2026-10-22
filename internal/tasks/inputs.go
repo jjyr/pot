@@ -23,7 +23,7 @@ func (s *Service) SendMessageWithParent(ctx context.Context, assistant, task, re
 		return fmt.Errorf("invalid message sender")
 	}
 	kind := "reference"
-	if sender.NodeID == s.options.ControlID && sender.AgentID == assistant && (sender.Kind == "user" || sender.Kind == "assistant") {
+	if sender.NodeID == s.options.NodeID && sender.AgentID == assistant && (sender.Kind == "user" || sender.Kind == "assistant") {
 		if sender.Kind == "user" {
 			kind = "user_guidance"
 		} else {
@@ -77,7 +77,7 @@ func (s *Service) input(ctx context.Context, assistant, task, requestID, text, k
 			state = "retained"
 		}
 		messageID, _ := core.HashJSON([]string{task, requestID})
-		message := protocol.Envelope{ID: messageID, Kind: kind, Owner: assistant, RequestID: requestID, Digest: hash, From: sender, To: protocol.AgentRef{NodeID: s.options.ControlID, Kind: "task", AgentID: task}, ConversationID: record.RunID, Text: text}
+		message := protocol.Envelope{ID: messageID, Kind: kind, Owner: assistant, RequestID: requestID, Digest: hash, From: sender, To: protocol.AgentRef{NodeID: s.options.NodeID, Kind: "task", AgentID: task}, ConversationID: record.RunID, Text: text}
 		if parent != nil {
 			message.Hops, err = protocol.NextMailHop(parent.Hops)
 			if err != nil {

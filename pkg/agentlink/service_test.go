@@ -510,8 +510,9 @@ DROP TABLE codex_agent_endpoints;
 DROP TABLE agent_link_endpoints;
 DROP TABLE display_resources;
 DROP TABLE provider_metadata;
-DROP TABLE extension_settings;
-DROP TABLE mcp_servers;
+DROP TABLE retired_extension_settings;
+DROP TABLE retired_mcp_servers;
+DROP TABLE extension_file_export;
 ALTER TABLE assistant_definitions DROP COLUMN deleted;
 ALTER TABLE assistant_profiles DROP COLUMN character;
 DELETE FROM pot_migrations WHERE id >= '0009_';`); err != nil {
@@ -621,7 +622,7 @@ ALTER TABLE agent_link_chat DROP COLUMN reply_state;
 ALTER TABLE agent_link_chat DROP COLUMN reply_error;
 ALTER TABLE agent_link_chat DROP COLUMN reply_uncertain;
 ALTER TABLE agent_link_chat DROP COLUMN checked_at;
-DROP TABLE agent_link_chat_sessions; DROP TABLE agent_link_endpoints; ALTER TABLE agent_link_chat DROP COLUMN sender_kind; DELETE FROM pot_migrations WHERE id >= '0020_'`); err != nil {
+DROP TABLE agent_link_chat_sessions; DROP TABLE agent_link_endpoints; ALTER TABLE agent_link_chat DROP COLUMN sender_kind; ALTER TABLE retired_extension_settings RENAME TO extension_settings; ALTER TABLE retired_mcp_servers RENAME TO mcp_servers; DROP TABLE extension_file_export; DELETE FROM pot_migrations WHERE id >= '0020_'`); err != nil {
 			t.Fatal(err)
 		}
 		side.close()

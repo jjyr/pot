@@ -14,7 +14,7 @@ import (
 
 func installDefaultToolFixture(t *testing.T, root, id string) {
 	t.Helper()
-	manifest := `{"schema_version":2,"id":"` + id + `","version":"1","contributes":{"tools":{"runtime":"node","execution":"runtime","entrypoint":"tool.mjs","files":["tool.mjs"],"requirements":[],"tools":[{"name":"` + strings.ReplaceAll(id, "-", "_") + `","description":"fixture","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}]}}}`
+	manifest := `{"schema_version":3,"name":"` + id + `","version":"1","contributes":{"tools":{"runtime":"node","execution":"runtime","entrypoint":"tool.mjs","files":["tool.mjs"],"requirements":[],"tools":[{"name":"` + strings.ReplaceAll(id, "-", "_") + `","description":"fixture","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}]}}}`
 	writeTaskFixture(t, filepath.Join(root, id, "plugin.json"), manifest)
 	writeTaskFixture(t, filepath.Join(root, id, "tool.mjs"), "ORIGINAL_TOOL")
 }

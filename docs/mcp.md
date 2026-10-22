@@ -7,13 +7,13 @@ uses the official Go SDK; the Node runtime uses the official JavaScript SDK.
 Neither caller implements another JSON-RPC framing or MCP handshake loop.
 
 ```text
-Control plugin bridge -> pluginhost (supervised Node process) -> pkg/mcp Go client
+Local plugin bridge -> pluginhost (supervised Node process) -> pkg/mcp Go client
                                    |                              | MCP stdio
                                    +-> shared Node SDK server <----+
                                             |
                                      plugin tool handlers
 
-Independent MCP settings -> pinned adapter + shared Node SDK -> selected Runtime
+Independent MCP settings -> pinned adapter + shared Node SDK -> local execution
                                                                | stdio / HTTP
                                                         independent MCP server
 
@@ -21,9 +21,8 @@ Codex Agent Link host -> pkg/mcp server API -> official Go SDK -> MCP stdio
 ```
 
 The two SDKs serve different language boundaries. Independent MCP calls keep
-running on the selected execution machine under the existing tool authorization,
-sandbox, credentials and cleanup supervision. Plugin MCP calls run on the owning
-Control, including when a remote Task invokes them. Codex's App Server JSONL
+running on the owning node under its tool authorization, sandbox, credentials
+and cleanup supervision. Plugin MCP calls use that same node. Codex's App Server JSONL
 protocol and Agent Link transport remain separate from MCP.
 
 ## Go sessions
@@ -81,7 +80,7 @@ the locked sources without rewriting them.
 
 Runtime tool snapshots include `mcp-adapter.mjs`, `mcp-runtime.mjs` and the
 credential-free `config.json`, all under the existing digest/file/size bounds.
-They remain self-contained when copied to another Runtime. The thin adapter
+The snapshots live in the local execution cache. The thin adapter
 translates the flat model tool contract; the shared SDK asset handles protocol IO.
 The adapter preserves structured content and metadata as additional tool output.
 No npm install, network module resolution or SDK download occurs during calls.

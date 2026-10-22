@@ -74,11 +74,26 @@ own filesystem. Agent receives injected execution services rather than discoveri
 product or machine infrastructure. Main and Worker instruction boundaries are
 defined in [Agent context](agent-context.md).
 
-`internal/control` coordinates the local product; `internal/runner` owns local
-launches, checkpoints, command receipts and cleanup evidence. These remain local
-implementation components. Every product Agent invocation passes through the
-shared execution manager. See [Backend components](backend-components.md),
+`internal/control` coordinates the local product; `internal/tasks` owns local
+task admission, execution, checkpoints, workspaces and event logs. Admission and
+run creation commit together in `tasks.sqlite`. Tool side effects have one
+receipt authority in `operations.sqlite`; there is no second command journal.
+Plugin packages, Skills and MCP definitions belong to the local filesystem.
+Every product Agent invocation passes through the shared execution manager.
+See [Backend components](backend-components.md),
 [Executor](executor.md) and [Permissions](permissions.md).
+
+```text
+Pot node A                         Pot node B
+  task -> local execution            task -> local execution
+  delegation ---- Agent Link ------> receiver-owned task
+```
+
+There are no Control/Runner deployment roles or centrally configured remote
+Runners. Each execution node owns its model configuration, credentials, resources
+and permissions. Agent Link transfers task intent and results, not a prepared
+local model snapshot or raw command launch. A node used only to access linked
+assistants does not require a local Provider or assistant.
 
 A request ID binds immutable contents. Exact retries return the original receipt;
 conflicting contents fail. Lost acknowledgments, restart and reconnect never

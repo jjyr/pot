@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"github.com/jjyr/pot/internal/hooks"
 	"github.com/jjyr/pot/internal/inbox"
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
@@ -28,8 +27,8 @@ func ID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 func Open(path string, options Options) (*Service, error) {
-	if !core.Identifier(options.ControlID) || !core.Identifier(options.RuntimeID) {
-		return nil, fmt.Errorf("invalid Task Control identity")
+	if !core.Identifier(options.NodeID) {
+		return nil, fmt.Errorf("invalid Task node identity")
 	}
 	if options.MaxTasks == 0 {
 		options.MaxTasks = 1000
@@ -42,6 +41,15 @@ func Open(path string, options Options) (*Service, error) {
 		return nil, err
 	}
 	s := &Service{db: db, options: options}
+	if _, err := db.Exec("INSERT INTO task_node(singleton,node_id) SELECT 1,? WHERE NOT EXISTS(SELECT 1 FROM task_node)", options.NodeID); err != nil {
+		db.Close()
+		return nil, err
+	}
+	var savedNode string
+	if err := db.QueryRow("SELECT node_id FROM task_node WHERE singleton=1").Scan(&savedNode); err != nil || savedNode != options.NodeID {
+		db.Close()
+		return nil, fmt.Errorf("Task data belongs to another node")
+	}
 	if err := s.initializeOutcomes(); err != nil {
 		db.Close()
 		return nil, err
@@ -50,21 +58,11 @@ func Open(path string, options Options) (*Service, error) {
 		db.Close()
 		return nil, err
 	}
-	if _, err := db.Exec("INSERT INTO task_authority SELECT ?,? WHERE NOT EXISTS(SELECT 1 FROM task_authority)", options.ControlID, options.RuntimeID); err != nil {
-		db.Close()
-		return nil, err
-	}
-	var savedControl, savedRuntime string
-	if err := db.QueryRow("SELECT control_id,runtime_id FROM task_authority").Scan(&savedControl, &savedRuntime); err != nil || savedControl != options.ControlID || savedRuntime != options.RuntimeID {
-		db.Close()
-		return nil, fmt.Errorf("Task data belongs to another Control/Runtime")
-	}
 	return s, nil
 }
-func (s *Service) Close() error      { return s.db.Close() }
-func (s *Service) DB() *sql.DB       { return s.db }
-func (s *Service) ControlID() string { return s.options.ControlID }
-func (s *Service) RuntimeID() string { return s.options.RuntimeID }
+func (s *Service) Close() error   { return s.db.Close() }
+func (s *Service) DB() *sql.DB    { return s.db }
+func (s *Service) NodeID() string { return s.options.NodeID }
 
 type query interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
@@ -129,7 +127,7 @@ func (s *Service) validateStored(ctx context.Context) error {
 		if err := core.DecodeJSON([]byte(raw), &r); err != nil {
 			return err
 		}
-		if r.SchemaVersion != 10 || r.AssistantID != assistant || r.Info.AssistantID != assistant || r.Info.ID != id || r.Info.RunID != r.RunID || !core.Identifier(assistant) || !core.Identifier(id) {
+		if r.SchemaVersion != 11 || r.AssistantID != assistant || r.Info.AssistantID != assistant || r.Info.ID != id || r.Info.RunID != r.RunID || !core.Identifier(assistant) || !core.Identifier(id) {
 			return fmt.Errorf("invalid stored Task ownership/schema")
 		}
 		if err := r.Origin.Validate(); err != nil {
@@ -142,7 +140,7 @@ func (s *Service) validateStored(ctx context.Context) error {
 			if err := r.Launch.Validate(r.Launch.RuntimeID); err != nil {
 				return err
 			}
-			if r.Launch.ControlID != s.options.ControlID || r.Launch.AssistantID != assistant || r.Launch.TaskID != id || r.Launch.RunID != r.RunID || r.Info.ExecutionTarget == nil || *r.Info.ExecutionTarget != r.Launch.ExecutionTarget {
+			if r.Launch.ControlID != s.options.NodeID || r.Launch.AssistantID != assistant || r.Launch.TaskID != id || r.Launch.RunID != r.RunID || r.Info.ExecutionTarget == nil || *r.Info.ExecutionTarget != r.Launch.ExecutionTarget {
 				return fmt.Errorf("stored Task launch binding mismatch")
 			}
 		}
@@ -169,7 +167,7 @@ func (s *Service) Prepare(ctx context.Context, assistant string, request protoco
 	if s.options.ResolveModel == nil {
 		return Selection{}, fmt.Errorf("Control model selection unavailable")
 	}
-	machine, err := s.ResolveMachine(ctx, request.MachineID)
+	_, err := s.LocalMachine(ctx, request.MachineID)
 	if err != nil {
 		return Selection{}, err
 	}
@@ -177,7 +175,6 @@ func (s *Service) Prepare(ctx context.Context, assistant string, request protoco
 	if err != nil {
 		return Selection{}, err
 	}
-	selection.MachineID = machine
 	if err := selection.Config.Validate(); err != nil {
 		return Selection{}, err
 	}
@@ -249,12 +246,7 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	if err != nil {
 		return Record{}, err
 	}
-	if request.MachineID == "" {
-		request.MachineID = selection.MachineID
-		if request.MachineID == "" {
-			request.MachineID = s.options.RuntimeID
-		}
-	}
+
 	var oldID, oldHash string
 	err = tx.QueryRowContext(ctx, "SELECT task_id,digest FROM task_writes WHERE assistant_id=? AND request_id=?", assistant, request.RequestID).Scan(&oldID, &oldHash)
 	if err == nil {
@@ -273,6 +265,11 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Record{}, err
 	}
+	request.MachineID, err = s.LocalMachine(ctx, request.MachineID)
+	if err != nil {
+		return Record{}, err
+	}
+
 	var count int
 	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks WHERE assistant_id=?", assistant).Scan(&count); err != nil {
 		return Record{}, err
@@ -285,8 +282,8 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	}
 	plugins := append([]string{}, selection.Plugins...)
 	id, runID := ID(), ID()
-	probe := runner.Launch{ControlID: s.options.ControlID, AssistantID: assistant, RuntimeID: request.MachineID, TaskID: id, RunID: runID, Generation: 1, ExecutionTarget: core.RuntimeTarget(request.MachineID), Config: selection.Config, Plugins: plugins, Skills: request.Skills, Workspace: request.Workspace, Text: request.Text}
-	if err := probe.Validate(request.MachineID); err != nil {
+	probe := Launch{ControlID: s.options.NodeID, AssistantID: assistant, RuntimeID: request.MachineID, TaskID: id, RunID: runID, Generation: 1, ExecutionTarget: core.RuntimeTarget(request.MachineID), Config: selection.Config, Plugins: plugins, Skills: request.Skills, Workspace: request.Workspace, Text: request.Text}
+	if err := probe.Validate(s.options.NodeID); err != nil {
 		return Record{}, err
 	}
 	title := strings.TrimSpace(strings.SplitN(request.Text, "\n", 2)[0])
@@ -294,7 +291,7 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	if len(runes) > 80 {
 		title = string(runes[:80])
 	}
-	record := Record{SchemaVersion: 10, Origin: origin, AssistantID: assistant, Info: protocol.TaskInfo{Address: &protocol.AgentRef{NodeID: s.options.ControlID, Kind: "task", AgentID: id}, ID: id, AssistantID: assistant, Title: title, Phase: protocol.TaskQueued, CreatedAtMS: at, UpdatedAtMS: at, Routing: &protocol.TaskRouting{Profile: selection.Config.SourceProfileID, Revision: selection.Config.SourceProfileRevision, Provider: selection.Config.Provider, Reason: "assistant selection", SelectionReason: request.SelectionReason}}, Request: request, Config: selection.Config, Plugins: plugins, RunID: runID, Generation: 1}
+	record := Record{SchemaVersion: 11, Origin: origin, AssistantID: assistant, Info: protocol.TaskInfo{Address: &protocol.AgentRef{NodeID: s.options.NodeID, Kind: "task", AgentID: id}, ID: id, AssistantID: assistant, Title: title, Phase: protocol.TaskQueued, CreatedAtMS: at, UpdatedAtMS: at, Routing: &protocol.TaskRouting{Profile: selection.Config.SourceProfileID, Revision: selection.Config.SourceProfileRevision, Provider: selection.Config.Provider, Reason: "assistant selection", SelectionReason: request.SelectionReason}}, Request: request, Config: selection.Config, Plugins: plugins, RunID: runID, Generation: 1}
 	record.Info.MachineID = request.MachineID
 	record.Info.RunID = runID
 	if err := write(ctx, tx, &record); err != nil {
@@ -303,10 +300,10 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	if _, err := tx.ExecContext(ctx, "INSERT INTO task_writes(assistant_id,request_id,digest,task_id) VALUES(?,?,?,?)", assistant, request.RequestID, hash, id); err != nil {
 		return Record{}, err
 	}
-	sender := protocol.AgentRef{NodeID: s.options.ControlID, Kind: "assistant", AgentID: assistant}
+	sender := protocol.AgentRef{NodeID: s.options.NodeID, Kind: "assistant", AgentID: assistant}
 	inputHash, _ := inputDigest(currentInputDigestFormat, request.Text, "input", sender, nil)
 	messageID, _ := core.HashJSON([]string{id, runID})
-	message := protocol.Envelope{ID: messageID, Kind: "input", Owner: assistant, RequestID: runID, Digest: inputHash, From: sender, To: protocol.AgentRef{NodeID: s.options.ControlID, Kind: "task", AgentID: id}, ConversationID: runID, Text: request.Text}
+	message := protocol.Envelope{ID: messageID, Kind: "input", Owner: assistant, RequestID: runID, Digest: inputHash, From: sender, To: protocol.AgentRef{NodeID: s.options.NodeID, Kind: "task", AgentID: id}, ConversationID: runID, Text: request.Text}
 	if err := inbox.EnqueueTx(ctx, tx, message, "in", "active"); err != nil {
 		return Record{}, err
 	}
@@ -344,7 +341,7 @@ func (s *Service) change(ctx context.Context, assistant, id string, fn func(*sql
 				return fmt.Errorf("Task terminal transition requires a finalized outcome")
 			}
 			event := hooks.Task(assistant, record.Generation, *record.Outcome)
-			if err := hooks.EnqueueTx(ctx, tx, s.options.ControlID, s.options.RuntimeID, event); err != nil {
+			if err := hooks.EnqueueTx(ctx, tx, s.options.NodeID, s.options.NodeID, event); err != nil {
 				return err
 			}
 			published = append(published, event)
@@ -385,14 +382,12 @@ func validateInput(requestID, text string) error {
 	return nil
 }
 
-func (s *Service) ResolveMachine(ctx context.Context, machine string) (string, error) {
-	if s.options.ResolveMachine != nil {
-		return s.options.ResolveMachine(ctx, machine)
+// LocalMachine accepts only this node. Remote work must use Agent Link.
+func (s *Service) LocalMachine(_ context.Context, machine string) (string, error) {
+	if machine != "" && machine != s.options.NodeID {
+		return "", protocol.APIError{Code: "remote_execution_removed"}
 	}
-	if machine == "" {
-		machine = s.options.RuntimeID
-	}
-	return machine, nil
+	return s.options.NodeID, nil
 }
 
 // RetireOwner serializes identity retirement with Task admission, including a

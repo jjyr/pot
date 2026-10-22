@@ -1,4 +1,4 @@
-package runner
+package tasks
 
 import (
 	"context"
@@ -14,8 +14,8 @@ import (
 
 func TestFirstExecutionTimeSurvivesResumeAndRestart(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "runner.sqlite")
-	j, err := Open(path, "runtime", "boot")
+	path := filepath.Join(t.TempDir(), "tasks.sqlite")
+	j, err := OpenJournal(path, "runtime", "boot")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,25 +26,25 @@ func TestFirstExecutionTimeSurvivesResumeAndRestart(t *testing.T) {
 		t.Fatal("acceptance must not start the clock", accepted, err)
 	}
 	before := time.Now().UnixMilli()
-	if claimed, err := j.Claim(ctx, "control", "task", "run"); err != nil || !claimed {
+	if claimed, err := j.Claim(ctx, "runtime", "task", "run"); err != nil || !claimed {
 		t.Fatal(claimed, err)
 	}
-	first, err := j.Inspect(ctx, "control", "task", "run")
+	first, err := j.Inspect(ctx, "runtime", "task", "run")
 	if err != nil || first.StartedAtMS < before || first.StartedAtMS > time.Now().UnixMilli() {
 		t.Fatal("claim must persist its actual start", first, err)
 	}
 	// Use a distinct historical value so this detects resets without sleeps.
 	started := first.StartedAtMS - 60000
-	if err := j.change(ctx, "control", "task", "run", func(run *Run) error { run.StartedAtMS = started; return nil }); err != nil {
+	if err := j.change(ctx, "runtime", "task", "run", func(run *Run) error { run.StartedAtMS = started; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if err := j.Wait(ctx, "control", "task", "run", "allowance"); err != nil {
+	if err := j.Wait(ctx, "runtime", "task", "run", "allowance"); err != nil {
 		t.Fatal(err)
 	}
-	if err := j.Resume(ctx, "control", "task", "run"); err != nil {
+	if err := j.Resume(ctx, "runtime", "task", "run"); err != nil {
 		t.Fatal(err)
 	}
-	if claimed, err := j.Claim(ctx, "control", "task", "run"); err != nil || !claimed {
+	if claimed, err := j.Claim(ctx, "runtime", "task", "run"); err != nil || !claimed {
 		t.Fatal(claimed, err)
 	}
 	duplicate, err := j.Accept(ctx, launch)
@@ -54,12 +54,12 @@ func TestFirstExecutionTimeSurvivesResumeAndRestart(t *testing.T) {
 	if err := j.Close(); err != nil {
 		t.Fatal(err)
 	}
-	j, err = Open(path, "runtime", "nextboot")
+	j, err = OpenJournal(path, "runtime", "nextboot")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer j.Close()
-	restored, err := j.Inspect(ctx, "control", "task", "run")
+	restored, err := j.Inspect(ctx, "runtime", "task", "run")
 	if err != nil || restored.StartedAtMS != started || restored.Phase != RecoveryRequired {
 		t.Fatal("restart lost the original start", restored, err)
 	}
@@ -75,17 +75,17 @@ func launchFixture(t *testing.T) Launch {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return Launch{ControlID: "control", AssistantID: "assistant", RuntimeID: "runtime", TaskID: "task", RunID: "run", Generation: 1, ExecutionTarget: core.RuntimeTarget("runtime"), Config: spec, Plugins: []string{}, Text: "do work"}
+	return Launch{ControlID: "runtime", AssistantID: "assistant", RuntimeID: "runtime", TaskID: "task", RunID: "run", Generation: 1, ExecutionTarget: core.RuntimeTarget("runtime"), Config: spec, Plugins: []string{}, Text: "do work"}
 }
-func TestImmutableLaunchDuplicateClaimsAndPendingCommandFence(t *testing.T) {
+func TestImmutableLaunchDuplicateClaimsAndTerminalReceipt(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "runner.sqlite")
-	a, err := Open(path, "runtime", "boot")
+	path := filepath.Join(t.TempDir(), "tasks.sqlite")
+	a, err := OpenJournal(path, "runtime", "boot")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	b, err := Open(path, "runtime", "boot")
+	b, err := OpenJournal(path, "runtime", "boot")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestImmutableLaunchDuplicateClaimsAndPendingCommandFence(t *testing.T) {
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			won, err := j.Claim(ctx, "control", "task", "run")
+			won, err := j.Claim(ctx, "runtime", "task", "run")
 			if err != nil {
 				t.Error(err)
 			}
@@ -123,35 +123,18 @@ func TestImmutableLaunchDuplicateClaimsAndPendingCommandFence(t *testing.T) {
 	if winners.Load() != 1 {
 		t.Fatal(winners.Load())
 	}
-	command, claim, err := a.BeginCommand(ctx, "control", "task", "run", "call", json.RawMessage(`{"cmd":"effect"}`))
-	if err != nil || !claim || command.Phase != "pending" {
-		t.Fatal(command, claim, err)
-	}
-	_, claim, err = b.BeginCommand(ctx, "control", "task", "run", "call", json.RawMessage(`{"cmd":"effect"}`))
-	if err != nil || claim {
-		t.Fatal("pending command reclaimed", claim, err)
-	}
-	if _, _, err := b.BeginCommand(ctx, "control", "task", "run", "call", json.RawMessage(`{"cmd":"other"}`)); err == nil {
-		t.Fatal("command conflict accepted")
-	}
 	terminal := Terminal{Outcome: core.Success, Text: "done"}
-	if err := a.Finish(ctx, "control", "task", "run", terminal); !errors.Is(err, core.ErrCleanupUnconfirmed) {
-		t.Fatal("pending effects finalized", err)
-	}
-	if err := a.CompleteCommand(ctx, "control", "task", "run", "call", json.RawMessage(`{"effect":1}`)); err != nil {
+	if err := a.Finish(ctx, "runtime", "task", "run", terminal); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Finish(ctx, "control", "task", "run", terminal); err != nil {
-		t.Fatal(err)
-	}
-	if err := b.Finish(ctx, "control", "task", "run", terminal); err != nil {
+	if err := b.Finish(ctx, "runtime", "task", "run", terminal); err != nil {
 		t.Fatal("duplicate final receipt", err)
 	}
 }
 func TestRestartFencesOriginalRunAndNeverReclaims(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "runner.sqlite")
-	j, err := Open(path, "runtime", "boot-one")
+	path := filepath.Join(t.TempDir(), "tasks.sqlite")
+	j, err := OpenJournal(path, "runtime", "boot-one")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,26 +142,24 @@ func TestRestartFencesOriginalRunAndNeverReclaims(t *testing.T) {
 	if _, err := j.Accept(ctx, launch); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := j.Claim(ctx, "control", "task", "run"); err != nil {
+	if _, err := j.Claim(ctx, "runtime", "task", "run"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := j.BeginCommand(ctx, "control", "task", "run", "effect", json.RawMessage(`{}`)); err != nil {
-		t.Fatal(err)
-	}
+
 	j.Close()
-	j, err = Open(path, "runtime", "boot-two")
+	j, err = OpenJournal(path, "runtime", "boot-two")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer j.Close()
-	record, err := j.Inspect(ctx, "control", "task", "run")
+	record, err := j.Inspect(ctx, "runtime", "task", "run")
 	if err != nil || record.Phase != RecoveryRequired {
 		t.Fatal(record, err)
 	}
 	if err := j.CheckPolicyCleanup(ctx); !errors.Is(err, core.ErrCleanupUnconfirmed) {
 		t.Fatal("fresh boot acknowledged unconfirmed policy cleanup", err)
 	}
-	if claimed, err := j.Claim(ctx, "control", "task", "run"); err != nil || claimed {
+	if claimed, err := j.Claim(ctx, "runtime", "task", "run"); err != nil || claimed {
 		t.Fatal(claimed, err)
 	}
 	next := launch
@@ -186,22 +167,16 @@ func TestRestartFencesOriginalRunAndNeverReclaims(t *testing.T) {
 	if _, err := j.Accept(ctx, next); err == nil {
 		t.Fatal("unsettled Task replaced")
 	}
-	if err := j.ReconcileRecovered(ctx, "control", "task", "run", nil, nil, false); !errors.Is(err, core.ErrCleanupUnconfirmed) {
+	if err := j.ReconcileRecovered(ctx, "runtime", "task", "run", nil, false); !errors.Is(err, core.ErrCleanupUnconfirmed) {
 		t.Fatal(err)
 	}
-	if err := j.ReconcileRecovered(ctx, "control", "task", "run", nil, nil, true); !errors.Is(err, core.ErrCleanupUnconfirmed) {
-		t.Fatal("missing original command receipt ignored", err)
-	}
-	if err := j.CompleteCommand(ctx, "control", "task", "run", "effect", json.RawMessage(`{"known":true}`)); err != nil {
-		t.Fatal(err)
-	}
-	if err := j.ReconcileRecovered(ctx, "control", "task", "run", nil, nil, true); err != nil {
+	if err := j.ReconcileRecovered(ctx, "runtime", "task", "run", nil, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := j.CheckPolicyCleanup(ctx); err != nil {
 		t.Fatal("authoritative reconciliation did not clear policy fence", err)
 	}
-	record, _ = j.Inspect(ctx, "control", "task", "run")
+	record, _ = j.Inspect(ctx, "runtime", "task", "run")
 	if record.Phase != Interrupted || !record.CleanupConfirmed {
 		t.Fatal(record)
 	}
@@ -220,10 +195,10 @@ func TestWorkerCannotSelectAnotherTarget(t *testing.T) {
 	}
 }
 
-func TestRestartRetainsOriginalCleanupProofAndCommandInput(t *testing.T) {
+func TestRestartRetainsOriginalCleanupProof(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "runner.sqlite")
-	j, err := Open(path, "runtime", "original-boot")
+	path := filepath.Join(t.TempDir(), "tasks.sqlite")
+	j, err := OpenJournal(path, "runtime", "original-boot")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,20 +209,13 @@ func TestRestartRetainsOriginalCleanupProofAndCommandInput(t *testing.T) {
 	if _, err = j.Claim(ctx, l.ControlID, l.TaskID, l.RunID); err != nil {
 		t.Fatal(err)
 	}
-	input := json.RawMessage(`{"original":"immutable"}`)
-	if _, _, err = j.BeginCommand(ctx, l.ControlID, l.TaskID, l.RunID, "call", input); err != nil {
-		t.Fatal(err)
-	}
-	if err = j.CompleteCommand(ctx, l.ControlID, l.TaskID, l.RunID, "call", json.RawMessage(`{"known":true}`)); err != nil {
-		t.Fatal(err)
-	}
 	if err = j.RecordCleanup(ctx, l.ControlID, l.TaskID, l.RunID); err != nil {
 		t.Fatal(err)
 	}
 	if err = j.Close(); err != nil {
 		t.Fatal(err)
 	}
-	j, err = Open(path, "runtime", "next-boot")
+	j, err = OpenJournal(path, "runtime", "next-boot")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,11 +224,7 @@ func TestRestartRetainsOriginalCleanupProofAndCommandInput(t *testing.T) {
 	if err != nil || run.Phase != RecoveryRequired || !run.CleanupConfirmed {
 		t.Fatal(run, err)
 	}
-	commands, err := j.Commands(ctx, l.ControlID, l.TaskID, l.RunID)
-	if err != nil || len(commands) != 1 || string(commands[0].Input) != string(input) || commands[0].Phase != "complete" {
-		t.Fatal(commands, err)
-	}
-	if err = j.ReconcileRecovered(ctx, l.ControlID, l.TaskID, l.RunID, nil, nil, true); err != nil {
+	if err = j.ReconcileRecovered(ctx, l.ControlID, l.TaskID, l.RunID, nil, true); err != nil {
 		t.Fatal(err)
 	}
 }

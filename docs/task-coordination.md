@@ -16,6 +16,13 @@ serialized task configuration without an unexported native-only request field.
 Only owner authority can select that configuration; peer callers retain the
 receiver-owned execution policy.
 
+The local Task service has one node identity and a direct local execution
+interface. A new `machine_id` must be omitted or identify this node; another
+machine is rejected before model selection or insertion. Already prepared
+schedule/retry requests obey the same local admission rule. Cross-node work
+requires an Agent Link delegation rather than a local Task with a remote target.
+Exact retries of historical submissions still return their original receipt.
+
 An authenticated user conversation can submit linked work without any local
 assistant or Provider. Its durable session owns the directing receipt and result
 route; the receiving assistant owns execution. User task results return directly
@@ -97,13 +104,12 @@ allowances still apply, and choosing a model grants no machine/tool authority.
 `model` ID. A selected connection without a model uses its default model. When
 both are omitted, the invoking assistant's active configuration is copied.
 Existing Tasks retain their model snapshots; each schedule occurrence creates a
-new Task and resolves its selection then. Machine placement is independent of
-model selection.
+new Task and resolves its selection then. Local model selection does not select a remote execution node.
 
 ## Messages and completion
 
 `send_message({to: {node_id, kind: "task", agent_id}, text})` sends an input
-to an existing Task through its owning Control. Runtime records the sender from
+to an existing Task through its owning node. Runtime records the sender from
 the authenticated execution and binds any processing parent automatically; the
 model supplies only the recipient and text. User inputs and owner-assistant
 guidance are processed at safe model boundaries, with pending user guidance
@@ -170,8 +176,8 @@ no implicit per-turn model-request count limit.
 Cancellation, configured request/token allowances, context limits and individual
 operation deadlines still apply; context compaction preserves continuation.
 
-The destination Runner persists `started_at_ms` when it first claims an accepted
-run. Subsequent claims after allowance resume retain that timestamp. Control
+The local execution journal persists `started_at_ms` when it first claims an accepted
+run. Subsequent claims after allowance resume retain that timestamp. The Task service
 copies it into Task info from the original run receipt, including when the first
 observed receipt is waiting or terminal. Zero means execution has not started or
 its original start time is unavailable; creation and update timestamps are never
@@ -213,7 +219,7 @@ same original destination journal through `POST /api/v1/runtime/recovery` with
 `control_id`, `task_id`, `run_id` and the action. These private/native ports are
 excluded from browser publication. Inspection returns receipt states and unresolved
 reasons without starting a model or tool. Reconciliation consults the
-original coordinator operations and local command receipts. It accepts no client-supplied result or cleanup
+original Operations journal and verified archived execution evidence. It accepts no client-supplied result or cleanup
 acknowledgment. Known results update the original checkpoint once; only proven
 cleanup releases held capacity and ends the run as interrupted. A previous-boot
 Host run with issued operations and no recorded cleanup proof remains fenced.
@@ -268,8 +274,8 @@ cleanup is confirmed.
 Continuation preserves Task identity/address, creation brief, model selection,
 original machine and execution target, workspace, and settled model history. A
 new Run ID has separate execution receipts, approvals, start time and outcome.
-The session generation stays fixed. Previous terminal Control records are retained
-in `task_run_history`; destination Runner journals retain every Run. Task transcripts
+The session generation stays fixed. Previous terminal Task records are retained
+in `task_run_history`; local execution journals retain every Run. Task transcripts
 use one monotonic cursor across Runs. Original input is not executed again; only
 the new owner guidance starts the continuation. Scheduled occurrences still create
 independent Tasks; a user continuation becomes manual work without changing that
@@ -280,7 +286,7 @@ silently selecting another directory or destination. A previous run with uncerta
 effects must be reconciled before a continuation can execute. Subsequent tools
 always use the machine's current execution authorization.
 
-Task and Runner record payloads use schema versions 9 and 7. Database schemas and
+Task and execution record payloads use schema versions 11 and 7. Database schemas and
 automatic upgrades are owned by the [DB migration layer](database-migrations.md).
 Development builds use an independent data root; unsupported pre-migration formats
 are rejected.
@@ -304,17 +310,17 @@ The projection has no subscriptions, delivery workers or acknowledgments and
 does not change Agent result reporting. Initial startup and reconnect establish
 a fresh baseline rather than replaying old outcomes.
 
-After a committed outcome advances the indexed head, Control invalidates
+After a committed outcome advances the indexed head, the node invalidates
 `task-outcomes`. Ordinary transcript updates still invalidate `tasks` but do not
 wake the client notification reader. See [System notifications](shared-ui.md#system-notifications).
 
 ## Execution transcript
 
 `GET /api/v1/tasks/{id}/events?after=CURSOR&limit=100` reads a bounded,
-append-only page from the original Runner across all of the Task's Runs. Each item carries a durable
+append-only page from the original execution journal across all of the Task's Runs. Each item carries a durable
 `sequence` plus its generation/turn-bound Agent event. The page returns `cursor`
 and `has_more`; clients advance only through contiguous sequences. Historical remote pages remain cached with `unavailable: true`; retired
-Control/Runner destinations cannot execute or fetch new output. Agent Link task
+distributed destinations cannot execute or fetch new output. Agent Link task
 details expose their canonical result. Clients request transcripts only when
 the task advertises `task.events`; unsupported reads return a capability error.
 Changes wake the existing `tasks` invalidation stream.

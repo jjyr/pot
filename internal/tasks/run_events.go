@@ -1,4 +1,4 @@
-package runner
+package tasks
 
 import (
 	"context"
@@ -22,17 +22,17 @@ type EventPage struct {
 func (j *Journal) AppendEvent(ctx context.Context, control, task, run string, event core.AgentEvent) error {
 	return j.changeTx(ctx, control, task, run, func(tx *sql.Tx, r *Run) error {
 		if r.Phase != Running || r.BootID != j.BootID || event.Generation != r.Launch.Generation || event.TurnID != r.Launch.RunID || event.Seq == 0 {
-			return errors.New("stale Runner transcript event")
+			return errors.New("stale task transcript event")
 		}
 		if r.EventSequence >= core.MaxSafeInteger {
-			return errors.New("Runner transcript cursor exhausted")
+			return errors.New("task transcript cursor exhausted")
 		}
 		raw, err := json.Marshal(event)
 		if err != nil {
 			return err
 		}
 		if len(raw) > 2*1024*1024 {
-			return errors.New("Runner event exceeds limit")
+			return errors.New("task event exceeds limit")
 		}
 		r.EventSequence++
 		r.Sequence++
@@ -56,7 +56,7 @@ func (j *Journal) Events(ctx context.Context, control, task, run string, after, 
 		return result, err
 	}
 	if record == nil {
-		return result, errors.New("original Runner run missing")
+		return result, errors.New("original task run missing")
 	}
 	rows, err := j.db.QueryContext(ctx, "SELECT sequence,event FROM task_events WHERE control_id=? AND task_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?", control, task, after, record.EventSequence, limit)
 	if err != nil {
@@ -78,7 +78,7 @@ func (j *Journal) Events(ctx context.Context, control, task, run string, after, 
 			return result, err
 		}
 		if event.Sequence != result.Cursor+1 {
-			return result, errors.New("Runner transcript sequence gap")
+			return result, errors.New("task transcript sequence gap")
 		}
 		result.Events = append(result.Events, event)
 		result.Cursor = event.Sequence

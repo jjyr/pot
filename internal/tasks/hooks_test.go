@@ -9,27 +9,26 @@ import (
 	"testing"
 
 	"github.com/jjyr/pot/internal/hooks"
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
 func TestTerminalHooksCoverAllOutcomesAndPreserveFailure(t *testing.T) {
 	for _, scenario := range []struct {
-		phase   runner.Phase
+		phase   Phase
 		kind    hooks.Kind
 		outcome core.Outcome
 		text    string
 	}{
-		{runner.Complete, hooks.TaskCompleted, core.Success, "partial output"},
-		{runner.Failed, hooks.TaskFailed, core.Outcome{Kind: "failed", Error: "model transport failed"}, "partial output"},
-		{runner.Failed, hooks.TaskFailed, core.Outcome{Kind: "failed", Error: "preparation failed before model start"}, ""},
-		{runner.Interrupted, hooks.TaskInterrupted, core.Cancelled, ""},
-		{runner.Cancelled, hooks.TaskCancelled, core.Cancelled, ""},
+		{Complete, hooks.TaskCompleted, core.Success, "partial output"},
+		{Failed, hooks.TaskFailed, core.Outcome{Kind: "failed", Error: "model transport failed"}, "partial output"},
+		{Failed, hooks.TaskFailed, core.Outcome{Kind: "failed", Error: "preparation failed before model start"}, ""},
+		{Interrupted, hooks.TaskInterrupted, core.Cancelled, ""},
+		{Cancelled, hooks.TaskCancelled, core.Cancelled, ""},
 	} {
 		t.Run(string(scenario.kind), func(t *testing.T) {
 			ctx := context.Background()
-			s, port, _, _ := fixture(t)
+			s, port, _ := fixture(t)
 			record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "work", Text: "actual work"})
 			if err != nil {
 				t.Fatal(err)
@@ -41,7 +40,7 @@ func TestTerminalHooksCoverAllOutcomesAndPreserveFailure(t *testing.T) {
 			run := port.runs[record.RunID]
 			run.Phase = scenario.phase
 			run.CleanupConfirmed = true
-			run.Result = &runner.Terminal{Outcome: scenario.outcome, Text: scenario.text}
+			run.Result = &Terminal{Outcome: scenario.outcome, Text: scenario.text}
 			port.runs[record.RunID] = run
 			port.mu.Unlock()
 			var delivered []hooks.Event
@@ -81,7 +80,7 @@ func TestTerminalHooksCoverAllOutcomesAndPreserveFailure(t *testing.T) {
 
 func TestStartedHookRequiresRunnerStartAndIsUIOnlyAcrossRestart(t *testing.T) {
 	ctx := context.Background()
-	s, port, target, path := fixture(t)
+	s, port, path := fixture(t)
 	var events []hooks.Event
 	s.options.PublishHook = func(event hooks.Event) { events = append(events, event) }
 	port.lose = true
@@ -97,7 +96,7 @@ func TestStartedHookRequiresRunnerStartAndIsUIOnlyAcrossRestart(t *testing.T) {
 	}
 	port.mu.Lock()
 	run := port.runs[record.RunID]
-	run.Phase, run.StartedAtMS = runner.Accepted, 0
+	run.Phase, run.StartedAtMS = Accepted, 0
 	port.runs[record.RunID] = run
 	port.mu.Unlock()
 	if err := s.Tick(ctx); err != nil {
@@ -107,7 +106,7 @@ func TestStartedHookRequiresRunnerStartAndIsUIOnlyAcrossRestart(t *testing.T) {
 		t.Fatal("queued receipt emitted start", events)
 	}
 	port.mu.Lock()
-	run.Phase, run.StartedAtMS = runner.Running, 1000
+	run.Phase, run.StartedAtMS = Running, 1000
 	port.runs[record.RunID] = run
 	port.mu.Unlock()
 	if err := s.Tick(ctx); err != nil {
@@ -122,7 +121,7 @@ func TestStartedHookRequiresRunnerStartAndIsUIOnlyAcrossRestart(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restored, err := Open(path, Options{ControlID: "control", RuntimeID: "machine", Port: port, ResolveTarget: func(context.Context, string) (core.ExecutionTarget, error) { return *target, nil }, PublishHook: func(event hooks.Event) { events = append(events, event) }})
+	restored, err := Open(path, Options{NodeID: "machine", Executor: port, PublishHook: func(event hooks.Event) { events = append(events, event) }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +136,7 @@ func TestStartedHookRequiresRunnerStartAndIsUIOnlyAcrossRestart(t *testing.T) {
 
 func TestPreparedOutcomeCannotCommitAfterConcurrentTaskChange(t *testing.T) {
 	ctx := context.Background()
-	s, port, _, _ := fixture(t)
+	s, port, _ := fixture(t)
 	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "stale", Text: "work"})
 	if err != nil {
 		t.Fatal(err)
@@ -147,13 +146,13 @@ func TestPreparedOutcomeCannotCommitAfterConcurrentTaskChange(t *testing.T) {
 	}
 	port.mu.Lock()
 	run := port.runs[record.RunID]
-	run.Phase, run.CleanupConfirmed = runner.Complete, true
-	run.Result = &runner.Terminal{Outcome: core.Success, Text: "done"}
+	run.Phase, run.CleanupConfirmed = Complete, true
+	run.Result = &Terminal{Outcome: core.Success, Text: "done"}
 	port.runs[record.RunID] = run
 	port.mu.Unlock()
 	commits := 0
 	s.options.PrepareOutcome = func(ctx context.Context, snapshot Record, event protocol.TaskResultEvent) (OutcomeCommit, error) {
-		if err := s.SendMessage(ctx, "assistant", record.Info.ID, "reference", protocol.AgentRef{NodeID: "control", Kind: "task", AgentID: "peer"}, "late reference"); err != nil {
+		if err := s.SendMessage(ctx, "assistant", record.Info.ID, "reference", protocol.AgentRef{NodeID: "machine", Kind: "task", AgentID: "peer"}, "late reference"); err != nil {
 			return nil, err
 		}
 		return func(context.Context, *sql.Tx, *protocol.TaskResultEvent) error { commits++; return nil }, nil
@@ -177,7 +176,7 @@ func TestPreparedOutcomeCannotCommitAfterConcurrentTaskChange(t *testing.T) {
 
 func TestTaskStoreRejectsPreviousSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.sqlite")
-	s, err := Open(path, Options{ControlID: "control", RuntimeID: "machine"})
+	s, err := Open(path, Options{NodeID: "machine"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +184,7 @@ func TestTaskStoreRejectsPreviousSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Close()
-	_, err = Open(path, Options{ControlID: "control", RuntimeID: "machine"})
+	_, err = Open(path, Options{NodeID: "machine"})
 	if err == nil || !strings.Contains(err.Error(), "unsupported legacy task_schema") {
 		t.Fatal(err)
 	}
@@ -193,7 +192,7 @@ func TestTaskStoreRejectsPreviousSchema(t *testing.T) {
 
 func TestOutcomePreparationFailureLeavesTaskActive(t *testing.T) {
 	ctx := context.Background()
-	s, _, _, _ := fixture(t)
+	s, _, _ := fixture(t)
 	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "blocked", Text: "work"})
 	if err != nil {
 		t.Fatal(err)
@@ -213,7 +212,7 @@ func TestOutcomeProcessorCannotRebindTaskOrReopenExecution(t *testing.T) {
 	for _, field := range []string{"task", "run", "origin", "phase"} {
 		t.Run(field, func(t *testing.T) {
 			ctx := context.Background()
-			s, _, _, _ := fixture(t)
+			s, _, _ := fixture(t)
 			record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "binding", Text: "work"})
 			if err != nil {
 				t.Fatal(err)
@@ -248,7 +247,7 @@ func TestPredispatchStopHookIsAtomicAndNotRepeatedByArchive(t *testing.T) {
 	for _, mode := range []string{"cancel", "interrupt"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := context.Background()
-			s, _, _, _ := fixture(t)
+			s, _, _ := fixture(t)
 			record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "work", Text: "queued work"})
 			if err != nil {
 				t.Fatal(err)

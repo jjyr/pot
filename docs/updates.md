@@ -18,7 +18,7 @@ An update replaces one complete installation: executable(s), shared frontend,
 Node, sandbox assets, plugins and built-in Skills. Every running App, standalone
 Runtime and browser service launched from that installation registers a private
 local update endpoint. Processes launched from another installation are outside
-the group. No remote Runner installation or cross-machine coordination occurs.
+the group. Each node updates its own installation.
 The browser UI requests the update of its selected Control, never its own browser
 machine. Operators must coordinate remote deployments separately.
 

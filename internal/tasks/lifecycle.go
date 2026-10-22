@@ -5,16 +5,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
-// Tick reconciles original runs. It sends each launch once after committing its
-// intent; an uncertain transport is only inspected under that same identity.
+// Tick reconciles local runs. It starts each launch once after committing its
+// intent; an uncertain outcome is inspected only under that same identity.
 func (s *Service) Tick(ctx context.Context) error {
-	if s.options.Port == nil || s.options.ResolveTarget == nil {
-		return fmt.Errorf("Task destination ports unavailable")
+	if s.options.Executor == nil {
+		return fmt.Errorf("local Task executor unavailable")
 	}
 	rows, err := s.db.QueryContext(ctx, "SELECT assistant_id,id FROM tasks WHERE phase IN ('queued','running','waiting','waiting_approval') OR EXISTS(SELECT 1 FROM task_inputs i WHERE i.assistant_id=tasks.assistant_id AND i.task_id=tasks.id AND i.state='pending' AND i.kind IN ('guidance','user_guidance')) ORDER BY created,id")
 	if err != nil {
@@ -58,23 +57,16 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 			return nil
 		}
 	}
+	// Retired distributed records keep their original destination and evidence.
+	// Never inspect or stop an unrelated local run under a historical remote ID.
+	if !record.local(s.options.NodeID) {
+		return s.markWaiting(ctx, assistant, id, protocol.APIError{Code: "original_execution_unavailable"})
+	}
 	launchNow := false
 	if record.Launch == nil {
-		target, err := s.options.ResolveTarget(ctx, record.Request.MachineID)
-		if err == nil && record.Info.ExecutionTarget != nil && target != *record.Info.ExecutionTarget {
-			err = fmt.Errorf("original Task execution target changed")
-		}
-		if err != nil {
-			return s.markWaiting(ctx, assistant, id, err)
-		}
-		if target.RuntimeID != record.Request.MachineID {
-			return fmt.Errorf("destination policy resolved another machine")
-		}
-		if err := target.Validate(); err != nil {
-			return err
-		}
-		if s.options.ValidateTarget != nil {
-			if err := s.options.ValidateTarget(ctx, target, record.Request.Requirements); err != nil {
+		target := core.RuntimeTarget(s.options.NodeID)
+		if s.options.ValidateRequirements != nil {
+			if err := s.options.ValidateRequirements(ctx, record.Request.Requirements); err != nil {
 				return s.markWaiting(ctx, assistant, id, err)
 			}
 		}
@@ -91,15 +83,19 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 					return nil
 				}
 			}
-			launch := runner.Launch{ControlID: s.options.ControlID, AssistantID: assistant, RuntimeID: target.RuntimeID, TaskID: id, RunID: current.RunID, Generation: current.Generation, ExecutionTarget: target, Config: current.Config, Plugins: current.Plugins, Skills: current.Request.Skills, Workspace: current.Request.Workspace, Text: current.Request.Text, InputID: current.RunInputID}
+			launch := Launch{ControlID: s.options.NodeID, AssistantID: assistant, RuntimeID: target.RuntimeID, TaskID: id, RunID: current.RunID, Generation: current.Generation, ExecutionTarget: target, Config: current.Config, Plugins: current.Plugins, Skills: current.Request.Skills, Workspace: current.Request.Workspace, Text: current.Request.Text, InputID: current.RunInputID}
 			if current.RunInputID != "" {
 				launch.Text = current.RunText
 			}
 			if err := launch.Validate(target.RuntimeID); err != nil {
 				return err
 			}
+			if executor, ok := s.options.Executor.(*Executor); ok {
+				if _, err := executor.Journal.acceptTx(ctx, tx, launch); err != nil {
+					return err
+				}
+			}
 			current.Launch = &launch
-			current.LaunchSent = true
 			current.Info.ExecutionTarget = &target
 
 			current.Info.Phase = protocol.TaskRunning
@@ -119,20 +115,29 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 	if record.Launch == nil {
 		return nil
 	}
-	var run *runner.Run
+	var run *Run
 	if launchNow {
-		accepted, err := s.options.Port.Launch(ctx, *record.Launch)
+		accepted, err := s.options.Executor.Launch(ctx, *record.Launch)
 		if err != nil {
 			return s.markWaiting(ctx, assistant, id, err)
 		}
 		run = &accepted
 	} else {
-		run, err = s.options.Port.Inspect(ctx, s.options.ControlID, id, record.RunID)
+		run, err = s.options.Executor.Inspect(ctx, s.options.NodeID, id, record.RunID)
 		if err != nil {
 			return s.markWaiting(ctx, assistant, id, err)
 		}
 		if run == nil {
 			return s.markWaiting(ctx, assistant, id, fmt.Errorf("original launch receipt is not yet known; no replacement was sent"))
+		}
+		// Admission is already committed. Retrying a same-boot accepted run is
+		// safe: Claim has a single winner, and restart fences prior-boot runs.
+		if _, local := s.options.Executor.(*Executor); local && run.Phase == Accepted {
+			accepted, startErr := s.options.Executor.Launch(ctx, *record.Launch)
+			if startErr != nil {
+				return s.markWaiting(ctx, assistant, id, startErr)
+			}
+			run = &accepted
 		}
 	}
 	expected, err := record.Launch.Digest()
@@ -145,13 +150,13 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 	}
 	var terminal protocol.TaskPhase
 	switch run.Phase {
-	case runner.Complete:
+	case Complete:
 		terminal = protocol.TaskComplete
-	case runner.Failed:
+	case Failed:
 		terminal = protocol.TaskFailed
-	case runner.Interrupted:
+	case Interrupted:
 		terminal = protocol.TaskInterrupted
-	case runner.Cancelled:
+	case Cancelled:
 		terminal = protocol.TaskCancelled
 		if record.StopMode == "interrupt" {
 			terminal = protocol.TaskInterrupted
@@ -176,22 +181,22 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 			current.Info.StartedAtMS = run.StartedAtMS
 		}
 		switch run.Phase {
-		case runner.Accepted:
+		case Accepted:
 			current.Info.Phase = protocol.TaskQueued
-		case runner.Running:
+		case Running:
 			current.Info.Phase = protocol.TaskRunning
 			if s.options.AwaitingApproval != nil && s.options.AwaitingApproval(assistant, id, current.RunID, current.Generation) {
 				current.Info.Phase = protocol.TaskWaitingApproval
 			}
-		case runner.Waiting:
+		case Waiting:
 			current.Info.Phase = protocol.TaskWaiting
 			current.Error = run.WaitDetail
-		case runner.RecoveryRequired:
+		case RecoveryRequired:
 			current.Info.Phase = protocol.TaskWaiting
 			current.Info.RemoteWaiting = true
 			current.Error = "original run requires receipt and cleanup reconciliation"
 		default:
-			return fmt.Errorf("unknown Runner receipt phase")
+			return fmt.Errorf("unknown task run receipt phase")
 		}
 		return nil
 	})
@@ -228,14 +233,14 @@ func (s *Service) Stop(ctx context.Context, assistant, id, mode string) error {
 		if mode == "interrupt" {
 			phase = protocol.TaskInterrupted
 		}
-		err = s.finish(ctx, *record, phase, &runner.Terminal{Outcome: core.Cancelled, Text: "Task stopped before dispatch."}, 0, mode)
+		err = s.finish(ctx, *record, phase, &Terminal{Outcome: core.Cancelled, Text: "Task stopped before dispatch."}, 0, mode)
 		if errors.Is(err, errOutcomeChanged) {
 			continue
 		}
 		return err
 	}
 	send := false
-	var launch *runner.Launch
+	var launch *Launch
 	err := s.change(ctx, assistant, id, func(tx *sql.Tx, r *Record) error {
 		if r.Info.Phase.Scope() != "active" {
 			state := "retained"
@@ -266,30 +271,39 @@ func (s *Service) Stop(ctx context.Context, assistant, id, mode string) error {
 	if err != nil || !send {
 		return err
 	}
-	if s.options.Port == nil {
+	if launch.ControlID != s.options.NodeID || launch.RuntimeID != s.options.NodeID || launch.ExecutionTarget != core.RuntimeTarget(s.options.NodeID) {
+		return s.markWaiting(ctx, assistant, id, protocol.APIError{Code: "original_execution_unavailable"})
+	}
+	if s.options.Executor == nil {
 		return s.markWaiting(ctx, assistant, id, fmt.Errorf("destination unavailable during stop"))
 	}
-	if err := s.options.Port.Stop(ctx, s.options.ControlID, id, launch.RunID, mode); err != nil {
+	if err := s.options.Executor.Stop(ctx, s.options.NodeID, id, launch.RunID, mode); err != nil {
 		return s.markWaiting(ctx, assistant, id, err)
 	}
 	return nil
 }
 
+func (r Record) local(node string) bool {
+	target := core.RuntimeTarget(node)
+	return r.Request.MachineID == node &&
+		(r.Info.ExecutionTarget == nil || *r.Info.ExecutionTarget == target) &&
+		(r.Launch == nil || (r.Launch.ControlID == node && r.Launch.RuntimeID == node && r.Launch.ExecutionTarget == target))
+}
+
 // ResumeWaiting resumes the same confirmed allowance-waiting run. It never
 // launches a replacement or changes destination/configuration after restart.
 func (s *Service) ResumeWaiting(ctx context.Context, assistant, id string) error {
-	port, ok := s.options.Port.(Resumer)
-	if !ok {
-		return fmt.Errorf("destination allowance resume port unavailable")
+	if s.options.Executor == nil {
+		return fmt.Errorf("local allowance resume unavailable")
 	}
 	record, err := s.Get(ctx, assistant, id)
 	if err != nil {
 		return err
 	}
-	if record == nil || record.Info.Phase != protocol.TaskWaiting || record.Info.RemoteWaiting || record.Launch == nil || record.StopMode != "" {
+	if record == nil || !record.local(s.options.NodeID) || record.Info.Phase != protocol.TaskWaiting || record.Info.RemoteWaiting || record.Launch == nil || record.StopMode != "" {
 		return fmt.Errorf("Task is not safely resumable")
 	}
-	if err := port.Resume(ctx, s.options.ControlID, id, record.RunID); err != nil {
+	if err := s.options.Executor.Resume(ctx, s.options.NodeID, id, record.RunID); err != nil {
 		return s.markWaiting(ctx, assistant, id, err)
 	}
 	return s.change(ctx, assistant, id, func(tx *sql.Tx, r *Record) error { r.Info.Phase = protocol.TaskQueued; r.Error = ""; return nil })
