@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin || (linux && desktop)
 
 package desktop
 
@@ -47,6 +47,8 @@ type Service struct {
 	pendingNotification       map[string]interface{}
 	attentionWake             chan struct{}
 	reduceMotion, motionKnown bool
+	smoke                     bool
+	smokeReady                bool
 }
 
 func (s *Service) Call(ctx context.Context, method, path, body string) (string, error) {
@@ -108,7 +110,8 @@ func Run(root string) error {
 func runProduct(parent context.Context, root string) (result error) {
 	ctx, stop := context.WithCancel(parent)
 	defer stop()
-	runtime, err := product.Open(ctx, product.Options{Root: root, Control: control.Options{Embedded: true}})
+	smoke, _ := ctx.Value(smokeKey{}).(bool)
+	runtime, err := product.Open(ctx, product.Options{Root: root, DisableMetadataRefresh: smoke, Control: control.Options{Embedded: true}})
 	if err != nil {
 		return err
 	}
@@ -136,13 +139,14 @@ func runProduct(parent context.Context, root string) (result error) {
 	}
 	notifier := notifications.New()
 	service := &Service{notificationStore: notificationStore, notifier: notifier, notificationViews: map[string]NotificationView{}, ctx: ctx, api: api, subscriptions: map[string]context.CancelFunc{}, reads: reads, attentionWake: make(chan struct{}, 1)}
+	service.smoke = smoke
 	service.notificationAuthorization = &systemnotifications.Authorization{
 		Store: notificationStore, Status: notificationAuthorization,
 		Request: func() error { _, err := notifier.RequestNotificationAuthorization(); return err },
 	}
 	localClient := socket.Endpoint.Client()
 	localClient.Timeout = 0
-	manager, err := localui.Open(ctx, localui.Options{Local: localui.NewLocalHTTPClient(localClient, socket.Endpoint.Token, api.RuntimeID), LocalID: api.RuntimeID, LocalName: "This Mac", OnStreamReset: func(space string) {
+	manager, err := localui.Open(ctx, localui.Options{Local: localui.NewLocalHTTPClient(localClient, socket.Endpoint.Token, api.RuntimeID), LocalID: api.RuntimeID, LocalName: localDeviceName(), OnStreamReset: func(space string) {
 		service.mu.Lock()
 		app := service.app
 		service.mu.Unlock()
@@ -183,7 +187,7 @@ func runProduct(parent context.Context, root string) (result error) {
 	service.mu.Unlock()
 	notifier.OnNotificationResponse(service.notificationResponse)
 	main := app.Window.NewWithOptions(application.WebviewWindowOptions{Name: "pot-main", Title: "Pot", Width: 1100, Height: 760, MinWidth: 390, MinHeight: 480, URL: "/?platform=desktop", Mac: application.MacWindow{TitleBar: application.MacTitleBarHiddenInsetUnified, InvisibleTitleBarHeight: 44}})
-	main.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) { main.Hide(); e.Cancel() })
+	main.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) { closeMain(app, main, e) })
 	tray := app.Window.NewWithOptions(application.WebviewWindowOptions{Name: "pot-tray", Title: "Pot", Width: 380, Height: 560, URL: "/?platform=desktop&surface=tray", Frameless: true, AlwaysOnTop: true, Hidden: true, DisableResize: true, HideOnEscape: true, HideOnFocusLost: true})
 	tray.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) { tray.Hide(); e.Cancel() })
 	service.main, service.tray = main, tray
@@ -197,11 +201,7 @@ func runProduct(parent context.Context, root string) (result error) {
 	status.SetIcon(trayIcon)
 	status.SetTooltip("Pot")
 	status.AttachWindow(tray).WindowOffset(5)
-	menu := app.NewMenu()
-	menu.AddRole(application.AppMenu)
-	menu.AddRole(application.EditMenu)
-	menu.AddRole(application.WindowMenu)
-	app.Menu.Set(menu)
+	configureMenu(app)
 	trayMenu := app.NewMenu()
 	trayMenu.Add("Open Pot").OnClick(func(*application.Context) { service.OpenMain() })
 	trayMenu.AddSeparator()
@@ -232,5 +232,8 @@ func runProduct(parent context.Context, root string) (result error) {
 
 	})
 	go func() { <-ctx.Done(); app.Quit() }()
+	if smoke {
+		return service.runSmoke(app)
+	}
 	return app.Run()
 }

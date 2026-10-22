@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin || (linux && desktop)
 
 package desktop
 
@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/jjyr/pot/internal/localui"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
+	"time"
 )
 
 type NotificationView struct {
@@ -40,6 +41,14 @@ func (s *Service) RequestSystemNotificationPermission() (map[string]any, error) 
 // NotificationMainReady is called after the main UI has loaded its directory
 // and painted. Tray initialization cannot consume or start the automatic attempt.
 func (s *Service) NotificationMainReady(surface string) (map[string]any, error) {
+	if s.smoke && surface == "main" {
+		s.mu.Lock()
+		s.smokeReady = true
+		s.mu.Unlock()
+		// Let Wails deliver this binding's response before destroying its WebView.
+		time.AfterFunc(250*time.Millisecond, s.app.Quit)
+		return s.SystemNotificationStatus(), nil
+	}
 	if surface != "main" {
 		return s.SystemNotificationStatus(), nil
 	}
