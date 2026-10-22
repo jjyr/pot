@@ -397,29 +397,25 @@ func (s *Service) taskCompaction(ctx context.Context, owner, turn string, raw js
 	return s.recordCompaction(ctx, owner, turn, raw)
 }
 func (s *Service) resumeTaskAllowance(ctx context.Context) {
-	rows, err := s.Tasks.DB().QueryContext(ctx, "SELECT assistant_id,id FROM tasks WHERE phase='waiting' AND json_extract(body,'$.info.remote_waiting')=0 AND json_extract(body,'$.stop_mode')=''")
+	active, err := s.Tasks.LocalActive(ctx)
 	if err != nil {
 		return
 	}
-	pairs := [][2]string{}
-	for rows.Next() {
-		var owner, id string
-		if rows.Scan(&owner, &id) == nil {
-			pairs = append(pairs, [2]string{owner, id})
+	for _, task := range active {
+		if task.Phase != protocol.TaskWaiting || task.RemoteWaiting {
+			continue
 		}
-	}
-	rows.Close()
-	for _, pair := range pairs {
-		waiting, err := s.Usage.Waiting(ctx, pair[1])
+		waiting, err := s.Usage.Waiting(ctx, task.ID)
 		if err != nil || waiting == nil {
 			continue
 		}
-		ready, err := s.Usage.Ready(ctx, pair[1], storage.Now())
+		ready, err := s.Usage.Ready(ctx, task.ID, storage.Now())
 		if err == nil && ready {
-			s.Tasks.ResumeWaiting(ctx, pair[0], pair[1])
+			_ = s.Tasks.ResumeWaiting(ctx, task.AssistantID, task.ID)
 		}
 	}
 }
+
 func (f *taskFeedback) Settle(ctx context.Context) error {
 	if err := f.s.settleTaskOperations(ctx, f.launch.TaskID); err != nil {
 		return err

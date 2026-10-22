@@ -74,7 +74,7 @@ func TestAgentPortEmptyNodeUserTaskResultAndRetrySurviveRestart(t *testing.T) {
 	if details["info"].(map[string]any)["assistant_id"] != owner || details["result"].(map[string]any)["text"] != "remote-user-task-result" {
 		t.Fatal("detail lost directing conversation or result", detail)
 	}
-	delegation, err := a.service.taskExecution(ctx, linkChatID(c.ID, "main"), info.ID)
+	delegation, err := a.service.Tasks.Execution(ctx, linkChatID(c.ID, "main"), info.ID)
 	if err != nil || delegation.Execution.Request.From.Kind != "user" {
 		t.Fatal(delegation, err)
 	}

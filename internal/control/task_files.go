@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 
-	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
@@ -28,9 +27,9 @@ func (s *Service) ReadTaskFileChunk(ctx context.Context, owner, task, path strin
 	if target.RuntimeID != s.options.RuntimeID {
 		return protocol.FileChunk{}, protocol.APIError{Code: "original_execution_unavailable"}
 	}
-	return s.localTaskFileChunk(ctx, target, task, path, offset, revision)
+	return s.localTaskFileChunk(ctx, task, path, offset, revision)
 }
-func (s *Service) localTaskFileChunk(ctx context.Context, target core.ExecutionTarget, task, path string, offset uint64, revision string) (protocol.FileChunk, error) {
+func (s *Service) localTaskFileChunk(ctx context.Context, task, path string, offset uint64, revision string) (protocol.FileChunk, error) {
 	var result protocol.FileChunk
 	if err := ctx.Err(); err != nil {
 		return result, err

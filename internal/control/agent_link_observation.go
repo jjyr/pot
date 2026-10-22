@@ -34,8 +34,8 @@ func (b potLinkBackend) Observe(ctx context.Context, peerNode string) (agentlink
 	for index := range value.Assistants {
 		byID[value.Assistants[index].AssistantID] = &value.Assistants[index]
 	}
-	// Peer correspondence and notification handling can run outside the main
-	// conversation. Observe their real manager admission rather than reporting idle.
+	// Include the owning conversation's manager admission and cleanup fences,
+	// even before a conversation projection has been loaded.
 	for _, active := range b.s.options.Manager.Snapshot() {
 		if active.Phase == execution.Interrupted {
 			owner := active.Owner
@@ -61,29 +61,23 @@ func (b potLinkBackend) Observe(ctx context.Context, peerNode string) (agentlink
 			}
 		}
 	}
-	rows, err := b.s.Tasks.DB().QueryContext(ctx, "SELECT assistant_id,phase,COUNT(*) FROM tasks WHERE phase IN ('queued','running','waiting','waiting_approval') GROUP BY assistant_id,phase")
+	activity, err := b.s.Tasks.LocalActivity(ctx)
 	if err != nil {
 		return value, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var id, phase string
-		var count int64
-		if err = rows.Scan(&id, &phase, &count); err != nil {
-			return value, err
-		}
-		if a := byID[id]; a != nil {
-			switch phase {
+	for _, item := range activity {
+		if a := byID[item.AssistantID]; a != nil {
+			switch item.Phase {
 			case "queued":
-				a.Queued = count
+				a.Queued = item.Count
 			case "running":
-				a.Running = count
+				a.Running = item.Count
 			case "waiting":
-				a.WaitingAllowance = count
+				a.WaitingAllowance = item.Count
 			case "waiting_approval":
-				a.WaitingApproval = count
+				a.WaitingApproval = item.Count
 			}
 		}
 	}
-	return value, rows.Err()
+	return value, nil
 }

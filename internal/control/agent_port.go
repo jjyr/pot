@@ -2,7 +2,6 @@ package control
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -11,6 +10,7 @@ import (
 	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/internal/attachments"
 	"github.com/jjyr/pot/internal/schedule"
+	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/core"
@@ -93,7 +93,12 @@ func (s *Service) CallAgent(ctx context.Context, owner string, operation agentli
 	if info, ok := value.(protocol.TaskInfo); ok {
 		return s.taskPresentation(ctx, info), nil
 	}
-	if operation == agentlink.TaskRead && value != nil {
+	if operation == agentlink.TaskRead {
+		task, ok := value.(*tasks.Record)
+		if !ok || task == nil {
+			return nil, protocol.APIError{Code: "not_found"}
+		}
+
 		raw, err := json.Marshal(value)
 		if err != nil {
 			return nil, err
@@ -102,19 +107,11 @@ func (s *Service) CallAgent(ctx context.Context, owner string, operation agentli
 		if err = json.Unmarshal(raw, &record); err != nil {
 			return nil, err
 		}
-		if record == nil {
-			return nil, protocol.APIError{Code: "not_found"}
-		}
-		owner := target.AssistantID
-		if target.LinkID != "" {
-			owner = linkChatID(target.LinkID, target.AssistantID)
-		}
 		capabilities := agentlink.Description{Version: 1, Scope: "owner", Operations: agentlink.OwnerOperations()}
-		if d, err := s.taskExecution(ctx, owner, call.ID); err == nil {
-			capabilities = s.taskExecutionCapabilities(ctx, d)
-		} else if !errors.Is(err, sql.ErrNoRows) {
-			return nil, err
+		if task.Execution != nil {
+			capabilities = s.taskExecutionCapabilities(ctx, task)
 		}
+
 		record["capabilities"] = capabilities
 		return record, nil
 	}
@@ -579,13 +576,20 @@ func (p agentPort) taskCall(ctx context.Context, owner string, op agentlink.Oper
 		if err := protocol.DecodeStrict(call.Body, &input); err != nil {
 			return nil, err
 		}
-		items, err := s.SetTaskDispositions(ctx, owner, input.Decisions)
+		items, err := s.Tasks.SetDispositions(ctx, owner, input.Decisions)
 		return map[string]any{"items": items}, err
 	}
 	if !core.Identifier(call.ID) {
 		return nil, agentlink.ErrInvalid
 	}
-	if s.LinkTask(ctx, owner, call.ID) {
+	record, err := s.Tasks.Get(ctx, owner, call.ID)
+	if err != nil {
+		return nil, err
+	}
+	if record == nil {
+		return nil, agentlink.ErrNotFound
+	}
+	if record.Execution != nil {
 		if op == agentlink.TaskEvents {
 			return map[string]any{"events": []any{}, "cursor": 0, "has_more": false, "unavailable": true}, nil
 		}
@@ -603,7 +607,6 @@ func (p agentPort) taskCall(ctx context.Context, owner string, op agentlink.Oper
 			return nil, agentlink.ErrUnsupported
 		}
 	}
-	var err error
 	switch op {
 	case agentlink.TaskCancel, agentlink.TaskInterrupt:
 		var input struct {

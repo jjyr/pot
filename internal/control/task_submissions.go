@@ -58,6 +58,11 @@ func (s *Service) createTaskFrom(ctx context.Context, owner string, from protoco
 	if e := request.Validate(); e != nil {
 		return protocol.TaskInfo{}, e
 	}
+	// Models and permissions belong to the receiver; never forward local secrets,
+	// provider profiles or executable model settings to a connected node.
+	if request.MachineID != "" || request.Profile != nil || request.Model != nil || request.Skills != nil || request.Workspace.Mode() == "worktree" || request.Requirements != (protocol.TaskRequirements{}) || request.Executor != "" && request.Workspace.ProjectDir != "" {
+		return protocol.TaskInfo{}, agentlink.ErrUnsupported
+	}
 	links, e := s.agentLinks.service.List(ctx)
 	if e != nil {
 		return protocol.TaskInfo{}, e
@@ -121,23 +126,11 @@ func (s *Service) createTaskFrom(ctx context.Context, owner string, from protoco
 	} else if selected.Peer.Adapter == "codex" {
 		return protocol.TaskInfo{}, agentlink.ErrUnsupported
 	}
-	// Models and permissions belong to the receiver; never forward local secrets,
-	// provider profiles or executable model settings to a connected node.
-	if request.Profile != nil || request.Model != nil || request.Skills != nil || request.Workspace.Mode() == "worktree" || request.Requirements.Desktop || request.Requirements.ExactBudget || request.Requirements.LiveSteering {
-		return protocol.TaskInfo{}, agentlink.ErrUnsupported
-	}
 	r := agentlink.TaskRequest{Executor: request.Executor, RequestID: request.RequestID, From: from, Text: request.Text, Workspace: request.Workspace.ProjectDir}
 	if request.Target != nil {
 		r.AssistantID = request.Target.AgentID
 	}
 	id, _ := core.HashJSON([]string{"agent-link-task", owner, request.RequestID})
-	var written bool
-	if err := s.Tasks.DB().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM task_writes WHERE assistant_id=? AND request_id=?)", owner, request.RequestID).Scan(&written); err != nil {
-		return protocol.TaskInfo{}, err
-	}
-	if written {
-		return protocol.TaskInfo{}, agentlink.ErrConflict
-	}
 	now := time.Now().UnixMilli()
 	origin := &protocol.AgentLinkOrigin{LinkID: selected.ID, NodeID: selected.PeerHost.NodeID, AssistantID: r.AssistantID, Kind: selected.Peer.Adapter, Name: selected.Peer.Name}
 	if selected.ID == "local" {
@@ -151,9 +144,6 @@ func (s *Service) createTaskFrom(ctx context.Context, owner string, from protoco
 	}
 	return record.Info, e
 }
-func (s *Service) taskExecution(ctx context.Context, owner, id string) (*tasks.Record, error) {
-	return s.Tasks.Execution(ctx, owner, id)
-}
 func (s *Service) GetTask(ctx context.Context, owner, id string) (*tasks.Record, error) {
 	record, err := s.Tasks.Get(ctx, owner, id)
 	if record != nil {
@@ -164,9 +154,18 @@ func (s *Service) GetTask(ctx context.Context, owner, id string) (*tasks.Record,
 func (s *Service) guideTaskExecution(ctx context.Context, owner, id string, input protocol.TaskInput) (any, error) {
 	s.linkMu.Lock()
 	defer s.linkMu.Unlock()
-	d, err := s.taskExecution(ctx, owner, id)
+	d, err := s.Tasks.Execution(ctx, owner, id)
 	if err != nil {
 		return nil, err
+	}
+	// TaskGuidance carries owner instructions only; it cannot preserve a
+	// correspondence parent as reference data. Never upgrade such input to the
+	// immutable owner's authority merely because the receiver supports guidance.
+	if _, reference := ctx.Value(mailParentKey{}).(protocol.Envelope); reference {
+		return nil, agentlink.ErrUnauthorized
+	}
+	if sender, bound := ctx.Value(taskInputSenderKey{}).(protocol.AgentRef); bound && sender != d.Execution.Request.From {
+		return nil, agentlink.ErrUnauthorized
 	}
 	if !s.taskExecutionCapabilities(ctx, d).Supports(agentlink.TaskInput) || d.Execution.Receipt.ID == "" {
 		return nil, agentlink.ErrUnsupported
@@ -186,7 +185,7 @@ func (s *Service) guideTaskExecution(ctx context.Context, owner, id string, inpu
 }
 
 func (s *Service) StopTask(ctx context.Context, owner, id, mode string) error {
-	d, e := s.taskExecution(ctx, owner, id)
+	d, e := s.Tasks.Execution(ctx, owner, id)
 	if errors.Is(e, sql.ErrNoRows) {
 		return s.Tasks.Stop(ctx, owner, id, mode)
 	}
@@ -203,7 +202,7 @@ func (s *Service) StopTask(ctx context.Context, owner, id, mode string) error {
 	if d.Execution.Receipt.ID == "" {
 		return nil
 	}
-	_, e = s.cancelLinkTask(ctx, d.Info.AgentLink.LinkID, d.Execution.Request.From, d.Execution.Receipt.ID)
+	_, e = s.agentLinks.service.Cancel(ctx, taskLinkID(d.Info.AgentLink.LinkID), d.Execution.Request.From, d.Execution.Receipt.ID)
 	return e
 }
 func (s *Service) syncTaskExecutions(ctx context.Context) {
@@ -253,9 +252,9 @@ func (s *Service) syncTaskExecutions(ctx context.Context) {
 			remote = d.Execution.Receipt
 			e = nil
 		} else if d.Execution.Receipt.ID == "" {
-			remote, e = s.submitLinkTask(ctx, it.link, d.Execution.Request)
+			remote, e = s.agentLinks.service.Submit(ctx, taskLinkID(it.link), d.Execution.Request)
 		} else {
-			remote, e = s.statusLinkTask(ctx, it.link, d.Execution.Request.From, d.Execution.Receipt.ID)
+			remote, e = s.agentLinks.service.Status(ctx, taskLinkID(it.link), d.Execution.Request.From, d.Execution.Receipt.ID)
 		}
 		if e != nil {
 			definitive := errors.Is(e, agentlink.ErrInvalid) || errors.Is(e, agentlink.ErrUnsupported) || errors.Is(e, agentlink.ErrUnauthorized) || errors.Is(e, agentlink.ErrConflict) || errors.Is(e, agentlink.ErrNotFound) || errors.Is(e, agentlink.ErrFenced)
@@ -266,7 +265,7 @@ func (s *Service) syncTaskExecutions(ctx context.Context) {
 			remote = agentlink.Task{RequestID: d.Execution.Request.RequestID, State: "failed", Error: e.Error(), UpdatedAt: time.Now().UTC()}
 		}
 		if it.stop != 0 && !terminalLinkTask(remote.State) {
-			if cancelled, err := s.cancelLinkTask(ctx, it.link, d.Execution.Request.From, remote.ID); err == nil {
+			if cancelled, err := s.agentLinks.service.Cancel(ctx, taskLinkID(it.link), d.Execution.Request.From, remote.ID); err == nil {
 				remote = cancelled
 			}
 		}
@@ -378,24 +377,6 @@ func (s *Service) userTaskExecutionNotification(ctx context.Context, id, owner s
 func linkRunID(id string) string {
 	v := linkChatID("task", id)
 	return v[:8] + "-" + v[8:12] + "-" + v[12:16] + "-" + v[16:20] + "-" + v[20:32]
-}
-
-func (s *Service) SetTaskDispositions(ctx context.Context, owner string, decisions []protocol.TaskDisposition) ([]protocol.TaskInfo, error) {
-	return s.Tasks.SetDispositions(ctx, owner, decisions)
-}
-func (s *Service) LinkTask(ctx context.Context, owner, id string) bool {
-	_, e := s.taskExecution(ctx, owner, id)
-	return e == nil
-}
-
-func (s *Service) submitLinkTask(ctx context.Context, link string, r agentlink.TaskRequest) (agentlink.Task, error) {
-	return s.agentLinks.service.Submit(ctx, taskLinkID(link), r)
-}
-func (s *Service) statusLinkTask(ctx context.Context, link string, from protocol.AgentRef, id string) (agentlink.Task, error) {
-	return s.agentLinks.service.Status(ctx, taskLinkID(link), from, id)
-}
-func (s *Service) cancelLinkTask(ctx context.Context, link string, from protocol.AgentRef, id string) (agentlink.Task, error) {
-	return s.agentLinks.service.Cancel(ctx, taskLinkID(link), from, id)
 }
 
 func taskLinkID(link string) string {

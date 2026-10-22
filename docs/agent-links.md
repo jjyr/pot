@@ -169,8 +169,10 @@ identity and assistant node are checked.
 
 `observe` returns a live, payload-free node summary: hostname, per-assistant task
 counts (running, queued, waiting for approval or allowance), chat activity and
-uncertain-cleanup fences. Counts cover all tasks owned by that receiving node,
-not only the caller's delegations. No prompts, task text, workspace paths, tool
+uncertain-cleanup fences. Counts cover all local executions on the receiving
+node, regardless of their caller. Caller-side records of linked Tasks and
+historical remote launches are excluded; an unavailable original execution is
+not reported as an allowance wait. No prompts, task text, workspace paths, tool
 arguments, model settings or credentials are exported. Outbox counts and the
 oldest known acceptance timestamp are scoped to the authenticated caller's node;
 the request cannot select another peer. Delivery receipts still mean durable

@@ -42,7 +42,10 @@ catalogue and original conversation use the same retained task reference.
 `create_task` accepts `link_id` and an optional assistant `target` address.
 Explicit targets select that assistant; otherwise the receiving node resolves its
 persisted default once. The receiver owns execution, model selection and local
-permissions. Local provider credentials and model snapshots are never forwarded.
+permissions. Linked submission rejects local `machine_id`, model, Skills and
+execution requirements before admission. Ordinary Pot targets may accept a
+destination directory hint; Codex chooses its own workspace. Local provider
+credentials and model snapshots are never forwarded.
 The directing node stores an idempotent Task and execution reference rather
 than launching a local worker copy. Assistant-directed results notify the
 original directing assistant through its inbox and task-outcome projection;
@@ -130,7 +133,10 @@ Tasks.
 Task history projects initial input, assistant guidance, user guidance and peer
 reference from the shared `agent_messages` table. The operator messages HTTP
 endpoint binds user provenance; model tools cannot choose their sender. Local workers consume and acknowledge inputs against the original run.
-Linked adapters support only their advertised input capabilities.
+Linked adapters support only their advertised input capabilities. The current
+linked guidance contract carries owner instructions, so inputs bound to incoming
+correspondence are rejected rather than upgraded from reference data to owner
+authority.
 
 The model-visible `create_task` requires a title followed by complete execution
 instructions, preserving exact user commands and constraints; title-only briefs

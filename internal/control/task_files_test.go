@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/jjyr/pot/pkg/core"
 )
 
 func TestTaskChunksBoundMemoryPreserveRevisionAndConfineLinks(t *testing.T) {
@@ -28,7 +26,7 @@ func TestTaskChunksBoundMemoryPreserveRevisionAndConfineLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	file.Close()
-	first, err := s.localTaskFileChunk(ctx, core.RuntimeTarget("local"), "worker", "large.bin", 0, "")
+	first, err := s.localTaskFileChunk(ctx, "worker", "large.bin", 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +34,7 @@ func TestTaskChunksBoundMemoryPreserveRevisionAndConfineLinks(t *testing.T) {
 	if err != nil || uint64(len(data)) != TaskFileChunkSize || first.Size != 32*1024*1024 {
 		t.Fatalf("chunk: %+v %v", first, err)
 	}
-	last, err := s.localTaskFileChunk(ctx, core.RuntimeTarget("local"), "worker", "large.bin", 32*1024*1024-4, first.Revision)
+	last, err := s.localTaskFileChunk(ctx, "worker", "large.bin", 32*1024*1024-4, first.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +46,7 @@ func TestTaskChunksBoundMemoryPreserveRevisionAndConfineLinks(t *testing.T) {
 	file, _ = os.OpenFile(name, os.O_RDWR, 0600)
 	file.WriteAt([]byte("edit"), 0)
 	file.Close()
-	if _, err = s.localTaskFileChunk(ctx, core.RuntimeTarget("local"), "worker", "large.bin", TaskFileChunkSize, first.Revision); err == nil {
+	if _, err = s.localTaskFileChunk(ctx, "worker", "large.bin", TaskFileChunkSize, first.Revision); err == nil {
 		t.Fatal("changed file accepted")
 	}
 	outside := filepath.Join(t.TempDir(), "private")
@@ -57,7 +55,7 @@ func TestTaskChunksBoundMemoryPreserveRevisionAndConfineLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, path := range []string{"escape", "../../control.sqlite"} {
-		if _, err = s.localTaskFileChunk(ctx, core.RuntimeTarget("local"), "worker", path, 0, ""); err == nil {
+		if _, err = s.localTaskFileChunk(ctx, "worker", path, 0, ""); err == nil {
 			t.Fatal("escaped original workspace")
 		}
 	}

@@ -22,7 +22,6 @@ Chat / tasks / schedules / agent tools
      models, resources and permissions
 ```
 
-
 ## Ownership
 
 Each node owns its assistants, models, credentials, workspaces, permissions,
@@ -53,7 +52,8 @@ Other linked tasks resolve their explicit target or the receiving default once.
 The receiver owns accepted tasks and execution facts. The sender stores a durable
 Task and its original execution reference in the same catalogue used for local
 work. Status, results, cancellation and notifications address that original
-identity. Unsupported operations fail explicitly. Accepted cancellation does not prove execution stopped.
+identity. Unsupported operations fail explicitly. Accepted cancellation does not
+prove execution stopped.
 
 Chat and assistant-scoped task/schedule operations enter the same Agent Link
 port for local and linked assistants. UI controls follow versioned operation
@@ -63,7 +63,8 @@ remains an explicit capability; peer authentication does not grant it.
 Each assistant has one durable conversation context, including incoming
 correspondence as reference data, never new user authority. The UI shows
 correspondence in collapsed receipt records. Explicit messaging tools reply to
-peers; final model text can report to the user and is not automatically forwarded. Assistant-directed task results enter
+peers; final model text can report to the user and is not automatically forwarded.
+Assistant-directed task results enter
 the original assistant's inbox. User-directed task results return to their
 original conversation and task notifications without a local assistant.
 See [Agent Links](agent-links.md),
@@ -89,10 +90,12 @@ disconnected; lack of observation never proves execution stopped.
 
 The receiving Pot adapter additionally owns local runs, checkpoints, workspaces
 and event logs. Local admission and run creation commit together. Tool side
-effects have one receipt authority in `operations.sqlite`; there is no second command journal.
+effects have one receipt authority in `operations.sqlite`; there is no second
+command journal.
 Plugin packages, Skills and MCP definitions belong to the local filesystem.
 Every local Pot Agent invocation passes through the shared execution manager.
-Node shutdown and updates interrupt only this local execution; linked Tasks retain their receiver-owned state.
+Node shutdown and updates interrupt only this local execution; linked Tasks
+retain their receiver-owned state.
 See [Backend components](backend-components.md),
 [Executor](executor.md) and [Permissions](permissions.md).
 

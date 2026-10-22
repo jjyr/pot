@@ -103,7 +103,7 @@ func TestPotLinkDelegationOwnsTaskOnReceiverAndNotifiesOriginalAssistant(t *test
 		t.Fatal(e)
 	}
 	for {
-		d, e := a.service.taskExecution(ctx, "main", info.ID)
+		d, e := a.service.Tasks.Execution(ctx, "main", info.ID)
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -148,7 +148,7 @@ func TestPotLinkDelegationOwnsTaskOnReceiverAndNotifiesOriginalAssistant(t *test
 	if e != nil || len(raw) == 0 {
 		t.Fatal(e)
 	}
-	archived, e := a.service.SetTaskDispositions(ctx, "main", []protocol.TaskDisposition{{TaskID: info.ID, RunID: page.Items[0].RunID, Archived: true, Reason: "reviewed"}})
+	archived, e := a.service.Tasks.SetDispositions(ctx, "main", []protocol.TaskDisposition{{TaskID: info.ID, RunID: page.Items[0].RunID, Archived: true, Reason: "reviewed"}})
 	if e != nil || len(archived) != 1 || !archived[0].Archived {
 		t.Fatal(archived, e)
 	}

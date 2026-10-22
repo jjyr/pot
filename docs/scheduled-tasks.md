@@ -126,7 +126,7 @@ as `suppressed` without a model call. Accepted summary execution alone does not
 acknowledge an outcome. See [Hooks](hooks.md) and
 [Agent messages](assistant-messages.md#completion-events).
 
-At most 100 undeleted definitions, with the latest 100 ended/skipped records per schedule; unfinished runs remain. Tasks retain existing total limits. Queue/schedules persist as `tasks.sqlite`. Old task metadata is not imported.
+At most 100 undeleted definitions, with the latest 100 ended/skipped records per schedule; unfinished runs remain. Tasks retain existing total limits. Queue/schedules persist as `tasks.sqlite`. Upgrades retain Task and schedule identities and original execution evidence.
 
 API: paginated `GET /api/v1/schedules`; `POST /api/v1/schedules` accepts `request_id`, `action`, `schedule_id`, `spec`. Reuse the same write request ID for creation and management retries; reject changed content under the same ID. Run records link to task details and share task states/archive behavior.
 

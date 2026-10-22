@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/protocol"
 	"strconv"
@@ -21,7 +22,38 @@ func TestLinkObservationCountsCompleteTaskSetAndScopesOutbox(t *testing.T) {
 	s.mu.Unlock()
 	// Only metadata is queried; no execution or model request is started.
 	for index, phase := range []string{"running", "queued", "queued", "waiting", "waiting_approval", "complete", "failed"} {
-		if _, err := s.Tasks.DB().Exec("INSERT INTO tasks(assistant_id,id,phase,created,body)VALUES('main',?,?,1,'{}')", "fixture-"+strconv.Itoa(index), phase); err != nil {
+		id := "fixture-" + strconv.Itoa(index)
+		body, _ := json.Marshal(map[string]any{"request": protocol.CreateTask{MachineID: "observation-node"}, "info": protocol.TaskInfo{ID: id, AssistantID: "main", Phase: protocol.TaskPhase(phase)}})
+		if _, err := s.Tasks.DB().Exec("INSERT INTO tasks(assistant_id,id,phase,created,body)VALUES('main',?,?,1,?)", id, phase, string(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Caller-side receipts and historical destinations must not inflate this
+	// node's execution counts. An unavailable local run is not an allowance wait.
+	for _, phase := range []string{"running", "queued", "waiting", "waiting_approval"} {
+		body, _ := json.Marshal(map[string]any{"execution": map[string]any{}, "info": protocol.TaskInfo{ID: "linked-" + phase, AssistantID: "main", Phase: protocol.TaskPhase(phase)}})
+		if _, err := s.Tasks.DB().Exec("INSERT INTO tasks(assistant_id,id,phase,created,body)VALUES('main',?,?,1,?)", "linked-"+phase, phase, string(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, kind := range []string{"target", "launch", "unavailable"} {
+		info := protocol.TaskInfo{ID: kind, AssistantID: "main", Phase: protocol.TaskRunning}
+		body := map[string]any{"request": protocol.CreateTask{MachineID: "observation-node"}, "info": info}
+		if kind == "target" {
+			target := core.RuntimeTarget("retired-node")
+			info.ExecutionTarget = &target
+		}
+		if kind == "launch" {
+			body["launch"] = map[string]any{"control_id": "observation-node", "runtime_id": "retired-node", "execution_target": core.RuntimeTarget("retired-node")}
+		}
+		if kind == "unavailable" {
+			info.Phase = protocol.TaskWaiting
+			info.RemoteWaiting = true
+		}
+		body["info"] = info
+		raw, _ := json.Marshal(body)
+		if _, err := s.Tasks.DB().Exec("INSERT INTO tasks(assistant_id,id,phase,created,body)VALUES('main',?,?,1,?)", kind, info.Phase, string(raw)); err != nil {
 			t.Fatal(err)
 		}
 	}

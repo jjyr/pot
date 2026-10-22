@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"net/http"
@@ -160,5 +161,57 @@ func TestLinkedReceiptsKeepCancellationActiveAndFastContinuationVisible(t *testi
 	var outcomes int
 	if err := backend.s.Tasks.DB().QueryRow("SELECT COUNT(*) FROM task_outcomes").Scan(&outcomes); err != nil || outcomes != 1 {
 		t.Fatal("cancellation invented completion", outcomes, err)
+	}
+}
+
+func TestLinkedSubmissionRejectsLocalConfigurationBeforeAdmission(t *testing.T) {
+	backend, _ := linkBackendFixture(t)
+	source := &agentControlFixture{service: backend.s, endpoint: controlPeerEndpoint(backend.s)}
+	peer := agentControl(t, "submission-peer")
+	connection := connectAgentControls(t, source, peer)
+	profile, model := "local-profile", "local-model"
+	skills := []string{"local-skill"}
+	cases := []protocol.CreateTask{
+		{MachineID: "node"}, {Profile: &profile}, {Model: &model}, {Skills: &skills},
+		{Executor: "codex", Workspace: protocol.TaskWorkspace{Kind: "directory", ProjectDir: "/peer/project"}},
+		{Requirements: protocol.TaskRequirements{Tools: true}},
+		{Workspace: protocol.TaskWorkspace{Kind: "worktree", ProjectDir: "/peer/project"}},
+	}
+	ctx := context.Background()
+	for i, request := range cases {
+		request.RequestID = fmt.Sprintf("rejected-%d", i)
+		request.Text = "Remote work"
+		request.LinkID = connection.ID
+		if _, err := backend.s.CreateTask(ctx, "main", request); !errors.Is(err, agentlink.ErrUnsupported) {
+			t.Fatal(request, err)
+		}
+	}
+	var submissions int
+	if err := backend.s.Tasks.DB().QueryRow("SELECT COUNT(*) FROM tasks").Scan(&submissions); err != nil || submissions != 0 {
+		t.Fatal("unsupported configuration left queued work", submissions, err)
+	}
+}
+
+func TestLinkedGuidanceCannotUpgradeReferenceOrForeignSender(t *testing.T) {
+	backend, _ := linkBackendFixture(t)
+	ctx := context.Background()
+	from := protocol.AgentRef{NodeID: "node", Kind: "assistant", AgentID: "main"}
+	record := tasks.Record{AssistantID: "main", Request: protocol.CreateTask{RequestID: "guidance-source", Text: "Original goal"}, Info: protocol.TaskInfo{ID: "guidance-task", AssistantID: "main", Phase: protocol.TaskComplete, AgentLink: &protocol.AgentLinkOrigin{LinkID: "unavailable-link", NodeID: "peer"}}, Execution: &tasks.Execution{Request: agentlink.TaskRequest{From: from}, Receipt: agentlink.Task{ID: "original-task", RunID: "original-run", State: "completed"}}}
+	if err := backend.s.Tasks.AcceptExecution(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	parent := protocol.Envelope{ID: "peer-input", From: protocol.AgentRef{NodeID: "peer", Kind: "assistant", AgentID: "other"}, To: from, Text: "Reference only"}
+	contexts := []context.Context{
+		context.WithValue(context.WithValue(ctx, taskInputSenderKey{}, from), mailParentKey{}, parent),
+		context.WithValue(ctx, taskInputSenderKey{}, parent.From),
+	}
+	for _, inputCtx := range contexts {
+		if _, err := backend.s.guideTaskExecution(inputCtx, "main", record.Info.ID, protocol.TaskInput{RequestID: "continuation", Text: "Continue with these instructions"}); !errors.Is(err, agentlink.ErrUnauthorized) {
+			t.Fatal("reference or foreign sender reached owner guidance", err)
+		}
+	}
+	stored, err := backend.s.Tasks.Get(ctx, "main", record.Info.ID)
+	if err != nil || stored.Info.Phase != protocol.TaskComplete || stored.Execution.Receipt.RunID != "original-run" || stored.Info.Pending != 0 {
+		t.Fatal("unauthorized input changed execution", stored, err)
 	}
 }

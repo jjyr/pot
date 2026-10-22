@@ -56,7 +56,9 @@ receipts, outcome index and archive transaction. There is no parallel live
 Delegation catalogue in Control. Linked Tasks carry an execution binding instead
 of a local configuration or launch. The Pot adapter's local execution manager,
 run journal and cleanup proof remain receiver implementation details.
-Historical remote run records cannot enter local execution.
+Historical remote run records cannot enter local execution. Activity indicators,
+topology observations, maintenance and allowance recovery use the same
+receiver-ownership filter, separately from the location-independent catalogue.
 
 Builtin packages ship as runtime resources. User packages and Skills live in
 `~/.pot/plugins/<name>` and `~/.pot/skills/<name>`. File settings are read by the
