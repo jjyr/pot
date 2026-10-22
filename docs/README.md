@@ -6,9 +6,12 @@ Code defines actual behavior.
 | Topic | Read |
 |---|---|
 | Deployment, resource APIs and web-ui-server | [Deployment](deployment.md) |
+| Linux server image, persistent volumes and Docker isolation | [Docker](docker.md) |
 | Local updates, interruption confirmation and release signing | [Updates](updates.md) |
 | Database schemas, version history and automatic upgrades | [Database migrations](database-migrations.md) |
 | Build, test and release | [Development](development.md) |
+| Release gates, installation channels, signing and Homebrew | [Releases](releases.md) |
+| Native desktop packages and platform requirements | [Desktop installation](desktop-installation.md) |
 | PR screenshot storage and naming | [PR images](pr-images/README.md) |
 | Current product scope and deferred platform work | [Development plan](development-plan.md) |
 | Assistant rules, project AGENTS.md, routing and Skills | [Agent context](agent-context.md) |

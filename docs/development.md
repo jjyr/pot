@@ -171,33 +171,22 @@ bypass failed hooks. CI separates portable product and macOS packaging checks.
 
 ## CI and manual PR checks
 
-CI runs automatically on every tag push, including tags outside the release
-version pattern. Branch pushes (including `main`), PR events and GitHub Release
-events do not start CI. The separate Release workflow still publishes only for
-`v*.*.*` tag pushes or its explicit manual release input; it does not wait for CI.
-
-To run CI manually, open **Actions → CI → Run workflow** and choose a trusted
-branch or tag containing the workflow. Leave `pr` blank to check that selected
-ref, or enter a PR number from this repository to check its latest head commit,
-including a fork PR. For example:
+CI runs automatically only on tag pushes. All tags are checked, while exact stable
+version tags enter controlled per-channel release paths after shared checks and
+the corresponding native package and smoke gates succeed. Ordinary manual runs do not publish.
+Branch pushes and PR events do not start CI.
 
 ```sh
 gh workflow run ci.yml --ref main -f pr=123
+gh workflow run ci.yml --ref main -f ref=refs/heads/my-branch
 ```
 
-The workflow resolves the PR head once at the start and pins both Linux and macOS
-jobs to that SHA in the base repository, rather than the PR merge commit. Invalid
-or inaccessible PR numbers fail before product jobs start. A later push to the PR
-requires another manual run. Runs for different PR numbers do not cancel each
-other; a new run for the same workflow ref and PR cancels the previous run.
-
-Manual PR checks execute the PR's build scripts and tool configuration on GitHub
-hosted runners. Review that code before starting the run and select a trusted
-workflow ref. Only the source-resolution job is granted pull-request read
-permission. Product jobs have read-only repository access, do not persist checkout
-credentials, skip shared mise and Go caches, and receive no release secrets. They
-use the selected workflow's check steps with the PR's source tree; changes to the
-PR's workflow are not run.
+The optional `ref` and `pr` inputs are mutually exclusive. Leave both blank to
+check the ref selected in Actions. The source job pins one SHA for all subsequent
+jobs; review selected PR code before running it. Read-only validation receives no
+release secrets. See [Releases and installation channels](releases.md) for the
+native build matrix, artifact names, signing requirements, manual release gate,
+Homebrew generation and GHCR permissions.
 
 ## Database changes
 

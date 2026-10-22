@@ -92,11 +92,15 @@ mise exec -- go run ./scripts/sign-release keygen /private/path/pot-update-key.p
 
 Set the base64 public key as the GitHub Actions repository variable
 `POT_UPDATE_PUBLIC_KEY`, and the private PEM as the secret
-`POT_UPDATE_PRIVATE_KEY`. The Release workflow pins the public key in every
-executable, builds the App and CLI archives for macOS arm64 and Linux amd64/arm64,
-and signs the manifest only after all artifacts exist. A configured public key
-without the matching private key fails publishing preparation. Unsigned local
-builds remain possible, but have no self-update capability.
+`POT_UPDATE_PRIVATE_KEY`. The CI packaging jobs pin the public key in every
+executable, including container builds. After shared checks and the macOS/Linux
+CLI build gates succeed, the macOS release workflow signs the manifest for the
+macOS App and macOS/Linux CLI archives. It
+requires the matching private key and platform code-signing configuration before
+publication. See [Releases](releases.md) for the environment gate, artifact naming
+and channel contracts. Docker and Linux publication do not depend on macOS
+signing. Unsigned local builds remain possible, but
+without a pinned public key they have no self-update capability.
 
 Install the first build containing the pinned key manually. Existing builds that
 predate this updater cannot bootstrap themselves into it. Key replacement also

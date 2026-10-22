@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""Generate a cask from the versioned macOS ZIP and its verified checksum sidecar."""
+
+import argparse
+import hashlib
+from pathlib import Path
+import urllib.request
+
+from release_contract import checksum, generate_cask, version_number
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("version")
+parser.add_argument("directory", type=Path)
+parser.add_argument(
+    "--verify-url",
+    action="store_true",
+    help="Also download the published GitHub asset and compare its SHA-256",
+)
+args = parser.parse_args()
+version = version_number(args.version)
+if args.verify_url:
+    archive = args.directory / f"Pot-{version}-arm64.zip"
+    url = f"https://github.com/jjyr/pot/releases/download/v{version}/{archive.name}"
+    with urllib.request.urlopen(url, timeout=60) as response:
+        if response.geturl().split(":", 1)[0] != "https":
+            raise ValueError("release download redirected away from HTTPS")
+        remote = hashlib.file_digest(response, "sha256").hexdigest()
+    if remote != checksum(archive):
+        raise ValueError("published release URL does not match local archive SHA-256")
+generate_cask(version, args.directory)
+print(args.directory / "pot.rb")
