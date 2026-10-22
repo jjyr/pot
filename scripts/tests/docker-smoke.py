@@ -27,7 +27,9 @@ def main():
     args = parser.parse_args()
     suffix = uuid.uuid4().hex
     name, volume = "pot-smoke-" + suffix, "pot-smoke-home-" + suffix
-    origin = "http://pot-smoke.invalid"
+    # Exercise HTTPS public-origin semantics over the same internal HTTP hop
+    # used behind a TLS-terminating reverse proxy.
+    origin = "https://pot-smoke.invalid"
     port = None
 
     def inspect():
@@ -60,7 +62,13 @@ def main():
             args.image,
         )
         port = int(inspect()["NetworkSettings"]["Ports"]["17703/tcp"][0]["HostPort"])
-        wait(lambda: inspect()["State"]["Health"]["Status"] == "healthy", "healthy services")
+
+        def healthy():
+            state = inspect()["State"]
+            assert state["Running"], "Container exited before becoming ready"
+            return state["Health"]["Status"] == "healthy"
+
+        wait(healthy, "healthy services")
 
     def cli(*arguments):
         return docker("exec", name, "pot", *arguments).stdout.strip()
@@ -94,7 +102,7 @@ def main():
         status, headers, _ = request("/access/token", "POST", token=token)
         assert status == 200, "Token login failed"
         cookie = headers["Set-Cookie"]
-        assert "HttpOnly" in cookie and "SameSite=Strict" in cookie
+        assert "HttpOnly" in cookie and "SameSite=Strict" in cookie and "Secure" in cookie
         return cookie.split(";", 1)[0]
 
     def fingerprint():
