@@ -138,6 +138,19 @@ that private origin. This opt-in fixture adds no product data or native notifica
 with a deterministic loopback model fixture; it needs cached Playwright CLI and
 an installed browser.
 
+For Markdown resource previews, start `POT_MARKDOWN_RESOURCE_FIXTURE=1
+POT_RESOURCE_FIXTURE_URL_FILE=/tmp/pot-markdown-url mise exec -- go test
+./internal/transport -run '^TestResourceBrowserFixture$' -count=1 -v -timeout=30m`.
+Open the written origin at `/scripts/tests/fixtures/markdown-resources.html` and
+run `scripts/tests/go-ui-markdown-resources-browser.js` with Playwright's
+`run-code --filename`. This uses synthetic files, production registration and
+presentation tools, and the authenticated resource APIs. It checks the reader,
+source switch, copying, original download, safety boundaries and load failures.
+For before/after captures, put the baseline's actual `web/src` tree at
+`output/markdown-before/web/src` first; `?before=1` loads those modules and styles
+against the same registered Markdown. `?capture=1` shows one resource; `theme` and
+`locale` select the visual scenario. Stop with `POST /fixture/stop` at its origin.
+
 For assistant-switching scroll checks without a backend, serve the repository
 root on loopback and open
 `/scripts/tests/fixtures/chat-switching.html?conversation=alpha&locale=en`.

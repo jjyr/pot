@@ -93,6 +93,44 @@ func TestResourceToolsSnapshotActualFilesAndFenceOwnership(t *testing.T) {
 	}
 }
 
+func TestMarkdownResourceRegistrationRetainsWorkspaceAndBundleBoundaries(t *testing.T) {
+	s, _ := configurationService(t)
+	ctx := context.Background()
+	a, err := s.CreateAssistant(ctx, CreateAssistant{RequestID: "markdown-boundaries", Name: "Resources"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := s.ExecutionWorkspace(a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range map[string]string{"review.md": "# Review\n\n![Missing](missing.png)\n", "asset.txt": "declared asset"} {
+		if err := os.WriteFile(filepath.Join(workspace, name), []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	if err := os.WriteFile(outside, []byte("# Outside workspace\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(workspace, "escape.md")); err != nil {
+		t.Fatal(err)
+	}
+	for index, input := range []string{
+		`{"path":"review.md","assets":["asset.txt"]}`,
+		`{"path":"review.md","assets":["../outside.md"]}`,
+		`{"path":"escape.md"}`,
+		`{"path":"../outside.md"}`,
+	} {
+		if _, err := s.registerResource(ctx, a.ID, a.ID, fmt.Sprint("boundary-", index), false, json.RawMessage(input)); err == nil {
+			t.Fatal("Markdown bypassed bundle or workspace boundary", input)
+		}
+	}
+	if _, err := s.registerResource(ctx, a.ID, a.ID, "single-markdown", false, json.RawMessage(`{"path":"review.md","name":"Misleading.html"}`)); err != nil {
+		t.Fatal("single Markdown with a missing relative image must still register", err)
+	}
+}
+
 func TestRegisterResourceNameSchemaDescribesDisplayLabel(t *testing.T) {
 	for _, tool := range resourceTools() {
 		if tool.Name != "register_resource" {

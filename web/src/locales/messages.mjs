@@ -201,6 +201,7 @@ export const messages = {
 
     'resource.downloadFailed':'Could not download this file. Try again.',
     'resource.result':'Component result',
+    'resource.markdown':'Markdown', 'resource.showSource':'Show source', 'resource.showMarkdown':'Show Markdown',
     'resource.downloadBundle':'Download ZIP',
     'tool.registerResource':'Prepare resource', 'tool.presentResource':'Show resource',
     'attachments.historyUnavailable':'The current model cannot read this earlier attachment.',
@@ -1128,6 +1129,7 @@ export const messages = {
 
     'resource.downloadFailed':'文件下载失败，请重试。',
     'resource.result':'组件结果',
+    'resource.markdown':'Markdown', 'resource.showSource':'显示源码', 'resource.showMarkdown':'显示 Markdown',
     'resource.downloadBundle':'下载资源包',
     'tool.registerResource':'准备资源', 'tool.presentResource':'展示资源',
     'attachments.historyUnavailable':'当前模型无法读取此历史附件。',

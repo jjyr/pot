@@ -1,14 +1,23 @@
 import {translate} from '../locales/messages.mjs';
+import {renderMarkdown} from './markdown.mjs';
 
 const node=(tag,cls='',text)=>{const element=document.createElement(tag);element.className=cls;if(text!==undefined)element.textContent=text;return element;};
 const previewKind=type=>/^image\/(png|jpeg|webp|gif)$/.test(type)?'image':/^audio\/(mpeg|aac|wav|wave|x-wav|ogg|mp4|webm|flac)$/.test(type)?'audio':/^video\/(mp4|webm|ogg)$/.test(type)?'video':type==='application/pdf'?'pdf':type==='text/html'?'html':type==='text/plain'?'text':'file';
+
+// Entry is the immutable source path. Display labels and download basenames do
+// not select a renderer. Retain old text/plain manifests without rewriting them.
+export function resourcePreviewKind(resource){
+  const type=String(resource.mime_type||'').split(';')[0].trim().toLowerCase();
+  if(['text/markdown','text/x-markdown'].includes(type)||['text/plain','text/html'].includes(type)&&/\.(md|markdown)$/i.test(resource.entry||''))return 'markdown';
+  return previewKind(type);
+}
 
 function register(){
   if(customElements.get('pot-resource'))return;
   customElements.define('pot-resource',class extends HTMLElement{
     generation=0;
     connectedCallback(){
-      const generation=++this.generation,{resource,mode,caption}=this.presentation,kind=previewKind(resource.mime_type);
+      const generation=++this.generation,{resource,mode,caption}=this.presentation,kind=resourcePreviewKind(resource);
       const t=key=>translate(document.documentElement.lang,`resource.${key}`);
       this.dataset.kind=kind;this.dataset.mode=mode;
       const head=node('div','resource-heading'),identity=node('div','resource-identity'),badge=node('span','resource-type'),title=node('strong','resource-name',caption||resource.name),details=node('span','resource-details');
@@ -41,6 +50,18 @@ function register(){
         const media=node(kind,'resource-media');media.controls=true;media.preload='metadata';media.setAttribute('aria-label',caption||resource.name);if(kind==='video')media.playsInline=true;media.onloadedmetadata=ready;media.onerror=fail;setURL(media,lease.url(resource.entry));body.append(media);
       }else if(kind==='pdf'){
         const frame=node('iframe','resource-document');frame.title=caption||resource.name;frame.onload=ready;frame.onerror=fail;setURL(frame,lease.url(resource.entry));body.append(frame);
+      }else if(kind==='markdown'){
+        const prose=node('div','resource-markdown message-body'),pre=node('pre','resource-text'),toggle=node('button','resource-action');
+        toggle.type='button';toggle.disabled=true;pre.hidden=true;body.append(prose,pre);actions.prepend(toggle);
+        let source=false;
+        const refreshToggle=()=>{toggle.textContent=t(source?'showMarkdown':'showSource');toggle.setAttribute('aria-pressed',String(source));};
+        toggle.onclick=()=>{source=!source;prose.hidden=source;pre.hidden=!source;refreshToggle();};
+        refreshToggle();window.addEventListener('pot:locale',refreshToggle);const stop=this.stopLocale;this.stopLocale=()=>{stop();window.removeEventListener('pot:locale',refreshToggle);};
+        lease.read(resource.entry).then(blob=>blob.text()).then(text=>{if(current()){
+          // No workspace image/download adapters: raw HTML stays literal, remote
+          // images stay links, and undeclared relative paths cannot fetch bytes.
+          pre.textContent=text;prose.append(renderMarkdown(text));toggle.disabled=false;ready();
+        }}).catch(fail);
       }else if(kind==='text'){
         const pre=node('pre','resource-text');body.append(pre);lease.read(resource.entry).then(blob=>blob.text()).then(text=>{if(current()){pre.textContent=text;ready();}}).catch(fail);
       }else if(kind==='html'){

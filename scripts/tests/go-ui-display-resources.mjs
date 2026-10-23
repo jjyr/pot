@@ -3,6 +3,19 @@ import {registerHooks} from 'node:module';
 import {createProductionClient} from '../../web/src/adapters/production.mjs';
 import {createDisplayResources,resourcePresentation,projectResourceMessages} from '../../web/src/state/display-resources.mjs';
 import {projectChatReplies} from '../../web/src/state/chat-replies.mjs';
+import {resourcePreviewKind} from '../../web/src/components/resource-view.mjs';
+
+for(const [mime_type,entry,name,kind] of [
+  ['text/plain','review.md','review.html','markdown'],
+  ['text/plain','review.MARKDOWN','review.txt','markdown'],
+  ['text/html','raw.md','raw.html','markdown'],
+  ['text/markdown; charset=utf-8','opaque','opaque','markdown'],
+  ['text/x-markdown','opaque','opaque','markdown'],
+  ['text/plain','ordinary.txt','spoof.md','text'],
+  ['text/plain','ordinary.log','spoof.markdown','text'],
+  ['application/pdf','binary.md','spoof.md','pdf'],
+  ['text/html','actual.html','spoof.md','html'],
+])assert.equal(resourcePreviewKind({mime_type,entry,name}),kind,`${mime_type} ${entry}`);
 
 const file={path:'report.txt',mime_type:'text/plain',size:6,digest:'fixed'},resource={id:'resource',name:'report.txt',entry:file.path,files:[file],download:file},scope={owner:'alice',space:'remote'},reads=[];
 const acquire=createDisplayResources(async(path,options)=>{reads.push({path,options});return {size:file.size,revision:file.digest,offset:0,data:btoa('report')};},()=>scope,(_,path,captured)=>JSON.stringify([captured,path]));
