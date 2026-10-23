@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/internal/assistant"
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -131,12 +131,12 @@ func TestConfiguredModelTaskRecoveryLive(t *testing.T) {
 			}
 			gate := make(chan struct{})
 			var attempts atomic.Int32
-			prepare := s.Runner.Prepare
-			s.Runner.Prepare = func(workerCtx context.Context, run runner.Run) (runner.Prepared, error) {
+			prepare := s.TaskRuns.Prepare
+			s.TaskRuns.Prepare = func(workerCtx context.Context, run tasks.Run) (tasks.Prepared, error) {
 				select {
 				case <-gate:
 				case <-workerCtx.Done():
-					return runner.Prepared{}, workerCtx.Err()
+					return tasks.Prepared{}, workerCtx.Err()
 				}
 				prepared, err := prepare(workerCtx, run)
 				if err == nil {

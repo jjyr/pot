@@ -31,8 +31,8 @@ belongs to the complete database, including tables used by other components:
 | Kind | Product location | Contents |
 |---|---|---|
 | `control` | `control.sqlite` | Assistant registry, providers, encrypted secrets, integration accounts, Agent Link connections and host access configuration |
-| `tasks` | `tasks.sqlite` | Tasks, schedules, inbox, mailbox, plugin checkpoints, routing and resource receipts |
-| `runner` | `runner.sqlite` | Runs, execution receipts, events, resources and workspaces |
+| `tasks` | `tasks.sqlite` | Local/linked Tasks, request receipts, runs, execution checkpoints/events/workspaces, schedules, inbox, mailbox and plugin checkpoints |
+| `runner` | Retired `runner.sqlite` | Upgrade input only; imported into Tasks and local resource files |
 | `conversation` | Each conversation database | Messages, context, configuration, steering and instruction updates |
 | `machines` | `machines.sqlite` | Autonomous signing identity, local labels and archived membership records |
 | `usage` | `usage.sqlite` | Requests, routing, allowances, tools and compactions |
@@ -175,9 +175,8 @@ requiring a new TCP invitation without deleting mailbox messages or receipts.
 their ports cannot be assumed to serve the new TCP protocol.
 
 `machines/0002_peer_tcp.sql` preserves signing identities, membership epochs and
-original join requests while removing old HTTP endpoints and CA settings. Existing
-Runners update their endpoint against the saved Control identity; migration never
-re-enrolls a machine or replays execution. See [Peer protocol](peer-protocol.md).
+original join requests while removing old HTTP endpoints and CA settings. These are historical conversion rules; current nodes do not restore distributed
+Runner membership, re-enroll machines or replay execution. See [Peer protocol](peer-protocol.md).
 
 `tasks/0009_background_instances.sql` separates installed plugin identity from
 background instance identity and adds optional model connection ownership. It
@@ -198,6 +197,14 @@ remains confined to storage so skipped-version upgrades can recognize old pixels
 `machines/0003_autonomous_node_identity` preserves the stable signing identity
 and labels and archives former distributed membership facts. Local recovery keeps
 its original receipts; retired remote launches remain fenced.
+`tasks/0022_local_task_node` replaces the live Control/Runtime authority pair with
+one owning node identity. The former pair is archived in `retired_task_authority`.
+Task/run snapshots, hashes, destinations, schedules and effect receipts are not
+rewritten. `tasks/0023_local_runs` imports the former `runner.sqlite` run, workspace and
+event records into `tasks.sqlite` under a one-time receipt. The old file remains
+inactive recovery evidence. Admission and run creation now share one transaction.
+Persisted launch identity field names remain immutable evidence. Retired remote
+records never dispatch, inspect, stop or resume through the local executor.
 `control/0017_agent_link_nodes` expires assistant-scoped invitations and requires
 fresh node-wide admission, preserving mailbox history and keys.
 `control/0018_agent_link_delegation_stop` retains cancellation intent and chat
@@ -314,7 +321,7 @@ uncertain-outcome recovery; migration never resumes or replaces a Codex thread.
 
 ## Task replies and schedule delivery
 
-`tasks/0022_task_reply_artifacts` removes scheduler comparison baselines and
+`tasks/0027_task_reply_artifacts` removes scheduler comparison baselines and
 per-occurrence change flags, including cached management replies. Former
 `changes` policies become `all`; explicit `all` and `failures` policies remain.
 The worker's final reply supplies the summary and optional `.pot-artifacts/`
@@ -322,3 +329,69 @@ files supply attachment paths. Artifact collection diagnostics use optional
 `artifacts_error` outcome metadata. Task identities, execution targets, due times,
 generations, write digests, historical outcomes and inbox delivery states survive;
 startup never replays work or renotifies previously suppressed outcomes.
+
+## Local extension and resource files
+
+`control/0028_extension_files` retires live SQLite extension settings and MCP
+definitions. Before readers start, a pending receipt exports them atomically to
+`extensions.json` and `mcp.json`, converts installed plugin definitions to
+schema 3/name, and moves default `agent/plugins` and `agent/skills` directories
+into the node root. Secret references are preserved; secret values remain encrypted.
+Conflicting files or nonempty directories fail without overwriting their contents.
+Only successful exports clear archived SQL rows and the pending receipt. Later
+starts read the files directly and never restore settings from SQLite.
+
+`runner/0004_local_effects` archives original command input/reply bytes solely for
+recovery, fences unfinished runs with old receipts, and drops the duplicate live
+command tables. New effects use only `operations.sqlite`.
+`runner/0005_resource_files` exports frozen resource bodies into
+`cache/resources`, converting embedded Skill trees to local files, then clears
+the SQL bodies. File checksums and original run identity bind recovery. Neither
+conversion invokes tools or replays work. Interrupted exports retry under the
+exclusive node-root lock; conflicting existing files stop startup.
+
+## Unified Agent Link Tasks
+
+`control/0029_unified_tasks` retires the separate delegation table as upgrade
+input. `tasks/0024_unified_tasks` upgrades Task payloads to schema 12 and records
+a pending import. Before receivers start, the importer consolidates original
+linked Tasks into `tasks.sqlite`, preserving task/request IDs, caller identity,
+execution and run references, cancellation intent and notification state. It
+commits the import receipt with all Task and request rows; conflicts roll back
+without overwriting existing work. Subsequent starts never restore archived
+submissions or submit executions during migration.
+
+All targets now share Task listing, archive transactions and outcome indexing.
+Outcome receipts include the original run ID so fast completed continuations
+remain distinct and repeated observations cannot advance the cursor twice.
+Local model snapshots are optional and present only for Pot-owned execution.
+The original control rows remain archived evidence, never a live task store.
+
+## Generic Task executor selection
+
+`control/0030_generic_task_executor` and `tasks/0025_generic_task_executor` convert
+stored `executor: "codex"` selectors to `executor: "agent"`. Adapter identities
+remain unchanged. The upgrade converts archived submissions before their one-time
+import, current and historical Task requests, caller request digests and receiver
+job payloads. Receiver payloads use the frozen TaskRequest encoding so exact
+retries still match, including escaped text. Task/run IDs, session bindings,
+results, delivery cursors, cancellation intent and uncertain cleanup evidence
+survive. The migration never starts work. This frozen intermediate format is
+consumed by the subsequent target-address upgrade; historical selectors are storage upgrade input only.
+
+## Unified Task target addresses
+
+`tasks/0026_task_targets` and `control/0031_task_targets` replace Task executor,
+connection and machine selectors with one receiver address. Task record format 13
+retains the original execution node internally. Cached directories become target
+entries with their own capabilities; Task receipts have one receiver identity.
+Caller digests, receiver payloads, snapshots and archived import inputs are
+converted together with their original destinations. Exact retries retain the
+accepted Task, session, run, cancellation, result and delivery bindings.
+
+Historical default-directed submissions with no reconstructable receiver retain
+their original request evidence and an unknown outcome. Upgrade never resolves a
+new default for them, starts work or resets uncertain cleanup. Saved connections
+remain transport and trust records; removing their selector from Task requests
+does not remove an accepted Task's pinned route. Connected Adapters must upgrade
+together; retired request fields are rejected by the current protocol.

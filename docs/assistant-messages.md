@@ -48,12 +48,16 @@ including after the summary ends. Started, uncertain executions remain fenced;
 reconciling the original turn then admits separately accepted pending input.
 
 Assistant correspondence is grouped by the full sender Agent address and owning
-recipient. A peer retains one independent model context across wire conversations;
-different senders, including equal Agent IDs on different Controls, remain separate.
+recipient, then enters the owning assistant conversation as reference input.
+Correspondence shares its history, configuration, serial execution and allowance.
+Different assistants retain separate histories; sender addresses and wire
+conversations retain their exact identities.
 Task messages are consumed at safe model boundaries; owner guidance accepted
 after finalization continues in the next Run of the same Task. Messages
 do not interrupt commands. Assistant replies to peers use `send_message`; final
-model text is private to that correspondence and is not automatically forwarded.
+model text can report to the user in the owning conversation and is not
+automatically forwarded to the peer. Incoming envelopes appear as collapsed
+receive-message records, like tool calls, rather than ordinary chat prose.
 User chat remains serial, while background Tasks execute independently under
 Runtime capacity and model admission limits.
 
@@ -68,7 +72,7 @@ size. Additional messages and arrivals during execution remain for the next turn
 | --- | --- | --- |
 | User input | One assistant's pending user messages, in receipt order | Main |
 | Runtime notifications | One assistant's pending task outcomes and plugin events, in receipt order | Summary |
-| Agent correspondence | Owning recipient and full sender address | Independent peer context |
+| Agent correspondence | Owning recipient and full sender address | Owning assistant conversation |
 
 User batch selection commits all original projections, queue removal and turn
 membership atomically. Each message retains its own request receipt and status;
@@ -86,12 +90,16 @@ The delivery instruction identifies updates as reference data, never new user
 requests or additional authorization. Each member is acknowledged after its
 handling turn is durable, including silent routine updates and accepted recovery.
 Peer messages from one sender are claimed atomically and supplied together as untrusted
-reference data. Runtime selects the batch member with the highest hop count as
+reference data. Pending user inputs have priority; correspondence cannot start a
+parallel model session or interrupt a running turn. Runtime selects the batch
+member with the highest hop count as
 the processing parent; automatic replies to its sender retain that member's wire
 conversation and the batch's maximum causal hop. Models do not select individual
 reply messages. Allowance resume retains exact membership and does not absorb
-later arrivals. An uncertain peer blocks its
-own sender group; unrelated peers continue independently.
+later arrivals. The assistant conversation owns allowance recovery and
+uncertain-execution
+fencing. Previously saved private correspondence checkpoints remain inspectable
+and are not automatically replayed into the new shared context.
 
 Approval events remain UI-only hooks and never join these batches.
 
@@ -169,16 +177,18 @@ Its tagged operations are `directory`, `register`, `pending`, `deliver`,
 
 Inbox states include queued, processing, waiting, processed, failed, interrupted
 and policy-suppressed (`suppressed`) outcomes. A processing attempt is persisted
-before model invocation. Restart marks incomplete attempts interrupted. Allowance continuation reuses only a
-stopped checkpoint with no started model/tool effects. A fenced sender group
-does not replay its input; other peer contexts remain independent.
+before model invocation. Restart marks incomplete attempts interrupted.
+Allowance continuation uses the owning assistant conversation and reuses only a
+stopped checkpoint with no started model/tool effects. Uncertain correspondence
+is not automatically replayed. Its immutable receipt remains available for
+inspection, including the collapsed history record.
 
 ## Durable identity migration
 
 Migrating a message address changes its field name, not its logical node ID,
 message ID, conversation, delivery receipt or processing state. Mailbox context
 keys are migrated with their full sender and recipient addresses. Task snapshots
-convert `info.address`; Task/Runner Control ownership stays intact.
+convert `info.address`; original task/run ownership stays intact.
 
 Existing Task input digests bind the complete original parent envelope, which
 need not be stored in the same database. These irreversible hashes cannot always

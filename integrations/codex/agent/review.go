@@ -20,7 +20,7 @@ func (b *backend) awaitReview(ctx context.Context, j job, method string, params 
 	if len(params) > maxBody {
 		return "", agentlink.ErrInvalid
 	}
-	if j.Message != nil || j.Request.Executor != "codex" || j.Request.From.Kind != "assistant" {
+	if j.Message != nil || j.Request.Target.Kind != "node" || j.Request.From.Kind != "assistant" {
 		return "", agentlink.ErrUnauthorized
 	}
 	p := &pendingReview{value: agentlink.ExecutionApproval{ID: identifier(), JobID: j.Task.ID, Method: method, Params: append(json.RawMessage(nil), params...)}, job: j, done: make(chan string, 1), ctx: ctx}
@@ -81,7 +81,7 @@ func (b *backend) Review(ctx context.Context, r agentlink.ReviewRequest) (agentl
 			return result, agentlink.ErrInvalid
 		}
 		p := b.reviews[r.ID]
-		if p == nil || p.resolved || p.ctx.Err() != nil || p.job.Message != nil || p.job.Request.Executor != "codex" || p.job.Request.From != r.Caller {
+		if p == nil || p.resolved || p.ctx.Err() != nil || p.job.Message != nil || p.job.Request.Target.Kind != "node" || p.job.Request.From != r.Caller {
 			return result, agentlink.ErrNotFound
 		}
 		current, err := b.read(ctx, r.Caller, p.job.Task.ID)
@@ -94,7 +94,7 @@ func (b *backend) Review(ctx context.Context, r agentlink.ReviewRequest) (agentl
 		return result, nil
 	}
 	for _, p := range b.reviews {
-		if !p.resolved && p.ctx.Err() == nil && p.job.Message == nil && p.job.Request.Executor == "codex" && p.job.Request.From == r.Caller {
+		if !p.resolved && p.ctx.Err() == nil && p.job.Message == nil && p.job.Request.Target.Kind == "node" && p.job.Request.From == r.Caller {
 			result.Pending = append(result.Pending, p.value)
 		}
 	}

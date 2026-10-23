@@ -1,6 +1,6 @@
 # Scheduled tasks
 
-Control owns persistent schedules, triggering, deduplication, task admission and
+Each node owns persistent schedules, triggering, deduplication, task admission and
 notifications. Each trigger creates an independent local background task/Agent
 session. Main Agent manages schedules through tools without a resident model or
 sleep/cron commands.
@@ -15,7 +15,7 @@ dispatch. See [Agent Link](agent-links.md#product-operation-port).
 Chat / tasks -> schedules
              | Create, edit, pause, run now, delete
              ▼
-Control scheduler -> SQLite tasks.sqlite (schedules + triggers + task queue)
+Local scheduler -> SQLite tasks.sqlite (schedules + triggers + task queue)
              | Due: create one run transactionally
              ▼
 Shared task queue (default concurrency 8) -> independent Task / current machine execution policy
@@ -46,12 +46,12 @@ retry.
   (13 executions per day). After 20:00 its next execution is 08:00 the next day.
 - Time zone: saved IANA identifier. UI creation initializes it once from the
   browser/WebView system zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`).
-  Assistant tool creation without `timezone` resolves the **owning Control's** OS
-  system zone, regardless of destination Runtime or client zone. Explicit zones
+  Assistant tool creation without `timezone` resolves the **owning node's** OS
+  system zone, regardless of client zone. Explicit zones
   override either default; omission on tool updates preserves the saved zone.
   The default follows the system **at creation**; saved plans never drift when
   the system zone changes or the device travels. Editing and locale refreshes
-  preserve the selected zone. The Control checks `TZ`, the `/etc/localtime`
+  preserve the selected zone. The node checks `TZ`, the `/etc/localtime`
   zoneinfo link, `/etc/timezone`, then a resolvable Go local zone name. It embeds
   IANA tzdata. An unresolvable zone (including offset-only/POSIX `TZ` or `Local`)
   requires an explicit IANA zone; there is no silent Shanghai/UTC fallback.
@@ -62,7 +62,11 @@ retry.
 
 Pause/delete stops future triggers; queued/running tasks continue and can be interrupted on the task page. Paused schedules can run now. Skip a trigger while its previous run is queued/running to prevent backlog. Delete preserves history; APIs hide deleted definitions by default.
 
-Schedules require their owning Control to remain running. Local App Quit/sleep/shutdown stops its Control; closing a remote client does not stop Control. Control resume applies catch-up policy without waking the execution machine. Interrupted model execution is not replayed automatically. Scheduling waits while the model is unready or budget exhausted.
+Schedules require their owning node to remain running. App Quit or machine
+shutdown stops that node; closing a client leaves the node running. After sleep
+or restart, the node applies its catch-up policy. Interrupted model execution
+is not replayed automatically. Scheduling waits while the model is unready or
+budget exhausted.
 
 Cron uses `robfig/cron/v3` with only the five standard fields enabled. Lists,
 ranges, positive steps, `*`, and English month/weekday names are supported.
@@ -132,7 +136,7 @@ the existing automatic delivery; this does not introduce periodic polling or an
 idle assistant wakeup. Task-specific change detection and business checkpoints
 follow the goal's own storage and reporting instructions.
 
-At most 100 undeleted definitions, with the latest 100 ended/skipped records per schedule; unfinished runs remain. Tasks retain existing total limits. Queue/schedules persist as `tasks.sqlite`. Old task metadata is not imported.
+At most 100 undeleted definitions, with the latest 100 ended/skipped records per schedule; unfinished runs remain. Tasks retain existing total limits. Queue/schedules persist as `tasks.sqlite`. Upgrades retain Task and schedule identities and original execution evidence.
 
 API: paginated `GET /api/v1/schedules`; `POST /api/v1/schedules` accepts `request_id`, `action`, `schedule_id`, `spec`. Reuse the same write request ID for creation and management retries; reject changed content under the same ID. Run records link to task details and share task states/archive behavior.
 

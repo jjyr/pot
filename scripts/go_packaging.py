@@ -272,7 +272,7 @@ def prepare_resources(destination, platform):
 
 
 def prepare_plugins(destination, platform):
-    """Package declared tool and Control-local capability files and brand assets."""
+    """Package declared tool and node-local capability files and brand assets."""
     destination.mkdir(parents=True, exist_ok=True)
     # These are generated package outputs, never instance disks or user data.
     for name in ("podman", "apple-vm"):
@@ -284,6 +284,12 @@ def prepare_plugins(destination, platform):
         if not manifest_path.is_file():
             continue
         manifest = json.loads(manifest_path.read_text())
+        if (
+            manifest.get("schema_version") != 3
+            or manifest.get("name") != source.name
+            or "id" in manifest
+        ):
+            raise ValueError("plugin name must match its directory in schema 3")
         contributions = manifest["contributes"]
         if not contributions or set(contributions) - {
             "tools",

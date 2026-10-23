@@ -11,6 +11,7 @@ async function mountFixture(){
   const {mountApp}=await import('../../web/src/components/ui.js');
   let scope={space:'one',owner:'alpha'},cursor=0,receive=null;
   const changes=new Set(),now=Date.now(),realNow=Date.now;
+  const capabilities={version:1,operations:['chat.read','chat.send','task.list','task.read','task.events','task.input','task.interrupt','task.control','task.archive','approvals.manage','schedules.manage']};
   const f=window.taskExpansionFixture={items:new Map(),calls:[],now,errors:[],extraMessages:[]};Date.now=()=>f.now;
   window.addEventListener('error',event=>f.errors.push(event.message));window.addEventListener('unhandledrejection',event=>f.errors.push(String(event.reason?.stack||event.reason)));
   f.makeTasks=(count,space=scope.space)=>Array.from({length:count},(_,index)=>({id:`task-${index}`,title:`${index+1}. ${index%2?'Review background task updates, keyboard focus and conversation return context':'核查后台任务的原地展开、手机布局、阅读位置以及详情返回状态，长标题需要限制为两行显示'}`,phase:'running',assistant_id:'alpha',started_at_ms:now-400000-index*1000,updated_at_ms:index,_space_id:space}));
@@ -24,7 +25,7 @@ async function mountFixture(){
       f.calls.push({path,options:{space:options.space,owner:options.owner}});
       const url=new URL(path,location.href),space=options.space||scope.space,items=f.items.get(space)||[];
       if(url.pathname==='/api/v1/spaces')return {active_space_id:'one',items:[{id:'one',name:'Fixture A',control_id:'control-a',connected:true},{id:'two',name:'Fixture B',control_id:'control-b',connected:true}]};
-      if(url.pathname==='/api/v1/assistants')return [{id:'alpha',name:'Pot',revision:1,reply_count:0}];
+      if(url.pathname==='/api/v1/assistants')return [{id:'alpha',name:'Pot',revision:1,reply_count:0,capabilities}];
       if(url.pathname==='/api/v1/permissions')return {pending:items.filter(task=>task.phase==='waiting_approval').map(task=>({id:'approval-'+task.id,request:{owner:'alpha',task:task.id,call_id:'call',turn:'run',machine_id:'fixture',tool:'exec_command',args:{cmd:'read fixture'}}})),policy:{machines:{}}};
       if((url.pathname==='/api/v1/tasks/query'||url.pathname==='/api/v1/tasks/catalog')){
         const offset=Number(url.searchParams.get('offset')||0),limit=Number(url.searchParams.get('limit')||50);
@@ -36,7 +37,7 @@ async function mountFixture(){
         return {items:[plan],selected:url.searchParams.get('selected')?plan:null,runs:[{id:'run',task_id:'task-0',summary:'Fixture scheduled task',state:'complete',scheduled_label:'Yesterday'}],runs_next_offset:null};
       }
       const task=items.find(item=>url.pathname==='/api/v1/tasks/'+item.id);
-      if(task)return {run_id:'run',info:task,request:{text:task.title}};
+      if(task)return {run_id:'run',info:task,request:{text:task.title},capabilities};
       if(url.pathname.endsWith('/events')){const events=(f.taskEvents||[]).filter(row=>row.sequence>Number(url.searchParams.get('after')||0));return {events,cursor:events.at(-1)?.sequence||0,has_more:false};}
       if(url.pathname.endsWith('/messages'))return [];
       return {items:[]};

@@ -43,17 +43,12 @@ const (
 	TaskFiles          Operation = "task.files"
 	TaskRecovery       Operation = "task.recovery"
 	TaskResume         Operation = "task.resume"
+	TaskRetry          Operation = "task.retry"
 	TaskArchive        Operation = "task.archive"
 	TaskOutcomes       Operation = "task.outcomes"
 	TaskConfigure      Operation = "task.configure"
 	Schedules          Operation = "schedules.manage"
 )
-
-type Target struct {
-	Locale      string `json:"locale,omitempty"`
-	LinkID      string `json:"link_id,omitempty"`
-	AssistantID string `json:"assistant_id"`
-}
 
 // Call parameters are operation-specific DTOs plus bounded read cursors. ID is
 // a task resource, not a path. Action distinguishes reading and adding inputs.
@@ -78,9 +73,9 @@ func (d Description) Supports(op Operation) bool {
 // The host binds caller identity before invoking it. A target cannot select a
 // sender, an authorization scope or an arbitrary operator HTTP route.
 type Port interface {
-	Describe(context.Context, Target) (Description, error)
-	Call(context.Context, Target, Operation, Call) (any, error)
-	Subscribe(context.Context, Target) (Subscription, error)
+	Describe(context.Context, protocol.AgentRef) (Description, error)
+	Call(context.Context, protocol.AgentRef, Operation, Call) (any, error)
+	Subscribe(context.Context, protocol.AgentRef, string) (Subscription, error)
 }
 
 // Subscription coalesces wakeups; Frame reads a bounded cursor-based update.
@@ -100,6 +95,6 @@ func OwnerOperations() []Operation {
 		ChatCancel, ChatSteer, ChatControl, ChatRetry, ChatContinue, ChatAttachments,
 		ChatReferences, ChatCompletions, AssistantConfigure, AssistantRules, AssistantProfile, AssistantDelete, AssistantUsage, Approvals,
 		TaskSubmit, TaskRead, TaskList, TaskCancel, TaskInterrupt, TaskControl, TaskInput,
-		TaskEvents, TaskFiles, TaskRecovery, TaskResume, TaskArchive, TaskOutcomes,
+		TaskEvents, TaskFiles, TaskRecovery, TaskResume, TaskRetry, TaskArchive, TaskOutcomes,
 		TaskConfigure, Schedules}
 }

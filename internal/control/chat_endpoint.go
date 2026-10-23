@@ -9,11 +9,15 @@ import (
 	"time"
 )
 
-func (p agentPort) chatEndpoint(ctx context.Context, target agentlink.Target, locale string) (agentlink.ChatEndpoint, error) {
-	if target.LinkID != "" {
-		return linkedChatEndpoint{s: p.s, target: target, locale: locale}, nil
+func (p agentPort) chatEndpoint(ctx context.Context, target protocol.AgentRef, locale string) (agentlink.ChatEndpoint, error) {
+	link, err := p.s.agentLinkRoute(ctx, target)
+	if err != nil {
+		return nil, err
 	}
-	c, err := p.s.Conversation(ctx, target.AssistantID)
+	if link != "" {
+		return linkedChatEndpoint{s: p.s, target: target, link: link, locale: locale}, nil
+	}
+	c, err := p.s.Conversation(ctx, target.AgentID)
 	return nativeChatEndpoint{c}, err
 }
 
@@ -38,12 +42,13 @@ func (a nativeChatEndpoint) Subscribe(ctx context.Context) (agentlink.Subscripti
 
 type linkedChatEndpoint struct {
 	s      *Service
-	target agentlink.Target
+	target protocol.AgentRef
+	link   string
 	locale string
 }
 
 func (a linkedChatEndpoint) Read(ctx context.Context) (protocol.UIFrame, error) {
-	v, err := a.s.linkChatLocale(ctx, a.target.LinkID, a.target.AssistantID, a.locale)
+	v, err := a.s.linkChatLocale(ctx, a.link, a.target.AgentID, a.locale)
 	if err != nil {
 		return protocol.UIFrame{}, err
 	}
@@ -53,16 +58,16 @@ func (a linkedChatEndpoint) Send(ctx context.Context, input protocol.SendMessage
 	if len(input.Attachments) != 0 || len(input.References) != 0 {
 		return protocol.SendMessageAccepted{}, agentlink.ErrUnsupported
 	}
-	if input.ConversationID != linkChatID(a.target.LinkID, a.target.AssistantID) {
+	if input.ConversationID != linkChatID(a.link, a.target.AgentID) {
 		return protocol.SendMessageAccepted{}, agentlink.ErrConflict
 	}
-	return a.s.SendLinkChat(ctx, a.target.LinkID, a.target.AssistantID, input.RequestID, input.Text)
+	return a.s.SendLinkChat(ctx, a.link, a.target.AgentID, input.RequestID, input.Text)
 }
 func (a linkedChatEndpoint) Receipt(ctx context.Context, query protocol.SendReceiptQuery) (protocol.SendReceipt, error) {
-	if query.ConversationID != linkChatID(a.target.LinkID, a.target.AssistantID) {
+	if query.ConversationID != linkChatID(a.link, a.target.AgentID) {
 		return protocol.SendReceipt{}, agentlink.ErrConflict
 	}
-	return a.s.linkChatReceipt(ctx, a.target.LinkID, a.target.AssistantID, query.RequestID)
+	return a.s.linkChatReceipt(ctx, a.link, a.target.AgentID, query.RequestID)
 }
 func (a linkedChatEndpoint) Subscribe(ctx context.Context) (agentlink.Subscription, error) {
 	updates := make(chan struct{}, 1)

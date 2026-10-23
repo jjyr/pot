@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Pot
+Exec=pot-desktop
+Icon=pot-desktop
+Terminal=false
+Categories=Utility;Development;
+StartupWMClass=pot-app

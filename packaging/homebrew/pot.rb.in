@@ -14,8 +14,4 @@ cask "pot" do
 
   app "Pot.app"
 
-  postflight_steps do
-    run "/usr/bin/xattr",
-        args: ["-dr", "com.apple.quarantine", "{{appdir}}/Pot.app"]
-  end
 end

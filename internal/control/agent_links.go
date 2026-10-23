@@ -124,7 +124,7 @@ func (s *Service) openAgentLinks() error {
 			case <-s.ctx.Done():
 				return
 			case <-ticker.C:
-				s.syncLinkDelegations(s.ctx)
+				s.syncTaskExecutions(s.ctx)
 			}
 		}
 	}()
@@ -280,7 +280,7 @@ func (s *Service) AgentLinks(ctx context.Context) (any, error) {
 		}
 		assistants := []any{}
 		if c.Directory != nil {
-			for _, a := range c.Directory.Assistants {
+			for _, a := range c.Directory.Assistants() {
 				var count int64
 				var replyID, preview string
 				var at int64
@@ -494,7 +494,7 @@ func (s *Service) linkedPeer(ctx context.Context, local, peer protocol.AgentRef)
 			}
 			d = &fresh
 		}
-		for _, a := range d.Assistants {
+		for _, a := range d.Assistants() {
 			if a.Address == peer {
 				return true
 			}
@@ -521,7 +521,7 @@ func (s *Service) agentLinkPeers(ctx context.Context, owner string) ([]protocol.
 				}
 			}
 			if link.Directory != nil {
-				for _, a := range link.Directory.Assistants {
+				for _, a := range link.Directory.Assistants() {
 					result = append(result, protocol.MailAssistant{Address: a.Address, Name: a.Name})
 				}
 			}

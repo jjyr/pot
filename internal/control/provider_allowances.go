@@ -283,7 +283,7 @@ func allowanceReadStatus(err error) string {
 }
 
 // runProviderAllowance is called under pluginMu with one job per immutable
-// connection/package instance. Credentials and adapter reads remain Control-local.
+// connection/package instance. Credentials and adapter reads remain node-local.
 func (s *Service) runProviderAllowance(ctx context.Context, b assistant.BackgroundBinding, now int64) {
 	before, route, typ, err := s.Profiles.ProviderConnection(ctx, b.ConnectionID)
 	if err != nil || !typ.Capabilities.Allowances || typ.PluginID != b.PluginID {

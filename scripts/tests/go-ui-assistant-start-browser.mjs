@@ -19,9 +19,9 @@ const client={production:true,runtime:{runtime_id:'fixture',boot_id:'boot'},scop
   if(url.pathname==='/api/v1/providers')return {default_provider_id:defaultProvider,profiles:[],provider_types:[{id:'custom',name:'Custom API',available:true}],directory:[],connections:[]};
   if(url.pathname==='/api/v1/agent-links'){
    if(options.body?.action==='preview'){await pause(200);return {peer:{node_id:'codex-node',kind:'codex',name:'Codex'},endpoint:'tcp://127.0.0.1:8793',fingerprint:'SHA256:fixture'};}
-   if(options.body?.action==='connect'){const link={id:'linked',peer:{node_id:'codex-node',kind:'codex',name:'Codex'},status:'connected',directory:{default_assistant_id:remoteDefault,assistants:remoteAssistants}};links=[link];return link;}
+   if(options.body?.action==='connect'){const link={id:'linked',peer:{node_id:'codex-node',kind:'codex',name:'Codex'},status:'connected',directory:{default_target:{kind:'assistant',agent_id:remoteDefault},targets:remoteAssistants}};links=[link];return link;}
    if(failDirectory)throw Error('Synthetic directory unavailable');
-   if(links[0])links[0].directory={default_assistant_id:remoteDefault,assistants:remoteAssistants};
+   if(links[0])links[0].directory={default_target:{kind:'assistant',agent_id:remoteDefault},targets:remoteAssistants};
    return {items:links};
   }
   return {items:[],pending:[],policy:{}};

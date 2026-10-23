@@ -23,7 +23,7 @@ func TestProviderAllowanceRouteDecodesOwnerConfiguration(t *testing.T) {
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `{"schema_version":2,"id":"quota-reader","version":"1","contributes":{"model_providers":{"providers":[{"id":"gateway","name":"Quota Gateway","protocol":"openai_chat","capabilities":{"catalog":"none","allowances":true}}],"adapter":{"runtime":"node","execution":"control","entrypoint":"reader.mjs","files":["reader.mjs"]}}}}`
+	manifest := `{"schema_version":3,"name":"quota-reader","version":"1","contributes":{"model_providers":{"providers":[{"id":"gateway","name":"Quota Gateway","protocol":"openai_chat","capabilities":{"catalog":"none","allowances":true}}],"adapter":{"runtime":"node","execution":"control","entrypoint":"reader.mjs","files":["reader.mjs"]}}}}`
 	for name, source := range map[string]string{"plugin.json": manifest, "reader.mjs": "export async function read(){throw Error('fixture must use the saved cache')}"} {
 		if err := os.WriteFile(filepath.Join(directory, name), []byte(source), 0600); err != nil {
 			t.Fatal(err)

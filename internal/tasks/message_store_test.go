@@ -10,13 +10,13 @@ import (
 
 func TestForwardedPeerMessageRemainsReferenceAcrossLongChains(t *testing.T) {
 	ctx := context.Background()
-	s, _, _, _ := fixture(t)
-	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "create", Text: "work"})
+	s, _, _ := fixture(t)
+	record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "create", Text: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sender := protocol.AgentRef{NodeID: s.ControlID(), Kind: "assistant", AgentID: "assistant"}
-	parent := protocol.Envelope{ID: "peer-parent", Kind: "message", From: protocol.AgentRef{NodeID: s.ControlID(), Kind: "assistant", AgentID: "peer"}, To: sender, ConversationID: record.RunID, Text: "reference", Hops: 130}
+	sender := protocol.AgentRef{NodeID: s.NodeID(), Kind: "assistant", AgentID: "assistant"}
+	parent := protocol.Envelope{ID: "peer-parent", Kind: "message", From: protocol.AgentRef{NodeID: s.NodeID(), Kind: "assistant", AgentID: "peer"}, To: sender, ConversationID: record.RunID, Text: "reference", Hops: 130}
 	if err = s.SendMessageWithParent(ctx, "assistant", record.Info.ID, "reference", sender, "forwarded data", &parent); err != nil {
 		t.Fatal(err)
 	}
@@ -39,12 +39,12 @@ func TestForwardedPeerMessageRemainsReferenceAcrossLongChains(t *testing.T) {
 
 func TestNodeIdentityUpgradeRetainsInputHashWithoutStoredParent(t *testing.T) {
 	ctx := context.Background()
-	s, _, _, path := fixture(t)
-	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "create-upgrade", Text: "original work"})
+	s, _, path := fixture(t)
+	record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "create-upgrade", Text: "original work"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sender := protocol.AgentRef{NodeID: s.ControlID(), Kind: "assistant", AgentID: "assistant"}
+	sender := protocol.AgentRef{NodeID: s.NodeID(), Kind: "assistant", AgentID: "assistant"}
 	parent := protocol.Envelope{ID: "external-parent", Kind: "message", From: protocol.AgentRef{NodeID: "remote", Kind: "assistant", AgentID: "alice"}, To: sender, ConversationID: record.RunID, Text: "parent content", Hops: 2}
 	if err = s.SendMessageWithParent(ctx, "assistant", record.Info.ID, "retained-request", sender, "reference text", &parent); err != nil {
 		t.Fatal(err)
@@ -53,11 +53,11 @@ func TestNodeIdentityUpgradeRetainsInputHashWithoutStoredParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// This private fixture represents tasks.sqlite before migration 0006. The
+	// This private fixture represents sqlite before migration 0006. The
 	// parent is deliberately absent; its complete content cannot be reconstructed.
 	_, err = s.DB().Exec(`UPDATE agent_messages SET envelope=replace(envelope,'"node_id":','"control_id":');
 UPDATE agent_messages SET envelope=json_set(envelope,'$.digest',?) WHERE json_extract(envelope,'$.request_id')='retained-request';
-UPDATE tasks SET body=replace(json_set(body,'$.schema_version',9),'"node_id":','"control_id":');
+UPDATE tasks SET body=replace(json_set(json_remove(body,'$.node_id'),'$.schema_version',9,'$.request.machine_id','machine'),'"node_id":','"control_id":');
 DROP INDEX agent_messages_outbox_route; ALTER TABLE agent_messages DROP COLUMN accepted_at_ms; ALTER TABLE assistant_mail_identity RENAME COLUMN node_id TO control_id;
 ALTER TABLE assistant_contacts RENAME COLUMN node TO control;
 DROP TABLE plugin_background_writes; DROP TABLE task_input_digest_formats; DROP TABLE codex_task_inputs; DROP TABLE codex_task_sessions; DROP TABLE codex_task_executor; DROP TABLE codex_link_jobs; DROP TABLE codex_link_assistants; DROP INDEX agent_link_user_chat_routes; DROP INDEX agent_chat_replies;
@@ -65,7 +65,7 @@ ALTER TABLE plugin_background DROP COLUMN diagnostic;
 DROP INDEX agent_plugin_instance_state;
 ALTER TABLE plugin_background DROP COLUMN plugin_id;
 ALTER TABLE plugin_background DROP COLUMN connection_id;
-DELETE FROM pot_migrations WHERE id >= '0006_';`, legacyHash)
+DROP TABLE run_workspaces; DROP TABLE task_runs; DROP TABLE task_events; DROP TABLE retired_execution_receipts; DROP TABLE journal_file_import; DROP TABLE task_submission_import; DROP INDEX task_outcomes_run; ALTER TABLE task_outcomes DROP COLUMN run_id; DROP TABLE task_node; ALTER TABLE retired_task_authority RENAME TO task_authority; DELETE FROM pot_migrations WHERE id >= '0006_';`, legacyHash)
 	if err != nil {
 		t.Fatal(err)
 	}

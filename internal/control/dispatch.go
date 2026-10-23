@@ -23,7 +23,6 @@ import (
 type ToolEngine interface {
 	Execute(context.Context, executor.Request, func(executor.Event) error) (map[string]any, error)
 }
-type TargetDispatch func(context.Context, Operation, executor.Request, func(core.Update) error) (json.RawMessage, error)
 
 // Dispatcher is fixed to one run. Every ordinary and composition child operation
 // reaches this same target, approval and receipt boundary.
@@ -40,9 +39,9 @@ type Dispatcher struct {
 	Operations             *Operations
 	Host                   ToolEngine
 	ResolveCommand         func(context.Context, map[string]any) (*CommandContext, error)
-	Target                 TargetDispatch
-	Credentials            integrations.CredentialResolver
-	Product                map[string]agent.Dispatch
+
+	Credentials integrations.CredentialResolver
+	Product     map[string]agent.Dispatch
 }
 
 func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionContext, call modelprotocol.ToolCall, emit func(core.Update) error) (output json.RawMessage, resultErr error) {
@@ -112,6 +111,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 	target, err := d.target(args["execution_target"])
 	if err != nil {
 		return nil, err
+	}
+	if target.RuntimeID != d.RuntimeID {
+		return nil, errors.New("execution target must be the local node")
 	}
 	delete(args, "execution_target")
 	name, engineArgs, err := d.prepare(call.Name, args, target)
@@ -262,9 +264,6 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 				value, _ = json.Marshal(result)
 			}
 		}
-	} else if d.Target != nil {
-		executionAttempted = true
-		value, err = d.Target(ctx, operation, request, emit)
 	} else {
 		err = errors.New("execution destination is unavailable; no fallback")
 	}

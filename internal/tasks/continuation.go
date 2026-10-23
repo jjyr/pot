@@ -12,7 +12,7 @@ import (
 	"github.com/jjyr/pot/pkg/storage"
 )
 
-// Run reads a previous immutable Control receipt or the current run.
+// Run reads a previous immutable local run receipt or the current run.
 func (s *Service) Run(ctx context.Context, owner, task, run string) (*Record, error) {
 	current, err := s.Get(ctx, owner, task)
 	if err != nil || current == nil || current.RunID == run {
@@ -64,7 +64,7 @@ func (s *Service) continuePending(ctx context.Context, owner, task string) error
 		r.Info.ArchiveReason = ""
 		r.Info.StartedAtMS = 0
 		r.StopMode, r.Error = "", ""
-		r.Finalizing, r.LaunchSent = false, false
+		r.Finalizing = false
 		r.Launch, r.Result, r.Outcome = nil, nil, nil
 		r.Origin = protocol.TaskOrigin{Kind: "manual"}
 		if r.Info.Pending > 0 {

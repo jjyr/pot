@@ -9,16 +9,13 @@ from pathlib import Path
 import subprocess
 
 from go_packaging import ROOT, storage_format
+from release_contract import update_artifacts, version_number
 
 
 def sign(version, output):
+    version = version_number(version)
     artifacts = []
-    for kind, target, name in [
-        ("app", "darwin-arm64", f"Pot-{version}-arm64.zip"),
-        ("cli", "darwin-arm64", "pot-go-darwin-arm64.tar.gz"),
-        ("cli", "linux-amd64", "pot-go-linux-amd64.tar.gz"),
-        ("cli", "linux-arm64", "pot-go-linux-arm64.tar.gz"),
-    ]:
+    for kind, target, name in update_artifacts(version):
         archive = output / name
         with archive.open("rb") as source:
             digest = hashlib.file_digest(source, "sha256").hexdigest()

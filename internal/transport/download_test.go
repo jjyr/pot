@@ -55,7 +55,7 @@ func TestCompletedTaskDownloadStreamsBeyondOldProxyLimit(t *testing.T) {
 	}
 	sub := s.Tasks.Subscribe()
 	defer sub.Close()
-	task, err := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: "artifact", Text: "Artifact fixture", MachineID: runtime.Root.Identity.RuntimeID})
+	task, err := s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "artifact", Text: "Artifact fixture"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestCompletedTaskDownloadStreamsBeyondOldProxyLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	workspace, err := s.RunnerJournal.TaskWorkspace(ctx, task.Info.ID)
+	workspace, err := s.RunJournal.TaskWorkspace(ctx, task.Info.ID)
 	if err != nil || workspace == nil {
 		t.Fatal(workspace, err)
 	}

@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""Developer ID sign and notarize the validated macOS App and CLI archives."""
+
+import base64
+import os
+from pathlib import Path
+import plistlib
+import secrets
+import subprocess
+import sys
+import tarfile
+import tempfile
+
+from release_contract import ROOT, checksum, version_number, write_checksum
+
+
+def call(*args):
+    result = subprocess.run(args)
+    if result.returncode:
+        # Certificate/notary passwords must never appear in an exception's argv.
+        raise SystemExit(f"{args[0]} failed with status {result.returncode}")
+
+
+def sign_tree(root, identity, keychain):
+    # Sign actual Mach-O files, including bundled runtimes, before the App seal.
+    magics = {bytes.fromhex(value) for value in ["cffaedfe", "feedfacf", "cafebabe", "bebafeca"]}
+    for path in sorted(root.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        if path.is_file() and not path.is_symlink():
+            with path.open("rb") as source:
+                macho = source.read(4) in magics
+            if macho:
+                call(
+                    "codesign",
+                    "--force",
+                    "--timestamp",
+                    "--options",
+                    "runtime",
+                    "--entitlements",
+                    str(ROOT / "packaging/macos-release.entitlements"),
+                    "--keychain",
+                    str(keychain),
+                    "--sign",
+                    identity,
+                    str(path),
+                )
+    if root.suffix == ".app":
+        call(
+            "codesign",
+            "--force",
+            "--timestamp",
+            "--options",
+            "runtime",
+            "--keychain",
+            str(keychain),
+            "--sign",
+            identity,
+            str(root),
+        )
+        call("codesign", "--verify", "--deep", "--strict", str(root))
+
+
+def notarize(archive):
+    result = subprocess.run(
+        [
+            "xcrun",
+            "notarytool",
+            "submit",
+            str(archive),
+            "--apple-id",
+            os.environ["APPLE_ID"],
+            "--team-id",
+            os.environ["APPLE_TEAM_ID"],
+            "--password",
+            os.environ["APPLE_APP_PASSWORD"],
+            "--wait",
+            "--output-format",
+            "plist",
+        ],
+        stdout=subprocess.PIPE,
+    )
+    if result.returncode or plistlib.loads(result.stdout).get("status") != "Accepted":
+        raise RuntimeError("Apple notarization was not accepted")
+
+
+def main():
+    version = version_number(sys.argv[1])
+    output = Path(sys.argv[2]).resolve()
+    identity = os.environ["MACOS_SIGNING_IDENTITY"]
+    if not identity.startswith("Developer ID Application:"):
+        raise ValueError("MACOS_SIGNING_IDENTITY must be a Developer ID Application identity")
+    with tempfile.TemporaryDirectory(prefix="pot-sign-macos-") as temporary:
+        root = Path(temporary)
+        certificate = root / "certificate.p12"
+        certificate.write_bytes(
+            base64.b64decode(os.environ["MACOS_CERTIFICATE_P12"], validate=True)
+        )
+        keychain = root / "release.keychain-db"
+        password = secrets.token_urlsafe(32)
+        call("security", "create-keychain", "-p", password, str(keychain))
+        try:
+            call("security", "set-keychain-settings", "-lut", "21600", str(keychain))
+            call("security", "unlock-keychain", "-p", password, str(keychain))
+            call(
+                "security",
+                "import",
+                str(certificate),
+                "-k",
+                str(keychain),
+                "-P",
+                os.environ["MACOS_CERTIFICATE_PASSWORD"],
+                "-T",
+                "/usr/bin/codesign",
+            )
+            call(
+                "security",
+                "set-key-partition-list",
+                "-S",
+                "apple-tool:,apple:",
+                "-s",
+                "-k",
+                password,
+                str(keychain),
+            )
+            for name in [f"Pot-{version}-arm64.zip", f"pot-go-{version}-darwin-arm64.tar.gz"]:
+                archive = output / name
+                if (
+                    archive.with_name(name + ".sha256").read_text()
+                    != f"{checksum(archive)}  {name}\n"
+                ):
+                    raise ValueError(f"input checksum mismatch: {name}")
+                stage = root / name
+                stage.mkdir()
+                if name.endswith(".zip"):
+                    call("ditto", "-x", "-k", str(archive), str(stage))
+                    tree = stage / "Pot.app"
+                else:
+                    with tarfile.open(archive) as packed:
+                        packed.extractall(stage, filter="data")
+                    tree = stage / "pot-go-darwin-arm64"
+                sign_tree(tree, identity, keychain)
+                notary_zip = root / "notary.zip"
+                call("ditto", "-c", "-k", "--keepParent", str(tree), str(notary_zip))
+                notarize(notary_zip)
+                if tree.suffix == ".app":
+                    call("xcrun", "stapler", "staple", str(tree))
+                    call("xcrun", "stapler", "validate", str(tree))
+                    call("spctl", "--assess", "--type", "execute", "--verbose", str(tree))
+                    archive.unlink()
+                    call(
+                        "ditto",
+                        "-c",
+                        "-k",
+                        "--sequesterRsrc",
+                        "--keepParent",
+                        str(tree),
+                        str(archive),
+                    )
+                else:
+                    with tarfile.open(archive, "w:gz") as packed:
+                        packed.add(tree, arcname=tree.name)
+                notary_zip.unlink()
+                write_checksum(archive)
+        finally:
+            call("security", "delete-keychain", str(keychain))
+
+
+if __name__ == "__main__":
+    main()

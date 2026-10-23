@@ -1,84 +1,152 @@
-name: Release
+name: macOS release and signed updates
 
+# Only CI can enter after shared checks and this channel's packaging gates.
 on:
-  push:
-    tags: ["v*.*.*"]
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      tag:
-        description: Existing release tag (e.g. v0.1.0)
+      sha:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      public-key:
         required: true
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: pot-release
+  group: pot-macos-release-${{ inputs.version }}
   cancel-in-progress: false
 
 jobs:
-  release:
-    # Wails release packaging requires an Apple Silicon Mac.
-    runs-on: [self-hosted, macOS, ARM64, pot-release]
-    timeout-minutes: 120
-    env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-      POT_UPDATE_PUBLIC_KEY: ${{ vars.POT_UPDATE_PUBLIC_KEY }}
+  preflight:
+    name: Approve and verify release configuration
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 10
     steps:
-      - name: Validate release tag
-        run: |
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: refs/tags/${{ env.RELEASE_TAG }}
+          ref: ${{ inputs.sha }}
           persist-credentials: false
-          clean: true
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
         with:
           version: 2026.10.10
-      - name: Prepare build prerequisites
-        run: |
-          mise run doctor
-      - name: Build release
-        # Complete App and CLI packages share one signed update manifest.
+          cache: false
+          install_args: go python
+      - name: Require explicit operator setup and all signing credentials
         env:
+          POT_MACOS_RELEASE_ENABLED: ${{ vars.POT_MACOS_RELEASE_ENABLED }}
+          POT_UPDATE_PUBLIC_KEY: ${{ inputs.public-key }}
           POT_UPDATE_PRIVATE_KEY: ${{ secrets.POT_UPDATE_PRIVATE_KEY }}
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ vars.MACOS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_SHA: ${{ inputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: mise exec -- python scripts/release-preflight
+
+  macos:
+    needs: preflight
+    name: Sign and notarize macOS packages
+    runs-on: macos-26
+    environment: release
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: package-cli-linux-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: package-macos
+          path: dist
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.10.10
+          cache: false
+          install_args: python
+      - name: Sign and notarize validated archives
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ vars.MACOS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: mise exec -- python scripts/sign-macos-release '${{ inputs.version }}' dist
+      - name: Smoke signed macOS packages
+        env:
+          POT_APP_VERSION: ${{ inputs.version }}
         run: |
-          mise run test:release
-          mise run release "$RELEASE_TAG" --output "$RUNNER_TEMP/pot-release-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-      - name: Publish GitHub Release
+          mise exec -- python scripts/tests/macos-package-smoke.py dist/Pot-${{ inputs.version }}-arm64.zip
+          mise exec -- python scripts/tests/server-package-smoke.py dist/pot-go-${{ inputs.version }}-darwin-arm64.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: signed-macos
+          path: |
+            dist/Pot-*.zip
+            dist/Pot-*.zip.sha256
+            dist/pot-go-*-darwin-arm64.tar.gz
+            dist/pot-go-*-darwin-arm64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: macos
+    name: Publish signed macOS assets and update feed
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    concurrency:
+      group: pot-github-assets-${{ inputs.version }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.10.10
+          cache: false
+          install_args: go python
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: package-cli-linux-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: package-macos
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: signed-*
+          merge-multiple: true
+          path: dist
+      - name: Generate signed feed, cask and final checksums
+        env:
+          POT_BUILD_REVISION: ${{ inputs.sha }}
+          POT_UPDATE_PUBLIC_KEY: ${{ inputs.public-key }}
+          POT_UPDATE_PRIVATE_KEY: ${{ secrets.POT_UPDATE_PRIVATE_KEY }}
+        run: mise exec -- python scripts/prepare-release '${{ inputs.version }}' dist --channel macos --signed
+      - name: Publish qualified macOS channel assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          output="$RUNNER_TEMP/pot-release-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --draft
-          fi
-          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber \
-            "$output"/*.zip "$output"/*.tar.gz "$output"/*.sha256 "$output/pot.rb"
-          if [ -f "$output/update.json" ]; then
-            gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber "$output/update.json"
-          fi
-          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
-      - name: Check out Homebrew tap
-        if: env.HOMEBREW_TAP_TOKEN != ''
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          repository: jjyr/homebrew-tap
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          path: .local/homebrew-tap
-      - name: Update Homebrew cask
-        if: env.HOMEBREW_TAP_TOKEN != ''
-        working-directory: .local/homebrew-tap
-        run: |
-          mkdir -p Casks
-          cp "$RUNNER_TEMP/pot-release-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/pot.rb" Casks/pot.rb
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Casks/pot.rb
-          if ! git diff --cached --quiet; then
-            git commit -m "Update Pot to $RELEASE_TAG"
-            git push
-          fi
+          RELEASE_SHA: ${{ inputs.sha }}
+        run: mise exec -- python scripts/publish-release '${{ inputs.version }}' dist --channel macos

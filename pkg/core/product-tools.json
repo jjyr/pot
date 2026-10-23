@@ -1,7 +1,7 @@
 [
   {
     "name": "create_task",
-    "description": "Create a background task and immediately return its ID. Include goal, context, constraints and deliverables in text. Interpret the applicable AGENTS.md routing rules semantically using available configured Providers and models. Explicit current-task choices take precedence; otherwise leave unmatched work on existing defaults. Never silently substitute an unavailable preferred executor. Create a task for new work. To continue existing work, send owner guidance to that task with send_message; this also reopens archived tasks in their original workspace. Runtime prepares the workspace before the Worker starts. For Git feature development select workspace.kind=worktree and its source project_dir; reuse an existing worktree or explicitly requested in-place project with kind=directory. Without a project use temporary (the default). Runtime refreshes the remote base and creates managed worktrees; do not ask the Worker to choose directories, pull the base or create its own worktree. Keep workspace setup metadata out of the Worker text; the Worker receives its cwd. Omitted executor, link_id and target retain ordinary task execution. executor=codex directly delegates a task to a Codex node without a Codex assistant; one task owns one session and approval requests return to this assistant. Assistant messages carry no approval authority. To delegate to a linked node, provide its link_id and optionally target from list_assistants; the receiver uses its persisted default assistant when target is omitted. Linked nodes own their models, permissions, credentials and workspaces. Accepted work remains bound to the chosen receiver assistant. Files are not copied from other workspaces. Tool calls use the receiving node’s local authorization; completion closes only this Task's processes and sessions while retaining files. The text must contain a concise title on its first line AND complete instructions on following lines. A title-only brief is rejected. Preserve the user's exact commands and constraints; workers do not see the chat.",
+    "description": "Create a background Task and immediately return its ID. Include goal, context, constraints and deliverables in text. Interpret applicable AGENTS.md routing rules semantically using configured Providers, models and advertised Agent capabilities. Explicit current-task choices take precedence; otherwise retain existing defaults. Every Task uses Agent Link, including local execution. Omit target to use the current assistant. For another receiver, copy its full target address from list_execution_targets or list_assistants. An assistant address selects that assistant; a node address selects its independent task execution capability. The host resolves the connection internally. Never guess a receiver or silently substitute another target. Accepted work stays bound to its original receiver and caller. The receiving Adapter owns models, permissions, credentials, workspace and execution. Other receivers reject local profile, model, Skills and requirements; node targets also reject workspace overrides. For ordinary local Git development select workspace.kind=worktree and source project_dir; reuse an existing worktree or an explicitly requested in-place project with kind=directory. Without a project use temporary. The local Adapter prepares the workspace, refreshes the remote base and creates managed worktrees before starting the Agent. Keep setup metadata out of the execution text; the Agent receives its cwd. Files are not copied between workspaces. Create a Task for new work; use send_message for owner guidance or continuation only when supported. Approval forwarding requires the receiver’s advertised capability and remains bound to the original Task and caller; assistant messages carry no approval authority. The text must contain a concise title on its first line AND complete instructions on following lines. A title-only brief is rejected. Preserve the user’s exact commands and constraints; the executing Agent does not see the chat.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -12,7 +12,7 @@
         "profile": {
           "type": "string",
           "minLength": 1,
-          "description": "Configured Provider connection Profile ID chosen autonomously for this task. Omit to use the invoking assistant’s active configuration. No user allowlist or route confirmation is needed."
+          "description": "Configured Provider connection Profile ID for an ordinary local Task. Omit to use the invoking assistant’s active configuration. No user allowlist or route confirmation is needed. Unsupported for linked Tasks."
         },
         "requirements": {
           "type": "object",
@@ -31,28 +31,29 @@
               "type": "boolean"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "description": "Local execution requirements; unsupported for linked Tasks."
         },
         "selection_reason": {
           "type": "string",
           "maxLength": 512,
-          "description": "Concise creation-time reason for the chosen executor; do not claim certainty for ambiguous work."
+          "description": "Concise creation-time reason for the chosen target or model; do not claim certainty for ambiguous work."
         },
         "skills": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "Global skill names to include in this task. Omitted or empty loads no global skills. Project skills are always discovered independently."
+          "description": "Local global skill names for an ordinary local Task. Omitted or empty loads no global skills. Project skills are discovered independently. Unsupported for linked Tasks."
         },
         "model": {
           "type": "string",
           "minLength": 1,
-          "description": "Concrete model ID supported by the selected Provider. Omitted uses that Provider’s default model; with no Provider selection, uses the invoking assistant’s active model."
+          "description": "Concrete model ID for an ordinary local Task. Omit to use the selected Provider’s default, or the invoking assistant’s active model when no Provider is selected. Unsupported for linked Tasks."
         },
         "workspace": {
           "type": "object",
-          "description": "Destination-local workspace intent. Feature development in a Git project defaults to worktree; explicit reuse/in-place overrides it. Runtime generates and binds the actual path.",
+          "description": "Workspace intent for an ordinary local Task; the local Adapter prepares and binds the path. Other assistant targets may accept a destination directory hint. Node targets use the receiver’s configured scope and reject workspace overrides.",
           "properties": {
             "kind": {
               "type": "string",
@@ -64,7 +65,7 @@
             },
             "project_dir": {
               "type": "string",
-              "description": "Existing absolute source project path on the selected execution machine; omit for temporary."
+              "description": "Existing absolute source project path on the receiving node; omit for temporary."
             },
             "remote": {
               "type": "string",
@@ -76,7 +77,7 @@
             },
             "branch": {
               "type": "string",
-              "description": "Optional new feature branch; otherwise Runtime generates a unique codex/ branch."
+              "description": "Optional new feature branch; otherwise the local Adapter generates a unique feature branch."
             },
             "commit": {
               "type": "string",
@@ -84,10 +85,6 @@
             }
           },
           "additionalProperties": false
-        },
-        "link_id": {
-          "type": "string",
-          "description": "Agent Link connection ID from list_execution_targets. Omit for local execution."
         },
         "target": {
           "type": "object",
@@ -98,7 +95,8 @@
             "kind": {
               "type": "string",
               "enum": [
-                "assistant"
+                "assistant",
+                "node"
               ]
             },
             "agent_id": {
@@ -111,14 +109,7 @@
             "agent_id"
           ],
           "additionalProperties": false,
-          "description": "Explicit receiving assistant address from list_assistants. Omit to use the receiving node’s persisted default."
-        },
-        "executor": {
-          "type": "string",
-          "enum": [
-            "codex"
-          ],
-          "description": "Explicit Codex task execution. Creates one independent Codex session per task, with approvals in this assistant. Omit to retain ordinary task execution. Use link_id to select a Codex node when multiple are connected; do not supply an assistant target."
+          "description": "Receiving address from the advertised target catalogue. Omit for the current assistant. assistant selects that exact assistant; node selects that node’s independent task execution capability, with agent_id equal to node_id. The host resolves local or connected routing. Unsupported targets fail without fallback."
         }
       },
       "required": [
@@ -237,7 +228,7 @@
   },
   {
     "name": "send_message",
-    "description": "Send a durable message to a Task or assistant using its address and the message text. Runtime binds the real sender, message provenance and reply linkage automatically. Active Tasks receive owner guidance or peer reference at a model boundary. Owner guidance to an ended Task reopens the same Task and starts a new run with retained context and workspace. Peer references never restart ended Tasks. Returns acceptance, never execution completion. Do not send task completion yourself: Runtime reports final results automatically.",
+    "description": "Send a durable message to a Task or assistant using its address and text. Runtime binds the real sender, provenance and reply linkage. Ordinary local Tasks receive owner guidance or peer reference at a model boundary; new owner guidance can reopen an ended local Task in its retained workspace. Linked Task guidance and continuation require the receiving Adapter’s task input capability and may reject active-run input. Peer references cannot become owner guidance or restart ended Tasks. Returns acceptance, never execution completion. Runtime reports final Task results automatically; do not send completion yourself.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -283,7 +274,7 @@
   },
   {
     "name": "interrupt",
-    "description": "Interrupt current work while retaining task/session/files and pending guidance. Does not replay interrupted input or automatically resume. Running work retains capacity until cleanup is confirmed; continue later by sending new owner guidance to the same Task. Completed task results remain complete.",
+    "description": "Interrupt current work where the receiving Adapter supports interruption, retaining Task/session/files and pending guidance. Linked Tasks currently do not support interruption. Does not replay interrupted input or automatically resume. Local work retains capacity until cleanup is confirmed; later owner guidance can continue the same Task. Completed results remain complete.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -300,7 +291,7 @@
   },
   {
     "name": "cancel_task",
-    "description": "Abandon a task: stop current execution, discard pending guidance and mark cancelled after confirmed cleanup. Retains history and files; cancelled tasks appear in Archived. Use interrupt to preserve guidance for later continuation. Completed results remain complete.",
+    "description": "Request cancellation where the receiving Adapter supports it. Cancellation intent is durable; acceptance does not confirm execution has stopped. Local Tasks discard pending guidance and become cancelled and archived after confirmed cleanup. Linked Tasks retain their last accepted state until the receiver confirms a terminal outcome; their archive state is independent. History and files remain. Completed results remain complete.",
     "inputSchema": {
       "type": "object",
       "properties": {

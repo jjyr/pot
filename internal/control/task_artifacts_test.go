@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -98,7 +97,7 @@ func TestTaskArtifactErrorsPreserveFinalReplyAndStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, phase := range []protocol.TaskPhase{protocol.TaskComplete, protocol.TaskFailed, protocol.TaskInterrupted, protocol.TaskCancelled} {
-		task := tasks.Record{Info: protocol.TaskInfo{ID: "worker"}, Origin: protocol.TaskOrigin{Kind: "manual"}, Launch: &runner.Launch{ExecutionTarget: core.RuntimeTarget(s.options.RuntimeID)}}
+		task := tasks.Record{Info: protocol.TaskInfo{ID: "worker"}, Origin: protocol.TaskOrigin{Kind: "manual"}, Launch: &tasks.Launch{ExecutionTarget: core.RuntimeTarget(s.options.RuntimeID)}}
 		event := protocol.TaskResultEvent{Phase: phase, Text: "Final reply with evidence and limitations", Error: "original execution diagnostic"}
 		commit, err := s.prepareTaskOutcome(ctx, task, event)
 		if err != nil {

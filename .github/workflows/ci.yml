@@ -5,24 +5,33 @@ on:
     tags: ["**"]
   workflow_dispatch:
     inputs:
-      pr:
-        description: PR number to check (blank uses the selected branch/tag)
+      ref:
+        description: Source ref (blank uses selected branch/tag; releases require refs/tags/vMAJOR.MINOR.PATCH)
         required: false
         type: string
+      pr:
+        description: PR number to check (mutually exclusive with ref)
+        required: false
+        type: string
+      publish:
+        description: Publish an existing stable tag after checks, packaging and release environment approval
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}-pr-${{ inputs.pr || 'none' }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ inputs.ref }}-pr-${{ inputs.pr || 'none' }}
+  # A running official release must finish without another run cancelling it.
+  cancel-in-progress: false
 
 env:
   MISE_AUTO_INSTALL: 'false'
 
 jobs:
   source:
-    name: Resolve source commit
+    name: Resolve source and release intent
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -30,44 +39,32 @@ jobs:
       pull-requests: read
     outputs:
       sha: ${{ steps.source.outputs.sha }}
+      version: ${{ steps.source.outputs.version }}
+      official: ${{ steps.source.outputs.official }}
+      public-key: ${{ vars.POT_UPDATE_PUBLIC_KEY }}
     steps:
-      # Resolve before checking out or executing any PR code. Fork heads are
-      # available through the base repository's pull request refs.
+      # Resolve using the selected workflow's code before executing any PR code.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - name: Resolve selected ref or PR head
         id: source
-        shell: bash
         env:
+          SOURCE_REF: ${{ inputs.ref }}
           PR_NUMBER: ${{ inputs.pr }}
-          SELECTED_SHA: ${{ github.sha }}
+          PUBLISH: ${{ inputs.publish || false }}
           GH_TOKEN: ${{ github.token }}
-        run: |
-          sha="$SELECTED_SHA"
-          if [[ -n "$PR_NUMBER" ]]; then
-            if [[ ! "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
-              echo "::error::PR number must be a positive integer."
-              exit 1
-            fi
-            if ! sha=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.head.sha'); then
-              echo "::error::Unable to resolve PR #$PR_NUMBER in $GITHUB_REPOSITORY."
-              exit 1
-            fi
-          fi
-          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::Unable to resolve a valid source commit."
-            exit 1
-          fi
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "Checking commit $sha"
+        run: python3 scripts/release-plan
 
   product:
     needs: source
-    name: Go product (${{ matrix.os }})
+    name: Product checks (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-26]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -76,10 +73,9 @@ jobs:
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
         with:
           version: 2026.10.10
-          cache: ${{ inputs.pr == '' }}
+          cache: ${{ inputs.pr == '' && inputs.ref == '' }}
           install_args: go python node ruff shfmt shellcheck swiftformat
-      # Skip shared caches when executing manually selected PR code.
-      - if: inputs.pr == ''
+      - if: inputs.pr == '' && inputs.ref == ''
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
@@ -95,7 +91,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap ripgrep socat
-          # Qualification host must permit unprivileged bwrap/user namespaces.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: mise run test:sandbox
       - run: mise run test:i18n
@@ -103,9 +98,242 @@ jobs:
       - run: mise run licenses
       - run: mise run build:go
       - run: mise run build:linux
+      - run: mise exec -- python scripts/tests/ci-release.py
+      - if: runner.os == 'Linux'
+        run: mise exec -- go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.11
+      - if: runner.os == 'Linux'
+        run: mise exec -- python scripts/tests/docker-entrypoint.py
       - if: runner.os == 'macOS'
         run: mise run lint
       - if: runner.os == 'macOS'
         run: mise run test:release
-      - if: runner.os == 'macOS'
-        run: mise run build
+
+  server:
+    needs: [source, product]
+    name: Native CLI (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04, platform: linux-amd64}
+          - {os: ubuntu-24.04-arm, platform: linux-arm64}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      POT_APP_VERSION: ${{ needs.source.outputs.version }}
+      POT_BUILD_REVISION: ${{ needs.source.outputs.sha }}
+      POT_UPDATE_PUBLIC_KEY: ${{ needs.source.outputs.public-key }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.10.10
+          cache: false
+          install_args: go python node
+      - run: mise exec -- python scripts/package-server --platform ${{ matrix.platform }} --output dist
+      - run: mise exec -- python scripts/tests/server-package-smoke.py dist/pot-go-${{ env.POT_APP_VERSION }}-${{ matrix.platform }}.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: package-cli-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  macos:
+    needs: [source, product]
+    name: Native macOS App
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      POT_APP_VERSION: ${{ needs.source.outputs.version }}
+      POT_BUILD_REVISION: ${{ needs.source.outputs.sha }}
+      POT_UPDATE_PUBLIC_KEY: ${{ needs.source.outputs.public-key }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.10.10
+          cache: false
+          install_args: go python node
+      - run: mise exec -- python scripts/release "$POT_APP_VERSION" --app-only --output dist
+      - run: mise exec -- python scripts/package-server --platform darwin-arm64 --output dist
+      - run: mise exec -- python scripts/tests/server-package-smoke.py dist/pot-go-${{ env.POT_APP_VERSION }}-darwin-arm64.tar.gz
+      - run: ruby -c dist/pot.rb
+      - run: mise exec -- python scripts/tests/macos-package-smoke.py dist/Pot-${{ env.POT_APP_VERSION }}-arm64.zip
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: package-macos
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  desktop:
+    needs: [source, product]
+    name: Experimental Linux desktop
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      POT_APP_VERSION: ${{ needs.source.outputs.version }}
+      POT_BUILD_REVISION: ${{ needs.source.outputs.sha }}
+      POT_UPDATE_PUBLIC_KEY: ${{ needs.source.outputs.public-key }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.10.10
+          cache: false
+          install_args: go python node
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev build-essential pkg-config binutils xvfb xauth dbus-user-session bubblewrap socat
+      - run: mise exec -- python scripts/build-desktop --platform linux-amd64 --output dist
+      - run: xvfb-run -a mise exec -- python scripts/smoke-desktop --archive "dist/pot-desktop_${POT_APP_VERSION}_linux_amd64.deb" --platform linux-amd64
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: package-desktop-linux-amd64
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  docker-smoke:
+    needs: [source, product]
+    name: Native container smoke (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04, arch: amd64}
+          - {os: ubuntu-24.04-arm, arch: arm64}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      POT_APP_VERSION: ${{ needs.source.outputs.version }}
+      POT_BUILD_REVISION: ${{ needs.source.outputs.sha }}
+      POT_UPDATE_PUBLIC_KEY: ${{ needs.source.outputs.public-key }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build native image without pushing
+        run: |
+          docker buildx build --platform linux/${{ matrix.arch }} --load -t pot:smoke \
+            --build-arg POT_APP_VERSION --build-arg POT_BUILD_REVISION --build-arg POT_UPDATE_PUBLIC_KEY .
+      - name: Verify container version and revision
+        run: |
+          package_version=$(docker run --rm pot:smoke --version)
+          test "$package_version" = "pot $POT_APP_VERSION ($POT_BUILD_REVISION)"
+      - run: python3 scripts/tests/docker-smoke.py --image pot:smoke --sandbox unavailable
+
+  container:
+    needs: [source, docker-smoke]
+    name: Multiarchitecture OCI distribution
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      POT_APP_VERSION: ${{ needs.source.outputs.version }}
+      POT_BUILD_REVISION: ${{ needs.source.outputs.sha }}
+      POT_UPDATE_PUBLIC_KEY: ${{ needs.source.outputs.public-key }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Export multiarchitecture image without pushing
+        run: |
+          mkdir -p dist
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --build-arg POT_APP_VERSION --build-arg POT_BUILD_REVISION --build-arg POT_UPDATE_PUBLIC_KEY \
+            --output "type=oci,dest=dist/pot-container-${POT_APP_VERSION}.oci.tar" .
+          sha256sum "dist/pot-container-${POT_APP_VERSION}.oci.tar" > "dist/pot-container-${POT_APP_VERSION}.oci.tar.sha256"
+          sed -i 's@  dist/@  @' "dist/pot-container-${POT_APP_VERSION}.oci.tar.sha256"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: package-container
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  distribution:
+    needs: [source, server, macos, desktop, container]
+    name: Verify complete distribution
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: package-*
+          merge-multiple: true
+          path: dist
+      - env:
+          POT_BUILD_REVISION: ${{ needs.source.outputs.sha }}
+        run: python3 scripts/prepare-release '${{ needs.source.outputs.version }}' dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: distribution-unsigned
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-server:
+    needs: [source, server]
+    if: needs.source.outputs.official == 'true'
+    uses: ./.github/workflows/release-linux.yml
+    permissions:
+      contents: write
+    with:
+      sha: ${{ needs.source.outputs.sha }}
+      version: ${{ needs.source.outputs.version }}
+      channel: server
+
+  publish-desktop:
+    # Serialize GitHub asset writers, but a failed different channel does not
+    # block this channel after its own native package and smoke succeeded.
+    needs: [source, desktop, publish-server]
+    if: ${{ !cancelled() && needs.source.outputs.official == 'true' && needs.desktop.result == 'success' }}
+    uses: ./.github/workflows/release-linux.yml
+    permissions:
+      contents: write
+    with:
+      sha: ${{ needs.source.outputs.sha }}
+      version: ${{ needs.source.outputs.version }}
+      channel: desktop
+
+  publish-macos:
+    needs: [source, server, macos, publish-desktop]
+    if: ${{ !cancelled() && needs.source.outputs.official == 'true' && needs.server.result == 'success' && needs.macos.result == 'success' }}
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+    with:
+      sha: ${{ needs.source.outputs.sha }}
+      version: ${{ needs.source.outputs.version }}
+      public-key: ${{ needs.source.outputs.public-key }}
+    secrets: inherit
+
+  publish-container:
+    needs: [source, container]
+    if: needs.source.outputs.official == 'true'
+    uses: ./.github/workflows/release-container.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      sha: ${{ needs.source.outputs.sha }}
+      version: ${{ needs.source.outputs.version }}

@@ -273,7 +273,7 @@ func TestMessageRetriesRetainExplicitRecipientAndCallerScope(t *testing.T) {
 	b := testBackend(t)
 	ctx := context.Background()
 	from := protocol.AgentRef{NodeID: "pot-sender", Kind: "assistant", AgentID: "main"}
-	r := agentlink.TaskRequest{RequestID: "same", From: from, Text: "hello"}
+	r := agentlink.TaskRequest{RequestID: "same", From: from, Target: agentlink.AssistantTarget(b.nodeID, "codex"), Text: "hello"}
 	first, err := submitMessageFixture(b, ctx, r)
 	if err != nil {
 		t.Fatal(err)
@@ -282,15 +282,15 @@ func TestMessageRetriesRetainExplicitRecipientAndCallerScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	retry, err := submitMessageFixture(b, ctx, r)
-	if err != nil || retry.ID != first.ID || retry.Assistant.Address.AgentID != "codex" {
+	if err != nil || retry.ID != first.ID || retry.Receiver.Address.AgentID != "codex" {
 		t.Fatal("retry moved to changed default", retry, err)
 	}
-	r.RequestID, r.AssistantID = "new", "second"
+	r.RequestID, r.Target.AgentID = "new", "second"
 	second, err := submitMessageFixture(b, ctx, r)
-	if err != nil || second.Assistant.Address.AgentID != "second" {
+	if err != nil || second.Receiver.Address.AgentID != "second" {
 		t.Fatal(second, err)
 	}
-	r.RequestID, r.AssistantID = "same", "codex"
+	r.RequestID, r.Target.AgentID = "same", "codex"
 	r.Text = "changed"
 	if _, err = submitMessageFixture(b, ctx, r); !errors.Is(err, agentlink.ErrConflict) {
 		t.Fatal("changed retry accepted", err)
@@ -384,10 +384,10 @@ func TestSignedAgentLinkDelegatesToCodexDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	directory, err := local.links.Directory(ctx, connection.ID)
-	if err != nil || directory.DefaultAssistantID != "codex" || len(directory.Assistants) != 1 {
+	if err != nil || directory.DefaultAssistant() != "codex" || len(directory.Assistants()) != 1 {
 		t.Fatal(directory, err)
 	}
-	request := agentlink.TaskRequest{RequestID: "signed-task", From: local.identity.Address, Text: "from signed link", Executor: "codex"}
+	request := agentlink.TaskRequest{RequestID: "signed-task", From: local.identity.Address, Text: "from signed link", Target: agentlink.NodeTarget(remote.identity.Address.NodeID)}
 	accepted, err := local.links.Submit(ctx, connection.ID, request)
 	if err != nil {
 		t.Fatal(err)
@@ -417,7 +417,7 @@ func TestAssistantsParallelButOwnSessionSerial(t *testing.T) {
 		t.Fatal(err)
 	}
 	from := protocol.AgentRef{NodeID: "pot-sender", Kind: "assistant", AgentID: "main"}
-	first, err := submitMessageFixture(b, ctx, agentlink.TaskRequest{RequestID: "hang-first", From: from, AssistantID: "codex", Text: "hang"})
+	first, err := submitMessageFixture(b, ctx, agentlink.TaskRequest{RequestID: "hang-first", From: from, Target: agentlink.AssistantTarget(b.nodeID, "codex"), Text: "hang"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,11 +432,11 @@ func TestAssistantsParallelButOwnSessionSerial(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	next, err := submitMessageFixture(b, ctx, agentlink.TaskRequest{RequestID: "queued-next", From: from, AssistantID: "codex", Text: "after interruption"})
+	next, err := submitMessageFixture(b, ctx, agentlink.TaskRequest{RequestID: "queued-next", From: from, Target: agentlink.AssistantTarget(b.nodeID, "codex"), Text: "after interruption"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	parallel, err := submitMessageFixture(b, ctx, agentlink.TaskRequest{RequestID: "other-session", From: from, AssistantID: "second", Text: "parallel"})
+	parallel, err := submitMessageFixture(b, ctx, agentlink.TaskRequest{RequestID: "other-session", From: from, Target: agentlink.AssistantTarget(b.nodeID, "second"), Text: "parallel"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +468,7 @@ func TestVirtualAssistantSendKeepsActiveMessageParent(t *testing.T) {
 	}
 	from := protocol.AgentRef{NodeID: "peer-node", Kind: "assistant", AgentID: "remote"}
 	parent := protocol.Envelope{ID: "parent-message", Kind: "message", From: from, To: b.identity(a).Address, ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: "reference", Hops: 7}
-	task, err := b.submitMessage(ctx, agentlink.TaskRequest{RequestID: "message-parent", From: from, AssistantID: a.ID, Text: parent.Text}, parent)
+	task, err := b.submitMessage(ctx, agentlink.TaskRequest{RequestID: "message-parent", From: from, Target: agentlink.AssistantTarget(b.nodeID, a.ID), Text: parent.Text}, parent)
 	if err != nil {
 		t.Fatal(err)
 	}

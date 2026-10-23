@@ -136,12 +136,9 @@ func (w TaskWorkspace) Validate() error {
 }
 
 type CreateTask struct {
-	Executor  string        `json:"executor,omitempty"`
-	LinkID    string        `json:"link_id,omitempty"`
 	Target    *AgentRef     `json:"target,omitempty"`
 	Workspace TaskWorkspace `json:"workspace"`
 
-	MachineID       string           `json:"machine_id"`
 	Skills          *[]string        `json:"skills"`
 	RequestID       string           `json:"request_id" required:"true"`
 	Text            string           `json:"text" required:"true"`
@@ -152,16 +149,13 @@ type CreateTask struct {
 }
 
 func (t CreateTask) Validate() error {
-	if t.Executor != "" && t.Executor != "codex" || t.Executor != "" && t.Target != nil {
-		return fmt.Errorf("invalid task executor")
-	}
-	if t.LinkID != "" && !core.Identifier(t.LinkID) || t.Target != nil && (!t.Target.Valid() || t.Target.Kind != "assistant") {
-		return fmt.Errorf("invalid agent link target")
+	if t.Target != nil && (!t.Target.Valid() || (t.Target.Kind != "assistant" && (t.Target.Kind != "node" || t.Target.AgentID != t.Target.NodeID))) {
+		return fmt.Errorf("invalid task target")
 	}
 	if err := t.Workspace.Validate(); err != nil {
 		return err
 	}
-	if t.RequestID == "" || len(t.RequestID) > 128 || strings.ContainsRune(t.RequestID, 0) || strings.TrimSpace(t.Text) == "" || len(t.Text) > 65536 || t.MachineID != "" && !core.Identifier(t.MachineID) {
+	if t.RequestID == "" || len(t.RequestID) > 128 || strings.ContainsRune(t.RequestID, 0) || strings.TrimSpace(t.Text) == "" || len(t.Text) > 65536 {
 		return fmt.Errorf("invalid task request")
 	}
 	return nil

@@ -49,7 +49,7 @@ func TestLinkedPotRetiresOnlySelectedAssistant(t *testing.T) {
 		t.Fatal(defs, err)
 	}
 	link, err := a.service.agentLinks.service.Get(ctx, connection.ID)
-	if err != nil || len(link.Directory.Assistants) != 1 || link.Directory.DefaultAssistantID != "" {
+	if err != nil || len(link.Directory.Assistants()) != 1 || link.Directory.DefaultAssistant() != "" {
 		t.Fatal(link, err)
 	}
 	local, err := a.service.Registry.Definitions(ctx)

@@ -120,3 +120,17 @@ func TestEventGateAndChanges(t *testing.T) {
 		t.Fatal(value, err)
 	}
 }
+
+func TestDecodeJSONReceiptTimestamps(t *testing.T) {
+	var receipt struct {
+		CreatedAt time.Time `json:"created_at"`
+	}
+	if err := DecodeJSON([]byte(`{"created_at":"2026-10-23T00:00:00Z"}`), &receipt); err != nil || receipt.CreatedAt.IsZero() {
+		t.Fatal(receipt, err)
+	}
+	for _, raw := range []string{`{"created_at":null}`, `{"created_at":{}}`, `{"created_at":"invalid"}`} {
+		if err := DecodeJSON([]byte(raw), &receipt); err == nil {
+			t.Fatal("accepted invalid timestamp", raw)
+		}
+	}
+}

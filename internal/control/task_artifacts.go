@@ -33,7 +33,7 @@ func (s *Service) prepareTaskOutcome(ctx context.Context, task tasks.Record, eve
 		if task.Launch.ExecutionTarget.RuntimeID != s.options.RuntimeID {
 			artifactErr = protocol.APIError{Code: "original_execution_unavailable"}
 		} else {
-			workspace, err := s.RunnerJournal.TaskWorkspace(ctx, task.Info.ID)
+			workspace, err := s.RunJournal.TaskWorkspace(ctx, task.Info.ID)
 			if err != nil {
 				artifactErr = err
 			} else if workspace != nil {

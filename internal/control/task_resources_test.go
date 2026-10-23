@@ -2,14 +2,13 @@ package control
 
 import (
 	"context"
-	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -43,7 +42,7 @@ func TestWorkerResourcesKeepDestinationInstructionsAndSkills(t *testing.T) {
 	s.options.PluginRoot = pluginRoot
 	s.Profiles.pluginRoot = pluginRoot
 	pluginDir := filepath.Join(pluginRoot, "qualifier")
-	writeTaskFixture(t, filepath.Join(pluginDir, "plugin.json"), `{"schema_version":2,"id":"qualifier","version":"1","contributes":{"tools":{"runtime":"node","execution":"runtime","entrypoint":"plugin.mjs","files":["plugin.mjs"],"requirements":[],"tools":[{"name":"fixture_echo","description":"fixture","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}]}}}`)
+	writeTaskFixture(t, filepath.Join(pluginDir, "plugin.json"), `{"schema_version":3,"name":"qualifier","version":"1","contributes":{"tools":{"runtime":"node","execution":"runtime","entrypoint":"plugin.mjs","files":["plugin.mjs"],"requirements":[],"tools":[{"name":"fixture_echo","description":"fixture","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}]}}}`)
 	writeTaskFixture(t, filepath.Join(pluginDir, "plugin.mjs"), "OLD_PLUGIN")
 	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "test", Name: "Test", Model: "model", Endpoint: "https://example.test", Protocol: "openai_chat", APIKey: "fixture-only", MaxOutputTokens: 100})
 	if err != nil {
@@ -67,30 +66,31 @@ func TestWorkerResourcesKeepDestinationInstructionsAndSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	empty, err := s.currentTaskResource(ctx, runner.Launch{Config: omitted.Config, Plugins: omitted.Plugins})
+	empty, err := s.currentTaskResource(ctx, tasks.Launch{Config: omitted.Config, Plugins: omitted.Plugins})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(empty.Roots) != 0 {
 		t.Fatal("omitted selection inherited global skills")
 	}
-	if _, err = s.currentTaskResource(ctx, runner.Launch{Config: omitted.Config, Plugins: omitted.Plugins, Skills: &[]string{"source"}}); err == nil {
+	if _, err = s.currentTaskResource(ctx, tasks.Launch{Config: omitted.Config, Plugins: omitted.Plugins, Skills: &[]string{"source"}}); err == nil {
 		t.Fatal("source project skill satisfied selected global bundle")
 	}
 	selected, err := s.selectTask(ctx, "main", protocol.CreateTask{Skills: &[]string{"global"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	resources, err := s.currentTaskResource(ctx, runner.Launch{Config: selected.Config, Plugins: selected.Plugins, Skills: &[]string{"global"}})
+	resources, err := s.currentTaskResource(ctx, tasks.Launch{Config: selected.Config, Plugins: selected.Plugins, Skills: &[]string{"global"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, root := range resources.Roots {
-		for _, data := range root.Files {
-			decoded, _ := base64.RawStdEncoding.DecodeString(data)
-			if strings.Contains(string(decoded), "SOURCE_PROJECT_SKILL") || strings.Contains(string(decoded), "MAIN_GLOBAL_PRIVATE") {
-				t.Fatal("Main/source project context crossed resource boundary")
-			}
+		data, err := os.ReadFile(filepath.Join(root.Path, "global", "SKILL.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "SOURCE_PROJECT_SKILL") || strings.Contains(string(data), "MAIN_GLOBAL_PRIVATE") {
+			t.Fatal("unselected context copied")
 		}
 	}
 	cwd := filepath.Join(s.options.Workspace, "tasks", "worker")
@@ -100,12 +100,12 @@ func TestWorkerResourcesKeepDestinationInstructionsAndSkills(t *testing.T) {
 	fixtureGit(t, cwd, "init")
 	writeTaskFixture(t, filepath.Join(cwd, "AGENTS.md"), "DESTINATION_PROJECT")
 	writeTaskFixture(t, filepath.Join(cwd, ".agents", "skills", "destination", "SKILL.md"), "---\nname: destination\ndescription: Destination skill\n---\nDestination")
-	launch := runner.Launch{ControlID: "local", RuntimeID: "local", AssistantID: "main", TaskID: "worker", RunID: "run", Generation: 1, ExecutionTarget: core.RuntimeTarget("local"), Config: selected.Config, Plugins: selected.Plugins, Skills: &[]string{"global"}, Workspace: protocol.TaskWorkspace{Kind: "directory", ProjectDir: cwd}, Text: "work"}
-	run, err := s.RunnerJournal.Accept(ctx, launch)
+	launch := tasks.Launch{ControlID: "local", RuntimeID: "local", AssistantID: "main", TaskID: "worker", RunID: "run", Generation: 1, ExecutionTarget: core.RuntimeTarget("local"), Config: selected.Config, Plugins: selected.Plugins, Skills: &[]string{"global"}, Workspace: protocol.TaskWorkspace{Kind: "directory", ProjectDir: cwd}, Text: "work"}
+	run, err := s.RunJournal.Accept(ctx, launch)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.RunnerJournal.Claim(ctx, "local", "worker", "run"); err != nil {
+	if _, err = s.RunJournal.Claim(ctx, "local", "worker", "run"); err != nil {
 		t.Fatal(err)
 	}
 	// Queued tasks synchronize current global content immediately before Prepare.
@@ -122,11 +122,9 @@ func TestWorkerResourcesKeepDestinationInstructionsAndSkills(t *testing.T) {
 	}
 	contains := func(r taskResource, text string) bool {
 		for _, root := range r.Roots {
-			for _, data := range root.Files {
-				decoded, _ := base64.RawStdEncoding.DecodeString(data)
-				if strings.Contains(string(decoded), text) {
-					return true
-				}
+			data, _ := os.ReadFile(filepath.Join(root.Path, "global", "SKILL.md"))
+			if strings.Contains(string(data), text) {
+				return true
 			}
 		}
 		return false
@@ -142,7 +140,7 @@ func TestWorkerResourcesKeepDestinationInstructionsAndSkills(t *testing.T) {
 		t.Fatal("queued Task did not use current global resources")
 	}
 	writeTaskFixture(t, globalPath, "---\nname: global\ndescription: Global skill\n---\nINFLIGHT_UPDATE")
-	reused, sameDigest, err := s.prepareTaskResources(ctx, launch, func() (taskResource, error) { t.Fatal("in-flight resources fetched again"); return taskResource{}, nil })
+	reused, sameDigest, err := s.prepareTaskResources(ctx, launch)
 	if err != nil || sameDigest != digest || !contains(reused, "QUEUED_UPDATE") || contains(reused, "INFLIGHT_UPDATE") {
 		t.Fatal("original run resource evidence changed", err)
 	}

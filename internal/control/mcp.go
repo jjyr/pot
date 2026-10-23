@@ -52,31 +52,29 @@ type MCPCommand struct {
 	Credentials *MCPCredentials `json:"credentials"`
 }
 
-func (s *Service) mcpServers(ctx context.Context) ([]MCPServer, error) {
-	rows, err := s.integrationDB.QueryContext(ctx, "SELECT id,revision,body FROM mcp_servers ORDER BY id")
-	if err != nil {
+func (s *Service) mcpServers(_ context.Context) ([]MCPServer, error) {
+	f := mcpFile{Version: 1, Servers: []MCPServer{}}
+	if err := readConfig(filepath.Join(s.options.Root, "mcp.json"), &f); err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	result := []MCPServer{}
-	for rows.Next() {
-		var server MCPServer
-		var raw []byte
-		var id string
-		var revision int64
-		if err = rows.Scan(&id, &revision, &raw); err != nil {
-			return nil, err
-		}
-		if err = json.Unmarshal(raw, &server); err != nil {
-			return nil, err
-		}
-		server.ID = id
-		server.Revision = revision
-		server.HasCredentials = server.SecretRef != ""
-		result = append(result, server)
+	if f.Version != 1 {
+		return nil, errors.New("unsupported MCP configuration")
 	}
-	return result, rows.Err()
+	seen := map[string]bool{}
+	for i := range f.Servers {
+		v := &f.Servers[i]
+		if err := validateMCP(*v); err != nil {
+			return nil, err
+		}
+		if seen[v.ID] {
+			return nil, errors.New("duplicate MCP name")
+		}
+		seen[v.ID] = true
+		v.HasCredentials = v.SecretRef != ""
+	}
+	return f.Servers, nil
 }
+
 func validateMCP(server MCPServer) error {
 	if server.Auth != "" && server.Auth != "none" && server.Auth != "oauth" {
 		return errors.New("invalid MCP authentication")
@@ -178,7 +176,7 @@ func (s *Service) ManageMCP(ctx context.Context, command MCPCommand) (any, error
 			}
 		}
 		if command.Action == "remove" {
-			_, err = s.integrationDB.ExecContext(ctx, "DELETE FROM mcp_servers WHERE id=? AND revision=?", old.ID, old.Revision)
+			err = s.saveMCP(*old, true)
 			result = map[string]bool{"saved": err == nil}
 			return err
 		}
@@ -186,8 +184,7 @@ func (s *Service) ManageMCP(ctx context.Context, command MCPCommand) (any, error
 			tools, err := s.discoverMCP(ctx, *old)
 			if err != nil {
 				old.Status = "unavailable"
-				body, _ := json.Marshal(old)
-				_, saveErr := s.integrationDB.ExecContext(ctx, "UPDATE mcp_servers SET revision=?,body=? WHERE id=?", old.Revision, body, old.ID)
+				saveErr := s.saveMCP(*old, false)
 				s.Changes.Notify("extensions")
 				return errors.Join(err, saveErr)
 			}
@@ -242,11 +239,7 @@ func (s *Service) ManageMCP(ctx context.Context, command MCPCommand) (any, error
 			return errors.New("unknown MCP action")
 		}
 		server.Revision++
-		body, err := json.Marshal(server)
-		if err != nil {
-			return err
-		}
-		_, err = s.integrationDB.ExecContext(ctx, "INSERT INTO mcp_servers(id,revision,body) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,body=excluded.body", server.ID, server.Revision, body)
+		err = s.saveMCP(server, false)
 		server.SecretRef = ""
 		server.HasCredentials = command.Credentials != nil || old != nil && old.HasCredentials
 		result = server

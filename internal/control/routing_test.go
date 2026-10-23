@@ -10,7 +10,6 @@ import (
 
 	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/core"
-	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 )
 
@@ -36,7 +35,7 @@ func TestRoutingCASQuotaFencesAndCompleteCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := tasks.Record{LaunchSent: true, Config: spec}
+	record := tasks.Record{Launch: &tasks.Launch{}, Config: &spec}
 	raw, _ := json.Marshal(record)
 	if _, err = s.Tasks.DB().ExecContext(ctx, "INSERT INTO tasks VALUES('main','unknown','waiting',0,?)", string(raw)); err != nil {
 		t.Fatal(err)
@@ -76,46 +75,6 @@ func TestRoutingCASQuotaFencesAndCompleteCatalog(t *testing.T) {
 	summary := s.modelContext()
 	if len(summary) > 4100 || !strings.Contains(summary, "model-004") || strings.Contains(summary, "model-079") {
 		t.Fatal("routing summary is unbounded or lost configured models")
-	}
-}
-func TestTaskMachineSelectionDefaultsLocalAndKeepsOriginalReceipt(t *testing.T) {
-	s := taskResourceService(t)
-	ctx := context.Background()
-	if machine, err := s.selectTaskMachine(ctx, ""); err != nil || machine != "local" {
-		t.Fatal("default did not select local Runtime", machine, err)
-	}
-	if err := s.Machines.SetLabels(ctx, "local", []string{"task-runner"}); err != nil {
-		t.Fatal(err)
-	}
-	machine, err := s.selectTaskMachine(ctx, "")
-	if err != nil || machine != "local" {
-		t.Fatal(machine, err)
-	}
-	// Tasks tests inject model/port contracts independently; this verifies the
-	// default-choice retry never calls the dynamic placement resolver again.
-	calls := 0
-	spec := taskConfig(t)
-	service, err := tasks.Open(t.TempDir()+"/tasks.sqlite", tasks.Options{ControlID: "control", RuntimeID: "local", ResolveMachine: func(context.Context, string) (string, error) {
-		calls++
-		if calls > 1 {
-			return "changed", nil
-		}
-		return "original", nil
-	}, ResolveModel: func(context.Context, string, protocol.CreateTask) (tasks.Selection, error) {
-		return tasks.Selection{Config: spec, Plugins: []string{}}, nil
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer service.Close()
-	request := protocol.CreateTask{RequestID: "admit", Text: "Work"}
-	first, err := service.Create(ctx, "main", request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := service.Create(ctx, "main", request)
-	if err != nil || first.Info.ID != second.Info.ID || second.Request.MachineID != "original" || calls != 1 {
-		t.Fatal(first, second, calls, err)
 	}
 }
 func taskConfig(t *testing.T) core.ResolvedSpec {

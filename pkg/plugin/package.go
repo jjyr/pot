@@ -14,8 +14,9 @@ import (
 )
 
 type Package struct {
-	Root     string
-	Manifest core.PluginManifest
+	Root        string
+	Manifest    core.PluginManifest
+	DisplayName string
 }
 
 func Load(directory string) (Package, error) {
@@ -28,10 +29,12 @@ func Load(directory string) (Package, error) {
 	if err != nil {
 		return p, err
 	}
-	if err = core.DecodeJSON(data, &p.Manifest); err != nil {
+	definition, err := DecodeDefinition(data)
+	if err != nil {
 		return p, err
 	}
-	return p, p.Manifest.Validate()
+	p.Manifest, p.DisplayName = definition.Snapshot(), definition.DisplayName
+	return p, nil
 }
 
 func Discover(directory string) ([]Package, error) {
@@ -54,6 +57,9 @@ func Discover(directory string) ([]Package, error) {
 		p, err := Load(filepath.Join(directory, entry.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("plugin %s: %w", entry.Name(), err)
+		}
+		if entry.Name() != p.Manifest.ID {
+			return nil, errors.New("plugin directory must match its name")
 		}
 		if seen[p.Manifest.ID] {
 			return nil, errors.New("duplicate plugin ID")
@@ -125,7 +131,7 @@ func (p Package) Executable(name string) (string, error) {
 }
 
 // ToolBundle projects only the selected tool capability and its text files.
-// Only explicitly declared tool files enter transferable Task bundles.
+// Only explicitly declared tool files enter local execution snapshots.
 func (p Package) ToolBundle() (core.PluginBundle, error) {
 	b := core.PluginBundle{}
 	if err := p.Manifest.Validate(); err != nil {
@@ -179,7 +185,7 @@ func (p Package) BackgroundIdentity() (core.PluginIdentity, error) {
 	return identity, err
 }
 
-// ModelProviderIdentity pins the Control-local definitions and adapter files.
+// ModelProviderIdentity pins the node-local definitions and adapter files.
 // It does not authorize execution or add these assets to a Task bundle.
 func (p Package) ModelProviderIdentity() (core.PluginIdentity, error) {
 	identity := core.PluginIdentity{ID: p.Manifest.ID, Version: p.Manifest.Version}

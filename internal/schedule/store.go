@@ -88,7 +88,10 @@ func (s *Service) Get(ctx context.Context, assistant, id string) (*Plan, error) 
 	return readPlan(ctx, s.db, assistant, id)
 }
 func (s *Service) resolve(ctx context.Context, assistant string, spec protocol.ScheduleSpec, id string) (resolved, error) {
-	request := protocol.CreateTask{MachineID: spec.MachineID, RequestID: id, Text: fmt.Sprintf("[Scheduled] %s\n%s\n\nThis is one independent scheduled run. Complete the check and report its findings, evidence and limitations in your final reply. Maintain any business-specific checkpoints in your own task data as needed. Do not fabricate evidence or success if the check failed. Do not edit schedules or start other tasks.", spec.Title, spec.Goal), Profile: spec.Profile, Model: spec.Model, Requirements: spec.Requirements}
+	if _, err := s.options.Tasks.LocalMachine(ctx, spec.MachineID); err != nil {
+		return resolved{}, err
+	}
+	request := protocol.CreateTask{RequestID: id, Text: fmt.Sprintf("[Scheduled] %s\n%s\n\nThis is one independent scheduled run. Complete the check and report its findings, evidence and limitations in your final reply. Maintain any business-specific checkpoints in your own task data as needed. Do not fabricate evidence or success if the check failed. Do not edit schedules or start other tasks.", spec.Title, spec.Goal), Profile: spec.Profile, Model: spec.Model, Requirements: spec.Requirements}
 	selection, err := s.options.Tasks.Prepare(ctx, assistant, request)
 	return resolved{request, selection}, err
 }
@@ -120,7 +123,7 @@ func (s *Service) Manage(ctx context.Context, assistant string, request Request,
 		spec := *request.Spec
 		if spec.MachineID == "" {
 			if request.Action == "create" {
-				spec.MachineID, err = s.options.Tasks.ResolveMachine(ctx, "")
+				spec.MachineID, err = s.options.Tasks.LocalMachine(ctx, "")
 				if err != nil {
 					return nil, err
 				}

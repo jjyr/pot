@@ -1,9 +1,9 @@
 # Plugin packages
 
-A plugin is a trusted locally installed directory with a schema-2 `plugin.json`
+A plugin is a trusted locally installed directory with a schema-3 `plugin.json`
 manifest. `pkg/plugin` validates identity and confined file access without
 starting processes. Packages can contribute tools, owner-enabled background
-services, Control-local MCP servers and node-local model connection types.
+services, Node-local MCP servers and node-local model connection types.
 Unknown manifest fields fail explicitly.
 
 ```text
@@ -13,11 +13,22 @@ Package manifest + declared files
            |
            +-- tools ----------> digest-pinned Task bundle -> executor
            +-- background -----> local service -> assistant inbox
-           +-- mcp ------------> Control-local stdio server / tool handlers
+           +-- mcp ------------> Node-local stdio server / tool handlers
            `-- model_providers -> local connection registry / metadata reader
 ```
 
 ## Manifest and execution
+
+Installed manifests use `schema_version: 3`, `name` as the unique package key,
+and optional `display_name` for presentation. The directory basename must match
+`name`; packages installed through Extensions are copied to
+`~/.pot/plugins/<name>`. Import rejects legacy `id` manifests. The one-time
+storage upgrade converts already installed schema-2 packages. Provider and tool
+IDs within contributions retain their own identities.
+
+Immutable execution snapshots use an internal manifest projection with the
+original ID-based schema. They are distinct from installed definitions; upgrades
+do not rewrite digest-bound historical execution evidence.
 
 `contributes.tools` declares `runtime: "node"`, `execution: "runtime"`,
 `entrypoint`, `files`, `requirements` and `tools`. Optional `credentials` name
@@ -31,7 +42,7 @@ the declared UTF-8 files, limited to 32 files / 512 KiB, and are digest-pinned.
 Executors reject extra payloads and unknown capabilities. Tool installation does
 not grant execution authority; each call uses [execution authorization](permissions.md). A shell command grant never authorizes a plugin. Protected plugin sessions are sandboxed; Trusted machines use host sessions.
 
-## Discovery, synchronization and packaging
+## Discovery and packaging
 
 Trusted tool implementations may return a preflight failure with `isError:true`,
 an `error` message, an optional `code`, and `execution_status:"not_started"` only
@@ -122,11 +133,11 @@ revisions, package digests and enablement fence acceptance. These capabilities
 and files never enter Task tool bundles. Quota API failures are independent of
 inference availability; host policy owns monitoring and assistant delivery.
 
-## Control-local MCP contributions
+## Node-local MCP contributions
 
 `contributes.mcp` declares `runtime: "node"`, `execution: "control"`, an entrypoint,
 a bounded file set and optional declared credentials. These files stay on the
-owning Control and never enter Runtime tool bundles.
+owning node and never enter task tool bundles.
 `pkg/mcp` supplies the official Go SDK client and shared Node SDK server runtime;
 `pkg/pluginhost` owns process startup, declared credentials, a 30-second
 invocation deadline and supervised cleanup. The plugin entrypoint imports the
@@ -148,7 +159,7 @@ or exposes credentials through callbacks. Checkpoints remain private to the poll
 
 ## Background services and assistant notifications
 
-An installed schema-2 package can additionally declare `contributes.background`:
+An installed schema-3 package can additionally declare `contributes.background`:
 
 ```json
 {
@@ -300,7 +311,7 @@ independent Controls/devices. The owner must inspect interrupted conversations.
 ### GitHub notifications
 
 The bundled GitHub package owns subscription configuration, defaults, GitHub API
-reads, filtering, deduplication and aggregation. Its Control-local **MCP stdio
+reads, filtering, deduplication and aggregation. Its Node-local **MCP stdio
 server** exposes `list_subscriptions`, `create_subscription`, `update_subscription`,
 `delete_subscription` and `read_notifications`. Agent preparation performs MCP
 `initialize` and `tools/list`; `mcp_github` forwards the selected name and JSON

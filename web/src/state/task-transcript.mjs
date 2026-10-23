@@ -20,7 +20,7 @@ export function appendTaskEvents(state,events){
   return state;
 }
 
-// Applied inputs use the Runner's durable bookmark, independent of HTTP fetch
+// Applied inputs use the execution's durable bookmark, independent of HTTP fetch
 // order or clocks on separate machines. Unapplied inputs remain at the tail.
 export function projectTaskMessages(state,inputs,record,{offline=false}={}){
   const phase=record.info?.phase,active=['queued','running','waiting','waiting_approval'].includes(phase),rows=[];

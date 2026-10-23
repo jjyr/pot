@@ -735,7 +735,6 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       const policy=value.quota.policy;
       limitProjection.append(action(`${tr('Usage limits','用量限制')}${pages.length>1?' · '+page.space.name:''}`,()=>policyEditor(policy,owner),{disabled:page.stale}));
       if(value.quota?.active){const allowance=card(`${tr('Token allowance','Token 配额')} · ${page.space.name}`);allowance.append(n('p','hint',value.quota?.active?`${Number(value.quota.remaining).toLocaleString(locale())} ${tr('remaining','剩余')} · ${value.quota.reset_label||''}`:tr('No active token limit','未启用 token 限额')),action(tr('Edit allowance','编辑配额'),()=>policyEditor(policy,owner),{disabled:page.stale}));projection.append(allowance);}
-      if(usageOwner&&!usageOwner.returnTask)for(const mail of value.mail_waits||[]){const waiting=section(tr('Correspondence waiting for allowance','助手通信正在等待配额'));waiting.append(n('p','hint',mail.provider||''));const requestID=uid(),resume=action(tr('Resume correspondence','恢复助手通信'),event=>operation(event.currentTarget,()=>request('/api/v1/usage/resume',{...owner,method:'POST',body:{request_id:requestID,scope:mail.scope,turn:mail.turn,since:mail.since}}),()=>show('usage',{keepUsageOwner:true})),{disabled:page.stale});waiting.append(resume);projection.append(waiting);}
       if(value.waiting){const waiting=section(tr('Waiting for allowance','等待配额'));waiting.append(n('p','hint',value.waiting.provider||''));for(const name of ['resume','cancel']){const requestID=uid(),task=usageOwner?.returnTask;const button=action(tr(name==='resume'?'Resume':'Cancel waiting',name==='resume'?'恢复':'取消等待'),event=>operation(event.currentTarget,async()=>{if(task)return request(`/api/v1/tasks/${encodeURIComponent(task.id)}/${name}`,{...owner,method:'POST',body:{request_id:requestID,...(name==='resume'?{turn:value.waiting.turn,since:value.waiting.since}:{})}});if(name==='resume')return request('/api/v1/usage/resume',{...owner,method:'POST',body:{request_id:requestID,turn:value.waiting.turn,since:value.waiting.since}});const snapshot=await request('/api/v1/snapshot',owner),message=snapshot.messages?.find(message=>message.id===snapshot.turn?.user_message_id);if(!message||message.request_id!==value.waiting.turn)throw Error(tr('Allowance wait changed. Refresh Usage.','配额等待已变化，请刷新用量页面。'));return request('/api/v1/turn/cancel',{...owner,method:'POST',body:{request_id:requestID,user_message_id:message.id}});},()=>show('usage',{keepUsageOwner:true})),{disabled:page.stale||!usageOwner});waiting.append(button);}projection.append(waiting);}
     }
       for(const [index,node]of [...projection.children].entries())node.dataset.viewKey=node.querySelector('h2')?.textContent||node.className+':'+index;
@@ -775,8 +774,8 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
         if(disposed||editor!==currentEditor||host.firstElementChild!==currentRoot)return;
         const link=(snapshot.items||[]).find(item=>item.id===connectedID);
         if(!link)throw Error(translate(locale(),'agentLinks.failed'));
-        const assistants=(link.assistants||link.directory?.assistants||[]).filter(item=>(item.capabilities||link.directory?.operations?.[item.address?.agent_id||item.id])?.operations?.includes('chat.read')),defaultID=link.directory?.default_assistant_id;
-        if(!assistants.length&&link.directory?.task_executor){await leave();route='add-assistant';const list=body();list.append(n('h1','',t('executorTitle')),n('p','hint',t('executorDescription')),action(t('back'),()=>show('add-assistant',{force:true})));return;}
+        const assistants=(link.assistants||link.directory?.targets?.filter(item=>item.address?.kind==='assistant')||[]).filter(item=>item.capabilities?.operations?.includes('chat.read')),defaultID=link.directory?.default_target?.agent_id;
+        if(!assistants.length&&link.directory?.targets?.some(item=>item.address?.kind==='node'&&item.capabilities?.operations?.includes('task.submit'))){await leave();route='add-assistant';const list=body();list.append(n('h1','',t('executorTitle')),n('p','hint',t('executorDescription')),action(t('back'),()=>show('add-assistant',{force:true})));return;}
         const chosen=assistants.length===1?assistants[0]:assistants.find(item=>(item.address?.agent_id||item.id)===defaultID);
         const open=assistant=>openChat({space:captured.space,owner:'agent-link:'+connectedID+':'+(assistant.address?.agent_id||assistant.id)});
         if(chosen){await leave();await open(chosen);return;}
@@ -843,7 +842,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
         if(node.subtitle)view.inspector.append(n('p','hint topology-host',node.subtitle));
         view.inspector.append(n('p',node.status==='connected'?'success-text':'hint',t(paused?'agentLinks.disconnected':node.status==='stale'?'topology.status.stale':'agentLinks.status.'+(node.status==='connected'?'connected':node.status==='connecting'?'connecting':'offline'))),n('p','hint',t(paused?'agentLinks.disconnectedDescription':'topology.messageScope')));
         showActivity(node);
-        const assistants=node.link?.assistants||node.link?.directory?.assistants||(!node.link?(client.assistants||[]).filter(item=>!item.origin&&item.space_id===node.space):[]),directory=n('section','topology-assistants');
+        const assistants=node.link?.assistants||node.link?.directory?.targets?.filter(item=>item.address?.kind==='assistant')||(!node.link?(client.assistants||[]).filter(item=>!item.origin&&item.space_id===node.space):[]),directory=n('section','topology-assistants');
         directory.append(n('h3','section-heading',t('agentLinks.providedAssistants')));
         if(!assistants.length)directory.append(n('p','hint',t('agentLinks.noAssistants')));
         for(const assistant of assistants){
@@ -852,8 +851,8 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
           open.append(avatar(24,assistant.avatar),n('span','topology-assistant-name',assistant.name||remoteID));
           const activity=node.activities?.get(remoteID),state=node.observation?.fresh?assistantActivityState(activity):'unknown';
           open.append(n('span','topology-assistant-state state-'+state,t('topology.activity.'+state)));
-          if(remoteID===(node.link?.default_assistant_id||node.link?.directory?.default_assistant_id))open.append(n('span','hint',t('agentLinks.defaultAssistant')));
-          if(node.link&&!(assistant.capabilities||node.link.directory?.operations?.[remoteID])?.operations?.includes('chat.read'))open.disabled=true;
+          if(remoteID===(node.link?.default_assistant_id||node.link?.directory?.default_target?.agent_id))open.append(n('span','hint',t('agentLinks.defaultAssistant')));
+          if(node.link&&!assistant.capabilities?.operations?.includes('chat.read'))open.disabled=true;
           open.setAttribute('aria-label',t('agentLinks.openChat')+' · '+(assistant.name||remoteID));directory.append(open);
         }
         view.inspector.append(directory);

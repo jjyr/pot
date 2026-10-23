@@ -28,7 +28,7 @@ async function run(){
       async request(path){
         const url=new URL(path,location.href);
         if(url.pathname==='/api/v1/spaces')return {active_space_id:'one',items:[{id:'one',name:'Fixture',control_id:'fixture',connected:true}]};
-        if(url.pathname==='/api/v1/assistants')return {items:[{id:'alpha',name:'Alpha'},{id:'beta',name:'Beta'}]};
+        if(url.pathname==='/api/v1/assistants')return {items:[{id:'alpha',name:'Alpha'},{id:'beta',name:'Beta'}].map(item=>({...item,capabilities:{version:1,operations:['chat.read','chat.send','assistant.configure','task.list']}}))};
         if(url.pathname==='/api/v1/tasks/query'){await pause(taskDelay);return {items:Array.from({length:taskCount},(_,index)=>({id:`task-${index}`,title:`Background task ${index+1}`,phase:'running',assistant_id:scope.owner}))};}
         return {items:[],pending:[],policy:{}};
       },

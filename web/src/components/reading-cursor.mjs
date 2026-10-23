@@ -52,7 +52,8 @@ export function createReadingCursor(history,{active=()=>true,requestRender=()=>{
     if(!active()||depth||Math.abs(history.scrollTop-appliedTop)<.5)return false;
     if(width&&(history.clientWidth!==width||history.clientHeight!==height)){apply();return false;}
     if(!moving){apply();return false;}
-    read();appliedTop=history.scrollTop;scrolled();return true;
+    const delta=history.scrollTop-appliedTop;
+    read();appliedTop=history.scrollTop;scrolled(delta);return true;
   }
   function gesture(event,{up=false}={}){
     if(event.defaultPrevented||!active())return false;

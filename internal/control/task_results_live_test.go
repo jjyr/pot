@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/internal/assistant"
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/internal/tasks"
@@ -104,8 +103,8 @@ func TestConfiguredModelTaskResultsLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	var requests atomic.Int32
-	prepare := s.Runner.Prepare
-	s.Runner.Prepare = func(ctx context.Context, run runner.Run) (runner.Prepared, error) {
+	prepare := s.TaskRuns.Prepare
+	s.TaskRuns.Prepare = func(ctx context.Context, run tasks.Run) (tasks.Prepared, error) {
 		prepared, err := prepare(ctx, run)
 		if err == nil {
 			prepared.Agent.Services = taskResultsLiveServices{prepared.Agent.Services.(core.ExecutionServices), &requests}
@@ -181,11 +180,11 @@ func TestConfiguredModelTaskResultsLive(t *testing.T) {
 				}
 				id = accepted.TaskID
 			} else {
-				record, err := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: scenario.name, Text: "Live " + scenario.name + "\n" + scenario.goal})
+				record, err := s.CreateTask(ctx, "main", protocol.CreateTask{RequestID: scenario.name, Text: "Live " + scenario.name + "\n" + scenario.goal})
 				if err != nil {
 					t.Fatal(err)
 				}
-				id = record.Info.ID
+				id = record.ID
 			}
 			s.wakeTasks()
 			record := awaitLifecycleTask(t, ctx, s, id, func(r *tasks.Record) bool { return r.Info.Phase.Scope() != "active" })

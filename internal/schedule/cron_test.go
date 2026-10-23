@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jjyr/pot/internal/tasks"
-	"github.com/jjyr/pot/pkg/core"
 	"sync"
 	"testing"
 	"time"
@@ -187,7 +186,7 @@ func TestCronConcurrentOccurrenceRestartPauseAndEdit(t *testing.T) {
 	if err = f.tasks.Close(); err != nil {
 		t.Fatal(err)
 	}
-	queue, err := tasks.Open(path, tasks.Options{ControlID: "control", RuntimeID: "machine", Port: f.destination, ResolveModel: func(context.Context, string, protocol.CreateTask) (tasks.Selection, error) { return selection, nil }, ResolveTarget: func(context.Context, string) (core.ExecutionTarget, error) { return core.RuntimeTarget("machine"), nil }})
+	queue, err := tasks.Open(path, tasks.Options{NodeID: "machine", Executor: f.destination, ResolveModel: func(context.Context, string, protocol.CreateTask) (tasks.Selection, error) { return selection, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}

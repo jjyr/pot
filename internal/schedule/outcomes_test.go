@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/jjyr/pot/internal/hooks"
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -32,7 +31,7 @@ func scheduledTask(t *testing.T, f fixture, spec protocol.ScheduleSpec) (protoco
 	return info, *task
 }
 
-func finishScheduled(t *testing.T, f fixture, task tasks.Record, phase runner.Phase) {
+func finishScheduled(t *testing.T, f fixture, task tasks.Record, phase tasks.Phase) {
 	t.Helper()
 	ctx := context.Background()
 	if err := f.tasks.Tick(ctx); err != nil {
@@ -43,8 +42,8 @@ func finishScheduled(t *testing.T, f fixture, task tasks.Record, phase runner.Ph
 			continue
 		}
 		run.Phase, run.CleanupConfirmed = phase, true
-		run.Result = &runner.Terminal{Outcome: core.Success, Text: "partial output"}
-		if phase == runner.Failed {
+		run.Result = &tasks.Terminal{Outcome: core.Success, Text: "partial output"}
+		if phase == tasks.Failed {
 			run.Result.Outcome = core.Outcome{Kind: "failed", Error: "actual execution failure"}
 		}
 		f.destination.runs[id] = run
@@ -82,7 +81,7 @@ func TestScheduledOutcomesUseSharedInboxAndPolicy(t *testing.T) {
 				switch scenario {
 				case "failed":
 					phase = protocol.TaskFailed
-					finishScheduled(t, f, task, runner.Failed)
+					finishScheduled(t, f, task, tasks.Failed)
 				case "interrupted", "cancelled":
 					mode := "interrupt"
 					phase = protocol.TaskInterrupted
@@ -93,7 +92,7 @@ func TestScheduledOutcomesUseSharedInboxAndPolicy(t *testing.T) {
 						t.Fatal(err)
 					}
 				default:
-					finishScheduled(t, f, task, runner.Complete)
+					finishScheduled(t, f, task, tasks.Complete)
 				}
 				event, state := taskEnvelope(t, f, task.Info.ID)
 				notify := policy == "all" || (phase == protocol.TaskFailed || phase == protocol.TaskInterrupted)
@@ -201,6 +200,13 @@ func TestScheduledPolicySnapshotSurvivesRestart(t *testing.T) {
 	if err := f.tasks.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}
+	f.destination.complete(task.Info.ID)
+	if _, err := f.tasks.DB().Exec(`CREATE TRIGGER reject_outcome BEFORE INSERT ON agent_messages WHEN json_extract(NEW.envelope,'$.kind')='task_result' BEGIN SELECT RAISE(ABORT,'reject outcome'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.tasks.Tick(ctx); err == nil {
+		t.Fatal("outcome failure did not roll back")
+	}
 	// Editing a definition changes its generation and policy, not this occurrence.
 	spec.Notify, spec.Goal = "failures", "A new observation goal"
 	if _, err := f.schedule.Manage(ctx, "assistant", Request{RequestID: "edit", Action: "update", ScheduleID: info.ID, Spec: &spec}, millis("2026-10-16T00:02:00Z")); err != nil {
@@ -215,8 +221,7 @@ func TestScheduledPolicySnapshotSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	var schedules *Service
-	restored, err := tasks.Open(path, tasks.Options{ControlID: "control", RuntimeID: "machine", Port: f.destination,
-		ResolveTarget: func(context.Context, string) (core.ExecutionTarget, error) { return core.RuntimeTarget("machine"), nil },
+	restored, err := tasks.Open(path, tasks.Options{NodeID: "machine", Executor: f.destination,
 		PrepareOutcome: func(ctx context.Context, task tasks.Record, event protocol.TaskResultEvent) (tasks.OutcomeCommit, error) {
 			return schedules.PrepareOutcome(ctx, task, event)
 		},
@@ -230,7 +235,9 @@ func TestScheduledPolicySnapshotSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.tasks, f.schedule = restored, schedules
-	f.destination.complete(task.Info.ID)
+	if _, err := restored.DB().Exec("DROP TRIGGER reject_outcome"); err != nil {
+		t.Fatal(err)
+	}
 	if err := restored.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}

@@ -20,7 +20,7 @@ func TestTaskReplyArtifactsUpgrade(t *testing.T) {
 			prior := fstest.MapFS{}
 			entries, _ := fs.ReadDir(migrationFiles, "migrations/tasks")
 			for _, entry := range entries {
-				if entry.Name() >= "0022_" || skip && entry.Name() >= "0008_" {
+				if entry.Name() >= "0027_" || skip && entry.Name() >= "0008_" {
 					continue
 				}
 				name := "migrations/tasks/" + entry.Name()
