@@ -14,7 +14,7 @@ func address(control, assistant string) protocol.AgentRef {
 func mailbox(t *testing.T, control string) (*Mailbox, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "mail.sqlite")
-	m, err := OpenMailbox(path, control)
+	m, err := OpenMailbox(path, control, MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestRemoteMailDurableReceiptDedupAndRestartFence(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.Close()
-	b, err = OpenMailbox(bpath, "control-b")
+	b, err = OpenMailbox(bpath, "control-b", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestRemoteMailDurableReceiptDedupAndRestartFence(t *testing.T) {
 	if history, err := b.History(ctx, "unrelated", 0); err != nil || len(history) != 0 {
 		t.Fatal("mail leaked across owners", history, err)
 	}
-	if wrong, err := OpenMailbox(bpath, "wrong-control"); err == nil {
+	if wrong, err := OpenMailbox(bpath, "wrong-control", MailboxOptions{}); err == nil {
 		wrong.Close()
 		t.Fatal("mailbox rebound")
 	}
@@ -109,7 +109,7 @@ func TestPeerFenceDoesNotBlockOtherAgent(t *testing.T) {
 	deliver(t, b, two)
 	b.Close()
 	var err error
-	b, err = OpenMailbox(bpath, "control-b")
+	b, err = OpenMailbox(bpath, "control-b", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

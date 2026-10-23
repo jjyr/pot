@@ -71,7 +71,7 @@ func (f *fixture) open() {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	mail, err := assistant.OpenMailbox(filepath.Join(f.root, "tasks.sqlite"), f.id)
+	mail, err := assistant.OpenMailbox(filepath.Join(f.root, "tasks.sqlite"), f.id, assistant.MailboxOptions{})
 	if err != nil {
 		f.t.Fatal(err)
 	}

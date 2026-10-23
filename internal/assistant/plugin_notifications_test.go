@@ -21,7 +21,7 @@ import (
 func TestPluginAcceptanceDurableConcurrentIdempotentAndBound(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "mail.sqlite")
-	m, err := OpenMailbox(path, "control")
+	m, err := OpenMailbox(path, "control", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestPluginAcceptanceDurableConcurrentIdempotentAndBound(t *testing.T) {
 	if err = m.Close(); err != nil {
 		t.Fatal(err)
 	}
-	m, err = OpenMailbox(path, "control")
+	m, err = OpenMailbox(path, "control", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestPluginAcceptanceDurableConcurrentIdempotentAndBound(t *testing.T) {
 func TestPluginInterruptedAttemptFencedAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "mail.sqlite")
-	m, _ := OpenMailbox(path, "control")
+	m, _ := OpenMailbox(path, "control", MailboxOptions{})
 	b := BackgroundBinding{ID: "example", PluginID: "example", Enabled: true, Assistant: "main", Config: []byte(`{}`)}
 	m.ConfigureBackground(ctx, b)
 	stored, _ := m.Backgrounds(ctx)
@@ -153,7 +153,7 @@ func TestPluginInterruptedAttemptFencedAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.Close()
-	m, err := OpenMailbox(path, "control")
+	m, err := OpenMailbox(path, "control", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestPluginInterruptedAttemptFencedAfterRestart(t *testing.T) {
 
 func TestPluginCapacityRetryAndImmediateReclaim(t *testing.T) {
 	ctx := context.Background()
-	m, err := OpenMailbox(filepath.Join(t.TempDir(), "mail.sqlite"), "control")
+	m, err := OpenMailbox(filepath.Join(t.TempDir(), "mail.sqlite"), "control", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestPluginStoredFormatUpgradePreservesBindingAndReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.Close()
-	m, err := OpenMailbox(path, "local")
+	m, err := OpenMailbox(path, "local", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,12 +378,12 @@ func TestPluginNotificationBatchCountsCanonicalPayloadBytes(t *testing.T) {
 func TestPluginDefaultInitializationConcurrent(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "mail.sqlite")
-	m, err := OpenMailbox(path, "local")
+	m, err := OpenMailbox(path, "local", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer m.Close()
-	other, err := OpenMailbox(path, "local")
+	other, err := OpenMailbox(path, "local", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +447,7 @@ func TestPluginDefaultInitializationConcurrent(t *testing.T) {
 func TestPluginBackgroundFailureDiagnosticSurvivesRestartAndClearsOnSuccess(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "mail.sqlite")
-	m, err := OpenMailbox(path, "control")
+	m, err := OpenMailbox(path, "control", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +460,7 @@ func TestPluginBackgroundFailureDiagnosticSurvivesRestartAndClearsOnSuccess(t *t
 		t.Fatal(err)
 	}
 	m.Close()
-	m, err = OpenMailbox(path, "control")
+	m, err = OpenMailbox(path, "control", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -643,7 +643,7 @@ func TestBackgroundWritesFenceInflightAndRetainOpaqueProgress(t *testing.T) {
 // capacity exhaustion on the last receiver rolls back the earlier enqueue.
 func TestPluginFanoutAtomicBackpressureRevisionAndRetry(t *testing.T) {
 	ctx := context.Background()
-	m, err := OpenMailbox(filepath.Join(t.TempDir(), "mail.sqlite"), "control")
+	m, err := OpenMailbox(filepath.Join(t.TempDir(), "mail.sqlite"), "control", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

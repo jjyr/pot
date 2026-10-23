@@ -68,6 +68,13 @@ and notification views are transcript/receiver projections over this table, not 
 Task completion and its event commit in the same transaction. Task schema 10 stores node addresses; automatic migrations upgrade the prior
 unified outcome format without importing legacy queues or schedule notifications.
 
+New local assistant mail checks the recipient's active identity inside the inbox
+writer transaction. Assistant retirement takes the same writer lock and rejects
+queued, processing, allowance-waiting or interrupted correspondence. Either mail
+is accepted first and blocks retirement, or retirement commits first and new mail
+is rejected. Exact retries retain their immutable receipts after retirement;
+direct-user reply projections do not require an active local assistant.
+
 The assistant's user inbox is separate and has priority at turn boundaries.
 Accepted requests arriving during automatic result handling start their
 own Main turn afterwards; they do not inherit the summary's role. Pending user

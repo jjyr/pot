@@ -51,9 +51,6 @@ func (m controlLinkMailbox) Deliver(ctx context.Context, value protocol.Envelope
 		if value.To.Kind != "assistant" {
 			return protocol.Receipt{}, agentlink.ErrNotFound
 		}
-		if _, err := m.s.agentLinkIdentity(ctx, value.To.AgentID); err != nil {
-			return protocol.Receipt{}, err
-		}
 	}
 	var receipt protocol.Receipt
 	if direct {
