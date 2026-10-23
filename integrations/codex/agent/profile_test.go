@@ -22,16 +22,21 @@ import (
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/assistantavatar"
 	"github.com/jjyr/pot/pkg/execution"
+	"github.com/jjyr/pot/pkg/peer"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/web"
 )
 
-func profileApplication(t *testing.T) (*agentHost, *transport.Application, string) {
+func profileApplication(t *testing.T, configure ...func(*peer.Server)) (*agentHost, *transport.Application, string) {
 	t.Helper()
 	h, _ := testHost(t)
 	t.Cleanup(h.close)
 	ctx := context.Background()
-	listener, err := linkhost.ListenPeer(ctx, "127.0.0.1:0", h.peerServer())
+	server := h.peerServer()
+	for _, apply := range configure {
+		apply(server)
+	}
+	listener, err := linkhost.ListenPeer(ctx, "127.0.0.1:0", server)
 	if err != nil {
 		t.Fatal(err)
 	}

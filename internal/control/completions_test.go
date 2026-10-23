@@ -145,7 +145,36 @@ func TestAssistantCompletionsRetireDefinitionsWithoutUsingHistoricalContacts(t *
 		if err != nil {
 			t.Fatal(err)
 		}
-		return value["items"].([]protocol.Completion)
+		items := value["items"].([]protocol.Completion)
+		if query == "@" {
+			// The product tool reads the same persisted active directory as Chat
+			// and Task completions, independently of sidebar chat capabilities.
+			listed, err := a.service.productCall(ctx, owner.ID, "directory-check", "list_assistants", []byte("{}"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			active := map[protocol.AgentRef]bool{}
+			for _, assistant := range listed.(map[string]any)["assistants"].([]protocol.MailAssistant) {
+				if assistant.Address != (protocol.AgentRef{NodeID: a.service.options.RuntimeID, Kind: "assistant", AgentID: owner.ID}) {
+					active[assistant.Address] = true
+				}
+			}
+			for _, item := range items {
+				if item.Offline {
+					continue // The tool's existing directory is online-only.
+				}
+				parts := strings.SplitN(strings.TrimPrefix(item.Token, "@assistant:"), "/", 2)
+				ref := protocol.AgentRef{NodeID: parts[0], Kind: "assistant", AgentID: parts[1]}
+				if !active[ref] {
+					t.Fatal("tool omitted a current completion address", ref)
+				}
+				delete(active, ref)
+			}
+			if len(active) != 0 {
+				t.Fatal("tool retained an identity outside the active completion directory", active)
+			}
+		}
+		return items
 	}
 	if items := lookup("@"); len(items) != 2 {
 		t.Fatal("contacts entered current candidates", items)

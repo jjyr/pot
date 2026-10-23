@@ -9,6 +9,7 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/peer"
 	"github.com/jjyr/pot/pkg/protocol"
+	"reflect"
 )
 
 var ErrCapacity = errors.New("agent_link_capacity_exceeded")
@@ -73,8 +74,18 @@ func (s *Service) Directory(ctx context.Context, id string) (Directory, error) {
 	if e != nil {
 		return Directory{}, e
 	}
+	return s.readPeerDirectory(ctx, c, session)
+}
+
+// Each request captures an epoch before network I/O. A confirmed deletion or
+// newer request fences its response, including the value returned to callers.
+func (s *Service) readPeerDirectory(ctx context.Context, c Connection, session *peer.Session) (Directory, error) {
+	s.mu.Lock()
+	s.directoryEpoch[c.ID]++
+	epoch := s.directoryEpoch[c.ID]
+	s.mu.Unlock()
 	var d Directory
-	e = s.call(ctx, session, "directory", struct{}{}, &d)
+	e := s.call(ctx, session, "directory", struct{}{}, &d)
 	if e == nil {
 		e = validateDirectory(d, c.PeerHost.NodeID)
 		if d.Adapter != c.Peer.Adapter {
@@ -83,8 +94,17 @@ func (s *Service) Directory(ctx context.Context, id string) (Directory, error) {
 	}
 	if e == nil {
 		s.mu.Lock()
-		current, err := s.Get(ctx, id)
-		if err == nil {
+		current, err := s.Get(ctx, c.ID)
+		if err == nil && (current.State == "revoked" || current.State == "disconnected") {
+			err = ErrDisconnected
+		}
+		if err == nil && s.directoryEpoch[c.ID] != epoch {
+			if current.Directory == nil {
+				err = ErrUnavailable
+			} else {
+				d = *current.Directory
+			}
+		} else if err == nil && !reflect.DeepEqual(current.Directory, &d) {
 			current.Directory = &d
 			err = s.update(ctx, current)
 		}

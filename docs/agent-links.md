@@ -70,8 +70,16 @@ available only to authenticated user callers, never assistant or task callers.
 Its typed request binds the selected assistant and saved profile revision.
 The receiver retires only an idle identity and rejects stale revisions, active
 work and unconfirmed cleanup. No deletion is queued while disconnected. A
-successful deletion refreshes the sender's directory; it does not revoke the
-node connection, choose a replacement default or delete workspace files.
+successful deletion first persists removal of the exact assistant address from
+the sender's saved directory, then attempts a refresh. A failed refresh retains
+that removal and the other known assistants. Directory reads carry in-memory
+epochs so responses started before an acknowledged deletion or newer read cannot
+restore an older snapshot. Sync success and failure update connection status
+against the current saved directory. These snapshots supply both mention
+completion and the assistant tool directory; historical identity presentation
+caches remain separate. Deletion does not revoke the node connection, choose a
+replacement default or delete workspace files. Offline state alone is not
+deletion evidence, and assistants without chat capabilities remain valid targets.
 
 Chat capabilities distinguish send, receipt, history, subscription, attachments,
 references and individual turn controls. Task capabilities distinguish submit,

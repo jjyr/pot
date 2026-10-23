@@ -33,6 +33,9 @@ type Service struct {
 	rates                    map[string]rate
 	observations             map[string]ObservationSample
 	observationNotifications map[string]int64
+	// Protected by mu. Network directory reads must not overwrite a later read
+	// or a confirmed retirement with a snapshot captured before it.
+	directoryEpoch map[string]uint64
 }
 type rate struct {
 	At     time.Time
@@ -78,7 +81,7 @@ func New(options Options) (*Service, error) {
 		return nil, ErrInvalid
 	}
 	options.HostKey = append(ed25519.PrivateKey(nil), options.HostKey...)
-	return &Service{options: options, sessions: map[string]*peer.Session{}, pendingSessions: map[*peer.Session]bool{}, rates: map[string]rate{}, observations: map[string]ObservationSample{}, observationNotifications: map[string]int64{}}, nil
+	return &Service{options: options, sessions: map[string]*peer.Session{}, pendingSessions: map[*peer.Session]bool{}, rates: map[string]rate{}, observations: map[string]ObservationSample{}, observationNotifications: map[string]int64{}, directoryEpoch: map[string]uint64{}}, nil
 }
 
 func validIdentity(identity Identity) bool {

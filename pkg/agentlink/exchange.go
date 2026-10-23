@@ -114,24 +114,9 @@ func (s *Service) Sync(ctx context.Context, id string) error {
 		}
 	}
 	if s.options.Backend != nil {
-		var directory Directory
-		if err = s.call(ctx, session, "directory", struct{}{}, &directory); err != nil {
-			return s.failed(ctx, connection, err)
-		}
-		if err = validateDirectory(directory, connection.PeerHost.NodeID); err != nil {
-			return err
-		}
-		if !reflect.DeepEqual(connection.Directory, &directory) {
-			s.mu.Lock()
-			current, updateErr := s.Get(ctx, id)
-			if updateErr == nil && current.State != "disconnected" && current.State != "revoked" {
-				current.Directory = &directory
-				updateErr = s.update(ctx, current)
-			}
-			s.mu.Unlock()
-			if updateErr != nil {
-				return updateErr
-			}
+		directory, readErr := s.readPeerDirectory(ctx, connection, session)
+		if readErr != nil {
+			return s.failed(ctx, connection, readErr)
 		}
 		connection.Directory = &directory
 		s.sampleObservation(ctx, connection, directory, session)
@@ -218,17 +203,32 @@ func (s *Service) Sync(ctx context.Context, id string) error {
 			return s.failed(ctx, connection, ErrConflict)
 		}
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err = s.Get(ctx, id)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
-	connection.LastSeen = &now
-	connection.State = "ready"
-	connection.LastError = ""
-	return s.update(ctx, connection)
+	current.LastSeen = &now
+	current.State = "ready"
+	current.LastError = ""
+	return s.update(ctx, current)
 }
 func (s *Service) failed(ctx context.Context, connection Connection, err error) error {
 	if errors.Is(err, ErrRevoked) {
 		_ = s.revokeLocal(ctx, connection, false)
 		return err
 	}
+	// Status updates must retain the most recent persisted directory, rather
+	// than re-saving a connection snapshot captured before network I/O.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, readErr := s.Get(ctx, connection.ID)
+	if readErr != nil {
+		return err
+	}
+	connection = current
 	connection.State = "offline"
 	connection.LastError = ErrUnavailable.Error()
 	for _, known := range []error{ErrConflict, ErrUnauthorized, ErrExpired, ErrInvalid} {

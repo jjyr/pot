@@ -2,7 +2,9 @@ package agentlink
 
 import (
 	"context"
+	"errors"
 	"github.com/jjyr/pot/pkg/protocol"
+	"time"
 )
 
 type DeleteAssistantRequest struct {
@@ -40,6 +42,35 @@ func (s *Service) DeleteAssistant(ctx context.Context, link string, input Delete
 		err = ErrConflict
 	}
 	if err == nil {
+		// The authenticated acknowledgement is deletion evidence even when the
+		// following directory read is unavailable. Persist that evidence in the
+		// existing snapshot before notifying its consumers and fencing old reads.
+		persist, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		s.mu.Lock()
+		s.directoryEpoch[link]++
+		current, readErr := s.Get(persist, link)
+		if readErr == nil && current.Directory != nil {
+			d := *current.Directory
+			d.Targets = append([]Endpoint(nil), d.Targets...)
+			target := AssistantTarget(c.PeerHost.NodeID, input.AssistantID)
+			targets := d.Targets[:0]
+			for _, entry := range d.Targets {
+				if entry.Address != target {
+					targets = append(targets, entry)
+				}
+			}
+			d.Targets = targets
+			if d.DefaultTarget != nil && *d.DefaultTarget == target {
+				d.DefaultTarget = nil
+			}
+			current.Directory = &d
+			readErr = s.update(persist, current)
+		}
+		s.mu.Unlock()
+		if readErr != nil && !errors.Is(readErr, ErrRevoked) {
+			return result, readErr
+		}
 		// A successful retirement remains successful if a later directory read fails.
 		_, _ = s.Directory(ctx, link)
 	}
