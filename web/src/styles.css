@@ -331,7 +331,7 @@ input[type='checkbox'].field-input { width: 18px; height: 18px; min-height: 18px
 .usage-period-link.control:hover,.usage-period-link.control.selected { color: var(--primary); text-decoration: underline; }.usage-period-link.control.selected { font-weight: 600; }
 .usage-period-link.control:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }.usage-range .hint { font-size: 12px; }
 @media(max-width:719px),(pointer:coarse) { .usage-period-link.control { min-height: 44px; } }
-.usage-day[aria-pressed='true'] { outline: 1px solid var(--primary); outline-offset: -1px; }.usage-day:disabled { opacity: .35; cursor: default; }
+.usage-day:disabled { opacity: .35; cursor: default; }
 @media(max-width:600px) { .usage-calendar-controls { gap: 4px; } }
 .usage-chart { display: flex; align-items: end; gap: min(4px,calc(120px / var(--usage-bars))); height: 166px; margin: 16px 0 8px; }
 .chart-column { display: flex; flex: 1; min-width: 0; flex-direction: column; justify-content: end; height: 100%; gap: 8px; text-align: center; border-radius: 3px; cursor: help; }
