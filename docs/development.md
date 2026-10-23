@@ -89,7 +89,9 @@ those checks.
 `test:sandbox` runs real file, socket, network, terminal, plugin and cleanup tests with the pinned SDK. `test:sandbox-linux` uses a disposable non-root Docker host with namespace restrictions relaxed only on the outer test container; only test assets are mounted read-only.
 
 `check:go` verifies formatting, vet and architectural imports. `test:go` uses the
-race detector. UI tests cover owner-scoped state, drafts, IME, navigation and
+race detector with a 20-minute timeout per package, allowing the complete Control
+suite to run on hosted Linux runners. CI also bounds each product job to 60 minutes.
+UI tests cover owner-scoped state, drafts, IME, navigation and
 streamed output. Eval uses the production Agent with deterministic local fixtures;
 paid model calls run only through explicit live commands. Public API tests build
 an independent external consumer and a standalone composition worker.
