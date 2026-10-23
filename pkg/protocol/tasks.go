@@ -150,13 +150,23 @@ type CreateTask struct {
 }
 
 func (t CreateTask) Validate() error {
+	return t.validate(65536)
+}
+
+// ValidateScheduled permits a full schedule goal plus its title and run instructions.
+// Only the local scheduler uses this path; ordinary task submission keeps its limit.
+func (t CreateTask) ValidateScheduled() error {
+	return t.validate(MaxScheduledTaskTextBytes)
+}
+
+func (t CreateTask) validate(textLimit int) error {
 	if t.Target != nil && (!t.Target.Valid() || (t.Target.Kind != "assistant" && (t.Target.Kind != "node" || t.Target.AgentID != t.Target.NodeID))) {
 		return fmt.Errorf("invalid task target")
 	}
 	if err := t.Workspace.Validate(); err != nil {
 		return err
 	}
-	if t.RequestID == "" || len(t.RequestID) > 128 || strings.ContainsRune(t.RequestID, 0) || strings.TrimSpace(t.Text) == "" || len(t.Text) > 65536 {
+	if t.RequestID == "" || len(t.RequestID) > 128 || strings.ContainsRune(t.RequestID, 0) || strings.TrimSpace(t.Text) == "" || len(t.Text) > textLimit {
 		return fmt.Errorf("invalid task request")
 	}
 	return nil
@@ -245,6 +255,13 @@ type ScheduleHookResult struct {
 	Diagnostic    string `json:"diagnostic,omitempty"`
 	ExecutionMode string `json:"execution_mode,omitempty"`
 }
+
+// MaxScheduleGoalBytes is the UTF-8 byte capacity, not a model token allowance.
+const MaxScheduleGoalBytes = 512 * 1024
+
+// MaxScheduledTaskTextBytes includes space for an 80-rune title and scheduler instructions.
+const MaxScheduledTaskTextBytes = MaxScheduleGoalBytes + 1024
+
 type ScheduleSpec struct {
 	BeforeRun    *ScheduleBeforeRun `json:"before_run,omitempty"`
 	BeforeRunSet bool               `json:"-"`

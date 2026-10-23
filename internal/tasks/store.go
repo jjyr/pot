@@ -164,13 +164,29 @@ func (s *Service) GetTx(ctx context.Context, tx *sql.Tx, assistant, id string) (
 }
 
 func (s *Service) Prepare(ctx context.Context, assistant string, request protocol.CreateTask) (Selection, error) {
+	return s.prepare(ctx, assistant, request, false)
+}
+
+// PrepareScheduled admits schedule text without widening ordinary task submissions.
+func (s *Service) PrepareScheduled(ctx context.Context, assistant string, request protocol.CreateTask) (Selection, error) {
+	return s.prepare(ctx, assistant, request, true)
+}
+
+func validateRequest(request protocol.CreateTask, scheduled bool) error {
+	if scheduled {
+		return request.ValidateScheduled()
+	}
+	return request.Validate()
+}
+
+func (s *Service) prepare(ctx context.Context, assistant string, request protocol.CreateTask, scheduled bool) (Selection, error) {
 	if request.Target != nil && *request.Target != (protocol.AgentRef{NodeID: s.options.NodeID, Kind: "assistant", AgentID: assistant}) {
 		return Selection{}, fmt.Errorf("explicit executor must use Agent Link submission")
 	}
 	if !core.Identifier(assistant) {
 		return Selection{}, fmt.Errorf("invalid assistant identity")
 	}
-	if err := request.Validate(); err != nil {
+	if err := validateRequest(request, scheduled); err != nil {
 		return Selection{}, err
 	}
 	if s.options.ResolveModel == nil {
@@ -244,7 +260,7 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	if !core.Identifier(assistant) {
 		return Record{}, fmt.Errorf("invalid assistant")
 	}
-	if err := request.Validate(); err != nil {
+	if err := validateRequest(request, origin.Kind == "schedule"); err != nil {
 		return Record{}, err
 	}
 	if err := origin.Validate(); err != nil {

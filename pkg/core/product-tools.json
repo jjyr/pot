@@ -386,11 +386,14 @@
           "properties": {
             "title": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "maxLength": 80,
+              "description": "Nonempty, not whitespace-only; at most 80 Unicode characters."
             },
             "goal": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "Nonempty, not whitespace-only; at most 512 KiB = 524288 UTF-8 bytes (512 x 1024), measured in bytes, not characters. Model execution also depends on the selected model's token context window."
             },
             "timezone": {
               "type": "string",

@@ -46,7 +46,7 @@ func (l Launch) Validate(runtimeID string) error {
 	if err := l.ExecutionTarget.Validate(); err != nil {
 		return err
 	}
-	if l.Generation == 0 || l.Generation > core.MaxSafeInteger || strings.TrimSpace(l.Text) == "" || len(l.Text) > 256*1024 {
+	if l.Generation == 0 || l.Generation > core.MaxSafeInteger || strings.TrimSpace(l.Text) == "" || len(l.Text) > protocol.MaxScheduledTaskTextBytes {
 		return fmt.Errorf("invalid task generation/input")
 	}
 	if len(l.InputID) > 128 || strings.ContainsRune(l.InputID, 0) {
@@ -78,7 +78,9 @@ func (l Launch) Validate(runtimeID string) error {
 	if err != nil {
 		return err
 	}
-	if len(data) > 768*1024 {
+	// JSON can use six bytes per input byte (for example, a NUL as \u0000).
+	// Preserve the existing metadata budget alongside a fully escaped schedule input.
+	if len(data) > 6*protocol.MaxScheduledTaskTextBytes+768*1024 {
 		return fmt.Errorf("task launch exceeds transport limit")
 	}
 	return nil

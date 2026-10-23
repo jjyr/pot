@@ -99,7 +99,13 @@ func (e Envelope) Validate() error {
 			return fmt.Errorf("task event title missing")
 		}
 	}
-	validText := strings.TrimSpace(e.Text) != "" && len(e.Text) <= MaxMailText
+	textLimit := MaxMailText
+	if e.Kind == "input" {
+		// Initial input is produced locally after task admission. It must retain
+		// the full scheduled goal; correspondence and guidance keep their limits.
+		textLimit = MaxScheduledTaskTextBytes
+	}
+	validText := strings.TrimSpace(e.Text) != "" && len(e.Text) <= textLimit
 	if e.Kind == "plugin_event" {
 		validText = e.Text == ""
 	}

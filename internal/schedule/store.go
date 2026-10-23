@@ -101,7 +101,7 @@ func (s *Service) resolve(ctx context.Context, assistant string, spec protocol.S
 		return resolved{}, err
 	}
 	request := protocol.CreateTask{RequestID: id, Text: fmt.Sprintf("[Scheduled] %s\n%s\n\nThis is one independent scheduled run. Complete the check and report its findings, evidence and limitations in your final reply. Maintain any business-specific checkpoints in your own task data as needed. Do not fabricate evidence or success if the check failed. Do not edit schedules or start other tasks.", spec.Title, spec.Goal), Profile: spec.Profile, Model: spec.Model, Requirements: spec.Requirements}
-	selection, err := s.options.Tasks.Prepare(ctx, assistant, request)
+	selection, err := s.options.Tasks.PrepareScheduled(ctx, assistant, request)
 	return resolved{request, selection}, err
 }
 func (s *Service) Manage(ctx context.Context, assistant string, request Request, at int64) (json.RawMessage, error) {
