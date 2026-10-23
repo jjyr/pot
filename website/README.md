@@ -119,7 +119,9 @@ performed by the website. Result previews use synthetic notes, a documentation
 change excerpt and real shared-UI screenshots with isolated synthetic records.
 See [screenshot provenance](../docs/images/README.md).
 
-The header's local star icon links to the repository. On static pages a single
+The header's inline GitHub Mark links to the repository. It reuses the existing
+product icon from [Primer Octicons](https://github.com/primer/octicons/blob/main/icons/mark-github-16.svg)
+under the MIT license; the notice is included in `assets/Octicons-LICENSE.txt`. On static pages a single
 unauthenticated request to `https://api.github.com/repos/jjyr/pot` can add the
 public star count, cached in localStorage for six hours. Requests omit credentials
 and referrers and time out after three seconds. Failed requests, rate limits,
