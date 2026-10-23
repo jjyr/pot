@@ -23,9 +23,10 @@ output. Never ask the user to paste an API key or token into the conversation.
    before replacing files or opening its data with a newer version. Never start
    two hosts against the same Runtime root. Back up the complete root and its
    secret master key with Pot stopped before an upgrade.
-2. Establish whether the user wants a **Desktop app**, a **Linux Server with Web
-   UI**, or **Docker**. Agent-assisted installation is a way to choose and carry
-   out any of these paths. macOS desktop requires Apple Silicon and macOS 26+.
+2. Establish whether the user wants a **Desktop app** or **Web UI**. For Web UI,
+   choose a directly installed **Linux Server** or a **Docker** deployment; both
+   provide browser access. Agent-assisted installation can help with either path.
+   macOS desktop requires Apple Silicon and macOS 26+.
    Native Linux desktop is **Experimental**, with separate GTK/WebKit and display
    requirements. Linux server/Web UI works from source on glibc amd64/arm64;
    Docker uses a Linux Engine. Windows is currently unsupported. See
@@ -66,7 +67,7 @@ and architecture rather than constructing a download URL. The
   `./pot serve -root "$HOME/.pot-node" -ui 127.0.0.1:17703`. In another terminal
   use `./pot access -root "$HOME/.pot-node" token` locally. See the server section
   below for browser access, stopping, backups and first verification.
-- Docker: the configured image is `ghcr.io/jjyr/pot`, with package channel
+- Web UI (Docker): the configured image is `ghcr.io/jjyr/pot`, with package channel
   <https://github.com/users/jjyr/packages/container/package/pot>. This page is not
   available until the package is published. Check actual tags there; publication
   uses `VERSION` without the `v` prefix and does not publish `latest`. Use

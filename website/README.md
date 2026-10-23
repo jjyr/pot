@@ -102,9 +102,10 @@ they do not call real agents or contain real connection information.
 The repository is `https://github.com/jjyr/pot`. The installation section links
 its [agent installation guide](../docs/install-with-agent.md), macOS, Linux and
 Web UI as four parallel choices. macOS includes App downloads and Homebrew; Linux
-contains both the Experimental native `.deb` desktop and the Docker
-[container package channel](https://github.com/users/jjyr/packages/container/package/pot).
-Web UI links to server release downloads. macOS is selected by
+contains only the Experimental native `.deb` desktop. Web UI groups direct server
+release downloads with the Docker
+[container package channel](https://github.com/users/jjyr/packages/container/package/pot),
+both accessed through a browser. macOS is selected by
 default; keyboard users can switch with arrows, Home and End. Without JavaScript,
 all four sections remain visible. Language switches preserve the selected channel.
 Download buttons open the official Releases selector, since the first packages

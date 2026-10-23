@@ -170,7 +170,9 @@
     "配置与运行说明 ↗": "配置与运行说明 ↗",
     "Linux .deb": "Linux .deb",
     "原生桌面 · Debian / Ubuntu · amd64": "原生桌面 · Debian / Ubuntu · amd64",
-    "容器运行 · Linux amd64 / arm64，通过浏览器使用。": "容器运行 · Linux amd64 / arm64，通过浏览器使用。"
+    "容器运行 · Linux amd64 / arm64，通过浏览器使用。": "容器运行 · Linux amd64 / arm64，通过浏览器使用。",
+    "直接运行服务端": "直接运行服务端",
+    "下载 Release 后直接运行服务端。": "下载 Release 后直接运行服务端。"
   },
   "demo": {
     "language": "语言",
