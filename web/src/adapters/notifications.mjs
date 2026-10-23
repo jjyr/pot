@@ -94,11 +94,11 @@ export function createSystemNotifications({client,surface,view,open,locale,host=
   }
   async function deliver(event,current=()=>!disposed) {
     if(!current())return;
-    const text=notificationText(event,locale());
-    if(client.desktop){await client.notifySystem({...event,...text});return;}
+    if(client.desktop){await client.notifySystem({...event,...notificationText(event,locale())});return;}
     const visible=await browserViewing(event);
     if(!current()||!await claim(event.id,host.indexedDB)||!current())return;
     if(visible||!enabled||browserNotificationPermission(host)!=='granted')return;
+    const text=notificationText(event,locale());
     const notification=new host.Notification(text.title,{body:text.body,tag:event.id,icon:'/assets/PotCompanion.png'});
     notification.onclick=()=>{notification.close();host.focus();Promise.resolve(open(event)).catch(fail);};
   }

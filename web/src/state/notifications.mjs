@@ -1,7 +1,15 @@
+import {translate} from '../locales/messages.mjs';
+
 // Reply and approval observations have independent baselines per owner. Task
 // outcomes use their own durable cursor rather than a full Task-list snapshot.
 const identity=assistant=>({space:assistant.space_id,control:assistant.control_id||assistant.space_id,owner:assistant.id,name:String(assistant.name||'Pot').slice(0,60)});
 const event=(base,kind,id,task='')=>({...base,kind,task,id:JSON.stringify([base.control,base.owner,kind,id])});
+// At most 120 Unicode code points (480 UTF-8 bytes), within the native
+// notification body's 512-byte limit, including emoji and CJK replies.
+function replyPreview(value) {
+  const text=Array.from(String(value||'').replace(/\s+/gu,' ').trim());
+  return text.length>120?text.slice(0,119).join('')+'…':text.join('');
+}
 export function taskOutcomeNotifications(assistant,items) {
   const base=identity(assistant);
   // Failed tasks first enter assistant recovery. Only an unresolved failure
@@ -22,7 +30,7 @@ export function createNotificationProjection() {
       owners.set(key,current);
       if(!previous)return [];
       const events=[];
-      if(current.reply&&current.reply!==previous.reply&&current.count>previous.count)events.push(event(base,'reply',current.reply));
+      if(current.reply&&current.reply!==previous.reply&&current.count>previous.count)events.push(event({...base,preview:replyPreview(assistant.preview)},'reply',current.reply));
       for(const approval of previous.approvals?approvals||[]:[])if(!previous.approvals.has(approval.id))
         events.push(event({...base,name:String(approval.task_title||base.name).slice(0,60)},'approval',approval.id,approval.request?.task||''));
       return events;
@@ -37,8 +45,7 @@ export function viewingNotification(view,event) {
 }
 
 export function notificationText(event,locale='en') {
-  const zh=locale==='zh-CN';
-  const bodies={reply:zh?'助手回复已完成':'Assistant reply complete','task-complete':zh?'后台任务已完成':'Background task complete',
-    'task-failed':zh?'后台任务失败或中断':'Background task failed or interrupted',approval:zh?'需要你的审批，请在 Pot 中查看':'Approval required. Review in Pot.'};
-  return {title:`Pot · ${String(event.name||'Pot').replace(/[\r\n\t]/g,' ').slice(0,60)}`,body:bodies[event.kind]};
+  const keys={reply:'notifications.replyComplete','task-complete':'notifications.taskComplete','task-failed':'notifications.taskFailed',approval:'notifications.approvalRequired'};
+  const body=(event.kind==='reply'&&replyPreview(event.preview))||translate(locale,keys[event.kind]);
+  return {title:`Pot · ${String(event.name||'Pot').replace(/[\r\n\t]/g,' ').slice(0,60)}`,body};
 }

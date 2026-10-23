@@ -323,7 +323,11 @@ click handlers.
 Notifications observe owner-scoped projections on domain invalidations:
 
 - A changed assistant catalogue `reply_id` with an increased `reply_count`
-  identifies a completed assistant reply. Token updates do not notify.
+  identifies a completed assistant reply. The notification body uses that reply's
+  catalogue preview for both local and linked assistants. Whitespace is collapsed
+  and previews are limited to 120 Unicode code points, with an ellipsis when
+  notification formatting truncates them. Empty previews use a localized reply
+  completion message. Token updates do not notify.
 - Task `complete` notifies success and `interrupted` notifies interruption.
   A `failed` transition first enters assistant recovery; unresolved failures
   notify through the assistant reply rather than an immediate Task alert.
@@ -332,9 +336,9 @@ Notifications observe owner-scoped projections on domain invalidations:
   The compact [Task outcome API](task-coordination.md#client-notification-outcomes)
   reads only changes after a client cursor. `task-outcomes` invalidations wake
   this reader; token/output updates do not query notification state.
-- New pending permission request IDs notify approval. Tool arguments and full
-  assistant responses are never included; text contains a bounded name and a
-  short event description.
+- New pending permission request IDs notify approval. Tool arguments are never
+  included. Task and approval notifications contain a bounded name and a short
+  localized event description.
 
 Each assistant has separate Task-outcome and approval refresh queues. A failed
 read retains that reader's last successful cursor or baseline; it cannot reset

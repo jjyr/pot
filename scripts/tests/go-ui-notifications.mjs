@@ -9,8 +9,19 @@ const projection=createNotificationProjection();
 assert.deepEqual(projection.observe(owner,[approval()],'boot'),[],'history is a baseline');
 assert.deepEqual(projection.observe(owner,[approval()],'boot'),[],'duplicate snapshot');
 assert.deepEqual(projection.observe({...owner,responding:true},[],'boot'),[],'token states do not notify');
-const events=projection.observe({...owner,reply_id:'new',reply_count:5},[{...approval('new'),task_title:'Build'}],'boot');
+const events=projection.observe({...owner,reply_id:'new',reply_count:5,preview:' 已完成修改。\n\t检查通过。 '},[{...approval('new'),task_title:'Build'}],'boot');
 assert.deepEqual(events.map(event=>event.kind),['reply','approval']);
+for(const locale of ['en','zh-CN'])assert.equal(notificationText(events[0],locale).body,'已完成修改。 检查通过。','Reply content is preserved in either UI language');
+const longReply=notificationText({kind:'reply',preview:'😀'.repeat(130)}).body;
+assert.equal(longReply,'😀'.repeat(119)+'…');
+assert(Buffer.byteLength(longReply,'utf8')<=512,'Unicode previews fit the native byte limit');
+for(const preview of [undefined,'',' \n\t ']){
+ assert.equal(notificationText({kind:'reply',preview},'en').body,'Assistant reply complete');
+ assert.equal(notificationText({kind:'reply',preview},'zh-CN').body,'助手回复已完成');
+}
+assert.equal(notificationText({kind:'task-complete'},'zh-CN').body,'后台任务已完成');
+assert.equal(notificationText({kind:'task-failed'},'zh-CN').body,'后台任务失败或中断');
+assert.equal(notificationText({kind:'approval'},'zh-CN').body,'需要你的审批，请在 Pot 中查看');
 assert.equal(events[1].name,'Build','Task approval uses its Task name');
 assert(!JSON.stringify(events.map(event=>notificationText(event))).includes('secret'));
 projection.reset('space-a');
@@ -51,7 +62,8 @@ assert.equal(manager.state.enabled,true);assert.equal(manager.state.permission,'
 await manager.directory();assert.equal(shown.length,0);
 await manager.authorize();assert.equal(requests,1);assert.equal(manager.state.permission,'granted');
 clientA.assistants[0]={...owner,reply_id:'reply-visible',reply_count:5};await manager.directory();assert.equal(shown.length,0,'focused corresponding chat suppressed');
-focused=false;clientA.assistants[0]={...owner,reply_id:'reply-background',reply_count:6};await manager.directory();assert.equal(shown.length,1,'background window delivers');
+focused=false;clientA.assistants[0]={...owner,reply_id:'reply-background',reply_count:6,preview:'Updated the notification content.\nChecks passed.'};await manager.directory();assert.equal(shown.length,1,'background window delivers');
+assert.equal(shown[0].options.body,'Updated the notification content. Checks passed.','Browser notification shows the completed reply');
 shown[0].onclick();assert.equal(opened[0].space,'space-a');assert.equal(opened[0].owner,'alpha');assert(shown[0].closed);
 focused=true;route={route:'chat',space:'space-a',owner:'beta'};
 clientA.assistants[0]={...owner,reply_id:'reply-other-chat',reply_count:7};await manager.directory();assert.equal(shown.length,2,'foreground other chat delivers');
@@ -101,11 +113,26 @@ const linkedOwner={...owner,capabilities:{version:1,operations:['chat.read']},id
 const linkedClient={...nativeClient,assistants:[linkedOwner],request:async path=>{linkedReads.push(path);throw Error('Unsupported local read');},notifySystem:async event=>linkedAlerts.push(event),onNotificationClick:undefined};
 const linkedManager=createSystemNotifications({client:linkedClient,surface:'main',view:()=>route,open:()=>{},locale:()=> 'en',host:host()});
 await linkedManager.directory();await linkedManager.refresh();assert.deepEqual(linkedReads,[],'Unadvertised task and approval reads stay disabled');
-linkedClient.assistants=[{...linkedOwner,reply_id:'remote-reply',reply_count:5}];await linkedManager.directory();
+linkedClient.assistants=[{...linkedOwner,reply_id:'remote-reply',reply_count:5,preview:'审查完成。\n'+'😀'.repeat(130)}];await linkedManager.directory();
 assert.equal(linkedAlerts.length,1);assert.equal(linkedAlerts[0].kind,'reply');assert.equal(linkedAlerts[0].owner,linkedOwner.id,'Existing notification routing keeps the exact linked assistant');
+assert.equal(linkedAlerts[0].body,'审查完成。 '+'😀'.repeat(113)+'…','Native linked reply notifications use bounded actual content');
+assert(Buffer.byteLength(linkedAlerts[0].body,'utf8')<=512);
 linkedClient.assistants[0]={...linkedClient.assistants[0],capabilities:{version:1,operations:['chat.read','task.outcomes']}};
 linkedClient.request=async path=>{linkedReads.push(path);return {items:[],cursor:0,has_more:false};};
 await linkedManager.refresh();assert.deepEqual(linkedReads,['/api/v1/tasks/outcomes'],'An advertised remote task projection uses the same route without acquiring approval capability');linkedManager.dispose();
+
+// Resolve fallback wording in the current locale after asynchronous delivery
+// coordination, including a language switch while the event claim is pending.
+let releaseClaim,deliveryLocale='en';const localeClient=client(),localeHost=host();
+permission='granted';focused=false;storage.set('pot-system-notifications-browser-v1','true');
+const localeManager=createSystemNotifications({client:localeClient,surface:'main',view:()=>route,open:()=>{},locale:()=>deliveryLocale,
+ host:localeHost,claim:()=>new Promise(resolve=>{releaseClaim=resolve;})});
+await localeManager.directory();
+localeClient.assistants=[{...owner,reply_id:'locale-reply',reply_count:5}];
+const localeDelivery=localeManager.directory();
+while(!releaseClaim)await new Promise(resolve=>setTimeout(resolve,5));
+deliveryLocale='zh-CN';releaseClaim(true);await localeDelivery;
+assert.equal(shown.at(-1).options.body,'助手回复已完成','Pending delivery uses the latest UI locale');localeManager.dispose();
 
 // Distinct committed terminal transitions keep distinct event IDs even when
 // their timestamps coincide. Explicit cancellations remain silent.
