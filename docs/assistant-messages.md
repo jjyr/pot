@@ -31,10 +31,15 @@ execution; models cannot provide a sender, impersonate a user or produce Runtime
 events. Owner-origin messages guide active Tasks at a model boundary. Peer
 information is reference data, not new user authority. Owner guidance to an
 ended Task reopens the same Task and starts a new Run using retained context and
-workspace. Peer references do not restart ended Tasks. Workers can message only
-their owning assistant and cannot delegate or acquire management tools. Runtime
-binds the processing parent from the authenticated execution, never tool
-arguments. Replies to that parent's sender automatically set wire `reply_to` to
+workspace. Peer references do not restart ended Tasks. Workers can message their
+owning assistant and ordinary local Tasks owned by that same assistant. Full Task
+addresses must be supplied through task context, briefs or guidance; workers gain no Task discovery, delegation or management tools.
+The receiver validates both Tasks against the assistant-scoped catalogue; guessed
+IDs, cross-owner Tasks and wrong-node addresses do not bypass this boundary.
+Runtime binds the sender to its current Task/run/generation. Cross-owner and
+remote Task peer input are unsupported: the current linked input contract carries
+owner guidance and cannot preserve Task peer provenance. Runtime binds the
+processing parent from the authenticated execution, never tool arguments. Replies to that parent's sender automatically set wire `reply_to` to
 the parent's message ID and retain its conversation; forwarding starts a new
 wire conversation while retaining the causal hop count. Task inputs retain their
 accepted conversation identity, with any processing parent recorded
@@ -65,7 +70,18 @@ Different assistants retain separate histories; sender addresses and wire
 conversations retain their exact identities.
 Task messages are consumed at safe model boundaries; owner guidance accepted
 after finalization continues in the next Run of the same Task. Messages
-do not interrupt commands. Assistant replies to peers use `send_message`; final
+do not interrupt commands. Local Task receipts include `input_state`, a snapshot
+of the durable receiver input: `pending` awaits a safe model boundary, `consumed`
+has entered the receiver context, `retained` is saved without delivery, and
+`cancelled` was discarded by cancellation.
+Queued Tasks receive pending references when normal execution starts. Running
+Tasks receive them at the next boundary. Waiting (allowance or approval) and
+paused Tasks keep pending references until normal execution resumes; a message
+does not resume them or approve anything. References arriving during finalization,
+stopping or after the run ends are retained only, never a reason to launch a Run.
+Even a pending reference can become retained if the run ends before consuming it.
+Acceptance and input consumption never prove the requested work ran. Assistant
+replies to peers use `send_message`; final
 model text can report to the user in the owning conversation and is not
 automatically forwarded to the peer. Incoming envelopes appear as collapsed
 receive-message records, like tool calls, rather than ordinary chat prose.

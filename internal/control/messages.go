@@ -14,27 +14,39 @@ import (
 )
 
 type taskInputSenderKey struct{}
+type taskMessageRunKey struct{}
+
+// Bound by Worker preparation, never by message arguments. Keep the processing
+// parent pinned to this run even if the Task continues while the call is in flight.
+type taskMessageRun struct {
+	ID         string
+	Generation uint64
+}
 
 // sendAgentMessage receives sender only from an authenticated execution binding.
 // Tool arguments describe a recipient and content, never authority or provenance.
 func (s *Service) sendAgentMessage(ctx context.Context, id, owner string, sender protocol.AgentRef, send protocol.SendMail) (any, error) {
-	if !sender.Valid() || sender.NodeID != s.options.RuntimeID || !send.To.Valid() {
+	if !sender.Valid() || sender.NodeID != s.options.RuntimeID || !send.To.Valid() || sender == send.To {
 		return nil, errors.New("invalid agent address")
 	}
 	if sender.Kind == "task" {
+		run, bound := ctx.Value(taskMessageRunKey{}).(taskMessageRun)
 		source, err := s.Tasks.Get(ctx, owner, sender.AgentID)
-		if err != nil || source == nil {
-			return nil, errors.New("sender Task binding is unavailable")
+		if err != nil {
+			return nil, err
 		}
-		parent, err := s.Mailbox.LatestTaskInput(ctx, sender.AgentID, source.RunID)
+		if !bound || source == nil || source.Execution != nil || source.NodeID != s.options.RuntimeID || source.RunID != run.ID || source.Generation != run.Generation || source.Info.Phase.Scope() != "active" || source.StopMode != "" {
+			return nil, errors.New("stale Task message sender binding")
+		}
+		parent, err := s.Mailbox.LatestTaskInput(ctx, sender.AgentID, run.ID)
 		if err != nil {
 			return nil, err
 		}
 		if parent != nil {
 			ctx = context.WithValue(ctx, mailParentKey{}, *parent)
 		}
-		if send.To.Kind != "assistant" || send.To.NodeID != s.options.RuntimeID || send.To.AgentID != owner {
-			return nil, errors.New("Task messages may address only their owning assistant")
+		if send.To.Kind != "task" && (send.To.Kind != "assistant" || send.To.NodeID != s.options.RuntimeID || send.To.AgentID != owner) {
+			return nil, errors.New("Task messages may address their owning assistant or local Tasks owned by that assistant")
 		}
 	}
 	switch send.To.Kind {
@@ -44,11 +56,15 @@ func (s *Service) sendAgentMessage(ctx context.Context, id, owner string, sender
 		}
 		body, _ := json.Marshal(protocol.TaskInput{RequestID: id, Text: send.Text})
 		ctx = context.WithValue(ctx, taskInputSenderKey{}, sender)
-		if _, err := s.CallAgent(ctx, owner, agentlink.TaskInput, agentlink.Call{ID: send.To.AgentID, Action: "write", Body: body}); err != nil {
+		result, err := s.CallAgent(ctx, owner, agentlink.TaskInput, agentlink.Call{ID: send.To.AgentID, Action: "write", Body: body})
+		if err != nil {
 			return nil, err
 		}
 
 		s.wakeTasks()
+		if receipt, ok := result.(map[string]any); ok {
+			return receipt, nil
+		}
 		messageID, _ := core.HashJSON([]string{send.To.AgentID, id})
 		return map[string]any{"accepted": true, "message_id": messageID}, nil
 	case "user":

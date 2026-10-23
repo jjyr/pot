@@ -245,6 +245,7 @@ func TestLinkedGuidanceCannotUpgradeReferenceOrForeignSender(t *testing.T) {
 	contexts := []context.Context{
 		context.WithValue(context.WithValue(ctx, taskInputSenderKey{}, from), mailParentKey{}, parent),
 		context.WithValue(ctx, taskInputSenderKey{}, parent.From),
+		context.WithValue(ctx, taskInputSenderKey{}, protocol.AgentRef{NodeID: "node", Kind: "task", AgentID: "sibling"}),
 	}
 	for _, inputCtx := range contexts {
 		if _, err := backend.s.guideTaskExecution(inputCtx, "main", record.Info.ID, protocol.TaskInput{RequestID: "continuation", Text: "Continue with these instructions"}); !errors.Is(err, agentlink.ErrUnauthorized) {

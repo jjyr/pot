@@ -121,6 +121,15 @@ func (s *Service) Inputs(ctx context.Context, assistant, task string) ([]Input, 
 	}
 	return result, rows.Err()
 }
+
+// InputState reports the durable receiver projection at receipt time. Pending
+// does not imply model delivery; retained references cannot start another run.
+func (s *Service) InputState(ctx context.Context, assistant, task, requestID string) (string, error) {
+	var state string
+	err := s.db.QueryRowContext(ctx, "SELECT state FROM task_inputs WHERE assistant_id=? AND task_id=? AND request_id=?", assistant, task, requestID).Scan(&state)
+	return state, err
+}
+
 func (s *Service) Steering(ctx context.Context, assistant, task, runID string, finalizing bool) (inputs []agent.SteeringInput, err error) {
 	inputs = []agent.SteeringInput{}
 	err = s.change(ctx, assistant, task, func(tx *sql.Tx, record *Record) error {
