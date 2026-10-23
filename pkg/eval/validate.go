@@ -68,6 +68,7 @@ func Validate(directory string) (Report, error) {
 	terminals := map[string]bool{}
 	activeTools := map[string]string{}
 	messageActive := map[string]bool{}
+	messageIDs := map[string]string{}
 	lastText := ""
 	previousTime := uint64(0)
 	eventCount := uint64(0)
@@ -113,10 +114,11 @@ func Validate(directory string) (Report, error) {
 			key := event.TurnID + "\x00" + e.Update.ID
 			switch e.Update.Type {
 			case "message_started":
-				if messageActive[event.TurnID] {
+				if messageActive[event.TurnID] && (e.Update.ID == "" || messageIDs[event.TurnID] != e.Update.ID) {
 					return report, fmt.Errorf("overlapping Agent messages")
 				}
 				messageActive[event.TurnID] = true
+				messageIDs[event.TurnID] = e.Update.ID
 			case "text_delta":
 				if !messageActive[event.TurnID] {
 					return report, fmt.Errorf("text outside Agent message")

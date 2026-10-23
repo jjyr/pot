@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jjyr/pot/internal/buildinfo"
@@ -76,6 +78,8 @@ func (p Provider) Validate() error {
 // Forward performs one POST without redirects or application retries. Its caller
 // must durably reserve and claim the request before invoking it. Any transport
 // failure has an uncertain outcome and must retain its reservation/receipt.
+// timeout bounds response headers only; callers own stream cancellation and
+// must provide an inactivity or total deadline appropriate to their operation.
 func Forward(ctx context.Context, p Provider, key []byte, body json.RawMessage, beta string, timeout time.Duration) (*http.Response, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
@@ -114,14 +118,16 @@ func Forward(ctx context.Context, p Provider, key []byte, body json.RawMessage, 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 	transport.ResponseHeaderTimeout = timeout
-	client := &http.Client{Transport: transport, Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	// The Agent owns a renewable inactivity timer across request opening and
+	// stream reads. A Client.Timeout would cut off an active long response.
+	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(req)
 	if err != nil {
 		transport.CloseIdleConnections()
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, ErrConnection
+		return nil, connectionError(err)
 	}
 	// A response owns its body and connection until Close; the wrapper also closes
 	// this request's private idle pool rather than retaining provider credentials.
@@ -138,8 +144,36 @@ type responseBody struct {
 	closeIdle  func()
 }
 
-func (b *responseBody) Read(p []byte) (int, error) { return b.ReadCloser.Read(p) }
-func (b *responseBody) Close() error               { err := b.ReadCloser.Close(); b.closeIdle(); return err }
+func (b *responseBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if transientTransport(err) {
+		err = &core.TransientModelError{Cause: err}
+	}
+	return n, err
+}
+func (b *responseBody) Close() error { err := b.ReadCloser.Close(); b.closeIdle(); return err }
+
+func transientTransport(err error) bool {
+	var network net.Error
+	return errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED) ||
+		errors.Is(err, syscall.EPIPE) || errors.As(err, &network) && (network.Timeout() || network.Temporary())
+}
+
+func connectionError(err error) error {
+	if errors.Is(err, io.EOF) || transientTransport(err) {
+		return &core.TransientModelError{Cause: ErrConnection}
+	}
+	return ErrConnection
+}
 
 // StatusError never embeds provider bodies, endpoint queries or credentials.
-func StatusError(status int) error { return fmt.Errorf("model provider returned HTTP %d", status) }
+func StatusError(status int) error {
+	err := fmt.Errorf("model provider returned HTTP %d", status)
+	switch status {
+	case 408, 429, 500, 502, 503, 504:
+		return &core.TransientModelError{Cause: err}
+	default:
+		return err
+	}
+}

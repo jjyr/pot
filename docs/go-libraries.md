@@ -73,6 +73,20 @@ desired built-in tools and plugins explicitly when embedding. Tool permissions,
 credentials, persistence and model HTTP access remain the caller's responsibility.
 Model codecs in `pkg/modelprotocol` do not fetch provider credentials.
 
+Model services mark temporary inference failures with `core.TransientModelError`.
+The Agent retries only that boundary up to three times after 2, 4 and 8 seconds,
+using a fresh request ID and inactivity interval each time. Cancellation and persistence
+failures stop retries. A repeated `message_started` with the same ID resets
+incomplete displayed text; event consumers must replace it rather than append
+another reply. Completed model history and tool receipts are retained. Unknown
+provider usage remains the model service's responsibility for every attempt.
+`AgentSettings.RequestTimeoutMS` is a rolling model-stream inactivity timeout,
+defaulting to 600000 ms. It covers model opening and is renewed on headers and
+nonempty reads, including SSE keepalives and partial tool arguments. Services
+must honor context cancellation while opening or reading; their `Close` must
+unblock a pending read. A separate total HTTP timeout must not truncate an active
+response. The execution owner's context retains any overall deadline.
+
 For message references, `core.TurnRequest.Inputs` carries each accepted user's
 transcript ID, original text, attachments and selected quotes. `Agent.MessageID`
 is an optional caller callback that supplies the transcript ID for each assistant

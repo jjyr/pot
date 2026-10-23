@@ -165,7 +165,11 @@ When allowance is sufficient and automatic continuation enabled, the scheduler r
 Resume reuses the saved Agent context, without replaying original prompts/tools. The model still chooses subsequent tools; this is not an exactly-once guarantee for external actions. Missing sessions, unconfirmed tool cleanup, or unknown crash side effects cannot retry automatically.
 
 Model connection failures and incomplete streams preserve the last committed
-context for an explicit failed-turn retry. An interrupted sample's uncommitted
+context for bounded automatic retries and, after exhaustion, an explicit
+failed-turn retry. Automatic retries wait 2, 4 and 8 seconds and stop immediately
+on turn cancellation. Model inactivity defaults to ten minutes; received stream
+bytes renew the interval instead of limiting an active response's total duration.
+An interrupted sample's uncommitted
 output is discarded; already completed tool receipts remain in history. A new
 sample uses a new request ID and reservation. The old sample's unknown usage
 retains its conservative reservation until the allowance window ends; making a

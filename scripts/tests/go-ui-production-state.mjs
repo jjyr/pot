@@ -117,6 +117,11 @@ const transcript=createTaskTranscript(),event=(sequence,type,value={})=>({sequen
 appendTaskEvents(transcript,[event(1,'message_started'),event(2,'text_delta',{text:'First'}),event(3,'tool_started',{id:'t',name:'read',args:{path:'a'}}),event(4,'tool_output',{id:'t',text:'result'})]);
 appendTaskEvents(transcript,[event(2,'text_delta',{text:'duplicate'}),event(5,'text_delta',{text:' reply'}),event(6,'message_finished')]);
 assert.equal(transcript.messages[0].text,'First reply');assert.ok(transcript.messages[1].tool.output[0].text.includes('result'));assert.equal(transcript.cursor,6);
+const retried=createTaskTranscript();
+appendTaskEvents(retried,[event(1,'message_started',{id:'reply'}),event(2,'text_delta',{text:'Discard this'}),event(3,'message_started',{id:'reply'})]);
+assert.equal(retried.messages.length,1,'A model retry retains one reply');assert.equal(retried.active.text,'','A retry clears incomplete text before new deltas');
+appendTaskEvents(retried,[event(4,'text_delta',{text:'Recovered'}),event(5,'message_finished',{text:'Recovered'})]);
+assert.equal(retried.messages[0].text,'Recovered');assert.equal(retried.messages[0].phase,'complete');
 appendTaskEvents(transcript,[event(7,'turn_finished',{outcome:{kind:'unknown',error:'Execution result is uncertain'}})]);assert.equal(transcript.messages.at(-1).role,'system');
 const {projectTaskMessages}=await import('../../web/src/state/task-transcript.mjs');
 const ordered=createTaskTranscript(),userInput={request_id:'operator',kind:'user_guidance',state:'consumed',text:'User direction'},referenceInput={request_id:'reference',kind:'reference',sender:'peer',state:'pending',text:'Peer information'};

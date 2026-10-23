@@ -243,6 +243,7 @@ func (s *Service) refreshAssistantConfiguration(ctx context.Context, current cor
 		next.Params.Agent.BuiltinTools = settings.BuiltinTools
 		next.Params.Agent.AllowedTools = nil
 		next.Params.Agent.Plugins = settings.Plugins
+		next.Params.Agent.RequestTimeoutMS = settings.RequestTimeoutMS
 		for name, configured := range next.Params.Agent.Plugins {
 			configured.Source = nil
 			next.Params.Agent.Plugins[name] = configured

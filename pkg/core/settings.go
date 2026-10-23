@@ -49,12 +49,14 @@ type AgentSettings struct {
 	SystemPrompt     *string                 `json:"system_prompt"`
 	BuiltinTools     []string                `json:"builtin_tools"`
 	AllowedTools     *[]string               `json:"allowed_tools"`
-	RequestTimeoutMS uint64                  `json:"request_timeout_ms"`
-	Shell            ShellSettings           `json:"shell"`
+	// RequestTimeoutMS bounds inactivity while opening/reading a model stream,
+	// not its total duration. Nonempty stream reads renew the interval.
+	RequestTimeoutMS uint64        `json:"request_timeout_ms"`
+	Shell            ShellSettings `json:"shell"`
 }
 
 func DefaultAgentSettings() AgentSettings {
-	return AgentSettings{Plugins: map[string]PluginConfig{}, ContextWindow: 32768, AutoCompact: true, UseProviderUsage: true, ContextReserve: 4096, BuiltinTools: []string{"exec_command", "write_stdin", "apply_patch", "exec", "wait"}, RequestTimeoutMS: 180000, Shell: DefaultShellSettings()}
+	return AgentSettings{Plugins: map[string]PluginConfig{}, ContextWindow: 32768, AutoCompact: true, UseProviderUsage: true, ContextReserve: 4096, BuiltinTools: []string{"exec_command", "write_stdin", "apply_patch", "exec", "wait"}, RequestTimeoutMS: 600000, Shell: DefaultShellSettings()}
 }
 func (s *AgentSettings) UnmarshalJSON(data []byte) error {
 	type plain AgentSettings

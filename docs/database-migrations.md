@@ -67,6 +67,14 @@ before release. No runtime downgrade or Down migration is supported.
 
 ## Changing persisted data
 
+Conversation migration `0006_model_idle_timeout` moves current thread, pending
+configuration and saved conversation profiles to the 600000 ms inactivity
+default, recalculating resolved configuration hashes. Conversation context,
+retry identity, uncertain effects, completed tool receipts and historical
+configuration responses remain unchanged. Model connections receive the new
+default on load; immutable historical Task snapshots retain their saved values,
+which now bound inactivity rather than total response duration.
+
 Every change to tables, columns, indexes, views, triggers or stored JSON contracts
 must include its migration in the same change, with updated callers and tests.
 Persisted Go struct changes count even when SQLite table definitions stay the
