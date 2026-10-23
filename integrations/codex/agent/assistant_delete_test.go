@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/protocol"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -22,7 +24,20 @@ func TestLinkedCodexDeletionThroughAuthenticatedBrowser(t *testing.T) {
 	if _, err := app.Control.AgentLinks(ctx); err != nil {
 		t.Fatal(err)
 	}
+	observer, err := app.Control.Registry.Create(ctx, "rejection-observer", "Observer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = app.Control.ManageAgentLink(ctx, control.AgentLinkCommand{Action: "reconnect", ID: strings.Split(owner, ":")[1]}); err != nil {
+		t.Fatal(err)
+	}
 	handler, cookie := profileBrowserHandler(t, app)
+	expected := []protocol.AgentRef{agentlink.AssistantTarget(h.backend.nodeID, "codex"), agentlink.AssistantTarget(h.backend.nodeID, "survivor")}
+	check := func() {
+		t.Helper()
+		assertBrowserAssistantDirectory(t, app, handler, cookie, observer.ID, expected, nil)
+	}
+	check()
 	call := func(method, path string, body any) *httptest.ResponseRecorder {
 		t.Helper()
 		var raw []byte
@@ -46,6 +61,10 @@ func TestLinkedCodexDeletionThroughAuthenticatedBrowser(t *testing.T) {
 	if !bytes.Contains(w.Body.Bytes(), []byte("assistant_changed")) {
 		t.Fatal(w.Code, w.Body.String())
 	}
+	if w.Code < 400 {
+		t.Fatal("stale revision returned browser success")
+	}
+	check()
 	work, err := submitMessageFixture(h.backend, ctx, agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "sender", Kind: "assistant", AgentID: "main"}, RequestID: "busy", Text: "task"})
 	if err != nil {
 		t.Fatal(err)
@@ -54,6 +73,10 @@ func TestLinkedCodexDeletionThroughAuthenticatedBrowser(t *testing.T) {
 	if !bytes.Contains(w.Body.Bytes(), []byte("assistant_busy")) {
 		t.Fatal(w.Code, w.Body.String())
 	}
+	if w.Code < 400 {
+		t.Fatal("busy retirement returned browser success")
+	}
+	check()
 	if err = h.backend.update(ctx, work.ID, func(j *job) error { j.Task.State = "completed"; return nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -61,6 +84,8 @@ func TestLinkedCodexDeletionThroughAuthenticatedBrowser(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
+	expected = []protocol.AgentRef{agentlink.AssistantTarget(h.backend.nodeID, "survivor")}
+	check()
 	d, err := h.backend.Directory(ctx)
 	if err != nil || len(d.Assistants()) != 1 || d.Assistants()[0].Address.AgentID != "survivor" {
 		t.Fatal(d, err)

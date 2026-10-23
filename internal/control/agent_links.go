@@ -503,7 +503,7 @@ func (s *Service) linkedPeer(ctx context.Context, local, peer protocol.AgentRef)
 	return false
 }
 
-func (s *Service) agentLinkPeers(ctx context.Context, owner string) ([]protocol.MailAssistant, error) {
+func (s *Service) agentLinkPeers(ctx context.Context) ([]protocol.MailAssistant, error) {
 	result := []protocol.MailAssistant{}
 	if s.agentLinks == nil {
 		return result, nil

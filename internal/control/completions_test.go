@@ -161,7 +161,7 @@ func TestAssistantCompletionsRetireDefinitionsWithoutUsingHistoricalContacts(t *
 			}
 			for _, item := range items {
 				if item.Offline {
-					continue // The tool's existing directory is online-only.
+					continue // The tool omits explicitly disconnected peers.
 				}
 				parts := strings.SplitN(strings.TrimPrefix(item.Token, "@assistant:"), "/", 2)
 				ref := protocol.AgentRef{NodeID: parts[0], Kind: "assistant", AgentID: parts[1]}

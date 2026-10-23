@@ -147,7 +147,7 @@ func TestAgentLinkControlsExchangeWithoutAppAndDoNotGrantExecution(t *testing.T)
 		if _, _, err = item.local.Permissions.Policy(item.remote.options.RuntimeID); err == nil {
 			t.Fatal("Agent Link granted execution policy")
 		}
-		peers, err := item.local.agentLinkPeers(ctx, "main")
+		peers, err := item.local.agentLinkPeers(ctx)
 		if err != nil || len(peers) != 1 || peers[0].Address.NodeID != item.remote.options.RuntimeID {
 			t.Fatal(peers, err)
 		}
@@ -205,7 +205,7 @@ func TestAgentLinkControlBindingRevocationAndNarrowListener(t *testing.T) {
 		t.Fatal("remote side retained revoked communication")
 	}
 	for _, s := range []*Service{a.service, b.service} {
-		peers, err := s.agentLinkPeers(ctx, "main")
+		peers, err := s.agentLinkPeers(ctx)
 		if err != nil || len(peers) != 0 {
 			t.Fatal("revoked peer remains visible", peers, err)
 		}
