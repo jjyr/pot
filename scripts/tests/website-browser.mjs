@@ -84,27 +84,17 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  for(const selector of ['#install-linux .linux-native .primary','#install-web .web-server .primary'])
   for(const link of await page.locator(selector).all())assert.equal(await link.getAttribute('href'),'https://github.com/jjyr/pot/releases');
  if(!installOnly){
- // 01 is a static product image followed by a local conversation and result.
+ // 01 is a local conversation with communication disclosures and a result preview.
  assert.equal(await page.locator('#assistant [role=tab], #assistant [data-flow], #run-project').count(),0);
  assert.equal(await page.locator('.a01-communication').count(),2);
  assert.deepEqual(await page.locator('.a01-communication').evaluateAll(els=>els.map(e=>e.open)),[false,true]);
  for(const width of [1280,390,320]){
   await page.setViewportSize({width,height:900});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} 01 overflow at ${width}`);
-  const image=page.locator(width>720?'.a01-desktop-shot':'.a01-mobile-shot');
-  const size=width>720?1280:390;
-  assert(await image.evaluate((e,size)=>e.complete&&e.naturalWidth===size&&e.getBoundingClientRect().width===size,size));
-  await page.locator('.a01-product-frame').focus();
-  if(await page.locator('.a01-product-frame').evaluate(e=>e.scrollWidth>e.clientWidth)){
-   await page.keyboard.press('ArrowRight');
-   await page.waitForFunction(()=>document.querySelector('.a01-product-frame').scrollLeft>0);
-  }
-  await page.locator('#a01-openOriginal').focus();await page.keyboard.press('Enter');
-  assert(await page.locator('#a01-originalDialog').evaluate(e=>e.open));
-  assert.equal(await page.locator('#a01-originalImage').evaluate(e=>e.naturalWidth),size);
-  await page.locator('.a01-zoom-scroll').focus();await page.keyboard.press('ArrowRight');
-  await page.waitForFunction(()=>document.querySelector('.a01-zoom-scroll').scrollLeft>0);
-  await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>document.activeElement.id),'a01-openOriginal');
+  await page.locator('#a01-openResult').focus();await page.keyboard.press('Enter');
+  assert(await page.locator('#a01-resultDialog').evaluate(e=>e.open));
+  assert(await page.locator('#a01-resultDialog').evaluate(e=>e.scrollWidth<=e.clientWidth),`${locale} result overflow at ${width}`);
+  await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>document.activeElement.id),'a01-openResult');
  }
  await page.locator('.a01-communication').first().locator('summary').first().focus();
  await page.keyboard.press('Enter');assert(await page.locator('.a01-communication').first().evaluate(e=>e.open));
@@ -162,9 +152,6 @@ const offline=await browser.newPage();const outgoing=[];
 offline.on('request',request=>{if(request.url().startsWith('https://'))outgoing.push(request.url())});
 await offline.goto(origin+'/website/pot-preview.html');
 if(!installOnly){
-await offline.locator('#a01-openOriginal').click();
-await offline.waitForFunction(()=>document.querySelector('#a01-originalImage').naturalWidth===1280);assert.deepEqual(outgoing,[]);
-await offline.keyboard.press('Escape');
 await offline.locator('#a01-openResult').click();assert(await offline.locator('#a01-resultDialog').evaluate(e=>e.open));
 await offline.keyboard.press('Escape');
 }
@@ -173,9 +160,10 @@ assert.equal(await offline.locator('[role=tab][aria-selected=true]').getAttribut
 assert(await offline.locator('#install-web .web-server').isVisible());
 assert(await offline.locator('#install-web .web-docker').isVisible());
 assert(await offline.locator('.github-star img').evaluate(e=>e.src.startsWith('data:image/svg+xml;base64,')&&e.complete&&e.naturalWidth===98&&e.naturalHeight===96));
-const noJS=await browser.newPage({javaScriptEnabled:false});await noJS.goto(origin+'/website/en/');assert.equal(await noJS.locator('#agent-prompt').textContent(),install.prompt);assert.equal(await noJS.locator('.a01-product-image').count(),2);assert.equal(await noJS.locator('.a01-communication').count(),2);assert.equal(await noJS.locator('.install-panel:visible').count(),4);
+const noJS=await browser.newPage({javaScriptEnabled:false});await noJS.goto(origin+'/website/en/');assert.equal(await noJS.locator('#agent-prompt').textContent(),install.prompt);assert.equal(await noJS.locator('.a01-communication').count(),2);assert.equal(await noJS.locator('.install-panel:visible').count(),4);
 assert.equal(await noJS.locator('#install-linux #docker-image').count(),0);
 assert(await noJS.locator('#install-web .web-docker').isVisible());
+assert.deepEqual(outgoing,[]);
 console.log('Offline preview and no-JavaScript install content passed');
 } finally {
  await browser.close();

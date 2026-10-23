@@ -145,8 +145,6 @@ def embedded_assets():
         "grok": "grok.svg",
         "devin": "devin.png",
         "github": "github-invertocat-black.svg",
-        "assistantDesktop": "assistant-desktop.png",
-        "assistantMobile": "assistant-mobile.png",
     }.items():
         path = ROOT / "assets" / file
         mime = mimetypes.guess_type(file)[0]
@@ -168,8 +166,6 @@ def preview():
             "grok": "grok.svg",
             "devin": "devin.png",
             "github": "github-invertocat-black.svg",
-            "assistantDesktop": "assistant-desktop.png",
-            "assistantMobile": "assistant-mobile.png",
         }.items():
             body = body.replace("assets/" + file, assets[key])
         config = {**config, "assets": assets}
