@@ -53,7 +53,13 @@ func TestLinkedPotRetiresOnlySelectedAssistant(t *testing.T) {
 	}
 	// Deletion remains successful even if its best-effort cache refresh fails.
 	// Read the receiver's directory rather than racing cached observations.
-	directory, err := a.service.agentLinks.service.Directory(ctx, connection.ID)
+	// The directory request can be rejected before dispatch while the peer is
+	// refreshing its cache. Retry that exact admission rejection only; never
+	// repeat deletion or accept a cached result in place of the receiver read.
+	value, err = retryAgentCapacity(ctx, func(ctx context.Context) (any, error) {
+		return a.service.agentLinks.service.Directory(ctx, connection.ID)
+	})
+	directory, _ := value.(agentlink.Directory)
 	if err != nil || len(directory.Assistants()) != 1 || directory.DefaultAssistant() != "" {
 		t.Fatal(directory, err)
 	}
