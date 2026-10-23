@@ -102,6 +102,9 @@ func TestPeerFenceDoesNotBlockOtherAgent(t *testing.T) {
 	}
 	reply := sendMail(t, b, "reply", bob, alice, &one)
 	deliver(t, a, reply)
+	if err := a.Claim(ctx, reply.ID); err != nil {
+		t.Fatal(err)
+	}
 	two := sendMail(t, a, "two", alice, bob, &reply)
 	deliver(t, b, two)
 	b.Close()
@@ -131,6 +134,9 @@ func TestLocalMailReplyParticipantsAndAutomaticHopBound(t *testing.T) {
 	m, _ := mailbox(t, "local")
 	alice, bob, charlie := address("local", "alice"), address("local", "bob"), address("local", "charlie")
 	initial := sendMail(t, m, "one", alice, bob, nil)
+	if err := m.Claim(ctx, initial.ID); err != nil {
+		t.Fatal(err)
+	}
 	if pending, err := m.Pending(ctx, "local"); err != nil || len(pending) != 0 {
 		t.Fatal(pending, err)
 	}
@@ -148,9 +154,6 @@ func TestLocalMailReplyParticipantsAndAutomaticHopBound(t *testing.T) {
 	if forwarded.ReplyTo != nil || forwarded.ConversationID == initial.ConversationID || forwarded.Hops != 1 {
 		t.Fatal("forward lost causation or became a reply to another agent", forwarded)
 	}
-	if err := m.Claim(ctx, "one"); err != nil {
-		t.Fatal(err)
-	}
 	if err := m.Finish(ctx, "one", true, "done"); err != nil {
 		t.Fatal(err)
 	}
@@ -162,6 +165,9 @@ func TestLocalMailReplyParticipantsAndAutomaticHopBound(t *testing.T) {
 	}
 	remote := protocol.Envelope{Kind: "message", ID: "long-chain", From: address("remote", "peer"), To: bob, ConversationID: newConversation(), Text: "continuing work", Hops: 130}
 	deliver(t, m, remote)
+	if err := m.Claim(ctx, remote.ID); err != nil {
+		t.Fatal(err)
+	}
 	if forwarded, err := m.Send(ctx, "continue", bob, protocol.SendMail{To: alice, Text: "new conversation"}, &remote); err != nil || forwarded.Hops != 131 || forwarded.ReplyTo != nil {
 		t.Fatal("long chain lost continuation or provenance", forwarded, err)
 	}

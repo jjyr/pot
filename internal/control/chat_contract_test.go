@@ -159,6 +159,9 @@ func TestChatRepliesKeepExactParentsAcrossOutOfOrderDeliveryAndRestart(t *testin
 		}
 		inputs = append(inputs, awaitAgentLinkMail(t, b.service, accepted.MessageID).Message)
 	}
+	if err := b.service.Mailbox.Claim(ctx, inputs[0].ID); err != nil {
+		t.Fatal(err)
+	}
 	for i := len(inputs) - 1; i >= 0; i-- {
 		parent := inputs[i]
 		replyCtx := context.WithValue(ctx, mailParentKey{}, parent)

@@ -25,6 +25,9 @@ func TestPotLinkDirectChatUsesExistingMailboxAndSeparateUserProjection(t *testin
 		t.Fatal("conflicting retry admitted")
 	}
 	message := awaitAgentLinkMail(t, b.service, id).Message
+	if err := b.service.Mailbox.Claim(ctx, message.ID); err != nil {
+		t.Fatal(err)
+	}
 	replyCtx := context.WithValue(ctx, mailParentKey{}, message)
 	_, e = b.service.sendAssistantMail(replyCtx, "peer-reply", "main", protocol.SendMail{To: message.From, Text: "answer"})
 	if e != nil {

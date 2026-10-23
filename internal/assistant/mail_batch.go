@@ -30,8 +30,10 @@ const sameMailGroup = `b.direction='in' AND json_extract(b.envelope,'$.kind')='m
  AND json_extract(b.envelope,'$.from.kind')=json_extract(m.envelope,'$.from.kind')
  AND json_extract(b.envelope,'$.from.agent_id')=json_extract(m.envelope,'$.from.agent_id')`
 
+// Confirmed failure is terminal history, not a lease over future correspondence.
+// Uncertain executions still require the owning conversation's recovery gate.
 const blockedMailGroup = ` AND NOT EXISTS(SELECT 1 FROM agent_messages b WHERE ` + sameMailGroup + ` AND
- (b.state IN ('processing','interrupted','failed') OR b.state='waiting' AND
+ (b.state IN ('processing','interrupted') OR b.state='waiting' AND
  COALESCE((SELECT batch FROM agent_delivery_items WHERE message=b.id),b.id)!=COALESCE((SELECT batch FROM agent_delivery_items WHERE message=m.id),m.id)))`
 
 func (m *Mailbox) ClaimMailBatch(ctx context.Context, seed protocol.Envelope) (MailBatch, error) {

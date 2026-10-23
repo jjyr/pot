@@ -4,11 +4,31 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 
 	"github.com/jjyr/pot/internal/inbox"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 )
+
+// ResumeDelivery restores only the original journal membership after the owning
+// conversation admits a verified continuation. Ordinary inbox polling and sender
+// tools cannot reopen a failed or interrupted receiver attempt.
+func (m *Mailbox) ResumeDelivery(ctx context.Context, owner, batch string) error {
+	return storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
+		var count, invalid int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN recipient!=? OR direction!='in' OR state NOT IN ('processing','failed','interrupted') THEN 1 ELSE 0 END),0)
+ FROM agent_messages WHERE id IN (SELECT message FROM agent_delivery_items WHERE batch=?)`, owner, batch).Scan(&count, &invalid); err != nil {
+			return err
+		}
+		if count == 0 || invalid != 0 {
+			return errors.New("original delivery cannot resume")
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE agent_messages SET state='processing',detail=NULL
+ WHERE id IN (SELECT message FROM agent_delivery_items WHERE batch=?)`, batch)
+		return err
+	})
+}
 
 // Notifications reads both trusted notification sources in inbox receipt order.
 // Correspondence uses its sender batch but shares the same owning conversation.

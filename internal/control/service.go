@@ -228,6 +228,12 @@ func (s *Service) Conversation(ctx context.Context, id string) (*assistant.Conve
 		return s.finishAgentDelivery(ctx, id, r, result)
 	}}
 	options.IdlePolicy = s.idleCompactPolicy
+	options.OnRetryStarting = func(ctx context.Context, request protocol.SendMessage) error {
+		if !strings.HasPrefix(request.RequestID, "pot-result-") {
+			return nil
+		}
+		return s.Mailbox.ResumeDelivery(ctx, id, strings.TrimPrefix(request.RequestID, "pot-result-"))
+	}
 	options.ProjectUI = func(ctx context.Context, messages []protocol.UIMessage) error {
 		for i := range messages {
 			m := &messages[i]
