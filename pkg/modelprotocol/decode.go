@@ -3,6 +3,7 @@ package modelprotocol
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 )
@@ -233,7 +234,7 @@ func (d *Decoder) Finish() (Message, error) {
 		return Message{}, d.failed
 	}
 	if !d.terminal {
-		return Message{}, fmt.Errorf("model stream ended without terminal response")
+		return Message{}, fmt.Errorf("model stream ended without terminal response: %w", io.ErrUnexpectedEOF)
 	}
 	switch d.reason {
 	case "stop", "tool_calls", "end_turn", "tool_use", "STOP":

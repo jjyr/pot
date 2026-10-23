@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import {communication,communicationArgs} from '../../web/src/state/communication.mjs';
+import {messageIdentities,messageAddresses} from '../../web/src/state/message-identities.mjs';
+const addr=(node,agent='same',kind='assistant')=>({node_id:node,kind,agent_id:agent});
+const actor=addr('local'),peer=addr('remote');
+const send={name:'send_message',phase:'completed',args:{to:peer,text:'**Actual message**'},result:JSON.stringify({accepted:true})};
+assert.equal(communication(send,actor).accepted,true);
+assert.deepEqual(communication(send,actor).messages,[{from:actor,to:peer,text:'**Actual message**'}]);
+for(const result of [{completed:true},{accepted:'true'},'Accepted',{accepted:false},undefined])assert.equal(communication({...send,result},actor).accepted,false,'Tool completion is not acceptance');
+assert.equal(communication({...send,phase:'failed'},actor).accepted,false);
+for(const args of [null,'{"text":"unfinished',{},[],{text:{unsafe:'object'}}]){
+  const model=communication({...send,args,phase:'preparing'},actor);
+  assert.equal(model.messages[0].text,null,'Partial or malformed text cannot become a body');
+}
+const serialized=JSON.stringify(send.args);
+assert.equal(communication({...send,args:serialized},actor).messages[0].text,send.args.text);
+assert.deepEqual(messageAddresses({...send,args:serialized}),[peer]);
+assert.equal(communicationArgs({args:'{"text":'}),null);
+const mail={name:'receive_message',phase:'completed',args:{messages:[{from:peer,to:actor,text:'one'},{from:peer,to:actor,text:'two'},{from:addr('third'),to:actor,text:'three'}]}};
+assert.equal(communication(mail).sources.length,2);
+assert.equal(communication(mail).count,3);
+assert.deepEqual(communication(mail).messages.map(m=>m.text),['one','two','three']);
+assert.equal(communication({...mail,args:{messages:[null]}}).messages[0].text,null);
+assert.equal(communication({...send,args:{to:addr('remote','job','task'),text:'complete'}}).kind,'send','Task guidance is not delegation');
+const task={id:'job',title:'Review',phase:'queued',address:addr('remote','job','task'),agent_link:{kind:'codex',node_id:'remote',assistant_id:'same',name:'Codex'}};
+const delegate=communication({name:'create_task',args:{target:peer,text:'Review\nCheck the diff'},result:JSON.stringify(task)},actor);
+assert.equal(delegate.kind,'delegate');assert.deepEqual(delegate.messages[0].to,peer);assert.equal(delegate.task.id,'job');
+assert.equal(communication({name:'exec',args:{code:'send_message()'}},actor),null);
+const client={runtime:{runtime_id:'local'},spaces:[{id:'space',control_id:'local'}],assistants:[{id:'same',control_id:'local',name:'Codex is my name',avatar:'image'},{id:'linked',control_id:'local',profile_name:'Actual peer',origin:{node_id:'remote',assistant_id:'same',kind:'codex'},offline:true}]};
+const identities=messageIdentities(client);
+assert.equal(identities.resolve(actor).brand,'pot','A display name does not select the brand');
+assert.equal(identities.resolve(actor).avatar,'image');
+assert.equal(identities.resolve(peer).brand,'codex');assert.equal(identities.resolve(peer).offline,true);
+assert.equal(identities.resolve(addr('unknown')),undefined);
+assert.deepEqual(identities.actor({space:'space',owner:'linked'}),peer,'Synthetic linked IDs never become envelope identities');
+assert.deepEqual(identities.actor({space:'space',owner:'same'}),actor);
+assert.equal(identities.actor({space:'space',owner:'agent-link:missing:same'}),undefined,'Missing directory entries never turn a synthetic ID into an envelope address');
+console.log('Communication: complete arguments, batching, true acceptance, delegation, kinds, avatars and full-address brands passed');

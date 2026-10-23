@@ -7,6 +7,17 @@ credentials or grant execution permissions.
 
 ## Addresses and provenance
 
+Assistant mention completions read undeleted local definitions and the current
+Agent Link directory snapshots. Contacts and the bounded name/avatar cache used
+to display historical messages are not selection directories. Opening an `@`
+query waits for a current completion read; assistant and Agent Link invalidations
+retire visible options and fence pending reads before refreshing both Chat and
+Task guidance. Existing inline references and drafts keep their full addresses.
+Remote deletion becomes known when the receiver's directory is refreshed by the
+existing Agent Link lifecycle. An unreachable peer without deletion evidence
+retains its cached directory and the existing offline indication; opening the
+picker does not connect to peers or infer deletion from connectivity.
+
 An Agent address is `{node_id, kind, agent_id}`. Model recipients may have
 kind `assistant` or `task`, or the original `user` address when replying to a
 direct Agent Link chat; Task addresses belong to their owning Control,
@@ -20,10 +31,15 @@ execution; models cannot provide a sender, impersonate a user or produce Runtime
 events. Owner-origin messages guide active Tasks at a model boundary. Peer
 information is reference data, not new user authority. Owner guidance to an
 ended Task reopens the same Task and starts a new Run using retained context and
-workspace. Peer references do not restart ended Tasks. Workers can message only
-their owning assistant and cannot delegate or acquire management tools. Runtime
-binds the processing parent from the authenticated execution, never tool
-arguments. Replies to that parent's sender automatically set wire `reply_to` to
+workspace. Peer references do not restart ended Tasks. Workers can message their
+owning assistant and ordinary local Tasks owned by that same assistant. Full Task
+addresses must be supplied through task context, briefs or guidance; workers gain no Task discovery, delegation or management tools.
+The receiver validates both Tasks against the assistant-scoped catalogue; guessed
+IDs, cross-owner Tasks and wrong-node addresses do not bypass this boundary.
+Runtime binds the sender to its current Task/run/generation. Cross-owner and
+remote Task peer input are unsupported: the current linked input contract carries
+owner guidance and cannot preserve Task peer provenance. Runtime binds the
+processing parent from the authenticated execution, never tool arguments. Replies to that parent's sender automatically set wire `reply_to` to
 the parent's message ID and retain its conversation; forwarding starts a new
 wire conversation while retaining the causal hop count. Task inputs retain their
 accepted conversation identity, with any processing parent recorded
@@ -54,7 +70,18 @@ Different assistants retain separate histories; sender addresses and wire
 conversations retain their exact identities.
 Task messages are consumed at safe model boundaries; owner guidance accepted
 after finalization continues in the next Run of the same Task. Messages
-do not interrupt commands. Assistant replies to peers use `send_message`; final
+do not interrupt commands. Local Task receipts include `input_state`, a snapshot
+of the durable receiver input: `pending` awaits a safe model boundary, `consumed`
+has entered the receiver context, `retained` is saved without delivery, and
+`cancelled` was discarded by cancellation.
+Queued Tasks receive pending references when normal execution starts. Running
+Tasks receive them at the next boundary. Waiting (allowance or approval) and
+paused Tasks keep pending references until normal execution resumes; a message
+does not resume them or approve anything. References arriving during finalization,
+stopping or after the run ends are retained only, never a reason to launch a Run.
+Even a pending reference can become retained if the run ends before consuming it.
+Acceptance and input consumption never prove the requested work ran. Assistant
+replies to peers use `send_message`; final
 model text can report to the user in the owning conversation and is not
 automatically forwarded to the peer. Incoming envelopes appear as collapsed
 receive-message records, like tool calls, rather than ordinary chat prose.
@@ -208,3 +235,33 @@ content, including sender, text and parent. This internal hash version does not
 accept old network address fields. Ordinary tool output, plugin state, historical
 model messages and provider replay remain opaque evidence. Migrations change only
 known typed address paths and keep uncertain executions fenced.
+
+## Conversation presentation
+
+Chat and Task transcripts share the communication tool disclosure. Its summary
+keeps the operation and resolved full-address identities, with a compact pair of
+avatar or brand endpoints and a static directional line. Names and brands come
+from the existing assistant directory/cache; unknown addresses keep a neutral
+node. The direction line contains no channel label; channel and tool information
+remain in secondary Call details. Offline is an endpoint property and never
+changes Task phase. Ordinary send and receive records start collapsed. Manual
+choices survive message, directory, stream, locale and theme updates; existing
+approval and explicit navigation rules still apply.
+
+Opening a message hides the summary relation diagram and shows a sender avatar
+and readable name, recipient and necessary source on a single identity row.
+The complete parsed `text` follows through the shared safe Markdown renderer,
+without a bubble, outer card, tinted fill or decorative left rule. Full address
+JSON stays in the secondary disclosure. Receive batches retain every envelope's own from/to/body;
+summary counts distinguish one sender with several messages from several sources.
+Incomplete arguments show preparation, and unavailable bodies point to the
+secondary Call details disclosure. That disclosure retains the tool name, full
+addresses, arguments, result and diagnostic output with copy controls. Tool
+failures have a separate error area.
+
+Only an explicit successful `accepted: true` receipt is labeled Accepted. Received
+here means the envelope entered this conversation; neither label implies delivery,
+reading or business processing. Envelopes have no sender timestamp, so none is
+invented. `create_task` is a distinct delegation operation with the existing Task
+detail entry; its tool receipt says Task created, while the detail owns current
+Task progress and approvals. Ordinary task guidance remains a message.

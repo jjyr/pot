@@ -95,3 +95,22 @@ try{
  assert.equal((await transport.read('/api/v1/providers')).connections[0].available,true,'An extension lifecycle event from another window invalidates the same projection');transport.resources.clear();
 }finally{globalThis.fetch=originalFetch;}
 console.log('Provider registry lifecycle: extension commands and streamed events invalidate executable availability without stale reuse or cross-Space eviction');
+
+// Current selections cannot reuse stale search results, even inside the TTL.
+let mentionItems=[{token:'@assistant:local/same',label:'Retired'},{token:'@assistant:remote/same',label:'Remote'}],mentionGate;
+const mentionClient={...client,request:async()=>{const items=structuredClone(mentionItems);if(mentionGate)await mentionGate.promise;return {items};}};
+const mentionReads=createResourceReads(mentionClient),mentionPath='/api/v1/completions?q=%40Retired';
+assert.equal((await mentionReads.read(mentionPath)).items.length,2);
+mentionItems=mentionItems.slice(1);
+assert.equal((await mentionReads.read(mentionPath)).items.length,1,'Reopening an old query never returns its cached deleted item');
+let invalidated=0;
+const stopMentions=mentionReads.subscribeInvalidation((topics,source)=>{assert.equal(source.space,'b');assert.deepEqual(topics,['agent-links']);invalidated++;});
+mentionGate=deferred();const oldMentions=mentionReads.read(mentionPath);mentionItems=[];
+mentionReads.invalidate(['agent-links'],{space:'b'});assert.equal(invalidated,1,'Directory invalidation reaches mounted selectors synchronously');stopMentions();
+const releaseMentions=mentionGate;mentionGate=null;releaseMentions.resolve();
+assert.deepEqual((await oldMentions).items,[],'Late directory results must re-read instead of reviving removed identities');
+mentionItems=[{token:'@assistant:remote/same',label:'Offline',offline:true}];
+assert.equal((await mentionReads.read(mentionPath)).items[0].offline,true,'Offline is distinct from deleted');
+mentionReads.invalidate([],{space:'b',reset:true});mentionItems=[];
+assert.deepEqual((await mentionReads.read(mentionPath)).items,[],'Reconnect does not reuse old candidates');
+console.log('Mention directory: authoritative search, Agent Link invalidation, late read fencing, reconnect and offline preservation passed');

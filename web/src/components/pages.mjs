@@ -559,6 +559,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     const current=()=>gate.current(token)&&taskView===view;
     const mutate=async(suffix,body)=>{if(!current())return;await request(path+suffix,{...fileScope,method:'POST',body});if(current())await refreshTaskEvents(view);};
     const ui=createTaskConversation({root,task,record,locale,client,scope:fileScope,draft:taskDrafts.get(draftKey)||'',onDraft:text=>{taskDraftVersions.set(draftKey,(taskDraftVersions.get(draftKey)||0)+1);if(text)taskDrafts.set(draftKey,text);else taskDrafts.delete(draftKey);},
+      onOpenTask:child=>taskDetail({...child,_space_id:fileScope.space,assistant_id:fileScope.owner}),
       assistantName:(client.assistants||[]).find(item=>item.id===task.assistant_id&&item.space_id===task._space_id)?.name||task.assistant_id,
       downloadFile:({task:id,path})=>client.downloadFile(id,path,fileScope),toolMemory,approvalFor:tool=>approvalFor(tool,task.id),onDecision:decideApproval,
       onSend:async text=>{
@@ -740,7 +741,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     const routing=data.routing_total||{};
     if(routing.requests){const routingCard=card(tr('Task routing turns','任务路由回合'));routingCard.append(usageTooltip(n('p','usage-number',`${compact(routing.input+routing.output)} tokens`),{title:tr('Task routing turns','任务路由回合'),rows:usageRows(routing,locale()),note:tr('Includes the entire main-chat turn that delegated a task. Already included in totals.','包含委派任务的整个主聊天回合，已计入总量。')}));projection.append(routingCard);}
     projection.append(usageTrend(data,{locale:locale(),timezone,preset:range.preset}),usageDistributions(data,{locale:locale()}));
-    if(calendarPages){const calendarData=calendarPages.length===1?calendarPages[0].value:combineUsage(calendarPages);projection.append(usageCalendar(calendarData,{locale:locale(),timezone,year,range,onYear:value=>{filter.usageYear=value;show('usage',{keepUsageOwner:true});},onDate:day=>onRange({preset:'day',start:day,end:day})}));}
+    if(calendarPages){const calendarData=calendarPages.length===1?calendarPages[0].value:combineUsage(calendarPages);projection.append(usageCalendar(calendarData,{locale:locale(),timezone,year,onYear:value=>{filter.usageYear=value;show('usage',{keepUsageOwner:true});},onDate:day=>onRange({preset:'day',start:day,end:day})}));}
     else {const failure=n('section','page-card usage-calendar-error');failure.append(n('p','inline-error',t('calendarUnavailable')),action(translate(locale(),'retry'),()=>pageView?.queue.run()));projection.append(failure);}
     for(const page of pages) {
       const value=page.value,owner={space:page.space.id,owner:usageOwner?.owner||''};

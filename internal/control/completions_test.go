@@ -118,3 +118,82 @@ func TestAssistantCompletionsReadPinnedPeerProfilesAndExcludeRevokedNodes(t *tes
 		t.Fatal("revoked node remains in mention picker", items)
 	}
 }
+
+func TestAssistantCompletionsRetireDefinitionsWithoutUsingHistoricalContacts(t *testing.T) {
+	ctx := context.Background()
+	a, b := agentControl(t, "retire-local"), agentControl(t, "retire-remote")
+	owner, err := a.service.Registry.Create(ctx, "observer", "Observer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection := connectAgentControls(t, a, b)
+	// Contacts are historical identity metadata, not an active peer directory.
+	for _, directory := range []protocol.Directory{
+		{NodeID: "retire-remote", Assistants: []protocol.MailAssistant{
+			{Address: protocol.AgentRef{NodeID: "retire-remote", Kind: "assistant", AgentID: "main"}, Name: "Historical remote"},
+			{Address: protocol.AgentRef{NodeID: "retire-remote", Kind: "assistant", AgentID: "deleted"}, Name: "Deleted contact"},
+		}},
+		{NodeID: "old-node", Assistants: []protocol.MailAssistant{{Address: protocol.AgentRef{NodeID: "old-node", Kind: "assistant", AgentID: "main"}, Name: "Old contact"}}},
+	} {
+		if err := a.service.Mailbox.Register(ctx, directory); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lookup := func(query string) []protocol.Completion {
+		t.Helper()
+		value, err := a.service.Completions(ctx, owner.ID, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value["items"].([]protocol.Completion)
+	}
+	if items := lookup("@"); len(items) != 2 {
+		t.Fatal("contacts entered current candidates", items)
+	}
+	retire := func(service *Service) {
+		t.Helper()
+		definitions, err := service.Registry.Definitions(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, definition := range definitions {
+			if definition.ID == "main" {
+				if err := service.DeleteAssistant(ctx, definition.ID, definition.Revision); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+		}
+		t.Fatal("historical main assistant missing")
+	}
+	retire(a.service)
+	if items := lookup("@"); len(items) != 1 || items[0].Token != "@assistant:retire-remote/main" {
+		t.Fatal("local retirement removed the wrong same-ID identity", items)
+	}
+	if items := lookup("@contact"); len(items) != 0 {
+		t.Fatal("historical contact matched a new query", items)
+	}
+	if _, err := a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "disconnect", ID: connection.ID}); err != nil {
+		t.Fatal(err)
+	}
+	retire(b.service)
+	// The source has no deletion evidence until it receives a new directory.
+	if items := lookup("@"); len(items) != 1 || !items[0].Offline {
+		t.Fatal("disconnection fabricated a remote deletion", items)
+	}
+	if _, err := a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "reconnect", ID: connection.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.service.agentLinks.service.Directory(ctx, connection.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{"@", "@Main", "@Historical", "@contact"} {
+		if items := lookup(query); len(items) != 0 {
+			t.Fatal("confirmed directory deletion resurrected from history", query, items)
+		}
+	}
+	contacts, err := a.service.Mailbox.Contacts(ctx)
+	if err != nil || len(contacts) != 3 {
+		t.Fatal("selection refresh erased historical identities", contacts, err)
+	}
+}

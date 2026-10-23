@@ -29,7 +29,7 @@ export function bindCompletions(input,{client,host,locale,mobile=false,id='pot-r
     });
   }
   function choose(item){
-    if(!active||composing||input.disabled||input.readOnly||item.offline)return;
+    if(!active||menu.hidden||!items.includes(item)||composing||input.disabled||input.readOnly||item.offline)return;
     const query=completionQuery(input.value,input.selectionStart,input.selectionEnd);
     if(!query||query.start!==active.start||query.query!==active.query)return close();
     const raw=selectorText(item);if(!raw)return close();
@@ -60,7 +60,7 @@ export function bindCompletions(input,{client,host,locale,mobile=false,id='pot-r
     for(const button of triggers.children)button.setAttribute('aria-pressed',String(button.dataset.trigger===active.query[0]));
   }
   async function update(){
-    if(composing||input.disabled||input.readOnly||document.activeElement!==input)return close();const query=completionQuery(input.value,input.selectionStart,input.selectionEnd);if(!query)return close();
+    if(disposed||composing||input.disabled||input.readOnly||document.activeElement!==input)return close();const query=completionQuery(input.value,input.selectionStart,input.selectionEnd);if(!query)return close();
     if(active?.query===query.query&&active.start===query.start)return;
     close();active=query;const ticket=version,scope=client.scope(),key=JSON.stringify(scope);abort=new AbortController();
     try{const result=await (client.read||client.request)('/api/v1/completions?'+new URLSearchParams({q:query.query}),{...scope,signal:abort.signal});if(disposed||ticket!==version||JSON.stringify(client.scope())!==key||composing)return;const current=completionQuery(input.value,input.selectionStart,input.selectionEnd);if(!current||current.query!==query.query||current.start!==query.start)return close();
@@ -80,7 +80,14 @@ export function bindCompletions(input,{client,host,locale,mobile=false,id='pot-r
   for(const trigger of ['/', '@']){const button=node('button','composer-selector-trigger');button.type='button';button.dataset.trigger=trigger;button.setAttribute('aria-pressed','false');button.append(node('span','composer-selector-symbol',trigger),node('span'));button.onclick=()=>{if(composing||input.disabled||input.readOnly)return;const query=completionQuery(input.value,input.selectionStart,input.selectionEnd),at=input.selectionStart;input.setRangeText(query?trigger:(at&&!/\s/u.test(input.value[at-1])?' ':'')+trigger,query?.start??at,query?.end??input.selectionEnd,'end');input.focus({preventScroll:true});emit();};triggers.append(button);}
   const start=()=>{composing=true;close();},end=()=>{composing=false;ended=performance.now();update();},blur=event=>{if(!menu.contains(event.relatedTarget))close();},keyup=event=>{if(event.key!=='Escape')update();};
   const outside=event=>{if(!host.contains(event.target))close();};
+  const stopInvalidations=client.resources?.subscribeInvalidation((topics,source={})=>{
+    if(!active?.query.startsWith('@')||source.space&&source.space!==client.scope().space)return;
+    if(topics.length&&!topics.some(topic=>['assistants','agent-links','spaces','runtime'].includes(topic))&&!source.reset)return;
+    // Retire both visible options and the request generation immediately. Keep
+    // draft text, existing references, selection and Skills exactly as entered.
+    close();update();
+  });
   input.addEventListener('input',update);input.addEventListener('click',update);input.addEventListener('keyup',keyup);input.addEventListener('select',update);input.addEventListener('keydown',key,true);input.addEventListener('compositionstart',start);input.addEventListener('compositionend',end);input.addEventListener('blur',blur);document.addEventListener('pointerdown',outside);window.addEventListener('pot:locale',refresh);
   refresh();
-  return {value,refresh,reset:close,setValue(text){if(composing||text===value()&&(selected.length||!splitComposerValue(text).items.length))return;close();const draft=splitComposerValue(text);selected=draft.items.map(item=>({...metadata.get(item.token),...item}));setText(draft.text);paintChips();},dispose(){disposed=true;close();menu.remove();chips.remove();triggers.remove();form.classList.remove('has-completions');for(const event of ['input','click','select'])input.removeEventListener(event,update);input.removeEventListener('keyup',keyup);input.removeEventListener('keydown',key,true);input.removeEventListener('compositionstart',start);input.removeEventListener('compositionend',end);input.removeEventListener('blur',blur);document.removeEventListener('pointerdown',outside);window.removeEventListener('pot:locale',refresh);}};
+  return {value,refresh,reset:close,setValue(text){if(composing||text===value()&&(selected.length||!splitComposerValue(text).items.length))return;close();const draft=splitComposerValue(text);selected=draft.items.map(item=>({...metadata.get(item.token),...item}));setText(draft.text);paintChips();},dispose(){disposed=true;stopInvalidations?.();close();menu.remove();chips.remove();triggers.remove();form.classList.remove('has-completions');for(const event of ['input','click','select'])input.removeEventListener(event,update);input.removeEventListener('keyup',keyup);input.removeEventListener('keydown',key,true);input.removeEventListener('compositionstart',start);input.removeEventListener('compositionend',end);input.removeEventListener('blur',blur);document.removeEventListener('pointerdown',outside);window.removeEventListener('pot:locale',refresh);}};
 }

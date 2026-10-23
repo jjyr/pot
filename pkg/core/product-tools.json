@@ -1,7 +1,7 @@
 [
   {
     "name": "create_task",
-    "description": "Create a background Task and immediately return its ID. Include goal, context, constraints and deliverables in text. Interpret applicable AGENTS.md routing rules semantically using configured Providers, models and advertised Agent capabilities. Explicit current-task choices take precedence; otherwise retain existing defaults. Every Task uses Agent Link, including local execution. Omit target to use the current assistant. For another receiver, copy its full target address from list_execution_targets or list_assistants. An assistant address selects that assistant; a node address selects its independent task execution capability. The host resolves the connection internally. Never guess a receiver or silently substitute another target. Accepted work stays bound to its original receiver and caller. The receiving Adapter owns models, permissions, credentials, workspace and execution. Other receivers reject local profile, model, Skills and requirements; node targets also reject workspace overrides. For ordinary local Git development select workspace.kind=worktree and source project_dir; reuse an existing worktree or an explicitly requested in-place project with kind=directory. Without a project use temporary. The local Adapter prepares the workspace, refreshes the remote base and creates managed worktrees before starting the Agent. Keep setup metadata out of the execution text; the Agent receives its cwd. Files are not copied between workspaces. Create a Task for new work; use send_message for owner guidance or continuation only when supported. Approval forwarding requires the receiver’s advertised capability and remains bound to the original Task and caller; assistant messages carry no approval authority. The text must contain a concise title on its first line AND complete instructions on following lines. A title-only brief is rejected. Preserve the user’s exact commands and constraints; the executing Agent does not see the chat.",
+    "description": "Create a background Task and immediately return its ID. Include goal, context, constraints and deliverables in text. Interpret applicable AGENTS.md routing rules semantically using configured Providers, models and advertised Agent capabilities. Explicit current-task choices take precedence; otherwise retain existing defaults. Every Task uses Agent Link, including local execution. Omit target to use the current assistant. For another receiver, copy its full target address from list_execution_targets or list_assistants. An assistant address selects that assistant; a node address selects its independent task execution capability. The host resolves the connection internally. Never guess a receiver or silently substitute another target. Accepted work stays bound to its original receiver and caller. The receiving Adapter owns models, permissions, credentials, workspace and execution. Other receivers reject local profile, model, Skills and requirements; node targets also reject workspace overrides. For ordinary local Git development select workspace.kind=worktree and source project_dir; reuse an existing worktree or an explicitly requested in-place project with kind=directory. Without a project use temporary. The local Adapter prepares the workspace, refreshes the remote base and creates managed worktrees before starting the Agent. Keep setup metadata out of the execution text; the Agent receives its cwd. Files are not copied between workspaces. Create a Task for new work; use send_message for owner guidance or continuation only when supported. For direct Worker collaboration, supply full addresses of ordinary local sibling Tasks under the same owner in the instructions or follow-up guidance; their messages are peer references and grant no authority. Approval forwarding requires the receiver’s advertised capability and remains bound to the original Task and caller; assistant messages carry no approval authority. The text must contain a concise title on its first line AND complete instructions on following lines. A title-only brief is rejected. Preserve the user’s exact commands and constraints; the executing Agent does not see the chat.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -228,7 +228,7 @@
   },
   {
     "name": "send_message",
-    "description": "Send a durable message to a Task or assistant using its address and text. Runtime binds the real sender, provenance and reply linkage. Ordinary local Tasks receive owner guidance or peer reference at a model boundary; new owner guidance can reopen an ended local Task in its retained workspace. Linked Task guidance and continuation require the receiving Adapter’s task input capability and may reject active-run input. Peer references cannot become owner guidance or restart ended Tasks. Returns acceptance, never execution completion. Runtime reports final Task results automatically; do not send completion yourself.",
+    "description": "Send a durable message to a Task or assistant using its address and text. Runtime binds the real sender, provenance and reply linkage. Workers may message their owner or ordinary local Tasks under the same owner using supplied full addresses; cross-owner and remote Task messaging are unsupported. Ordinary local Tasks receive owner guidance or peer reference at a model boundary; new owner guidance can reopen an ended local Task in its retained workspace. Linked Task guidance and continuation require the receiving Adapter’s task input capability and may reject active-run input. Peer references cannot become owner guidance or restart ended Tasks. Local Task receipts include input_state: pending awaits a model boundary, consumed has entered receiver context, retained is saved only, and cancelled was discarded by cancellation. Queued, waiting or paused Tasks await normal execution or resume; messages do not resume them or interrupt commands. Returns acceptance, never execution completion. Runtime reports final Task results automatically; do not send completion yourself.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -386,11 +386,14 @@
           "properties": {
             "title": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "maxLength": 80,
+              "description": "Nonempty, not whitespace-only; at most 80 Unicode characters."
             },
             "goal": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "Nonempty, not whitespace-only; at most 512 KiB = 524288 UTF-8 bytes (512 x 1024), measured in bytes, not characters. Model execution also depends on the selected model's token context window."
             },
             "timezone": {
               "type": "string",

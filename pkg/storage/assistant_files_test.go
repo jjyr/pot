@@ -67,7 +67,7 @@ INSERT INTO assistant_welcome VALUES('main','original welcome')`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := migrateDatabase(t.Context(), conversation, ConversationDatabase, migrationsBefore(t, ConversationDatabase, "0006_")); err != nil {
+	if err := migrateDatabase(t.Context(), conversation, ConversationDatabase, migrationsBefore(t, ConversationDatabase, "0007_")); err != nil {
 		t.Fatal(err)
 	}
 	rules, _ := json.Marshal(Rules{1, "current edited rules", "old-revision"})

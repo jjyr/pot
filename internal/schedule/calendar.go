@@ -15,8 +15,17 @@ func Validate(spec protocol.ScheduleSpec) error {
 	if _, err := cronexpr.Location(spec.Timezone); err != nil {
 		return err
 	}
-	if strings.TrimSpace(spec.Title) == "" || utf8.RuneCountInString(spec.Title) > 80 || strings.TrimSpace(spec.Goal) == "" || len(spec.Goal) > 8000 {
-		return fmt.Errorf("schedule needs a 1–80 character title and goal up to 8000 bytes")
+	if strings.TrimSpace(spec.Title) == "" {
+		return fmt.Errorf("spec.title must not be empty or whitespace-only")
+	}
+	if actual := utf8.RuneCountInString(spec.Title); actual > 80 {
+		return fmt.Errorf("spec.title exceeds limit: actual=%d characters, limit=80 characters", actual)
+	}
+	if strings.TrimSpace(spec.Goal) == "" {
+		return fmt.Errorf("spec.goal must not be empty or whitespace-only")
+	}
+	if actual := len(spec.Goal); actual > protocol.MaxScheduleGoalBytes {
+		return fmt.Errorf("spec.goal exceeds limit: actual=%d UTF-8 bytes, limit=%d UTF-8 bytes (512 KiB)", actual, protocol.MaxScheduleGoalBytes)
 	}
 	if spec.Notify != "all" && spec.Notify != "failures" {
 		return fmt.Errorf("invalid notification policy")

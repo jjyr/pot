@@ -6,18 +6,14 @@ const iso=value=>value.toISOString().slice(0,10);
 export const usageToday=()=>new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 export function usageDateAdd(value,days){const result=date(value);result.setUTCDate(result.getUTCDate()+days);return iso(result);}
 const weekStart=value=>usageDateAdd(value,-((date(value).getUTCDay()+6)%7));
+const presets=['month','quarter','halfyear','year'];
 export function usageRange(preset='month',anchor=usageToday()) {
-  const value=date(anchor),year=value.getUTCFullYear(),month=value.getUTCMonth();
-  if(preset==='year')return {preset,start:`${year}-01-01`,end:`${year}-12-31`};
-  if(preset==='month')return {preset,start:iso(new Date(Date.UTC(year,month,1,12))),end:iso(new Date(Date.UTC(year,month+1,0,12)))};
-  if(preset==='quarter'){const first=Math.floor(month/3)*3;return {preset,start:iso(new Date(Date.UTC(year,first,1,12))),end:iso(new Date(Date.UTC(year,first+3,0,12)))};}
-  if(preset==='fortnight'){const start=usageDateAdd(weekStart(anchor),-7);return {preset,start,end:usageDateAdd(start,13)};}
-  throw Error('Unknown usage preset');
+  if(!presets.includes(preset))preset='month';
+  const value=date(anchor),year=value.getUTCFullYear(),months={month:1,quarter:3,halfyear:6,year:12}[preset],first=Math.floor(value.getUTCMonth()/months)*months;
+  return {preset,start:iso(new Date(Date.UTC(year,first,1,12))),end:iso(new Date(Date.UTC(year,first+months,0,12)))};
 }
 export function usageShiftRange(range,direction) {
-  if(range.preset==='month')return usageRange('month',usageDateAdd(direction<0?range.start:range.end,direction));
-  if(range.preset==='year')return usageRange('year',`${Number(range.start.slice(0,4))+direction}-01-01`);
-  if(range.preset==='quarter')return usageRange('quarter',usageDateAdd(direction<0?range.start:range.end,direction));
+  if(presets.includes(range.preset))return usageRange(range.preset,usageDateAdd(direction<0?range.start:range.end,direction));
   const days=Math.round((date(range.end)-date(range.start))/86400000)+1;
   return {...range,start:usageDateAdd(range.start,days*direction),end:usageDateAdd(range.end,days*direction)};
 }
@@ -29,7 +25,7 @@ export function usageRangeControls(range,{locale,onRange,today=usageToday()}) {
   const t=key=>translate(locale,'usage.'+key),root=n('section','page-card usage-range'),line=n('div','usage-range-toolbar'),shortcuts=n('div','usage-period-links');
   root.dataset.start=range.start;root.dataset.end=range.end;root.dataset.preset=range.preset;
   shortcuts.setAttribute('role','group');shortcuts.setAttribute('aria-label',t('period'));
-  for(const key of ['fortnight','month','quarter','year']){
+  for(const key of presets){
     const target=usageRange(key,today),selected=range.preset===key;
     const button=action(t('period.'+key),()=>onRange(target));button.classList.add('usage-period-link');button.classList.toggle('selected',selected);button.dataset.preset=key;button.setAttribute('aria-pressed',String(selected));shortcuts.append(button);
   }

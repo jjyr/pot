@@ -123,7 +123,7 @@ async function navigationFrames({root,client,select,snapshot,historyReads,emit})
   const atLatest=()=>{
     const h=history();if(h.scrollHeight-h.clientHeight-h.scrollTop>1)throw Error('Chat is not at latest');
     const last=snapshot(client.scope().owner).messages.at(-1),node=row(last.id);
-    if(!node||node.getBoundingClientRect().bottom>h.getBoundingClientRect().bottom+1)throw Error('Latest message is not mounted in the viewport');
+    if(!node||node.getBoundingClientRect().bottom>h.getBoundingClientRect().bottom+1)throw Error(`Latest message ${last.id} is not mounted in the viewport (${node?.getBoundingClientRect().bottom} > ${h.getBoundingClientRect().bottom})`);
   };
   const atAnchor=anchor=>()=>{if(!row(anchor.id)||Math.abs(offset(anchor.id)-anchor.offset)>2)throw Error(`Anchor ${anchor.id} drifted: ${anchor.offset} → ${offset(anchor.id)}`);};
   const narrow=matchMedia('(max-width:719px)').matches;
@@ -142,7 +142,11 @@ async function navigationFrames({root,client,select,snapshot,historyReads,emit})
   check(nextDrag.id!==firstDrag.id||Math.abs(nextDrag.offset-firstDrag.offset)>100,'Scrollbar dragging continues across virtual row resize callbacks');
   window.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));root.querySelector('.latest-button').click();await settle();
   await settings();await frames('Settings return follows latest from its first frame',returnFromSettings,()=>{atLatest();if(Math.abs(root.querySelector('.composer-area').getBoundingClientRect().height-composerHeight)>1)throw Error('Composer height changed');});
-  await frames('Cached chat switch follows latest from its first frame',async()=>{await select('beta');await select('alpha');},atLatest);
+  const draftOwner=client.scope().owner,cachedDraft=input.value;
+  await frames('Cached chat switch restores its multiline draft height and Latest from its first frame',async()=>{await select('beta');await select('alpha');},()=>{
+    atLatest();
+    if(client.scope().owner===draftOwner&&(input.value!==cachedDraft||Math.abs(root.querySelector('.composer-area').getBoundingClientRect().height-composerHeight)>1))throw Error('Cached draft content or height changed');
+  });
   history().dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));history().scrollTop=history().scrollHeight/2;await settle();
   const anchor=capture();check(!!anchor.id,'Reading frame has a message anchor');
   await frames('Composer growth and shrink preserve historical reading',async()=>{

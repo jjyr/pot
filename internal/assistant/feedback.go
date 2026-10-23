@@ -298,6 +298,9 @@ func (f *turnFeedback) event(event core.AgentEvent) error {
 				f.reply = message.ID
 				message.Status = protocol.Streaming
 				message.Error = ""
+				if update.ID == message.ID {
+					message.Text = ""
+				}
 				return c.putMessageLocked(ctx, message, nil)
 			}
 		}

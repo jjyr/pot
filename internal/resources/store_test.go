@@ -1,15 +1,99 @@
 package resources
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 )
+
+func TestDisplayLabelsAndDownloadFilenamesAreIndependent(t *testing.T) {
+	root := t.TempDir()
+	s, err := Open(filepath.Join(root, "originals"), filepath.Join(root, "control.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	labels := []string{"Pot 通信记录 · 修订 02（A/B 局部对照）", `A\B`, strings.Repeat("中文", 200), strings.Repeat("长显示名称/", 2000), "NUL.html", "..", ".hidden", "line\x00\r\nbreak"}
+	paths := []string{"demo/index.html", "demo/ui.css"}
+	contents := [][]byte{[]byte("<link rel=stylesheet href=ui.css>"), []byte("body{color:red}")}
+	for index, label := range labels {
+		for _, bundle := range []bool{false, true} {
+			count := 1
+			if bundle {
+				count = 2
+			}
+			request := fmt.Sprintf("label-%d-%t", index, bundle)
+			r, err := s.Register(ctx, "alice", request, request, label, paths[0], paths[:count], contents[:count])
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, err := s.Get(ctx, "alice", r.ID)
+			if err != nil || stored.Name != label || stored.Entry != paths[0] || stored.Files[0].Path != paths[0] {
+				t.Fatal("display label or original path changed", err)
+			}
+			for _, mode := range []string{"preview", "download"} {
+				if err := (Presentation{Resource: stored, Mode: mode}).Validate(); err != nil {
+					t.Fatal("presentation rejected display label", err)
+				}
+			}
+			if r.Download.Path != core.DownloadFilename(r.Download.Path) || len(r.Download.Path) > 255 {
+				t.Fatal("unsafe download filename", r.Download.Path)
+			}
+			file, _, err := s.OpenFile(ctx, "alice", r.ID, "@download")
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := io.ReadAll(file)
+			file.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bundle {
+				if r.Download.Path != "index.html" || !bytes.Equal(data, contents[0]) {
+					t.Fatal("single-file download changed with display label")
+				}
+				continue
+			}
+			if !strings.HasSuffix(r.Download.Path, ".zip") || r.Files[1].Path != paths[1] {
+				t.Fatal("bundle filename or asset path changed")
+			}
+			if label == ".hidden" && r.Download.Path != ".hidden.zip" {
+				t.Fatal("dotfile label lost its stem")
+			}
+			archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+			if err != nil || len(archive.File) != len(paths) {
+				t.Fatal("invalid bundle", err)
+			}
+			for i, entry := range archive.File {
+				reader, err := entry.Open()
+				if err != nil {
+					t.Fatal(err)
+				}
+				original, err := io.ReadAll(reader)
+				reader.Close()
+				if err != nil || entry.Name != paths[i] || !bytes.Equal(original, contents[i]) {
+					t.Fatal("archive entry changed", err)
+				}
+			}
+		}
+	}
+	for i, name := range []string{"CON.txt", "notes?.txt", strings.Repeat("中", 100) + ".txt"} {
+		r, err := s.Register(ctx, "alice", fmt.Sprint("filename-", i), "hash", "Display A/B", "dir/"+name, []string{"dir/" + name}, [][]byte{[]byte("original")})
+		if err != nil || r.Download.Path != core.DownloadFilename(name) || r.Entry != "dir/"+name {
+			t.Fatal("single-file filename conversion", err)
+		}
+	}
+}
 
 func TestResourceOriginalsOwnershipReceiptAndRestart(t *testing.T) {
 	ctx := context.Background()

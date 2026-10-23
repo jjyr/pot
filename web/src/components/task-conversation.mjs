@@ -18,7 +18,7 @@ import {createMessageWindow} from './message-window.mjs';
 import {createReadingCursor} from './reading-cursor.mjs';
 import {copyFeedback} from './motion.mjs';
 
-export function createTaskConversation({root,task,record:initial,locale,client,scope,draft,onDraft,downloadFile,toolMemory,approvalFor,onDecision,onSend,onStop,onPause,onCancel,onArchive,onUsage,onRefresh,onSettings,assistantName}){
+export function createTaskConversation({root,task,record:initial,locale,client,scope,draft,onDraft,downloadFile,toolMemory,approvalFor,onDecision,onSend,onStop,onPause,onCancel,onArchive,onUsage,onRefresh,onSettings,onOpenTask,assistantName}){
   const machineLabel=id=>machinePresentation(client).label(id,scope,locale());
   const acquireFileImage=client.acquireFileImage?({task,path})=>client.acquireFileImage(task,path,scope):undefined;
   const resourceOptions={acquireResource:client.acquireResource?resource=>client.acquireResource(resource,scope):undefined,downloadResource:client.downloadResource?resource=>client.downloadResource(resource,scope):undefined};
@@ -41,7 +41,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   let forest,projection,restoringPosition=false;
   const reading=createReadingCursor(history,{active:()=>!disposed&&root.isConnected&&!!history.clientHeight,requestRender:scheduleFollow,changed:()=>{latest.hidden=reading.following;}});
   const editor=bindComposer(input,{layout:work=>reading.layout(work),onInput:text=>{draftVersion++;onDraft(completion.value());updateComposer();},onSend:submit,onCompositionEnd:updateComposer});
-  const completion=bindCompletions(input,{client:{scope:()=>scope,request:(path,options)=>client.request(path,options)},host:composerArea,locale,mobile:editor.mobile,id:`pot-task-${task.id}-completions`,setText:text=>editor.setValue(text)});
+  const completion=bindCompletions(input,{client:{scope:()=>scope,resources:client.resources,read:client.read?(path,options)=>client.read(path,options):undefined,request:(path,options)=>client.request(path,options)},host:composerArea,locale,mobile:editor.mobile,id:`pot-task-${task.id}-completions`,setText:text=>editor.setValue(text)});
   input.value='';completion.setValue(draft);
   const can=operation=>supportsCapability(record,operation);
   const linked=()=>record.info?.agent_link||task.agent_link;
@@ -101,13 +101,15 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
  if(!entry.compact){entry.compact=createCompaction({locale});entry.element.append(entry.compact.element);}
  entry.compact.update(message);
  }else if(message.tool){
-        if(!entry.tool){entry.tool=createToolCall({resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key:JSON.stringify([scope,task.id,message.id]),locale,machineLabel,onDecision,onInteract:event=>reading.engage(event),onLocate:(call,turn)=>{const target=forest.byID.get(turn+':'+call)?.message;if(target){reading.locate({id:target.id,expand:true});renderTranscript();}},downloadFile,acquireFileImage});entry.element.append(entry.tool.element);}
+        if(!entry.tool){entry.tool=createToolCall({messageActor:()=>record.info?.address||task.address,onOpenTask,resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key:JSON.stringify([scope,task.id,message.id]),locale,machineLabel,onDecision,onInteract:event=>reading.engage(event),onLocate:(call,turn)=>{const target=forest.byID.get(turn+':'+call)?.message;if(target){reading.locate({id:target.id,expand:true});renderTranscript();}},downloadFile,acquireFileImage});entry.element.append(entry.tool.element);}
         const children=forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children||[];
         const approvalDescendant=children.some(function pending(entry){return !!approvalFor(entry.message.tool)||entry.children.some(pending);});
         entry.tool.update(message,{approval:approvalFor(message.tool),approvalDescendant,offline:unavailable||!!connectionError,children:children.map(child=>child.message)});
         if((reading.destination||restoringPosition)&&destinations.has(message.id)||reading.destination?.expand&&reading.destination.id===message.id)entry.tool.element.open=true;
-        if(!entry.childrenWindow){entry.childrenWindow=createMessageWindow({scroller:history,host:entry.tool.children,render:renderMessage,dispose:disposeMessage,requestRender:()=>reading.reflow(),compensate:delta=>reading.compensate(delta),heights});entry.tool.element.addEventListener('toggle',scheduleFollow);}
-        entry.childrenWindow.set(entry.tool.element.open?children.map(child=>({...child.message,viewKey:child.message.id})):[],{target:destinations.has(message.id)?{id:destinations.get(message.id)}:undefined});
+        if(children.length||entry.childrenWindow){
+          if(!entry.childrenWindow){entry.childrenWindow=createMessageWindow({scroller:history,host:entry.tool.children,nested:true,render:renderMessage,dispose:disposeMessage,requestRender:()=>reading.reflow(),reading,heights});entry.tool.element.addEventListener('toggle',scheduleFollow);}
+          entry.childrenWindow.set(entry.tool.element.open?children.map(child=>({...child.message,viewKey:child.message.id})):[],{target:destinations.has(message.id)?{id:destinations.get(message.id)}:undefined});
+        }
       }else{
         if(!entry.body){entry.body=n('div','message-body');entry.element.append(entry.body);if(message.role==='assistant')entry.reply=createReplyBubble(entry.body);}
         if(message.role==='assistant')entry.reply.update(message,{t,downloadFile,acquireFileImage,...resourceOptions,onReconnect:can('task.read')?()=>run(onRefresh):undefined,onSettings:can('assistant.configure')?onSettings:undefined});
@@ -123,7 +125,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
       }
       return entry;
   }
-  const transcriptWindow=createMessageWindow({scroller:history,host:transcript,render:renderMessage,dispose:disposeMessage,requestRender:()=>reading.reflow(),compensate:delta=>reading.compensate(delta),heights});
+  const transcriptWindow=createMessageWindow({scroller:history,host:transcript,render:renderMessage,dispose:disposeMessage,requestRender:()=>reading.reflow(),reading,heights});
   let destinations=new Map();
   function renderTranscript(){
     if(!state)return;

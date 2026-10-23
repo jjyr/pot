@@ -458,8 +458,26 @@ retries return its retained completion receipt without affecting a later turn.
 
 A model transport error, truncated stream or cancellation during a live turn
 closes the stream and saves the last committed context without an active model
-marker. Failed turns can use the existing retry action with the original input
-and confirmed tool receipts; each new sample gets a new request ID. Partial
+marker. Temporary transport failures, interrupted streams, inactivity timeouts
+and provider HTTP 408/429/500/502/503/504 responses retry at the same model
+boundary after 2, 4 and 8 seconds (at most four attempts). Each attempt has its
+own inactivity interval and request ID, and still respects turn request and allowance limits.
+Cancellation, permanent failures, failed checkpoint writes and failed observation
+persistence stop retries. Incomplete text is replaced in the same reply;
+uncommitted tool proposals are discarded and committed tool receipts remain.
+After retries are exhausted, failed turns can use the existing retry action with
+the original input and confirmed tool receipts; each new sample gets a new
+request ID. Partial
 model text and proposed tool calls are not replayed. Cleanup failures and failed
 checkpoint writes still require recovery. Provider usage for an interrupted
 request remains unknown/conservatively reserved independently of retryability.
+
+`request_timeout_ms` now bounds inactivity, defaulting to 600000 ms (ten minutes),
+rather than total request duration. Waiting for response headers is bounded by
+that interval; after headers, every nonempty stream read renews it. Text,
+reasoning, partial tool arguments and SSE keepalives all count as transport
+activity. An active reply can run longer than ten minutes. Empty reads do not
+renew the timer. User cancellation and any owning task/turn deadline remain
+authoritative. Inactivity reports its timeout cause instead of the socket-close
+error produced by concurrently stopping a blocked read. The HTTP client has no
+separate total-response deadline.

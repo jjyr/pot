@@ -1,10 +1,10 @@
 // Real Usage page with synthetic date-scoped API projections. No account access.
-const params=new URLSearchParams(location.search),baseline=params.has('baseline');
-const prefix=baseline?'/output/pr-images/usage-date-ranges-baseline/web/src':'/web/src';
+const params=new URLSearchParams(location.search),review=params.has('review');
+const prefix=new URL('../../web/src',import.meta.url).pathname;
 document.querySelector('#styles').href=prefix+'/styles.css';
 const {createPages}=await import(prefix+'/components/pages.mjs');
-const {usageToday,usageDateAdd,usageTrendBuckets}=await import('/web/src/components/usage-period.mjs');
-const {usageNumbers}=await import('/web/src/components/usage.mjs');
+const {usageToday,usageDateAdd,usageTrendBuckets}=await import(prefix+'/components/usage-period.mjs');
+const {usageNumbers}=await import(prefix+'/components/usage.mjs');
 let language=params.get('locale')||'zh-CN',scenario=params.get('case')||'complete';
 document.documentElement.lang=language;document.documentElement.dataset.theme=params.get('theme')||'light';
 document.body.classList.toggle('capture',params.has('capture'));
@@ -45,6 +45,7 @@ function verify(){
   check(columns.length===expected.length&&columns.every((node,i)=>node.dataset.date===expected[i].date),'Trend retains selected dates and groups natural weeks/months');
   check(columns.every((node,i)=>Math.abs(parseFloat(node.querySelector('.chart-bar').style.height)-(expected[i].input+expected[i].output)/max*140)<.001),'Trend scales only the selected range');
   for(const key of ['categoryShare','modelShare'])check(distributions.querySelector(`[data-view-key="${key}"] .usage-share-heading .hint`).textContent.includes(numbers.compact(data.total.input+data.total.output)),'Distribution total matches selected range');
+  check(!chart.querySelector(':scope>p.hint'),'Compaction has no bottom explanatory line');
   check(chart.querySelectorAll('.usage-share-row').length===2,'Both compaction trigger classes remain visible');
   const pre=chart.querySelector('[data-view-key="precompact"]');
   if(scenario==='empty')check(chart.querySelectorAll('.usage-share-bar>span').length===0,'Empty data draws no false shares');
@@ -54,7 +55,9 @@ function verify(){
   if(calendar){
     const tiles=[...calendar.querySelectorAll('.usage-day')],year=tiles[0].dataset.date.slice(0,4);
     check(tiles[0].dataset.date===year+'-01-01'&&tiles.at(-1).dataset.date===year+'-12-31','Overview uses a natural calendar year');
-    check(tiles.every(tile=>(tile.getAttribute('aria-pressed')==='true')===(tile.dataset.date>=start&&tile.dataset.date<=end)),'Calendar highlights exactly the selected dates');
+    check(tiles.every(tile=>!tile.hasAttribute('aria-pressed')),'Calendar tiles do not mark the selected range');
+    check(tiles.filter(tile=>!tile.matches(':focus-visible')).every(tile=>getComputedStyle(tile).outlineStyle==='none'),'Calendar range has no outline');
+    check(new Set(tiles.filter(tile=>!tile.disabled).map(tile=>getComputedStyle(tile).backgroundColor)).size>1||scenario==='empty','Calendar intensity colors remain');
   }
   check(host.scrollWidth<=document.documentElement.clientWidth,'Usage page fits the current viewport');
   check([...trend.querySelectorAll('.chart-column small')].filter(node=>node.textContent.trim()).every((node,i,labels)=>!i||node.getBoundingClientRect().left>=labels[i-1].getBoundingClientRect().right),'Date labels do not overlap');
@@ -63,14 +66,14 @@ function verify(){
 async function render(){
   if(params.has('conversation'))await pages.openUsage({space:'local',owner:'main',name:'Fixture conversation'},false);
   else await pages.show('usage',{force:true});
-  if(!baseline)verify();
+  if(!review)verify();
 }
 const localeSelect=document.querySelector('#fixture-locale'),themeSelect=document.querySelector('#fixture-theme'),caseSelect=document.querySelector('#fixture-case');
 localeSelect.value=language;themeSelect.value=document.documentElement.dataset.theme;caseSelect.value=scenario;
-localeSelect.onchange=async()=>{language=localeSelect.value;document.documentElement.lang=language;await render();};
+localeSelect.onchange=()=>{language=localeSelect.value;document.documentElement.lang=language;window.dispatchEvent(new Event('pot:locale'));};
 themeSelect.onchange=()=>document.documentElement.dataset.theme=themeSelect.value;
 caseSelect.onchange=async()=>{scenario=caseSelect.value;await render();};
-window.usageFixture={verify,requests,hold(){holdNext=true;},release(){release?.();release=null;},failCalendar(value){failCalendar=value;}};
+window.usageFixture={verify,requests,refresh:()=>pages.show('usage'),open:context=>context?pages.openUsage(context,false):pages.show('usage'),hold(){holdNext=true;},release(){release?.();release=null;},failCalendar(value){failCalendar=value;}};
 window.addEventListener('error',event=>{result.textContent='FAIL '+event.message;});
 window.addEventListener('unhandledrejection',event=>{result.textContent='FAIL '+event.reason;});
 window.addEventListener('pagehide',()=>pages.dispose());

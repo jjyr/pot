@@ -49,7 +49,11 @@ func (p *ProfileStore) Test(ctx context.Context, r TestProvider) (map[string]boo
 	}
 	u, _ := url.Parse(endpoint)
 	provider := gateway.Provider{ID: "connection-test", SecretRef: "connection-test", Endpoint: endpoint, Protocol: r.Protocol, AllowedHosts: []string{u.Hostname()}}
-	response, err := gateway.Forward(ctx, provider, key, body, "", 30*time.Second)
+	// This short settings probe owns its total deadline. Gateway does not impose
+	// a total HTTP timeout on normal, potentially long-lived Agent streams.
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	response, err := gateway.Forward(requestCtx, provider, key, body, "", 30*time.Second)
 	if err != nil {
 		return nil, err
 	}

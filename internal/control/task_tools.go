@@ -75,6 +75,7 @@ func (s *Service) productDispatchBound(owner, executionOwner, turn string, gener
 				if worker {
 					sender.Kind = "task"
 					sender.AgentID = executionOwner
+					ctx = context.WithValue(ctx, taskMessageRunKey{}, taskMessageRun{ID: turn, Generation: generation})
 				} else {
 					mail, err := s.Mailbox.DeliveryMail(ctx, owner, turn)
 					if err != nil {

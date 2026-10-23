@@ -3,8 +3,10 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jjyr/pot/internal/resources"
@@ -33,6 +35,34 @@ func TestResourceToolsSnapshotActualFilesAndFenceOwnership(t *testing.T) {
 	if json.Unmarshal(raw, &resource) != nil || resource.MIMEType != "text/html" {
 		t.Fatal("invalid registered resource", string(raw))
 	}
+	if resource.Name != "demo.html" || resource.Download.Path != "demo.html" {
+		t.Fatal("default display or download name changed")
+	}
+	for i, label := range []string{"Pot 通信记录 · 修订 02（A/B 局部对照）", `A\B`, strings.Repeat("中文", 200), strings.Repeat("long/名称", 2000)} {
+		args, _ := json.Marshal(map[string]string{"path": "demo.html", "name": label})
+		registered, err := s.registerResource(ctx, a.ID, a.ID, fmt.Sprint("label-", i), false, args)
+		if err != nil {
+			t.Fatal("display label rejected", err)
+		}
+		var r resources.Resource
+		if err := json.Unmarshal(registered, &r); err != nil || r.Name != label {
+			t.Fatal("display label changed", err)
+		}
+		args, _ = json.Marshal(map[string]string{"resource_id": r.ID, "mode": "preview"})
+		shown, err := s.presentResource(ctx, a.ID, args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result struct {
+			Presentation resources.Presentation `json:"presentation"`
+		}
+		if err := json.Unmarshal(shown, &result); err != nil || result.Presentation.Resource.Name != label {
+			t.Fatal("presentation label changed", err)
+		}
+		if err := result.Presentation.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	}
 	os.Remove(filepath.Join(workspace, "demo.html"))
 	retried, err := dispatch[call.Name](ctx, core.ExecutionContext{Owner: a.ID}, call, nil)
 	if err != nil || string(raw) != string(retried) {
@@ -60,6 +90,24 @@ func TestResourceToolsSnapshotActualFilesAndFenceOwnership(t *testing.T) {
 	}
 	if _, err = s.registerResource(ctx, a.ID, "task", "worker", true, json.RawMessage(`{"path":"demo.html","task_id":"other"}`)); err == nil {
 		t.Fatal("worker imported another task")
+	}
+}
+
+func TestRegisterResourceNameSchemaDescribesDisplayLabel(t *testing.T) {
+	for _, tool := range resourceTools() {
+		if tool.Name != "register_resource" {
+			continue
+		}
+		var schema struct {
+			Properties map[string]map[string]any `json:"properties"`
+		}
+		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
+			t.Fatal(err)
+		}
+		name := schema.Properties["name"]
+		if name["type"] != "string" || name["maxLength"] != nil || name["pattern"] != nil || !strings.Contains(name["description"].(string), "display label") {
+			t.Fatal("name schema restricts display labels", name)
+		}
 	}
 }
 

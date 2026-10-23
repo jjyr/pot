@@ -16,6 +16,26 @@ declare their additional workspace-relative `assets`. Registration does not show
 the resource. Source reads retain the original Task launch and revision when the
 workspace is remote; failed remote reads never fall back to a local path.
 
+The optional `name` is a display label, preserved verbatim, including Unicode,
+slashes and backslashes. It has no filename character restrictions or separate
+255-byte/character limit; overall transport and resource limits still apply.
+Omitting it or passing an empty string uses the source basename. The label never
+selects a workspace path, stored blob path or ZIP entry.
+
+Download filenames are derived separately with `core.DownloadFilename`. A single
+file keeps its original entry basename when portable; its label does not rename
+the download. An HTML bundle uses the label with its final extension replaced by
+`.zip` (dotfile labels keep their stem). Separators, control characters (including NUL) and Windows-forbidden
+filename characters become underscores; trailing dots/spaces are removed and
+Windows device names are prefixed with an underscore. Empty or dot-only names
+fall back to `resource`. Filenames fit 255 UTF-8 bytes, truncating only at rune
+boundaries and retaining the final extension when it fits. An extension that alone
+exceeds the limit retains its prefix, with room for a nonempty stem. The manifest's
+`download.path` carries this suggested basename to browser and native clients;
+HTTP headers and native save dialogs apply the same conversion at their boundary.
+Original `entry`/`files[].path` values and ZIP entries retain their declared paths
+and existing path validation.
+
 `present_resource` accepts a registered `resource_id`, `mode: preview | download`
 and optional caption. Preview displays the appropriate component; download shows
 a file delivery card. Both require a separate user action to save a file.

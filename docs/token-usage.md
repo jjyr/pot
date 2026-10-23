@@ -1,14 +1,18 @@
 # Token usage and allowances
 
 Usage has one date range for the total card, trend, category shares, model shares
-and compaction usage. Four directly clickable options select 2 weeks, 1 month,
-3 months or 1 year; there is no dropdown or custom date form. Two weeks cover
-last week and this week (Monday–Sunday); month, quarter and year select the
-current natural calendar period. Previous/next moves a whole selected period
+and compaction usage. Four directly clickable options select 1 month,
+3 months, 6 months or 1 year; there is no dropdown or custom date form. They select
+the current natural calendar month, quarter, half-year (January–June or
+July–December) or year, using inclusive start/end dates rather than fixed day counts.
+Previous/next moves a whole selected period
 without overlapping dates. Selecting an option again returns to its current
 period. The current month is the default. The active timescale stays highlighted
 when navigating previous periods. Selection survives navigation and language
-changes within the window. Current periods retain all dates, including zero-usage
+changes and usage refreshes within the window, shared by overall, assistant and
+task usage entries. There is no URL or stored range preference; a new window or
+full reload starts with the current month. Unknown or removed presets resolve
+to the current month. Current periods retain all dates, including zero-usage
 and future dates, and mark statistics through today. Dates follow the current
 system IANA zone. Clicking the full-year calendar still selects an individual day.
 
@@ -31,7 +35,8 @@ A separate full-year calendar appears below these charts. Its year controls do
 not change the selected statistics above. Each column starts Sunday and every
 calendar date is retained, including February 29. Intensity uses a shared annual
 scale. Narrow views stack the two halves of the year. Future tiles are disabled;
-selected dates are outlined. Selecting a tile switches the upper statistics to
+tiles do not mark the selected statistics range. Keyboard focus retains its
+outline. Selecting a tile switches the upper statistics to
 that one day. Hovering or focusing a tile shows category shares and exact
 input/cache/uncached/output counts and cache hit rate. Escape dismisses details.
 The calendar has its own error/retry state so its failure does not hide the
@@ -160,7 +165,11 @@ When allowance is sufficient and automatic continuation enabled, the scheduler r
 Resume reuses the saved Agent context, without replaying original prompts/tools. The model still chooses subsequent tools; this is not an exactly-once guarantee for external actions. Missing sessions, unconfirmed tool cleanup, or unknown crash side effects cannot retry automatically.
 
 Model connection failures and incomplete streams preserve the last committed
-context for an explicit failed-turn retry. An interrupted sample's uncommitted
+context for bounded automatic retries and, after exhaustion, an explicit
+failed-turn retry. Automatic retries wait 2, 4 and 8 seconds and stop immediately
+on turn cancellation. Model inactivity defaults to ten minutes; received stream
+bytes renew the interval instead of limiting an active response's total duration.
+An interrupted sample's uncommitted
 output is discarded; already completed tool receipts remain in history. A new
 sample uses a new request ID and reservation. The old sample's unknown usage
 retains its conservative reservation until the allowance window ends; making a
