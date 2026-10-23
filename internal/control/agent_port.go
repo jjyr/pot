@@ -688,7 +688,29 @@ func (p agentPort) taskCall(ctx context.Context, owner string, op agentlink.Oper
 		if err = protocol.DecodeStrict(call.Body, &input); err == nil {
 			sender := protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: owner}
 			if from, ok := ctx.Value(taskInputSenderKey{}).(protocol.AgentRef); ok {
-				if from.NodeID != s.options.RuntimeID || from.Kind != "assistant" || from.AgentID != owner {
+				if from.NodeID != s.options.RuntimeID {
+					return nil, agentlink.ErrUnauthorized
+				}
+				switch from.Kind {
+				case "assistant":
+					if from.AgentID != owner {
+						return nil, agentlink.ErrUnauthorized
+					}
+				case "task":
+					// A Task input is peer reference, never the owner's guidance.
+					// Keep the existing assistant-scoped catalogue isolation.
+					if record.NodeID != s.options.RuntimeID || (record.Info.Address != nil && *record.Info.Address != (protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "task", AgentID: call.ID})) {
+						return nil, agentlink.ErrUnauthorized
+					}
+					source, e := s.Tasks.Get(ctx, owner, from.AgentID)
+					if e != nil {
+						return nil, e
+					}
+					run, bound := ctx.Value(taskMessageRunKey{}).(taskMessageRun)
+					if !bound || source == nil || source.Execution != nil || source.NodeID != s.options.RuntimeID || source.RunID != run.ID || source.Generation != run.Generation || source.Info.Phase.Scope() != "active" || source.StopMode != "" {
+						return nil, agentlink.ErrUnauthorized
+					}
+				default:
 					return nil, agentlink.ErrUnauthorized
 				}
 				sender = from
@@ -701,6 +723,14 @@ func (p agentPort) taskCall(ctx context.Context, owner string, op agentlink.Oper
 				parent = &value
 			}
 			err = s.Tasks.SendMessageWithParent(ctx, owner, call.ID, input.RequestID, sender, input.Text, parent)
+			if err == nil {
+				state, err := s.Tasks.InputState(ctx, owner, call.ID, input.RequestID)
+				if err != nil {
+					return nil, err
+				}
+				messageID, _ := core.HashJSON([]string{call.ID, input.RequestID})
+				return map[string]any{"accepted": true, "message_id": messageID, "input_state": state}, nil
+			}
 		}
 	case agentlink.TaskRetry:
 		var input struct {

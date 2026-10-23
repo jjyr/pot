@@ -2,8 +2,10 @@
 
 Task guidance, reference messages and completion events share the Agent inbox;
 see [Agent messages](assistant-messages.md). Main manages Tasks. Workers can
-message only their owning assistant; they cannot create, inspect, stop or wait
-for other Tasks. Task-result and plugin-notification handling retain the
+message their owning assistant and ordinary local sibling Tasks under that owner
+using supplied full addresses. Cross-owner and remote Task peer input are
+unsupported. Workers cannot create, inspect, stop or wait for other Tasks.
+Task-result and plugin-notification handling retain the
 assistant's configured tools and current machine permissions. A batch with
 eligible failed work additionally exposes the retry tool described below.
 
