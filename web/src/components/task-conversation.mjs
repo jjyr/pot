@@ -18,7 +18,7 @@ import {createMessageWindow} from './message-window.mjs';
 import {createReadingCursor} from './reading-cursor.mjs';
 import {copyFeedback} from './motion.mjs';
 
-export function createTaskConversation({root,task,record:initial,locale,client,scope,draft,onDraft,downloadFile,toolMemory,approvalFor,onDecision,onSend,onStop,onPause,onCancel,onArchive,onUsage,onRefresh,onSettings,assistantName}){
+export function createTaskConversation({root,task,record:initial,locale,client,scope,draft,onDraft,downloadFile,toolMemory,approvalFor,onDecision,onSend,onStop,onPause,onCancel,onArchive,onUsage,onRefresh,onSettings,onOpenTask,assistantName}){
   const machineLabel=id=>machinePresentation(client).label(id,scope,locale());
   const acquireFileImage=client.acquireFileImage?({task,path})=>client.acquireFileImage(task,path,scope):undefined;
   const resourceOptions={acquireResource:client.acquireResource?resource=>client.acquireResource(resource,scope):undefined,downloadResource:client.downloadResource?resource=>client.downloadResource(resource,scope):undefined};
@@ -101,7 +101,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
  if(!entry.compact){entry.compact=createCompaction({locale});entry.element.append(entry.compact.element);}
  entry.compact.update(message);
  }else if(message.tool){
-        if(!entry.tool){entry.tool=createToolCall({resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key:JSON.stringify([scope,task.id,message.id]),locale,machineLabel,onDecision,onInteract:event=>reading.engage(event),onLocate:(call,turn)=>{const target=forest.byID.get(turn+':'+call)?.message;if(target){reading.locate({id:target.id,expand:true});renderTranscript();}},downloadFile,acquireFileImage});entry.element.append(entry.tool.element);}
+        if(!entry.tool){entry.tool=createToolCall({messageActor:()=>record.info?.address||task.address,onOpenTask,resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key:JSON.stringify([scope,task.id,message.id]),locale,machineLabel,onDecision,onInteract:event=>reading.engage(event),onLocate:(call,turn)=>{const target=forest.byID.get(turn+':'+call)?.message;if(target){reading.locate({id:target.id,expand:true});renderTranscript();}},downloadFile,acquireFileImage});entry.element.append(entry.tool.element);}
         const children=forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children||[];
         const approvalDescendant=children.some(function pending(entry){return !!approvalFor(entry.message.tool)||entry.children.some(pending);});
         entry.tool.update(message,{approval:approvalFor(message.tool),approvalDescendant,offline:unavailable||!!connectionError,children:children.map(child=>child.message)});

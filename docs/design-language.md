@@ -7,8 +7,9 @@ and build and regression commands in [Development](development.md#checks).
 
 ## Visual language
 
-Use quiet surfaces, system typography, fine dividers and restrained color. Blue
-identifies primary actions and focus; status colors accompany text or icons.
+Use warm paper surfaces, charcoal text, system typography and fine gray-green
+dividers. Terracotta identifies assistant mentions and navigation selection. Blue
+continues to identify actions, links and focus; status colors accompany text or icons.
 Assistant replies use quiet neutral bubbles; user messages use a soft blue fill. Reserve
 cards for related controls or details, rather than wrapping every row.
 
@@ -19,21 +20,28 @@ System / Light / Dark appearance is available in General settings.
 
 | Token | Light | Dark |
 | --- | --- | --- |
-| Canvas | `#FDFDFD` | `#202020` |
-| Surface | `#FFFFFF` | `#2B2B2B` |
-| Navigation / titlebar | `#F4F4F4` | `#282828` |
-| Assistant pane | `#E9EEF5` | `#303640` |
-| Assistant selection | `#D9E4F3` | `#3B475B` |
-| Primary text | `#262626` | `#F2F2F2` |
-| Secondary text | `#646464` | `#B7B7B7` |
-| Divider | `#E8E8E8` | `#414141` |
-| Input border | `#D6D6D6` | `#555555` |
-| Primary action / link | `#0068DA` | `#0A84FF` |
-| Secondary control | `#ECEFF3` | `#414141` |
+| Canvas | `#F8F6F1` | `#22231F` |
+| Surface | `#FFFEFA` | `#2B2D27` |
+| Navigation / titlebar | `#F0EDE6` | `#282A24` |
+| Assistant pane | `#F0EDE6` | `#2B2D27` |
+| Assistant selection | `#F1E5D8` | `#49392D` |
+| Primary text | `#282924` | `#F0F0E5` |
+| Secondary text | `#62655C` | `#BCC2B1` |
+| Divider | `#DEDED4` | `#464B3F` |
+| Input border | `#C9CBC0` | `#626859` |
+| Identity accent | `#98522F` | `#E2AD82` |
+| Communication line | `#869477` | `#9CAE86` |
+| Primary action / link | `#0068DA` | `#4D9FFF` |
+| Secondary control | `#EEEEE6` | `#464B3F` |
 | User message fill | `#E7F2FF` | `#243A52` |
 | Success | `#247844` | `#78BE8A` |
 | Attention | `#885B13` | `#D7AF66` |
 | Error / destructive action | `#BD342D` | `#FF6961` |
+
+Conversation Markdown uses 15 px text with a 24 px line height. Tool headings stay
+compact at 12 px; communication bodies use 14 px text with a 1.8 line height
+(13 px in narrow communication containers).
+Task, approval and resource components keep their existing placement and controls.
 
 Keep text readable against its actual surface, targeting WCAG AA contrast.
 Selection, focus and status need more than color alone. Default assistant avatars
