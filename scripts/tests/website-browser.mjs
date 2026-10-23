@@ -19,19 +19,32 @@ await page.addInitScript(()=>{Object.defineProperty(navigator,'clipboard',{confi
 for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  await page.goto(`${origin}/website/${locale}/`);
  assert.equal(await page.locator('#agent-prompt').textContent(),install.prompt);
- assert.equal(await page.locator('.install-card').count(),4);
+ assert.equal(await page.locator('.install-panel').count(),4);
+ assert.equal(await page.locator('[role=tab][aria-selected=true]').getAttribute('data-install'),'desktop');
+ assert.equal(await page.locator('.install-panel:visible').count(),1);
  for(const width of [1280,390]){
   await page.setViewportSize({width,height:width===390?844:900});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} overflow at ${width}`);
   if(width===390)assert(await page.evaluate(()=>{const star=document.querySelector('.github-star').getBoundingClientRect(),start=document.querySelector('.nav-cta').getBoundingClientRect();return star.right<=start.left&&Math.abs((star.top+star.bottom-start.top-start.bottom)/2)<2;}),`${locale} header actions share a row`);
-  for(const id of ['agent-prompt','desktop-command','docker-command','server-command']){
+  for(const [channel,id] of [['agent','agent-prompt'],['desktop','brew-command'],['docker','docker-image'],['web','server-command']]){
+   await page.locator(`[data-install="${channel}"]`).click();
+   if(channel==='web'&&!await page.locator('.web-start').evaluate(e=>e.open))await page.locator('.web-start summary').click();
    await page.locator(`[data-copy="${id}"]`).click();
    assert.equal(await page.evaluate(()=>window.copied),await page.locator('#'+id).textContent());
   }
  }
- await page.selectOption('#desktop-platform','linux');
- assert.equal(await page.locator('#desktop-command').textContent(),install.linux);
- await page.locator('[data-copy="desktop-command"]').click();assert.equal(await page.evaluate(()=>window.copied),install.linux);
+ // Keyboard navigation exposes one focusable tab and its associated panel.
+ await page.locator('[data-install="desktop"]').focus();
+ await page.keyboard.press('ArrowRight');
+ assert.equal(await page.locator('[role=tab][aria-selected=true]').getAttribute('data-install'),'docker');
+ await page.keyboard.press('End');assert.equal(await page.locator('#install-web').isVisible(),true);
+ await page.keyboard.press('Home');assert.equal(await page.locator('#install-agent').isVisible(),true);
+ assert.equal(await page.locator('[role=tab][tabindex="0"]').count(),1);
+ assert.equal(await page.locator('#brew-command').textContent(),install.brew);
+ assert.equal(await page.locator('#docker-image').textContent(),install.image);
+ assert.equal(await page.locator('#install-docker .primary').getAttribute('href'),'https://github.com/users/jjyr/packages/container/package/pot');
+ for(const selector of ['#install-desktop .primary','#install-web .primary'])
+  for(const link of await page.locator(selector).all())assert.equal(await link.getAttribute('href'),'https://github.com/jjyr/pot/releases');
  await page.locator('#run-project').click();
  assert.equal(await page.locator('.project-task.running').count(),3);
  await page.waitForFunction(()=>document.querySelectorAll('.project-task.done').length===1);
@@ -48,6 +61,10 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  }
  console.log('locale, responsive, clipboard, parallel playback and deliverables:',locale,'passed');
 }
+await page.locator('[data-install="docker"]').click();
+await page.selectOption('#language-select','ja');await page.waitForURL('**/ja/**');
+assert.equal(await page.locator('[role=tab][aria-selected=true]').getAttribute('data-install'),'docker');
+console.log('Static language switch preserves selected installation channel');
 await page.setViewportSize({width:1280,height:900});
 for(const mode of ['ok','limited','network','invalid','zero','timeout']){
  starMode=mode;
@@ -66,7 +83,7 @@ const before=starRequests;await page.reload();await page.waitForTimeout(100);ass
 await page.addInitScript(()=>{Object.defineProperty(window,'localStorage',{configurable:true,get(){throw Error('Unavailable storage')}})});
 starMode='limited';await page.reload();await page.waitForTimeout(100);assert.equal((await page.locator('.github-star').innerText()).trim(),'GitHub Star');
 await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw Error('Denied')}}}));
-await page.locator('[data-copy="agent-prompt"]').click();assert.equal(await page.evaluate(()=>getSelection().toString()),install.prompt);assert.match(await page.locator('#copy-status').innerText(),/Select and copy/);
+await page.locator('[data-install="agent"]').click();await page.locator('[data-copy="agent-prompt"]').click();assert.equal(await page.evaluate(()=>getSelection().toString()),install.prompt);assert.match(await page.locator('#copy-status').innerText(),/Select and copy/);
 // Keyboard activation and modal focus restoration use native controls.
 await page.locator('#run-project').focus();await page.keyboard.press('Enter');assert.equal(await page.locator('.project-task.running').count(),3);
 await page.locator('#finish-project').focus();await page.keyboard.press('Space');
@@ -80,7 +97,10 @@ const offline=await browser.newPage();const outgoing=[];
 offline.on('request',request=>{if(request.url().startsWith('https://'))outgoing.push(request.url())});
 await offline.goto(origin+'/website/pot-preview.html');await offline.locator('.delivery-links [data-open-report="screens"]').click();
 await offline.waitForFunction(()=>[...document.querySelectorAll('.report-gallery img')].every(i=>i.complete&&i.naturalWidth===1280));assert.deepEqual(outgoing,[]);
-const noJS=await browser.newPage({javaScriptEnabled:false});await noJS.goto(origin+'/website/en/');assert.equal(await noJS.locator('#agent-prompt').textContent(),install.prompt);assert.equal(await noJS.locator('.project-task').count(),3);assert.equal(await noJS.locator('.install-card').count(),4);
+await offline.locator('#report-dialog').evaluate(e=>e.close());
+await offline.locator('[data-install="web"]').click();await offline.selectOption('#language-select','es');
+assert.equal(await offline.locator('[role=tab][aria-selected=true]').getAttribute('data-install'),'web');
+const noJS=await browser.newPage({javaScriptEnabled:false});await noJS.goto(origin+'/website/en/');assert.equal(await noJS.locator('#agent-prompt').textContent(),install.prompt);assert.equal(await noJS.locator('.project-task').count(),3);assert.equal(await noJS.locator('.install-panel:visible').count(),4);
 console.log('Offline preview and no-JavaScript install content passed');
 } finally {
  await browser.close();

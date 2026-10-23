@@ -66,12 +66,7 @@ def render(code, prefix="../", root=False):
     catalog = CATALOGS[code]
     texts = catalog["page"]
     demo = catalog["demo"]
-    install = {
-        **INSTALL,
-        "server": INSTALL["server"].replace(
-            "{anotherTerminal}", texts["在另一个终端中获取登录 token："]
-        ),
-    }
+    install = INSTALL
 
     def node(m):
         raw = m[1]
@@ -111,8 +106,8 @@ def render(code, prefix="../", root=False):
     )
     for marker, key in {
         "agent-prompt": "prompt",
-        "desktop-command": "mac",
-        "docker-command": "docker",
+        "brew-command": "brew",
+        "docker-image": "image",
         "server-command": "server",
     }.items():
         page = page.replace("<!--" + marker + "-->", esc(install[key]))

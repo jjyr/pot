@@ -44,6 +44,38 @@ output. Never ask the user to paste an API key or token into the conversation.
    available official source build below. Select a reviewed tag or revision and
    record it; do not silently upgrade an existing checkout.
 
+## Official download channels
+
+The website and README link to [Releases](https://github.com/jjyr/pot/releases)
+for macOS App, Experimental Linux desktop and Web UI / Server downloads. The
+release selector is intentional until assets exist; match the selected version
+and architecture rather than constructing a download URL. The
+[release contract](releases.md) defines these filenames:
+
+- macOS Apple Silicon: `Pot-VERSION-arm64.zip`; extract and move Pot.app to
+  Applications, then open it. A release can also include `pot.rb`: download that
+  cask and run `brew install --cask ./pot.rb` from its directory. The public
+  `jjyr/homebrew-tap` currently has no Pot cask; do not substitute a tap command.
+- Linux desktop: `pot-desktop_VERSION_linux_amd64.deb` is Experimental. Check
+  its checksum, then `sudo apt install ./THE_DOWNLOADED_FILE.deb` and launch
+  `pot-desktop`. Use the actual downloaded filename. Do not offer arm64 until a
+  corresponding qualified asset exists.
+- Web UI / Server: `pot-go-VERSION-linux-ARCH.tar.gz`, with `ARCH` matching
+  `amd64` or `arm64`. Verify the checksum and extract into a new directory. From
+  the extracted `pot-go-linux-ARCH/bin`, run
+  `./pot serve -root "$HOME/.pot-node" -ui 127.0.0.1:17703`. In another terminal
+  use `./pot access -root "$HOME/.pot-node" token` locally. See the server section
+  below for browser access, stopping, backups and first verification.
+- Docker: the configured image is `ghcr.io/jjyr/pot`, with package channel
+  <https://github.com/users/jjyr/packages/container/package/pot>. This page is not
+  available until the package is published. Check actual tags there; publication
+  uses `VERSION` without the `v` prefix and does not publish `latest`. Use
+  [Docker instructions](docker.md) for the versioned image and persistent volumes.
+
+These channels are published independently; a stable release may contain only
+some assets. Use the source paths below when the requested package is still
+unavailable.
+
 ## Build from source when a matching package is unavailable
 
 Install Git and [mise](https://mise.jdx.dev/getting-started.html) using their

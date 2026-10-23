@@ -2,7 +2,7 @@
 (() => {
 const $=(s,root=document)=>root.querySelector(s), $$=(s,root=document)=>[...root.querySelectorAll(s)];
 let data=JSON.parse($('#pot-data').textContent), lang=data.locale;
-let agent='codex',mode='direct',flow=0,report='install',taskPhase=3,timers=[];
+let agent='codex',mode='direct',flow=0,report='install',taskPhase=3,installChannel='desktop',timers=[];
 const names={codex:'Codex',claude:'Claude',grok:'Grok bot',devin:'Devin'};
 const files={pot:'pot.png',codex:'codex.png',claude:'claude.svg',grok:'grok.svg',devin:'devin.png'};
 const keys=Object.keys(names);
@@ -77,20 +77,45 @@ function reportData(){
 function reportBody(r){return (r.table?'<table><thead><tr>'+r.table[0].map(v=>'<th scope="col">'+esc(v)+'</th>').join('')+'</tr></thead><tbody>'+r.table.slice(1).map(row=>'<tr>'+row.map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'')+r.sections.map(s=>'<h3>'+esc(s.title)+'</h3>'+(s.paragraphs||[]).map(v=>'<p>'+esc(v)+'</p>').join('')+(s.items?'<ul>'+s.items.map(v=>'<li>'+esc(v)+'</li>').join('')+'</ul>':'')).join('');}
 function openReport(){const r=reportData();$('#report-content').innerHTML='<h2 id="report-title">'+esc(r.title)+'</h2><p>'+esc(r.intro)+'</p>'+reportBody(r)+(report==='screens'?`<div class="report-gallery"><img src="${data.productImages?.work||data.assetBase+'assets/product-work.png'}" alt="${esc(t('助手工作、后台任务、Agent Link'))}"><img src="${data.productImages?.link||data.assetBase+'assets/product-agent-link.png'}" alt="Agent Link"></div>`:'');if(!$('#report-dialog').open)$('#report-dialog').showModal();}
 function downloadReport(){const r=reportData(),lines=[r.title,d().sample,'',r.intro,''];if(r.table)r.table.forEach(row=>lines.push(row.join(' | ')));r.sections.forEach(s=>lines.push('',s.title,...(s.paragraphs||[]),...(s.items||[]).map(v=>'• '+v)));const url=URL.createObjectURL(new Blob([lines.join('\n')],{type:'text/plain;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download=`Pot-${r.title}-${d().sample}.txt`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-function restoreQuery(){const q=new URLSearchParams(location.search);if(keys.includes(q.get('agent')))agent=q.get('agent');if(['direct','delegate'].includes(q.get('mode')))mode=q.get('mode');if(['0','1','2'].includes(q.get('flow')))flow=Number(q.get('flow'));if(['0','1','2','3'].includes(q.get('phase')))taskPhase=Number(q.get('phase'));if(['install','docs','screens','site'].includes(q.get('report')))report=q.get('report');return q.has('report');}
+function restoreQuery(){const q=new URLSearchParams(location.search);if(keys.includes(q.get('agent')))agent=q.get('agent');if(['direct','delegate'].includes(q.get('mode')))mode=q.get('mode');if(['0','1','2'].includes(q.get('flow')))flow=Number(q.get('flow'));if(['0','1','2','3'].includes(q.get('phase')))taskPhase=Number(q.get('phase'));if(['install','docs','screens','site'].includes(q.get('report')))report=q.get('report');if(installChannels.includes(q.get('install')))installChannel=q.get('install');return q.has('report');}
 function section(){const ids=['main','assistant','agent-link','workflow','start'];return '#'+(ids.filter(id=>$('#'+id).getBoundingClientRect().top<innerHeight/2).pop()||'main');}
 function changeLanguage(next,persist=true){
  if(!PotLocale.codes.includes(next)||next===lang)return;
  if(persist)PotLocale.save(next);
  const hash=section(),wasOpen=$('#report-dialog').open;clearTimers();
  if(window.POT_PREVIEW){const page=window.POT_PREVIEW[next];document.body.innerHTML=page.body;document.documentElement.lang=next;document.title=page.title;$('meta[name="description"]').content=page.description;data=page.data;lang=next;renderAll();if(wasOpen)openReport();const target=$(hash);if(hash==='#main')window.scrollTo({top:0,behavior:'instant'});else if(target)target.scrollIntoView({behavior:'instant'});$('#language-select').focus({preventScroll:true});}
- else{const url=new URL(data.assetBase+next+'/',location.href);url.search=new URLSearchParams({agent,mode,flow:String(flow),phase:String(taskPhase),...(wasOpen?{report}: {})}).toString();url.hash=hash==='#main'?'':hash;location.assign(url.href);}
+ else{const url=new URL(data.assetBase+next+'/',location.href);url.search=new URLSearchParams({agent,mode,flow:String(flow),phase:String(taskPhase),install:installChannel,...(wasOpen?{report}: {})}).toString();url.hash=hash==='#main'?'':hash;location.assign(url.href);}
 }
-function renderAll(){renderAgent();renderProject(taskPhase);if(taskPhase<3)runProject(taskPhase);renderFlow();$('#language-select').value=lang;}
-document.addEventListener('change',e=>{if(e.target.id==='language-select')changeLanguage(e.target.value);if(e.target.id==='desktop-platform')$('#desktop-command').textContent=data.install[e.target.value];});
+const installChannels=['agent','desktop','docker','web'];
+function selectInstall(next,focus=false){
+ if(!installChannels.includes(next))return;
+ installChannel=next;
+ $('.install-tabs').hidden=false;
+ $('.install-section').classList.add('install-ready');
+ document.querySelectorAll('[data-install]').forEach(button=>{
+  const selected=button.dataset.install===next;
+  button.setAttribute('aria-selected',String(selected));button.tabIndex=selected?0:-1;
+  const panel=$('#'+button.getAttribute('aria-controls'));panel.hidden=!selected;
+  panel.setAttribute('role','tabpanel');panel.tabIndex=0;
+  if(selected&&focus)button.focus();
+ });
+}
+document.addEventListener('keydown',e=>{
+ const button=e.target.closest('[data-install]');if(!button)return;
+ let index=installChannels.indexOf(button.dataset.install);
+ if(e.key==='ArrowRight')index=(index+1)%4;
+ else if(e.key==='ArrowLeft')index=(index+3)%4;
+ else if(e.key==='Home')index=0;
+ else if(e.key==='End')index=3;
+ else return;
+ e.preventDefault();selectInstall(installChannels[index],true);
+});
+function renderAll(){selectInstall(installChannel);renderAgent();renderProject(taskPhase);if(taskPhase<3)runProject(taskPhase);renderFlow();$('#language-select').value=lang;}
+document.addEventListener('change',e=>{if(e.target.id==='language-select')changeLanguage(e.target.value);});
 document.addEventListener('click',e=>{
  const b=e.target.closest('button');if(!b||b.disabled)return;
- if(b.dataset.agent){agent=b.dataset.agent;renderAgent();}
+ if(b.dataset.install){selectInstall(b.dataset.install);}
+ else if(b.dataset.agent){agent=b.dataset.agent;renderAgent();}
  else if(b.dataset.mode){mode=b.dataset.mode;renderAgent();}
   else if(b.dataset.flow!==undefined){flow=Number(b.dataset.flow);renderFlow();}
  else if(b.dataset.openReport){report=b.dataset.openReport;openReport();}

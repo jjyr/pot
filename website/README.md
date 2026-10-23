@@ -50,7 +50,7 @@ Storage failures do not prevent use.
 - `build-site.py` validates catalog structure and registered template text, then
   generates `index.html`, the six localized pages and `pot-preview.html`.
   `build-preview.py` runs the same generator.
-- `install.json` contains the single English agent prompt and literal build commands; the generator inserts these without translation. Keep the prompt identical to the README and installation guide.
+- `install.json` contains the single English agent prompt, local Homebrew cask command, image address and packaged server command; the generator inserts these without translation. Keep the prompt identical to the README and installation guide.
 - `app.js` provides shared interactions and localized report previews/downloads.
 - `locale.js` normalizes languages, saves preferences and detects language only
   at the root entry.
@@ -100,10 +100,17 @@ All website tasks, conversations, scheduled work and reports are local examples;
 they do not call real agents or contain real connection information.
 
 The repository is `https://github.com/jjyr/pot`. The installation section links
-its [agent installation guide](../docs/install-with-agent.md), desktop, Docker
-and Server documentation as four parallel choices. Release assets and container
-images are pending; the displayed commands use the official source-build paths.
-The repository is currently private, so these sources and guides require repository access. Check current releases and visibility before changing this status. The English agent prompt is
+its [agent installation guide](../docs/install-with-agent.md), desktop downloads,
+[container package channel](https://github.com/users/jjyr/packages/container/package/pot)
+and Web UI release downloads as four parallel choices. Desktop is selected by
+default; keyboard users can switch with arrows, Home and End. Without JavaScript,
+all four sections remain visible. Language switches preserve the selected channel.
+Download buttons open the official Releases selector, since the first packages
+are pending. Homebrew uses the release's local `pot.rb` cask, not an unpublished
+tap formula. The container address has no invented version or `latest` tag; its
+package page awaits first publication. Platform requirements follow the
+[release contract](../docs/releases.md). Keep these small availability notes in
+sync when the channels publish. The English agent prompt is
 intentionally identical in every locale. No installation or agent execution is
 performed by the website. Result previews use synthetic notes, a documentation
 change excerpt and real shared-UI screenshots with isolated synthetic records.
