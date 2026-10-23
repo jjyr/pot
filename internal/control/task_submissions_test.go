@@ -29,7 +29,10 @@ func TestAgentToolsShareTaskPortAndCatalogueAcrossLocalAndPeer(t *testing.T) {
 	ids := []string{}
 	for i, request := range requests {
 		body, _ := json.Marshal(request)
-		accepted, err := source.productCall(ctx, "main", []string{"local-request", "peer-request"}[i], "create_task", body)
+		id := []string{"local-request", "peer-request"}[i]
+		accepted, err := retryAgentCapacity(ctx, func(ctx context.Context) (any, error) {
+			return source.productCall(ctx, "main", id, "create_task", body)
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
