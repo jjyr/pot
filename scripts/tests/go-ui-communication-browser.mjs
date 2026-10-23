@@ -76,6 +76,7 @@ try{
   composed.value.tool={...composed.value.tool,script:{focus:{name:'send_message',args:{to:remote,text:'Focused message'}},calls:[]}};composed.view.update(composed.value);
   check(!composed.root.open&&!composed.root.querySelector('.communication-summary').hidden,'composed tool focus stays collapsed');
   await expand(composed);check(composed.root.querySelector('.communication-summary').hidden,'expanded composition hides summary diagram');
+  check(!composed.root.querySelector('.communication-text'),'composition focus never mounts duplicate hidden Markdown or media');
   const unknown=card('unknown','send_message',{to:address('unlisted'),text:'Unknown target'});
   check(unknown.root.querySelectorAll('.communication-mark .connection-brand').length===1,'unknown remote cannot borrow same-id brand');
   client.assistants=client.assistants.map(item=>item.origin?.node_id==='remote'?{...item,profile_name:'<b>Renamed</b> · 超长助手名称 '.repeat(4)}:item);

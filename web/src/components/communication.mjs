@@ -34,7 +34,7 @@ export function createCommunication({locale,resolveIdentity,downloadFile,acquire
     const name=resolveIdentity(model.messages[0]?.to)?.name||(['pot','codex'].includes(source?.kind||task?.executor_icon)?translate(locale(),'agentLinks.source'+((source?.kind||task?.executor_icon)==='pot'?'Pot':'Codex')):null);
     return {label:name||t('messageTask'),named:!!name,brand:source?.kind||task?.executor_icon};
   }
-  function update(model,{expanded=false,preparing=false}={}){
+  function update(model,{expanded=false,preparing=false,summaryOnly=false}={}){
     summary.hidden=!model||expanded;body.hidden=!model;if(!model)return;
     const profiles=model.messages.map(mail=>[resolveIdentity(mail.from),resolveIdentity(mail.to)]),target=taskTarget(model);
     const signature=JSON.stringify([model.kind,model.messages.map(mail=>[mail.from,mail.to]),model.count,target,locale()]),profileRefs=profiles.flat();
@@ -44,7 +44,7 @@ export function createCommunication({locale,resolveIdentity,downloadFile,acquire
       const mail=model.messages[0]||{};
       summary.append(flow({...mail,from:multiple?undefined:mail.from,to:toKeys.size>1?undefined:mail.to},{fromLabel:multiple?t('messageSources').replace('{count}',model.sources.length.toLocaleString(locale())):undefined,toLabel:toKeys.size>1?t('messageRecipients'):model.kind==='delegate'?target.label:undefined,toBrand:model.kind==='delegate'?target.brand:undefined}));
     }
-    if(!expanded)return;
+    if(!expanded||summaryOnly)return;
     for(const entry of entries.values())entry.box.hidden=true;
     for(const [index,mail] of model.messages.entries()){
       let entry=entries.get(index);

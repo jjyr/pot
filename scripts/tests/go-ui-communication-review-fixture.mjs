@@ -51,6 +51,10 @@ window.communicationReview={errors,scenario,text,async prepare(){
   card.scrollIntoView({block:'start'});
   await document.fonts.ready;
   await frame();
+  // Long phone records can hit the scroll extent during disclosure reflow.
+  // Keep the actual summary below the scroll viewport's top edge.
+  const history=document.querySelector('.history'),inset=history.getBoundingClientRect().top+16-card.getBoundingClientRect().top;
+  if(inset>0){history.dispatchEvent(new WheelEvent('wheel',{deltaY:-inset,bubbles:true}));history.scrollTop=Math.max(0,history.scrollTop-inset);history.dispatchEvent(new Event('scroll'));await frame();}
   if(window.reviewInjected||errors.length)throw Error('Unsafe rendering or runtime error: '+errors.join('; '));
   window.communicationReview.ready=true;
   return {scenario,primaryOpen:card.open,rawOpen:raw.open,errors};

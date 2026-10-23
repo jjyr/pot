@@ -74,7 +74,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     const model=communication(tool,messageActor()),summaryModel=model||(!isGroup&&script?.focus?communication(script.focus,messageActor()):null);
     metadata.hidden=isGroup;raw.hidden=isGroup;
     if(model){if(metadata.parentElement!==rawBody)rawBody.prepend(metadata);}else if(metadata.parentElement!==body)body.insertBefore(metadata,approval);
-    communicationView.update(summaryModel,{expanded:root.open&&!pending,preparing:tool.phase==='preparing'});
+    communicationView.update(summaryModel,{expanded:root.open&&!pending,summaryOnly:!model,preparing:tool.phase==='preparing'});
     communicationView.body.hidden=!model||!!pending;
     root.classList.toggle('communication-tool',!!summaryModel);
     // Receive records are a history projection, not a timed network operation.
