@@ -198,11 +198,7 @@ func (s *Service) prepareTaskWorkspace(ctx context.Context, l tasks.Launch, poli
 			err = errors.Join(checkErr, errors.New("workspace path identity changed"))
 			return nil, fmt.Errorf("original Task workspace unavailable: %w", err)
 		}
-		info, statErr := os.Stat(saved.Path)
-		if statErr != nil {
-			return nil, statErr
-		}
-		id, idErr := taskDirectoryIdentity(info)
+		id, idErr := taskWorkspaceDirectoryIdentity(saved.Path)
 		if idErr != nil || id != saved.DirectoryID {
 			return nil, errors.New("original workspace directory identity changed")
 		}
@@ -434,11 +430,7 @@ func (s *Service) prepareTaskWorkspace(ctx context.Context, l tasks.Launch, poli
 			return nil, errors.New("prepared worktree identity changed")
 		}
 	}
-	info, statErr := os.Stat(w.Path)
-	if statErr != nil {
-		return nil, statErr
-	}
-	w.DirectoryID, err = taskDirectoryIdentity(info)
+	w.DirectoryID, err = taskWorkspaceDirectoryIdentity(w.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -463,7 +455,23 @@ func (s *Service) taskWorkspacePath(ctx context.Context, task string) (string, e
 	if canonical != w.Path {
 		return "", errors.New("workspace path identity changed")
 	}
+	id, err := taskWorkspaceDirectoryIdentity(canonical)
+	if err != nil {
+		return "", err
+	}
+	if id != w.DirectoryID {
+		return "", errors.New("workspace directory identity changed")
+	}
 	return canonical, nil
+}
+
+func taskWorkspaceDirectoryIdentity(path string) (string, error) {
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	return taskDirectoryIdentity(root)
 }
 
 // Open and verify the directory handle itself so download roots cannot be swapped
@@ -487,13 +495,9 @@ func (s *Service) openTaskWorkspace(ctx context.Context, task string) (*os.Root,
 	if err != nil {
 		return nil, err
 	}
-	info, err := root.Stat(".")
-	if err == nil {
-		var id string
-		id, err = taskDirectoryIdentity(info)
-		if err == nil && id != w.DirectoryID {
-			err = errors.New("workspace directory identity changed")
-		}
+	id, err := taskDirectoryIdentity(root)
+	if err == nil && id != w.DirectoryID {
+		err = errors.New("workspace directory identity changed")
 	}
 	if err != nil {
 		root.Close()

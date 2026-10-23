@@ -336,6 +336,17 @@ completed results. Assistant/task messages and independent Codex tasks remain
 eligible for their normal execution paths. Started work still follows the host's
 uncertain-outcome recovery; migration never resumes or replaces a Codex thread.
 
+## Workspace directory identity
+
+`tasks/0029_workspace_directory_identity` fences ready Task workspace bindings
+whose device/inode identity lacks original OS creation evidence. It marks them
+`identity_unverified` while retaining their paths, old identities, Git metadata
+and run history. It never reads or modifies workspace files and does not derive
+new evidence from the current path. New `directory-v2:` bindings remain verified;
+preparing and failed receipts retain their existing fences. Legacy continuation
+and workspace downloads require an explicitly selected new Task, as described in
+[Task workspace selection](task-workspaces.md#persistence-and-lifetime).
+
 ## Task replies and schedule delivery
 
 `tasks/0027_task_reply_artifacts` removes scheduler comparison baselines and

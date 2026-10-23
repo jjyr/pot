@@ -10,6 +10,9 @@ import (
 )
 
 // Workspace is destination-local preparation evidence, never a Worker prompt.
+// Ready DirectoryID values use directory-v2: plus a hash of OS directory-instance
+// evidence, including creation time. Legacy identity_unverified rows remain
+// historical evidence and must not be adopted as prepared workspaces.
 type Workspace struct {
 	Status      string   `json:"status"`
 	Kind        string   `json:"kind"`

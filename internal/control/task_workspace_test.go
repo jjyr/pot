@@ -213,6 +213,9 @@ func TestTemporaryWorkspaceRetainsOriginalAndFencesLostPreparation(t *testing.T)
 		t.Fatal("lost workspace silently recreated")
 	}
 	os.MkdirAll(w.Path, 0700)
+	if _, err = s.taskWorkspacePath(ctx, l.TaskID); err == nil {
+		t.Fatal("replaced directory accepted for execution")
+	}
 	if root, e := s.openTaskWorkspace(ctx, l.TaskID); e == nil {
 		root.Close()
 		t.Fatal("replaced directory accepted for downloads")
@@ -225,6 +228,124 @@ func TestTemporaryWorkspaceRetainsOriginalAndFencesLostPreparation(t *testing.T)
 	blocked := workspaceLaunch(t, s, "blocked", protocol.TaskWorkspace{})
 	if _, err = s.prepareTaskWorkspace(ctx, blocked, MachinePolicy{ExecutionAccess: "deny"}); err == nil {
 		t.Fatal("blocked machine prepared workspace")
+	}
+}
+
+func TestTaskWorkspaceIdentitySurvivesWritesRenameAndRestart(t *testing.T) {
+	s := taskResourceService(t)
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "workspace")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	l := workspaceLaunch(t, s, "instance", protocol.TaskWorkspace{Kind: "directory", ProjectDir: dir})
+	w, err := s.prepareTaskWorkspace(ctx, l, MachinePolicy{ExecutionAccess: "allow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := w.Path
+	writeTaskFixture(t, filepath.Join(path, "result.txt"), "original contents")
+	checkPreparation := true
+	check := func(accepted bool) {
+		t.Helper()
+		if checkPreparation {
+			_, err := s.prepareTaskWorkspace(ctx, l, MachinePolicy{ExecutionAccess: "allow"})
+			if (err == nil) != accepted {
+				t.Fatalf("continued preparation: accepted=%v error=%v", accepted, err)
+			}
+		}
+		_, err := s.taskWorkspacePath(ctx, "instance")
+		if (err == nil) != accepted {
+			t.Fatalf("execution root: accepted=%v error=%v", accepted, err)
+		}
+		root, err := s.openTaskWorkspace(ctx, "instance")
+		if root != nil {
+			root.Close()
+		}
+		if (err == nil) != accepted {
+			t.Fatalf("download root: accepted=%v error=%v", accepted, err)
+		}
+	}
+	check(true)
+	if err := os.Remove(filepath.Join(path, "result.txt")); err != nil {
+		t.Fatal(err)
+	}
+	writeTaskFixture(t, filepath.Join(path, "other.txt"), "preserve me")
+	check(true) // ctime/mtime changed; the directory instance did not.
+	retained := path + "-retained"
+	if err := os.Rename(path, retained); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(retained, path); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(retained, path); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
+	options := s.options
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	checkPreparation = false // Run recovery is independent of persisted directory proof.
+	check(true)
+	if contents, err := os.ReadFile(filepath.Join(path, "other.txt")); err != nil || string(contents) != "preserve me" {
+		t.Fatal("workspace contents changed", string(contents), err)
+	}
+}
+
+func TestUnverifiedLegacyWorkspaceRequiresExplicitNewTask(t *testing.T) {
+	s := taskResourceService(t)
+	ctx := context.Background()
+	l := workspaceLaunch(t, s, "legacy", protocol.TaskWorkspace{})
+	w, err := s.prepareTaskWorkspace(ctx, l, MachinePolicy{ExecutionAccess: "allow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(w.Path) })
+	writeTaskFixture(t, filepath.Join(w.Path, "result.txt"), "original work")
+	// Match the migration's outcome without inventing new original-instance proof.
+	if _, err := s.Tasks.DB().Exec(`UPDATE run_workspaces SET body=json_set(body,'$.status','identity_unverified','$.directory_id','legacy-device-inode') WHERE task_id='legacy'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.prepareTaskWorkspace(ctx, l, MachinePolicy{ExecutionAccess: "allow"}); err == nil {
+		t.Fatal("legacy continuation rebound to the current path")
+	}
+	if _, err := s.taskWorkspacePath(ctx, l.TaskID); err == nil {
+		t.Fatal("legacy execution root accepted")
+	}
+	if root, err := s.openTaskWorkspace(ctx, l.TaskID); err == nil {
+		root.Close()
+		t.Fatal("legacy download root accepted")
+	}
+	if path := bindTestWorkspace(t, s, "explicit-new-task", w.Path); path != w.Path {
+		t.Fatal("explicit directory selection did not retain files", path)
+	}
+	root, err := s.openTaskWorkspace(ctx, "explicit-new-task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	data, err := root.ReadFile("result.txt")
+	if err != nil || string(data) != "original work" {
+		t.Fatal("original workspace files changed", string(data), err)
 	}
 }
 

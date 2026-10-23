@@ -145,6 +145,26 @@ directory is missing, report its loss rather than silently recreating an empty
 workspace and resuming as if files survived. OS temporary storage is not a durable
 artifact store.
 
+Workspace identity is versioned as `directory-v2:` and binds the opened directory's
+device, inode and immutable OS creation time. Linux requires `statx` birth-time
+support; macOS requires a nonzero directory birth time. Missing creation evidence
+fails preparation and access instead of falling back to device/inode alone, since
+filesystems can immediately reuse an inode after deletion. Normal writes inside
+the directory do not change its identity. Preparation/resume, execution workspace
+lookup and download roots all validate that identity; downloads inspect the opened
+directory handle rather than restating a potentially replaced path.
+
+The identity upgrade cannot reconstruct an old directory's original creation
+evidence from its current path. `tasks/0029_workspace_directory_identity` marks
+previously ready legacy bindings `identity_unverified`, retaining paths, old
+identities, run history and all workspace files. Such bindings cannot resume or
+serve original-workspace downloads automatically. Independently retained delivery
+files remain separate. To continue with the preserved files, the user must
+explicitly select the original directory or worktree for a **new Task**, which
+records a new verified instance. This does not rebind or replay the original Task.
+Inspect the preserved directory before selecting it; migration never opens,
+deletes, recreates or trusts the current path as proof of its original instance.
+
 Task state, checkpoints and operation receipts remain in their owning component
 stores. Downloads must resolve through recorded original file locations or
 explicitly retained delivered files, rather than assuming `WORKSPACE/tasks/ID`.
