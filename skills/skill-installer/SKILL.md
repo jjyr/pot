@@ -5,10 +5,11 @@ description: Install skills from a local directory or GitHub, inspect installed 
 
 # Install and manage user skills
 
-Global skills are installed at `~/.pot/agent/skills/<name>`. Control owns global skill installation and updates for connected execution.
+Global skills are installed at `~/.pot/skills/<name>`. Each node owns its global
+skill installation and updates.
 Task Agents receive fixed read-only bundles and cannot install/update global skills.
-Independent App local mode uses its own global catalog. Use `--dest <project>/.agents/skills` when the user
-requests a project-specific installation.
+Use `--dest <project>/.agents/skills` when the user requests a project-specific
+installation.
 
 List installed bundles by reading SKILL.md metadata in these directories.
 Project bundles take priority over user global bundles. When listing remote
@@ -18,17 +19,20 @@ curated catalog.
 ## Install
 
 Resolve helper paths from the injected catalog, relative to the relevant SKILL.md.
-Global commands must run on Control (or the independent local owner); on execution
-nodes use only explicit project `--dest` paths. Do not write into the supplied cache.
+Global commands run on the owning node through its main agent. Task agents use
+only explicit project `--dest` paths. Do not write into the supplied cache.
+Pass the owning node's absolute global Skill directory as `--dest`; a custom
+node root has its own directory. Do not derive it from the process's `HOME`,
+which may be private to that execution.
 
 Use the helper through exec_command. It validates the complete bundle, preserves
 resources and executable script permissions, prepares a sibling staging directory,
 and publishes only after validation succeeds.
 
 ```sh
-python3 <injected-skill-installer-path>/scripts/install_skill.py --local /data/workspace/downloads/example-skill
-python3 <injected-skill-installer-path>/scripts/install_skill.py --repo owner/repo --path path/to/example-skill --ref main
-python3 <injected-skill-installer-path>/scripts/install_skill.py --url https://github.com/owner/repo/tree/main/path/to/example-skill
+python3 <injected-skill-installer-path>/scripts/install_skill.py --local /data/workspace/downloads/example-skill --dest /absolute/node-root/skills
+python3 <injected-skill-installer-path>/scripts/install_skill.py --repo owner/repo --path path/to/example-skill --ref main --dest /absolute/node-root/skills
+python3 <injected-skill-installer-path>/scripts/install_skill.py --url https://github.com/owner/repo/tree/main/path/to/example-skill --dest /absolute/node-root/skills
 ```
 
 For branch names containing slashes, prefer `--repo`, `--path` and `--ref`.
@@ -47,7 +51,7 @@ user's task.
 The shared format validator is available at:
 
 ```sh
-python3 <injected-skill-creator-path>/scripts/quick_validate.py ~/.pot/agent/skills/example-skill
+python3 <injected-skill-creator-path>/scripts/quick_validate.py ~/.pot/skills/example-skill
 ```
 
 It checks structure and metadata, not instruction quality or script behavior.

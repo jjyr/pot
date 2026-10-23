@@ -23,7 +23,7 @@ func allowanceFixture(t *testing.T, handler http.HandlerFunc) (*Service, *httpte
 	t.Cleanup(server.Close)
 	root := t.TempDir()
 	pluginRoot := filepath.Join(root, "plugins")
-	writeTaskFixture(t, filepath.Join(pluginRoot, "quota-fixture", "plugin.json"), `{"schema_version":2,"id":"quota-fixture","version":"1","contributes":{"model_providers":{"providers":[{"id":"gateway","name":"Fixture Gateway","protocol":"openai_chat","capabilities":{"catalog":"none","allowances":true}}],"adapter":{"runtime":"node","execution":"control","entrypoint":"provider.mjs","files":["provider.mjs"],"credential_env":"FIXTURE_KEY"}}}}`)
+	writeTaskFixture(t, filepath.Join(pluginRoot, "quota-fixture", "plugin.json"), `{"schema_version":3,"name":"quota-fixture","version":"1","contributes":{"model_providers":{"providers":[{"id":"gateway","name":"Fixture Gateway","protocol":"openai_chat","capabilities":{"catalog":"none","allowances":true}}],"adapter":{"runtime":"node","execution":"control","entrypoint":"provider.mjs","files":["provider.mjs"],"credential_env":"FIXTURE_KEY"}}}}`)
 	writeTaskFixture(t, filepath.Join(pluginRoot, "quota-fixture", "provider.mjs"), `export async function read(input) { const response=await fetch(input.connection.endpoint,{headers:{Authorization:'Bearer '+process.env.FIXTURE_KEY}});if(response.status===403)return {error:{code:'permission'}};if(!response.ok)return {error:{code:'unavailable'}};return {allowances:await response.json()};}`)
 	manager, err := execution.New("allowance-control", "boot", execution.DefaultLimits())
 	if err != nil {

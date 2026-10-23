@@ -18,8 +18,8 @@ import (
 	"github.com/jjyr/pot/pkg/processscope"
 )
 
-// RunModelProvider reads connection metadata through the Control-local adapter.
-// This unary JSON RPC never transports model inference or enters Runner bundles.
+// RunModelProvider reads connection metadata through the node-local adapter.
+// This unary JSON RPC never transports model inference or enters task snapshots.
 // Credentials are scoped by the host to this connection and injected only into
 // the child's environment. Package stderr and exception text are not diagnostics.
 func RunModelProvider(ctx context.Context, node string, p plugin.Package, input core.ModelProviderRequest, credentials map[string]string, worker []string) (core.ModelProviderResponse, error) {

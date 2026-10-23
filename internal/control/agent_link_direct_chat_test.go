@@ -24,7 +24,7 @@ func TestAgentLinkEmptyNodeChatSurvivesAssistantDeletionAndRestart(t *testing.T)
 		t.Fatal("connection borrowed an assistant", c)
 	}
 	local, err := (potLinkBackend{a.service}).Directory(ctx)
-	if err != nil || len(local.Assistants) != 0 {
+	if err != nil || len(local.Assistants()) != 0 {
 		t.Fatal(local, err)
 	}
 	send := func(request string) protocol.Envelope {
@@ -63,7 +63,7 @@ func TestAgentLinkEmptyNodeChatSurvivesAssistantDeletionAndRestart(t *testing.T)
 		t.Fatal(err)
 	}
 	local, err = (potLinkBackend{a.service}).Directory(ctx)
-	if err != nil || local.DefaultAssistantID != added.ID {
+	if err != nil || local.DefaultAssistant() != added.ID {
 		t.Fatal("new local default not advertised", local, err)
 	}
 	if err = a.service.DeleteAssistant(ctx, added.ID, added.Revision); err != nil {

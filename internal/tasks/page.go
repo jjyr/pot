@@ -38,17 +38,6 @@ func (s *Service) Catalog(ctx context.Context, query protocol.TaskQuery) (protoc
 	return s.page(ctx, "", query)
 }
 
-// Executing reports actual owner-scoped activity without loading Task histories.
-func (s *Service) Executing(ctx context.Context, assistant string) (bool, error) {
-	if !core.Identifier(assistant) {
-		return false, fmt.Errorf("invalid assistant identity")
-	}
-	var executing bool
-	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE assistant_id=? AND phase='running'
-		AND json_extract(body,'$.info.archived') IS NOT TRUE AND json_extract(body,'$.info.paused') IS NOT TRUE)`, assistant).Scan(&executing)
-	return executing, err
-}
-
 func (s *Service) page(ctx context.Context, assistant string, query protocol.TaskQuery) (protocol.TaskPage, error) {
 	page := protocol.TaskPage{Items: []protocol.TaskInfo{}}
 	limit := query.Limit
@@ -81,8 +70,8 @@ func (s *Service) page(ctx context.Context, assistant string, query protocol.Tas
 		if err != nil {
 			return page, err
 		}
-		where += " AND json_extract(body,'$.info.execution_target')=?"
-		args = append(args, string(raw))
+		where += " AND (json_extract(body,'$.info.execution_target')=? OR json_extract(body,'$.info.agent_link.node_id')=?)"
+		args = append(args, string(raw), target.RuntimeID)
 	}
 	// One read transaction keeps counts, clamped offsets and rows consistent.
 	tx, err := s.db.BeginTx(ctx, nil)

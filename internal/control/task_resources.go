@@ -2,17 +2,14 @@ package control
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/core"
 	pluginpkg "github.com/jjyr/pot/pkg/plugin"
 	"github.com/jjyr/pot/pkg/protocol"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -22,11 +19,7 @@ import (
 type taskResource struct {
 	Config        core.ResolvedSpec `json:"config"`
 	ReservedNames []string          `json:"reserved_names"`
-	Roots         []taskSkillRoot   `json:"roots"`
-}
-type taskSkillRoot struct {
-	Builtin bool              `json:"builtin"`
-	Files   map[string]string `json:"files"`
+	Roots         []core.SkillRoot  `json:"roots"`
 }
 
 func (s *Service) selectTask(ctx context.Context, owner string, r protocol.CreateTask) (tasks.Selection, error) {
@@ -88,7 +81,7 @@ func (s *Service) selectTask(ctx context.Context, owner string, r protocol.Creat
 	}
 	return tasks.Selection{Config: spec, Plugins: plugins}, nil
 }
-func (s *Service) currentTaskResource(ctx context.Context, l runner.Launch) (taskResource, error) {
+func (s *Service) currentTaskResource(ctx context.Context, l tasks.Launch) (taskResource, error) {
 	body, _ := json.Marshal(l.Config)
 	var spec core.ResolvedSpec
 	if err := core.DecodeJSON(body, &spec); err != nil {
@@ -103,7 +96,7 @@ func (s *Service) currentTaskResource(ctx context.Context, l runner.Launch) (tas
 		}
 	}
 	if profile == nil {
-		return taskResource{}, errors.New("Task source Provider is unavailable for resource synchronization")
+		return taskResource{}, errors.New("Task source Provider is unavailable for local resource preparation")
 	}
 	if err := s.Profiles.sourceAvailable(ctx, spec.Provider); err != nil {
 		return taskResource{}, err
@@ -141,8 +134,8 @@ func (s *Service) currentTaskResource(ctx context.Context, l runner.Launch) (tas
 	if err := spec.Rehash(); err != nil {
 		return taskResource{}, err
 	}
-	// Only currently selected Control global skills cross the execution boundary. Worker
-	// instructions and project skills are discovered at the fixed destination.
+	// Freeze selected node-wide Skills. Worker instructions and project Skills
+	// are discovered in the execution workspace.
 	roots := []core.SkillRoot{{Path: filepath.Join(s.options.AgentHome, "skills")}}
 	if s.options.BuiltinSkills != "" {
 		roots = append(roots, core.SkillRoot{Path: s.options.BuiltinSkills, Builtin: true})
@@ -179,162 +172,120 @@ func (s *Service) currentTaskResource(ctx context.Context, l runner.Launch) (tas
 		}
 		selectedPaths[filepath.Dir(skill.Location)] = true
 	}
-	resources := taskResource{Config: spec, ReservedNames: reserved, Roots: []taskSkillRoot{}}
-	total := 0
+	resources := taskResource{Config: spec, ReservedNames: reserved, Roots: []core.SkillRoot{}}
 	for _, root := range roots {
-		tree := taskSkillRoot{Builtin: root.Builtin, Files: map[string]string{}}
-		info, err := os.Lstat(root.Path)
-		if os.IsNotExist(err) {
+		names := []string{}
+		for selected := range selectedPaths {
+			if filepath.Dir(selected) == root.Path {
+				names = append(names, filepath.Base(selected))
+			}
+		}
+		if len(names) == 0 {
 			continue
 		}
+		sort.Strings(names)
+		frozen, err := snapshotSkills(ctx, root, names, filepath.Join(s.options.Root, "cache", "resources", "skills"))
 		if err != nil {
 			return taskResource{}, err
 		}
-		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return taskResource{}, errors.New("skill source must be a directory without links")
-		}
-		fs, err := os.OpenRoot(root.Path)
-		if err != nil {
-			return taskResource{}, err
-		}
-		var walk func(string, int) error
-		walk = func(dir string, depth int) error {
-			if depth > 32 {
-				return errors.New("skill depth exceeds limit")
-			}
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			f, err := fs.Open(dir)
-			if err != nil {
-				return err
-			}
-			children, err := f.ReadDir(-1)
-			f.Close()
-			if err != nil {
-				return err
-			}
-			for _, child := range children {
-				candidate := filepath.Join(root.Path, dir, child.Name())
-				included := false
-				for selected := range selectedPaths {
-					if candidate == selected || strings.HasPrefix(selected, candidate+string(filepath.Separator)) || strings.HasPrefix(candidate, selected+string(filepath.Separator)) {
-						included = true
-						break
-					}
-				}
-				if !included {
-					continue
-				}
-				if strings.HasPrefix(child.Name(), ".") {
-					continue
-				}
-				path := filepath.Join(dir, child.Name())
-				if child.Type()&os.ModeSymlink != 0 {
-					return errors.New("skill resource links forbidden")
-				}
-				if child.IsDir() {
-					if err := walk(path, depth+1); err != nil {
-						return err
-					}
-					continue
-				}
-				if !child.Type().IsRegular() {
-					return errors.New("skill resource must be regular")
-				}
-				f, err := fs.Open(path)
-				if err != nil {
-					return err
-				}
-				data, err := io.ReadAll(io.LimitReader(f, 2*1024*1024+1))
-				f.Close()
-				if err != nil {
-					return err
-				}
-				total += len(data)
-				if len(data) > 2*1024*1024 || total > 16*1024*1024 || len(tree.Files) >= 2048 {
-					return errors.New("task skill resource limit exceeded")
-				}
-				tree.Files[filepath.ToSlash(path)] = base64.RawStdEncoding.EncodeToString(data)
-			}
-			return nil
-		}
-		err = walk(".", 0)
-		fs.Close()
-		if err != nil {
-			return taskResource{}, err
-		}
-		if len(tree.Files) > 0 {
-			resources.Roots = append(resources.Roots, tree)
-		}
+		resources.Roots = append(resources.Roots, frozen)
 	}
 	return resources, nil
 }
 
-func (s *Service) installTaskSkills(ctx context.Context, r taskResource, owner, revision string, target core.ExecutionTarget) ([]core.SkillRoot, error) {
-	if !target.IsLocalTo(s.options.RuntimeID) {
-		return nil, errors.New("resource installation requires destination Runtime")
+// snapshotSkills freezes only the selected local directories. File contents stay
+// as files, with executable modes intact; there is no resource wire format.
+func snapshotSkills(ctx context.Context, root core.SkillRoot, names []string, cache string) (core.SkillRoot, error) {
+	if err := os.MkdirAll(cache, 0700); err != nil {
+		return core.SkillRoot{}, err
 	}
-	roots := []core.SkillRoot{}
-	workspaceRoot := filepath.Join(s.options.Root, "resource-cache", "task-skills")
-	if err := os.MkdirAll(workspaceRoot, 0700); err != nil {
-		return nil, err
-	}
-	workspace := filepath.Join(workspaceRoot, owner)
-
-	anchor, err := os.OpenRoot(workspaceRoot)
+	stage, err := os.MkdirTemp(cache, ".prepare-")
 	if err != nil {
-		return nil, err
+		return core.SkillRoot{}, err
 	}
-	defer anchor.Close()
-	relative := filepath.Join(owner, revision)
-	if err = anchor.RemoveAll(relative); err != nil {
-		return nil, err
-	}
-	for i, tree := range r.Roots {
-		directory := filepath.Join(workspace, revision, fmt.Sprint(i))
-		relativeRoot := filepath.Join(relative, fmt.Sprint(i))
-		if err := anchor.MkdirAll(relativeRoot, 0700); err != nil {
-			return nil, err
-		}
-		fs, err := anchor.OpenRoot(relativeRoot)
+	defer os.RemoveAll(stage)
+	evidence := map[string]string{}
+	total := 0
+	for _, name := range names {
+		source := filepath.Join(root.Path, name)
+		err = filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			rel, e := filepath.Rel(root.Path, path)
+			if e != nil {
+				return e
+			}
+			if strings.Count(filepath.ToSlash(rel), "/") > 32 {
+				return errors.New("skill resource depth limit exceeded")
+			}
+			if strings.HasPrefix(entry.Name(), ".") {
+				if entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if entry.Type()&os.ModeSymlink != 0 {
+				return errors.New("skill resource links forbidden")
+			}
+			if entry.IsDir() {
+				return os.MkdirAll(filepath.Join(stage, rel), 0700)
+			}
+			info, e := entry.Info()
+			if e != nil {
+				return e
+			}
+			if !info.Mode().IsRegular() {
+				return errors.New("skill resource must be regular")
+			}
+			if info.Size() > 2*1024*1024 || len(evidence) >= 2048 {
+				return errors.New("task skill resource limit exceeded")
+			}
+			data, e := os.ReadFile(path)
+			if e != nil {
+				return e
+			}
+			total += len(data)
+			if total > 16*1024*1024 {
+				return errors.New("task skill resource limit exceeded")
+			}
+			hash, e := core.HashJSON([]any{data, uint32(info.Mode().Perm())})
+			if e != nil {
+				return e
+			}
+			evidence[filepath.ToSlash(rel)] = hash
+			dest := filepath.Join(stage, rel)
+			if err := os.WriteFile(dest, data, info.Mode().Perm()); err != nil {
+				return err
+			}
+			return os.Chmod(dest, info.Mode().Perm())
+		})
 		if err != nil {
-			return nil, err
+			return core.SkillRoot{}, err
 		}
-		for name, encoded := range tree.Files {
-			if !core.SafeRelativePath(name) {
-				fs.Close()
-				return nil, errors.New("invalid immutable skill path")
-			}
-			data, err := base64.RawStdEncoding.DecodeString(encoded)
-			if err != nil {
-				fs.Close()
-				return nil, err
-			}
-			parent := filepath.Dir(name)
-			if err = fs.MkdirAll(parent, 0700); err != nil {
-				fs.Close()
-				return nil, err
-			}
-			f, err := fs.OpenFile(name, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0700)
-			if err != nil {
-				fs.Close()
-				return nil, err
-			}
-			_, err = f.Write(data)
-			closeErr := f.Close()
-			if err = errors.Join(err, closeErr); err != nil {
-				fs.Close()
-				return nil, err
-			}
-		}
-		fs.Close()
-		roots = append(roots, core.SkillRoot{Path: directory, Location: filepath.ToSlash(filepath.Join(workspace, revision, fmt.Sprint(i))), Builtin: tree.Builtin})
 	}
-	return roots, ctx.Err()
+	digest, err := core.HashJSON(evidence)
+	if err != nil {
+		return core.SkillRoot{}, err
+	}
+	dest := filepath.Join(cache, digest)
+	if err = os.MkdirAll(cache, 0700); err != nil {
+		return core.SkillRoot{}, err
+	}
+	if _, err = os.Stat(dest); os.IsNotExist(err) {
+		if err = os.Rename(stage, dest); err != nil {
+			return core.SkillRoot{}, err
+		}
+	} else if err != nil {
+		return core.SkillRoot{}, err
+	}
+	return core.SkillRoot{Path: dest, Location: dest, Builtin: root.Builtin}, nil
 }
 
-func validateTaskResource(l runner.Launch, r taskResource) error {
+func validateTaskResource(l tasks.Launch, r taskResource) error {
 	if err := r.Config.Validate(); err != nil {
 		return err
 	}
@@ -360,13 +311,13 @@ func validateTaskResource(l runner.Launch, r taskResource) error {
 	}
 	return nil
 }
-func (s *Service) readPreparedTaskResources(ctx context.Context, l runner.Launch) (taskResource, string, error) {
-	raw, revision, err := s.RunnerJournal.PreparedResources(ctx, l.ControlID, l.TaskID, l.RunID)
+func (s *Service) readPreparedTaskResources(ctx context.Context, l tasks.Launch) (taskResource, string, error) {
+	raw, revision, err := s.RunJournal.PreparedResources(ctx, l.ControlID, l.TaskID, l.RunID)
 	if err != nil {
 		return taskResource{}, "", err
 	}
 	if raw == nil {
-		return taskResource{}, "", errors.New("original Runner resources not prepared")
+		return taskResource{}, "", errors.New("original task resources not prepared")
 	}
 	var resources taskResource
 	if err = core.DecodeJSON(raw, &resources); err != nil {
@@ -374,13 +325,13 @@ func (s *Service) readPreparedTaskResources(ctx context.Context, l runner.Launch
 	}
 	return resources, revision, validateTaskResource(l, resources)
 }
-func (s *Service) prepareTaskResources(ctx context.Context, l runner.Launch, fetch func() (taskResource, error)) (taskResource, string, error) {
-	raw, _, err := s.RunnerJournal.PreparedResources(ctx, l.ControlID, l.TaskID, l.RunID)
+func (s *Service) prepareTaskResources(ctx context.Context, l tasks.Launch) (taskResource, string, error) {
+	raw, _, err := s.RunJournal.PreparedResources(ctx, l.ControlID, l.TaskID, l.RunID)
 	if err != nil {
 		return taskResource{}, "", err
 	}
 	if raw == nil {
-		resources, err := fetch()
+		resources, err := s.currentTaskResource(ctx, l)
 		if err != nil {
 			return taskResource{}, "", err
 		}
@@ -391,12 +342,10 @@ func (s *Service) prepareTaskResources(ctx context.Context, l runner.Launch, fet
 		if err != nil {
 			return taskResource{}, "", err
 		}
-		if l.ControlID == s.options.RuntimeID {
-			if err = s.Profiles.sourceAvailable(ctx, l.Config.Provider); err != nil {
-				return taskResource{}, "", err
-			}
+		if err = s.Profiles.sourceAvailable(ctx, l.Config.Provider); err != nil {
+			return taskResource{}, "", err
 		}
-		if _, _, err = s.RunnerJournal.PinResources(ctx, l.ControlID, l.TaskID, l.RunID, raw); err != nil {
+		if _, _, err = s.RunJournal.PinResources(ctx, l.ControlID, l.TaskID, l.RunID, raw); err != nil {
 			return taskResource{}, "", err
 		}
 	}

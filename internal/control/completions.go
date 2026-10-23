@@ -99,7 +99,7 @@ func (s *Service) assistantCompletions(ctx context.Context, owner string) ([]pro
 			if endpoint, err := url.Parse(link.Endpoint); err == nil && endpoint.Host != "" {
 				source += " · " + endpoint.Host
 			}
-			for _, assistant := range link.Directory.Assistants {
+			for _, assistant := range link.Directory.Assistants() {
 				if assistant.Address.NodeID != link.Peer.Address.NodeID {
 					continue
 				}

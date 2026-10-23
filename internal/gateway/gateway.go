@@ -1,4 +1,4 @@
-// Package gateway owns provider networking at Control. Agent and Runner receive
+// Package gateway owns provider networking on its owning node. Agents receive
 // an injected model port; they do not import this package or receive credentials.
 package gateway
 

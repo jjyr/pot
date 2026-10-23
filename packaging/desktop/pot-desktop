@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /opt/pot-desktop/bin/pot-app "$@"

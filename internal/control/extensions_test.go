@@ -196,7 +196,9 @@ func TestMCPHTTPDiscoveryCallToolSelectionAndEncryptedCredentials(t *testing.T) 
 		t.Fatal("stale MCP update accepted")
 	}
 	var plain string
-	if err = s.integrationDB.QueryRow("SELECT body FROM mcp_servers WHERE id='docs'").Scan(&plain); err != nil || strings.Contains(plain, "fixture-private") {
+	raw, readErr := os.ReadFile(filepath.Join(s.options.Root, "mcp.json"))
+	plain = string(raw)
+	if err = readErr; err != nil || strings.Contains(plain, "fixture-private") {
 		t.Fatal(plain, err)
 	}
 }
@@ -275,5 +277,32 @@ func TestFailedMCPTestKeepsEditableConfigurationRevision(t *testing.T) {
 	server.Name = "Updated after failed test"
 	if _, err = s.ManageMCP(ctx, MCPCommand{Action: "save", Server: server}); err != nil {
 		t.Fatal("could not edit failed connection", err)
+	}
+}
+
+func TestExtensionFilesAreReadWithoutRestart(t *testing.T) {
+	s := taskResourceService(t)
+	ctx := context.Background()
+	// Only files own catalogue settings; there are no live SQL configuration tables.
+	for _, table := range []string{"extension_settings", "mcp_servers"} {
+		var count int
+		if err := s.integrationDB.QueryRow("SELECT count(*) FROM sqlite_master WHERE name=?", table).Scan(&count); err != nil || count != 0 {
+			t.Fatal(table, count, err)
+		}
+	}
+	writeTaskFixture(t, filepath.Join(s.options.Root, "extensions.json"), `{"version":1,"plugins":{},"skills":{}}`)
+	enabled, err := s.enabled(ctx, "plugins", "example")
+	if err != nil || !enabled {
+		t.Fatal(enabled, err)
+	}
+	writeTaskFixture(t, filepath.Join(s.options.Root, "extensions.json"), `{"version":1,"plugins":{"example":{"enabled":false,"revision":1}},"skills":{}}`)
+	enabled, err = s.enabled(ctx, "plugins", "example")
+	if err != nil || enabled {
+		t.Fatal("external edit not read", enabled, err)
+	}
+	writeTaskFixture(t, filepath.Join(s.options.Root, "mcp.json"), `{"version":1,"servers":[{"id":"example","name":"Example","revision":1,"transport":"stdio","command":"example","enabled":true}]}`)
+	servers, err := s.mcpServers(ctx)
+	if err != nil || len(servers) != 1 || servers[0].Command != "example" {
+		t.Fatal(servers, err)
 	}
 }

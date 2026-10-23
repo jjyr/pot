@@ -6,6 +6,12 @@ tray use direct bindings and the shared frontend. An independent
 `web-ui-server` process publishes browser access to one explicitly selected
 local node. See [Architecture](architecture.md) for ownership and failure rules.
 
+Deploy one complete Pot node on each execution machine and connect nodes through
+Agent Link. Control and Runner are not separate services or configurable node
+roles. Configure models, credentials, resources and machine permissions on the
+node that will execute the work. The optional browser service only publishes UI
+access to a local node; it does not coordinate remote execution.
+
 ## Install and data roots
 
 Use the Go CLI archive built for the target OS/architecture, or build from a
@@ -18,26 +24,47 @@ mise run build:cli
 
 CLI archives include the target Go CLI, pinned Node, tool plugins and Skills.
 Linux Node requires a glibc-based host. Install any tools required by your selected
-plugins, including Chrome/Chromium for browser execution. Runtime creates no VMs
-or containers. Keep private data roots on a local filesystem supporting Unix
-sockets and file locks. See [Development](development.md) for packaging.
+plugins, including Chrome/Chromium for browser execution. Keep private data roots
+on a local filesystem supporting Unix sockets and file locks. See
+[Development](development.md) for packaging.
 Upgrade each node independently from a compatible protocol revision. Manual upgrades can
 apply pending [database migrations](database-migrations.md); stop the old
 processes and back up the complete data root before schema-changing upgrades.
 The chat UI can update one local installation and its running hosts; see
 [Updates](updates.md). Remote installations require separate coordination.
 
-The default Go root is `~/.pot-go` on macOS and Linux. Use `-root /absolute/path`
-for an independent instance. New roots require empty directories and receive a
-stable Runtime identity. App and standalone Runtime cannot open the same root
+The default root is `~/.pot` on macOS and Linux. Use `-root /absolute/path`
+for an independent instance. New roots may contain extension files and a global
+`AGENTS.md` before initialization and receive a stable node identity. App and standalone Runtime cannot open the same root
 concurrently.
 Keep each root private and preserve its identity and secret master key across
 restarts. See [Secrets](secrets.md).
 
-Tool packages live under `Resources/plugins/`, with a `plugin.json` manifest and
-explicit declared files. Stop Runtime before replacing complete packages. See
-[Plugin packages](plugins.md). Main and Tasks use their owning node's local filesystem. Remote work is delegated
-through Agent Link to an autonomous node.
+Local configuration has one file owner:
+
+```text
+~/.pot/
+  plugins/<name>/plugin.json   user packages and declared assets
+  skills/<name>/SKILL.md       user Skill bundles
+  extensions.json             enablement and installation sources
+  mcp.json                    independent MCP definitions and secret references
+  cache/resources/            immutable local execution snapshots
+  tasks.sqlite                task/run state, checkpoints and event history
+  operations.sqlite           tool side-effect receipts
+```
+
+Builtin packages and Skills ship under `Resources/plugins` and `Resources/skills`.
+User packages use unique names across both roots. Stop Runtime before replacing
+complete packages manually. Configuration files contain no credential values;
+credentials remain in the encrypted secret store. See [Extensions](extensions.md)
+and [Plugin packages](plugins.md). Remote work uses Agent Link delegation.
+
+Existing installations using `~/.pot-go` must explicitly select that root with
+`-root`, or stop all hosts and move the complete root to `~/.pot` before starting
+the new build. Preserve identity, keys and all databases together. Pot does not
+silently open or merge a different root. On upgrade, former `agent/plugins` and
+`agent/skills` move into the root, and SQLite extension settings export once to
+files. Conflicting nonempty destinations stop startup for resolution.
 
 ## Standalone node
 
@@ -109,7 +136,6 @@ Old native remote Space credentials are no longer read or used for connections.
 command receipts. The POST interface supports only `action: "create"`,
 `kind: "assistant"`, a stable `request_id`, and assistant creation fields.
 Machine authorization uses [Permissions](permissions.md), not resource creation.
-VM definitions, mappings, image preparation and lifecycle commands are absent.
 Unknown commands and obsolete fields fail without modifying stored data.
 
 ## Independent browser service
@@ -181,7 +207,7 @@ Provider. Routing stores only profile/provider concurrency limits.
 macOS or Linux. Install writes a reviewable definition without overwriting an
 existing one. Start/stop act on that definition, and the recorded root must match.
 Use the same account/root when restarting after upgrades. Neither building nor
-installing an archive starts a VM or installs a user service.
+installing an archive installs a user service.
 
 ## Agent Link access
 

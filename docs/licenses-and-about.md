@@ -75,10 +75,10 @@ notice set is unavailable; they do not substitute the font license for the
 linked dependencies. Packaged builds include all cross-platform notice files,
 and all supported platforms include the same runtime notices.
 
-## Retained assets
+## Asset notices
 
 Node tool plugins, built-in Skills and frontend assets retain their own notices.
-Brand icons continue to derive from `resources/app/PotIcon.swift`; tray atlases use
-the same artwork. Runtime packages contain no guest images, VM Helper or noVNC.
+Brand icons derive from `resources/app/PotIcon.swift`; tray atlases use the same
+artwork.
 
 SRT and its npm dependencies are pinned by `sandbox/package-lock.json`. Packaging includes their notices under `sandbox/THIRD-PARTY-NOTICES.txt`, exposed by About alongside Node and Go notices. The checked SDK extension is maintained in `sandbox/patch-sdk.mjs`.

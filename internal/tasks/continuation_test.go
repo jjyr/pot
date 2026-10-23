@@ -2,7 +2,6 @@ package tasks
 
 import (
 	"context"
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 	"testing"
@@ -15,7 +14,7 @@ func completeRun(t *testing.T, s *Service, p *fakePort, task Record) {
 	}
 	p.mu.Lock()
 	r := p.runs[task.RunID]
-	r.Phase, r.Result, r.CleanupConfirmed = runner.Complete, &runner.Terminal{Outcome: core.Success, Text: "done"}, true
+	r.Phase, r.Result, r.CleanupConfirmed = Complete, &Terminal{Outcome: core.Success, Text: "done"}, true
 	p.runs[task.RunID] = r
 	p.mu.Unlock()
 	if err := s.Tick(context.Background()); err != nil {
@@ -25,11 +24,11 @@ func completeRun(t *testing.T, s *Service, p *fakePort, task Record) {
 
 func TestOwnerBatchArchiveAndContinuationPreserveTaskAndReceipts(t *testing.T) {
 	ctx := context.Background()
-	s, p, _, path := fixture(t)
+	s, p, path := fixture(t)
 	var records []Record
 	var decisions []protocol.TaskDisposition
 	for _, id := range []string{"a", "b"} {
-		r, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: id, Text: "original instructions", Workspace: protocol.TaskWorkspace{Kind: "worktree", ProjectDir: "/project"}})
+		r, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: id, Text: "original instructions", Workspace: protocol.TaskWorkspace{Kind: "worktree", ProjectDir: "/project"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -49,7 +48,7 @@ func TestOwnerBatchArchiveAndContinuationPreserveTaskAndReceipts(t *testing.T) {
 		t.Fatal(page, err)
 	}
 	original := records[0]
-	user := protocol.AgentRef{NodeID: s.ControlID(), Kind: "user", AgentID: "assistant"}
+	user := protocol.AgentRef{NodeID: s.NodeID(), Kind: "user", AgentID: "assistant"}
 	// A new input survives restart and immediately removes the archive flag.
 	for range 2 {
 		if err = s.SendMessage(ctx, "assistant", original.Info.ID, "followup", user, "modify the existing result"); err != nil {
@@ -103,13 +102,13 @@ func TestStopEndedTaskDiscardsQueuedFollowupWithoutChangingResult(t *testing.T) 
 	for _, mode := range []string{"cancel", "interrupt"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := context.Background()
-			s, p, _, _ := fixture(t)
-			r, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "original", Text: "work"})
+			s, p, _ := fixture(t)
+			r, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "original", Text: "work"})
 			if err != nil {
 				t.Fatal(err)
 			}
 			completeRun(t, s, p, r)
-			if err = s.SendMessage(ctx, "assistant", r.Info.ID, "followup", protocol.AgentRef{NodeID: s.ControlID(), Kind: "user", AgentID: "assistant"}, "additional work"); err != nil {
+			if err = s.SendMessage(ctx, "assistant", r.Info.ID, "followup", protocol.AgentRef{NodeID: s.NodeID(), Kind: "user", AgentID: "assistant"}, "additional work"); err != nil {
 				t.Fatal(err)
 			}
 			if err = s.Stop(ctx, "assistant", r.Info.ID, mode); err != nil {
@@ -128,8 +127,8 @@ func TestStopEndedTaskDiscardsQueuedFollowupWithoutChangingResult(t *testing.T) 
 
 func TestFinalizingGuidanceStartsNextRunButReferencesDoNot(t *testing.T) {
 	ctx := context.Background()
-	s, p, _, _ := fixture(t)
-	r, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "work", Text: "original"})
+	s, p, _ := fixture(t)
+	r, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "work", Text: "original"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +138,7 @@ func TestFinalizingGuidanceStartsNextRunButReferencesDoNot(t *testing.T) {
 	if _, err = s.Steering(ctx, "assistant", r.Info.ID, r.RunID, true); err != nil {
 		t.Fatal(err)
 	}
-	owner := protocol.AgentRef{NodeID: s.ControlID(), Kind: "assistant", AgentID: "assistant"}
+	owner := protocol.AgentRef{NodeID: s.NodeID(), Kind: "assistant", AgentID: "assistant"}
 	if err = s.SendMessage(ctx, "assistant", r.Info.ID, "late", owner, "new work"); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +155,7 @@ func TestFinalizingGuidanceStartsNextRunButReferencesDoNot(t *testing.T) {
 		t.Fatal(next)
 	}
 	completeRun(t, s, p, *next)
-	peer := protocol.AgentRef{NodeID: s.ControlID(), Kind: "assistant", AgentID: "peer"}
+	peer := protocol.AgentRef{NodeID: s.NodeID(), Kind: "assistant", AgentID: "peer"}
 	if err = s.SendMessage(ctx, "assistant", r.Info.ID, "reference", peer, "reference"); err != nil {
 		t.Fatal(err)
 	}

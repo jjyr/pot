@@ -3,12 +3,12 @@ package control
 import (
 	"context"
 	"errors"
-	"github.com/jjyr/pot/internal/runner"
+	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/core"
 )
 
-func (s *Service) TaskEvents(ctx context.Context, owner, task string, after, limit uint64) (runner.EventPage, error) {
-	empty := runner.EventPage{Events: []runner.Event{}, Cursor: after}
+func (s *Service) TaskEvents(ctx context.Context, owner, task string, after, limit uint64) (tasks.EventPage, error) {
+	empty := tasks.EventPage{Events: []tasks.Event{}, Cursor: after}
 	if after > core.MaxSafeInteger || limit > 100 {
 		return empty, errors.New("invalid Task event page")
 	}
@@ -33,7 +33,7 @@ func (s *Service) TaskEvents(ctx context.Context, owner, task string, after, lim
 	}
 	launch := record.Launch
 	if launch.RuntimeID == s.options.RuntimeID {
-		return s.RunnerJournal.Events(ctx, launch.ControlID, task, launch.RunID, after, limit)
+		return s.RunJournal.Events(ctx, launch.ControlID, task, launch.RunID, after, limit)
 	}
 	page := empty
 	page.Unavailable = true
@@ -47,7 +47,7 @@ func (s *Service) TaskEvents(ctx context.Context, owner, task string, after, lim
 			page.HasMore = true
 			break
 		}
-		var item runner.Event
+		var item tasks.Event
 		var raw []byte
 		if err = rows.Scan(&item.Sequence, &raw); err != nil {
 			return page, err

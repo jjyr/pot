@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/peer"
 	"github.com/jjyr/pot/pkg/protocol"
 )
@@ -16,34 +17,32 @@ var ErrUnsupported = errors.New("agent_link_capability_unsupported")
 var ErrDisconnected = errors.New("agent_link_disconnected")
 
 func validateDirectory(d Directory, node string) error {
-	if d.TaskExecutor != nil && (d.Adapter != "codex" || d.TaskExecutor.Version != 1 || d.TaskExecutor.Scope != "caller" || !d.TaskExecutor.Supports(TaskSubmit)) {
+	if d.NodeID != node || len(d.Targets) > 257 || d.Name == "" || !core.Identifier(d.Adapter) {
 		return ErrConflict
 	}
-	if d.NodeID != node || len(d.Assistants) > 256 || len(d.Operations) != len(d.Assistants) || d.Name == "" || (d.Adapter != "pot" && d.Adapter != "codex") {
-		return ErrConflict
-	}
-	seen := map[string]bool{}
-	for _, a := range d.Assistants {
-		if !validIdentity(a) || a.Address.Kind != "assistant" || a.Address.NodeID != node || a.Adapter != d.Adapter || seen[a.Address.AgentID] {
+	seen := map[protocol.AgentRef]bool{}
+	for _, entry := range d.Targets {
+		ref, description := entry.Address, entry.Capabilities
+		scope := "peer"
+		if ref.Kind == "node" {
+			scope = "caller"
+		}
+		if !ValidTarget(ref) || !validIdentity(entry.Identity) || ref.NodeID != node || entry.Adapter != d.Adapter || seen[ref] || description.Version != 1 || description.Scope != scope || len(description.Operations) > 64 {
 			return ErrConflict
 		}
-		seen[a.Address.AgentID] = true
-	}
-	if d.DefaultAssistantID != "" && !seen[d.DefaultAssistantID] {
-		return ErrConflict
-	}
-	for id, description := range d.Operations {
-		if !seen[id] || description.Version != 1 || description.Scope != "peer" || len(description.Operations) > 64 {
-			return ErrConflict
-		}
-		seenOperations := map[Operation]bool{}
-		for _, operation := range description.Operations {
-			if operation == "" || seenOperations[operation] {
+		seen[ref] = true
+		operations := map[Operation]bool{}
+		for _, op := range description.Operations {
+			if op == "" || operations[op] {
 				return ErrConflict
 			}
-			seenOperations[operation] = true
+			operations[op] = true
 		}
 	}
+	if d.DefaultTarget != nil && !seen[*d.DefaultTarget] {
+		return ErrConflict
+	}
+
 	return nil
 }
 func (s *Service) localDirectory(ctx context.Context) (Directory, error) {
@@ -78,6 +77,9 @@ func (s *Service) Directory(ctx context.Context, id string) (Directory, error) {
 	e = s.call(ctx, session, "directory", struct{}{}, &d)
 	if e == nil {
 		e = validateDirectory(d, c.PeerHost.NodeID)
+		if d.Adapter != c.Peer.Adapter {
+			e = ErrConflict
+		}
 	}
 	if e == nil {
 		s.mu.Lock()
@@ -113,18 +115,35 @@ func (s *Service) Submit(ctx context.Context, id string, r TaskRequest) (Task, e
 	if r.Configuration != nil && id != "" {
 		return Task{}, ErrUnsupported
 	}
+	if !ValidTarget(r.Target) {
+		return Task{}, ErrInvalid
+	}
 	if strings.TrimSpace(r.RequestID) == "" || len(r.RequestID) > 128 || strings.TrimSpace(r.Text) == "" || len(r.Text) > 65536 {
 		return Task{}, ErrInvalid
 	}
 	if id == "" {
+		if r.Target.NodeID != s.options.HostIdentity.NodeID {
+			return Task{}, ErrConflict
+		}
 		if s.options.Backend == nil {
 			return Task{}, ErrUnsupported
 		}
-		return s.options.Backend.Submit(ctx, r)
+		identity, err := s.localIdentity(ctx)
+		if err != nil {
+			return Task{}, err
+		}
+		result, err := s.options.Backend.Submit(ctx, r)
+		if err == nil {
+			err = validateSubmission(result, r, s.options.HostIdentity.NodeID, identity.Adapter)
+		}
+		return result, err
 	}
 	c, e := s.Get(ctx, id)
 	if e != nil {
 		return Task{}, e
+	}
+	if r.Target.NodeID != c.PeerHost.NodeID {
+		return Task{}, ErrConflict
 	}
 	session, e := s.businessSession(ctx, c)
 	if e != nil {
@@ -133,10 +152,7 @@ func (s *Service) Submit(ctx context.Context, id string, r TaskRequest) (Task, e
 	var t Task
 	e = s.call(ctx, session, "task.submit", r, &t)
 	if e == nil {
-		e = validateTask(t, c.PeerHost.NodeID, "", r.RequestID)
-		if r.AssistantID != "" && t.Assistant.Address.AgentID != r.AssistantID {
-			e = ErrConflict
-		}
+		e = validateSubmission(t, r, c.PeerHost.NodeID, c.Peer.Adapter)
 	}
 	return t, e
 }
@@ -154,10 +170,20 @@ func (s *Service) lookup(ctx context.Context, id string, from protocol.AgentRef,
 		if s.options.Backend == nil {
 			return Task{}, ErrUnsupported
 		}
-		if method == "task.cancel" {
-			return s.options.Backend.Cancel(ctx, from, task)
+		identity, err := s.localIdentity(ctx)
+		if err != nil {
+			return Task{}, err
 		}
-		return s.options.Backend.Status(ctx, from, task)
+		var result Task
+		if method == "task.cancel" {
+			result, err = s.options.Backend.Cancel(ctx, from, task)
+		} else {
+			result, err = s.options.Backend.Status(ctx, from, task)
+		}
+		if err == nil {
+			err = validateTask(result, s.options.HostIdentity.NodeID, identity.Adapter, task, "")
+		}
+		return result, err
 	}
 	c, e := s.Get(ctx, id)
 	if e != nil {
@@ -170,7 +196,7 @@ func (s *Service) lookup(ctx context.Context, id string, from protocol.AgentRef,
 	var t Task
 	e = s.call(ctx, session, method, taskLookup{from, task}, &t)
 	if e == nil {
-		e = validateTask(t, c.PeerHost.NodeID, task, "")
+		e = validateTask(t, c.PeerHost.NodeID, c.Peer.Adapter, task, "")
 	}
 	return t, e
 }
@@ -191,7 +217,7 @@ func (s *Service) business(ctx context.Context, c Connection, remote peer.Identi
 			return nil, ErrUnauthorized
 		}
 		backend, ok := s.options.Backend.(ReviewBackend)
-		if !ok || d.TaskExecutor == nil || !d.TaskExecutor.Supports(Approvals) {
+		if !ok || !d.Capabilities(NodeTarget(d.NodeID)).Supports(Approvals) {
 			return nil, ErrUnsupported
 		}
 		result, e = backend.Review(ctx, input)
@@ -215,7 +241,7 @@ func (s *Service) business(ctx context.Context, c Connection, remote peer.Identi
 			return nil, ErrInvalid
 		}
 		backend, ok := s.options.Backend.(AssistantDeletionBackend)
-		if !ok || !d.Operations[input.AssistantID].Supports(AssistantDelete) {
+		if !ok || !d.Capabilities(AssistantTarget(d.NodeID, input.AssistantID)).Supports(AssistantDelete) {
 			return nil, ErrUnsupported
 		}
 		e = backend.DeleteAssistant(ctx, input)
@@ -226,13 +252,16 @@ func (s *Service) business(ctx context.Context, c Connection, remote peer.Identi
 			return nil, ErrInvalid
 		}
 		backend, ok := s.options.Backend.(ProfileBackend)
-		if !ok || !d.Operations[input.AssistantID].Supports(AssistantProfile) {
+		if !ok || !d.Capabilities(AssistantTarget(d.NodeID, input.AssistantID)).Supports(AssistantProfile) {
 			return nil, ErrUnsupported
 		}
 		result, e = backend.Profile(ctx, input)
 	case "task.submit":
 		var input TaskRequest
 		if decodeJSON(r.Params, &input) != nil || !taskCaller(input.From) || input.From.NodeID != remote.NodeID || strings.TrimSpace(input.RequestID) == "" || len(input.RequestID) > 128 || strings.TrimSpace(input.Text) == "" || len(input.Text) > 65536 {
+			return nil, ErrInvalid
+		}
+		if !ValidTarget(input.Target) || input.Target.NodeID != s.options.HostIdentity.NodeID {
 			return nil, ErrInvalid
 		}
 		if input.Configuration != nil {
@@ -245,11 +274,7 @@ func (s *Service) business(ctx context.Context, c Connection, remote peer.Identi
 		if decodeJSON(r.Params, &input) != nil || !validGuidance(input, remote.NodeID) {
 			return nil, ErrInvalid
 		}
-		backend, ok := s.options.Backend.(TaskInputBackend)
-		if !ok || d.TaskExecutor == nil || !d.TaskExecutor.Supports(TaskInput) {
-			return nil, ErrUnsupported
-		}
-		result, e = backend.Input(ctx, input)
+		result, e = s.input(ctx, d, input)
 	case "task.status", "task.cancel":
 		var input taskLookup
 		if decodeJSON(r.Params, &input) != nil || !taskCaller(input.From) || input.From.NodeID != remote.NodeID || input.ID == "" {
@@ -320,9 +345,19 @@ func (s *Service) Reconnect(ctx context.Context, id string) error {
 // The saved directory is removed; business history and running work are retained.
 func (s *Service) Delete(ctx context.Context, id string) error { return s.Revoke(ctx, id) }
 
-func validateTask(t Task, node, id, request string) error {
-	receiver := t.Receiver()
-	if t.ID == "" || len(t.ID) > 256 || !validIdentity(receiver) || (t.Execution == nil && receiver.Address.Kind != "assistant") || (t.Execution != nil && (receiver.Address.Kind != "task" || receiver.Address.AgentID != t.ID || receiver.Adapter != "codex")) || receiver.Address.NodeID != node || id != "" && t.ID != id || request != "" && t.RequestID != request || len(t.Result) > 1024*1024 || len(t.Error) > 65536 {
+func validateSubmission(task Task, request TaskRequest, node, adapter string) error {
+	if err := validateTask(task, node, adapter, "", request.RequestID); err != nil {
+		return err
+	}
+	if request.Target.Kind == "node" && task.Receiver.Address.Kind != "task" || request.Target.Kind == "assistant" && task.Receiver.Address != request.Target {
+		return ErrConflict
+	}
+	return nil
+}
+
+func validateTask(t Task, node, adapter, id, request string) error {
+	receiver := t.Receiver
+	if t.ID == "" || len(t.ID) > 256 || !validIdentity(receiver) || receiver.Adapter != adapter || (receiver.Address.Kind != "assistant" && (receiver.Address.Kind != "task" || receiver.Address.AgentID != t.ID)) || receiver.Address.NodeID != node || id != "" && t.ID != id || request != "" && t.RequestID != request || len(t.Result) > 1024*1024 || len(t.Error) > 65536 {
 		return ErrConflict
 	}
 	switch t.State {

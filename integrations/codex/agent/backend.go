@@ -96,16 +96,15 @@ func (b *backend) identity(a assistant) agentlink.Identity {
 }
 func (b *backend) Directory(ctx context.Context) (agentlink.Directory, error) {
 	list, err := b.list(ctx)
-	d := agentlink.Directory{NodeID: b.nodeID, Name: "Codex", Adapter: "codex", Assistants: []agentlink.Identity{}}
-	d.Operations = map[string]agentlink.Description{}
-	d.TaskExecutor = &agentlink.Description{Version: 1, Scope: "caller", Operations: []agentlink.Operation{agentlink.TaskSubmit, agentlink.TaskRead, agentlink.TaskCancel, agentlink.TaskInput, agentlink.Approvals}}
+	d := agentlink.Directory{NodeID: b.nodeID, Name: "Codex", Adapter: "codex", Targets: []agentlink.Endpoint{}}
+	d.Targets = append(d.Targets, agentlink.Endpoint{Identity: agentlink.Identity{Address: agentlink.NodeTarget(b.nodeID), Name: d.Name, Adapter: d.Adapter}, Capabilities: agentlink.Description{Version: 1, Scope: "caller", Operations: []agentlink.Operation{agentlink.TaskSubmit, agentlink.TaskRead, agentlink.TaskCancel, agentlink.TaskInput, agentlink.Approvals}}})
 	for _, a := range list {
 		identity := b.identity(a)
 		identity.Avatar = a.Avatar
-		d.Assistants = append(d.Assistants, identity)
-		d.Operations[a.ID] = agentlink.Description{Version: 1, Scope: "peer", Operations: []agentlink.Operation{agentlink.AssistantProfile, agentlink.AssistantDelete}}
+		d.Targets = append(d.Targets, agentlink.Endpoint{Identity: identity, Capabilities: agentlink.Description{Version: 1, Scope: "peer", Operations: []agentlink.Operation{agentlink.AssistantProfile, agentlink.AssistantDelete}}})
 		if a.Default {
-			d.DefaultAssistantID = a.ID
+			ref := identity.Address
+			d.DefaultTarget = &ref
 		}
 	}
 	return d, err
@@ -202,7 +201,7 @@ func jobID(from protocol.AgentRef, request string) string {
 	return hex.EncodeToString(sum[:])
 }
 func (b *backend) Submit(ctx context.Context, r agentlink.TaskRequest) (agentlink.Task, error) {
-	if r.Executor != "codex" || r.Configuration != nil {
+	if r.Target != agentlink.NodeTarget(b.nodeID) || r.Configuration != nil {
 		return agentlink.Task{}, agentlink.ErrUnsupported
 	}
 	if !validID(r.RequestID) || !r.From.Valid() || r.Text == "" || len(r.Text) > 24000 {
@@ -214,12 +213,12 @@ func (b *backend) Submit(ctx context.Context, r agentlink.TaskRequest) (agentlin
 // submitMessage admits one addressed inbox envelope. It never resolves a node
 // default or accepts task workspace/configuration overrides.
 func (b *backend) submitMessage(ctx context.Context, r agentlink.TaskRequest, message protocol.Envelope) (agentlink.Task, error) {
-	if r.Executor != "" || r.Configuration != nil || r.Workspace != "" {
+	if r.Target.Kind != "assistant" || r.Target.NodeID != b.nodeID || r.Configuration != nil || r.Workspace != "" {
 		return agentlink.Task{}, agentlink.ErrUnsupported
 	}
 	if !validID(r.RequestID) || message.Validate() != nil || message.Kind != "message" ||
 		(message.From.Kind != "assistant" && message.From.Kind != "task") || message.To.NodeID != b.nodeID || message.To.Kind != "assistant" ||
-		message.From != r.From || message.To.AgentID != r.AssistantID || message.Text != r.Text {
+		message.From != r.From || message.To.AgentID != r.Target.AgentID || message.Text != r.Text {
 		return agentlink.Task{}, agentlink.ErrInvalid
 	}
 	payload := encoded(r)
@@ -239,7 +238,7 @@ func (b *backend) submitMessage(ctx context.Context, r agentlink.TaskRequest, me
 	if !errors.Is(priorErr, sql.ErrNoRows) {
 		return agentlink.Task{}, priorErr
 	}
-	a, err := b.resolve(ctx, r.AssistantID)
+	a, err := b.resolve(ctx, r.Target.AgentID)
 	if err != nil {
 		return agentlink.Task{}, err
 	}
@@ -279,7 +278,7 @@ func (b *backend) submitMessage(ctx context.Context, r agentlink.TaskRequest, me
 			return agentlink.ErrFenced
 		}
 		now := time.Now().UTC()
-		accepted = job{Task: agentlink.Task{ID: jobID(r.From, r.RequestID), RequestID: r.RequestID, Assistant: b.identity(a), State: "queued", CreatedAt: now, UpdatedAt: now}, Request: r, Message: &message}
+		accepted = job{Task: agentlink.Task{ID: jobID(r.From, r.RequestID), RequestID: r.RequestID, Receiver: b.identity(a), State: "queued", CreatedAt: now, UpdatedAt: now}, Request: r, Message: &message}
 		_, err = tx.ExecContext(ctx, "INSERT INTO codex_link_jobs(id,caller,request_id,assistant_id,payload,data) VALUES(?,?,?,?,?,?)", accepted.Task.ID, callerKey(r.From), r.RequestID, a.ID, payload, encoded(accepted))
 		return err
 	})
@@ -474,7 +473,7 @@ func (b *backend) runAssistant(ctx context.Context, id string) {
 	}
 }
 func (b *backend) execute(ctx context.Context, selected job) {
-	a, err := b.resolve(ctx, selected.Task.Assistant.Address.AgentID)
+	a, err := b.resolve(ctx, selected.Task.Receiver.Address.AgentID)
 	if err != nil {
 		return
 	}
@@ -564,7 +563,7 @@ func (b *backend) receiveMessages(ctx context.Context) error {
 			sum := sha256.Sum256([]byte(e.ID))
 			request = "mail:" + hex.EncodeToString(sum[:])
 		}
-		_, err = b.submitMessage(ctx, agentlink.TaskRequest{RequestID: request, From: e.From, AssistantID: e.To.AgentID, Text: e.Text}, e)
+		_, err = b.submitMessage(ctx, agentlink.TaskRequest{RequestID: request, From: e.From, Target: e.To, Text: e.Text}, e)
 		if err != nil {
 			return err
 		}
@@ -594,7 +593,7 @@ func messageReply(j job) *protocol.Envelope {
 	if text == "" {
 		return nil
 	}
-	return &protocol.Envelope{ID: "codex-reply-" + j.Task.ID, Kind: "message", From: j.Task.Assistant.Address, To: parent.From, ConversationID: parent.ConversationID, ReplyTo: &parent.ID, Hops: hops, Text: trimBytes(text, 65536)}
+	return &protocol.Envelope{ID: "codex-reply-" + j.Task.ID, Kind: "message", From: j.Task.Receiver.Address, To: parent.From, ConversationID: parent.ConversationID, ReplyTo: &parent.ID, Hops: hops, Text: trimBytes(text, 65536)}
 }
 
 // publishMessages commits a reply and marks processing in one transaction.

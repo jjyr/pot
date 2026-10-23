@@ -28,7 +28,7 @@ func TestBackgroundProtocolCannotForgeRouteOrLeakCredential(t *testing.T) {
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			root := t.TempDir()
-			manifest := `{"schema_version":2,"id":"example","version":"1","contributes":{"background":{"runtime":"node","execution":"control","entrypoint":"service.mjs","files":["service.mjs"],"credentials":{"SERVICE_TOKEN":{"service":"github"}}}}}`
+			manifest := `{"schema_version":3,"name":"example","version":"1","contributes":{"background":{"runtime":"node","execution":"control","entrypoint":"service.mjs","files":["service.mjs"],"credentials":{"SERVICE_TOKEN":{"service":"github"}}}}}`
 			if err := os.WriteFile(filepath.Join(root, "plugin.json"), []byte(manifest), 0600); err != nil {
 				t.Fatal(err)
 			}

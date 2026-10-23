@@ -1,6 +1,5 @@
 {
-  "schema_version": 2,
-  "id": "computer-use",
+  "schema_version": 3,
   "version": "0.4.1",
   "contributes": {
     "tools": {
@@ -40,5 +39,6 @@
         }
       ]
     }
-  }
+  },
+  "name": "computer-use"
 }

@@ -277,15 +277,15 @@ func (h *agentHost) connectionAPI(w http.ResponseWriter, r *http.Request) {
 			}
 			directory := c.Directory
 			if directory == nil {
-				directory = &agentlink.Directory{Assistants: []agentlink.Identity{c.Peer}}
+				directory = &agentlink.Directory{Targets: []agentlink.Endpoint{}}
 			}
-			view = append(view, map[string]any{"id": c.ID, "assistants": directory.Assistants, "operations": directory.Operations, "default_assistant_id": directory.DefaultAssistantID, "peer": map[string]any{"id": c.Peer.Address.AgentID, "node_id": c.Peer.Address.NodeID, "address": c.Endpoint, "kind": c.Peer.Adapter, "name": c.Peer.Name}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
+			view = append(view, map[string]any{"id": c.ID, "assistants": directory.Assistants(), "default_assistant_id": directory.DefaultAssistant(), "peer": map[string]any{"id": c.Peer.Address.AgentID, "node_id": c.Peer.Address.NodeID, "address": c.Endpoint, "kind": c.Peer.Adapter, "name": c.Peer.Name}, "status": state, "revision": c.CreatedAt.UnixMilli(), "last_error": c.LastError})
 		}
 		directory, err := h.backend.Directory(r.Context())
 		if handleError(w, err) {
 			return
 		}
-		writeJSON(w, 200, map[string]any{"items": view, "directory": directory, "self_assistants": directory.Assistants, "addresses": h.addresses(r.Context()), "self": map[string]any{"id": "codex", "node_id": h.identity.Address.NodeID, "kind": "codex", "name": "Codex", "address": endpoint, "endpoint": endpoint, "status": status, "reason_code": networkError}, "network": map[string]any{"listen": hostPeerListen, "endpoint": endpoint, "mode": "address", "status": status, "reason_code": networkError}, "identity": h.identity, "peer_identity": h.peerIdentity})
+		writeJSON(w, 200, map[string]any{"items": view, "directory": directory, "self_assistants": directory.Assistants(), "addresses": h.addresses(r.Context()), "self": map[string]any{"id": "codex", "node_id": h.identity.Address.NodeID, "kind": "codex", "name": "Codex", "address": endpoint, "endpoint": endpoint, "status": status, "reason_code": networkError}, "network": map[string]any{"listen": hostPeerListen, "endpoint": endpoint, "mode": "address", "status": status, "reason_code": networkError}, "identity": h.identity, "peer_identity": h.peerIdentity})
 		return
 	}
 	if r.Method != "POST" {

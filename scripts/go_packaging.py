@@ -272,18 +272,46 @@ def prepare_resources(destination, platform):
 
 
 def prepare_plugins(destination, platform):
-    """Package declared tool and Control-local capability files and brand assets."""
+    """Synchronize a dedicated generated directory with current plugin packages."""
+    destination = destination.absolute()
+    if destination.is_symlink():
+        raise ValueError("plugin output must not be a symlink")
+    destination = destination.resolve()
+    source_root = (ROOT / "plugins").resolve()
+    if destination.is_relative_to(source_root) or source_root.is_relative_to(destination):
+        raise ValueError("plugin output must not overlap plugin sources")
+    # Build and validate first; a bad declaration must not erase previous output.
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".plugins-", dir=destination.parent) as temporary:
+        staged = Path(temporary)
+        package_plugins(staged)
+        destination.mkdir(exist_ok=True)
+        # Only generated output children are removed. Never follow their symlinks.
+        for child in destination.iterdir():
+            if child.is_symlink() or not child.is_dir():
+                child.unlink()
+            else:
+                shutil.rmtree(child)
+        for package in staged.iterdir():
+            shutil.move(package, destination / package.name)
+
+
+def package_plugins(destination):
+    """Package declared capability files and brand assets into a fresh directory."""
     destination.mkdir(parents=True, exist_ok=True)
-    # These are generated package outputs, never instance disks or user data.
-    for name in ("podman", "apple-vm"):
-        retired = destination / name
-        if retired.is_dir() and not retired.is_symlink():
-            shutil.rmtree(retired)
     for source in sorted((ROOT / "plugins").iterdir()):
+        if source.is_symlink():
+            raise ValueError("unsafe plugin source")
         manifest_path = source / "plugin.json"
         if not manifest_path.is_file():
             continue
         manifest = json.loads(manifest_path.read_text())
+        if (
+            manifest.get("schema_version") != 3
+            or manifest.get("name") != source.name
+            or "id" in manifest
+        ):
+            raise ValueError("plugin name must match its directory in schema 3")
         contributions = manifest["contributes"]
         if not contributions or set(contributions) - {
             "tools",
@@ -309,8 +337,6 @@ def prepare_plugins(destination, platform):
                 raise ValueError("unsupported plugin execution target")
             declarations.append(declaration)
         package = destination / source.name
-        if package.exists():
-            shutil.rmtree(package)
         package.mkdir(parents=True)
         shutil.copy2(manifest_path, package / "plugin.json")
         for name in sorted(
@@ -322,7 +348,11 @@ def prepare_plugins(destination, platform):
             }
         ):
             relative = Path(name)
-            if relative.is_absolute() or ".." in relative.parts or (source / relative).is_symlink():
+            if (
+                relative.is_absolute()
+                or ".." in relative.parts
+                or any((source / part).is_symlink() for part in (relative, *relative.parents))
+            ):
                 raise ValueError("unsafe plugin file")
             target = package / relative
             target.parent.mkdir(parents=True, exist_ok=True)

@@ -22,7 +22,7 @@ func TestWireNullUnknownAndEventShape(t *testing.T) {
 			t.Fatal(data)
 		}
 	}
-	if err := DecodeStrict([]byte(`{"request_id":"r","text":"build","machine_id":"remote"}`), &request); err != nil {
+	if err := DecodeStrict([]byte(`{"request_id":"r","text":"build","target":{"node_id":"remote","kind":"node","agent_id":"remote"}}`), &request); err != nil {
 		t.Fatal(err)
 	}
 	var spec ScheduleSpec
@@ -33,7 +33,7 @@ func TestWireNullUnknownAndEventShape(t *testing.T) {
 		t.Fatal(spec)
 	}
 }
-func TestFileLinksReferencesAndRouting(t *testing.T) {
+func TestFileLinks(t *testing.T) {
 	task := "00000000-0000-4000-8000-000000000001"
 	id, file, err := ParseFileLink("pot-file://" + task + "/reports/%E6%8A%A5%E5%91%8A%20a.pdf")
 	if err != nil || id != task || file != "reports/报告 a.pdf" {
@@ -43,22 +43,6 @@ func TestFileLinksReferencesAndRouting(t *testing.T) {
 		if _, _, err := ParseFileLink("pot-file://" + task + "/" + p); err == nil {
 			t.Fatal(p)
 		}
-	}
-	machines := []MachineRoute{{"runner", []string{"linux", "task-runner"}}, {"control", DefaultLabels("macos")}}
-	if selected, err := SelectMachine(machines, "control", References{}); err != nil || selected != "control" {
-		t.Fatal("default placement followed labels instead of the owning Control", selected, err)
-	}
-	refs, err := ParseReferences("工作 /machine:runner /tag:linux /tag:linux /skill:pdf")
-	if err != nil || len(refs.Tags) != 1 {
-		t.Fatal(refs, err)
-	}
-	id, err = SelectMachine(machines, "control", refs)
-	if err != nil || id != "runner" {
-		t.Fatal(id, err)
-	}
-	refs.Tags = append(refs.Tags, "desktop")
-	if _, err = SelectMachine(machines, "control", refs); err == nil {
-		t.Fatal("capability fallback")
 	}
 	start, q, ok := CompletionQuery("中文 /desk", len("中文 /desk"))
 	if !ok || start != 7 || q != "desk" {
@@ -104,6 +88,32 @@ func TestTaskWorkspaceIntentValidation(t *testing.T) {
 	for _, w := range []TaskWorkspace{{Kind: "unknown"}, {Kind: "worktree"}, {Kind: "temporary", ProjectDir: "/project"}, {Kind: "directory", ProjectDir: "/project", Remote: "origin"}, {Kind: "worktree", ProjectDir: "/project", Base: "main", Commit: "deadbeef"}, {Kind: "directory", ProjectDir: "/project\nother"}} {
 		if err := w.Validate(); err == nil {
 			t.Fatalf("accepted invalid workspace: %+v", w)
+		}
+	}
+}
+
+func TestTaskTargetValidation(t *testing.T) {
+	for _, target := range []*AgentRef{nil, {NodeID: "node", Kind: "node", AgentID: "node"}, {NodeID: "node", Kind: "assistant", AgentID: "main"}} {
+		if err := (CreateTask{Target: target, RequestID: "request", Text: "work"}).Validate(); err != nil {
+			t.Fatal(target, err)
+		}
+	}
+	for _, target := range []*AgentRef{{NodeID: "node", Kind: "task", AgentID: "task"}, {NodeID: "node", Kind: "node", AgentID: "other"}, {NodeID: "", Kind: "assistant", AgentID: "main"}} {
+		if err := (CreateTask{Target: target, RequestID: "request", Text: "work"}).Validate(); err == nil {
+			t.Fatal(target)
+		}
+	}
+}
+
+func TestRetiredTaskSelectorsAreRejected(t *testing.T) {
+	for _, raw := range []string{
+		`{"request_id":"request","text":"work","executor":"agent"}`,
+		`{"request_id":"request","text":"work","link_id":"connection"}`,
+		`{"request_id":"request","text":"work","machine_id":"node"}`,
+	} {
+		var request CreateTask
+		if err := DecodeStrict([]byte(raw), &request); err == nil {
+			t.Fatal("retired task selector accepted", raw)
 		}
 	}
 }

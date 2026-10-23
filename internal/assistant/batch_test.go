@@ -242,51 +242,29 @@ func TestPeerBatchGroupsFullAddressAcrossWireConversations(t *testing.T) {
 	}
 }
 
-func TestPeerBatchWaitAndRestartRetainExactMembership(t *testing.T) {
+func TestRetiredCorrespondenceWaitsArePreservedWithoutReplay(t *testing.T) {
 	ctx := context.Background()
 	m, path := mailbox(t, "local")
-	from, to := address("local", "peer"), address("local", "main")
-	a := sendMail(t, m, "a", from, to, nil)
-	sendMail(t, m, "b", from, to, nil)
-	batch, err := m.ClaimMailBatch(ctx, a)
-	if err != nil {
+	original := sendMail(t, m, "old-wait", address("local", "peer"), address("local", "main"), nil)
+	if _, err := m.db.Exec("UPDATE agent_messages SET state='waiting',detail='original allowance' WHERE id=?", original.ID); err != nil {
 		t.Fatal(err)
 	}
-	var cleanup atomic.Int64
-	c := conversationFixture(t, filepath.Join(t.TempDir(), "chat.sqlite"), "boot", func(context.Context, core.ModelRequest) (io.ReadCloser, error) { return replySSE("unused"), nil }, &cleanup)
-	thread, err := c.Thread(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err = m.Session(ctx, a, thread.Config); err != nil {
-		t.Fatal(err)
-	}
-	checkpoint := recoveryCheckpoint()
-	checkpoint.LastRequest = batch.ID
-	raw, _ := json.Marshal(checkpoint)
-	if err = m.SaveSessionContext(ctx, a, raw); err != nil {
-		t.Fatal(err)
-	}
-	if err = m.Wait(ctx, a, "allowance"); err != nil {
-		t.Fatal(err)
-	}
-	sendMail(t, m, "later", from, to, nil)
 	m.Close()
-	m, err = OpenMailbox(path, "local")
+	reopened, err := OpenMailbox(path, "local")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
-	resumed, err := m.ClaimMailBatch(ctx, a)
-	if err != nil || len(resumed.Messages) != 2 {
-		t.Fatal("waiting batch absorbed later input", resumed, err)
+	defer reopened.Close()
+	candidates, err := reopened.Candidates(ctx, "main")
+	if err != nil || len(candidates) != 0 {
+		t.Fatal("retired private checkpoint became executable", candidates, err)
 	}
-	if err = m.Finish(ctx, a.ID, true, "done"); err != nil {
-		t.Fatal(err)
+	if _, err = reopened.ClaimMailBatch(ctx, original); err == nil {
+		t.Fatal("retired wait was replayed")
 	}
-	next, err := m.Next(ctx, "main")
-	if err != nil || next == nil || next.ID != "later" {
-		t.Fatal(next, err)
+	var state, detail string
+	if err = reopened.db.QueryRow("SELECT state,detail FROM agent_messages WHERE id=?", original.ID).Scan(&state, &detail); err != nil || state != "waiting" || detail != "original allowance" {
+		t.Fatal(state, detail, err)
 	}
 }
 

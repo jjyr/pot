@@ -17,9 +17,8 @@ type deletionBackend struct {
 func (b *deletionBackend) Directory(ctx context.Context) (Directory, error) {
 	d, err := b.testBackend.Directory(ctx)
 	if b.advertise.Load() {
-		for id, description := range d.Operations {
-			description.Operations = append(description.Operations, AssistantDelete)
-			d.Operations[id] = description
+		for i := range d.Targets {
+			d.Targets[i].Capabilities.Operations = append(d.Targets[i].Capabilities.Operations, AssistantDelete)
 		}
 	}
 	return d, err

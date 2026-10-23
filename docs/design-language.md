@@ -87,6 +87,9 @@ an editor. Release uses distance and velocity; cancellation and reversal settle
 back. Existing editor leave guards still decide whether Back may complete.
 Reduced Motion removes transitions, activity animation and gesture settling.
 Content updates preserve reading anchors rather than animating the whole history.
+Chat and Task history retain native scrolling, inertia and keyboard/scrollbar
+interaction. Their thin rounded scrollbar has a quiet thumb that strengthens on
+hover, reserves stable layout space and uses system colors in forced-color mode.
 
 ## Application shell and navigation
 

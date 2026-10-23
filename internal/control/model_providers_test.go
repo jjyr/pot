@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jjyr/pot/internal/runner"
+	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/modeldirectory"
 	"github.com/jjyr/pot/pkg/modelprotocol"
@@ -27,7 +27,7 @@ func installMetadataFixture(t *testing.T, s *Service) string {
 	if err := os.Mkdir(target, 0700); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `{"schema_version":2,"id":"acme","version":"1","contributes":{"model_providers":{"providers":[{"id":"aggregate","name":"Aggregate","protocol":"openai_chat","capabilities":{"catalog":"plugin","allowances":true}}],"adapter":{"runtime":"node","execution":"control","entrypoint":"reader.mjs","files":["reader.mjs"],"credential_env":"ACME_KEY"}}}}`
+	manifest := `{"schema_version":3,"name":"acme","version":"1","contributes":{"model_providers":{"providers":[{"id":"aggregate","name":"Aggregate","protocol":"openai_chat","capabilities":{"catalog":"plugin","allowances":true}}],"adapter":{"runtime":"node","execution":"control","entrypoint":"reader.mjs","files":["reader.mjs"],"credential_env":"ACME_KEY"}}}}`
 	body := `export async function read(input) {
  if (process.env.ACME_KEY !== 'isolated-token') return {error:{code:'authorization'}};
  if(input.method==='list_models') return {catalog:{read_at:new Date().toISOString(),models:[{id:'acme/text',context_window:128000,max_output:16000,input_modalities:['text','image']}]}};
@@ -251,24 +251,24 @@ func TestDisabledProviderBlocksFreshDefaultTasksAndUnpreparedResources(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	launch := runner.Launch{ControlID: s.options.RuntimeID, RuntimeID: s.options.RuntimeID, AssistantID: "main", TaskID: "prepared-source", RunID: "run", Generation: 1, ExecutionTarget: core.RuntimeTarget(s.options.RuntimeID), Config: selection.Config, Plugins: selection.Plugins, Workspace: protocol.TaskWorkspace{Kind: "directory", ProjectDir: t.TempDir()}, Text: "work"}
-	if _, err = s.RunnerJournal.Accept(ctx, launch); err != nil {
+	launch := tasks.Launch{ControlID: s.options.RuntimeID, RuntimeID: s.options.RuntimeID, AssistantID: "main", TaskID: "prepared-source", RunID: "run", Generation: 1, ExecutionTarget: core.RuntimeTarget(s.options.RuntimeID), Config: selection.Config, Plugins: selection.Plugins, Workspace: protocol.TaskWorkspace{Kind: "directory", ProjectDir: t.TempDir()}, Text: "work"}
+	if _, err = s.RunJournal.Accept(ctx, launch); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.RunnerJournal.Claim(ctx, launch.ControlID, launch.TaskID, launch.RunID); err != nil {
+	if _, err = s.RunJournal.Claim(ctx, launch.ControlID, launch.TaskID, launch.RunID); err != nil {
 		t.Fatal(err)
 	}
-	resources, revision, err := s.prepareTaskResources(ctx, launch, func() (taskResource, error) { return s.currentTaskResource(ctx, launch) })
+	resources, revision, err := s.prepareTaskResources(ctx, launch)
 	if err != nil {
 		t.Fatal(err)
 	}
 	queued := launch
 	queued.TaskID = "unprepared-source"
 	queued.RunID = "queued-run"
-	if _, err = s.RunnerJournal.Accept(ctx, queued); err != nil {
+	if _, err = s.RunJournal.Accept(ctx, queued); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.RunnerJournal.Claim(ctx, queued.ControlID, queued.TaskID, queued.RunID); err != nil {
+	if _, err = s.RunJournal.Claim(ctx, queued.ControlID, queued.TaskID, queued.RunID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.ManageExtension(ctx, "", ExtensionCommand{Action: "toggle", Kind: "plugins", ID: "standard-model-providers", Enabled: false}); err != nil {
@@ -280,36 +280,32 @@ func TestDisabledProviderBlocksFreshDefaultTasksAndUnpreparedResources(t *testin
 	if _, err = s.currentTaskResource(ctx, queued); err == nil {
 		t.Fatal("disabled source prepared queued task")
 	}
-	if _, _, err = s.prepareTaskResources(ctx, queued, func() (taskResource, error) { return s.currentTaskResource(ctx, queued) }); err == nil {
+	if _, _, err = s.prepareTaskResources(ctx, queued); err == nil {
 		t.Fatal("disabled source pinned first resources")
 	}
-	reused, sameRevision, err := s.prepareTaskResources(ctx, launch, func() (taskResource, error) { t.Fatal("prepared resources fetched again"); return taskResource{}, nil })
+	reused, sameRevision, err := s.prepareTaskResources(ctx, launch)
 	if err != nil || sameRevision != revision || reused.Config.SpecHash != resources.Config.SpecHash {
 		t.Fatal("prepared immutable route changed", err)
 	}
 }
 
-func TestRemoteRunnerPinsFetchedResourcesWithoutProviderSecrets(t *testing.T) {
+func TestLocalExecutionRejectsAnotherNodesModelConfiguration(t *testing.T) {
 	ctx := context.Background()
-	control, profile := configurationService(t)
-	spec, err := control.Profiles.Resolve(profile.ID)
+	source, profile := configurationService(t)
+	spec, err := source.Profiles.Resolve(profile.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker := taskResourceService(t)
-	if _, err = worker.Providers.Get(ctx, spec.Provider); err == nil {
-		t.Fatal("fixture Runner unexpectedly owns Control's provider")
+	node := taskResourceService(t)
+	launch := tasks.Launch{ControlID: "remote-control", RuntimeID: node.options.RuntimeID, AssistantID: "main", TaskID: "remote-resource", Plugins: []string{}, RunID: "run", Generation: 1, ExecutionTarget: core.RuntimeTarget(node.options.RuntimeID), Config: spec, Workspace: protocol.TaskWorkspace{Kind: "directory", ProjectDir: t.TempDir()}, Text: "work"}
+	if _, err = node.TaskRuns.Launch(ctx, launch); err == nil {
+		t.Fatal("accepted a centrally configured remote execution")
 	}
-	launch := runner.Launch{ControlID: "remote-control", RuntimeID: worker.options.RuntimeID, AssistantID: "main", TaskID: "remote-resource", Plugins: []string{}, RunID: "run", Generation: 1, ExecutionTarget: core.RuntimeTarget(worker.options.RuntimeID), Config: spec, Workspace: protocol.TaskWorkspace{Kind: "directory", ProjectDir: t.TempDir()}, Text: "work"}
-	if _, err = worker.RunnerJournal.Accept(ctx, launch); err != nil {
-		t.Fatal(err)
+	if _, err = node.prepareTask(ctx, tasks.Run{Launch: launch}); err == nil {
+		t.Fatal("prepared another node's model configuration")
 	}
-	if _, err = worker.RunnerJournal.Claim(ctx, launch.ControlID, launch.TaskID, launch.RunID); err != nil {
-		t.Fatal(err)
-	}
-	fixed := taskResource{Config: spec, Roots: []taskSkillRoot{}, ReservedNames: []string{}}
-	if _, _, err = worker.prepareTaskResources(ctx, launch, func() (taskResource, error) { return fixed, nil }); err != nil {
-		t.Fatal("Runner queried Control's private registry", err)
+	if runs, err := node.RunJournal.Runs(ctx); err != nil || len(runs) != 0 {
+		t.Fatal("rejected launch left a receipt", runs, err)
 	}
 }
 
@@ -445,7 +441,7 @@ func TestDeclarativeDirectoryReaderUsesLocalFactsWithoutCredentials(t *testing.T
 	}
 	s.Profiles.directory = directory
 	root := s.options.PluginRoot
-	manifest := `{"schema_version":2,"id":"local-facts","version":"1","contributes":{"model_providers":{"providers":[{"id":"openai","name":"Local facts","protocol":"openai_responses","directory_provider":"openai","capabilities":{"catalog":"models_dev"}}]}}}`
+	manifest := `{"schema_version":3,"name":"local-facts","version":"1","contributes":{"model_providers":{"providers":[{"id":"openai","name":"Local facts","protocol":"openai_responses","directory_provider":"openai","capabilities":{"catalog":"models_dev"}}]}}}`
 	writeTaskFixture(t, filepath.Join(root, "local-facts", "plugin.json"), manifest)
 	result, err := s.Profiles.Check(context.Background(), CheckProvider{ProviderTypeID: "local-facts/openai", Endpoint: "https://never-contacted.invalid/v1", Protocol: "openai_responses"})
 	if err != nil || !result.Supported || result.Catalog == nil || len(result.Catalog.Models) == 0 {

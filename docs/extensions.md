@@ -9,14 +9,19 @@ actual execution workspace, rather than a browser filesystem directory.
 
 ```text
 Extensions (local node) -> local node catalogue
-    |-- tools / Skills       -> prepared execution -> selected Runtime
+    |-- tools / Skills       -> local resource snapshot -> local execution
     |-- background services  -> assistant notifications
-    |-- plugin MCP servers   -> owning Control / shared MCP component
+    |-- plugin MCP servers   -> local service / shared MCP component
     `-- model connections    -> AI Providers -> node readers / Gateway
 ```
 
 Builtin and user Plugins use the same contribution and enablement rules.
-Settings are stored in `control.sqlite`; an absent setting means enabled.
+User packages and Skills live in `~/.pot/plugins/<name>` and
+`~/.pot/skills/<name>` (or the explicit node root). `extensions.json` owns
+installation sources, enablement and revisions; an absent setting means enabled.
+Independent MCP definitions and discovered catalogues live in `mcp.json`.
+These files are read for new catalogue/configuration requests; external changes
+apply to future executions. Already prepared resources retain their snapshots.
 Disabled packages cannot supply new tools, background services or model
 connections. Saved model connections retain their configuration and report
 unavailable; already prepared executions retain their fixed resources.
@@ -32,7 +37,7 @@ Other background-service routing remains under third-party accounts.
 ## Plugins and icons
 
 The catalogue discovers packaged `PluginRoot` directories and user installations
-under `AgentHome/plugins`. Package IDs are unique across both roots; `mcp-` is
+under `AgentHome/plugins` (the node root by default). Package names are unique across both roots; `mcp-` is
 reserved for managed MCP adapters. Import accepts an absolute directory on the
 owning node, validates declared capabilities and copies only their files.
 User installations can update from their recorded source or be removed. Removal
@@ -71,11 +76,10 @@ be inspected, edited and disabled in their actual assistant workspace.
 ## Independent MCP servers
 
 Independent MCP servers are configured separately from Plugin packages. Packages
-can also declare a Control-local stdio MCP capability (for example GitHub
-subscriptions); see [Control-local MCP contributions](plugins.md#control-local-mcp-contributions).
-These package servers are discovered and invoked on the owning Control, including
-for remote Tasks; their files and credentials do not travel to the execution machine.
-The independent server transports below retain their execution-machine behavior. Supported transports
+can also declare a node-local stdio MCP capability (for example GitHub
+subscriptions); see [Plugin MCP contributions](plugins.md#node-local-mcp-contributions).
+Both forms execute on the owning node with its local credentials and policy.
+Supported independent server transports
 are stdio (command, argument array and optional absolute working directory) and
 Streamable HTTP. The UI also imports `mcpServers` JSON entries containing either
 `command`/`args` or `url`; duplicate IDs fail rather than overwrite. Entries save
@@ -96,10 +100,8 @@ arguments. Original schemas accompany that tool's description. This supports
 nested MCP inputs without changing other tool interfaces. Namespace collisions
 are rejected. The adapter and shared Node SDK asset come from [pkg/mcp](mcp.md).
 Their files are digest-pinned and follow normal approval,
-cancellation, operation receipts, cleanup supervision and execution-machine
-policy. Stdio commands run on that execution machine, so their executable,
-arguments, working directory and dependencies must exist there; connection tests
-run on the owning node. There is no fallback to another machine.
+cancellation, operation receipts, cleanup supervision and local machine policy. Stdio executables, arguments, working directories and
+dependencies must exist on the owning node. Connection tests use that same node.
 
 Environment variables and request headers are stored in the existing encrypted
 secret store. Public catalogue responses and execution snapshots contain no

@@ -3,7 +3,6 @@ package schedule
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -12,7 +11,7 @@ import (
 	"github.com/jjyr/pot/pkg/storage"
 )
 
-// PrepareOutcome reads the fixed destination before opening the terminal Task
+// PrepareOutcome reads the local result file before opening the terminal Task
 // transaction. Its commit joins schedule history and policy to the same outcome.
 func (s *Service) PrepareOutcome(ctx context.Context, task tasks.Record, event protocol.TaskResultEvent) (tasks.OutcomeCommit, error) {
 	if task.Origin.Kind != "schedule" {
@@ -22,7 +21,7 @@ func (s *Service) PrepareOutcome(ctx context.Context, task tasks.Record, event p
 	var resultErr error
 	if event.Phase == protocol.TaskComplete {
 		if s.options.Results == nil || task.Info.ExecutionTarget == nil {
-			resultErr = fmt.Errorf("fixed destination result transport unavailable")
+			resultErr = fmt.Errorf("local scheduled result reader unavailable")
 		} else {
 			var data []byte
 			data, resultErr = s.options.Results.ReadResult(ctx, *task.Info.ExecutionTarget, task.Info.ID, ".pot-schedule-result.json", 16384)
@@ -30,11 +29,8 @@ func (s *Service) PrepareOutcome(ctx context.Context, task tasks.Record, event p
 				result, resultErr = ParseResult(data)
 			}
 		}
-		if errors.Is(resultErr, tasks.ErrResultPending) || ctx.Err() != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			return nil, resultErr
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
 	}
 	return func(ctx context.Context, tx *sql.Tx, event *protocol.TaskResultEvent) error {

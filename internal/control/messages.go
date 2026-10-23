@@ -13,6 +13,8 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
+type taskInputSenderKey struct{}
+
 // sendAgentMessage receives sender only from an authenticated execution binding.
 // Tool arguments describe a recipient and content, never authority or provenance.
 func (s *Service) sendAgentMessage(ctx context.Context, id, owner string, sender protocol.AgentRef, send protocol.SendMail) (any, error) {
@@ -40,20 +42,9 @@ func (s *Service) sendAgentMessage(ctx context.Context, id, owner string, sender
 		if send.To.NodeID != s.options.RuntimeID {
 			return nil, errors.New("address the Task through its owning Control")
 		}
-		var parent *protocol.Envelope
-		if value, ok := ctx.Value(mailParentKey{}).(protocol.Envelope); ok {
-			if value.To != sender {
-				return nil, errors.New("message parent sender differs")
-			}
-			parent = &value
-		}
-		if s.LinkTask(ctx, owner, send.To.AgentID) {
-			if sender.Kind != "assistant" || sender.AgentID != owner {
-				return nil, agentlink.ErrUnauthorized
-			}
-			return s.guideLinkTask(ctx, owner, send.To.AgentID, protocol.TaskInput{RequestID: id, Text: send.Text})
-		}
-		if err := s.Tasks.SendMessageWithParent(ctx, owner, send.To.AgentID, id, sender, send.Text, parent); err != nil {
+		body, _ := json.Marshal(protocol.TaskInput{RequestID: id, Text: send.Text})
+		ctx = context.WithValue(ctx, taskInputSenderKey{}, sender)
+		if _, err := s.CallAgent(ctx, owner, agentlink.TaskInput, agentlink.Call{ID: send.To.AgentID, Action: "write", Body: body}); err != nil {
 			return nil, err
 		}
 
@@ -149,24 +140,22 @@ func (s *Service) deliverNotifications(ctx context.Context, owner string) {
 		case "task_result":
 			result := notice.Result
 			task := map[string]any{"kind": notice.Kind, "title": result.Title, "phase": result.Phase, "result": result.Text, "error": result.Error, "evidence": result.Evidence, "artifacts": result.Artifacts, "artifact_task_id": result.TaskID, "task_id": result.TaskID, "run_id": result.RunID}
-			if delegation, e := s.linkDelegation(ctx, owner, result.TaskID); e == nil {
-				task["retry_allowed"] = false
-				task["original_instructions"] = delegation.Request.Text
-				task["agent_link"] = delegation.Info.AgentLink
-			} else {
-				eligible, err := s.Tasks.CanRetry(ctx, owner, result.TaskID)
-				if err != nil {
-					return
-				}
-				task["retry_allowed"] = eligible
-				record, err := s.Tasks.Run(ctx, owner, result.TaskID, result.RunID)
-				if err != nil {
-					return
-				}
-				if record != nil {
-					task["original_instructions"] = record.Request.Text
+			eligible, err := s.Tasks.CanRetry(ctx, owner, result.TaskID)
+			if err != nil {
+				return
+			}
+			task["retry_allowed"] = eligible
+			record, err := s.Tasks.Run(ctx, owner, result.TaskID, result.RunID)
+			if err != nil {
+				return
+			}
+			if record != nil {
+				task["original_instructions"] = record.Request.Text
+				if record.Info.AgentLink != nil {
+					task["agent_link"] = record.Info.AgentLink
 				}
 			}
+
 			item = task
 		case "plugin_event":
 			item = map[string]any{"kind": notice.Kind, "plugin": notice.Plugin}

@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/internal/assistant"
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/internal/usage"
@@ -110,8 +109,8 @@ func TestDeepSeekParallelDispatchObservationLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	var requests atomic.Int32
-	originalPrepare := s.Runner.Prepare
-	s.Runner.Prepare = func(ctx context.Context, r runner.Run) (runner.Prepared, error) {
+	originalPrepare := s.TaskRuns.Prepare
+	s.TaskRuns.Prepare = func(ctx context.Context, r tasks.Run) (tasks.Prepared, error) {
 		prepared, err := originalPrepare(ctx, r)
 		if err == nil {
 			prepared.Agent.Services = parallelObservationServices{prepared.Agent.Services.(core.ExecutionServices), &requests}

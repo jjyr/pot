@@ -301,7 +301,7 @@ func TestPluginMCPHostScopesOpaqueInstancesToInstalledPackage(t *testing.T) {
 		}
 	}
 	p.Manifest.ID = "other-package"
-	raw, _ := json.Marshal(p.Manifest)
+	raw, _ := json.Marshal(plugin.Definition{SchemaVersion: 3, Name: p.Manifest.ID, Version: p.Manifest.Version, Contributes: p.Manifest.Contributes})
 	if err = os.WriteFile(filepath.Join(root, "plugin.json"), raw, 0600); err != nil {
 		t.Fatal(err)
 	}

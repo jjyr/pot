@@ -2,7 +2,6 @@ package control
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -52,27 +51,35 @@ type ExtensionCommand struct {
 }
 
 func extensionID(location string) string { value, _ := core.HashJSON(location); return value }
-func extensionEnabled(ctx context.Context, db *sql.DB, kind, id string) (bool, error) {
-	if db == nil {
-		return true, nil
+func (s *Service) enabled(_ context.Context, kind, id string) (bool, error) {
+	f, err := readExtensionFile(s.options.Root)
+	if err != nil {
+		return false, err
 	}
-	var enabled bool
-	err := db.QueryRowContext(ctx, "SELECT enabled FROM extension_settings WHERE kind=? AND id=?", kind, id).Scan(&enabled)
-	if errors.Is(err, sql.ErrNoRows) {
-		return true, nil
+	if v, ok := f.settings(kind)[id]; ok {
+		return v.Enabled, nil
 	}
-	return enabled, err
-}
-func (s *Service) enabled(ctx context.Context, kind, id string) (bool, error) {
-	return extensionEnabled(ctx, s.integrationDB, kind, id)
+	return true, nil
 }
 func discoverPlugins(roots ...string) ([]plugin.Package, error) {
 	result := []plugin.Package{}
 	seen := map[string]bool{}
+	seenRoots := map[string]bool{}
 	for _, root := range roots {
 		if root == "" {
 			continue
 		}
+		absolute, err := filepath.Abs(root)
+		if err != nil {
+			return nil, err
+		}
+		if canonical, e := filepath.EvalSymlinks(absolute); e == nil {
+			absolute = canonical
+		}
+		if seenRoots[absolute] {
+			continue
+		}
+		seenRoots[absolute] = true
 		packages, err := plugin.Discover(root)
 		if err != nil {
 			return nil, err
@@ -86,10 +93,11 @@ func discoverPlugins(roots ...string) ([]plugin.Package, error) {
 		}
 	}
 	if !seen["standard-model-providers"] {
-		var manifest core.PluginManifest
-		if err := core.DecodeJSON(pluginassets.StandardModelProviders, &manifest); err != nil {
+		definition, err := plugin.DecodeDefinition(pluginassets.StandardModelProviders)
+		if err != nil {
 			return nil, err
 		}
+		manifest := definition.Snapshot()
 		if err := manifest.Validate(); err != nil {
 			return nil, err
 		}
@@ -113,6 +121,9 @@ func (s *Service) extensionCatalog(ctx context.Context, owner string) ([]Extensi
 			source = "user"
 		}
 		item := Extension{ID: p.Manifest.ID, Kind: "plugins", Name: p.Manifest.ID, Source: source, Location: p.Root, Version: p.Manifest.Version, Enabled: true}
+		if p.DisplayName != "" {
+			item.Name = p.DisplayName
+		}
 		item.Icon, _ = p.Icon()
 		if tools := p.Manifest.Contributes.Tools; tools != nil {
 			item.Requirements = tools.Requirements
@@ -179,11 +190,14 @@ func (s *Service) extensionCatalog(ctx context.Context, owner string) ([]Extensi
 		}
 		entries = append(entries, Extension{ID: extensionID(skill.Location), Kind: "skills", Name: skill.Name, Description: skill.Description, Source: source, Location: skill.Location, Enabled: true, Manual: skill.DisableModelInvocation})
 	}
+	settings, err := readExtensionFile(s.options.Root)
+	if err != nil {
+		return nil, nil, err
+	}
 	for index := range entries {
 		item := &entries[index]
-		err := s.integrationDB.QueryRowContext(ctx, "SELECT enabled,revision,source FROM extension_settings WHERE kind=? AND id=?", item.Kind, item.ID).Scan(&item.Enabled, &item.Revision, &item.Origin)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return nil, nil, err
+		if v, ok := settings.settings(item.Kind)[item.ID]; ok {
+			item.Enabled, item.Revision, item.Origin = v.Enabled, v.Revision, v.Source
 		}
 	}
 	return entries, diagnostics, nil
@@ -265,7 +279,7 @@ func (s *Service) ManageExtension(ctx context.Context, owner string, c Extension
 		}
 		switch c.Action {
 		case "toggle":
-			_, err = s.integrationDB.ExecContext(ctx, "INSERT INTO extension_settings(kind,id,enabled,revision,source) VALUES(?,?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET enabled=excluded.enabled,revision=excluded.revision", item.Kind, item.ID, c.Enabled, item.Revision+1, item.Origin)
+			err = s.saveExtensionSetting(item.Kind, item.ID, &extensionSetting{c.Enabled, item.Revision + 1, item.Origin})
 		case "save":
 			if item.Kind != "skills" || item.Source == "builtin" {
 				return errors.New("extension is read only")
@@ -308,7 +322,7 @@ func (s *Service) ManageExtension(ctx context.Context, owner string, c Extension
 				err = os.Rename(name, item.Location)
 			}
 			if err == nil {
-				_, err = s.integrationDB.ExecContext(ctx, "INSERT INTO extension_settings(kind,id,enabled,revision,source) VALUES(?,?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET revision=excluded.revision", item.Kind, item.ID, item.Enabled, item.Revision+1, item.Origin)
+				err = s.saveExtensionSetting(item.Kind, item.ID, &extensionSetting{item.Enabled, item.Revision + 1, item.Origin})
 				if err != nil {
 					rollback, rollbackErr := os.CreateTemp(filepath.Dir(item.Location), ".pot-skill-rollback-")
 					if rollbackErr == nil {
@@ -338,7 +352,7 @@ func (s *Service) ManageExtension(ctx context.Context, owner string, c Extension
 			dest := filepath.Join(trash, fmt.Sprintf("%s-%d", item.ID, storage.Now()))
 			err = os.Rename(path, dest)
 			if err == nil {
-				_, err = s.integrationDB.ExecContext(ctx, "DELETE FROM extension_settings WHERE kind=? AND id=?", item.Kind, item.ID)
+				err = s.saveExtensionSetting(item.Kind, item.ID, nil)
 				if err != nil {
 					err = errors.Join(err, os.Rename(dest, path))
 				}
@@ -536,7 +550,7 @@ func (s *Service) installExtension(ctx context.Context, c ExtensionCommand, entr
 			enabled = item.Enabled
 		}
 	}
-	_, err = s.integrationDB.ExecContext(ctx, "INSERT INTO extension_settings(kind,id,enabled,revision,source) VALUES(?,?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET revision=excluded.revision,source=excluded.source", c.Kind, id, enabled, revision, c.Source)
+	err = s.saveExtensionSetting(c.Kind, id, &extensionSetting{enabled, revision, c.Source})
 	if err != nil {
 		_ = os.RemoveAll(dest)
 		if backup != "" {

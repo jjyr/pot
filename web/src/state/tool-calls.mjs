@@ -11,13 +11,19 @@ export function applyToolUpdate(tool,update){
   }
   return tool;
 }
+const parsedResults=new WeakMap();
 export function toolResult(tool){
   let result=tool?.result;
-  if(typeof result==='string'){try{return JSON.parse(result);}catch{return result;}}
+  if(typeof result==='string'){
+    const cached=parsedResults.get(tool);if(cached?.source===result)return cached.value;
+    let value;try{value=JSON.parse(result);}catch{value=result;}
+    parsedResults.set(tool,{source:result,value});return value;
+  }
   return result;
 }
 export function toolSummary(tool){
   const args=tool?.args||{};
+  if(tool?.name==='receive_message')return (args.messages||[]).map(message=>message.from?.agent_id).filter(Boolean).filter((value,index,all)=>all.indexOf(value)===index).join(', ');
   if(tool?.name==='write_stdin')return '';
   if(['exec','cua_repl'].includes(tool?.name))return `${args.code||''}`.trim().split('\n')[0]||'exec';
   if(tool?.name==='apply_patch')return String(args.patch||args.input||'').split('\n').find(line=>/^\*\*\* (Add|Update|Delete) File:/.test(line))?.replace(/^\*\*\* /,'')||'apply_patch';

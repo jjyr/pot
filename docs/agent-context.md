@@ -24,8 +24,9 @@ produce neither a completed chat bubble nor a reply notification.
 
 ## Sources and scope
 
-Global Main instructions come from the owning Runtime's
-`~/.pot/agent/AGENTS.md` (`POT_AGENT_HOME` overrides the Agent home directory).
+Global Main instructions come from `AGENTS.md` in the owning node's data root,
+`~/.pot/AGENTS.md` by default. An explicit root uses its own file; embedding hosts
+can supply a separate `AgentHome` directory.
 Task Agents do not load global Main or assistant AGENTS.md. The owning node
 prepares selected global Skills/plugins and discovers project instructions in
 its local execution workspace. A linked node prepares its own resources; see
@@ -45,8 +46,8 @@ Only `AGENTS.md` is read. `AGENTS.override.md` and fallback filenames are ignore
 
 Main contexts load global instructions, assistant rules and applicable project directory instructions. Worker contexts load only applicable project directory instructions: workers have no assistant AGENTS.md and inherit neither assistant rules nor global Agent-home rules. The delegating assistant must include relevant constraints in the task brief. Project AGENTS.md files remain ordinary directory policies, separate from the assistant's own rule record. Assistant rules are snapshotted for each execution and never grant permissions. Deeper directory guidance takes precedence on conflicts, and explicit user instructions take precedence over file instructions. There is no instruction-file size cap or truncation; normal model context limits still apply. Empty/whitespace-only contents are omitted; invalid UTF-8 is decoded lossily.
 
-Instruction discovery reads the destination Runtime's local filesystem. It does
-not start an execution process or translate paths through a guest namespace.
+Instruction discovery reads the destination Runtime's local filesystem without
+starting an execution process.
 
 ## Refresh and injection
 
@@ -309,7 +310,7 @@ Threads, routing defaults, task ownership and assistant rules are independent.
 
 ```text
 skills/<name>/                    # Packaged builtin bundles in this repo
-~/.pot/agent/skills/<name>/        # User global bundles
+~/.pot/skills/<name>/              # User global bundles
 PROJECT/.agents/skills/<name>/    # Project-specific bundles
 ```
 
@@ -325,21 +326,20 @@ Malformed bundles produce diagnostics and are omitted. Symlink directories and S
 ## Unified execution view and permissions
 
 Main execution advertises actual user/builtin source paths. Tasks materialize
-selected local bundles beneath `.pot/control-resources/<digest>/` in their
-fixed workspace. The digest identifies prepared content, not a user-requested
-version. Injected paths are absolute destination-local paths; no mount or HOME
+selected local bundles beneath the node's `cache/resources/skills/<digest>/`.
+The digest identifies prepared content, not a user-requested version. Injected paths are absolute destination-local paths; no mount or HOME
 translation is performed. Project Skills remain independently discovered.
 
 Skills grant no execution authority. Instructions and Skills use the same local
 filesystem rules for execution on the owning node. Runtime asset
-paths are set by host composition and remain independent of guest management.
+paths are set by host composition.
 See [Permissions](permissions.md) and [Executor](executor.md).
 
 ## Injection and task selection
 
 `core.ExecutionContext.SkillResources` carries ordered SkillRoot entries, reserved names and optional selections. `pkg/agent` discovers supplied filesystem roots without interpreting product roles or machine discovery. Callers provide `core.SkillResources` for Main and Task contexts.
 
-Task creation accepts optional `skills: ["name", ...]` selecting global user or builtin bundles only. Omitted or empty lists load no global skills. Project skills are always discovered independently and are not filtered by this list. Selections persist, but each new execution prepares current contents before starting the Agent. Contents remain stable for that run; Control does not retain per-task bundle versions. Unavailable selected global skills fail visibly when preparing a turn, even if a project skill has that name.
+Task creation accepts optional `skills: ["name", ...]` selecting global user or builtin bundles only. Omitted or empty lists load no global skills. Project skills are always discovered independently and are not filtered by this list. Selections persist, but each new execution prepares current contents before starting the Agent. Contents remain stable in the local run cache; the node does not expose a user-managed bundle version catalogue. Unavailable selected global skills fail visibly when preparing a turn, even if a project skill has that name.
 
 Node-owned [extension settings](extensions.md) filter disabled bundles before Main discovery and reject disabled explicit global Task selections. Builtin names remain reserved even when disabled.
 

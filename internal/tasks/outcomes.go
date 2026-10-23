@@ -7,13 +7,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
 var errOutcomeChanged = errors.New("Task changed during outcome preparation")
 
-func outcome(record Record, phase protocol.TaskPhase, result *runner.Terminal) protocol.TaskResultEvent {
+func outcome(record Record, phase protocol.TaskPhase, result *Terminal) protocol.TaskResultEvent {
 	text, diagnostic := record.Error, record.Error
 	if result != nil {
 		diagnostic = result.Outcome.Error
@@ -33,7 +32,7 @@ func outcome(record Record, phase protocol.TaskPhase, result *runner.Terminal) p
 
 // finish prepares domain data outside the transaction. A stale snapshot cannot
 // commit a result, update a baseline, or enqueue a hook for a changed run.
-func (s *Service) finish(ctx context.Context, snapshot Record, phase protocol.TaskPhase, result *runner.Terminal, started int64, stopMode string) error {
+func (s *Service) finish(ctx context.Context, snapshot Record, phase protocol.TaskPhase, result *Terminal, started int64, stopMode string) error {
 	event := outcome(snapshot, phase, result)
 	var commit OutcomeCommit
 	var err error

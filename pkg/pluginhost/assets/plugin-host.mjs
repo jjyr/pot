@@ -1,4 +1,4 @@
-// Generic Node plugin transport. Plugin processes use Host process groups or Guest scope cgroups.
+// Generic Node plugin transport. The execution supervisor owns process lifetime and cleanup.
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 const entry = process.argv[1];

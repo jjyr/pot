@@ -4,15 +4,17 @@ import (
 	"fmt"
 	"github.com/jjyr/pot/pkg/core"
 	"strconv"
+	"strings"
 )
 
 // UIMessage adds a durable insertion sequence and a read version to a message
 // projection. Neither field participates in model history or persistence.
 type UIMessage struct {
-	Message     `json:"message" required:"true"`
-	Sequence    string `json:"sequence"`
-	Version     int64  `json:"version"`
-	ContextOnly bool   `json:"context_only,omitempty"`
+	Message        `json:"message" required:"true"`
+	Sequence       string     `json:"sequence"`
+	Version        int64      `json:"version"`
+	ContextOnly    bool       `json:"context_only,omitempty"`
+	Correspondence []Envelope `json:"correspondence,omitempty"`
 }
 
 type UIHistory struct {
@@ -62,6 +64,19 @@ func (s UISnapshot) Validate() error {
 		}
 		if m.ConversationID != s.ConversationID {
 			return fmt.Errorf("cross-conversation UI message")
+		}
+		if len(m.Correspondence) > 0 {
+			if m.Role != System || m.RequestID == nil || !strings.HasPrefix(*m.RequestID, "pot-result-") || len(m.Correspondence) > 8 {
+				return fmt.Errorf("invalid correspondence projection")
+			}
+			for _, mail := range m.Correspondence {
+				if mail.Kind != "message" || mail.To.Kind != "assistant" || mail.From.Kind != "assistant" && mail.From.Kind != "task" && mail.From.Kind != "user" {
+					return fmt.Errorf("invalid correspondence sender")
+				}
+				if err := mail.Validate(); err != nil {
+					return err
+				}
+			}
 		}
 		n, err := strconv.ParseInt(m.Sequence, 10, 64)
 		if err != nil || n <= 0 || uint64(n) > core.MaxSafeInteger || m.Version < 0 || m.Version > s.Cursor {

@@ -15,7 +15,7 @@ func mixedPackage(t *testing.T, root string) Package {
 		Background: &core.PluginBackground{Runtime: "node", Execution: "control", Entrypoint: "service.mjs", Files: []string{"service.mjs"}},
 		Tools:      &core.PluginTools{Runtime: "node", Execution: "runtime", Entrypoint: "index.mjs", Files: []string{"index.mjs"}, Requirements: []string{}, Tools: []json.RawMessage{json.RawMessage(`{"name":"echo","description":"echo","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}`)}},
 	}}
-	data, err := json.Marshal(m)
+	data, err := json.Marshal(Definition{SchemaVersion: 3, Name: m.ID, Version: m.Version, Contributes: m.Contributes})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,9 +92,9 @@ func TestCommonDiscoveryRejectsDuplicateIdentityAndUnsafeToolFiles(t *testing.T)
 func TestUnsupportedAndLegacyCapabilitiesFailExplicitly(t *testing.T) {
 	for _, manifest := range []string{
 		`{"schema_version":1,"id":"old","version":"1","contributes":{"tools":{}}}`,
-		`{"schema_version":2,"id":"empty","version":"1","contributes":{}}`,
-		`{"schema_version":2,"id":"mcp","version":"1","contributes":{"mcp":{}}}`,
-		`{"schema_version":2,"id":"bad","version":"1","contributes":{"sandbox_providers":[{"id":"test","host_os":["darwin"],"executable":"../provider","default_shared":false}]}}`,
+		`{"schema_version":3,"name":"empty","version":"1","contributes":{}}`,
+		`{"schema_version":3,"name":"mcp","version":"1","contributes":{"mcp":{}}}`,
+		`{"schema_version":3,"name":"bad","version":"1","contributes":{"sandbox_providers":[{"id":"test","host_os":["darwin"],"executable":"../provider","default_shared":false}]}}`,
 	} {
 		root := t.TempDir()
 		if err := os.WriteFile(filepath.Join(root, "plugin.json"), []byte(manifest), 0600); err != nil {
@@ -103,5 +103,24 @@ func TestUnsupportedAndLegacyCapabilitiesFailExplicitly(t *testing.T) {
 		if _, err := Load(root); err == nil {
 			t.Fatal("unsupported manifest accepted", manifest)
 		}
+	}
+}
+
+func TestInstalledPluginNamesAndSnapshotIdentity(t *testing.T) {
+	root := t.TempDir()
+	mixedPackage(t, filepath.Join(root, "mixed"))
+	packages, err := Discover(root)
+	if err != nil || len(packages) != 1 || packages[0].Manifest.ID != "mixed" {
+		t.Fatal(packages, err)
+	}
+	if err := os.Rename(filepath.Join(root, "mixed"), filepath.Join(root, "renamed")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Discover(root); err == nil {
+		t.Fatal("directory/name mismatch accepted")
+	}
+	legacy := []byte(`{"schema_version":2,"id":"mixed","version":"1","contributes":{}}`)
+	if _, err := DecodeDefinition(legacy); err == nil {
+		t.Fatal("legacy installed manifest accepted")
 	}
 }

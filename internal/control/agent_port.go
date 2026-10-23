@@ -10,6 +10,7 @@ import (
 	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/internal/attachments"
 	"github.com/jjyr/pot/internal/schedule"
+	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/core"
@@ -21,23 +22,68 @@ type agentPort struct{ s *Service }
 
 var _ agentlink.Port = agentPort{}
 
-// AgentTarget decodes a presentation key. It never changes caller authority.
-func AgentTarget(owner string) (agentlink.Target, error) {
+type agentRouteKey struct{}
+
+// ValidAgentKey validates a UI resource key; it grants no caller authority.
+func ValidAgentKey(owner string) bool {
 	if !strings.HasPrefix(owner, "agent-link:") {
-		if !core.Identifier(owner) {
-			return agentlink.Target{}, agentlink.ErrInvalid
-		}
-		return agentlink.Target{AssistantID: owner}, nil
+		return core.Identifier(owner)
 	}
 	parts := strings.SplitN(strings.TrimPrefix(owner, "agent-link:"), ":", 2)
-	if len(parts) != 2 || !core.Identifier(parts[0]) || !core.Identifier(parts[1]) {
-		return agentlink.Target{}, agentlink.ErrInvalid
+	return len(parts) == 2 && core.Identifier(parts[0]) && core.Identifier(parts[1])
+}
+func (s *Service) agentTarget(ctx context.Context, owner string) (context.Context, protocol.AgentRef, error) {
+	if !ValidAgentKey(owner) {
+		return ctx, protocol.AgentRef{}, agentlink.ErrInvalid
 	}
-	return agentlink.Target{LinkID: parts[0], AssistantID: parts[1]}, nil
+	if !strings.HasPrefix(owner, "agent-link:") {
+		return ctx, agentlink.AssistantTarget(s.options.RuntimeID, owner), nil
+	}
+	parts := strings.SplitN(strings.TrimPrefix(owner, "agent-link:"), ":", 2)
+	c, err := s.agentLinks.service.Get(ctx, parts[0])
+	if err != nil {
+		return ctx, protocol.AgentRef{}, err
+	}
+	return context.WithValue(ctx, agentRouteKey{}, c.ID), agentlink.AssistantTarget(c.PeerHost.NodeID, parts[1]), nil
+}
+func (s *Service) agentLinkRoute(ctx context.Context, target protocol.AgentRef) (string, error) {
+	if !agentlink.ValidTarget(target) {
+		return "", agentlink.ErrInvalid
+	}
+	if pinned, ok := ctx.Value(agentRouteKey{}).(string); ok {
+		c, err := s.agentLinks.service.Get(ctx, pinned)
+		if err != nil {
+			return "", err
+		}
+		if c.PeerHost.NodeID != target.NodeID {
+			return "", agentlink.ErrConflict
+		}
+		return c.ID, nil
+	}
+	if target.NodeID == s.options.RuntimeID {
+		return "", nil
+	}
+	connections, err := s.agentLinks.service.List(ctx)
+	if err != nil {
+		return "", err
+	}
+	var route string
+	for _, c := range connections {
+		if c.State != "revoked" && c.PeerHost.NodeID == target.NodeID {
+			if route != "" {
+				return "", agentlink.ErrConflict
+			}
+			route = c.ID
+		}
+	}
+	if route == "" {
+		return "", agentlink.ErrNotFound
+	}
+	return route, nil
 }
 
 func (s *Service) AgentCapabilities(ctx context.Context, owner string) (agentlink.Description, error) {
-	target, err := AgentTarget(owner)
+	ctx, target, err := s.agentTarget(ctx, owner)
 	if err != nil {
 		return agentlink.Description{}, err
 	}
@@ -45,15 +91,14 @@ func (s *Service) AgentCapabilities(ctx context.Context, owner string) (agentlin
 }
 
 func (s *Service) SubscribeAgent(ctx context.Context, owner, locale string) (agentlink.Subscription, error) {
-	target, err := AgentTarget(owner)
+	ctx, target, err := s.agentTarget(ctx, owner)
 	if err != nil {
 		return agentlink.Subscription{}, err
 	}
-	target.Locale = locale
-	return (agentPort{s}).Subscribe(ctx, target)
+	return (agentPort{s}).Subscribe(ctx, target, locale)
 }
 
-func (p agentPort) Subscribe(ctx context.Context, target agentlink.Target) (agentlink.Subscription, error) {
+func (p agentPort) Subscribe(ctx context.Context, target protocol.AgentRef, locale string) (agentlink.Subscription, error) {
 	d, err := p.Describe(ctx, target)
 	if err != nil {
 		return agentlink.Subscription{}, err
@@ -61,7 +106,7 @@ func (p agentPort) Subscribe(ctx context.Context, target agentlink.Target) (agen
 	if !d.Supports(agentlink.ChatSubscribe) {
 		return agentlink.Subscription{}, agentlink.ErrUnsupported
 	}
-	endpoint, err := p.chatEndpoint(ctx, target, target.Locale)
+	endpoint, err := p.chatEndpoint(ctx, target, locale)
 	if err != nil {
 		return agentlink.Subscription{}, err
 	}
@@ -69,7 +114,11 @@ func (p agentPort) Subscribe(ctx context.Context, target agentlink.Target) (agen
 }
 
 func (s *Service) CallAgent(ctx context.Context, owner string, operation agentlink.Operation, call agentlink.Call) (any, error) {
-	target, err := AgentTarget(owner)
+	ctx, target, err := s.agentTarget(ctx, owner)
+	if err != nil {
+		return nil, err
+	}
+	link, err := s.agentLinkRoute(ctx, target)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +130,7 @@ func (s *Service) CallAgent(ctx context.Context, owner string, operation agentli
 	}
 	value, err := (agentPort{s}).Call(ctx, target, operation, call)
 	if err != nil {
-		if target.LinkID == "" && !errors.Is(err, agentlink.ErrUnsupported) {
+		if link == "" && !errors.Is(err, agentlink.ErrUnsupported) {
 			if errors.Is(err, agentlink.ErrInvalid) {
 				return nil, errors.New(err.Error())
 			}
@@ -92,7 +141,12 @@ func (s *Service) CallAgent(ctx context.Context, owner string, operation agentli
 	if info, ok := value.(protocol.TaskInfo); ok {
 		return s.taskPresentation(ctx, info), nil
 	}
-	if operation == agentlink.TaskRead && value != nil {
+	if operation == agentlink.TaskRead {
+		task, ok := value.(*tasks.Record)
+		if !ok || task == nil {
+			return nil, protocol.APIError{Code: "not_found"}
+		}
+
 		raw, err := json.Marshal(value)
 		if err != nil {
 			return nil, err
@@ -101,48 +155,30 @@ func (s *Service) CallAgent(ctx context.Context, owner string, operation agentli
 		if err = json.Unmarshal(raw, &record); err != nil {
 			return nil, err
 		}
-		if record == nil {
-			return nil, protocol.APIError{Code: "not_found"}
+		capabilities := agentlink.Description{Version: 1, Scope: "owner", Operations: agentlink.OwnerOperations()}
+		if task.Execution != nil {
+			capabilities = s.taskExecutionCapabilities(ctx, task)
 		}
-		owner := target.AssistantID
-		if target.LinkID != "" {
-			owner = linkChatID(target.LinkID, target.AssistantID)
-		}
-		ops := agentlink.OwnerOperations()
-		scope := "owner"
-		if s.LinkTask(ctx, owner, call.ID) {
-			scope = "caller"
-			ops = []agentlink.Operation{agentlink.TaskRead, agentlink.TaskArchive}
-			if d, err := s.linkDelegation(ctx, owner, call.ID); err == nil && d.Info.AgentLink != nil {
-				link := d.Info.AgentLink.LinkID
-				if link == "local" {
-					ops = append(ops, agentlink.TaskCancel)
-					if d.Request.Executor == "codex" {
-						ops = append(ops, agentlink.TaskInput)
-					}
-				} else if connection, err := s.agentLinks.service.Get(ctx, link); err == nil && connection.State != "revoked" && connection.Directory != nil && ((d.Request.Executor == "codex" && connection.Directory.TaskExecutor != nil && connection.Directory.TaskExecutor.Supports(agentlink.TaskCancel)) || connection.Directory.Operations[d.Info.AgentLink.AssistantID].Supports(agentlink.TaskCancel)) {
-					ops = append(ops, agentlink.TaskCancel)
-					if d.Request.Executor == "codex" {
-						ops = append(ops, agentlink.TaskInput)
-					}
-				}
-			}
-		}
-		record["capabilities"] = agentlink.Description{Version: 1, Scope: scope, Operations: ops}
+
+		record["capabilities"] = capabilities
 		return record, nil
 	}
 	return value, nil
 }
 
-func (p agentPort) Describe(ctx context.Context, target agentlink.Target) (agentlink.Description, error) {
-	if target.LinkID == "" {
+func (p agentPort) Describe(ctx context.Context, target protocol.AgentRef) (agentlink.Description, error) {
+	link, err := p.s.agentLinkRoute(ctx, target)
+	if err != nil {
+		return agentlink.Description{}, err
+	}
+	if link == "" {
 		definitions, err := p.s.Registry.Definitions(ctx)
 		if err != nil {
 			return agentlink.Description{}, err
 		}
 		found := false
 		for _, definition := range definitions {
-			if definition.ID == target.AssistantID {
+			if definition.ID == target.AgentID {
 				found = true
 				break
 			}
@@ -152,16 +188,16 @@ func (p agentPort) Describe(ctx context.Context, target agentlink.Target) (agent
 		}
 		return agentlink.Description{Version: 1, Scope: "owner", Operations: agentlink.OwnerOperations()}, nil
 	}
-	c, err := p.s.agentLinks.service.Get(ctx, target.LinkID)
+	c, err := p.s.agentLinks.service.Get(ctx, link)
 	if err != nil {
 		return agentlink.Description{}, err
 	}
 	d := agentlink.Description{}
 	if c.State != "revoked" && c.Directory != nil {
-		d = c.Directory.Operations[target.AssistantID]
+		d = c.Directory.Capabilities(target)
 	}
 	var retained bool
-	if err = p.s.integrationDB.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_link_chat_sessions WHERE link_id=? AND assistant_id=?)", target.LinkID, target.AssistantID).Scan(&retained); err != nil {
+	if err = p.s.integrationDB.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_link_chat_sessions WHERE link_id=? AND assistant_id=?)", link, target.AgentID).Scan(&retained); err != nil {
 		return d, err
 	}
 	if d.Version != 1 && retained {
@@ -178,18 +214,22 @@ func (p agentPort) Describe(ctx context.Context, target agentlink.Target) (agent
 	return d, nil
 }
 
-func (p agentPort) Call(ctx context.Context, target agentlink.Target, operation agentlink.Operation, call agentlink.Call) (any, error) {
-	if target.LinkID != "" && operation == agentlink.TaskSubmit {
+func (p agentPort) Call(ctx context.Context, target protocol.AgentRef, operation agentlink.Operation, call agentlink.Call) (any, error) {
+	link, err := p.s.agentLinkRoute(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+	if link != "" && operation == agentlink.TaskSubmit {
 		var request protocol.CreateTask
 		if err := protocol.DecodeStrict(call.Body, &request); err != nil {
 			return nil, err
 		}
 		var accepted bool
-		if err := p.s.integrationDB.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_link_delegations WHERE owner=? AND request_id=?)", linkChatID(target.LinkID, target.AssistantID), request.RequestID).Scan(&accepted); err != nil {
+		if err := p.s.Tasks.DB().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM task_writes WHERE assistant_id=? AND request_id=?)", linkChatID(link, target.AgentID), request.RequestID).Scan(&accepted); err != nil {
 			return nil, err
 		}
 		if accepted {
-			return p.linkedCall(ctx, target, operation, call)
+			return p.linkedCall(ctx, target, link, operation, call)
 		}
 	}
 	d, err := p.Describe(ctx, target)
@@ -230,11 +270,11 @@ func (p agentPort) Call(ctx context.Context, target agentlink.Target, operation 
 			return endpoint.Send(ctx, input)
 		}
 	}
-	if target.LinkID != "" {
-		return p.linkedCall(ctx, target, operation, call)
+	if link != "" {
+		return p.linkedCall(ctx, target, link, operation, call)
 	}
 	s := p.s
-	assistantID := target.AssistantID
+	assistantID := target.AgentID
 	switch operation {
 	case agentlink.ChatAttachments:
 		if call.Action == "read" {
@@ -329,22 +369,15 @@ func (p agentPort) Call(ctx context.Context, target agentlink.Target, operation 
 		if err != nil {
 			return nil, err
 		}
-		mail, err := s.MailAllowanceWaits(ctx, assistantID)
-		if err != nil {
-			return nil, err
-		}
-		return struct {
-			usage.Summary
-			MailWaits []usage.Waiting `json:"mail_waits"`
-		}{summary, mail}, nil
+		return summary, nil
 	}
 	return p.localCall(ctx, assistantID, operation, call)
 }
 
-func (p agentPort) linkedCall(ctx context.Context, target agentlink.Target, op agentlink.Operation, call agentlink.Call) (any, error) {
+func (p agentPort) linkedCall(ctx context.Context, target protocol.AgentRef, link string, op agentlink.Operation, call agentlink.Call) (any, error) {
 	s := p.s
 	if op == agentlink.Approvals {
-		owner := "agent-link:" + target.LinkID + ":" + target.AssistantID
+		owner := "agent-link:" + link + ":" + target.AgentID
 		if call.Action == "read" {
 			return s.reviewView(ctx, owner, nil, []any{}), nil
 		}
@@ -367,7 +400,7 @@ func (p agentPort) linkedCall(ctx context.Context, target agentlink.Target, op a
 		if err := protocol.DecodeStrict(call.Body, &input); err != nil {
 			return nil, err
 		}
-		return s.agentLinks.service.DeleteAssistant(ctx, target.LinkID, agentlink.DeleteAssistantRequest{From: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: linkChatID(target.LinkID, target.AssistantID)}, AssistantID: target.AssistantID, Revision: input.Revision})
+		return s.agentLinks.service.DeleteAssistant(ctx, link, agentlink.DeleteAssistantRequest{From: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: linkChatID(link, target.AgentID)}, AssistantID: target.AgentID, Revision: input.Revision})
 	}
 	if op == agentlink.AssistantProfile {
 		var input struct {
@@ -382,33 +415,24 @@ func (p agentPort) linkedCall(ctx context.Context, target agentlink.Target, op a
 		if action == "write" {
 			action = "update"
 		}
-		return s.agentLinks.service.Profile(ctx, target.LinkID, agentlink.ProfileRequest{From: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: linkChatID(target.LinkID, target.AssistantID)}, AssistantID: target.AssistantID, Action: action, Name: input.Name, Avatar: input.Avatar, Revision: input.Revision})
+		return s.agentLinks.service.Profile(ctx, link, agentlink.ProfileRequest{From: protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: linkChatID(link, target.AgentID)}, AssistantID: target.AgentID, Action: action, Name: input.Name, Avatar: input.Avatar, Revision: input.Revision})
 	}
-	owner := linkChatID(target.LinkID, target.AssistantID)
+	owner := linkChatID(link, target.AgentID)
 	if op == agentlink.TaskSubmit {
 		var input protocol.CreateTask
 		if err := protocol.DecodeStrict(call.Body, &input); err != nil {
 			return nil, err
 		}
-		if input.LinkID == "" && input.Target == nil {
-			input.LinkID = target.LinkID
-			input.Target = &protocol.AgentRef{NodeID: s.linkNodeID(ctx, target.LinkID), Kind: "assistant", AgentID: target.AssistantID}
+		if input.Target == nil {
+			input.Target = &target
 		}
 		// Persist a user route even when the conversation has not sent text yet.
-		if _, err := s.integrationDB.ExecContext(ctx, "INSERT INTO agent_link_chat_sessions(link_id,assistant_id,id) VALUES(?,?,?) ON CONFLICT DO NOTHING", target.LinkID, target.AssistantID, owner); err != nil {
+		if _, err := s.integrationDB.ExecContext(ctx, "INSERT INTO agent_link_chat_sessions(link_id,assistant_id,id) VALUES(?,?,?) ON CONFLICT DO NOTHING", link, target.AgentID, owner); err != nil {
 			return nil, err
 		}
 		return s.createTaskFrom(ctx, owner, protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: owner}, input)
 	}
 	return p.taskCall(ctx, owner, op, call)
-}
-
-func (s *Service) linkNodeID(ctx context.Context, link string) string {
-	c, err := s.agentLinks.service.Get(ctx, link)
-	if err != nil {
-		return ""
-	}
-	return c.PeerHost.NodeID
 }
 
 func (p agentPort) localCall(ctx context.Context, assistantID string, op agentlink.Operation, call agentlink.Call) (any, error) {
@@ -599,13 +623,20 @@ func (p agentPort) taskCall(ctx context.Context, owner string, op agentlink.Oper
 		if err := protocol.DecodeStrict(call.Body, &input); err != nil {
 			return nil, err
 		}
-		items, err := s.SetTaskDispositions(ctx, owner, input.Decisions)
+		items, err := s.Tasks.SetDispositions(ctx, owner, input.Decisions)
 		return map[string]any{"items": items}, err
 	}
 	if !core.Identifier(call.ID) {
 		return nil, agentlink.ErrInvalid
 	}
-	if s.LinkTask(ctx, owner, call.ID) {
+	record, err := s.Tasks.Get(ctx, owner, call.ID)
+	if err != nil {
+		return nil, err
+	}
+	if record == nil {
+		return nil, agentlink.ErrNotFound
+	}
+	if record.Execution != nil {
 		if op == agentlink.TaskEvents {
 			return map[string]any{"events": []any{}, "cursor": 0, "has_more": false, "unavailable": true}, nil
 		}
@@ -614,7 +645,7 @@ func (p agentPort) taskCall(ctx context.Context, owner string, op agentlink.Oper
 			if err := protocol.DecodeStrict(call.Body, &input); err != nil {
 				return nil, err
 			}
-			return s.guideLinkTask(ctx, owner, call.ID, input)
+			return s.guideTaskExecution(ctx, owner, call.ID, input)
 		}
 		if op == agentlink.TaskInput && call.Action == "read" {
 			return []any{}, nil
@@ -623,7 +654,6 @@ func (p agentPort) taskCall(ctx context.Context, owner string, op agentlink.Oper
 			return nil, agentlink.ErrUnsupported
 		}
 	}
-	var err error
 	switch op {
 	case agentlink.TaskCancel, agentlink.TaskInterrupt:
 		var input struct {
@@ -653,8 +683,34 @@ func (p agentPort) taskCall(ctx context.Context, owner string, op agentlink.Oper
 		}
 		var input protocol.TaskInput
 		if err = protocol.DecodeStrict(call.Body, &input); err == nil {
-			err = s.Tasks.SendMessage(ctx, owner, call.ID, input.RequestID, protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: owner}, input.Text)
+			sender := protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: owner}
+			if from, ok := ctx.Value(taskInputSenderKey{}).(protocol.AgentRef); ok {
+				if from.NodeID != s.options.RuntimeID || from.Kind != "assistant" || from.AgentID != owner {
+					return nil, agentlink.ErrUnauthorized
+				}
+				sender = from
+			}
+			var parent *protocol.Envelope
+			if value, ok := ctx.Value(mailParentKey{}).(protocol.Envelope); ok {
+				if value.To != sender {
+					return nil, agentlink.ErrUnauthorized
+				}
+				parent = &value
+			}
+			err = s.Tasks.SendMessageWithParent(ctx, owner, call.ID, input.RequestID, sender, input.Text, parent)
 		}
+	case agentlink.TaskRetry:
+		var input struct {
+			Instructions string `json:"instructions" required:"true"`
+		}
+		if err = protocol.DecodeStrict(call.Body, &input); err != nil {
+			return nil, err
+		}
+		record, err := s.Tasks.Retry(ctx, owner, call.ID, input.Instructions)
+		if err == nil {
+			s.wakeTasks()
+		}
+		return record.Info, err
 	case agentlink.TaskControl, agentlink.TaskRecovery:
 		var input struct {
 			RunID  string `json:"run_id" required:"true"`

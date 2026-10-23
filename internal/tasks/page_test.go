@@ -8,7 +8,7 @@ import (
 )
 
 func TestCatalogPaginatesAcrossOwnersWithoutLeakingAgentPages(t *testing.T) {
-	s, _, _, _ := fixture(t)
+	s, _, _ := fixture(t)
 	ctx := context.Background()
 	for i := 0; i < 120; i++ {
 		owner := "alpha"
@@ -19,7 +19,7 @@ func TestCatalogPaginatesAcrossOwnersWithoutLeakingAgentPages(t *testing.T) {
 		if i == 0 {
 			text += "\nÜBER你好"
 		}
-		record, err := s.Create(ctx, owner, protocol.CreateTask{RequestID: fmt.Sprint(i), Text: text})
+		record, err := s.AcceptLocal(ctx, owner, protocol.CreateTask{RequestID: fmt.Sprint(i), Text: text})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/jjyr/pot/pkg/core"
 	"io"
 	"net"
 	"net/http"
@@ -216,11 +217,25 @@ func (s *Service) CompleteMCPOAuth(ctx context.Context, c MCPOAuthCommand) (resu
 		_ = s.Machines.OwnerAction(func() error {
 			s.extensionsMu.Lock()
 			defer s.extensionsMu.Unlock()
+			servers, err := s.mcpServers(ctx)
+			if err != nil {
+				return err
+			}
+			matched := false
+			for _, current := range servers {
+				a, _ := core.HashJSON(current)
+				b, _ := core.HashJSON(session.Server)
+				if current.ID == session.Server.ID && a == b {
+					matched = true
+				}
+			}
+			if !matched {
+				return nil
+			}
 			server := session.Server
 			server.Status = "authorization"
 			server.Revision++
-			raw, _ := json.Marshal(server)
-			_, err := s.integrationDB.ExecContext(context.WithoutCancel(ctx), "UPDATE mcp_servers SET revision=?,body=? WHERE id=? AND revision=?", server.Revision, raw, server.ID, session.Server.Revision)
+			err = s.saveMCP(server, false)
 			s.Changes.Notify("extensions")
 			return err
 		})

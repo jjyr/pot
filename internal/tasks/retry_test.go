@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 )
@@ -20,9 +19,9 @@ func failRetryTask(t *testing.T, s *Service, p *fakePort, record Record) {
 	}
 	p.mu.Lock()
 	run := p.runs[record.RunID]
-	run.Phase = runner.Failed
+	run.Phase = Failed
 	run.CleanupConfirmed = true
-	run.Result = &runner.Terminal{Outcome: core.Outcome{Kind: "failed", Error: "temporary upstream failure"}}
+	run.Result = &Terminal{Outcome: core.Outcome{Kind: "failed", Error: "temporary upstream failure"}}
 	p.runs[record.RunID] = run
 	p.mu.Unlock()
 	if err := s.Tick(ctx); err != nil {
@@ -32,13 +31,13 @@ func failRetryTask(t *testing.T, s *Service, p *fakePort, record Record) {
 
 func TestRetryPreservesScopeAndHasOneDurableReplacementPerSource(t *testing.T) {
 	ctx := context.Background()
-	s, p, _, path := fixture(t)
+	s, p, path := fixture(t)
 	skills := []string{"research"}
-	original, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "original", Text: "Research\nKeep the original constraints.", Skills: &skills, Requirements: protocol.TaskRequirements{Tools: true}})
+	original, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "original", Text: "Research\nKeep the original constraints.", Skills: &skills, Requirements: protocol.TaskRequirements{Tools: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SendMessage(ctx, "assistant", original.Info.ID, "guidance", protocol.AgentRef{NodeID: "control", Kind: "assistant", AgentID: "assistant"}, "Preserve this additional constraint."); err != nil {
+	if err := s.SendMessage(ctx, "assistant", original.Info.ID, "guidance", protocol.AgentRef{NodeID: "machine", Kind: "assistant", AgentID: "assistant"}, "Preserve this additional constraint."); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Tick(ctx); err != nil {
@@ -52,7 +51,7 @@ func TestRetryPreservesScopeAndHasOneDurableReplacementPerSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if retry.Info.ID == original.Info.ID || retry.Request.MachineID != original.Request.MachineID || !reflect.DeepEqual(retry.Config, original.Config) || !reflect.DeepEqual(retry.Request.Skills, original.Request.Skills) || retry.Request.Requirements != original.Request.Requirements || !strings.Contains(retry.Request.Text, original.Request.Text) || !strings.Contains(retry.Request.Text, "Preserve this additional constraint.") {
+	if retry.Info.ID == original.Info.ID || retry.NodeID != original.NodeID || !reflect.DeepEqual(retry.Config, original.Config) || !reflect.DeepEqual(retry.Request.Skills, original.Request.Skills) || retry.Request.Requirements != original.Request.Requirements || !strings.Contains(retry.Request.Text, original.Request.Text) || !strings.Contains(retry.Request.Text, "Preserve this additional constraint.") {
 		t.Fatal("replacement lost original scope", retry)
 	}
 	// Reopening storage retains the original receipt without consuming recovery
@@ -72,7 +71,7 @@ func TestRetryPreservesScopeAndHasOneDurableReplacementPerSource(t *testing.T) {
 			t.Fatal("failed replacement lost recovery eligibility", allowed, err)
 		}
 		next, err := reopened.Retry(ctx, "assistant", retry.Info.ID, "Diagnose the next transient failure.")
-		if err != nil || next.Info.ID == retry.Info.ID || next.Request.MachineID != original.Request.MachineID || !reflect.DeepEqual(next.Config, original.Config) {
+		if err != nil || next.Info.ID == retry.Info.ID || next.NodeID != original.NodeID || !reflect.DeepEqual(next.Config, original.Config) {
 			t.Fatal("recovery chain stopped or changed scope", next, err)
 		}
 		again, err := reopened.Retry(ctx, "assistant", retry.Info.ID, "Repeat the same receipt.")
@@ -87,9 +86,9 @@ func TestRetryPreservesScopeAndHasOneDurableReplacementPerSource(t *testing.T) {
 }
 
 func TestRetryRejectsActiveAndStoppedTasks(t *testing.T) {
-	s, _, _, _ := fixture(t)
+	s, _, _ := fixture(t)
 	ctx := context.Background()
-	r, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "active", Text: "Work\nDo it."})
+	r, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "active", Text: "Work\nDo it."})
 	if err != nil {
 		t.Fatal(err)
 	}

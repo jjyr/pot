@@ -1,0 +1,135 @@
+// Production Chat, synthetic long tool output and delayed bidirectional pages.
+// Serve the repository over loopback; all assertions run in the browser itself.
+import {mountApp} from '../../web/src/components/ui.js';
+import {createMessageWindow} from '../../web/src/components/message-window.mjs';
+import {createToolCall} from '../../web/src/components/tool-call.mjs';
+import {createTaskConversation} from '../../web/src/components/task-conversation.mjs';
+
+const root=document.querySelector('#app'),results=document.querySelector('#results');
+const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const frame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
+const settle=async()=>{await frame();await frame();await pause(60);};
+const errors=[],reads=[];
+window.addEventListener('error',event=>errors.push(event.message));
+window.addEventListener('unhandledrejection',event=>errors.push(String(event.reason?.stack||event.reason)));
+document.documentElement.dataset.platform='browser';
+localStorage.setItem('pot-system-notifications-browser-v1','false');
+let receive,version=1,count=1600,scope={space:'fixture',owner:'alpha'},inflight=0,maxInflight=0;
+const longOutput=Array.from({length:350},(_,i)=>`- Record ${i}: synthetic inspection evidence, retained for tool disclosure testing.`).join('\n');
+const message=index=>{
+  const base={id:`m${index}`,sequence:String(index),version:1,status:'complete',text:''};
+  if(index%4===1)return {...base,role:'user',request_id:`turn${index}`,text:`Review batch ${index}. Check the evidence and describe the result.`};
+  if(index%4===2)return {...base,role:'tool',tool:{id:`tool${index}`,turn_id:`turn${index-1}`,name:'inspect_records',args:{batch:index,query:'Synthetic records only'},phase:'completed',started_at_ms:1,finished_at_ms:1001,result:{content:[{type:'text',text:longOutput}]}}};
+  return {...base,role:'assistant',reply_to:`m${index-index%4+1-4*(index%4===0)}`,text:`### Batch ${index} findings\n\n`+'The records are available and the conversation remains readable while scrolling. '.repeat(index%7+2)};
+};
+const page=(first,last)=>({kind:'reset',runtime_id:'fixture',boot_id:'boot',owner_id:JSON.stringify(['fixture','alpha']),conversation_id:'alpha',cursor:String(version),replies:[],running:false,turn_id:null,messages:Array.from({length:last-first+1},(_,i)=>message(first+i)),history:{before:String(first),after:String(last),has_more:first>1,has_newer:last<count}});
+const client={production:true,runtime:{runtime_id:'fixture',boot_id:'boot'},scope:()=>({...scope}),setScope:value=>scope={...scope,...value},changes:()=>()=>{},
+  subscribe(callback,status){receive=callback;queueMicrotask(()=>{status('connected');callback(page(count-79,count));});return()=>{};},
+  async history(query){
+    const start=performance.now();maxInflight=Math.max(maxInflight,++inflight);
+    reads.push({...query});await pause(160);inflight--;
+    const first=query.before?Math.max(1,Number(query.before)-80):query.after?Number(query.after)+1:count-79;
+    const last=query.before?Number(query.before)-1:Math.min(count,first+79);
+    const result=page(first,last);result.elapsed=performance.now()-start;return result;
+  },
+  async request(path){const url=new URL(path,location.href);
+    if(url.pathname==='/api/v1/spaces')return {active_space_id:'fixture',items:[{id:'fixture',name:'Fixture',kind:'local',control_id:'fixture',connected:true}]};
+    if(url.pathname==='/api/v1/assistants')return {items:[{id:'alpha',name:'Scroll fixture'}]};
+    return {items:[],pending:[],policy:{}};
+  },
+};
+mountApp(root,client);
+const history=()=>root.querySelector('.history');
+function scroll(top){const h=history();h.dispatchEvent(new WheelEvent('wheel',{deltaY:top-h.scrollTop||-1,bubbles:true}));h.scrollTop=top;h.dispatchEvent(new Event('scroll'));}
+function anchor(){const h=history(),top=h.getBoundingClientRect().top;const row=[...h.querySelectorAll('article.message')].find(e=>{const r=e.getBoundingClientRect();return r.height&&r.bottom>top&&r.top<top+h.clientHeight;});return row?{id:row.dataset.messageId,offset:row.getBoundingClientRect().top-top,node:row}:null;}
+function offset(id){const h=history(),row=h.querySelector(`[data-message-id="${id}"]`);return row?.getBoundingClientRect().top-h.getBoundingClientRect().top;}
+const check=(value,label)=>{results.textContent+=`${value?'PASS':'FAIL'} ${label}\n`;};
+async function run(){
+  results.textContent='Running…\n';
+  try{
+    root.querySelector('.latest-button').click();await settle();
+    const h=history();
+    const collapsed=[...h.querySelectorAll('details.tool-call')].filter(e=>!e.open);
+    const hiddenChars=collapsed.reduce((sum,e)=>sum+(e.querySelector('.tool-body')?.textContent.length||0),0);
+    results.textContent+=`Collapsed tool body characters: ${hiddenChars}\n`;
+    check(collapsed.length>0&&hiddenChars<1000,'collapsed tools defer output and raw JSON');
+    scroll(h.scrollTop-h.clientHeight*.5);await settle();
+    const saved=anchor();scroll(h.scrollTop-h.clientHeight*2);await settle();scroll(h.scrollTop+h.clientHeight*2);await settle();
+    check(h.querySelector(`[data-message-id="${saved.id}"]`)===saved.node,'nearby round trip reuses message DOM');
+    const timings=[];let blanks=0,gaps=0,maxMounted=0;
+    for(let i=0;i<90;i++){
+      const start=performance.now();scroll(Math.max(0,h.scrollTop+(i%30<15?-1:1)*h.clientHeight*.8));await frame();await frame();
+      timings.push(performance.now()-start);if(!anchor())blanks++;
+      const viewport=h.getBoundingClientRect();if([...h.querySelectorAll('.message-window-spacer')].some(e=>{const r=e.getBoundingClientRect();return r.height>1&&r.bottom>viewport.top+1&&r.top<viewport.top+h.clientHeight-1;}))gaps++;
+      maxMounted=Math.max(maxMounted,h.querySelectorAll('article.message').length);
+    }
+    check(blanks===0,'rapid bidirectional scrolling keeps a visible message every sampled frame');
+    check(gaps===0,'virtual spacers never enter the sampled viewport');
+    check(maxMounted<180,`mounted rows stay bounded (${maxMounted})`);
+    check(maxInflight<=1,'history prefetch serializes delayed reads');
+    const ordered=timings.sort((a,b)=>a-b);results.textContent+=`Scroll sample p95: ${ordered[Math.floor(ordered.length*.95)].toFixed(1)}ms (two frames); pages: ${reads.length}\n`;
+    for(let i=0;i<10;i++){scroll(100);await pause(190);await settle();}
+    check(reads.filter(query=>query.before).length>=9,'traversal pages beyond the 640-message data window');
+    const countBefore=reads.length;scroll(h.scrollHeight-h.clientHeight*2.5);await pause(30);
+    check(reads.slice(countBefore).some(query=>query.after),'newer history prefetch starts more than one viewport before the edge');
+    await pause(190);await settle();
+    scroll(h.scrollTop-h.clientHeight*.2);await settle();
+    const reading=anchor();version++;count+=4;const delta=page(count-3,count);receive({...delta,kind:'delta',base_cursor:String(version-1)});await settle();
+    check(Math.abs(offset(reading.id)-reading.offset)<3,'new output preserves historical reading');
+    const tool=h.querySelector('details.tool-call');
+    if(tool){tool.open=true;await settle();check(!!tool.querySelector('.tool-section pre')?.textContent,'opening a tool renders its output');const raw=tool.querySelector('.tool-raw');check(!raw.querySelector('pre'),'raw JSON remains deferred');raw.open=true;await settle();check(!!raw.querySelector('pre'),'opening raw details renders JSON');tool.open=false;await settle();}
+    root.querySelector('.latest-button').click();await pause(250);await settle();
+    check(h.scrollHeight-h.clientHeight-h.scrollTop<2,'Latest follows the newest message');
+    await componentChecks();
+    check(errors.length===0,'no browser exceptions');
+    results.textContent+='DONE scrolling checks\n';
+  }catch(error){results.textContent+='STOP '+error.stack+'\n';}
+}
+document.querySelector('#run').onclick=run;
+document.querySelector('#capture').onclick=async()=>{const h=history();scroll(h.scrollHeight-h.clientHeight*3);await settle();results.textContent='Reading synthetic history. Scroll to inspect continuity and the scrollbar.';};
+
+async function componentChecks(){
+  const scroller=document.createElement('div'),host=document.createElement('div'),live=new Set();
+  scroller.style.cssText='position:fixed;left:-20000px;top:0;width:600px;height:240px;overflow:auto';host.className='message-window';scroller.append(host);document.body.append(scroller);
+  const rows=Array.from({length:240},(_,i)=>({id:`bounded-${i}`,viewKey:`bounded-${i}`,role:'user'})),heights=new Map(rows.map(row=>[row.viewKey,136]));
+  const windowed=createMessageWindow({scroller,host,heights,requestRender:()=>{},compensate:()=>{},render(item,existing){if(existing)return existing;const row=document.createElement('article');row.className='message';row.style.cssText='height:120px;overflow:hidden;white-space:pre';row.textContent='Synthetic retained text. '.repeat(12000);const entry={row};live.add(entry);return entry;},dispose(entry){entry.row.remove();live.delete(entry);}});
+  try{
+    for(let i=0;i<18;i++){
+      scroller.scrollTop=i*1300;windowed.layout(rows);
+      const cached=[...live].filter(entry=>!entry.row.isConnected);
+      if(cached.length>32||cached.reduce((sum,entry)=>sum+entry.row.textContent.length*2+512,0)>2*1024*1024)throw Error('Detached row cache exceeded its budget');
+    }
+    check(true,'detached cache stays within row/text budgets across long traversal');
+    windowed.layout([]);check(live.size===0,'data/owner retirement disposes mounted and cached rows');
+    const payload='x'.repeat(1100000),heavy=rows.map(row=>({...row,text:payload}));
+    windowed.layout(heavy);scroller.scrollTop=8000;windowed.layout(heavy);
+    check([...live].every(entry=>entry.row.isConnected),'large deferred message payloads are excluded from the detached cache');
+    windowed.layout([]);
+    windowed.layout(rows);windowed.close();check(live.size===0,'closing the window releases every retained row');
+  }finally{windowed.close();scroller.remove();}
+  const call=createToolCall(),tool={id:'mutable',name:'fixture_tool',phase:'running',args:{},output:[{text:'initial output'}]};
+  document.body.append(call.element);call.element.open=true;call.update({tool});
+  tool.output[0].text+=' updated';call.update({tool});
+  check(call.element.textContent.includes('initial output updated'),'in-place Task output updates invalidate expanded tool content');
+  tool.output[0].text='Synthetic output line\n'.repeat(3000);call.update({tool});
+  const output=[...call.element.querySelectorAll('.tool-section')].find(section=>section.querySelectorAll('.tool-action').length===2),outputText=output.querySelector('pre');
+  outputText.scrollTop=0;outputText.dispatchEvent(new Event('scroll'));tool.output[0].text+='LATEST TAIL';call.update({tool});
+  check(!outputText.textContent.includes('LATEST TAIL'),'paused long tool output retains its displayed text');
+  output.querySelector('.tool-section-heading button:last-child').click();
+  check(outputText.textContent.endsWith('LATEST TAIL'),'tool output Latest invalidates the deferred body and reveals new output');
+  call.element.remove();
+  const taskRoot=document.createElement('div');taskRoot.className='page-content';taskRoot.style.cssText='position:fixed;left:-20000px;top:0;width:800px;height:700px';document.body.append(taskRoot);
+  const task={id:'scroll-task',phase:'running'},record={info:{phase:'running'},request:{text:'Synthetic task'},capabilities:{version:1,operations:['task.read','task.input']}};
+  const messages=Array.from({length:400},(_,i)=>({id:`task-${i}`,sequence:i+1,role:'assistant',text:'Synthetic task history. '.repeat(12),phase:'complete'}));
+  const active={id:'task-live',sequence:401,role:'assistant',text:'First task output',phase:'streaming'};messages.push(active);
+  const state={cursor:401,messages,active,tools:new Map(),inputs:new Map()};
+  const taskUI=createTaskConversation({root:taskRoot,task,record,locale:()=>document.documentElement.lang,client,scope:client.scope(),draft:'',onDraft:()=>{},toolMemory:new Map(),approvalFor:()=>null});
+  try{
+    taskUI.update({state});taskUI.start();await settle();
+    check(taskRoot.querySelectorAll('article.message').length<100,'long Task transcripts retain bounded DOM windows');
+    active.text+=' with a streamed continuation';state.cursor++;taskUI.update({state});await settle();
+    check(taskRoot.textContent.includes('First task output with a streamed continuation'),'Task projection refreshes in-place streaming updates');
+    const row=taskRoot.querySelector('[data-message-id="task-live"]');taskUI.history.dispatchEvent(new Event('scroll'));await settle();
+    check(taskRoot.querySelector('[data-message-id="task-live"]')===row,'Task viewport refresh retains its current message node');
+  }finally{taskUI.dispose();taskRoot.remove();}
+}

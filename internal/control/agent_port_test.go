@@ -51,7 +51,7 @@ func TestAgentPortEmptyNodeUserTaskResultAndRetrySurviveRestart(t *testing.T) {
 	}
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		a.service.syncLinkDelegations(ctx)
+		a.service.syncTaskExecutions(ctx)
 		frame, e := a.service.LinkChat(ctx, c.ID, "main")
 		if e != nil {
 			t.Fatal(e)
@@ -61,12 +61,21 @@ func TestAgentPortEmptyNodeUserTaskResultAndRetrySurviveRestart(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("task result did not reach user conversation", frame)
+			record, readErr := a.service.Tasks.Get(ctx, linkChatID(c.ID, "main"), info.ID)
+			t.Fatalf("task result did not reach user conversation: frame=%+v record=%+v execution=%+v err=%v", frame, record, nil, readErr)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	delegation, err := a.service.linkDelegation(ctx, linkChatID(c.ID, "main"), info.ID)
-	if err != nil || delegation.Request.From.Kind != "user" {
+	detail, err := a.service.CallAgent(ctx, owner, agentlink.TaskRead, agentlink.Call{ID: info.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	details := detail.(map[string]any)
+	if details["info"].(map[string]any)["assistant_id"] != owner || details["result"].(map[string]any)["text"] != "remote-user-task-result" {
+		t.Fatal("detail lost directing conversation or result", detail)
+	}
+	delegation, err := a.service.Tasks.Execution(ctx, linkChatID(c.ID, "main"), info.ID)
+	if err != nil || delegation.Execution.Request.From.Kind != "user" {
 		t.Fatal(delegation, err)
 	}
 	var autonomous int
@@ -97,7 +106,7 @@ func TestAgentPortEmptyNodeUserTaskResultAndRetrySurviveRestart(t *testing.T) {
 	if err != nil || repeated.(protocol.TaskInfo).ID != info.ID {
 		t.Fatal(repeated, err)
 	}
-	a.service.syncLinkDelegations(ctx)
+	a.service.syncTaskExecutions(ctx)
 	frame, err := a.service.LinkChat(ctx, c.ID, "main")
 	if err != nil || len(frame.Messages) != 1 {
 		t.Fatal("result duplicated after restart", frame, err)
@@ -129,7 +138,7 @@ func TestAgentLinkTaskConfigurationUsesSerializableOwnerCapability(t *testing.T)
 	b, _ := linkBackendFixture(t)
 	ctx := context.Background()
 	request := protocol.CreateTask{RequestID: "configured-task", Text: "Configured task\nUse the existing owner model."}
-	input := agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "node", Kind: "assistant", AgentID: "main"}, AssistantID: "main", RequestID: request.RequestID, Text: request.Text, Configuration: &request}
+	input := agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "node", Kind: "assistant", AgentID: "main"}, Target: agentlink.AssistantTarget(b.s.options.RuntimeID, "main"), RequestID: request.RequestID, Text: request.Text, Configuration: &request}
 	raw := operationBody(t, input)
 	var decoded agentlink.TaskRequest
 	if err := json.Unmarshal(raw, &decoded); err != nil || decoded.Configuration == nil {
@@ -151,7 +160,7 @@ func TestAgentLinkTaskConfigurationUsesSerializableOwnerCapability(t *testing.T)
 		}
 	}
 	directory, err := b.Directory(ctx)
-	if err != nil || directory.Operations["main"].Supports(agentlink.TaskConfigure) {
+	if err != nil || directory.Capabilities(agentlink.AssistantTarget(directory.NodeID, "main")).Supports(agentlink.TaskConfigure) {
 		t.Fatal("owner capability leaked to peers", directory, err)
 	}
 }
@@ -160,7 +169,7 @@ func TestAgentLinkUserTaskReceiptRetainsFullCallerScope(t *testing.T) {
 	b, _ := linkBackendFixture(t)
 	ctx := context.Background()
 	from := protocol.AgentRef{NodeID: "remote-user-node", Kind: "user", AgentID: "session"}
-	task, err := b.Submit(ctx, agentlink.TaskRequest{From: from, RequestID: "request", Text: "Work\nKeep caller identity"})
+	task, err := b.Submit(ctx, agentlink.TaskRequest{From: from, RequestID: "request", Text: "Work\nKeep caller identity", Target: agentlink.AssistantTarget(b.s.options.RuntimeID, "main")})
 	if err != nil {
 		t.Fatal(err)
 	}
