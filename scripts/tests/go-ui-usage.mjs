@@ -2,6 +2,26 @@ import assert from 'node:assert/strict';
 import {usageCalendarWeeks,usageModelColor,usagePercent,usageCompactionRows,compactionTokens} from '../../web/src/components/usage-calendar.mjs';
 import {usageNumbers,usageRows} from '../../web/src/components/usage.mjs';
 import {combineUsage} from '../../web/src/state/aggregate.mjs';
+import {usageRange,usageShiftRange,usageTrendBuckets} from '../../web/src/components/usage-period.mjs';
+
+assert.deepEqual(usageRange('month','2024-02-29'),{preset:'month',start:'2024-02-01',end:'2024-02-29'});
+assert.deepEqual(usageShiftRange(usageRange('month','2024-03-31'),-1),usageRange('month','2024-02-15'),'Moving from March uses a whole natural February');
+assert.deepEqual(usageRange('fortnight','2026-10-25'),{preset:'fortnight',start:'2026-10-12',end:'2026-10-25'},'Two weeks cover last week and this week, aligned to Monday');
+assert.deepEqual(usageRange('fortnight','2026-01-01'),{preset:'fortnight',start:'2025-12-22',end:'2026-01-04'});
+assert.deepEqual(usageRange('quarter','2024-02-29'),{preset:'quarter',start:'2024-01-01',end:'2024-03-31'});
+assert.deepEqual(usageShiftRange(usageRange('quarter','2026-01-01'),-1),usageRange('quarter','2025-12-31'),'Quarter navigation crosses year boundaries');
+assert.deepEqual(usageShiftRange(usageRange('year','2024-02-29'),1),usageRange('year','2025-01-01'));
+for(const preset of ['fortnight','month','quarter','year']){
+  const range=usageRange(preset,'2024-03-01'),previous=usageShiftRange(range,-1);
+  assert.equal((new Date(range.start)-new Date(previous.end))/86400000,1,'Previous period is adjacent without duplicating a date');
+  assert.deepEqual(usageShiftRange(previous,1),range,'Next period returns to the same natural dates');
+}
+const daily=Array.from({length:91},(_,i)=>({date:new Date(Date.UTC(2024,0,1+i)).toISOString().slice(0,10),input:100,output:20,cache:75}));
+const weekly=usageTrendBuckets({buckets:daily},'quarter');
+assert.equal(weekly.kind,'week');assert.equal(weekly.buckets.length,13);assert.equal(weekly.buckets[0].date,'2024-01-01');assert.equal(weekly.buckets[0].end,'2024-01-07');assert.equal(weekly.buckets[0].cache,525);
+const monthly=usageTrendBuckets({buckets:daily},'year');
+assert.deepEqual(monthly.buckets.map(row=>[row.date,row.end,row.input]),[['2024-01-01','2024-01-31',3100],['2024-02-01','2024-02-29',2900],['2024-03-01','2024-03-31',3100]]);
+assert.equal(monthly.buckets.reduce((sum,row)=>sum+row.input+row.output,0),10920,'Grouping preserves totals without duplicating cache or boundary dates');
 
 for(let weekday=0;weekday<7;weekday++){
   const buckets=Array.from({length:365},(_,i)=>({date:new Date(Date.UTC(2024,1,25+weekday+i)).toISOString().slice(0,10),input:i}));

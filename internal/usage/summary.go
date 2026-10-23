@@ -12,6 +12,8 @@ import (
 
 type Query struct {
 	Days     int    `json:"days"`
+	Start    string `json:"start"`
+	End      string `json:"end"`
 	Timezone string `json:"timezone"`
 	Scope    string `json:"scope"`
 	Offset   int    `json:"offset"`
@@ -86,6 +88,9 @@ type CompactionRecord struct {
 type Summary struct {
 	RoutingTotal     Totals            `json:"routing_total"`
 	Days             int               `json:"days"`
+	Start            string            `json:"start"`
+	End              string            `json:"end"`
+	Today            string            `json:"today"`
 	Timezone         string            `json:"timezone"`
 	Scope            string            `json:"scope"`
 	Total            Totals            `json:"total"`
@@ -119,13 +124,10 @@ func (l *Ledger) Summary(ctx context.Context, q Query, atMS int64) (Summary, err
 	return value, err
 }
 func summary(ctx context.Context, db queryDB, q Query, atMS int64) (Summary, error) {
-	if q.Days == 0 {
-		q.Days = 365
-	}
 	if q.Timezone == "" {
 		q.Timezone = "Asia/Shanghai"
 	}
-	if q.Days != 14 && q.Days != 30 && q.Days != 90 && q.Days != 365 || q.Offset < 0 || q.Offset > 1000000 || len(q.Scope) > 128 {
+	if q.Offset < 0 || q.Offset > 1000000 || len(q.Scope) > 128 {
 		return Summary{}, fmt.Errorf("invalid usage query")
 	}
 	zone, err := time.LoadLocation(q.Timezone)
@@ -135,17 +137,21 @@ func summary(ctx context.Context, db queryDB, q Query, atMS int64) (Summary, err
 	at := time.UnixMilli(atMS).In(zone)
 	y, m, d := at.Date()
 	today := time.Date(y, m, d, 12, 0, 0, 0, time.UTC)
-	first := today.AddDate(0, 0, 1-q.Days)
+	first, last, err := queryDates(q, today)
+	if err != nil {
+		return Summary{}, err
+	}
+	q.Days = int(last.Sub(first)/(24*time.Hour)) + 1
 	begin, err := midnight(zone, first)
 	if err != nil {
 		return Summary{}, err
 	}
-	end, err := midnight(zone, today.AddDate(0, 0, 1))
+	end, err := midnight(zone, last.AddDate(0, 0, 1))
 	if err != nil {
 		return Summary{}, err
 	}
 	stop := min(end.UnixMilli(), atMS+1)
-	s := Summary{Days: q.Days, Timezone: q.Timezone, Scope: q.Scope, Capabilities: map[string]bool{"compaction": true, "provider_quota": true}}
+	s := Summary{Days: q.Days, Start: first.Format(time.DateOnly), End: last.Format(time.DateOnly), Today: today.Format(time.DateOnly), Timezone: q.Timezone, Scope: q.Scope, Capabilities: map[string]bool{"compaction": true, "provider_quota": true}}
 	if err = calendarSummary(ctx, db, q, first, zone, atMS, &s); err != nil {
 		return s, err
 	}
@@ -158,12 +164,7 @@ func summary(ctx context.Context, db queryDB, q Query, atMS int64) (Summary, err
 	if s.Historical, err = aggregate(ctx, db, q.Scope, 0, 1, ""); err != nil {
 		return s, err
 	}
-	groupStart, groupEnd := begin.UnixMilli(), stop
-	if q.Scope != "" {
-		groupStart = 0
-		groupEnd = math.MaxInt64
-	}
-	if s.RoutingTotal, err = aggregate(ctx, db, q.Scope, groupStart, groupEnd, "AND r.scope='main' AND EXISTS(SELECT 1 FROM routing_turns t WHERE t.turn_id=r.turn_id)"); err != nil {
+	if s.RoutingTotal, err = aggregate(ctx, db, q.Scope, begin.UnixMilli(), stop, "AND r.scope='main' AND EXISTS(SELECT 1 FROM routing_turns t WHERE t.turn_id=r.turn_id)"); err != nil {
 		return s, err
 	}
 	if s.Quota, err = quotaIn(ctx, db, "", atMS); err != nil {
@@ -171,6 +172,26 @@ func summary(ctx context.Context, db queryDB, q Query, atMS int64) (Summary, err
 	}
 	s.Waiting, err = waitingIn(ctx, db, q.Scope)
 	return s, err
+}
+
+// Date-only values use UTC for calendar arithmetic; midnight converts each
+// boundary independently to the requested zone, including DST transitions.
+func queryDates(q Query, today time.Time) (time.Time, time.Time, error) {
+	if q.Start != "" || q.End != "" {
+		first, err := time.Parse(time.DateOnly, q.Start)
+		last, endErr := time.Parse(time.DateOnly, q.End)
+		if err != nil || endErr != nil || q.Days != 0 || last.Before(first) || last.Sub(first) > 3659*24*time.Hour {
+			return time.Time{}, time.Time{}, fmt.Errorf("invalid usage date range")
+		}
+		return first.Add(12 * time.Hour), last.Add(12 * time.Hour), nil
+	}
+	if q.Days == 0 {
+		q.Days = 365
+	}
+	if q.Days != 14 && q.Days != 30 && q.Days != 90 && q.Days != 365 {
+		return time.Time{}, time.Time{}, fmt.Errorf("invalid usage range")
+	}
+	return today.AddDate(0, 0, 1-q.Days), today, nil
 }
 func nullable(n sql.NullInt64) *int64 {
 	if !n.Valid {

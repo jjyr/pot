@@ -103,7 +103,7 @@ async page => {
   await page.goBack();await page.locator('#pot-composer:visible').waitFor();
   await page.goForward();await page.getByLabel('任务追加',{exact:true}).waitFor();
   await page.getByRole('button',{name:'任务操作',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'用量',exact:true}).click();
-  await page.getByText('累计用量',{exact:true}).waitFor();await back().click();await page.getByLabel('任务追加',{exact:true}).waitFor();
+  await page.getByText('会话用量',{exact:true}).waitFor();await back().click();await page.getByLabel('任务追加',{exact:true}).waitFor();
   await back().click();await page.locator('#pot-composer:visible').waitFor();
   await page.getByRole('button',{name:'任务',exact:true}).first().click();
   await page.locator('.task-row').getByText('等待授权',{exact:true}).waitFor();

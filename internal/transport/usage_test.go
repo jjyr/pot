@@ -55,7 +55,7 @@ func TestUsageSummaryAndIndependentListRoutes(t *testing.T) {
 			t.Fatal("list must return only a bounded page", kind, string(data))
 		}
 	}
-	for _, path := range []string{"/api/v1/usage/requests", "/api/v1/usage/tools?scope=main&offset=-1", "/api/v1/usage/models?days=2", "/api/v1/usage/compactions?scope=main&timezone=Invalid"} {
+	for _, path := range []string{"/api/v1/usage/requests", "/api/v1/usage/tools?scope=main&offset=-1", "/api/v1/usage/models?days=2", "/api/v1/usage/compactions?scope=main&timezone=Invalid", "/api/v1/usage/summary?start=2024-01-01", "/api/v1/usage/summary?start=2024-01-01&end=2024-12-31&days=365", "/api/v1/usage/models?start=2024-01-01&end=2024-12-31"} {
 		if _, err := app.Call(ctx, Request{Method: "GET", Path: path}); err == nil {
 			t.Fatal("invalid list query accepted", path)
 		}
@@ -107,6 +107,7 @@ func TestBrowserReadRoutesReachApplication(t *testing.T) {
 		"/api/v1/snapshot", "/api/v1/permissions", "/api/v1/machines", "/api/v1/schedules",
 		"/api/v1/tasks/query", "/api/v1/tasks/catalog", "/api/v1/tasks/outcomes", "/api/v1/tasks/outcomes?after=0", "/api/v1/usage/providers",
 		"/api/v1/usage/summary?scope=main&timezone=UTC",
+		"/api/v1/usage/summary?scope=main&timezone=UTC&start=2024-01-01&end=2024-12-31",
 		"/api/v1/usage/models?scope=main&timezone=UTC&offset=0",
 		"/api/v1/usage/requests?scope=main&timezone=UTC&offset=0",
 		"/api/v1/usage/tools?scope=main&timezone=UTC&offset=0",
@@ -132,6 +133,12 @@ func TestBrowserReadRoutesReachApplication(t *testing.T) {
 				var summary usage.Summary
 				if err = json.Unmarshal(w.Body.Bytes(), &summary); err != nil || summary.Quota.Policy != usage.DefaultPolicy() {
 					t.Fatal("summary must include the policy used by the editor", w.Body.String(), err)
+				}
+			}
+			if path == "/api/v1/usage/summary?scope=main&timezone=UTC&start=2024-01-01&end=2024-12-31" {
+				var summary usage.Summary
+				if err = json.Unmarshal(w.Body.Bytes(), &summary); err != nil || summary.Start != "2024-01-01" || summary.End != "2024-12-31" || len(summary.Buckets) != 366 || summary.Total.Requests != 0 {
+					t.Fatal("explicit browser dates did not reach the ledger", w.Body.String(), err)
 				}
 			}
 			if path == "/api/v1/tasks/outcomes" || path == "/api/v1/tasks/outcomes?after=0" {

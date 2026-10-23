@@ -28,7 +28,7 @@ func page[T any](offset int, items []T) Page {
 }
 
 func (l *Ledger) Page(ctx context.Context, kind string, q Query, atMS int64) (Page, error) {
-	if q.Offset < 0 || q.Offset > 1000000 || len(q.Scope) > 128 {
+	if q.Offset < 0 || q.Offset > 1000000 || len(q.Scope) > 128 || q.Start != "" || q.End != "" {
 		return Page{}, fmt.Errorf("invalid usage query")
 	}
 	if q.Timezone == "" {
