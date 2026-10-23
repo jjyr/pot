@@ -21,8 +21,8 @@ type schemaSnapshot struct {
 	UserVersion, ApplicationID int
 }
 
-// These contracts were captured from independent empty databases after the full
-// pre-release chain at 69d641c7. They include final ALTER/rebuild results, partial
+// These contracts match independent empty databases after the full
+// pre-release chain at b5330724. They include final ALTER/rebuild results, partial
 // and expression indexes, constraints, defaults and migration-created records.
 // They are test data, never a production migration source.
 func snapshotDatabase(t *testing.T, db *sql.DB) schemaSnapshot {

@@ -171,7 +171,6 @@ func testTaskWorkspaceProjectTools(t *testing.T, protected bool) {
 	t.Cleanup(func() { fixtureGit(t, source, "worktree", "remove", "--force", w.Path) })
 }
 func TestTemporaryWorkspaceRetainsOriginalAndFencesLostPreparation(t *testing.T) {
-	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	tmp := t.TempDir()
