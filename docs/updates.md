@@ -97,8 +97,12 @@ Set the base64 public key as the GitHub Actions repository variable
 executable, including container builds. After shared checks and the macOS/Linux
 CLI build gates succeed, the macOS release workflow signs the manifest for the
 macOS App and macOS/Linux CLI archives. It
-requires the matching private key and platform code-signing configuration before
-publication. See [Releases](releases.md) for the environment gate, artifact naming
+requires the matching private key in both macOS release modes before
+publication. `unsigned` packages use ad-hoc integrity signatures without Developer
+ID or Apple notarization; `signed` additionally requires Apple signing and notary
+configuration. The Ed25519 feed authenticates the final bytes in either case and
+does not grant Gatekeeper approval. See the
+[macOS first-launch guide](desktop-installation.md#macos). See [Releases](releases.md) for the environment gate, artifact naming
 and channel contracts. Docker and Linux publication do not depend on macOS
 signing. Unsigned local builds remain possible, but
 without a pinned public key they have no self-update capability.

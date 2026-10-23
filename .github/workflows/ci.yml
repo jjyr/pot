@@ -14,7 +14,7 @@ on:
         required: false
         type: string
       publish:
-        description: Publish an existing stable tag after checks, packaging and release environment approval
+        description: Publish an existing stable tag after checks, packaging and release environment gates
         default: false
         type: boolean
 
@@ -99,6 +99,7 @@ jobs:
       - run: mise run build:go
       - run: mise run build:linux
       - run: mise exec -- python scripts/tests/ci-release.py
+      - run: mise exec -- python scripts/tests/homebrew-cask.py
       - if: runner.os == 'Linux'
         run: mise exec -- go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.11
       - if: runner.os == 'Linux'
@@ -148,6 +149,8 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 60
     env:
+      # Validation always exercises ad-hoc sealing without release credentials.
+      POT_MACOS_RELEASE_MODE: unsigned
       POT_APP_VERSION: ${{ needs.source.outputs.version }}
       POT_BUILD_REVISION: ${{ needs.source.outputs.sha }}
       POT_UPDATE_PUBLIC_KEY: ${{ needs.source.outputs.public-key }}
@@ -163,8 +166,13 @@ jobs:
           install_args: go python node
       - run: mise exec -- python scripts/release "$POT_APP_VERSION" --app-only --output dist
       - run: mise exec -- python scripts/package-server --platform darwin-arm64 --output dist
+      - name: Exercise unsigned sealing before native smoke
+        run: |
+          mise exec -- python scripts/sign-macos-release "$POT_APP_VERSION" dist --mode unsigned
+          mise exec -- python scripts/generate-cask "$POT_APP_VERSION" dist
       - run: mise exec -- python scripts/tests/server-package-smoke.py dist/pot-go-${{ env.POT_APP_VERSION }}-darwin-arm64.tar.gz
       - run: ruby -c dist/pot.rb
+      - run: brew ruby scripts/tests/homebrew-cask.rb Casks/pot.rb dist/pot.rb
       - run: mise exec -- python scripts/tests/macos-package-smoke.py dist/Pot-${{ env.POT_APP_VERSION }}-arm64.zip
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -321,6 +329,7 @@ jobs:
     uses: ./.github/workflows/release.yml
     permissions:
       contents: write
+      pull-requests: write
     with:
       sha: ${{ needs.source.outputs.sha }}
       version: ${{ needs.source.outputs.version }}

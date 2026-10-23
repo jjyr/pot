@@ -17,11 +17,56 @@ native windows        local Runtime / executor
 
 ## macOS
 
-The existing Apple Silicon app requires macOS 26 or later. Build its independently
-identified development bundle with `mise run build`, or use the production app
-from the project's release channel. See [Development](development.md) and
-[Updates](updates.md) for macOS packaging and signed updates. This Linux adaptation
-does not change macOS window, tray, Keychain or notification behavior.
+The Apple Silicon app requires macOS 26 or later. During the unsigned release
+phase, the website and README offer **Homebrew installation only**:
+
+```sh
+brew tap jjyr/pot https://github.com/jjyr/pot.git
+brew install --cask jjyr/pot/pot
+```
+
+The first tap needs the explicit Git URL because this repository is named `pot`.
+The root `Casks/pot.rb` is disabled until the first macOS release is published and
+its cask update PR is merged. See [cask maintenance](releases.md#homebrew-generation).
+Homebrew installs `Pot.app` in Applications from the release ZIP and verifies its
+SHA-256. The ZIP remains a required release asset while its direct download entry
+is hidden; `pot.rb` is maintained in source and is not a Release asset.
+Upgrade with `brew upgrade --cask jjyr/pot/pot` after the corresponding cask PR is
+merged. Until a matching release exists, see [Development](development.md) to
+build the independently identified development bundle with `mise run build`.
+
+Read `MACOS-RELEASE.txt` in the selected release for its signing status.
+`unsigned` releases are ad-hoc signed for executable integrity;
+they have **no Developer ID signature or Apple notarization**. Ad-hoc signing does
+not verify the developer's identity. `signed` releases use Developer ID signing
+and Apple notarization.
+
+macOS may block an unnotarized App downloaded from the internet. Only for a download
+you trust from the official release, try opening it, then allow that App in
+**System Settings → Privacy & Security** if macOS offers that option. Alternatively,
+after verifying the download and placing the App in Applications, remove quarantine
+from this App alone in Terminal:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Pot.app
+```
+
+This is a trust decision about this one App. Do not disable Gatekeeper globally.
+Removing quarantine does not repair a damaged signature, a corrupt package or
+missing dependencies; recheck the archive and report a launch failure if it
+persists. Quit Pot before manually replacing the complete App for an upgrade;
+back up its data first.
+
+Homebrew preserves quarantine and does not guarantee bypassing Gatekeeper; the
+same first-launch guidance applies to cask installations.
+
+The macOS CLI archive uses the same release mode. When macOS blocks a trusted,
+verified extracted CLI installation, apply any quarantine exception only to that
+specific extracted `pot-go-darwin-arm64` directory, never to a parent containing
+other applications. Pot's [signed update feed](updates.md) authenticates package
+origin separately from Apple signing in both modes; it does not grant Gatekeeper
+approval. Published downloads and successful native smoke are prerequisites for
+release availability, not claims about packages that have not been published.
 
 ## Linux (Experimental)
 

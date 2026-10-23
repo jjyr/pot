@@ -4,22 +4,19 @@
 import os
 import subprocess
 
-from release_contract import version_number
+from release_contract import macos_mode, version_number
 
-if os.environ.get("POT_MACOS_RELEASE_ENABLED") != "true":
-    raise SystemExit(
-        "Release disabled: configure the protected release environment and POT_MACOS_RELEASE_ENABLED=true"
-    )
-required = [
-    "POT_UPDATE_PUBLIC_KEY",
-    "POT_UPDATE_PRIVATE_KEY",
-    "MACOS_CERTIFICATE_P12",
-    "MACOS_CERTIFICATE_PASSWORD",
-    "MACOS_SIGNING_IDENTITY",
-    "APPLE_ID",
-    "APPLE_TEAM_ID",
-    "APPLE_APP_PASSWORD",
-]
+mode = macos_mode(os.environ.get("POT_MACOS_RELEASE_MODE"))
+required = ["POT_UPDATE_PUBLIC_KEY", "POT_UPDATE_PRIVATE_KEY"]
+if mode == "signed":
+    required += [
+        "MACOS_CERTIFICATE_P12",
+        "MACOS_CERTIFICATE_PASSWORD",
+        "MACOS_SIGNING_IDENTITY",
+        "APPLE_ID",
+        "APPLE_TEAM_ID",
+        "APPLE_APP_PASSWORD",
+    ]
 missing = [name for name in required if not os.environ.get(name)]
 if missing:
     raise SystemExit("Incomplete release configuration: " + ", ".join(missing))
@@ -43,4 +40,7 @@ subprocess.run(
     stdout=subprocess.DEVNULL,
     check=True,
 )
-print("Stable tag and complete signing configuration verified")
+if output := os.environ.get("GITHUB_OUTPUT"):
+    with open(output, "a") as stream:
+        stream.write(f"mode={mode}\n")
+print(f"Stable tag, {mode} mode and Ed25519 key pair verified")

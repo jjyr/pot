@@ -150,9 +150,8 @@
     "Web UI": "Web UI",
     "把这段英文交给你的助手，它会读取安装指南并帮你完成配置。": "把這段英文交給你的助手，它會閱讀安裝指南並幫你完成設定。",
     "macOS 26+ · Apple Silicon": "macOS 26+ · Apple Silicon",
-    "下载 macOS App": "下載 macOS App",
     "Homebrew": "Homebrew",
-    "先从 macOS Release 下载 pot.rb，再在下载目录运行：": "先從 macOS Release 下載 pot.rb，再於下載目錄執行：",
+    "Homebrew 安装与首次启动 ↗": "Homebrew 安裝與首次啟動 ↗",
     "Linux": "Linux",
     "Experimental": "Experimental",
     "下载 .deb": "下載 .deb",
@@ -172,7 +171,9 @@
     "原生桌面 · Debian / Ubuntu · amd64": "原生桌面 · Debian / Ubuntu · amd64",
     "容器运行 · Linux amd64 / arm64，通过浏览器使用。": "容器執行 · Linux amd64 / arm64，透過瀏覽器使用。",
     "直接运行服务端": "直接執行伺服器",
-    "下载 Release 后直接运行服务端。": "下載 Release 後直接執行伺服器。"
+    "下载 Release 后直接运行服务端。": "下載 Release 後直接執行伺服器。",
+    "使用本仓库作为 Homebrew tap，依次运行：": "使用本儲存庫作為 Homebrew tap，依序執行：",
+    "首次 macOS 发布并合并 cask 更新后即可安装；Homebrew 保留首次启动安全检查。": "首次 macOS 發布並合併 cask 更新後即可安裝；Homebrew 保留首次啟動安全檢查。"
   },
   "demo": {
     "language": "語言",

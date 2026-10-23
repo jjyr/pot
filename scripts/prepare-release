@@ -13,15 +13,22 @@ from release_contract import (
     checksum_name,
     distribution_names,
     generate_cask,
+    macos_release_notes,
     version_number,
     verify_oci,
 )
 
 
-def prepare(version, output, signed=False, channel="validation"):
+def prepare(version, output, sign_feed=False, channel="validation", macos_mode=None):
     version = version_number(version)
-    if signed and channel != "macos":
+    if sign_feed and channel != "macos":
         raise ValueError("only the macOS update channel signs the shared feed")
+    if channel == "macos":
+        notes = macos_release_notes(version, os.environ.get("POT_BUILD_REVISION"), macos_mode)
+        if not sign_feed:
+            raise ValueError("macOS publication requires an Ed25519-signed update feed")
+    elif macos_mode is not None:
+        raise ValueError("macOS mode is only valid for the macOS channel")
     names = distribution_names(version, channel)
     for name in names:
         archive = output / name
@@ -37,15 +44,15 @@ def prepare(version, output, signed=False, channel="validation"):
         )
     if channel in {"macos", "validation"}:
         generate_cask(version, output)
-    if signed:
+    if sign_feed:
         subprocess.run(
             [sys.executable, str(ROOT / "scripts/update-release"), version, str(output)], check=True
         )
+    if channel == "macos":
+        (output / "MACOS-RELEASE.txt").write_text(notes)
     files = [output / name for name in names]
-    if channel in {"macos", "validation"}:
-        files.append(output / "pot.rb")
-    if signed:
-        files.append(output / "update.json")
+    if sign_feed:
+        files.extend([output / "update.json", output / "MACOS-RELEASE.txt"])
     (output / checksum_name(channel)).write_text(
         "".join(f"{checksum(path)}  {path.name}\n" for path in files)
     )
@@ -55,11 +62,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("version")
     parser.add_argument("output", type=Path)
-    parser.add_argument("--signed", action="store_true")
+    parser.add_argument("--sign-feed", action="store_true")
+    parser.add_argument("--macos-mode", choices=["unsigned", "signed"])
     parser.add_argument(
         "--channel",
         choices=["validation", "server", "desktop", "macos", "container"],
         default="validation",
     )
     args = parser.parse_args()
-    prepare(args.version, args.output, args.signed, args.channel)
+    prepare(args.version, args.output, args.sign_feed, args.channel, args.macos_mode)

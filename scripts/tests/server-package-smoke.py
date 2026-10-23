@@ -14,6 +14,9 @@ import time
 import urllib.error
 import urllib.request
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from macos_release import verify_resources, verify_signatures  # noqa: E402
+
 with tempfile.TemporaryDirectory(prefix="pot-server-smoke-") as temporary:
     root = Path(temporary)
     with tarfile.open(sys.argv[1]) as archive:
@@ -21,6 +24,10 @@ with tempfile.TemporaryDirectory(prefix="pot-server-smoke-") as temporary:
     installation = next(root.glob("pot-go-*"))
     binary = installation / "bin/pot"
     metadata = json.loads((installation / "Resources/update.json").read_text())
+    if metadata["platform"] == "darwin-arm64":
+        verify_resources(installation / "Resources", os.environ["POT_APP_VERSION"], "cli")
+        if mode := os.environ.get("POT_MACOS_RELEASE_MODE"):
+            verify_signatures(installation, mode)
     assert metadata["version"] == os.environ["POT_APP_VERSION"], metadata
     version = subprocess.check_output([binary, "--version"], text=True)
     assert version.split()[1] == os.environ["POT_APP_VERSION"], version

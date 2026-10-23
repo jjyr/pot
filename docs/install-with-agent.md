@@ -47,16 +47,33 @@ output. Never ask the user to paste an API key or token into the conversation.
 
 ## Official download channels
 
-The website and README link to [Releases](https://github.com/jjyr/pot/releases)
-for macOS App, Experimental Linux desktop and Web UI / Server downloads. The
-release selector is intentional until assets exist; match the selected version
-and architecture rather than constructing a download URL. The
+During the unsigned release phase, the website and README offer macOS installation
+through Homebrew only. Their direct download links remain available for
+Experimental Linux desktop and Web UI / Server via
+[Releases](https://github.com/jjyr/pot/releases). The release selector is intentional
+until assets exist; match the selected version and architecture rather than
+constructing a download URL. The
 [release contract](releases.md) defines these filenames:
 
-- macOS Apple Silicon: `Pot-VERSION-arm64.zip`; extract and move Pot.app to
-  Applications, then open it. A release can also include `pot.rb`: download that
-  cask and run `brew install --cask ./pot.rb` from its directory. The public
-  `jjyr/homebrew-tap` currently has no Pot cask; do not substitute a tap command.
+- macOS Apple Silicon: use this repository as the tap (the explicit URL is required
+  on first use), then install:
+
+  ```sh
+  brew tap jjyr/pot https://github.com/jjyr/pot.git
+  brew install --cask jjyr/pot/pot
+  ```
+
+  Upgrade with `brew upgrade --cask jjyr/pot/pot`. The cask is disabled until the
+  first macOS release and its cask update PR are merged; see
+  [cask maintenance](releases.md#homebrew-generation). The cask installs the
+  release's `Pot-VERSION-arm64.zip`, which remains published with its checksums
+  even while the App download entry is hidden. Read `MACOS-RELEASE.txt`:
+  `unsigned` means ad-hoc integrity signing without Developer ID or Apple
+  notarization. Follow the
+  [macOS first-launch guide](desktop-installation.md#macos) only for trusted,
+  checksum-verified downloads; do not disable Gatekeeper globally.
+  Homebrew preserves quarantine and may require that same App-specific first-launch
+  allowance. Use the same-repository tap commands above after verifying availability.
 - Linux desktop: `pot-desktop_VERSION_linux_amd64.deb` is Experimental. Check
   its checksum, then `sudo apt install ./THE_DOWNLOADED_FILE.deb` and launch
   `pot-desktop`. Use the actual downloaded filename. Do not offer arm64 until a
@@ -106,8 +123,8 @@ mise run open
 This creates the independent development bundle `.local/go/PotGoPreview.app`,
 not a production release. Launch that bundle again to start; use **Quit** to
 stop it (closing the macOS window leaves Pot running). Rebuild with these same
-commands after quitting and backing up before updates. For published signed
-packages, follow their release instructions and [Updates](updates.md).
+commands after quitting and backing up before updates. For published
+packages in either release mode, follow their release instructions and [Updates](updates.md).
 
 On native Debian/Ubuntu amd64, build the Experimental Linux desktop package:
 

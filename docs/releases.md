@@ -5,18 +5,19 @@ checks pass. Docker, Linux server and the experimental Linux desktop do not depe
 on macOS signing. Each channel requires its own build, smoke, checksum and
 applicable signing gates. Windows is currently unsupported.
 
-Source builds remain the installation path until public artifacts exist. The
-public `jjyr/homebrew-tap` repository exists, but does not currently contain a Pot
-cask. Generating `pot.rb` does not make `brew install --cask jjyr/tap/pot` available.
-These workflows never modify the tap or registry visibility.
+Source builds remain available until public artifacts exist. This repository is
+also the Homebrew tap: root `Casks/pot.rb` starts disabled until the first macOS
+release is published and its reviewed cask update lands. Release workflows propose
+a cask update PR after successful macOS publication; they never push the default branch or
+change repository/registry visibility.
 
 | Channel | Versioned distribution | Publication boundary |
 |---|---|---|
 | Linux server, amd64/arm64 | `pot-go-VERSION-linux-ARCH.tar.gz` | Both native CLI builds and extracted-package smoke; GitHub Release assets |
 | Linux desktop (Experimental), amd64 | `pot-desktop_VERSION_linux_amd64.deb` | Native GTK/WebKit build and real WebView smoke; GitHub Release assets; manual upgrades |
-| macOS 26+, Apple Silicon | `Pot-VERSION-arm64.zip`, `pot-go-VERSION-darwin-arm64.tar.gz` | Native App/CLI smoke, Developer ID signing and notarization; GitHub assets, cask and signed update feed |
+| macOS 26+, Apple Silicon | `Pot-VERSION-arm64.zip`, `pot-go-VERSION-darwin-arm64.tar.gz` | Native App/CLI smoke and explicit `unsigned` (ad-hoc) or `signed` (Developer ID + notarization) mode; GitHub assets, cask and signed update feed |
 | Container, Linux amd64/arm64 | `pot-container-VERSION.oci.tar`, `ghcr.io/jjyr/pot:VERSION` | Native image build/smoke on both architectures, OCI integrity and metadata verification; GHCR |
-| Homebrew | Generated `pot.rb` macOS release asset | Local cask installation after a release exists; public tap inclusion is a separate reviewed change |
+| Homebrew | Root `Casks/pot.rb` in `jjyr/pot` | Published final App ZIP verified before a same-repository cask update PR; merge makes installation/upgrades available |
 
 The experimental designation applies only to the new Linux native desktop `.deb`.
 Its amd64 build and native WebView smoke have been exercised locally; native
@@ -69,8 +70,9 @@ resolve one source SHA + version + publication intent
   Linux CLI builds  Linux desktop    macOS App + CLI    native Docker builds
    + native smoke   + native smoke    + native smoke     + smoke amd64/arm64
        |                 |                |                  |
-       |                 |       Developer ID + notary   multiarch OCI export
-       |                 |       signed feed + cask     digest/arch/version/SHA
+       |                 |       ad-hoc OR Developer ID  multiarch OCI export
+       |                 |           + notary
+       |                 |       signed update feed     digest/arch/version/SHA
        |                 |                |                  |
   server GH assets  desktop GH assets  macOS GH assets    GHCR :VERSION
        +-----------------+----------------+
@@ -136,45 +138,84 @@ internal installation directory `pot-go-PLATFORM`.
 Channel publication is intentionally independent, not a transaction across GitHub
 and GHCR. An environment refusal, registry error or platform failure may leave
 other successful channels publicly available. Inspect actual assets and channel
-job results before retrying. Missing signing credentials affect only macOS.
+job results before retrying. Missing update keys or the selected mode's signing
+credentials affect only macOS.
 
 ## Environment, permissions and signing setup
 
-Configure the GitHub environment `release` with required reviewers and appropriate
-tag/deployment restrictions before publishing tags. Only official publication
+Configure the GitHub environment `release` with custom deployment restrictions
+allowing only tags matching `v*`, and no required reviewers for automatic
+publication after tag pushes. GitHub's pattern is intentionally broader than the
+script's exact `vMAJOR.MINOR.PATCH` publication fence; branches are not allowed.
+For manual publication, select the existing stable tag as the workflow ref as well
+as the source ref, so the environment sees an allowed tag. Only official publication
 calls can request writes. Linux/macOS publishers use `contents: write`; the GHCR
 publisher has `contents: read` and `packages: write`. Checks and packaging receive
-no signing secrets. GHCR must permit this repository's Actions token to publish
+no signing secrets. Ordinary macOS packaging also exercises the ad-hoc sealing
+path and checks final extracted signatures before native smoke, so a manual
+validation run can qualify that path without publication or Apple credentials.
+The official macOS workflow subsequently applies its explicitly selected release
+mode to those artifacts. GHCR must permit this repository's Actions token to publish
 `ghcr.io/jjyr/pot`; an existing package may require repository access to be granted.
 No extra registry secret is required for the configured GHCR path.
 
-macOS requires its own configuration before its channel can publish:
+macOS requires an explicit mode and update key pair before its channel can publish:
 
 | Configuration | Kind | Purpose |
 |---|---|---|
-| `POT_MACOS_RELEASE_ENABLED=true` | Release variable | Confirms macOS signing/notary setup is ready |
+| `POT_MACOS_RELEASE_MODE` | Release environment variable | Required: `unsigned` or `signed`; no implicit default or fallback |
 | `POT_UPDATE_PUBLIC_KEY` | Repository variable | Base64 Ed25519 key pinned consistently in executables and images |
-| `POT_UPDATE_PRIVATE_KEY` | Release secret | Matching PKCS8 PEM for feed signing |
-| `MACOS_CERTIFICATE_P12` | Release secret | Base64 Developer ID Application certificate/private key |
-| `MACOS_CERTIFICATE_PASSWORD` | Release secret | Certificate import password |
-| `MACOS_SIGNING_IDENTITY` | Release variable | Full `Developer ID Application: ...` identity |
-| `APPLE_ID`, `APPLE_APP_PASSWORD` | Release secrets | Notary authentication |
-| `APPLE_TEAM_ID` | Release variable | Apple developer team |
+| `POT_UPDATE_PRIVATE_KEY` | Repository or release secret | Matching PKCS8 PEM for feed signing |
+| `MACOS_CERTIFICATE_P12` | Release secret | Required for `signed`: base64 Developer ID Application certificate/private key |
+| `MACOS_CERTIFICATE_PASSWORD` | Release secret | Required for `signed`: certificate import password |
+| `MACOS_SIGNING_IDENTITY` | Release variable | Required for `signed`: full `Developer ID Application: ...` identity |
+| `APPLE_ID`, `APPLE_APP_PASSWORD` | Release secrets | Required for `signed`: notary authentication |
+| `APPLE_TEAM_ID` | Release variable | Required for `signed`: Apple developer team |
 
-The public update key is useful to all builds, but the private key and Apple
-credentials are used only by the macOS release workflow. Preflight rejects missing
-configuration or a mismatched Ed25519 pair. A temporary keychain signs bundled
-Mach-O files before the App seal. The workflow requires notarization acceptance,
-validates/staples the App ticket and smoke-tests the signed packages. The cask and
-feed checksums are regenerated after signing. No signature is fabricated or
-silently omitted from a published macOS package.
+`unsigned` means **no Developer ID signature and no Apple notarization**. It
+requires no Apple account or certificate. On native Apple Silicon macOS, the
+workflow ad-hoc signs every bundled Mach-O (including Node and CLI), seals the App,
+and verifies those signatures again from the final extracted archives. Ad-hoc
+signing provides integrity and executability, not developer identity or Gatekeeper
+approval. Native App preview, CLI/HTTP service, Node/npm, bundle resources,
+installation metadata, version and commit SHA checks remain required.
 
-The signed feed retains its existing JSON payload/envelope format and lists only
-the macOS App and macOS/Linux CLI installations supported by the updater. It is
-published when the macOS signed-update channel succeeds; Linux releases remain
-manually installable if that feed is not yet available. Linux desktop and container
-upgrades are explicit operations. See [Updates](updates.md) for trust bootstrap
-and storage-format restrictions.
+`signed` additionally requires every Apple setting above. A temporary keychain
+signs bundled Mach-O files before the App seal. Both App and CLI must receive
+notarization acceptance; the App ticket is stapled and validated and Gatekeeper
+assessment must pass. Missing credentials or any signing/notary failure is fatal;
+the workflow never falls back to `unsigned`. Preflight snapshots the chosen mode
+for all subsequent jobs, so an environment variable edit cannot change it mid-run.
+
+Both modes require the matching Ed25519 update key pair. This is Pot's update
+origin authentication, independent of Apple developer identity. The feed retains
+its existing JSON payload/envelope format and binds the final macOS App and
+macOS/Linux CLI bytes, sizes, versions and hashes. An ad-hoc package can participate
+because the existing updater verifies that pinned Pot key and the archive digest;
+it does not require an Apple identity. Signature checks are never bypassed and no
+unsigned feed is published. This does not confer Apple approval: read the
+[macOS first-launch instructions](desktop-installation.md#macos), including for
+manual upgrades. Linux desktop and container upgrades remain explicit operations.
+See [Updates](updates.md) for trust bootstrap and storage-format restrictions.
+
+After final sealing and native smoke, the workflow regenerates the cask and feed
+from the exact archives. `MACOS-RELEASE.txt` records mode, version, commit and an
+installation-document link. It is published alongside ZIP/TAR, SHA256 sidecars,
+`update.json` and `SHA256SUMS-macos`; the manifest binds the disclosure
+and signed feed as well as archives. `pot.rb` is internal generated metadata,
+not a required publication file or Release asset. Release notes direct users to this file
+and explain that Homebrew preserves quarantine. Archive names stay versioned in
+both modes. Different bytes or mode metadata for an existing version cannot
+replace published assets. Publication retries reuse identical existing assets and
+add missing assets; retain the same qualified artifact set for partial retries.
+A rebuild that produces different bytes must fail rather than overwrite.
+
+For an initial release without an Apple account, set the release environment
+variable `POT_MACOS_RELEASE_MODE=unsigned`. Later provision the Apple settings and
+switch that one variable to `signed` **for a subsequent version**. Do not replace
+an earlier version's ad-hoc downloads with newly signed bytes. The former
+`POT_MACOS_RELEASE_ENABLED` flag is no longer used. Environment configuration alone
+does not install this workflow; the code must be merged before tagging a release.
 
 Runner availability, pinned toolchains, package repositories, upstream downloads
 and standard Actions minutes/billing remain execution prerequisites. A job refused
@@ -182,16 +223,86 @@ before startup does not establish a code failure. Paid model tests are not enabl
 
 ## Homebrew generation
 
-Cask generation verifies the archive's SHA-256 sidecar and embedded bundle
-version, then fills the fixed versioned GitHub URL and digest. It preserves
-Gatekeeper quarantine handling and never writes to the remote tap.
+The website and README expose macOS through Homebrew only. Release assets retain
+App ZIP/CLI archives, their SHA-256 sidecars, `MACOS-RELEASE.txt`,
+`SHA256SUMS-macos` and the Ed25519-signed update feed. `pot.rb` is not uploaded.
+Both `unsigned` and `signed` modes use the same tap path and final-byte checks.
+
+```sh
+brew tap jjyr/pot https://github.com/jjyr/pot.git
+brew install --cask jjyr/pot/pot
+# Later, after the next cask update PR is merged:
+brew upgrade --cask jjyr/pot/pot
+```
+
+The initial tap must include the explicit URL: the repository is `pot`, not
+`homebrew-pot`. Homebrew supports an arbitrary Git URL with its two-argument tap
+command; see [Homebrew Taps](https://docs.brew.sh/Taps). Casks live in root
+`Casks/`. No separate tap repository is used. Private repository/assets require
+GitHub access; normal public installation requires the repository and artifacts
+to be public. These workflows never change visibility.
+
+Before the first release, `Casks/pot.rb` is explicitly disabled and has no archive
+version, URL or checksum: no installable artifact exists. It cannot silently
+install a development build. After publication, `scripts/sync-homebrew-cask`
+downloads the final versioned App ZIP and checksum sidecar using `github.token`,
+checks GitHub's SHA-256 digest and byte size, and uses the shared
+`release_contract.generate_cask` template/version/sidecar validation. Sealing and
+notarization happen before these final bytes are published. There is no `latest`
+URL or unchecked checksum. `packaging/homebrew/pot.rb.in` remains the single
+installable cask template; repository license terms apply to generated casks.
+
+```text
+validated source SHA -> final macOS sealing/smoke -> immutable Release assets
+                                                        |
+                                             download + verify final ZIP
+                                                        |
+                                same-repository homebrew/pot-vVERSION branch
+                                                        |
+                                    reviewed PR -> Casks/pot.rb on main
+                                                        |
+                                                brew install / upgrade
+```
+
+The separate `homebrew` job runs only after macOS publication succeeds. It requests
+`contents: write` for a new branch and `pull-requests: write` for its PR, with no
+new PAT. It creates a branch from the current default branch and changes only
+`Casks/pot.rb`. It never moves a release tag. Its source implementation remains
+pinned to the validated release SHA; the distribution pointer commit necessarily
+comes later. First installation becomes available **after the cask PR is merged**.
+
+Retries reuse an identical existing branch/open PR. A different branch, closed PR,
+equal/newer conflicting cask or unexpected changes stop for manual review; no
+existing branch is rewritten and no automatic merge/retry loop occurs. An older
+release cannot downgrade the default-branch cask. Protected branch policies still
+apply when reviewing/merging the PR.
+
+A cask synchronization error does not undo or relabel successful asset publication.
+The job logs the actual error and emits a warning and Actions summary with a
+recovery command. If repository settings prohibit Actions PR creation, the branch
+may exist without a PR; a maintainer can open its PR manually. To retry after
+resolving permissions or reviewing the branch/PR, use an authorized `gh` session
+from the released source revision (substitute its exact version and SHA):
+
+```sh
+GITHUB_REPOSITORY=jjyr/pot python3 scripts/sync-homebrew-cask 1.2.3 VALIDATED_40_CHARACTER_SHA
+```
+
+This recovery command only reads published assets and proposes the cask PR; it
+never publishes assets. It fails visibly if branch creation or PR permission is
+missing. A maintainer must explicitly allow Actions to create PRs in repository
+Actions settings for automatic PR creation, or open the generated branch's PR
+manually. No workflow changes repository settings or substitutes personal
+credentials for its Actions token.
+
+For local artifact validation before publication, the existing generator remains:
 
 ```sh
 mise exec -- python scripts/generate-cask 1.2.3 /absolute/artifacts
-# After that macOS version is publicly available, also verify the URL's bytes:
 mise exec -- python scripts/generate-cask 1.2.3 /absolute/artifacts --verify-url
-brew install --cask /absolute/artifacts/pot.rb
 ```
 
-Public tap inclusion is a separate authorized, reviewed change copying the cask
-to `Casks/pot.rb`. No Homebrew tap token is consumed by these workflows.
+These commands create internal `pot.rb` metadata, not a Release asset or user
+installation step. Homebrew preserves quarantine; an unnotarized App can still
+need the [App-specific first-launch allowance](desktop-installation.md#macos).
+Never disable Gatekeeper globally.

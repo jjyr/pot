@@ -3,7 +3,7 @@ const {chromium}=await import(process.env.POT_PLAYWRIGHT_MODULE||'playwright');
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 const installOnly=process.argv.includes('--install-only');
-const browser=await chromium.launch({headless:true});
+const browser=await chromium.launch({headless:true,executablePath:process.env.POT_CHROMIUM_EXECUTABLE});
 try {
 const origin=process.env.POT_WEBSITE_ORIGIN||'http://127.0.0.1:4173',errors=[];
 const install=JSON.parse(await fs.readFile('website/install.json','utf8'));
@@ -44,6 +44,13 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
     assert(await page.locator('#install-linux .linux-native').isVisible());
     assert.equal(await page.locator('#install-linux .experimental').innerText(),'Experimental');
    }
+   if(channel==='macos'){
+    assert.equal(await page.locator('#install-macos a').count(),1);
+    assert.equal(await page.locator('#install-macos .install-guide').getAttribute('href'),'https://github.com/jjyr/pot/blob/main/docs/desktop-installation.md#macos');
+    assert.equal(await page.locator('#install-macos a[href*="/releases"]').count(),0);
+    assert.equal(await page.locator('#install-macos a.primary').count(),0);
+    assert(await page.locator('#install-macos .brew-install').isVisible());
+   }
    if(channel==='web'){
     assert(await page.locator('#install-web .web-server').isVisible());
     assert(await page.locator('#install-web .web-docker').isVisible());
@@ -66,7 +73,7 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  assert.equal(await page.locator('#brew-command').textContent(),install.brew);
  assert.equal(await page.locator('#docker-image').textContent(),install.image);
  assert.equal(await page.locator('#install-web .web-docker .primary').getAttribute('href'),'https://github.com/users/jjyr/packages/container/package/pot');
- for(const selector of ['#install-macos .primary','#install-linux .linux-native .primary','#install-web .web-server .primary'])
+ for(const selector of ['#install-linux .linux-native .primary','#install-web .web-server .primary'])
   for(const link of await page.locator(selector).all())assert.equal(await link.getAttribute('href'),'https://github.com/jjyr/pot/releases');
  if(!installOnly){
  await page.locator('#run-project').click();

@@ -19,6 +19,29 @@ def version_number(value):
     return version
 
 
+def macos_mode(value):
+    if value not in {"unsigned", "signed"}:
+        raise ValueError("POT_MACOS_RELEASE_MODE must explicitly select unsigned or signed")
+    return value
+
+
+def macos_release_notes(version, revision, mode):
+    macos_mode(mode)
+    if not re.fullmatch(r"[a-f0-9]{40}", revision or ""):
+        raise ValueError("macOS release requires the validated 40-character commit SHA")
+    status = (
+        "Ad-hoc signed for integrity only; no Developer ID signature or Apple notarization."
+        if mode == "unsigned"
+        else "Developer ID signed and Apple notarized."
+    )
+    return (
+        f"Pot {version_number(version)}\nCommit: {revision}\nmacOS mode: {mode}\n{status}\n"
+        "The Ed25519-signed update feed authenticates Pot artifacts independently of Apple.\n"
+        "Installation and Gatekeeper instructions:\n"
+        f"https://github.com/jjyr/pot/blob/v{version}/docs/desktop-installation.md#macos\n"
+    )
+
+
 def checksum(path):
     with path.open("rb") as source:
         return hashlib.file_digest(source, "sha256").hexdigest()
@@ -57,7 +80,7 @@ def release_assets(version, channel):
     names = distribution_names(version, channel)
     assets = names + [name + ".sha256" for name in names] + [checksum_name(channel)]
     if channel == "macos":
-        assets += ["pot.rb", "update.json"]
+        assets += ["update.json", "MACOS-RELEASE.txt"]
     return assets
 
 

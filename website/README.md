@@ -50,7 +50,7 @@ Storage failures do not prevent use.
 - `build-site.py` validates catalog structure and registered template text, then
   generates `index.html`, the six localized pages and `pot-preview.html`.
   `build-preview.py` runs the same generator.
-- `install.json` contains the single English agent prompt, local Homebrew cask command, image address and packaged server command; the generator inserts these without translation. Keep the prompt identical to the README and installation guide.
+- `install.json` contains the single English agent prompt, same-repository Homebrew tap/install commands, image address and packaged server command; the generator inserts these without translation. Keep the prompt identical to the README and installation guide.
 - `app.js` provides shared interactions and localized report previews/downloads.
 - `locale.js` normalizes languages, saves preferences and detects language only
   at the root entry.
@@ -101,16 +101,25 @@ they do not call real agents or contain real connection information.
 
 The repository is `https://github.com/jjyr/pot`. The installation section links
 its [agent installation guide](../docs/install-with-agent.md), macOS, Linux and
-Web UI as four parallel choices. macOS includes App downloads and Homebrew; Linux
+Web UI as four parallel choices. During the unsigned release phase, macOS exposes
+only the same-repository Homebrew tap/install commands and its installation/first-launch guide;
+it has no App download button or generic Release link. Homebrew still downloads
+the release App ZIP and preserves quarantine/Gatekeeper handling. Linux
 contains only the Experimental native `.deb` desktop. Web UI groups direct server
 release downloads with the Docker
 [container package channel](https://github.com/users/jjyr/packages/container/package/pot),
 both accessed through a browser. macOS is selected by
 default; keyboard users can switch with arrows, Home and End. Without JavaScript,
 all four sections remain visible. Language switches preserve the selected channel.
-Download buttons open the official Releases selector, since the first packages
-are pending. Homebrew uses the release's local `pot.rb` cask, not an unpublished
-tap formula. The container address has no invented version or `latest` tag; its
+Linux desktop and Web UI server download buttons open the official Releases
+selector, since the first packages are pending. Homebrew uses root `Casks/pot.rb` in this repository. The first tap includes
+`https://github.com/jjyr/pot.git` explicitly; installation becomes available after
+the first macOS release and its cask update PR are merged.
+The linked installation guide explains macOS signing status,
+application-specific Gatekeeper allowances and Homebrew quarantine. Keep those
+instructions in [Desktop installation](../docs/desktop-installation.md#macos);
+release notes and `MACOS-RELEASE.txt` disclose each version's selected mode.
+The container address has no invented version or `latest` tag; its
 package page awaits first publication. Platform requirements follow the
 [release contract](../docs/releases.md). Keep these small availability notes in
 sync when the channels publish. The English agent prompt is

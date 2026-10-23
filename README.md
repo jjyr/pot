@@ -50,15 +50,26 @@ existing data, choose a channel and complete first setup. To install it yourself
 
 | Channel | Download / install | Platform |
 |---|---|---|
-| macOS App | [Download macOS App](https://github.com/jjyr/pot/releases) — select `Pot-VERSION-arm64.zip` | Apple Silicon, macOS 26+ |
-| Homebrew | Download `pot.rb` from the macOS release, then run `brew install --cask ./pot.rb` in its directory | macOS; [cask instructions](docs/releases.md#homebrew-generation) |
+| macOS (Homebrew) | Use the two commands below; [tap instructions](docs/releases.md#homebrew-generation) | Apple Silicon, macOS 26+; [first launch](docs/desktop-installation.md#macos) |
 | Linux desktop · Experimental | [Download .deb](https://github.com/jjyr/pot/releases) — select `pot-desktop_VERSION_linux_amd64.deb` | Debian / Ubuntu amd64; [requirements](docs/desktop-installation.md#linux-experimental) |
 | Web UI (Docker) | [View Docker image](https://github.com/users/jjyr/packages/container/package/pot) · `ghcr.io/jjyr/pot` | Linux amd64 / arm64; [installation and running](docs/docker.md) |
 | Web UI (Server) | [Download Web UI / Server](https://github.com/jjyr/pot/releases) — select `pot-go-VERSION-linux-ARCH.tar.gz` | glibc Linux amd64 / arm64; [configuration and running](docs/deployment.md) |
 
-Download links open the official release selector; packages and the container
-image await their first publication. Homebrew uses the release's local cask;
-there is currently no Pot cask in the public tap. Once images are published,
+```sh
+brew tap jjyr/pot https://github.com/jjyr/pot.git
+brew install --cask jjyr/pot/pot
+```
+
+Upgrade with `brew upgrade --cask jjyr/pot/pot`.
+
+During the unsigned release phase, macOS installation is offered through Homebrew
+only. Homebrew may still require an App-specific Gatekeeper allowance; follow the
+[first-launch guide](docs/desktop-installation.md#macos).
+
+Linux download links open the official release selector; packages and the container
+image await their first publication. The cask in this repository is disabled until
+the first macOS release and its cask update PR are merged. The first `brew tap`
+requires the explicit Git URL above. Once images are published,
 choose an explicit version tag; no `latest` tag is published. Check release
 notes and supplied checksums. If your package is unavailable, the
 [agent guide](docs/install-with-agent.md#build-from-source-when-a-matching-package-is-unavailable)
