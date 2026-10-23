@@ -83,7 +83,7 @@ assert.equal(linkDisplayName({peer:{node_id:'opaque',name:'opaque',kind:'codex'}
 const anonymous=projectTopology([{...local,name:''}],[],[page([{id:'anonymous',peer:{node_id:'opaque',kind:'pot'},status:'offline'}])]);
 assert.ok(anonymous.nodes.every(node=>!['opaque','local-node'].includes(node.name)));
 let fail=false;
-const machineClient={runtime:{boot_id:'one'},spaces:[{id:'local',control_id:'owner-a'},{id:'other',control_id:'owner-b'}],scope:()=>({space:'local'}),request:async(path,{space,owner})=>{assert.equal(owner,'');if(fail)throw Error('offline');return {items:[{id:'same-id',hostname:space+'-host',ip_addresses:[space==='local'?'10.0.0.1':'10.0.0.2']}]};}};
+const machineClient={runtime:{boot_id:'one'},spaces:[{id:'local',control_id:'owner-a'},{id:'other',control_id:'owner-b'}],scope:()=>({space:'local'}),request:async(path,{space,owner})=>{assert.equal(owner,'');if(fail)throw Error('offline');return [{id:'same-id',hostname:space+'-host',ip_addresses:[space==='local'?'10.0.0.1':'10.0.0.2']}];}};
 const presentation=machinePresentation(machineClient);
 await Promise.all(['local','other'].map(space=>presentation.load({space})));
 assert.equal(presentation.label('same-id',{space:'local'},'en'),'local-host · 10.0.0.1');
