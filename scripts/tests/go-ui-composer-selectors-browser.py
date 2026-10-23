@@ -50,7 +50,7 @@ def main():
 
     try:
         origin = f"http://127.0.0.1:{server.server_port}"
-        cli("open", "about:blank")
+        cli("open", "about:blank", "--browser", os.environ.get("POT_COMPOSER_BROWSER", "chrome"))
         images = ROOT / "output/playwright"
         images.mkdir(parents=True, exist_ok=True)
         for width, height, locale, theme in [
@@ -75,6 +75,12 @@ def main():
             )
             cli(
                 "run-code",
+                "async page => await page.locator('.composer').screenshot({path: "
+                + json.dumps(str(images / f"composer-inline-{width}-{locale}-after.png"))
+                + "})",
+            )
+            cli(
+                "run-code",
                 "async page => { await page.locator('.composer-selector-trigger[data-trigger=\"/\"]').click(); await page.getByRole('option', {name:'code-review 检查代码质量、潜在问题与测试覆盖'}).waitFor(); }",
             )
             cli(
@@ -96,6 +102,11 @@ def main():
             + "}); }",
         )
         print("Desktop/mobile Enter, IME, main/task composer regression checks passed", flush=True)
+        native_checks = (ROOT / "scripts/tests/go-ui-composer-mentions-browser.js").read_text()
+        cli("run-code", native_checks)
+        print(
+            "Native mention typing, clipboard, undo/redo, deletion and scrolling passed", flush=True
+        )
     finally:
         cli("close")
         server.shutdown()

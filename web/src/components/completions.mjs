@@ -3,6 +3,7 @@ import {avatar} from './avatar.mjs';
 import {node} from './primitives.mjs';
 import {icon} from './icons.mjs';
 import {selectorText,splitComposerValue,joinComposerValue} from './composer-selectors.mjs';
+import {bindComposerMentions} from './composer-mentions.mjs';
 
 export function completionQuery(text,caret,end=caret){
   if(caret!==end)return null;
@@ -16,8 +17,8 @@ export function bindCompletions(input,{client,host,locale,mobile=false,id='pot-r
   const chips=node('div','composer-selectors'),triggers=node('div','composer-selectors-triggers');chips.hidden=true;chips.setAttribute('aria-live','polite');form.classList.add('has-completions');form.prepend(chips);form.append(triggers);
   input.setAttribute('aria-autocomplete','list');input.setAttribute('aria-controls',list.id);input.setAttribute('aria-expanded','false');
   let items=[],selected=[],index=0,active=null,composing=false,ended=-Infinity,abort,version=0,lastLocale=locale(),disposed=false;
-  const metadata=new Map();
-  const value=()=>joinComposerValue(selected,input.value);
+  const metadata=new Map(),mentions=bindComposerMentions(input,{setText});
+  const value=()=>joinComposerValue(selected,mentions.value());
   const emit=()=>input.dispatchEvent(new Event('input',{bubbles:true}));
   const close=()=>{version++;abort?.abort();items=[];active=null;menu.hidden=true;input.setAttribute('aria-expanded','false');input.removeAttribute('aria-activedescendant');for(const button of triggers.children)button.setAttribute('aria-pressed','false');};
   const optionID=offset=>`${id.replace(/-completions$/,'')}-${offset}`;
@@ -36,7 +37,7 @@ export function bindCompletions(input,{client,host,locale,mobile=false,id='pot-r
     if(item.token.startsWith('@assistant:')){
       // Native selection retains surrounding text and moves the caret after the
       // inline reference, ready for more typing. Each occurrence stays in place.
-      input.setRangeText(raw+' ',query.start,query.end,'end');
+      close();mentions.replace(raw+' ',query.start,query.end);
     }else{
       input.setRangeText('',query.start,query.end,'end');
       if(!selected.some(old=>old.token===item.token))selected.push({...item,raw});
@@ -89,5 +90,5 @@ export function bindCompletions(input,{client,host,locale,mobile=false,id='pot-r
   });
   input.addEventListener('input',update);input.addEventListener('click',update);input.addEventListener('keyup',keyup);input.addEventListener('select',update);input.addEventListener('keydown',key,true);input.addEventListener('compositionstart',start);input.addEventListener('compositionend',end);input.addEventListener('blur',blur);document.addEventListener('pointerdown',outside);window.addEventListener('pot:locale',refresh);
   refresh();
-  return {value,refresh,reset:close,setValue(text){if(composing||text===value()&&(selected.length||!splitComposerValue(text).items.length))return;close();const draft=splitComposerValue(text);selected=draft.items.map(item=>({...metadata.get(item.token),...item}));setText(draft.text);paintChips();},dispose(){disposed=true;stopInvalidations?.();close();menu.remove();chips.remove();triggers.remove();form.classList.remove('has-completions');for(const event of ['input','click','select'])input.removeEventListener(event,update);input.removeEventListener('keyup',keyup);input.removeEventListener('keydown',key,true);input.removeEventListener('compositionstart',start);input.removeEventListener('compositionend',end);input.removeEventListener('blur',blur);document.removeEventListener('pointerdown',outside);window.removeEventListener('pot:locale',refresh);}};
+  return {value,refresh,reset:close,setValue(text){if(composing||text===value()&&(selected.length||!splitComposerValue(text).items.length))return;close();const draft=splitComposerValue(text);selected=draft.items.map(item=>({...metadata.get(item.token),...item}));mentions.setValue(draft.text);paintChips();},dispose(){disposed=true;stopInvalidations?.();close();mentions.dispose();menu.remove();chips.remove();triggers.remove();form.classList.remove('has-completions');for(const event of ['input','click','select'])input.removeEventListener(event,update);input.removeEventListener('keyup',keyup);input.removeEventListener('keydown',key,true);input.removeEventListener('compositionstart',start);input.removeEventListener('compositionend',end);input.removeEventListener('blur',blur);document.removeEventListener('pointerdown',outside);window.removeEventListener('pot:locale',refresh);}};
 }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {completionQuery} from '../../web/src/components/completions.mjs';
 import {parseAssistantMention,selectorText,splitComposerValue,joinComposerValue} from '../../web/src/components/composer-selectors.mjs';
+import {decodeMentions,encodeMentions,editMentions} from '../../web/src/components/composer-mentions.mjs';
 import {createConversationState,beginSubscription,acceptSnapshot,setDraft,beginSend,settleSend,draft} from '../../web/src/state/conversation.mjs';
 assert.deepEqual(completionQuery('请 @研究',5),{start:2,end:5,query:'@研究'});
 for(const text of ['a@example.com','https://host/path','/tmp/path','@a/b'])assert.equal(completionQuery(text,text.length),null);
@@ -22,6 +23,17 @@ assert.deepEqual(restored.items.map(item=>item.token),[skill.token]);assert.equa
 assert.equal(joinComposerValue(restored.items,restored.text).split(mention).length,2,'Old mixed draft retains one mention');
 const remote=selectorText({...assistant,token:'@assistant:node-b/agent-a'});
 assert.notEqual(remote,mention);assert.equal(parseAssistantMention(remote).node,'node-b','Same display name and agent ID retain the selected node');
+const inline=decodeMentions('前文 '+mention+' '+remote+' 后文');
+assert.equal(inline.text,'前文 @'+assistant.label+' @'+assistant.label+' 后文');
+assert.equal(encodeMentions(inline),'前文 '+mention+' '+remote+' 后文');
+assert.equal(encodeMentions(inline,inline.mentions[1].start,inline.mentions[1].end),remote,'Copy retains the selected same-name identity');
+assert.equal(encodeMentions(editMentions(inline,'新增 '+inline.text,{start:0,end:0})),'新增 前文 '+mention+' '+remote+' 后文');
+const target=inline.mentions[0];
+assert.equal(encodeMentions(editMentions(inline,inline.text.slice(0,target.start)+inline.text.slice(target.end),target)),'前文  '+remote+' 后文','Deleting one reference preserves the other full identity');
+const edited=editMentions(inline,inline.text.slice(0,target.start+2)+'改'+inline.text.slice(target.start+3));
+assert.equal(edited.mentions.length,1,'Editing a label cannot silently retain a different recipient');
+assert.equal(edited.mentions[0].node,'node-b');
+assert.equal(decodeMentions('@'+assistant.label).mentions.length,0,'Typed display names never infer identities');
 assert.equal(splitComposerValue('Example /skill:code-review\nMore').text,'Example /skill:code-review\nMore');
 assert.equal(splitComposerValue('`/skill:code-review`').items.length,0);
 assert.equal(splitComposerValue('[@broken](pot-assistant:node/../agent)').items.length,0);
