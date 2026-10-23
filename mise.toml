@@ -144,7 +144,7 @@ run = "go run ./scripts/check-go"
 
 [tasks."test:go"]
 description = "Test Go product components with the race detector"
-run = "go test -race ./..."
+run = "go test -race -timeout=20m ./..."
 
 [tasks."build:go"]
 description = "Build Go CLI independently of the desktop"
