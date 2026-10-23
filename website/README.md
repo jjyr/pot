@@ -130,7 +130,11 @@ See [screenshot provenance](../docs/images/README.md).
 
 The header's GitHub Invertocat links to the repository. It uses the unmodified
 black SVG from the [GitHub Brand Toolkit](https://brand.github.com/foundations/logo),
-served locally with its original 98:96 proportions. Source and trademark terms
+served locally with its original 98:96 proportions. The image has an HTML height
+of 16 pixels and an automatic width, so it stays compact even before the stylesheet
+loads or when a cached stylesheet predates the image selector. Its dedicated CSS
+class preserves that size; the link provides a 44-pixel minimum touch height.
+Source and trademark terms
 are recorded in `assets/GitHub-NOTICE.txt`. On static pages a single
 unauthenticated request to `https://api.github.com/repos/jjyr/pot` can add the
 public star count, cached in localStorage for six hours. Requests omit credentials
