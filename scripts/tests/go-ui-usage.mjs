@@ -6,16 +6,23 @@ import {usageRange,usageShiftRange,usageTrendBuckets} from '../../web/src/compon
 
 assert.deepEqual(usageRange('month','2024-02-29'),{preset:'month',start:'2024-02-01',end:'2024-02-29'});
 assert.deepEqual(usageShiftRange(usageRange('month','2024-03-31'),-1),usageRange('month','2024-02-15'),'Moving from March uses a whole natural February');
-assert.deepEqual(usageRange('fortnight','2026-10-25'),{preset:'fortnight',start:'2026-10-12',end:'2026-10-25'},'Two weeks cover last week and this week, aligned to Monday');
-assert.deepEqual(usageRange('fortnight','2026-01-01'),{preset:'fortnight',start:'2025-12-22',end:'2026-01-04'});
+assert.deepEqual(usageRange(),usageRange('month'),'First entry defaults to the current calendar month');
+for(const removed of ['fortnight','week','all','7','14','',null,'unknown'])assert.deepEqual(usageRange(removed,'2024-02-29'),usageRange('month','2024-02-29'),'Removed or invalid presets fall back to one month');
+assert.deepEqual(usageRange('halfyear','2024-02-29'),{preset:'halfyear',start:'2024-01-01',end:'2024-06-30'});
+assert.deepEqual(usageRange('halfyear','2024-06-30'),usageRange('halfyear','2024-02-29'));
+assert.deepEqual(usageRange('halfyear','2024-07-01'),{preset:'halfyear',start:'2024-07-01',end:'2024-12-31'});
+assert.deepEqual(usageShiftRange(usageRange('halfyear','2024-07-31'),-1),usageRange('halfyear','2024-02-29'));
+assert.deepEqual(usageShiftRange(usageRange('halfyear','2024-01-31'),-1),usageRange('halfyear','2023-12-31'),'Half-year navigation crosses years without month-end overflow');
 assert.deepEqual(usageRange('quarter','2024-02-29'),{preset:'quarter',start:'2024-01-01',end:'2024-03-31'});
 assert.deepEqual(usageShiftRange(usageRange('quarter','2026-01-01'),-1),usageRange('quarter','2025-12-31'),'Quarter navigation crosses year boundaries');
 assert.deepEqual(usageShiftRange(usageRange('year','2024-02-29'),1),usageRange('year','2025-01-01'));
-for(const preset of ['fortnight','month','quarter','year']){
+for(const preset of ['month','quarter','halfyear','year']){
   const range=usageRange(preset,'2024-03-01'),previous=usageShiftRange(range,-1);
   assert.equal((new Date(range.start)-new Date(previous.end))/86400000,1,'Previous period is adjacent without duplicating a date');
   assert.deepEqual(usageShiftRange(previous,1),range,'Next period returns to the same natural dates');
 }
+const halfyearDays=Array.from({length:182},(_,i)=>({date:new Date(Date.UTC(2024,0,1+i)).toISOString().slice(0,10),input:100}));
+assert.equal(usageTrendBuckets({buckets:halfyearDays},'halfyear').buckets.length,6,'Leap half-year retains all six calendar months');
 const daily=Array.from({length:91},(_,i)=>({date:new Date(Date.UTC(2024,0,1+i)).toISOString().slice(0,10),input:100,output:20,cache:75}));
 const weekly=usageTrendBuckets({buckets:daily},'quarter');
 assert.equal(weekly.kind,'week');assert.equal(weekly.buckets.length,13);assert.equal(weekly.buckets[0].date,'2024-01-01');assert.equal(weekly.buckets[0].end,'2024-01-07');assert.equal(weekly.buckets[0].cache,525);
