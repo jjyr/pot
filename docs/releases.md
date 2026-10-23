@@ -221,6 +221,24 @@ before startup does not establish a code failure. Paid model tests are not enabl
 
 ## Homebrew generation
 
+During the unsigned release phase, the website and README offer macOS installation
+through Homebrew only. The release still publishes the App ZIP, SHA256 files,
+`pot.rb` and Ed25519-signed update feed; hiding a download entry does not change
+packaging or publication. After a matching macOS release exists, select it in
+[Releases](https://github.com/jjyr/pot/releases), read `MACOS-RELEASE.txt`, download
+its `pot.rb` and run `brew install --cask ./pot.rb` in that directory. Inspect the
+cask before running it; it references the versioned official App ZIP and its
+SHA-256. See the [first-launch guide](desktop-installation.md#macos) for quarantine
+handling. No matching published release means this installation is not yet
+available.
+
+For a future version with verified Developer ID signing and notarization, switch
+the documented release mode to `signed`, then restore the macOS App link in
+`website/templates/page.html` and all six catalogs, regenerate the site and add
+the README download entry. Update these installation guides with that policy.
+The website uses static content; it does not read release settings or secrets.
+Never replace an earlier version's unsigned assets with signed bytes.
+
 Cask generation verifies the archive's SHA-256 sidecar and embedded bundle
 version, then fills the fixed versioned GitHub URL and digest. Both modes preserve
 Gatekeeper quarantine handling and never writes to the remote tap.

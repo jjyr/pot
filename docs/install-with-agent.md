@@ -47,18 +47,23 @@ output. Never ask the user to paste an API key or token into the conversation.
 
 ## Official download channels
 
-The website and README link to [Releases](https://github.com/jjyr/pot/releases)
-for macOS App, Experimental Linux desktop and Web UI / Server downloads. The
-release selector is intentional until assets exist; match the selected version
-and architecture rather than constructing a download URL. The
+During the unsigned release phase, the website and README offer macOS installation
+through Homebrew only. Their direct download links remain available for
+Experimental Linux desktop and Web UI / Server via
+[Releases](https://github.com/jjyr/pot/releases). The release selector is intentional
+until assets exist; match the selected version and architecture rather than
+constructing a download URL. The
 [release contract](releases.md) defines these filenames:
 
-- macOS Apple Silicon: `Pot-VERSION-arm64.zip`; extract and move Pot.app to
-  Applications, then open it. Read `MACOS-RELEASE.txt`: `unsigned` means ad-hoc
-  integrity signing without Developer ID or Apple notarization. Follow the
+- macOS Apple Silicon: download the selected release's `pot.rb` and run
+  `brew install --cask ./pot.rb` from its directory; see
+  [cask instructions](releases.md#homebrew-generation). The cask installs the
+  release's `Pot-VERSION-arm64.zip`, which remains published with its checksums
+  even while the App download entry is hidden. Read `MACOS-RELEASE.txt`:
+  `unsigned` means ad-hoc integrity signing without Developer ID or Apple
+  notarization. Follow the
   [macOS first-launch guide](desktop-installation.md#macos) only for trusted,
-  checksum-verified downloads; do not disable Gatekeeper globally. A release can
-  also include `pot.rb`: download that cask and run `brew install --cask ./pot.rb` from its directory.
+  checksum-verified downloads; do not disable Gatekeeper globally.
   Homebrew preserves quarantine and may require that same App-specific first-launch
   allowance. The public `jjyr/homebrew-tap` currently has no Pot cask; do not
   substitute a tap command.

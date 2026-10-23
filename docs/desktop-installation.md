@@ -17,20 +17,19 @@ native windows        local Runtime / executor
 
 ## macOS
 
-The Apple Silicon app requires macOS 26 or later. Until a matching download is
-published, build its independently identified development bundle with
-`mise run build`. See [Development](development.md) for source builds.
+The Apple Silicon app requires macOS 26 or later. During the unsigned release
+phase, the website and README offer **Homebrew installation only**. Once a matching
+release is published, download that release's `pot.rb` and follow the
+[local cask instructions](releases.md#homebrew-generation), running
+`brew install --cask ./pot.rb` in its directory. Homebrew installs `Pot.app` in
+Applications from the release ZIP and verifies the archive against the cask's
+SHA-256. The ZIP remains a required release asset even while its direct download
+entry is hidden. Until a matching release exists, see
+[Development](development.md) to build the independently identified development
+bundle with `mise run build`.
 
-For a published release, download `Pot-VERSION-arm64.zip` and its `.sha256`
-sidecar from the project's GitHub Release. In that download directory, verify:
-
-```sh
-shasum -a 256 -c Pot-VERSION-arm64.zip.sha256
-```
-
-Replace `VERSION` with the selected release version. Read `MACOS-RELEASE.txt` in
-that release for its signing status, then extract and move `Pot.app` to
-`/Applications`. `unsigned` releases are ad-hoc signed for executable integrity;
+Read `MACOS-RELEASE.txt` in the selected release for its signing status.
+`unsigned` releases are ad-hoc signed for executable integrity;
 they have **no Developer ID signature or Apple notarization**. Ad-hoc signing does
 not verify the developer's identity. `signed` releases use Developer ID signing
 and Apple notarization.
@@ -51,10 +50,9 @@ missing dependencies; recheck the archive and report a launch failure if it
 persists. Quit Pot before manually replacing the complete App for an upgrade;
 back up its data first.
 
-A release may also supply `pot.rb` for `brew install --cask ./pot.rb`. Homebrew
-preserves quarantine and does not guarantee bypassing Gatekeeper; the same
-first-launch guidance applies. The public tap does not currently contain a Pot
-cask. See [release channels and Homebrew](releases.md#homebrew-generation).
+Homebrew preserves quarantine and does not guarantee bypassing Gatekeeper; the
+same first-launch guidance applies to cask installations. The public tap does
+not currently contain a Pot cask.
 
 The macOS CLI archive uses the same release mode. When macOS blocks a trusted,
 verified extracted CLI installation, apply any quarantine exception only to that
