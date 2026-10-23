@@ -37,6 +37,7 @@ App resources and portable CLI archives include these original plain-text files:
 | `FrontendFontLicense.txt` | IBM Plex Sans under the SIL Open Font License |
 | `FrontendIconLicense.txt` | Retained Lucide/Feather and GitHub Octicons under ISC/MIT terms |
 | `FrontendDiagramLicense.txt` | Pele and its bundled Lucide zoom icon under MIT/ISC terms |
+| `FrontendVirtualizerLicense.txt` | TanStack Virtual Core under MIT terms |
 | `ModelDirectoryLicense.txt` | The models.dev catalog seed and Lobe Icons provider artwork |
 | `node/LICENSE` | The pinned Node.js distribution and its bundled dependencies |
 

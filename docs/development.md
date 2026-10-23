@@ -152,11 +152,30 @@ scenario; `window.navigationCaptureContinue()` resumes the checks.
 For scrolling and disclosure regressions, open
 `/scripts/tests/fixtures/chat-scroll.html?conversation=alpha&locale=en&theme=light`
 on the same loopback server. Run scrolling checks to exercise rapid reversals,
-sample viewport coverage and frame intervals, traverse beyond the data window,
+sample viewport coverage on each animation frame and frame intervals, traverse beyond the data window,
 prefetch newer history with delayed reads, and inspect deferred tool/raw details.
 Run at desktop and phone widths, including `locale=zh-CN&theme=dark`. Capture
 reading position leaves a synthetic conversation available for manual wheel,
 touchpad, keyboard and scrollbar checks.
+
+For composer resizing, run `scripts/tests/go-ui-chat-composer-browser.js` with
+Playwright CLI `run-code --filename` against that fixture, on desktop and in an
+iPhone WebKit context. Trusted textarea edits cover empty, multiline, height-cap
+overflow and clearing cycles. Per-frame assertions check Latest following,
+message movement matching composer growth, historical reading anchors and the
+single TanStack scroll writer. The navigation fixture separately checks cached
+multiline drafts and their reading positions on page and assistant returns.
+
+For long mobile touch regressions, open the scrolling fixture with Playwright
+CLI in an iPhone device context and run
+`scripts/tests/go-ui-chat-touch-browser.js` via `run-code --filename`.
+Chromium uses trusted touch gestures, including long swipes and reversals beyond
+the 640-message data window and back through evicted history;
+WebKit simulates drag, pointer cancellation and momentum with native scroll
+position input. The checks assert progress, viewport coverage and a single
+TanStack scroll writer without writes during finger contact or the moving
+momentum tail (ending at `scrollend` or 150 ms of quiet). Neither mode
+qualifies physical iPhone Safari momentum or installed home-screen behavior.
 
 For incoming correspondence disclosure checks, open
 `/scripts/tests/fixtures/correspondence.html?locale=en&theme=light` on the loopback

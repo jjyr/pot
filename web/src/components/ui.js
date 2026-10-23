@@ -146,13 +146,14 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     changed:()=>{latest.hidden=reading.following;state.uiAnchor=reading.following?null:selectedSequence()||reading.anchor?.sequence||null;},
     interact:()=>cancelChatPosition(),
     upward:()=>loadEarlierNearTop(),
+    downward:()=>loadNewerNearBottom(),
     canReadEarlier:()=>!!(state.snapshot?.history?.has_more||state.snapshot?.history?.has_newer),
     scrolled:delta=>{
       const now=performance.now();
       historySpeed=now-historyScrollTime<200?Math.abs(delta)/Math.max(1,now-historyScrollTime):0;
       historyScrollTime=now;
       if(delta<0)loadEarlierNearTop();
-      if(delta>0&&!historyLoading&&!historyFailure&&history.scrollHeight-history.clientHeight-history.scrollTop<historyPrefetch()&&state.snapshot?.history?.has_newer){pauseFollowing();readHistory({after:state.snapshot.history.after});}
+      if(delta>0)loadNewerNearBottom();
     },
   });
   const notifications=client.production?createSystemNotifications({client,surface,locale:()=>locale,
@@ -642,6 +643,11 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       pauseFollowing();readHistory({before:state.snapshot.history.before});
     }
   }
+  function loadNewerNearBottom(){
+    if(!historyLoading&&!historyFailure&&history.scrollHeight-history.clientHeight-history.scrollTop<historyPrefetch()&&state.snapshot?.history?.has_newer){
+      pauseFollowing();readHistory({after:state.snapshot.history.after});
+    }
+  }
   latest.onclick = async()=>{const ticket=positionChat({kind:'latest'});if(state.snapshot?.history?.has_newer)await readHistory({},{around:true,positionTicket:ticket});if(!currentChatPosition(ticket))return;state.uiAnchor=null;renderMessagesNow();};
   historyStatus.onclick=()=>{pauseFollowing();if(historyFailure==='history.missing'){historyFailure='';renderMessages();}else if(!historyLoading&&state.snapshot?.history?.has_more)readHistory({before:state.snapshot.history.before});};
   const messageNodes = new Map(),toolMemory=new Map();
@@ -747,12 +753,14 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     if(record.tool){
       const entry=forest.byID.get(message.tool.turn_id+':'+message.tool.id),children=entry?.children.map(child=>child.message)||[];
       if(chatPosition&&navigationPath.has(message.id)||reading.destination?.expand&&reading.destination.id===message.id)record.tool.element.open=true;
-      if(!record.childrenWindow){record.childrenWindow=createMessageWindow({scroller:history,host:record.tool.children,render:renderMessage,dispose:disposeMessage,requestRender:requestMessageRender,compensate:delta=>reading.compensate(delta),heights:windowHeights});record.tool.element.addEventListener('toggle',()=>renderMessages());}
-      record.childrenWindow.set(record.tool.element.open?children:[],{target:navigationPath.has(message.id)?{id:navigationPath.get(message.id)}:undefined});
+      if(children.length||record.childrenWindow){
+        if(!record.childrenWindow){record.childrenWindow=createMessageWindow({scroller:history,host:record.tool.children,nested:true,render:renderMessage,dispose:disposeMessage,requestRender:requestMessageRender,reading,heights:windowHeights});record.tool.element.addEventListener('toggle',()=>renderMessages());}
+        record.childrenWindow.set(record.tool.element.open?children:[],{target:navigationPath.has(message.id)?{id:navigationPath.get(message.id)}:undefined});
+      }
     }
     return record;
   };
-  const messageWindow=createMessageWindow({scroller:history,host:windowHost,render:renderMessage,dispose:disposeMessage,requestRender:requestMessageRender,compensate:delta=>reading.compensate(delta),heights:windowHeights});
+  const messageWindow=createMessageWindow({scroller:history,host:windowHost,render:renderMessage,dispose:disposeMessage,requestRender:requestMessageRender,reading,heights:windowHeights});
   const viewportObserver=new ResizeObserver(()=>requestMessageRender(true));viewportObserver.observe(history);
   function renderMessages(viewportOnly=false){fullRender ||= !viewportOnly;if(disposed||renderFrame)return;renderFrame=requestAnimationFrame(()=>{renderFrame=0;const viewportOnly=!fullRender;fullRender=false;renderMessagesNow(viewportOnly);});}
   function renderMessagesNow(viewportOnly=false) {

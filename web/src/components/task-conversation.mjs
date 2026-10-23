@@ -106,8 +106,10 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
         const approvalDescendant=children.some(function pending(entry){return !!approvalFor(entry.message.tool)||entry.children.some(pending);});
         entry.tool.update(message,{approval:approvalFor(message.tool),approvalDescendant,offline:unavailable||!!connectionError,children:children.map(child=>child.message)});
         if((reading.destination||restoringPosition)&&destinations.has(message.id)||reading.destination?.expand&&reading.destination.id===message.id)entry.tool.element.open=true;
-        if(!entry.childrenWindow){entry.childrenWindow=createMessageWindow({scroller:history,host:entry.tool.children,render:renderMessage,dispose:disposeMessage,requestRender:()=>reading.reflow(),compensate:delta=>reading.compensate(delta),heights});entry.tool.element.addEventListener('toggle',scheduleFollow);}
-        entry.childrenWindow.set(entry.tool.element.open?children.map(child=>({...child.message,viewKey:child.message.id})):[],{target:destinations.has(message.id)?{id:destinations.get(message.id)}:undefined});
+        if(children.length||entry.childrenWindow){
+          if(!entry.childrenWindow){entry.childrenWindow=createMessageWindow({scroller:history,host:entry.tool.children,nested:true,render:renderMessage,dispose:disposeMessage,requestRender:()=>reading.reflow(),reading,heights});entry.tool.element.addEventListener('toggle',scheduleFollow);}
+          entry.childrenWindow.set(entry.tool.element.open?children.map(child=>({...child.message,viewKey:child.message.id})):[],{target:destinations.has(message.id)?{id:destinations.get(message.id)}:undefined});
+        }
       }else{
         if(!entry.body){entry.body=n('div','message-body');entry.element.append(entry.body);if(message.role==='assistant')entry.reply=createReplyBubble(entry.body);}
         if(message.role==='assistant')entry.reply.update(message,{t,downloadFile,acquireFileImage,...resourceOptions,onReconnect:can('task.read')?()=>run(onRefresh):undefined,onSettings:can('assistant.configure')?onSettings:undefined});
@@ -123,7 +125,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
       }
       return entry;
   }
-  const transcriptWindow=createMessageWindow({scroller:history,host:transcript,render:renderMessage,dispose:disposeMessage,requestRender:()=>reading.reflow(),compensate:delta=>reading.compensate(delta),heights});
+  const transcriptWindow=createMessageWindow({scroller:history,host:transcript,render:renderMessage,dispose:disposeMessage,requestRender:()=>reading.reflow(),reading,heights});
   let destinations=new Map();
   function renderTranscript(){
     if(!state)return;

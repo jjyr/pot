@@ -250,6 +250,10 @@ def prepare_resources(destination, platform):
     shutil.copy2(
         ROOT / "web/src/vendor/pele-LICENSE.txt", destination / "FrontendDiagramLicense.txt"
     )
+    shutil.copy2(
+        ROOT / "web/src/vendor/tanstack-virtual-core-LICENSE.txt",
+        destination / "FrontendVirtualizerLicense.txt",
+    )
     (destination / "FrontendIconLicense.txt").write_text(
         "\n\n".join(
             (ROOT / "web/src/assets" / name).read_text().rstrip()

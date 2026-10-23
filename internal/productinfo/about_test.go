@@ -9,7 +9,7 @@ import (
 
 func TestReadUsesFixedBoundedPlainTextNotices(t *testing.T) {
 	root := t.TempDir()
-	for _, name := range []string{"LICENSE.txt", "GoDependencyLicenses.txt", "FrontendFontLicense.txt", "FrontendIconLicense.txt", "FrontendDiagramLicense.txt", "ModelDirectoryLicense.txt", "node/LICENSE", "sandbox/THIRD-PARTY-NOTICES.txt"} {
+	for _, name := range []string{"LICENSE.txt", "GoDependencyLicenses.txt", "FrontendFontLicense.txt", "FrontendIconLicense.txt", "FrontendDiagramLicense.txt", "FrontendVirtualizerLicense.txt", "ModelDirectoryLicense.txt", "node/LICENSE", "sandbox/THIRD-PARTY-NOTICES.txt"} {
 		p := filepath.Join(root, name)
 		os.MkdirAll(filepath.Dir(p), 0700)
 		os.WriteFile(p, []byte("<script>plain text notice</script>"), 0600)
@@ -19,9 +19,15 @@ func TestReadUsesFixedBoundedPlainTextNotices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !value.NoticesAvailable || len(value.Licenses) != 8 || !strings.Contains(value.Licenses[0].Text, "<script>") {
+	if !value.NoticesAvailable || len(value.Licenses) != 9 || !strings.Contains(value.Licenses[0].Text, "<script>") {
 		t.Fatalf("notice projection %+v", value)
 	}
+	virtualizerNotice := filepath.Join(root, "FrontendVirtualizerLicense.txt")
+	os.Remove(virtualizerNotice)
+	if incomplete, err := Read(root); err != nil || incomplete.NoticesAvailable {
+		t.Fatal("missing TanStack notice presented as complete")
+	}
+	os.WriteFile(virtualizerNotice, []byte("TanStack MIT"), 0600)
 	peleNotice := filepath.Join(root, "FrontendDiagramLicense.txt")
 	os.Remove(peleNotice)
 	if incomplete, err := Read(root); err != nil || incomplete.NoticesAvailable {
