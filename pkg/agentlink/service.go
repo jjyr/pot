@@ -40,7 +40,7 @@ type Service struct {
 type rate struct {
 	At     time.Time
 	Count  int
-	Active int
+	Active [2]int
 }
 type address struct {
 	Version    int           `json:"version"`

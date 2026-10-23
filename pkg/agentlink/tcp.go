@@ -100,10 +100,10 @@ func (s *Service) handler(id string, remote peer.Identity) peer.Handler {
 			if decodeJSON(request.Params, &input) != nil || input.ID != id {
 				return nil, ErrInvalid
 			}
-			if !s.admit(id) {
+			if !s.admit(id, controlAdmission) {
 				return nil, ErrUnavailable
 			}
-			defer s.release(id)
+			defer s.release(id, controlAdmission)
 			result, err = s.exchange(ctx, connection, input)
 		case "revoke":
 			var input revokeRequest
@@ -290,7 +290,17 @@ func (s *Service) closeSessions() {
 	}
 }
 
-func (s *Service) admit(id string) bool {
+type admissionKind int
+
+const (
+	controlAdmission admissionKind = iota
+	businessAdmission
+
+	maxConcurrentBusinessRequests = 5
+	maxRequestsPerMinute          = 180
+)
+
+func (s *Service) admit(id string, kind admissionKind) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
@@ -299,18 +309,22 @@ func (s *Service) admit(id string) bool {
 		value.At = now
 		value.Count = 0
 	}
-	if value.Count >= 180 || value.Active >= 1 {
+	limit := 1
+	if kind == businessAdmission {
+		limit = maxConcurrentBusinessRequests
+	}
+	if value.Count >= maxRequestsPerMinute || value.Active[kind] >= limit {
 		return false
 	}
 	value.Count++
-	value.Active++
+	value.Active[kind]++
 	s.rates[id] = value
 	return true
 }
-func (s *Service) release(id string) {
+func (s *Service) release(id string, kind admissionKind) {
 	s.mu.Lock()
 	value := s.rates[id]
-	value.Active--
+	value.Active[kind]--
 	s.rates[id] = value
 	s.mu.Unlock()
 }

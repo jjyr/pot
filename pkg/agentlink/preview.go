@@ -107,10 +107,10 @@ func (s *Service) previewHandler(request previewRequest) peer.Handler {
 		if len(input.Params) > 128 || decodeJSON(input.Params, &params) != nil || !validToken(params.Code) {
 			return nil, ErrInvalid
 		}
-		if !s.admit("preview:" + request.Invitation) {
+		if !s.admit("preview:"+request.Invitation, controlAdmission) {
 			return nil, ErrUnavailable
 		}
-		defer s.release("preview:" + request.Invitation)
+		defer s.release("preview:"+request.Invitation, controlAdmission)
 		value := request
 		value.Code = params.Code
 		result, err := s.previewInvitation(ctx, value)

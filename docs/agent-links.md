@@ -163,6 +163,15 @@ distributed execution services.
 
 ## Business contract and recovery
 
+Each authenticated connection admits up to five simultaneous incoming business
+requests, including directory reads, observations and task operations. A sixth
+request returns `agent_link_capacity_exceeded` before invoking the backend.
+The slot remains occupied until its handler returns, including after a caller
+stops waiting. This is a request limit, not a limit on running Tasks.
+Mailbox exchange retains a separate single-request slot; both share the existing
+180 admitted requests per minute per connection. Invitation preview retains its
+single-request slot and separate per-invitation rate budget.
+
 `Backend` provides `Directory`, `Observe`, `Submit`, `Status` and `Cancel`. The same receiver
 implementation owns in-process calls and authenticated remote calls. The receiver
 enforces per-assistant operation support and caller ownership; unsupported
