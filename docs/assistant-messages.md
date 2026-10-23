@@ -215,11 +215,17 @@ Chat and Task transcripts share the communication tool disclosure. Its summary
 keeps the operation and resolved full-address identities, with a compact pair of
 avatar or brand endpoints and a static directional line. Names and brands come
 from the existing assistant directory/cache; unknown addresses keep a neutral
-node. Same-node mail is labeled “This node”; only different known node IDs use
-“Agent Link”. Offline is an endpoint property and never changes Task phase.
+node. The direction line contains no channel label; channel and tool information
+remain in secondary Call details. Offline is an endpoint property and never
+changes Task phase. Ordinary send and receive records start collapsed. Manual
+choices survive message, directory, stream, locale and theme updates; existing
+approval and explicit navigation rules still apply.
 
-Opening a message shows the complete parsed `text` through the shared safe
-Markdown renderer. Receive batches retain every envelope's own from/to/body;
+Opening a message hides the summary relation diagram and shows a sender avatar
+and readable name, recipient and necessary source on a single identity row.
+The complete parsed `text` follows through the shared safe Markdown renderer,
+without a bubble, outer card, tinted fill or decorative left rule. Full address
+JSON stays in the secondary disclosure. Receive batches retain every envelope's own from/to/body;
 summary counts distinguish one sender with several messages from several sources.
 Incomplete arguments show preparation, and unavailable bodies point to the
 secondary Call details disclosure. That disclosure retains the tool name, full

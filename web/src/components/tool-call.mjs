@@ -26,6 +26,8 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
   let current,options={},signature='',approvalID='',approvalCard=null,rawSignature='',autoOpened=false,building=false,refreshStatus=()=>{};
   let bodyVersion=[];
   const sectionsByKey=new Map();
+  // Ordinary communication starts collapsed; only explicit reading/navigation or
+  // the existing approval path opens it. Updates never reapply a default.
   root.open=memory.get(key)?.open||false;raw.open=memory.get(key)?.raw||false;
   function messageTitle(tool){
     const model=communication(tool,messageActor());
@@ -72,7 +74,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     const model=communication(tool,messageActor()),summaryModel=model||(!isGroup&&script?.focus?communication(script.focus,messageActor()):null);
     metadata.hidden=isGroup;raw.hidden=isGroup;
     if(model){if(metadata.parentElement!==rawBody)rawBody.prepend(metadata);}else if(metadata.parentElement!==body)body.insertBefore(metadata,approval);
-    communicationView.update(summaryModel,{expanded:root.open&&!!model&&!pending,preparing:tool.phase==='preparing'});
+    communicationView.update(summaryModel,{expanded:root.open&&!pending,preparing:tool.phase==='preparing'});
     communicationView.body.hidden=!model||!!pending;
     root.classList.toggle('communication-tool',!!summaryModel);
     // Receive records are a history projection, not a timed network operation.
@@ -115,8 +117,9 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     const error=isGroup?'':tool.diagnostic||(tool.failurePhase?t(tool.failurePhase):['failed','denied','unknown'].includes(phase)?String(toolFailure(tool)||t(phase)).split('\n')[0]:'');failure.textContent=String(error).split('\n')[0];failure.hidden=!error;
     failure.onclick=script?event=>{event.preventDefault();root.open=true;onLocate?.(tool.failureID||script.failureID,tool.turn_id);}:null;
     if(script&&error){failure.tabIndex=0;failure.setAttribute('role','button');failure.onkeydown=event=>{if(['Enter',' '].includes(event.key)){event.preventDefault();failure.click();}};}else{failure.removeAttribute('tabindex');failure.removeAttribute('role');failure.onkeydown=null;}
-    const nextSignature=JSON.stringify([tool.name,tool.target,tool.workdir,tool.execution_mode,targetLabel,locale()]);
-    if(signature!==nextSignature){signature=nextSignature;metadata.replaceChildren();for(const [label,value]of [[t('executionMode'),tool.execution_mode==='host'?t('hostExecution'):tool.execution_mode==='sandbox'?t('sandboxExecution'):null],[t('name'),tool.name],[t('target'),targetLabel],[t('workdir'),tool.workdir]])if(value)metadata.append(n('dt','',label),n('dd','',value));}
+    const channels=model?[...new Set(model.messages.map(mail=>t(!mail.from?.node_id||!mail.to?.node_id?'channelUnknown':mail.from.node_id===mail.to.node_id?'channelLocal':'channelLink')))].join(', '):'';
+    const nextSignature=JSON.stringify([tool.name,tool.target,tool.workdir,tool.execution_mode,targetLabel,channels,locale()]);
+    if(signature!==nextSignature){signature=nextSignature;metadata.replaceChildren();for(const [label,value]of [[t('messageChannel'),channels],[t('executionMode'),tool.execution_mode==='host'?t('hostExecution'):tool.execution_mode==='sandbox'?t('sandboxExecution'):null],[t('name'),tool.name],[t('target'),targetLabel],[t('workdir'),tool.workdir]])if(value)metadata.append(n('dt','',label),n('dd','',value));}
     if(pending){
       if(approvalID!==pending.id){approvalID=pending.id;approvalCard=createApprovalCard({locale,machineLabel,onDecision});approval.replaceChildren(approvalCard.element);}
       approvalCard.update(pending);

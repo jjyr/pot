@@ -39,7 +39,8 @@ System / Light / Dark appearance is available in General settings.
 | Error / destructive action | `#BD342D` | `#FF6961` |
 
 Conversation Markdown uses 15 px text with a 24 px line height. Tool headings stay
-compact at 12 px; communication bodies use 14 px text with a 1.7 line height.
+compact at 12 px; communication bodies use 14 px text with a 1.8 line height
+(13 px in narrow communication containers).
 Task, approval and resource components keep their existing placement and controls.
 
 Keep text readable against its actual surface, targeting WCAG AA contrast.

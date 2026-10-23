@@ -54,14 +54,21 @@ try{
   task.update({state});task.start();await frame();
   check(taskRoot.querySelector('[data-call-id=task-send] .tool-title')?.textContent===expected('sendMessageTo','@'+literal),'Task conversation shares complete target resolution');
   check(taskRoot.querySelector('[data-call-id=task-receive] .tool-title')?.textContent===expected('receiveMessageFrom','@Chef'),'Task receive tool record shares sender identity');
-  const editor=task.input;client.assistants=client.assistants.map(item=>item.origin?{...item,name:'Remote chef updated',profile_name:'Remote chef updated'}:item);
+  const taskSend=taskRoot.querySelector('[data-call-id=task-send]'),taskReceive=taskRoot.querySelector('[data-call-id=task-receive]');
+  check(!taskSend.open&&!taskReceive.open,'Task send and receive start collapsed');
+  taskSend.querySelector('summary').click();await frame();
+  check(taskSend.querySelector('.communication-summary').hidden&&taskSend.querySelector('.communication-identity'),'Task expanded identity replaces compact graph');
+  const editor=task.input;editor.dispatchEvent(new Event('input',{bubbles:true}));await frame();
+  check(taskSend.open&&!taskReceive.open,'Task typing retains disclosure choices');client.assistants=client.assistants.map(item=>item.origin?{...item,name:'Remote chef updated',profile_name:'Remote chef updated'}:item);
   task.update({});await frame();
   check(taskRoot.querySelector('.tool-title')?.textContent===expected('sendMessageTo','@Remote chef updated'),'Task directory refresh updates existing title');
+  check(taskSend.open&&!taskReceive.open,'Task directory refresh retains disclosure choices');
   check(task.input===editor&&editor.value==='Unsent task draft','Task draft/editor survive identity update');
   locale=locale==='en'?'zh-CN':'en';document.documentElement.lang=locale;
   for(const entry of cards)entry.view.update(entry.value);task.update({});await frame();
   check(title(outbound)===expected('sendMessageTo','@Chef'),'mounted title follows locale accessor');
   check(taskRoot.querySelector('.tool-title')?.textContent===expected('sendMessageTo','@Remote chef updated'),'Task title follows locale accessor');
+  check(taskSend.open&&!taskReceive.open,'Task locale refresh retains disclosure choices');
   check(host.scrollWidth<=host.clientWidth+1,'long names fit the available width');
   result.textContent=`PASS (${innerWidth}px): incoming/outgoing, full address, self, duplicate source, fallback, streaming, escaping, raw details, disclosure, Task, drafts, rename and live i18n`;
   if(!params.has('embedded')){const phone=document.createElement('iframe');phone.title='Phone message title checks';phone.src='/scripts/tests/fixtures/message-titles.html?embedded=1&locale=zh-CN';document.body.append(phone);}

@@ -179,7 +179,7 @@ on loopback port 17723. It copies the **same** review fixture into each tree;
 the fixture mounts production Chat without extra styling. Open
 `/before/scripts/tests/fixtures/communication-review.html?locale=en&theme=light`
 or `/after/scripts/tests/fixtures/communication-review.html?locale=en&theme=dark`.
-Use `scenario=send`, `receive` or `details` to select the native disclosure;
+Use `scenario=collapsed`, `send`, `receive` or `details` to select the native disclosure;
 at phone widths, select Pot first. Pot and Code reviewer are synthetic directory
 identities; the latter is explicitly a Codex peer using the product brand assets.
 Accepted/received records and the connected peer state are simulated. Requests
@@ -201,9 +201,10 @@ PLAYWRIGHT_BROWSERS_PATH="$PWD/output/pr-images/toolchain/browsers" \
 
 Run these Node commands through `mise exec --` when the pinned toolchain is not
 already on PATH. The capture script accepts an origin and output directory as
-positional arguments. It uses independent fresh pages with equal data, locale,
-theme and dimensions for each pair: 1280×1000 send/receive/dark, 1280×1400 expanded
-details, and 390×1000 phone receive, all at device scale 1. It checks safe Markdown,
+positional arguments. `POT_CHROMIUM_EXECUTABLE` optionally selects an existing
+Chromium executable without downloading another browser. It uses independent fresh pages with equal data, locale,
+theme and dimensions for each pair: 1280×1000 collapsed/send/receive/dark, 1280×1400 expanded
+details, and 390×1000 phone receive in light and dark themes, all at device scale 1. It checks safe Markdown,
 send/receive direction, native disclosure state, loaded images and horizontal fit.
 Draft PNGs go to `output/pr-images/communication-review/`; copy only reviewed
 captures into the source branch's [PR image directory](pr-images/README.md).

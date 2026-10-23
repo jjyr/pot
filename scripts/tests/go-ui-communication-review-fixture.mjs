@@ -5,7 +5,7 @@ import {mountApp} from '../../web/src/components/ui.js';
 const params=new URLSearchParams(location.search),scenario=params.get('scenario')||'send';
 const local={node_id:'review-local',kind:'assistant',agent_id:'pot'};
 const remote={node_id:'review-codex',kind:'assistant',agent_id:'review'};
-const text='**Review summary**\n\n- Keep the message easy to read.\n- Check the same layout at phone width.\n\n`const safe = true;`\n\n<script>window.reviewInjected = true</script>';
+const text='**Review summary**\n\n- Keep the message easy to read.\n- Check the same layout at phone width.\n\n```js\nconst safe = true;\nconst description = "A long code line stays inside its own scrollable code block at phone width.";\n```\n\nThis paragraph checks natural long-message reading, with clear spacing between paragraphs, lists and code. The same synthetic text is shown in both source versions.\n\n<script>window.reviewInjected = true</script>';
 const tool=(id,name,args,result)=>({id,role:'tool',status:'complete',text:'',tool:{id,turn_id:'review',name,args,result,phase:'completed'}});
 const messages=[
   {id:'request',request_id:'review',role:'user',status:'complete',text:'Review the communication UI using this synthetic conversation.'},
@@ -44,7 +44,7 @@ window.communicationReview={errors,scenario,text,async prepare(){
   if(!card)throw Error('Review card did not mount');
   // Use native production disclosures; never inject alternate UI or screenshot CSS.
   for(const item of document.querySelectorAll('details.tool-call'))if(item!==card&&item.open)item.querySelector('summary').click();
-  if(!card.open)card.querySelector('summary').click();
+  if(scenario!=='collapsed'&&!card.open)card.querySelector('summary').click();
   await frame();
   const raw=card.querySelector('.tool-raw');
   if(scenario==='details'&&!raw.open){raw.querySelector('summary').click();await frame();}
