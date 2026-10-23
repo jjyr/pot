@@ -36,7 +36,7 @@ const host=document.querySelector('#page'),result=document.querySelector('#resul
 const pages=createPages({client,host,approvalHost:document.querySelector('#approvals'),chatApprovalHost:document.querySelector('#chat-approvals'),chatVisible:()=>false,locale:()=>language,notify:()=>{},changed:()=>{},titleChanged:()=>{},openChat:()=>{}});
 function verify(){
   const checks=[],check=(value,message)=>{if(!value)throw Error(message);checks.push(message);};
-  const range=host.querySelector('.usage-range'),start=range.dataset.start,end=range.dataset.end,data=summary(start,end),numbers=usageNumbers(language),preset=host.querySelector('.usage-period-select').value;
+  const range=host.querySelector('.usage-range'),start=range.dataset.start,end=range.dataset.end,data=summary(start,end),numbers=usageNumbers(language),preset=range.dataset.preset;
   const calendar=host.querySelector('.usage-calendar'),trend=host.querySelector('.usage-trend'),distributions=host.querySelector('.usage-distributions'),chart=distributions.querySelector('[data-view-key="compactionShare"]');
   check(requests.some(row=>row.start===start&&row.end===end),'Page queries explicit inclusive date boundaries');
   check(host.querySelector('.usage-total .metric strong').textContent===numbers.compact(data.total.input+data.total.output),'Top totals follow selected dates even in conversation scope');

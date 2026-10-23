@@ -708,11 +708,11 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
         select.onchange=()=>{filter.usageSpace=select.value;usageOffsets.clear();show('usage',{keepUsageOwner:true});};headingActions.append(select);
       }
     }
-    const t=key=>translate(locale(),'usage.'+key),onRange=range=>{filter.usageRange=range;filter.usageDraft=null;show('usage',{keepUsageOwner:true});};
+    const t=key=>translate(locale(),'usage.'+key),onRange=range=>{filter.usageRange=range;show('usage',{keepUsageOwner:true});};
     const titleRow=toolbar(n('h2','page-heading',usageOwner?t('scopedTitle'):tr('Overall statistics','总体统计')),headingActions);titleRow.classList.add('usage-heading');root.append(titleRow);
     if(usageOwner)root.append(n('p','hint',usageOwner.name));
     const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone,scopeID=usageOwner?.scope||usageOwner?.owner||'',range={...filter.usageRange},year=filter.usageYear,params={start:range.start,end:range.end,timezone,scope:scopeID},calendarParams={start:`${year}-01-01`,end:`${year}-12-31`,timezone,scope:scopeID},spaceID=usageOwner?.space||filter.usageSpace;
-    root.append(usageRangeControls(range,{locale:locale(),onRange,draft:filter.usageDraft,onDraft:value=>filter.usageDraft=value}));
+    root.append(usageRangeControls(range,{locale:locale(),onRange}));
     const selectedNotices=n('div'),calendarNotices=n('div');root.append(selectedNotices);
     root.dataset.usageScope=JSON.stringify([spaceID,scopeID,usageOwner?.owner||'']);
     const listsRoot=n('div','usage-lists'),jobs=[];
@@ -737,7 +737,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     const routing=data.routing_total||{};
     if(routing.requests){const routingCard=card(tr('Task routing turns','任务路由回合'));routingCard.append(usageTooltip(n('p','usage-number',`${compact(routing.input+routing.output)} tokens`),{title:tr('Task routing turns','任务路由回合'),rows:usageRows(routing,locale()),note:tr('Includes the entire main-chat turn that delegated a task. Already included in totals.','包含委派任务的整个主聊天回合，已计入总量。')}));projection.append(routingCard);}
     projection.append(usageTrend(data,{locale:locale(),timezone,preset:range.preset}),usageDistributions(data,{locale:locale()}));
-    if(calendarPages){const calendarData=calendarPages.length===1?calendarPages[0].value:combineUsage(calendarPages);projection.append(usageCalendar(calendarData,{locale:locale(),timezone,year,range,onYear:value=>{filter.usageYear=value;show('usage',{keepUsageOwner:true});},onDate:day=>onRange({preset:'custom',start:day,end:day})}));}
+    if(calendarPages){const calendarData=calendarPages.length===1?calendarPages[0].value:combineUsage(calendarPages);projection.append(usageCalendar(calendarData,{locale:locale(),timezone,year,range,onYear:value=>{filter.usageYear=value;show('usage',{keepUsageOwner:true});},onDate:day=>onRange({preset:'day',start:day,end:day})}));}
     else {const failure=n('section','page-card usage-calendar-error');failure.append(n('p','inline-error',t('calendarUnavailable')),action(translate(locale(),'retry'),()=>pageView?.queue.run()));projection.append(failure);}
     for(const page of pages) {
       const value=page.value,owner={space:page.space.id,owner:usageOwner?.owner||''};

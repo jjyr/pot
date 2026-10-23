@@ -1,12 +1,16 @@
 # Token usage and allowances
 
 Usage has one date range for the total card, trend, category shares, model shares
-and compaction usage. Week (Monday–Sunday), month and year use natural calendar
-boundaries with previous/next navigation. The current month is the default;
-recent 30 days and inclusive custom dates are also available. The selection
-survives navigation and language changes within the window. Current periods keep
-all their dates, including zero-usage/future dates, and mark statistics through
-today. Dates follow the current system IANA zone.
+and compaction usage. Four directly clickable options select 2 weeks, 1 month,
+3 months or 1 year; there is no dropdown or custom date form. Two weeks cover
+last week and this week (Monday–Sunday); month, quarter and year select the
+current natural calendar period. Previous/next moves a whole selected period
+without overlapping dates. Selecting an option again returns to its current
+period. The current month is the default. The active timescale stays highlighted
+when navigating previous periods. Selection survives navigation and language
+changes within the window. Current periods retain all dates, including zero-usage
+and future dates, and mark statistics through today. Dates follow the current
+system IANA zone. Clicking the full-year calendar still selects an individual day.
 
 The stacked trend separates uncached input, cached input and output. Intervals of
 up to 31 days use daily bars; longer intervals up to 180 days use Monday-based

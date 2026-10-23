@@ -1,8 +1,10 @@
 async page => {
   const ready=async()=>{await page.waitForFunction(()=>document.querySelector('.page-content')?.getAttribute('aria-busy')==='false'&&!!document.querySelector('.usage-trend'));await page.evaluate(()=>window.usageFixture.verify());};
+  const selectedRange=()=>page.locator('.usage-range').evaluate(node=>({start:node.dataset.start,end:node.dataset.end}));
   await page.waitForFunction(()=>/^(PASS|FAIL)/.test(document.querySelector('#result').textContent));
   if(!(await page.locator('#result').textContent()).startsWith('PASS'))throw Error(await page.locator('#result').textContent());
   await ready();
+  if(await page.locator('.usage-range select,.usage-range input').count()||await page.locator('.usage-period-link').count()!==4)throw Error('Exactly four directly clickable timescales, without extra date controls');
   const last=page.locator('.usage-trend .chart-column').last();
   await last.focus();
   if(!await last.locator('.usage-tooltip').evaluate(node=>node.matches(':popover-open')))throw Error('Keyboard focus must show usage details');
@@ -13,56 +15,46 @@ async page => {
   await page.keyboard.press('Escape');
   const scenario=await page.locator('#fixture-case').inputValue();
   if(scenario==='trend'){
-    await page.locator('.usage-period-select').selectOption('week');await ready();
-    if(await page.locator('.chart-column').count()!==7)throw Error('Natural week must retain seven dates');
-    const current=await page.locator('.usage-range').getAttribute('data-start');
-    await page.locator('.usage-range-toolbar>.control').first().click();await ready();
-    if(await page.locator('.usage-range').getAttribute('data-start')===current)throw Error('Previous period failed');
-    await page.locator('.usage-period-select').selectOption('year');await ready();
-    if(await page.locator('.chart-column').count()!==12)throw Error('Full year must show twelve natural months');
-    await page.locator('.usage-period-select').selectOption('custom');await ready();
-    const inputs=page.locator('.usage-custom-range input');
-    await inputs.nth(0).fill('2024-02-28');await inputs.nth(1).fill('2024-03-01');
-    const originalLanguage=await page.locator('#fixture-locale').inputValue();
-    await page.locator('#fixture-locale').selectOption(originalLanguage==='en'?'zh-CN':'en');await ready();
-    if(await inputs.nth(0).inputValue()!=='2024-02-28'||await inputs.nth(1).inputValue()!=='2024-03-01')throw Error('Locale switch lost unapplied custom dates');
-    await page.locator('.usage-custom-range button').click();await ready();
-    if(await page.locator('.chart-column').count()!==3)throw Error('Custom dates lost leap day');
+    for(const preset of ['fortnight','month','quarter','year']){
+      const link=page.locator(`.usage-period-link[data-preset="${preset}"]`);
+      await link.click();await ready();const current=await selectedRange();
+      if(await page.locator('.usage-period-link[aria-pressed="true"]').count()!==1||await link.getAttribute('aria-pressed')!=='true')throw Error('Selected timescale must be marked');
+      if(!await page.locator('.usage-range-toolbar>.control').last().isDisabled())throw Error('Next period must be disabled beyond the current natural period');
+      if(preset==='fortnight'&&await page.locator('.chart-column').count()!==14)throw Error('Two weeks must retain fourteen dates');
+      if(preset==='month'&&!current.start.endsWith('-01'))throw Error('Month must start on its first day');
+      if(preset==='quarter'&&!/-0[147]-01$|-10-01$/.test(current.start))throw Error('Three months must align to a natural quarter');
+      if(preset==='year'&&await page.locator('.chart-column').count()!==12)throw Error('Year must show twelve natural months');
+      await page.locator('.usage-range-toolbar>.control').first().click();await ready();const previous=await selectedRange();
+      if((new Date(current.start)-new Date(previous.end))/86400000!==1)throw Error('Adjacent periods must not overlap or skip a day');
+      if(await link.getAttribute('aria-pressed')!=='true')throw Error('Timescale stays selected while browsing previous periods');
+      await page.locator('.usage-range-toolbar>.control').last().click();await ready();
+      if(JSON.stringify(await selectedRange())!==JSON.stringify(current))throw Error('Next period failed to return to current dates');
+    }
     const year=Number(await page.locator('.usage-calendar-controls>span').textContent());
     for(let i=year;i>2024;i--){await page.locator('.usage-calendar-controls button').first().click();await ready();}
     if(await page.locator('.usage-day').count()!==366)throw Error('Calendar year must include leap day');
     await page.locator('.usage-day[data-date="2024-02-29"]').click();await ready();
-    if(await page.locator('.chart-column').count()!==1||await page.locator('.usage-range').getAttribute('data-start')!=='2024-02-29')throw Error('Selecting calendar date must update all statistics');
+    if(await page.locator('.chart-column').count()!==1||(await selectedRange()).start!=='2024-02-29')throw Error('Selecting calendar date must update all statistics');
     const request=await page.evaluate(()=>window.usageFixture.requests.find(row=>row.start==='2024-02-29'&&row.end==='2024-02-29'));
     if(request.scope!=='main'||request.owner!=='main')throw Error('Date selection lost conversation owner');
-    // Hold an older request while a different range completes, then release it.
     await page.evaluate(()=>window.usageFixture.hold());
-    await page.locator('.usage-period-select').selectOption('week');
+    await page.locator('.usage-period-link[data-preset="fortnight"]').click();
     await page.waitForFunction(()=>document.querySelector('.page-content')?.getAttribute('aria-busy')==='true');
-    await page.locator('.usage-period-select').selectOption('month');await ready();
-    const selected=await page.locator('.usage-range').getAttribute('data-start');
+    await page.locator('.usage-period-link[data-preset="month"]').click();await ready();
+    const selected=await selectedRange();
     await page.evaluate(()=>window.usageFixture.release());
-    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-    await ready();
-    if(await page.locator('.usage-range').getAttribute('data-start')!==selected)throw Error('Stale response replaced the selected range');
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));await ready();
+    if(JSON.stringify(await selectedRange())!==JSON.stringify(selected))throw Error('Stale response replaced selected dates');
     await page.evaluate(()=>window.usageFixture.failCalendar(true));
     await page.locator('.usage-calendar-controls button').first().click();await ready();
     if(!await page.locator('.usage-calendar-error').count())throw Error('Annual failure must leave selected statistics available');
     await page.evaluate(()=>window.usageFixture.failCalendar(false));
     await page.locator('.usage-calendar-error button').click();await ready();
     if(!await page.locator('.usage-calendar').count())throw Error('Calendar retry failed');
-    await page.locator('.usage-period-select').selectOption('recent');await ready();
-    if(await page.locator('.chart-column').count()!==30)throw Error('Recent 30 days must remain available');
-    await page.locator('.usage-period-select').selectOption('custom');await ready();
-    await page.locator('.usage-custom-range input').nth(0).fill('2017-01-01');
-    await page.locator('.usage-custom-range input').nth(1).fill('2026-12-31');
-    await page.locator('.usage-custom-range button').click();await ready();
-    if(await page.locator('.chart-column').count()!==120)throw Error('Long custom ranges must fit natural months without scrolling');
-    await page.locator('.usage-period-select').selectOption('recent');await ready();
   }
-  const language=await page.locator('#fixture-locale').inputValue(),selected=await page.locator('.usage-range').getAttribute('data-start');
+  const language=await page.locator('#fixture-locale').inputValue(),selected=await selectedRange();
   await page.locator('#fixture-locale').selectOption(language==='en'?'zh-CN':'en');
   await page.waitForFunction(expected=>document.querySelector('.usage-trend h2')?.textContent===expected,language==='en'?'用量趋势':'Usage trend');await ready();
-  if(await page.locator('.usage-range').getAttribute('data-start')!==selected)throw Error('Language switch lost date selection');
-  return 'Date controls, distributions, calendar selection, ownership, stale requests and locale passed';
+  if(JSON.stringify(await selectedRange())!==JSON.stringify(selected))throw Error('Language switch lost date selection');
+  return 'Four timescales, natural period navigation, distributions, calendar selection, stale requests and locale passed';
 }
