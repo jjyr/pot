@@ -1,7 +1,7 @@
 # Pot website
 
 A standalone product website with equal emphasis on assistant tasks and Agent Link,
-including the verified Codex integration. It uses static HTML, CSS and JavaScript;
+including the verified Codex integration, a parallel-task example and four installation paths. It uses static HTML, CSS and JavaScript;
 Python's standard library generates all six language entries and an offline preview.
 No product runtime, Node dependencies or build framework are required.
 
@@ -33,7 +33,7 @@ navigation and refresh work on an ordinary static server without rewrites. With
 JavaScript disabled, the localized body and language links remain available.
 
 Language switching preserves the current section, agent, direct/delegated mode,
-task example, playback stage, workflow step and open result preview. Static pages
+playback stage, workflow step and open result preview. Static pages
 carry demo state in query parameters; the offline preview switches in place.
 Chinese script subtags take precedence over region subtags: `zh-Hant`, `zh-TW`,
 `zh-HK` and `zh-MO` select Traditional Chinese; `zh-Hans` selects Simplified Chinese.
@@ -50,6 +50,7 @@ Storage failures do not prevent use.
 - `build-site.py` validates catalog structure and registered template text, then
   generates `index.html`, the six localized pages and `pot-preview.html`.
   `build-preview.py` runs the same generator.
+- `install.json` contains the single English agent prompt and literal build commands; the generator inserts these without translation. Keep the prompt identical to the README and installation guide.
 - `app.js` provides shared interactions and localized report previews/downloads.
 - `locale.js` normalizes languages, saves preferences and detects language only
   at the root entry.
@@ -88,7 +89,7 @@ The deployment includes only `index.html`, `style.css`, `app.js`, `locale.js`,
 `assets/` and the six locale directories. Templates, catalogs, build scripts,
 the README and the offline preview are excluded. Relative resource and language
 links work under the `/pot/` project path; for example, Simplified Chinese is
-available at `https://jjyr.github.io/pot/zh-CN/`. No custom domain is configured.
+available at `https://jjyr.github.io/pot/zh-CN/`. The production website is available at `https://pot.jjylab.com`.
 
 ## Product claims and links
 
@@ -98,12 +99,23 @@ released native adapters. Nodes retain their own tools, credentials and approval
 All website tasks, conversations, scheduled work and reports are local examples;
 they do not call real agents or contain real connection information.
 
-The repository is `https://github.com/jjyr/pot`. Its documentation index is
-[`docs/README.md`](../docs/README.md), and Codex setup is documented in
-[`integrations/codex/README.md`](../integrations/codex/README.md). The repository is
-currently private, so these are contributor references rather than public install
-or documentation links. The website retains its in-page guidance until public
-entry points are available; it does not invent download commands.
+The repository is `https://github.com/jjyr/pot`. The installation section links
+its [agent installation guide](../docs/install-with-agent.md), desktop, Docker
+and Server documentation as four parallel choices. Release assets and container
+images are pending; the displayed commands use the official source-build paths.
+The repository is currently private, so these sources and guides require repository access. Check current releases and visibility before changing this status. The English agent prompt is
+intentionally identical in every locale. No installation or agent execution is
+performed by the website. Result previews use synthetic notes, a documentation
+change excerpt and real shared-UI screenshots with isolated synthetic records.
+See [screenshot provenance](../docs/images/README.md).
+
+The header's local star icon links to the repository. On static pages a single
+unauthenticated request to `https://api.github.com/repos/jjyr/pot` can add the
+public star count, cached in localStorage for six hours. Requests omit credentials
+and referrers and time out after three seconds. Failed requests, rate limits,
+unusable storage and invalid/zero counts retain the working link without a count.
+There is no server, token or build-time network dependency; the offline preview
+makes no star-count request. Clicking the link does not perform a Star action.
 
 ## Brand image sources
 
@@ -121,3 +133,14 @@ screen reader announcements.
 
 Trademarks and images belong to their respective owners. Their use identifies
 connection targets and does not imply endorsement or additional integration support.
+
+## Browser checks
+
+After building, serve the **checkout root** (the product screenshot fixture imports
+`web/src`), for example `python3 -m http.server 4173 --bind 127.0.0.1`.
+With Playwright and Chromium available outside the website runtime, run
+`node scripts/tests/website-browser.mjs`. `POT_WEBSITE_ORIGIN` overrides the server
+origin; `POT_PLAYWRIGHT_MODULE` can point to an external Playwright module.
+These checks cover six-language copy behavior, parallel playback and its terminal
+state, deliverable previews, narrow layouts, keyboard controls and Star fallbacks.
+They use synthetic clipboard/API responses and never execute installation commands.

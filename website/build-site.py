@@ -21,6 +21,7 @@ CATALOGS = {code: json.loads((ROOT / "i18n" / f"{code}.json").read_text()) for c
 META_DESCRIPTION_KEY = html.unescape(
     re.search(r'<meta name="description" content="([^"]+)"', TEMPLATE)[1]
 )
+INSTALL = json.loads((ROOT / "install.json").read_text())
 REFERENCE = CATALOGS["en"]
 # Every meaningful template string must have an explicit catalog entry or be a brand.
 BRANDS = {"Pot", "Codex", "Claude", "Grok bot", "Devin", "Agent Link", "Pot.", "Pot → Codex"}
@@ -65,6 +66,12 @@ def render(code, prefix="../", root=False):
     catalog = CATALOGS[code]
     texts = catalog["page"]
     demo = catalog["demo"]
+    install = {
+        **INSTALL,
+        "server": INSTALL["server"].replace(
+            "{anotherTerminal}", texts["在另一个终端中获取登录 token："]
+        ),
+    }
 
     def node(m):
         raw = m[1]
@@ -102,7 +109,26 @@ def render(code, prefix="../", root=False):
         "".join(f'<link rel="alternate" hreflang="{k}" href="{prefix}{k}/">' for k in LANGUAGES)
         + f'<link rel="alternate" hreflang="x-default" href="{prefix}index.html">'
     )
-    config = {**catalog, "locale": code, "assetBase": prefix}
+    for marker, key in {
+        "agent-prompt": "prompt",
+        "desktop-command": "mac",
+        "docker-command": "docker",
+        "server-command": "server",
+    }.items():
+        page = page.replace("<!--" + marker + "-->", esc(install[key]))
+    tasks = [
+        ("install", "验证 Linux 安装", "启动、模型连接、重开持久化"),
+        ("docs", "整理入门文档", "平台、安装步骤、首次配置"),
+        ("screens", "准备产品截图", "助手工作、后台任务、Agent Link"),
+    ]
+    page = page.replace(
+        "<!--project-tasks-->",
+        "".join(
+            f'<article class="project-task done"><span class="task-number">0{i + 1}</span><h3>{esc(texts[title])}</h3><p>{esc(texts[detail])}</p><span class="pill project-state">{esc(texts["已完成"])}</span><button data-open-report="{key}">{esc(texts["查看示例成果"])} ↗</button></article>'
+            for i, (key, title, detail) in enumerate(tasks)
+        ),
+    )
+    config = {**catalog, "install": install, "locale": code, "assetBase": prefix}
     scripts = f'<script src="{prefix}locale.js"></script><script id="pot-data" type="application/json">{payload(config)}</script><script src="{prefix}app.js" defer></script>'
     page = page.replace('<script src="app.js" defer></script>', alternatives + scripts)
     conversation, flow = initial_demo(catalog, prefix)
@@ -157,7 +183,12 @@ def preview():
             "devin": "devin.png",
         }.items():
             body = body.replace("assets/" + file, assets[key])
-        config = {**config, "assets": assets}
+        product_images = {
+            key: "data:image/png;base64,"
+            + base64.b64encode((ROOT / "assets" / file).read_bytes()).decode()
+            for key, file in {"work": "product-work.png", "link": "product-agent-link.png"}.items()
+        }
+        config = {**config, "assets": assets, "productImages": product_images}
         title = html.unescape(re.search(r"<title>(.*?)</title>", page, re.S)[1])
         description = config["page"][META_DESCRIPTION_KEY]
         bundle[code] = {"body": body, "data": config, "title": title, "description": description}
@@ -184,7 +215,7 @@ def preview():
         + app
         + "</script></body></html>"
     )
-    assert not re.search(r'(?:src|href)=["\'](?:https?://|\.\./|assets/)', result), (
+    assert not re.search(r'(?:src=|<link\b[^>]*\bhref=)["\'](?:https?://|\.\./|assets/)', result), (
         "Preview contains a remote or missing resource"
     )
     (ROOT / "pot-preview.html").write_text(result)

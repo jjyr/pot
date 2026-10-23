@@ -5,6 +5,7 @@ Code defines actual behavior.
 
 | Topic | Read |
 |---|---|
+| Agent-assisted installation and first configuration | [Install with an agent](install-with-agent.md) |
 | Deployment, resource APIs and web-ui-server | [Deployment](deployment.md) |
 | Linux server image, persistent volumes and Docker isolation | [Docker](docker.md) |
 | Local updates, interruption confirmation and release signing | [Updates](updates.md) |
