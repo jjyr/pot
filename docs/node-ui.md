@@ -7,9 +7,9 @@ rows. Names and list positions never determine routing.
 
 Execution-machine names use the current OS hostname, with a local interface IP
 and finally the OS name as discovery fallbacks. `GET /api/v1/machines` returns a
-top-level array with `hostname` and `ip_addresses` as live, best-effort
-presentation metadata; it does not persist them or change stable routing/policy
-IDs. Only up, non-loopback interfaces supply
+JSON array. Each entry includes `hostname` and `ip_addresses` as live, best-effort
+presentation metadata; it does not persist
+them or change stable routing/policy IDs. Only up, non-loopback interfaces supply
 unicast addresses; link-local addresses are omitted. Addresses are deduplicated
 and sorted with IPv4 before IPv6. These addresses do not prove remote reachability.
 The Link graph and inspector show the same host information directly.
