@@ -152,6 +152,33 @@ func TestBrowserReadRoutesReachApplication(t *testing.T) {
 			}
 		})
 	}
+	for _, period := range []struct {
+		start, end string
+		days       int
+	}{
+		{"2024-02-19", "2024-03-03", 14},
+		{"2024-02-01", "2024-02-29", 29},
+		{"2024-01-01", "2024-03-31", 91},
+		{"2024-01-01", "2024-12-31", 366},
+	} {
+		path := "/api/v1/usage/summary?assistant_id=" + owner.ID + "&scope=main&timezone=UTC&start=" + period.start + "&end=" + period.end
+		r := httptest.NewRequest("GET", "http://localhost"+path, nil)
+		r.AddCookie(cookie)
+		w := httptest.NewRecorder()
+		browser.ServeHTTP(w, r)
+		var summary usage.Summary
+		if err := json.Unmarshal(w.Body.Bytes(), &summary); err != nil || w.Code != http.StatusOK || summary.Days != period.days || summary.Start != period.start || summary.End != period.end || len(summary.Buckets) != period.days || summary.Total.Requests != 0 || summary.Timezone != "UTC" || summary.Scope != "main" {
+			t.Fatalf("assistant browser dates did not reach the ledger: status=%d days=%d start=%s end=%s error=%v", w.Code, summary.Days, summary.Start, summary.End, err)
+		}
+	}
+	for _, query := range []string{
+		"summary?start=2024-01-01", "summary?start=2024-01-01&end=2024-12-31&days=365",
+		"models?start=2024-01-01&end=2024-12-31",
+	} {
+		if _, err := app.Call(ctx, Request{Method: "GET", Path: "/api/v1/usage/" + query + "&assistant_id=" + owner.ID}); err == nil {
+			t.Fatal("invalid assistant usage date range accepted", query)
+		}
+	}
 	for _, path := range []string{"/api/v1/runtime/control", "/api/v1/runtime/resources", "/api/v1/terminals", "/api/v1/usage/policy"} {
 		r := httptest.NewRequest("GET", "http://localhost"+path, nil)
 		r.AddCookie(cookie)

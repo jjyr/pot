@@ -338,7 +338,7 @@ func (p agentPort) Call(ctx context.Context, target protocol.AgentRef, operation
 		}
 		return s.ManageApproval(ctx, assistantID, call.Body)
 	case agentlink.AssistantUsage:
-		days, offset := 365, 0
+		days, offset := 0, 0
 		var err error
 		if call.Query["days"] != "" {
 			days, err = strconv.Atoi(call.Query["days"])
@@ -356,8 +356,11 @@ func (p agentPort) Call(ctx context.Context, target protocol.AgentRef, operation
 		if zone == "" {
 			zone = "Asia/Shanghai"
 		}
-		q := usage.Query{Days: days, Timezone: zone, Scope: call.Query["scope"], Offset: offset}
+		q := usage.Query{Days: days, Start: call.Query["start"], End: call.Query["end"], Timezone: zone, Scope: call.Query["scope"], Offset: offset}
 		if call.ID != "summary" {
+			if q.Start != "" || q.End != "" {
+				return nil, errors.New("date ranges require usage summary")
+			}
 			switch call.ID {
 			case "models", "requests", "tools", "compactions":
 				return s.Usage.Page(ctx, call.ID, q, storage.Now())
