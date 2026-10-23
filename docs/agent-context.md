@@ -369,13 +369,20 @@ the task and are not offered as global selectors. Skills have no icons.
 saved avatars, names and sources. Cached offline assistants are visible but
 cannot be selected. Opening the picker reads snapshots without connecting to peers.
 
-Selections appear as removable composer chips. They remain ordinary message
-text internally: `/skill:skill-creator` and
-`[@Display name](pot-assistant:NODE_ID/AGENT_ID)`. The selected prefix is followed
-by a newline and the typed message. Full assistant identity survives duplicate
-display names, drafts, retries and history; mention links are displayed as
-non-navigable names. They identify collaborators to the current assistant and
-never change the receiving conversation or automatically send peer messages.
+Skills appear as removable composer chips and serialize as a `/skill:skill-creator`
+prefix followed by a newline and the typed message. Selecting an assistant replaces
+only the current `@query` at the caret with an inline Markdown reference,
+`[@Display name](pot-assistant:NODE_ID/AGENT_ID)`, followed by a space. The native
+textarea shows this readable name and explicit address; typing continues after
+the reference, with surrounding text intact. Main Chat and task guidance use the
+same completion behavior. Draft restoration keeps assistant references in the
+body, including mentions from previously saved selector prefixes.
+
+Full assistant identity survives duplicate display names, drafts, retries and
+history; history renders mention links as non-navigable `@Display name` references
+with the full address in their title. They identify collaborators to the current
+assistant and never change the receiving conversation or automatically send peer
+messages.
 The existing `list_assistants` and `send_message` tools handle collaboration.
 There are no added prompt instructions or model-side lookup tools.
 

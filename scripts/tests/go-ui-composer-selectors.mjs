@@ -9,9 +9,19 @@ const skill={token:'/skill:code-review',label:'code-review'},assistant={token:'@
 const mention=selectorText(assistant);assert.deepEqual(parseAssistantMention(mention),{label:assistant.label,node:'node-a',agent:'agent-a',token:assistant.token});
 assert.equal(selectorText({token:'@assistant:node/../other',label:'bad'}),'');
 assert.equal(parseAssistantMention('[@bad](javascript:alert(1))'),null);
-const selected=[skill,assistant],text='检查 PR\n只检查新改动';
+const selected=[skill],text=`请 ${mention} 检查 PR\n${mention} 只检查新改动`;
 const encoded=joinComposerValue(selected,text),decoded=splitComposerValue(encoded);
 assert.equal(decoded.text,text);assert.deepEqual(decoded.items.map(item=>item.token),selected.map(item=>item.token));assert.equal(joinComposerValue(decoded.items,decoded.text),encoded);
+for(const body of [mention,mention+'\n后文','前文 '+mention+' 后文',mention+' '+mention]){
+  assert.deepEqual(splitComposerValue(body),{items:[],text:body},'Inline mentions never become chips');
+  const withSkill=joinComposerValue([skill],body),restored=splitComposerValue(withSkill);
+  assert.equal(restored.text,body);assert.equal(joinComposerValue(restored.items,restored.text),withSkill);
+}
+const oldDraft=joinComposerValue([skill,assistant],'原有正文'),restored=splitComposerValue(oldDraft);
+assert.deepEqual(restored.items.map(item=>item.token),[skill.token]);assert.equal(restored.text,mention+'\n原有正文');
+assert.equal(joinComposerValue(restored.items,restored.text).split(mention).length,2,'Old mixed draft retains one mention');
+const remote=selectorText({...assistant,token:'@assistant:node-b/agent-a'});
+assert.notEqual(remote,mention);assert.equal(parseAssistantMention(remote).node,'node-b','Same display name and agent ID retain the selected node');
 assert.equal(splitComposerValue('Example /skill:code-review\nMore').text,'Example /skill:code-review\nMore');
 assert.equal(splitComposerValue('`/skill:code-review`').items.length,0);
 assert.equal(splitComposerValue('[@broken](pot-assistant:node/../agent)').items.length,0);

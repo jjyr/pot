@@ -62,7 +62,7 @@ def main():
             cli("resize", str(width), str(height))
             cli(
                 "goto",
-                f"{origin}/scripts/tests/fixtures/composer-selectors.html?conversation=alpha&locale={locale}&theme={theme}&capture=assistants",
+                f"{origin}/scripts/tests/fixtures/composer-selectors.html?conversation=alpha&locale={locale}&theme={theme}&capture=assistants{'&mobile=1' if width < 719 else ''}",
             )
             cli(
                 "run-code",
