@@ -19,10 +19,17 @@ const task=card('task','get_task',{task_id:'task-one'},{task:{id:'task-one',titl
 const schedule=card('schedule','manage_schedule',{action:'create',spec:{title:'Morning review',kind:'cron',cron:'0 9 * * 1-5',timezone:'Asia/Shanghai',enabled:true}},{id:'plan-one',title:'Morning review',enabled:true});
 const resource=card('resource','register_resource',{path:'activity-design.html'},{id:'resource-one',name:'activity-design.html',mime_type:'text/html',size:18000,files:[{path:'activity-design.html',mime_type:'text/html',size:18000}]});
 const external=card('external','mcp_lookup',{query:'tool activity',limit:2},{content:[{type:'text',text:JSON.stringify({items:[{title:'Terminal activity',description:'Command and output in one view'},{title:'Task activity',description:'Receipt status and task state are separate'}],total:2})}]});
+const observation=(sequence,title='Example Domain')=>({protocol_version:1,session_id:'browser-internal-session',sequence,viewport:{width:1280,height:800},url:'https://example.com/',title,elements:[{element:'1',role:'link',name:'Learn more',value:'',properties:[]}],truncated:false});
+const observedPage=document.createElement('canvas');observedPage.width=640;observedPage.height=160;
+const drawing=observedPage.getContext('2d');drawing.fillStyle='#f0f0f2';drawing.fillRect(0,0,640,160);drawing.fillStyle='#202124';drawing.font='bold 24px sans-serif';drawing.fillText('Example Domain',32,48);drawing.font='16px sans-serif';drawing.fillText('This domain is for use in illustrative examples.',32,85);drawing.fillStyle='#38488f';drawing.fillText('Learn more',32,122);
+const screenshot={type:'image',mimeType:'image/png',data:observedPage.toDataURL().split(',')[1]};
+const browserResult={session_id:'repl-internal-session',content:[{type:'text',text:JSON.stringify(observation(1,'Earlier page'))},{...screenshot,data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='},{type:'text',text:JSON.stringify(observation(2))},screenshot]};
 try{
   if(review){
     const scenario=params.get('scenario')||'terminal';
-    for(const entry of scenario==='details'?[task,schedule,resource]:[command,change])await expand(entry);
+    if(scenario==='browser'){
+      host.replaceChildren();const browser=card('browser-review','cua_repl',{code:'state = await tab.observe();'},browserResult);await expand(browser);
+    }else for(const entry of scenario==='details'?[task,schedule,resource]:[command,change])await expand(entry);
     window.toolContentFixture={ready:true};
   }else{
     const {toolKind,toolArgs,patchGroups}=await import('../../web/src/state/tool-presentation.mjs');
@@ -70,6 +77,21 @@ try{
     const partial=card('partial','unknown_tool','{"query":',undefined,'preparing');await expand(partial);check(partial.root.querySelector('.tool-content').textContent.includes(t('preparingArguments')),'partial arguments identified');
     check(toolArgs(partial.value.tool)===null&&toolKind({name:'cua_repl'})==='browser','partial args and tool classification');
     const browser=card('browser','cua_repl',{code:'await tab.getState();'},{content:[{type:'text',text:'Observed Pot chat'}]});await expand(browser);check(browser.root.querySelector('.tool-script-code').textContent==='await tab.getState();','browser source retained without inferred actions');
+    browser.value.tool={...browser.value.tool,result:browserResult};browser.view.update(browser.value);await frame();
+    const browserContent=browser.root.querySelector('.tool-content');
+    check(browserContent.textContent.includes('Example Domain')&&browserContent.textContent.includes('https://example.com/'),'browser shows latest page title and URL');
+    check(!['elements','sequence','session_id','Earlier page','Learn more'].some(text=>browserContent.textContent.includes(text)),'browser technical observations stay out of reading view');
+    check(browserContent.querySelectorAll('img').length===1&&browserContent.querySelector('img').src.endsWith(screenshot.data),'browser shows only latest screenshot');
+    browser.root.querySelector('.tool-raw>summary').click();await frame();check(browser.root.querySelector('.tool-raw').textContent.includes('elements')&&browser.root.querySelector('.tool-raw').textContent.includes('Earlier page'),'raw details retain full observation history');
+    browser.value.tool={...browser.value.tool,result:{...browserResult,isError:true,error:'Page action failed',content:[...browserResult.content,{type:'text',text:'REPL diagnostic retained'}]}};browser.view.update(browser.value);await frame();
+    check(browserContent.textContent.includes('REPL diagnostic retained')&&browserContent.textContent.includes('Page action failed'),'browser retains logs and failure diagnostics');
+    const retainedImage=browserContent.querySelector('img');locale=locale==='en'?'zh-CN':'en';browser.view.update(browser.value);await frame();
+    check(browserContent.textContent.includes(t('page'))&&browserContent.querySelector('img')===retainedImage&&retainedImage.alt===t('image'),'browser locale refresh preserves image and updates accessible labels');
+    locale=params.get('locale')||'en';browser.view.update(browser.value);
+    const textBrowser=card('text-browser','cua_repl',{}, {session_id:'text-repl',content:[{type:'text',text:JSON.stringify({...observation(1),limitations:'Canvas content requires visual capability.'})}]});await expand(textBrowser);
+    check(!textBrowser.root.querySelector('img')&&textBrowser.root.querySelector('.tool-content').textContent.includes('Canvas content requires visual capability.'),'text-only observations preserve limitations without images');
+    const plainBrowser=card('plain-browser','cua_repl',{}, {content:[{type:'text',text:'{"elements":["user data"],"title":"User output"}'}]});await expand(plainBrowser);
+    check(plainBrowser.root.querySelector('.tool-content').textContent.includes('user data'),'ordinary REPL objects are not mistaken for observations');
     const script=card('script','exec',{code:'await tools.exec_command({cmd:"pwd"});'},{output:'script result',completed:true});script.root.open=true;script.view.update(script.value,{children:[command.value]});await frame();check(!script.root.querySelector('.tool-script-code'),'composition children replace duplicate source');
     const assistantFiles=card('assistant-files','apply_patch',{patch:'*** Begin Patch\n*** Update File: /assistant/AGENTS.md\n@@\n-old rules\n+new rules\n*** End Patch'},{output:'Updated /assistant/AGENTS.md'});await expand(assistantFiles);check(assistantFiles.root.querySelector('.tool-file-heading').textContent.includes('/assistant/AGENTS.md')&&assistantFiles.root.querySelector('.tool-diff-add').textContent.includes('new rules'),'assistant files use the ordinary file diff');
     const pending=card('approval','exec_command',{cmd:'rm sample.txt'},undefined,'preparing');pending.view.update(pending.value,{approval:{id:'review',request:{tool:'exec_command',machine_id:'dev',args:{cmd:'rm sample.txt'}}}});await frame();check(pending.root.open&&!pending.root.querySelector('.tool-approval').hidden&&pending.root.querySelector('.tool-terminal').hidden,'exact approval takes priority over terminal');

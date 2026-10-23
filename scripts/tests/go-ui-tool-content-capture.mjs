@@ -30,6 +30,7 @@ try{
     }}finally{await parent.close();}
   }
   for(const [name,width,height,locale,theme,scenario]of [
+    ['computer-desktop-light',1100,1000,'zh-CN','light','browser'],
     ['terminal-desktop-light',1100,1200,'en','light','terminal'],
     ['terminal-mobile-dark',390,1300,'zh-CN','dark','terminal'],
     ['details-desktop-light',1100,1500,'en','light','details'],
