@@ -25,13 +25,13 @@ func TestDirectTasksOwnIndependentPersistentSessions(t *testing.T) {
 	go func() { b.run(ctx); close(done) }()
 	defer func() { cancel(); <-done }()
 	from := protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}
-	request := agentlink.TaskRequest{From: from, Executor: "codex", RequestID: "first", Text: "approve"}
+	request := agentlink.TaskRequest{From: from, Executor: "agent", RequestID: "first", Text: "approve"}
 	first, err := b.Submit(ctx, request)
 	if err != nil || first.Execution == nil || first.Assistant.Address.Valid() {
 		t.Fatal(first, err)
 	}
 	pending := awaitReview(t, b, reviewQuery(from))
-	second, err := b.Submit(ctx, agentlink.TaskRequest{From: from, Executor: "codex", RequestID: "second", Text: "parallel"})
+	second, err := b.Submit(ctx, agentlink.TaskRequest{From: from, Executor: "agent", RequestID: "second", Text: "parallel"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,8 +118,8 @@ func TestCodexTaskRequiresExplicitExecutionAndAssistantOwner(t *testing.T) {
 	ctx := context.Background()
 	for _, r := range []agentlink.TaskRequest{
 		{From: protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}, AssistantID: "codex", RequestID: "assistant-target", Text: "work"},
-		{From: protocol.AgentRef{NodeID: "pot", Kind: "user", AgentID: "user"}, Executor: "codex", RequestID: "direct-user", Text: "work"},
-		{From: protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}, Executor: "codex", AssistantID: "codex", RequestID: "mixed", Text: "work"},
+		{From: protocol.AgentRef{NodeID: "pot", Kind: "user", AgentID: "user"}, Executor: "agent", RequestID: "direct-user", Text: "work"},
+		{From: protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}, Executor: "agent", AssistantID: "codex", RequestID: "mixed", Text: "work"},
 	} {
 		if _, err := b.Submit(ctx, r); err == nil {
 			t.Fatal("ambiguous execution accepted", r)
@@ -135,7 +135,7 @@ func TestDirectTaskDoesNotRequireCodexAssistant(t *testing.T) {
 		t.Fatal(err)
 	}
 	from := protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}
-	task, err := b.Submit(ctx, agentlink.TaskRequest{From: from, Executor: "codex", RequestID: "no-assistant", Text: "execute independently"})
+	task, err := b.Submit(ctx, agentlink.TaskRequest{From: from, Executor: "agent", RequestID: "no-assistant", Text: "execute independently"})
 	if err != nil {
 		t.Fatal(err)
 	}

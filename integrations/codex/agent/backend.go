@@ -202,7 +202,7 @@ func jobID(from protocol.AgentRef, request string) string {
 	return hex.EncodeToString(sum[:])
 }
 func (b *backend) Submit(ctx context.Context, r agentlink.TaskRequest) (agentlink.Task, error) {
-	if r.Executor != "codex" || r.Configuration != nil {
+	if r.Executor != "agent" || r.Configuration != nil {
 		return agentlink.Task{}, agentlink.ErrUnsupported
 	}
 	if !validID(r.RequestID) || !r.From.Valid() || r.Text == "" || len(r.Text) > 24000 {

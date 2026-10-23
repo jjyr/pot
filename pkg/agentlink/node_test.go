@@ -64,9 +64,22 @@ func TestTaskCallerKindsAndConfigurationAuthorityOnPeerTransport(t *testing.T) {
 			t.Fatal(kind, err)
 		}
 	}
+	for _, executor := range []string{"codex", "claude", "unknown"} {
+		request := TaskRequest{From: protocol.AgentRef{NodeID: a.id, Kind: "assistant", AgentID: "source"}, RequestID: "invalid-selector", Text: "Work", Executor: executor}
+		for _, link := range []string{"", c.ID} {
+			if _, err := a.service.Submit(ctx, link, request); !errors.Is(err, ErrInvalid) {
+				t.Fatal("retired selector reached backend", link, executor, err)
+			}
+		}
+	}
 	session, err := a.service.ensureSession(ctx, c)
 	if err != nil {
 		t.Fatal(err)
+	}
+	var invalidResult Task
+	invalidRequest := TaskRequest{From: protocol.AgentRef{NodeID: a.id, Kind: "assistant", AgentID: "source"}, RequestID: "invalid-wire", Text: "Work", Executor: "codex"}
+	if err = a.service.call(ctx, session, "task.submit", invalidRequest, &invalidResult); !errors.Is(err, ErrInvalid) {
+		t.Fatal("wire selector bypassed validation", err)
 	}
 	configuration := protocol.CreateTask{RequestID: "owner-config", Text: "Work"}
 	input := TaskRequest{From: protocol.AgentRef{NodeID: a.id, Kind: "assistant", AgentID: "source"}, RequestID: configuration.RequestID, Text: configuration.Text, Configuration: &configuration}
@@ -169,6 +182,7 @@ type guidanceBackend struct {
 
 func (b *guidanceBackend) Directory(ctx context.Context) (Directory, error) {
 	d, err := b.testBackend.Directory(ctx)
+	d.TaskExecutor = &Description{Version: 1, Scope: "caller", Operations: []Operation{TaskSubmit, TaskInput}}
 	if b.supportsInput.Load() {
 		description := d.Operations["other"]
 		description.Operations = append(description.Operations, TaskInput)
@@ -211,5 +225,43 @@ func TestTaskInputUsesSameCapabilitiesForLocalAndPeerAdapters(t *testing.T) {
 		if _, err := a.service.Input(ctx, link, forged); !errors.Is(err, ErrInvalid) || backend.inputs.Load() != 1 {
 			t.Fatal("foreign local caller admitted", link, err)
 		}
+	}
+}
+
+func TestGenericAdapterValidationRetainsNodeAndReceiptBindings(t *testing.T) {
+	identity := Identity{Address: protocol.AgentRef{NodeID: "receiver", Kind: "node", AgentID: "receiver"}, Adapter: "fixture-agent", Name: "Agent"}
+	if !validNodeIdentity(identity) {
+		t.Fatal(identity)
+	}
+	for _, adapter := range []string{"", "..", "../agent", "agent/type", string(make([]byte, 129))} {
+		invalid := identity
+		invalid.Adapter = adapter
+		if validIdentity(invalid) {
+			t.Fatal("invalid adapter identity accepted", adapter)
+		}
+		if err := validateDirectory(Directory{NodeID: "receiver", Name: "Agent", Adapter: adapter}, "receiver"); err == nil {
+			t.Fatal("invalid adapter directory accepted", adapter)
+		}
+	}
+	directory := Directory{NodeID: "receiver", Name: "Agent", Adapter: "fixture-agent", TaskExecutor: &Description{Version: 1, Scope: "caller", Operations: []Operation{TaskSubmit, TaskRead}}}
+	if err := validateDirectory(directory, "receiver"); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateDirectory(directory, "other-node"); err == nil {
+		t.Fatal("foreign directory accepted")
+	}
+	identity.Address = protocol.AgentRef{NodeID: "receiver", Kind: "task", AgentID: "task"}
+	receipt := Task{ID: "task", RequestID: "request", Execution: &identity, State: "queued"}
+	if err := validateTask(receipt, "receiver", "fixture-agent", "task", "request"); err != nil {
+		t.Fatal(err)
+	}
+	for _, binding := range [][4]string{{"wrong-node", "fixture-agent", "task", "request"}, {"receiver", "other-agent", "task", "request"}, {"receiver", "fixture-agent", "other-task", "request"}, {"receiver", "fixture-agent", "task", "other-request"}} {
+		if err := validateTask(receipt, binding[0], binding[1], binding[2], binding[3]); err == nil {
+			t.Fatal("receipt binding ignored", binding)
+		}
+	}
+	identity.Address.AgentID = "different-task"
+	if err := validateTask(receipt, "receiver", "fixture-agent", "task", "request"); err == nil {
+		t.Fatal("execution identity mismatch accepted")
 	}
 }

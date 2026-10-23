@@ -13,11 +13,11 @@ func TestObservationSeparatesTaskLoadChatAndCleanupFence(t *testing.T) {
 	b := testBackend(t)
 	ctx := context.Background()
 	from := protocol.AgentRef{NodeID: "peer", Kind: "assistant", AgentID: "main"}
-	running, err := b.Submit(ctx, agentlink.TaskRequest{Executor: "codex", From: from, RequestID: "running", Text: "secret task text"})
+	running, err := b.Submit(ctx, agentlink.TaskRequest{Executor: "agent", From: from, RequestID: "running", Text: "secret task text"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = b.Submit(ctx, agentlink.TaskRequest{Executor: "codex", From: from, RequestID: "queued", Text: "secret queued text"}); err != nil {
+	if _, err = b.Submit(ctx, agentlink.TaskRequest{Executor: "agent", From: from, RequestID: "queued", Text: "secret queued text"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = submitMessageFixture(b, ctx, agentlink.TaskRequest{From: from, RequestID: "chat", Text: "secret chat text"}); err != nil {

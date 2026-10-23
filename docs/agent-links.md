@@ -6,12 +6,13 @@ status, cancellation and result notification. Each receiver owns its models,
 credentials, workspaces, permissions and execution supervision. A connection
 never grants owner HTTP APIs, model proxying or raw process launch access.
 
-A Codex node advertises a caller-scoped `task_executor` independently of its
-assistant directory. Explicit tasks map directly to independent Codex threads.
+A node may advertise a caller-scoped `task_executor` independently of its
+assistant directory. `executor: "agent"` selects this capability regardless of the
+Adapter implementation. The receiving Adapter owns task sessions and execution.
 Only their original directing assistant's authenticated user may approve their
 operations. Assistant messages never carry approval authority or request user
 approval; the receiving assistant declines operations outside its permissions and
-reports the denial. See [Codex execution](task-coordination.md#codex-execution).
+reports the denial. See [Agent execution](task-coordination.md#agent-execution).
 
 The [architecture overview](architecture.md) shows the shared local/peer operation
 port and its execution adapters.
@@ -23,16 +24,19 @@ addresses are `{node_id, kind: assistant, agent_id}`. Node IDs, connection IDs,
 assistant IDs and execution IDs are distinct. Names and origin icons are display
 metadata. One machine can host several autonomous nodes.
 
-`Directory` advertises the current assistants, persisted default assistant ID
-and per-assistant operation descriptions. Pot exposes real assistants. Codex exposes
-virtual assistants for assistant messaging and presentation management; each owns
-one persistent message context. Its node-level `task_executor` advertises explicit
-task submit/read/cancel/input and human review, separately from assistant controls.
-One task owns one persistent Codex thread, without an assistant target. Task and
-message sessions do not share context; shared workspaces still share files.
+`Directory` advertises current assistants, a persisted default assistant ID,
+per-assistant operation descriptions and an optional caller-scoped `task_executor`.
+Adapter identifiers are bounded identifiers describing the implementation. They
+do not grant capabilities. Directory and Task receipts must match the connected
+node and Adapter identity; execution receipts also bind their original Task ID.
+A node may expose assistant messaging, independent Task execution or both. The
+receiving Adapter owns their execution contexts. See the
+[Codex Adapter](../integrations/codex/README.md) for its separate task and message
+sessions.
 
-For ordinary Pot task routing, an explicit target wins. An omitted target uses
-the receiver's persisted default, initially its first assistant. Resolution occurs once at durable acceptance.
+For ordinary assistant Task routing, an explicit target wins. An omitted target
+uses the receiver's persisted default, initially its first assistant. Resolution
+occurs once at durable acceptance.
 Exact retries return that original receipt even after the default changes or the
 assistant is removed. Removing the default does not silently select another:
 the directory advertises an empty default until the owner chooses a valid one.

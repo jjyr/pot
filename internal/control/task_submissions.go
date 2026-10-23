@@ -67,10 +67,10 @@ func (s *Service) createTaskFrom(ctx context.Context, owner string, from protoco
 	if e != nil {
 		return protocol.TaskInfo{}, e
 	}
-	if request.Executor == "codex" && request.LinkID == "" {
+	if request.Executor == "agent" && request.LinkID == "" {
 		chosen := ""
 		for _, c := range links {
-			if c.State == "revoked" || c.Peer.Adapter != "codex" {
+			if c.State == "revoked" || c.State == "disconnected" {
 				continue
 			}
 			directory, err := s.agentLinks.service.Directory(ctx, c.ID)
@@ -112,8 +112,8 @@ func (s *Service) createTaskFrom(ctx context.Context, owner string, from protoco
 	if request.Target != nil && selected.PeerHost.NodeID != request.Target.NodeID {
 		return protocol.TaskInfo{}, agentlink.ErrConflict
 	}
-	if request.Executor == "codex" {
-		if from.Kind != "assistant" || selected.Peer.Adapter != "codex" || request.Target != nil {
+	if request.Executor == "agent" {
+		if from.Kind != "assistant" || request.Target != nil {
 			return protocol.TaskInfo{}, agentlink.ErrUnsupported
 		}
 		directory, err := s.agentLinks.service.Directory(ctx, selected.ID)
@@ -123,8 +123,18 @@ func (s *Service) createTaskFrom(ctx context.Context, owner string, from protoco
 		if directory.TaskExecutor == nil || !directory.TaskExecutor.Supports(agentlink.TaskSubmit) {
 			return protocol.TaskInfo{}, agentlink.ErrUnsupported
 		}
-	} else if selected.Peer.Adapter == "codex" {
-		return protocol.TaskInfo{}, agentlink.ErrUnsupported
+	} else {
+		directory, err := s.agentLinks.service.Directory(ctx, taskLinkID(selected.ID))
+		if err != nil {
+			return protocol.TaskInfo{}, err
+		}
+		assistant := directory.DefaultAssistantID
+		if request.Target != nil {
+			assistant = request.Target.AgentID
+		}
+		if !directory.Operations[assistant].Supports(agentlink.TaskSubmit) {
+			return protocol.TaskInfo{}, agentlink.ErrUnsupported
+		}
 	}
 	r := agentlink.TaskRequest{Executor: request.Executor, RequestID: request.RequestID, From: from, Text: request.Text, Workspace: request.Workspace.ProjectDir}
 	if request.Target != nil {
@@ -298,7 +308,7 @@ func (s *Service) taskExecutionNotification(ctx context.Context, id, owner strin
 		run = linkRunID(id)
 	}
 	eventID := id
-	if d.Execution.Request.Executor == "codex" {
+	if d.Execution.Request.Executor == "agent" {
 		eventID, _ = core.HashJSON([]string{id, run})
 	}
 	result := protocol.TaskResultEvent{TaskID: id, RunID: run, Title: d.Info.Title, Phase: d.Info.Phase, Text: d.Execution.Receipt.Result, Error: d.Execution.Receipt.Error, Origin: protocol.TaskOrigin{Kind: "manual"}}

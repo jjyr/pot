@@ -43,15 +43,16 @@ catalogue and original conversation use the same retained task reference.
 Explicit targets select that assistant; otherwise the receiving node resolves its
 persisted default once. The receiver owns execution, model selection and local
 permissions. Linked submission rejects local `machine_id`, model, Skills and
-execution requirements before admission. Ordinary Pot targets may accept a
-destination directory hint; Codex chooses its own workspace. Local provider
-credentials and model snapshots are never forwarded.
+execution requirements before admission. Assistant targets may accept a
+destination directory hint; explicit node executors choose their own workspace.
+Local provider credentials and model snapshots are never forwarded.
 The directing node stores an idempotent Task and execution reference rather
 than launching a local worker copy. Assistant-directed results notify the
 original directing assistant through its inbox and task-outcome projection;
 user-directed results follow the conversation route described above.
 
-Linked tasks use the same lists and detail view, with a Codex or Pot source icon.
+Linked tasks use the same lists and detail view, with the receiving Adapter’s
+source icon.
 Cancellation targets the original accepted task; local archive state is supported.
 Additional controls follow the receiving adapter's advertised operations. Codex
 accepts guidance after a terminal run to continue the same task; live steering,
@@ -59,50 +60,55 @@ pause, local allowance controls, remote file reads and execution transcripts are
 currently unavailable across nodes.
 Disconnected nodes retain the last accepted state without replaying work.
 
-## Codex execution
+## Agent execution
 
-The assistant decides how to execute a task using its instructions and available
-capabilities. Omitting `executor` preserves ordinary task routing. Explicit
-`executor: "codex"` selects a Codex node, never a Codex assistant. `link_id` chooses
-a node; without it exactly one reachable, capable Codex node must exist. Ambiguous
-or unavailable selection fails without falling back to ordinary tasks. `target`,
-local model configuration, Skills and workspace overrides cannot accompany a
-Codex execution request; the receiving owner controls execution scope.
+Every Task invokes the Agent Link port, including the in-process local Adapter.
+The assistant selects a receiver using instructions and advertised capabilities.
+Omitting `executor` preserves ordinary assistant Task routing. Explicit
+`executor: "agent"` selects a node's caller-scoped `task_executor` capability,
+independently of its Adapter name. `link_id` chooses a connection; without it
+exactly one reachable, capable connected node must exist. Ambiguous or unavailable
+selection fails without falling back to ordinary Tasks. `target`, local model
+configuration, Skills and workspace overrides cannot accompany an explicit
+executor request; the receiving owner controls execution scope.
 
 ```text
-User <--> current assistant A -- task T1 --> Codex thread S1
-                  |                 ^             |
-                  |                 +-- approval -+
-                  +------------ task T2 --> Codex thread S2
-
-Assistant A -- message --> assistant B (any backend)
-            <-- answer / permission denial --
-            no approval authority or user approval forwarding
+User <--> directing assistant A
+                  |
+                  v
+             Task catalogue
+                  |
+            Agent Link port
+             /           \
+     local Adapter    connected Adapter
+                  |      (e.g. Codex)
+                  v
+       receiver-owned Agent execution
+                  |
+          Task status / outcome
 ```
 
-Each accepted task persistently owns exactly one thread and a snapshot of its
-execution workspace/mode. Exact submission retries return the same task. Separate
-tasks execute independently, including while another waits for approval. After a
-terminal run, owner guidance starts a new run in the same task/thread; active-run
-guidance is rejected. Previous results remain in receiver history and each run
-has a distinct completion notification. Restart does not replay uncertain work or
-replace unavailable threads.
+`task_executor` and per-assistant operation descriptions are separate capabilities;
+a node may advertise both. Adapter identifiers describe implementations, not
+execution policy. Exact submission retries return the original accepted Task,
+including after a directory change. Cancellation, guidance and approval forwarding
+require the receiving Adapter's advertised operations. Owner guidance cannot be
+synthesized from a peer reference or a forwarded message. Continuations preserve
+the Task identity and produce distinct run identities and completion notifications.
+Restart never replays uncertain work.
 
-Codex retains its configured approval policy and reviewer. Automatic review runs
-entirely on the receiving Codex host; its events, decisions and history do not
-cross Agent Link or appear in Pot's approval interface. Only a pending App Server
-request that requires a human decision is forwarded into A's existing approval
-list and card. Resolved requests disappear; execution outcomes use ordinary task
-results or assistant replies, not a separate approval history.
+The [Codex Adapter](../integrations/codex/README.md) currently implements independent
+persistent task sessions and terminal-run continuation. Its workspace, session and
+approval implementation belong to that Adapter rather than the shared Task API.
+Other Adapters can implement the same contract with their own Agent runtime.
 
-Only authenticated user operations in A's existing permission interface may
-resolve T1's exact pending command/file request with `allow_once` or `deny`.
-Decisions bind the original caller, task, thread and turn, and expire with that
-execution. There is no additional node grant and no model approval tool.
-Assistant messages follow B's receiver policy: operations within its authority
-may run; requests for human approval are declined and returned as a failure to A. Neither
-A nor B opens user approvals because of a message. Message text cannot change
-this boundary or upgrade a message into a user-approved delegated task.
+Where approval forwarding is supported, only authenticated user operations in A's
+existing permission interface may resolve the original Task's exact pending request
+with `allow_once` or `deny`. Decisions bind the original caller, Task and execution,
+and expire with that execution. The receiving Adapter owns automatic review;
+there is no model approval tool or extra node grant. Assistant messages carry no
+approval authority and cannot become a user-approved Task. The receiver declines
+operations outside its message permissions and returns the denial.
 
 ## Autonomous model routing
 

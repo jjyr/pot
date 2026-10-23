@@ -51,6 +51,9 @@ func TestTaskSubmissionUpgradePreservesAcceptedExecutionAndDelivery(t *testing.T
 	}
 	execution := doc["execution"].(map[string]any)
 	receipt := execution["receipt"].(map[string]any)
+	if doc["request"].(map[string]any)["executor"] != "agent" || execution["request"].(map[string]any)["executor"] != "agent" {
+		t.Fatal("historical selector was not converted before import", raw)
+	}
 	if record.SchemaVersion != 12 || record.RunID != "original-run" || receipt["id"] != "original-thread" || receipt["run_id"] != "original-turn" || receipt["state"] != "completed" || execution["notified"] != true || execution["stop_requested"] != true {
 		t.Fatal(raw)
 	}

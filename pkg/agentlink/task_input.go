@@ -30,7 +30,7 @@ func (s *Service) Input(ctx context.Context, link string, r TaskGuidance) (Task,
 		}
 		result, err := s.input(ctx, directory, r)
 		if err == nil {
-			err = validateTask(result, s.options.HostIdentity.NodeID, r.ID, "")
+			err = validateTask(result, s.options.HostIdentity.NodeID, directory.Adapter, r.ID, "")
 		}
 		return result, err
 	}
@@ -45,7 +45,7 @@ func (s *Service) Input(ctx context.Context, link string, r TaskGuidance) (Task,
 	var result Task
 	err = s.call(ctx, session, "task.input", r, &result)
 	if err == nil {
-		err = validateTask(result, c.PeerHost.NodeID, r.ID, "")
+		err = validateTask(result, c.PeerHost.NodeID, c.Peer.Adapter, r.ID, "")
 	}
 	return result, err
 }
@@ -57,15 +57,16 @@ func (s *Service) input(ctx context.Context, directory Directory, r TaskGuidance
 	if !ok {
 		return Task{}, ErrUnsupported
 	}
-	var capabilities Description
-	if directory.TaskExecutor != nil {
-		capabilities = *directory.TaskExecutor
-	} else {
-		task, err := s.options.Backend.Status(ctx, r.From, r.ID)
-		if err != nil {
-			return Task{}, err
+	task, err := s.options.Backend.Status(ctx, r.From, r.ID)
+	if err != nil {
+		return Task{}, err
+	}
+	capabilities := directory.Operations[task.Assistant.Address.AgentID]
+	if task.Execution != nil {
+		capabilities = Description{}
+		if directory.TaskExecutor != nil {
+			capabilities = *directory.TaskExecutor
 		}
-		capabilities = directory.Operations[task.Assistant.Address.AgentID]
 	}
 	if !capabilities.Supports(TaskInput) {
 		return Task{}, ErrUnsupported

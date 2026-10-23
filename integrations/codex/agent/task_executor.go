@@ -86,7 +86,7 @@ func (b *backend) Input(ctx context.Context, r agentlink.TaskGuidance) (agentlin
 		if err := json.Unmarshal([]byte(raw), &result); err != nil {
 			return err
 		}
-		if result.Request.Executor != "codex" || result.Message != nil {
+		if result.Request.Executor != "agent" || result.Message != nil {
 			return agentlink.ErrUnsupported
 		}
 		var prior string

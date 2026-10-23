@@ -103,3 +103,20 @@ func TestTaskWorkspaceIntentValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskExecutorIsAnAgentCapabilitySelector(t *testing.T) {
+	for _, executor := range []string{"", "agent"} {
+		if err := (CreateTask{Executor: executor, RequestID: "request", Text: "work"}).Validate(); err != nil {
+			t.Fatal(executor, err)
+		}
+	}
+	for _, request := range []CreateTask{
+		{Executor: "codex", RequestID: "request", Text: "work"},
+		{Executor: "claude", RequestID: "request", Text: "work"},
+		{Executor: "agent", Target: &AgentRef{NodeID: "receiver", Kind: "assistant", AgentID: "assistant"}, RequestID: "request", Text: "work"},
+	} {
+		if err := request.Validate(); err == nil {
+			t.Fatal("accepted invalid selector", request)
+		}
+	}
+}

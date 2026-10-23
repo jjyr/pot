@@ -44,7 +44,7 @@ func TestHumanApprovalResumesOnlyOriginalOperation(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			from := protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}
-			accepted, err := b.Submit(ctx, agentlink.TaskRequest{From: from, Executor: "codex", RequestID: "request", Text: "approve"})
+			accepted, err := b.Submit(ctx, agentlink.TaskRequest{From: from, Executor: "agent", RequestID: "request", Text: "approve"})
 			if err != nil {
 				t.Fatal(err)
 			}

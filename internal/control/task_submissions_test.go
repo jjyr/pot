@@ -94,7 +94,7 @@ func TestAcceptedTaskCancellationPersistsThroughDisconnectAndRestart(t *testing.
 		t.Fatal(capabilities)
 	}
 	// A type label cannot grant an executor capability absent from the directory.
-	record.Execution.Request.Executor = "codex"
+	record.Execution.Request.Executor = "agent"
 	if backend.s.taskExecutionCapabilities(ctx, &record).Supports(agentlink.TaskInput) {
 		t.Fatal("invented Codex input capability")
 	}
@@ -173,7 +173,7 @@ func TestLinkedSubmissionRejectsLocalConfigurationBeforeAdmission(t *testing.T) 
 	skills := []string{"local-skill"}
 	cases := []protocol.CreateTask{
 		{MachineID: "node"}, {Profile: &profile}, {Model: &model}, {Skills: &skills},
-		{Executor: "codex", Workspace: protocol.TaskWorkspace{Kind: "directory", ProjectDir: "/peer/project"}},
+		{Executor: "agent", Workspace: protocol.TaskWorkspace{Kind: "directory", ProjectDir: "/peer/project"}},
 		{Requirements: protocol.TaskRequirements{Tools: true}},
 		{Workspace: protocol.TaskWorkspace{Kind: "worktree", ProjectDir: "/peer/project"}},
 	}

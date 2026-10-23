@@ -355,3 +355,15 @@ Outcome receipts include the original run ID so fast completed continuations
 remain distinct and repeated observations cannot advance the cursor twice.
 Local model snapshots are optional and present only for Pot-owned execution.
 The original control rows remain archived evidence, never a live task store.
+
+## Generic Task executor selection
+
+`control/0030_generic_task_executor` and `tasks/0025_generic_task_executor` convert
+stored `executor: "codex"` selectors to `executor: "agent"`. Adapter identities
+remain unchanged. The upgrade converts archived submissions before their one-time
+import, current and historical Task requests, caller request digests and receiver
+job payloads. Receiver payloads use the frozen TaskRequest encoding so exact
+retries still match, including escaped text. Task/run IDs, session bindings,
+results, delivery cursors, cancellation intent and uncertain cleanup evidence
+survive. The migration never starts work. The public API accepts only the generic
+selector; historical selectors are storage upgrade input only.

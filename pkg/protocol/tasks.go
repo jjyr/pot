@@ -152,7 +152,7 @@ type CreateTask struct {
 }
 
 func (t CreateTask) Validate() error {
-	if t.Executor != "" && t.Executor != "codex" || t.Executor != "" && t.Target != nil {
+	if t.Executor != "" && t.Executor != "agent" || t.Executor != "" && t.Target != nil {
 		return fmt.Errorf("invalid task executor")
 	}
 	if t.LinkID != "" && !core.Identifier(t.LinkID) || t.Target != nil && (!t.Target.Valid() || t.Target.Kind != "assistant") {

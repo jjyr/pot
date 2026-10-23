@@ -387,7 +387,7 @@ func TestSignedAgentLinkDelegatesToCodexDirectory(t *testing.T) {
 	if err != nil || directory.DefaultAssistantID != "codex" || len(directory.Assistants) != 1 {
 		t.Fatal(directory, err)
 	}
-	request := agentlink.TaskRequest{RequestID: "signed-task", From: local.identity.Address, Text: "from signed link", Executor: "codex"}
+	request := agentlink.TaskRequest{RequestID: "signed-task", From: local.identity.Address, Text: "from signed link", Executor: "agent"}
 	accepted, err := local.links.Submit(ctx, connection.ID, request)
 	if err != nil {
 		t.Fatal(err)
