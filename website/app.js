@@ -46,20 +46,36 @@ async function copyCode(id){
  try{await navigator.clipboard.writeText(code.textContent);status.textContent=t('已复制。');}
  catch{status.textContent=t('无法自动复制，请选择代码后复制。');const range=document.createRange();range.selectNodeContents(code);const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);}
 }
+// Truncate compact values so the visible count never overstates the API value.
+function compactStars(count){
+ const units=[[1e15,'{count}q'],[1e12,'{count}t'],[1e9,'{count}b'],[1e6,'{count}m'],[1e3,'{count}k']];
+ const unit=units.find(([size])=>count>=size);
+ if(!unit)return new Intl.NumberFormat(lang).format(count);
+ const value=count/unit[0],short=value>=100?Math.floor(value):Math.floor(value*10)/10;
+ return format(t(unit[1]),{count:new Intl.NumberFormat(lang,{maximumFractionDigits:1}).format(short)});
+}
 async function showStars(){
  // Offline previews stay offline. The repository link works without this enhancement.
  if(window.POT_PREVIEW)return;
- const label=$('.github-star span');
- const display=count=>{if(Number.isSafeInteger(count)&&count>0)label.textContent=t('GitHub Star')+' · '+new Intl.NumberFormat(lang,{notation:'compact'}).format(count);};
+ const link=$('.github-star'),bubble=$('.github-star-count');
+ const valid=count=>Number.isSafeInteger(count)&&count>=0;
+ const display=count=>{
+  if(!valid(count))return;
+  const full=new Intl.NumberFormat(lang).format(count);
+  $('.github-star-count-full').textContent=full;
+  $('.github-star-count-compact').textContent=compactStars(count);
+  const label=format(t('在 GitHub 上查看 Pot 仓库，Star 数 {count}'),{count:full});
+  link.setAttribute('aria-label',label);link.title=label;bubble.hidden=false;
+ };
  const key='pot-github-stars-v1',ttl=6*60*60*1000;
- try{const cached=JSON.parse(localStorage.getItem(key));if(cached&&Number.isFinite(cached.time)&&cached.time<=Date.now()&&Date.now()-cached.time<ttl&&Number.isSafeInteger(cached.count)&&cached.count>0){display(cached.count);return;}}catch{}
+ try{const cached=JSON.parse(localStorage.getItem(key));if(cached&&Number.isFinite(cached.time)&&cached.time<=Date.now()&&Date.now()-cached.time<ttl&&valid(cached.count)){display(cached.count);return;}}catch{}
  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),3000);
  try{
   const response=await fetch('https://api.github.com/repos/jjyr/pot',{credentials:'omit',referrerPolicy:'no-referrer',signal:controller.signal});
   if(!response.ok)return;
   const {stargazers_count:count}=await response.json();
   display(count);
-  if(Number.isSafeInteger(count)&&count>0)try{localStorage.setItem(key,JSON.stringify({count,time:Date.now()}));}catch{}
+  if(valid(count))try{localStorage.setItem(key,JSON.stringify({count,time:Date.now()}));}catch{}
  }catch{}finally{clearTimeout(timeout);}
 }
 function renderFlow(){

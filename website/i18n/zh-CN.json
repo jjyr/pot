@@ -109,8 +109,6 @@
     "关闭预览": "关闭预览",
     "下载示例报告": "下载示例报告",
     "示例内容，用于体验交付方式": "示例内容，用于体验交付方式",
-    "在 GitHub 上 Star Pot": "在 GitHub 上 Star Pot",
-    "GitHub Star": "GitHub Star",
     "一个目标，三项后台任务": "一个目标，三项后台任务",
     "帮我把这个项目准备到可以对外展示：验证 Linux 安装流程，补齐入门文档，再准备几张有代表性的产品截图。": "帮我把这个项目准备到可以对外展示：验证 Linux 安装流程，补齐入门文档，再准备几张有代表性的产品截图。",
     "我会并行处理安装、文档和截图，再把成果汇总到这里。你可以随时补充要求。": "我会并行处理安装、文档和截图，再把成果汇总到这里。你可以随时补充要求。",
@@ -173,7 +171,15 @@
     "直接运行服务端": "直接运行服务端",
     "下载 Release 后直接运行服务端。": "下载 Release 后直接运行服务端。",
     "使用本仓库作为 Homebrew tap，依次运行：": "使用本仓库作为 Homebrew tap，依次运行：",
-    "首次 macOS 发布并合并 cask 更新后即可安装；Homebrew 保留首次启动安全检查。": "首次 macOS 发布并合并 cask 更新后即可安装；Homebrew 保留首次启动安全检查。"
+    "首次 macOS 发布并合并 cask 更新后即可安装；Homebrew 保留首次启动安全检查。": "首次 macOS 发布并合并 cask 更新后即可安装；Homebrew 保留首次启动安全检查。",
+    "Star": "Star",
+    "在 GitHub 上查看 Pot 仓库": "在 GitHub 上查看 Pot 仓库",
+    "在 GitHub 上查看 Pot 仓库，Star 数 {count}": "在 GitHub 上查看 Pot 仓库，Star 数 {count}",
+    "{count}k": "{count}k",
+    "{count}m": "{count}m",
+    "{count}b": "{count}b",
+    "{count}t": "{count}t",
+    "{count}q": "{count}q"
   },
   "demo": {
     "language": "语言",

@@ -109,8 +109,6 @@
     "关闭预览": "Close preview",
     "下载示例报告": "Download example report",
     "示例内容，用于体验交付方式": "Example content to show how results are delivered",
-    "在 GitHub 上 Star Pot": "Star Pot on GitHub",
-    "GitHub Star": "GitHub Star",
     "一个目标，三项后台任务": "One goal. Three background tasks.",
     "帮我把这个项目准备到可以对外展示：验证 Linux 安装流程，补齐入门文档，再准备几张有代表性的产品截图。": "Get this project ready to share: verify Linux installation, complete the getting-started docs, and prepare a few representative product screenshots.",
     "我会并行处理安装、文档和截图，再把成果汇总到这里。你可以随时补充要求。": "I’ll work on installation, docs and screenshots in parallel, then bring the results back here. You can add details along the way.",
@@ -173,7 +171,15 @@
     "直接运行服务端": "Run the server directly",
     "下载 Release 后直接运行服务端。": "Download a release and run the server directly.",
     "使用本仓库作为 Homebrew tap，依次运行：": "Use this repository as the Homebrew tap, then run:",
-    "首次 macOS 发布并合并 cask 更新后即可安装；Homebrew 保留首次启动安全检查。": "Installation becomes available after the first macOS release and cask update merge; Homebrew preserves first-launch security checks."
+    "首次 macOS 发布并合并 cask 更新后即可安装；Homebrew 保留首次启动安全检查。": "Installation becomes available after the first macOS release and cask update merge; Homebrew preserves first-launch security checks.",
+    "Star": "Star",
+    "在 GitHub 上查看 Pot 仓库": "View the Pot repository on GitHub",
+    "在 GitHub 上查看 Pot 仓库，Star 数 {count}": "View the Pot repository on GitHub, {count} stars",
+    "{count}k": "{count}k",
+    "{count}m": "{count}m",
+    "{count}b": "{count}b",
+    "{count}t": "{count}t",
+    "{count}q": "{count}q"
   },
   "demo": {
     "language": "Language",

@@ -109,8 +109,6 @@
     "关闭预览": "關閉預覽",
     "下载示例报告": "下載範例報告",
     "示例内容，用于体验交付方式": "範例內容，體驗成果交付方式",
-    "在 GitHub 上 Star Pot": "在 GitHub 上 Star Pot",
-    "GitHub Star": "GitHub Star",
     "一个目标，三项后台任务": "一個目標，三項背景任務",
     "帮我把这个项目准备到可以对外展示：验证 Linux 安装流程，补齐入门文档，再准备几张有代表性的产品截图。": "幫我把這個專案準備到可以對外展示：驗證 Linux 安裝流程，補齊入門文件，再準備幾張具代表性的產品截圖。",
     "我会并行处理安装、文档和截图，再把成果汇总到这里。你可以随时补充要求。": "我會並行處理安裝、文件和截圖，再把成果彙整到這裡。你可以隨時補充需求。",
@@ -173,7 +171,15 @@
     "直接运行服务端": "直接執行伺服器",
     "下载 Release 后直接运行服务端。": "下載 Release 後直接執行伺服器。",
     "使用本仓库作为 Homebrew tap，依次运行：": "使用本儲存庫作為 Homebrew tap，依序執行：",
-    "首次 macOS 发布并合并 cask 更新后即可安装；Homebrew 保留首次启动安全检查。": "首次 macOS 發布並合併 cask 更新後即可安裝；Homebrew 保留首次啟動安全檢查。"
+    "首次 macOS 发布并合并 cask 更新后即可安装；Homebrew 保留首次启动安全检查。": "首次 macOS 發布並合併 cask 更新後即可安裝；Homebrew 保留首次啟動安全檢查。",
+    "Star": "Star",
+    "在 GitHub 上查看 Pot 仓库": "在 GitHub 上查看 Pot 儲存庫",
+    "在 GitHub 上查看 Pot 仓库，Star 数 {count}": "在 GitHub 上查看 Pot 儲存庫，Star 數 {count}",
+    "{count}k": "{count}k",
+    "{count}m": "{count}m",
+    "{count}b": "{count}b",
+    "{count}t": "{count}t",
+    "{count}q": "{count}q"
   },
   "demo": {
     "language": "語言",

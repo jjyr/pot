@@ -138,8 +138,16 @@ Source and trademark terms
 are recorded in `assets/GitHub-NOTICE.txt`. On static pages a single
 unauthenticated request to `https://api.github.com/repos/jjyr/pot` can add the
 public star count, cached in localStorage for six hours. Requests omit credentials
-and referrers and time out after three seconds. Failed requests, rate limits,
-unusable storage and invalid/zero counts retain the working link without a count.
+and referrers and time out after three seconds. Failed requests, rate limits and invalid counts retain the working link without
+a count. If storage is unavailable, a successful network response can still show
+the count.
+Valid counts are nonnegative safe integers, including a genuine zero. Only known
+counts show the separate bubble; loading or failure keeps the Star entry usable.
+The warm-white 44px segments form one link and one keyboard focus target, including
+the gap and the bubble's left-pointing tip. The official icon has an HTML height
+of 16px as well as scoped CSS sizing, keeping it small before styles load. Desktop
+counts use locale grouping; at 580px and below a truncated compact value is shown
+(with k/m/b/t/q units), while the full count stays in the link label and title.
 There is no server, token or build-time network dependency; the offline preview
 makes no star-count request. Clicking the link does not perform a Star action.
 
@@ -175,3 +183,8 @@ They use synthetic clipboard/API responses and never execute installation comman
 Use `node scripts/tests/website-browser.mjs --install-only` to check only installation
 classification, links, copy behavior, keyboard navigation, responsive layouts and
 static/offline language state without running the task-demo and Star scenarios.
+
+Run `node scripts/tests/website-star-browser.mjs` for the focused Star layout,
+API fallback, cache and input checks. It uses the same browser environment
+variables as the website checks. Set `POT_WEBSITE_OLD_CSS` to a stylesheet file
+to also check new HTML against a previous stylesheet.
