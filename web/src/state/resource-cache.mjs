@@ -79,10 +79,10 @@ const resources={
   '/api/v1/machines':['machines'],
   '/api/v1/agent-links':['agent-links'],
   '/api/v1/about':['runtime'],
-  '/api/v1/completions':['machines','skills','assistants','settings','permissions'],
+  '/api/v1/completions':['machines','skills','assistants','agent-links','settings','permissions'],
 };
 export function createResourceReads(client) {
-  const listeners=new Set(),boots=new Map();
+  const listeners=new Set(),invalidations=new Set(),boots=new Map();
   const cache=createResourceCache({onChange:(key,error)=>{
     for(const listener of listeners)listener(JSON.parse(key),error);
   }});
@@ -97,7 +97,10 @@ export function createResourceReads(client) {
   };
   const cachedRead=(meta,options,load)=>{
     const ttl=meta.topics.some(topic=>['usage','tasks','schedules','conversation','machines','skills'].includes(topic))?5000:30000;
-    return cache.read(JSON.stringify(meta),load,{ttl,signal:options.signal,authoritative:options.authoritative});
+    // Selection candidates must wait for the current directory. Historical
+    // identity display may retain names, but must never supply active targets.
+    const mentions=meta.path.startsWith('/api/v1/completions?')&&new URLSearchParams(meta.path.split('?')[1]).get('q')?.startsWith('@');
+    return cache.read(JSON.stringify(meta),load,{ttl,signal:options.signal,authoritative:options.authoritative||mentions});
   };
   return {
     // A complete merged source collection is one entry, even when it required
@@ -109,6 +112,7 @@ export function createResourceReads(client) {
       return cachedRead(meta,options,()=>client.request(path,{...options,space:meta.space,owner:meta.owner,signal:undefined}));
     },
     subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);},
+    subscribeInvalidation(listener){invalidations.add(listener);return ()=>invalidations.delete(listener);},
     invalidate(topics=[],source={}) {
       const matches=key=>{
         const meta=JSON.parse(key);
@@ -128,6 +132,9 @@ export function createResourceReads(client) {
         if(topics.includes('extensions'))cache.reset(key=>matches(key)&&JSON.parse(key).path==='/api/v1/providers');
         cache.invalidate(matches);
       }
+      // Notify after fencing pending reads, before any consumer can select an
+      // item from an obsolete projection. This is distinct from read completion.
+      for(const listener of invalidations)listener(topics,bootChanged?{...source,reset:true}:source);
     },
     clear(){cache.reset();boots.clear();},
   };
