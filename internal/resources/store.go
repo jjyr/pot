@@ -106,7 +106,10 @@ func (s *Store) Register(ctx context.Context, owner, request, hash, name, entry 
 		return *previous, nil
 	}
 	resource := Resource{ID: storage.ID(), Name: name, Entry: entry}
-	if !core.Identifier(owner) || len(paths) == 0 || len(paths) > 64 || len(paths) != len(contents) || name == "" || len(name) > 255 || strings.ContainsAny(name, "/\\\x00") {
+	if name == "" {
+		return resource, errors.New("resource.name must be a nonempty display label")
+	}
+	if !core.Identifier(owner) || len(paths) == 0 || len(paths) > 64 || len(paths) != len(contents) {
 		return resource, errors.New("invalid resource manifest")
 	}
 	found := false
@@ -139,6 +142,7 @@ func (s *Store) Register(ctx context.Context, owner, request, hash, name, entry 
 	for _, file := range resource.Files {
 		if file.Path == entry {
 			resource.Download = file
+			resource.Download.Path = core.DownloadFilename(filepath.Base(file.Path))
 		}
 	}
 	if len(paths) > 1 {
@@ -158,7 +162,12 @@ func (s *Store) Register(ctx context.Context, owner, request, hash, name, entry 
 		}
 		archive = buffer.Bytes()
 		digest := sha256.Sum256(archive)
-		resource.Download = File{Path: strings.TrimSuffix(name, filepath.Ext(name)) + ".zip", MIMEType: "application/zip", Size: uint64(len(archive)), Digest: hex.EncodeToString(digest[:])}
+		downloadName := core.DownloadFilename(name)
+		if ext := filepath.Ext(downloadName); ext != downloadName {
+			downloadName = strings.TrimSuffix(downloadName, ext)
+		}
+		downloadName = core.DownloadFilename(downloadName + ".zip")
+		resource.Download = File{Path: downloadName, MIMEType: "application/zip", Size: uint64(len(archive)), Digest: hex.EncodeToString(digest[:])}
 	}
 	var total, count int64
 	if err := s.db.QueryRowContext(ctx, "SELECT COALESCE(SUM(size),0),COUNT(*) FROM display_resources").Scan(&total, &count); err != nil {

@@ -111,7 +111,7 @@ func (a *Application) resourceContent(w http.ResponseWriter, r *http.Request) bo
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	w.Header().Set("ETag", `"`+metadata.Digest+`"`)
 	if operation == "download" {
-		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": metadata.Path[strings.LastIndex(metadata.Path, "/")+1:]}))
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": core.DownloadFilename(metadata.Path[strings.LastIndex(metadata.Path, "/")+1:])}))
 	}
 	http.ServeContent(w, r, metadata.Path, time.Time{}, file)
 	return true

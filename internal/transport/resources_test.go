@@ -11,6 +11,7 @@ import (
 	"image/gif"
 	"image/png"
 	"math"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,7 +28,7 @@ import (
 	webassets "github.com/jjyr/pot/web"
 )
 
-func resourceApplication(t *testing.T) (*Application, []resources.Resource) {
+func resourceApplication(t *testing.T, displayLabels ...string) (*Application, []resources.Resource) {
 	t.Helper()
 	ctx := context.Background()
 	sources := []string{"landscape.png", "pulse.gif", "voice.wav", "sample.webm", "notes.pdf", "demo.html", "report.txt"}
@@ -51,7 +52,7 @@ func resourceApplication(t *testing.T) (*Application, []resources.Resource) {
 			text, _ := message.Content.(string)
 			var resource resources.Resource
 			if json.Unmarshal([]byte(text), &resource) == nil && resource.ID != "" {
-				registered[resource.Name] = resource
+				registered[resource.Entry] = resource
 			}
 			if strings.Contains(text, `"presentation"`) {
 				presented++
@@ -65,6 +66,9 @@ func resourceApplication(t *testing.T) (*Application, []resources.Resource) {
 		if len(registered) == 0 {
 			for index, path := range sources {
 				args := map[string]any{"path": path}
+				if len(displayLabels) > 0 {
+					args["name"] = displayLabels[0]
+				}
 				if path == "demo.html" {
 					args["assets"] = []string{"demo.css", "demo.js"}
 				}
@@ -167,6 +171,33 @@ func resourceApplication(t *testing.T) (*Application, []resources.Resource) {
 		case <-sub:
 		case <-timer.C:
 			t.Fatal("resource fixture timed out")
+		}
+	}
+}
+
+func TestResourceHTTPDownloadsWithLongDisplayLabel(t *testing.T) {
+	label := "Pot 通信记录 · A/B \\ " + strings.Repeat("中文", 150)
+	app, items := resourceApplication(t, label)
+	for _, resource := range items {
+		if resource.Name != label {
+			t.Fatal("tool or durable presentation changed display label")
+		}
+		request := httptest.NewRequest("GET", "/api/v1/resources/"+resource.ID+"/download?assistant_id=main", nil)
+		response := httptest.NewRecorder()
+		if !app.resourceContent(response, request) || response.Code != 200 {
+			t.Fatal("download failed", response.Code)
+		}
+		kind, params, err := mime.ParseMediaType(response.Header().Get("Content-Disposition"))
+		name := params["filename"]
+		if err != nil || kind != "attachment" || name != resource.Download.Path || len(name) > 255 || strings.ContainsAny(name, "/\\\x00\r\n") {
+			t.Fatal("unsafe download header", name, err)
+		}
+		if len(resource.Files) > 1 {
+			if !strings.HasSuffix(name, ".zip") || !strings.HasPrefix(name, "Pot 通信记录 · A_B _ ") {
+				t.Fatal("bundle download filename", name)
+			}
+		} else if name != filepath.Base(resource.Entry) {
+			t.Fatal("display label renamed a single-file download", name)
 		}
 	}
 }

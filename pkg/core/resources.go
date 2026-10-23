@@ -3,7 +3,6 @@ package core
 import (
 	"encoding/hex"
 	"errors"
-	"strings"
 )
 
 type ResourceFile struct {
@@ -14,7 +13,7 @@ type ResourceFile struct {
 }
 type Resource struct {
 	ID       string         `json:"id"`
-	Name     string         `json:"name"`
+	Name     string         `json:"name"` // Display label, independent of file paths and download filenames.
 	MIMEType string         `json:"mime_type"`
 	Size     uint64         `json:"size"`
 	Entry    string         `json:"entry"`
@@ -29,7 +28,10 @@ type ResourcePresentation struct {
 
 func (p ResourcePresentation) Validate() error {
 	r := p.Resource
-	if !Identifier(r.ID) || r.Name == "" || len(r.Name) > 255 || strings.ContainsAny(r.Name, "/\\\x00") || len(p.Caption) > 1000 || p.Mode != "preview" && p.Mode != "download" || len(r.Files) == 0 || len(r.Files) > 64 || r.Size > 64<<20 {
+	if r.Name == "" {
+		return errors.New("resource.name must be a nonempty display label")
+	}
+	if !Identifier(r.ID) || len(p.Caption) > 1000 || p.Mode != "preview" && p.Mode != "download" || len(r.Files) == 0 || len(r.Files) > 64 || r.Size > 64<<20 {
 		return errors.New("invalid resource presentation")
 	}
 	var total uint64
