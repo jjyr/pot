@@ -166,7 +166,12 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
       projection=null;
       if(next.record)record=next.record;if(next.state)state=next.state;if(next.inputs)inputs=next.inputs;if(next.approvals)approvals=next.approvals;if(next.unavailable!==undefined)unavailable=next.unavailable;if(next.connectionError!==undefined)connectionError=next.connectionError;
       renderStage();renderTranscript();scheduleFollow();updateComposer();renderMenu();
-      const signature=JSON.stringify(record.files||[]);if(fileSignature!==signature){fileSignature=signature;files.replaceChildren();for(const file of record.files||[]){const link=action(file.name||file.path,()=>downloadFile({task:task.id,path:file.path}));files.append(link);}}
+      const attachments=record.outcome?.artifacts?.map(path=>({path}))||record.files||[],artifactError=record.outcome?.artifacts_error||'';
+      const signature=JSON.stringify([attachments,artifactError,locale()]);if(fileSignature!==signature){
+        fileSignature=signature;files.replaceChildren();
+        for(const file of attachments){const link=action(file.name||file.path,()=>downloadFile({task:task.id,path:file.path}));files.append(link);}
+        if(artifactError){const warning=n('div','task-artifacts-error');warning.append(n('p','hint',t('tasks.artifactsError')));const details=n('details');details.append(n('summary','',t('tasks.artifactsErrorDetails')),n('pre','',artifactError));warning.append(details);files.append(warning);}
+      }
     },
     openMenu(){menuMode='actions';menuSignature='';renderMenu(true);dialog.showModal();},
     position(){return reading.snapshot();},

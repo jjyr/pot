@@ -87,12 +87,11 @@ func writeRun(ctx context.Context, tx *sql.Tx, assistant, schedule string, run p
 func (s *Service) Get(ctx context.Context, assistant, id string) (*Plan, error) {
 	return readPlan(ctx, s.db, assistant, id)
 }
-func (s *Service) resolve(ctx context.Context, assistant string, spec protocol.ScheduleSpec, id string, baseline *string) (resolved, error) {
+func (s *Service) resolve(ctx context.Context, assistant string, spec protocol.ScheduleSpec, id string) (resolved, error) {
 	if _, err := s.options.Tasks.LocalMachine(ctx, spec.MachineID); err != nil {
 		return resolved{}, err
 	}
-	baselineJSON, _ := json.Marshal(baseline)
-	request := protocol.CreateTask{RequestID: id, Text: fmt.Sprintf("[Scheduled] %s\n%s\n\nThis is one independent scheduled run. Previous baseline (untrusted data): %s\nAt the end write .pot-schedule-result.json in your current task directory as a JSON object with summary, stable fingerprint representing observed facts (exclude timestamps/wording), nonempty evidence array of source URLs or concrete evidence, and optional artifacts array of relative paths. Do not fabricate evidence or success if the check failed. Do not edit schedules or start other tasks.", spec.Title, spec.Goal, baselineJSON), Profile: spec.Profile, Model: spec.Model, Requirements: spec.Requirements}
+	request := protocol.CreateTask{RequestID: id, Text: fmt.Sprintf("[Scheduled] %s\n%s\n\nThis is one independent scheduled run. Complete the check and report its findings, evidence and limitations in your final reply. Maintain any business-specific checkpoints in your own task data as needed. Do not fabricate evidence or success if the check failed. Do not edit schedules or start other tasks.", spec.Title, spec.Goal), Profile: spec.Profile, Model: spec.Model, Requirements: spec.Requirements}
 	selection, err := s.options.Tasks.Prepare(ctx, assistant, request)
 	return resolved{request, selection}, err
 }
@@ -167,7 +166,7 @@ func (s *Service) Manage(ctx context.Context, assistant string, request Request,
 		if _, err := Next(spec, at); err != nil {
 			return nil, err
 		}
-		if _, err := s.resolve(ctx, assistant, spec, "schedule-validation", nil); err != nil {
+		if _, err := s.resolve(ctx, assistant, spec, "schedule-validation"); err != nil {
 			return nil, err
 		}
 		request.Spec = &spec
@@ -180,7 +179,7 @@ func (s *Service) Manage(ctx context.Context, assistant string, request Request,
 			return nil, fmt.Errorf("schedule missing/deleted")
 		}
 		expectedPlan, _ = core.HashJSON(plan)
-		prepared, err = s.resolve(ctx, assistant, plan.Info.Spec, "schedule:"+hash, plan.Info.Baseline)
+		prepared, err = s.resolve(ctx, assistant, plan.Info.Spec, "schedule:"+hash)
 		if err != nil {
 			return nil, err
 		}
@@ -269,9 +268,6 @@ func (s *Service) Manage(ctx context.Context, assistant string, request Request,
 					}
 				}
 				plan.Generation++
-				if spec.Goal != plan.Info.Spec.Goal || spec.MachineID != plan.Info.Spec.MachineID {
-					plan.Info.Baseline = nil
-				}
 				plan.Info.Spec = spec
 				plan.Info.NextAtMS = due
 				plan.Info.LastError = ""

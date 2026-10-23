@@ -72,7 +72,7 @@ func TestCronSchedulesUpgrade(t *testing.T) {
 						t.Fatal(err)
 					}
 					info := plan.Info
-					if plan.Generation != 7 || info.NextAtMS == nil || *info.NextAtMS != 123456789 || info.Baseline == nil || *info.Baseline != "fingerprint" || info.Spec.Timezone != "America/New_York" || info.Spec.MachineID != "remote" || *info.Spec.Profile != "profile" || *info.Spec.Model != "model" || info.Spec.Enabled != (kind != "once") || info.Spec.Misfire != "skip" || info.Spec.Notify != "all" || !info.Spec.Requirements.Tools || info.LastError != "retained" {
+					if plan.Generation != 7 || info.NextAtMS == nil || *info.NextAtMS != 123456789 || info.Spec.Timezone != "America/New_York" || info.Spec.MachineID != "remote" || *info.Spec.Profile != "profile" || *info.Spec.Model != "model" || info.Spec.Enabled != (kind != "once") || info.Spec.Misfire != "skip" || info.Spec.Notify != "all" || !info.Spec.Requirements.Tools || info.LastError != "retained" {
 						t.Fatal("changed state", body)
 					}
 					wantKind := kind

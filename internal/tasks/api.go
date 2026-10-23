@@ -110,6 +110,3 @@ type LocalExecutor interface {
 type Enqueue interface {
 	EnqueueTx(context.Context, *sql.Tx, string, protocol.CreateTask, Selection, protocol.TaskOrigin, int64) (Record, error)
 }
-type ResultReader interface {
-	ReadResult(context.Context, core.ExecutionTarget, string, string, int64) (json.RawMessage, error)
-}
