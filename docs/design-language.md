@@ -449,8 +449,30 @@ diagnostic, arguments, ordered output, final results and a secondary raw call/re
 Waiting for approval, reconnecting and unconfirmed results keep their explicit
 statuses. Tool failures alone do not request user attention; task outcomes and
 approval or recovery controls communicate impact and required action.
-Commands, scripts and patches retain monospace formatting; supported image results
-render inline. No tool action implicitly repeats an operation.
+Expanded calls use a semantic content view before the secondary raw disclosure.
+Commands share a read-only terminal surface: resolved machine/workdir and shell,
+the exact command, retained output and exit/source-truncation receipts. The visual
+shell prompt is excluded from copying; process input and controls are labeled as
+interactions rather than shell commands. Patches group actual additions/removals
+by file, including move destinations. Composition children take precedence over
+duplicating the orchestration source; the complete source remains in raw details.
+
+Task reads distinguish the completed read receipt from the returned Task phase.
+Their title, phase and latest result use the retained receipt, while Open task
+navigates to the current known Task. Schedules, discovery tools
+and unknown extensions show labeled fields and lists; unfamiliar field names and
+values remain verbatim. Structured JSON in MCP text blocks uses the same readable
+view. Plain result text uses safe Markdown, and supported images render inline.
+Browser calls preserve their source and actual observations without inferring
+page actions from JavaScript. Assistant rules and profile files use the same
+command and per-file patch views as other files. Resource registration shows manifest information
+and its registration receipt; presentation uses the existing conversation resource
+component rather than duplicating the preview inside a tool.
+
+Both Chat and Task use these views. Technical metadata, original arguments,
+results and output remain in secondary raw details. Structured displays bound
+depth, item count, node count and text; truncation points to raw details, and copy
+retains the complete available value. No tool action implicitly repeats an operation.
 
 Ordinary calls default to collapsed. Composition children nest under their original
 `exec` call in start order. Exact approval requests open the affected call and its

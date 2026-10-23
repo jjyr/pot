@@ -248,6 +248,22 @@ and a deterministic local provider that invokes the real resource tools.
 Playwright CLI's `run-code --filename` option against that origin. Stop the
 fixture with `POST /fixture/stop`. No product data or paid model calls are used.
 
+For semantic tool activity, serve the repository root on loopback and open
+`/scripts/tests/fixtures/tool-content.html?locale=en&theme=light`. The shared Chat/Task
+disclosure runs behavioral checks for terminal copying/following, retained output,
+file diffs, Task receipt versus execution state, schedules, resources, extension
+results, bounded rendering, safe content, approvals and live locale changes.
+Repeat at 390 px with `locale=zh-CN&theme=dark`. `review=1` leaves deterministic
+receipts for screenshots; `scenario=terminal` opens the command and patch, while
+`scenario=details` opens Task, schedule and registration results.
+`scripts/tests/go-ui-tool-content-capture.mjs` runs the four locale/theme/width
+combinations, existing communication checks and exports component screenshots.
+Its positional arguments are the repository-server origin, an optional URL prefix
+for an archived baseline containing `web/` plus the same fixture, an output
+directory, and an optional disposable preview origin for the existing Chat/Task
+tool and process-session integration checks. Use the `POT_PLAYWRIGHT_MODULE` and
+`POT_CHROMIUM_EXECUTABLE` overrides described above for a cached local toolchain.
+
 Use private temporary data roots for service integration tests. Never open the
 same root in App and standalone Runtime concurrently. Report checks and limitations
 in the task/PR, not repository validation reports. Store only reviewed UI comparison
