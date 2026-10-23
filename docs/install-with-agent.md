@@ -55,9 +55,17 @@ until assets exist; match the selected version and architecture rather than
 constructing a download URL. The
 [release contract](releases.md) defines these filenames:
 
-- macOS Apple Silicon: download the selected release's `pot.rb` and run
-  `brew install --cask ./pot.rb` from its directory; see
-  [cask instructions](releases.md#homebrew-generation). The cask installs the
+- macOS Apple Silicon: use this repository as the tap (the explicit URL is required
+  on first use), then install:
+
+  ```sh
+  brew tap jjyr/pot https://github.com/jjyr/pot.git
+  brew install --cask jjyr/pot/pot
+  ```
+
+  Upgrade with `brew upgrade --cask jjyr/pot/pot`. The cask is disabled until the
+  first macOS release and its cask update PR are merged; see
+  [cask maintenance](releases.md#homebrew-generation). The cask installs the
   release's `Pot-VERSION-arm64.zip`, which remains published with its checksums
   even while the App download entry is hidden. Read `MACOS-RELEASE.txt`:
   `unsigned` means ad-hoc integrity signing without Developer ID or Apple
@@ -65,8 +73,7 @@ constructing a download URL. The
   [macOS first-launch guide](desktop-installation.md#macos) only for trusted,
   checksum-verified downloads; do not disable Gatekeeper globally.
   Homebrew preserves quarantine and may require that same App-specific first-launch
-  allowance. The public `jjyr/homebrew-tap` currently has no Pot cask; do not
-  substitute a tap command.
+  allowance. Use the same-repository tap commands above after verifying availability.
 - Linux desktop: `pot-desktop_VERSION_linux_amd64.deb` is Experimental. Check
   its checksum, then `sudo apt install ./THE_DOWNLOADED_FILE.deb` and launch
   `pot-desktop`. Use the actual downloaded filename. Do not offer arm64 until a

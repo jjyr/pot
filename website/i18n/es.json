@@ -151,9 +151,7 @@
     "把这段英文交给你的助手，它会读取安装指南并帮你完成配置。": "Dale este prompt en inglés a tu agente para que lea la guía y te ayude a configurar Pot.",
     "macOS 26+ · Apple Silicon": "macOS 26+ · Apple Silicon",
     "Homebrew": "Homebrew",
-    "首个版本发布后，下载该 macOS Release 的 pot.rb，再在下载目录运行：": "Cuando se publique la primera versión, descarga su pot.rb para macOS y ejecuta lo siguiente en el directorio de descarga:",
     "Homebrew 安装与首次启动 ↗": "Instalación con Homebrew y primer inicio ↗",
-    "macOS 暂仅提供 Homebrew 安装入口；安装包待首次发布。": "Por ahora, solo se ofrece la instalación de macOS mediante Homebrew; los paquetes están pendientes de su primera publicación.",
     "Linux": "Linux",
     "Experimental": "Experimental",
     "下载 .deb": "Descargar .deb",
@@ -173,7 +171,9 @@
     "原生桌面 · Debian / Ubuntu · amd64": "Escritorio nativo · Debian / Ubuntu · amd64",
     "容器运行 · Linux amd64 / arm64，通过浏览器使用。": "Ejecuta en un contenedor · Linux amd64 / arm64, desde el navegador.",
     "直接运行服务端": "Ejecutar el servidor directamente",
-    "下载 Release 后直接运行服务端。": "Descarga una versión y ejecuta el servidor directamente."
+    "下载 Release 后直接运行服务端。": "Descarga una versión y ejecuta el servidor directamente.",
+    "使用本仓库作为 Homebrew tap，依次运行：": "Añade este repositorio como tap de Homebrew y ejecuta:",
+    "首次 macOS 发布并合并 cask 更新后即可安装；Homebrew 保留首次启动安全检查。": "La instalación estará disponible tras la primera versión de macOS y la integración del cask; Homebrew conserva las comprobaciones de seguridad del primer inicio."
   },
   "demo": {
     "language": "Idioma",

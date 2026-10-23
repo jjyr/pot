@@ -155,3 +155,39 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ inputs.sha }}
         run: mise exec -- python scripts/publish-release '${{ inputs.version }}' dist --channel macos --macos-mode '${{ needs.preflight.outputs.mode }}'
+
+  homebrew:
+    needs: publish
+    name: Propose Homebrew cask update after publication
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - name: Verify published bytes and propose cask PR
+        id: sync
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_SHA: ${{ inputs.sha }}
+        run: python3 scripts/sync-homebrew-cask "$RELEASE_VERSION" "$RELEASE_SHA"
+      - name: Report cask synchronization separately from publication
+        if: always()
+        env:
+          SYNC_OUTCOME: ${{ steps.sync.outcome }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_SHA: ${{ inputs.sha }}
+        run: |
+          if [ "$SYNC_OUTCOME" = success ]; then
+            echo "macOS assets published. Homebrew cask verified; see sync log for PR or already synchronized status. Review/merge any pending cask PR before installation or upgrades." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::macOS assets are published, but Homebrew cask synchronization failed. Inspect the sync log and repository Actions PR permissions."
+            echo "macOS publication succeeded; Homebrew sync needs attention. No automatic retry or main push was attempted." >> "$GITHUB_STEP_SUMMARY"
+            echo "After resolving permissions or reviewing the existing branch/PR, run: GITHUB_REPOSITORY=jjyr/pot python3 scripts/sync-homebrew-cask $RELEASE_VERSION $RELEASE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          fi

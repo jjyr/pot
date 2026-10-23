@@ -151,9 +151,7 @@
     "把这段英文交给你的助手，它会读取安装指南并帮你完成配置。": "Give this English prompt to your agent to read the guide and help you get set up.",
     "macOS 26+ · Apple Silicon": "macOS 26+ · Apple Silicon",
     "Homebrew": "Homebrew",
-    "首个版本发布后，下载该 macOS Release 的 pot.rb，再在下载目录运行：": "Once the first release is published, download its macOS pot.rb, then run in your downloads directory:",
     "Homebrew 安装与首次启动 ↗": "Homebrew installation and first launch ↗",
-    "macOS 暂仅提供 Homebrew 安装入口；安装包待首次发布。": "For now, macOS installation is offered through Homebrew only; packages await their first release.",
     "Linux": "Linux",
     "Experimental": "Experimental",
     "下载 .deb": "Download .deb",
@@ -173,7 +171,9 @@
     "原生桌面 · Debian / Ubuntu · amd64": "Native desktop · Debian / Ubuntu · amd64",
     "容器运行 · Linux amd64 / arm64，通过浏览器使用。": "Run in a container · Linux amd64 / arm64, accessed in your browser.",
     "直接运行服务端": "Run the server directly",
-    "下载 Release 后直接运行服务端。": "Download a release and run the server directly."
+    "下载 Release 后直接运行服务端。": "Download a release and run the server directly.",
+    "使用本仓库作为 Homebrew tap，依次运行：": "Use this repository as the Homebrew tap, then run:",
+    "首次 macOS 发布并合并 cask 更新后即可安装；Homebrew 保留首次启动安全检查。": "Installation becomes available after the first macOS release and cask update merge; Homebrew preserves first-launch security checks."
   },
   "demo": {
     "language": "Language",

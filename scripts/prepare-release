@@ -51,8 +51,6 @@ def prepare(version, output, sign_feed=False, channel="validation", macos_mode=N
     if channel == "macos":
         (output / "MACOS-RELEASE.txt").write_text(notes)
     files = [output / name for name in names]
-    if channel in {"macos", "validation"}:
-        files.append(output / "pot.rb")
     if sign_feed:
         files.extend([output / "update.json", output / "MACOS-RELEASE.txt"])
     (output / checksum_name(channel)).write_text(

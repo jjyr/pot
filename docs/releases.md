@@ -5,10 +5,11 @@ checks pass. Docker, Linux server and the experimental Linux desktop do not depe
 on macOS signing. Each channel requires its own build, smoke, checksum and
 applicable signing gates. Windows is currently unsupported.
 
-Source builds remain the installation path until public artifacts exist. The
-public `jjyr/homebrew-tap` repository exists, but does not currently contain a Pot
-cask. Generating `pot.rb` does not make `brew install --cask jjyr/tap/pot` available.
-These workflows never modify the tap or registry visibility.
+Source builds remain available until public artifacts exist. This repository is
+also the Homebrew tap: root `Casks/pot.rb` starts disabled until the first macOS
+release is published and its reviewed cask update lands. Release workflows propose
+a cask update PR after successful macOS publication; they never push the default branch or
+change repository/registry visibility.
 
 | Channel | Versioned distribution | Publication boundary |
 |---|---|---|
@@ -16,7 +17,7 @@ These workflows never modify the tap or registry visibility.
 | Linux desktop (Experimental), amd64 | `pot-desktop_VERSION_linux_amd64.deb` | Native GTK/WebKit build and real WebView smoke; GitHub Release assets; manual upgrades |
 | macOS 26+, Apple Silicon | `Pot-VERSION-arm64.zip`, `pot-go-VERSION-darwin-arm64.tar.gz` | Native App/CLI smoke and explicit `unsigned` (ad-hoc) or `signed` (Developer ID + notarization) mode; GitHub assets, cask and signed update feed |
 | Container, Linux amd64/arm64 | `pot-container-VERSION.oci.tar`, `ghcr.io/jjyr/pot:VERSION` | Native image build/smoke on both architectures, OCI integrity and metadata verification; GHCR |
-| Homebrew | Generated `pot.rb` macOS release asset | Local cask installation after a release exists; public tap inclusion is a separate reviewed change |
+| Homebrew | Root `Casks/pot.rb` in `jjyr/pot` | Published final App ZIP verified before a same-repository cask update PR; merge makes installation/upgrades available |
 
 The experimental designation applies only to the new Linux native desktop `.deb`.
 Its amd64 build and native WebView smoke have been exercised locally; native
@@ -71,7 +72,7 @@ resolve one source SHA + version + publication intent
        |                 |                |                  |
        |                 |       ad-hoc OR Developer ID  multiarch OCI export
        |                 |           + notary
-       |                 |       signed feed + cask     digest/arch/version/SHA
+       |                 |       signed update feed     digest/arch/version/SHA
        |                 |                |                  |
   server GH assets  desktop GH assets  macOS GH assets    GHCR :VERSION
        +-----------------+----------------+
@@ -200,8 +201,9 @@ See [Updates](updates.md) for trust bootstrap and storage-format restrictions.
 After final sealing and native smoke, the workflow regenerates the cask and feed
 from the exact archives. `MACOS-RELEASE.txt` records mode, version, commit and an
 installation-document link. It is published alongside ZIP/TAR, SHA256 sidecars,
-`pot.rb`, `update.json` and `SHA256SUMS-macos`; the manifest binds the disclosure,
-cask and signed feed as well as archives. Release notes direct users to this file
+`update.json` and `SHA256SUMS-macos`; the manifest binds the disclosure
+and signed feed as well as archives. `pot.rb` is internal generated metadata,
+not a required publication file or Release asset. Release notes direct users to this file
 and explain that Homebrew preserves quarantine. Archive names stay versioned in
 both modes. Different bytes or mode metadata for an existing version cannot
 replace published assets. Publication retries reuse identical existing assets and
@@ -221,36 +223,86 @@ before startup does not establish a code failure. Paid model tests are not enabl
 
 ## Homebrew generation
 
-During the unsigned release phase, the website and README offer macOS installation
-through Homebrew only. The release still publishes the App ZIP, SHA256 files,
-`pot.rb` and Ed25519-signed update feed; hiding a download entry does not change
-packaging or publication. After a matching macOS release exists, select it in
-[Releases](https://github.com/jjyr/pot/releases), read `MACOS-RELEASE.txt`, download
-its `pot.rb` and run `brew install --cask ./pot.rb` in that directory. Inspect the
-cask before running it; it references the versioned official App ZIP and its
-SHA-256. See the [first-launch guide](desktop-installation.md#macos) for quarantine
-handling. No matching published release means this installation is not yet
-available.
+The website and README expose macOS through Homebrew only. Release assets retain
+App ZIP/CLI archives, their SHA-256 sidecars, `MACOS-RELEASE.txt`,
+`SHA256SUMS-macos` and the Ed25519-signed update feed. `pot.rb` is not uploaded.
+Both `unsigned` and `signed` modes use the same tap path and final-byte checks.
 
-For a future version with verified Developer ID signing and notarization, switch
-the documented release mode to `signed`, then restore the macOS App link in
-`website/templates/page.html` and all six catalogs, regenerate the site and add
-the README download entry. Update these installation guides with that policy.
-The website uses static content; it does not read release settings or secrets.
-Never replace an earlier version's unsigned assets with signed bytes.
+```sh
+brew tap jjyr/pot https://github.com/jjyr/pot.git
+brew install --cask jjyr/pot/pot
+# Later, after the next cask update PR is merged:
+brew upgrade --cask jjyr/pot/pot
+```
 
-Cask generation verifies the archive's SHA-256 sidecar and embedded bundle
-version, then fills the fixed versioned GitHub URL and digest. Both modes preserve
-Gatekeeper quarantine handling and never writes to the remote tap.
+The initial tap must include the explicit URL: the repository is `pot`, not
+`homebrew-pot`. Homebrew supports an arbitrary Git URL with its two-argument tap
+command; see [Homebrew Taps](https://docs.brew.sh/Taps). Casks live in root
+`Casks/`. No separate tap repository is used. Private repository/assets require
+GitHub access; normal public installation requires the repository and artifacts
+to be public. These workflows never change visibility.
+
+Before the first release, `Casks/pot.rb` is explicitly disabled and has no archive
+version, URL or checksum: no installable artifact exists. It cannot silently
+install a development build. After publication, `scripts/sync-homebrew-cask`
+downloads the final versioned App ZIP and checksum sidecar using `github.token`,
+checks GitHub's SHA-256 digest and byte size, and uses the shared
+`release_contract.generate_cask` template/version/sidecar validation. Sealing and
+notarization happen before these final bytes are published. There is no `latest`
+URL or unchecked checksum. `packaging/homebrew/pot.rb.in` remains the single
+installable cask template; repository license terms apply to generated casks.
+
+```text
+validated source SHA -> final macOS sealing/smoke -> immutable Release assets
+                                                        |
+                                             download + verify final ZIP
+                                                        |
+                                same-repository homebrew/pot-vVERSION branch
+                                                        |
+                                    reviewed PR -> Casks/pot.rb on main
+                                                        |
+                                                brew install / upgrade
+```
+
+The separate `homebrew` job runs only after macOS publication succeeds. It requests
+`contents: write` for a new branch and `pull-requests: write` for its PR, with no
+new PAT. It creates a branch from the current default branch and changes only
+`Casks/pot.rb`. It never moves a release tag. Its source implementation remains
+pinned to the validated release SHA; the distribution pointer commit necessarily
+comes later. First installation becomes available **after the cask PR is merged**.
+
+Retries reuse an identical existing branch/open PR. A different branch, closed PR,
+equal/newer conflicting cask or unexpected changes stop for manual review; no
+existing branch is rewritten and no automatic merge/retry loop occurs. An older
+release cannot downgrade the default-branch cask. Protected branch policies still
+apply when reviewing/merging the PR.
+
+A cask synchronization error does not undo or relabel successful asset publication.
+The job logs the actual error and emits a warning and Actions summary with a
+recovery command. If repository settings prohibit Actions PR creation, the branch
+may exist without a PR; a maintainer can open its PR manually. To retry after
+resolving permissions or reviewing the branch/PR, use an authorized `gh` session
+from the released source revision (substitute its exact version and SHA):
+
+```sh
+GITHUB_REPOSITORY=jjyr/pot python3 scripts/sync-homebrew-cask 1.2.3 VALIDATED_40_CHARACTER_SHA
+```
+
+This recovery command only reads published assets and proposes the cask PR; it
+never publishes assets. It fails visibly if branch creation or PR permission is
+missing. A maintainer must explicitly allow Actions to create PRs in repository
+Actions settings for automatic PR creation, or open the generated branch's PR
+manually. No workflow changes repository settings or substitutes personal
+credentials for its Actions token.
+
+For local artifact validation before publication, the existing generator remains:
 
 ```sh
 mise exec -- python scripts/generate-cask 1.2.3 /absolute/artifacts
-# After that macOS version is publicly available, also verify the URL's bytes:
 mise exec -- python scripts/generate-cask 1.2.3 /absolute/artifacts --verify-url
-brew install --cask /absolute/artifacts/pot.rb
 ```
 
-Public tap inclusion is a separate authorized, reviewed change copying the cask
-to `Casks/pot.rb`. Homebrew can install an unnotarized App, but does not guarantee
-that Gatekeeper will allow its first launch; follow the
-[application-specific instructions](desktop-installation.md#macos). No Homebrew tap token is consumed by these workflows.
+These commands create internal `pot.rb` metadata, not a Release asset or user
+installation step. Homebrew preserves quarantine; an unnotarized App can still
+need the [App-specific first-launch allowance](desktop-installation.md#macos).
+Never disable Gatekeeper globally.

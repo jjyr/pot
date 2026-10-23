@@ -3,7 +3,7 @@ const {chromium}=await import(process.env.POT_PLAYWRIGHT_MODULE||'playwright');
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 const installOnly=process.argv.includes('--install-only');
-const browser=await chromium.launch({headless:true});
+const browser=await chromium.launch({headless:true,executablePath:process.env.POT_CHROMIUM_EXECUTABLE});
 try {
 const origin=process.env.POT_WEBSITE_ORIGIN||'http://127.0.0.1:4173',errors=[];
 const install=JSON.parse(await fs.readFile('website/install.json','utf8'));

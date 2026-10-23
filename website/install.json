@@ -1,6 +1,6 @@
 {
   "prompt": "Read https://github.com/jjyr/pot/blob/main/docs/install-with-agent.md and help me install and configure Pot on this computer.",
-  "brew": "brew install --cask ./pot.rb",
+  "brew": "brew tap jjyr/pot https://github.com/jjyr/pot.git\nbrew install --cask jjyr/pot/pot",
   "image": "ghcr.io/jjyr/pot",
   "server": "./pot serve -root \"$HOME/.pot-node\" -ui 127.0.0.1:17703"
 }

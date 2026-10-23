@@ -155,7 +155,7 @@ class CompleteDistribution(AssetsFixture, unittest.TestCase):
             self.assertIn("/v#{version}/Pot-#{version}-arm64.zip", cask)
             self.assertNotIn("xattr", cask)
             self.assertNotIn("@SHA256@", cask)
-            self.assertEqual(len((root / "SHA256SUMS").read_text().splitlines()), 7)
+            self.assertEqual(len((root / "SHA256SUMS").read_text().splitlines()), 6)
 
     def test_missing_container_cannot_be_a_complete_distribution(self):
         for missing in ["pot-container-1.2.3.oci.tar"]:
@@ -568,9 +568,10 @@ class MacOSPublication(AssetsFixture, unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "complete asset set"):
                     publish("1.2.3", root, "macos", mode)
                 manifest.write_text(original)
-                (root / "pot.rb").write_text("changed bytes")
-                with self.assertRaisesRegex(ValueError, "complete asset set"):
-                    publish("1.2.3", root, "macos", mode)
+                (root / "pot.rb").unlink()
+                publish("1.2.3", root, "macos", mode)
+                self.assertNotIn("pot.rb", uploads)
+                self.assertNotIn("pot.rb", original)
                 # Even a newly valid manifest cannot override existing assets.
                 with mock.patch("subprocess.run"):
                     prepare("1.2.3", root, sign_feed=True, channel="macos", macos_mode=other_mode)

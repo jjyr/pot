@@ -151,9 +151,7 @@
     "把这段英文交给你的助手，它会读取安装指南并帮你完成配置。": "把这段英文交给你的助手，它会读取安装指南并帮你完成配置。",
     "macOS 26+ · Apple Silicon": "macOS 26+ · Apple Silicon",
     "Homebrew": "Homebrew",
-    "首个版本发布后，下载该 macOS Release 的 pot.rb，再在下载目录运行：": "首个版本发布后，下载该 macOS Release 的 pot.rb，再在下载目录运行：",
     "Homebrew 安装与首次启动 ↗": "Homebrew 安装与首次启动 ↗",
-    "macOS 暂仅提供 Homebrew 安装入口；安装包待首次发布。": "macOS 暂仅提供 Homebrew 安装入口；安装包待首次发布。",
     "Linux": "Linux",
     "Experimental": "Experimental",
     "下载 .deb": "下载 .deb",
@@ -173,7 +171,9 @@
     "原生桌面 · Debian / Ubuntu · amd64": "原生桌面 · Debian / Ubuntu · amd64",
     "容器运行 · Linux amd64 / arm64，通过浏览器使用。": "容器运行 · Linux amd64 / arm64，通过浏览器使用。",
     "直接运行服务端": "直接运行服务端",
-    "下载 Release 后直接运行服务端。": "下载 Release 后直接运行服务端。"
+    "下载 Release 后直接运行服务端。": "下载 Release 后直接运行服务端。",
+    "使用本仓库作为 Homebrew tap，依次运行：": "使用本仓库作为 Homebrew tap，依次运行：",
+    "首次 macOS 发布并合并 cask 更新后即可安装；Homebrew 保留首次启动安全检查。": "首次 macOS 发布并合并 cask 更新后即可安装；Homebrew 保留首次启动安全检查。"
   },
   "demo": {
     "language": "语言",

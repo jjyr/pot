@@ -151,9 +151,7 @@
     "把这段英文交给你的助手，它会读取安装指南并帮你完成配置。": "この英語のプロンプトをエージェントに渡すと、ガイドを読んでセットアップを手伝います。",
     "macOS 26+ · Apple Silicon": "macOS 26+ · Apple Silicon",
     "Homebrew": "Homebrew",
-    "首个版本发布后，下载该 macOS Release 的 pot.rb，再在下载目录运行：": "最初のリリース公開後、その macOS 用 pot.rb をダウンロードし、ダウンロード先で実行してください：",
     "Homebrew 安装与首次启动 ↗": "Homebrew でのインストールと初回起動 ↗",
-    "macOS 暂仅提供 Homebrew 安装入口；安装包待首次发布。": "当面、macOS のインストールは Homebrew のみを案内します。パッケージは初回リリース待ちです。",
     "Linux": "Linux",
     "Experimental": "Experimental",
     "下载 .deb": ".deb をダウンロード",
@@ -173,7 +171,9 @@
     "原生桌面 · Debian / Ubuntu · amd64": "ネイティブデスクトップ · Debian / Ubuntu · amd64",
     "容器运行 · Linux amd64 / arm64，通过浏览器使用。": "コンテナで実行 · Linux amd64 / arm64、ブラウザーで利用。",
     "直接运行服务端": "サーバーを直接実行",
-    "下载 Release 后直接运行服务端。": "リリースをダウンロードしてサーバーを直接実行します。"
+    "下载 Release 后直接运行服务端。": "リリースをダウンロードしてサーバーを直接実行します。",
+    "使用本仓库作为 Homebrew tap，依次运行：": "このリポジトリを Homebrew tap として追加し、順に実行します：",
+    "首次 macOS 发布并合并 cask 更新后即可安装；Homebrew 保留首次启动安全检查。": "初回の macOS リリースと cask 更新のマージ後にインストールできます。Homebrew は初回起動時のセキュリティチェックを維持します。"
   },
   "demo": {
     "language": "言語",

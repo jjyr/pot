@@ -18,15 +18,22 @@ native windows        local Runtime / executor
 ## macOS
 
 The Apple Silicon app requires macOS 26 or later. During the unsigned release
-phase, the website and README offer **Homebrew installation only**. Once a matching
-release is published, download that release's `pot.rb` and follow the
-[local cask instructions](releases.md#homebrew-generation), running
-`brew install --cask ./pot.rb` in its directory. Homebrew installs `Pot.app` in
-Applications from the release ZIP and verifies the archive against the cask's
-SHA-256. The ZIP remains a required release asset even while its direct download
-entry is hidden. Until a matching release exists, see
-[Development](development.md) to build the independently identified development
-bundle with `mise run build`.
+phase, the website and README offer **Homebrew installation only**:
+
+```sh
+brew tap jjyr/pot https://github.com/jjyr/pot.git
+brew install --cask jjyr/pot/pot
+```
+
+The first tap needs the explicit Git URL because this repository is named `pot`.
+The root `Casks/pot.rb` is disabled until the first macOS release is published and
+its cask update PR is merged. See [cask maintenance](releases.md#homebrew-generation).
+Homebrew installs `Pot.app` in Applications from the release ZIP and verifies its
+SHA-256. The ZIP remains a required release asset while its direct download entry
+is hidden; `pot.rb` is maintained in source and is not a Release asset.
+Upgrade with `brew upgrade --cask jjyr/pot/pot` after the corresponding cask PR is
+merged. Until a matching release exists, see [Development](development.md) to
+build the independently identified development bundle with `mise run build`.
 
 Read `MACOS-RELEASE.txt` in the selected release for its signing status.
 `unsigned` releases are ad-hoc signed for executable integrity;
@@ -51,8 +58,7 @@ persists. Quit Pot before manually replacing the complete App for an upgrade;
 back up its data first.
 
 Homebrew preserves quarantine and does not guarantee bypassing Gatekeeper; the
-same first-launch guidance applies to cask installations. The public tap does
-not currently contain a Pot cask.
+same first-launch guidance applies to cask installations.
 
 The macOS CLI archive uses the same release mode. When macOS blocks a trusted,
 verified extracted CLI installation, apply any quarantine exception only to that

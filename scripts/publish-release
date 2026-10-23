@@ -39,10 +39,10 @@ def publish(version, output, channel, macos_mode=None):
             )
     elif macos_mode is not None:
         raise ValueError("macOS mode is only valid for the macOS channel")
-    # Require the complete manifest, including feed, cask and mode disclosure.
+    # Require the complete manifest, including feed and mode disclosure.
     names = distribution_names(version, channel)
     if channel == "macos":
-        names += ["pot.rb", "update.json", "MACOS-RELEASE.txt"]
+        names += ["update.json", "MACOS-RELEASE.txt"]
     expected = "".join(f"{checksum(output / name)}  {name}\n" for name in names)
     if (output / checksum_name(channel)).read_text() != expected:
         raise ValueError("channel checksum manifest does not match complete asset set")

@@ -80,7 +80,7 @@ def release_assets(version, channel):
     names = distribution_names(version, channel)
     assets = names + [name + ".sha256" for name in names] + [checksum_name(channel)]
     if channel == "macos":
-        assets += ["pot.rb", "update.json", "MACOS-RELEASE.txt"]
+        assets += ["update.json", "MACOS-RELEASE.txt"]
     return assets
 
 
