@@ -498,6 +498,9 @@ It covers query boundaries, compact rows, keyboard/IME selection, unavailable
 assistants, owner-scoped drafts, late lookups, failed sends and unchanged send
 destinations. It makes no model calls and saves screenshots under ignored
 `output/playwright/`.
+The same fixture checks native mention typing, clipboard serialization, whole-label
+deletion, undo/redo and highlight scrolling. Set `POT_COMPOSER_BROWSER=webkit` to
+run it against the cached WebKit browser.
 
 The Codex integration tests use a real Agent Link transport and a supervised
 App Server protocol fixture. Run the task/approval and automatic-review boundary

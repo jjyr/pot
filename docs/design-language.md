@@ -80,9 +80,11 @@ Chat and Task composers share compact floating selectors above the input.
 Rows are 28 px on desktop and at least 44 px on narrow/touch surfaces. Names and
 truncated descriptions share one line, with full details on hover. Assistant
 avatars are 20 px. Menus are at most 440 px wide and
-their candidates scroll within the available viewport. Selected references are
-removable chips above the native textarea; the compact attachment, selector and
-send actions share its bottom row.
+their candidates scroll within the available viewport. Selected Skills are
+removable chips above the native textarea. Assistant references display as tinted
+`@name` labels at their insertion positions in the text, with full node/assistant
+identities retained in drafts and sent messages. The compact attachment, selector
+and send actions share the bottom row.
 Keep copy concise; put detailed operating explanations behind disclosures or in
 field help.
 

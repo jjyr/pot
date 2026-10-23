@@ -151,6 +151,13 @@ do not rewrite its value. Only explicit restoration, matching send receipts and
 completion replace text. Composition events, `isComposing` and key code 229 keep
 candidate confirmation from choosing a completion or sending a message.
 
+Assistant references use compact `@name` text in the native textarea and an
+inert, scroll-synchronized highlight layer. Identity ranges serialize to the same
+full-address links used in messages and drafts; ordinary typed names never resolve
+to identities. Completion, restored drafts and pasted links share this display.
+Editing or deleting a reference replaces the whole label, while copying a complete
+reference preserves its address. Chat and Task guidance use the same editor.
+
 Phone and tablet browsers leave Enter, including modified Enter and Enter with
 reference completions open, to native textarea editing and IME. Ordinary Enter
 inserts a line break; sending requires activation of the send button. Their

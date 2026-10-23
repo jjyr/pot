@@ -666,6 +666,13 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 .composer-toolbar .send-button { grid-column:3;grid-row:3;margin:0;align-self:center; }
 .composer.has-completions{position:relative;display:grid;grid-template-columns:32px minmax(0,1fr) 32px;align-items:end;padding:8px 10px;column-gap:8px;row-gap:0;}
 .composer.has-completions .composer-input{grid-column:1/-1;grid-row:4;width:100%;min-height:36px;padding:4px 2px 8px;}
+.composer-mention-layer{grid-column:1/-1;grid-row:4;align-self:end;min-width:0;padding:4px 2px 8px;line-height:24px;white-space:pre-wrap;overflow-wrap:break-word;overflow:hidden;pointer-events:none;}
+.composer-mention-layer[hidden]{display:none;}
+.composer-mention-layer .assistant-mention{padding:0;overflow-wrap:inherit;box-decoration-break:clone;-webkit-box-decoration-break:clone;}
+.composer-input.has-inline-mentions{position:relative;color:transparent;caret-color:var(--text);}
+.composer-input.has-inline-mentions::selection{color:var(--text);background:var(--assistant-selection);}
+@media(max-width:719px),(pointer:coarse){.composer-mention-layer{font-size:16px;}}
+.surface-tray .composer-mention-layer{font-size:14px;}
 .composer.has-completions .send-button{grid-column:3;grid-row:5;margin:0;align-self:center;}
 .composer.has-completions .composer-toolbar .attachment-trigger{grid-row:5;}
 .composer.has-completions .attachment-hint{grid-row:6;}
