@@ -34,17 +34,20 @@
 </section>
 <div class="intro-band wrap"><span>好想法，值得被完成。</span><p>Pot 负责推进，Agent 各展所长。<br>你只需要专注于，下一件想做的事。</p><a href="#assistant" aria-label="了解助手能力">↓</a></div>
 <section id="assistant" class="section wrap assistant-section" aria-labelledby="assistant-title">
-<div class="section-top"><span class="section-number">01 / YOUR ASSISTANT</span><span class="small-label">从对话，走向行动</span></div>
-<div class="section-heading"><h2 id="assistant-title">不止接住你的话，<br>也接着把事做完。</h2><p>说清目标，Pot 就能建立后台任务，推进工作，<br class="desktop-break">并把进度和结果带回对话。你可以随时继续沟通。</p></div>
-<div class="project-demo">
-<div class="project-conversation"><span class="demo-label">一个目标，三项后台任务</span>
-<p class="project-user">帮我把这个项目准备到可以对外展示：验证 Linux 安装流程，补齐入门文档，再准备几张有代表性的产品截图。</p>
-<div class="project-reply"><img src="assets/pot.png" alt=""><p>我会并行处理安装、文档和截图，再把成果汇总到这里。你可以随时补充要求。</p></div>
-<div class="project-controls"><button id="run-project" class="button primary">播放工作过程</button><button id="finish-project" class="text-link">直接看成果</button></div>
-<small class="demo-disclaimer">根据真实工作流程改编的本地示例，不会创建真实任务或发送消息。</small></div>
-<div class="project-tasks" aria-label="三项并行任务"><!--project-tasks--></div>
-<div class="project-delivery" aria-live="polite"><b>回到同一段对话</b><p id="project-summary">安装核心流程通过，另有两项桌面行为待补测；文档和截图已准备好。</p><div class="delivery-links"><button data-open-report="install">安装验收记录 ↗</button><button data-open-report="docs">文档修改 PR ↗</button><button data-open-report="screens">预览产品截图 ↗</button></div><p class="project-followup">手机端截图再放大一点，文档先保留这个版本。</p><p class="project-next">收到。我会调整手机端截图，保留当前文档版本。</p></div>
-</div>
+<div class="section-top"><span class="section-number">01 / 你的助手</span><span class="small-label">每个助手，都在同一个地方。</span></div>
+<div class="section-heading"><h2 id="assistant-title">你的助手们，各有所长。</h2><p>和不同助手讨论、交给它们独立推进，也让它们彼此沟通，一起把事情做完。</p></div>
+<section class="a01-script-region" aria-labelledby="a01-script-title"><div class="a01-script-label"><h2 id="a01-script-title">把同一件事，接着聊下去。</h2><span>官网设计 · 对话与成果示意</span></div>
+   <div class="a01-story">
+    <div class="a01-story-top">官网设计的本地示意，不会发送消息或创建任务。</div>
+    <div class="a01-conversation-part"><div class="a01-user">想做一个 Pot 官网，让第一次来的人看懂：有多个助手，也能一起做事。</div><div class="a01-assistant"><div class="a01-identity"><img class="a01-avatar" src="assets/pot.png" alt="">Pot</div><p>我们用一个官网设计的例子，把助手、协作和成果放在一起。我请设计师托尼先看布局。</p></div></div>
+    <div class="a01-conversation-part">
+     <details class="a01-communication"><summary>向 @设计师托尼 发送消息<div class="a01-route" aria-label="Pot 向设计师托尼"><img class="a01-avatar" src="assets/pot.png" alt=""><span>Pot</span><i class="a01-direction" aria-hidden="true"></i><span class="a01-generic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.3"/><path d="M5 20v-2a7 7 0 0 1 14 0v2"/></svg></span><span>设计师托尼</span></div></summary><div class="a01-communication-body"><div class="a01-identity"><img class="a01-avatar" src="assets/pot.png" alt="">Pot</div><p>请保留真实导航和助手列表，用官网设计的例子展示协作，再留一个设计预览入口。</p><details class="a01-call-details"><summary>调用详情</summary><p>本地演示，不会发送消息。</p><code>send_message</code></details></div></details>
+     <details class="a01-communication" open><summary>收到 @设计师托尼 的消息<div class="a01-route" aria-label="设计师托尼 向 Pot"><span class="a01-generic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.3"/><path d="M5 20v-2a7 7 0 0 1 14 0v2"/></svg></span><span>设计师托尼</span><i class="a01-direction" aria-hidden="true"></i><img class="a01-avatar" src="assets/pot.png" alt=""><span>Pot</span></div></summary><div class="a01-communication-body"><div class="a01-identity"><span class="a01-generic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.3"/><path d="M5 20v-2a7 7 0 0 1 14 0v2"/></svg></span>设计师托尼</div><p>我建议让助手列表一直露出。通信只展开一条短正文，成果入口放在后面，访客一眼就能看懂。</p><details class="a01-call-details"><summary>调用详情</summary><p>本地演示，没有真实消息传输。</p><code>receive_message</code></details></div></details>
+    </div>
+    <div class="a01-conversation-part"><div class="a01-assistant"><div class="a01-identity"><img class="a01-avatar" src="assets/pot.png" alt="">Pot</div><p>先看这个局部方向。我们可以在这里继续改文案和布局。</p></div><button type="button" class="a01-result" id="a01-openResult"><span class="a01-file" aria-hidden="true">▤</span><span><strong>官网设计 · 局部预览</strong><small>打开演示成果</small></span><span class="a01-arrow" aria-hidden="true">↗</span></button><div class="a01-user a01-last-user">把标题再短一点，手机上也要看清助手之间的沟通。</div></div>
+
+   </div>
+</section>
 </section>
 <section id="agent-link" class="link-section" aria-labelledby="link-title"><div class="wrap">
 <div class="section-top"><span class="section-number">02 / AGENT LINK</span><span class="small-label">一条连接，打开更多可能</span></div>
@@ -78,4 +81,5 @@
 </main>
 <footer class="wrap"><a class="brand" href="#"><img src="assets/pot.png" alt=""><span>Pot.</span></a><p>一个助手，更多可能。</p><a href="#main">回到顶部 ↑</a><span class="footer-note">为想法留一点空间。</span></footer>
 <dialog id="report-dialog" aria-labelledby="report-title"><div class="dialog-top"><span>示例成果 · 本地预览</span><button id="close-dialog" aria-label="关闭预览">×</button></div><div id="report-content"></div><div class="dialog-actions"><button id="download-report" class="button primary">下载示例报告 <span>↓</span></button><small>示例内容，用于体验交付方式</small></div></dialog>
+<dialog class="a01-dialog" id="a01-resultDialog" aria-labelledby="a01-resultTitle"><div class="a01-dialog-top"><strong id="a01-resultTitle">官网设计 · 演示成果入口</strong><button type="button" data-close="a01-resultDialog">关闭</button></div><div class="a01-result-preview"><p class="a01-sample-mark">排版示意 / 非真实助手产出</p><div class="a01-mini-site"><div class="a01-mini-brand"><img src="assets/pot.png" alt="">Pot<span style="color:var(--accent)">.</span></div><h2>你的助手，<br><span>一起把事情做完。</span></h2><p>和 Pot 讨论目标，让不同助手发挥各自所长。设计、沟通和成果，回到同一个对话里。</p><div class="a01-sample-tags"><span>多个助手</span><span>彼此沟通</span><span>成果回到对话</span></div></div><p>这是展示「从对话进入成果、再回到对话修改」的本地示例。它不代表助手已完成官网设计，也不创建任务。关闭后可继续查看下方的修改意见。</p></div></dialog>
 </body></html>

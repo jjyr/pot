@@ -36,13 +36,6 @@
     "Pot 负责推进，Agent 各展所长。": "Pot impulsa el trabajo. Cada agente aporta sus fortalezas.",
     "你只需要专注于，下一件想做的事。": "Tú puedes centrarte en lo que quieres hacer después.",
     "了解助手能力": "Ver las capacidades del asistente",
-    "01 / YOUR ASSISTANT": "01 / TU ASISTENTE",
-    "从对话，走向行动": "De la conversación a la acción",
-    "不止接住你的话，": "Te escucha.",
-    "也接着把事做完。": "Y lo lleva a cabo.",
-    "说清目标，Pot 就能建立后台任务，推进工作，": "Explica tu objetivo. Pot puede crear una tarea en segundo plano, hacerla avanzar",
-    "并把进度和结果带回对话。你可以随时继续沟通。": "y traer el progreso y los resultados a la conversación. Puedes seguir hablando cuando quieras.",
-    "后台任务": "Tarea en segundo plano",
     "已完成": "Completada",
     "02 / AGENT LINK": "02 / Agent Link",
     "一条连接，打开更多可能": "Una conexión. Más posibilidades.",
@@ -109,20 +102,6 @@
     "关闭预览": "Cerrar vista previa",
     "下载示例报告": "Descargar informe de ejemplo",
     "示例内容，用于体验交付方式": "Contenido de ejemplo para mostrar cómo se entregan los resultados",
-    "一个目标，三项后台任务": "Un objetivo. Tres tareas en segundo plano.",
-    "帮我把这个项目准备到可以对外展示：验证 Linux 安装流程，补齐入门文档，再准备几张有代表性的产品截图。": "Prepara este proyecto para compartirlo: verifica la instalación en Linux, completa la guía inicial y prepara capturas representativas del producto.",
-    "我会并行处理安装、文档和截图，再把成果汇总到这里。你可以随时补充要求。": "Trabajaré en instalación, documentación y capturas en paralelo y reuniré los resultados aquí. Puedes añadir detalles en cualquier momento.",
-    "播放工作过程": "Reproducir el trabajo",
-    "直接看成果": "Ver los resultados",
-    "根据真实工作流程改编的本地示例，不会创建真实任务或发送消息。": "Ejemplo local basado en un flujo real. No crea tareas ni mensajes reales.",
-    "三项并行任务": "Tres tareas en paralelo",
-    "回到同一段对话": "De vuelta en la misma conversación",
-    "安装核心流程通过，另有两项桌面行为待补测；文档和截图已准备好。": "El flujo básico de instalación pasó; faltan dos comprobaciones de escritorio. La documentación y las capturas están listas.",
-    "安装验收记录 ↗": "Notas de instalación ↗",
-    "文档修改 PR ↗": "PR de documentación ↗",
-    "预览产品截图 ↗": "Ver capturas del producto ↗",
-    "手机端截图再放大一点，文档先保留这个版本。": "Amplía un poco las capturas móviles. Conserva esta versión de la documentación.",
-    "收到。我会调整手机端截图，保留当前文档版本。": "De acuerdo. Ajustaré las capturas móviles y conservaré los documentos actuales.",
     "04 / GET STARTED": "04 / EMPEZAR",
     "选一种适合你的开始方式": "Elige cómo empezar",
     "让助手安装": "Instalar con un agente",
@@ -135,14 +114,6 @@
     "源码 ↗": "Código fuente ↗",
     "已复制。": "Copiado.",
     "无法自动复制，请选择代码后复制。": "No se pudo copiar. Selecciona y copia el código.",
-    "验证 Linux 安装": "Verificar la instalación en Linux",
-    "启动、模型连接、重开持久化": "Inicio, conexión al modelo y persistencia al reabrir",
-    "整理入门文档": "Completar la guía inicial",
-    "平台、安装步骤、首次配置": "Plataformas, pasos de instalación y configuración",
-    "准备产品截图": "Preparar capturas del producto",
-    "助手工作、后台任务、Agent Link": "Asistente, tareas en segundo plano y Agent Link",
-    "逐项推进，成果会回到这里。": "El trabajo avanza; los resultados volverán aquí.",
-    "查看示例成果": "Ver resultado de ejemplo",
     "选择你的安装方式。Windows 暂不支持。": "Elige cómo instalar. Windows aún no es compatible.",
     "安装方式": "Método de instalación",
     "Web UI": "Web UI",
@@ -179,7 +150,40 @@
     "{count}m": "{count}m",
     "{count}b": "{count}b",
     "{count}t": "{count}t",
-    "{count}q": "{count}q"
+    "{count}q": "{count}q",
+    "01 / 你的助手": "01 / TUS ASISTENTES",
+    "每个助手，都在同一个地方。": "Todos tus asistentes, en un solo lugar.",
+    "你的助手们，各有所长。": "Tus asistentes, cada uno con su especialidad.",
+    "和不同助手讨论、交给它们独立推进，也让它们彼此沟通，一起把事情做完。": "Habla con distintos asistentes, encárgales trabajo independiente y deja que se comuniquen para terminar las cosas juntos.",
+    "把同一件事，接着聊下去。": "Sigue hablando del mismo trabajo.",
+    "官网设计 · 对话与成果示意": "Diseño web · ejemplo de conversación y resultado",
+    "官网设计的本地示意，不会发送消息或创建任务。": "Ejemplo local de diseño web. No se envían mensajes ni se crean tareas.",
+    "想做一个 Pot 官网，让第一次来的人看懂：有多个助手，也能一起做事。": "Quiero una web de Pot que ayude a los nuevos visitantes a entender que hay varios asistentes y que pueden trabajar juntos.",
+    "我们用一个官网设计的例子，把助手、协作和成果放在一起。我请设计师托尼先看布局。": "Usemos un ejemplo de diseño web para reunir asistentes, colaboración y resultados. Le pediré al diseñador Tony que revise la distribución.",
+    "向 @设计师托尼 发送消息": "Enviar un mensaje a @Diseñador Tony",
+    "Pot 向设计师托尼": "Pot a Diseñador Tony",
+    "设计师托尼": "Diseñador Tony",
+    "请保留真实导航和助手列表，用官网设计的例子展示协作，再留一个设计预览入口。": "Conserva la navegación y la lista de asistentes reales, muestra la colaboración con el ejemplo de diseño web e incluye una vista previa del diseño.",
+    "调用详情": "Detalles de la llamada",
+    "本地演示，不会发送消息。": "Ejemplo local. No se envía ningún mensaje.",
+    "收到 @设计师托尼 的消息": "Mensaje de @Diseñador Tony",
+    "设计师托尼 向 Pot": "Diseñador Tony a Pot",
+    "我建议让助手列表一直露出。通信只展开一条短正文，成果入口放在后面，访客一眼就能看懂。": "Sugiero mantener visible la lista de asistentes. Muestra un solo mensaje breve expandido y después el resultado, para que se entienda de un vistazo.",
+    "本地演示，没有真实消息传输。": "Ejemplo local. No hay transmisión real de mensajes.",
+    "先看这个局部方向。我们可以在这里继续改文案和布局。": "Mira primero esta propuesta. Podemos seguir ajustando el texto y la distribución aquí.",
+    "官网设计 · 局部预览": "Diseño web · vista previa parcial",
+    "打开演示成果": "Abrir resultado de ejemplo",
+    "把标题再短一点，手机上也要看清助手之间的沟通。": "Acorta un poco el título y haz que la comunicación entre asistentes también se lea bien en el móvil.",
+    "关闭": "Cerrar",
+    "官网设计 · 演示成果入口": "Diseño web · resultado de ejemplo",
+    "排版示意 / 非真实助手产出": "Ejemplo de diseño / no es un resultado real de un asistente",
+    "一起把事情做完。": "Terminad las cosas juntos.",
+    "和 Pot 讨论目标，让不同助手发挥各自所长。设计、沟通和成果，回到同一个对话里。": "Comenta tu objetivo con Pot y deja que cada asistente aporte su especialidad. Diseño, comunicación y resultados vuelven a la misma conversación.",
+    "彼此沟通": "Comunicación entre asistentes",
+    "成果回到对话": "Resultados en la conversación",
+    "这是展示「从对话进入成果、再回到对话修改」的本地示例。它不代表助手已完成官网设计，也不创建任务。关闭后可继续查看下方的修改意见。": "Este ejemplo local muestra cómo abrir un resultado desde una conversación y volver para comentar cambios. No representa un trabajo terminado por un asistente ni crea una tarea. Ciérralo para seguir leyendo los comentarios.",
+    "send_message": "send_message",
+    "receive_message": "receive_message"
   },
   "demo": {
     "language": "Idioma",
@@ -190,10 +194,8 @@
     "directExample": "Conversación directa con el otro asistente · Ejemplo",
     "delegateReply": "Encargaré el objetivo a {agent}, seguiré la tarea y traeré el resultado aquí.",
     "returnExample": "Pot → {agent} → Resultado recibido · Ejemplo",
-    "playing": "Tarea en curso",
     "replay": "Reproducir de nuevo",
     "statusCreated": "Creada",
-    "statusRunning": "En curso",
     "statusFinishing": "Preparando resultados",
     "agentTalk": [
       [
@@ -251,62 +253,6 @@
     "siteBundle": "Web de producto · Entrega de ejemplo",
     "siteBundleSub": "Estructura / Interacciones / Validación",
     "siteReportTitle": "Web de producto · Notas de entrega de ejemplo",
-    "projectReports": [
-      {
-        "title": "Notas de instalación · ejemplo",
-        "intro": "Revisión de ejemplo de una compilación de escritorio Linux; no certifica tu equipo.",
-        "sections": [
-          {
-            "title": "Comprobado en este ejemplo",
-            "paragraphs": [
-              "La app inicia, el modelo configurado conecta y el asistente y los ajustes persisten al reabrir."
-            ]
-          },
-          {
-            "title": "Pendiente",
-            "paragraphs": [
-              "Comprobar las ventanas de Wayland y los clics de notificaciones en el escritorio de destino."
-            ]
-          }
-        ]
-      },
-      {
-        "title": "PR de documentación inicial · ejemplo",
-        "intro": "Cambio de documentación ficticio para el proyecto de la demo; no crea un PR en GitHub.",
-        "sections": [
-          {
-            "title": "Cambios propuestos",
-            "paragraphs": [
-              "Separar el estado Experimental del escritorio Linux de Server y Docker. Mostrar requisitos antes de los comandos y explicar la configuración."
-            ]
-          },
-          {
-            "title": "Extracto de revisión",
-            "paragraphs": [
-              "Antes: «Instala Pot y empieza a hablar». Después: «Elige plataforma, verifica el paquete, abre Pot y añade un proveedor. Introduce las claves en la interfaz local»."
-            ]
-          }
-        ]
-      },
-      {
-        "title": "Capturas del producto · ejemplo",
-        "intro": "La interfaz real del producto usa datos sintéticos aislados. No se accedió a conversaciones ni tareas reales.",
-        "sections": [
-          {
-            "title": "Vistas preparadas",
-            "paragraphs": [
-              "Conversación con tres tareas y sus resultados; delegación y respuesta por Agent Link."
-            ]
-          },
-          {
-            "title": "Siguiente ajuste",
-            "paragraphs": [
-              "Ampliar el recorte móvil y conservar la versión aprobada de los documentos."
-            ]
-          }
-        ]
-      }
-    ],
     "siteReport": {
       "intro": "Del objetivo al archivo: los resultados vuelven con su contexto. Esta vista previa muestra qué podría entregar un agente al terminar una tarea.",
       "sections": [

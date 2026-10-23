@@ -36,13 +36,6 @@
     "Pot 负责推进，Agent 各展所长。": "Pot keeps things moving. Each agent brings its strengths.",
     "你只需要专注于，下一件想做的事。": "You can focus on what you want to do next.",
     "了解助手能力": "Explore assistant capabilities",
-    "01 / YOUR ASSISTANT": "01 / YOUR ASSISTANT",
-    "从对话，走向行动": "From conversation to action",
-    "不止接住你的话，": "It hears you.",
-    "也接着把事做完。": "And follows through.",
-    "说清目标，Pot 就能建立后台任务，推进工作，": "Describe your goal. Pot can start a background task, move it forward,",
-    "并把进度和结果带回对话。你可以随时继续沟通。": "and bring progress and results back to the conversation. Keep talking whenever you need to.",
-    "后台任务": "Background task",
     "已完成": "Completed",
     "02 / AGENT LINK": "02 / AGENT LINK",
     "一条连接，打开更多可能": "One connection. More possibilities.",
@@ -109,20 +102,6 @@
     "关闭预览": "Close preview",
     "下载示例报告": "Download example report",
     "示例内容，用于体验交付方式": "Example content to show how results are delivered",
-    "一个目标，三项后台任务": "One goal. Three background tasks.",
-    "帮我把这个项目准备到可以对外展示：验证 Linux 安装流程，补齐入门文档，再准备几张有代表性的产品截图。": "Get this project ready to share: verify Linux installation, complete the getting-started docs, and prepare a few representative product screenshots.",
-    "我会并行处理安装、文档和截图，再把成果汇总到这里。你可以随时补充要求。": "I’ll work on installation, docs and screenshots in parallel, then bring the results back here. You can add details along the way.",
-    "播放工作过程": "Play the workflow",
-    "直接看成果": "See completed work",
-    "根据真实工作流程改编的本地示例，不会创建真实任务或发送消息。": "Local example adapted from a real workflow. No real tasks or messages are created.",
-    "三项并行任务": "Three parallel tasks",
-    "回到同一段对话": "Back in the same conversation",
-    "安装核心流程通过，另有两项桌面行为待补测；文档和截图已准备好。": "The core installation flow passed; two desktop behaviors still need checking. Docs and screenshots are ready.",
-    "安装验收记录 ↗": "Installation notes ↗",
-    "文档修改 PR ↗": "Documentation PR ↗",
-    "预览产品截图 ↗": "Preview product screenshots ↗",
-    "手机端截图再放大一点，文档先保留这个版本。": "Make the mobile screenshots a little larger. Keep this version of the docs.",
-    "收到。我会调整手机端截图，保留当前文档版本。": "Got it. I’ll resize the mobile screenshots and keep the current docs.",
     "04 / GET STARTED": "04 / GET STARTED",
     "选一种适合你的开始方式": "Choose how to get started",
     "让助手安装": "Install with an agent",
@@ -135,14 +114,6 @@
     "源码 ↗": "Source code ↗",
     "已复制。": "Copied.",
     "无法自动复制，请选择代码后复制。": "Copy unavailable. Select and copy the code.",
-    "验证 Linux 安装": "Verify Linux installation",
-    "启动、模型连接、重开持久化": "Startup, model connection, persistence after reopening",
-    "整理入门文档": "Complete getting-started docs",
-    "平台、安装步骤、首次配置": "Platforms, installation steps, first configuration",
-    "准备产品截图": "Prepare product screenshots",
-    "助手工作、后台任务、Agent Link": "Assistant work, background tasks, Agent Link",
-    "逐项推进，成果会回到这里。": "Work is progressing; results will return here.",
-    "查看示例成果": "View example result",
     "选择你的安装方式。Windows 暂不支持。": "Choose how to install. Windows is not supported yet.",
     "安装方式": "Installation method",
     "Web UI": "Web UI",
@@ -179,7 +150,40 @@
     "{count}m": "{count}m",
     "{count}b": "{count}b",
     "{count}t": "{count}t",
-    "{count}q": "{count}q"
+    "{count}q": "{count}q",
+    "01 / 你的助手": "01 / YOUR ASSISTANTS",
+    "每个助手，都在同一个地方。": "Every assistant, in one place.",
+    "你的助手们，各有所长。": "Your assistants, each with their strengths.",
+    "和不同助手讨论、交给它们独立推进，也让它们彼此沟通，一起把事情做完。": "Talk with different assistants, let them work independently, and have them communicate to get things done together.",
+    "把同一件事，接着聊下去。": "Keep the conversation going.",
+    "官网设计 · 对话与成果示意": "Website design · conversation and result illustration",
+    "官网设计的本地示意，不会发送消息或创建任务。": "A local website-design illustration. No messages are sent or tasks created.",
+    "想做一个 Pot 官网，让第一次来的人看懂：有多个助手，也能一起做事。": "I want a Pot website that helps first-time visitors understand: there are multiple assistants, and they can work together.",
+    "我们用一个官网设计的例子，把助手、协作和成果放在一起。我请设计师托尼先看布局。": "Let’s use a website-design example to bring assistants, collaboration and results together. I’ll ask Designer Tony to look at the layout.",
+    "向 @设计师托尼 发送消息": "Send a message to @Designer Tony",
+    "Pot 向设计师托尼": "Pot to Designer Tony",
+    "设计师托尼": "Designer Tony",
+    "请保留真实导航和助手列表，用官网设计的例子展示协作，再留一个设计预览入口。": "Keep the real navigation and assistant list, show collaboration through the website-design example, and include a design preview.",
+    "调用详情": "Call details",
+    "本地演示，不会发送消息。": "Local illustration. No message is sent.",
+    "收到 @设计师托尼 的消息": "Message from @Designer Tony",
+    "设计师托尼 向 Pot": "Designer Tony to Pot",
+    "我建议让助手列表一直露出。通信只展开一条短正文，成果入口放在后面，访客一眼就能看懂。": "I suggest keeping the assistant list visible. Expand just one short message, then show the result so visitors can understand it at a glance.",
+    "本地演示，没有真实消息传输。": "Local illustration. No message is transmitted.",
+    "先看这个局部方向。我们可以在这里继续改文案和布局。": "Take a look at this direction first. We can keep refining the copy and layout here.",
+    "官网设计 · 局部预览": "Website design · partial preview",
+    "打开演示成果": "Open example result",
+    "把标题再短一点，手机上也要看清助手之间的沟通。": "Make the title shorter, and keep communication between assistants readable on mobile.",
+    "关闭": "Close",
+    "官网设计 · 演示成果入口": "Website design · example result",
+    "排版示意 / 非真实助手产出": "Layout illustration / not an actual assistant deliverable",
+    "一起把事情做完。": "Get things done together.",
+    "和 Pot 讨论目标，让不同助手发挥各自所长。设计、沟通和成果，回到同一个对话里。": "Discuss your goal with Pot and let different assistants contribute their strengths. Design, communication and results return to the same conversation.",
+    "彼此沟通": "Communicate with each other",
+    "成果回到对话": "Results in the conversation",
+    "这是展示「从对话进入成果、再回到对话修改」的本地示例。它不代表助手已完成官网设计，也不创建任务。关闭后可继续查看下方的修改意见。": "This local example illustrates opening a result from a conversation, then returning to discuss changes. It does not represent completed assistant work or create a task. Close it to continue reading the feedback.",
+    "send_message": "send_message",
+    "receive_message": "receive_message"
   },
   "demo": {
     "language": "Language",
@@ -190,10 +194,8 @@
     "directExample": "Direct conversation with the other assistant · Example",
     "delegateReply": "I’ll hand the goal to {agent}, follow the task and bring the result back here.",
     "returnExample": "Pot → {agent} → Result returned · Example",
-    "playing": "Task in progress",
     "replay": "Play again",
     "statusCreated": "Created",
-    "statusRunning": "In progress",
     "statusFinishing": "Preparing results",
     "agentTalk": [
       [
@@ -251,62 +253,6 @@
     "siteBundle": "Product website · Example delivery",
     "siteBundleSub": "Page structure / Interactions / Validation notes",
     "siteReportTitle": "Product website · Example delivery notes",
-    "projectReports": [
-      {
-        "title": "Installation acceptance · example",
-        "intro": "A sample review of a Linux desktop build, not certification of your computer.",
-        "sections": [
-          {
-            "title": "Checked in this example",
-            "paragraphs": [
-              "The app starts, the configured model connects, and the assistant and settings remain after reopening."
-            ]
-          },
-          {
-            "title": "Still to check",
-            "paragraphs": [
-              "Wayland window behavior and notification clicks need testing on the target desktop."
-            ]
-          }
-        ]
-      },
-      {
-        "title": "Getting-started documentation PR · example",
-        "intro": "A synthetic documentation change for the project in this demo; no GitHub PR is created.",
-        "sections": [
-          {
-            "title": "Proposed changes",
-            "paragraphs": [
-              "Separate Linux desktop Experimental status from Server and Docker. Put requirements before commands and explain first configuration."
-            ]
-          },
-          {
-            "title": "Review excerpt",
-            "paragraphs": [
-              "Before: “Install Pot and start chatting.” After: “Choose your platform, verify the artifact, open Pot, then add a model provider. Keep keys in the local UI.”"
-            ]
-          }
-        ]
-      },
-      {
-        "title": "Product screenshots · example",
-        "intro": "The actual shared product UI below uses isolated synthetic records. No real conversations or tasks were accessed.",
-        "sections": [
-          {
-            "title": "Prepared views",
-            "paragraphs": [
-              "Assistant conversation with three background tasks and returned work; Agent Link delegation and reply."
-            ]
-          },
-          {
-            "title": "Next edit",
-            "paragraphs": [
-              "Enlarge the mobile crop while keeping the approved documentation version."
-            ]
-          }
-        ]
-      }
-    ],
     "siteReport": {
       "intro": "From a goal to a file, results return with context. This preview shows the kind of content an agent could deliver after completing a task.",
       "sections": [
