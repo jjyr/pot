@@ -149,6 +149,17 @@ at desktop and phone widths; `locale=zh-CN&theme=dark` exercises the other local
 and theme. Add `capture-navigation=1` to pause at the multiline-draft return
 scenario; `window.navigationCaptureContinue()` resumes the checks.
 
+On the same loopback server, `/scripts/tests/fixtures/chat-cache.html` exercises
+the actual IndexedDB schema, reopening, atomic rollback, history reads, version
+fencing, multiple writers and retired boots. `/scripts/tests/fixtures/chat-cache-ui.html?conversation=alpha&locale=en`
+holds a real database transaction to check commit-before-display, samples
+assistant-switch frames, restores historical reading in a fresh mount, reads
+Latest without the backend, and reloads the browser to verify persisted output.
+`/scripts/tests/fixtures/chat-cache-narrow.html` runs the same UI fixture in a
+390px frame with Chinese text and dark appearance.
+Both fixtures use isolated synthetic databases. Repeat the UI fixture at phone
+width and with `locale=zh-CN&theme=dark`.
+
 For scrolling and disclosure regressions, open
 `/scripts/tests/fixtures/chat-scroll.html?conversation=alpha&locale=en&theme=light`
 on the same loopback server. Run scrolling checks to exercise rapid reversals,

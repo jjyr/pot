@@ -38,7 +38,7 @@ export function messageConfirmsSend(message, receipt) {
     : message.request_id===request.request_id);
 }
 
-export function acceptSnapshot(state, snapshot, epoch) {
+export function acceptSnapshot(state, snapshot, epoch, {committed=false,receivedMessages=snapshot?.messages}={}) {
   if (epoch !== state.epoch || !validSnapshot(snapshot)) return false;
   const previous = state.snapshot;
   // A different identity/boot is established only by a fresh subscription. Late
@@ -46,8 +46,17 @@ export function acceptSnapshot(state, snapshot, epoch) {
   if (previous && (ownerKey(previous) !== ownerKey(snapshot) || previous.boot_id !== snapshot.boot_id)) return false;
   if (previous && BigInt(snapshot.cursor) < BigInt(previous.cursor)) return false;
   if (previous && snapshot.cursor === previous.cursor && snapshot.kind !== 'reset') return false;
-  const receivedMessages=snapshot.messages;
-  snapshot = mergeUIFrame(previous, snapshot, state.uiAnchor);
+  if(!committed)snapshot = mergeUIFrame(previous, snapshot, state.uiAnchor);
+  else if(previous){
+    // Disk reads clone records. Reuse unchanged active rows so a token update
+    // does not invalidate every mounted row's measurement and content view.
+    const old=new Map(previous.messages.map(message=>[message.id,message]));
+    snapshot={...snapshot,messages:snapshot.messages.map(message=>{
+      const value=old.get(message.id);
+      if(!value||value.sequence!==message.sequence||!!value.context_only!==!!message.context_only)return message;
+      return message.version!==undefined&&value.version===message.version||message.version===undefined&&JSON.stringify(value)===JSON.stringify(message)?value:message;
+    })};
+  }
   state.snapshot = snapshot;
   const key=ownerKey(snapshot),pending=state.pending.get(key),send=state.sends.get(key);
   for(const message of receivedMessages)if(message.request_id){const receipt=JSON.stringify([key,message.request_id]);state.seenRequests.delete(receipt);state.seenRequests.add(receipt);}

@@ -1,6 +1,7 @@
 // Production Chat, synthetic long tool output and delayed bidirectional pages.
 // Serve the repository over loopback; all assertions run in the browser itself.
 import {mountApp} from '../../web/src/components/ui.js';
+import {createChatCache} from '../../web/src/state/chat-cache.mjs';
 import {createMessageWindow} from '../../web/src/components/message-window.mjs';
 import {createToolCall} from '../../web/src/components/tool-call.mjs';
 import {createTaskConversation} from '../../web/src/components/task-conversation.mjs';
@@ -23,7 +24,7 @@ const message=index=>{
   return {...base,role:'assistant',reply_to:`m${index-index%4+1-4*(index%4===0)}`,text:`### Batch ${index} findings\n\n`+'The records are available and the conversation remains readable while scrolling. '.repeat(index%7+2)};
 };
 const page=(first,last)=>({kind:'reset',runtime_id:'fixture',boot_id:'boot',owner_id:JSON.stringify(['fixture','alpha']),conversation_id:'alpha',cursor:String(version),replies:[],running:false,turn_id:null,messages:Array.from({length:last-first+1},(_,i)=>message(first+i)),history:{before:String(first),after:String(last),has_more:first>1,has_newer:last<count}});
-const client={production:true,runtime:{runtime_id:'fixture',boot_id:'boot'},scope:()=>({...scope}),setScope:value=>scope={...scope,...value},changes:()=>()=>{},
+const client={chatCacheName:'pot-scroll-'+crypto.randomUUID(),production:true,runtime:{runtime_id:'fixture',boot_id:'boot'},scope:()=>({...scope}),setScope:value=>scope={...scope,...value},changes:()=>()=>{},
   subscribe(callback,status){receive=callback;queueMicrotask(()=>{status('connected');callback(page(count-79,count));});return()=>{};},
   async history(query){
     const start=performance.now();maxInflight=Math.max(maxInflight,++inflight);
@@ -54,8 +55,8 @@ async function run(){
     results.textContent+=`Collapsed tool body characters: ${hiddenChars}\n`;
     check(collapsed.length>0&&hiddenChars<1000,'collapsed tools defer output and raw JSON');
     scroll(h.scrollTop-h.clientHeight*.5);await settle();
-    const saved=anchor();scroll(h.scrollTop-h.clientHeight*2);await settle();scroll(h.scrollTop+h.clientHeight*2);await settle();
-    check(h.querySelector(`[data-message-id="${saved.id}"]`)===saved.node,'nearby round trip reuses message DOM');
+    const saved=anchor();h.dispatchEvent(new Event('scroll'));await settle();
+    check(h.querySelector(`[data-message-id="${saved.id}"]`)===saved.node,'unchanged viewport reuses its mounted message DOM');
     const timings=[];let blanks=0,gaps=0,maxMounted=0;
     for(let i=0;i<90;i++){
       const start=performance.now();scroll(Math.max(0,h.scrollTop+(i%30<15?-1:1)*h.clientHeight*.8));await frame();
@@ -70,14 +71,16 @@ async function run(){
     const ordered=timings.sort((a,b)=>a-b);results.textContent+=`Scroll sample p95: ${ordered[Math.floor(ordered.length*.95)].toFixed(1)}ms (one frame); pages: ${reads.length}\n`;
     for(let i=0;i<10;i++){scroll(100);await pause(190);await settle();}
     check(reads.filter(query=>query.before).length>=9,'traversal pages beyond the 640-message data window');
-    const countBefore=reads.length;scroll(h.scrollHeight-h.clientHeight*2.5);await pause(30);
-    check(reads.slice(countBefore).some(query=>query.after),'newer history prefetch starts more than one viewport before the edge');
+    const persisted=createChatCache({name:client.chatCacheName}),cacheKey=JSON.stringify(['fixture','fixture','alpha']);
+    const beforePrefetch=(await persisted.read(cacheKey)).snapshot.history.after;scroll(h.scrollHeight-h.clientHeight*2.5);await pause(80);
+    const afterPrefetch=(await persisted.read(cacheKey)).snapshot.history.after;persisted.close();
+    check(BigInt(afterPrefetch)>BigInt(beforePrefetch),'newer history prefetch reads disk or backend more than one viewport before the edge');
     await pause(190);await settle();
     scroll(h.scrollTop-h.clientHeight*.2);await settle();
     const reading=anchor();version++;count+=4;const delta=page(count-3,count);receive({...delta,kind:'delta',base_cursor:String(version-1)});await settle();
     check(Math.abs(offset(reading.id)-reading.offset)<3,'new output preserves historical reading');
     const tool=h.querySelector('details.tool-call');
-    if(tool){tool.open=true;await settle();check(!!tool.querySelector('.tool-section pre')?.textContent,'opening a tool renders its output');const raw=tool.querySelector('.tool-raw');check(!raw.querySelector('pre'),'raw JSON remains deferred');raw.open=true;await settle();check(!!raw.querySelector('pre'),'opening raw details renders JSON');tool.open=false;await settle();}
+    if(tool){tool.open=true;await settle();check(tool.querySelector('.tool-content')?.textContent.includes('Record'),'opening a tool renders its output');const raw=tool.querySelector('.tool-raw');check(!raw.querySelector('pre'),'raw JSON remains deferred');raw.open=true;await settle();check(!!raw.querySelector('pre'),'opening raw details renders JSON');tool.open=false;await settle();}
     root.querySelector('.latest-button').click();await pause(250);await settle();
     check(h.scrollHeight-h.clientHeight-h.scrollTop<2,'Latest follows the newest message');
     await componentChecks();
@@ -98,22 +101,22 @@ async function componentChecks(){
     for(let i=0;i<18;i++){
       scroller.scrollTop=i*1300;windowed.layout(rows);
       const cached=[...live].filter(entry=>!entry.row.isConnected);
-      if(cached.length>32||cached.reduce((sum,entry)=>sum+entry.row.textContent.length*2+512,0)>2*1024*1024)throw Error('Detached row cache exceeded its budget');
+      if(cached.length)throw Error('A retired message DOM remained cached in memory');
     }
-    check(true,'detached cache stays within row/text budgets across long traversal');
-    windowed.layout([]);check(live.size===0,'data/owner retirement disposes mounted and cached rows');
+    check(true,'retired message DOM is released throughout long traversal');
+    windowed.layout([]);check(live.size===0,'data/owner retirement disposes every mounted row');
     const payload='x'.repeat(1100000),heavy=rows.map(row=>({...row,text:payload}));
     windowed.layout(heavy);scroller.scrollTop=8000;windowed.layout(heavy);
-    check([...live].every(entry=>entry.row.isConnected),'large deferred message payloads are excluded from the detached cache');
+    check([...live].every(entry=>entry.row.isConnected),'large deferred message payloads do not retain detached DOM');
     windowed.layout([]);
-    windowed.layout(rows);windowed.close();check(live.size===0,'closing the window releases every retained row');
+    windowed.layout(rows);windowed.close();check(live.size===0,'closing the window releases every mounted row');
   }finally{windowed.close();scroller.remove();}
   const call=createToolCall(),tool={id:'mutable',name:'fixture_tool',phase:'running',args:{},output:[{text:'initial output'}]};
   document.body.append(call.element);call.element.open=true;call.update({tool});
   tool.output[0].text+=' updated';call.update({tool});
   check(call.element.textContent.includes('initial output updated'),'in-place Task output updates invalidate expanded tool content');
   tool.output[0].text='Synthetic output line\n'.repeat(3000);call.update({tool});
-  const output=[...call.element.querySelectorAll('.tool-section')].find(section=>section.querySelectorAll('.tool-action').length===2),outputText=output.querySelector('pre');
+  const outputText=call.element.querySelector('.tool-output'),output=outputText.closest('.tool-section');
   outputText.scrollTop=0;outputText.dispatchEvent(new Event('scroll'));tool.output[0].text+='LATEST TAIL';call.update({tool});
   check(!outputText.textContent.includes('LATEST TAIL'),'paused long tool output retains its displayed text');
   output.querySelector('.tool-section-heading button:last-child').click();
@@ -166,5 +169,18 @@ async function virtualizerChecks(){
     await move(scroller.scrollTop-1000);const reading=visible(),readingOffset=offset(reading);
     rows=[...rows,{id:'appended',viewKey:'appended',role:'user',height:180}];windowed.layout(rows);await settle();
     check(reading.isConnected&&Math.abs(offset(reading)-readingOffset)<2,'appended output does not pull a historical reader to the end');
+    const targetID=rows.at(-1).id;
+    windowed.layout(rows,{target:{id:targetID}});await settle();
+    rows=[...rows].reverse();windowed.layout(rows);await settle();
+    check(!!host.querySelector(`[data-message-id="${targetID}"]`),'reordering rows preserves the retained navigation target');
+    rows=rows.slice(0,24);windowed.layout(rows);await settle();
+    check(!!host.querySelector(`[data-message-id="${targetID}"]`),'trimming history resolves a retained navigation target by message identity');
+    windowed.layout(rows,{target:{end:true}});await settle();
+    rows=rows.slice(-2);windowed.layout(rows);await settle();
+    check(scroller.scrollHeight-scroller.clientHeight-scroller.scrollTop<2,'an end target follows the current list after it shrinks');
+    windowed.layout(rows,{target:{id:targetID}});await settle();
+    rows=[];windowed.layout(rows);await settle();
+    rows=[{id:'replacement',viewKey:'replacement',role:'user',height:180}];windowed.layout(rows);await settle();
+    check(!!host.querySelector('[data-message-id="replacement"]'),'a removed target cannot break an empty or replacement window');
   }finally{cancelAnimationFrame(renderFrame);windowed.close();scroller.remove();}
 }
