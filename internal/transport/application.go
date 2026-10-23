@@ -215,7 +215,7 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 		case "/api/v1/permissions":
 			return s.ApprovalView(ctx, owner), nil
 		case "/api/v1/usage/summary", "/api/v1/usage/models", "/api/v1/usage/requests", "/api/v1/usage/tools", "/api/v1/usage/compactions":
-			days := 365
+			days := 0
 			if text := u.Query().Get("days"); text != "" {
 				days, err = strconv.Atoi(text)
 				if err != nil {
@@ -234,9 +234,12 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 				zone = "Asia/Shanghai"
 			}
 			if path != "/api/v1/usage/summary" {
+				if u.Query().Get("start") != "" || u.Query().Get("end") != "" {
+					return nil, errors.New("date ranges require usage summary")
+				}
 				return s.Usage.Page(ctx, strings.TrimPrefix(path, "/api/v1/usage/"), usage.Query{Days: days, Timezone: zone, Scope: u.Query().Get("scope"), Offset: offset}, storage.Now())
 			}
-			summary, err := s.Usage.Summary(ctx, usage.Query{Days: days, Timezone: zone, Scope: u.Query().Get("scope"), Offset: offset}, storage.Now())
+			summary, err := s.Usage.Summary(ctx, usage.Query{Days: days, Start: u.Query().Get("start"), End: u.Query().Get("end"), Timezone: zone, Scope: u.Query().Get("scope"), Offset: offset}, storage.Now())
 			if err != nil {
 				return nil, err
 			}

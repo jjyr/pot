@@ -1,23 +1,42 @@
 # Token usage and allowances
 
-Usage shows a GitHub-style calendar for the last 365 days including today. Each
-column is a week starting Sunday; tiles keep every calendar date, including days
-with no usage. Tile intensity represents daily input + output tokens on a shared
-scale across the year. Narrow views stack the two halves of the year. Dates follow
-the current system IANA zone; today is incomplete. Hovering, keyboard-focusing or
-tapping a tile shows its total, a horizontal stacked bar of Agent categories,
-category counts and percentages, and exact input/cache/uncached/output counts and
-cache hit rate. Escape or an outside tap dismisses the tooltip. Daily tooltips
-combine all models within each category and do not list model names.
+Usage has one date range for the total card, trend, category shares, model shares
+and compaction usage. Four directly clickable options select 2 weeks, 1 month,
+3 months or 1 year; there is no dropdown or custom date form. Two weeks cover
+last week and this week (Monday–Sunday); month, quarter and year select the
+current natural calendar period. Previous/next moves a whole selected period
+without overlapping dates. Selecting an option again returns to its current
+period. The current month is the default. The active timescale stays highlighted
+when navigating previous periods. Selection survives navigation and language
+changes within the window. Current periods retain all dates, including zero-usage
+and future dates, and mark statistics through today. Dates follow the current
+system IANA zone. Clicking the full-year calendar still selects an individual day.
 
-Below the calendar, matching stacked bars show complete annual category and model
-shares, token counts and percentages. A model's full ID determines its stable
-color independently of sorting, refreshes and other models. Small shares retain
-their true widths and remain readable in the labeled list. Overall Usage aggregates this node by date/category/model. Linked nodes own
-their usage; their ledgers are not combined here. These summaries are complete aggregates, not first pages of
-model details. Conversation totals and detail lists remain lifetime values; their
-calendar and share bars cover the last year only. Cached tokens remain part of
-input and total tokens; token counts are not billed cost.
+The stacked trend separates uncached input, cached input and output. Intervals of
+up to 31 days use daily bars; longer intervals up to 180 days use Monday-based
+weeks; longer intervals and year selections use calendar months. Partial first
+and last weeks/months include only the selected dates. Bars fit the viewport
+without horizontal scrolling, scale to the largest displayed total, and expose
+exact date boundaries, counts and cache hit rates on hover, focus or tap.
+
+The three horizontal charts follow that same date range, including in a task or
+main-chat scope. Category and model shares reconcile with the selected total;
+compaction is an included subset. A model's full ID determines its stable color
+independently of sorting, refreshes and other models. Small shares retain true
+widths and remain readable in the labeled list. These are complete aggregates,
+not first pages of model details. Lifetime detail lists keep their separate labels.
+Cached tokens remain part of input and total tokens; counts are not billed cost.
+
+A separate full-year calendar appears below these charts. Its year controls do
+not change the selected statistics above. Each column starts Sunday and every
+calendar date is retained, including February 29. Intensity uses a shared annual
+scale. Narrow views stack the two halves of the year. Future tiles are disabled;
+selected dates are outlined. Selecting a tile switches the upper statistics to
+that one day. Hovering or focusing a tile shows category shares and exact
+input/cache/uncached/output counts and cache hit rate. Escape dismisses details.
+The calendar has its own error/retry state so its failure does not hide the
+selected statistics. Overall Usage aggregates this node by date/category/model;
+linked nodes own their usage and their ledgers are not combined here.
 
 Each task (including archived tasks) and main chat has a usage entry. Details show cumulative usage, model consumption, and tool call rankings. Guidance continues the same task; turn IDs link records. Global usage does not list tasks.
 
@@ -38,12 +57,12 @@ The local gateway captures provider usage through the generic model gateway. Sha
 - Skills lack a reliable independent metering boundary, so no Skills statistics tab or estimated allocation. Skills loading remains unintegrated and unchanged here.
 - Pi development sessions and old usage databases are not imported; this revision starts a new usage database.
 
-Runtime uses indexed SQL aggregation over explicit local-day boundaries and independent 20-item pages for lifetime models, requests, tools and compactions. The summary defaults to 365 daily buckets with ISO dates and complete daily/annual Agent and annual model totals. Explicit 14/30/90-day API queries also use daily buckets. Calendar aggregation groups date/Agent/model in SQL without loading request records; all summary projections share one transaction. Requests sort by request start time descending, then ID descending; compactions sort by occurrence time ascending, then ID; tools sort by call count descending, then name. The summary never loads these lists. Initial summary/list queries run concurrently; subsequent paging refreshes only its list and retains rows while pending or on failure. The shared HTML frontend refreshes from persisted usage updates, keeps the displayed page while preparing replacements, preserves scroll, and rejects stale query responses. Shared CSS and components render the charts, allowance bars and editing controls.
+Runtime uses indexed SQL aggregation over explicit local-day boundaries and independent 20-item pages for lifetime models, requests, tools and compactions. The summary accepts inclusive ISO start/end dates (at most 3,660 days), or a relative 14/30/90/365-day range, defaulting to 365 days. All ranges return daily buckets and complete Agent/model totals. Future request timestamps are excluded at the current instant; empty future dates remain in the projection. Calendar aggregation groups date/Agent/model in SQL without loading request records; all summary projections share one transaction. Requests sort by request start time descending, then ID descending; compactions sort by occurrence time ascending, then ID; tools sort by call count descending, then name. The summary never loads these lists. Initial summary/list queries run concurrently; subsequent paging refreshes only its list and retains rows while pending or on failure. The shared HTML frontend refreshes from persisted usage updates, keeps the displayed page while preparing replacements, preserves scroll, and rejects stale query responses. Shared CSS and components render the charts, allowance bars and editing controls.
 
-Annual compaction usage appears below the annual model distribution, using the
+Compaction usage appears below the selected model distribution, using the
 same horizontal stacked bar. `compaction_totals` in the summary groups linked
 requests into `precompact` (cache maintenance) and `compact` (threshold, overflow
-and manual triggers), within the calendar's scope and local-day interval. Every
+and manual triggers), within the selected scope and local-day interval. Every
 metered attempt contributes once, including failures and retries; never-sent
 rejections are excluded. This is a subset of the existing Agent/model totals.
 Consumption is input + output; cache reads are already included in input. Cache
@@ -109,7 +128,7 @@ policy described below; they are not context estimates.
 
 ## Main-chat routing subset
 
-The `routing_total` summary reports whole main-chat turns that attempt task delegation, already included in total usage. Global scope covers the displayed year; main-chat details use lifetime scope. It includes all requests in the marked turn, even before the delegation tool call, and preserves incomplete usage. It is not a separately measured routing fee; no extra model call is introduced. Task scope reports no main-chat routing subset. Markers are durable/idempotent and historical unmarked turns are not inferred. See [Execution preferences](agent-context.md).
+The `routing_total` summary reports whole main-chat turns that attempt task delegation, already included in total usage. Global and main-chat scopes both follow the selected date interval. It includes all requests in the marked turn, even before the delegation tool call, and preserves incomplete usage. It is not a separately measured routing fee; no extra model call is introduced. Task scope reports no main-chat routing subset. Markers are durable/idempotent and historical unmarked turns are not inferred. See [Execution preferences](agent-context.md).
 
 
 ## Display and limits
@@ -151,7 +170,7 @@ turn retryable does not mark that request rejected or refund its allowance.
 
 Usage query/policy/recovery APIs require the main Runtime token; workers cannot read the global ledger or change policies. Internal compaction endpoints validate session authority.
 
-- `GET /api/v1/usage/summary?days=14&timezone=Asia/Shanghai&scope=`: empty scope = global; assistant ID (`main` for the default assistant) or task ID = session. Session totals ignore days; trends follow days. Returns totals, trend buckets, allowances and waiting state, without detail lists.
+- `GET /api/v1/usage/summary?start=2026-10-01&end=2026-10-31&timezone=Asia/Shanghai&scope=`: dates are inclusive local calendar dates. Send both dates, in order, with no `days` parameter; the maximum span is 3,660 days. Alternatively `days=14|30|90|365` selects a relative interval ending today. Empty scope is global; an assistant ID (`main` for the default assistant) or task ID selects that scope. Total, daily buckets, Agent/model/compaction shares and routing subset follow the same interval. Response includes `start`, `end` and `today`; `lifetime` remains separate. Allowances and waiting state stay current regardless of the date range. No detail lists are loaded.
 - `GET /api/v1/usage/compaction-record?scope=OWNER_OR_TASK&id=OPERATION`: owner-scoped private diagnostic record for investigation. Includes trigger/configuration, timing, context fingerprints, original native request and response, before/after context and metered attempts. Unknown usage remains null; context estimates are distinct from billed usage. Records contain private conversation data and never authorization headers. Chat and usage pages show compaction status and token counts without a download action.
 - `GET /api/v1/usage/{models|requests|tools|compactions}?scope=OWNER&timezone=Asia/Shanghai&offset=0`: returns `{items, offset, next_offset}`. Each resource has independent 20-item pagination. Requests/tools/compactions require a session scope and use lifetime data. Models accept empty scope for global data and `days=14|30|90|365`; scoped models use lifetime data. A null next offset marks the end. Request/compaction timestamps use ascending ID as the tie-breaker; tools use ascending name after descending call count.
 - Compaction lifecycle enters the local coordinator through injected execution services; Workers cannot read global usage or change policies.
@@ -199,7 +218,6 @@ Attribution persists with the turn configuration snapshot at API reservation. La
 model, background-default, or profile changes do not rewrite past records. Main chat, background tasks, schedules, and compaction
 share one ledger; compaction retains its actual Agent/model attribution.
 
-Global categories use the page's selected range/zone, matching global totals; session/task details use their scope's
-lifetime range, matching the total card. Pages hold 20 categories, sorted by input+output descending, then stable Agent/model order.
+Summary categories use the selected range/zone in global and conversation scopes, matching the total card. Paginated session/task details use their scope's lifetime range and are labeled separately. Pages hold 20 categories, sorted by input+output descending, then stable Agent/model order.
 Pagination does not change totals/trends/allowances; scope/zone changes reset pages, and the global model range resets its pages. Stale responses are discarded.
 Categories show input/output/input-cache hits. Incomplete-record counts are not calculated or exposed in usage aggregates or the UI. Individual request details keep missing token values as unknown rather than zero; reservations still retain conservative accounting until complete usage arrives or the allowance window ends.

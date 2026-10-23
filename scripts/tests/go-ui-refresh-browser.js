@@ -46,9 +46,9 @@ async page=>{
   });
   await page.locator('.usage-total strong').filter({hasText:/^12$/}).waitFor();
   await page.evaluate(()=>{const f=refreshFixture;f.metric=document.querySelector('.usage-total');f.bar=document.querySelector('.usage-day');f.bar.focus();f.hold='/api/v1/usage/summary';f.refresh=f.pages.refresh(['usage']);for(let i=0;i<20;i++)f.pages.refresh(['usage']);});
-  assert(await page.evaluate(()=>refreshFixture.pending.length===1&&refreshFixture.metric.isConnected&&refreshFixture.bar===document.activeElement),'Usage refresh keeps metrics and focused chart while coalescing a burst');
+  assert(await page.evaluate(()=>refreshFixture.pending.length===2&&refreshFixture.metric.isConnected&&refreshFixture.bar===document.activeElement),'Usage refresh keeps metrics and focused chart while coalescing a burst');
   await page.evaluate(async()=>{const f=refreshFixture;f.usage.total.input=20;f.release();await f.refresh;});
-  await page.waitForFunction(()=>refreshFixture.pending.length===1);await page.evaluate(()=>{refreshFixture.hold='';refreshFixture.release();});await idle();
+  await page.waitForFunction(()=>refreshFixture.pending.length===2);await page.evaluate(()=>{refreshFixture.hold='';refreshFixture.release();});await idle();
   assert(await page.evaluate(()=>refreshFixture.metric===document.querySelector('.usage-total')&&refreshFixture.bar===document.querySelector('.usage-day')&&document.activeElement===refreshFixture.bar),'Usage patches the existing cards and chart: '+await page.evaluate(()=>JSON.stringify({metric:refreshFixture.metric===document.querySelector('.usage-total'),bar:refreshFixture.bar===document.querySelector('.usage-day'),focus:document.activeElement?.outerHTML?.slice(0,300),connected:refreshFixture.bar.isConnected})));
   await page.evaluate(async()=>{const f=refreshFixture;f.hold='/api/v1/usage/summary';f.refresh=f.pages.refresh(['usage']);for(const call of f.pending.splice(0))call.reject(Error('Offline'));await f.refresh;f.hold='';});
   assert(await page.evaluate(()=>refreshFixture.metric.isConnected&&document.querySelector('.space-availability')),'Usage failures retain the cached projection');

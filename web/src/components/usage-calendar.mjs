@@ -1,4 +1,5 @@
-import {node as n} from './primitives.mjs';
+import {node as n,action} from './primitives.mjs';
+import {usageToday} from './usage-period.mjs';
 import {usageNumbers,usageRows,usageTooltip} from './usage.mjs';
 import {translate} from '../locales/messages.mjs';
 
@@ -55,10 +56,15 @@ function distribution(rows,{locale,kind='agent',exact=false}) {
   }
   root.append(bar,list);if(!rows.length)root.append(n('p','hint',translate(locale,'usage.empty')));return root;
 }
-export function usageCalendar(data,{locale,timezone}) {
+export function usageCalendar(data,{locale,timezone,year,range,onYear,onDate}) {
   const t=key=>translate(locale,'usage.'+key),numbers=usageNumbers(locale),card=n('section','page-section page-card usage-calendar'),heading=n('div','usage-chart-heading'),period=n('div','usage-calendar-period');
   const buckets=data.buckets||[],weeks=usageCalendarWeeks(buckets),split=Math.ceil(weeks.length/2),maximum=Math.max(1,...buckets.map(tokens));
-  heading.append(n('h2','',t('calendarTitle')),n('span','hint',t('lastYear')));card.append(heading);
+  card.style.setProperty('--usage-week-count',String(weeks.length||53));card.style.setProperty('--usage-first-weeks',String(split||27));
+  const today=data.today||usageToday(),controls=n('div','usage-calendar-controls');
+  year=year||Number(buckets.at(-1)?.date.slice(0,4)||today.slice(0,4));
+  const previous=action('‹',()=>onYear?.(year-1)),next=action('›',()=>onYear?.(year+1),{disabled:year>=Number(today.slice(0,4))});
+  for(const [button,key]of [[previous,'previousYear'],[next,'nextYear']]){button.setAttribute('aria-label',t(key));button.title=t(key);}
+  controls.append(previous,n('span','',String(year)),next);heading.append(n('h2','',t('calendarTitle')),controls);card.append(heading);
   const formatDate=new Intl.DateTimeFormat(locale,{dateStyle:'medium',timeZone:'UTC'}),month=new Intl.DateTimeFormat(locale,{month:'short',timeZone:'UTC'});
   period.append(n('span','hint',buckets.length?`${formatDate.format(date(buckets[0].date))} — ${formatDate.format(date(buckets.at(-1).date))}`:t('empty')),n('span','usage-value',t('tokens').replace('{count}',numbers.compact(tokens(data.total||{})))));card.append(period);
   const panels=n('div','usage-calendar-panels');
@@ -73,25 +79,32 @@ export function usageCalendar(data,{locale,timezone}) {
       if(first){const label=n('span','',month.format(date(first.date)));label.style.gridColumn=`${column+1} / span ${Math.min(3,group.length-column)}`;months.append(label);}
       for(const bucket of week){
         if(!bucket){grid.append(n('span','usage-day-blank'));continue;}
-        const day=n('button','usage-day'),value=tokens(bucket),title=formatDate.format(date(bucket.date)),last=bucket===buckets.at(-1),rows=agentRows(bucket.agents);
+        const day=n('button','usage-day'),value=tokens(bucket),title=formatDate.format(date(bucket.date)),current=bucket.date===today,rows=agentRows(bucket.agents);
         day.type='button';day.dataset.viewKey=bucket.date;day.dataset.date=bucket.date;day.dataset.level=String(value?Math.min(4,1+Math.floor(Math.sqrt(value/maximum)*4)):0);
+        day.disabled=bucket.date>today;day.setAttribute('aria-pressed',String(!!range&&bucket.date>=range.start&&bucket.date<=range.end));
         day.setAttribute('aria-label',t('dayLabel').replace('{date}',title).replace('{count}',numbers.exact(value))+' · '+rows.map(row=>`${agentLabel(row.agent,locale)} ${numbers.exact(tokens(row))} ${usagePercent(tokens(row),value,locale)}`).join(' · '));
-        usageTooltip(day,{title:`${title} · ${t('tokens').replace('{count}',numbers.compact(value))}`,note:[last?t('throughNow'):'',timezone].filter(Boolean).join(' · '),render:()=>{
+        usageTooltip(day,{title:`${title} · ${t('tokens').replace('{count}',numbers.compact(value))}`,note:[current?t('throughNow'):'',timezone].filter(Boolean).join(' · '),render:()=>{
           const detail=n('div','usage-day-detail');detail.append(distribution(rows,{locale,exact:true}));const counts=n('div','usage-day-counts');
           for(const [label,value]of usageRows(bucket,locale)){const row=n('div','usage-tooltip-row');row.append(n('span','',label),n('span','',value));counts.append(row);}detail.append(counts);return detail;
-        }});grid.append(day);
+        }});
+        day.onclick=event=>{event.currentTarget.querySelector('.usage-tooltip')?.hidePopover();onDate?.(bucket.date);};grid.append(day);
       }
     }
     calendar.append(weekdays,grid);panel.append(months,calendar);panels.append(panel);
   }
   card.append(panels);
   const legend=n('div','usage-calendar-legend');legend.append(n('span','',t('less')));for(let level=0;level<5;level++){const swatch=n('i');swatch.dataset.level=String(level);swatch.setAttribute('aria-hidden','true');legend.append(swatch);}legend.append(n('span','',t('more')));card.append(legend);
-  for(const [key,rows,kind]of [['annualAgents',agentRows(data.agents),'agent'],['annualModels',sortRows(data.models||[],'model'),'model']]){
-    const section=n('section','usage-annual-share'),header=n('div','usage-share-heading');section.dataset.viewKey=key;header.append(n('h3','',t(key)),n('span','hint',t('tokens').replace('{count}',numbers.compact(tokens(data.total||{})))));section.append(header,distribution(rows,{locale,kind}));card.append(section);
+  card.append(n('p','hint usage-calendar-note',t('calendarNote').replace('{timezone}',timezone)));return card;
+}
+
+export function usageDistributions(data,{locale}) {
+  const t=key=>translate(locale,'usage.'+key),numbers=usageNumbers(locale),card=n('div','usage-distributions');
+  for(const [key,rows,kind]of [['categoryShare',agentRows(data.agents),'agent'],['modelShare',sortRows(data.models||[],'model'),'model']]){
+    const section=n('section','page-section page-card usage-period-share'),header=n('div','usage-share-heading');section.dataset.viewKey=key;header.append(n('h2','',t(key)),n('span','hint',t('tokens').replace('{count}',numbers.compact(tokens(data.total||{})))));section.append(header,distribution(rows,{locale,kind}));card.append(section);
   }
   const compactions=usageCompactionRows(data.compaction_totals),compactionTotal={input:0,output:0,input_known:true,output_known:true};
   for(const row of compactions){compactionTotal.input+=row.input;compactionTotal.output+=row.output;compactionTotal.input_known&&=row.input_known;compactionTotal.output_known&&=row.output_known;}
-  const compactSection=n('section','usage-annual-share'),compactHeading=n('div','usage-share-heading');compactSection.dataset.viewKey='annualCompaction';
-  compactHeading.append(n('h3','',t('annualCompaction')),n('span','hint',t('tokens').replace('{count}',compactionTokens(compactionTotal,locale))));compactSection.append(compactHeading,distribution(compactions,{locale,kind:'compaction'}));card.append(compactSection);
-  card.append(n('p','hint usage-calendar-note',t('calendarNote').replace('{timezone}',timezone)));return card;
+  const compactSection=n('section','page-section page-card usage-period-share'),compactHeading=n('div','usage-share-heading');compactSection.dataset.viewKey='compactionShare';
+  compactHeading.append(n('h2','',t('compactionShare')),n('span','hint',t('tokens').replace('{count}',compactionTokens(compactionTotal,locale))));compactSection.append(compactHeading,distribution(compactions,{locale,kind:'compaction'}),n('p','hint',t('compactionNote')));card.append(compactSection);
+  return card;
 }
