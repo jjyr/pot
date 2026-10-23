@@ -294,6 +294,14 @@ func (s *Service) host(owner string, generation uint64) (*executor.Engine, error
 			options.SandboxRead = append(options.SandboxRead, workspace.GitDirs...)
 			options.SandboxWrite = append(options.SandboxWrite, workspace.GitDirs...)
 			options.SandboxRead = append(options.SandboxRead, filepath.Join(s.options.Root, "resource-cache", "task-skills", owner))
+		} else {
+			// Main discovers installed Skills outside its writable workspace.
+			// Expose their files without exposing adjacent Runtime state. Workers
+			// retain only their explicitly prepared Skill snapshots above.
+			options.SandboxRead = append(options.SandboxRead, filepath.Join(s.options.AgentHome, "skills"))
+			if s.options.BuiltinSkills != "" {
+				options.SandboxRead = append(options.SandboxRead, s.options.BuiltinSkills)
+			}
 		}
 		e = executor.New(options)
 		s.hosts[owner] = e
