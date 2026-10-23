@@ -46,8 +46,8 @@ Only `AGENTS.md` is read. `AGENTS.override.md` and fallback filenames are ignore
 
 Main contexts load global instructions, assistant rules and applicable project directory instructions. Worker contexts load only applicable project directory instructions: workers have no assistant AGENTS.md and inherit neither assistant rules nor global Agent-home rules. The delegating assistant must include relevant constraints in the task brief. Project AGENTS.md files remain ordinary directory policies, separate from the assistant's own rule record. Assistant rules are snapshotted for each execution and never grant permissions. Deeper directory guidance takes precedence on conflicts, and explicit user instructions take precedence over file instructions. There is no instruction-file size cap or truncation; normal model context limits still apply. Empty/whitespace-only contents are omitted; invalid UTF-8 is decoded lossily.
 
-Instruction discovery reads the destination Runtime's local filesystem. It does
-not start an execution process or translate paths through a guest namespace.
+Instruction discovery reads the destination Runtime's local filesystem without
+starting an execution process.
 
 ## Refresh and injection
 
@@ -332,7 +332,7 @@ translation is performed. Project Skills remain independently discovered.
 
 Skills grant no execution authority. Instructions and Skills use the same local
 filesystem rules for execution on the owning node. Runtime asset
-paths are set by host composition and remain independent of guest management.
+paths are set by host composition.
 See [Permissions](permissions.md) and [Executor](executor.md).
 
 ## Injection and task selection
@@ -355,19 +355,38 @@ The installer uses the adjacent creator validator. It accepts a local bundle, Gi
 
 apply_patch remains workspace-scoped. Global installation/update is performed on the owning node. Tasks cannot modify supplied global bundles. Use injected bundle paths for helper scripts, and `--dest PROJECT/.agents/skills` for project installation.
 
-## Message references and machine labels
+## Message references, Skills and assistant mentions
 
 Selected Chat excerpts use structured message IDs and quote data, independently
 of the slash selectors below. Main can read referenced original messages by ID
 after compaction. See [Chat references](chat-references.md).
 
-App and Web autocomplete standalone `/` words at the caret using authenticated,
-assistant-scoped `/api/v1/completions` metadata. Candidates include the local
-machine, node-managed labels, and the assistant's current global Skill catalog. Project Skills are discovered by the
-task and are not offered as global selectors.
-References are editable message text: `/machine:RUNTIME_ID`, `/tag:desktop`,
-`/skill:skill-creator`. Their identifiers survive drafts, retries and history.
-Use spaces around tokens; backtick-quoted examples are not selectors.
+App and Web autocomplete standalone `/` and `@` words at the caret using
+authenticated, assistant-scoped `/api/v1/completions` metadata. `/` offers only
+the assistant's current global Skill catalog. Project Skills are discovered by
+the task and are not offered as global selectors. Skills have no icons.
+`@` offers the other local assistants and the connected node directories, with
+saved avatars, names and sources. Cached offline assistants are visible but
+cannot be selected. Opening the picker reads snapshots without connecting to peers.
+
+Selections appear as removable composer chips. They remain ordinary message
+text internally: `/skill:skill-creator` and
+`[@Display name](pot-assistant:NODE_ID/AGENT_ID)`. The selected prefix is followed
+by a newline and the typed message. Full assistant identity survives duplicate
+display names, drafts, retries and history; mention links are displayed as
+non-navigable names. They identify collaborators to the current assistant and
+never change the receiving conversation or automatically send peer messages.
+The existing `list_assistants` and `send_message` tools handle collaboration.
+There are no added prompt instructions or model-side lookup tools.
+
+Desktop arrows select candidates and Enter inserts one; Escape dismisses the
+picker. Mobile Enter remains a newline and candidates are selected by touch.
+IME candidate confirmation never selects or sends. URLs, paths and email
+addresses do not open the pickers. The menus, chips and hints follow UI locale.
+
+Machine references `/machine:RUNTIME_ID` and `/tag:desktop` are not autocomplete
+candidates. Use spaces around textual tokens; backtick-quoted examples are not
+selectors.
 
 A message may specify one machine and multiple labels (AND). A machine plus labels
 must satisfy both; conflicting explicit tool destinations are rejected. Absent

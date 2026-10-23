@@ -22,8 +22,7 @@ a managed Git worktree, or an OS temporary directory before their first model
 request. Commands, patches, plugins, instruction discovery and protected execution
 use this same binding. [Task workspace selection](task-workspaces.md) defines
 selection, base refresh, directory naming and recovery. Selected local resources are prepared before execution and remain fixed in the
-run's resource cache. Project replication, VM images and host/guest path
-translation are absent.
+run's resource cache.
 
 Protected launches require packaged Node/SRT assets and a confined workspace.
 Workspace/project files are writable. System libraries, selected installation

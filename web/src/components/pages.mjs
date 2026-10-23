@@ -673,7 +673,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
   }
   function scheduleEditor(item) {
     const t=key=>translate(locale(),`schedule.${key}`);
-    const spec=item?.spec||{title:'',goal:'',machine_id:'',timezone:browserTimezone(),kind:'cron',cron:'0 9 * * *',at:'',every_minutes:60,misfire:'coalesce',notify:'changes',enabled:true,profile:null,model:null,requirements:{tools:false,desktop:false,exact_budget:false,live_steering:false}};
+    const spec=item?.spec||{title:'',goal:'',machine_id:'',timezone:browserTimezone(),kind:'cron',cron:'0 9 * * *',at:'',every_minutes:60,misfire:'coalesce',notify:'all',enabled:true,profile:null,model:null,requirements:{tools:false,desktop:false,exact_budget:false,live_steering:false}};
     const definitions=[
       ...(!item?[{name:'owner_ref',key:'assistant',choices:(client.assistants||[]).filter(owner=>supportsCapability(owner,'schedules.manage')).map(owner=>[JSON.stringify([owner.space_id,owner.id]),`${owner.name} · ${owner.space_name||''}`])}]:[]),
       {name:'title',key:'title',required:true},{name:'goal',key:'goal',kind:'textarea',required:true},{name:'machine_id',key:'machine',choices:[['',t('defaultMachine')],...(spec.machine_id?[[spec.machine_id,machineInfo.label(spec.machine_id,{space:item?._space_id||scope().space},locale())]]:[])]},
@@ -683,7 +683,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       {name:'every_minutes',key:'minutes',kind:'number',min:1,max:525600,parse:Number},
       {name:'cron',key:'cron',helpKey:'cronHelp',placeholder:'0 8-20 * * *'},
       {name:'misfire',key:'misfire',choiceKeys:{coalesce:'coalesce',skip:'skip'},choices:['coalesce','skip'].map(key=>[key,t(key)])},
-      {name:'notify',key:'notify',choiceKeys:{changes:'changes',all:'all',failures:'failures'},choices:['changes','all','failures'].map(key=>[key,t(key)])},
+      {name:'notify',key:'notify',choiceKeys:{all:'all',failures:'failures'},choices:['all','failures'].map(key=>[key,t(key)])},
       {name:'enabled',key:'enabled',kind:'checkbox'},
     ].map(definition=>({...definition,label:t(definition.key),...(definition.helpKey?{help:t(definition.helpKey)}:{})}));
     let preview;

@@ -63,8 +63,10 @@ execution scope and bundle digest. Cancellation, ownership checks, operation
 receipts and uncertainty fences apply to plugin calls as to built-in tools.
 
 `mise run build:plugins` packages manifests, declared capability files and optional `icon.svg` / `icon.png` presentation assets and their attribution files.
-Packages contain no VM engines, images or guest bootstrap. Stop Runtime before
-replacing a complete package. The Extensions page imports and updates user packages separately from packaged resources. Managed independent MCP servers use the same tool execution boundary; see [Extensions](extensions.md). A plugin marketplace and automatic package updates remain outside this contract. The [Codex Agent Link adapter](../integrations/codex/README.md) is a standalone
+The build synchronizes its generated output directory to the current declared
+plugins, removing stale packages and undeclared files. Use a dedicated build
+directory for `--output`, separate from user-installed plugins and Runtime data.
+Stop Runtime before replacing a complete package. The Extensions page imports and updates user packages separately from packaged resources. Managed independent MCP servers use the same tool execution boundary; see [Extensions](extensions.md). A plugin marketplace and automatic package updates remain outside this contract. The [Codex Agent Link adapter](../integrations/codex/README.md) is a standalone
 node adapter, separate from tool-plugin background services.
 
 ## Model connection contributions

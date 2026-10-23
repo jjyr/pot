@@ -68,7 +68,7 @@ async page => {
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Narrow task detail fits viewport');
   await page.setViewportSize({width:1200,height:1000});
   await composer.fill('/skill:r');await page.locator('.task-composer-area .completion-option').first().waitFor();const beforeCompletion=posts.length;await composer.press('Enter');assert(await composer.inputValue()==='/skill:review '&&posts.length===beforeCompletion,'Scoped completion chooses a reference without sending');
-  assert(await composer.getAttribute('aria-controls')==='pot-task-task-proof-completions','Task and main composers use distinct completion identities');
+  assert(await composer.getAttribute('aria-controls')==='pot-task-task-proof-completions-options','Task and main composers use distinct completion identities');
   await page.locator('.task-goal > summary').click();await composer.fill('保留这条尚未发送的指导');await page.locator('.task-transcript .script-group > summary').click();await tool.locator(':scope > summary').click();
   await composer.evaluate(node=>{window.__taskComposer=node;});
   inputs.push({request_id:'reference',kind:'reference',sender:'peer',state:'pending',text:'已确认仓库访问可用。'});

@@ -16,9 +16,9 @@ mise run build
 mise run open
 ```
 
-`prepare` supplies pinned Node, tool plugins, Skills and license assets. It starts
-no execution environment. `build`/`bundle` create `.local/go/PotGoPreview.app`, an
-independent development bundle with ID `dev.pot.go-preview`. Release packaging
+`prepare` supplies pinned Node, tool plugins, Skills and license assets.
+`build`/`bundle` create `.local/go/PotGoPreview.app`, an independent development
+bundle with ID `dev.pot.go-preview`. Release packaging
 uses the production identity. Do not replace a running product's files implicitly.
 
 ## Builds and packaging
@@ -34,9 +34,8 @@ uses the production identity. Do not replace a running product's files implicitl
 | `mise run release -- VERSION` | App/CLI archives, checksums, cask and configured signed update feed; publishing is separate |
 
 `scripts/build-go-app`, `scripts/build-go-cli` and `scripts/go_packaging.py` own
-layout and checksums. Packages include no VM engines, images, guest bootstrap,
-remote desktop viewer or guest execution subprocess. Standalone and embedded
-Runtime locate trusted tool assets independently of workspace preparation.
+layout and checksums. Standalone and embedded Runtime locate trusted tool assets
+independently of workspace preparation.
 
 For cross-platform tool packages:
 
@@ -225,8 +224,8 @@ for versioning, startup upgrades and required upgrade coverage.
 | `scripts/` | Build, release, source checks and fixtures |
 | `eval/` | Deterministic and explicit live evaluation |
 
-`resources/app/PotIcon.swift` remains the vector artwork master used by icon and
-tray generation; removing the VM Helper does not remove brand generation.
+`resources/app/PotIcon.swift` is the vector artwork master for app icons and tray
+atlases. `mise run icons` generates these assets; App packaging includes `Pot.icns`.
 
 Paid tests require an explicit `POT_LIVE=1` in the calling process.
 
@@ -269,6 +268,7 @@ The test preserves the configured model, protocol and reasoning effort, caps
 output at 2048 tokens and real requests at 32, and exposes only coordination
 tools. Single/multiple dispatch must be silent; injected pre-execution failures
 exercise recovery after single and repeated transient failures.
+
 `POT_LIVE_OUTPUT` optionally retains private transcript evidence outside the repo.
 `POT_BASELINE_MAIN_PROMPT_FILE` optionally adds a creation-confirmation comparison
 using an explicitly supplied earlier prompt. For example:
@@ -278,6 +278,18 @@ POT_LIVE=1 POT_CONFIGURED_LIVE_ROOT=/absolute/control/root \
   mise exec -- go test -v ./internal/control \
   -run '^TestConfiguredModelTaskRecoveryLive$' -count=1 -timeout=9m
 ```
+
+`TestConfiguredModelTaskResultsLive` uses the same configured-root/key selectors
+to qualify final replies and artifact delivery with the real model. It covers a
+plain Task, a scheduled report without a result-file schema, partial attachment
+delivery with a symlink diagnostic, and optional worker-to-owner communication.
+The model creates all files itself; owner resource previews are checked against
+their actual contents. It retains production prompts, caps the whole run at 48
+requests and 2048 output tokens per request, and uses disposable stores and Task
+workspaces. Run it with `POT_LIVE=1`, `POT_CONFIGURED_LIVE_ROOT` and the machine's
+existing key selector, using `-run '^TestConfiguredModelTaskResultsLive$' -count=1
+-v -timeout=10m`. Optional `POT_LIVE_OUTPUT` saves non-secret result evidence
+outside the repository. No installed service or production data is modified.
 
 For a machine's existing configured model, the opt-in
 `TestConfiguredModelMessageReferencesLive` test accepts
@@ -388,6 +400,15 @@ and no model credentials. Desktop/mobile, English/Chinese and light/dark cases
 cover explicit API creation, conversation draft restoration, source-specific
 connection instructions, remote default/explicit selection, empty-directory
 refresh and directory-load failure recovery. Screenshots stay under ignored
+`output/playwright/`.
+
+The composer selector browser fixture is also part of `test:ui-http-integration`:
+`mise exec -- python scripts/tests/go-ui-composer-selectors-browser.py`.
+It exercises the shared Chat DOM with synthetic skill/assistant directories,
+saved avatars and receipts at desktop/phone widths in both languages and themes.
+It covers query boundaries, compact rows, keyboard/IME selection, unavailable
+assistants, owner-scoped drafts, late lookups, failed sends and unchanged send
+destinations. It makes no model calls and saves screenshots under ignored
 `output/playwright/`.
 
 The Codex integration tests use a real Agent Link transport and a supervised

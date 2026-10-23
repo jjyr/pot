@@ -30,7 +30,7 @@ description = "Check Go compilation, component boundaries and source formatting"
 depends = ["lint", "check:go"]
 
 [tasks.test]
-description = "Test product contracts without model calls or VMs"
+description = "Test product contracts without model calls"
 depends = ["test:go", "test:ui", "test:packaging", "test:eval", "test:public-api"]
 
 [tasks.prepare]
@@ -62,7 +62,7 @@ flag "--output <path>" default=".local/releases" help="Release artifact director
 run = 'python scripts/release "$usage_version" --output "$usage_output"'
 
 [tasks."test:release"]
-description = "Verify macOS release packaging without a build or VM"
+description = "Verify macOS release packaging without building the App"
 run = "python scripts/tests/release-packaging.py"
 
 [tasks."build:web-ui"]
@@ -84,7 +84,7 @@ run = "python scripts/go-notices --output .local/licenses/go-dependencies.txt ./
 [tasks."test:ui"]
 description = "Verify shared DOM composer and production owner-scoped state contracts"
 depends = ["test:ui-fluid", "test:assistant-creation"]
-run = ["node --test pkg/mcp/node_runtime.test.mjs", "node scripts/tests/go-ui-updates.mjs", "node scripts/tests/go-ui-history.mjs", "node scripts/tests/go-ui-resource-cache.mjs", "node scripts/tests/go-ui-display-resources.mjs", "node scripts/tests/go-ui-topology.mjs", "node scripts/tests/go-ui-agent-links.mjs", "node scripts/tests/go-ui-state.mjs", "node scripts/tests/go-ui-send-confirmation.mjs", "node scripts/tests/go-ui-production-state.mjs", "node scripts/tests/go-ui-provider-plugins.mjs", "node scripts/tests/go-ui-usage.mjs", "node scripts/tests/script-runs.mjs", "node scripts/tests/go-ui-notifications.mjs", "node scripts/tests/go-ui-github-subscriptions.mjs", "node --test plugins/github/*.test.mjs", "node scripts/tests/go-ui-attachments.mjs", "node scripts/tests/go-ui-file-images.mjs", "node scripts/tests/go-ui-references.mjs", "node scripts/tests/web-errors.js"]
+run = ["node --test pkg/mcp/node_runtime.test.mjs", "node scripts/tests/go-ui-updates.mjs", "node scripts/tests/go-ui-history.mjs", "node scripts/tests/go-ui-resource-cache.mjs", "node scripts/tests/go-ui-display-resources.mjs", "node scripts/tests/go-ui-topology.mjs", "node scripts/tests/go-ui-agent-links.mjs", "node scripts/tests/go-ui-state.mjs", "node scripts/tests/go-ui-send-confirmation.mjs", "node scripts/tests/go-ui-production-state.mjs", "node scripts/tests/go-ui-provider-plugins.mjs", "node scripts/tests/go-ui-usage.mjs", "node scripts/tests/script-runs.mjs", "node scripts/tests/go-ui-notifications.mjs", "node scripts/tests/go-ui-github-subscriptions.mjs", "node --test plugins/github/*.test.mjs", "node scripts/tests/go-ui-attachments.mjs", "node scripts/tests/go-ui-file-images.mjs", "node scripts/tests/go-ui-references.mjs", "node scripts/tests/go-ui-composer-selectors.mjs", "node scripts/tests/web-errors.js"]
 
 
 [tasks."test:executor"]
@@ -184,7 +184,7 @@ xcrun swiftc -module-cache-path .local/icons/modules resources/app/PotIcon.swift
 
 [tasks."test:ui-http-integration"]
 description = "Opt-in real local browser/HTTP/SSE integration (cached Playwright CLI and browser required)"
-run = ["python scripts/tests/go-ui-http-integration.py", "python scripts/tests/go-ui-assistant-start-browser.py", "python scripts/tests/go-ui-assistant-settings-browser.py", "python scripts/tests/go-ui-linked-approvals-browser.py", "python scripts/tests/go-ui-usage-browser.py"]
+run = ["python scripts/tests/go-ui-http-integration.py", "python scripts/tests/go-ui-assistant-start-browser.py", "python scripts/tests/go-ui-assistant-settings-browser.py", "python scripts/tests/go-ui-linked-approvals-browser.py", "python scripts/tests/go-ui-composer-selectors-browser.py", "python scripts/tests/go-ui-usage-browser.py"]
 
 [tasks."test:public-api"]
 description = "Verify reusable Go libraries from an independent external module"

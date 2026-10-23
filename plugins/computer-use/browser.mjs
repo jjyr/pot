@@ -58,7 +58,7 @@ async function finishClose() {
   }
   if (child?.pid && child.exitCode === null && child.signalCode === null) {
     // Browser.close lets Chrome stop/reap its own helpers before the profile is
-    // removed. Keep Chrome in the existing plugin process group/cgroup.
+    // removed. Keep Chrome in the existing plugin execution scope.
     const exited = waitForExit(child, 2000);
     const graceful = command('Browser.close', {}, false, 1500).catch(() => {});
     if (!await exited) {
@@ -68,7 +68,7 @@ async function finishClose() {
       await graceful;
       // A main-PID exit cannot prove descendant cleanup after forced shutdown.
       // Retain the profile inside the plugin's private TMPDIR; outer Go scope
-      // disposal removes it only after authoritative group/cgroup cleanup.
+      // disposal removes it only after confirmed execution cleanup.
       cleanupError = new Error(confirmed
         ? 'Browser descendant cleanup unconfirmed after forced shutdown; reset the session; profile retained'
         : 'Browser process cleanup unconfirmed after forced shutdown; reset the session; profile retained');

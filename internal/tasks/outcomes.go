@@ -31,7 +31,7 @@ func outcome(record Record, phase protocol.TaskPhase, result *Terminal) protocol
 }
 
 // finish prepares domain data outside the transaction. A stale snapshot cannot
-// commit a result, update a baseline, or enqueue a hook for a changed run.
+// commit a result or enqueue a hook for a changed run.
 func (s *Service) finish(ctx context.Context, snapshot Record, phase protocol.TaskPhase, result *Terminal, started int64, stopMode string) error {
 	event := outcome(snapshot, phase, result)
 	var commit OutcomeCommit

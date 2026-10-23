@@ -119,6 +119,7 @@ type TaskResultEvent struct {
 	Origin            TaskOrigin `json:"origin"`
 	Evidence          []string   `json:"evidence,omitempty"`
 	Artifacts         []string   `json:"artifacts,omitempty"`
+	ArtifactsError    string     `json:"artifacts_error,omitempty"`
 	SuppressionReason string     `json:"suppression_reason,omitempty"`
 }
 

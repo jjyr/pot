@@ -18,7 +18,7 @@ func Validate(spec protocol.ScheduleSpec) error {
 	if strings.TrimSpace(spec.Title) == "" || utf8.RuneCountInString(spec.Title) > 80 || strings.TrimSpace(spec.Goal) == "" || len(spec.Goal) > 8000 {
 		return fmt.Errorf("schedule needs a 1–80 character title and goal up to 8000 bytes")
 	}
-	if spec.Notify != "changes" && spec.Notify != "all" && spec.Notify != "failures" {
+	if spec.Notify != "all" && spec.Notify != "failures" {
 		return fmt.Errorf("invalid notification policy")
 	}
 	if err := spec.Validate(); err != nil {

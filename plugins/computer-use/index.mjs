@@ -78,7 +78,7 @@ The REPL controls a separate headless Chromium in this execution machine. Native
     getTab: id => { if (!active || id !== active) throw new Error('Unknown tab'); return tabHandle(id); },
     getState: () => active ? run('observe') : Promise.resolve({ tabs: [] }),
   });
-  // Guest OS/cgroup isolation is authoritative; a JS context is not a security boundary.
+  // The executor enforces execution mode; a JS context is not a security boundary.
   for (const key of ['process', 'require', 'module', 'exports']) delete r.context[key];
   Object.assign(r.context, { cua, nodeRepl: Object.freeze({ write }), console: Object.freeze({ log: (...args) => write(args.length === 1 ? args[0] : args) }) });
   let initialized = false;

@@ -1,0 +1,350 @@
+{
+  "page": {
+    "Pot 是你的 AI 助手。独立推进任务，通过 Agent Link 连接更多 Agent，把想法变成成果。": "Pot is your AI assistant. Move tasks forward independently and connect with more agents through Agent Link to turn ideas into results.",
+    "Pot · 一起，把事情做成": "Pot · Make things happen, together",
+    "跳到主要内容": "Skip to content",
+    "Pot 首页": "Pot home",
+    "主导航": "Main navigation",
+    "助手能力": "Your assistant",
+    "协作方式": "Working together",
+    "开始使用": "Get started",
+    "YOUR ASSISTANT. MORE CONNECTED.": "YOUR ASSISTANT. MORE CONNECTED.",
+    "你的 AI 助手，": "Your AI assistant.",
+    "连接更多 Agent": "More agents.",
+    "一起做事。": "Better together.",
+    "从一句想法，到一份真正的成果。": "From a simple idea to something you can use.",
+    "让 Pot 独立推进任务，也让 Codex 等 Agent": "Let Pot move tasks forward and bring agents like Codex",
+    "加入对话，发挥各自所长。": "into the conversation, each doing what they do best.",
+    "认识你的 Pot": "Meet your Pot",
+    "体验 Agent Link": "Explore Agent Link",
+    "一个助手，也是更多协作的起点。": "One assistant. A starting point for more collaboration.",
+    "Pot 与 Agent 协作的本地交互示意": "Local demonstration of Pot working with other agents",
+    "A LITTLE HELP. A LOT DONE.": "A LITTLE HELP. A LOT DONE.",
+    "开发与实现": "Build and develop",
+    "分析与讨论": "Analyze and discuss",
+    "与 Pot 一起工作": "Working with Pot",
+    "把这个想法，做成一个产品官网。": "Turn this idea into a product website.",
+    "交给我。先梳理内容，": "Leave it with me. I’ll organize the content,",
+    "再请 Codex 一起完成页面。": "then work with Codex to build the page.",
+    "产品官网 · 开发任务": "Product website · Development task",
+    "· 示例": "· Example",
+    "已交付": "Delivered",
+    "↳ 查看这次协作的成果": "↳ See what this collaboration produced",
+    "微笑的陶土色 Pot 角色": "The smiling, ochre Pot character",
+    "交互示意 · Codex 已支持 · 其余为生态连接构想": "Interactive demo · Codex supported · Others show ecosystem concepts",
+    "好想法，值得被完成。": "Good ideas deserve to happen.",
+    "Pot 负责推进，Agent 各展所长。": "Pot keeps things moving. Each agent brings its strengths.",
+    "你只需要专注于，下一件想做的事。": "You can focus on what you want to do next.",
+    "了解助手能力": "Explore assistant capabilities",
+    "01 / YOUR ASSISTANT": "01 / YOUR ASSISTANT",
+    "从对话，走向行动": "From conversation to action",
+    "不止接住你的话，": "It hears you.",
+    "也接着把事做完。": "And follows through.",
+    "说清目标，Pot 就能建立后台任务，推进工作，": "Describe your goal. Pot can start a background task, move it forward,",
+    "并把进度和结果带回对话。你可以随时继续沟通。": "and bring progress and results back to the conversation. Keep talking whenever you need to.",
+    "试试一句话，启动一件事": "One request. Something gets started.",
+    "帮我调研建站方案，": "Research website-building options",
+    "整理成一份对比报告。": "and put together a comparison report.",
+    "从理解需求、收集资料到整理交付，": "From understanding the brief and gathering information to delivery,",
+    "让过程有迹可循，让结果触手可及。": "follow the progress and keep the results close at hand.",
+    "选择任务示例": "Choose a task example",
+    "方案调研": "Research",
+    "整理资料": "Organize",
+    "定时追踪": "Track changes",
+    "播放任务过程": "Play task demo",
+    "本地演示，不会创建真实任务": "Local demo. No real task is created.",
+    "后台任务": "Background task",
+    "已完成": "Completed",
+    "理解目标，建立任务": "Understand the goal and create a task",
+    "明确使用场景与比较维度": "Define the use case and comparison criteria",
+    "收集资料，推进调研": "Gather information and research options",
+    "整理方案、成本与维护方式": "Compare approaches, costs and maintenance",
+    "整理结论，带回成果": "Summarize findings and return results",
+    "在对话中交付可继续使用的文件": "Deliver a usable file in the conversation",
+    "建站方案对比报告": "Website options comparison",
+    "REPORT · 点击预览示例成果": "REPORT · Preview the example result",
+    "02 / AGENT LINK": "02 / AGENT LINK",
+    "一条连接，打开更多可能": "One connection. More possibilities.",
+    "你的助手，": "Your assistant",
+    "也有自己的好搭档。": "has good company.",
+    "用 Agent Link 连接另一个节点的助手。": "Use Agent Link to reach an assistant on another node.",
+    "直接找它对话，或让 Pot 委派任务、收取结果。": "Talk to it directly, or ask Pot to delegate a task and collect the result.",
+    "各自保有工具、凭据与审批规则。": "Each node keeps its own tools, credentials and approval rules.",
+    "选择一个 Agent，看看如何协作": "Choose an agent to explore how you could work together",
+    "你的 Pot": "Your Pot",
+    "理解目标 · 组织协作": "Understand goals · Coordinate work",
+    "选择连接的 Agent": "Choose a connected agent",
+    "代码与构建": "Code and build",
+    "分析与写作": "Analyze and write",
+    "观点与探索": "Ideas and exploration",
+    "工程与交付": "Engineer and deliver",
+    "Pot ↔ Codex：已核实支持连接、对话与任务委派。": "Pot ↔ Codex: connection, conversation and task delegation have been verified.",
+    "Agent Link · 已支持": "Agent Link · Supported",
+    "交互示意": "Interactive demo",
+    "协作模式": "Collaboration mode",
+    "直接对话": "Talk directly",
+    "让 Pot 委派": "Ask Pot to delegate",
+    "这段协作，从你的下一个想法开始": "Your next idea could start a conversation like this",
+    "添加连接": "Add a connection",
+    "使用对方提供的连接信息": "Use the connection details provided by the other node",
+    "助手出现": "Find its assistant",
+    "找到这个节点提供的助手": "See the assistants that node makes available",
+    "开始协作": "Start working together",
+    "直接对话，或交给 Pot 委派": "Talk directly or ask Pot to delegate",
+    "收到成果": "Receive the result",
+    "回到对话，继续下一步": "Return to the conversation and take the next step",
+    "03 / BETTER TOGETHER": "03 / BETTER TOGETHER",
+    "让分工，发生在对话里": "Share the work, right in the conversation",
+    "从「我有个想法」，": "From “I have an idea”",
+    "到「已经做好了」。": "to “it’s ready.”",
+    "你定方向，Pot 推进工作，Codex 承接开发。": "You set the direction, Pot moves things forward, and Codex handles development.",
+    "成果回到同一个对话里，修改也能接着来。": "Results return to the same conversation, where you can keep refining them.",
+    "浏览协作过程": "Explore the collaboration steps",
+    "一起把想法聊清楚": "Shape the idea together",
+    "你 ↔ Pot": "You ↔ Pot",
+    "让擅长的 Agent 接手": "Bring in the right agent",
+    "收成果，继续打磨": "Review and refine",
+    "Codex → Pot → 你": "Codex → Pot → You",
+    "ROOM FOR YOUR EVERYDAY": "ROOM FOR YOUR EVERYDAY",
+    "不只一次协作，": "Beyond one project.",
+    "也照顾日常。": "Part of your day.",
+    "多个助手": "Multiple assistants",
+    "让不同助手，各自专注一类工作。": "Let different assistants focus on different kinds of work.",
+    "定时工作": "Scheduled work",
+    "安排重复任务，持续关注你关心的事。": "Arrange recurring tasks and keep up with what matters.",
+    "模型选择": "Model selection",
+    "按工作需要，配置合适的模型。": "Configure a model that fits the work.",
+    "开源与自托管": "Open source and self-hosted",
+    "在自己的环境里运行，掌握配置与数据。": "Run it in your own environment and manage your configuration and data.",
+    "MAKE ROOM FOR WHAT'S NEXT.": "MAKE ROOM FOR WHAT’S NEXT.",
+    "下一件事，": "Your next idea.",
+    "和 Pot 一起做。": "Make it with Pot.",
+    "先认识助手，再连接你的 Agent 伙伴。": "Meet your assistant. Then connect your agent partners.",
+    "开始使用 Pot": "Get started with Pot",
+    "已有 Pot？打开你的 Pot，进入助手对话即可开始。需要协作时，在「Agent Link」中添加对方提供的连接。": "Already have Pot? Open a conversation with your assistant. When you want to collaborate, add the connection supplied by the other node in Agent Link.",
+    "首次安装：公开安装入口确认后将在此提供。当前可通过已有的 Pot 应用或 Web UI 开始。": "Installing for the first time? A public installation link will be added once verified. For now, start with your existing Pot app or web interface.",
+    "先体验助手任务示例": "Try an assistant task example",
+    "Agent Link 使用指南": "Agent Link guide",
+    "打开 Agent Link → 添加连接 → 填写对方提供的连接信息 → 选择可用助手。你可以直接发起对话，也可以请 Pot 委派任务。": "Open Agent Link → add a connection → enter the details supplied by the other node → choose an available assistant. Talk directly or ask Pot to delegate a task.",
+    "Pot 和 Codex 的互联已核实。Claude、Grok bot、Devin 在本页展示生态协作构想，具体接入取决于对应桥接与节点能力。": "Pot and Codex interconnection has been verified. Claude, Grok bot and Devin appear here as ecosystem collaboration concepts. Actual access depends on the bridge and node capabilities.",
+    "文档与源码入口": "Documentation and source code",
+    "公开文档与 GitHub 源码入口正在确认中。你可以先阅读本页的 Agent Link 使用指南，或通过任务与协作示例了解 Pot。": "Public documentation and GitHub source links are still being confirmed. Start with the Agent Link guide here, or explore the task and collaboration examples.",
+    "一个助手，更多可能。": "One assistant. More possibilities.",
+    "回到顶部 ↑": "Back to top ↑",
+    "为想法留一点空间。": "Make a little room for ideas.",
+    "示例成果 · 本地预览": "Example result · Local preview",
+    "关闭预览": "Close preview",
+    "下载示例报告": "Download example report",
+    "示例内容，用于体验交付方式": "Example content to show how results are delivered"
+  },
+  "demo": {
+    "language": "Language",
+    "switchLanguage": "Choose language",
+    "sample": "Example",
+    "supportConcept": "Ecosystem concept · Access to be confirmed",
+    "conceptNote": "{agent} is shown as an ecosystem concept. Access depends on the bridge and node capabilities; a native adapter is not being claimed.",
+    "directExample": "Direct conversation with the other assistant · Example",
+    "delegateReply": "I’ll hand the goal to {agent}, follow the task and bring the result back here.",
+    "returnExample": "Pot → {agent} → Result returned · Example",
+    "playing": "Task in progress",
+    "replay": "Play again",
+    "statusCreated": "Created",
+    "statusRunning": "In progress",
+    "statusFinishing": "Preparing results",
+    "agentTalk": [
+      [
+        "Build an interactive page from this website plan.",
+        "Sure. I’ll outline the page structure, implement a responsive layout and interactions, then return the files and validation notes.",
+        "Page files and validation notes",
+        "Build the product website",
+        "Ask Codex to implement the agreed website content and return the page files and validation notes."
+      ],
+      [
+        "Review this product introduction. How could it be clearer?",
+        "Start with what people want to achieve. Explain what the assistant can complete, then use concrete conversations to show how agents collaborate.",
+        "Product narrative and copy suggestions",
+        "Clarify the product story",
+        "Ask Claude to discuss the structure of the product introduction and put together clear copy suggestions."
+      ],
+      [
+        "What questions about personal AI assistants are worth exploring?",
+        "We could explore how tasks continue over time, how people and assistants share the work, and how multiple agents collaborate, with questions to investigate.",
+        "Exploration questions and perspectives",
+        "Explore product perspectives",
+        "Ask Grok bot to discuss AI assistant use cases from different perspectives and return a list of questions."
+      ],
+      [
+        "How should we break this page brief into verifiable engineering tasks?",
+        "Split it into layout, interactions, mobile checks and file delivery, with clear completion criteria for each step.",
+        "Engineering plan and delivery checklist",
+        "Outline the engineering plan",
+        "Ask Devin to break the website brief into engineering steps and list the deliverables and checks for each."
+      ]
+    ],
+    "extraTasks": {
+      "organize": {
+        "prompt": "Turn these scattered materials\ninto a project brief.",
+        "title": "Project materials brief",
+        "steps": [
+          [
+            "Identify the content and create a task",
+            "Set the scope and brief structure"
+          ],
+          [
+            "Organize information and extract key points",
+            "Summarize background, decisions and actions"
+          ],
+          [
+            "Prepare the brief and deliver the file",
+            "Return organized project materials"
+          ]
+        ]
+      },
+      "watch": {
+        "prompt": "Check project progress each week\nand send me a summary of changes.",
+        "title": "Project progress summary",
+        "steps": [
+          [
+            "Define the scope and schedule the work",
+            "Agree what to follow and how often"
+          ],
+          [
+            "Check on schedule and summarize changes",
+            "Review progress using available information"
+          ],
+          [
+            "Deliver the summary and flag follow-up",
+            "Bring this update back to the conversation"
+          ]
+        ]
+      }
+    },
+    "flowEyebrows": [
+      "A SHARED START",
+      "THE RIGHT PARTNER",
+      "BACK WITH SOMETHING REAL"
+    ],
+    "flowNumber": "Collaboration example / {n}",
+    "flowUsers": [
+      "I want a website introducing Pot. It should feel warm and clear, and explain Agent Link.",
+      "That direction works. Let Codex handle development.",
+      "Looks good. Make the diagram a little bigger on mobile."
+    ],
+    "flowReplies": [
+      "Let’s focus on two things: an assistant that completes tasks independently, and connections with other agents. Once the content is agreed, I’ll move implementation forward.",
+      "I’ll give Codex the content, visual direction and interaction requirements, create a development task and follow up on the result.",
+      "The page and interactions are complete, with desktop and mobile validation notes."
+    ],
+    "flowRoute": [
+      "Your idea",
+      "Pot shapes the brief",
+      "Your feedback",
+      "Next round"
+    ],
+    "flowStatus": "Delegated · Waiting for the result · Example status",
+    "siteBundle": "Product website · Example delivery",
+    "siteBundleSub": "Page structure / Interactions / Validation notes",
+    "siteReportTitle": "Product website · Example delivery notes",
+    "reports": [
+      {
+        "intro": "Example result: comparing three common ways to build a product website by content scale, interaction needs and maintenance.",
+        "table": [
+          [
+            "Approach",
+            "Best suited to",
+            "Trade-offs"
+          ],
+          [
+            "Static HTML / CSS / JS",
+            "Product and showcase websites",
+            "Few dependencies; content changes require editing files"
+          ],
+          [
+            "Static site generator",
+            "Documentation and content sites",
+            "Consistent structure; build tools need maintenance"
+          ],
+          [
+            "Content management system",
+            "Frequent editing by several people",
+            "Easy editing; services and permissions need maintenance"
+          ]
+        ],
+        "sections": [
+          {
+            "title": "Recommendation",
+            "paragraphs": [
+              "For a clear product introduction with a few reliable interactions, start with a lightweight static page. Consider content management as the site grows.",
+              "This simplified example demonstrates the delivery format. No real research has been performed."
+            ]
+          }
+        ]
+      },
+      {
+        "intro": "Example result: organize scattered materials into background, agreed decisions and next actions.",
+        "sections": [
+          {
+            "title": "Project background",
+            "paragraphs": [
+              "Create a Chinese-language product website focused on assistant capabilities and Agent Link."
+            ]
+          },
+          {
+            "title": "Agreed decisions",
+            "items": [
+              "A warm, restrained design that clearly explains the product and collaboration.",
+              "Local examples explicitly marked as interactive demonstrations.",
+              "Readable connection diagrams and usable conversations on mobile."
+            ]
+          },
+          {
+            "title": "Next steps",
+            "paragraphs": [
+              "Confirm the official public documentation link and keep agent access information up to date."
+            ]
+          }
+        ]
+      },
+      {
+        "intro": "Example result: check information on an agreed schedule and turn changes into an actionable summary.",
+        "sections": [
+          {
+            "title": "What changed",
+            "items": [
+              "The page now shows task progress and result previews.",
+              "The Agent Link diagram lets you switch agents and collaboration modes.",
+              "Some ecosystem connection methods still need confirmation."
+            ]
+          },
+          {
+            "title": "What to watch",
+            "paragraphs": [
+              "Public installation and documentation links, supported connections and changes to the actual product capabilities.",
+              "No real scheduled task or external project monitoring has been set up here."
+            ]
+          }
+        ]
+      },
+      {
+        "intro": "From a goal to a file, results return with context. This preview shows the kind of content an agent could deliver after completing a task.",
+        "sections": [
+          {
+            "title": "Delivery contents",
+            "items": [
+              "A responsive product introduction in Chinese.",
+              "Assistant task demos, an Agent Link diagram and collaboration examples.",
+              "Preview instructions, interaction notes and validation records."
+            ]
+          },
+          {
+            "title": "Continue collaborating",
+            "paragraphs": [
+              "Give specific feedback in the conversation, such as ‘make the mobile diagram clearer’. Pot can use it to move the next round forward.",
+              "This is a collaboration demo. No message is sent to Codex or any other agent."
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -319,6 +319,17 @@ completed results. Assistant/task messages and independent Codex tasks remain
 eligible for their normal execution paths. Started work still follows the host's
 uncertain-outcome recovery; migration never resumes or replaces a Codex thread.
 
+## Task replies and schedule delivery
+
+`tasks/0027_task_reply_artifacts` removes scheduler comparison baselines and
+per-occurrence change flags, including cached management replies. Former
+`changes` policies become `all`; explicit `all` and `failures` policies remain.
+The worker's final reply supplies the summary and optional `.pot-artifacts/`
+files supply attachment paths. Artifact collection diagnostics use optional
+`artifacts_error` outcome metadata. Task identities, execution targets, due times,
+generations, write digests, historical outcomes and inbox delivery states survive;
+startup never replays work or renotifies previously suppressed outcomes.
+
 ## Local extension and resource files
 
 `control/0028_extension_files` retires live SQLite extension settings and MCP
