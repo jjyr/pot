@@ -178,7 +178,7 @@ def node(platform):
 
 
 def linker_flags(stripped=True):
-    version = os.environ.get("POT_APP_VERSION", "0.1.0")
+    version = os.environ.get("POT_APP_VERSION", "0.0.0")
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise ValueError("POT_APP_VERSION must be major.minor.patch")
     revision = os.environ.get("POT_BUILD_REVISION")
@@ -411,7 +411,7 @@ def update_metadata(resources, kind, target):
     """Record the complete installation contract beside its immutable assets."""
     import json
 
-    version = os.environ.get("POT_APP_VERSION", "0.1.0")
+    version = os.environ.get("POT_APP_VERSION", "0.0.0")
     (resources / "update.json").write_text(
         json.dumps(
             {

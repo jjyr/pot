@@ -25,7 +25,7 @@ Build locally; these commands do not publish an image:
 
 ```sh
 docker buildx build --platform linux/amd64 --load \
-  --build-arg POT_APP_VERSION=0.1.0 \
+  --build-arg POT_APP_VERSION=0.0.0 \
   --build-arg POT_BUILD_REVISION="$(git rev-parse HEAD)" \
   -t pot-server:local .
 docker compose -f docker/compose.yaml up -d --no-build
@@ -44,7 +44,7 @@ archive locally requires a builder supporting multi-platform output:
 
 ```sh
 docker buildx build --platform linux/amd64,linux/arm64 \
-  --build-arg POT_APP_VERSION=0.1.0 \
+  --build-arg POT_APP_VERSION=0.0.0 \
   --build-arg POT_BUILD_REVISION="$(git rev-parse HEAD)" \
   --output type=oci,dest=pot-server.oci.tar .
 ```
