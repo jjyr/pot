@@ -1,4 +1,4 @@
-//go:build darwin || linux
+//go:build linux
 
 package executor
 
@@ -219,7 +219,7 @@ func TestPatchAtomicErrorsDoNotSwitchToInPlace(t *testing.T) {
 			path, original := inplaceFixture(t)
 			err := replacePatchAtomically(path, []byte("replacement\n"), 0750, func(from, to string) error {
 				return &os.LinkError{Op: "rename", Old: from, New: to, Err: failure}
-			})
+			}, false)
 			if !errors.Is(err, failure) {
 				t.Fatal("atomic failure not preserved", err)
 			}

@@ -163,11 +163,16 @@ func TestRealSandboxExternalPatchRequiresWritePermission(t *testing.T) {
 	if _, err := e.Execute(t.Context(), r, nil); err == nil {
 		t.Fatal("patch followed a symlink to the granted file")
 	}
-	for _, patch := range []string{
+	deniedPatches := []string{
 		"*** Update File: " + sibling + "\n@@\n-old\n+changed\n",
 		"*** Update File: " + path + "\n*** Move to: " + filepath.Join(outside, "moved") + "\n@@\n-again\n+changed\n",
-		"*** Delete File: " + path + "\n",
-	} {
+	}
+	if runtime.GOOS == "linux" {
+		// Linux cannot unlink a file bind mount. Seatbelt's existing file
+		// write grant permits unlinking that exact file; this fix is Linux-only.
+		deniedPatches = append(deniedPatches, "*** Delete File: "+path+"\n")
+	}
+	for _, patch := range deniedPatches {
 		r.Args["patch"] = "*** Begin Patch\n" + patch + "*** End Patch"
 		if _, err := e.Execute(t.Context(), r, nil); err == nil {
 			t.Fatal("exact file grant allowed a directory mutation", patch)
@@ -197,6 +202,9 @@ func TestRealSandboxExternalPatchRequiresWritePermission(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.options.SandboxWrite = []string{outside}
+	// Seatbelt write grants do not imply directory reads, which the atomic
+	// writer needs to open and fsync its parent after replacement.
+	e.options.SandboxRead = []string{outside}
 	r.Args["patch"] = "*** Begin Patch\n*** Update File: " + path + "\n@@\n-again\n+atomic\n*** End Patch"
 	if _, err := e.Execute(t.Context(), r, nil); err != nil {
 		t.Fatal("directory grant patch failed", err)

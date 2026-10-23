@@ -3,6 +3,7 @@ package executor
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // patchWriteScope describes executor-owned grants for strategy selection only.
@@ -31,8 +32,11 @@ func (s patchWriteScope) directoryCovers(path string) bool {
 // Linux binds each allowWrite entry, including redundant file entries. Omit a
 // file entry already covered by a directory grant so it cannot obstruct atomic
 // replacement. This adds no paths to the OS allowlist.
-func patchScope(workspace string, write []string) (patchWriteScope, []string) {
-	var scope patchWriteScope
+func patchScope(workspace string, write []string) (*patchWriteScope, []string) {
+	if runtime.GOOS != "linux" {
+		return nil, write
+	}
+	scope := &patchWriteScope{}
 	roots := append([]string{workspace}, write...)
 	files := make(map[int]string)
 	for i, root := range roots {
@@ -68,8 +72,8 @@ func patchScope(workspace string, write []string) (patchWriteScope, []string) {
 	return scope, filtered
 }
 
-func (s patchWriteScope) inPlace(edit patchEdit) bool {
-	if edit.original == nil || edit.content == nil || edit.destination != "" {
+func (s *patchWriteScope) inPlace(edit patchEdit) bool {
+	if s == nil || len(s.Files) == 0 || edit.original == nil || edit.content == nil || edit.destination != "" {
 		return false
 	}
 	canonical, err := filepath.EvalSymlinks(edit.path)

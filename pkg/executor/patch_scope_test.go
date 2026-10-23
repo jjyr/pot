@@ -1,3 +1,5 @@
+//go:build linux
+
 package executor
 
 import (
@@ -73,7 +75,7 @@ func TestPatchStrategyPreservesSelectedSemantics(t *testing.T) {
 	for _, exact := range []bool{false, true} {
 		t.Run(map[bool]string{false: "host atomic", true: "exact file in-place"}[exact], func(t *testing.T) {
 			path, original := inplaceFixture(t)
-			var scope patchWriteScope
+			var scope *patchWriteScope
 			if exact {
 				scope, _ = patchScope(t.TempDir(), []string{path})
 			}
@@ -84,6 +86,59 @@ func TestPatchStrategyPreservesSelectedSemantics(t *testing.T) {
 			after, err := os.Stat(path)
 			if err != nil || os.SameFile(original.file, after) != exact {
 				t.Fatal("selected strategy changed", after, err)
+			}
+		})
+	}
+}
+
+func TestLinuxSandboxPatchDoesNotFallbackOnDirectoryDenial(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory write permissions")
+	}
+	path, original := inplaceFixture(t)
+	dir := filepath.Dir(path)
+	scope, _ := patchScope(t.TempDir(), []string{dir})
+	if err := os.Chmod(dir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+	patch := "*** Begin Patch\n*** Update File: " + path + "\n@@\n-original contents\n+replacement\n*** End Patch"
+	if _, err := applyPatch(dir, patch, scope); !os.IsPermission(err) {
+		t.Fatal("expected the selected atomic writer's permission error", err)
+	}
+	if data, err := os.ReadFile(path); err != nil || string(data) != string(original.data) {
+		t.Fatal("atomic writer fell back to modifying the file", string(data), err)
+	}
+}
+
+func TestLinuxPatchSelectsEachFileBeforeMutation(t *testing.T) {
+	for _, valid := range []bool{false, true} {
+		t.Run(map[bool]string{false: "stale second file", true: "mixed grants"}[valid], func(t *testing.T) {
+			exact, original := inplaceFixture(t)
+			atomic, atomicOriginal := inplaceFixture(t)
+			scope, _ := patchScope(t.TempDir(), []string{exact, filepath.Dir(atomic)})
+			old := "original contents"
+			if !valid {
+				old = "stale contents"
+			}
+			patch := "*** Begin Patch\n*** Update File: " + exact + "\n@@\n-original contents\n+replacement\n" +
+				"*** Update File: " + atomic + "\n@@\n-" + old + "\n+replacement\n*** End Patch"
+			_, err := applyPatch(filepath.Dir(exact), patch, scope)
+			if (err == nil) != valid {
+				t.Fatal("unexpected preflight result", err)
+			}
+			for path, before := range map[string]*patchOriginal{exact: original, atomic: atomicOriginal} {
+				want := "original contents\n"
+				if valid {
+					want = "replacement\n"
+				}
+				if data, err := os.ReadFile(path); err != nil || string(data) != want {
+					t.Fatal("unexpected contents", path, string(data), err)
+				}
+				after, err := os.Stat(path)
+				if err != nil || os.SameFile(before.file, after) != (!valid || path == exact) {
+					t.Fatal("unexpected write strategy", path, err)
+				}
 			}
 		})
 	}

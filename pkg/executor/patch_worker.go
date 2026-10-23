@@ -19,9 +19,9 @@ const PatchWorkerArgument = "--internal-patch-worker"
 // Private executor-to-worker input, supplied on stdin before workload startup.
 // WriteScope is not a model-visible tool argument or an OS permission override.
 type patchWorkerRequest struct {
-	Workspace  string          `json:"workspace"`
-	Patch      string          `json:"patch"`
-	WriteScope patchWriteScope `json:"write_scope"`
+	Workspace  string           `json:"workspace"`
+	Patch      string           `json:"patch"`
+	WriteScope *patchWriteScope `json:"write_scope,omitempty"`
 }
 
 // ServePatchWorker performs only the supplied authorized patch under its filesystem sandbox. Hosts

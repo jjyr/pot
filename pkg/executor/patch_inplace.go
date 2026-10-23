@@ -1,4 +1,4 @@
-//go:build darwin || linux
+//go:build linux
 
 package executor
 
@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 )
@@ -46,10 +47,8 @@ func writePatchInPlace(path string, data []byte, original *patchOriginal) (resul
 	if !info.Mode().IsRegular() || !os.SameFile(info, original.file) || info.Mode() != original.file.Mode() {
 		return errors.New("patch file changed since preflight")
 	}
-	var stat unix.Stat_t
-	if err := unix.Fstat(int(file.Fd()), &stat); err != nil {
-		return err
-	}
+	// File.Stat already fetched the inode metadata, including its link count.
+	stat := info.Sys().(*syscall.Stat_t)
 	if stat.Nlink != 1 {
 		return errors.New("cannot patch a multiply linked file in place")
 	}

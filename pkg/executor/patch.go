@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"unicode/utf8"
 )
@@ -66,15 +67,19 @@ func textLines(text string) []string {
 }
 
 // ApplyPatch validates all paths and hunks before the first mutation. Each write
-// is fsynced and atomically replaced. Protected workers use applyPatch with a
-// trusted write scope to select verified, non-crash-atomic file-only updates.
+// is fsynced. The original writer prefers atomic replacement and falls back to
+// writing the file when creating a sibling is denied. Linux protected workers
+// use a trusted write scope to select verified, non-crash-atomic file-only updates.
 // Multi-file patches are not transactions and
 // OS errors during commit must be reported as partial effects.
 func ApplyPatch(workspace, patch string) (string, error) {
-	return applyPatch(workspace, patch, patchWriteScope{})
+	return applyPatch(workspace, patch, nil)
 }
 
-func applyPatch(workspace, patch string, scope patchWriteScope) (string, error) {
+func applyPatch(workspace, patch string, scope *patchWriteScope) (string, error) {
+	if runtime.GOOS != "linux" {
+		scope = nil
+	}
 	if len(patch) > patchLimit || !utf8.ValidString(patch) {
 		return "", errors.New("patch exceeds 4 MiB or invalid UTF-8")
 	}
@@ -141,11 +146,9 @@ func applyPatch(workspace, patch string, scope patchWriteScope) (string, error) 
 			if !utf8.Valid(original) {
 				return "", errors.New("patch target is not UTF-8")
 			}
-			parent, err := os.Stat(filepath.Dir(target))
-			if err != nil {
-				return "", err
+			if scope != nil && len(scope.Files) > 0 {
+				edit.original = &patchOriginal{file: info, data: original}
 			}
-			edit.original = &patchOriginal{file: info, parent: parent, data: original}
 			content := textLines(string(original))
 			cursor, hunks := 0, 0
 			if index < len(lines) && strings.HasPrefix(lines[index], "*** Move to: ") {
@@ -268,6 +271,15 @@ func applyPatch(workspace, patch string, scope patchWriteScope) (string, error) 
 	// from the executor's private worker input, never from patch/tool arguments.
 	for i := range edits {
 		edits[i].inPlace = scope.inPlace(edits[i])
+		if edits[i].inPlace {
+			parent, err := os.Stat(filepath.Dir(edits[i].path))
+			if err != nil {
+				return "", err
+			}
+			edits[i].original.parent = parent
+		} else {
+			edits[i].original = nil
+		}
 	}
 	report := []string{}
 	for _, edit := range edits {
@@ -296,6 +308,8 @@ func applyPatch(workspace, patch string, scope patchWriteScope) (string, error) 
 		var err error
 		if edit.inPlace {
 			err = writePatchInPlace(target, []byte(*edit.content), edit.original)
+		} else if scope != nil {
+			err = replacePatchAtomically(target, []byte(*edit.content), edit.mode, os.Rename, false)
 		} else {
 			err = writeAtomic(target, []byte(*edit.content), edit.mode)
 		}
@@ -312,12 +326,24 @@ func applyPatch(workspace, patch string, scope patchWriteScope) (string, error) 
 	return strings.Join(report, "\n"), nil
 }
 func writeAtomic(path string, data []byte, mode os.FileMode) error {
-	return replacePatchAtomically(path, data, mode, os.Rename)
+	return replacePatchAtomically(path, data, mode, os.Rename, true)
 }
 
-func replacePatchAtomically(path string, data []byte, mode os.FileMode, rename func(string, string) error) error {
+func replacePatchAtomically(path string, data []byte, mode os.FileMode, rename func(string, string) error, fileFallback bool) error {
 	file, err := os.CreateTemp(filepath.Dir(path), ".pot-patch-")
 	if err != nil {
+		if fileFallback && os.IsPermission(err) {
+			// Preserve the original host/non-Linux file-only write behavior.
+			file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+			if err != nil {
+				return err
+			}
+			_, err = file.Write(data)
+			if err == nil {
+				err = file.Sync()
+			}
+			return errors.Join(err, file.Close())
+		}
 		return err
 	}
 	defer os.Remove(file.Name())
