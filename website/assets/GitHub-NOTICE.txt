@@ -1,0 +1,20 @@
+GitHub Invertocat
+
+github-invertocat-black.svg is an unmodified copy of:
+  GitHub Logos/SVG/GitHub_Invertocat_Black.svg
+from the official GitHub logo archive:
+  https://brand.github.com/GitHub_Logos.zip
+
+Source page and usage guidelines:
+  https://brand.github.com/foundations/logo
+  https://github.com/logos redirects to this page.
+
+The black artwork, 98 x 96 viewBox, paths and clipping are preserved as supplied.
+The website scales it proportionally and uses it as a social button linking to
+the Pot GitHub project. The Brand Toolkit explicitly permits this use. Do not
+alter the logo, add effects, distort its proportions or imply GitHub endorsement.
+
+GITHUB and the INVERTOCAT logo design are trademarks of GitHub, Inc. GitHub's
+logos and artwork remain the property of GitHub, Inc.; all rights reserved.
+This brand asset is subject to GitHub's brand guidelines, not the Octicons MIT
+license. See the source page for the full usage and legal guidance.

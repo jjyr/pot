@@ -156,6 +156,7 @@ def embedded_assets():
         "claude": "claude.svg",
         "grok": "grok.svg",
         "devin": "devin.png",
+        "github": "github-invertocat-black.svg",
     }.items():
         path = ROOT / "assets" / file
         mime = mimetypes.guess_type(file)[0]
@@ -176,6 +177,7 @@ def preview():
             "claude": "claude.svg",
             "grok": "grok.svg",
             "devin": "devin.png",
+            "github": "github-invertocat-black.svg",
         }.items():
             body = body.replace("assets/" + file, assets[key])
         product_images = {
