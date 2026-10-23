@@ -111,18 +111,6 @@ def render(code, prefix="../", root=False):
         "server-command": "server",
     }.items():
         page = page.replace("<!--" + marker + "-->", esc(install[key]))
-    tasks = [
-        ("install", "验证 Linux 安装", "启动、模型连接、重开持久化"),
-        ("docs", "整理入门文档", "平台、安装步骤、首次配置"),
-        ("screens", "准备产品截图", "助手工作、后台任务、Agent Link"),
-    ]
-    page = page.replace(
-        "<!--project-tasks-->",
-        "".join(
-            f'<article class="project-task done"><span class="task-number">0{i + 1}</span><h3>{esc(texts[title])}</h3><p>{esc(texts[detail])}</p><span class="pill project-state">{esc(texts["已完成"])}</span><button data-open-report="{key}">{esc(texts["查看示例成果"])} ↗</button></article>'
-            for i, (key, title, detail) in enumerate(tasks)
-        ),
-    )
     config = {**catalog, "install": install, "locale": code, "assetBase": prefix}
     scripts = f'<script src="{prefix}locale.js"></script><script id="pot-data" type="application/json">{payload(config)}</script><script src="{prefix}app.js" defer></script>'
     page = page.replace('<script src="app.js" defer></script>', alternatives + scripts)
@@ -157,6 +145,8 @@ def embedded_assets():
         "grok": "grok.svg",
         "devin": "devin.png",
         "github": "github-invertocat-black.svg",
+        "assistantDesktop": "assistant-desktop.png",
+        "assistantMobile": "assistant-mobile.png",
     }.items():
         path = ROOT / "assets" / file
         mime = mimetypes.guess_type(file)[0]
@@ -178,14 +168,11 @@ def preview():
             "grok": "grok.svg",
             "devin": "devin.png",
             "github": "github-invertocat-black.svg",
+            "assistantDesktop": "assistant-desktop.png",
+            "assistantMobile": "assistant-mobile.png",
         }.items():
             body = body.replace("assets/" + file, assets[key])
-        product_images = {
-            key: "data:image/png;base64,"
-            + base64.b64encode((ROOT / "assets" / file).read_bytes()).decode()
-            for key, file in {"work": "product-work.png", "link": "product-agent-link.png"}.items()
-        }
-        config = {**config, "assets": assets, "productImages": product_images}
+        config = {**config, "assets": assets}
         title = html.unescape(re.search(r"<title>(.*?)</title>", page, re.S)[1])
         description = config["page"][META_DESCRIPTION_KEY]
         bundle[code] = {"body": body, "data": config, "title": title, "description": description}

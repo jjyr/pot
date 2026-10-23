@@ -1,7 +1,7 @@
 # Pot website
 
 A standalone product website with equal emphasis on assistant tasks and Agent Link,
-including the verified Codex integration, a parallel-task example and four installation paths. It uses static HTML, CSS and JavaScript;
+including the verified Codex integration, a website-design conversation and four installation paths. It uses static HTML, CSS and JavaScript;
 Python's standard library generates all six language entries and an offline preview.
 No product runtime, Node dependencies or build framework are required.
 
@@ -33,7 +33,7 @@ navigation and refresh work on an ordinary static server without rewrites. With
 JavaScript disabled, the localized body and language links remain available.
 
 Language switching preserves the current section, agent, direct/delegated mode,
-playback stage, workflow step and open result preview. Static pages
+workflow step, communication disclosure state and open result preview. Static pages
 carry demo state in query parameters; the offline preview switches in place.
 Chinese script subtags take precedence over region subtags: `zh-Hant`, `zh-TW`,
 `zh-HK` and `zh-MO` select Traditional Chinese; `zh-Hans` selects Simplified Chinese.
@@ -62,6 +62,40 @@ server. Regenerate them whenever a source changes. The larger self-contained
 `pot-preview.html` is generated locally and ignored by Git; it embeds all six
 pages, catalogs, styles, scripts and brand images, supports offline language
 switching and requires no network subresources.
+
+## Assistant section
+
+Section 01 has two parts: a full product screenshot followed by a local
+website-design conversation with Pot and Designer Tony. It has no playback,
+stage navigation or repeated detail gallery. User messages have no identity row;
+assistant messages keep their name and avatar. Tony uses a generic avatar.
+Native `details` provide the communication disclosures and nested call details;
+one short incoming message starts expanded, as in the final composition.
+Native dialogs provide the original image and local design-result preview,
+including Escape dismissal and focus restoration. These controls never send
+messages, create tasks or invoke models.
+
+The desktop image stays at 1280 CSS pixels and the mobile image at 390 CSS
+pixels. At 720px and below the mobile source is shown; a keyboard-focusable image
+region contains horizontal scrolling when necessary. Do not shrink text inside
+these screenshots to fit the page, sharpen or redraw it. Keep screenshot copy
+verbatim; the surrounding labels, story and dialogs use all six catalogs.
+The offline builder embeds the same assets. Language switching preserves the
+communication disclosures and open preview, alongside the other section states.
+
+| Asset | Original source and size | SHA-256 |
+| --- | --- | --- |
+| `assets/assistant-desktop.png` | [PR #259, full desktop image](https://github.com/jjyr/pot/blob/7217ccd2d328e2837b29093fc6e42f31167fdba8/docs/pr-images/codex-warm-chat-bubbles/chat-rich-desktop-light-after.png), 1280 × 1400 | `79379d50a9f20b952d30a914880ab2247bbcf5f9101ac0d923f4a56a23c6dc4f` |
+| `assets/assistant-mobile.png` | [PR #232, full phone image](https://github.com/jjyr/pot/blob/8702c69242eb3b8d7b92a3fbf3a82ce4bfc033c4/docs/pr-images/codex-task-a12b413b-70e6-4690-ab0d-d15ba64a6658/chat-mobile-light-receive-after.png), 390 × 1000 | `bd2b505bbe1dab928b0c29d7653b7568ed7981c7bd5d282115749e520e5ce545` |
+
+These small lossless PNGs preserve the original bytes and full framing. They show
+actual product code rendering isolated synthetic test records, not live customer
+conversations, delivery receipts or proof of task completion. The Code reviewer
+identity in the desktop image is unchanged. The Pot/Tony website story below it
+is an HTML layout and interaction illustration, not a screenshot or a record of
+actual communication. Keep this distinction in short visible labels and image
+alternatives when refreshing the assets. Update the source links and hashes here
+when replacing either image; do not reuse PR review captures as product assets.
 
 ## GitHub Pages
 
@@ -124,8 +158,8 @@ package page awaits first publication. Platform requirements follow the
 [release contract](../docs/releases.md). Keep these small availability notes in
 sync when the channels publish. The English agent prompt is
 intentionally identical in every locale. No installation or agent execution is
-performed by the website. Result previews use synthetic notes, a documentation
-change excerpt and real shared-UI screenshots with isolated synthetic records.
+performed by the website. The website-design preview is a local layout illustration; the product images
+use isolated synthetic records rendered by real shared UI code.
 See [screenshot provenance](../docs/images/README.md).
 
 The header's GitHub Invertocat links to the repository. It uses the unmodified
@@ -176,13 +210,14 @@ After building, serve the **checkout root** (the product screenshot fixture impo
 With Playwright and Chromium available outside the website runtime, run
 `node scripts/tests/website-browser.mjs`. `POT_WEBSITE_ORIGIN` overrides the server
 origin; `POT_PLAYWRIGHT_MODULE` can point to an external Playwright module.
-These checks cover six-language copy behavior, parallel playback and its terminal
-state, deliverable previews, narrow layouts, keyboard controls and Star fallbacks.
+These checks cover six-language copy behavior, the assistant story and its nested
+disclosures, original-size images, local result previews, 320/390px layouts,
+keyboard controls, collaboration and Star fallbacks.
 They use synthetic clipboard/API responses and never execute installation commands.
 
 Use `node scripts/tests/website-browser.mjs --install-only` to check only installation
 classification, links, copy behavior, keyboard navigation, responsive layouts and
-static/offline language state without running the task-demo and Star scenarios.
+static/offline language state without running the assistant-story and Star scenarios.
 
 Run `node scripts/tests/website-star-browser.mjs` for the focused Star layout,
 API fallback, cache and input checks. It uses the same browser environment
