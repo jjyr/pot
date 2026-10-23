@@ -105,7 +105,7 @@ func legacyRunningHost(t *testing.T, root, token string) {
 		}
 	}
 	if _, err = db.Exec(`INSERT INTO codex_agent_host(singleton,control_id,owner_secret_ref,endpoint) VALUES(1,'existing-host','existing-owner','');
-DELETE FROM pot_migrations WHERE id LIKE '0009_%';
+UPDATE pot_migrations SET id='0001_baseline_control_unsupported_development_fixture';
 INSERT INTO agent_link_invitations(id,identity,endpoint,expires_at,secret_ref) VALUES('old-invite','{"address":{"control_id":"existing-host","kind":"assistant","agent_id":"codex"},"name":"Codex","adapter":"codex"}','tcp://127.0.0.1:8793',1,'old-invite-secret')`); err != nil {
 		t.Fatal(err)
 	}

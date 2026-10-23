@@ -16,6 +16,7 @@ import (
 )
 
 func TestAgentToolsShareTaskPortAndCatalogueAcrossLocalAndPeer(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { batchReply(w, "task result") }))
@@ -29,7 +30,10 @@ func TestAgentToolsShareTaskPortAndCatalogueAcrossLocalAndPeer(t *testing.T) {
 	ids := []string{}
 	for i, request := range requests {
 		body, _ := json.Marshal(request)
-		accepted, err := source.productCall(ctx, "main", []string{"local-request", "peer-request"}[i], "create_task", body)
+		id := []string{"local-request", "peer-request"}[i]
+		accepted, err := retryAgentCapacity(ctx, func(ctx context.Context) (any, error) {
+			return source.productCall(ctx, "main", id, "create_task", body)
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -118,6 +122,7 @@ func TestAgentToolsShareTaskPortAndCatalogueAcrossLocalAndPeer(t *testing.T) {
 }
 
 func TestAcceptedTaskCancellationPersistsThroughDisconnectAndRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	backend, _ := linkBackendFixture(t)
 	source := &agentControlFixture{service: backend.s, endpoint: controlPeerEndpoint(backend.s)}
@@ -162,6 +167,7 @@ func TestAcceptedTaskCancellationPersistsThroughDisconnectAndRestart(t *testing.
 }
 
 func TestLinkedReceiptsKeepCancellationActiveAndFastContinuationVisible(t *testing.T) {
+	t.Parallel()
 	backend, _ := linkBackendFixture(t)
 	ctx := context.Background()
 	record := tasks.Record{AssistantID: "main", Request: protocol.CreateTask{RequestID: "receipt-request", Text: "Remote work"}, Info: protocol.TaskInfo{ID: "receipt-task", AssistantID: "main", Phase: protocol.TaskQueued, AgentLink: &protocol.AgentLinkOrigin{LinkID: "peer-link", NodeID: "peer"}}, Execution: &tasks.Execution{Request: agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "node", Kind: "assistant", AgentID: "main"}}}}
@@ -204,6 +210,7 @@ func TestLinkedReceiptsKeepCancellationActiveAndFastContinuationVisible(t *testi
 }
 
 func TestLinkedSubmissionRejectsLocalConfigurationBeforeAdmission(t *testing.T) {
+	t.Parallel()
 	backend, _ := linkBackendFixture(t)
 	source := &agentControlFixture{service: backend.s, endpoint: controlPeerEndpoint(backend.s)}
 	peer := agentControl(t, "submission-peer")
@@ -234,6 +241,7 @@ func TestLinkedSubmissionRejectsLocalConfigurationBeforeAdmission(t *testing.T) 
 }
 
 func TestLinkedGuidanceCannotUpgradeReferenceOrForeignSender(t *testing.T) {
+	t.Parallel()
 	backend, _ := linkBackendFixture(t)
 	ctx := context.Background()
 	from := protocol.AgentRef{NodeID: "node", Kind: "assistant", AgentID: "main"}

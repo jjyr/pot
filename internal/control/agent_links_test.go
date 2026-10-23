@@ -20,10 +20,16 @@ import (
 // Retry only a confirmed capacity rejection, which precedes remote execution;
 // retain the exact original request and return every other outcome unchanged.
 func callAgentWhenReady(ctx context.Context, service *Service, owner string, operation agentlink.Operation, call agentlink.Call) (any, error) {
+	return retryAgentCapacity(ctx, func(ctx context.Context) (any, error) {
+		return service.CallAgent(ctx, owner, operation, call)
+	})
+}
+
+func retryAgentCapacity(ctx context.Context, call func(context.Context) (any, error)) (any, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	for {
-		value, err := service.CallAgent(ctx, owner, operation, call)
+		value, err := call(ctx)
 		var api protocol.APIError
 		if !errors.Is(err, agentlink.ErrCapacity) && !(errors.As(err, &api) && api.Code == agentlink.ErrCapacity.Error()) {
 			return value, err
@@ -33,6 +39,53 @@ func callAgentWhenReady(ctx context.Context, service *Service, owner string, ope
 			return nil, ctx.Err()
 		case <-time.After(20 * time.Millisecond):
 		}
+	}
+}
+
+func TestRetryAgentCapacityPreservesOtherOutcomes(t *testing.T) {
+	t.Parallel()
+	transport := errors.New("transport outcome unknown")
+	for _, tc := range []struct {
+		name  string
+		err   error
+		retry bool
+	}{
+		{name: "capacity", err: agentlink.ErrCapacity, retry: true},
+		{name: "api capacity", err: protocol.APIError{Code: agentlink.ErrCapacity.Error()}, retry: true},
+		{name: "success"},
+		{name: "transport", err: transport},
+		{name: "deadline", err: context.DeadlineExceeded},
+		{name: "cancelled", err: context.Canceled},
+		{name: "conflict", err: agentlink.ErrConflict},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			value, err := retryAgentCapacity(t.Context(), func(context.Context) (any, error) {
+				calls++
+				if calls == 1 {
+					return "original", tc.err
+				}
+				return "accepted", nil
+			})
+			if tc.retry {
+				if calls != 2 || value != "accepted" || err != nil {
+					t.Fatal(calls, value, err)
+				}
+			} else if calls != 1 || value != "original" || err != tc.err {
+				t.Fatal("changed non-capacity outcome", calls, value, err)
+			}
+		})
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	calls := 0
+	_, err := retryAgentCapacity(ctx, func(context.Context) (any, error) {
+		calls++
+		cancel()
+		return nil, agentlink.ErrCapacity
+	})
+	if !errors.Is(err, context.Canceled) || calls != 1 {
+		t.Fatal("retried after cancellation", calls, err)
 	}
 }
 
@@ -109,6 +162,7 @@ func awaitAgentLinkMail(t *testing.T, s *Service, id string) protocol.MailRecord
 }
 
 func TestAgentLinkControlsExchangeWithoutAppAndDoNotGrantExecution(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, b := agentControl(t, "link-a"), agentControl(t, "link-b")
 	peer := protocol.AgentRef{NodeID: "link-b", Kind: "assistant", AgentID: "main"}
@@ -167,6 +221,7 @@ func TestAgentLinkControlsExchangeWithoutAppAndDoNotGrantExecution(t *testing.T)
 }
 
 func TestAgentLinkControlBindingRevocationAndNarrowListener(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, b := agentControl(t, "binding-a"), agentControl(t, "binding-b")
 	connection := connectAgentControls(t, a, b)
@@ -213,6 +268,7 @@ func TestAgentLinkControlBindingRevocationAndNarrowListener(t *testing.T) {
 }
 
 func TestMissingAssistantCannotPublishIdentity(t *testing.T) {
+	t.Parallel()
 	s := taskControl(t, "empty-node", "")
 	if _, err := s.agentLinkIdentity(context.Background(), "main"); err == nil {
 		t.Fatal("missing assistant published identity")
@@ -220,6 +276,7 @@ func TestMissingAssistantCannotPublishIdentity(t *testing.T) {
 }
 
 func TestAgentLinkControlPreviewDoesNotClaimInvitation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, b := agentControl(t, "preview-a"), agentControl(t, "preview-b")
 	if _, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", Mode: "address", Endpoint: b.endpoint}); err != nil {
@@ -264,6 +321,7 @@ func TestAgentLinkControlPreviewDoesNotClaimInvitation(t *testing.T) {
 }
 
 func TestAgentLinkControlPreviewExpiredInvitation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, b := agentControl(t, "expired-a"), agentControl(t, "expired-b")
 	if _, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", Mode: "address", Endpoint: b.endpoint}); err != nil {

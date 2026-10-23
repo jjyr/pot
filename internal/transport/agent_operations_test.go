@@ -52,13 +52,13 @@ func TestUnifiedHTTPPortRunsLinkedTaskWithoutLocalAssistant(t *testing.T) {
 	query := "?assistant_id=" + url.QueryEscape(owner)
 	server := httptest.NewServer(Handler(&Application{Control: source, RuntimeID: "http-user-source", BootID: "boot"}, "private"))
 	defer server.Close()
-	call := func(method, path string, body any) (int, []byte) {
+	call := func(ctx context.Context, method, path string, body any) (int, []byte) {
 		t.Helper()
 		var data []byte
 		if body != nil {
 			data, _ = json.Marshal(body)
 		}
-		request, _ := http.NewRequest(method, server.URL+path, bytes.NewReader(data))
+		request, _ := http.NewRequestWithContext(ctx, method, server.URL+path, bytes.NewReader(data))
 		request.Header.Set("Authorization", "Bearer private")
 		request.Header.Set("Content-Type", "application/json")
 		response, err := server.Client().Do(request)
@@ -72,19 +72,35 @@ func TestUnifiedHTTPPortRunsLinkedTaskWithoutLocalAssistant(t *testing.T) {
 		}
 		return response.StatusCode, data
 	}
-	status, data := call("GET", "/api/v1/agent-links/capabilities"+query, nil)
+	status, data := call(ctx, "GET", "/api/v1/agent-links/capabilities"+query, nil)
 	var description agentlink.Description
 	if err = json.Unmarshal(data, &description); err != nil || status != 200 || !description.Supports(agentlink.TaskSubmit) || description.Supports(agentlink.AssistantConfigure) {
 		t.Fatal(status, string(data), err)
 	}
-	status, data = call("POST", "/api/v1/tasks"+query, protocol.CreateTask{RequestID: "http-user-task", Text: "Read report\nReturn a result through the original conversation."})
+	request := protocol.CreateTask{RequestID: "http-user-task", Text: "Read report\nReturn a result through the original conversation."}
+	ready, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for {
+		status, data = call(ready, "POST", "/api/v1/tasks"+query, request)
+		var api protocol.APIError
+		if status != http.StatusConflict || json.Unmarshal(data, &api) != nil || api.Code != agentlink.ErrCapacity.Error() {
+			break
+		}
+		// Observation can occupy the peer's one-operation limit. Only this
+		// explicit pre-execution refusal is safe to retry with the same request.
+		select {
+		case <-ready.Done():
+			t.Fatal("peer admission did not become ready", ready.Err())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
 	var task protocol.TaskInfo
 	if err = json.Unmarshal(data, &task); err != nil || status != 200 || task.AssistantID != owner {
 		t.Fatal(status, string(data), err)
 	}
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		status, data = call("GET", "/api/v1/tasks/"+task.ID+query, nil)
+		status, data = call(ctx, "GET", "/api/v1/tasks/"+task.ID+query, nil)
 		var record struct {
 			Info         protocol.TaskInfo
 			Capabilities agentlink.Description
@@ -104,7 +120,7 @@ func TestUnifiedHTTPPortRunsLinkedTaskWithoutLocalAssistant(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	for {
-		status, data = call("GET", "/api/v1/snapshot"+query, nil)
+		status, data = call(ctx, "GET", "/api/v1/snapshot"+query, nil)
 		var frame protocol.UIFrame
 		if err = json.Unmarshal(data, &frame); err != nil || status != 200 {
 			t.Fatal(status, string(data), err)
@@ -117,7 +133,7 @@ func TestUnifiedHTTPPortRunsLinkedTaskWithoutLocalAssistant(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	status, data = call("POST", "/api/v1/turn/cancel"+query, map[string]string{"request_id": "stop", "user_message_id": "user"})
+	status, data = call(ctx, "POST", "/api/v1/turn/cancel"+query, map[string]string{"request_id": "stop", "user_message_id": "user"})
 	if status < 400 {
 		t.Fatal("unsupported remote control fell back to local agent", string(data))
 	}

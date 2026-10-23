@@ -13,6 +13,7 @@ func operation(call string) Operation {
 	return Operation{Owner: "assistant", Turn: "turn", Generation: 1, CallID: call, Target: core.RuntimeTarget("machine"), Tool: "exec_command", Args: json.RawMessage(`{"cmd":"printf hello"}`)}
 }
 func TestReceiptDuplicateBindingRestartFence(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "operations.sqlite")
 	o, err := OpenOperations(path)

@@ -51,6 +51,7 @@ func fenceRecovery(t *testing.T, s *Service, l tasks.Launch) {
 	}
 }
 func TestRecoverySettlesOriginalOperationAndCheckpointWithoutReplay(t *testing.T) {
+	t.Parallel()
 	s, l, op := recoveryFixture(t)
 	ctx := context.Background()
 	key, _ := op.Key()
@@ -110,6 +111,7 @@ func TestRecoverySettlesOriginalOperationAndCheckpointWithoutReplay(t *testing.T
 	}
 }
 func TestRecoveryUnknownOriginalReceiptKeepsRunAndCapacityFenced(t *testing.T) {
+	t.Parallel()
 	s, l, op := recoveryFixture(t)
 	ctx := context.Background()
 	key, _ := op.Key()
@@ -130,6 +132,7 @@ func TestRecoveryUnknownOriginalReceiptKeepsRunAndCapacityFenced(t *testing.T) {
 	}
 }
 func TestRecoveryPriorBootHostRequiresOriginalCleanupProof(t *testing.T) {
+	t.Parallel()
 	s, l, op := recoveryFixture(t)
 	ctx := context.Background()
 	key, _ := op.Key()
@@ -148,6 +151,7 @@ func TestRecoveryPriorBootHostRequiresOriginalCleanupProof(t *testing.T) {
 	}
 }
 func TestRecoveryOriginalOwnerRunAndTargetCannotBeRebound(t *testing.T) {
+	t.Parallel()
 	s, l, op := recoveryFixture(t)
 	ctx := context.Background()
 	record := OperationRecord{Operation: op}

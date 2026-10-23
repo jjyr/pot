@@ -49,6 +49,7 @@ func configurationService(t *testing.T) (*Service, core.Profile) {
 	return service, profile
 }
 func TestAssistantSelectionDoesNotMutateProviderOrOtherAssistant(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	service, profile := configurationService(t)
 	first, err := service.CreateAssistant(ctx, CreateAssistant{RequestID: "first-assistant", Name: "First"})
@@ -90,6 +91,7 @@ func TestAssistantSelectionDoesNotMutateProviderOrOtherAssistant(t *testing.T) {
 	}
 }
 func TestModelDefaultsRefreshOnlySameProfileRevisionAndExplicitOverridesSurvive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	service, profile := configurationService(t)
 	selection := AssistantSelection{ProfileID: profile.ID, ProfileRevision: profile.Revision, Model: "second"}
@@ -122,6 +124,7 @@ func TestModelDefaultsRefreshOnlySameProfileRevisionAndExplicitOverridesSurvive(
 	}
 }
 func TestCreationBindsFullSelectionAndNeverReappliesOnRetry(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	service, profile := configurationService(t)
 	window := uint64(48000)

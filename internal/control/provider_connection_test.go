@@ -12,6 +12,7 @@ import (
 )
 
 func TestProviderDiscoveryAndInference(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct{ protocol, path, header, prefix, events string }{
 		{"openai_chat", "/v1/chat/completions", "Authorization", "Bearer ", `{"choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]}`},
 		{"openai_responses", "/v1/responses", "Authorization", "Bearer ", `{"type":"response.completed","response":{"output":[{"type":"message","content":[{"type":"output_text","text":"OK"}]}]}}`},
@@ -82,6 +83,7 @@ func TestProviderDiscoveryAndInference(t *testing.T) {
 }
 
 func TestDiscoveredInputModalitiesSurviveSelectionAndReload(t *testing.T) {
+	t.Parallel()
 	s, _ := configurationService(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/v1/models" {
@@ -130,6 +132,7 @@ func TestDiscoveredInputModalitiesSurviveSelectionAndReload(t *testing.T) {
 }
 
 func TestModelListOptionalModalitiesCompatibility(t *testing.T) {
+	t.Parallel()
 	s, _ := configurationService(t)
 	for _, extension := range []string{"", `,"modalities":null`, `,"modalities":["text","image"]`, `,"modalities":"image"`, `,"modalities":{"input":true}`, `,"modalities":{"input":["text",42]}`, `,"modalities":{"output":["image"]}`, `,"modalities":{"input":[]}`} {
 		t.Run(extension, func(t *testing.T) {
@@ -146,6 +149,7 @@ func TestModelListOptionalModalitiesCompatibility(t *testing.T) {
 }
 
 func TestProviderTestRejectsHTTPAndStreamFailures(t *testing.T) {
+	t.Parallel()
 	s, _ := configurationService(t)
 	for _, tt := range []struct {
 		name              string
@@ -179,6 +183,7 @@ func TestProviderTestRejectsHTTPAndStreamFailures(t *testing.T) {
 }
 
 func TestConnectionRequestDecodesThroughPublicAPI(t *testing.T) {
+	t.Parallel()
 	var request TestProvider
 	if err := core.DecodeJSON([]byte(`{"endpoint":"https://example.com/v1","protocol":"openai_chat","api_key":"test-key","profile_id":"","model":"model","reasoning_effort":null}`), &request); err != nil {
 		t.Fatal(err)

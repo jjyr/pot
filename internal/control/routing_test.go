@@ -14,6 +14,7 @@ import (
 )
 
 func TestRoutingCASQuotaFencesAndCompleteCatalog(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	models := []string{}

@@ -21,6 +21,7 @@ import (
 )
 
 func TestAssistantMailAcceptsDuringRecipientCompaction(t *testing.T) {
+	t.Parallel()
 	for _, outcome := range []string{"complete", "failed", "restart"} {
 		t.Run(outcome, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

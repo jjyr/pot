@@ -15,6 +15,7 @@ import (
 )
 
 func TestResourceToolsSnapshotActualFilesAndFenceOwnership(t *testing.T) {
+	t.Parallel()
 	s, _ := configurationService(t)
 	ctx := context.Background()
 	a, err := s.CreateAssistant(ctx, CreateAssistant{RequestID: "resources", Name: "Resources"})
@@ -94,6 +95,7 @@ func TestResourceToolsSnapshotActualFilesAndFenceOwnership(t *testing.T) {
 }
 
 func TestMarkdownResourceRegistrationRetainsWorkspaceAndBundleBoundaries(t *testing.T) {
+	t.Parallel()
 	s, _ := configurationService(t)
 	ctx := context.Background()
 	a, err := s.CreateAssistant(ctx, CreateAssistant{RequestID: "markdown-boundaries", Name: "Resources"})
@@ -132,6 +134,7 @@ func TestMarkdownResourceRegistrationRetainsWorkspaceAndBundleBoundaries(t *test
 }
 
 func TestRegisterResourceNameSchemaDescribesDisplayLabel(t *testing.T) {
+	t.Parallel()
 	for _, tool := range resourceTools() {
 		if tool.Name != "register_resource" {
 			continue
@@ -150,6 +153,7 @@ func TestRegisterResourceNameSchemaDescribesDisplayLabel(t *testing.T) {
 }
 
 func TestDeletedAssistantCannotReadOrRegisterResources(t *testing.T) {
+	t.Parallel()
 	s, _ := configurationService(t)
 	ctx := context.Background()
 	a, err := s.CreateAssistant(ctx, CreateAssistant{RequestID: "resource-owner", Name: "Resources"})

@@ -5,6 +5,8 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"database/sql"
+	"sync/atomic"
+
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -19,7 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
+
 	"testing"
 	"time"
 )
@@ -437,120 +439,6 @@ func TestTCPListenerPushesWithoutDialerPollingAndIdleHasNoBusinessRPC(t *testing
 	}
 }
 
-func TestNodeIdentityUpgradeReopensOriginalSignedPairAndReceipts(t *testing.T) {
-	ctx := context.Background()
-	a, b := newFixture(t, "upgrade-a"), newFixture(t, "upgrade-b")
-	invitation, err := b.service.Invite(ctx, b.endpoint)
-	if err != nil {
-		t.Fatal(err)
-	}
-	connection, err := a.service.Connect(ctx, invitation.Address)
-	if err != nil {
-		t.Fatal(err)
-	}
-	credential, err := a.service.secret(ctx, connection.ID)
-	if err != nil || credential.Pair == nil {
-		t.Fatal(credential, err)
-	}
-	oldPair, _ := json.Marshal(credential.Pair)
-	oldPair = []byte(strings.ReplaceAll(string(oldPair), `"node_id":`, `"control_id":`))
-	oldHost, _ := json.Marshal(a.service.options.HostIdentity)
-	oldHost = []byte(strings.ReplaceAll(string(oldHost), `"node_id":`, `"id":`))
-	oldClaim := digest(append(append(append([]byte("["), oldPair...), ','), append(oldHost, ']')...))
-	remoteConnection, err := b.service.Get(ctx, connection.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	remoteConnection.Local.Name = "Renamed after invitation was copied"
-	if err = b.service.update(ctx, remoteConnection); err != nil {
-		t.Fatal(err)
-	}
-	endpointA, endpointB := a.endpoint, b.endpoint
-	a.stop()
-	b.stop()
-	// Recreate the exact previous persisted format, including encrypted outgoing
-	// pair intent. Every database and key belongs to this private test fixture.
-	for _, fixture := range []*fixture{a, b} {
-		restoreAssistantSchemaForLegacyUpgrade(t, fixture.db)
-		links, err := fixture.service.List(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, link := range links {
-			raw, _ := json.Marshal(link)
-			legacy := strings.ReplaceAll(string(raw), `"node_id":`, `"control_id":`)
-			legacy = strings.Replace(legacy, `"peer_host":{"control_id":`, `"peer_host":{"id":`, 1)
-			legacy = strings.Replace(legacy, `"schema_version":5`, `"schema_version":2`, 1)
-			routeRaw, _ := json.Marshal([]protocol.AgentRef{link.Local.Address, link.Peer.Address})
-			oldRoute := digest([]byte(strings.ReplaceAll(string(routeRaw), `"node_id":`, `"control_id":`)))
-			if _, err = fixture.db.Exec("UPDATE agent_link_connections SET metadata=?,route=? WHERE id=?", legacy, oldRoute, link.ID); err != nil {
-				t.Fatal(err)
-			}
-			ref := "agent-link/connection/" + link.ID
-			secret, err := fixture.secret.Get(ctx, ref)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err = fixture.secret.Delete(ctx, ref); err != nil {
-				t.Fatal(err)
-			}
-			if err = fixture.secret.Put(ctx, ref, []byte(strings.ReplaceAll(string(secret), `"node_id":`, `"control_id":`))); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if _, err = fixture.db.Exec(`UPDATE agent_link_invitations SET identity=replace(identity,'"node_id":','"control_id":');
-ALTER TABLE codex_agent_host RENAME COLUMN node_id TO control_id;
-DROP TABLE node_identity_secret_migration;
-DROP TABLE agent_link_claim_digest_formats;
-DROP TABLE agent_link_node_settings;
-DROP TABLE retired_task_submissions;
-DROP TABLE agent_link_received_tasks;
-DROP TABLE agent_link_chat;
-DROP TABLE agent_link_chat_sessions;
-DROP TABLE codex_agent_endpoints;
-DROP TABLE agent_link_endpoints;
-DROP TABLE display_resources;
-DROP TABLE provider_metadata;
-DROP TABLE retired_extension_settings;
-DROP TABLE retired_mcp_servers;
-DROP TABLE extension_file_export;
-ALTER TABLE assistant_definitions DROP COLUMN deleted;
-ALTER TABLE assistant_profiles DROP COLUMN character;
-DELETE FROM pot_migrations WHERE id >= '0009_';`); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err = b.db.Exec("UPDATE agent_link_invitations SET claim_hash=? WHERE id=?", oldClaim, credential.Pair.Invitation); err != nil {
-		t.Fatal(err)
-	}
-	a.close()
-	b.close()
-	a.open()
-	b.open()
-	a.start(strings.TrimPrefix(endpointA, "tcp://"))
-	b.start(strings.TrimPrefix(endpointB, "tcp://"))
-	if err = a.service.Sync(ctx, connection.ID); !errors.Is(err, ErrReconnectRequired) {
-		t.Fatal("assistant-scoped link gained node authority", err)
-	}
-	current, err := a.service.Get(ctx, connection.ID)
-	if err != nil || current.ID != connection.ID || current.PeerHost != connection.PeerHost || current.State != "offline" {
-		t.Fatal(current, err)
-	}
-	// Freshly copied node invitations establish a new connection, preserving history.
-	invitation, err = b.service.Invite(ctx, b.endpoint)
-	if err != nil {
-		t.Fatal(err)
-	}
-	replacement, err := a.service.Connect(ctx, invitation.Address)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if replacement.ID == connection.ID || replacement.SchemaVersion != 5 {
-		t.Fatal(replacement)
-	}
-
-}
-
 type memoryNodeSecrets map[string][]byte
 
 func (m memoryNodeSecrets) Put(_ context.Context, id string, value []byte) error {
@@ -593,11 +481,11 @@ func TestFreshCustomSecretStoreCanReopenAfterConnecting(t *testing.T) {
 	}
 }
 
-func TestEstablishedAssistantAnchorUpgradeRetainsSignedConnection(t *testing.T) {
+func TestInitialSchemaReopenRetainsSignedConnection(t *testing.T) {
 	ctx := context.Background()
 	a, b := newFixture(t, "anchor-a"), newFixture(t, "anchor-b")
 	c := connect(t, a, b)
-	message := send(t, a, b, "before-node-anchor-upgrade", "preserve original receipt")
+	message := send(t, a, b, "before-schema-reopen", "preserve original receipt")
 	if err := a.service.Sync(ctx, c.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -605,28 +493,6 @@ func TestEstablishedAssistantAnchorUpgradeRetainsSignedConnection(t *testing.T) 
 	b.stop()
 	endpoints := []string{a.endpoint, b.endpoint}
 	for _, side := range []*fixture{a, b} {
-		restoreAssistantSchemaForLegacyUpgrade(t, side.db)
-		connection, err := side.service.Get(ctx, c.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		connection.SchemaVersion = 4
-		connection.Local.Address.Kind = "assistant"
-		connection.Local.Address.AgentID = "deleted-local-anchor"
-		connection.Peer.Address.Kind = "assistant"
-		connection.Peer.Address.AgentID = "deleted-peer-anchor"
-		if err = side.service.update(ctx, connection); err != nil {
-			t.Fatal(err)
-		}
-		if _, err = side.db.Exec(`DROP INDEX agent_link_chat_replies;
-ALTER TABLE agent_link_chat DROP COLUMN reply_to;
-ALTER TABLE agent_link_chat DROP COLUMN reply_state;
-ALTER TABLE agent_link_chat DROP COLUMN reply_error;
-ALTER TABLE agent_link_chat DROP COLUMN reply_uncertain;
-ALTER TABLE agent_link_chat DROP COLUMN checked_at;
-DROP TABLE agent_link_chat_sessions; DROP TABLE agent_link_endpoints; ALTER TABLE agent_link_chat DROP COLUMN sender_kind; ALTER TABLE retired_extension_settings RENAME TO extension_settings; ALTER TABLE retired_mcp_servers RENAME TO mcp_servers; DROP TABLE extension_file_export; ALTER TABLE retired_task_submissions RENAME TO agent_link_delegations; DELETE FROM pot_migrations WHERE id >= '0020_'`); err != nil {
-			t.Fatal(err)
-		}
 		side.close()
 	}
 	for index, side := range []*fixture{a, b} {
@@ -643,33 +509,13 @@ DROP TABLE agent_link_chat_sessions; DROP TABLE agent_link_endpoints; ALTER TABL
 		}
 	}
 	if mailCount(t, b, message.ID) != 1 {
-		t.Fatal("upgrade replayed or removed accepted message")
+		t.Fatal("reopen replayed or removed accepted message")
 	}
-	next := send(t, a, b, "after-node-anchor-upgrade", "same signed connection")
+	next := send(t, a, b, "after-schema-reopen", "same signed connection")
 	if err := a.service.Sync(ctx, c.ID); err != nil {
 		t.Fatal(err)
 	}
 	if mailCount(t, b, next.ID) != 1 {
-		t.Fatal("upgraded connection could not deliver")
-	}
-}
-
-// These link fixtures have no registered assistants. Restore the pre-file tables
-// before reconstructing a historical database, so current destructive migrations
-// can run again against the actual predecessor shape rather than current tables.
-func restoreAssistantSchemaForLegacyUpgrade(t *testing.T, db *sql.DB) {
-	t.Helper()
-	var count int
-	if err := db.QueryRow("SELECT count(*) FROM assistant_definitions").Scan(&count); err != nil || count != 0 {
-		t.Fatal("legacy link fixture unexpectedly contains assistant data", count, err)
-	}
-	if _, err := db.Exec(`DROP TABLE assistant_file_export;
-ALTER TABLE assistant_definitions ADD COLUMN name TEXT NOT NULL DEFAULT '';
-ALTER TABLE assistant_definitions ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE assistant_definitions ADD COLUMN created_name TEXT NOT NULL DEFAULT '';
-ALTER TABLE assistant_initial ADD COLUMN rules TEXT NOT NULL DEFAULT '';
-CREATE TABLE assistant_profiles(assistant_id TEXT PRIMARY KEY,avatar TEXT NOT NULL,character TEXT NOT NULL DEFAULT '');
-CREATE TABLE assistant_profile_requests(id TEXT PRIMARY KEY,input_hash TEXT NOT NULL,response TEXT NOT NULL);`); err != nil {
-		t.Fatal(err)
+		t.Fatal("reopened connection could not deliver")
 	}
 }

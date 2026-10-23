@@ -16,6 +16,7 @@ import (
 )
 
 func TestAssistantMailUsesOwningConversationAndExplicitPeerReplies(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	s := taskResourceService(t)
@@ -129,6 +130,7 @@ func TestAssistantMailUsesOwningConversationAndExplicitPeerReplies(t *testing.T)
 }
 
 func TestAssistantMailAllowanceUsesOwningConversation(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 	var calls atomic.Int32

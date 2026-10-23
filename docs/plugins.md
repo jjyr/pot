@@ -397,14 +397,10 @@ page. It performs GET only, does not expand comment bodies, create subscriptions
 enqueue messages or advance the realtime checkpoint. Installing the plugin creates
 no Cron. Analysis and replies remain agent work under existing authorization.
 
-Migration `0014_github_notification_filters` narrows ambiguous old broad reason
-lists to `mention`, keeps explicit nonempty filters and turns old empty repository
-lists into `null`. Migration `0015_plugin_mcp_subscriptions` converts the actual
-single binding into `legacy-github`, retaining its recipient, enabled state,
-account, filters and prior timestamp boundary. It preserves cursors, thread
-markers, write receipts and accepted inbox messages while retiring incompatible
-unaccepted groups and scans. The retained initialized root prevents default
-resurrection. Published migrations are unchanged.
+The first public database baseline starts with an empty subscription collection.
+It does not convert older development bindings, cursors or pending groups; see
+[Database migrations](database-migrations.md). Once initialized, the retained
+scanner root prevents deleting the last subscription from recreating a default.
 
 The plugin uses only GET requests to the GitHub REST API. It requests all thread
 states (including read threads), respects `X-Poll-Interval`, and overlaps its

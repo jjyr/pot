@@ -198,8 +198,7 @@ After 30 seconds, a disconnected owner or a sampling failure, current totals
 exclude that node and assistant activity is unknown. Cached values remain labeled
 in the inspector. Connection health and execution state stay independent.
 
-Message migration `0012_agent_message_timestamps` records local insertion time
-outside immutable envelopes. Exact retries retain that timestamp. Historical
+The message table records local insertion time outside immutable envelopes. Exact retries retain that timestamp. Historical
 messages retain zero (unknown); if an outbox contains such a message, its oldest
 timestamp remains unknown. Aggregates cover the entire node route rather than a
 bounded delivery page.

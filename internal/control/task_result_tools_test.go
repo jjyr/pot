@@ -21,6 +21,7 @@ import (
 )
 
 func TestTaskResultExecutesCommandAndImportsTaskAvatar(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	var rounds atomic.Int32

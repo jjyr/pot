@@ -15,6 +15,7 @@ import (
 )
 
 func TestFailedTaskRecoveryIsSilentAndReplacementReportsOnce(t *testing.T) {
+	t.Parallel()
 	for _, failures := range []int32{1, 3} {
 		t.Run(fmt.Sprintf("transient-failures=%d", failures), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -116,6 +117,7 @@ func TestFailedTaskRecoveryIsSilentAndReplacementReportsOnce(t *testing.T) {
 }
 
 func TestCreationErrorsCanBeRepairedAndMultipleTasksDispatchSilently(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	var rounds atomic.Int32

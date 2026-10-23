@@ -35,6 +35,7 @@ func writeTaskFixture(t *testing.T, name, text string) {
 	}
 }
 func TestWorkerResourcesKeepDestinationInstructionsAndSkills(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	legacyMainAssistant(ctx, s, "create", "Pot")

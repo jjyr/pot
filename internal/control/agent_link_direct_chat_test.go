@@ -10,6 +10,7 @@ import (
 )
 
 func TestAgentLinkEmptyNodeChatSurvivesAssistantDeletionAndRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, b := agentControl(t, "empty-chat"), agentControl(t, "receiver-chat")
 	defs, err := a.service.Registry.Definitions(ctx)

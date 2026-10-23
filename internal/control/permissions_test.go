@@ -73,6 +73,7 @@ func decideRequest(t *testing.T, p *PermissionStore, r HostRequest, action strin
 	return result.mode
 }
 func TestDefaultSandboxAndExplicitMachineTrust(t *testing.T) {
+	t.Parallel()
 	p := permissionFixture(t)
 	r := hostRequest("sandbox")
 	r.Host = false
@@ -95,6 +96,7 @@ func TestDefaultSandboxAndExplicitMachineTrust(t *testing.T) {
 	}
 }
 func TestPermanentCommandIsExactAndEditable(t *testing.T) {
+	t.Parallel()
 	p := permissionFixture(t)
 	r := hostRequest("approve")
 	if mode := decideRequest(t, p, r, "allow_always"); mode != "host" {
@@ -135,6 +137,7 @@ func TestPermanentCommandIsExactAndEditable(t *testing.T) {
 	}
 }
 func TestTaskGrantIsSameCommandAndCurrentWorkOnly(t *testing.T) {
+	t.Parallel()
 	p := permissionFixture(t)
 	r := hostRequest("approve")
 	decideRequest(t, p, r, "allow_task")
@@ -159,6 +162,7 @@ func TestTaskGrantIsSameCommandAndCurrentWorkOnly(t *testing.T) {
 	}
 }
 func TestExplicitDenialSurvivesBroadTrustAndBlockedAllowsCleanup(t *testing.T) {
+	t.Parallel()
 	p := permissionFixture(t)
 	r := hostRequest("denied")
 	decideRequest(t, p, r, "deny") // A grant elsewhere must not reverse this exact request.
@@ -199,6 +203,7 @@ func TestExplicitDenialSurvivesBroadTrustAndBlockedAllowsCleanup(t *testing.T) {
 	}
 }
 func TestRulesDenyHostBeforeTrustedAndManualCRUD(t *testing.T) {
+	t.Parallel()
 	p := permissionFixture(t)
 	r := hostRequest("manual")
 	rule := CommandRule{MachineID: "machine", Context: *r.Command, Policy: "deny_host"}
@@ -227,6 +232,7 @@ func TestRulesDenyHostBeforeTrustedAndManualCRUD(t *testing.T) {
 	}
 }
 func TestHostPatchUsesNormalPolicyAndExactOneTimeApproval(t *testing.T) {
+	t.Parallel()
 	for _, policy := range []string{"ask", "allow", "deny"} {
 		t.Run(policy, func(t *testing.T) {
 			p := permissionFixture(t)
@@ -271,6 +277,7 @@ func TestHostPatchUsesNormalPolicyAndExactOneTimeApproval(t *testing.T) {
 }
 
 func TestPersistenceFailureAndPendingApplicationFailClosed(t *testing.T) {
+	t.Parallel()
 	p := permissionFixture(t)
 	r := hostRequest("write-failure")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -317,6 +324,7 @@ func TestPersistenceFailureAndPendingApplicationFailClosed(t *testing.T) {
 	}
 }
 func TestOldFormatsArePreserved(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "permissions.json")
 	body := []byte(`{"version":5,"machines":{},"epochs":{}}`)
 	if err := os.WriteFile(path, body, 0600); err != nil {
@@ -332,6 +340,7 @@ func TestOldFormatsArePreserved(t *testing.T) {
 }
 
 func TestApplicationReceiptSaveFailureRetainsDurableFence(t *testing.T) {
+	t.Parallel()
 	p := permissionFixture(t)
 	path := p.path
 	p.Apply = func(string, uint64) error { p.path = t.TempDir(); return nil }
@@ -358,6 +367,7 @@ func TestApplicationReceiptSaveFailureRetainsDurableFence(t *testing.T) {
 }
 
 func TestExecutionAndPermissionTargetsRemainLocal(t *testing.T) {
+	t.Parallel()
 	s := taskControl(t, "node", "")
 	ctx := context.Background()
 	if _, err := s.Tasks.LocalMachine(ctx, "remote"); err == nil {

@@ -99,6 +99,7 @@ func readTaskMessage(t *testing.T, s *Service, raw json.RawMessage, state string
 }
 
 func TestWorkerMessagesReachSiblingBoundaryAndOwner(t *testing.T) {
+	t.Parallel()
 	s := taskPeerMessageService(t)
 	ctx := context.Background()
 	a, b := acceptMessageTask(t, s, "a"), acceptMessageTask(t, s, "b")
@@ -167,6 +168,7 @@ func TestWorkerMessagesReachSiblingBoundaryAndOwner(t *testing.T) {
 }
 
 func TestWorkerPeerMessageToEndedTaskIsRetainedWithoutRestart(t *testing.T) {
+	t.Parallel()
 	s := taskPeerMessageService(t)
 	ctx := context.Background()
 	a, b := acceptMessageTask(t, s, "a"), acceptMessageTask(t, s, "b")
@@ -191,6 +193,7 @@ func TestWorkerPeerMessageToEndedTaskIsRetainedWithoutRestart(t *testing.T) {
 }
 
 func TestWorkerPeerMessagesKeepCatalogueAndSenderIsolation(t *testing.T) {
+	t.Parallel()
 	s := taskPeerMessageService(t)
 	ctx := context.Background()
 	a, b := acceptMessageTask(t, s, "a"), acceptMessageTask(t, s, "b")

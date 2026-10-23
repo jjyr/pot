@@ -9,6 +9,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -80,6 +81,27 @@ func OpenDatabase(path string, kind Database) (*sql.DB, error) {
 	if !knownDatabase(kind) {
 		return nil, fmt.Errorf("unknown database kind %q", kind)
 	}
+	// Validate existing files through a read-only connection before OpenSQLite's
+	// journal PRAGMAs. Rejected pre-release databases keep their bytes and history.
+	if info, err := os.Stat(path); err == nil && info.Size() > 0 {
+		existing, err := OpenDatabaseReadOnly(path, kind)
+		if err != nil {
+			return nil, err
+		}
+		definitions, err := loadMigrations(migrationFiles, kind)
+		if err == nil {
+			_, err = checkMigrationHistory(context.Background(), existing, kind, definitions)
+		}
+		closeErr := existing.Close()
+		if err != nil {
+			return nil, err
+		}
+		if closeErr != nil {
+			return nil, closeErr
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
 	db, err := OpenSQLite(path)
 	if err != nil {
 		return nil, err
@@ -111,45 +133,12 @@ func migrateDatabase(ctx context.Context, db *sql.DB, kind Database, files fs.FS
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	exists, err := tableExists(ctx, db, "pot_migrations")
+	complete, err := checkMigrationHistory(ctx, db, kind, definitions)
 	if err != nil {
 		return err
 	}
-	if exists {
-		// Require an exact prefix: disallow downgrade, edited applied files,
-		// another database kind and holes instead of sql-migrate's catch-up mode.
-		rows, err := db.QueryContext(ctx, "SELECT id FROM pot_migrations ORDER BY id")
-		if err != nil {
-			return err
-		}
-		index := 0
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				rows.Close()
-				return err
-			}
-			if index >= len(definitions) || id != definitions[index].Id {
-				rows.Close()
-				return fmt.Errorf("%s database migration history mismatch at %q: newer database, changed migration or missing predecessor", kind, id)
-			}
-			index++
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return err
-		}
-		if index == len(definitions) {
-			return nil
-		}
-		if index == 0 {
-			if err := checkLegacyDatabase(ctx, db, kind); err != nil {
-				return err
-			}
-		}
-	} else if err := checkLegacyDatabase(ctx, db, kind); err != nil {
-		return err
+	if complete {
+		return nil
 	}
 	set := migrate.MigrationSet{TableName: "pot_migrations"}
 	_, err = set.ExecContext(ctx, db, "sqlite3", &migrate.MemoryMigrationSource{Migrations: definitions}, migrate.Up)
@@ -157,6 +146,52 @@ func migrateDatabase(ctx context.Context, db *sql.DB, kind Database, files fs.FS
 		return fmt.Errorf("migrate %s database: %w", kind, err)
 	}
 	return nil
+}
+
+// checkMigrationHistory only reads. An empty receipt table can remain after a
+// failed first migration; it is safe to retry only if no product objects exist.
+func checkMigrationHistory(ctx context.Context, db *sql.DB, kind Database, definitions []*migrate.Migration) (bool, error) {
+	exists, err := tableExists(ctx, db, "pot_migrations")
+	if err != nil {
+		return false, err
+	}
+	if exists {
+		// Require an exact prefix: disallow downgrade, edited applied files,
+		// another database kind and holes instead of sql-migrate's catch-up mode.
+		rows, err := db.QueryContext(ctx, "SELECT id FROM pot_migrations ORDER BY id")
+		if err != nil {
+			return false, err
+		}
+		index := 0
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return false, err
+			}
+			if index >= len(definitions) || id != definitions[index].Id {
+				rows.Close()
+				return false, fmt.Errorf("%s database migration history mismatch at %q: unsupported pre-release database, newer database, changed migration or missing predecessor; back up the complete root and use a new root (see docs/database-migrations.md)", kind, id)
+			}
+			index++
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return false, err
+		}
+		if index == len(definitions) {
+			return true, nil
+		}
+		if index == 0 {
+			if err := checkEmptyDatabase(ctx, db, kind); err != nil {
+				return false, err
+			}
+		}
+	} else if err := checkEmptyDatabase(ctx, db, kind); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 func knownDatabase(kind Database) bool {
@@ -211,47 +246,22 @@ func tableExists(ctx context.Context, db *sql.DB, table string) (bool, error) {
 	return exists, err
 }
 
-// The baseline adopts the last pre-migration format. Earlier formats were
-// already unsupported and must not be relabeled as successfully migrated.
-func checkLegacyDatabase(ctx context.Context, db *sql.DB, kind Database) error {
-	versions := map[string]int{}
-	switch kind {
-	case TasksDatabase:
-		versions = map[string]int{"task_schema": 8, "schedule_schema": 2}
-		var legacy bool
-		if err := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name IN ('assistant_mail','task_inputs','task_notifications'))").Scan(&legacy); err != nil {
-			return err
-		}
-		if legacy {
-			return fmt.Errorf("unsupported legacy agent message storage")
-		}
-	case RunnerDatabase:
-		versions = map[string]int{"runner_schema": 6}
-	case ConversationDatabase:
-		var version int
-		if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
-			return err
-		}
-		if version > 1 {
-			return fmt.Errorf("unsupported legacy conversation schema %d", version)
-		}
+// This one-time pre-release reset deliberately does not adopt any old schema,
+// even one whose final tables resemble the baseline. Future versions upgrade
+// only an exact prefix of this new migration lineage.
+func checkEmptyDatabase(ctx context.Context, db *sql.DB, kind Database) error {
+	var objects, userVersion, applicationID int
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name != 'pot_migrations'").Scan(&objects); err != nil {
+		return err
 	}
-	for table, expected := range versions {
-		exists, err := tableExists(ctx, db, table)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			continue
-		}
-		var count, minimum, maximum int
-		// table names are fixed constants above, never caller-supplied SQL.
-		if err := db.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(MIN(version),0),COALESCE(MAX(version),0) FROM "+table).Scan(&count, &minimum, &maximum); err != nil {
-			return err
-		}
-		if count != 1 || minimum != expected || maximum != expected {
-			return fmt.Errorf("unsupported legacy %s: expected one version %d row", table, expected)
-		}
+	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&userVersion); err != nil {
+		return err
+	}
+	if err := db.QueryRowContext(ctx, "PRAGMA application_id").Scan(&applicationID); err != nil {
+		return err
+	}
+	if objects != 0 || userVersion != 0 || applicationID != 0 {
+		return fmt.Errorf("%s database has unsupported pre-release or untracked schema; back up the complete root and use a new root (see docs/database-migrations.md)", kind)
 	}
 	return nil
 }

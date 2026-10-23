@@ -275,10 +275,10 @@ the probe also records a blocked occurrence for inspection. Ordinary timeout or
 execution errors continue only after the executor confirms process-tree cleanup.
 A crash before the executor's durable effect receipt can safely proceed to its
 first launch; a crash after that boundary requires a complete receipt or stays
-blocked. The tasks migration adds absent probe configuration and hook results
-without resetting next due times, generation, history or write digests. Migration
-`0027_task_reply_artifacts` retires scheduler baselines; probes do not maintain or update
-a scheduler comparison baseline.
+blocked. Probe configuration and hook results are stored in the initial Tasks
+schema. Probes do not maintain or update a scheduler comparison baseline.
+Older development databases follow the reset boundary in
+[Database migrations](database-migrations.md).
 
 A minimal probe for a local source marker can be saved as
 `/path/to/check_updates.py` (replace paths with your own):

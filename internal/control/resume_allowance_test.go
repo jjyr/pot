@@ -8,6 +8,7 @@ import (
 )
 
 func TestResumeAllowanceStaleTurnAndExactRetryCannotReleaseLaterMainWait(t *testing.T) {
+	t.Parallel()
 	s, _ := mainRecoveryFixture(t, false, true, false, "previous-boot")
 	ctx := context.Background()
 	s.Usage.Wait(ctx, usage.WaitRequest{Scope: "main", Turn: "a", AtMS: 1, Required: 1})

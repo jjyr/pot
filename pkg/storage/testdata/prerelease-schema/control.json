@@ -1,0 +1,217 @@
+{
+  "Objects": [
+    {
+      "Type": "index",
+      "Name": "agent_link_active_route",
+      "Table": "agent_link_connections",
+      "SQL": "CREATE UNIQUE INDEX agent_link_active_route ON agent_link_connections(route) WHERE state!='revoked'"
+    },
+    {
+      "Type": "index",
+      "Name": "agent_link_chat_replies",
+      "Table": "agent_link_chat",
+      "SQL": "CREATE INDEX agent_link_chat_replies ON agent_link_chat(reply_to)"
+    },
+    {
+      "Type": "index",
+      "Name": "display_resources_owner",
+      "Table": "display_resources",
+      "SQL": "CREATE INDEX display_resources_owner ON display_resources(owner)"
+    },
+    {
+      "Type": "table",
+      "Name": "agent_link_chat",
+      "Table": "agent_link_chat",
+      "SQL": "CREATE TABLE agent_link_chat(id TEXT PRIMARY KEY,link_id TEXT NOT NULL,assistant_id TEXT NOT NULL,request_id TEXT NOT NULL,role TEXT NOT NULL,text TEXT NOT NULL,created_at INTEGER NOT NULL, sender TEXT NOT NULL DEFAULT '', sender_kind TEXT NOT NULL DEFAULT 'assistant', reply_to TEXT NOT NULL DEFAULT '', reply_state TEXT NOT NULL DEFAULT 'pending', reply_error TEXT NOT NULL DEFAULT '', reply_uncertain INTEGER NOT NULL DEFAULT 0, checked_at INTEGER NOT NULL DEFAULT 0,UNIQUE(link_id,assistant_id,request_id,role))"
+    },
+    {
+      "Type": "table",
+      "Name": "agent_link_chat_sessions",
+      "Table": "agent_link_chat_sessions",
+      "SQL": "CREATE TABLE agent_link_chat_sessions(link_id TEXT NOT NULL,assistant_id TEXT NOT NULL,id TEXT NOT NULL UNIQUE, revision INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(link_id,assistant_id))"
+    },
+    {
+      "Type": "table",
+      "Name": "agent_link_claim_digest_formats",
+      "Table": "agent_link_claim_digest_formats",
+      "SQL": "CREATE TABLE agent_link_claim_digest_formats(invitation TEXT PRIMARY KEY REFERENCES agent_link_invitations(id) ON DELETE CASCADE,format INTEGER NOT NULL CHECK(format=1))"
+    },
+    {
+      "Type": "table",
+      "Name": "agent_link_connections",
+      "Table": "agent_link_connections",
+      "SQL": "CREATE TABLE agent_link_connections(id TEXT PRIMARY KEY,route TEXT NOT NULL,state TEXT NOT NULL,metadata TEXT NOT NULL,secret_ref TEXT NOT NULL,peer_key TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "agent_link_endpoints",
+      "Table": "agent_link_endpoints",
+      "SQL": "CREATE TABLE agent_link_endpoints(endpoint TEXT PRIMARY KEY NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "agent_link_host",
+      "Table": "agent_link_host",
+      "SQL": "CREATE TABLE agent_link_host (\n  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),\n  listen TEXT NOT NULL,\n  endpoint TEXT NOT NULL DEFAULT '',\n  mode TEXT NOT NULL DEFAULT 'https'\n)"
+    },
+    {
+      "Type": "table",
+      "Name": "agent_link_invitations",
+      "Table": "agent_link_invitations",
+      "SQL": "CREATE TABLE agent_link_invitations(id TEXT PRIMARY KEY,identity TEXT NOT NULL,endpoint TEXT NOT NULL,expires_at INTEGER NOT NULL,secret_ref TEXT NOT NULL,claim_hash TEXT NOT NULL DEFAULT '',connection_id TEXT NOT NULL DEFAULT '')"
+    },
+    {
+      "Type": "table",
+      "Name": "agent_link_node_settings",
+      "Table": "agent_link_node_settings",
+      "SQL": "CREATE TABLE agent_link_node_settings(singleton INTEGER PRIMARY KEY CHECK(singleton=1),default_assistant_id TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "agent_link_received_tasks",
+      "Table": "agent_link_received_tasks",
+      "SQL": "CREATE TABLE agent_link_received_tasks(id TEXT PRIMARY KEY,caller TEXT NOT NULL,request_id TEXT NOT NULL,assistant_id TEXT NOT NULL,payload TEXT NOT NULL,task_id TEXT NOT NULL DEFAULT '',UNIQUE(caller,request_id))"
+    },
+    {
+      "Type": "table",
+      "Name": "assistant_definitions",
+      "Table": "assistant_definitions",
+      "SQL": "CREATE TABLE assistant_definitions(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,request_id TEXT NOT NULL UNIQUE,deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0,1)))"
+    },
+    {
+      "Type": "table",
+      "Name": "assistant_file_export",
+      "Table": "assistant_file_export",
+      "SQL": "CREATE TABLE assistant_file_export(id TEXT PRIMARY KEY,name TEXT NOT NULL,avatar TEXT NOT NULL,character TEXT NOT NULL,seed TEXT NOT NULL,rules TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "assistant_initial",
+      "Table": "assistant_initial",
+      "SQL": "CREATE TABLE assistant_initial(id TEXT PRIMARY KEY, binding TEXT NOT NULL, spec TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "assistant_initial_intent",
+      "Table": "assistant_initial_intent",
+      "SQL": "CREATE TABLE assistant_initial_intent(id TEXT PRIMARY KEY,intent TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "assistant_registry_identity",
+      "Table": "assistant_registry_identity",
+      "SQL": "CREATE TABLE assistant_registry_identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1),root TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "assistant_welcome",
+      "Table": "assistant_welcome",
+      "SQL": "CREATE TABLE assistant_welcome(id TEXT PRIMARY KEY,text TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "codex_agent_endpoints",
+      "Table": "codex_agent_endpoints",
+      "SQL": "CREATE TABLE codex_agent_endpoints(endpoint TEXT PRIMARY KEY NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "codex_agent_host",
+      "Table": "codex_agent_host",
+      "SQL": "CREATE TABLE codex_agent_host(singleton INTEGER PRIMARY KEY CHECK(singleton=1),node_id TEXT NOT NULL,owner_secret_ref TEXT NOT NULL,endpoint TEXT NOT NULL DEFAULT '', peer_public_key TEXT NOT NULL DEFAULT '', peer_secret_ref TEXT NOT NULL DEFAULT '')"
+    },
+    {
+      "Type": "table",
+      "Name": "display_resources",
+      "Table": "display_resources",
+      "SQL": "CREATE TABLE display_resources(\n id TEXT PRIMARY KEY,\n owner TEXT NOT NULL,\n request_id TEXT NOT NULL UNIQUE,\n input_hash TEXT NOT NULL,\n metadata TEXT NOT NULL CHECK(json_valid(metadata)),\n size INTEGER NOT NULL CHECK(size\u003e=0),\n created_at_ms INTEGER NOT NULL\n)"
+    },
+    {
+      "Type": "table",
+      "Name": "extension_file_export",
+      "Table": "extension_file_export",
+      "SQL": "CREATE TABLE extension_file_export(singleton INTEGER PRIMARY KEY CHECK(singleton=1))"
+    },
+    {
+      "Type": "table",
+      "Name": "integration_accounts",
+      "Table": "integration_accounts",
+      "SQL": "CREATE TABLE integration_accounts(service TEXT PRIMARY KEY, revision INTEGER NOT NULL, metadata TEXT, secret_ref TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "node_identity_secret_migration",
+      "Table": "node_identity_secret_migration",
+      "SQL": "CREATE TABLE node_identity_secret_migration(singleton INTEGER PRIMARY KEY CHECK(singleton=1))"
+    },
+    {
+      "Type": "table",
+      "Name": "provider_metadata",
+      "Table": "provider_metadata",
+      "SQL": "CREATE TABLE provider_metadata(\n route_id TEXT NOT NULL REFERENCES providers(id),\n method TEXT NOT NULL CHECK(method IN ('list_models','read_allowances')),\n source_digest TEXT NOT NULL,\n payload TEXT NOT NULL CHECK(json_valid(payload)),\n PRIMARY KEY(route_id,method)\n)"
+    },
+    {
+      "Type": "table",
+      "Name": "providers",
+      "Table": "providers",
+      "SQL": "CREATE TABLE providers(id TEXT PRIMARY KEY,metadata TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "retired_extension_settings",
+      "Table": "retired_extension_settings",
+      "SQL": "CREATE TABLE \"retired_extension_settings\"(kind TEXT NOT NULL CHECK(kind IN ('plugins','skills')),id TEXT NOT NULL,enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),revision INTEGER NOT NULL,source TEXT NOT NULL DEFAULT '',PRIMARY KEY(kind,id))"
+    },
+    {
+      "Type": "table",
+      "Name": "retired_mcp_servers",
+      "Table": "retired_mcp_servers",
+      "SQL": "CREATE TABLE \"retired_mcp_servers\"(id TEXT PRIMARY KEY,revision INTEGER NOT NULL,body TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "retired_task_submissions",
+      "Table": "retired_task_submissions",
+      "SQL": "CREATE TABLE \"retired_task_submissions\"(id TEXT PRIMARY KEY,link_id TEXT NOT NULL,owner TEXT NOT NULL,request_id TEXT NOT NULL,payload TEXT NOT NULL,remote_id TEXT NOT NULL DEFAULT '',body TEXT NOT NULL DEFAULT '{}',notified INTEGER NOT NULL DEFAULT 0, stop_requested INTEGER NOT NULL DEFAULT 0,UNIQUE(owner,request_id))"
+    },
+    {
+      "Type": "table",
+      "Name": "secrets",
+      "Table": "secrets",
+      "SQL": "CREATE TABLE secrets(id TEXT PRIMARY KEY,nonce BLOB NOT NULL,ciphertext BLOB NOT NULL,tag BLOB NOT NULL)"
+    }
+  ],
+  "Rows": {
+    "agent_link_chat": [],
+    "agent_link_chat_sessions": [],
+    "agent_link_claim_digest_formats": [],
+    "agent_link_connections": [],
+    "agent_link_endpoints": [],
+    "agent_link_host": [],
+    "agent_link_invitations": [],
+    "agent_link_node_settings": [],
+    "agent_link_received_tasks": [],
+    "assistant_definitions": [],
+    "assistant_file_export": [],
+    "assistant_initial": [],
+    "assistant_initial_intent": [],
+    "assistant_registry_identity": [],
+    "assistant_welcome": [],
+    "codex_agent_endpoints": [],
+    "codex_agent_host": [],
+    "display_resources": [],
+    "extension_file_export": [
+      "1"
+    ],
+    "integration_accounts": [],
+    "node_identity_secret_migration": [],
+    "provider_metadata": [],
+    "providers": [],
+    "retired_extension_settings": [],
+    "retired_mcp_servers": [],
+    "retired_task_submissions": [],
+    "secrets": []
+  },
+  "UserVersion": 0,
+  "ApplicationID": 0
+}

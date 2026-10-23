@@ -88,9 +88,50 @@ those checks.
 
 `test:sandbox` runs real file, socket, network, terminal, plugin and cleanup tests with the pinned SDK. `test:sandbox-linux` uses a disposable non-root Docker host with namespace restrictions relaxed only on the outer test container; only test assets are mounted read-only.
 
-`check:go` verifies formatting, vet and architectural imports. `test:go` uses the
-race detector with a 20-minute timeout per package, allowing the complete Control
-suite to run on hosted Linux runners. CI also bounds each product job to 60 minutes.
+`check:go` verifies formatting, vet and architectural imports. `test:go` runs all
+Go tests without race instrumentation. `test` also runs `test:race` after that
+normal suite. Both paths use a configurable 20-minute per-package timeout
+(`POT_GO_TEST_TIMEOUT`, or `scripts/test_go.py --timeout`); CI bounds each product
+job to 60 minutes. `test:race:all` is the explicit complete race suite for changes
+to concurrency, persistence or lifecycle architecture. Run it when changing
+shared state or the scope of the focused plan.
+
+The focused race plan defaults every package and new test to race. The exact
+normal-only exceptions and reasons live in
+[`scripts/go-test-normal-only.json`](../scripts/go-test-normal-only.json).
+Selection uses active Go test files and exact function names; it does not infer
+coverage from name fragments. An unlisted test in an otherwise serial package
+or existing test file automatically enters race, and stale/duplicate exceptions
+fail validation. `python scripts/test_go.py race --list` prints the actual plan.
+Discovery uses the race build constraints, including tests in race-only files
+and packages.
+
+Control tests with independent roots, listeners and execution managers run in
+parallel, bounded by eight active cases and the available Go parallelism.
+Tests changing process-wide environment variables stay serial. The schedule
+probe matrix has independent fixtures; a separate serial case checks ambient
+secret isolation. Accepted probe tasks pause at preparation after their real run
+receipts exist; lifecycle tests cover subsequent model execution and delivery.
+The GitHub notification fixture holds the polling lock across its explicit clock
+sequence so the automatic ticker cannot overwrite simulated debounce windows.
+Override the bound with `go test -parallel=N` when diagnosing
+contention. Parallelism does not share mutable fixtures, skip assertions or
+change the normal/race selection.
+
+Full-package race remains on task scheduling/cancellation/recovery, execution
+and process supervision, assistant/inbox queues and compaction, concurrent storage,
+transport, Agent Link, plugin hosting and mutable provider caches. Control keeps
+these integration paths, including real workspace replacement and creation
+identity tests, approval/effect fences, cancellation, peer delivery, catalog
+refresh cancellation and credential rotation. Its explicitly listed serial
+configuration, resource/text and request-count contracts run in the complete
+normal suite. Pure value/encoding/rendering helpers also run normally. No normal
+functional or security tests are skipped by this selection in the normal suite.
+New tests need no race opt-in; adding a
+normal-only exception requires an explicit rationale in the reviewed manifest.
+The standalone `test:executor` remains available for local diagnosis; CI gets
+that full package coverage through `test:race` and does not run it twice.
+Any nonzero exit fails the check; no failing tests are retried.
 UI tests cover owner-scoped state, drafts, IME, navigation and
 streamed output. Eval uses the production Agent with deterministic local fixtures;
 paid model calls run only through explicit live commands. Public API tests build

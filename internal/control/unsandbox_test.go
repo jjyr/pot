@@ -26,6 +26,7 @@ func (e *modeEngine) Execute(_ context.Context, r executor.Request, _ func(execu
 }
 
 func TestUnsandboxRequestValidationPrecedesApproval(t *testing.T) {
+	t.Parallel()
 	d, e, _ := localDispatcher(t)
 	engine := &modeEngine{}
 	d.Host = engine
@@ -49,6 +50,7 @@ func TestUnsandboxRequestValidationPrecedesApproval(t *testing.T) {
 }
 
 func TestUnsandboxRequestSelectsPermissionRatherThanExecutionMode(t *testing.T) {
+	t.Parallel()
 	d, e, _ := localDispatcher(t)
 	engine := &modeEngine{}
 	d.Host = engine
@@ -95,6 +97,7 @@ func TestUnsandboxRequestSelectsPermissionRatherThanExecutionMode(t *testing.T) 
 }
 
 func TestRealUnixSocketRequiresHostApproval(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("POT_SANDBOX_INTEGRATION") != "1" {
 		t.Skip("set POT_SANDBOX_INTEGRATION=1 for real OS sandbox qualification")
 	}
@@ -199,6 +202,7 @@ func TestRealUnixSocketRequiresHostApproval(t *testing.T) {
 }
 
 func TestPreparedExecutionFailureIsVisibleToModel(t *testing.T) {
+	t.Parallel()
 	d, e, _ := localDispatcher(t)
 	d.Host = preparationFailureEngine{}
 	raw, err := d.Dispatch(context.Background(), e, modelprotocol.ToolCall{ID: "prepare", Name: "exec_command", Arguments: json.RawMessage(`{"cmd":"true","login":false}`)}, nil)
@@ -218,6 +222,7 @@ func (preparationFailureEngine) Execute(context.Context, executor.Request, func(
 }
 
 func TestExecutionEnvironmentReportsDestinationPolicy(t *testing.T) {
+	t.Parallel()
 	for _, policy := range []string{"ask", "allow", "deny"} {
 		section := executionEnvironment(MachinePolicy{ExecutionAccess: policy, Revision: 3}, core.RuntimeTarget("runner"), "/destination/workspace")
 		var data map[string]any

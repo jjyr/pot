@@ -23,6 +23,7 @@ import (
 // Exercise the actual mailbox -> Report -> model -> product dispatch path. A
 // confirmed model failure can be continued without replaying completed tools.
 func TestAssistantMailContinuationRestoresOriginalDelivery(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	var calls atomic.Int32
@@ -103,6 +104,7 @@ func TestAssistantMailContinuationRestoresOriginalDelivery(t *testing.T) {
 }
 
 func TestFailedAssistantMailDoesNotStarveLaterConversation(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	var calls atomic.Int32
@@ -171,6 +173,7 @@ func TestFailedAssistantMailDoesNotStarveLaterConversation(t *testing.T) {
 }
 
 func TestAcceptedSendSurvivesTranscriptWriteFailureWithoutResend(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	var calls atomic.Int32
@@ -237,6 +240,7 @@ func TestAcceptedSendSurvivesTranscriptWriteFailureWithoutResend(t *testing.T) {
 }
 
 func TestAssistantMailAllowanceResumeAfterRestartRestoresDelivery(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	var calls atomic.Int32

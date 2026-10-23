@@ -11,6 +11,7 @@ import (
 )
 
 func TestRetiredRemoteLaunchRemainsBoundAndNeverReplaysLocally(t *testing.T) {
+	t.Parallel()
 	s := taskControl(t, "node", "")
 	ctx := context.Background()
 	launch := tasks.Launch{ControlID: "node", AssistantID: "main", RuntimeID: "retired-runner", TaskID: "historic-task", RunID: "original-run", Generation: 1, ExecutionTarget: core.RuntimeTarget("retired-runner"), Config: taskConfig(t), Plugins: []string{}, Text: "original work"}
