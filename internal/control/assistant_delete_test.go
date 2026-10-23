@@ -84,7 +84,7 @@ func TestDeleteAssistantRejectsActiveTasks(t *testing.T) {
 	// Stop the fixture's dispatcher before inserting a queued Task.
 	s.cancel()
 	s.taskLife.wg.Wait()
-	_, err = s.Tasks.Create(ctx, a.ID, protocol.CreateTask{RequestID: "queued", Text: "queued task"})
+	_, err = s.Tasks.AcceptLocal(ctx, a.ID, protocol.CreateTask{RequestID: "queued", Text: "queued task"})
 	if err != nil {
 		t.Fatal(err)
 	}

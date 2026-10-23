@@ -20,6 +20,11 @@ import (
 
 func nodeMigrationPrefix(t *testing.T, db *sql.DB, kind Database, version int) {
 	t.Helper()
+	if err := migrateThrough(db, kind, version); err != nil {
+		t.Fatal(err)
+	}
+}
+func migrateThrough(db *sql.DB, kind Database, version int) error {
 	files := fstest.MapFS{}
 	err := fs.WalkDir(migrationFiles, "migrations/"+string(kind), func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -40,11 +45,9 @@ func nodeMigrationPrefix(t *testing.T, db *sql.DB, kind Database, version int) {
 		return nil
 	})
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
-	if err = migrateDatabase(context.Background(), db, kind, files); err != nil {
-		t.Fatal(err)
-	}
+	return migrateDatabase(context.Background(), db, kind, files)
 }
 func TestNodeIdentityTasksUpgradePreservesReceiptsAndCorrespondence(t *testing.T) {
 	ctx := context.Background()
@@ -94,10 +97,10 @@ INSERT INTO plugin_background VALUES('fixture',1,'main','{"control_id":"config",
 	if err = db.QueryRow("SELECT conversation FROM assistant_mail_sessions WHERE assistant='main'").Scan(&session); err != nil || session != newKey {
 		t.Fatal("peer context lost its migrated route", session, err)
 	}
-	if err = db.QueryRow("SELECT control_id,runtime_id FROM task_authority").Scan(&control, &runtime); err != nil || control != "actual-control" || runtime != "runner" {
+	if err = db.QueryRow("SELECT control_id,runtime_id FROM retired_task_authority").Scan(&control, &runtime); err != nil || control != "actual-control" || runtime != "runner" {
 		t.Fatal(control, runtime, err)
 	}
-	if err = db.QueryRow("SELECT body FROM tasks").Scan(&raw); err != nil || !strings.Contains(raw, `"schema_version":10`) || !strings.Contains(raw, `"node_id":"local"`) || !strings.Contains(raw, `"control_id":"actual-control"`) || !strings.Contains(raw, `"run_id":"original-run"`) {
+	if err = db.QueryRow("SELECT body FROM tasks").Scan(&raw); err != nil || !strings.Contains(raw, `"schema_version":13`) || !strings.Contains(raw, `"node_id":"local"`) || !strings.Contains(raw, `"control_id":"actual-control"`) || !strings.Contains(raw, `"run_id":"original-run"`) {
 		t.Fatal(raw, err)
 	}
 	if err = db.QueryRow("SELECT config,state FROM plugin_background").Scan(&config, &checkpoint); err != nil || config != `{"control_id":"config","kind":"assistant","agent_id":"business"}` || checkpoint != `{"id":"plugin-state","public_key":"ordinary"}` {

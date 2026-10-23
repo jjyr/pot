@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jjyr/pot/internal/runner"
+	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -56,9 +56,9 @@ func TestTaskMessageAutomaticallyBindsGuidanceAndPeerReference(t *testing.T) {
 	}
 	// Hold the Worker before preparation; this test exercises actual task inputs
 	// and product dispatch without starting a model or command.
-	s.Runner.Prepare = func(ctx context.Context, _ runner.Run) (runner.Prepared, error) {
+	s.TaskRuns.Prepare = func(ctx context.Context, _ tasks.Run) (tasks.Prepared, error) {
 		<-ctx.Done()
-		return runner.Prepared{}, ctx.Err()
+		return tasks.Prepared{}, ctx.Err()
 	}
 	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "test", Name: "Test", Model: "fixture", Endpoint: "https://example.test", Protocol: "openai_chat", APIKey: "fixture", MaxOutputTokens: 128})
 	if err != nil {
@@ -75,7 +75,7 @@ func TestTaskMessageAutomaticallyBindsGuidanceAndPeerReference(t *testing.T) {
 	if err = c.Configure(ctx, spec, 0); err != nil {
 		t.Fatal(err)
 	}
-	record, err := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: "create", Text: "CI rules\nAwait guidance."})
+	record, err := s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "create", Text: "CI rules\nAwait guidance."})
 	if err != nil {
 		t.Fatal(err)
 	}

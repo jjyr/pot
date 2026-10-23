@@ -9,8 +9,9 @@ Clicking downloads and verifies the complete package while work continues. Once
 prepared, the backend continues installation without requiring an open browser.
 If work is active, installation remains prepared until the initiating UI confirms
 **Interrupt and upgrade**. Cancellation retains the package and leaves work
-running. Confirmation covers the installation's active Tasks, replies and terminal
-sessions. Interrupted work is never automatically replayed.
+running. Confirmation covers the installation's local executions, replies and terminal
+sessions. Linked Tasks keep their receiver-owned state and are not cancelled by
+updating the directing node. Interrupted local work is never automatically replayed.
 
 ## Installation boundary
 
@@ -18,7 +19,7 @@ An update replaces one complete installation: executable(s), shared frontend,
 Node, sandbox assets, plugins and built-in Skills. Every running App, standalone
 Runtime and browser service launched from that installation registers a private
 local update endpoint. Processes launched from another installation are outside
-the group. No remote Runner installation or cross-machine coordination occurs.
+the group. Each node updates its own installation.
 The browser UI requests the update of its selected Control, never its own browser
 machine. Operators must coordinate remote deployments separately.
 

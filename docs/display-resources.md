@@ -25,7 +25,7 @@ Multi-file HTML originals download as a ZIP containing all declared originals.
 The isolated rendering transformation never replaces the downloadable originals.
 
 ```text
-workspace / original Runner -- snapshot --> owning Control resource store
+local workspace / original run -- snapshot --> node resource store
                                                    |
                                         register_resource -> resource ID
                                                    |
@@ -52,7 +52,7 @@ A successful Main presentation atomically persists its completed tool result and
 an assistant message with a typed `presentation`. Resource-only replies are
 included in history, unread counts and sidebar previews. Provider/model history
 keeps tool receipts and does not automatically receive the original bytes.
-Task views derive the same presentation from the Runner's durable tool event.
+Task views derive the same presentation from the run's durable tool event.
 Ordinary screenshots and arbitrary HTML-looking tool output are not promoted.
 
 ## Reading and platform adapters

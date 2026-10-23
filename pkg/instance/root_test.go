@@ -68,3 +68,33 @@ func TestRootCanonicalizesParentAliasesAndRejectsSymlinkRoot(t *testing.T) {
 		t.Fatal("accepted a symlink as the data root")
 	}
 }
+
+func TestRootInitializesAroundPreinstalledExtensions(t *testing.T) {
+	path := t.TempDir()
+	if err := os.Chmod(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"skills", "plugins"} {
+		if err := os.Mkdir(filepath.Join(path, name), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(path, "mcp.json"), []byte(`{"version":1,"servers":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	const instructions = "Existing global instructions"
+	if err := os.WriteFile(filepath.Join(path, "AGENTS.md"), []byte(instructions), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := os.Stat(filepath.Join(path, "mcp.json")); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(path, "AGENTS.md")); err != nil || string(raw) != instructions {
+		t.Fatal("initialization changed global instructions", string(raw), err)
+	}
+}

@@ -48,7 +48,7 @@ func (s *Service) Review(ctx context.Context, link string, r ReviewRequest) (Rev
 	if err != nil {
 		return ReviewState{}, err
 	}
-	if c.Directory == nil || c.Directory.TaskExecutor == nil || !c.Directory.TaskExecutor.Supports(Approvals) {
+	if c.Directory == nil || !c.Directory.Capabilities(NodeTarget(c.Directory.NodeID)).Supports(Approvals) {
 		return ReviewState{}, ErrUnsupported
 	}
 	session, err := s.businessSession(ctx, c)

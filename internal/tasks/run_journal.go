@@ -1,4 +1,4 @@
-package runner
+package tasks
 
 import (
 	"context"
@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
+	"path/filepath"
 	"time"
 )
 
@@ -16,20 +18,23 @@ const SchemaVersion = 7
 
 type Journal struct {
 	db        *sql.DB
-	RuntimeID string
+	NodeID    string
 	BootID    string
 	changes   core.Changes
+	resources storage.ResourceFiles
 }
 
-func Open(path, runtimeID, bootID string) (*Journal, error) {
-	if !core.Identifier(runtimeID) || !core.Identifier(bootID) {
-		return nil, fmt.Errorf("invalid Runner authority")
+func OpenJournal(path, nodeID, bootID string) (*Journal, error) {
+	if !core.Identifier(nodeID) || !core.Identifier(bootID) {
+		return nil, fmt.Errorf("invalid local task node identity")
 	}
-	db, err := storage.OpenDatabase(path, storage.RunnerDatabase)
+	db, err := storage.OpenDatabase(path, storage.TasksDatabase)
 	if err != nil {
 		return nil, err
 	}
-	j := &Journal{db: db, RuntimeID: runtimeID, BootID: bootID}
+	cache := filepath.Join(filepath.Dir(path), "cache", "resources")
+
+	j := &Journal{db: db, NodeID: nodeID, BootID: bootID, resources: storage.ResourceFiles{Root: cache}}
 	err = storage.Transaction(context.Background(), db, func(tx *sql.Tx) error {
 		rows, err := tx.Query("SELECT control_id,task_id,run_id,body FROM task_runs")
 		if err != nil {
@@ -54,7 +59,7 @@ func Open(path, runtimeID, bootID string) (*Journal, error) {
 			}
 			if run.Launch.ControlID != control || run.Launch.TaskID != task || run.Launch.RunID != runID {
 				rows.Close()
-				return fmt.Errorf("Runner journal key identity mismatch")
+				return fmt.Errorf("task journal key identity mismatch")
 			}
 			runs = append(runs, run)
 		}
@@ -71,9 +76,6 @@ func Open(path, runtimeID, bootID string) (*Journal, error) {
 				if err := writeRun(context.Background(), tx, run); err != nil {
 					return err
 				}
-				if _, err := tx.Exec("UPDATE run_commands SET phase='unknown' WHERE control_id=? AND task_id=? AND run_id=? AND phase='pending'", run.Launch.ControlID, run.Launch.TaskID, run.Launch.RunID); err != nil {
-					return err
-				}
 			}
 		}
 		return nil
@@ -86,11 +88,11 @@ func Open(path, runtimeID, bootID string) (*Journal, error) {
 }
 func (j *Journal) Close() error { return j.db.Close() }
 
-// CheckPolicyCleanup prevents a fresh Runner boot from acknowledging revocation
+// CheckPolicyCleanup prevents a fresh node boot from acknowledging revocation
 // while prior execution still requires authoritative cleanup reconciliation.
 func (j *Journal) CheckPolicyCleanup(ctx context.Context) error {
 	var unknown bool
-	if err := j.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM task_runs WHERE phase=?) OR EXISTS(SELECT 1 FROM run_commands WHERE phase='unknown')", RecoveryRequired).Scan(&unknown); err != nil {
+	if err := j.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM task_runs WHERE phase=?)", RecoveryRequired).Scan(&unknown); err != nil {
 		return err
 	}
 	if unknown {
@@ -103,7 +105,7 @@ func (j *Journal) validateRun(run Run) error {
 	if run.SchemaVersion != SchemaVersion || !core.Identifier(run.BootID) {
 		return fmt.Errorf("invalid run journal identity/schema")
 	}
-	if err := run.Launch.Validate(j.RuntimeID); err != nil {
+	if err := run.Launch.Validate(j.NodeID); err != nil {
 		return err
 	}
 	hash, err := run.Launch.Digest()
@@ -161,14 +163,18 @@ func (j *Journal) Inspect(ctx context.Context, control, task, run string) (*Run,
 	return readRun(ctx, j.db, control, task, run)
 }
 func (j *Journal) Accept(ctx context.Context, launch Launch) (value Run, err error) {
-	if err = launch.Validate(j.RuntimeID); err != nil {
+	err = storage.Transaction(ctx, j.db, func(tx *sql.Tx) error { var e error; value, e = j.acceptTx(ctx, tx, launch); return e })
+	return
+}
+func (j *Journal) acceptTx(ctx context.Context, tx *sql.Tx, launch Launch) (value Run, err error) {
+	if err = launch.Validate(j.NodeID); err != nil {
 		return value, err
 	}
 	hash, err := launch.Digest()
 	if err != nil {
 		return value, err
 	}
-	err = storage.Transaction(ctx, j.db, func(tx *sql.Tx) error {
+	err = (func(tx *sql.Tx) error {
 		old, err := readRun(ctx, tx, launch.ControlID, launch.TaskID, launch.RunID)
 		if err != nil {
 			return err
@@ -179,6 +185,9 @@ func (j *Journal) Accept(ctx context.Context, launch Launch) (value Run, err err
 			}
 			value = *old
 			return nil
+		}
+		if launch.ControlID != j.NodeID {
+			return protocol.APIError{Code: "remote_execution_removed"}
 		}
 		rows, err := tx.QueryContext(ctx, "SELECT body FROM task_runs WHERE control_id=? AND task_id=?", launch.ControlID, launch.TaskID)
 		if err != nil {
@@ -230,7 +239,7 @@ func (j *Journal) Accept(ctx context.Context, launch Launch) (value Run, err err
 		}
 		value = Run{SchemaVersion: SchemaVersion, Launch: launch, LaunchDigest: hash, BootID: j.BootID, Phase: Accepted, Context: checkpoint, Sequence: sequence, EventSequence: eventSequence}
 		return writeRun(ctx, tx, value)
-	})
+	})(tx)
 	return value, err
 }
 func (j *Journal) change(ctx context.Context, control, task, run string, fn func(*Run) error) error {
@@ -258,7 +267,7 @@ func (j *Journal) changeTx(ctx context.Context, control, task, run string, fn fu
 		return writeRun(ctx, tx, *value)
 	})
 	if err == nil && changed {
-		j.changes.Notify("runner")
+		j.changes.Notify("runs")
 	}
 	return err
 }
@@ -292,7 +301,7 @@ func (j *Journal) SaveContext(ctx context.Context, control, task, run string, ra
 	})
 }
 func (j *Journal) Finish(ctx context.Context, control, task, run string, result Terminal) error {
-	defer j.changes.Notify("runner")
+	defer j.changes.Notify("runs")
 	phase, err := result.phase()
 	if err != nil {
 		return err
@@ -314,13 +323,7 @@ func (j *Journal) Finish(ctx context.Context, control, task, run string, result 
 		if value.Phase != Running || value.BootID != j.BootID {
 			return fmt.Errorf("run is not current")
 		}
-		var pending int
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM run_commands WHERE control_id=? AND task_id=? AND run_id=? AND phase!='complete'", control, task, run).Scan(&pending); err != nil {
-			return err
-		}
-		if pending > 0 {
-			return core.ErrCleanupUnconfirmed
-		}
+
 		value.Phase = phase
 		value.Result = &result
 		value.CleanupConfirmed = true
@@ -341,13 +344,7 @@ func (j *Journal) Wait(ctx context.Context, control, task, run, detail string) e
 				return fmt.Errorf("unsettled run cannot wait for allowance")
 			}
 		}
-		var pending int
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM run_commands WHERE control_id=? AND task_id=? AND run_id=? AND phase!='complete'", control, task, run).Scan(&pending); err != nil {
-			return err
-		}
-		if pending > 0 {
-			return core.ErrCleanupUnconfirmed
-		}
+
 		value.Phase = Waiting
 		value.WaitDetail = detail
 		value.CleanupConfirmed = true
@@ -375,7 +372,7 @@ func (j *Journal) Fence(ctx context.Context, control, task, run string) error {
 		return nil
 	})
 }
-func (j *Journal) ReconcileRecovered(ctx context.Context, control, task, run string, commandReplies, receipts map[string]json.RawMessage, cleanupConfirmed bool) error {
+func (j *Journal) ReconcileRecovered(ctx context.Context, control, task, run string, receipts map[string]json.RawMessage, cleanupConfirmed bool) error {
 	if !cleanupConfirmed {
 		return core.ErrCleanupUnconfirmed
 	}
@@ -383,42 +380,7 @@ func (j *Journal) ReconcileRecovered(ctx context.Context, control, task, run str
 		if value.Phase != RecoveryRequired {
 			return fmt.Errorf("run does not require recovery")
 		}
-		for id, reply := range commandReplies {
-			command, err := readCommand(ctx, tx, control, task, run, id)
-			if err != nil {
-				return err
-			}
-			if command == nil {
-				continue
-			}
-			if !json.Valid(reply) || len(reply) > 16*1024*1024 {
-				return fmt.Errorf("invalid reconciled command reply")
-			}
-			if command.Phase == "complete" {
-				a, err := core.HashJSON(command.Reply)
-				if err != nil {
-					return err
-				}
-				b, err := core.HashJSON(reply)
-				if err != nil {
-					return err
-				}
-				if a != b {
-					return fmt.Errorf("reconciled command differs from original receipt")
-				}
-			} else {
-				if _, err := tx.ExecContext(ctx, "UPDATE run_commands SET phase='complete',reply=? WHERE control_id=? AND task_id=? AND run_id=? AND command_id=?", string(reply), control, task, run, id); err != nil {
-					return err
-				}
-			}
-		}
-		var pending int
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM run_commands WHERE control_id=? AND task_id=? AND run_id=? AND phase!='complete'", control, task, run).Scan(&pending); err != nil {
-			return err
-		}
-		if pending > 0 {
-			return core.ErrCleanupUnconfirmed
-		}
+
 		if len(value.Context) > 0 {
 			vision := false
 			if catalog := value.Launch.Config.Params.Agent.ModelCatalog; catalog != nil {
@@ -444,6 +406,17 @@ func (j *Journal) ReconcileRecovered(ctx context.Context, control, task, run str
 		value.Phase = Interrupted
 		value.Result = &Terminal{Outcome: core.Cancelled, Text: "Execution stopped after receipt reconciliation. Create a new task to continue."}
 		value.CleanupConfirmed = true
+		return nil
+	})
+}
+
+func (j *Journal) Settle(ctx context.Context, control, task, run string) error {
+	return j.changeTx(ctx, control, task, run, func(tx *sql.Tx, record *Run) error {
+		if record.Phase != Running || record.BootID != j.BootID {
+			return core.ErrCleanupUnconfirmed
+		}
+
+		record.Finalizing = true
 		return nil
 	})
 }

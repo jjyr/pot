@@ -5,8 +5,8 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 )
 
-// This snapshot informs model planning, never grants execution authority. Control
-// owns machine policy, including for contexts prepared on an enrolled Runner.
+// This snapshot informs model planning, never grants execution authority. The owning
+// node enforces its local machine policy for every execution.
 func executionEnvironment(policy MachinePolicy, target core.ExecutionTarget, workspace string) core.ContextSection {
 	data, _ := json.Marshal(map[string]any{
 		"runtime_id":                target.RuntimeID,

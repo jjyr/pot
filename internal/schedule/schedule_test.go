@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jjyr/pot/internal/hooks"
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -56,18 +55,18 @@ func TestCalendarDSTEarlierOccurrenceGapsAndWeekdays(t *testing.T) {
 }
 
 type destination struct {
-	runs     map[string]runner.Run
+	runs     map[string]tasks.Run
 	launches int
 }
 
-func (d *destination) Launch(_ context.Context, l runner.Launch) (runner.Run, error) {
+func (d *destination) Launch(_ context.Context, l tasks.Launch) (tasks.Run, error) {
 	hash, _ := l.Digest()
-	r := runner.Run{Launch: l, LaunchDigest: hash, Phase: runner.Running, BootID: "boot", StartedAtMS: time.Now().UnixMilli()}
+	r := tasks.Run{Launch: l, LaunchDigest: hash, Phase: tasks.Running, BootID: "boot", StartedAtMS: time.Now().UnixMilli()}
 	d.runs[l.RunID] = r
 	d.launches++
 	return r, nil
 }
-func (d *destination) Inspect(_ context.Context, control, task, run string) (*runner.Run, error) {
+func (d *destination) Inspect(_ context.Context, control, task, run string) (*tasks.Run, error) {
 	r, ok := d.runs[run]
 	if !ok {
 		return nil, nil
@@ -78,12 +77,22 @@ func (d *destination) Stop(context.Context, string, string, string, string) erro
 func (d *destination) complete(task string) {
 	for id, r := range d.runs {
 		if r.Launch.TaskID == task {
-			r.Phase = runner.Complete
-			r.Result = &runner.Terminal{Outcome: core.Success, Text: "observed"}
+			r.Phase = tasks.Complete
+			r.Result = &tasks.Terminal{Outcome: core.Success, Text: "observed"}
 			r.CleanupConfirmed = true
 			d.runs[id] = r
 		}
 	}
+}
+
+func (d *destination) Resume(_ context.Context, node, task, run string) error {
+	r, ok := d.runs[run]
+	if !ok || r.Launch.ControlID != node || r.Launch.TaskID != task {
+		return fmt.Errorf("original run unavailable")
+	}
+	r.Phase = tasks.Accepted
+	d.runs[run] = r
+	return nil
 }
 
 type resultReader struct {
@@ -118,19 +127,19 @@ func setup(t *testing.T) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	port := &destination{runs: map[string]runner.Run{}}
+	port := &destination{runs: map[string]tasks.Run{}}
 	reads := 0
 	var readsMu sync.Mutex
 	var service *Service
 	var events []hooks.Event
-	queue, err := tasks.Open(filepath.Join(t.TempDir(), "tasks.sqlite"), tasks.Options{ControlID: "control", RuntimeID: "machine", Port: port, PublishHook: func(event hooks.Event) { events = append(events, event) }, PrepareOutcome: func(ctx context.Context, record tasks.Record, event protocol.TaskResultEvent) (tasks.OutcomeCommit, error) {
+	queue, err := tasks.Open(filepath.Join(t.TempDir(), "tasks.sqlite"), tasks.Options{NodeID: "machine", Executor: port, PublishHook: func(event hooks.Event) { events = append(events, event) }, PrepareOutcome: func(ctx context.Context, record tasks.Record, event protocol.TaskResultEvent) (tasks.OutcomeCommit, error) {
 		return service.PrepareOutcome(ctx, record, event)
 	}, ResolveModel: func(context.Context, string, protocol.CreateTask) (tasks.Selection, error) {
 		readsMu.Lock()
 		reads++
 		readsMu.Unlock()
 		return tasks.Selection{Config: spec, Plugins: []string{}}, nil
-	}, ResolveTarget: func(context.Context, string) (core.ExecutionTarget, error) { return core.RuntimeTarget("machine"), nil }})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}

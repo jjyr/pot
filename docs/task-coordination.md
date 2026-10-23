@@ -16,6 +16,19 @@ serialized task configuration without an unexported native-only request field.
 Only owner authority can select that configuration; peer callers retain the
 receiver-owned execution policy.
 
+Task is independent of execution location. Local Pot, peer Pot and Codex tasks
+share one durable catalogue, request receipt, outcome cursor and archive batch.
+Every submission calls Agent Link; the local adapter stays in-process. The Pot
+receiving adapter accepts a local model configuration through owner-only
+`task.configure`, and keeps run/checkpoint/workspace state internally. Linked
+Tasks store their original caller-bound execution reference and last observation,
+without requiring a local Provider or a Pot model snapshot. Exact retries return
+the original Task before consulting mutable directories or defaults.
+
+Execution nodes are selected by target addresses, never a separate machine selector.
+Historical raw remote launches retain their original recovery fences and cannot
+be converted into a new local execution.
+
 An authenticated user conversation can submit linked work without any local
 assistant or Provider. Its durable session owns the directing receipt and result
 route; the receiving assistant owns execution. User task results return directly
@@ -25,65 +38,78 @@ catalogue and original conversation use the same retained task reference.
 
 ## Linked execution
 
-`create_task` accepts `link_id` and an optional assistant `target` address.
-Explicit targets select that assistant; otherwise the receiving node resolves its
-persisted default once. The receiver owns execution, model selection and local
-permissions. Local provider credentials and model snapshots are never forwarded.
-The directing node stores an idempotent delegation and remote reference rather
+`create_task` accepts a single optional `target` address. Omission selects the
+current assistant. An assistant address selects that exact assistant; a node
+address selects its independent task execution endpoint. A node address uses the
+node ID as its `agent_id`. The host resolves transport internally. Task requests
+never carry connection IDs, executor modes or machine selectors.
+
+The receiver owns execution, model selection and local permissions. Other
+receivers reject local profile, model, Skills and execution requirements before
+admission. Assistant targets may accept a destination directory hint; node targets
+choose their own workspace. Local credentials and model snapshots never cross
+nodes.
+The directing node stores an idempotent Task and execution reference rather
 than launching a local worker copy. Assistant-directed results notify the
 original directing assistant through its inbox and task-outcome projection;
 user-directed results follow the conversation route described above.
 
-Linked tasks use the same lists and detail view, with a Codex or Pot source icon.
+Linked tasks use the same lists and detail view, with the receiving Adapter’s
+source icon.
 Cancellation targets the original accepted task; local archive state is supported.
-Steering, pause, local allowance controls, remote file reads and execution
-transcripts require additional adapter capabilities and are currently unavailable.
+Additional controls follow the receiving adapter's advertised operations. Codex
+accepts guidance after a terminal run to continue the same task; live steering,
+pause, local allowance controls, remote file reads and execution transcripts are
+currently unavailable across nodes.
 Disconnected nodes retain the last accepted state without replaying work.
 
-## Codex execution
+## Agent execution
 
-The assistant decides how to execute a task using its instructions and available
-capabilities. Omitting `executor` preserves ordinary task routing. Explicit
-`executor: "codex"` selects a Codex node, never a Codex assistant. `link_id` chooses
-a node; without it exactly one reachable, capable Codex node must exist. Ambiguous
-or unavailable selection fails without falling back to ordinary tasks. `target`,
-local model configuration, Skills and workspace overrides cannot accompany a
-Codex execution request; the receiving owner controls execution scope.
+Every Task invokes the Agent Link port, including the in-process local Adapter.
+The assistant copies a target address from the advertised catalogue. Capabilities
+are attached directly to each target, independently of its Adapter name. The
+sender does not search for a sole remote executor or infer an execution mode from
+a connection. Missing, unsupported or disconnected destinations fail without
+fallback. Exact retries resolve their original receipt before consulting current
+routes, capabilities or defaults.
 
 ```text
-User <--> current assistant A -- task T1 --> Codex thread S1
-                  |                 ^             |
-                  |                 +-- approval -+
-                  +------------ task T2 --> Codex thread S2
-
-Assistant A -- message --> assistant B (any backend)
-            <-- answer / permission denial --
-            no approval authority or user approval forwarding
+User <--> directing assistant A
+                  |
+                  v
+             Task catalogue
+                  |
+            Agent Link port
+             /           \
+     local Adapter    connected Adapter
+                  |      (e.g. Codex)
+                  v
+       receiver-owned Agent execution
+                  |
+          Task status / outcome
 ```
 
-Each accepted task persistently owns exactly one thread and a snapshot of its
-execution workspace/mode. Exact submission retries return the same task. Separate
-tasks execute independently, including while another waits for approval. After a
-terminal run, owner guidance starts a new run in the same task/thread; active-run
-guidance is rejected. Previous results remain in receiver history and each run
-has a distinct completion notification. Restart does not replay uncertain work or
-replace unavailable threads.
+A node may advertise assistant and node endpoints together, each with its own
+capability scope. The same address type is used by Task submission and the product
+operation port. Task receipts contain one `receiver` identity; a node executor
+returns its independently owned Task address. Task identity remains distinct from
+run identity. Cancellation, guidance and approval forwarding require the selected
+endpoint's operations. Owner guidance cannot be synthesized from a peer reference
+or forwarded message. Continuations retain the Task identity and produce distinct
+run identities and completion notifications. Restart never replays uncertain work.
 
-Codex retains its configured approval policy and reviewer. Automatic review runs
-entirely on the receiving Codex host; its events, decisions and history do not
-cross Agent Link or appear in Pot's approval interface. Only a pending App Server
-request that requires a human decision is forwarded into A's existing approval
-list and card. Resolved requests disappear; execution outcomes use ordinary task
-results or assistant replies, not a separate approval history.
+The [Codex Adapter](../integrations/codex/README.md) currently implements independent
+persistent task sessions and terminal-run continuation. Its workspace, session and
+approval implementation belong to that Adapter rather than the shared Task API.
+Other Adapters can implement the same contract with their own Agent runtime.
 
-Only authenticated user operations in A's existing permission interface may
-resolve T1's exact pending command/file request with `allow_once` or `deny`.
-Decisions bind the original caller, task, thread and turn, and expire with that
-execution. There is no additional node grant and no model approval tool.
-Assistant messages follow B's receiver policy: operations within its authority
-may run; requests for human approval are declined and returned as a failure to A. Neither
-A nor B opens user approvals because of a message. Message text cannot change
-this boundary or upgrade a message into a user-approved delegated task.
+Where approval forwarding is supported, only authenticated user operations in A's
+existing permission interface may resolve the original Task's exact pending request
+with `allow_once` or `deny`. Decisions bind the original caller, Task and execution,
+and expire with that execution. The receiving Adapter owns automatic review;
+there is no model approval tool or extra node grant. Assistant messages carry no
+approval authority and cannot become a user-approved Task. The receiver declines
+operations outside its message permissions and returns the denial.
 
 ## Autonomous model routing
 
@@ -97,13 +123,12 @@ allowances still apply, and choosing a model grants no machine/tool authority.
 `model` ID. A selected connection without a model uses its default model. When
 both are omitted, the invoking assistant's active configuration is copied.
 Existing Tasks retain their model snapshots; each schedule occurrence creates a
-new Task and resolves its selection then. Machine placement is independent of
-model selection.
+new Task and resolves its selection then. Local model selection does not select a remote execution node.
 
 ## Messages and completion
 
 `send_message({to: {node_id, kind: "task", agent_id}, text})` sends an input
-to an existing Task through its owning Control. Runtime records the sender from
+to an existing Task through its owning node. Runtime records the sender from
 the authenticated execution and binds any processing parent automatically; the
 model supplies only the recipient and text. User inputs and owner-assistant
 guidance are processed at safe model boundaries, with pending user guidance
@@ -115,7 +140,10 @@ Tasks.
 Task history projects initial input, assistant guidance, user guidance and peer
 reference from the shared `agent_messages` table. The operator messages HTTP
 endpoint binds user provenance; model tools cannot choose their sender. Local workers consume and acknowledge inputs against the original run.
-Linked adapters support only their advertised input capabilities.
+Linked adapters support only their advertised input capabilities. The current
+linked guidance contract carries owner instructions, so inputs bound to incoming
+correspondence are rejected rather than upgraded from reference data to owner
+authority.
 
 The model-visible `create_task` requires a title followed by complete execution
 instructions, preserving exact user commands and constraints; title-only briefs
@@ -170,8 +198,8 @@ no implicit per-turn model-request count limit.
 Cancellation, configured request/token allowances, context limits and individual
 operation deadlines still apply; context compaction preserves continuation.
 
-The destination Runner persists `started_at_ms` when it first claims an accepted
-run. Subsequent claims after allowance resume retain that timestamp. Control
+The local execution journal persists `started_at_ms` when it first claims an accepted
+run. Subsequent claims after allowance resume retain that timestamp. The Task service
 copies it into Task info from the original run receipt, including when the first
 observed receipt is waiting or terminal. Zero means execution has not started or
 its original start time is unavailable; creation and update timestamps are never
@@ -213,7 +241,7 @@ same original destination journal through `POST /api/v1/runtime/recovery` with
 `control_id`, `task_id`, `run_id` and the action. These private/native ports are
 excluded from browser publication. Inspection returns receipt states and unresolved
 reasons without starting a model or tool. Reconciliation consults the
-original coordinator operations and local command receipts. It accepts no client-supplied result or cleanup
+original Operations journal and verified archived execution evidence. It accepts no client-supplied result or cleanup
 acknowledgment. Known results update the original checkpoint once; only proven
 cleanup releases held capacity and ends the run as interrupted. A previous-boot
 Host run with issued operations and no recorded cleanup proof remains fenced.
@@ -268,8 +296,8 @@ cleanup is confirmed.
 Continuation preserves Task identity/address, creation brief, model selection,
 original machine and execution target, workspace, and settled model history. A
 new Run ID has separate execution receipts, approvals, start time and outcome.
-The session generation stays fixed. Previous terminal Control records are retained
-in `task_run_history`; destination Runner journals retain every Run. Task transcripts
+The session generation stays fixed. Previous terminal Task records are retained
+in `task_run_history`; local execution journals retain every Run. Task transcripts
 use one monotonic cursor across Runs. Original input is not executed again; only
 the new owner guidance starts the continuation. Scheduled occurrences still create
 independent Tasks; a user continuation becomes manual work without changing that
@@ -280,7 +308,7 @@ silently selecting another directory or destination. A previous run with uncerta
 effects must be reconciled before a continuation can execute. Subsequent tools
 always use the machine's current execution authorization.
 
-Task and Runner record payloads use schema versions 9 and 7. Database schemas and
+Task and execution record payloads use schema versions 12 and 7. Database schemas and
 automatic upgrades are owned by the [DB migration layer](database-migrations.md).
 Development builds use an independent data root; unsupported pre-migration formats
 are rejected.
@@ -304,17 +332,17 @@ The projection has no subscriptions, delivery workers or acknowledgments and
 does not change Agent result reporting. Initial startup and reconnect establish
 a fresh baseline rather than replaying old outcomes.
 
-After a committed outcome advances the indexed head, Control invalidates
+After a committed outcome advances the indexed head, the node invalidates
 `task-outcomes`. Ordinary transcript updates still invalidate `tasks` but do not
 wake the client notification reader. See [System notifications](shared-ui.md#system-notifications).
 
 ## Execution transcript
 
 `GET /api/v1/tasks/{id}/events?after=CURSOR&limit=100` reads a bounded,
-append-only page from the original Runner across all of the Task's Runs. Each item carries a durable
+append-only page from the original execution journal across all of the Task's Runs. Each item carries a durable
 `sequence` plus its generation/turn-bound Agent event. The page returns `cursor`
 and `has_more`; clients advance only through contiguous sequences. Historical remote pages remain cached with `unavailable: true`; retired
-Control/Runner destinations cannot execute or fetch new output. Agent Link task
+distributed destinations cannot execute or fetch new output. Agent Link task
 details expose their canonical result. Clients request transcripts only when
 the task advertises `task.events`; unsupported reads return a capability error.
 Changes wake the existing `tasks` invalidation stream.

@@ -104,7 +104,7 @@ func (s *Service) admitTaskModel(ctx context.Context, tx *sql.Tx, spec core.Reso
 			continue
 		}
 		var active uint64
-		err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks WHERE phase IN ('queued','running','waiting','waiting_approval') AND json_extract(body,'$.launch_sent')=1 AND json_extract(body,'$.config."+item.key+"')=?", item.value).Scan(&active)
+		err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks WHERE phase IN ('queued','running','waiting','waiting_approval') AND json_type(body,'$.launch')='object' AND json_extract(body,'$.config."+item.key+"')=?", item.value).Scan(&active)
 		if err != nil {
 			return false, err
 		}
@@ -193,11 +193,4 @@ func (s *Service) modelContext() string {
 	}
 	raw, _ := json.Marshal(map[string]any{"profiles": rows})
 	return "Configured Provider/model summary (bounded; may omit choices). Choose autonomously; omission uses your active route. Use get_model_catalog for complete configured choices and model facts before selecting an omitted model. Explicit user choices take precedence; unavailable routes fail visibly.\n" + string(raw)
-}
-
-func (s *Service) selectTaskMachine(_ context.Context, machine string) (string, error) {
-	if machine == "" {
-		machine = s.options.RuntimeID
-	}
-	return machine, nil
 }

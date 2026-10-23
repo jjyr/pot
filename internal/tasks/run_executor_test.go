@@ -1,4 +1,4 @@
-package runner
+package tasks
 
 import (
 	"context"
@@ -14,17 +14,34 @@ import (
 	"testing"
 )
 
-type feedback struct{}
+type feedback struct {
+	settleErr error
+	journal   *Journal
+}
 
-func (feedback) LoadContext(context.Context) (json.RawMessage, error)          { return nil, nil }
-func (feedback) SaveContext(context.Context, json.RawMessage) error            { return nil }
+func (f feedback) LoadContext(ctx context.Context) (json.RawMessage, error) {
+	if f.journal == nil {
+		return nil, nil
+	}
+	r, e := f.journal.Inspect(ctx, "runtime", "task", "run")
+	if e != nil {
+		return nil, e
+	}
+	return r.Context, nil
+}
+func (f feedback) SaveContext(ctx context.Context, raw json.RawMessage) error {
+	if f.journal == nil {
+		return nil
+	}
+	return f.journal.SaveContext(ctx, "runtime", "task", "run", raw)
+}
 func (feedback) RecordTurn(context.Context, string) error                      { return nil }
 func (feedback) InputStreaming(context.Context, string) error                  { return nil }
 func (feedback) Ready(context.Context) error                                   { return nil }
 func (feedback) Steering(context.Context, bool) ([]agent.SteeringInput, error) { return nil, nil }
 func (feedback) AcknowledgeSteering(context.Context, []string) error           { return nil }
 func (feedback) Observe(context.Context, agent.Observation) error              { return nil }
-func (feedback) Settle(context.Context) error                                  { return nil }
+func (f feedback) Settle(context.Context) error                                { return f.settleErr }
 
 type models struct {
 	calls  atomic.Int32
@@ -44,9 +61,66 @@ func (*models) RPC(context.Context, *string, string, string, json.RawMessage) (j
 	return nil, nil, nil
 }
 func (*models) Compaction(context.Context, json.RawMessage) error { return nil }
-func TestUnknownCommandReceiptRetainsSharedExecutionCapacity(t *testing.T) {
+
+func TestExecutorRejectsForeignCoordinatorAndRetiredRun(t *testing.T) {
 	ctx := context.Background()
-	j, err := Open(filepath.Join(t.TempDir(), "runner.sqlite"), "runtime", "boot")
+	j, err := OpenJournal(filepath.Join(t.TempDir(), "tasks.sqlite"), "runtime", "boot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	manager, err := execution.New("runtime", "boot", execution.Limits{MaxActive: 1, MaxQueued: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Stop()
+	prepared := false
+	e := &Executor{Journal: j, Executions: manager, Context: ctx, Prepare: func(context.Context, Run) (Prepared, error) {
+		prepared = true
+		return Prepared{}, errors.New("foreign configuration reached local preparation")
+	}}
+	l := launchFixture(t)
+	l.ControlID = "retired-coordinator"
+	if _, err := e.Launch(ctx, l); err == nil {
+		t.Fatal("accepted foreign coordinator")
+	}
+	if runs, err := j.Runs(ctx); err != nil || len(runs) != 0 {
+		t.Fatal(runs, err)
+	}
+	// The journal can retain historical evidence, but execution cannot resume it.
+	if _, err := j.Accept(ctx, l); err == nil {
+		t.Fatal("journal admitted a new foreign launch")
+	}
+	hash, _ := l.Digest()
+	original := Run{SchemaVersion: SchemaVersion, Launch: l, LaunchDigest: hash, BootID: "boot", Phase: Accepted, Sequence: 1}
+	raw, _ := json.Marshal(original)
+	if _, err := j.db.Exec("INSERT INTO task_runs VALUES(?,?,?,?,?,?,?)", l.ControlID, l.TaskID, l.RunID, hash, original.Phase, original.BootID, string(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if retained, err := j.Accept(ctx, l); err != nil || retained.LaunchDigest != hash {
+		t.Fatal("historical retry lost its receipt", retained, err)
+	}
+	if _, err := e.Execute(ctx, l.ControlID, l.TaskID, l.RunID); err == nil {
+		t.Fatal("executed retired run")
+	}
+	if err := e.Resume(ctx, l.ControlID, l.TaskID, l.RunID); err == nil {
+		t.Fatal("resumed retired run")
+	}
+	if err := e.Stop(ctx, l.ControlID, l.TaskID, l.RunID, "cancel"); err == nil {
+		t.Fatal("changed retired run")
+	}
+	if prepared || len(manager.Snapshot()) != 0 {
+		t.Fatal("foreign run acquired local execution services")
+	}
+	r, err := j.Inspect(ctx, l.ControlID, l.TaskID, l.RunID)
+	if err != nil || r.Phase != Accepted || r.StopRequested != "" {
+		t.Fatal(r, err)
+	}
+}
+
+func TestUnsettledEffectsRetainsSharedExecutionCapacity(t *testing.T) {
+	ctx := context.Background()
+	j, err := OpenJournal(filepath.Join(t.TempDir(), "tasks.sqlite"), "runtime", "boot")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,19 +133,16 @@ func TestUnknownCommandReceiptRetainsSharedExecutionCapacity(t *testing.T) {
 	if _, err := j.Accept(ctx, launch); err != nil {
 		t.Fatal(err)
 	}
-	model := &models{before: func(core.ModelRequest) error {
-		_, _, err := j.BeginCommand(ctx, "control", "task", "run", "unconfirmed", json.RawMessage(`{"effect":"uncertain"}`))
-		return err
-	}}
+	model := &models{}
 	engine := &Executor{Journal: j, Executions: manager, Context: ctx, Prepare: func(_ context.Context, run Run) (Prepared, error) {
-		a := &agent.Agent{Services: model, Feedback: feedback{}, Cleanup: func(context.Context, core.ExecutionContext, bool) error { return nil }}
+		a := &agent.Agent{Services: model, Feedback: feedback{journal: j, settleErr: core.ErrCleanupUnconfirmed}, Cleanup: func(context.Context, core.ExecutionContext, bool) error { return nil }}
 		return Prepared{Agent: a, Context: core.ExecutionContext{Owner: run.Launch.TaskID, Role: core.Worker, Workspace: t.TempDir()}, Thread: core.Thread{Owner: run.Launch.TaskID, Generation: run.Launch.Generation, Config: run.Launch.Config}, ResourceDigest: pinTestResources(t, j, run)}, nil
 	}}
-	result, err := engine.Execute(ctx, "control", "task", "run")
+	result, err := engine.Execute(ctx, "runtime", "task", "run")
 	if result != nil || !errors.Is(err, core.ErrCleanupUnconfirmed) {
 		t.Fatal(result, err)
 	}
-	stored, _ := j.Inspect(ctx, "control", "task", "run")
+	stored, _ := j.Inspect(ctx, "runtime", "task", "run")
 	if stored.Phase != RecoveryRequired {
 		t.Fatal(stored)
 	}
@@ -81,7 +152,7 @@ func TestUnknownCommandReceiptRetainsSharedExecutionCapacity(t *testing.T) {
 }
 func TestExecutorUsesSharedCapacityAndJournalFeedbackWithoutResampling(t *testing.T) {
 	ctx := context.Background()
-	j, err := Open(filepath.Join(t.TempDir(), "runner.sqlite"), "runtime", "boot")
+	j, err := OpenJournal(filepath.Join(t.TempDir(), "tasks.sqlite"), "runtime", "boot")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,21 +172,21 @@ func TestExecutorUsesSharedCapacityAndJournalFeedbackWithoutResampling(t *testin
 		if len(active) != 1 || active[0].Phase != execution.Running {
 			t.Fatal("Agent preparation bypassed shared capacity", active)
 		}
-		a := &agent.Agent{Services: model, Feedback: feedback{}, Cleanup: func(context.Context, core.ExecutionContext, bool) error { return nil }}
+		a := &agent.Agent{Services: model, Feedback: feedback{journal: j}, Cleanup: func(context.Context, core.ExecutionContext, bool) error { return nil }}
 		return Prepared{Agent: a, Context: core.ExecutionContext{Owner: run.Launch.TaskID, Role: core.Worker, Workspace: t.TempDir()}, Thread: core.Thread{Owner: run.Launch.TaskID, Generation: run.Launch.Generation, Config: run.Launch.Config}, ResourceDigest: pinTestResources(t, j, run)}, nil
 	}
-	result, err := engine.Execute(ctx, "control", "task", "run")
+	result, err := engine.Execute(ctx, "runtime", "task", "run")
 	if err != nil || result == nil || result.Outcome.Kind != "success" || result.Text != "done" {
 		t.Fatal(result, err)
 	}
-	stored, err := j.Inspect(ctx, "control", "task", "run")
+	stored, err := j.Inspect(ctx, "runtime", "task", "run")
 	if err != nil || stored.Phase != Complete || !stored.CleanupConfirmed || len(stored.Context) == 0 {
 		t.Fatal(stored, err)
 	}
 	if err := manager.Drain(ctx); err != nil {
 		t.Fatal("capacity leaked", err)
 	}
-	again, err := engine.Execute(ctx, "control", "task", "run")
+	again, err := engine.Execute(ctx, "runtime", "task", "run")
 	if err != nil || again == nil || model.calls.Load() != 1 {
 		t.Fatal(again, err, model.calls.Load())
 	}

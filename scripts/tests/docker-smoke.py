@@ -74,7 +74,7 @@ def main():
         return docker("exec", name, "pot", *arguments).stdout.strip()
 
     def api(path):
-        return json.loads(cli("api", "-root", "/home/pot/.pot-go", path))
+        return json.loads(cli("api", "-root", "/home/pot/.pot", path))
 
     def python(code):
         return docker("exec", name, "python3", "-c", code).stdout.strip()
@@ -168,7 +168,7 @@ def main():
         python(
             "from pathlib import Path; "
             "Path('/home/pot/workspaces/restart-proof').write_text('persisted'); "
-            "assert Path('/home/pot/.pot-go/identity.json').stat().st_mode & 0o077 == 0; "
+            "assert Path('/home/pot/.pot/identity.json').stat().st_mode & 0o077 == 0; "
             "assert Path('/home/pot/.pot-web/browser-access.json').stat().st_mode & 0o077 == 0"
         )
         probe = docker("exec", name, "pot-sandbox-check", check=False)
@@ -186,7 +186,7 @@ def main():
         assert cli("access", "-browser-root", "/home/pot/.pot-web", "token") == token
         assert fingerprint() == key_hash, "Credential master key changed"
         assert "container-smoke-provider" in cli(
-            "api", "-root", "/home/pot/.pot-go", "/api/v1/providers"
+            "api", "-root", "/home/pot/.pot", "/api/v1/providers"
         )
         assert (
             python(

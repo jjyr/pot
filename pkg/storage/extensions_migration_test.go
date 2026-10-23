@@ -39,12 +39,12 @@ func TestExtensionsUpgradePreservesExistingControlAndRepeatedStartup(t *testing.
 	if err = db.QueryRow("SELECT name,revision FROM assistant_definitions WHERE id='main'").Scan(&name, &revision); err != nil || name != "Original" || revision != 7 {
 		t.Fatal(name, revision, err)
 	}
-	execMigrationSQL(t, db, "INSERT INTO extension_settings VALUES('plugins','github',0,1,'');INSERT INTO mcp_servers VALUES('test',1,'{}')")
+	execMigrationSQL(t, db, "INSERT INTO retired_extension_settings VALUES('plugins','github',0,1,'');INSERT INTO retired_mcp_servers VALUES('test',1,'{}')")
 	if err = Migrate(ctx, db, ControlDatabase); err != nil {
 		t.Fatal(err)
 	}
 	var count int
-	if err = db.QueryRow("SELECT COUNT(*) FROM extension_settings WHERE enabled=0").Scan(&count); err != nil || count != 1 {
+	if err = db.QueryRow("SELECT COUNT(*) FROM retired_extension_settings WHERE enabled=0").Scan(&count); err != nil || count != 1 {
 		t.Fatal(count, err)
 	}
 }

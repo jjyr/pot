@@ -6,7 +6,6 @@ import (
 	"errors"
 	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/internal/nodeidentity"
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/agent"
@@ -35,11 +34,17 @@ func (s *Service) openTasks() error {
 		return err
 	}
 	s.Profiles.ownerAction = s.Machines.OwnerAction
-	s.RunnerJournal, err = runner.Open(filepath.Join(s.options.Root, "runner.sqlite"), s.options.RuntimeID, s.options.BootID)
+	if err = storage.ImportLocalRuns(s.options.Root); err != nil {
+		return err
+	}
+	if err = storage.ImportTaskSubmissions(s.options.Root); err != nil {
+		return err
+	}
+	s.RunJournal, err = tasks.OpenJournal(filepath.Join(s.options.Root, "tasks.sqlite"), s.options.RuntimeID, s.options.BootID)
 	if err != nil {
 		return err
 	}
-	s.Runner = &runner.Executor{Journal: s.RunnerJournal, Executions: s.options.Manager, Context: s.ctx, Prepare: s.prepareTask}
+	s.TaskRuns = &tasks.Executor{Journal: s.RunJournal, Executions: s.options.Manager, Context: s.ctx, Prepare: s.prepareTask}
 	s.Tasks, err = tasks.Open(filepath.Join(s.options.Root, "tasks.sqlite"), tasks.Options{OwnerAvailable: func(ctx context.Context, owner string) error {
 		deleted, err := s.Registry.Deleted(ctx, owner)
 		if err != nil {
@@ -49,7 +54,7 @@ func (s *Service) openTasks() error {
 			return protocol.APIError{Code: "assistant_unavailable"}
 		}
 		return nil
-	}, ControlID: s.options.RuntimeID, RuntimeID: s.options.RuntimeID, Port: taskRouter{s}, ResolveModel: s.selectTask, ResolveTarget: s.taskTarget, ResolveMachine: s.selectTaskMachine, ValidateTarget: s.validateTaskTarget, AdmitModel: s.admitTaskModel, AwaitingApproval: s.taskAwaitingApproval, PublishHook: s.publishHook, OutcomesChanged: func() { s.Changes.Notify("task-outcomes") }, PrepareOutcome: func(ctx context.Context, record tasks.Record, event protocol.TaskResultEvent) (tasks.OutcomeCommit, error) {
+	}, NodeID: s.options.RuntimeID, Executor: s.TaskRuns, ResolveModel: s.selectTask, ValidateRequirements: s.validateTaskRequirements, AdmitModel: s.admitTaskModel, AwaitingApproval: s.taskAwaitingApproval, PublishHook: s.publishHook, OutcomesChanged: func() { s.Changes.Notify("task-outcomes") }, PrepareOutcome: func(ctx context.Context, record tasks.Record, event protocol.TaskResultEvent) (tasks.OutcomeCommit, error) {
 		return s.Schedules.PrepareOutcome(ctx, record, event)
 	}})
 	if err != nil {
@@ -139,29 +144,17 @@ func (s *Service) taskReady(ctx context.Context, owner string) (bool, error) {
 	}
 	return s.Usage.Ready(ctx, owner, storage.Now())
 }
-func (s *Service) taskTarget(ctx context.Context, machine string) (core.ExecutionTarget, error) {
-	if machine == "" {
-		machine = s.options.RuntimeID
-	}
-	if machine != s.options.RuntimeID {
-		return core.ExecutionTarget{}, protocol.APIError{Code: "remote_execution_removed"}
-	}
-	if _, _, err := s.Permissions.Policy(machine); err != nil {
-		return core.ExecutionTarget{}, err
-	}
-	return core.RuntimeTarget(machine), nil
-}
 func (s *Service) taskLoop() {
 	defer s.taskLife.wg.Done()
 	sub := s.Tasks.Subscribe()
 	defer sub.Close()
-	runnerSub := s.RunnerJournal.Subscribe()
-	defer runnerSub.Close()
+	runSub := s.RunJournal.Subscribe()
+	defer runSub.Close()
 	mailSub := s.Mailbox.Changes.Subscribe()
 	defer mailSub.Close()
 	policySub := s.Permissions.Changes.Subscribe()
 	defer policySub.Close()
-	for _, source := range []*core.Subscription{sub, runnerSub, policySub, mailSub} {
+	for _, source := range []*core.Subscription{sub, runSub, policySub, mailSub} {
 		s.taskLife.wg.Add(1)
 		go func(source *core.Subscription) {
 			defer s.taskLife.wg.Done()
@@ -249,88 +242,33 @@ func (s *Service) deliverNotificationsForOwners(ctx context.Context) {
 	}
 }
 
-type taskRouter struct{ s *Service }
-
-func (p taskRouter) original(ctx context.Context, control, task, run string) (runner.Port, error) {
-	var raw []byte
-	err := p.s.Tasks.DB().QueryRowContext(ctx, "SELECT body FROM tasks WHERE id=? AND json_extract(body,'$.run_id')=?", task, run).Scan(&raw)
-	if err != nil {
-		return nil, err
-	}
-	var r tasks.Record
-	if err = core.DecodeJSON(raw, &r); err != nil {
-		return nil, err
-	}
-	if control != p.s.options.RuntimeID || r.Launch == nil {
-		return nil, errors.New("original Task launch unavailable")
-	}
-	if r.Launch.RuntimeID == p.s.options.RuntimeID {
-		return p.s.Runner, nil
-	}
-	return nil, protocol.APIError{Code: "original_execution_unavailable"}
-}
-func (p taskRouter) Launch(ctx context.Context, l runner.Launch) (runner.Run, error) {
-	if l.RuntimeID == p.s.options.RuntimeID {
-		return p.s.Runner.Launch(ctx, l)
-	}
-	return runner.Run{}, protocol.APIError{Code: "remote_execution_removed"}
-}
-func (p taskRouter) Inspect(ctx context.Context, c, t, r string) (*runner.Run, error) {
-	port, err := p.original(ctx, c, t, r)
-	if err != nil {
-		return nil, err
-	}
-	return port.Inspect(ctx, c, t, r)
-}
-func (p taskRouter) Stop(ctx context.Context, c, t, r, m string) error {
-	port, err := p.original(ctx, c, t, r)
-	if err != nil {
-		return err
-	}
-	return port.Stop(ctx, c, t, r, m)
-}
-func (p taskRouter) Resume(ctx context.Context, c, t, r string) error {
-	port, err := p.original(ctx, c, t, r)
-	if err != nil {
-		return err
-	}
-	resume, ok := port.(tasks.Resumer)
-	if !ok {
-		return errors.New("destination resume unavailable")
-	}
-	return resume.Resume(ctx, c, t, r)
-}
-
-func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepared, error) {
+func (s *Service) prepareTask(ctx context.Context, r tasks.Run) (tasks.Prepared, error) {
 	l := r.Launch
 	if l.ControlID != s.options.RuntimeID {
-		return runner.Prepared{}, protocol.APIError{Code: "original_execution_unavailable"}
+		return tasks.Prepared{}, protocol.APIError{Code: "original_execution_unavailable"}
 	}
-	resources, revision, err := s.prepareTaskResources(ctx, l, func() (taskResource, error) { return s.currentTaskResource(ctx, l) })
+	resources, revision, err := s.prepareTaskResources(ctx, l)
 	if err != nil {
-		return runner.Prepared{}, err
+		return tasks.Prepared{}, err
 	}
 	config := resources.Config
 	policy, _, err := s.Permissions.Policy(l.RuntimeID)
 	if err != nil {
-		return runner.Prepared{}, err
+		return tasks.Prepared{}, err
 	}
 	if _, err = s.prepareTaskWorkspace(ctx, l, policy); err != nil {
-		return runner.Prepared{}, err
+		return tasks.Prepared{}, err
 	}
-	// The Runner independently verifies selected names and its pinned resource digest.
-	roots, err := s.installTaskSkills(ctx, resources, l.TaskID, revision, l.ExecutionTarget)
-	if err != nil {
-		return runner.Prepared{}, err
-	}
+	// Task execution verifies selected names and its pinned resource digest.
+
 	execution, err := s.prepareExecution(ctx, l.TaskID, l.ExecutionTarget, true, "")
 	if err != nil {
-		return runner.Prepared{}, err
+		return tasks.Prepared{}, err
 	}
 	if err = s.addExecutionEnvironment(&execution, l.ExecutionTarget); err != nil {
-		return runner.Prepared{}, err
+		return tasks.Prepared{}, err
 	}
-	execution.SkillResources.Roots = append(execution.SkillResources.Roots, roots...)
+	execution.SkillResources.Roots = append(execution.SkillResources.Roots, resources.Roots...)
 	execution.SkillResources.Selection = nil
 	execution.SkillResources.ReservedNames = resources.ReservedNames
 	execution.Role = core.Worker
@@ -338,9 +276,9 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 	execution.ContextSections = append(execution.ContextSections, core.ContextSection{Key: "agent-addresses", Text: string(addresses)})
 	engine, err := s.host(l.TaskID, l.Generation)
 	if err != nil {
-		return runner.Prepared{}, err
+		return tasks.Prepared{}, err
 	}
-	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: l.TaskID, Turn: l.RunID, Generation: l.Generation, DefaultTarget: l.ExecutionTarget, ApprovalOwner: l.AssistantID, Task: l.TaskID, Spec: config, Usage: s.Usage, UsageScope: l.TaskID, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Target: s.options.Target, Credentials: s, Product: s.productDispatchBound(l.AssistantID, l.TaskID, l.RunID, l.Generation, true)}
+	dispatch := &Dispatcher{RuntimeID: s.options.RuntimeID, Owner: l.TaskID, Turn: l.RunID, Generation: l.Generation, DefaultTarget: l.ExecutionTarget, ApprovalOwner: l.AssistantID, Task: l.TaskID, Spec: config, Usage: s.Usage, UsageScope: l.TaskID, Permissions: s.Permissions, Operations: s.Operations, Host: engine, Credentials: s, Product: s.productDispatchBound(l.AssistantID, l.TaskID, l.RunID, l.Generation, true)}
 	feedback := &taskFeedback{s: s, launch: l}
 	model := &ModelSession{Registry: s.Providers, Usage: s.Usage, Spec: config, Scope: l.TaskID, Turn: l.RunID, Generation: l.Generation, Role: "task", Claim: feedback.claimModel}
 	ports := &executionPorts{model: model, compaction: func(ctx context.Context, raw json.RawMessage) error {
@@ -350,14 +288,14 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 	for _, raw := range core.ExecutionTools(config.Params.Agent.Shell) {
 		var d modelprotocol.ToolDefinition
 		if err = core.DecodeJSON(raw, &d); err != nil {
-			return runner.Prepared{}, err
+			return tasks.Prepared{}, err
 		}
 		definitions = append(definitions, d)
 	}
 	definitions = append(definitions, s.productTools(true)...)
 	mcpTools, err := s.pluginMCPTools(ctx, dispatch.Product)
 	if err != nil {
-		return runner.Prepared{}, err
+		return tasks.Prepared{}, err
 	}
 	definitions = append(definitions, mcpTools...)
 	loop := &agent.Agent{Services: ports, Feedback: feedback, Dispatch: dispatch.Dispatch, Tools: definitions, Composer: s.options.Composer, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
@@ -369,12 +307,12 @@ func (s *Service) prepareTask(ctx context.Context, r runner.Run) (runner.Prepare
 		}
 		return result
 	}}
-	return runner.Prepared{Agent: loop, Context: execution, Thread: core.Thread{Owner: l.TaskID, Generation: l.Generation, Config: config}, ResourceDigest: revision}, nil
+	return tasks.Prepared{Agent: loop, Context: execution, Thread: core.Thread{Owner: l.TaskID, Generation: l.Generation, Config: config}, ResourceDigest: revision}, nil
 }
 
 type taskFeedback struct {
 	s      *Service
-	launch runner.Launch
+	launch tasks.Launch
 }
 
 func (f *taskFeedback) current(ctx context.Context) error {
@@ -385,18 +323,26 @@ func (f *taskFeedback) current(ctx context.Context) error {
 	if r == nil || r.RunID != f.launch.RunID || r.StopMode != "" || r.Info.Phase.Scope() != "active" {
 		return errors.New("Task Control binding is stale")
 	}
+	run, err := f.s.RunJournal.Inspect(ctx, f.launch.ControlID, f.launch.TaskID, f.launch.RunID)
+	if err != nil {
+		return err
+	}
+	if run == nil || run.Phase != tasks.Running || run.BootID != f.s.options.BootID || run.StopRequested != "" {
+		return errors.New("task execution is fenced")
+	}
+
 	return nil
 }
 func (f *taskFeedback) claimModel(ctx context.Context, id string) error {
 	if err := f.current(ctx); err != nil {
 		return err
 	}
-	run, err := f.s.RunnerJournal.Inspect(ctx, f.launch.ControlID, f.launch.TaskID, f.launch.RunID)
+	run, err := f.s.RunJournal.Inspect(ctx, f.launch.ControlID, f.launch.TaskID, f.launch.RunID)
 	if err != nil {
 		return err
 	}
-	if run == nil || run.Phase != runner.Running || run.BootID != f.s.options.BootID {
-		return errors.New("Task Runner binding is stale")
+	if run == nil || run.Phase != tasks.Running || run.BootID != f.s.options.BootID {
+		return errors.New("local task run binding is stale")
 	}
 	var checkpoint agent.Checkpoint
 	if err = core.DecodeJSON(run.Context, &checkpoint); err != nil {
@@ -407,8 +353,19 @@ func (f *taskFeedback) claimModel(ctx context.Context, id string) error {
 	}
 	return nil
 }
-func (f *taskFeedback) LoadContext(context.Context) (json.RawMessage, error) { return nil, nil }
-func (f *taskFeedback) SaveContext(context.Context, json.RawMessage) error   { return nil }
+func (f *taskFeedback) LoadContext(ctx context.Context) (json.RawMessage, error) {
+	if err := f.current(ctx); err != nil {
+		return nil, err
+	}
+	r, err := f.s.RunJournal.Inspect(ctx, f.launch.ControlID, f.launch.TaskID, f.launch.RunID)
+	if err != nil {
+		return nil, err
+	}
+	return r.Context, nil
+}
+func (f *taskFeedback) SaveContext(ctx context.Context, raw json.RawMessage) error {
+	return f.s.RunJournal.SaveContext(ctx, f.launch.ControlID, f.launch.TaskID, f.launch.RunID, raw)
+}
 func (f *taskFeedback) RecordTurn(ctx context.Context, id string) error {
 	if id != f.launch.RunID {
 		return errors.New("Task turn differs")
@@ -440,31 +397,30 @@ func (s *Service) taskCompaction(ctx context.Context, owner, turn string, raw js
 	return s.recordCompaction(ctx, owner, turn, raw)
 }
 func (s *Service) resumeTaskAllowance(ctx context.Context) {
-	rows, err := s.Tasks.DB().QueryContext(ctx, "SELECT assistant_id,id FROM tasks WHERE phase='waiting' AND json_extract(body,'$.info.remote_waiting')=0 AND json_extract(body,'$.stop_mode')=''")
+	active, err := s.Tasks.LocalActive(ctx)
 	if err != nil {
 		return
 	}
-	pairs := [][2]string{}
-	for rows.Next() {
-		var owner, id string
-		if rows.Scan(&owner, &id) == nil {
-			pairs = append(pairs, [2]string{owner, id})
+	for _, task := range active {
+		if task.Phase != protocol.TaskWaiting || task.RemoteWaiting {
+			continue
 		}
-	}
-	rows.Close()
-	for _, pair := range pairs {
-		waiting, err := s.Usage.Waiting(ctx, pair[1])
+		waiting, err := s.Usage.Waiting(ctx, task.ID)
 		if err != nil || waiting == nil {
 			continue
 		}
-		ready, err := s.Usage.Ready(ctx, pair[1], storage.Now())
+		ready, err := s.Usage.Ready(ctx, task.ID, storage.Now())
 		if err == nil && ready {
-			s.Tasks.ResumeWaiting(ctx, pair[0], pair[1])
+			_ = s.Tasks.ResumeWaiting(ctx, task.AssistantID, task.ID)
 		}
 	}
 }
+
 func (f *taskFeedback) Settle(ctx context.Context) error {
-	return f.s.settleTaskOperations(ctx, f.launch.TaskID)
+	if err := f.s.settleTaskOperations(ctx, f.launch.TaskID); err != nil {
+		return err
+	}
+	return f.s.RunJournal.Settle(ctx, f.launch.ControlID, f.launch.TaskID, f.launch.RunID)
 }
 
 type taskFiles struct{ s *Service }

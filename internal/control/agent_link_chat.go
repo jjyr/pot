@@ -30,9 +30,9 @@ func (s *Service) linkChatTarget(ctx context.Context, link, assistant string) (a
 	if c.Directory == nil {
 		return c, agentlink.Identity{}, agentlink.ErrUnavailable
 	}
-	for _, a := range c.Directory.Assistants {
+	for _, a := range c.Directory.Assistants() {
 		if a.Address.AgentID == assistant {
-			return c, a, nil
+			return c, a.Identity, nil
 		}
 	}
 	return c, agentlink.Identity{}, agentlink.ErrNotFound

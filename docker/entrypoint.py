@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 POT = "/opt/pot/bin/pot"
 HOME = "/home/pot"
-ROOT = "/home/pot/.pot-go"
+ROOT = "/home/pot/.pot"
 BROWSER = "/home/pot/.pot-web"
 WORKSPACE = "/home/pot/workspaces"
 RESOURCES = "/opt/pot/Resources"

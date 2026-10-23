@@ -188,7 +188,7 @@ inspection, including the collapsed history record.
 Migrating a message address changes its field name, not its logical node ID,
 message ID, conversation, delivery receipt or processing state. Mailbox context
 keys are migrated with their full sender and recipient addresses. Task snapshots
-convert `info.address`; Task/Runner Control ownership stays intact.
+convert `info.address`; original task/run ownership stays intact.
 
 Existing Task input digests bind the complete original parent envelope, which
 need not be stored in the same database. These irreversible hashes cannot always

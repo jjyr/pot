@@ -120,7 +120,7 @@ func TestQueuedUserAndTaskOutcomesUseSeparateAggregatedModelTurns(t *testing.T) 
 	}
 	var taskIDs []string
 	for i, goal := range []string{"Task A\nworker goal A", "Task B\nworker goal B"} {
-		record, err := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: fmt.Sprintf("task-%d", i), Text: goal})
+		record, err := s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: fmt.Sprintf("task-%d", i), Text: goal})
 		if err != nil {
 			t.Fatal(err)
 		}

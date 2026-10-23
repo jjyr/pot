@@ -116,8 +116,8 @@ class GoPackaging(unittest.TestCase):
                 (source / "plugin.json").write_text(
                     json.dumps(
                         {
-                            "schema_version": 2,
-                            "id": name,
+                            "schema_version": 3,
+                            "name": name,
                             "version": "1",
                             "contributes": {"model_providers": contribution},
                         }

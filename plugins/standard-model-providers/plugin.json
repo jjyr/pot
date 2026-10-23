@@ -1,6 +1,5 @@
 {
-  "schema_version": 2,
-  "id": "standard-model-providers",
+  "schema_version": 3,
   "version": "0.1.0",
   "contributes": {
     "model_providers": {
@@ -10,16 +9,26 @@
           "name": "Standard model providers",
           "protocol": "openai_chat",
           "directory_provider": "*",
-          "capabilities": { "catalog": "http" }
+          "capabilities": {
+            "catalog": "http"
+          }
         },
         {
           "id": "custom",
           "name": "Custom API",
           "protocol": "openai_chat",
-          "protocols": ["openai_chat", "openai_responses", "anthropic_messages", "gemini"],
-          "capabilities": { "catalog": "http" }
+          "protocols": [
+            "openai_chat",
+            "openai_responses",
+            "anthropic_messages",
+            "gemini"
+          ],
+          "capabilities": {
+            "catalog": "http"
+          }
         }
       ]
     }
-  }
+  },
+  "name": "standard-model-providers"
 }

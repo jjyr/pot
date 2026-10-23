@@ -20,6 +20,9 @@ func (s *Service) openIntegrations() error {
 	if err != nil {
 		return err
 	}
+	if err = storage.ExportLocalExtensions(s.integrationDB, s.options.Root, s.options.AgentHome); err != nil {
+		return err
+	}
 	s.integrationAccounts = integrations.NewSQLAccounts(s.integrationDB)
 	s.integrationSecrets, err = secrets.Open(path, s.options.Keys)
 	if err != nil {

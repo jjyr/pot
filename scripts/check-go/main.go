@@ -91,7 +91,7 @@ func check() error {
 			}
 		}
 		base := strings.TrimPrefix(pkg.ImportPath, "github.com/jjyr/pot/internal/")
-		if base == "runner" {
+		if base == "tasks" {
 			for _, dep := range pkg.Deps {
 				for _, forbidden := range []string{"control", "runtime", "transport", "gateway", "secrets", "desktop"} {
 					prefix := "github.com/jjyr/pot/internal/" + forbidden

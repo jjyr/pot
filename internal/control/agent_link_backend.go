@@ -29,8 +29,7 @@ func (b potLinkBackend) ChatStatus(ctx context.Context, query agentlink.ChatLook
 
 func (b potLinkBackend) Directory(ctx context.Context) (agentlink.Directory, error) {
 	defs, e := b.s.Registry.Definitions(ctx)
-	d := agentlink.Directory{NodeID: b.s.options.RuntimeID, Name: "Pot", Adapter: "pot", Assistants: []agentlink.Identity{}}
-	d.Operations = map[string]agentlink.Description{}
+	d := agentlink.Directory{NodeID: b.s.options.RuntimeID, Name: "Pot", Adapter: "pot", Targets: []agentlink.Endpoint{}}
 	if e != nil {
 		return d, e
 	}
@@ -40,8 +39,7 @@ func (b potLinkBackend) Directory(ctx context.Context) (agentlink.Directory, err
 			return d, e
 		}
 		i.Avatar = a.Avatar
-		d.Assistants = append(d.Assistants, i)
-		d.Operations[a.ID] = agentlink.Description{Version: 1, Scope: "peer", Operations: append(agentlink.PeerOperations(), agentlink.AssistantProfile, agentlink.AssistantDelete)}
+		d.Targets = append(d.Targets, agentlink.Endpoint{Identity: i, Capabilities: agentlink.Description{Version: 1, Scope: "peer", Operations: append(agentlink.PeerOperations(), agentlink.AssistantProfile, agentlink.AssistantDelete)}})
 	}
 	var savedDefault string
 	e = b.s.integrationDB.QueryRowContext(ctx, "SELECT default_assistant_id FROM agent_link_node_settings WHERE singleton=1").Scan(&savedDefault)
@@ -61,9 +59,10 @@ func (b potLinkBackend) Directory(ctx context.Context) (agentlink.Directory, err
 	}
 	// Deleting a default does not silently designate another assistant. The
 	// directory remains useful for explicit targets while omission fails clearly.
-	for _, a := range d.Assistants {
+	for _, a := range d.Assistants() {
 		if a.Address.AgentID == savedDefault {
-			d.DefaultAssistantID = savedDefault
+			ref := a.Address
+			d.DefaultTarget = &ref
 			break
 		}
 	}
@@ -72,23 +71,23 @@ func (b potLinkBackend) Directory(ctx context.Context) (agentlink.Directory, err
 
 func callerKey(a protocol.AgentRef) string { raw, _ := json.Marshal(a); return string(raw) }
 func (b potLinkBackend) Submit(ctx context.Context, r agentlink.TaskRequest) (agentlink.Task, error) {
-	if r.Executor != "" {
+	if !agentlink.ValidTarget(r.Target) || r.Target.NodeID != b.s.options.RuntimeID || r.Target.Kind != "assistant" {
 		return agentlink.Task{}, agentlink.ErrUnsupported
 	}
 	if r.Configuration != nil {
-		if r.From.NodeID != b.s.options.RuntimeID || r.From.Kind != "assistant" || r.AssistantID != r.From.AgentID || r.Configuration.RequestID != r.RequestID || r.Configuration.Text != r.Text || r.Configuration.Target != nil || r.Configuration.LinkID != "" {
+		if r.From.NodeID != b.s.options.RuntimeID || r.From.Kind != "assistant" || r.Target.AgentID != r.From.AgentID || r.Configuration.RequestID != r.RequestID || r.Configuration.Text != r.Text || r.Configuration.Target != nil && *r.Configuration.Target != r.Target {
 			return agentlink.Task{}, agentlink.ErrUnauthorized
 		}
-		record, err := b.s.Tasks.Create(ctx, r.AssistantID, *r.Configuration)
+		record, err := b.s.Tasks.AcceptLocal(ctx, r.Target.AgentID, *r.Configuration)
 		if err != nil {
 			return agentlink.Task{}, err
 		}
 		b.s.wakeTasks()
-		identity, err := b.s.agentLinkIdentity(ctx, r.AssistantID)
+		identity, err := b.s.agentLinkIdentity(ctx, r.Target.AgentID)
 		if err != nil {
 			return agentlink.Task{}, err
 		}
-		return agentlink.Task{ID: record.Info.ID, RequestID: r.RequestID, Assistant: identity, State: string(record.Info.Phase), CreatedAt: time.UnixMilli(record.Info.CreatedAtMS), UpdatedAt: time.UnixMilli(record.Info.UpdatedAtMS)}, nil
+		return agentlink.Task{ID: record.Info.ID, RequestID: r.RequestID, Receiver: identity, State: string(record.Info.Phase), CreatedAt: time.UnixMilli(record.Info.CreatedAtMS), UpdatedAt: time.UnixMilli(record.Info.UpdatedAtMS)}, nil
 	}
 	b.s.linkMu.Lock()
 	defer b.s.linkMu.Unlock()
@@ -105,12 +104,9 @@ func (b potLinkBackend) Submit(ctx context.Context, r agentlink.TaskRequest) (ag
 		if err != nil {
 			return agentlink.Task{}, err
 		}
-		owner = r.AssistantID
-		if owner == "" {
-			owner = d.DefaultAssistantID
-		}
+		owner = r.Target.AgentID
 		found := false
-		for _, a := range d.Assistants {
+		for _, a := range d.Assistants() {
 			if a.Address.AgentID == owner {
 				found = true
 			}
@@ -118,7 +114,7 @@ func (b potLinkBackend) Submit(ctx context.Context, r agentlink.TaskRequest) (ag
 		if !found {
 			return agentlink.Task{}, agentlink.ErrNotFound
 		}
-		if !d.Operations[owner].Supports(agentlink.TaskSubmit) {
+		if !d.Capabilities(agentlink.AssistantTarget(d.NodeID, owner)).Supports(agentlink.TaskSubmit) {
 			return agentlink.Task{}, agentlink.ErrUnsupported
 		}
 		_, e = b.s.integrationDB.ExecContext(ctx, "INSERT INTO agent_link_received_tasks(id,caller,request_id,assistant_id,payload)VALUES(?,?,?,?,?)", id, caller, r.RequestID, owner, string(payload))
@@ -130,7 +126,7 @@ func (b potLinkBackend) Submit(ctx context.Context, r agentlink.TaskRequest) (ag
 	if r.Workspace != "" {
 		request.Workspace = protocol.TaskWorkspace{Kind: "directory", ProjectDir: r.Workspace}
 	}
-	record, e := b.s.Tasks.Create(ctx, owner, request)
+	record, e := b.s.Tasks.AcceptLocal(ctx, owner, request)
 	if e != nil {
 		return agentlink.Task{}, e
 	}
@@ -150,12 +146,12 @@ func (b potLinkBackend) task(ctx context.Context, from protocol.AgentRef, id str
 			if err != nil {
 				return agentlink.Task{}, err
 			}
-			if record != nil {
+			if record != nil && record.Execution == nil {
 				identity, err := b.s.agentLinkIdentity(ctx, from.AgentID)
 				if err != nil {
 					return agentlink.Task{}, err
 				}
-				result := agentlink.Task{ID: id, RequestID: record.Request.RequestID, Assistant: identity, State: string(record.Info.Phase), Error: record.Error, CreatedAt: time.UnixMilli(record.Info.CreatedAtMS), UpdatedAt: time.UnixMilli(record.Info.UpdatedAtMS)}
+				result := agentlink.Task{ID: id, RequestID: record.Request.RequestID, Receiver: identity, State: string(record.Info.Phase), Error: record.Error, CreatedAt: time.UnixMilli(record.Info.CreatedAtMS), UpdatedAt: time.UnixMilli(record.Info.UpdatedAtMS)}
 				if record.Outcome != nil {
 					result.Result = record.Outcome.Text
 				}
@@ -174,7 +170,7 @@ func (b potLinkBackend) task(ctx context.Context, from protocol.AgentRef, id str
 	if e != nil {
 		return agentlink.Task{}, e
 	}
-	if record == nil {
+	if record == nil || record.Execution != nil {
 		return agentlink.Task{}, agentlink.ErrNotFound
 	}
 	assistant, e := b.s.agentLinkIdentity(ctx, owner)
@@ -187,7 +183,7 @@ func (b potLinkBackend) task(ctx context.Context, from protocol.AgentRef, id str
 		}
 		assistant = agentlink.Identity{Address: protocol.AgentRef{NodeID: b.s.options.RuntimeID, Kind: "assistant", AgentID: owner}, Name: owner, Adapter: "pot"}
 	}
-	t := agentlink.Task{ID: id, RequestID: request, Assistant: assistant, State: string(record.Info.Phase), Error: record.Error, CreatedAt: time.UnixMilli(record.Info.CreatedAtMS), UpdatedAt: time.UnixMilli(record.Info.UpdatedAtMS)}
+	t := agentlink.Task{ID: id, RequestID: request, Receiver: assistant, State: string(record.Info.Phase), Error: record.Error, CreatedAt: time.UnixMilli(record.Info.CreatedAtMS), UpdatedAt: time.UnixMilli(record.Info.UpdatedAtMS)}
 	if record.Outcome != nil {
 		t.Result = record.Outcome.Text
 	}

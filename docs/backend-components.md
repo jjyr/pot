@@ -13,7 +13,7 @@ points; `internal/` contains product implementation. All packages share one root
 | `pkg/agent` | Injected model/tool loop, classified context, compaction and Skill metadata discovery |
 | `pkg/modelprotocol` | Pure Chat Completions, Responses, Anthropic Messages and Gemini codecs |
 | `pkg/composition` | goja orchestration, isolated worker process, turn-scoped exec/wait lifecycle |
-| `pkg/executor`, `pkg/pluginhost` | Commands, patches, tool process sessions and Control-local background/metadata readers |
+| `pkg/executor`, `pkg/pluginhost` | Commands, patches, tool process sessions and node-local background/metadata readers |
 | `pkg/storage` | SQLite transactions, messages, events and context persistence |
 | `pkg/instance`, `pkg/modeldirectory` | Private data-root identity/locking and provider model metadata |
 | `internal/assistant` | Identities, rules, conversation Threads, chat driver and durable mailboxes |
@@ -23,9 +23,8 @@ points; `internal/` contains product implementation. All packages share one root
 | `internal/gateway`, `internal/secrets` | Node-owned provider HTTP routes and encrypted credential references |
 | `pkg/integrations`, `pkg/integrations/github` | Independent service login, single-account connections and credential caching through injected account/Secrets stores; GitHub device authorization adapter |
 | `internal/usage` | Durable reservations, allowances, usage settlement, tools and compaction accounting |
-| `internal/control`, `internal/tasks`, `internal/schedule` | Local/peer operation adapters, product coordination, model selection, permissions, durable Tasks and schedules |
+| `internal/control`, `internal/tasks`, `internal/schedule` | Local/peer operation adapters, product coordination, model selection, permissions, durable Tasks, local execution/checkpoints/event logs and schedules |
 | `internal/nodeidentity` | Autonomous node signing identity and local machine labels |
-| `internal/runner` | Destination-local immutable Task launches, checkpoints, original command inputs/receipts and event logs |
 | `pkg/execution` | Shared destination Agent queue, concurrency, cancellation and uncertainty fences |
 | `pkg/terminal` | Ephemeral user-operated PTYs, bounded replay and explicit process cleanup |
 | `pkg/plugin` | Common Plugin manifests, discovery, confined asset access and tool-only snapshots |
@@ -40,16 +39,31 @@ points; `internal/` contains product implementation. All packages share one root
 `cmd/pot` hosts standalone Runtime and the explicitly configured browser service. `cmd/pot-composition-worker` supplies
 an isolated composition worker for embedding applications. Components are libraries in the
 same process unless a deployment or process-isolation boundary is explicit.
-Agent and Runner receive injected services. They neither import Control/Gateway
+Agent and task execution receive injected services. They neither import Control/Gateway
 nor acquire provider credentials. Runtime composes components through their APIs;
 HTTP adapters and databases stay with their owning components.
 
-Every product Agent invocation, including correspondence and result handling in the owning conversation, passes
-through the destination's shared execution manager. The owning node manages provider keys,
+Every local Pot Agent invocation, including correspondence and result handling in
+its owning conversation, passes through the shared execution manager. The owning
+node manages provider keys,
 approvals, accounting and global resources. Workers run on their owning node and use its local execution services.
 
-Plugin manifests and declared assets under `plugins/` are packaged runtime data.
-The Go host loads them independently of execution.
+Task operations and model task tools enter the same Agent Link operation port.
+The local Pot adapter accepts owner-authorized configuration through `AcceptLocal`;
+peer Pot and Codex adapters own their execution policy. All caller-facing Tasks,
+including linked submissions, share the Task database, list query, request
+receipts, outcome index and archive transaction. There is no parallel live
+Delegation catalogue in Control. Linked Tasks carry an execution binding instead
+of a local configuration or launch. The Pot adapter's local execution manager,
+run journal and cleanup proof remain receiver implementation details.
+Historical remote run records cannot enter local execution. Activity indicators,
+topology observations, maintenance and allowance recovery use the same
+receiver-ownership filter, separately from the location-independent catalogue.
+
+Builtin packages ship as runtime resources. User packages and Skills live in
+`~/.pot/plugins/<name>` and `~/.pot/skills/<name>`. File settings are read by the
+owning node; execution freezes selected resources in its local cache. The Go
+host loads manifests independently of execution.
 
 `mise run check:go` checks formatting, vet and architectural imports. Headless
 packages must not depend on Wails; execution components must not depend on product

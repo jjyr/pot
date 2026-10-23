@@ -196,7 +196,7 @@ func TestConfiguredModelTaskWorkspacesLive(t *testing.T) {
 			}
 			sub := service.Tasks.Subscribe()
 			defer sub.Close()
-			task, err := service.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: "workspace-" + test.name, Workspace: test.workspace, Text: "Verify prepared workspace\nUse apply_patch to create proof.txt containing WORKSPACE_LIVE_OK and any line required by the project instructions. Then use exec_command to verify pwd and proof.txt. For a Git repository also check git status --short. For verification use portable shell commands pwd, cat, printf, test and git; rg is not installed. Work in the supplied cwd, preserve existing project files and finish briefly. Do not start services or make external changes."})
+			task, err := service.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "workspace-" + test.name, Workspace: test.workspace, Text: "Verify prepared workspace\nUse apply_patch to create proof.txt containing WORKSPACE_LIVE_OK and any line required by the project instructions. Then use exec_command to verify pwd and proof.txt. For a Git repository also check git status --short. For verification use portable shell commands pwd, cat, printf, test and git; rg is not installed. Work in the supplied cwd, preserve existing project files and finish briefly. Do not start services or make external changes."})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -225,7 +225,7 @@ func TestConfiguredModelTaskWorkspacesLive(t *testing.T) {
 					t.Fatal(e)
 				}
 			}
-			w, err := service.RunnerJournal.TaskWorkspace(ctx, task.Info.ID)
+			w, err := service.RunJournal.TaskWorkspace(ctx, task.Info.ID)
 			if err != nil || w == nil {
 				t.Fatal(w, err)
 			}
