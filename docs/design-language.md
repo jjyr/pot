@@ -247,6 +247,9 @@ preview and unread count. Linked assistants add a Codex or remote Pot source ico
 and node name in these rows and the conversation title. Source markers remain
 visible while disconnected; they do not replace assistant avatars. Long names
 truncate with full-text tooltips and unread counts stay at the trailing edge.
+Unread reply counts use a solid terracotta badge with canvas-colored text and a
+semibold assistant name. The count and name weight supplement color; the badge
+stays distinct from selection, activity and approval states in both themes.
 Search filters names without changing the selected conversation. Registry order
 remains stable; node identity distinguishes duplicate names. Initial history does
 not count as unread. Opening the conversation clears its indicator. Offline,
