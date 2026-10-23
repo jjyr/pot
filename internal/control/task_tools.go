@@ -206,15 +206,8 @@ func (s *Service) productCall(ctx context.Context, owner, id, name string, args 
 		links, err := s.AgentLinks(ctx)
 		return map[string]any{"local": map[string]any{"runtime_id": s.options.RuntimeID, "policy": policy}, "agent_links": links}, err
 	case "list_assistants":
-		directory, err := s.MailDirectory(ctx)
-		if err == nil {
-			peers, e := s.agentLinkPeers(ctx, owner)
-			if e != nil {
-				return nil, e
-			}
-			directory.Assistants = append(directory.Assistants, peers...)
-		}
-		return map[string]any{"assistants": directory.Assistants}, err
+		assistants, err := s.ListAssistants(ctx)
+		return map[string]any{"assistants": assistants}, err
 	case "get_model_catalog":
 		var query ModelCatalogQuery
 		if err := core.DecodeJSON(args, &query); err != nil {
@@ -224,6 +217,23 @@ func (s *Service) productCall(ctx context.Context, owner, id, name string, args 
 	}
 	return nil, fmt.Errorf("unknown product tool %s", name)
 }
+
+// ListAssistants is the product tool's current address catalogue. Definitions
+// and receiver-owned directories are authoritative; contacts and presentation
+// caches never add selectable identities. Remote availability follows the
+// tool's existing link-state policy, independently of chat capabilities.
+func (s *Service) ListAssistants(ctx context.Context) ([]protocol.MailAssistant, error) {
+	directory, err := s.MailDirectory(ctx)
+	if err != nil {
+		return nil, err
+	}
+	peers, err := s.agentLinkPeers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return append(directory.Assistants, peers...), nil
+}
+
 func (s *Service) MailDirectory(ctx context.Context) (protocol.Directory, error) {
 	definitions, err := s.Registry.Definitions(ctx)
 	d := protocol.Directory{NodeID: s.options.RuntimeID, Assistants: []protocol.MailAssistant{}}

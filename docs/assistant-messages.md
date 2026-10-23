@@ -18,6 +18,16 @@ existing Agent Link lifecycle. An unreachable peer without deletion evidence
 retains its cached directory and the existing offline indication; opening the
 picker does not connect to peers or infer deletion from connectivity.
 
+The owning node's valid directory is the authority for current assistant
+identity. `list_assistants` uses the Control `ListAssistants` query over those
+same local definitions and saved receiver directories, with its existing remote
+availability policy. UI views can require capabilities such as `chat.read`;
+absence from that narrower view does not retire a profile, message or task
+target. A confirmed management deletion removes the full address from the saved
+directory before a best-effort refresh, so tools, completions and UI projections
+observe the retirement even when that refresh fails. A rejected deletion leaves
+the active directory intact.
+
 An Agent address is `{node_id, kind, agent_id}`. Model recipients may have
 kind `assistant` or `task`, or the original `user` address when replying to a
 direct Agent Link chat; Task addresses belong to their owning Control,
