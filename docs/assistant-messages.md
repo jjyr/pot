@@ -208,3 +208,27 @@ content, including sender, text and parent. This internal hash version does not
 accept old network address fields. Ordinary tool output, plugin state, historical
 model messages and provider replay remain opaque evidence. Migrations change only
 known typed address paths and keep uncertain executions fenced.
+
+## Conversation presentation
+
+Chat and Task transcripts share the communication tool disclosure. Its summary
+keeps the operation and resolved full-address identities, with a compact pair of
+avatar or brand endpoints and a static directional line. Names and brands come
+from the existing assistant directory/cache; unknown addresses keep a neutral
+node. Same-node mail is labeled “This node”; only different known node IDs use
+“Agent Link”. Offline is an endpoint property and never changes Task phase.
+
+Opening a message shows the complete parsed `text` through the shared safe
+Markdown renderer. Receive batches retain every envelope's own from/to/body;
+summary counts distinguish one sender with several messages from several sources.
+Incomplete arguments show preparation, and unavailable bodies point to the
+secondary Call details disclosure. That disclosure retains the tool name, full
+addresses, arguments, result and diagnostic output with copy controls. Tool
+failures have a separate error area.
+
+Only an explicit successful `accepted: true` receipt is labeled Accepted. Received
+here means the envelope entered this conversation; neither label implies delivery,
+reading or business processing. Envelopes have no sender timestamp, so none is
+invented. `create_task` is a distinct delegation operation with the existing Task
+detail entry; its tool receipt says Task created, while the detail owns current
+Task progress and approvals. Ordinary task guidance remains a message.

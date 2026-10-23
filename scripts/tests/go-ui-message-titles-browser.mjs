@@ -19,7 +19,7 @@ const expected=(key,name)=>translate(locale,'tool.'+key).replace('{name}',name);
 try{
   const incoming=card(message('incoming','receive_message',{messages:[{from:remote,text:'<script>window.injected=true</script>'},{from:remote,text:'Second receipt'}]}));
   const outbound=card(message('outbound','send_message',{to:local,text:'Synthetic message'}));
-  check(title(incoming)===expected('receiveMessageFrom','@Chef'),'incoming real sender name, deduplicated by address');
+  check(title(incoming)===expected('receiveMessageFrom','@Chef')+translate(locale,'tool.messageCount').replace('{count}','2'),'incoming real sender name, deduplicated by address');
   check(title(outbound)===expected('sendMessageTo','@Chef'),'outgoing actual recipient (including self)');
   check(incoming.element.querySelector('.agent-source')?.getAttribute('aria-label').includes('Other kitchen'),'duplicate names retain existing linked source identity');
   const composed=card({...message('composed','exec',{}),tool:{id:'composed',name:'exec',phase:'completed',script:{focus:{name:'send_message',args:{to:remote}},calls:[]}}});
@@ -35,14 +35,16 @@ try{
   for(const args of [null,'{"to":',{}, {to:{kind:'assistant'}}, {to:remote}])streaming.update(message('streaming','send_message',args));
   check(title(streaming)===expected('sendMessageTo','@Chef'),'streaming partial arguments recover');
   incoming.element.querySelector('summary').click();await frame();
-  check(incoming.element.open&&incoming.element.textContent.includes(remote.node_id),'expanded sender address remains inspectable');
+  check(incoming.element.open&&incoming.element.querySelector('.communication-text').textContent.includes('<script>'),'expanded receive shows the message directly');
   check(incoming.element.textContent.includes('<script>')&&!window.injected,'message HTML stays literal');
   outbound.element.querySelector('summary').click();await frame();
+  check(!outbound.element.querySelector('.tool-raw').open,'call details start collapsed');
+  outbound.element.querySelector('.tool-raw>summary').click();await frame();
   check(outbound.element.textContent.includes('send_message')&&outbound.element.textContent.includes('node_id'),'raw tool name and arguments remain in expanded details');
   const literal='<img src=x onerror="window.injected=true"> [名字] 🙂';
   client.assistants=client.assistants.map(item=>item.origin?{...item,name:literal,profile_name:literal}:item);
   incoming.update(cards[0].value);
-  check(title(incoming)===expected('receiveMessageFrom','@'+literal)&&!incoming.element.querySelector('img[src=x]'),'renamed display name is literal DOM text');
+  check(title(incoming)===expected('receiveMessageFrom','@'+literal)+translate(locale,'tool.messageCount').replace('{count}','2')&&!incoming.element.querySelector('img[src=x]'),'renamed display name is literal DOM text');
   check(incoming.element.open,'identity refresh preserves native disclosure');
   const wrapped=incoming.element.querySelector('.tool-title');
   check(wrapped.scrollWidth<=wrapped.clientWidth+1,'literal long display name wraps inside the summary');

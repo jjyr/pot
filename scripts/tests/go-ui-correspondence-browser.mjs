@@ -40,6 +40,7 @@ window.correspondenceFixture={errors,refresh(){version++;receive?.(snapshot());}
   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
   check(card.open&&card.textContent.includes(incoming.text),'expanded receipt contains the original text');
   check(!window.peerExecuted,'incoming HTML stays text');
+  check(getComputedStyle(card.querySelector('.communication-text')).fontSize==='14px','Chat communication body keeps its reading typography inside tool rows');
   this.refresh();await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
   check(root.querySelector('details.tool-call')===card&&card.open,'refresh preserves the receipt and disclosure');
   check(root.querySelectorAll('details.tool-call').length===2,'refresh never duplicates a receipt');

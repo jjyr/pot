@@ -4,6 +4,8 @@ import {renderMarkdown} from './markdown.mjs';
 import {createApprovalCard} from './approval-card.mjs';
 import {messageAddresses} from '../state/message-identities.mjs';
 import {assistantMention} from './assistant-mention.mjs';
+import {communication} from '../state/communication.mjs';
+import {createCommunication} from './communication.mjs';
 import {agentSource} from './connection-visuals.mjs';
 const n=(tag,cls='',text)=>{const node=document.createElement(tag);node.className=cls;if(text!==undefined)node.textContent=text;return node;};
 const pretty=value=>typeof value==='string'?value:JSON.stringify(value??null,null,2);
@@ -13,18 +15,23 @@ function scheduleClock(update){clocks.add(update);if(clockFrame)return;const fra
 
 
 // Stable nodes preserve native disclosure, selection and output scroll on updates.
-export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolveMessageIdentity=()=>undefined,machineLabel=()=>translate(locale(),'machine.unavailable'),onDecision,onLocate,onInteract=()=>{},downloadFile,acquireFileImage}={}){
+export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolveMessageIdentity=()=>undefined,messageActor=()=>undefined,onOpenTask,resolveTask,machineLabel=()=>translate(locale(),'machine.unavailable'),onDecision,onLocate,onInteract=()=>{},downloadFile,acquireFileImage}={}){
   const t=name=>translate(locale(),`tool.${name}`),root=n('details','tool-call'),summary=n('summary','tool-summary');
   root.dataset.cacheKey=`tool:${key}`;
   summary.addEventListener('click',onInteract);
   const title=n('span','tool-title'),excerpt=n('span','tool-excerpt'),status=n('span','tool-status'),duration=n('span','tool-duration');summary.append(title,excerpt,status,duration);
   const context=n('div','tool-context'),failure=n('p','tool-failure'),body=n('div','tool-body'),metadata=n('dl','tool-metadata'),approval=n('div','tool-approval'),children=n('div','tool-children'),sections=n('div'),raw=n('details','tool-raw'),rawTitle=n('summary'),rawBody=n('div');raw.append(rawTitle,rawBody);body.append(failure,metadata,approval,children,sections,raw);summary.append(context);root.append(summary,body);
+  const communicationView=createCommunication({locale,resolveIdentity:resolveMessageIdentity,downloadFile,acquireFileImage,onOpenTask,resolveTask});
+  summary.append(communicationView.summary);body.insertBefore(communicationView.body,sections);
   let current,options={},signature='',approvalID='',approvalCard=null,rawSignature='',autoOpened=false,building=false,refreshStatus=()=>{};
   let bodyVersion=[];
   const sectionsByKey=new Map();
   root.open=memory.get(key)?.open||false;raw.open=memory.get(key)?.raw||false;
   function messageTitle(tool){
+    const model=communication(tool,messageActor());
+    if(model?.kind==='delegate'){const target=communicationView.taskTarget(model);title.textContent=target.named?t('delegateTaskTo').replace('{name}','@'+target.label):t('delegateTask');title.title=title.textContent;return true;}
     const addresses=messageAddresses(tool);if(!addresses)return false;
+    if(model?.kind==='receive'&&model.sources.length>1){title.textContent=t(model.sources.every(address=>address?.kind==='assistant')?'receiveMessageSources':'receiveMessageParticipants').replace('{count}',model.sources.length.toLocaleString(locale()));title.title=title.textContent;return true;}
     const participants=n('span'),seen=new Set();
     for(const address of addresses.length?addresses:[undefined]){
       const identity=JSON.stringify([address?.node_id,address?.kind,address?.agent_id]);if(seen.has(identity))continue;seen.add(identity);
@@ -37,6 +44,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     }
     const [prefix,suffix]=t(tool.name==='receive_message'?'receiveMessageFrom':'sendMessageTo').split('{name}');
     title.replaceChildren(document.createTextNode(prefix),...participants.childNodes,document.createTextNode(suffix));
+    if(model?.kind==='receive'&&model.count>1)title.append(document.createTextNode(t('messageCount').replace('{count}',model.count.toLocaleString(locale()))));
     title.title=title.textContent;return true;
   }
   const remember=()=>{if(!building)memory.set(key,{...memory.get(key),open:root.open,raw:raw.open});};root.addEventListener('toggle',()=>{remember();refreshStatus();if(current)update(current,options);});raw.addEventListener('toggle',()=>{remember();if(current)update(current,options);});
@@ -61,7 +69,14 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     current=message;options=next;const tool=message.tool;if(!tool)return;
     const result=tool.process?tool.process.result:toolResult(tool),pending=next.approval,script=tool.script,isGroup=tool.name==='script_group';
     root.classList.toggle('script-group',isGroup);root.classList.toggle('script-run',!!script&&!isGroup);
+    const model=communication(tool,messageActor()),summaryModel=model||(!isGroup&&script?.focus?communication(script.focus,messageActor()):null);
     metadata.hidden=isGroup;raw.hidden=isGroup;
+    if(model){if(metadata.parentElement!==rawBody)rawBody.prepend(metadata);}else if(metadata.parentElement!==body)body.insertBefore(metadata,approval);
+    communicationView.update(summaryModel,{expanded:root.open&&!!model&&!pending,preparing:tool.phase==='preparing'});
+    communicationView.body.hidden=!model||!!pending;
+    root.classList.toggle('communication-tool',!!summaryModel);
+    // Receive records are a history projection, not a timed network operation.
+    duration.hidden=model?.kind==='receive';
 
     const phase=pending?'waiting_approval':tool.phase;
     const names={exec_command:'command',write_stdin:'session',apply_patch:'patch',exec:'script',wait:'wait',cua_repl:'computer',create_task:'createTask',set_task_dispositions:'setTaskDispositions',get_task:'getTask',wait_task:'waitTask',update_agent_profile:'updateProfile',register_resource:'registerResource',present_resource:'presentResource'};
@@ -76,6 +91,10 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
       let shown=phase;
       if((isGroup&&['completed','failed','denied'].includes(phase))||(!root.open&&['failed','denied'].includes(phase)))shown='ended';
       if(phase==='completed'&&result?.completed===false&&result?.exec_id&&!script)shown='scriptYielded';
+      if(model?.kind==='receive'&&phase==='completed')shown='messageReceived';
+      else if(model?.kind==='send'&&model.accepted)shown='messageAccepted';
+      else if(model?.kind==='send'&&phase==='completed')shown='ended';
+      else if(model?.kind==='delegate'&&phase==='completed')shown=model.task?'messageTaskCreated':'ended';
       status.textContent=t(next.offline&&activeTool(tool)?'reconnecting':shown);
       if(childTools.length&&!script&&!tool.process){const complete=childTools.filter(child=>!activeTool(child)).length;if(complete<childTools.length&&!next.offline)status.textContent=t(childTools.filter(activeTool).every(child=>child.phase==='waiting_approval')?'waiting_approval':'scriptRunning');status.textContent+=` · ${complete}/${childTools.length}`;}
     };
@@ -115,13 +134,8 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     for(const item of sectionsByKey.values())item.box.hidden=true;
     if(isGroup)return;
     const args=tool.args||{};
-    if(pending){/* The exact approval arguments above are the operation preview. */}
-    else if(tool.name==='receive_message'){
-      for(const [index,message] of (args.messages||[]).entries()){
-        section(`sender-${index}`,t('sender'),message.from);
-        section(`message-${index}`,t('message'),message.text||'');
-      }
-    }
+    if(model){/* Message text is rendered once, above the secondary raw disclosure. */}
+    else if(pending){/* The exact approval arguments above are the operation preview. */}
     else if(tool.name==='exec_command')section('input',t('command'),args.cmd||'');
     else if(['exec','cua_repl'].includes(tool.name))section('input',t('code'),args.code||'');
     else if(tool.name==='apply_patch'){
@@ -134,6 +148,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
       if(actions.length)section('input',t('sessionActions'),actions.join('\n'));
     }else section('input',t('arguments'),args);
     const output=(tool.output||[]).map(chunk=>`${chunk.stream?`[${chunk.stream}]\n`:''}${chunk.text}`).join('\n');
+    if(!model){
     if(output)section('output',t('output'),output,{output:true});
     else if(activeTool(tool)&&!pending&&phase!=='waiting_approval'&&!['exec','wait'].includes(tool.name))section('output',t('output'),t('noOutput'),{output:true});
     if(result!==undefined){
@@ -149,9 +164,10 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
         if(media.result!==result){media.result=result;media.box.replaceChildren();for(const block of images){const img=n('img');img.alt=t('image');img.loading='lazy';img.src=`data:${block.mimeType};base64,${block.data}`;media.box.append(img);}}
       }else section('result',t('result'),result);
     }
-    rawTitle.textContent=t('raw');if(!raw.open)return;
+    }
+    rawTitle.textContent=t(model?'callDetails':'raw');if(!raw.open)return;
     const calls=tool.process?.calls||script?.calls||[tool],rawValue=JSON.stringify([locale(),calls]);
-    if(rawSignature!==rawValue){rawSignature=rawValue;rawBody.replaceChildren();for(const call of calls){rawBody.append(n('p','tool-call-id',script||tool.process?`${call.name} · ${call.id}`:call.id),n('p','tool-call-time',call.started_at_ms?new Date(call.started_at_ms).toLocaleString(locale()):''));for(const [label,value]of [[t('arguments'),call.args],[t('result'),call.result]])if(value!==undefined){const text=pretty(value),head=n('div','tool-section-heading');head.append(n('strong','',label),copyButton(t('copyJSON'),()=>text));rawBody.append(head,n('pre','tool-code',text.slice(0,LIMIT)));if(text.length>LIMIT)rawBody.append(n('p','tool-truncated',t('displayTruncated')));}}}
+    if(rawSignature!==rawValue){rawSignature=rawValue;rawBody.replaceChildren(...(model?[metadata]:[]));for(const call of calls){rawBody.append(n('p','tool-call-id',`${call.name} · ${call.id}`),n('p','tool-call-time',call.started_at_ms?new Date(call.started_at_ms).toLocaleString(locale()):''));for(const [label,value]of [[t('arguments'),call.args],[t('result'),call.result],...(model?[[t('output'),call.output]]:[])])if(value!==undefined){const text=pretty(value),head=n('div','tool-section-heading');head.append(n('strong','',label),copyButton(t('copyJSON'),()=>text));rawBody.append(head,n('pre','tool-code',text.slice(0,LIMIT)));if(text.length>LIMIT)rawBody.append(n('p','tool-truncated',t('displayTruncated')));}}}
   }
   function tick(){if(!root.isConnected||!activeTool(current?.tool))return false;if(document.hidden)return true;const tool=current.tool,waiting=options.approval||tool.phase==='waiting_approval',start=tool.script?tool.started_at_ms:waiting?(tool.waiting_at_ms||tool.started_at_ms):tool.running_at_ms||tool.started_at_ms;if(start)duration.textContent=`${waiting&&!tool.script?t('waited')+' ':''}${Math.max(0,Math.floor((Date.now()-start)/1000))}s`;return true;}
   return {element:root,children,update};

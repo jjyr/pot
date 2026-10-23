@@ -172,6 +172,13 @@ phone-width iframe. `?locale=zh-CN` starts in Chinese; each run also switches th
 locale of mounted titles. Add `verify=1` to the correspondence fixture above to
 check Chat names, directory renames and draft preservation automatically.
 
+For message-body, multi-source batching, acceptance, delegation and identity
+presentation checks, open `/scripts/tests/fixtures/communication.html` on that
+loopback server. It runs shared DOM assertions with synthetic complete addresses,
+partial arguments and error receipts, including live locale/directory updates and
+a 390 px iframe. Use `?locale=zh-CN&theme=dark`; `phone=1` constrains the fixture
+itself to the phone width. No message or Task is sent.
+
 For the resource tool and component fixture, run
 `POT_RESOURCE_FIXTURE_URL_FILE=/tmp/pot-resource-url mise exec -- go test
 ./internal/transport -run '^TestResourceBrowserFixture$' -v -count=1 -timeout=35m`.
