@@ -1,0 +1,46 @@
+name: Linux release channel
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      channel:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: pot-github-assets-${{ inputs.version }}
+      cancel-in-progress: false
+    env:
+      RELEASE_CHANNEL: ${{ inputs.channel }}
+      RELEASE_SHA: ${{ inputs.sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: ${{ inputs.channel == 'server' && 'package-cli-linux-*' || 'package-desktop-linux-amd64' }}
+          merge-multiple: true
+          path: dist
+      - name: Verify this channel only
+        run: python3 scripts/prepare-release '${{ inputs.version }}' dist --channel "$RELEASE_CHANNEL"
+      - name: Add immutable channel assets
+        run: python3 scripts/publish-release '${{ inputs.version }}' dist --channel "$RELEASE_CHANNEL"

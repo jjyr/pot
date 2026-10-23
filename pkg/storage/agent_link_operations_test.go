@@ -52,17 +52,22 @@ func TestAgentLinkOperationsUpgradePreservesReceiptsAndRestrictsCapabilities(t *
 		Peer      map[string]any `json:"peer_host"`
 		Directory struct {
 			Capabilities json.RawMessage
-			Operations   map[string]struct {
-				Version    int
-				Scope      string
-				Operations []string
+			Targets      []struct {
+				Capabilities struct {
+					Version    int
+					Scope      string
+					Operations []string
+				}
 			}
 		}
 	}
 	if err = json.Unmarshal([]byte(raw), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	ops := decoded.Directory.Operations["agent"]
+	if len(decoded.Directory.Targets) != 1 {
+		t.Fatal(raw)
+	}
+	ops := decoded.Directory.Targets[0].Capabilities
 	if decoded.ID != "link" || decoded.State != "active" || decoded.Peer["public_key"] != "pin" || len(decoded.Directory.Capabilities) != 0 || ops.Version != 1 || ops.Scope != "peer" || strings.Join(ops.Operations, ",") != "chat.read,chat.send,chat.receipt" {
 		t.Fatal(raw)
 	}

@@ -44,7 +44,7 @@ func TestHumanApprovalResumesOnlyOriginalOperation(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			from := protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}
-			accepted, err := b.Submit(ctx, agentlink.TaskRequest{From: from, Executor: "codex", RequestID: "request", Text: "approve"})
+			accepted, err := b.Submit(ctx, agentlink.TaskRequest{From: from, Target: agentlink.NodeTarget(b.nodeID), RequestID: "request", Text: "approve"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -119,7 +119,7 @@ func TestAssistantMessageDeniesWithoutUserApproval(t *testing.T) {
 	b := testBackend(t)
 	ctx := context.Background()
 	from := protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}
-	accepted, err := submitMessageFixture(b, ctx, agentlink.TaskRequest{From: from, AssistantID: "codex", RequestID: "message", Text: "approve"})
+	accepted, err := submitMessageFixture(b, ctx, agentlink.TaskRequest{From: from, Target: agentlink.AssistantTarget(b.nodeID, "codex"), RequestID: "message", Text: "approve"})
 	if err != nil {
 		t.Fatal(err)
 	}

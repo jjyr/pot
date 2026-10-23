@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/modelprotocol"
 )
@@ -46,12 +47,13 @@ func (s *Service) retryDeliveredTask(ctx context.Context, owner, turn string, ar
 	if err := s.deliveredTask(ctx, owner, turn, request.TaskID); err != nil {
 		return nil, err
 	}
-	record, err := s.Tasks.Retry(ctx, owner, request.TaskID, request.Instructions)
+	body, _ := json.Marshal(map[string]string{"instructions": request.Instructions})
+	info, err := s.CallAgent(ctx, owner, agentlink.TaskRetry, agentlink.Call{ID: request.TaskID, Body: body})
 	if err != nil {
 		return nil, err
 	}
 	s.wakeTasks()
-	return json.Marshal(record.Info)
+	return json.Marshal(info)
 }
 
 func (s *Service) resultRetryTools(ctx context.Context, owner, turn string) ([]modelprotocol.ToolDefinition, error) {

@@ -65,7 +65,7 @@ func TestAgentHostMCPDirectoryWithoutCompetingInboxReader(t *testing.T) {
 		t.Fatal(result, err)
 	}
 	raw, _ := json.Marshal(result)
-	if !strings.Contains(string(raw), "default_assistant_id") || strings.Contains(string(raw), h.token) {
+	if !strings.Contains(string(raw), "default_target") || strings.Contains(string(raw), h.token) {
 		t.Fatal("bad directory result", string(raw))
 	}
 	updated, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "pot_update_profile", Arguments: map[string]any{"assistant_id": "codex", "name": "MCP assistant"}})
@@ -399,7 +399,7 @@ func TestAgentHostPeerDeliveryRemainsUnreadUntilCodexReads(t *testing.T) {
 	if json.Unmarshal(w.Body.Bytes(), &snapshot) != nil || len(snapshot.Items) != 1 {
 		t.Fatal(w.Body.String())
 	}
-	if snapshot.Directory.NodeID != b.identity.Address.NodeID || snapshot.Directory.DefaultAssistantID != "codex" || len(snapshot.Directory.Assistants) != 1 || snapshot.Directory.Assistants[0].Address != b.identity.Address {
+	if snapshot.Directory.NodeID != b.identity.Address.NodeID || snapshot.Directory.DefaultAssistant() != "codex" || len(snapshot.Directory.Assistants()) != 1 || snapshot.Directory.Assistants()[0].Address != b.identity.Address {
 		t.Fatal("local node directory mismatch", w.Body.String())
 	}
 	item := snapshot.Items[0]

@@ -68,6 +68,11 @@ original continuation boundary. Continuation survives bounded reset/delta reads
 even when its original input is outside the loaded message window.
 `view.messages` contains message envelopes (`message`, decimal-string `sequence`,
 `version`, optional `context_only`); `view.history` describes the loaded interval.
+Correspondence inputs also carry UI-only `correspondence` envelopes read from
+the original inbox batch journal. Snapshot, delta and history reads project the
+same incoming-message disclosure record. This metadata is not persisted into the
+conversation message or used as model history; the system reference input is
+already part of the owning assistant's transcript.
 `view.replies` describes per-input execution using `input_id`, `state`, optional
 `error` and `uncertain`. States are pending, queued, running, waiting, paused,
 cancelling, completed, failed, cancelled and unknown. Pending means a locally
@@ -145,6 +150,17 @@ paused reading restores a message or task anchor; restoration callbacks are
 scoped to the originating navigation generation.
 
 Main Chat mounts measured windows around the viewport with pixel overscan.
+The overscan covers two viewports in each direction and grows ahead of fast
+scrolling by up to two more. A window prepares incoming rows before retiring
+outgoing rows and retains up to 32 detached rows within a 2 MiB estimate of message
+content and DOM text for nearby returns. Data eviction and owner changes retire
+these rows too. Detached
+media release their leases; reconnecting them uses the shared resource cache.
+Scroll-only updates reuse the conversation's message projection and tool forest;
+new data, send state and connectivity invalidate that projection. Task transcripts
+likewise reuse their projection until their next update. Collapsed tools build
+their summaries and approval controls first; output and raw JSON render only when
+their respective disclosures open.
 Expanded tool children have their own windows sharing the chat scroller. Resize
 observers update placeholders; message-ID anchors compensate for prepend,
 attachment decoding, disclosure, viewport and font changes. Focus and selected
@@ -188,8 +204,9 @@ Snapshot refresh retains composer nodes, drafts and reading position. It follows
 the bottom only when the reader was already near it; otherwise the latest-message
 action remains available. Upward wheel, touch and keyboard gestures pause following
 immediately, including small movements within the bottom proximity threshold.
-Following resumes at the bottom or through Latest. Older history starts loading
-within one viewport of the top (at least 180 px); upward gestures also trigger it
+Following resumes at the bottom or through Latest. Older and newer history start
+prefetching within two viewports of the relevant edge (at least 360 px), extending
+up to four viewports with observed scroll speed and request latency. Upward gestures also trigger it
 when the loaded content cannot scroll. Page reads remain serialized and preserve
 the visible message anchor. When the complete conversation fits in the viewport,
 upward gestures leave it still, without history reads or a Latest action; new
@@ -228,7 +245,7 @@ than being classified as a service disconnection.
 
 ## Task execution transcripts
 
-`GET /api/v1/tasks/{id}/events?after=...&limit=...` pages the original Runner's
+`GET /api/v1/tasks/{id}/events?after=...&limit=...` pages the original run's
 durable ordered log. Each row has an outer sequence and its execution update:
 message boundaries, text deltas, tool starts/output/results and turn outcomes.
 The reply contains `cursor`, `has_more` and `unavailable`. Historical remote pages
@@ -238,7 +255,7 @@ direct unsupported requests return a capability error. The original execution
 owner remains fixed.
 
 [`state/task-transcript.mjs`](../web/src/state/task-transcript.mjs) incrementally
-reduces each ordered batch and ignores duplicates. New Runner output invalidates
+reduces each ordered batch and ignores duplicates. New execution output invalidates
 Tasks; an open Task detail fetches only rows after its cursor. Incremental DOM
 updates preserve the guidance draft instead of rebuilding the form. Pagination
 rejects a non-advancing cursor. Tools remain expandable and file links retain the

@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""Build a complete native Linux desktop package (no release publication)."""
+
+import argparse
+import os
+from pathlib import Path
+import platform
+import re
+import shutil
+import subprocess
+import tarfile
+import tempfile
+
+from go_packaging import BUILD, ROOT, call, digest, go_build, linker_flags, prepare_resources
+
+
+def write_deb(staged, work, archive, version, arch, binary):
+    """Write the standard ar/debian-binary/control/data format using binutils."""
+    # Record the actual build host's libc ABI floor; a newer host must not silently
+    # produce a package advertised as compatible with an older distribution.
+    symbols = subprocess.check_output(["readelf", "--version-info", binary], text=True)
+    versions = re.findall(r"GLIBC_(\d+)\.(\d+)", symbols)
+    floor = ".".join(max(versions, key=lambda v: tuple(map(int, v))))
+    control = work / "control"
+    control.mkdir()
+    (control / "control").write_text(
+        f"Package: pot-desktop\nVersion: {version}\nArchitecture: {arch}\n"
+        "Section: utils\nPriority: optional\nMaintainer: Pot <pot@users.noreply.github.com>\n"
+        f"Installed-Size: {sum(p.stat().st_size for p in staged.rglob('*') if p.is_file()) // 1024}\n"
+        f"Depends: libc6 (>= {floor}), libgtk-3-0, libwebkit2gtk-4.1-0, dbus-user-session, bubblewrap, socat\n"
+        "Recommends: git, ripgrep\nHomepage: https://github.com/jjyr/pot\n"
+        "Description: Pot desktop assistant and local Runtime\n"
+        " Shared native desktop UI, Agent Links, bundled Node, plugins and Skills.\n"
+    )
+    for name, source in (("control", control), ("data", staged)):
+        with tarfile.open(work / f"{name}.tar.gz", "w:gz", dereference=False) as target:
+            for child in sorted(source.iterdir()):
+                target.add(child, arcname="./" + child.name)
+    (work / "debian-binary").write_text("2.0\n")
+    subprocess.run(
+        ["ar", "qc", archive, "debian-binary", "control.tar.gz", "data.tar.gz"],
+        cwd=work,
+        check=True,
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--platform", required=True, choices=("linux-amd64", "linux-arm64"))
+    parser.add_argument("--output", type=Path, default=BUILD / "dist")
+    args = parser.parse_args()
+    native = "linux-" + {"x86_64": "amd64", "aarch64": "arm64"}.get(
+        platform.machine(), "unsupported"
+    )
+    if platform.system() != "Linux" or args.platform != native:
+        parser.error(
+            "Linux desktop packages require a native Linux runner of the target architecture"
+        )
+    version = os.environ.get("POT_APP_VERSION", "0.1.0")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        parser.error("POT_APP_VERSION must be major.minor.patch")
+    BUILD.mkdir(parents=True, exist_ok=True)
+    output = args.output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    archive = output / f"pot-desktop_{version}_{args.platform.replace('-', '_')}.deb"
+    with tempfile.TemporaryDirectory(prefix=".desktop-", dir=BUILD) as temporary:
+        work = Path(temporary)
+        staged = work / "package"
+        install = staged / "opt/pot-desktop"
+        resources = install / "Resources"
+        prepare_resources(resources, args.platform)
+        binary = install / "bin/pot-app"
+        binary.parent.mkdir(parents=True)
+        call(
+            [
+                "go",
+                "build",
+                "-mod=readonly",
+                "-trimpath",
+                "-tags=production,gtk3,desktop",
+                "-ldflags=" + linker_flags(),
+                "-o",
+                binary,
+                "./cmd/pot-app",
+            ],
+            env={**os.environ, "CGO_ENABLED": "1"},
+        )
+        go_build("./cmd/pot", install / "bin/pot", args.platform)
+        call(
+            [
+                "python3",
+                ROOT / "scripts/go-notices",
+                "--output",
+                resources / "GoDependencyLicenses.txt",
+                "./cmd/pot-app",
+                "./cmd/pot",
+            ],
+            env={**os.environ, "CGO_ENABLED": "1", "GOFLAGS": "-tags=gtk3,desktop"},
+        )
+        # No update.json: replacing a distribution-managed /opt tree through the
+        # App updater is not supported. Upgrade the complete .deb while stopped.
+        for name, relative in (
+            ("pot-desktop.desktop", "usr/share/applications/pot-desktop.desktop"),
+            ("pot-desktop", "usr/bin/pot-desktop"),
+        ):
+            destination = staged / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / "packaging/desktop" / name, destination)
+        icon = staged / "usr/share/icons/hicolor/128x128/apps/pot-desktop.png"
+        icon.parent.mkdir(parents=True)
+        shutil.copy2(ROOT / "resources/app/assets/Pot128.png", icon)
+        staged_archive = work / archive.name
+        write_deb(staged, work, staged_archive, version, args.platform.split("-")[1], binary)
+        staged_archive.replace(archive)
+    archive.with_suffix(".deb.sha256").write_text(f"{digest(archive)}  {archive.name}\n")
+    print(archive)
+
+
+if __name__ == "__main__":
+    main()

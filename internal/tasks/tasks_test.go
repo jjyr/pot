@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 	"path/filepath"
@@ -14,28 +13,30 @@ import (
 )
 
 type fakePort struct {
-	mu       sync.Mutex
-	runs     map[string]runner.Run
-	launches int
-	stops    int
-	lose     bool
+	mu          sync.Mutex
+	runs        map[string]Run
+	launches    int
+	inspections int
+	stops       int
+	lose        bool
 }
 
-func (p *fakePort) Launch(_ context.Context, l runner.Launch) (runner.Run, error) {
+func (p *fakePort) Launch(_ context.Context, l Launch) (Run, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.launches++
 	hash, _ := l.Digest()
-	run := runner.Run{SchemaVersion: runner.SchemaVersion, Launch: l, LaunchDigest: hash, BootID: "boot", Phase: runner.Running, StartedAtMS: time.Now().UnixMilli()}
+	run := Run{SchemaVersion: SchemaVersion, Launch: l, LaunchDigest: hash, BootID: "boot", Phase: Running, StartedAtMS: time.Now().UnixMilli()}
 	p.runs[l.RunID] = run
 	if p.lose {
-		return runner.Run{}, errors.New("ack lost")
+		return Run{}, errors.New("ack lost")
 	}
 	return run, nil
 }
-func (p *fakePort) Inspect(_ context.Context, control, task, run string) (*runner.Run, error) {
+func (p *fakePort) Inspect(_ context.Context, control, task, run string) (*Run, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.inspections++
 	r, ok := p.runs[run]
 	if !ok {
 		return nil, nil
@@ -50,9 +51,20 @@ func (p *fakePort) Stop(_ context.Context, control, task, run, mode string) erro
 	defer p.mu.Unlock()
 	p.stops++
 	r := p.runs[run]
-	r.Phase = runner.Cancelled
+	r.Phase = Cancelled
 	r.CleanupConfirmed = true
-	r.Result = &runner.Terminal{Outcome: core.Cancelled}
+	r.Result = &Terminal{Outcome: core.Cancelled}
+	p.runs[run] = r
+	return nil
+}
+func (p *fakePort) Resume(_ context.Context, node, task, run string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	r, ok := p.runs[run]
+	if !ok || r.Launch.ControlID != node || r.Launch.TaskID != task {
+		return fmt.Errorf("original run unavailable")
+	}
+	r.Phase = Accepted
 	p.runs[run] = r
 	return nil
 }
@@ -68,25 +80,24 @@ func selection(t *testing.T) Selection {
 	}
 	return Selection{Config: config, Plugins: []string{}}
 }
-func fixture(t *testing.T) (*Service, *fakePort, *core.ExecutionTarget, string) {
+func fixture(t *testing.T) (*Service, *fakePort, string) {
 	t.Helper()
-	p := &fakePort{runs: map[string]runner.Run{}}
-	target := core.RuntimeTarget("machine")
+	p := &fakePort{runs: map[string]Run{}}
 	path := filepath.Join(t.TempDir(), "tasks.sqlite")
 	selected := selection(t)
-	s, err := Open(path, Options{ControlID: "control", RuntimeID: "machine", Port: p, ResolveModel: func(context.Context, string, protocol.CreateTask) (Selection, error) { return selected, nil }, ResolveTarget: func(context.Context, string) (core.ExecutionTarget, error) { return target, nil }})
+	s, err := Open(path, Options{NodeID: "machine", Executor: p, ResolveModel: func(context.Context, string, protocol.CreateTask) (Selection, error) { return selected, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
-	return s, p, &target, path
+	return s, p, path
 }
 func TestOriginalStartTimeFromDelayedReceiptsSurvivesRestart(t *testing.T) {
-	for _, phase := range []runner.Phase{runner.Running, runner.Waiting, runner.Complete} {
+	for _, phase := range []Phase{Running, Waiting, Complete} {
 		t.Run(string(phase), func(t *testing.T) {
 			ctx := context.Background()
-			s, p, _, path := fixture(t)
-			record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "clock", Text: "work"})
+			s, p, path := fixture(t)
+			record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "clock", Text: "work"})
 			if err != nil || record.Info.StartedAtMS != 0 {
 				t.Fatal("queued Task must not start the clock", record, err)
 			}
@@ -101,8 +112,8 @@ func TestOriginalStartTimeFromDelayedReceiptsSurvivesRestart(t *testing.T) {
 			run := p.runs[record.RunID]
 			run.StartedAtMS = record.Info.CreatedAtMS + 60000
 			run.Phase = phase
-			if phase == runner.Complete {
-				run.Result = &runner.Terminal{Outcome: core.Success, Text: "done"}
+			if phase == Complete {
+				run.Result = &Terminal{Outcome: core.Success, Text: "done"}
 				run.CleanupConfirmed = true
 			}
 			p.runs[record.RunID] = run
@@ -130,9 +141,9 @@ func TestOriginalStartTimeFromDelayedReceiptsSurvivesRestart(t *testing.T) {
 
 func TestTasksOnSameMachineLaunchIndependently(t *testing.T) {
 	ctx := context.Background()
-	s, p, _, _ := fixture(t)
+	s, p, _ := fixture(t)
 	for _, requestID := range []string{"first", "second"} {
-		if _, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: requestID, Text: "work"}); err != nil {
+		if _, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: requestID, Text: "work"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -143,14 +154,13 @@ func TestTasksOnSameMachineLaunchIndependently(t *testing.T) {
 		t.Fatal("independent tasks on the same machine did not both launch", p.launches)
 	}
 }
-func TestLostLaunchAckInspectsOriginalAndPinsCurrentDispatchPolicy(t *testing.T) {
+func TestUnconfirmedLocalLaunchInspectsOriginalAcrossRestart(t *testing.T) {
 	ctx := context.Background()
-	s, p, target, path := fixture(t)
-	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "create", Text: "work"})
+	s, p, path := fixture(t)
+	record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "create", Text: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	*target = core.RuntimeTarget("machine")
 	p.lose = true
 	if err := s.Tick(ctx); err != nil {
 		t.Fatal(err)
@@ -159,7 +169,6 @@ func TestLostLaunchAckInspectsOriginalAndPinsCurrentDispatchPolicy(t *testing.T)
 	if p.launches != 1 || !current.Info.RemoteWaiting || current.Info.ExecutionTarget.RuntimeID != "machine" {
 		t.Fatal(current, p.launches)
 	}
-	*target = core.RuntimeTarget("other")
 	if err := s.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -183,30 +192,36 @@ func TestLostLaunchAckInspectsOriginalAndPinsCurrentDispatchPolicy(t *testing.T)
 }
 func TestIdempotencyOwnershipGuidanceReferencesAndStop(t *testing.T) {
 	ctx := context.Background()
-	s, p, _, _ := fixture(t)
+	s, p, _ := fixture(t)
+	calls := 0
+	resolve := s.options.ResolveModel
+	s.options.ResolveModel = func(ctx context.Context, owner string, request protocol.CreateTask) (Selection, error) {
+		calls++
+		return resolve(ctx, owner, request)
+	}
 	request := protocol.CreateTask{RequestID: "create", Text: "work"}
-	record, err := s.Create(ctx, "assistant", request)
+	record, err := s.AcceptLocal(ctx, "assistant", request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := s.Create(ctx, "assistant", request)
-	if err != nil || again.Info.ID != record.Info.ID {
+	again, err := s.AcceptLocal(ctx, "assistant", request)
+	if err != nil || again.Info.ID != record.Info.ID || calls != 1 {
 		t.Fatal(again, err)
 	}
 	request.Text = "changed"
-	if _, err := s.Create(ctx, "assistant", request); err == nil {
+	if _, err := s.AcceptLocal(ctx, "assistant", request); err == nil {
 		t.Fatal("changed identity accepted")
 	}
 	if other, err := s.Get(ctx, "other", record.Info.ID); err != nil || other != nil {
 		t.Fatal("owner leaked", other, err)
 	}
-	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "guidance", protocol.AgentRef{NodeID: s.ControlID(), Kind: "assistant", AgentID: "assistant"}, "new work"); err != nil {
+	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "guidance", protocol.AgentRef{NodeID: s.NodeID(), Kind: "assistant", AgentID: "assistant"}, "new work"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "operator-guidance", protocol.AgentRef{NodeID: s.ControlID(), Kind: "user", AgentID: "assistant"}, "operator direction"); err != nil {
+	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "operator-guidance", protocol.AgentRef{NodeID: s.NodeID(), Kind: "user", AgentID: "assistant"}, "operator direction"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "operator-guidance", protocol.AgentRef{NodeID: s.ControlID(), Kind: "assistant", AgentID: "assistant"}, "operator direction"); err == nil {
+	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "operator-guidance", protocol.AgentRef{NodeID: s.NodeID(), Kind: "assistant", AgentID: "assistant"}, "operator direction"); err == nil {
 		t.Fatal("assistant retry changed operator provenance")
 	}
 	inputsBefore, err := s.Inputs(ctx, "assistant", record.Info.ID)
@@ -230,7 +245,7 @@ func TestIdempotencyOwnershipGuidanceReferencesAndStop(t *testing.T) {
 	if err := s.Stop(ctx, "assistant", record.Info.ID, "interrupt"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "late", protocol.AgentRef{NodeID: s.ControlID(), Kind: "assistant", AgentID: "assistant"}, "unsafe"); err == nil {
+	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "late", protocol.AgentRef{NodeID: s.NodeID(), Kind: "assistant", AgentID: "assistant"}, "unsafe"); err == nil {
 		t.Fatal("guidance during stop accepted")
 	}
 	if err := s.Tick(ctx); err != nil {
@@ -240,7 +255,7 @@ func TestIdempotencyOwnershipGuidanceReferencesAndStop(t *testing.T) {
 	if current.Info.Phase != protocol.TaskInterrupted || p.stops != 1 {
 		t.Fatal(current, p.stops)
 	}
-	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "reference", protocol.AgentRef{NodeID: s.ControlID(), Kind: "assistant", AgentID: "trusted-sender"}, "data only"); err != nil {
+	if err := s.SendMessage(ctx, "assistant", record.Info.ID, "reference", protocol.AgentRef{NodeID: s.NodeID(), Kind: "assistant", AgentID: "trusted-sender"}, "data only"); err != nil {
 		t.Fatal(err)
 	}
 	inputs, err := s.Inputs(ctx, "assistant", record.Info.ID)
@@ -257,8 +272,8 @@ func TestIdempotencyOwnershipGuidanceReferencesAndStop(t *testing.T) {
 }
 func TestTaskWaitCursorSuppressesUnchangedAndWakesOnCompletion(t *testing.T) {
 	ctx := context.Background()
-	s, p, _, _ := fixture(t)
-	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "create", Text: "work"})
+	s, p, _ := fixture(t)
+	record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "create", Text: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,8 +293,8 @@ func TestTaskWaitCursorSuppressesUnchangedAndWakesOnCompletion(t *testing.T) {
 	}()
 	p.mu.Lock()
 	run := p.runs[record.RunID]
-	run.Phase = runner.Complete
-	run.Result = &runner.Terminal{Outcome: core.Success, Text: "done"}
+	run.Phase = Complete
+	run.Result = &Terminal{Outcome: core.Success, Text: "done"}
 	run.CleanupConfirmed = true
 	p.runs[record.RunID] = run
 	p.mu.Unlock()
@@ -304,8 +319,8 @@ func TestTaskWaitCursorSuppressesUnchangedAndWakesOnCompletion(t *testing.T) {
 
 func TestTaskApprovalStateWakesWaitAndResumesOriginalRun(t *testing.T) {
 	ctx := context.Background()
-	s, p, _, _ := fixture(t)
-	record, err := s.Create(ctx, "assistant", protocol.CreateTask{RequestID: "approval", Text: "work"})
+	s, p, _ := fixture(t)
+	record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "approval", Text: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,11 +366,11 @@ func TestTaskApprovalStateWakesWaitAndResumesOriginalRun(t *testing.T) {
 	}
 }
 func TestCreateRollbackDoesNotLeaveReceiptOrInput(t *testing.T) {
-	s, _, _, _ := fixture(t)
+	s, _, _ := fixture(t)
 	if _, err := s.db.Exec(`CREATE TRIGGER fail_tasks BEFORE INSERT ON tasks BEGIN SELECT RAISE(ABORT,'disk fixture');END`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Create(context.Background(), "assistant", protocol.CreateTask{RequestID: "create", Text: "work"}); err == nil {
+	if _, err := s.AcceptLocal(context.Background(), "assistant", protocol.CreateTask{RequestID: "create", Text: "work"}); err == nil {
 		t.Fatal("failure hidden")
 	}
 	for _, table := range []string{"tasks", "task_writes", "task_inputs"} {

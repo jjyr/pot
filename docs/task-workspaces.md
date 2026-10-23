@@ -1,11 +1,13 @@
 # Task workspace selection
 
-Runtime prepares and records one destination-local workspace before starting a
-Task Agent. See [Executor](executor.md) for process lifetime and authorization.
+The receiving Pot adapter prepares and records one local workspace before
+starting a Task Agent. Other adapters own their workspace rules; directing nodes
+do not prepare a local workspace for linked execution. See [Executor](executor.md)
+for process lifetime and authorization.
 
 ## Selection rules
 
-Each Task has one effective execution workspace on its fixed destination Runtime.
+Each local Pot execution has one effective workspace on its receiving node.
 Apply these rules in order:
 
 | Task intent | Workspace |
@@ -164,11 +166,12 @@ a `project_dir` is supplied, in which case it selects direct directory use.
 The invoking model selects `worktree` for feature development in Git repositories.
 An omitted feature branch becomes `codex/task-TASK_ID`.
 
-Runner schema 7 persists the preparation fence and resolved workspace alongside
-the original launch. Preparation interrupted before a ready receipt is not
-automatically replayed; inspect its original effects. Task schema 9 includes the
-structured intent in launch and creation receipts. Older schemas are rejected;
-production upgrades require an explicit data conversion before switching builds.
+Run schema 7 persists the preparation fence and resolved workspace alongside
+the original launch in `tasks.sqlite`. Task schema 12 includes the structured
+intent in launch and creation receipts. Admission creates both records in one
+transaction. Preparation interrupted before a ready receipt is not automatically
+replayed; inspect its original effects. Supported upgrades run through the
+[database migrations](database-migrations.md).
 
 Git preparation is supervised and follows the destination machine policy.
 Protected Git preparation uses SRT, including its normal host prerequisites.

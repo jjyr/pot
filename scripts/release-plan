@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""Resolve a CI source once and decide whether publication is authorized by the event."""
+
+import json
+import os
+import re
+import subprocess
+
+from release_contract import VERSION
+
+
+def plan(event, selected_ref, requested_ref, pr, publish, selected_sha, resolve):
+    if pr and requested_ref:
+        raise ValueError("choose either ref or pr")
+    if pr and not re.fullmatch(r"[1-9][0-9]*", pr):
+        raise ValueError("PR number must be a positive integer")
+    ref = requested_ref or selected_ref
+    if (
+        ref.startswith("-")
+        or subprocess.run(
+            ["git", "check-ref-format", "--allow-onelevel", ref],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+    ):
+        raise ValueError("invalid source ref")
+    sha = resolve(f"pulls/{pr}", ".head.sha") if pr else selected_sha
+    if requested_ref:
+        sha = resolve(f"commits/{ref}", ".sha")
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise ValueError("unable to resolve a source commit")
+    match = re.fullmatch(r"refs/tags/v(" + VERSION + r")", ref)
+    official = not pr and bool(match) and (event == "push" or publish)
+    if publish and not official:
+        raise ValueError("publication requires an existing refs/tags/vMAJOR.MINOR.PATCH and no PR")
+    if official:
+        tag_sha = resolve(f"commits/{ref}", ".sha")
+        if tag_sha != sha:
+            raise ValueError("release tag does not identify the selected commit")
+    return {
+        "sha": sha,
+        "version": match.group(1) if match else "0.0.0",
+        "official": str(official).lower(),
+    }
+
+
+def main():
+    repository = os.environ["GITHUB_REPOSITORY"]
+
+    def resolve(endpoint, query):
+        return subprocess.check_output(
+            ["gh", "api", f"repos/{repository}/{endpoint}", "--jq", query], text=True
+        ).strip()
+
+    result = plan(
+        os.environ["GITHUB_EVENT_NAME"],
+        os.environ["GITHUB_REF"],
+        os.environ.get("SOURCE_REF", ""),
+        os.environ.get("PR_NUMBER", ""),
+        os.environ.get("PUBLISH", "false") == "true",
+        os.environ["GITHUB_SHA"],
+        resolve,
+    )
+    with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+        for name, value in result.items():
+            output.write(f"{name}={value}\n")
+    print(json.dumps(result))
+
+
+if __name__ == "__main__":
+    main()

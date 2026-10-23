@@ -39,7 +39,7 @@ func (m *Mailbox) ClaimMailBatch(ctx context.Context, seed protocol.Envelope) (M
 	err := storage.Transaction(ctx, m.db, func(tx *sql.Tx) error {
 		var state string
 		var body []byte
-		err := tx.QueryRowContext(ctx, `SELECT state,envelope FROM agent_messages m WHERE id=? AND direction='in' AND state IN ('queued','waiting') AND json_extract(envelope,'$.kind')='message'`+blockedMailGroup, seed.ID).Scan(&state, &body)
+		err := tx.QueryRowContext(ctx, `SELECT state,envelope FROM agent_messages m WHERE id=? AND direction='in' AND state='queued' AND json_extract(envelope,'$.kind')='message'`+blockedMailGroup, seed.ID).Scan(&state, &body)
 		if err != nil {
 			return err
 		}
@@ -50,36 +50,18 @@ func (m *Mailbox) ClaimMailBatch(ctx context.Context, seed protocol.Envelope) (M
 		if !sameEnvelope(stored, seed) {
 			return errors.New("mail batch seed changed")
 		}
-		if state == "waiting" {
-			err = tx.QueryRowContext(ctx, "SELECT batch FROM agent_delivery_items WHERE message=?", seed.ID).Scan(&batch.ID)
-			if err != nil {
-				return err
-			}
-			rows, err := tx.QueryContext(ctx, "SELECT envelope FROM agent_messages WHERE id IN (SELECT message FROM agent_delivery_items WHERE batch=?) AND state='waiting' ORDER BY sequence", batch.ID)
-			if err != nil {
-				return err
-			}
-			batch.Messages, err = readBatchRows(rows)
-			if err != nil {
-				return err
-			}
-			if len(batch.Messages) == 0 || batch.Messages[0].ID != batch.ID {
-				return errors.New("waiting batch membership is incomplete")
-			}
-		} else {
-			rows, err := tx.QueryContext(ctx, `SELECT envelope FROM agent_messages WHERE direction='in' AND state='queued' AND recipient=? AND json_extract(envelope,'$.kind')='message' AND json_extract(envelope,'$.from.node_id')=? AND json_extract(envelope,'$.from.kind')=? AND json_extract(envelope,'$.from.agent_id')=? ORDER BY sequence LIMIT ?`, seed.To.AgentID, seed.From.NodeID, seed.From.Kind, seed.From.AgentID, inbox.MaxBatchMessages)
-			if err != nil {
-				return err
-			}
-			batch.Messages, err = readBatchRows(rows)
-			if err != nil {
-				return err
-			}
-			if len(batch.Messages) == 0 || batch.Messages[0].ID != seed.ID {
-				return errors.New("mail batch seed is not oldest")
-			}
-			batch.ID = seed.ID
+		rows, err := tx.QueryContext(ctx, `SELECT envelope FROM agent_messages WHERE direction='in' AND state='queued' AND recipient=? AND json_extract(envelope,'$.kind')='message' AND json_extract(envelope,'$.from.node_id')=? AND json_extract(envelope,'$.from.kind')=? AND json_extract(envelope,'$.from.agent_id')=? ORDER BY sequence LIMIT ?`, seed.To.AgentID, seed.From.NodeID, seed.From.Kind, seed.From.AgentID, inbox.MaxBatchMessages)
+		if err != nil {
+			return err
 		}
+		batch.Messages, err = readBatchRows(rows)
+		if err != nil {
+			return err
+		}
+		if len(batch.Messages) == 0 || batch.Messages[0].ID != seed.ID {
+			return errors.New("mail batch seed is not oldest")
+		}
+		batch.ID = seed.ID
 		for _, message := range batch.Messages {
 			if err := claimBatchItem(ctx, tx, batch.ID, message.ID, state); err != nil {
 				return err

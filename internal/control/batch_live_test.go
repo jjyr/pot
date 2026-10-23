@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jjyr/pot/internal/runner"
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
@@ -196,8 +196,8 @@ func TestDeepSeekCategoryBatchesLive(t *testing.T) {
 	}
 	// Inject a model-service failure after the real model requests the harmless
 	// command. Main/Summary and peer services are retained.
-	prepare := s.Runner.Prepare
-	s.Runner.Prepare = func(ctx context.Context, r runner.Run) (runner.Prepared, error) {
+	prepare := s.TaskRuns.Prepare
+	s.TaskRuns.Prepare = func(ctx context.Context, r tasks.Run) (tasks.Prepared, error) {
 		p, e := prepare(ctx, r)
 		if e == nil && strings.HasPrefix(r.Launch.Text, "TASK_BETA") {
 			p.Agent.Services = &liveBatchFailingContinuation{Services: p.Agent.Services}
@@ -246,7 +246,7 @@ func TestDeepSeekCategoryBatchesLive(t *testing.T) {
 	}
 	var taskIDs []string
 	for i, goal := range goals {
-		r, e := s.Tasks.Create(ctx, "main", protocol.CreateTask{RequestID: fmt.Sprintf("task-%d", i), Text: goal})
+		r, e := s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: fmt.Sprintf("task-%d", i), Text: goal})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -285,8 +285,8 @@ func TestDeepSeekCategoryBatchesLive(t *testing.T) {
 	}
 	destination := protocol.AgentRef{NodeID: "live", Kind: "assistant", AgentID: "main"}
 	peerInputs := []struct{ owner, text string }{
-		{alpha.ID, "请协助确认简单算式 6×6；反馈中标记 PEER_ALPHA_ONE。"},
-		{beta.ID, "请确认 8×8，以 PEER_BETA_ONE 标记，只反馈本发送者内容。"},
+		{alpha.ID, "请协助确认简单算式 6×6；通过 send_message 向本发送者反馈，标记 PEER_ALPHA_ONE。"},
+		{beta.ID, "请确认 8×8，通过 send_message 向本发送者反馈，以 PEER_BETA_ONE 标记，只反馈本发送者内容。"},
 		{alpha.ID, "补充同一批反馈：3×7，标记 PEER_ALPHA_TWO；两项一起简短反馈即可。"},
 	}
 	var mail []protocol.Envelope
@@ -383,20 +383,8 @@ func TestDeepSeekCategoryBatchesLive(t *testing.T) {
 		{mail[0], []string{"PEER_ALPHA_ONE", "36", "PEER_ALPHA_TWO", "21"}, "PEER_BETA"},
 		{mail[1], []string{"PEER_BETA_ONE", "64"}, "PEER_ALPHA"},
 	} {
-		_, raw, e := s.Mailbox.Session(ctx, group.seed, spec)
-		if e != nil {
-			t.Fatal(e)
-		}
-		var checkpoint agent.Checkpoint
-		if e = json.Unmarshal(raw, &checkpoint); e != nil {
-			t.Fatal(e)
-		}
+
 		text := ""
-		for _, m := range checkpoint.Messages {
-			if m.Role == "assistant" {
-				text += m.Text
-			}
-		}
 		history, e := s.Mailbox.History(ctx, group.seed.From.AgentID, 0)
 		if e != nil {
 			t.Fatal(e)
@@ -422,10 +410,10 @@ func TestDeepSeekCategoryBatchesLive(t *testing.T) {
 		if r.Category == "summary" && !containsAll(last, "TASK_ALPHA", "TASK_BETA", `"phase":"failed"`, `"phase":"complete"`) {
 			t.Fatal("task results did not share one model request")
 		}
-		if r.Category == "peer-alpha" && (!containsAll(string(r.Body), "PEER_ALPHA_ONE", "PEER_ALPHA_TWO") || strings.Contains(string(r.Body), "PEER_BETA")) {
+		if r.Category == "peer-alpha" && (!containsAll(last, "PEER_ALPHA_ONE", "PEER_ALPHA_TWO") || strings.Contains(last, "PEER_BETA")) {
 			t.Fatal("Alpha model context split or mixed")
 		}
-		if r.Category == "peer-beta" && strings.Contains(string(r.Body), "PEER_ALPHA") {
+		if r.Category == "peer-beta" && strings.Contains(last, "PEER_ALPHA") {
 			t.Fatal("Beta model context mixed")
 		}
 	}
@@ -456,21 +444,19 @@ func batchRequestCategory(body []byte) (string, string) {
 		}
 	}
 	if strings.Contains(fields.Messages[0].Content, "Process background updates") {
-		return "summary", last
-	}
-	if strings.Contains(fields.Messages[0].Content, "Complete the assigned task.") {
-		return "worker", last
-	}
-	for _, m := range fields.Messages {
-		if strings.Contains(m.Content, `key="assistant-mail"`) {
-			if strings.Contains(m.Content, "PEER_ALPHA") {
+		if strings.Contains(last, `"kind":"message"`) {
+			if strings.Contains(last, "PEER_ALPHA") {
 				return "peer-alpha", last
 			}
-			if strings.Contains(m.Content, "PEER_BETA") {
+			if strings.Contains(last, "PEER_BETA") {
 				return "peer-beta", last
 			}
 			return "peer-other", last
 		}
+		return "summary", last
+	}
+	if strings.Contains(fields.Messages[0].Content, "Complete the assigned task.") {
+		return "worker", last
 	}
 	// Chat batches now retain separate original messages and stable IDs. Ignore
 	// context sections and inspect the newest consecutive conversation inputs.

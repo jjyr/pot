@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+"""Fail before publication when the complete release configuration is unavailable."""
+
+import os
+import subprocess
+
+from release_contract import version_number
+
+if os.environ.get("POT_MACOS_RELEASE_ENABLED") != "true":
+    raise SystemExit(
+        "Release disabled: configure the protected release environment and POT_MACOS_RELEASE_ENABLED=true"
+    )
+required = [
+    "POT_UPDATE_PUBLIC_KEY",
+    "POT_UPDATE_PRIVATE_KEY",
+    "MACOS_CERTIFICATE_P12",
+    "MACOS_CERTIFICATE_PASSWORD",
+    "MACOS_SIGNING_IDENTITY",
+    "APPLE_ID",
+    "APPLE_TEAM_ID",
+    "APPLE_APP_PASSWORD",
+]
+missing = [name for name in required if not os.environ.get(name)]
+if missing:
+    raise SystemExit("Incomplete release configuration: " + ", ".join(missing))
+version = version_number(os.environ["RELEASE_VERSION"])
+sha = subprocess.check_output(
+    [
+        "gh",
+        "api",
+        f"repos/{os.environ['GITHUB_REPOSITORY']}/commits/refs/tags/v{version}",
+        "--jq",
+        ".sha",
+    ],
+    text=True,
+).strip()
+if sha != os.environ["RELEASE_SHA"]:
+    raise SystemExit("Release tag moved after validation")
+# Validate the key pair without writing a private key or publishing a feed.
+subprocess.run(
+    ["go", "run", "./scripts/sign-release", "sign"],
+    input=b"release preflight",
+    stdout=subprocess.DEVNULL,
+    check=True,
+)
+print("Stable tag and complete signing configuration verified")

@@ -2,14 +2,13 @@
 """Build a release ZIP, checksum and matching Homebrew cask."""
 
 import argparse
-import hashlib
 import os
 from pathlib import Path
 import platform
 import plistlib
-import re
-import shutil
 import subprocess
+
+from release_contract import generate_cask, version_number, write_checksum
 
 REPO = Path(__file__).resolve().parents[1]
 APP = REPO / ".local/go/Pot.app"
@@ -30,13 +29,8 @@ def package(app, output, version):
         ["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(app), str(archive)],
         check=True,
     )
-    with archive.open("rb") as source:
-        digest = hashlib.file_digest(source, "sha256").hexdigest()
-    (output / f"{archive.name}.sha256").write_text(f"{digest}  {archive.name}\n")
-    template = (REPO / "packaging/homebrew/pot.rb.in").read_text()
-    (output / "pot.rb").write_text(
-        template.replace("@VERSION@", version).replace("@SHA256@", digest)
-    )
+    write_checksum(archive)
+    generate_cask(version, output)
     print(archive)
 
 
@@ -44,20 +38,24 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("version", help="Release version, e.g. 0.1.0 or v0.1.0")
     parser.add_argument("--output", type=Path, default=REPO / ".local/releases")
+    parser.add_argument("--app-only", action="store_true", help="Build only the macOS App archive")
     args = parser.parse_args()
-    version = args.version.removeprefix("v")
-    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
-        parser.error("version must be a numeric major.minor.patch version")
+    try:
+        version = version_number(args.version)
+    except ValueError as error:
+        parser.error(str(error))
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         parser.error("release builds require Apple Silicon macOS")
     env = dict(os.environ, POT_APP_RELEASE="1", POT_APP_VERSION=version)
     subprocess.run(["python3", str(REPO / "scripts/build-go-app")], check=True, env=env)
     package(APP, args.output.resolve(), version)
+    if args.app_only:
+        return
     for target in ["darwin-arm64", "linux-amd64", "linux-arm64"]:
         subprocess.run(
             [
                 "python3",
-                str(REPO / "scripts/build-go-cli"),
+                str(REPO / "scripts/package-server"),
                 "--platform",
                 target,
                 "--output",

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jjyr/pot/internal/runner"
+	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/executor"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -19,12 +19,12 @@ func bindTestWorkspace(t *testing.T, s *Service, task, dir string) string {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	l := runner.Launch{ControlID: s.options.RuntimeID, RuntimeID: s.options.RuntimeID, AssistantID: "main", TaskID: task, RunID: "fixture-" + task, Generation: 1, ExecutionTarget: core.RuntimeTarget(s.options.RuntimeID), Config: taskConfig(t), Plugins: []string{}, Text: "fixture", Workspace: protocol.TaskWorkspace{Kind: "directory", ProjectDir: dir}}
+	l := tasks.Launch{ControlID: s.options.RuntimeID, RuntimeID: s.options.RuntimeID, AssistantID: "main", TaskID: task, RunID: "fixture-" + task, Generation: 1, ExecutionTarget: core.RuntimeTarget(s.options.RuntimeID), Config: taskConfig(t), Plugins: []string{}, Text: "fixture", Workspace: protocol.TaskWorkspace{Kind: "directory", ProjectDir: dir}}
 	ctx := context.Background()
-	if _, err := s.RunnerJournal.Accept(ctx, l); err != nil {
+	if _, err := s.RunJournal.Accept(ctx, l); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RunnerJournal.Claim(ctx, l.ControlID, task, l.RunID); err != nil {
+	if _, err := s.RunJournal.Claim(ctx, l.ControlID, task, l.RunID); err != nil {
 		t.Fatal(err)
 	}
 	w, err := s.prepareTaskWorkspace(ctx, l, MachinePolicy{ExecutionAccess: "allow"})
@@ -33,13 +33,13 @@ func bindTestWorkspace(t *testing.T, s *Service, task, dir string) string {
 	}
 	return w.Path
 }
-func workspaceLaunch(t *testing.T, s *Service, id string, intent protocol.TaskWorkspace) runner.Launch {
+func workspaceLaunch(t *testing.T, s *Service, id string, intent protocol.TaskWorkspace) tasks.Launch {
 	t.Helper()
-	l := runner.Launch{ControlID: "local", RuntimeID: "local", AssistantID: "main", TaskID: id, RunID: "run-" + id, Generation: 1, ExecutionTarget: core.RuntimeTarget("local"), Config: taskConfig(t), Plugins: []string{}, Text: "workspace fixture", Workspace: intent}
-	if _, err := s.RunnerJournal.Accept(context.Background(), l); err != nil {
+	l := tasks.Launch{ControlID: "local", RuntimeID: "local", AssistantID: "main", TaskID: id, RunID: "run-" + id, Generation: 1, ExecutionTarget: core.RuntimeTarget("local"), Config: taskConfig(t), Plugins: []string{}, Text: "workspace fixture", Workspace: intent}
+	if _, err := s.RunJournal.Accept(context.Background(), l); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RunnerJournal.Claim(context.Background(), "local", id, l.RunID); err != nil {
+	if _, err := s.RunJournal.Claim(context.Background(), "local", id, l.RunID); err != nil {
 		t.Fatal(err)
 	}
 	return l
@@ -188,17 +188,17 @@ func TestTemporaryWorkspaceRetainsOriginalAndFencesLostPreparation(t *testing.T)
 	if err != nil || w2.Path != w.Path {
 		t.Fatal(w2, err)
 	}
-	if err = s.RunnerJournal.RecordCleanup(ctx, l.ControlID, l.TaskID, l.RunID); err != nil {
+	if err = s.RunJournal.RecordCleanup(ctx, l.ControlID, l.TaskID, l.RunID); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.RunnerJournal.Finish(ctx, l.ControlID, l.TaskID, l.RunID, runner.Terminal{Outcome: core.Success}); err != nil {
+	if err = s.RunJournal.Finish(ctx, l.ControlID, l.TaskID, l.RunID, tasks.Terminal{Outcome: core.Success}); err != nil {
 		t.Fatal(err)
 	}
 	l.RunID = "resume-temporary"
-	if _, err = s.RunnerJournal.Accept(ctx, l); err != nil {
+	if _, err = s.RunJournal.Accept(ctx, l); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.RunnerJournal.Claim(ctx, l.ControlID, l.TaskID, l.RunID); err != nil {
+	if _, err = s.RunJournal.Claim(ctx, l.ControlID, l.TaskID, l.RunID); err != nil {
 		t.Fatal(err)
 	}
 	resumed, err := s.prepareTaskWorkspace(ctx, l, MachinePolicy{ExecutionAccess: "allow"})
@@ -218,7 +218,7 @@ func TestTemporaryWorkspaceRetainsOriginalAndFencesLostPreparation(t *testing.T)
 		t.Fatal("replaced directory accepted for downloads")
 	}
 	interrupted := workspaceLaunch(t, s, "interrupted", protocol.TaskWorkspace{})
-	s.RunnerJournal.BeginWorkspace(ctx, interrupted.ControlID, interrupted.TaskID, interrupted.RunID)
+	s.RunJournal.BeginWorkspace(ctx, interrupted.ControlID, interrupted.TaskID, interrupted.RunID)
 	if _, err = s.prepareTaskWorkspace(ctx, interrupted, MachinePolicy{ExecutionAccess: "allow"}); err == nil {
 		t.Fatal("uncertain preparation replayed")
 	}

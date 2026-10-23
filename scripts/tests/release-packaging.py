@@ -7,11 +7,13 @@ import platform
 import plistlib
 import runpy
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
 
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "scripts"))
 package = runpy.run_path(str(REPO / "scripts/release"))["package"]
 
 

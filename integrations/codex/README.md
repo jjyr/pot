@@ -18,7 +18,7 @@ in reported task counts. Directional pending-message summaries are scoped to the
 authenticated peer. Pot displays these summaries in the existing icon topology.
 
 ```text
-Pot assistant -- create_task(executor=codex) --> task T --> Codex thread T
+Pot assistant -- create_task(target=node address) --> task T --> Codex thread T
       ^                    | approval / result                 |
       +--------------------+-----------------------------------+
 Pot assistant -- send_message --> Codex assistant --> message thread
@@ -38,7 +38,7 @@ The receiving host chooses the Codex login, model, workspace and sandbox mode.
 Only the user in the directing assistant can approve that assistant's explicitly
 delegated Codex task operations. Assistant messages carry no approval authority;
 requests needing a human decision are declined and reported to the sender.
-See [task and approval contract](../../docs/task-coordination.md#codex-execution).
+See [task and approval contract](../../docs/task-coordination.md#agent-execution).
 ## Install and connect
 
 Install from the same revision as Pot:
@@ -145,10 +145,12 @@ upgrade rules.
 
 ### Human approvals in Pot
 
-`create_task({executor:"codex", text:"Title\nInstructions"})` chooses the sole
-available Codex node; set `link_id` to choose explicitly when several are connected.
-Do not supply an assistant target. Omission of `executor` retains existing task
-execution. Unavailable or ambiguous Codex selection fails without fallback.
+Select this Adapter's advertised node address with
+`create_task({target:{node_id:"<node>",kind:"node",agent_id:"<node>"},text:"Title\nInstructions"})`.
+Copy the address from `list_execution_targets`; connection routing is internal.
+An omitted target uses the current assistant. Assistant targets and node task
+execution are distinct advertised endpoints. Unavailable or unsupported targets
+fail without fallback.
 
 The host's independent task execution scope initially uses its isolated read-only
 workspace. Configure future tasks locally with:

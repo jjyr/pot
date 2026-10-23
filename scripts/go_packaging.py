@@ -306,6 +306,12 @@ def package_plugins(destination):
         if not manifest_path.is_file():
             continue
         manifest = json.loads(manifest_path.read_text())
+        if (
+            manifest.get("schema_version") != 3
+            or manifest.get("name") != source.name
+            or "id" in manifest
+        ):
+            raise ValueError("plugin name must match its directory in schema 3")
         contributions = manifest["contributes"]
         if not contributions or set(contributions) - {
             "tools",

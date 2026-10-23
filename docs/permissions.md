@@ -9,7 +9,7 @@ directing assistant's existing approval UI. Codex's own approval policy and
 automatic reviewer remain effective on the receiving host; automatic review
 events and decisions are neither transmitted through Agent Link nor shown in
 Pot. Assistant messages never carry approval authority or forward user approvals.
-See [Codex execution](task-coordination.md#codex-execution).
+See [Agent execution](task-coordination.md#agent-execution).
 
 ## Machine defaults and command rules
 

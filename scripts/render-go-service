@@ -6,7 +6,7 @@ from pathlib import Path
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--binary", type=Path, required=True)
-parser.add_argument("--root", type=Path, default=Path.home() / ".pot-go")
+parser.add_argument("--root", type=Path, default=Path.home() / ".pot")
 parser.add_argument("--output", type=Path, required=True)
 parser.add_argument(
     "--template", action="store_true", help="Use @POT_GO_PREFIX@ for the installation prefix"
@@ -16,7 +16,7 @@ for value in (str(args.binary), str(args.root)):
     if any(char in value for char in '\n\r"\\'):
         parser.error("Service paths contain unsupported characters")
 binary = "@POT_GO_PREFIX@/bin/pot" if args.template else str(args.binary.resolve(strict=True))
-root = "%h/.pot-go" if args.template else str(args.root.resolve())
+root = "%h/.pot" if args.template else str(args.root.resolve())
 working = "@POT_GO_PREFIX@" if args.template else str(args.binary.resolve().parent.parent)
 args.output.parent.mkdir(parents=True, exist_ok=True)
 args.output.write_text(f'''# Review paths and install explicitly as a user unit named pot-go-runtime.service.

@@ -6,12 +6,14 @@ status, cancellation and result notification. Each receiver owns its models,
 credentials, workspaces, permissions and execution supervision. A connection
 never grants owner HTTP APIs, model proxying or raw process launch access.
 
-A Codex node advertises a caller-scoped `task_executor` independently of its
-assistant directory. Explicit tasks map directly to independent Codex threads.
+A node may advertise assistant and node task-execution endpoints in one `targets`
+catalogue. Each entry carries its address, identity and versioned capabilities.
+`create_task.target` selects the endpoint; the receiving Adapter owns task sessions
+and execution.
 Only their original directing assistant's authenticated user may approve their
 operations. Assistant messages never carry approval authority or request user
 approval; the receiving assistant declines operations outside its permissions and
-reports the denial. See [Codex execution](task-coordination.md#codex-execution).
+reports the denial. See [Agent execution](task-coordination.md#agent-execution).
 
 The [architecture overview](architecture.md) shows the shared local/peer operation
 port and its execution adapters.
@@ -23,26 +25,24 @@ addresses are `{node_id, kind: assistant, agent_id}`. Node IDs, connection IDs,
 assistant IDs and execution IDs are distinct. Names and origin icons are display
 metadata. One machine can host several autonomous nodes.
 
-`Directory` advertises the current assistants, persisted default assistant ID
-and per-assistant operation descriptions. Pot exposes real assistants. Codex exposes
-virtual assistants for assistant messaging and presentation management; each owns
-one persistent message context. Its node-level `task_executor` advertises explicit
-task submit/read/cancel/input and human review, separately from assistant controls.
-One task owns one persistent Codex thread, without an assistant target. Task and
-message sessions do not share context; shared workspaces still share files.
+`Directory.targets` binds each receiver's identity directly to its capability
+description. Assistant endpoints have peer scope; independent node execution has
+caller scope. The optional `default_target` is used by receiver-owned presentation
+and messaging policy. Task creation always selects the current assistant when its
+target is omitted; other Task receivers are explicit.
 
-For ordinary Pot task routing, an explicit target wins. An omitted target uses
-the receiver's persisted default, initially its first assistant. Resolution occurs once at durable acceptance.
-Exact retries return that original receipt even after the default changes or the
-assistant is removed. Removing the default does not silently select another:
-the directory advertises an empty default until the owner chooses a valid one.
-Accepted tasks retain their original owner and historical reference.
+Adapter identifiers describe implementations and grant no capabilities. Directory
+and Task receipts must match the connected node and Adapter identity. Task receipts
+have one `receiver`, whose address is an assistant or independently owned Task.
+Exact retries return the original receipt even after directory changes or identity
+retirement. Node, caller, Task, run and saved connection identities remain distinct.
 
 ## Product operation port
 
 `agentlink.Port` defines `Describe(Target)`, `Call(Target, Operation, params)`
 and capability-checked `Subscribe(Target)` for cursor-based chat frames.
-A target contains an assistant ID and an optional saved link ID. Both local and
+A target is the shared `{node_id, kind, agent_id}` receiver address. Connection
+routing and locale are invocation context rather than parts of that address. Both local and
 linked chat, task and assistant-scoped schedule routes use this port. HTTP and
 native adapters only translate typed requests; there is no separate linked-chat
 HTTP API or unexported native task payload. The local adapter remains in the
@@ -52,8 +52,8 @@ current process; this change does not introduce an agent or scheduler plugin.
 for admission and dispatches operations to their implementations. Owner and peer
 describe authorization scope; dispatch follows the requested capability and target.
 
-Directories advertise a version-1 operation description per assistant under
-`operations`, with explicit `peer` scope. The authenticated local operator sees
+Directories attach a version-1 capability description to each endpoint. Assistant
+endpoints use explicit `peer` scope. The authenticated local operator sees
 an `owner` description. `GET /api/v1/agent-links/capabilities?assistant_id=...`
 returns the effective description; assistant catalogue rows carry the same data.
 The frontend chooses controls from these descriptions and uses the shared chat
@@ -90,6 +90,11 @@ Linked task lists, archive choices and outcome cursors are projections of this
 caller's durable submissions, not access to the receiver's entire task catalogue.
 Task details include their effective operation description. Unsupported task
 transcripts or input controls are not queried or displayed.
+
+Owner-authorized failed-task retry and task guidance enter the same operation
+port. Assistant-originated guidance retains its authenticated sender and parent;
+using the port never converts it into user authority. Retry delivery authorization
+is checked before calling the owner-only `task.retry` operation.
 
 The current scheduler is retained behind the owning assistant's
 `schedules.manage` capability. It is not moved into a separate service or made a
@@ -164,8 +169,10 @@ identity and assistant node are checked.
 
 `observe` returns a live, payload-free node summary: hostname, per-assistant task
 counts (running, queued, waiting for approval or allowance), chat activity and
-uncertain-cleanup fences. Counts cover all tasks owned by that receiving node,
-not only the caller's delegations. No prompts, task text, workspace paths, tool
+uncertain-cleanup fences. Counts cover all local executions on the receiving
+node, regardless of their caller. Caller-side records of linked Tasks and
+historical remote launches are excluded; an unavailable original execution is
+not reported as an allowance wait. No prompts, task text, workspace paths, tool
 arguments, model settings or credentials are exported. Outbox counts and the
 oldest known acceptance timestamp are scoped to the authenticated caller's node;
 the request cannot select another peer. Delivery receipts still mean durable
@@ -190,12 +197,16 @@ timestamp remains unknown. Aggregates cover the entire node route rather than a
 bounded delivery page.
 
 The receiver durably deduplicates the complete task request before executing.
-The sender stores a delegation and remote reference, never a local worker copy.
+The sender stores a Task and original execution reference in its shared Task
+catalogue. The receiver owns the actual execution. Local and peer submissions
+share the same task operations; caller-side receipt caching does not run a worker.
 A lost submission response retries the same request ID; it cannot create another
 execution. A disconnected or uncertain request remains unresolved. Definitive
 admission failures surface in the original task list and notification route.
-Cancellation never fabricates completion; before the remote reference arrives,
-a durable cancellation intent waits for acceptance and then targets that task.
+Cancellation intent is persisted before any attempt to send it. Before acceptance
+is observed it waits for the original reference; afterward it always targets that
+reference. Disconnect and restart retain the intent for retry. Cancellation never
+fabricates completion or proves that execution stopped.
 
 Direct user chats with another Pot use a persisted user session address per
 connection and target assistant, rather than the local default assistant. User requests address an
@@ -227,8 +238,9 @@ caller, request, task reference and result ID. A different user session or calle
 kind cannot inspect or cancel that accepted task. Retained conversation and task
 reads still work after deleting a link, without permitting new execution.
 Results retain receiver provenance. Source icons in assistant lists, chat titles and task rows identify Codex or another Pot.
-Task details expose cancellation and local archive state; unsupported local
-controls, steering and file access are unavailable. Neither current adapter
+Task details expose local archive state and controls advertised by the receiving
+adapter. Codex supports terminal-run continuation; live steering and remote file
+access are unavailable. Neither current adapter
 advertises cross-node artifact access. Directory entries and exported capabilities
 must be implemented before additional controls are exposed.
 

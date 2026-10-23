@@ -33,7 +33,7 @@ func (b *backend) ownerExecutor(ctx context.Context, workspace, mode string) err
 // submitTask never resolves an assistant. Each accepted task snapshots the
 // receiver-owned execution scope and owns its own persistent Codex thread.
 func (b *backend) submitTask(ctx context.Context, r agentlink.TaskRequest) (agentlink.Task, error) {
-	if r.AssistantID != "" || r.From.Kind != "assistant" || r.Workspace != "" {
+	if r.Target != agentlink.NodeTarget(b.nodeID) || r.From.Kind != "assistant" || r.Workspace != "" {
 		return agentlink.Task{}, agentlink.ErrInvalid
 	}
 	var accepted job
@@ -63,7 +63,7 @@ func (b *backend) submitTask(ctx context.Context, r agentlink.TaskRequest) (agen
 		now := time.Now().UTC()
 		id := jobID(r.From, r.RequestID)
 		identity := agentlink.Identity{Address: protocol.AgentRef{NodeID: b.nodeID, Kind: "task", AgentID: id}, Name: "Codex", Adapter: "codex"}
-		accepted = job{Task: agentlink.Task{ID: id, RunID: id, RequestID: r.RequestID, Execution: &identity, State: "queued", CreatedAt: now, UpdatedAt: now}, Request: r}
+		accepted = job{Task: agentlink.Task{ID: id, RunID: id, RequestID: r.RequestID, Receiver: identity, State: "queued", CreatedAt: now, UpdatedAt: now}, Request: r}
 		if _, err := tx.ExecContext(ctx, "INSERT INTO codex_link_jobs(id,caller,request_id,assistant_id,payload,data) VALUES(?,?,?,NULL,?,?)", id, callerKey(r.From), r.RequestID, encoded(r), encoded(accepted)); err != nil {
 			return err
 		}
@@ -86,7 +86,7 @@ func (b *backend) Input(ctx context.Context, r agentlink.TaskGuidance) (agentlin
 		if err := json.Unmarshal([]byte(raw), &result); err != nil {
 			return err
 		}
-		if result.Request.Executor != "codex" || result.Message != nil {
+		if result.Request.Target.Kind != "node" || result.Message != nil {
 			return agentlink.ErrUnsupported
 		}
 		var prior string

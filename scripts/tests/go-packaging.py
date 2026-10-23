@@ -171,7 +171,13 @@ class GoPackaging(unittest.TestCase):
             for name in ("../private/entry.mjs", str(outside / "entry.mjs"), "linked/entry.mjs"):
                 declaration["files"] = [name]
                 (source / "plugin.json").write_text(
-                    json.dumps({"contributes": {"tools": declaration}})
+                    json.dumps(
+                        {
+                            "schema_version": 3,
+                            "name": "example",
+                            "contributes": {"tools": declaration},
+                        }
+                    )
                 )
                 with self.subTest(file=name), mock.patch.object(go_packaging, "ROOT", root):
                     with self.assertRaisesRegex(ValueError, "unsafe plugin file"):
@@ -206,8 +212,8 @@ class GoPackaging(unittest.TestCase):
                 (source / "plugin.json").write_text(
                     json.dumps(
                         {
-                            "schema_version": 2,
-                            "id": name,
+                            "schema_version": 3,
+                            "name": name,
                             "version": "1",
                             "contributes": {"model_providers": contribution},
                         }

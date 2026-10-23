@@ -5,8 +5,8 @@ import (
 	"slices"
 )
 
-// PluginMCP is an installed Control-local stdio MCP server. Its files and
-// credentials never travel in Runtime tool bundles. Configuration is opaque.
+// PluginMCP is an installed node-local stdio MCP server. Its files and
+// credentials stay outside task tool snapshots. Configuration is opaque.
 type PluginMCP struct {
 	Runtime       string                  `json:"runtime"`
 	Execution     string                  `json:"execution"`

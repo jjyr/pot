@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"github.com/jjyr/pot/pkg/protocol"
 
-	"github.com/jjyr/pot/internal/runner"
+	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
@@ -30,7 +30,7 @@ type RecoverySnapshot struct {
 	ControlID        string            `json:"control_id"`
 	TaskID           string            `json:"task_id"`
 	RunID            string            `json:"run_id"`
-	Phase            runner.Phase      `json:"phase"`
+	Phase            tasks.Phase       `json:"phase"`
 	CleanupConfirmed bool              `json:"cleanup_confirmed"`
 	Reconciled       bool              `json:"reconciled"`
 	Receipts         []RecoveryReceipt `json:"receipts"`
@@ -64,7 +64,7 @@ func (s *Service) TaskRecovery(ctx context.Context, owner, task, run, action str
 }
 
 // RecoverRuntimeRun is a native/private owner port; browser forwarding excludes
-// it. A joined Runner still obtains operation evidence from its original Control.
+// it. Reconciliation reads original local operations and execution receipts only.
 func (s *Service) RecoverRuntimeRun(ctx context.Context, q RecoveryCommand) (RecoverySnapshot, error) {
 	if err := recoveryAction(q.Action); err != nil {
 		return RecoverySnapshot{}, err
@@ -72,7 +72,7 @@ func (s *Service) RecoverRuntimeRun(ctx context.Context, q RecoveryCommand) (Rec
 	if !core.Identifier(q.ControlID) || !core.Identifier(q.TaskID) || !core.Identifier(q.RunID) {
 		return RecoverySnapshot{}, errors.New("invalid original recovery identity")
 	}
-	record, err := s.RunnerJournal.Inspect(ctx, q.ControlID, q.TaskID, q.RunID)
+	record, err := s.RunJournal.Inspect(ctx, q.ControlID, q.TaskID, q.RunID)
 	if err != nil {
 		return RecoverySnapshot{}, err
 	}
@@ -82,13 +82,46 @@ func (s *Service) RecoverRuntimeRun(ctx context.Context, q RecoveryCommand) (Rec
 	return s.recoverRun(ctx, *record, q.Action)
 }
 
-func (s *Service) recoveryOperations(ctx context.Context, l runner.Launch) ([]OperationRecord, error) {
-	if l.ControlID == s.options.RuntimeID {
-		return s.Operations.RecoveryRecords(ctx, l.TaskID, l.RunID)
+func (s *Service) recoveryOperations(ctx context.Context, l tasks.Launch) ([]OperationRecord, error) {
+	if l.ControlID != s.options.RuntimeID {
+		return nil, protocol.APIError{Code: "original_execution_unavailable"}
 	}
-	return nil, protocol.APIError{Code: "original_execution_unavailable"}
+	records, err := s.Operations.RecoveryRecords(ctx, l.TaskID, l.RunID)
+	if err != nil {
+		return nil, err
+	}
+	old, err := s.RunJournal.OriginalOperations(ctx, l.ControlID, l.TaskID, l.RunID)
+	if err != nil {
+		return nil, err
+	}
+	index := map[string]int{}
+	for i, r := range records {
+		index[r.Operation.CallID] = i
+	}
+	for _, v := range old {
+		i, ok := index[v.CallID]
+		if !ok {
+			return nil, errors.New("archived execution has no original operation")
+		}
+		r := &records[i]
+		hash, _ := core.HashJSON(r.Operation)
+		if hash != v.OperationHash {
+			return nil, errors.New("archived operation differs from original effect")
+		}
+		if v.Known {
+			if r.Receipt.State == "complete" {
+				a, _ := core.HashJSON(r.Receipt.Result)
+				b, _ := core.HashJSON(v.Result)
+				if a != b || r.Receipt.Error != v.Error {
+					return nil, errors.New("archived result conflicts with original effect")
+				}
+			}
+			r.Receipt.State, r.Receipt.Result, r.Receipt.Error = "complete", v.Result, v.Error
+		}
+	}
+	return records, nil
 }
-func validateRecoveryOperation(l runner.Launch, r OperationRecord) error {
+func validateRecoveryOperation(l tasks.Launch, r OperationRecord) error {
 	op := r.Operation
 	key, err := op.Key()
 	if err != nil {
@@ -103,7 +136,7 @@ func validateRecoveryOperation(l runner.Launch, r OperationRecord) error {
 	}
 	return nil
 }
-func (s *Service) settleRecoveryOperations(ctx context.Context, l runner.Launch, records []OperationRecord) error {
+func (s *Service) settleRecoveryOperations(ctx context.Context, l tasks.Launch, records []OperationRecord) error {
 	if l.ControlID != s.options.RuntimeID {
 		return protocol.APIError{Code: "original_execution_unavailable"}
 	}
@@ -141,93 +174,26 @@ func agentRecoveryValue(receipt Receipt) json.RawMessage {
 	return receipt.Result
 }
 
-func (s *Service) recoverRun(ctx context.Context, record runner.Run, action string) (RecoverySnapshot, error) {
+func (s *Service) recoverRun(ctx context.Context, record tasks.Run, action string) (RecoverySnapshot, error) {
 	l := record.Launch
 	out := RecoverySnapshot{ControlID: l.ControlID, TaskID: l.TaskID, RunID: l.RunID, Phase: record.Phase, CleanupConfirmed: record.CleanupConfirmed, Receipts: []RecoveryReceipt{}, Unresolved: []string{}}
-	if record.Phase != runner.RecoveryRequired && !record.Phase.Ended() {
+	if record.Phase != tasks.RecoveryRequired && !record.Phase.Ended() {
 		return out, errors.New("original run is still active or safely waiting")
 	}
-	if !s.Runner.RecoveryIdle(l.ControlID, l.TaskID, l.RunID) {
+	if !s.TaskRuns.RecoveryIdle(l.ControlID, l.TaskID, l.RunID) {
 		return out, errors.New("original invocation is still stopping")
 	}
 	operations, err := s.recoveryOperations(ctx, l)
 	if err != nil {
 		return out, err
 	}
-	byCall := map[string]int{}
-	for i, op := range operations {
-		if err = validateRecoveryOperation(l, op); err != nil {
+	for _, operation := range operations {
+		if err = validateRecoveryOperation(l, operation); err != nil {
 			return out, err
 		}
-		if _, ok := byCall[op.Operation.CallID]; ok {
-			return out, errors.New("duplicate original operation call")
-		}
-		byCall[op.Operation.CallID] = i
-	}
-	commands, err := s.RunnerJournal.Commands(ctx, l.ControlID, l.TaskID, l.RunID)
-	if err != nil {
-		return out, err
-	}
-	replies := map[string]json.RawMessage{}
-	for _, command := range commands {
-		var input remoteExecute
-		if err = core.DecodeJSON(command.Input, &input); err != nil {
-			return out, errors.New("original command input missing or invalid")
-		}
-		i, ok := byCall[command.ID]
-		if !ok {
-			return out, errors.New("original command has no Control operation")
-		}
-		operation := &operations[i]
-		hash, _ := core.HashJSON(input.Operation)
-		if hash != operation.Receipt.InputHash || input.Request.ID != command.ID {
-			return out, errors.New("original command differs from Control operation")
-		}
-		if command.Phase == "complete" {
-			var reply executeReply
-			if err = core.DecodeJSON(command.Reply, &reply); err != nil || reply.CleanupUnconfirmed || !json.Valid(reply.Value) {
-				return out, errors.New("original command result unavailable or cleanup uncertain")
-			}
-			candidate := *operation
-			candidate.Receipt.State = "complete"
-			candidate.Receipt.Result = reply.Value
-			candidate.Receipt.Error = reply.Error
-			if operation.Receipt.State == "complete" {
-				a, _ := core.HashJSON(operation.Receipt.Result)
-				b, _ := core.HashJSON(reply.Value)
-				if a != b || operation.Receipt.Error != reply.Error {
-					return out, errors.New("original command conflicts with Control receipt")
-				}
-			}
-			*operation = candidate
-			replies[command.ID] = command.Reply
-		}
-	}
-	for i := range operations {
-		operation := &operations[i]
-
-		out.Receipts = append(out.Receipts, RecoveryReceipt{operation.Operation.CallID, "control_operation", operation.Receipt.State})
+		out.Receipts = append(out.Receipts, RecoveryReceipt{operation.Operation.CallID, "operation", operation.Receipt.State})
 		if operation.Receipt.State != "complete" {
 			out.Unresolved = append(out.Unresolved, "original operation result unavailable: "+operation.Operation.CallID)
-		}
-	}
-	for _, command := range commands {
-		if _, ok := replies[command.ID]; !ok {
-			operation := operations[byCall[command.ID]]
-			if operation.Receipt.State == "complete" {
-				replies[command.ID], err = json.Marshal(executeReply{Value: operation.Receipt.Result, Error: operation.Receipt.Error})
-				if err != nil {
-					return out, err
-				}
-			}
-		}
-		state := "unknown"
-		if _, ok := replies[command.ID]; ok {
-			state = "complete"
-		}
-		out.Receipts = append(out.Receipts, RecoveryReceipt{command.ID, "runner_command", state})
-		if state != "complete" {
-			out.Unresolved = append(out.Unresolved, "original Runner command result unavailable: "+command.ID)
 		}
 	}
 	values := map[string]json.RawMessage{}
@@ -258,7 +224,7 @@ func (s *Service) recoverRun(ctx context.Context, record runner.Run, action stri
 		return out, nil
 	}
 	if !record.CleanupConfirmed {
-		if err = s.proveRecoveryCleanup(ctx, record, len(operations) > 0 || len(commands) > 0); err != nil {
+		if err = s.proveRecoveryCleanup(ctx, record, len(operations) > 0); err != nil {
 			out.Unresolved = append(out.Unresolved, err.Error())
 			return out, nil
 		}
@@ -266,20 +232,20 @@ func (s *Service) recoverRun(ctx context.Context, record runner.Run, action stri
 	if err = s.settleRecoveryOperations(ctx, l, operations); err != nil {
 		return out, err
 	}
-	if err = s.RunnerJournal.ReconcileRecovered(ctx, l.ControlID, l.TaskID, l.RunID, replies, values, true); err != nil {
+	if err = s.RunJournal.ReconcileRecovered(ctx, l.ControlID, l.TaskID, l.RunID, values, true); err != nil {
 		return out, err
 	}
 	if err = s.options.Manager.ReconcileInterrupted(execution.Identity{Owner: l.TaskID, RequestID: l.RunID, Generation: l.Generation, Role: "task"}); err != nil {
 		return out, err
 	}
-	out.Phase = runner.Interrupted
+	out.Phase = tasks.Interrupted
 	out.CleanupConfirmed = true
 	out.Reconciled = true
 	s.wakeTasks()
 	s.Changes.Notify("tasks")
 	return out, nil
 }
-func (s *Service) proveRecoveryCleanup(ctx context.Context, record runner.Run, issued bool) error {
+func (s *Service) proveRecoveryCleanup(ctx context.Context, record tasks.Run, issued bool) error {
 	l := record.Launch
 	if !issued {
 		return nil

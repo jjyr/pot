@@ -1,76 +1,98 @@
 <p align="center">
-  <img src="resources/app/assets/Pot384.png" width="128" height="128" alt="Pot — an ochre companion with an open tilted rim and a smile">
+  <img src="resources/app/assets/Pot384.png" width="96" height="96" alt="Pot">
 </p>
 
 # Pot
 
-Pot is an open-source implementation of the Dot experience.
+**Your AI assistant, connected to other assistants, ready to get things done.**
 
-Pot runs assistants and background tasks on autonomous Go nodes. Agent Link
-connects Pot, Codex and compatible agents for conversation and task delegation.
-Each node owns its models, credentials, workspace and authorized local execution.
-See [Executor](docs/executor.md) for execution and isolation boundaries.
+Pot turns conversations into completed work. Ask your assistant to research,
+work with files or automate recurring tasks. **Agent Link** connects Pot,
+Codex and other agents through compatible adapters to exchange messages and
+delegate work across computers.
+
+[Documentation](docs/README.md) · [Codex setup](integrations/codex/README.md) · [Releases](https://github.com/jjyr/pot/releases)
+
+## Main features
+
+### Assistants
+
+Give an assistant an ongoing goal: research a topic, follow a project or keep
+track of changes. It can break work into background tasks, dispatch them, receive
+progress and results, and follow up in your conversation. Files and workspaces
+persist between tasks, so research can build on earlier work.
+
+Assistants can also respond to events from enabled plugins, including your
+[GitHub personal notifications](docs/plugins.md#github-notifications), and
+receive task updates automatically. Ask for [scheduled research](docs/scheduled-tasks.md)
+or recurring checks to keep following a topic while Pot is running. Choose your
+model providers and extend assistants with plugins, MCP servers and Skills.
+
+### Agent Link
+
+Work with the agents you already use—**Claude, Codex, Grok bot, Pi** and
+others—through Agent Link adapters. Connected assistants can exchange messages
+and delegate tasks across computers, while each agent keeps its own models,
+credentials, workspace and permissions.
+
+Pot-to-Pot connections and a [Codex adapter](integrations/codex/README.md) are
+included. Claude, Grok bot and Pi require their own compatible adapters; this
+repository does not bundle them. Explicit Codex tasks each have an independent
+persistent thread and can run in parallel. See [Agent Link](docs/agent-links.md)
+for the collaboration protocol and supported capabilities.
 
 ## Install
 
-### macOS App
+Start from source today; packaged distribution is pending.
 
-Requires Apple Silicon and macOS 26 or later.
+| Platform | Install / download | Availability |
+|---|---|---|
+| macOS desktop / Homebrew | [Build guide](docs/development.md#toolchains-and-workflow) · [Downloads](https://github.com/jjyr/pot/releases) | Apple Silicon, macOS 26+. Homebrew distribution is pending. |
+| Linux server / Web UI | [Quick start](#linux-server--web-ui) · [Deployment guide](docs/deployment.md) | Available from source on a glibc-based amd64 or arm64 host. |
+| Docker | [Build and installation guide](docs/docker.md) · [Releases](https://github.com/jjyr/pot/releases) | Image not yet published. |
+| Linux desktop (Experimental) | [Build and installation guide](docs/desktop-installation.md#linux-experimental) · [Releases](https://github.com/jjyr/pot/releases) | Native `.deb` packaging is experimental; no desktop package is published yet. |
+
+Windows is currently unsupported.
+
+## Quick start
+
+### Desktop
+
+Open Pot, choose **Add assistant** and connect an API model provider, another
+Pot, or Codex. Try: “Research this project and suggest three improvements.”
+
+For Agent Link, copy connection information from one side into **Add Agent** on
+the other. See [Agent Link](docs/agent-links.md) or [Codex setup](integrations/codex/README.md).
+
+### Linux server / Web UI
+
+With Git and [mise](https://mise.jdx.dev/getting-started.html) installed:
 
 ```sh
-brew install --cask jjyr/tap/pot
-```
-
-### Server node
-
-On Linux or macOS, use a Go CLI archive or build the complete runtime from a
-checkout with the pinned toolchains in `mise.toml`:
-
-```sh
+git clone https://github.com/jjyr/pot.git
+cd pot
 mise install
-mise run build:cli
+mise run prepare
+mise run build:go
+.local/go/bin/pot serve -root "$HOME/.pot-node" -ui 127.0.0.1:17703
 ```
 
-A [server node](docs/deployment.md#standalone-node) manages its assistants,
-conversations, model credentials and local tasks. Connect agents through Agent
-Link, and publish browser access with the independent Web UI service.
-
-Go hosts the product logic. The macOS App uses Wails v3 and the system WebView;
-main window, tray and the independent browser service share HTML/CSS/JavaScript.
-The reusable [MCP component](docs/mcp.md) supplies SDK-based protocol support for
-plugin tools, independent servers and Codex integration.
-
-Trusted [Plugin packages](docs/plugins.md) contribute tools, background services
-and model connections. The Runtime supplies Node for JavaScript adapters;
-browser tools use Chrome/Chromium installed on the execution machine.
-
-## Features
-
-- **A personal AI assistant** — give instructions, ask questions, and follow up through chat.
-- **Local execution** — tools run on their owning node; remote work uses Agent Link delegation.
-- **Background tasks** — Pot binds each task to a fixed Runtime, tracks progress, and reports results.
-- **Scheduled work** — ask Pot to run recurring tasks and notify you when something changes.
-- **Persistent workspaces** — retain files in assistant and Task directories.
-
-See the [documentation](docs/README.md) for details.
-
-## Codex integration
-
-Connect Codex through Agent Link by copying a connection segment and pasting it
-into **Add Agent**. Your Pot assistant can select Codex for an explicit task,
-which owns an independent persistent Codex session and returns pending human
-approvals to that assistant's existing UI. Codex virtual assistants also accept
-assistant-to-assistant messages under their own execution policy, without
-forwarding user approvals. Default task routing is unchanged. Codex keeps its
-own login, model settings, workspace, permissions and automatic reviewer. See the
-[installation and connection guide](integrations/codex/README.md).
-
-From a checkout containing the integration:
+Leave it running. In another terminal in the checkout, get your login token:
 
 ```sh
-mise exec -- python3 integrations/codex/install.py
+.local/go/bin/pot access -root "$HOME/.pot-node" token
 ```
 
-Enable the Pot plugin in Codex, open `pot_open_connections`, then copy and paste
-the connection segment between nodes. Configure additional assistants and their
-local workspaces through the host's local `assistant` command.
+Open <http://127.0.0.1:17703>, sign in with the token and add an assistant as above.
+The first run creates the private data root and token. For a remote server,
+forward the port from your computer first:
+
+```sh
+ssh -L 17703:127.0.0.1:17703 user@your-server
+```
+
+`pot serve` runs the Runtime; `-ui` adds its local browser interface.
+`pot web-ui-server` is an independent browser service with a separate data root.
+See [deployment](docs/deployment.md) for that setup, TLS and services.
+
+Licensed under the [MIT License](LICENSE).

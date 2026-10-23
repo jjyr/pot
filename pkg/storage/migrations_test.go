@@ -554,7 +554,7 @@ INSERT INTO task_writes VALUES('owner','request','original-digest','task');`, ph
 			if err := db.QueryRow("SELECT digest FROM task_writes").Scan(&digest); err != nil {
 				t.Fatal(err)
 			}
-			if version != 10 || run != "run" || archived != (phase == "complete" || phase == "cancelled") || text != "original" || outcome != "retained" || digest != "original-digest" {
+			if version != 13 || run != "run" || archived != (phase == "complete" || phase == "cancelled") || text != "original" || outcome != "retained" || digest != "original-digest" {
 				t.Fatal(version, run, archived, text, outcome, digest)
 			}
 		})

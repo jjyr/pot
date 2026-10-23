@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jjyr/pot/internal/runner"
+	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/sandbox"
 )
 
@@ -65,7 +65,7 @@ type taskGitPolicy struct {
 	admit       func() (func(), error)
 }
 
-func (s *Service) workspaceGitContext(ctx context.Context, w runner.Workspace, policy MachinePolicy) (context.Context, error) {
+func (s *Service) workspaceGitContext(ctx context.Context, w tasks.Workspace, policy MachinePolicy) (context.Context, error) {
 	gate := func() (func(), error) {
 		if policy.Revision == 0 {
 			return func() {}, nil
@@ -182,11 +182,11 @@ func gitWorkspace(ctx context.Context, dir string, args ...string) (string, erro
 	}
 	return strings.TrimSpace(output.String()), nil
 }
-func (s *Service) prepareTaskWorkspace(ctx context.Context, l runner.Launch, policy MachinePolicy) (result *runner.Workspace, err error) {
+func (s *Service) prepareTaskWorkspace(ctx context.Context, l tasks.Launch, policy MachinePolicy) (result *tasks.Workspace, err error) {
 	if policy.ExecutionAccess == "deny" {
 		return nil, errors.New("workspace preparation blocked by machine policy")
 	}
-	saved, claim, err := s.RunnerJournal.BeginWorkspace(ctx, l.ControlID, l.TaskID, l.RunID)
+	saved, claim, err := s.RunJournal.BeginWorkspace(ctx, l.ControlID, l.TaskID, l.RunID)
 	if err != nil {
 		return nil, err
 	}
@@ -216,14 +216,14 @@ func (s *Service) prepareTaskWorkspace(ctx context.Context, l runner.Launch, pol
 	}
 	w := *saved
 	w.Kind = l.Workspace.Mode()
-	save := func() error { return s.RunnerJournal.SaveWorkspace(ctx, l.ControlID, l.TaskID, l.RunID, w) }
+	save := func() error { return s.RunJournal.SaveWorkspace(ctx, l.ControlID, l.TaskID, l.RunID, w) }
 	defer func() {
 		if err != nil {
 			w.Status = "failed"
 			w.Error = err.Error()
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
-			err = errors.Join(err, s.RunnerJournal.SaveWorkspace(cleanup, l.ControlID, l.TaskID, l.RunID, w))
+			err = errors.Join(err, s.RunJournal.SaveWorkspace(cleanup, l.ControlID, l.TaskID, l.RunID, w))
 		}
 	}()
 	switch w.Kind {
@@ -449,7 +449,7 @@ func (s *Service) prepareTaskWorkspace(ctx context.Context, l runner.Launch, pol
 	return &w, nil
 }
 func (s *Service) taskWorkspacePath(ctx context.Context, task string) (string, error) {
-	w, err := s.RunnerJournal.TaskWorkspace(ctx, task)
+	w, err := s.RunJournal.TaskWorkspace(ctx, task)
 	if err != nil {
 		return "", err
 	}
@@ -469,7 +469,7 @@ func (s *Service) taskWorkspacePath(ctx context.Context, task string) (string, e
 // Open and verify the directory handle itself so download roots cannot be swapped
 // between path validation and opening (including a symlink to Runtime authority).
 func (s *Service) openTaskWorkspace(ctx context.Context, task string) (*os.Root, error) {
-	w, err := s.RunnerJournal.TaskWorkspace(ctx, task)
+	w, err := s.RunJournal.TaskWorkspace(ctx, task)
 	if err != nil {
 		return nil, err
 	}

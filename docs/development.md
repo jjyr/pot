@@ -149,6 +149,22 @@ at desktop and phone widths; `locale=zh-CN&theme=dark` exercises the other local
 and theme. Add `capture-navigation=1` to pause at the multiline-draft return
 scenario; `window.navigationCaptureContinue()` resumes the checks.
 
+For scrolling and disclosure regressions, open
+`/scripts/tests/fixtures/chat-scroll.html?conversation=alpha&locale=en&theme=light`
+on the same loopback server. Run scrolling checks to exercise rapid reversals,
+sample viewport coverage and frame intervals, traverse beyond the data window,
+prefetch newer history with delayed reads, and inspect deferred tool/raw details.
+Run at desktop and phone widths, including `locale=zh-CN&theme=dark`. Capture
+reading position leaves a synthetic conversation available for manual wheel,
+touchpad, keyboard and scrollbar checks.
+
+For incoming correspondence disclosure checks, open
+`/scripts/tests/fixtures/correspondence.html?locale=en&theme=light` on the loopback
+server and run `await window.correspondenceFixture.verify()` in the browser.
+At phone widths, select Pot from the assistant list first. Repeat with
+`locale=zh-CN`; `before=1` shows the previous private-correspondence presentation
+for comparison. This fixture uses production Chat components and synthetic data.
+
 For the resource tool and component fixture, run
 `POT_RESOURCE_FIXTURE_URL_FILE=/tmp/pot-resource-url mise exec -- go test
 ./internal/transport -run '^TestResourceBrowserFixture$' -v -count=1 -timeout=35m`.
@@ -170,33 +186,22 @@ bypass failed hooks. CI separates portable product and macOS packaging checks.
 
 ## CI and manual PR checks
 
-CI runs automatically on every tag push, including tags outside the release
-version pattern. Branch pushes (including `main`), PR events and GitHub Release
-events do not start CI. The separate Release workflow still publishes only for
-`v*.*.*` tag pushes or its explicit manual release input; it does not wait for CI.
-
-To run CI manually, open **Actions → CI → Run workflow** and choose a trusted
-branch or tag containing the workflow. Leave `pr` blank to check that selected
-ref, or enter a PR number from this repository to check its latest head commit,
-including a fork PR. For example:
+CI runs automatically only on tag pushes. All tags are checked, while exact stable
+version tags enter controlled per-channel release paths after shared checks and
+the corresponding native package and smoke gates succeed. Ordinary manual runs do not publish.
+Branch pushes and PR events do not start CI.
 
 ```sh
 gh workflow run ci.yml --ref main -f pr=123
+gh workflow run ci.yml --ref main -f ref=refs/heads/my-branch
 ```
 
-The workflow resolves the PR head once at the start and pins both Linux and macOS
-jobs to that SHA in the base repository, rather than the PR merge commit. Invalid
-or inaccessible PR numbers fail before product jobs start. A later push to the PR
-requires another manual run. Runs for different PR numbers do not cancel each
-other; a new run for the same workflow ref and PR cancels the previous run.
-
-Manual PR checks execute the PR's build scripts and tool configuration on GitHub
-hosted runners. Review that code before starting the run and select a trusted
-workflow ref. Only the source-resolution job is granted pull-request read
-permission. Product jobs have read-only repository access, do not persist checkout
-credentials, skip shared mise and Go caches, and receive no release secrets. They
-use the selected workflow's check steps with the PR's source tree; changes to the
-PR's workflow are not run.
+The optional `ref` and `pr` inputs are mutually exclusive. Leave both blank to
+check the ref selected in Actions. The source job pins one SHA for all subsequent
+jobs; review selected PR code before running it. Read-only validation receives no
+release secrets. See [Releases and installation channels](releases.md) for the
+native build matrix, artifact names, signing requirements, manual release gate,
+Homebrew generation and GHCR permissions.
 
 ## Database changes
 
