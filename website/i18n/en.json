@@ -130,7 +130,6 @@
     "让助手安装": "Install with an agent",
     "复制 Prompt": "Copy prompt",
     "安装与首次配置指南 ↗": "Installation and first setup ↗",
-    "桌面应用": "Desktop app",
     "macOS": "macOS",
     "复制命令": "Copy commands",
     "Docker": "Docker",
@@ -156,11 +155,9 @@
     "先从 macOS Release 下载 pot.rb，再在下载目录运行：": "Download pot.rb from the macOS release, then run in your downloads directory:",
     "Linux": "Linux",
     "Experimental": "Experimental",
-    "Debian / Ubuntu · amd64": "Debian / Ubuntu · amd64",
     "下载 .deb": "Download .deb",
     "Linux 安装说明 ↗": "Linux installation guide ↗",
     "下载将打开官方 Release 列表；安装包待首次发布。": "Downloads open official Releases; packages await their first release.",
-    "在 Linux amd64 / arm64 上运行，保留你的数据与工作区。": "Run on Linux amd64 / arm64, keeping your data and workspaces.",
     "查看 Docker 镜像": "View Docker image",
     "复制镜像地址": "Copy image address",
     "镜像待首次发布；发布后选择明确的版本标签。": "Image publication is pending; choose an explicit version tag once available.",
@@ -170,7 +167,10 @@
     "选择 Linux amd64 / arm64 的 pot-go 压缩包；待首次发布。": "Choose a pot-go archive for Linux amd64 / arm64; first release pending.",
     "启动命令": "Start command",
     "解压对应平台的压缩包后，在其中的 bin 目录运行：": "Extract the archive for your platform, then run from its bin directory:",
-    "配置与运行说明 ↗": "Configuration and running guide ↗"
+    "配置与运行说明 ↗": "Configuration and running guide ↗",
+    "Linux .deb": "Linux .deb",
+    "原生桌面 · Debian / Ubuntu · amd64": "Native desktop · Debian / Ubuntu · amd64",
+    "容器运行 · Linux amd64 / arm64，通过浏览器使用。": "Run in a container · Linux amd64 / arm64, accessed in your browser."
   },
   "demo": {
     "language": "Language",

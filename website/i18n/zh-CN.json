@@ -130,7 +130,6 @@
     "让助手安装": "让助手安装",
     "复制 Prompt": "复制 Prompt",
     "安装与首次配置指南 ↗": "安装与首次配置指南 ↗",
-    "桌面应用": "桌面应用",
     "macOS": "macOS",
     "复制命令": "复制命令",
     "Docker": "Docker",
@@ -156,11 +155,9 @@
     "先从 macOS Release 下载 pot.rb，再在下载目录运行：": "先从 macOS Release 下载 pot.rb，再在下载目录运行：",
     "Linux": "Linux",
     "Experimental": "Experimental",
-    "Debian / Ubuntu · amd64": "Debian / Ubuntu · amd64",
     "下载 .deb": "下载 .deb",
     "Linux 安装说明 ↗": "Linux 安装说明 ↗",
     "下载将打开官方 Release 列表；安装包待首次发布。": "下载将打开官方 Release 列表；安装包待首次发布。",
-    "在 Linux amd64 / arm64 上运行，保留你的数据与工作区。": "在 Linux amd64 / arm64 上运行，保留你的数据与工作区。",
     "查看 Docker 镜像": "查看 Docker 镜像",
     "复制镜像地址": "复制镜像地址",
     "镜像待首次发布；发布后选择明确的版本标签。": "镜像待首次发布；发布后选择明确的版本标签。",
@@ -170,7 +167,10 @@
     "选择 Linux amd64 / arm64 的 pot-go 压缩包；待首次发布。": "选择 Linux amd64 / arm64 的 pot-go 压缩包；待首次发布。",
     "启动命令": "启动命令",
     "解压对应平台的压缩包后，在其中的 bin 目录运行：": "解压对应平台的压缩包后，在其中的 bin 目录运行：",
-    "配置与运行说明 ↗": "配置与运行说明 ↗"
+    "配置与运行说明 ↗": "配置与运行说明 ↗",
+    "Linux .deb": "Linux .deb",
+    "原生桌面 · Debian / Ubuntu · amd64": "原生桌面 · Debian / Ubuntu · amd64",
+    "容器运行 · Linux amd64 / arm64，通过浏览器使用。": "容器运行 · Linux amd64 / arm64，通过浏览器使用。"
   },
   "demo": {
     "language": "语言",

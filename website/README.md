@@ -100,9 +100,11 @@ All website tasks, conversations, scheduled work and reports are local examples;
 they do not call real agents or contain real connection information.
 
 The repository is `https://github.com/jjyr/pot`. The installation section links
-its [agent installation guide](../docs/install-with-agent.md), desktop downloads,
-[container package channel](https://github.com/users/jjyr/packages/container/package/pot)
-and Web UI release downloads as four parallel choices. Desktop is selected by
+its [agent installation guide](../docs/install-with-agent.md), macOS, Linux and
+Web UI as four parallel choices. macOS includes App downloads and Homebrew; Linux
+contains both the Experimental native `.deb` desktop and the Docker
+[container package channel](https://github.com/users/jjyr/packages/container/package/pot).
+Web UI links to server release downloads. macOS is selected by
 default; keyboard users can switch with arrows, Home and End. Without JavaScript,
 all four sections remain visible. Language switches preserve the selected channel.
 Download buttons open the official Releases selector, since the first packages
@@ -151,3 +153,7 @@ origin; `POT_PLAYWRIGHT_MODULE` can point to an external Playwright module.
 These checks cover six-language copy behavior, parallel playback and its terminal
 state, deliverable previews, narrow layouts, keyboard controls and Star fallbacks.
 They use synthetic clipboard/API responses and never execute installation commands.
+
+Use `node scripts/tests/website-browser.mjs --install-only` to check only installation
+classification, links, copy behavior, keyboard navigation, responsive layouts and
+static/offline language state without running the task-demo and Star scenarios.
