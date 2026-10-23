@@ -83,6 +83,29 @@ export function createToolContent({locale=()=> 'en',downloadFile,acquireFileImag
     }
     section('result',t('result'),result,{structured:typeof result==='object'&&result!==null,markdown:typeof result==='string'});
   }
+  function browserView(result){
+    if(!Array.isArray(result?.content)){resultView(result);return;}
+    let page;
+    const content=[];
+    for(const block of result.content){
+      if(block.type==='text'&&typeof block.text==='string'){
+        let value;try{value=JSON.parse(block.text);}catch{/* REPL output remains visible. */}
+        if(value?.protocol_version===1&&Number.isInteger(value.sequence)&&Array.isArray(value.elements)&&typeof value.title==='string'&&typeof value.url==='string'){
+          page=value;continue;
+        }
+      }
+      content.push(block);
+    }
+    if(!page){resultView(result);return;}
+    // AX elements and transport metadata serve the model. The original receipt
+    // stays in raw details; the reading view shows the latest page and image.
+    section('page',t('page'),{title:page.title,url:page.url},{structured:true});
+    if(page.limitations)section('limitations',t('observations'),page.limitations);
+    const latestImage=content.findLast(block=>block.type==='image');
+    const visible=content.filter(block=>block.type!=='image'||block===latestImage);
+    const extra=Object.fromEntries(Object.entries(result).filter(([key])=>!['content','session_id'].includes(key)));
+    if(visible.length||Object.keys(extra).length)resultView({...extra,content:visible});
+  }
   function taskView(result,args){
     const task=result?.task;
     if(object(task)){
@@ -139,6 +162,7 @@ export function createToolContent({locale=()=> 'en',downloadFile,acquireFileImag
     if(kind==='script'||kind==='browser'){
       if(!hasChildren&&typeof args.code==='string')section('input',t('code'),args.code).content.classList.add('tool-script-code');
       if(kind==='script'&&typeof result?.output==='string')section('result',t('scriptOutput'),tool.script?.output||result.output||t('emptyOutput'),{output:true});
+      else if(kind==='browser')browserView(result);
       else resultView(result);
       const output=(tool.output||[]).map(chunk=>chunk.text).join('\n');if(output)section('output',t('output'),output,{output:true});
       if(!hasChildren&&kind==='script'&&result===undefined&&!args.code)section('input',t('wait'),t('waitingResult'));

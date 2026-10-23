@@ -52,7 +52,15 @@ Runtime selects observations from this configuration:
 - Text: accessibility roles, names, values and element IDs; coordinate actions are rejected.
 - Image: accessibility data plus a 1280×800 JPEG viewport; coordinate actions are allowed.
 
-Model code cannot change the mode. Canvas or inaccessible content may require vision. Additional descriptor fields include `supports_image_detail_original`, `supported_in_api`, `visibility`, `priority`, and literal model/tool message overrides; these do not change tool schemas or permissions.
+Model code cannot change the mode. Each successful page observation in image mode
+automatically captures a screenshot, including observations after navigation,
+clicks, input and scrolling. Text mode does not capture screenshots. Canvas or
+inaccessible content may require vision. Additional descriptor fields include `supports_image_detail_original`, `supported_in_api`, `visibility`, `priority`, and literal model/tool message overrides; these do not change tool schemas or permissions.
+
+Expanded computer-use calls in Chat and Task details show the latest page title,
+URL and screenshot, alongside other REPL output and diagnostics. Element trees,
+observation sequence numbers, session IDs and earlier observations remain in the
+raw call details and the model's full tool result.
 
 ## CUA REPL
 
