@@ -13,7 +13,7 @@ export function projectLinkedAssistants(page,space) {
       if(!assistantID)return null;
       const capabilities=assistant.capabilities;
       if(capabilities&&!supportsCapability({capabilities},'chat.read'))return null;
-      return {id:linkedAssistantID(link.id,assistantID),name:assistant.name||assistantID,
+      return {id:linkedAssistantID(link.id,assistantID),name:assistant.name||assistantID,profile_name:assistant.name,
         avatar:assistant.avatar,reply_id:assistant.reply_id,reply_count:assistant.reply_count||0,last_reply_at_ms:assistant.last_reply_at_ms,preview:assistant.preview,control_id:space.control_id||space.id,space_id:space.id,space_name:'',space_kind:'local',
         offline:link.status!=='connected',phase:link.status==='connected'?'ready':'offline',
         origin:{node_id:peer.node_id,host:linkHostLabel(link),kind:peer.kind||assistant.adapter,name:[linkDisplayName(link),linkHostLabel(link)].filter(Boolean).join(' · '),link_id:link.id,assistant_id:assistantID},

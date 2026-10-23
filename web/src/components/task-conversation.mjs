@@ -9,6 +9,7 @@ import {bindComposer} from './composer.mjs';
 import {bindCompletions} from './completions.mjs';
 import {createReplyBubble} from './reply.mjs';
 import {createToolCall} from './tool-call.mjs';
+import {messageIdentities} from '../state/message-identities.mjs';
 import {renderMarkdown} from './markdown.mjs';
 import {toolForest} from '../state/tool-calls.mjs';
 import {projectScriptRuns} from '../state/script-runs.mjs';
@@ -100,7 +101,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
  if(!entry.compact){entry.compact=createCompaction({locale});entry.element.append(entry.compact.element);}
  entry.compact.update(message);
  }else if(message.tool){
-        if(!entry.tool){entry.tool=createToolCall({memory:toolMemory,key:JSON.stringify([scope,task.id,message.id]),locale,machineLabel,onDecision,onInteract:event=>reading.engage(event),onLocate:(call,turn)=>{const target=forest.byID.get(turn+':'+call)?.message;if(target){reading.locate({id:target.id,expand:true});renderTranscript();}},downloadFile,acquireFileImage});entry.element.append(entry.tool.element);}
+        if(!entry.tool){entry.tool=createToolCall({resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key:JSON.stringify([scope,task.id,message.id]),locale,machineLabel,onDecision,onInteract:event=>reading.engage(event),onLocate:(call,turn)=>{const target=forest.byID.get(turn+':'+call)?.message;if(target){reading.locate({id:target.id,expand:true});renderTranscript();}},downloadFile,acquireFileImage});entry.element.append(entry.tool.element);}
         const children=forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children||[];
         const approvalDescendant=children.some(function pending(entry){return !!approvalFor(entry.message.tool)||entry.children.some(pending);});
         entry.tool.update(message,{approval:approvalFor(message.tool),approvalDescendant,offline:unavailable||!!connectionError,children:children.map(child=>child.message)});

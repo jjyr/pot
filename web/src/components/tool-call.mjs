@@ -2,6 +2,9 @@ import {activeTool,toolResult,toolSummary,toolFailure,patchFiles} from '../state
 import {translate} from '../locales/messages.mjs';
 import {renderMarkdown} from './markdown.mjs';
 import {createApprovalCard} from './approval-card.mjs';
+import {messageAddresses} from '../state/message-identities.mjs';
+import {assistantMention} from './assistant-mention.mjs';
+import {agentSource} from './connection-visuals.mjs';
 const n=(tag,cls='',text)=>{const node=document.createElement(tag);node.className=cls;if(text!==undefined)node.textContent=text;return node;};
 const pretty=value=>typeof value==='string'?value:JSON.stringify(value??null,null,2);
 const LIMIT=24000;
@@ -10,7 +13,7 @@ function scheduleClock(update){clocks.add(update);if(clockFrame)return;const fra
 
 
 // Stable nodes preserve native disclosure, selection and output scroll on updates.
-export function createToolCall({memory=new Map(),key='',locale=()=> 'en',machineLabel=()=>translate(locale(),'machine.unavailable'),onDecision,onLocate,onInteract=()=>{},downloadFile,acquireFileImage}={}){
+export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolveMessageIdentity=()=>undefined,machineLabel=()=>translate(locale(),'machine.unavailable'),onDecision,onLocate,onInteract=()=>{},downloadFile,acquireFileImage}={}){
   const t=name=>translate(locale(),`tool.${name}`),root=n('details','tool-call'),summary=n('summary','tool-summary');
   root.dataset.cacheKey=`tool:${key}`;
   summary.addEventListener('click',onInteract);
@@ -20,6 +23,22 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',machine
   let bodyVersion=[];
   const sectionsByKey=new Map();
   root.open=memory.get(key)?.open||false;raw.open=memory.get(key)?.raw||false;
+  function messageTitle(tool){
+    const addresses=messageAddresses(tool);if(!addresses)return false;
+    const participants=n('span'),seen=new Set();
+    for(const address of addresses.length?addresses:[undefined]){
+      const identity=JSON.stringify([address?.node_id,address?.kind,address?.agent_id]);if(seen.has(identity))continue;seen.add(identity);
+      if(participants.childNodes.length)participants.append(document.createTextNode(', '));
+      const profile=resolveMessageIdentity(address);
+      if(address?.kind==='assistant'&&profile?.name){
+        participants.append(assistantMention({label:profile.name,node:address.node_id,agent:address.agent_id}));
+        const source=agentSource(profile.origin,locale());if(source)participants.append(source);
+      }else participants.append(document.createTextNode(t(address?.kind==='task'?'messageTask':address?.kind==='user'?'messageUser':address?.kind==='assistant'?'messageAssistantUnavailable':'messageRecipientUnavailable')));
+    }
+    const [prefix,suffix]=t(tool.name==='receive_message'?'receiveMessageFrom':'sendMessageTo').split('{name}');
+    title.replaceChildren(document.createTextNode(prefix),...participants.childNodes,document.createTextNode(suffix));
+    title.title=title.textContent;return true;
+  }
   const remember=()=>{if(!building)memory.set(key,{...memory.get(key),open:root.open,raw:raw.open});};root.addEventListener('toggle',()=>{remember();refreshStatus();if(current)update(current,options);});raw.addEventListener('toggle',()=>{remember();if(current)update(current,options);});
   function copyButton(label,get){const button=n('button','tool-action',label);button.type='button';button.onclick=async()=>{try{await navigator.clipboard.writeText(get());button.textContent=t('copied');}catch{button.textContent=t('copyFailed');}};return button;}
   function section(id,label,value,{output=false,markdown=false}={}){
@@ -46,8 +65,9 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',machine
 
     const phase=pending?'waiting_approval':tool.phase;
     const names={exec_command:'command',write_stdin:'session',apply_patch:'patch',exec:'script',wait:'wait',cua_repl:'computer',create_task:'createTask',set_task_dispositions:'setTaskDispositions',get_task:'getTask',wait_task:'waitTask',update_agent_profile:'updateProfile',register_resource:'registerResource',present_resource:'presentResource'};
-    title.textContent=tool.name==='receive_message'?t('receiveMessage'):names[tool.name]?t(names[tool.name]):tool.name;
-    const preview=toolSummary(tool);
+    const messaging=messageTitle(tool);root.classList.toggle('message-tool',messaging);
+    if(!messaging)title.textContent=names[tool.name]?t(names[tool.name]):tool.name;
+    const preview=messaging?'':toolSummary(tool);
     excerpt.textContent=preview===tool.name||preview===title.textContent?'':preview;excerpt.title=excerpt.textContent;excerpt.hidden=!excerpt.textContent;
     const childTools=(next.children||[]).map(child=>child.tool);
     // A tool failure is execution detail, not a request for the user's attention.
@@ -63,6 +83,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',machine
     if(script){
       const focus=script.focus,label=focus?.name==='exec_command'?focus.args?.cmd?.trim().split('\n')[0]:focus?(names[focus.name]?t(names[focus.name]):focus.name):'';
       title.textContent=isGroup?t('executionHistory'):label||t('script');
+      if(!isGroup&&focus&&messageTitle(focus))root.classList.add('message-tool');
       excerpt.hidden=true;excerpt.textContent='';title.title=title.textContent;
     }
     root.dataset.phase=phase;root.dataset.callId=tool.id;root.dataset.turnId=tool.turn_id||'';

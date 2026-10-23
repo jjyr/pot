@@ -165,6 +165,13 @@ At phone widths, select Pot from the assistant list first. Repeat with
 `locale=zh-CN`; `before=1` shows the previous private-correspondence presentation
 for comparison. This fixture uses production Chat components and synthetic data.
 
+For message-title identity, streaming-argument, disclosure and Task checks, open
+`/scripts/tests/fixtures/message-titles.html` on the same loopback server. The
+fixture runs shared DOM assertions with synthetic full addresses and includes a
+phone-width iframe. `?locale=zh-CN` starts in Chinese; each run also switches the
+locale of mounted titles. Add `verify=1` to the correspondence fixture above to
+check Chat names, directory renames and draft preservation automatically.
+
 For the resource tool and component fixture, run
 `POT_RESOURCE_FIXTURE_URL_FILE=/tmp/pot-resource-url mise exec -- go test
 ./internal/transport -run '^TestResourceBrowserFixture$' -v -count=1 -timeout=35m`.

@@ -11,6 +11,7 @@ import {createSendConfirmation} from '../state/send-confirmation.mjs';
 import {bindMessageSelection,renderMessageReferences,referenceProblem} from './message-references.mjs';
 import {createSystemNotifications} from '../adapters/notifications.mjs';
 import {createToolCall} from './tool-call.mjs';
+import {messageIdentities} from '../state/message-identities.mjs';
 import {toolForest} from '../state/tool-calls.mjs';
 import {projectScriptRuns} from '../state/script-runs.mjs';
 import {avatar} from './avatar.mjs';
@@ -699,7 +700,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
  record.compact.update(message);
  }else if(message.role==='tool'&&message.tool){
       const scope=client.scope?.()||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
-      if(!record.tool){record.tool=createToolCall({memory:toolMemory,key,locale:()=>locale,machineLabel:id=>machinePresentation(client).label(id,scope,locale),onDecision:(approval,action)=>pages.decideApproval(approval,action),onInteract:event=>reading.engage(event),onLocate:(call,turn)=>{const target=renderingForest.byID.get(turn+':'+call)?.message;if(target)jumpToMessage(target.id,{expand:true});},...markdownFiles(scope)});bubble.append(record.tool.element);}
+      if(!record.tool){record.tool=createToolCall({resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key,locale:()=>locale,machineLabel:id=>machinePresentation(client).label(id,scope,locale),onDecision:(approval,action)=>pages.decideApproval(approval,action),onInteract:event=>reading.engage(event),onLocate:(call,turn)=>{const target=renderingForest.byID.get(turn+':'+call)?.message;if(target)jumpToMessage(target.id,{expand:true});},...markdownFiles(scope)});bubble.append(record.tool.element);}
       record.tool.update(message,{offline:connection==='offline'||disconnected,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
     }else if(message.role==='assistant'){
       record.reply ||= createReplyBubble(bubble);
