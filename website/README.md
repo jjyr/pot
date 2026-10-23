@@ -60,8 +60,35 @@ The root and localized HTML files are committed so `website/` is ready for a sta
 server. Regenerate them whenever a source changes. The larger self-contained
 `pot-preview.html` is generated locally and ignored by Git; it embeds all six
 pages, catalogs, styles, scripts and brand images, supports offline language
-switching and requires no network subresources. Deploy the contents of `website/`
-to a static host when needed; no production domain or deployment is configured here.
+switching and requires no network subresources.
+
+## GitHub Pages
+
+The [Website workflow](../.github/workflows/website.yml) builds and publishes the
+static site to GitHub Pages when `website/**` or the workflow changes on `main`.
+It also supports manual runs from the Actions tab; select `main`, since other
+branches are skipped. Website deployment runs independently of product releases.
+
+In the repository's **Settings > Pages**, set **Build and deployment > Source**
+to **GitHub Actions** before the first deployment. The private `jjyr/pot`
+repository requires a GitHub plan supporting Pages for private repositories,
+such as GitHub Pro. The published website is publicly accessible; the repository
+can remain private. The workflow uses the built-in `GITHUB_TOKEN` and does not
+require a personal access token.
+
+```text
+main push / manual run
+  -> generate six localized pages
+  -> stage public files only
+  -> upload Pages artifact
+  -> deploy to https://jjyr.github.io/pot/
+```
+
+The deployment includes only `index.html`, `style.css`, `app.js`, `locale.js`,
+`assets/` and the six locale directories. Templates, catalogs, build scripts,
+the README and the offline preview are excluded. Relative resource and language
+links work under the `/pot/` project path; for example, Simplified Chinese is
+available at `https://jjyr.github.io/pot/zh-CN/`. No custom domain is configured.
 
 ## Product claims and links
 
