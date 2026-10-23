@@ -46,17 +46,24 @@ Read https://github.com/jjyr/pot/blob/main/docs/install-with-agent.md and help m
 ```
 
 The [shared installation guide](docs/install-with-agent.md) helps your agent check
-existing data, choose Desktop, Docker or Server, and verify the current release
-channel. Prefer to install it yourself? Choose a path below. Start from source
-today; packaged distribution is pending. Source builds and GitHub-hosted guides
-currently require access to this private repository.
+existing data, choose a channel and complete first setup. To install it yourself:
 
-| Platform | Install / download | Availability |
+| Channel | Download / install | Platform |
 |---|---|---|
-| macOS desktop | [Build guide](docs/development.md#toolchains-and-workflow) · [Downloads](https://github.com/jjyr/pot/releases) | Apple Silicon, macOS 26+. Homebrew distribution is pending. |
-| Linux server / Web UI | [Quick start](#linux-server--web-ui) · [Deployment guide](docs/deployment.md) | Available from source on a glibc-based amd64 or arm64 host. |
-| Docker | [Build and installation guide](docs/docker.md) · [Releases](https://github.com/jjyr/pot/releases) | Image not yet published. |
-| Linux desktop (Experimental) | [Build and installation guide](docs/desktop-installation.md#linux-experimental) · [Releases](https://github.com/jjyr/pot/releases) | Native `.deb` packaging is experimental; no desktop package is published yet. |
+| macOS App | [Download macOS App](https://github.com/jjyr/pot/releases) — select `Pot-VERSION-arm64.zip` | Apple Silicon, macOS 26+ |
+| Homebrew | Download `pot.rb` from the macOS release, then run `brew install --cask ./pot.rb` in its directory | macOS; [cask instructions](docs/releases.md#homebrew-generation) |
+| Linux desktop · Experimental | [Download .deb](https://github.com/jjyr/pot/releases) — select `pot-desktop_VERSION_linux_amd64.deb` | Debian / Ubuntu amd64; [requirements](docs/desktop-installation.md#linux-experimental) |
+| Docker | [View Docker image](https://github.com/users/jjyr/packages/container/package/pot) · `ghcr.io/jjyr/pot` | Linux amd64 / arm64; [installation and running](docs/docker.md) |
+| Web UI / Server | [Download Web UI / Server](https://github.com/jjyr/pot/releases) — select `pot-go-VERSION-linux-ARCH.tar.gz` | glibc Linux amd64 / arm64; [configuration and running](docs/deployment.md) |
+
+Download links open the official release selector; packages and the container
+image await their first publication. Homebrew uses the release's local cask;
+there is currently no Pot cask in the public tap. Once images are published,
+choose an explicit version tag; no `latest` tag is published. Check release
+notes and supplied checksums. If your package is unavailable, the
+[agent guide](docs/install-with-agent.md#build-from-source-when-a-matching-package-is-unavailable)
+covers the official source builds. GitHub-hosted files currently require
+repository access.
 
 Windows is currently unsupported.
 
