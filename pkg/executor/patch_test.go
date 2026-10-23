@@ -48,31 +48,44 @@ func TestPatchPreflightMoveModeAndEscape(t *testing.T) {
 	}
 }
 
-func TestHostPatchRetainsFileOnlyPermissionFallback(t *testing.T) {
+func TestPatchPermissionFallback(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root bypasses directory write permissions")
 	}
-	dir := t.TempDir()
-	path := filepath.Join(dir, "file")
-	if err := os.WriteFile(path, []byte("old\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	before, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(dir, 0500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
-	if _, err := ApplyPatch(dir, "*** Begin Patch\n*** Update File: file\n@@\n-old\n+new\n*** End Patch"); err != nil {
-		t.Fatal("host lost its original file-only fallback", err)
-	}
-	after, err := os.Stat(path)
-	if err != nil || !os.SameFile(before, after) {
-		t.Fatal("fallback replaced the inode", err)
-	}
-	if data, err := os.ReadFile(path); err != nil || string(data) != "new\n" {
-		t.Fatal("fallback did not update contents", string(data), err)
+	for _, host := range []bool{true, false} {
+		t.Run(map[bool]string{true: "host", false: "worker"}[host], func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "file")
+			if err := os.WriteFile(path, []byte("old\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scope, _ := patchScope(dir, nil)
+			if host {
+				scope = nil
+			}
+			if err := os.Chmod(dir, 0500); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+			_, err = applyPatch(dir, "*** Begin Patch\n*** Update File: file\n@@\n-old\n+new\n*** End Patch", scope)
+			if scope == nil && err != nil || scope != nil && !os.IsPermission(err) {
+				t.Fatal("unexpected permission fallback", err)
+			}
+			want := "new\n"
+			if scope != nil {
+				want = "old\n"
+			}
+			after, err := os.Stat(path)
+			if err != nil || !os.SameFile(before, after) {
+				t.Fatal("file inode changed", err)
+			}
+			if data, err := os.ReadFile(path); err != nil || string(data) != want {
+				t.Fatal("unexpected file contents", string(data), err)
+			}
+		})
 	}
 }

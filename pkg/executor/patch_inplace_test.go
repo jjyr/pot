@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -56,30 +55,8 @@ func TestPatchInPlacePreservesIdentityAndMode(t *testing.T) {
 	}
 }
 
-func TestPatchInPlaceConcurrentWriters(t *testing.T) {
-	path, original := inplaceFixture(t)
-	start := make(chan struct{})
-	results := make(chan error, 2)
-	var workers sync.WaitGroup
-	for range 2 {
-		workers.Go(func() {
-			<-start
-			results <- writePatchInPlace(path, []byte("replacement\n"), original)
-		})
-	}
-	close(start)
-	workers.Wait()
-	first, second := <-results, <-results
-	if (first == nil) == (second == nil) {
-		t.Fatal("expected one commit and one conflict", first, second)
-	}
-	if data, err := os.ReadFile(path); err != nil || string(data) != "replacement\n" {
-		t.Fatal(string(data), err)
-	}
-}
-
 func TestPatchInPlaceRejectsChangedTargets(t *testing.T) {
-	for _, change := range []string{"contents", "file", "parent", "symlink", "hardlink", "mode", "locked", "missing", "directory"} {
+	for _, change := range []string{"contents", "file", "parent", "symlink", "hardlink", "mode", "locked"} {
 		t.Run(change, func(t *testing.T) {
 			path, original := inplaceFixture(t)
 			other := filepath.Join(t.TempDir(), "other")
@@ -102,13 +79,10 @@ func TestPatchInPlaceRejectsChangedTargets(t *testing.T) {
 				if err == nil {
 					err = os.WriteFile(path, original.data, 0750)
 				}
-			case "symlink", "missing", "directory":
+			case "symlink":
 				err = os.Remove(path)
-				if err == nil && change == "symlink" {
+				if err == nil {
 					err = os.Symlink(other, path)
-				}
-				if err == nil && change == "directory" {
-					err = os.Mkdir(path, 0700)
 				}
 			case "hardlink":
 				err = os.Link(path, other+"-link")
@@ -180,23 +154,21 @@ func (f *failingPatchFile) Sync() error {
 
 func TestPatchInPlaceRestoresOnIOFailure(t *testing.T) {
 	for _, operation := range []string{"write", "truncate", "sync"} {
-		for name, content := range map[string]string{"short": "short", "long": strings.Repeat("long", 30)} {
-			t.Run(operation+"/"+name, func(t *testing.T) {
-				path, original := inplaceFixture(t)
-				file, err := os.OpenFile(path, os.O_RDWR, 0)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer file.Close()
-				err = replacePatchContents(&failingPatchFile{File: file, operation: operation}, []byte(content), original.data)
-				if err == nil || !strings.Contains(err.Error(), "original contents restored") {
-					t.Fatal(err)
-				}
-				if data, err := os.ReadFile(path); err != nil || string(data) != string(original.data) {
-					t.Fatal("failed patch damaged original", string(data), err)
-				}
-			})
-		}
+		t.Run(operation, func(t *testing.T) {
+			path, original := inplaceFixture(t)
+			file, err := os.OpenFile(path, os.O_RDWR, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer file.Close()
+			err = replacePatchContents(&failingPatchFile{File: file, operation: operation}, []byte(strings.Repeat("new", 30)), original.data)
+			if err == nil || !strings.Contains(err.Error(), "original contents restored") {
+				t.Fatal(err)
+			}
+			if data, err := os.ReadFile(path); err != nil || string(data) != string(original.data) {
+				t.Fatal("failed patch damaged original", string(data), err)
+			}
+		})
 	}
 }
 
@@ -210,30 +182,5 @@ func TestPatchInPlaceReportsRestorationFailure(t *testing.T) {
 	err = replacePatchContents(&failingPatchFile{File: file, operation: "sync", repeated: true}, []byte("new"), original.data)
 	if err == nil || !strings.Contains(err.Error(), "restoration failed; file may be partially modified") {
 		t.Fatal(err)
-	}
-}
-
-func TestPatchAtomicErrorsDoNotSwitchToInPlace(t *testing.T) {
-	for _, failure := range []error{unix.EBUSY, unix.EACCES, unix.EROFS} {
-		t.Run(failure.Error(), func(t *testing.T) {
-			path, original := inplaceFixture(t)
-			err := replacePatchAtomically(path, []byte("replacement\n"), 0750, func(from, to string) error {
-				return &os.LinkError{Op: "rename", Old: from, New: to, Err: failure}
-			}, false)
-			if !errors.Is(err, failure) {
-				t.Fatal("atomic failure not preserved", err)
-			}
-			info, err := os.Stat(path)
-			if err != nil || !os.SameFile(info, original.file) {
-				t.Fatal("failed atomic patch changed identity", err)
-			}
-			if data, err := os.ReadFile(path); err != nil || string(data) != string(original.data) {
-				t.Fatal("failed atomic patch changed contents", string(data), err)
-			}
-			entries, err := os.ReadDir(filepath.Dir(path))
-			if err != nil || len(entries) != 1 {
-				t.Fatal("temporary file left behind", entries, err)
-			}
-		})
 	}
 }

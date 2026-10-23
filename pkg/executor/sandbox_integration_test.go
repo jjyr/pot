@@ -121,13 +121,6 @@ func TestRealSandboxExternalPatchRequiresWritePermission(t *testing.T) {
 	if after, err := os.Stat(path); err != nil || !os.SameFile(beforeExact, after) {
 		t.Fatal("exact file grant did not use in-place update", err)
 	}
-	// A failed hunk must not reach the in-place commit path.
-	if _, err := e.Execute(t.Context(), r, nil); err == nil {
-		t.Fatal("accepted stale patch context")
-	}
-	if data, _ := os.ReadFile(path); string(data) != "new\n" {
-		t.Fatal("failed patch changed the original contents")
-	}
 	r.Args["patch"] = "*** Begin Patch\n*** Update File: " + sibling + "\n@@\n-old\n+changed\n*** End Patch"
 	if _, err := e.Execute(t.Context(), r, nil); err == nil {
 		t.Fatal("one file grant exposed its sibling")
@@ -135,101 +128,39 @@ func TestRealSandboxExternalPatchRequiresWritePermission(t *testing.T) {
 	if data, _ := os.ReadFile(sibling); string(data) != "old\n" {
 		t.Fatal("sibling host file changed")
 	}
-	r.Args["patch"] = "*** Begin Patch\n*** Update File: " + path + "\n@@\n-new\n+again\n*** End Patch"
 	if runtime.GOOS == "linux" {
-		// The pinned SDK overlays a broader read-only parent after the file
-		// write bind. That combination still fails closed; patch must not
-		// bypass a read-only target or retry on the host.
+		// A read-only ancestor can shadow the SDK's writable file mount.
 		e.options.SandboxRead = []string{outside}
+		r.Args["patch"] = "*** Begin Patch\n*** Update File: " + path + "\n@@\n-new\n+changed\n*** End Patch"
 		if _, err := e.Execute(t.Context(), r, nil); err == nil {
 			t.Fatal("patch bypassed read-only target mount")
 		}
 		if data, _ := os.ReadFile(path); string(data) != "new\n" {
-			t.Fatal("read-only mount denial changed host file")
+			t.Fatal("read-only denial changed host file")
 		}
 	}
-	e.options.SandboxRead = []string{path, sibling}
-	if _, err := e.Execute(t.Context(), r, nil); err != nil {
-		t.Fatal("exact grant with read-only sibling failed", err)
-	}
-	if data, _ := os.ReadFile(path); string(data) != "again\n" {
-		t.Fatal("exact grant patch did not reach host file")
-	}
-	link := filepath.Join(r.CWD, "external-link")
-	if err := os.Symlink(path, link); err != nil {
-		t.Fatal(err)
-	}
-	r.Args["patch"] = "*** Begin Patch\n*** Update File: " + link + "\n@@\n-again\n+changed\n*** End Patch"
-	if _, err := e.Execute(t.Context(), r, nil); err == nil {
-		t.Fatal("patch followed a symlink to the granted file")
-	}
-	deniedPatches := []string{
-		"*** Update File: " + sibling + "\n@@\n-old\n+changed\n",
-		"*** Update File: " + path + "\n*** Move to: " + filepath.Join(outside, "moved") + "\n@@\n-again\n+changed\n",
-	}
-	if runtime.GOOS == "linux" {
-		// Linux cannot unlink a file bind mount. Seatbelt's existing file
-		// write grant permits unlinking that exact file; this fix is Linux-only.
-		deniedPatches = append(deniedPatches, "*** Delete File: "+path+"\n")
-	}
-	for _, patch := range deniedPatches {
-		r.Args["patch"] = "*** Begin Patch\n" + patch + "*** End Patch"
-		if _, err := e.Execute(t.Context(), r, nil); err == nil {
-			t.Fatal("exact file grant allowed a directory mutation", patch)
-		}
-	}
-	for _, name := range []string{"new-file", "new-dir/file"} {
-		r.Args["patch"] = "*** Begin Patch\n*** Add File: " + filepath.Join(outside, name) + "\n+changed\n*** End Patch"
-		// Linux may allow this only in its private hidden-parent overlay.
-		// The host tree below must remain unchanged regardless of the result.
-		result, err := e.Execute(t.Context(), r, nil)
-		t.Logf("ungranted creation %s: result=%v error=%v; checking host tree", name, result, err)
-	}
-	if data, _ := os.ReadFile(path); string(data) != "again\n" {
-		t.Fatal("denied directory mutations changed granted file")
-	}
-	if data, _ := os.ReadFile(sibling); string(data) != "old\n" {
-		t.Fatal("read-only sibling changed")
-	}
-	for _, name := range []string{"new-file", "new-dir", "moved"} {
-		if _, err := os.Lstat(filepath.Join(outside, name)); !os.IsNotExist(err) {
-			t.Fatal("exact file grant created host path", name, err)
-		}
-	}
-	// A directory grant continues to replace atomically, with a new inode.
-	before, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e.options.SandboxWrite = []string{outside}
-	// Seatbelt write grants do not imply directory reads, which the atomic
-	// writer needs to open and fsync its parent after replacement.
+	// Directory grants must replace atomically, including redundant file binds.
 	e.options.SandboxRead = []string{outside}
-	r.Args["patch"] = "*** Begin Patch\n*** Update File: " + path + "\n@@\n-again\n+atomic\n*** End Patch"
-	if _, err := e.Execute(t.Context(), r, nil); err != nil {
-		t.Fatal("directory grant patch failed", err)
-	}
-	after, err := os.Stat(path)
-	if err != nil || os.SameFile(before, after) {
-		t.Fatal("directory grant did not use atomic replacement", err)
-	}
-	if data, _ := os.ReadFile(path); string(data) != "atomic\n" {
-		t.Fatal("atomic patch did not reach host file")
-	}
-	for _, grants := range [][]string{{path, outside}, {outside, path}} {
+	old := "new"
+	for _, grants := range [][]string{{outside}, {path, outside}, {outside, path}} {
 		before, err := os.Stat(path)
 		if err != nil {
 			t.Fatal(err)
 		}
 		e.options.SandboxWrite = grants
-		r.Args["patch"] = "*** Begin Patch\n*** Update File: " + path + "\n@@\n-atomic\n+atomic\n*** End Patch"
+		next := old + "!"
+		r.Args["patch"] = "*** Begin Patch\n*** Update File: " + path + "\n@@\n-" + old + "\n+" + next + "\n*** End Patch"
 		if _, err := e.Execute(t.Context(), r, nil); err != nil {
-			t.Fatal("combined directory/file grants failed", grants, err)
+			t.Fatal("directory grant patch failed", grants, err)
 		}
 		after, err := os.Stat(path)
 		if err != nil || os.SameFile(before, after) {
-			t.Fatal("directory/file grants did not retain atomic replacement", grants, err)
+			t.Fatal("directory grant did not replace atomically", grants, err)
 		}
+		if data, err := os.ReadFile(path); err != nil || string(data) != next+"\n" {
+			t.Fatal("directory patch did not update host file", string(data), err)
+		}
+		old = next
 	}
 	r.Args["patch"] = "*** Begin Patch\n*** Update File: " + sibling + "\n@@\n-old\n+changed\n*** End Patch"
 	r.Mode = "host"

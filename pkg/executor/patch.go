@@ -17,7 +17,6 @@ type patchEdit struct {
 	content           *string
 	mode              os.FileMode
 	original          *patchOriginal
-	inPlace           bool
 }
 
 type patchOriginal struct {
@@ -66,12 +65,10 @@ func textLines(text string) []string {
 	return strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 }
 
-// ApplyPatch validates all paths and hunks before the first mutation. Each write
-// is fsynced. The original writer prefers atomic replacement and falls back to
-// writing the file when creating a sibling is denied. Linux protected workers
-// use a trusted write scope to select verified, non-crash-atomic file-only updates.
-// Multi-file patches are not transactions and
-// OS errors during commit must be reported as partial effects.
+// ApplyPatch preflights paths and hunks, then fsyncs each write. Writes prefer
+// atomic replacement, with a file-only permission fallback. Linux sandbox workers
+// preselect verified in-place writes instead. Multi-file commits are not
+// transactions and may report partial effects.
 func ApplyPatch(workspace, patch string) (string, error) {
 	return applyPatch(workspace, patch, nil)
 }
@@ -270,8 +267,7 @@ func applyPatch(workspace, patch string, scope *patchWriteScope) (string, error)
 	// Select every write strategy before the first mutation. Scope comes only
 	// from the executor's private worker input, never from patch/tool arguments.
 	for i := range edits {
-		edits[i].inPlace = scope.inPlace(edits[i])
-		if edits[i].inPlace {
+		if scope.inPlace(edits[i]) {
 			parent, err := os.Stat(filepath.Dir(edits[i].path))
 			if err != nil {
 				return "", err
@@ -306,12 +302,10 @@ func applyPatch(workspace, patch string, scope *patchWriteScope) (string, error)
 			return strings.Join(report, "\n"), err
 		}
 		var err error
-		if edit.inPlace {
+		if edit.original != nil {
 			err = writePatchInPlace(target, []byte(*edit.content), edit.original)
-		} else if scope != nil {
-			err = replacePatchAtomically(target, []byte(*edit.content), edit.mode, os.Rename, false)
 		} else {
-			err = writeAtomic(target, []byte(*edit.content), edit.mode)
+			err = writeAtomic(target, []byte(*edit.content), edit.mode, scope == nil)
 		}
 		if err != nil {
 			return strings.Join(report, "\n"), err
@@ -325,11 +319,7 @@ func applyPatch(workspace, patch string, scope *patchWriteScope) (string, error)
 	}
 	return strings.Join(report, "\n"), nil
 }
-func writeAtomic(path string, data []byte, mode os.FileMode) error {
-	return replacePatchAtomically(path, data, mode, os.Rename, true)
-}
-
-func replacePatchAtomically(path string, data []byte, mode os.FileMode, rename func(string, string) error, fileFallback bool) error {
+func writeAtomic(path string, data []byte, mode os.FileMode, fileFallback bool) error {
 	file, err := os.CreateTemp(filepath.Dir(path), ".pot-patch-")
 	if err != nil {
 		if fileFallback && os.IsPermission(err) {
@@ -360,7 +350,7 @@ func replacePatchAtomically(path string, data []byte, mode os.FileMode, rename f
 	if err := file.Close(); err != nil {
 		return err
 	}
-	if err := rename(file.Name(), path); err != nil {
+	if err := os.Rename(file.Name(), path); err != nil {
 		return err
 	}
 	directory, err := os.Open(filepath.Dir(path))

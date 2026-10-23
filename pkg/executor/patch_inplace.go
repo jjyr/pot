@@ -14,10 +14,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// A file-only grant cannot replace a directory entry. Keep the inode and its
-// metadata, and never create/truncate a path before verifying the preflight
-// identity and contents. The lock serializes cooperating in-place patches only;
-// arbitrary external writers and process/machine crashes are not transactional.
+// Pin parent and inode before writing through an exact-file grant.
+// The advisory lock only excludes cooperating writers.
 func writePatchInPlace(path string, data []byte, original *patchOriginal) (result error) {
 	parent, err := os.OpenRoot(filepath.Dir(path))
 	if err != nil {
