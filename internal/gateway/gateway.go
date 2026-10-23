@@ -78,6 +78,8 @@ func (p Provider) Validate() error {
 // Forward performs one POST without redirects or application retries. Its caller
 // must durably reserve and claim the request before invoking it. Any transport
 // failure has an uncertain outcome and must retain its reservation/receipt.
+// timeout bounds response headers only; callers own stream cancellation and
+// must provide an inactivity or total deadline appropriate to their operation.
 func Forward(ctx context.Context, p Provider, key []byte, body json.RawMessage, beta string, timeout time.Duration) (*http.Response, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
