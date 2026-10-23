@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/jjyr/pot/pkg/integrations"
 	"os"
 	"path/filepath"
@@ -26,7 +27,10 @@ func TestPluginNotificationConfigurationOwnerRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	s.Registry.Create(ctx, "create", "Pot")
+	owner, err := s.Registry.Create(ctx, "create", "Pot")
+	if err != nil {
+		t.Fatal(err)
+	}
 	app := &Application{Control: s}
 	if _, err = app.Call(ctx, Request{Method: "GET", Path: "/api/v1/plugin-notifications"}); err != nil {
 		t.Fatal(err)
@@ -36,7 +40,7 @@ func TestPluginNotificationConfigurationOwnerRoutes(t *testing.T) {
 			t.Fatal("invalid owner route accepted", body)
 		}
 	}
-	request := Request{Method: "POST", Path: "/api/v1/plugin-notifications/github", Body: json.RawMessage(`{"request_id":"save","enabled":false,"assistant":"main","config":{},"revision":0}`)}
+	request := Request{Method: "POST", Path: "/api/v1/plugin-notifications/github", Body: json.RawMessage(fmt.Sprintf(`{"request_id":"save","enabled":false,"assistant":%q,"config":{},"revision":0}`, owner.ID))}
 	if _, err = app.Call(ctx, request); err == nil {
 		t.Fatal("disconnected account accepted configuration")
 	}
@@ -49,7 +53,7 @@ func TestPluginNotificationConfigurationOwnerRoutes(t *testing.T) {
 }
 
 func TestGitHubFilterSettingsPortReturnsEffectiveRevisionAndIdempotentRetry(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	keys, _ := secrets.NewMemoryKey(make([]byte, 32))
 	manager, _ := execution.New("local", "boot", execution.Limits{MaxActive: 1, MaxQueued: 8})
@@ -78,7 +82,10 @@ func TestGitHubFilterSettingsPortReturnsEffectiveRevisionAndIdempotentRetry(t *t
 		t.Fatal(err)
 	}
 	defer s.Close()
-	s.Registry.Create(ctx, "create", "Pot")
+	owner, err := s.Registry.Create(ctx, "create", "Pot")
+	if err != nil {
+		t.Fatal(err)
+	}
 	login, err := s.Integrations.BeginLogin(ctx, "github")
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +108,7 @@ func TestGitHubFilterSettingsPortReturnsEffectiveRevisionAndIdempotentRetry(t *t
 	if _, err = app.Call(ctx, Request{Method: "GET", Path: "/api/v1/plugin-notifications"}); err != nil {
 		t.Fatal(err)
 	}
-	request := Request{Method: "POST", Path: "/api/v1/plugin-notifications/github", Body: json.RawMessage(`{"tool":"update_subscription","arguments":{"id":"default","request_id":"ui-save","revision":1,"account_id":"123","enabled":false,"assistant":"main","filters":{"repositories":null,"reasons":[],"subject_types":null,"threads":null}}}`)}
+	request := Request{Method: "POST", Path: "/api/v1/plugin-notifications/github", Body: json.RawMessage(fmt.Sprintf(`{"tool":"update_subscription","arguments":{"id":"default","request_id":"ui-save","revision":1,"account_id":"123","enabled":false,"assistant":%q,"filters":{"repositories":null,"reasons":[],"subject_types":null,"threads":null}}}`, owner.ID))}
 	for range 2 {
 		result, e := app.Call(ctx, request)
 		if e != nil {

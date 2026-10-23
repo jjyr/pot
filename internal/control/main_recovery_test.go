@@ -22,7 +22,7 @@ func mainRecoveryFixture(t *testing.T, issued, known, proof bool, boot string, c
 	t.Helper()
 	ctx := context.Background()
 	s := taskControl(t, "runtime", "")
-	if _, err := s.Registry.Create(ctx, "create", "Pot"); err != nil {
+	if _, err := legacyMainAssistant(ctx, s, "create", "Pot"); err != nil {
 		t.Fatal(err)
 	}
 	c, err := s.Conversation(ctx, "main")

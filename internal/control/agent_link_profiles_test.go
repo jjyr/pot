@@ -16,17 +16,20 @@ func TestLinkedPotRetiresOnlySelectedAssistant(t *testing.T) {
 	}
 	connection := connectAgentControls(t, a, b)
 	owner := "agent-link:" + connection.ID + ":main"
+	callAgent := func(operation agentlink.Operation, call agentlink.Call) (any, error) {
+		return callAgentWhenReady(ctx, a.service, owner, operation, call)
+	}
 	d, err := a.service.AgentCapabilities(ctx, owner)
 	if err != nil || !d.Supports(agentlink.AssistantDelete) {
 		t.Fatal(d, err)
 	}
-	value, err := a.service.CallAgent(ctx, owner, agentlink.AssistantProfile, agentlink.Call{Action: "get"})
+	value, err := callAgent(agentlink.AssistantProfile, agentlink.Call{Action: "get"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	p := value.(agentlink.Profile)
 	update, _ := json.Marshal(map[string]any{"name": "Remote name", "revision": p.Revision})
-	value, err = a.service.CallAgent(ctx, owner, agentlink.AssistantProfile, agentlink.Call{Action: "write", Body: update})
+	value, err = callAgent(agentlink.AssistantProfile, agentlink.Call{Action: "write", Body: update})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,23 +37,25 @@ func TestLinkedPotRetiresOnlySelectedAssistant(t *testing.T) {
 	if p.Name != "Remote name" || p.Avatar == "" {
 		t.Fatal("remote profile not saved", p)
 	}
-	if _, err = a.service.CallAgent(ctx, owner, agentlink.AssistantProfile, agentlink.Call{Action: "read"}); err != nil {
+	if _, err = callAgent(agentlink.AssistantProfile, agentlink.Call{Action: "read"}); err != nil {
 		t.Fatal("default avatar", err)
 	}
-	if _, err = a.service.CallAgent(ctx, owner, agentlink.AssistantDelete, agentlink.Call{Body: json.RawMessage(`{"revision":999}`)}); err == nil {
+	if _, err = callAgent(agentlink.AssistantDelete, agentlink.Call{Body: json.RawMessage(`{"revision":999}`)}); err == nil {
 		t.Fatal("stale revision accepted")
 	}
 	body, _ := json.Marshal(map[string]any{"revision": p.Revision})
-	if _, err = a.service.CallAgent(ctx, owner, agentlink.AssistantDelete, agentlink.Call{Body: body}); err != nil {
+	if _, err = callAgent(agentlink.AssistantDelete, agentlink.Call{Body: body}); err != nil {
 		t.Fatal(err)
 	}
 	defs, err := b.service.Registry.Definitions(ctx)
 	if err != nil || len(defs) != 1 || defs[0].ID != other.ID {
 		t.Fatal(defs, err)
 	}
-	link, err := a.service.agentLinks.service.Get(ctx, connection.ID)
-	if err != nil || len(link.Directory.Assistants()) != 1 || link.Directory.DefaultAssistant() != "" {
-		t.Fatal(link, err)
+	// Deletion remains successful even if its best-effort cache refresh fails.
+	// Read the receiver's directory rather than racing cached observations.
+	directory, err := a.service.agentLinks.service.Directory(ctx, connection.ID)
+	if err != nil || len(directory.Assistants()) != 1 || directory.DefaultAssistant() != "" {
+		t.Fatal(directory, err)
 	}
 	local, err := a.service.Registry.Definitions(ctx)
 	if err != nil || len(local) != 1 || local[0].ID != "main" {

@@ -37,7 +37,7 @@ func writeTaskFixture(t *testing.T, name, text string) {
 func TestWorkerResourcesKeepDestinationInstructionsAndSkills(t *testing.T) {
 	s := taskResourceService(t)
 	ctx := context.Background()
-	s.Registry.Create(ctx, "create", "Pot")
+	legacyMainAssistant(ctx, s, "create", "Pot")
 	pluginRoot := t.TempDir()
 	s.options.PluginRoot = pluginRoot
 	s.Profiles.pluginRoot = pluginRoot

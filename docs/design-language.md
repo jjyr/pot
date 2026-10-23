@@ -293,28 +293,34 @@ its name, avatar, speaking style and working preferences. The welcome is committ
 and the model checkpoint, so the first model request includes it as an assistant
 message. It makes no inference call, generates no unread notification and is never
 reinserted or translated on reopening. Existing conversations are not backfilled.
-The assistant saves user-requested names and avatars through `update_agent_profile`;
-directory, title and settings use that same identity. Optional fields preserve
-omitted values. Workers and peer conversations cannot edit the assistant profile.
+Assistant names, avatars and rules are files in `ROOT/assistants/ID`. The UI and
+ordinary model file tools share these sources. External edits update the sidebar,
+chat title and settings; stale UI drafts cannot overwrite changed base content.
+Execution and filesystem permissions govern model writes.
 
-The + action opens Add assistant. API creation uses random kitchen identities and
+The + action opens Add assistant. API creation uses random two-word slug identities and
 empty assistant instructions. Remote assistants are configured by their source
 node and displayed from its directory.
 
-All new assistants randomly choose from Cup, Mug, Bowl, Pan, Wok, Spoon, Fork, Tray,
-Whisk, Kettle, Lid, Jar, Jug, Plate, Dish and Glass. These English identity values
-are not translated. Unused base names take priority within the local node,
-including names set manually (case-insensitive, ignoring surrounding whitespace).
-Once all bases are occupied, a random base gets its smallest available suffix
-starting at 2, for example Cup 2. Name allocation and registration share one
-transaction across windows; request retries retain the saved identity and avatar.
+Every new local Pot assistant, including the first, receives a lowercase two-word
+slug such as `amber-otter`. Its default display name title-cases both words, such as `Amber Otter`; an
+explicit creation name overrides only that display name. Two independent choices
+from the bundled 1,221-word pool provide 1,490,841 combinations. Allocation excludes
+all historical IDs, including deleted assistants, and current display names
+(case-insensitive, ignoring surrounding whitespace). It chooses uniformly among
+the remaining pairs without numeric suffixes. Names are identity data and are not
+translated. Renaming changes only the display name; IDs, addresses and directories
+remain stable. Existing assistants retain their IDs and names, including `main`.
+Name allocation and registration share one transaction across windows; request
+retries retain the saved identity, initial welcome and avatar. Default avatars
+continue using the kitchen character artwork independently of generated names.
 The creation action stays busy until the operation finishes. Before selecting the
 new conversation, an authoritative catalogue read replaces any older cached list;
 a failed confirmation retries the saved creation rather than registering another.
 
 Assistant settings edit the name, avatar and configuration. Custom avatar uploads
 accept PNG, JPEG and WebP up to 8 MiB, center-cropped to a 128 px PNG; restoring the
-default retains the original character and background. Edits use the profile revision so
+default retains the original character and background. Edits use content revisions so
 stale settings cannot overwrite a newer chat profile change. **Personality and
 preferences** edits the assistant's AGENTS.md without requiring users to know that
 filename. Existing assistant location is read-only. Provider/model changes are saved on the assistant

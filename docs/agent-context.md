@@ -24,10 +24,10 @@ produce neither a completed chat bubble nor a reply notification.
 
 ## Sources and scope
 
-Global Main instructions come from `AGENTS.md` in the owning node's data root,
-`~/.pot/AGENTS.md` by default. An explicit root uses its own file; embedding hosts
-can supply a separate `AgentHome` directory.
-Task Agents do not load global Main or assistant AGENTS.md. The owning node
+Each Main assistant loads its own `ROOT/assistants/ID/AGENTS.md`, under `~/.pot`
+by default. There is no shared `~/.pot/AGENTS.md` source. The same directory owns
+`profile.json`, `avatar.png`, `default-avatar.png` and its conversation database.
+Task Agents do not load assistant AGENTS.md. The owning node
 prepares selected global Skills/plugins and discovers project instructions in
 its local execution workspace. A linked node prepares its own resources; see
 [Architecture](architecture.md).
@@ -42,16 +42,21 @@ remain ordinary injected instructions.
 
 Discovery starts at the execution cwd and finds the nearest ancestor with a `.git` file or directory. Discovery uses the nearest project root as its boundary, or cwd when there is no repository marker. It loads AGENTS.md files from that root through cwd in root-to-leaf order. Without a root marker it reads only cwd. Nested repositories stop inheritance from outer repositories. Descendants below cwd are not eagerly scanned; the injected guidance tells the agent to inspect applicable descendant AGENTS.md files before editing there.
 
-Only `AGENTS.md` is read. `AGENTS.override.md` and fallback filenames are ignored. Each chat assistant owns a versioned AGENTS.md text record in its own database. This record is independent of execution targets and travels with the assistant's state. Project AGENTS.md discovery remains filesystem-based. UI edits and assistant tools operate on the same DB record. Every successful save creates a new revision, including reverting to identical text.
+Only `AGENTS.md` is read. `AGENTS.override.md` and fallback filenames are ignored. Each chat assistant's rules come only from its AGENTS.md file. UI edits and
+ordinary file tools operate on this same file; a content digest detects stale UI
+saves. Project AGENTS.md discovery remains filesystem-based.
 
-Main contexts load global instructions, assistant rules and applicable project directory instructions. Worker contexts load only applicable project directory instructions: workers have no assistant AGENTS.md and inherit neither assistant rules nor global Agent-home rules. The delegating assistant must include relevant constraints in the task brief. Project AGENTS.md files remain ordinary directory policies, separate from the assistant's own rule record. Assistant rules are snapshotted for each execution and never grant permissions. Deeper directory guidance takes precedence on conflicts, and explicit user instructions take precedence over file instructions. There is no instruction-file size cap or truncation; normal model context limits still apply. Empty/whitespace-only contents are omitted; invalid UTF-8 is decoded lossily.
+Main contexts load their own assistant rules and applicable project directory instructions. Worker contexts load only applicable project directory instructions: workers have no assistant AGENTS.md and inherit neither assistant rules nor any shared rules. The delegating assistant must include relevant constraints in the task brief. Project AGENTS.md files remain ordinary directory policies, separate from the assistant's own rule record. Assistant rules are snapshotted for each execution and never grant permissions. Deeper directory guidance takes precedence on conflicts, and explicit user instructions take precedence over file instructions. There is no instruction-file size cap or truncation; normal model context limits still apply. Empty/whitespace-only contents are omitted; invalid UTF-8 is decoded lossily.
 
 Instruction discovery reads the destination Runtime's local filesystem without
 starting an execution process.
 
 ## Refresh and injection
 
-Runtime reloads sources when preparing each execution context. The resulting snapshot is used for that execution's model requests. Global instruction caching is used by Main services in the current Runtime process. A global read failure retains the last successful text and emits a diagnostic; repeated identical failures are reported once until recovery. Confirmed absence or a successful empty read clears the cached value. The cache is not persisted across restarts. Unexpected project read errors fail context preparation rather than reusing stale project instructions.
+Runtime reloads instruction files when preparing each execution context. The snapshot
+is used throughout that execution. Missing assistant rules are empty; unexpected
+read errors fail preparation. There is no process-wide shared-instruction cache.
+File changes refresh the UI without making a model request.
 
 `pkg/agent` records instructions as classified, append-only context sections for Main
 and Worker, including custom system prompts and configurations with no execution
@@ -82,7 +87,7 @@ Sections have stable keys and deterministic lexical ordering:
 |---|---|
 | `environment` | Optional caller-provided Runtime clock and execution workspace |
 | `execution-environment` | Main-only destination policy/revision, workspace and file/temp/network boundaries. Workers receive their prepared cwd through `environment`; tools still enforce current Control-owned policy |
-| `instructions` | Applicable global, assistant and project instructions; append a complete replacement on change |
+| `instructions` | Applicable assistant and project instructions; append a complete replacement on change |
 | `models` | Main-only configured routing summary; append a complete bounded replacement on change |
 | `plugins` | Enabled plugin instructions; append a complete replacement on change |
 | `skills` | Lazy-load metadata only, with authorized reader; append a complete replacement on change |
@@ -189,20 +194,20 @@ private diagnostic record retains request/response evidence and links to the
 actual metered attempts for investigation; usage is never added twice. Chat and
 usage pages do not expose a download action.
 
-## Assistant tools
+## Assistant files
 
-`read_agent_instructions({})` returns this chat assistant's `text` and `revision`.
-`update_agent_instructions({text})` replaces the complete text
-only after owner approval. The assistant identity comes from the execution owner;
-neither tool accepts an assistant ID or execution target selector. These tools are
-Main-only and remain subject to the configured tool allow-list. Updates always
-request fresh review, even with allow-by-default policy or matching grants. The
-Runtime snapshots the DB revision when preparing review and checks it at commit,
-so a concurrent UI save cannot be overwritten by a stale approved proposal.
-The model does not supply a revision. Permission requests
-bind the owner, Thread generation, turn, tool call and exact new content. The
-Agent dispatcher executes these calls internally after authorization; they are
-not exposed as unaudited MCP writes.
+`profile.json` contains `schema_version: 1` and `name`. Generated IDs are lowercase
+two-word slugs; default display names title-case the words, for example
+`hammer-ermine` and `Hammer Ermine`. `avatar.png` is the current 128x128 PNG; copying
+`default-avatar.png` over it restores the original avatar. Existing IDs and names
+are preserved. UI profile revisions are JSON-safe content fingerprints of the
+profile and avatar, so external file edits invalidate stale drafts.
+
+Models use ordinary file tools to edit these files. There are no dedicated
+instruction or profile model tools, and assistant identity does not grant file
+access. The normal sandbox/host policy applies to every operation, including
+external paths and edits to another assistant's files. UI and authenticated Agent
+Link APIs remain file-backed. See [Permissions](permissions.md).
 
 ## Conversational control
 
@@ -239,11 +244,9 @@ See [Plugin packages](plugins.md) for tool bundles.
 
 ## Routing rules
 
-Each conversational assistant owns AGENTS.md text in its database, with an
-opaque revision that changes on every save. It is part of the assistant's state,
-independent of execution target. Main contexts receive their own rules;
-workers receive task briefs and applicable project directory instructions, not
-assistant or global Agent-home rules. 
+Each conversational assistant owns an AGENTS.md file in its assistant directory.
+Main receives those rules; workers receive task briefs and applicable project
+directory instructions. Rules are independent of the execution workspace.
 The built-in dispatch instructions and fresh configured Provider/model catalog remain
 injected independently. A custom system prompt still receives file instructions.
 
@@ -265,10 +268,9 @@ create one. Creation selects the owning node's default Provider and that
 Provider's concrete default model. The assistant editor changes name, Provider,
 model, parameters and its own instructions without opening global settings.
 Instructions and model parameters start collapsed. Edits remain drafts until
-Save; conflicts preserve the draft. UI and agent edits share the DB instruction
-record and revision checks. `read_agent_instructions` and
-`update_agent_instructions` remain owner-scoped; instruction updates retain their
-owner-approval contract. Host file tools do not edit the live rule record.
+Save; conflicts preserve the draft. UI and direct file edits share the same files and content-revision checks.
+External changes notify the assistant directory and rule editor. File tools use
+ordinary node execution authorization.
 
 Task model routing is autonomous and requires no routing confirmation or user
 allowlist. The invoking assistant uses explicit task instructions, its AGENTS.md,
@@ -282,10 +284,9 @@ Space; chat choices and instructions belong to each assistant.
 
 A fresh registry has no assistants. AI settings can be saved before explicitly
 creating the first assistant; configuration saves and restarts never register one.
-Existing registered assistants retain their conversations and Tasks. Assistant
-rules are read exclusively from the current DB record. Old assistant files and
-saved preference metadata are not imported or converted. Existing DB rules are
-preserved. Project AGENTS.md files continue to be discovered independently for
+Existing registered assistants retain their conversations and Tasks. Assistant rules and profiles are read exclusively from their files. The recorded
+upgrade exports existing DB content before removing it; repeated startup never
+restores database copies. Project AGENTS.md files continue to be discovered independently for
 both assistants and workers.
 
 Configured Provider identity/model/capabilities determine available candidates.
@@ -353,7 +354,11 @@ The creator's scripts/quick_validate.py validates YAML metadata and scaffolds, a
 
 The installer uses the adjacent creator validator. It accepts a local bundle, GitHub repo/path/ref or tree URL. Downloads use only credentials available in the current execution target. Archive extraction rejects traversal and special files. Installation preserves resource contents and executable permissions, normalizes readable permissions, validates before publishing, and refuses replacement without --replace. Ordinary publication failures restore the previous directory; crash recovery and concurrent installers are not transactional.
 
-apply_patch remains workspace-scoped. Global installation/update is performed on the owning node. Tasks cannot modify supplied global bundles. Use injected bundle paths for helper scripts, and `--dest PROJECT/.agents/skills` for project installation.
+`apply_patch` accepts absolute paths and paths relative to the execution workspace,
+subject to the current filesystem and host authorization. Global installation/update
+is performed on the owning node. Tasks cannot modify supplied global bundles. Use
+injected bundle paths for helper scripts, and `--dest PROJECT/.agents/skills` for
+project installation.
 
 ## Message references, Skills and assistant mentions
 

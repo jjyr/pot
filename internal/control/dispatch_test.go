@@ -65,6 +65,46 @@ func TestAuthorizedHostCommandReceiptNoDuplicateEffect(t *testing.T) {
 	}
 }
 
+func TestExternalPatchApprovalControlsActualWrite(t *testing.T) {
+	for _, decision := range []string{"allow_once", "deny"} {
+		t.Run(decision, func(t *testing.T) {
+			d, execution, _ := localDispatcher(t)
+			if err := d.Permissions.Configure("local", MachinePolicy{ExecutionAccess: "ask"}); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "outside.txt")
+			args, _ := json.Marshal(map[string]any{"patch": "*** Begin Patch\n*** Add File: " + path + "\n+approved\n*** End Patch", "request_unsandboxed": true, "justification": "Edit the requested external file"})
+			call := modelprotocol.ToolCall{ID: "external-patch", Name: "apply_patch", Arguments: args}
+			_, err := d.Dispatch(t.Context(), execution, call, func(update core.Update) error {
+				if update.Phase == "waiting_approval" {
+					if _, err := os.Stat(path); !os.IsNotExist(err) {
+						t.Fatal("file changed before approval")
+					}
+					pending := d.Permissions.Pending(d.Owner)
+					if len(pending) != 1 || !strings.Contains(string(pending[0].Request.Args), execution.Workspace) {
+						t.Fatal("approval did not bind the patch workspace")
+					}
+					return d.Permissions.Decide(d.Owner, pending[0].ID, decision)
+				}
+				return nil
+			})
+			if decision == "deny" {
+				if !errors.Is(err, ErrHostDenied) {
+					t.Fatal(err)
+				}
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Fatal("denied patch wrote the file")
+				}
+				if _, err := d.Dispatch(t.Context(), execution, call, nil); !errors.Is(err, ErrHostDenied) {
+					t.Fatal("denied request became executable", err)
+				}
+			} else if data, readErr := os.ReadFile(path); err != nil || readErr != nil || string(data) != "approved\n" {
+				t.Fatal("approved patch did not update the external file", err, readErr)
+			}
+		})
+	}
+}
+
 type uncertainEngine struct{}
 
 func TestBrowserUnavailableDiagnosticSurvivesDispatchAndReceiptReplay(t *testing.T) {

@@ -233,7 +233,7 @@ func TestPluginCatalogRefreshCancelsWithItsOwner(t *testing.T) {
 func TestDisabledProviderBlocksFreshDefaultTasksAndUnpreparedResources(t *testing.T) {
 	ctx := context.Background()
 	s, profile := configurationService(t)
-	if _, err := s.Registry.Create(ctx, "task-owner", "Pot"); err != nil {
+	if _, err := legacyMainAssistant(ctx, s, "task-owner", "Pot"); err != nil {
 		t.Fatal(err)
 	}
 	spec, err := s.Profiles.Resolve(profile.ID)

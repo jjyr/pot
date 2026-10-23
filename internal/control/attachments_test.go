@@ -55,7 +55,7 @@ func TestAttachmentControlBytesRetryOwnershipAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if _, err = s.Registry.Create(ctx, "create", "Pot"); err != nil {
+	if _, err = legacyMainAssistant(ctx, s, "create", "Pot"); err != nil {
 		t.Fatal(err)
 	}
 	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "provider", ProfileID: "test", Name: "Test", Model: "gpt-4.1", Endpoint: upstream.URL, Protocol: "openai_chat", APIKey: "fake", MaxOutputTokens: 100})

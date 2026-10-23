@@ -13,26 +13,6 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 )
 
-func (s *InstructionSources) globalText(agentHome string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	data, err := os.ReadFile(filepath.Join(agentHome, "AGENTS.md"))
-	if err == nil {
-		s.global = strings.ToValidUTF8(string(data), "�")
-		s.globalError = ""
-	} else if os.IsNotExist(err) {
-		s.global = ""
-		s.globalError = ""
-	} else {
-		s.globalError = err.Error()
-	}
-	return s.global
-}
-func (s *InstructionSources) Diagnostic() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.globalError
-}
 func instructionSection(name, text string) string {
 	if strings.TrimSpace(text) == "" {
 		return ""

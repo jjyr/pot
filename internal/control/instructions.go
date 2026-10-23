@@ -7,18 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 )
 
-type InstructionSources struct {
-	mu          sync.Mutex
-	global      string
-	globalError string
-}
+type InstructionSources struct{}
 
-// Prepare reloads mutable Main instructions for each run. The global last-good
-// cache is process-local; project read errors fail preparation rather than reuse
-// stale text. User input is never modified to carry these sections.
+// Prepare reloads assistant and project instruction files for each run.
 func (s *InstructionSources) Prepare(agentHome, workspace, assistantRules string) (string, []core.SkillRoot, error) {
 	return s.prepare(agentHome, workspace, assistantRules, true)
 }
@@ -46,10 +39,7 @@ func (s *InstructionSources) prepare(agentHome, workspace, assistantRules string
 		}
 	}
 	parts := []string{}
-	global := ""
-	if includeGlobal {
-		global = s.globalText(agentHome)
-	} else {
+	if !includeGlobal {
 		assistantRules = ""
 	}
 	add := func(name, text string) {
@@ -57,7 +47,6 @@ func (s *InstructionSources) prepare(agentHome, workspace, assistantRules string
 			parts = append(parts, fmt.Sprintf("<%s>\n%s\n</%s>", name, text, name))
 		}
 	}
-	add("global_instructions", global)
 	add("assistant_instructions", assistantRules)
 	roots := []core.SkillRoot{}
 	if includeGlobal {

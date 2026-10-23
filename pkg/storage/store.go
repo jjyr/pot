@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,14 +20,21 @@ func Now() int64 { return time.Now().UnixMilli() }
 
 type Message = protocol.Message
 type Event = protocol.Event
-type Store struct{ db *sql.DB }
+type Store struct {
+	db        *sql.DB
+	directory string
+}
 
 func Open(path string) (*Store, error) {
 	db, err := OpenDatabase(path, ConversationDatabase)
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{db: db}
+	if err := ExportAssistantInstructions(db, filepath.Dir(path)); err != nil {
+		db.Close()
+		return nil, err
+	}
+	s := &Store{db: db, directory: filepath.Dir(path)}
 	// Reopening never replays uncertain model/tool effects. Preserve partial text.
 	messages, err := s.Messages(context.Background())
 	if err == nil {
@@ -341,51 +350,41 @@ type Rules struct {
 	Revision      string `json:"revision" required:"true"`
 }
 
-func rulesIn(ctx context.Context, tx *sql.Tx) (Rules, error) {
-	var body string
-	err := tx.QueryRowContext(ctx, "SELECT value FROM metadata WHERE key='assistant.instructions.v1'").Scan(&body)
-	if errors.Is(err, sql.ErrNoRows) {
-		r := Rules{1, "", ID()}
-		b, _ := json.Marshal(r)
-		_, err = tx.ExecContext(ctx, "INSERT INTO metadata VALUES ('assistant.instructions.v1',?)", string(b))
-		return r, err
-	}
-	if err != nil {
+func (s *Store) Instructions(ctx context.Context) (Rules, error) {
+	if err := ctx.Err(); err != nil {
 		return Rules{}, err
 	}
-	var r Rules
-	if err := protocol.DecodeStrict([]byte(body), &r); err != nil {
-		return r, err
-	}
-	if r.SchemaVersion != 1 || r.Revision == "" {
-		return r, errors.New("unsupported assistant instructions record")
-	}
-	return r, nil
-}
-func (s *Store) Instructions(ctx context.Context) (Rules, error) {
-	var rules Rules
-	err := Transaction(ctx, s.db, func(tx *sql.Tx) error { var err error; rules, err = rulesIn(ctx, tx); return err })
-	return rules, err
+	return ReadAssistantInstructions(s.directory)
 }
 func (s *Store) SaveInstructions(ctx context.Context, text, revision string) (Rules, error) {
+	if err := ctx.Err(); err != nil {
+		return Rules{}, err
+	}
 	if len(text) > 262144 {
 		return Rules{}, errors.New("assistant instructions exceed 256 KiB")
 	}
-	var rules Rules
-	err := Transaction(ctx, s.db, func(tx *sql.Tx) error {
-		current, err := rulesIn(ctx, tx)
-		if err != nil {
-			return err
-		}
-		if current.Revision != revision {
-			return errors.New("assistant instructions changed; reload before saving")
-		}
-		rules = Rules{1, text, ID()}
-		body, _ := json.Marshal(rules)
-		_, err = tx.ExecContext(ctx, "UPDATE metadata SET value=? WHERE key='assistant.instructions.v1'", string(body))
+	unlock := LockAssistantFiles(s.directory)
+	defer unlock()
+	current, err := s.Instructions(ctx)
+	if err != nil {
+		return Rules{}, err
+	}
+	if current.Revision != revision {
+		return Rules{}, errors.New("assistant instructions changed; reload before saving")
+	}
+	if err := WriteAssistantFile(filepath.Join(s.directory, "AGENTS.md"), []byte(text)); err != nil {
+		return Rules{}, err
+	}
+	return s.Instructions(ctx)
+}
+func (s *Store) InitializeInstructions(text string) error {
+	path := filepath.Join(s.directory, "AGENTS.md")
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
 		return err
-	})
-	return rules, err
+	}
+	return exportAssistantFile(path, []byte(text))
 }
 
 // Mail methods implement generic durable scoped receipts only. Assistant routing,

@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestHostInstructionPriorityGlobalLastGoodAndActualSkillPaths(t *testing.T) {
+func TestHostInstructionPriorityIgnoresSharedRulesAndKeepsActualSkillPaths(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
 	repo := filepath.Join(root, "repo")
@@ -23,6 +23,9 @@ func TestHostInstructionPriorityGlobalLastGoodAndActualSkillPaths(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	if strings.Contains(text, "Global rule") || !strings.Contains(text, "Assistant rule") {
+		t.Fatal("assistant rules must replace the shared instruction source", text)
+	}
 	resolved, _ := filepath.EvalSymlinks(cwd)
 	if strings.Index(text, "Root rule") > strings.Index(text, "Child rule") || roots[0].Path != filepath.Join(resolved, ".agents/skills") || roots[0].Location != roots[0].Path {
 		t.Fatal(text, roots)
@@ -30,7 +33,7 @@ func TestHostInstructionPriorityGlobalLastGoodAndActualSkillPaths(t *testing.T) 
 	os.Remove(filepath.Join(home, "AGENTS.md"))
 	os.Mkdir(filepath.Join(home, "AGENTS.md"), 0700)
 	text, _, err = source.Prepare(home, cwd, "")
-	if err != nil || !strings.Contains(text, "Global rule") || source.Diagnostic() == "" {
+	if err != nil || strings.Contains(text, "Global rule") {
 		t.Fatal(text, err)
 	}
 }

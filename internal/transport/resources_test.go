@@ -102,10 +102,12 @@ func resourceApplication(t *testing.T, displayLabels ...string) (*Application, [
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { service.Close() })
-	if _, err = service.Registry.Create(ctx, "fixture", "资源展示"); err != nil {
+	owner, err := service.Registry.Create(ctx, "fixture", "资源展示")
+	if err != nil {
 		t.Fatal(err)
 	}
-	workspace, _ := service.ExecutionWorkspace("main")
+	ownerID := owner.ID
+	workspace, _ := service.ExecutionWorkspace(ownerID)
 	writeResourceFixtures(t, workspace)
 	profile, err := service.Profiles.Save(ctx, control.SaveProfile{RequestID: "provider", Name: "Fixture", Model: "gpt-4.1", Endpoint: provider.URL + "/v1", Protocol: "openai_chat", APIKey: "isolated", MaxOutputTokens: 2000})
 	if err != nil {
@@ -118,7 +120,7 @@ func resourceApplication(t *testing.T, displayLabels ...string) (*Application, [
 	spec.Params.Agent.AutoCompact = false
 	spec.Params.Agent.BuiltinTools = []string{}
 	spec.Rehash()
-	c, err := service.Conversation(ctx, "main")
+	c, err := service.Conversation(ctx, ownerID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +133,7 @@ func resourceApplication(t *testing.T, displayLabels ...string) (*Application, [
 		t.Fatal(err)
 	}
 	defer remove()
-	if _, err = app.Call(ctx, Request{Method: "POST", Path: "/api/v1/messages", Body: json.RawMessage(`{"request_id":"resource-showcase","conversation_id":"main","text":"请展示图片、GIF、语音、视频、PDF 和可操作的 HTML，并单独给出下载文件。"}`)}); err != nil {
+	if _, err = app.Call(ctx, Request{Method: "POST", Path: "/api/v1/messages", Body: json.RawMessage(fmt.Sprintf(`{"request_id":"resource-showcase","conversation_id":%q,"text":"请展示图片、GIF、语音、视频、PDF 和可操作的 HTML，并单独给出下载文件。"}`, ownerID))}); err != nil {
 		t.Fatal(err)
 	}
 	timer := time.NewTimer(20 * time.Second)
@@ -178,11 +180,15 @@ func resourceApplication(t *testing.T, displayLabels ...string) (*Application, [
 func TestResourceHTTPDownloadsWithLongDisplayLabel(t *testing.T) {
 	label := "Pot 通信记录 · A/B \\ " + strings.Repeat("中文", 150)
 	app, items := resourceApplication(t, label)
+	owner, err := app.Control.Registry.FirstID(context.Background())
+	if err != nil || owner == "" {
+		t.Fatal("resource owner missing", err)
+	}
 	for _, resource := range items {
 		if resource.Name != label {
 			t.Fatal("tool or durable presentation changed display label")
 		}
-		request := httptest.NewRequest("GET", "/api/v1/resources/"+resource.ID+"/download?assistant_id=main", nil)
+		request := httptest.NewRequest("GET", "/api/v1/resources/"+resource.ID+"/download?assistant_id="+owner, nil)
 		response := httptest.NewRecorder()
 		if !app.resourceContent(response, request) || response.Code != 200 {
 			t.Fatal("download failed", response.Code)
@@ -287,6 +293,7 @@ func writeResourceFixtures(t *testing.T, workspace string) {
 
 func TestResourceHTTPToolsRangeDownloadAndIsolation(t *testing.T) {
 	app, items := resourceApplication(t)
+	ownerID := localAssistantID(t, app.Control)
 	handler := Handler(app, "operator")
 	get := func(path, owner, rangeHeader string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest("GET", path+"?assistant_id="+owner, nil)
@@ -299,19 +306,19 @@ func TestResourceHTTPToolsRangeDownloadAndIsolation(t *testing.T) {
 		return response
 	}
 	for _, resource := range items {
-		response := get("/api/v1/resources/"+resource.ID+"/content", "main", "bytes=4-11")
+		response := get("/api/v1/resources/"+resource.ID+"/content", ownerID, "bytes=4-11")
 		if response.Code != 206 || len(response.Body.Bytes()) != 8 || response.Header().Get("Accept-Ranges") != "bytes" {
 			t.Fatal("range", resource.Name, response.Code, response.Header())
 		}
 		if get("/api/v1/resources/"+resource.ID, "other", "").Code < 400 {
 			t.Fatal("cross owner read")
 		}
-		response = get("/api/v1/resources/"+resource.ID+"/download", "main", "")
+		response = get("/api/v1/resources/"+resource.ID+"/download", ownerID, "")
 		if response.Code != 200 || !strings.Contains(response.Header().Get("Content-Disposition"), "attachment") {
 			t.Fatal("download", response.Code)
 		}
 		if resource.MIMEType == "text/html" {
-			response = get("/api/v1/resources/"+resource.ID+"/render", "main", "")
+			response = get("/api/v1/resources/"+resource.ID+"/render", ownerID, "")
 			if response.Code != 200 || response.Header().Get("Content-Security-Policy") != resources.HTMLPolicy || !strings.Contains(response.Body.String(), "data:text/javascript;base64,") {
 				t.Fatal("HTML sandbox", response.Code)
 			}

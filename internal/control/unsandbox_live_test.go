@@ -90,7 +90,7 @@ func TestDeepSeekUnsandboxLive(t *testing.T) {
 					t.Error(err)
 				}
 			}()
-			if _, err = s.Registry.Create(ctx, "create-live", "Live permission test"); err != nil {
+			if _, err = legacyMainAssistant(ctx, s, "create-live", "Live permission test"); err != nil {
 				t.Fatal(err)
 			}
 			none := "none"

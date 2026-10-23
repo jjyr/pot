@@ -32,7 +32,7 @@ func TestLocalTaskUsesSharedCapacityOwnerModelAndSummary(t *testing.T) {
 		var event any
 		if isSummary {
 			summaryCalls.Add(1)
-			if !strings.Contains(string(fields["tools"]), "exec_command") || !strings.Contains(string(fields["tools"]), "update_agent_profile") {
+			if !strings.Contains(string(fields["tools"]), "exec_command") || strings.Contains(string(fields["tools"]), "update_agent_profile") {
 				t.Error("result handling lost assistant tools")
 			}
 			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "Task result summarized"}, "finish_reason": "stop"}}}
@@ -57,7 +57,7 @@ func TestLocalTaskUsesSharedCapacityOwnerModelAndSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	s.Registry.Create(ctx, "create", "Pot")
+	legacyMainAssistant(ctx, s, "create", "Pot")
 	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "test", Name: "Test", Model: "model", Endpoint: server.URL, Protocol: "openai_chat", APIKey: "task-key", MaxOutputTokens: 100})
 	if err != nil {
 		t.Fatal(err)

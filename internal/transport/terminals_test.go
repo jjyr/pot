@@ -25,9 +25,11 @@ func TestNativeTerminalAuthenticatedSocketAndOriginBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if _, err = s.Registry.Create(ctx, "create", "Pot"); err != nil {
+	owner, err := s.Registry.Create(ctx, "create", "Pot")
+	if err != nil {
 		t.Fatal(err)
 	}
+	ownerID := owner.ID
 	a := &Application{Control: s, RuntimeID: "local", BootID: "boot"}
 	server := httptest.NewServer(Handler(a, "private"))
 	defer server.Close()
@@ -60,7 +62,7 @@ func TestNativeTerminalAuthenticatedSocketAndOriginBoundary(t *testing.T) {
 	for !strings.Contains(output, "actual-pty-utf8-中文") {
 		kind, data, err := socket.Read(ctx)
 		if err != nil {
-			terminal, _ := s.Terminals.Get("main", id)
+			terminal, _ := s.Terminals.Get(ownerID, id)
 			t.Fatal(err, terminal.Info(), output)
 		}
 		if kind != websocket.MessageBinary {

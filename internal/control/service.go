@@ -55,6 +55,7 @@ type Service struct {
 	agentLinks          *agentLinkHost
 	linkPlugins         *linkhost.Host
 	pluginWG            sync.WaitGroup
+	fileWG              sync.WaitGroup
 	mcpOAuth            map[string]mcpOAuthSession
 	pluginMu            sync.Mutex
 	pluginStreams       map[string]backgroundStream
@@ -187,6 +188,7 @@ func Open(options Options) (*Service, error) {
 	go s.taskLoop()
 	s.pluginWG.Add(1)
 	go s.pluginLoop()
+	s.watchAssistantFiles()
 	success = true
 	return s, nil
 }
@@ -323,8 +325,8 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 	}
 	for _, definition := range identities {
 		if definition.ID == principal {
-			identity, _ := json.Marshal(map[string]any{"name": definition.Name, "has_avatar": definition.Avatar != "", "address": protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "assistant", AgentID: principal}})
-			executionContext.MainPrompt += "\nCurrent assistant identity (data): " + string(identity) + ". When the user asks to change your name or avatar, use update_agent_profile to save it."
+			identity, _ := json.Marshal(map[string]any{"directory": s.Registry.Directory(principal), "name": definition.Name, "has_avatar": definition.Avatar != "", "address": protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "assistant", AgentID: principal}})
+			executionContext.MainPrompt += "\nCurrent assistant identity (data): " + string(identity) + ". Edit profile.json, avatar.png or AGENTS.md in this directory with ordinary file tools and the current filesystem authorization when the user requests a change."
 			break
 		}
 	}
@@ -434,6 +436,7 @@ func (s *Service) Close() error {
 	s.mu.Unlock()
 	linkErr := s.closeAgentLinks()
 	s.pluginWG.Wait()
+	s.fileWG.Wait()
 	var result error = linkErr
 	if s.Terminals != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -105,7 +105,7 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 			}
 			var fields map[string]json.RawMessage
 			json.Unmarshal(raw, &fields)
-			if value := string(fields["tools"]); !strings.Contains(value, "exec_command") || !strings.Contains(value, "update_agent_profile") {
+			if value := string(fields["tools"]); !strings.Contains(value, "exec_command") || strings.Contains(value, "update_agent_profile") {
 				t.Error("notification lost assistant tools")
 			}
 		}
@@ -147,7 +147,7 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	s.Registry.Create(ctx, "create", "Pot")
+	legacyMainAssistant(ctx, s, "create", "Pot")
 	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "test", Name: "Test", Model: "model", Endpoint: model.URL, Protocol: "openai_chat", APIKey: "model-fixture", MaxOutputTokens: 100})
 	if err != nil {
 		t.Fatal(err)

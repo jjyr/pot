@@ -34,12 +34,16 @@ func TestCompletedTaskDownloadStreamsBeyondOldProxyLimit(t *testing.T) {
 	}
 	defer runtime.Close()
 	s := runtime.Control
-	s.Registry.Create(ctx, "create", "Files")
+	owner, err := s.Registry.Create(ctx, "create", "Files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerID := owner.ID
 	profile, err := s.Profiles.Save(ctx, control.SaveProfile{RequestID: "model", Name: "Model", Model: "fixture", Endpoint: model.URL, Protocol: "openai_chat", APIKey: "isolated", MaxOutputTokens: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := s.Conversation(ctx, "main")
+	c, err := s.Conversation(ctx, ownerID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,12 +59,12 @@ func TestCompletedTaskDownloadStreamsBeyondOldProxyLimit(t *testing.T) {
 	}
 	sub := s.Tasks.Subscribe()
 	defer sub.Close()
-	task, err := s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "artifact", Text: "Artifact fixture"})
+	task, err := s.Tasks.AcceptLocal(ctx, ownerID, protocol.CreateTask{RequestID: "artifact", Text: "Artifact fixture"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for {
-		record, err := s.Tasks.Get(ctx, "main", task.Info.ID)
+		record, err := s.Tasks.Get(ctx, ownerID, task.Info.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -111,7 +115,7 @@ func TestCompletedTaskDownloadStreamsBeyondOldProxyLimit(t *testing.T) {
 	}
 	public := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { r.Host = "localhost"; browser.ServeHTTP(w, r) }))
 	defer public.Close()
-	request, _ := http.NewRequestWithContext(ctx, "GET", public.URL+"/api/v1/tasks/"+task.Info.ID+"/file-download?assistant_id=main&path=large.bin", nil)
+	request, _ := http.NewRequestWithContext(ctx, "GET", public.URL+"/api/v1/tasks/"+task.Info.ID+"/file-download?assistant_id="+ownerID+"&path=large.bin", nil)
 	request.AddCookie(logged.Result().Cookies()[0])
 	response, err := public.Client().Do(request)
 	if err != nil {

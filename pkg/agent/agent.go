@@ -498,7 +498,7 @@ func (a *Agent) available(role core.ExecutionRole, settings core.AgentSettings, 
 				continue
 			}
 		}
-		if role == core.Worker && slices.Contains([]string{"create_task", "retry_task", "set_task_dispositions", "list_tasks", "get_task", "interrupt", "cancel_task", "list_assistants", "list_schedules", "get_schedule", "manage_schedule", "read_agent_instructions", "update_agent_instructions", "update_agent_profile"}, tool.Name) {
+		if role == core.Worker && slices.Contains([]string{"create_task", "retry_task", "set_task_dispositions", "list_tasks", "get_task", "interrupt", "cancel_task", "list_assistants", "list_schedules", "get_schedule", "manage_schedule"}, tool.Name) {
 			continue
 		}
 		if settings.AllowedTools != nil && !slices.Contains(*settings.AllowedTools, tool.Name) {

@@ -36,7 +36,7 @@ func TestModelDisconnectRetryPreservesUnknownUsageReservation(t *testing.T) {
 	defer upstream.Close()
 	ctx := context.Background()
 	s := taskResourceService(t)
-	if _, err := s.Registry.Create(ctx, "create", "Pot"); err != nil {
+	if _, err := legacyMainAssistant(ctx, s, "create", "Pot"); err != nil {
 		t.Fatal(err)
 	}
 	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "provider", ProfileID: "test", Name: "Test", Model: "model", Endpoint: upstream.URL, Protocol: "openai_chat", APIKey: "fixture", MaxOutputTokens: 100})

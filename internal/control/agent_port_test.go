@@ -41,7 +41,7 @@ func TestAgentPortEmptyNodeUserTaskResultAndRetrySurviveRestart(t *testing.T) {
 	}
 	request := protocol.CreateTask{RequestID: "user-task", Text: "Read report\nReturn a result to this user conversation."}
 	call := agentlink.Call{Body: operationBody(t, request)}
-	accepted, err := a.service.CallAgent(ctx, owner, agentlink.TaskSubmit, call)
+	accepted, err := callAgentWhenReady(ctx, a.service, owner, agentlink.TaskSubmit, call)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestAgentPortEmptyNodeUserTaskResultAndRetrySurviveRestart(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	detail, err := a.service.CallAgent(ctx, owner, agentlink.TaskRead, agentlink.Call{ID: info.ID})
+	detail, err := callAgentWhenReady(ctx, a.service, owner, agentlink.TaskRead, agentlink.Call{ID: info.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,10 +84,10 @@ func TestAgentPortEmptyNodeUserTaskResultAndRetrySurviveRestart(t *testing.T) {
 	}
 	other := request
 	other.Text = "Different content"
-	if _, err = a.service.CallAgent(ctx, owner, agentlink.TaskSubmit, agentlink.Call{Body: operationBody(t, other)}); err == nil {
+	if _, err = callAgentWhenReady(ctx, a.service, owner, agentlink.TaskSubmit, agentlink.Call{Body: operationBody(t, other)}); err == nil {
 		t.Fatal("conflicting user retry accepted")
 	}
-	if _, err = a.service.CallAgent(ctx, owner, agentlink.ChatCancel, agentlink.Call{Body: json.RawMessage(`{}`)}); err == nil {
+	if _, err = callAgentWhenReady(ctx, a.service, owner, agentlink.ChatCancel, agentlink.Call{Body: json.RawMessage(`{}`)}); err == nil {
 		t.Fatal("unadvertised operation reached local chat")
 	}
 	options := a.service.options
@@ -102,7 +102,7 @@ func TestAgentPortEmptyNodeUserTaskResultAndRetrySurviveRestart(t *testing.T) {
 	if err = a.service.agentLinks.service.Sync(ctx, c.ID); err != nil {
 		t.Fatal(err)
 	}
-	repeated, err := a.service.CallAgent(ctx, owner, agentlink.TaskSubmit, call)
+	repeated, err := callAgentWhenReady(ctx, a.service, owner, agentlink.TaskSubmit, call)
 	if err != nil || repeated.(protocol.TaskInfo).ID != info.ID {
 		t.Fatal(repeated, err)
 	}
@@ -111,25 +111,25 @@ func TestAgentPortEmptyNodeUserTaskResultAndRetrySurviveRestart(t *testing.T) {
 	if err != nil || len(frame.Messages) != 1 {
 		t.Fatal("result duplicated after restart", frame, err)
 	}
-	page, err := a.service.CallAgent(ctx, owner, agentlink.TaskList, agentlink.Call{Query: map[string]string{"scope": "all"}})
+	page, err := callAgentWhenReady(ctx, a.service, owner, agentlink.TaskList, agentlink.Call{Query: map[string]string{"scope": "all"}})
 	if err != nil || len(page.(protocol.TaskPage).Items) != 1 || page.(protocol.TaskPage).Items[0].AssistantID != owner {
 		t.Fatal(page, err)
 	}
 	if err = a.service.agentLinks.service.Delete(ctx, c.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = a.service.CallAgent(ctx, owner, agentlink.TaskRead, agentlink.Call{ID: info.ID}); err != nil {
+	if _, err = callAgentWhenReady(ctx, a.service, owner, agentlink.TaskRead, agentlink.Call{ID: info.ID}); err != nil {
 		t.Fatal("link deletion hid retained task", err)
 	}
-	if _, err = a.service.CallAgent(ctx, owner, agentlink.ChatRead, agentlink.Call{}); err != nil {
+	if _, err = callAgentWhenReady(ctx, a.service, owner, agentlink.ChatRead, agentlink.Call{}); err != nil {
 		t.Fatal("link deletion hid retained conversation", err)
 	}
-	if repeated, err = a.service.CallAgent(ctx, owner, agentlink.TaskSubmit, call); err != nil || repeated.(protocol.TaskInfo).ID != info.ID {
+	if repeated, err = callAgentWhenReady(ctx, a.service, owner, agentlink.TaskSubmit, call); err != nil || repeated.(protocol.TaskInfo).ID != info.ID {
 		t.Fatal("revoked link hid original immutable acceptance", repeated, err)
 	}
 	newRequest := request
 	newRequest.RequestID = "new-after-revocation"
-	if _, err = a.service.CallAgent(ctx, owner, agentlink.TaskSubmit, agentlink.Call{Body: operationBody(t, newRequest)}); err == nil {
+	if _, err = callAgentWhenReady(ctx, a.service, owner, agentlink.TaskSubmit, agentlink.Call{Body: operationBody(t, newRequest)}); err == nil {
 		t.Fatal("revoked link acquired new execution")
 	}
 }

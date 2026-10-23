@@ -30,11 +30,18 @@ func TestPatchPreflightMoveModeAndEscape(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "should-not-exist")); !os.IsNotExist(err) {
 		t.Fatal("mutated before validation")
 	}
-	os.Symlink(outside, filepath.Join(root, "link"))
-	for _, name := range []string{"../escape", "link/escape"} {
-		if _, err := ApplyPatch(root, "*** Begin Patch\n*** Add File: "+name+"\n+bad\n*** End Patch"); err == nil {
-			t.Fatal("accepted escape", name)
-		}
+	// ApplyPatch itself runs under the caller-selected filesystem boundary.
+	external := filepath.Join(outside, "external.txt")
+	if _, err := ApplyPatch(root, "*** Begin Patch\n*** Add File: "+external+"\n+allowed\n*** End Patch"); err != nil {
+		t.Fatal("host patch rejected an external path", err)
+	}
+	if data, err := os.ReadFile(external); err != nil || string(data) != "allowed\n" {
+		t.Fatal(string(data), err)
+	}
+	link := filepath.Join(root, "link")
+	os.Symlink(external, link)
+	if _, err := ApplyPatch(root, "*** Begin Patch\n*** Delete File: "+link+"\n*** End Patch"); err == nil {
+		t.Fatal("patched symlink itself")
 	}
 	if _, err := ApplyPatch(root, "*** Begin Patch\n*** Delete File: dir/b.txt\n*** End Patch"); err != nil {
 		t.Fatal(err)

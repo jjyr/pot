@@ -226,7 +226,7 @@ func TestPluginMCPDefaultDeletionSurvivesServiceRestartAndReconnect(t *testing.T
 	}
 	s := open()
 	s.pluginMu.Lock()
-	if _, err = s.Registry.Create(ctx, "first", "Pot"); err != nil {
+	if _, err = legacyMainAssistant(ctx, s, "first", "Pot"); err != nil {
 		t.Fatal(err)
 	}
 	saveAccount := func(s *Service) {

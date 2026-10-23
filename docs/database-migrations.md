@@ -33,7 +33,7 @@ belongs to the complete database, including tables used by other components:
 | `control` | `control.sqlite` | Assistant registry, providers, encrypted secrets, integration accounts, Agent Link connections and host access configuration |
 | `tasks` | `tasks.sqlite` | Local/linked Tasks, request receipts, runs, execution checkpoints/events/workspaces, schedules, inbox, mailbox and plugin checkpoints |
 | `runner` | Retired `runner.sqlite` | Upgrade input only; imported into Tasks and local resource files |
-| `conversation` | Each conversation database | Messages, context, configuration, steering and instruction updates |
+| `conversation` | Each conversation database | Messages, context, configuration, steering and pending rule exports |
 | `machines` | `machines.sqlite` | Autonomous signing identity, local labels and archived membership records |
 | `usage` | `usage.sqlite` | Requests, routing, allowances, tools and compactions |
 | `operations` | `operations.sqlite` | Operation receipts and scope/input bindings |
@@ -403,3 +403,20 @@ new default for them, starts work or resets uncertain cleanup. Saved connections
 remain transport and trust records; removing their selector from Task requests
 does not remove an accepted Task's pinned route. Connected Adapters must upgrade
 together; retired request fields are rejected by the current protocol.
+
+## Assistant files
+
+`control/0032_assistant_files` stages existing display names, avatars, default
+character seeds and initial rules for export. It removes live profile columns,
+profile tables and initial-rule copies. `conversation/0007_instruction_files`
+stages the current rule record, removes its metadata key and drops the retired
+instruction-tool proposal table. Historical messages and execution receipts remain.
+
+Before readers start, the exporter writes private files under `assistants/ID`.
+Current conversation rules take precedence over initial registry rules. Each file
+is published durably without overwriting a different existing file. A successful
+conversation receipt precedes clearing the registry outbox, so an interrupted
+export cannot restore initial rules over a newer rule file. Conflicts stop startup
+with pending data intact. Repeated startup resumes pending exports and never
+restores completed ones. New assistant registration uses the same durable
+publication outbox; only files hold live rules and display profiles.

@@ -50,10 +50,12 @@ func historyApplication(t *testing.T, count int) *Application {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { service.Close() })
-	if _, err = service.Registry.Create(ctx, "fixture", "History fixture"); err != nil {
+	owner, err := service.Registry.Create(ctx, "fixture", "History fixture")
+	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(root, "assistants", "main", "conversation.sqlite")
+	ownerID := owner.ID
+	path := filepath.Join(root, "assistants", ownerID, "conversation.sqlite")
 	if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +64,7 @@ func historyApplication(t *testing.T, count int) *Application {
 		t.Fatal(err)
 	}
 	for i := 1; i <= count; i++ {
-		m := protocol.Message{ID: fmt.Sprintf("m-%04d", i), ConversationID: "main", Role: protocol.User, Text: fmt.Sprintf("Message %04d: synthetic history.\n\nA paragraph to read while loading older messages.", i), Status: protocol.Complete, CreatedAtMS: 1}
+		m := protocol.Message{ID: fmt.Sprintf("m-%04d", i), ConversationID: ownerID, Role: protocol.User, Text: fmt.Sprintf("Message %04d: synthetic history.\n\nA paragraph to read while loading older messages.", i), Status: protocol.Complete, CreatedAtMS: 1}
 		switch i % 8 {
 		case 1:
 			m.Text += "\n```js\nconst answer = 42;\nconsole.log(answer);\n```"
@@ -100,7 +102,7 @@ func historyApplication(t *testing.T, count int) *Application {
 	spec.Params.Agent.AutoCompact = false
 	spec.Params.Agent.BuiltinTools = []string{}
 	spec.Rehash()
-	c, err := service.Conversation(ctx, "main")
+	c, err := service.Conversation(ctx, ownerID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +114,7 @@ func historyApplication(t *testing.T, count int) *Application {
 
 func TestHistoryHTTPBoundsAndScope(t *testing.T) {
 	app := historyApplication(t, 245)
+	ownerID := localAssistantID(t, app.Control)
 	handler := Handler(app, "private")
 	other, err := app.Control.Registry.Create(context.Background(), "other", "Other")
 	if err != nil {
@@ -121,15 +124,15 @@ func TestHistoryHTTPBoundsAndScope(t *testing.T) {
 		path, token string
 		code        int
 	}{
-		{"/api/v1/history?assistant_id=main", "wrong", 401},
+		{"/api/v1/history?assistant_id=" + ownerID, "wrong", 401},
 		{"/api/v1/history?assistant_id=missing", "private", 400},
 		{"/api/v1/history?assistant_id=" + other.ID + "&around=m-0002", "private", 404},
-		{"/api/v1/history?assistant_id=main&limit=121", "private", 400},
-		{"/api/v1/history?assistant_id=main&before=-1", "private", 400},
-		{"/api/v1/history?assistant_id=main&before=2&after=1", "private", 400},
-		{"/api/v1/history?assistant_id=main&before=9007199254740992", "private", 400},
-		{"/api/v1/history?assistant_id=main&around=m-0002", "private", 200},
-		{"/api/v1/snapshot?assistant_id=main", "private", 200},
+		{"/api/v1/history?assistant_id=" + ownerID + "&limit=121", "private", 400},
+		{"/api/v1/history?assistant_id=" + ownerID + "&before=-1", "private", 400},
+		{"/api/v1/history?assistant_id=" + ownerID + "&before=2&after=1", "private", 400},
+		{"/api/v1/history?assistant_id=" + ownerID + "&before=9007199254740992", "private", 400},
+		{"/api/v1/history?assistant_id=" + ownerID + "&around=m-0002", "private", 200},
+		{"/api/v1/snapshot?assistant_id=" + ownerID, "private", 200},
 	} {
 		t.Run(test.path, func(t *testing.T) {
 			r := httptest.NewRequest("GET", test.path, nil)

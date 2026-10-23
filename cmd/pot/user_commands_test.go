@@ -33,7 +33,8 @@ func TestUserCLIUsesAuthenticatedLocalRuntimeAndAssistantScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer service.Close()
-	if _, err = service.Registry.Create(ctx, "create", "Pot"); err != nil {
+	owner, err := service.Registry.Create(ctx, "create", "")
+	if err != nil {
 		t.Fatal(err)
 	}
 	socket, err := transport.StartSocket(ctx, root, &transport.Application{Control: service, RuntimeID: "local", BootID: "boot"})
@@ -41,14 +42,19 @@ func TestUserCLIUsesAuthenticatedLocalRuntimeAndAssistantScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer socket.Close(context.Background())
-	for _, command := range [][]string{{"doctor"}, {"tasks", "list"}, {"config", "get", "routing"}, {"config", "get", "agent"}} {
-		var out bytes.Buffer
-		args := append(command, "-root", root, "-assistant", "main")
-		if err = userCommand(ctx, args, &out); err != nil {
-			t.Fatal(command, err)
-		}
-		if !json.Valid(out.Bytes()) {
-			t.Fatal("CLI returned invalid JSON")
+	for _, explicit := range []bool{false, true} {
+		for _, command := range [][]string{{"doctor"}, {"tasks", "list"}, {"config", "get", "routing"}, {"config", "get", "agent"}} {
+			var out bytes.Buffer
+			args := append(append([]string{}, command...), "-root", root)
+			if explicit {
+				args = append(args, "-assistant", owner.ID)
+			}
+			if err = userCommand(ctx, args, &out); err != nil {
+				t.Fatal(command, err)
+			}
+			if !json.Valid(out.Bytes()) {
+				t.Fatal("CLI returned invalid JSON")
+			}
 		}
 	}
 	policy := filepath.Join(t.TempDir(), "policy.json")

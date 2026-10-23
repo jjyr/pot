@@ -2,7 +2,10 @@ package control
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"github.com/jjyr/pot/pkg/assistantavatar"
 	"io"
 	"net/http"
 	"os"
@@ -21,7 +24,8 @@ func TestTaskResultExecutesCommandAndImportsTaskAvatar(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	var rounds atomic.Int32
-	s, _ := batchService(t, func(w http.ResponseWriter, r *http.Request) {
+	var s *Service
+	s, _ = batchService(t, func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		var body struct {
 			Messages []struct{ Content string }
@@ -39,14 +43,14 @@ func TestTaskResultExecutesCommandAndImportsTaskAvatar(t *testing.T) {
 		for _, tool := range body.Tools {
 			names[tool.Function.Name] = true
 		}
-		for _, name := range []string{"exec_command", "exec", "wait", "create_task", "send_message", "manage_schedule", "update_agent_profile", "update_agent_instructions", "register_resource", "present_resource"} {
+		for _, name := range []string{"exec_command", "exec", "wait", "create_task", "send_message", "manage_schedule", "register_resource", "present_resource"} {
 			if !names[name] {
 				t.Error("notification lost configured assistant tool", name)
 			}
 		}
 		toolReply := func(name string, args any) {
 			input, _ := json.Marshal(args)
-			event, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": name, "type": "function", "function": map[string]any{"name": name, "arguments": string(input)}}}}, "finish_reason": "tool_calls"}}})
+			event, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": fmt.Sprintf("%s-%d", name, rounds.Load()), "type": "function", "function": map[string]any{"name": name, "arguments": string(input)}}}}, "finish_reason": "tool_calls"}}})
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Write([]byte("data: " + string(event) + "\n\ndata: [DONE]\n\n"))
 		}
@@ -73,7 +77,14 @@ func TestTaskResultExecutesCommandAndImportsTaskAvatar(t *testing.T) {
 				batchReply(w, "Missing artifact")
 				return
 			}
-			toolReply("update_agent_profile", map[string]any{"name": "Keyboard monkey", "avatar": map[string]string{"task_id": taskID, "path": "avatar.png"}})
+			workspace, err := s.taskWorkspacePath(ctx, taskID)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			profile := filepath.Join(s.Registry.Directory("main"), "profile.json")
+			avatar := filepath.Join(s.Registry.Directory("main"), "avatar.png")
+			toolReply("exec_command", map[string]any{"cmd": fmt.Sprintf("cp %s %s && printf '%s\\n' > %s", quoteFixturePath(filepath.Join(workspace, "avatar.png")), quoteFixturePath(avatar), `{"schema_version":1,"name":"Keyboard monkey"}`, quoteFixturePath(profile)), "login": false})
 		default:
 			batchReply(w, "Avatar saved")
 		}
@@ -81,7 +92,8 @@ func TestTaskResultExecutesCommandAndImportsTaskAvatar(t *testing.T) {
 	if err := s.Permissions.Configure("local", MachinePolicy{ExecutionAccess: "allow"}); err != nil {
 		t.Fatal(err)
 	}
-	source := profileImage(t)
+	encoded, _ := assistantavatar.Render("cup", "fixture")
+	source, _ := base64.StdEncoding.DecodeString(strings.TrimPrefix(encoded, "data:image/png;base64,"))
 	prepare := s.TaskRuns.Prepare
 	s.TaskRuns.Prepare = func(ctx context.Context, run tasks.Run) (tasks.Prepared, error) {
 		prepared, err := prepare(ctx, run)
@@ -118,4 +130,8 @@ func TestTaskResultExecutesCommandAndImportsTaskAvatar(t *testing.T) {
 			t.Fatal("follow-up tool failed", message.Tool.Name, message.Tool.Phase)
 		}
 	}
+}
+
+func quoteFixturePath(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }

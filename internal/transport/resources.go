@@ -65,9 +65,10 @@ func (a *Application) resourceContent(w http.ResponseWriter, r *http.Request) bo
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return true
 	}
-	owner := r.URL.Query().Get("assistant_id")
-	if owner == "" {
-		owner = "main"
+	owner, err := a.resolveOwner(r.Context(), r.URL.Query().Get("assistant_id"))
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return true
 	}
 	if operation == "render" {
 		resource, err := a.Control.Resources.Get(r.Context(), owner, id)

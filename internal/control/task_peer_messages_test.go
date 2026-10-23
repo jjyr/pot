@@ -35,7 +35,7 @@ func taskPeerMessageService(t *testing.T) *Service {
 		<-ctx.Done()
 		return tasks.Prepared{}, ctx.Err()
 	}
-	if _, err = s.Registry.Create(ctx, "create-main", "Main"); err != nil {
+	if _, err = legacyMainAssistant(ctx, s, "create-main", "Main"); err != nil {
 		t.Fatal(err)
 	}
 	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "fixture", Name: "Fixture", Model: "fixture", Endpoint: "https://example.test", Protocol: "openai_chat", APIKey: "fixture", MaxOutputTokens: 128})

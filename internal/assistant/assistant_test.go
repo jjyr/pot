@@ -23,7 +23,7 @@ func TestRegistryDurableCreationCASAndRootBinding(t *testing.T) {
 	}
 	defer first.Close()
 	created, err := first.Create(ctx, "create-one", "Research")
-	if err != nil || created.ID != "main" {
+	if err != nil || created.ID == "main" || created.Name != "Research" {
 		t.Fatal(created, err)
 	}
 	second, err := OpenRegistry(path, "main")
@@ -121,11 +121,11 @@ func TestThreadConfigurationPreservesContextAndRules(t *testing.T) {
 	if loaded, err := store.LoadContext(ctx); err != nil || string(loaded) != string(body) {
 		t.Fatal(string(loaded), err)
 	}
-	rules, err := LoadInstructions(ctx, store)
+	rules, err := store.Instructions(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rules, err = SaveInstructions(ctx, store, "Own assistant rules", rules.Revision)
+	rules, err = store.SaveInstructions(ctx, "Own assistant rules", rules.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestThreadConfigurationPreservesContextAndRules(t *testing.T) {
 	if err != nil || current.Generation != 2 || current.Config.Model != "model-a" {
 		t.Fatal(current, err)
 	}
-	saved, err := LoadInstructions(ctx, store)
+	saved, err := store.Instructions(ctx)
 	if err != nil || saved != rules {
 		t.Fatal(saved, err)
 	}

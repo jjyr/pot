@@ -5,8 +5,10 @@ package assistant
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -25,8 +27,8 @@ type Definition struct {
 	Avatar    string `json:"avatar,omitempty"`
 }
 type Registry struct {
-	db   *sql.DB
-	root string
+	db        *sql.DB
+	directory string
 }
 
 func OpenRegistry(path, root string) (*Registry, error) {
@@ -54,9 +56,28 @@ func OpenRegistry(path, root string) (*Registry, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Registry{db, root}, nil
+	directory := filepath.Dir(path)
+	unlock := storage.LockAssistantFiles(directory)
+	defer unlock()
+	if err := storage.ExportAssistantFiles(db, directory); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Registry{db: db, directory: directory}, nil
 }
 func (r *Registry) Close() error { return r.db.Close() }
+
+// FirstID resolves an omitted local selector without loading profile images.
+// An empty registry has no default assistant.
+func (r *Registry) FirstID(ctx context.Context) (string, error) {
+	var id string
+	err := r.db.QueryRowContext(ctx, "SELECT id FROM assistant_definitions WHERE deleted=0 ORDER BY sequence LIMIT 1").Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return id, err
+}
+
 func ValidateName(name string) error {
 	if !utf8.ValidString(name) || strings.TrimSpace(name) == "" || utf8.RuneCountInString(name) > 80 {
 		return errors.New("invalid assistant name")
@@ -68,24 +89,58 @@ func ValidateName(name string) error {
 	}
 	return nil
 }
+func (r *Registry) definition(ctx context.Context, id string) (Definition, error) {
+	var d Definition
+	if err := r.db.QueryRowContext(ctx, "SELECT id,request_id FROM assistant_definitions WHERE id=? AND deleted=0", id).Scan(&d.ID, &d.RequestID); err != nil {
+		return d, err
+	}
+	profile, revision, avatar, err := storage.ReadAssistantProfile(r.Directory(id))
+	if err != nil {
+		return d, err
+	}
+	d.Name, d.Revision, d.Avatar = profile.Name, revision, avatar
+	if err := validateDefinition(d); err != nil {
+		return d, err
+	}
+	if err := ValidateAvatar(avatar); err != nil {
+		return d, err
+	}
+	return d, nil
+}
+func (r *Registry) Directory(id string) string { return filepath.Join(r.directory, "assistants", id) }
 func (r *Registry) Definitions(ctx context.Context) ([]Definition, error) {
-	rows, err := r.db.QueryContext(ctx, "SELECT id,name,revision,request_id,COALESCE((SELECT avatar FROM assistant_profiles WHERE assistant_id=assistant_definitions.id),'') FROM assistant_definitions WHERE deleted=0 ORDER BY sequence")
+	unlock := storage.LockAssistantFiles(r.directory)
+	defer unlock()
+	if err := storage.ExportAssistantFiles(r.db, r.directory); err != nil {
+		return nil, err
+	}
+	rows, err := r.db.QueryContext(ctx, "SELECT id FROM assistant_definitions WHERE deleted=0 ORDER BY sequence")
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []Definition{}
+	var ids []string
 	for rows.Next() {
-		var d Definition
-		if err := rows.Scan(&d.ID, &d.Name, &d.Revision, &d.RequestID, &d.Avatar); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
 			return nil, err
 		}
-		if err := validateDefinition(d); err != nil {
-			return nil, err
-		}
-		out = append(out, d)
+		ids = append(ids, id)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	result := []Definition{}
+	for _, id := range ids {
+		d, err := r.definition(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, d)
+	}
+	return result, nil
 }
 func validateDefinition(d Definition) error {
 	if !core.Identifier(d.ID) || d.RequestID == "" || len(d.RequestID) > 128 || d.Revision == 0 || d.Revision > core.MaxSafeInteger {
@@ -104,9 +159,15 @@ func (r *Registry) CreateConfigured(ctx context.Context, request, name, profile,
 }
 
 // CreateWithIntent binds creation intent before publishing the assistant identity.
-// An empty name allocates an unused kitchen name inside the creation transaction.
+// Every creation allocates a two-word slug ID inside the creation transaction.
+// An empty display name title-cases that slug, including the first assistant.
 // The welcome template's {name} marker is filled once with the allocated name.
 func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingInput, rules string, intent json.RawMessage, welcome string, onlyFirst bool, resolve func() (*core.ResolvedSpec, error)) (Definition, error) {
+	unlock := storage.LockAssistantFiles(r.directory)
+	defer unlock()
+	if err := storage.ExportAssistantFiles(r.db, r.directory); err != nil {
+		return Definition{}, err
+	}
 	binding, err := core.HashJSON([]any{name, bindingInput, rules, intent, welcome})
 	if err != nil {
 		return Definition{}, err
@@ -126,17 +187,18 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 	var definition Definition
 	err = storage.Transaction(ctx, r.db, func(tx *sql.Tx) error {
 		if onlyFirst {
-			err := tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id,COALESCE((SELECT avatar FROM assistant_profiles WHERE assistant_id=assistant_definitions.id),'') FROM assistant_definitions WHERE deleted=0 ORDER BY sequence LIMIT 1").Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID, &definition.Avatar)
+			var id string
+			err := tx.QueryRowContext(ctx, "SELECT id FROM assistant_definitions WHERE deleted=0 ORDER BY sequence LIMIT 1").Scan(&id)
 			if err == nil {
-				return validateDefinition(definition)
+				definition.ID = id
+				return nil
 			}
 			if !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}
 		}
-		var createdName string
 		var deleted bool
-		err := tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id,created_name,COALESCE((SELECT avatar FROM assistant_profiles WHERE assistant_id=assistant_definitions.id),''),deleted FROM assistant_definitions WHERE request_id=?", request).Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID, &createdName, &definition.Avatar, &deleted)
+		err := tx.QueryRowContext(ctx, "SELECT id,deleted FROM assistant_definitions WHERE request_id=?", request).Scan(&definition.ID, &deleted)
 		if err == nil {
 			if deleted {
 				return errors.New("assistant creation request belongs to a deleted assistant")
@@ -145,10 +207,10 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 			if err := tx.QueryRowContext(ctx, "SELECT binding FROM assistant_initial WHERE id=?", definition.ID).Scan(&stored); err != nil {
 				return err
 			}
-			if (name != "" && createdName != name) || stored != binding {
+			if stored != binding {
 				return errors.New("conflicting assistant creation request")
 			}
-			return validateDefinition(definition)
+			return nil
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
@@ -160,34 +222,45 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 		if count >= 64 {
 			return errors.New("assistant limit reached")
 		}
-		if name == "" {
-			rows, err := tx.QueryContext(ctx, "SELECT name FROM assistant_definitions WHERE deleted=0")
-			if err != nil {
-				return err
-			}
-			var used []string
-			for rows.Next() {
-				var value string
-				if err := rows.Scan(&value); err != nil {
-					rows.Close()
-					return err
-				}
-				used = append(used, value)
-			}
-			err = rows.Err()
-			rows.Close()
-			if err != nil {
-				return err
-			}
-			name = randomAssistantName(used)
-		}
-		id := storage.ID()
-		var historical int
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM assistant_definitions").Scan(&historical); err != nil {
+		var used []string
+		rows, err := tx.QueryContext(ctx, "SELECT id,deleted FROM assistant_definitions")
+		if err != nil {
 			return err
 		}
-		if historical == 0 {
-			id = r.root
+		type registered struct {
+			id      string
+			deleted bool
+		}
+		var existing []registered
+		for rows.Next() {
+			var v registered
+			if err := rows.Scan(&v.id, &v.deleted); err != nil {
+				rows.Close()
+				return err
+			}
+			existing = append(existing, v)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		for _, v := range existing {
+			used = append(used, v.id)
+			if !v.deleted {
+				p, _, _, err := storage.ReadAssistantProfile(r.Directory(v.id))
+				if err != nil {
+					return err
+				}
+				used = append(used, p.Name)
+			}
+		}
+		id, err := randomAssistantSlug(used)
+		if err != nil {
+			return err
+		}
+		if name == "" {
+			name = slugDisplayName(id)
 		}
 		definition = Definition{ID: id, Name: name, Revision: 1, RequestID: request}
 		character := assistantavatar.ForName(name, request)
@@ -206,7 +279,7 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 		if err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO assistant_initial VALUES(?,?,?,?)", id, binding, string(data), rules); err != nil {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO assistant_initial VALUES(?,?,?)", id, binding, string(data)); err != nil {
 			return err
 		}
 		intentBody := string(intent)
@@ -221,14 +294,20 @@ func (r *Registry) CreateWithIntent(ctx context.Context, request, name, bindingI
 		if _, err = tx.ExecContext(ctx, "INSERT INTO assistant_welcome VALUES (?,?)", id, strings.ReplaceAll(welcome, "{name}", name)); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO assistant_definitions(id,name,revision,request_id,created_name) VALUES (?,?,?,?,?)", id, name, 1, request, name)
+		_, err = tx.ExecContext(ctx, "INSERT INTO assistant_definitions(id,request_id) VALUES (?,?)", id, request)
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO assistant_profiles(assistant_id,avatar,character) VALUES (?,?,?)", id, definition.Avatar, character)
+		_, err = tx.ExecContext(ctx, "INSERT INTO assistant_file_export VALUES (?,?,?,?,?,?)", id, name, definition.Avatar, character, request, rules)
 		return err
 	})
-	return definition, err
+	if err != nil {
+		return definition, err
+	}
+	if err := storage.ExportAssistantFiles(r.db, r.directory); err != nil {
+		return definition, err
+	}
+	return r.definition(ctx, definition.ID)
 }
 func (r *Registry) Welcome(ctx context.Context, id string) (string, error) {
 	var text string
@@ -243,49 +322,52 @@ func (r *Registry) Rename(ctx context.Context, id, name string, revision uint64)
 	return r.UpdateProfile(ctx, id, ProfileUpdate{Name: &name}, revision)
 }
 
-// UpdateProfile applies a settings edit under the same identity revision as chat
-// profile changes, so an outdated settings page cannot overwrite a newer edit.
+// UpdateProfile checks the current file revision so an outdated settings page
+// cannot overwrite a newer profile edit.
 func (r *Registry) UpdateProfile(ctx context.Context, id string, patch ProfileUpdate, revision uint64) (Definition, error) {
 	if err := patch.Validate(); err != nil {
 		return Definition{}, err
 	}
-	if revision == 0 || revision >= core.MaxSafeInteger {
-		return Definition{}, errors.New("invalid assistant revision")
+	unlock := storage.LockAssistantFiles(r.Directory(id))
+	defer unlock()
+	d, err := r.definition(ctx, id)
+	if err != nil {
+		return d, err
 	}
-	var definition Definition
-	err := storage.Transaction(ctx, r.db, func(tx *sql.Tx) error {
-		err := tx.QueryRowContext(ctx, "SELECT id,name,revision,request_id,COALESCE((SELECT avatar FROM assistant_profiles WHERE assistant_id=assistant_definitions.id),'') FROM assistant_definitions WHERE id=? AND revision=? AND deleted=0", id, revision).Scan(&definition.ID, &definition.Name, &definition.Revision, &definition.RequestID, &definition.Avatar)
-		if errors.Is(err, sql.ErrNoRows) {
-			return errors.New("assistant missing or changed; reload before saving")
-		}
-		if err != nil {
-			return err
-		}
-		if patch.Name != nil {
-			definition.Name = *patch.Name
-		}
-		if patch.Avatar != nil {
-			definition.Avatar = *patch.Avatar
-			if definition.Avatar == "" {
-				definition.Avatar, err = defaultAvatar(ctx, tx, id)
-				if err != nil {
-					return err
-				}
+	if d.Revision != revision {
+		return d, errors.New("assistant missing or changed; reload before saving")
+	}
+	if patch.Name != nil {
+		d.Name = *patch.Name
+	}
+	if patch.Avatar != nil {
+		avatar := *patch.Avatar
+		if avatar == "" {
+			avatar, err = r.DefaultAvatar(ctx, id)
+			if err != nil {
+				return d, err
 			}
 		}
-		definition.Revision++
-		if _, err = tx.ExecContext(ctx, "UPDATE assistant_definitions SET name=?,revision=? WHERE id=?", definition.Name, definition.Revision, id); err != nil {
-			return err
+		raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(avatar, avatarPrefix))
+		if err != nil {
+			return d, err
 		}
-		_, err = tx.ExecContext(ctx, "UPDATE assistant_profiles SET avatar=? WHERE assistant_id=?", definition.Avatar, id)
-		return err
-	})
-	return definition, err
+		if err := storage.WriteAssistantFile(filepath.Join(r.Directory(id), "avatar.png"), raw); err != nil {
+			return d, err
+		}
+	}
+	if patch.Name != nil {
+		data, _ := json.MarshalIndent(storage.AssistantProfile{SchemaVersion: 1, Name: d.Name}, "", "  ")
+		if err := storage.WriteAssistantFile(filepath.Join(r.Directory(id), "profile.json"), append(data, '\n')); err != nil {
+			return d, err
+		}
+	}
+	return r.definition(ctx, id)
 }
 
 func (r *Registry) Initial(ctx context.Context, id string) (*core.ResolvedSpec, string, error) {
-	var data, rules string
-	if err := r.db.QueryRowContext(ctx, "SELECT spec,rules FROM assistant_initial WHERE id=?", id).Scan(&data, &rules); err != nil {
+	var data string
+	if err := r.db.QueryRowContext(ctx, "SELECT spec FROM assistant_initial WHERE id=?", id).Scan(&data); err != nil {
 		return nil, "", err
 	}
 	var spec *core.ResolvedSpec
@@ -297,7 +379,8 @@ func (r *Registry) Initial(ctx context.Context, id string) (*core.ResolvedSpec, 
 			return nil, "", err
 		}
 	}
-	return spec, rules, nil
+	current, err := storage.ReadAssistantInstructions(r.Directory(id))
+	return spec, current.Text, err
 }
 
 func (r *Registry) InitialIntent(ctx context.Context, id string) (json.RawMessage, error) {
@@ -327,10 +410,15 @@ func (r *Registry) Delete(ctx context.Context, id string, revision uint64) error
 	if !core.Identifier(id) || revision == 0 || revision > core.MaxSafeInteger {
 		return errors.New("invalid assistant deletion")
 	}
+	unlock := storage.LockAssistantFiles(r.Directory(id))
+	defer unlock()
 	return storage.Transaction(ctx, r.db, func(tx *sql.Tx) error {
-		var current uint64
 		var deleted bool
-		if err := tx.QueryRowContext(ctx, "SELECT revision,deleted FROM assistant_definitions WHERE id=?", id).Scan(&current, &deleted); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT deleted FROM assistant_definitions WHERE id=?", id).Scan(&deleted); err != nil {
+			return err
+		}
+		_, current, _, err := storage.ReadAssistantProfile(r.Directory(id))
+		if err != nil {
 			return err
 		}
 		if current != revision {
@@ -339,23 +427,21 @@ func (r *Registry) Delete(ctx context.Context, id string, revision uint64) error
 		if deleted {
 			return nil
 		}
-		_, err := tx.ExecContext(ctx, "UPDATE assistant_definitions SET deleted=1 WHERE id=?", id)
+		_, err = tx.ExecContext(ctx, "UPDATE assistant_definitions SET deleted=1 WHERE id=?", id)
 		return err
 	})
 }
-
-// DefaultAvatar returns the originally assigned character and background, even
-// after renaming or uploading a custom profile image.
 func (r *Registry) DefaultAvatar(ctx context.Context, id string) (string, error) {
-	return defaultAvatar(ctx, r.db, id)
-}
-func defaultAvatar(ctx context.Context, query interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, id string) (string, error) {
-	var character, seed string
-	err := query.QueryRowContext(ctx, "SELECT p.character,d.request_id FROM assistant_profiles p JOIN assistant_definitions d ON d.id=p.assistant_id WHERE d.id=? AND d.deleted=0", id).Scan(&character, &seed)
+	deleted, err := r.Deleted(ctx, id)
 	if err != nil {
 		return "", err
 	}
-	return assistantavatar.Render(character, seed)
+	if deleted {
+		return "", sql.ErrNoRows
+	}
+	data, err := storage.ReadAssistantFile(r.Directory(id), "default-avatar.png", AvatarSourceLimit)
+	if err != nil {
+		return "", err
+	}
+	return avatarPrefix + base64.StdEncoding.EncodeToString(data), nil
 }

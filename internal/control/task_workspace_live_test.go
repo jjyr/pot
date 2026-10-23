@@ -136,7 +136,7 @@ func TestConfiguredModelTaskWorkspacesLive(t *testing.T) {
 			t.Error(e)
 		}
 	}()
-	service.Registry.Create(ctx, "create", "Workspace qualification")
+	legacyMainAssistant(ctx, service, "create", "Workspace qualification")
 	saved, err := service.Profiles.Save(ctx, SaveProfile{RequestID: "live", ProfileID: "live", Name: "Workspace qualification", Model: profile.Model, Endpoint: proxy.URL, Protocol: provider.Protocol, APIKey: "isolated-proxy", MaxOutputTokens: 2048, ReasoningEffort: profile.Params.ReasoningEffort})
 	if err != nil {
 		t.Fatal(err)

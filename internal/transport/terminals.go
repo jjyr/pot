@@ -67,9 +67,10 @@ func (a *Application) terminalSocket(w http.ResponseWriter, r *http.Request) boo
 	if len(parts) != 2 || parts[1] != "socket" {
 		return false
 	}
-	owner := r.URL.Query().Get("assistant_id")
-	if owner == "" {
-		owner = "main"
+	owner, err := a.resolveOwner(r.Context(), r.URL.Query().Get("assistant_id"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return true
 	}
 	if !core.Identifier(owner) || r.Method != "GET" {
 		http.Error(w, "invalid terminal scope", 400)

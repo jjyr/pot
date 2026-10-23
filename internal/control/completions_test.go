@@ -12,7 +12,7 @@ import (
 func TestCompletionsUseOwnerResourcesAndBoundMetadataWithoutExecution(t *testing.T) {
 	s := taskResourceService(t)
 	ctx := context.Background()
-	if _, err := s.Registry.Create(ctx, "create", "Pot"); err != nil {
+	if _, err := legacyMainAssistant(ctx, s, "create", "Pot"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Machines.SetLabels(ctx, "local", []string{"desktop", "task-runner"}); err != nil {
@@ -150,9 +150,23 @@ func TestAssistantCompletionsRetireDefinitionsWithoutUsingHistoricalContacts(t *
 	if items := lookup("@"); len(items) != 2 {
 		t.Fatal("contacts entered current candidates", items)
 	}
-	if err := a.service.DeleteAssistant(ctx, "main", 1); err != nil {
-		t.Fatal(err)
+	retire := func(service *Service) {
+		t.Helper()
+		definitions, err := service.Registry.Definitions(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, definition := range definitions {
+			if definition.ID == "main" {
+				if err := service.DeleteAssistant(ctx, definition.ID, definition.Revision); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+		}
+		t.Fatal("historical main assistant missing")
 	}
+	retire(a.service)
 	if items := lookup("@"); len(items) != 1 || items[0].Token != "@assistant:retire-remote/main" {
 		t.Fatal("local retirement removed the wrong same-ID identity", items)
 	}
@@ -162,9 +176,7 @@ func TestAssistantCompletionsRetireDefinitionsWithoutUsingHistoricalContacts(t *
 	if _, err := a.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "disconnect", ID: connection.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.service.DeleteAssistant(ctx, "main", 1); err != nil {
-		t.Fatal(err)
-	}
+	retire(b.service)
 	// The source has no deletion evidence until it receives a new directory.
 	if items := lookup("@"); len(items) != 1 || !items[0].Offline {
 		t.Fatal("disconnection fabricated a remote deletion", items)

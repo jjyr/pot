@@ -17,6 +17,7 @@ from pathlib import Path
 import secrets
 import shutil
 import signal
+import shlex
 import socket
 import struct
 import subprocess
@@ -156,13 +157,22 @@ def run(binary, base, env, cli_command, profile_only=False):
                     default=-1,
                 )
                 text = message_text(messages[last_user]) if last_user >= 0 else ""
-                changes = {
-                    "以后叫你小白": {"name": "小白"},
-                    "把头像换为测试图片": {"avatar": {"path": "profile-avatar.png"}},
-                }
+                changes = {"以后叫你小白", "把头像换为测试图片"}
                 if text in changes and not any(
                     m.get("role") == "tool" for m in messages[last_user + 1 :]
                 ):
+                    owner = api("GET", "/api/v1/assistants")[0]["id"]
+                    directory = base / "runtime/assistants" / owner
+                    if text == "以后叫你小白":
+                        code = f"import json; from pathlib import Path; p=Path({str(directory / 'profile.json')!r}); d=json.loads(p.read_text()); d['name']='小白'; p.write_text(json.dumps(d,ensure_ascii=False))"
+                        command = "python3 -c " + shlex.quote(code)
+                    else:
+                        command = (
+                            "cp "
+                            + shlex.quote(str(avatar_path))
+                            + " "
+                            + shlex.quote(str(directory / "avatar.png"))
+                        )
                     self.send_response(200)
                     self.send_header("Content-Type", "text/event-stream")
                     self.end_headers()
@@ -177,8 +187,10 @@ def run(binary, base, env, cli_command, profile_only=False):
                                             "id": "rename-onboarding",
                                             "type": "function",
                                             "function": {
-                                                "name": "update_agent_profile",
-                                                "arguments": json.dumps(changes[text]),
+                                                "name": "exec_command",
+                                                "arguments": json.dumps(
+                                                    {"cmd": command, "login": False}
+                                                ),
                                             },
                                         }
                                     ]
@@ -269,9 +281,7 @@ def run(binary, base, env, cli_command, profile_only=False):
                 )
             )
             wait_for(lambda: cli("status", "-root", str(base / "runtime")), "Runtime")
-            avatar_workspace = base / "runtime/agent-workspace/assistants/main"
-            avatar_workspace.mkdir(parents=True, exist_ok=True)
-            avatar_path = avatar_workspace / "profile-avatar.png"
+            avatar_path = base / "profile-avatar.png"
             if image := env.get("POT_PROFILE_FIXTURE_IMAGE"):
                 avatar_path.write_bytes(Path(image).read_bytes())
             else:
@@ -328,7 +338,7 @@ def run(binary, base, env, cli_command, profile_only=False):
                 any(
                     m.get("role") == "assistant"
                     and re.fullmatch(
-                        re.escape(welcome).replace(re.escape("{name}"), "[A-Za-z]+"),
+                        re.escape(welcome).replace(re.escape("{name}"), "[A-Z][a-z]+ [A-Z][a-z]+"),
                         message_text(m),
                     )
                     is not None

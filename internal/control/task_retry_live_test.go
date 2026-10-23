@@ -100,7 +100,7 @@ func TestConfiguredModelTaskRecoveryLive(t *testing.T) {
 					t.Error(err)
 				}
 			}()
-			if _, err = s.Registry.Create(ctx, "create", "Live recovery"); err != nil {
+			if _, err = legacyMainAssistant(ctx, s, "create", "Live recovery"); err != nil {
 				t.Fatal(err)
 			}
 			modelSettings := core.ModelSettings{}

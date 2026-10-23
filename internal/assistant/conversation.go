@@ -152,6 +152,10 @@ func OpenConversation(path string, options ConversationOptions) (*Conversation, 
 	if err != nil {
 		return nil, err
 	}
+	if err := store.InitializeInstructions(options.InitialRules); err != nil {
+		store.Close()
+		return nil, err
+	}
 	ok := false
 	defer func() {
 		if !ok {
@@ -171,10 +175,6 @@ func OpenConversation(path string, options ConversationOptions) (*Conversation, 
 			}
 			if len(options.InitialRules) > 262144 {
 				return errors.New("initial rules exceed limit")
-			}
-			rules, _ := json.Marshal(storage.Rules{SchemaVersion: 1, Text: options.InitialRules, Revision: storage.ID()})
-			if _, err := tx.Exec("INSERT INTO metadata VALUES('assistant.instructions.v1',?)", string(rules)); err != nil {
-				return err
 			}
 			if len(options.InitialIntent) > 0 && string(options.InitialIntent) != "null" {
 				if !json.Valid(options.InitialIntent) {

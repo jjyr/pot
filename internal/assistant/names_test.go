@@ -4,50 +4,89 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/jjyr/pot/pkg/core"
+	"github.com/jjyr/pot/pkg/storage"
 )
 
-func TestKitchenNamePoolAndRandomSelection(t *testing.T) {
-	want := []string{"Cup", "Mug", "Bowl", "Pan", "Wok", "Spoon", "Fork", "Tray", "Whisk", "Kettle", "Lid", "Jar", "Jug", "Plate", "Dish", "Glass"}
-	if !slices.Equal(kitchenNames[:], want) {
-		t.Fatalf("kitchen identity pool changed: %v", kitchenNames)
+func TestAssistantSlugPool(t *testing.T) {
+	if len(slugWords) < 1024 {
+		t.Fatalf("too few combinations: %d words", len(slugWords))
 	}
-	for index, expected := range want {
-		got := pickAssistantName(nil, func(size int) int {
-			if size != len(want) {
-				t.Fatalf("random choice excludes unused names: %d", size)
-			}
-			return index
-		})
-		if got != expected {
-			t.Fatalf("choice %d: %q, want %q", index, got, expected)
+	seen := map[string]bool{}
+	wordPattern := regexp.MustCompile(`^[a-z]{2,12}$`)
+	for _, word := range slugWords {
+		if !wordPattern.MatchString(word) || seen[word] {
+			t.Fatalf("invalid or duplicate slug word: %q", word)
 		}
+		seen[word] = true
 	}
 }
 
-func TestKitchenNamesPreferUnusedThenSmallestSuffix(t *testing.T) {
-	first := func(int) int { return 0 }
-	used := []string{" cuP ", "Cup 2", "Custom name"}
-	if name := pickAssistantName(used, first); name != "Mug" {
-		t.Fatal("did not skip manually named/case-folded duplicate", name)
+func TestExistingAssistantIdentitiesSurviveNewNaming(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "control.sqlite")
+	r, err := OpenRegistry(path, "main")
+	if err != nil {
+		t.Fatal(err)
 	}
-	used = append(used, kitchenNames[1:]...)
-	used = append(used, "Cup 4")
-	if name := pickAssistantName(used, first); name != "Cup 3" {
-		t.Fatal("did not choose smallest free suffix", name)
-	}
-	for index, base := range kitchenNames {
-		if name := pickAssistantName(kitchenNames[:], func(int) int { return index }); name != base+" 2" {
-			t.Fatal("suffix did not retain randomly chosen base", name)
+	// The persisted ID/name fields keep their existing string contract. No
+	// schema conversion or rewriting of historical references is needed.
+	for _, item := range [][3]string{{"main", "Cup", "original-main"}, {"ABCDEFGHIJKLMNOPQRSTUVWXYZ", "Renamed helper", "original-other"}} {
+		if _, err := r.db.Exec("INSERT INTO assistant_definitions(id,request_id) VALUES(?,?)", item[0], item[2]); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.db.Exec("INSERT INTO assistant_file_export VALUES(?,?,?,'cup',?,'')", item[0], item[1], "", item[2]); err != nil {
+			t.Fatal(err)
 		}
 	}
-	// A renamed/deleted base becomes available before any numbered variant.
-	used = slices.DeleteFunc(slices.Clone(used), func(name string) bool { return name == "Bowl" })
-	if name := pickAssistantName(used, first); name != "Bowl" {
-		t.Fatal("unused base did not take priority", name)
+	if err := storage.ExportAssistantFiles(r.db, filepath.Dir(path)); err != nil {
+		t.Fatal(err)
+	}
+	before, err := r.Definitions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	r, err = OpenRegistry(path, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	created, err := r.Create(ctx, "new", "")
+	if err != nil || created.Name != slugDisplayName(created.ID) || !strings.Contains(created.ID, "-") {
+		t.Fatal(created, err)
+	}
+	after, err := r.Definitions(ctx)
+	if err != nil || len(after) != 3 || !slices.Equal(before, after[:2]) {
+		t.Fatal("new naming changed an existing identity", after, err)
+	}
+}
+
+func TestAssistantSlugAllocatesOnlyFreePairs(t *testing.T) {
+	words := []string{"amber", "otter", "quiet"}
+	// Names are compared case-insensitively; duplicate reservations count once.
+	used := []string{" AMBER-OTTER ", "amber-otter", "quiet-amber", "legacy-ID", "main"}
+	want := []string{"amber-amber", "amber-quiet", "otter-amber", "otter-otter", "otter-quiet", "quiet-otter", "quiet-quiet"}
+	for index, expected := range want {
+		got, err := pickAssistantSlug(words, used, func(size int) int {
+			if size != len(want) {
+				t.Fatalf("wrong available count: %d", size)
+			}
+			return index
+		})
+		if err != nil || got != expected {
+			t.Fatalf("choice %d: %q, %v; want %q", index, got, err, expected)
+		}
+	}
+	used = append(used, want...)
+	if _, err := pickAssistantSlug(words, used, func(int) int { t.Fatal("exhausted pool attempted a random pick"); return 0 }); err == nil {
+		t.Fatal("exhausted pool accepted")
 	}
 }
 
@@ -62,6 +101,8 @@ func TestRandomCreationConcurrentHandlesRetriesAndRestart(t *testing.T) {
 		return r
 	}
 	first, second := open(), open()
+	defer first.Close()
+	defer second.Close()
 	var wg sync.WaitGroup
 	for index := range 32 {
 		wg.Go(func() {
@@ -79,22 +120,20 @@ func TestRandomCreationConcurrentHandlesRetriesAndRestart(t *testing.T) {
 		t.Fatalf("duplicate/missing creation: %d %v", len(definitions), err)
 	}
 	seen := map[string]bool{}
-	for index, d := range definitions {
-		if seen[d.Name] {
-			t.Fatal("concurrent duplicate", d.Name)
+	for _, d := range definitions {
+		parts := strings.Split(d.ID, "-")
+		if d.Name != slugDisplayName(d.ID) || !core.Identifier(d.ID) || len(parts) != 2 || !slices.Contains(slugWords, parts[0]) || !slices.Contains(slugWords, parts[1]) {
+			t.Fatal("creation did not share a two-word ID and initial name", d)
 		}
-		seen[d.Name] = true
-		if index < len(kitchenNames) && !slices.Contains(kitchenNames[:], d.Name) {
-			t.Fatal("numbered before base names exhausted", d.Name)
+		if seen[d.ID] {
+			t.Fatal("concurrent duplicate", d.ID)
 		}
-		if index >= len(kitchenNames) && !strings.Contains(d.Name, " ") {
-			t.Fatal("missing suffix", d.Name)
-		}
+		seen[d.ID] = true
 	}
 	original := definitions[0]
-	renamed, err := first.Rename(ctx, original.ID, "My kitchen helper", original.Revision)
-	if err != nil {
-		t.Fatal(err)
+	renamed, err := first.Rename(ctx, original.ID, "My helper", original.Revision)
+	if err != nil || renamed.ID != original.ID {
+		t.Fatal("rename changed ID", renamed, err)
 	}
 	first.Close()
 	second.Close()
@@ -108,17 +147,11 @@ func TestRandomCreationConcurrentHandlesRetriesAndRestart(t *testing.T) {
 	if err != nil || welcome != "Hi, I'm "+original.Name+"." {
 		t.Fatal("welcome was regenerated on retry", welcome, err)
 	}
-	next, err := r.Create(ctx, "freed-base", "")
-	if err != nil || next.Name != original.Name {
-		t.Fatal("did not reuse free base name", next, err)
-	}
-	other, err := OpenRegistry(filepath.Join(t.TempDir(), "other.sqlite"), "other")
-	if err != nil {
+	if err := r.Delete(ctx, original.ID, renamed.Revision); err != nil {
 		t.Fatal(err)
 	}
-	defer other.Close()
-	independent, err := other.Create(ctx, "independent", "")
-	if err != nil || !slices.Contains(kitchenNames[:], independent.Name) {
-		t.Fatal("another Space inherited occupied names", independent, err)
+	next, err := r.Create(ctx, "next", "")
+	if err != nil || seen[next.ID] || next.Name != slugDisplayName(next.ID) {
+		t.Fatal("new creation reused historical ID", next, err)
 	}
 }

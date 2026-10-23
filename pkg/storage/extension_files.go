@@ -25,7 +25,7 @@ func ExportLocalExtensions(db *sql.DB, root, home string) error {
 		return nil
 	}
 	if home == root {
-		for _, name := range []string{"skills", "plugins", "AGENTS.md"} {
+		for _, name := range []string{"skills", "plugins"} {
 			old := filepath.Join(root, "agent", name)
 			dest := filepath.Join(home, name)
 			if _, err := os.Lstat(old); errors.Is(err, os.ErrNotExist) {

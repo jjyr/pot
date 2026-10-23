@@ -91,8 +91,9 @@ opens connection setup.
 
 First-use Chat offers the shared Add assistant page and never bootstraps an
 assistant while reading its directory. Selecting API creation uses the default
-connection or opens Provider setup, then explicitly creates one kitchen-named
-assistant with the selected UI locale. Nested setup in an assistant draft
+connection or opens Provider setup, then explicitly creates one assistant with a
+random two-word slug ID such as `amber-otter` and a default name such as `Amber Otter`,
+using the selected UI locale for its welcome message. Nested setup in an assistant draft
 returns to that draft. The explicit bootstrap API retains its one-time identity
 receipt for callers that intentionally request it; ordinary page loads do not call it.
 

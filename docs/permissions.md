@@ -74,8 +74,10 @@ requests, child/sibling Tasks, scheduled occurrences, machines or generations.
 Completion/cancellation, restart, authorization epoch changes and policy invalidation clear
 temporary grants. Background scheduling grants no authority.
 
-Instruction edits always require independent exact `allow_once`/`deny` review,
-even on Trusted or Blocked machines; command/task grants never approve them.
+Assistant file edits follow this same machine policy. A host `apply_patch`
+request binds the complete patch and workspace and offers `allow_once`/`deny`.
+It never creates a command grant. Trusted machines already permit host patches;
+Blocked machines reject new patches. File ownership is not a separate permission.
 
 Every pending decision binds owner, Task/run/turn, generation, call ID, Runtime,
 authorization epoch, tool and full arguments/context. A later grant cannot reverse a denial

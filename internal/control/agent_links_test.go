@@ -16,6 +16,26 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
+// Background observation shares the peer's one-operation admission limit.
+// Retry only a confirmed capacity rejection, which precedes remote execution;
+// retain the exact original request and return every other outcome unchanged.
+func callAgentWhenReady(ctx context.Context, service *Service, owner string, operation agentlink.Operation, call agentlink.Call) (any, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for {
+		value, err := service.CallAgent(ctx, owner, operation, call)
+		var api protocol.APIError
+		if !errors.Is(err, agentlink.ErrCapacity) && !(errors.As(err, &api) && api.Code == agentlink.ErrCapacity.Error()) {
+			return value, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
 type agentControlFixture struct {
 	service  *Service
 	endpoint string
@@ -38,7 +58,7 @@ func agentControl(t *testing.T, id string) *agentControlFixture {
 	}
 	fixture.endpoint = controlPeerEndpoint(fixture.service)
 	t.Cleanup(func() { fixture.service.Close() })
-	if _, err = fixture.service.Registry.Create(context.Background(), "create-main", "Main"); err != nil {
+	if _, err = legacyMainAssistant(context.Background(), fixture.service, "create-main", "Main"); err != nil {
 		t.Fatal(err)
 	}
 	return fixture
