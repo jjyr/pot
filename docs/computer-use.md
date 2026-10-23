@@ -4,7 +4,7 @@ The default-enabled `computer-use` plugin provides a persistent `cua_repl`
 JavaScript session and a dedicated headless Chromium on the fixed execution
 Runtime. The owning node applies exact execution authorization. Protected machines sandbox the plugin and browser; Trusted machines execute directly.
 Each REPL has its own browser and temporary profile; cleanup does not close
-sibling Tasks' sessions. Native desktop automation and guest viewing are absent.
+sibling Tasks' sessions.
 
 ## Configuration
 
