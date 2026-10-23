@@ -2,7 +2,7 @@
 (() => {
 const $=(s,root=document)=>root.querySelector(s), $$=(s,root=document)=>[...root.querySelectorAll(s)];
 let data=JSON.parse($('#pot-data').textContent), lang=data.locale;
-let agent='codex',mode='direct',flow=0,report='install',taskPhase=3,installChannel='desktop',timers=[];
+let agent='codex',mode='direct',flow=0,report='install',taskPhase=3,installChannel='macos',timers=[];
 const names={codex:'Codex',claude:'Claude',grok:'Grok bot',devin:'Devin'};
 const files={pot:'pot.png',codex:'codex.png',claude:'claude.svg',grok:'grok.svg',devin:'devin.png'};
 const keys=Object.keys(names);
@@ -86,7 +86,7 @@ function changeLanguage(next,persist=true){
  if(window.POT_PREVIEW){const page=window.POT_PREVIEW[next];document.body.innerHTML=page.body;document.documentElement.lang=next;document.title=page.title;$('meta[name="description"]').content=page.description;data=page.data;lang=next;renderAll();if(wasOpen)openReport();const target=$(hash);if(hash==='#main')window.scrollTo({top:0,behavior:'instant'});else if(target)target.scrollIntoView({behavior:'instant'});$('#language-select').focus({preventScroll:true});}
  else{const url=new URL(data.assetBase+next+'/',location.href);url.search=new URLSearchParams({agent,mode,flow:String(flow),phase:String(taskPhase),install:installChannel,...(wasOpen?{report}: {})}).toString();url.hash=hash==='#main'?'':hash;location.assign(url.href);}
 }
-const installChannels=['agent','desktop','docker','web'];
+const installChannels=['agent','macos','linux','web'];
 function selectInstall(next,focus=false){
  if(!installChannels.includes(next))return;
  installChannel=next;

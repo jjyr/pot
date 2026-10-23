@@ -53,7 +53,7 @@ existing data, choose a channel and complete first setup. To install it yourself
 | macOS App | [Download macOS App](https://github.com/jjyr/pot/releases) — select `Pot-VERSION-arm64.zip` | Apple Silicon, macOS 26+ |
 | Homebrew | Download `pot.rb` from the macOS release, then run `brew install --cask ./pot.rb` in its directory | macOS; [cask instructions](docs/releases.md#homebrew-generation) |
 | Linux desktop · Experimental | [Download .deb](https://github.com/jjyr/pot/releases) — select `pot-desktop_VERSION_linux_amd64.deb` | Debian / Ubuntu amd64; [requirements](docs/desktop-installation.md#linux-experimental) |
-| Docker | [View Docker image](https://github.com/users/jjyr/packages/container/package/pot) · `ghcr.io/jjyr/pot` | Linux amd64 / arm64; [installation and running](docs/docker.md) |
+| Linux · Docker | [View Docker image](https://github.com/users/jjyr/packages/container/package/pot) · `ghcr.io/jjyr/pot` | Linux amd64 / arm64; [installation and running](docs/docker.md) |
 | Web UI / Server | [Download Web UI / Server](https://github.com/jjyr/pot/releases) — select `pot-go-VERSION-linux-ARCH.tar.gz` | glibc Linux amd64 / arm64; [configuration and running](docs/deployment.md) |
 
 Download links open the official release selector; packages and the container
