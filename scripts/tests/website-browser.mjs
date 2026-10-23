@@ -28,18 +28,27 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
   await page.setViewportSize({width,height:width===390?844:900});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} overflow at ${width}`);
   if(width===390)assert(await page.evaluate(()=>{const star=document.querySelector('.github-star').getBoundingClientRect(),start=document.querySelector('.nav-cta').getBoundingClientRect();return star.right<=start.left&&Math.abs((star.top+star.bottom-start.top-start.bottom)/2)<2;}),`${locale} header actions share a row`);
-  for(const [channel,id] of [['agent','agent-prompt'],['macos','brew-command'],['linux','docker-image'],['web','server-command']]){
+  for(const [channel,id] of [['agent','agent-prompt'],['macos','brew-command'],['linux',null],['web','docker-image'],['web','server-command']]){
    await page.locator(`[data-install="${channel}"]`).click();
    assert.equal(await page.locator('.install-panel:visible').count(),1);
    assert.equal(await page.locator(`[data-install="${channel}"]`).getAttribute('aria-selected'),'true');
    if(channel==='linux'){
+    assert.equal(await page.locator('#install-linux a.primary').count(),1);
+    assert.equal(await page.locator('#install-linux #docker-image').count(),0);
+    assert.equal(await page.locator('#install-linux a[href*="packages/container"]').count(),0);
     assert(await page.locator('#install-linux .linux-native').isVisible());
-    assert(await page.locator('#install-linux .linux-docker').isVisible());
     assert.equal(await page.locator('#install-linux .experimental').innerText(),'Experimental');
    }
+   if(channel==='web'){
+    assert(await page.locator('#install-web .web-server').isVisible());
+    assert(await page.locator('#install-web .web-docker').isVisible());
+   }
    if(channel==='web'&&!await page.locator('.web-start').evaluate(e=>e.open))await page.locator('.web-start summary').click();
-   await page.locator(`[data-copy="${id}"]`).click();
-   assert.equal(await page.evaluate(()=>window.copied),await page.locator('#'+id).textContent());
+   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} ${channel} overflow at ${width}`);
+   if(id){
+    await page.locator(`[data-copy="${id}"]`).click();
+    assert.equal(await page.evaluate(()=>window.copied),await page.locator('#'+id).textContent());
+   }
   }
  }
  // Keyboard navigation exposes one focusable tab and its associated panel.
@@ -51,8 +60,8 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  assert.equal(await page.locator('[role=tab][tabindex="0"]').count(),1);
  assert.equal(await page.locator('#brew-command').textContent(),install.brew);
  assert.equal(await page.locator('#docker-image').textContent(),install.image);
- assert.equal(await page.locator('#install-linux .linux-docker .primary').getAttribute('href'),'https://github.com/users/jjyr/packages/container/package/pot');
- for(const selector of ['#install-macos .primary','#install-linux .linux-native .primary','#install-web .primary'])
+ assert.equal(await page.locator('#install-web .web-docker .primary').getAttribute('href'),'https://github.com/users/jjyr/packages/container/package/pot');
+ for(const selector of ['#install-macos .primary','#install-linux .linux-native .primary','#install-web .web-server .primary'])
   for(const link of await page.locator(selector).all())assert.equal(await link.getAttribute('href'),'https://github.com/jjyr/pot/releases');
  if(!installOnly){
  await page.locator('#run-project').click();
@@ -72,9 +81,10 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  }
  console.log(installOnly?'installation, responsive, clipboard and keyboard:':'locale, responsive, clipboard, parallel playback and deliverables:',locale,'passed');
 }
-await page.locator('[data-install="linux"]').click();
+await page.locator('[data-install="web"]').click();
 await page.selectOption('#language-select','ja');await page.waitForURL('**/ja/**');
-assert.equal(await page.locator('[role=tab][aria-selected=true]').getAttribute('data-install'),'linux');
+assert.equal(await page.locator('[role=tab][aria-selected=true]').getAttribute('data-install'),'web');
+assert(await page.locator('#install-web .web-docker').isVisible());
 console.log('Static language switch preserves selected installation channel');
 await page.setViewportSize({width:1280,height:900});
 if(!installOnly){
@@ -115,11 +125,13 @@ await offline.locator('.delivery-links [data-open-report="screens"]').click();
 await offline.waitForFunction(()=>[...document.querySelectorAll('.report-gallery img')].every(i=>i.complete&&i.naturalWidth===1280));assert.deepEqual(outgoing,[]);
 await offline.locator('#report-dialog').evaluate(e=>e.close());
 }
-await offline.locator('[data-install="linux"]').click();await offline.selectOption('#language-select','es');
-assert.equal(await offline.locator('[role=tab][aria-selected=true]').getAttribute('data-install'),'linux');
-assert(await offline.locator('#install-linux .linux-native').isVisible());
-assert(await offline.locator('#install-linux .linux-docker').isVisible());
+await offline.locator('[data-install="web"]').click();await offline.selectOption('#language-select','es');
+assert.equal(await offline.locator('[role=tab][aria-selected=true]').getAttribute('data-install'),'web');
+assert(await offline.locator('#install-web .web-server').isVisible());
+assert(await offline.locator('#install-web .web-docker').isVisible());
 const noJS=await browser.newPage({javaScriptEnabled:false});await noJS.goto(origin+'/website/en/');assert.equal(await noJS.locator('#agent-prompt').textContent(),install.prompt);assert.equal(await noJS.locator('.project-task').count(),3);assert.equal(await noJS.locator('.install-panel:visible').count(),4);
+assert.equal(await noJS.locator('#install-linux #docker-image').count(),0);
+assert(await noJS.locator('#install-web .web-docker').isVisible());
 console.log('Offline preview and no-JavaScript install content passed');
 } finally {
  await browser.close();

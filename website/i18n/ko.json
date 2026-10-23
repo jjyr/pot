@@ -170,7 +170,9 @@
     "配置与运行说明 ↗": "설정 및 실행 안내 ↗",
     "Linux .deb": "Linux .deb",
     "原生桌面 · Debian / Ubuntu · amd64": "네이티브 데스크톱 · Debian / Ubuntu · amd64",
-    "容器运行 · Linux amd64 / arm64，通过浏览器使用。": "컨테이너 실행 · Linux amd64 / arm64, 브라우저로 사용합니다."
+    "容器运行 · Linux amd64 / arm64，通过浏览器使用。": "컨테이너 실행 · Linux amd64 / arm64, 브라우저로 사용합니다.",
+    "直接运行服务端": "서버 직접 실행",
+    "下载 Release 后直接运行服务端。": "릴리스를 다운로드한 뒤 서버를 직접 실행하세요."
   },
   "demo": {
     "language": "언어",
