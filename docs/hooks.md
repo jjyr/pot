@@ -92,3 +92,16 @@ Hooks add no queue beyond the existing user inbox and shared Agent inbox. Task
 outcomes use the bounded, cross-Task summary policy in
 [Agent messages](assistant-messages.md#category-specific-batches). Approval hooks
 remain outside Agent batching.
+
+## Schedule before-run scripts
+
+`spec.before_run` is a user-configured script executed by the schedule trigger
+pipeline before Task/session creation. It is **not** one of the trusted lifecycle
+events above, a model tool, or an additional event-delivery system. Configure it
+through `manage_schedule` or the schedule editor. Its strictly parsed stdout
+selects only `run` or `skip`, with an optional reason. Valid skip creates only
+schedule history; it publishes no Task outcome hook or assistant inbox entry.
+Known errors default to normal Task admission only after confirmed cleanup;
+unknown execution/cleanup stays blocked under the existing operation receipt
+fence. See [before-run probes](scheduled-tasks.md#before-run-probes) for the
+copyable script, protocol, directory/policy rules, manual triggers and recovery.

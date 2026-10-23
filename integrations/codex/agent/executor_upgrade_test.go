@@ -17,7 +17,7 @@ func TestExecutorUpgradeRetainsExactRetriesAndIndependentSessions(t *testing.T) 
 	ctx := context.Background()
 	// The preceding schema has the same tables; restore its receipt prefix and
 	// insert historical requests without dispatching any work.
-	if _, err := b.db.Exec("DELETE FROM pot_migrations WHERE id >= '0025_'"); err != nil {
+	if _, err := b.db.Exec("DROP TABLE schedule_probes; DELETE FROM pot_migrations WHERE id >= '0025_'"); err != nil {
 		t.Fatal(err)
 	}
 	from := protocol.AgentRef{NodeID: "caller", Kind: "assistant", AgentID: "owner"}

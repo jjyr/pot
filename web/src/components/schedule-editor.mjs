@@ -1,6 +1,24 @@
 import {node as n} from './primitives.mjs';
 import {translate} from '../locales/messages.mjs';
 
+
+export function beforeRunDraft(values,locale) {
+  if(!values.before_run_command?.trim())return null;
+  try{
+    const command=JSON.parse(values.before_run_command),timeout=Number(values.before_run_timeout);
+    if(!Array.isArray(command)||!command.length||command.length>64||command.some(arg=>typeof arg!=='string'||arg.includes('\0'))||!command[0]||!Number.isInteger(timeout)||timeout<1||timeout>300)throw Error();
+    return {command,cwd:values.before_run_cwd||'',timeout_seconds:timeout};
+  }catch{throw Object.assign(Error(translate(locale,'schedule.hookInvalid')),{uiKey:'schedule.hookInvalid'});}
+}
+export function hookHistory(run,locale){
+  if(!run.hook)return null;
+  const box=n('div','schedule-hook-result');
+  box.append(n('p','hint',translate(locale,`schedule.hook.${run.hook.status}`)));
+  if(run.hook.reason&&run.hook.reason!==run.summary)box.append(n('p','',run.hook.reason));
+  if(run.hook.diagnostic){const disclosure=n('details','detail-disclosure');disclosure.append(n('summary','',translate(locale,'schedule.diagnostics')),n('pre','',run.hook.diagnostic));box.append(disclosure);}
+  return box;
+}
+
 export const browserTimezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || '';
 export const timeRule = values => ({kind:values.kind,cron:values.cron||'',timezone:values.timezone,at:values.at||'',every_minutes:Number(values.every_minutes)||0});
 

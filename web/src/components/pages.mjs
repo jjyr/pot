@@ -1,7 +1,7 @@
 import {machinePresentation,machineDisplayName} from '../state/machine-identity.mjs';
 import {connectionBrand,taskAgentSource} from './connection-visuals.mjs';
 import {createExtensions} from './extensions.mjs';
-import {browserTimezone,connectScheduleEditor} from './schedule-editor.mjs';
+import {browserTimezone,connectScheduleEditor,beforeRunDraft,hookHistory} from './schedule-editor.mjs';
 import {usageCalendar,usageDistributions} from './usage-calendar.mjs';
 import {usageRange,usageRangeControls,usageToday} from './usage-period.mjs';
 import {notificationSetting} from './notification-setting.mjs';
@@ -667,8 +667,8 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       },{primary:name==='run',danger:name==='delete',disabled:selected._stale||view.busy});actions.append(button);
     }
     if(view.confirmed){const remove=actions.lastChild;remove.textContent=tr('Confirm removal','确认移除');}info.append(actions,n('p','hint',tr('Pausing or removing only affects future runs.','暂停或移除只影响未来的执行。')));root.append(info,n('p','hint',tr('Run history','运行历史')));
-    const rows=(value.runs||[]).map(run=>{const summary=n('span','',run.summary);if(run.task_id)summary.append(action(tr('View task','查看任务'),()=>taskDetail({id:run.task_id,title:run.summary||selected.spec.title,assistant_id:selected._assistant_id,_assistant_id:selected._assistant_id,_space_id:selected._space_id})));return [run.scheduled_label,run.state,summary];});
-    root.append(table([tr('Scheduled','计划时间'),tr('State','状态'),tr('Summary','摘要')],rows,(value.runs||[]).map(run=>run.id||JSON.stringify([run.scheduled_label,run.task_id]))));
+    const rows=(value.runs||[]).map(run=>{const summary=n('span','',run.summary),hook=hookHistory(run,locale());if(hook)summary.append(hook);if(run.task_id)summary.append(action(translate(locale(),'schedule.viewTask'),()=>taskDetail({id:run.task_id,title:run.summary||selected.spec.title,assistant_id:selected._assistant_id,_assistant_id:selected._assistant_id,_space_id:selected._space_id})));return [run.scheduled_label,translate(locale(),`schedule.state.${run.state}`),summary];});
+    root.append(table(['scheduled','state','summary'].map(key=>translate(locale(),`schedule.${key}`)),rows,(value.runs||[]).map(run=>run.id||JSON.stringify([run.scheduled_label,run.task_id]))));
     root.append(toolbar(action(tr('Newer entries','较新记录'),()=>scheduleHistory(selected,false,Math.max(0,runsOffset-20)),{disabled:!runsOffset}),action(tr('Older entries','较早记录'),()=>scheduleHistory(selected,false,value.runs_next_offset),{disabled:value.runs_next_offset==null})));
   }
   function scheduleEditor(item) {
@@ -684,13 +684,16 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       {name:'cron',key:'cron',helpKey:'cronHelp',placeholder:'0 8-20 * * *'},
       {name:'misfire',key:'misfire',choiceKeys:{coalesce:'coalesce',skip:'skip'},choices:['coalesce','skip'].map(key=>[key,t(key)])},
       {name:'notify',key:'notify',choiceKeys:{all:'all',failures:'failures'},choices:['all','failures'].map(key=>[key,t(key)])},
+      {name:'before_run_command',key:'hookCommand',helpKey:'hookHelp',kind:'textarea',placeholder:'["python3", "/path/to/check_updates.py"]'},
+      {name:'before_run_cwd',key:'hookCwd',helpKey:'hookCwdHelp'},
+      {name:'before_run_timeout',key:'hookTimeout',kind:'number',min:1,max:300,parse:Number},
       {name:'enabled',key:'enabled',kind:'checkbox'},
     ].map(definition=>({...definition,label:t(definition.key),...(definition.helpKey?{help:t(definition.helpKey)}:{})}));
     let preview;
-    const view=renderEditor(t(item?'edit':'new'),{...spec,owner_ref:JSON.stringify([item?item._space_id:scope().space,item?item._assistant_id:scope().owner])},definitions,async(values,context)=>{
+    const view=renderEditor(t(item?'edit':'new'),{...spec,before_run_command:spec.before_run?JSON.stringify(spec.before_run.command):'',before_run_cwd:spec.before_run?.cwd||'',before_run_timeout:spec.before_run?.timeout_seconds||30,owner_ref:JSON.stringify([item?item._space_id:scope().space,item?item._assistant_id:scope().owner])},definitions,async(values,context)=>{
       await preview.validate(values);
-      const {owner_ref,...specValues}=values;const [space,owner]=JSON.parse(owner_ref);
-      const canonical={...specValues,cron:values.kind==='cron'?values.cron:'',at:values.kind==='once'?values.at:'',every_minutes:values.kind==='interval'?values.every_minutes:0};
+      const {owner_ref,before_run_command,before_run_cwd,before_run_timeout,...specValues}=values;const [space,owner]=JSON.parse(owner_ref);
+      const canonical={...specValues,before_run:beforeRunDraft(values,locale()),cron:values.kind==='cron'?values.cron:'',at:values.kind==='once'?values.at:'',every_minutes:values.kind==='interval'?values.every_minutes:0};
       return request('/api/v1/schedules',{...context,space,owner,method:'POST',body:{request_id:context.request_id,action:item?'update':'create',schedule_id:item?.id||'',spec:canonical}});
     },{capturedScope:item?{space:item._space_id,owner:item._assistant_id}:scope(),submitLabel:t('save')});
     preview=connectScheduleEditor({view,request,locale,definitions,machineInfo,current:()=>editor?.session===view.session&&!disposed});

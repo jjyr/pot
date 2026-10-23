@@ -39,6 +39,7 @@ func (e *NotStartedError) Error() string { return e.Cause.Error() }
 func (e *NotStartedError) Unwrap() error { return e.Cause }
 
 type Request struct {
+	direct    *CommandInput
 	Command   *CommandContext    `json:"command_context,omitempty"`
 	Mode      string             `json:"mode"`
 	Revision  uint64             `json:"revision"`
@@ -126,6 +127,9 @@ func (e *Engine) Execute(ctx context.Context, request Request, emit func(Event) 
 			}
 		}
 	}()
+	if request.Operation == "run_command" && request.direct == nil {
+		return nil, errors.New("direct command input is required")
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -248,7 +252,7 @@ func ValidateArguments(name string, args map[string]any) error {
 	var fields string
 	var required string
 	switch name {
-	case "exec_command":
+	case "exec_command", "run_command":
 		fields = "cmd shell login tty interactive workdir max_output_chars yield_time_ms"
 		required = "cmd"
 	case "write_stdin":

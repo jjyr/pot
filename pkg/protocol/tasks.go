@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/cronexpr"
@@ -210,7 +211,44 @@ type TaskOutcomePage struct {
 	Cursor  uint64        `json:"cursor"`
 	HasMore bool          `json:"has_more"`
 }
+
+// ScheduleBeforeRun executes argv directly; omitted cwd uses the owning assistant workspace.
+type ScheduleBeforeRun struct {
+	Command        []string `json:"command"`
+	CWD            string   `json:"cwd,omitempty"`
+	TimeoutSeconds uint64   `json:"timeout_seconds,omitempty"`
+}
+
+func (b ScheduleBeforeRun) Validate() error {
+	if len(b.Command) == 0 || len(b.Command) > 64 || b.Command[0] == "" || b.TimeoutSeconds > 300 {
+		return fmt.Errorf("invalid before_run command or timeout")
+	}
+	if len(b.CWD) > 4096 {
+		return fmt.Errorf("before_run cwd exceeds bounds")
+	}
+	size := len(b.CWD)
+	for _, arg := range b.Command {
+		size += len(arg)
+		if strings.ContainsRune(arg, 0) {
+			return fmt.Errorf("invalid before_run argument")
+		}
+	}
+	if size > 16384 || strings.ContainsRune(b.CWD, 0) {
+		return fmt.Errorf("before_run exceeds bounds")
+	}
+	return nil
+}
+
+type ScheduleHookResult struct {
+	Status        string `json:"status"`
+	Reason        string `json:"reason,omitempty"`
+	Diagnostic    string `json:"diagnostic,omitempty"`
+	ExecutionMode string `json:"execution_mode,omitempty"`
+}
 type ScheduleSpec struct {
+	BeforeRun    *ScheduleBeforeRun `json:"before_run,omitempty"`
+	BeforeRunSet bool               `json:"-"`
+
 	MachineID    string           `json:"machine_id"`
 	Title        string           `json:"title" required:"true"`
 	Goal         string           `json:"goal" required:"true"`
@@ -234,9 +272,19 @@ func (s *ScheduleSpec) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*s = ScheduleSpec(value)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	_, s.BeforeRunSet = fields["before_run"]
 	return nil
 }
 func (s ScheduleSpec) Validate() error {
+	if s.BeforeRun != nil {
+		if err := s.BeforeRun.Validate(); err != nil {
+			return err
+		}
+	}
 	if s.Title == "" || s.Goal == "" || s.MachineID != "" && !core.Identifier(s.MachineID) {
 		return fmt.Errorf("invalid schedule")
 	}
@@ -286,15 +334,16 @@ type ScheduleInfo struct {
 	CreatedAtMS int64        `json:"created_at_ms"`
 }
 type ScheduleRun struct {
-	ID             string  `json:"id"`
-	ScheduledForMS int64   `json:"scheduled_for_ms"`
-	ScheduledLabel string  `json:"scheduled_label"`
-	Generation     uint64  `json:"generation"`
-	TaskID         *string `json:"task_id"`
-	State          string  `json:"state"`
-	Summary        string  `json:"summary"`
-	FinishedAtMS   *int64  `json:"finished_at_ms"`
-	Notify         string  `json:"notify"`
+	Hook           *ScheduleHookResult `json:"hook"`
+	ID             string              `json:"id"`
+	ScheduledForMS int64               `json:"scheduled_for_ms"`
+	ScheduledLabel string              `json:"scheduled_label"`
+	Generation     uint64              `json:"generation"`
+	TaskID         *string             `json:"task_id"`
+	State          string              `json:"state"`
+	Summary        string              `json:"summary"`
+	FinishedAtMS   *int64              `json:"finished_at_ms"`
+	Notify         string              `json:"notify"`
 }
 type SchedulePage struct {
 	Items          []ScheduleInfo `json:"items"`

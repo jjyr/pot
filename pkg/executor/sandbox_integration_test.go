@@ -298,3 +298,11 @@ func TestRealSandboxSharedToolBinDoesNotCoverWorkspace(t *testing.T) {
 		t.Fatal(string(data), err)
 	}
 }
+
+func TestRealSandboxDirectCommand(t *testing.T) {
+	e, r := sandboxFixture(t)
+	result, err := e.RunCommand(context.Background(), r, CommandInput{Argv: []string{"/bin/sh", "-c", `read context; printf '%s' "$context"`}, Input: "{\"occurrence_id\":\"fixture\"}\n"})
+	if err != nil || result["exit_code"] != 0 || result["stdout"] != `{"occurrence_id":"fixture"}` {
+		t.Fatal(result, err)
+	}
+}

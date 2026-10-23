@@ -18,7 +18,12 @@ func New(options Options) (*Service, error) {
 	if options.Tasks == nil || options.Ready == nil {
 		return nil, fmt.Errorf("schedules require Task coordination and explicit readiness")
 	}
-	s := &Service{db: options.Tasks.DB(), options: options}
+	ctx := options.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	s := &Service{db: options.Tasks.DB(), options: options, probes: probeLife{ctx: ctx, cancel: cancel, active: map[string]bool{}}}
 	return s, nil
 }
 
@@ -82,6 +87,10 @@ func writeRun(ctx context.Context, tx *sql.Tx, assistant, schedule string, run p
 		return err
 	}
 	_, err = tx.ExecContext(ctx, "DELETE FROM schedule_runs WHERE rowid IN (SELECT rowid FROM schedule_runs WHERE assistant_id=? AND schedule_id=? AND finished IS NOT NULL ORDER BY scheduled DESC,rowid DESC LIMIT -1 OFFSET 100)", assistant, schedule)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, "DELETE FROM schedule_probes WHERE assistant_id=? AND schedule_id=? AND NOT EXISTS (SELECT 1 FROM schedule_runs r WHERE r.assistant_id=schedule_probes.assistant_id AND r.schedule_id=schedule_probes.schedule_id AND r.id=schedule_probes.occurrence_id)", assistant, schedule)
 	return err
 }
 func (s *Service) Get(ctx context.Context, assistant, id string) (*Plan, error) {
@@ -99,7 +108,7 @@ func (s *Service) Manage(ctx context.Context, assistant string, request Request,
 	if !core.Identifier(assistant) || request.RequestID == "" || len(request.RequestID) > 128 || strings.ContainsRune(request.RequestID, 0) || at < 0 || uint64(at) > core.MaxSafeInteger {
 		return nil, fmt.Errorf("invalid schedule request identity/time")
 	}
-	hash, err := core.HashJSON(request)
+	hash, err := scheduleRequestHash(request)
 	if err != nil {
 		return nil, err
 	}
@@ -115,12 +124,23 @@ func (s *Service) Manage(ctx context.Context, assistant string, request Request,
 		return nil, err
 	}
 	var prepared resolved
+	preserveBeforeRun := request.Spec != nil && request.Spec.BeforeRun == nil && !request.Spec.BeforeRunSet
 	var expectedPlan string
 	if request.Action == "create" || request.Action == "update" {
 		if request.Spec == nil {
 			return nil, fmt.Errorf("schedule spec required")
 		}
 		spec := *request.Spec
+		if request.Action == "update" && spec.BeforeRun == nil && !spec.BeforeRunSet {
+			plan, e := s.Get(ctx, assistant, request.ScheduleID)
+			if e != nil {
+				return nil, e
+			}
+			if plan == nil {
+				return nil, fmt.Errorf("schedule missing")
+			}
+			spec.BeforeRun = plan.Info.Spec.BeforeRun
+		}
 		if spec.MachineID == "" {
 			if request.Action == "create" {
 				spec.MachineID, err = s.options.Tasks.LocalMachine(ctx, "")
@@ -179,7 +199,9 @@ func (s *Service) Manage(ctx context.Context, assistant string, request Request,
 			return nil, fmt.Errorf("schedule missing/deleted")
 		}
 		expectedPlan, _ = core.HashJSON(plan)
-		prepared, err = s.resolve(ctx, assistant, plan.Info.Spec, "schedule:"+hash)
+		if plan.Info.Spec.BeforeRun == nil {
+			prepared, err = s.resolve(ctx, assistant, plan.Info.Spec, "schedule:"+hash)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -257,6 +279,9 @@ func (s *Service) Manage(ctx context.Context, assistant string, request Request,
 			switch request.Action {
 			case "update":
 				spec := *request.Spec
+				if preserveBeforeRun {
+					spec.BeforeRun = plan.Info.Spec.BeforeRun
+				}
 				var due *int64
 				if spec.Enabled {
 					due, err = Next(spec, at)
@@ -272,9 +297,15 @@ func (s *Service) Manage(ctx context.Context, assistant string, request Request,
 				plan.Info.NextAtMS = due
 				plan.Info.LastError = ""
 			case "pause":
+				if plan.Info.Spec.BeforeRun != nil {
+					plan.Generation++
+				}
 				plan.Info.Spec.Enabled = false
 				plan.Info.NextAtMS = nil
 			case "resume":
+				if plan.Info.Spec.BeforeRun != nil {
+					plan.Generation++
+				}
 				due, err := Next(plan.Info.Spec, at)
 				if err != nil {
 					return err
@@ -286,6 +317,9 @@ func (s *Service) Manage(ctx context.Context, assistant string, request Request,
 				plan.Info.NextAtMS = due
 				plan.Info.LastError = ""
 			case "delete":
+				if plan.Info.Spec.BeforeRun != nil {
+					plan.Generation++
+				}
 				plan.Info.Deleted = true
 				plan.Info.Spec.Enabled = false
 				plan.Info.NextAtMS = nil
@@ -300,6 +334,17 @@ func (s *Service) Manage(ctx context.Context, assistant string, request Request,
 				}
 				if busy {
 					return fmt.Errorf("schedule already has queued/running work")
+				}
+				if plan.Info.Spec.BeforeRun != nil {
+					occurrence := "manual:" + hash
+					if err := s.reserveProbeTx(ctx, tx, assistant, *plan, at, occurrence, "manual"); err != nil {
+						return err
+					}
+					replyJSON, err = json.Marshal(map[string]string{"occurrence_id": occurrence})
+					if err != nil {
+						return err
+					}
+					break
 				}
 				task, err := s.launchTx(ctx, tx, assistant, *plan, at, "manual:"+hash, prepared)
 				if err != nil {
@@ -328,6 +373,9 @@ func (s *Service) Manage(ctx context.Context, assistant string, request Request,
 	if err == nil {
 		s.options.Tasks.Notify()
 	}
+	if err == nil {
+		err = s.resumeProbes(ctx)
+	}
 	return replyJSON, err
 }
 func (s *Service) busyTx(ctx context.Context, tx *sql.Tx, assistant, id string) (bool, error) {
@@ -346,6 +394,10 @@ func (s *Service) busyTx(ctx context.Context, tx *sql.Tx, assistant, id string) 
 		if err := core.DecodeJSON([]byte(raw), &run); err != nil {
 			rows.Close()
 			return false, err
+		}
+		if run.TaskID == nil {
+			rows.Close()
+			return true, nil
 		}
 		if run.TaskID != nil {
 			ids = append(ids, *run.TaskID)
@@ -393,4 +445,22 @@ func (s *Service) launchTx(ctx context.Context, tx *sql.Tx, assistant string, pl
 		return task, err
 	}
 	return task, nil
+}
+
+// Keep historical request digests for omitted optional configuration, while
+// distinguishing explicit null (remove) from omission (preserve).
+func scheduleRequestHash(request Request) (string, error) {
+	raw, err := json.Marshal(request)
+	if err != nil {
+		return "", err
+	}
+	if request.Spec != nil && request.Spec.BeforeRun == nil && request.Spec.BeforeRunSet {
+		var value map[string]any
+		if err = json.Unmarshal(raw, &value); err != nil {
+			return "", err
+		}
+		value["spec"].(map[string]any)["before_run"] = nil
+		return core.HashJSON(value)
+	}
+	return core.HashJSON(json.RawMessage(raw))
 }

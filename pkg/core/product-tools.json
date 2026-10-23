@@ -362,7 +362,7 @@
   },
   {
     "name": "manage_schedule",
-    "description": "Create/update/pause/resume/delete/run a persistent schedule. Pausing/deleting prevents future triggers and does not cancel current work. An immediate run is non-overlapping. Calendar recurrence uses five-field Cron. Omitted timezone defaults to the owning Control system IANA zone on create; updates preserve the saved zone. Saved zones stay fixed when the system zone changes. Explicit timezone overrides the default. Control triggers a new task on the saved machine; each dispatch reads that machine's current execution policy. Omit machine_id on update to preserve the selected machine. Creation/update requires spec. Deletion is soft and keeps execution history.",
+    "description": "Create/update/pause/resume/delete/run a persistent schedule. Pausing/deleting prevents future triggers and does not cancel current work. An immediate run is non-overlapping. Calendar recurrence uses five-field Cron. Omitted timezone defaults to the owning Control system IANA zone on create; updates preserve the saved zone. Saved zones stay fixed when the system zone changes. Explicit timezone overrides the default. Control triggers a new task on the saved machine; each dispatch reads that machine's current execution policy. Omit machine_id on update to preserve the selected machine. Creation/update requires spec. Deletion is soft and keeps execution history. Optional spec.before_run executes one argv script before Task/session creation for scheduled and manual triggers. Only successful {\"status\":\"skip\",\"reason\":\"optional\"} skips without a Task or model call; empty output/missing status runs, errors default to run after confirmed process cleanup. command is an argv array, not shell syntax. cwd defaults to the owning assistant workspace; relative cwd resolves there. timeout_seconds defaults to 30 (maximum 300). Current machine policy applies; configuration grants no permission. Omit before_run on update to retain it, null removes it. Run with a hook returns occurrence_id; inspect get_schedule for results.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -468,6 +468,35 @@
               "type": "string",
               "maxLength": 256,
               "description": "cron: minute hour day-of-month month day-of-week. Lists, ranges, steps, month/weekday names supported; Sunday=0. Restricted DOM and DOW match either. No seconds, macros, ?, L, W or #. Example: 0 8-20 * * * runs hourly 08:00 through 20:00. DST gaps skipped; repeated wall times run once at the earlier instant."
+            },
+            "before_run": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "command": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "maxItems": 64
+                },
+                "cwd": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "timeout_seconds": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 300
+                }
+              },
+              "required": [
+                "command"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [

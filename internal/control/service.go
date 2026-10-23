@@ -443,6 +443,9 @@ func (s *Service) Close() error {
 	if s.taskLife != nil {
 		s.taskLife.wg.Wait()
 	}
+	if s.Schedules != nil {
+		result = errors.Join(result, s.Schedules.Close())
+	}
 	if s.TaskRuns != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		result = errors.Join(result, s.TaskRuns.Close(ctx))

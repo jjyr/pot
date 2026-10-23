@@ -45,6 +45,7 @@ type process struct {
 	readers        []*os.File
 	stdinClosed    bool
 	maxOutput      int
+	rawCommand     bool
 }
 
 func (p *process) notify() {
@@ -258,7 +259,14 @@ func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process,
 		home = r.CWD
 	}
 	var command *exec.Cmd
-	if r.Mode == "sandbox" || e.options.Admit != nil {
+	if r.direct != nil {
+		command = exec.Command(r.direct.Argv[0], r.direct.Argv[1:]...)
+		command.Dir = workdir
+		command.Env = sandbox.Environment()
+		if r.Mode == "host" {
+			command.Env = append(command.Env, "HOME="+home)
+		}
+	} else if r.Mode == "sandbox" || e.options.Admit != nil {
 		flag := "-c"
 		if login {
 			flag = "-lc"
@@ -276,7 +284,7 @@ func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process,
 		return "", nil, err
 	}
 	command.Env = mergeEnvironment(command.Env, r.Environment)
-	p := &process{mode: r.Mode, interactive: r.Args["interactive"] == true, cmd: command, changed: make(chan struct{}, 1), done: make(chan struct{}), stop: make(chan struct{}), touched: time.Now(), maxOutput: int(policy.MaxOutputBytes)}
+	p := &process{rawCommand: r.direct != nil, mode: r.Mode, interactive: r.Args["interactive"] == true, cmd: command, changed: make(chan struct{}, 1), done: make(chan struct{}), stop: make(chan struct{}), touched: time.Now(), maxOutput: int(policy.MaxOutputBytes)}
 
 	if r.Mode == "session" {
 		return "", nil, errors.New("session authority cannot launch a new command")
@@ -417,6 +425,9 @@ func (e *Engine) startProcess(ctx context.Context, r Request) (string, *process,
 	started = true
 	e.sessions[id] = p
 	go p.run(time.Duration(policy.SessionIdleTimeoutMS) * time.Millisecond)
+	if r.direct != nil {
+		go func() { _, _ = io.WriteString(p.input, r.direct.Input); _ = p.input.Close() }()
+	}
 	return id, p, nil
 }
 func (e *Engine) executeProcess(ctx context.Context, r Request, emit func(Event) error) (map[string]any, error) {
@@ -430,7 +441,7 @@ func (e *Engine) executeProcess(ctx context.Context, r Request, emit func(Event)
 	}
 	var id string
 	var p *process
-	if r.Operation == "exec_command" {
+	if r.Operation == "exec_command" || r.Operation == "run_command" {
 		id, p, err = e.startProcess(ctx, r)
 		if err != nil {
 			return nil, err
@@ -613,7 +624,11 @@ waiting:
 	if session != nil {
 		status = "running"
 	}
-	return map[string]any{"execution_mode": p.mode, "execution_status": status, "stdout": strings.ToValidUTF8(string(stdout), "�"), "stderr": strings.ToValidUTF8(string(stderr), "�"), "truncated": truncated, "exit_code": exit, "reason": reason, "session_id": session}, nil
+	result := map[string]any{"execution_mode": p.mode, "execution_status": status, "stdout": strings.ToValidUTF8(string(stdout), "�"), "stderr": strings.ToValidUTF8(string(stderr), "�"), "truncated": truncated, "exit_code": exit, "reason": reason, "session_id": session}
+	if p.rawCommand {
+		result["invalid_utf8"] = !utf8.Valid(stdout) || !utf8.Valid(stderr)
+	}
+	return result, nil
 }
 func completeUTF8(data []byte) int {
 	offset := 0
