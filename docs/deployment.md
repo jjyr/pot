@@ -33,6 +33,22 @@ processes and back up the complete data root before schema-changing upgrades.
 The chat UI can update one local installation and its running hosts; see
 [Updates](updates.md). Remote installations require separate coordination.
 
+For upgrades between roots that already store assistant profiles and rules as
+files, compare independent, stopped reference and migrated copies before touching
+the live root:
+
+```sh
+mise exec -- python scripts/verify-assistant-files /path/to/reference /path/to/migrated
+```
+
+The read-only check queries registered assistant IDs, including retired assistants,
+and compares saved `profile.json` and `AGENTS.md` bytes. Names belong to profile
+files; they are no longer columns in `assistant_definitions`. Missing profiles,
+changed registrations or files, and symlinked assistant files fail the check. Rules
+may be absent in both copies. Keep both copies stable and finish SQLite recovery
+on a disposable copy before checking it. This check supplements database integrity,
+identity/key and task-history verification; it does not migrate or deploy a root.
+
 The default root is `~/.pot` on macOS and Linux. Use `-root /absolute/path`
 for an independent instance. New roots may contain extension packages and configuration before initialization. Each root receives a stable node identity. App and standalone Runtime cannot open the same root
 concurrently.

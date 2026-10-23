@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""Verify saved assistant profiles and rules across two stopped upgrade copies."""
+
+import argparse
+from contextlib import closing
+import json
+from pathlib import Path
+import re
+import sqlite3
+import sys
+
+
+def registered_ids(root):
+    database = root / "control.sqlite"
+    with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
+        ids = {row[0] for row in db.execute("SELECT id FROM assistant_definitions")}
+    for ident in ids:
+        if (
+            not isinstance(ident, str)
+            or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", ident)
+            or ident in {".", ".."}
+        ):
+            raise ValueError("invalid registered assistant identity")
+    return ids
+
+
+def saved_file(root, ident, name):
+    folder = root / "assistants" / ident
+    path = folder / name
+    for part in [root / "assistants", folder, path]:
+        if part.is_symlink():
+            raise ValueError(f"{ident}/{name}: expected a regular saved file")
+    if name == "AGENTS.md" and not path.exists():
+        return None
+    if not path.is_file():
+        raise ValueError(f"{ident}/{name}: saved file is missing or not regular")
+    return path.read_bytes()
+
+
+def verify(reference, upgraded):
+    reference, upgraded = reference.resolve(strict=True), upgraded.resolve(strict=True)
+    if reference == upgraded:
+        raise ValueError("reference and upgraded roots must be independent copies")
+    ids = registered_ids(reference)
+    if registered_ids(upgraded) != ids:
+        raise ValueError("registered assistant identities changed")
+    count = 0
+    for ident in sorted(ids):
+        for name in ["profile.json", "AGENTS.md"]:
+            before = saved_file(reference, ident, name)
+            after = saved_file(upgraded, ident, name)
+            if before != after:
+                raise ValueError(f"{ident}/{name}: saved file changed")
+            count += before is not None
+    return {"assistants": len(ids), "files": count}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("reference", type=Path, help="Stopped reference copy before migration")
+    parser.add_argument("upgraded", type=Path, help="Separate stopped copy after migration")
+    args = parser.parse_args()
+    try:
+        result = verify(args.reference, args.upgraded)
+    except (OSError, ValueError, sqlite3.Error) as error:
+        print(f"Assistant file verification failed: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps(result))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -161,7 +161,7 @@ python scripts/build-go-plugins --platform linux-amd64 --output .local/go/linux-
 
 [tasks."test:packaging"]
 description = "Verify package layout, immutable export and service artifact generation"
-run = ["python scripts/tests/go-packaging.py", "python integrations/codex/install_test.py"]
+run = ["python scripts/tests/go-packaging.py", "python integrations/codex/install_test.py", "python scripts/tests/assistant-files.py"]
 
 [tasks.preview]
 description = "Run the disposable loopback shared UI preview (no model or product data)"
