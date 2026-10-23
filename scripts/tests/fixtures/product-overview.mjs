@@ -3,6 +3,7 @@
 import {mountApp} from '../../../web/src/components/ui.js';
 import {avatarFromFile} from '../../../web/src/components/avatar.mjs';
 const avatar=await avatarFromFile(await (await fetch('../../../resources/app/assets/Pot384.png')).blob());
+const developmentAvatar=await avatarFromFile(await (await fetch('./product-overview-avatar.png')).blob());
 const linked=new URLSearchParams(location.search).get('view')==='link';
 const space={id:linked?'demo-linked':'demo-work',control_id:linked?'demo-linked':'demo-work',name:'Local Pot',kind:'local',connected:true};
 const local={node_id:space.id,kind:'assistant',agent_id:'pot'};
@@ -38,7 +39,7 @@ const client={production:true,runtime:{runtime_id:space.id,boot_id:'demo'},space
   const name=new URL(path,location.href).pathname;
   if(name==='/api/v1/spaces')return {items:[space],active_space_id:space.id};
   if(name==='/api/v1/assistants')return [{id:'pot',name:'Pot',avatar,revision:1,capabilities:{version:1,operations:['chat.read','chat.send','task.list','task.read']}}];
-  if(name==='/api/v1/agent-links')return {items:[{id:'demo-link',peer:{node_id:remote.node_id,kind:'codex',name:'Codex'},status:'connected',assistants:[{address:remote,name:'Development',adapter:'codex',capabilities:{version:1,operations:['chat.read','task.list','task.read']}}]}]};
+  if(name==='/api/v1/agent-links')return {items:[{id:'demo-link',peer:{node_id:remote.node_id,kind:'codex',name:'Codex'},status:'connected',assistants:[{address:remote,name:'Development',avatar:developmentAvatar,adapter:'codex',capabilities:{version:1,operations:['chat.read','task.list','task.read']}}]}]};
   if(name==='/api/v1/tasks/query'||name==='/api/v1/tasks/catalog')return {items:tasks,counts:{active:tasks.length},total:tasks.length};
   if(name==='/api/v1/tasks/outcomes')return {items:[],cursor:0,has_more:false};
   return {items:[],pending:[],policy:{machines:{}}};
