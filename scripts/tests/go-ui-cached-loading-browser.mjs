@@ -23,7 +23,7 @@ const client={production:true,desktop:false,runtime:{runtime_id:'fixture-control
     if(base==='/api/v1/schedules')return {items:[],next_offset:null};
     if(base==='/api/v1/permissions')return {pending:[],machines:[],policy:{}};
     if(base==='/api/v1/integrations'){const loggedIn=counts.get(key)>1;return {items:[{id:'github',name:'GitHub',login_available:true,status:loggedIn?'connected':'disconnected',...(loggedIn?{account:{revision:1,identity:{username:'fixture-login'}}}:{login:{id:'fixture-login',status:'pending'}})}]};}
-    if(base==='/api/v1/machines')return {items:[{id:'m',name:'Fixture Machine',status:'online'}]};
+    if(base==='/api/v1/machines')return [{id:'m',name:'Fixture Machine',status:'online'}];
     if(base==='/api/v1/usage/requests'){const offset=Number(url.searchParams.get('offset')||0);return {items:Array.from({length:20},(_,i)=>({label:'Request '+(60-offset-i),model:'fixture-model',input:10,output:2,state:'complete'})),next_offset:offset<40?offset+20:null};}
     if(base==='/api/v1/usage/summary')return {total:{input:100,output:20,cache:5},lifetime:{input:100,output:20,cache:5},quota:{policy:{period:'none'},active:false},buckets:[],providers:[]};
     if(base.startsWith('/api/v1/usage/'))return {items:[{agent:'pot',model:'fixture-model',input:100,output:20,cache:5}],next_offset:null};
