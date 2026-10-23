@@ -16,29 +16,15 @@ export function bindCompletions(input,{client,host,locale,mobile=false,id='pot-r
   const chips=node('div','composer-selectors'),triggers=node('div','composer-selectors-triggers');chips.hidden=true;chips.setAttribute('aria-live','polite');form.classList.add('has-completions');form.prepend(chips);form.append(triggers);
   input.setAttribute('aria-autocomplete','list');input.setAttribute('aria-controls',list.id);input.setAttribute('aria-expanded','false');
   let items=[],selected=[],index=0,active=null,composing=false,ended=-Infinity,abort,version=0,lastLocale=locale(),disposed=false;
-  const metadata=new Map(),profileRequests=new Map();
+  const metadata=new Map();
   const value=()=>joinComposerValue(selected,input.value);
   const emit=()=>input.dispatchEvent(new Event('input',{bubbles:true}));
   const close=()=>{version++;abort?.abort();items=[];active=null;menu.hidden=true;input.setAttribute('aria-expanded','false');input.removeAttribute('aria-activedescendant');for(const button of triggers.children)button.setAttribute('aria-pressed','false');};
   const optionID=offset=>`${id.replace(/-completions$/,'')}-${offset}`;
-  function restoreProfiles(){
-    const scope=client.scope(),key=JSON.stringify(scope);
-    for(const selectedItem of selected){
-      if(!selectedItem.token.startsWith('@')||selectedItem.avatar)continue;
-      const requestKey=key+selectedItem.token;if(profileRequests.has(requestKey))continue;
-      const controller=new AbortController();profileRequests.set(requestKey,controller);
-      Promise.resolve().then(()=>(client.read||client.request)('/api/v1/completions?'+new URLSearchParams({q:selectedItem.token}),{...scope,signal:controller.signal})).then(result=>{
-        if(disposed||key!==JSON.stringify(client.scope()))return;
-        const profile=result.items?.find(item=>item.token===selectedItem.token);if(!profile)return;
-        metadata.set(profile.token,profile);
-        const current=selected.find(item=>item.token===selectedItem.token);if(current){current.avatar=profile.avatar;paintChips();}
-      }).catch(()=>{}).finally(()=>profileRequests.delete(requestKey));
-    }
-  }
   function paintChips(){
     chips.replaceChildren();chips.hidden=!selected.length;
-    selected.forEach((item,offset)=>{const chip=node('span','composer-selector'),assistant=item.token.startsWith('@');chip.title=item.token;
-      if(assistant)chip.append(avatar(18,item.avatar));chip.append(node('span','composer-selector-name',(assistant?'@':'/')+item.label));
+    selected.forEach((item,offset)=>{const chip=node('span','composer-selector');chip.title=item.token;
+      chip.append(node('span','composer-selector-name','/'+item.label));
       const remove=node('button','composer-selector-remove');remove.type='button';remove.disabled=input.disabled||input.readOnly;remove.setAttribute('aria-label',t('completions.remove').replace('{name}',item.label));remove.append(icon('close'));remove.onclick=()=>{if(composing||input.disabled||input.readOnly)return;selected.splice(offset,1);paintChips();emit();input.focus({preventScroll:true});};chip.append(remove);chips.append(chip);
     });
   }
@@ -47,8 +33,14 @@ export function bindCompletions(input,{client,host,locale,mobile=false,id='pot-r
     const query=completionQuery(input.value,input.selectionStart,input.selectionEnd);
     if(!query||query.start!==active.start||query.query!==active.query)return close();
     const raw=selectorText(item);if(!raw)return close();
-    input.setRangeText('',query.start,query.end,'end');
-    if(!selected.some(old=>old.token===item.token))selected.push({...item,raw});
+    if(item.token.startsWith('@assistant:')){
+      // Native selection retains surrounding text and moves the caret after the
+      // inline reference, ready for more typing. Each occurrence stays in place.
+      input.setRangeText(raw+' ',query.start,query.end,'end');
+    }else{
+      input.setRangeText('',query.start,query.end,'end');
+      if(!selected.some(old=>old.token===item.token))selected.push({...item,raw});
+    }
     close();paintChips();emit();input.focus({preventScroll:true});
   }
   function paint(){
@@ -90,5 +82,5 @@ export function bindCompletions(input,{client,host,locale,mobile=false,id='pot-r
   const outside=event=>{if(!host.contains(event.target))close();};
   input.addEventListener('input',update);input.addEventListener('click',update);input.addEventListener('keyup',keyup);input.addEventListener('select',update);input.addEventListener('keydown',key,true);input.addEventListener('compositionstart',start);input.addEventListener('compositionend',end);input.addEventListener('blur',blur);document.addEventListener('pointerdown',outside);window.addEventListener('pot:locale',refresh);
   refresh();
-  return {value,refresh,reset:close,setValue(text){if(composing||text===value()&&(selected.length||!splitComposerValue(text).items.length))return;close();const draft=splitComposerValue(text);selected=draft.items.map(item=>({...metadata.get(item.token),...item}));setText(draft.text);paintChips();restoreProfiles();},dispose(){disposed=true;close();for(const controller of profileRequests.values())controller.abort();menu.remove();chips.remove();triggers.remove();form.classList.remove('has-completions');for(const event of ['input','click','select'])input.removeEventListener(event,update);input.removeEventListener('keyup',keyup);input.removeEventListener('keydown',key,true);input.removeEventListener('compositionstart',start);input.removeEventListener('compositionend',end);input.removeEventListener('blur',blur);document.removeEventListener('pointerdown',outside);window.removeEventListener('pot:locale',refresh);}};
+  return {value,refresh,reset:close,setValue(text){if(composing||text===value()&&(selected.length||!splitComposerValue(text).items.length))return;close();const draft=splitComposerValue(text);selected=draft.items.map(item=>({...metadata.get(item.token),...item}));setText(draft.text);paintChips();},dispose(){disposed=true;close();menu.remove();chips.remove();triggers.remove();form.classList.remove('has-completions');for(const event of ['input','click','select'])input.removeEventListener(event,update);input.removeEventListener('keyup',keyup);input.removeEventListener('keydown',key,true);input.removeEventListener('compositionstart',start);input.removeEventListener('compositionend',end);input.removeEventListener('blur',blur);document.removeEventListener('pointerdown',outside);window.removeEventListener('pot:locale',refresh);}};
 }

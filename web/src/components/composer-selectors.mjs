@@ -16,10 +16,13 @@ export function selectorText(item){
   return `[@${name}](pot-assistant:${match[1]}/${match[2]})`;
 }
 export function splitComposerValue(value){
-  const newline=value.indexOf('\n'),head=newline<0?value:value.slice(0,newline),items=[];
+  const newline=value.indexOf('\n'),head=newline<0?value:value.slice(0,newline),items=[],mentions=[];
   const pattern=new RegExp('^(?:/skill:[a-z0-9_-]{1,64}|'+assistantMentionSource+')(?: |$)','u');
   let rest=head;
-  while(rest){const match=rest.match(pattern);if(!match)return {items:[],text:value};const raw=match[0].trimEnd(),mention=parseAssistantMention(raw);items.push(mention?{token:mention.token,label:mention.label,detail:mention.node,raw}:{token:raw,label:raw.slice(7),detail:'',raw});rest=rest.slice(match[0].length);}
-  return items.length?{items,text:newline<0?'':value.slice(newline+1)}:{items:[],text:value};
+  while(rest){const match=rest.match(pattern);if(!match)return {items:[],text:value};const raw=match[0].trimEnd(),mention=parseAssistantMention(raw);if(mention)mentions.push(raw);else items.push({token:raw,label:raw.slice(7),detail:'',raw});rest=rest.slice(match[0].length);}
+  // Only Skills are extracted into chips. Keep existing mixed selector drafts'
+  // mentions in the body without changing their stored text representation.
+  const body=newline<0?'':value.slice(newline+1);
+  return items.length?{items,text:mentions.join(' ')+(mentions.length&&body?'\n':'')+body}:{items:[],text:value};
 }
 export function joinComposerValue(items,text){return items.length?items.map(item=>item.raw||selectorText(item)).join(' ')+(text?'\n'+text:''):text;}
