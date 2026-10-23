@@ -299,6 +299,19 @@ Turn `state` distinguishes allowance waiting from active thinking.
 Subscription errors retain their available diagnostics; a
 frontend rendering exception is reported by the interface error handler rather
 than being classified as a service disconnection.
+The error log retains up to 20 distinct exceptions in the browser tab's session,
+including across reloads; its count is historical, not a count of active faults.
+Closing the alert leaves those records available. Clear log removes the records
+and hides the log button; a subsequent exception starts a fresh log and alert.
+Report issue opens the repository's GitHub Bug report form with the latest error
+as its title, the available Pot version, browser environment and retained error
+logs. The user can edit the report before submitting. The report uses the same
+credential-redacted diagnostics as Copy log and omits the current page URL.
+Long logs are included newest first and truncated with a notice to keep the
+encoded link below 7,800 characters; Copy log retains the full available log.
+Desktop hosts open the form in the system browser.
+Task file download failures stay in the task view with localized retry and
+diagnostic details rather than entering this page exception log.
 
 ## Task execution transcripts
 

@@ -461,6 +461,7 @@ input[type='checkbox'].field-input { width: 18px; height: 18px; min-height: 18px
 .task-action-error{color:var(--danger);overflow-wrap:anywhere;}
 .task-files:not(:empty){display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;}
 .task-unmatched-approvals:empty,.task-files:empty{display:none;}
+.task-download-error{margin-top:16px;min-width:0;}.task-download-error>p{color:var(--danger);}.task-download-error pre{white-space:pre-wrap;overflow-wrap:anywhere;}
 .task-unmatched-approvals>
 .approval-description{white-space:pre-line;}.approval-arguments{white-space:pre-wrap;overflow-wrap:anywhere;font:13px monospace;}.background-task.needs-approval{color:var(--attention);}.background-task.needs-approval .task-activity-dot{background:var(--attention);animation:none;}.background-task-status{flex:none;color:var(--attention);}
 .browser-actions{align-items:flex-start;gap:8px;}.browser-actions>.control{border:0;background:transparent;font-size:13px;padding:2px 6px;}

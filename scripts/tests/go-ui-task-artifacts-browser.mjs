@@ -3,7 +3,7 @@ import {createTaskConversation} from '../../web/src/components/task-conversation
 import {createTaskTranscript} from '../../web/src/state/task-transcript.mjs';
 const f=window.taskArtifactsFixture={locale:'en',downloads:[]};
 f.record={info:{phase:'complete'},request:{text:'Check tool failures and attach the detailed report.'},result:{text:'Check completed. Three tool failures were observed; details are in the attached report.'},outcome:{artifacts:['.pot-artifacts/report.md'],artifacts_error:'unsupported artifact: .pot-artifacts/escape'},capabilities:{version:1,operations:['task.read','task.files','task.input']}};
-f.ui=createTaskConversation({root:document.querySelector('main'),task:{id:'self-check',assistant_id:'pot'},record:f.record,locale:()=>f.locale,client:{request:async()=>({items:[]})},scope:{space:'local',owner:'pot'},draft:'',onDraft:()=>{},downloadFile:value=>f.downloads.push(value),toolMemory:new Map(),approvalFor:()=>null,onDecision:()=>{},onSend:()=>{},onStop:()=>{},onPause:()=>{},onCancel:()=>{},onArchive:()=>{},onUsage:()=>{},onRefresh:()=>{},onSettings:()=>{},assistantName:'Pot'});
+f.ui=createTaskConversation({root:document.querySelector('main'),task:{id:'self-check',assistant_id:'pot'},record:f.record,locale:()=>f.locale,client:{request:async()=>({items:[]})},scope:{space:'local',owner:'pot'},draft:'',onDraft:()=>{},downloadFile:value=>{f.downloads.push(value);if(f.pendingDownload)return f.pendingDownload;if(f.failDownload)throw TypeError('Failed to fetch');},toolMemory:new Map(),approvalFor:()=>null,onDecision:()=>{},onSend:()=>{},onStop:()=>{},onPause:()=>{},onCancel:()=>{},onArchive:()=>{},onUsage:()=>{},onRefresh:()=>{},onSettings:()=>{},assistantName:'Pot'});
 f.state=createTaskTranscript();f.update=()=>f.ui.update({record:f.record,state:f.state,inputs:[],approvals:[]});f.update();f.ui.start();
 f.setLocale=locale=>{f.locale=locale;f.update();};
 f.check=()=>{
@@ -17,4 +17,26 @@ f.check=()=>{
  const artifacts=f.record.outcome.artifacts;delete f.record.outcome.artifacts;delete f.record.outcome.artifacts_error;f.update();check(!files.textContent,'No attachments and no warning is an empty delivery');
  f.record.outcome={artifacts,artifacts_error:'unsupported artifact: .pot-artifacts/escape'};f.setLocale('en');
  return 'PASS: final reply, completion status, attachment download, missing attachments and live warning locale';
+};
+f.checkDownload=async()=>{
+ const check=(condition,message)=>{if(!condition)throw Error(message);};
+ f.failDownload=true;
+ await document.querySelector('.task-files button').onclick();
+ const notice=document.querySelector('.task-download-error');
+ check(!notice.hidden&&notice.textContent.includes('Could not download this file. Try again.'),'A failed download is handled in the Task');
+ check(notice.textContent.includes('Failed to fetch'),'Original diagnostic remains available');
+ f.setLocale('zh-CN');
+ check(notice.textContent.includes('文件下载失败，请重试。')&&notice.querySelector('button').textContent==='重试','Failure and retry follow the live locale');
+ f.failDownload=false;
+ const failed=f.downloads.at(-1);
+ await notice.querySelector('button').onclick();
+ check(notice.hidden&&f.downloads.at(-1).task===failed.task&&f.downloads.at(-1).path===failed.path,'Retry uses the same Task and file and clears the error');
+ let reject;f.pendingDownload=new Promise((_,fail)=>{reject=fail;});
+ const pending=document.querySelector('.task-files button').onclick();
+ f.setLocale('en');reject(TypeError('Failed to fetch'));await pending;
+ check(notice.textContent.includes('Could not download this file. Try again.'),'A pending failure resolves in the current language');
+ f.pendingDownload=null;
+ await notice.querySelector('button').onclick();
+ check(window.potErrors.logs().length===0,'Handled download failures never enter the page error log');
+ return 'PASS: handled download failures, original diagnostics, retry identity and live locale during IO';
 };

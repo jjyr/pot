@@ -17,7 +17,7 @@ class Element {
 
 function fixture({storage = new Map(), blockedStorage = false, loading = false, copyFails = false} = {}) {
   let now = 0, sequence = 0, reloaded = false, copied;
-  const timers = new Map(), listeners = {}, consoleErrors = [];
+  const timers = new Map(), listeners = {}, consoleErrors = [], opened = [];
   const body = new Element('body');
   const document = {
     readyState: loading ? 'loading' : 'complete', body, activeElement: null,
@@ -32,7 +32,8 @@ function fixture({storage = new Map(), blockedStorage = false, loading = false, 
       getItem: key => { if (blockedStorage) throw Error('blocked'); return storage.get(key); },
       setItem: (key, value) => { if (blockedStorage) throw Error('quota'); storage.set(key, value); },
     },
-    navigator: {clipboard: {writeText: async text => { if (copyFails) throw Error('denied'); copied = text; }}},
+    navigator: {userAgent: 'FixtureBrowser/1.0 FixtureOS', clipboard: {writeText: async text => { if (copyFails) throw Error('denied'); copied = text; }}},
+    open: (...args) => { opened.push(args); },
     console: {error: (...args) => consoleErrors.push(args)},
     setTimeout: (fn, delay) => { const id = ++sequence; timers.set(id, {fn, at: now + delay}); return id; },
     clearTimeout: id => timers.delete(id),
@@ -46,7 +47,7 @@ function fixture({storage = new Map(), blockedStorage = false, loading = false, 
     now += delay;
     for (const [id, timer] of [...timers]) if (timer.at <= now) { timers.delete(id); timer.fn(); }
   };
-  return {context, body, document, listeners, storage, consoleErrors, toast, logs, tick,
+  return {context, body, document, listeners, storage, consoleErrors, opened, toast, logs, tick,
     launcher: () => body.children.find(child => child.id === 'pot-error-log'),
     reloaded: () => reloaded, copied: () => copied};
 }
@@ -108,6 +109,17 @@ async function test() {
   assert.equal(restored.launcher().hidden, false);
   restored.listeners.error({message: error.message, error});
   assert.equal(restored.toast().hidden, false, 'a new occurrence after reload must still alert');
+  const clear = restored.toast().querySelectorAll().find(node => node.dataset.errorText === 'web.error.clear');
+  clear.onclick();
+  assert.equal(restored.logs().length, 0);
+  assert.equal(restored.toast().hidden, true);
+  assert.equal(restored.launcher().hidden, true, 'clearing hides the historical log launcher');
+  const cleared = fixture({storage: restored.storage});
+  assert.equal(cleared.logs().length, 0, 'cleared records must not return after reload');
+  assert.equal(cleared.launcher().hidden, true);
+  restored.listeners.error({message: error.message, error});
+  assert.equal(restored.logs()[0].count, 1);
+  assert.equal(restored.toast().hidden, false, 'the same exception after clearing must alert immediately');
 
   const early = fixture({loading: true, blockedStorage: true, copyFails: true});
   early.context.potReportPanic('time not implemented on this platform');
@@ -121,6 +133,9 @@ async function test() {
   assert.ok(early.toast().find('span').textContent.includes('copy-failed'));
   early.listeners.unhandledrejection({reason: Error('unhandled fixture')});
   assert.equal(early.logs().at(-1).kind, 'unhandledrejection');
+  early.toast().querySelectorAll().find(node => node.dataset.errorText === 'web.error.clear').onclick();
+  assert.equal(early.logs().length, 0, 'clearing works even when session storage is blocked');
+  assert.equal(early.launcher().hidden, true);
 
   const paused = fixture();
   paused.listeners.error({message: 'hover fixture'});
@@ -143,6 +158,61 @@ async function test() {
   bounded.context.potReportPanic('Bearer secret-value api_key=fixture-private-value sk-fixture https://user:password@example.test/app.js?access_token=fixture-private-value#secret');
   const serialized = JSON.stringify(bounded.logs().at(-1));
   for (const secret of ['secret-value', 'fixture-private-value', 'sk-fixture', 'password', '#secret']) assert.ok(!serialized.includes(secret), secret);
-  console.log('Web errors: capture, panic bridge, timers, deduplication, copy, storage, limits and redaction passed');
+
+  const reporting = fixture();
+  const reportButton = f => f.toast().querySelectorAll().find(node => node.dataset.errorText === 'web.error.report');
+  reporting.context.potErrors.configureIssueReport({version: 'v1.2.3'});
+  const reportError = Error('Invalid array length & special characters + $& 中文');
+  reporting.listeners.error({message: reportError.message, error: reportError});
+  reporting.tick(1);
+  reporting.listeners.error({message: 'Failed to fetch'});
+  reporting.tick(1);
+  reporting.listeners.error({message: reportError.message, error: reportError});
+  await reportButton(reporting).onclick();
+  assert.equal(reporting.opened.length, 1);
+  const [issueLink, target, features] = reporting.opened[0], issue = new URL(issueLink);
+  assert.equal(issue.origin + issue.pathname, 'https://github.com/jjyr/pot/issues/new');
+  assert.equal(issue.searchParams.get('template'), 'bug_report.yml');
+  assert.equal(issue.searchParams.get('title'), `Interface error: ${reportError.message}`);
+  assert.equal(issue.searchParams.get('affected-area'), 'Web browser');
+  assert.equal(issue.searchParams.get('pot-version'), 'v1.2.3');
+  assert.equal(issue.searchParams.get('environment'), 'FixtureBrowser/1.0 FixtureOS');
+  const issueLog = issue.searchParams.get('additional-context');
+  assert.ok(issueLog.includes(reportError.message) && issueLog.includes('Failed to fetch'));
+  assert.ok(issueLog.includes('Count: 2;') && issueLog.indexOf(reportError.message) < issueLog.indexOf('Failed to fetch'), 'order by latest occurrence, including repeated errors');
+  assert.ok(issueLog.split('\n').every(line => line.startsWith('    ')), 'diagnostic Markdown remains literal');
+  assert.ok(!issueLink.includes('do-not-log'));
+  assert.equal(target, '_blank');
+  assert.equal(features, 'noopener,noreferrer');
+  const template = fs.readFileSync(path.join(__dirname, '../../.github/ISSUE_TEMPLATE/bug_report.yml'), 'utf8');
+  for (const key of ['affected-area', 'pot-version', 'environment', 'additional-context']) assert.ok(template.includes(`id: ${key}`), `Issue form owns ${key}`);
+  assert.ok(template.includes('- Web browser') && template.includes('- Desktop app'));
+
+  let nativeURL;
+  reporting.context.potErrors.configureIssueReport({version: 'v1.2.4', desktop: true, openExternal: async url => { nativeURL = url; }});
+  await reportButton(reporting).onclick();
+  assert.equal(new URL(nativeURL).searchParams.get('affected-area'), 'Desktop app');
+  assert.equal(new URL(nativeURL).searchParams.get('pot-version'), 'v1.2.4');
+  assert.equal(reporting.opened.length, 1, 'desktop uses the external browser bridge');
+  reporting.context.potErrors.configureIssueReport({openExternal: async () => { throw Error('Unavailable'); }});
+  await reportButton(reporting).onclick();
+  assert.ok(reporting.toast().find('span').textContent.includes('Could not open GitHub'));
+
+  const longReport = fixture();
+  longReport.listeners.error({message: 'Older failure'});
+  longReport.tick(1);
+  longReport.context.potReportPanic(`新异常😀${'详情'.repeat(3000)} Bearer secret-value api_key=fixture-private-value https://user:password@example.test/app.js?access_token=fixture-private-value#secret`);
+  await reportButton(longReport).onclick();
+  const longURL = longReport.opened[0][0], longLog = new URL(longURL).searchParams.get('additional-context');
+  assert.ok(longURL.length <= 7800, 'encoded URL remains within the GitHub link budget');
+  assert.ok(longLog.includes('新异常😀') && longLog.includes('The log was shortened'));
+  assert.ok(!longLog.includes('\uFFFD'), 'truncation does not split Unicode code points');
+  assert.equal(longReport.logs().length, 2, 'reporting must not remove retained logs');
+  const secrets = fixture();
+  secrets.context.potReportPanic('Bearer secret-value api_key=fixture-private-value sk-fixture https://user:password@example.test/app.js?access_token=fixture-private-value#secret');
+  await reportButton(secrets).onclick();
+  const exported = JSON.stringify([...new URL(secrets.opened[0][0]).searchParams]);
+  for (const secret of ['secret-value', 'fixture-private-value', 'sk-fixture', 'password', '#secret', 'do-not-log']) assert.ok(!exported.includes(secret), secret);
+  console.log('Web errors: capture, timers, copy, clear, storage, redaction, GitHub form prefill, native opening and bounded Unicode reports passed');
 }
 test().catch(error => { console.error(error); process.exitCode = 1; });

@@ -10,10 +10,18 @@
     'web.error.close': 'Close',
     'web.error.log': 'Error log',
     'web.error.copy': 'Copy log',
+    'web.error.clear': 'Clear log',
+    'web.error.report': 'Report issue',
+    'web.error.issueTitle': 'Interface error: {message}',
+    'web.error.unknownVersion': 'Unknown (please fill in)',
+    'web.error.reportTruncated': 'The log was shortened to fit the link. Use Copy log in Pot to add the full log.',
+    'web.error.reportFailed': 'Could not open GitHub. Please copy the log and report the issue manually.',
     'web.error.copied': 'Log copied',
     'web.error.copy-failed': 'Could not copy. Select and copy the log below.',
   };
   let translate = key => fallback[key];
+  const t = key => translate(key) || fallback[key];
+  let issueContext = {};
   let records = [];
   const observed = new WeakSet();
   let toast, details, log, launcher, copyStatus, timer;
@@ -50,8 +58,36 @@
     try { sessionStorage.setItem(storageKey, JSON.stringify(records)); } catch { /* Console and in-memory logs still work. */ }
   }
 
-  function text() {
-    return records.map(record => `${record.time} [${record.kind}] ${record.page}\n${record.message}\n${record.stack}\nCount: ${record.count}; last seen: ${record.lastSeen}`).join('\n\n');
+  function text(items = records) {
+    return items.map(record => `${record.time} [${record.kind}] ${record.page}\n${record.message}\n${record.stack}\nCount: ${record.count}; last seen: ${record.lastSeen}`).join('\n\n');
+  }
+
+  function issueURL() {
+    const latest = records.reduce((last, record) => !last || record.lastSeen > last.lastSeen ? record : last, null);
+    const url = new URL('https://github.com/jjyr/pot/issues/new');
+    url.searchParams.set('template', 'bug_report.yml');
+    url.searchParams.set('title', t('web.error.issueTitle').replace('{message}', () => (latest?.message || '').split('\n')[0].slice(0, 120)));
+    url.searchParams.set('affected-area', issueContext.desktop ? 'Desktop app' : 'Web browser');
+    url.searchParams.set('pot-version', clean(issueContext.version || t('web.error.unknownVersion'), 128));
+    url.searchParams.set('environment', clean(navigator.userAgent || '', 256));
+    // Indentation keeps diagnostic text literal in GitHub Markdown. Keep the
+    // latest occurrence first so a long history cannot crowd out the new fault.
+    const ordered = [...records].sort((a, b) => b.lastSeen.localeCompare(a.lastSeen));
+    const lines = text(ordered).split('\n').map(line => `    ${line}`).join('\n');
+    const setLog = value => url.searchParams.set('additional-context', value);
+    setLog(lines);
+    if (url.href.length > 7800) {
+      const chars = Array.from(lines), notice = `\n\n${t('web.error.reportTruncated')}`;
+      let low = 0, high = chars.length;
+      while (low < high) {
+        const middle = Math.ceil((low + high) / 2);
+        setLog(chars.slice(0, middle).join('') + notice);
+        if (url.href.length <= 7800) low = middle;
+        else high = middle - 1;
+      }
+      setLog(chars.slice(0, low).join('') + notice);
+    }
+    return url.href;
   }
 
   function pause() { clearTimeout(timer); }
@@ -137,6 +173,26 @@
     details.addEventListener('toggle', schedule);
     const summary = element('summary', 'web.error.details');
     const copy = element('button', 'web.error.copy');
+    const clear = element('button', 'web.error.clear');
+    const reportIssue = element('button', 'web.error.report');
+    reportIssue.onclick = async () => {
+      try {
+        const url = issueURL();
+        if (issueContext.openExternal) await issueContext.openExternal(url);
+        else window.open(url, '_blank', 'noopener,noreferrer');
+      } catch {
+        copyStatus.textContent = t('web.error.reportFailed');
+      }
+    };
+    clear.onclick = () => {
+      records = [];
+      persist();
+      hide();
+      dismissedAt = -Infinity;
+      details.open = false;
+      copyStatus.textContent = '';
+      render();
+    };
     copyStatus = element('span');
     copyStatus.setAttribute('role', 'status');
     copy.onclick = async () => {
@@ -148,7 +204,7 @@
       }
     };
     log = element('pre');
-    details.append(summary, copy, copyStatus, log);
+    details.append(summary, copy, clear, reportIssue, copyStatus, log);
     toast.append(title, message, actions, details);
     toast.addEventListener('mouseenter', () => { hovered = true; pause(); });
     toast.addEventListener('mouseleave', () => { hovered = false; schedule(); });
@@ -165,6 +221,7 @@
   restore();
   window.potErrors = {
     setTranslator(value) { translate = value; render(); },
+    configureIssueReport({version, desktop, openExternal}) { issueContext = {version, desktop, openExternal}; },
     reportPanic(message) { report('panic', new Error(message), message); },
     logs() { return records.map(record => ({...record})); },
   };
