@@ -1,4 +1,4 @@
-name: macOS release and signed updates
+name: macOS release and authenticated updates
 
 # Only CI can enter after shared checks and this channel's packaging gates.
 on:
@@ -23,10 +23,12 @@ concurrency:
 
 jobs:
   preflight:
-    name: Approve and verify release configuration
+    name: Verify macOS mode and release configuration
     runs-on: ubuntu-24.04
     environment: release
     timeout-minutes: 10
+    outputs:
+      mode: ${{ steps.preflight.outputs.mode }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -37,9 +39,10 @@ jobs:
           version: 2026.10.10
           cache: false
           install_args: go python
-      - name: Require explicit operator setup and all signing credentials
+      - name: Verify selected mode, required credentials and update key pair
+        id: preflight
         env:
-          POT_MACOS_RELEASE_ENABLED: ${{ vars.POT_MACOS_RELEASE_ENABLED }}
+          POT_MACOS_RELEASE_MODE: ${{ vars.POT_MACOS_RELEASE_MODE }}
           POT_UPDATE_PUBLIC_KEY: ${{ inputs.public-key }}
           POT_UPDATE_PRIVATE_KEY: ${{ secrets.POT_UPDATE_PRIVATE_KEY }}
           MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
@@ -55,7 +58,7 @@ jobs:
 
   macos:
     needs: preflight
-    name: Sign and notarize macOS packages
+    name: Seal macOS packages (${{ needs.preflight.outputs.mode }})
     runs-on: macos-26
     environment: release
     timeout-minutes: 60
@@ -78,7 +81,7 @@ jobs:
           version: 2026.10.10
           cache: false
           install_args: python
-      - name: Sign and notarize validated archives
+      - name: Seal validated archives in selected mode
         env:
           MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -86,16 +89,18 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-        run: mise exec -- python scripts/sign-macos-release '${{ inputs.version }}' dist
-      - name: Smoke signed macOS packages
+        run: mise exec -- python scripts/sign-macos-release '${{ inputs.version }}' dist --mode '${{ needs.preflight.outputs.mode }}'
+      - name: Smoke final macOS packages
         env:
           POT_APP_VERSION: ${{ inputs.version }}
+          POT_BUILD_REVISION: ${{ inputs.sha }}
+          POT_MACOS_RELEASE_MODE: ${{ needs.preflight.outputs.mode }}
         run: |
           mise exec -- python scripts/tests/macos-package-smoke.py dist/Pot-${{ inputs.version }}-arm64.zip
           mise exec -- python scripts/tests/server-package-smoke.py dist/pot-go-${{ inputs.version }}-darwin-arm64.tar.gz
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: signed-macos
+          name: sealed-macos
           path: |
             dist/Pot-*.zip
             dist/Pot-*.zip.sha256
@@ -105,8 +110,8 @@ jobs:
           retention-days: 7
 
   publish:
-    needs: macos
-    name: Publish signed macOS assets and update feed
+    needs: [preflight, macos]
+    name: Publish macOS assets and authenticated update feed
     runs-on: ubuntu-24.04
     environment: release
     timeout-minutes: 30
@@ -136,7 +141,7 @@ jobs:
           path: dist
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: signed-*
+          name: sealed-macos
           merge-multiple: true
           path: dist
       - name: Generate signed feed, cask and final checksums
@@ -144,9 +149,9 @@ jobs:
           POT_BUILD_REVISION: ${{ inputs.sha }}
           POT_UPDATE_PUBLIC_KEY: ${{ inputs.public-key }}
           POT_UPDATE_PRIVATE_KEY: ${{ secrets.POT_UPDATE_PRIVATE_KEY }}
-        run: mise exec -- python scripts/prepare-release '${{ inputs.version }}' dist --channel macos --signed
+        run: mise exec -- python scripts/prepare-release '${{ inputs.version }}' dist --channel macos --sign-feed --macos-mode '${{ needs.preflight.outputs.mode }}'
       - name: Publish qualified macOS channel assets
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ inputs.sha }}
-        run: mise exec -- python scripts/publish-release '${{ inputs.version }}' dist --channel macos
+        run: mise exec -- python scripts/publish-release '${{ inputs.version }}' dist --channel macos --macos-mode '${{ needs.preflight.outputs.mode }}'

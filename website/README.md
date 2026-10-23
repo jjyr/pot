@@ -110,7 +110,11 @@ default; keyboard users can switch with arrows, Home and End. Without JavaScript
 all four sections remain visible. Language switches preserve the selected channel.
 Download buttons open the official Releases selector, since the first packages
 are pending. Homebrew uses the release's local `pot.rb` cask, not an unpublished
-tap formula. The container address has no invented version or `latest` tag; its
+tap formula. The linked installation guide explains macOS signing status,
+application-specific Gatekeeper allowances and Homebrew quarantine. Keep those
+instructions in [Desktop installation](../docs/desktop-installation.md#macos);
+release notes and `MACOS-RELEASE.txt` disclose each version's selected mode.
+The container address has no invented version or `latest` tag; its
 package page awaits first publication. Platform requirements follow the
 [release contract](../docs/releases.md). Keep these small availability notes in
 sync when the channels publish. The English agent prompt is

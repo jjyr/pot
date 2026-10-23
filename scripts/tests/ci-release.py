@@ -26,6 +26,7 @@ from release_contract import (
     checksum_name,
     verify_oci,
     write_checksum,
+    macos_release_notes,
 )  # noqa: E402
 
 plan = runpy.run_path(str(ROOT / "scripts/release-plan"))["plan"]
@@ -190,27 +191,102 @@ class CompleteDistribution(AssetsFixture, unittest.TestCase):
                     "subprocess.run", side_effect=AssertionError("effect before asset validation")
                 ):
                     with self.assertRaisesRegex(ValueError, "missing or empty"):
-                        prepare("1.2.3", root, channel=channel)
+                        with mock.patch.dict(os.environ, POT_BUILD_REVISION=SHA):
+                            prepare(
+                                "1.2.3",
+                                root,
+                                channel=channel,
+                                sign_feed=channel == "macos",
+                                macos_mode="unsigned" if channel == "macos" else None,
+                            )
 
-    def test_missing_release_enable_or_signing_keys_fails_before_external_effects(self):
-        for environment, error in [
-            ({}, "Release disabled"),
-            ({"POT_MACOS_RELEASE_ENABLED": "true"}, "Incomplete release configuration"),
+    def test_missing_mode_or_credentials_fails_before_external_effects(self):
+        for environment, error, exception in [
+            ({}, "explicitly select", ValueError),
+            ({"POT_MACOS_RELEASE_MODE": "auto"}, "explicitly select", ValueError),
+            ({"POT_MACOS_RELEASE_MODE": "unsigned"}, "POT_UPDATE_PRIVATE_KEY", SystemExit),
+            (
+                {
+                    "POT_MACOS_RELEASE_MODE": "signed",
+                    "POT_UPDATE_PUBLIC_KEY": "fixture",
+                    "POT_UPDATE_PRIVATE_KEY": "fixture",
+                },
+                "MACOS_CERTIFICATE_P12",
+                SystemExit,
+            ),
         ]:
             with (
                 self.subTest(environment=environment),
                 mock.patch.dict(os.environ, environment, clear=True),
+                mock.patch("subprocess.run", side_effect=AssertionError("effect before gate")),
                 mock.patch(
-                    "subprocess.run",
-                    side_effect=AssertionError("external effect before configuration gate"),
+                    "subprocess.check_output", side_effect=AssertionError("effect before gate")
                 ),
-                mock.patch(
-                    "subprocess.check_output",
-                    side_effect=AssertionError("external effect before configuration gate"),
-                ),
-                self.assertRaisesRegex(SystemExit, error),
+                self.assertRaisesRegex(exception, error),
             ):
                 runpy.run_path(str(ROOT / "scripts/release-preflight"))
+
+    def test_signed_requires_each_apple_setting_without_fallback(self):
+        names = [
+            "MACOS_CERTIFICATE_P12",
+            "MACOS_CERTIFICATE_PASSWORD",
+            "MACOS_SIGNING_IDENTITY",
+            "APPLE_ID",
+            "APPLE_TEAM_ID",
+            "APPLE_APP_PASSWORD",
+        ]
+        configured = {
+            name: "fixture" for name in names + ["POT_UPDATE_PUBLIC_KEY", "POT_UPDATE_PRIVATE_KEY"]
+        }
+        configured["POT_MACOS_RELEASE_MODE"] = "signed"
+        for name in names:
+            environment = {key: value for key, value in configured.items() if key != name}
+            with (
+                self.subTest(missing=name),
+                mock.patch.dict(os.environ, environment, clear=True),
+                mock.patch(
+                    "subprocess.check_output", side_effect=AssertionError("effect before gate")
+                ),
+                self.assertRaisesRegex(SystemExit, name),
+            ):
+                runpy.run_path(str(ROOT / "scripts/release-preflight"))
+
+    def test_unsigned_preflight_needs_real_update_key_pair_but_no_apple_account(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            key = Path(temporary) / "fixture.pem"
+            public = subprocess.check_output(
+                ["go", "run", "./scripts/sign-release", "keygen", str(key)],
+                cwd=ROOT,
+                text=True,
+            ).strip()
+            environment = {
+                "PATH": os.environ["PATH"],
+                "HOME": os.environ["HOME"],
+                "POT_MACOS_RELEASE_MODE": "unsigned",
+                "POT_UPDATE_PUBLIC_KEY": public,
+                "POT_UPDATE_PRIVATE_KEY": key.read_text(),
+                "RELEASE_VERSION": "1.2.3",
+                "RELEASE_SHA": SHA,
+                "GITHUB_REPOSITORY": "jjyr/pot",
+            }
+            with (
+                mock.patch.dict(os.environ, environment, clear=True),
+                mock.patch("subprocess.check_output", return_value=SHA),
+                mock.patch("builtins.print"),
+            ):
+                runpy.run_path(str(ROOT / "scripts/release-preflight"))
+                with (
+                    mock.patch("subprocess.check_output", return_value=OTHER),
+                    self.assertRaisesRegex(SystemExit, "tag moved"),
+                ):
+                    runpy.run_path(str(ROOT / "scripts/release-preflight"))
+                with (
+                    mock.patch.dict(
+                        os.environ, POT_UPDATE_PUBLIC_KEY=base64.b64encode(b"x" * 32).decode()
+                    ),
+                    self.assertRaises(subprocess.CalledProcessError),
+                ):
+                    runpy.run_path(str(ROOT / "scripts/release-preflight"))
 
     def test_container_must_have_both_real_architectures(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -403,6 +479,220 @@ class GitHubPublication(AssetsFixture, unittest.TestCase):
             self.assertEqual(len(names), len(set(names)))
             self.assertIn("SHA256SUMS-server", names)
             self.assertIn("SHA256SUMS-desktop", names)
+
+
+class MacOSPublication(AssetsFixture, unittest.TestCase):
+    def test_both_modes_sign_feed_bind_metadata_and_resume_partial_upload(self):
+        for mode in ["unsigned", "signed"]:
+            with self.subTest(mode=mode):
+                self.exercise(mode)
+
+    def exercise(self, mode):
+        publish = runpy.run_path(str(ROOT / "scripts/publish-release"))["publish"]
+        real_output = subprocess.check_output
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.fixture(root)
+            key = root / "fixture.pem"
+            public = real_output(
+                ["go", "run", "./scripts/sign-release", "keygen", str(key)],
+                cwd=ROOT,
+                text=True,
+            ).strip()
+            environment = dict(
+                POT_BUILD_REVISION=SHA,
+                POT_UPDATE_PUBLIC_KEY=public,
+                POT_UPDATE_PRIVATE_KEY=key.read_text(),
+                GITHUB_REPOSITORY="jjyr/pot",
+                RELEASE_SHA=SHA,
+            )
+            with mock.patch.dict(os.environ, environment):
+                prepare("1.2.3", root, sign_feed=True, channel="macos", macos_mode=mode)
+            notes = (root / "MACOS-RELEASE.txt").read_text()
+            self.assertEqual(notes, macos_release_notes("1.2.3", SHA, mode))
+            envelope = json.loads((root / "update.json").read_text())
+            self.assertEqual(len(base64.b64decode(envelope["signature"])), 64)
+            payload = json.loads(base64.b64decode(envelope["payload"]))
+            self.assertEqual(len(payload["artifacts"]), 4)
+            for artifact in payload["artifacts"]:
+                path = root / artifact["url"].split("/")[-1]
+                self.assertEqual(artifact["sha256"], checksum(path))
+                self.assertEqual(artifact["size"], path.stat().st_size)
+            release = {"draft": False, "assets": []}
+            uploads = []
+            fail = True
+
+            def run(arguments, **options):
+                nonlocal fail
+                if arguments[:2] == ["gh", "api"]:
+                    return subprocess.CompletedProcess(arguments, 0, json.dumps(release), "")
+                self.assertEqual(arguments[:3], ["gh", "release", "upload"])
+                path = Path(arguments[-1])
+                if fail and len(uploads) == 2:
+                    fail = False
+                    return subprocess.CompletedProcess(arguments, 1, "", "fixture network failure")
+                self.assertNotIn(path.name, uploads)
+                uploads.append(path.name)
+                release["assets"].append(
+                    {
+                        "name": path.name,
+                        "size": path.stat().st_size,
+                        "digest": "sha256:" + checksum(path),
+                    }
+                )
+                return subprocess.CompletedProcess(arguments, 0, "", "")
+
+            with (
+                mock.patch.dict(os.environ, environment),
+                mock.patch("subprocess.check_output", return_value=SHA),
+                mock.patch("subprocess.run", side_effect=run),
+                mock.patch("builtins.print"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "fixture network failure"):
+                    publish("1.2.3", root, "macos", mode)
+                publish("1.2.3", root, "macos", mode)
+                count = len(uploads)
+                publish("1.2.3", root, "macos", mode)
+                self.assertEqual(len(uploads), count)
+                # A later Apple enrollment cannot replace the same version's bytes.
+                other_mode = "signed" if mode == "unsigned" else "unsigned"
+                (root / "MACOS-RELEASE.txt").write_text(
+                    macos_release_notes("1.2.3", SHA, other_mode)
+                )
+                with self.assertRaisesRegex(ValueError, "metadata"):
+                    publish("1.2.3", root, "macos", mode)
+                (root / "MACOS-RELEASE.txt").write_text(notes)
+                manifest = root / "SHA256SUMS-macos"
+                original = manifest.read_text()
+                manifest.write_text(original.splitlines()[0] + "\n")
+                with self.assertRaisesRegex(ValueError, "complete asset set"):
+                    publish("1.2.3", root, "macos", mode)
+                manifest.write_text(original)
+                (root / "pot.rb").write_text("changed bytes")
+                with self.assertRaisesRegex(ValueError, "complete asset set"):
+                    publish("1.2.3", root, "macos", mode)
+                # Even a newly valid manifest cannot override existing assets.
+                with mock.patch("subprocess.run"):
+                    prepare("1.2.3", root, sign_feed=True, channel="macos", macos_mode=other_mode)
+                with self.assertRaisesRegex(ValueError, "Refusing to replace"):
+                    publish("1.2.3", root, "macos", other_mode)
+                self.assertEqual(len(uploads), count)
+
+
+class MacOSSealing(unittest.TestCase):
+    def test_unsigned_entrypoint_does_not_read_apple_credentials(self):
+        main = runpy.run_path(str(ROOT / "scripts/sign-macos-release"))["main"]
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(
+                sys, "argv", ["sign-macos-release", "1.2.3", ".", "--mode", "unsigned"]
+            ),
+            mock.patch.dict(main.__globals__, seal_archives=mock.Mock()) as namespace,
+        ):
+            main()
+            self.assertEqual(namespace["seal_archives"].call_args.args[3], "-")
+
+    def test_extracted_signature_check_rejects_wrong_identity_and_damage(self):
+        from macos_release import verify_signatures
+
+        with tempfile.TemporaryDirectory() as temporary:
+            tree = Path(temporary)
+            (tree / "pot").write_bytes(bytes.fromhex("cffaedfe") + b"fixture")
+            for mode, details, accepted in [
+                ("unsigned", "Signature=adhoc\n", True),
+                ("unsigned", "Authority=Developer ID Application: fixture\n", False),
+                ("signed", "Signature=adhoc\n", False),
+                ("signed", "Authority=Developer ID Application: fixture\n", True),
+            ]:
+                with (
+                    self.subTest(mode=mode, details=details),
+                    mock.patch(
+                        "subprocess.run",
+                        return_value=subprocess.CompletedProcess([], 0, "", details),
+                    ),
+                ):
+                    if accepted:
+                        verify_signatures(tree, mode)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "expected"):
+                            verify_signatures(tree, mode)
+            with (
+                mock.patch(
+                    "subprocess.run", side_effect=subprocess.CalledProcessError(1, "codesign")
+                ),
+                self.assertRaises(subprocess.CalledProcessError),
+            ):
+                verify_signatures(tree, "unsigned")
+            (tree / "pot").unlink()
+            with self.assertRaisesRegex(ValueError, "no Mach-O"):
+                verify_signatures(tree, "unsigned")
+
+    def test_unsigned_only_uses_adhoc_and_signed_notary_failure_is_fatal(self):
+        sealing = runpy.run_path(str(ROOT / "scripts/sign-macos-release"))
+        seal = sealing["seal_archives"]
+        for mode in ["unsigned", "signed"]:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                output = root / "dist"
+                output.mkdir()
+                stage = root / "stage"
+                stage.mkdir()
+                app = root / "Pot.app"
+                (app / "Contents/MacOS").mkdir(parents=True)
+                (app / "Contents/MacOS/pot-app").write_bytes(bytes.fromhex("cffaedfe") + b"fixture")
+                with zipfile.ZipFile(output / "Pot-1.2.3-arm64.zip", "w") as packed:
+                    packed.write(app / "Contents/MacOS/pot-app", "Pot.app/Contents/MacOS/pot-app")
+                cli = root / "pot-go-darwin-arm64"
+                cli.mkdir()
+                (cli / "pot").write_bytes(bytes.fromhex("cffaedfe") + b"fixture")
+                with tarfile.open(output / "pot-go-1.2.3-darwin-arm64.tar.gz", "w:gz") as packed:
+                    packed.add(cli, arcname=cli.name)
+                for path in output.iterdir():
+                    write_checksum(path)
+                commands = []
+
+                def call(*args):
+                    commands.append(args)
+                    if args[:4] == ("ditto", "-x", "-k", str(output / "Pot-1.2.3-arm64.zip")):
+                        with zipfile.ZipFile(args[3]) as packed:
+                            packed.extractall(args[4])
+                    elif args[:3] == ("ditto", "-c", "-k"):
+                        with zipfile.ZipFile(args[-1], "w") as packed:
+                            tree = Path(args[-2])
+                            for path in tree.rglob("*"):
+                                if path.is_file():
+                                    packed.write(path, str(path.relative_to(tree.parent)))
+
+                with (
+                    mock.patch.dict(seal.__globals__, call=call),
+                    mock.patch.dict(
+                        seal.__globals__,
+                        notarize=mock.Mock(side_effect=RuntimeError("notary refused")),
+                    ),
+                ):
+                    if mode == "signed":
+                        with self.assertRaisesRegex(RuntimeError, "notary refused"):
+                            seal(
+                                "1.2.3",
+                                output,
+                                stage,
+                                "Developer ID Application: fixture",
+                                root / "keychain",
+                            )
+                    else:
+                        seal("1.2.3", output, stage, "-")
+                        self.assertTrue(
+                            all(cmd[0] not in {"xcrun", "security", "spctl"} for cmd in commands)
+                        )
+                        for cmd in commands:
+                            if cmd[0] == "codesign" and "--sign" in cmd:
+                                self.assertEqual(cmd[cmd.index("--sign") + 1], "-")
+                        for path in output.iterdir():
+                            if not path.name.endswith(".sha256"):
+                                self.assertEqual(
+                                    path.with_name(path.name + ".sha256").read_text(),
+                                    f"{checksum(path)}  {path.name}\n",
+                                )
 
 
 @unittest.skipUnless(

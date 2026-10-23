@@ -54,9 +54,14 @@ and architecture rather than constructing a download URL. The
 [release contract](releases.md) defines these filenames:
 
 - macOS Apple Silicon: `Pot-VERSION-arm64.zip`; extract and move Pot.app to
-  Applications, then open it. A release can also include `pot.rb`: download that
-  cask and run `brew install --cask ./pot.rb` from its directory. The public
-  `jjyr/homebrew-tap` currently has no Pot cask; do not substitute a tap command.
+  Applications, then open it. Read `MACOS-RELEASE.txt`: `unsigned` means ad-hoc
+  integrity signing without Developer ID or Apple notarization. Follow the
+  [macOS first-launch guide](desktop-installation.md#macos) only for trusted,
+  checksum-verified downloads; do not disable Gatekeeper globally. A release can
+  also include `pot.rb`: download that cask and run `brew install --cask ./pot.rb` from its directory.
+  Homebrew preserves quarantine and may require that same App-specific first-launch
+  allowance. The public `jjyr/homebrew-tap` currently has no Pot cask; do not
+  substitute a tap command.
 - Linux desktop: `pot-desktop_VERSION_linux_amd64.deb` is Experimental. Check
   its checksum, then `sudo apt install ./THE_DOWNLOADED_FILE.deb` and launch
   `pot-desktop`. Use the actual downloaded filename. Do not offer arm64 until a
@@ -106,8 +111,8 @@ mise run open
 This creates the independent development bundle `.local/go/PotGoPreview.app`,
 not a production release. Launch that bundle again to start; use **Quit** to
 stop it (closing the macOS window leaves Pot running). Rebuild with these same
-commands after quitting and backing up before updates. For published signed
-packages, follow their release instructions and [Updates](updates.md).
+commands after quitting and backing up before updates. For published
+packages in either release mode, follow their release instructions and [Updates](updates.md).
 
 On native Debian/Ubuntu amd64, build the Experimental Linux desktop package:
 

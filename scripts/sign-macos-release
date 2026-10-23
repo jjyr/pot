@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Developer ID sign and notarize the validated macOS App and CLI archives."""
+"""Seal validated macOS archives in explicit ad-hoc or Developer ID/notarized mode."""
 
+import argparse
 import base64
 import os
 from pathlib import Path
 import plistlib
 import secrets
 import subprocess
-import sys
 import tarfile
 import tempfile
 
+from macos_release import macho_files
 from release_contract import ROOT, checksum, version_number, write_checksum
 
 
@@ -21,42 +22,69 @@ def call(*args):
         raise SystemExit(f"{args[0]} failed with status {result.returncode}")
 
 
-def sign_tree(root, identity, keychain):
-    # Sign actual Mach-O files, including bundled runtimes, before the App seal.
-    magics = {bytes.fromhex(value) for value in ["cffaedfe", "feedfacf", "cafebabe", "bebafeca"]}
-    for path in sorted(root.rglob("*"), key=lambda p: len(p.parts), reverse=True):
-        if path.is_file() and not path.is_symlink():
-            with path.open("rb") as source:
-                macho = source.read(4) in magics
-            if macho:
-                call(
-                    "codesign",
-                    "--force",
-                    "--timestamp",
-                    "--options",
-                    "runtime",
-                    "--entitlements",
-                    str(ROOT / "packaging/macos-release.entitlements"),
-                    "--keychain",
-                    str(keychain),
-                    "--sign",
-                    identity,
-                    str(path),
-                )
-    if root.suffix == ".app":
-        call(
-            "codesign",
-            "--force",
+def sign_tree(root, identity, keychain=None):
+    options = (
+        ["--timestamp=none"]
+        if identity == "-"
+        else [
             "--timestamp",
             "--options",
             "runtime",
             "--keychain",
             str(keychain),
-            "--sign",
-            identity,
-            str(root),
-        )
+        ]
+    )
+    file_options = (
+        options
+        if identity == "-"
+        else [
+            *options,
+            "--entitlements",
+            str(ROOT / "packaging/macos-release.entitlements"),
+        ]
+    )
+    files = list(macho_files(root))
+    if not files:
+        raise ValueError("macOS archive contains no Mach-O executables")
+    for path in files:
+        call("codesign", "--force", *file_options, "--sign", identity, str(path))
+        call("codesign", "--verify", "--strict", str(path))
+    if root.suffix == ".app":
+        call("codesign", "--force", *options, "--sign", identity, str(root))
         call("codesign", "--verify", "--deep", "--strict", str(root))
+
+
+def seal_archives(version, output, root, identity, keychain=None):
+    for name in [f"Pot-{version}-arm64.zip", f"pot-go-{version}-darwin-arm64.tar.gz"]:
+        archive = output / name
+        if archive.with_name(name + ".sha256").read_text() != f"{checksum(archive)}  {name}\n":
+            raise ValueError(f"input checksum mismatch: {name}")
+        stage = root / name
+        stage.mkdir()
+        if name.endswith(".zip"):
+            call("ditto", "-x", "-k", str(archive), str(stage))
+            tree = stage / "Pot.app"
+        else:
+            with tarfile.open(archive) as packed:
+                packed.extractall(stage, filter="data")
+            tree = stage / "pot-go-darwin-arm64"
+        sign_tree(tree, identity, keychain)
+        if identity != "-":
+            notary_zip = root / "notary.zip"
+            call("ditto", "-c", "-k", "--keepParent", str(tree), str(notary_zip))
+            notarize(notary_zip)
+            notary_zip.unlink()
+            if tree.suffix == ".app":
+                call("xcrun", "stapler", "staple", str(tree))
+                call("xcrun", "stapler", "validate", str(tree))
+                call("spctl", "--assess", "--type", "execute", "--verbose", str(tree))
+        if tree.suffix == ".app":
+            archive.unlink()
+            call("ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(tree), str(archive))
+        else:
+            with tarfile.open(archive, "w:gz") as packed:
+                packed.add(tree, arcname=tree.name)
+        write_checksum(archive)
 
 
 def notarize(archive):
@@ -83,8 +111,17 @@ def notarize(archive):
 
 
 def main():
-    version = version_number(sys.argv[1])
-    output = Path(sys.argv[2]).resolve()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("version")
+    parser.add_argument("output", type=Path)
+    parser.add_argument("--mode", required=True, choices=["unsigned", "signed"])
+    args = parser.parse_args()
+    version = version_number(args.version)
+    output = args.output.resolve()
+    if args.mode == "unsigned":
+        with tempfile.TemporaryDirectory(prefix="pot-adhoc-macos-") as temporary:
+            seal_archives(version, output, Path(temporary), "-")
+        return
     identity = os.environ["MACOS_SIGNING_IDENTITY"]
     if not identity.startswith("Developer ID Application:"):
         raise ValueError("MACOS_SIGNING_IDENTITY must be a Developer ID Application identity")
@@ -121,45 +158,7 @@ def main():
                 password,
                 str(keychain),
             )
-            for name in [f"Pot-{version}-arm64.zip", f"pot-go-{version}-darwin-arm64.tar.gz"]:
-                archive = output / name
-                if (
-                    archive.with_name(name + ".sha256").read_text()
-                    != f"{checksum(archive)}  {name}\n"
-                ):
-                    raise ValueError(f"input checksum mismatch: {name}")
-                stage = root / name
-                stage.mkdir()
-                if name.endswith(".zip"):
-                    call("ditto", "-x", "-k", str(archive), str(stage))
-                    tree = stage / "Pot.app"
-                else:
-                    with tarfile.open(archive) as packed:
-                        packed.extractall(stage, filter="data")
-                    tree = stage / "pot-go-darwin-arm64"
-                sign_tree(tree, identity, keychain)
-                notary_zip = root / "notary.zip"
-                call("ditto", "-c", "-k", "--keepParent", str(tree), str(notary_zip))
-                notarize(notary_zip)
-                if tree.suffix == ".app":
-                    call("xcrun", "stapler", "staple", str(tree))
-                    call("xcrun", "stapler", "validate", str(tree))
-                    call("spctl", "--assess", "--type", "execute", "--verbose", str(tree))
-                    archive.unlink()
-                    call(
-                        "ditto",
-                        "-c",
-                        "-k",
-                        "--sequesterRsrc",
-                        "--keepParent",
-                        str(tree),
-                        str(archive),
-                    )
-                else:
-                    with tarfile.open(archive, "w:gz") as packed:
-                        packed.add(tree, arcname=tree.name)
-                notary_zip.unlink()
-                write_checksum(archive)
+            seal_archives(version, output, root, identity, keychain)
         finally:
             call("security", "delete-keychain", str(keychain))
 
