@@ -1,6 +1,7 @@
 import {reconcile} from './reconcile.mjs';
 import {node as n,action,table} from './primitives.mjs';
 import {translate} from '../locales/messages.mjs';
+import {usageTrendBuckets,usageRangeLabel,usageToday} from './usage-period.mjs';
 
 export function usageNumbers(locale) {
   const exact=value=>value==null?'—':Number(value).toLocaleString(locale);
@@ -37,6 +38,29 @@ export function usageRows(value,locale) {
     [t('uncached'),exact(uncached(value))],
     [t('output'),value.output_known===false?'—':exact(value.output)],
     [t('hitRate'),hitRate(value)]];
+}
+
+export function usageTrend(data,{locale,timezone,preset}) {
+  const t=key=>translate(locale,'usage.'+key),numbers=usageNumbers(locale),{buckets,kind}=usageTrendBuckets(data,preset),today=data.today||usageToday();
+  const card=n('section','page-section page-card usage-trend'),heading=n('div','usage-chart-heading'),legend=n('div','usage-legend'),chart=n('div','usage-chart');
+  chart.style.setProperty('--usage-bars',String(Math.max(1,buckets.length)));
+  heading.append(n('h2','',t('trendTitle')),n('span','hint',t('granularity.'+kind)));card.append(heading);
+  const series=[['usage-uncached',t('uncached'),value=>numbers.uncached(value)],['usage-cached',t('cached'),value=>value.cache||0],['usage-output',t('output'),value=>value.output||0]];
+  for(const [className,label]of series){const entry=n('span');entry.append(n('i',className),n('span','',label));legend.append(entry);}
+  chart.setAttribute('role','group');chart.setAttribute('aria-label',t('trendLabel'));
+  const multipleYears=buckets[0]?.date.slice(0,4)!==buckets.at(-1)?.end.slice(0,4);
+  const maximum=Math.max(1,...buckets.map(value=>(value.input||0)+(value.output||0))),shortDate=new Intl.DateTimeFormat(locale,{...(kind==='month'?{month:'short',...(multipleYears?{year:'2-digit'}:{})}:{month:'numeric',day:'numeric'}),timeZone:'UTC'}),labelStep=Math.max(1,Math.ceil(buckets.length/6));
+  for(const [index,bucket]of buckets.entries()){
+    const column=n('div','chart-column'),bar=n('div','chart-bar'),date=new Date(bucket.date+'T12:00:00Z'),title=usageRangeLabel({start:bucket.date,end:bucket.end},locale),rows=usageRows(bucket,locale),current=bucket.date<=today&&bucket.end>=today,value=(bucket.input||0)+(bucket.output||0);
+    column.dataset.viewKey=bucket.date;column.dataset.date=bucket.date;
+    column.setAttribute('aria-label',`${title} · ${rows.map(row=>row.join(' ')).join(' · ')}`);
+    bar.style.height=`${value/maximum*140}px`;
+    for(const [className,,amount]of series){const segment=n('span',className);segment.style.flexGrow=String(amount(bucket)||0);bar.append(segment);}
+    column.append(bar,n('small','',index%labelStep===0?shortDate.format(date):'\u00a0'));
+    usageTooltip(column,{title,rows,note:[current?t('throughNow'):'',timezone].filter(Boolean).join(' · ')});chart.append(column);
+  }
+  card.append(legend,chart);if(!buckets.length)card.append(n('p','hint',t('empty')));
+  card.append(n('p','hint usage-trend-note',t('trendNote').replace('{timezone}',timezone)));return card;
 }
 
 // Keep each resource's page, failures and pending state local to its own region.

@@ -2,6 +2,21 @@ import assert from 'node:assert/strict';
 import {usageCalendarWeeks,usageModelColor,usagePercent,usageCompactionRows,compactionTokens} from '../../web/src/components/usage-calendar.mjs';
 import {usageNumbers,usageRows} from '../../web/src/components/usage.mjs';
 import {combineUsage} from '../../web/src/state/aggregate.mjs';
+import {usageRange,usageShiftRange,usageValidRange,usageTrendBuckets} from '../../web/src/components/usage-period.mjs';
+
+assert.deepEqual(usageRange('month','2024-02-29'),{preset:'month',start:'2024-02-01',end:'2024-02-29'});
+assert.deepEqual(usageShiftRange(usageRange('month','2024-03-31'),-1),usageRange('month','2024-02-15'),'Moving from March uses a whole natural February');
+assert.deepEqual(usageRange('week','2026-10-25'),{preset:'week',start:'2026-10-19',end:'2026-10-25'},'Weeks begin on Monday');
+assert.deepEqual(usageShiftRange(usageRange('year','2024-02-29'),1),usageRange('year','2025-01-01'));
+assert.equal(usageRange('recent','2026-01-01').start,'2025-12-03');
+for(const [start,end]of [['2026-02-30','2026-03-01'],['2026-10-23','2026-10-01'],['','2026-01-01'],['2000-01-01','2026-01-01']])assert.equal(usageValidRange(start,end),false);
+assert.equal(usageValidRange('2024-02-29','2024-02-29'),true);
+const daily=Array.from({length:91},(_,i)=>({date:new Date(Date.UTC(2024,0,1+i)).toISOString().slice(0,10),input:100,output:20,cache:75}));
+const weekly=usageTrendBuckets({buckets:daily},'custom');
+assert.equal(weekly.kind,'week');assert.equal(weekly.buckets.length,13);assert.equal(weekly.buckets[0].date,'2024-01-01');assert.equal(weekly.buckets[0].end,'2024-01-07');assert.equal(weekly.buckets[0].cache,525);
+const monthly=usageTrendBuckets({buckets:daily},'year');
+assert.deepEqual(monthly.buckets.map(row=>[row.date,row.end,row.input]),[['2024-01-01','2024-01-31',3100],['2024-02-01','2024-02-29',2900],['2024-03-01','2024-03-31',3100]]);
+assert.equal(monthly.buckets.reduce((sum,row)=>sum+row.input+row.output,0),10920,'Grouping preserves totals without duplicating cache or boundary dates');
 
 for(let weekday=0;weekday<7;weekday++){
   const buckets=Array.from({length:365},(_,i)=>({date:new Date(Date.UTC(2024,1,25+weekday+i)).toISOString().slice(0,10),input:i}));
