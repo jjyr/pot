@@ -3,11 +3,8 @@ package control
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"github.com/jjyr/pot/pkg/agentlink"
-	"github.com/jjyr/pot/pkg/protocol"
 	"testing"
-	"time"
 )
 
 func TestLinkedPotRetiresOnlySelectedAssistant(t *testing.T) {
@@ -20,23 +17,7 @@ func TestLinkedPotRetiresOnlySelectedAssistant(t *testing.T) {
 	connection := connectAgentControls(t, a, b)
 	owner := "agent-link:" + connection.ID + ":main"
 	callAgent := func(operation agentlink.Operation, call agentlink.Call) (any, error) {
-		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		for {
-			value, err := a.service.CallAgent(ctx, owner, operation, call)
-			var api protocol.APIError
-			if !errors.As(err, &api) || api.Code != agentlink.ErrCapacity.Error() {
-				return value, err
-			}
-			// Background observations share the one-operation admission limit.
-			// Capacity rejection happens before execution, so only that outcome
-			// can safely retry the exact profile request.
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(20 * time.Millisecond):
-			}
-		}
+		return callAgentWhenReady(ctx, a.service, owner, operation, call)
 	}
 	d, err := a.service.AgentCapabilities(ctx, owner)
 	if err != nil || !d.Supports(agentlink.AssistantDelete) {
