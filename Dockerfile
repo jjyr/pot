@@ -9,7 +9,7 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
 ARG TARGETOS
 ARG TARGETARCH
-ARG POT_APP_VERSION=0.1.0
+ARG POT_APP_VERSION=0.0.0
 ARG POT_BUILD_REVISION=container-local
 ARG POT_UPDATE_PUBLIC_KEY=
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
@@ -35,7 +35,7 @@ ENV HOME=/home/pot \
     PATH=/opt/pot/bin:/opt/pot/Resources/node/bin:/usr/local/bin:/usr/bin:/bin \
     POT_WEB_ORIGIN=http://localhost:17703 \
     PYTHONDONTWRITEBYTECODE=1
-ARG POT_APP_VERSION=0.1.0
+ARG POT_APP_VERSION=0.0.0
 ARG POT_BUILD_REVISION=container-local
 LABEL org.opencontainers.image.source="https://github.com/jjyr/pot" \
       org.opencontainers.image.title="Pot server" \

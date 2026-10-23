@@ -22,7 +22,7 @@ from go_packaging import (
 
 if platform.system() != "Darwin" or platform.machine() != "arm64":
     raise SystemExit("The Go desktop targets Apple Silicon macOS.")
-version = os.environ.get("POT_APP_VERSION", "0.1.0")
+version = os.environ.get("POT_APP_VERSION", "0.0.0")
 if not re.fullmatch(r"\d+\.\d+\.\d+", version):
     raise SystemExit("POT_APP_VERSION must be major.minor.patch")
 BUILD.mkdir(parents=True, exist_ok=True)

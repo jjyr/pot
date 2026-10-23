@@ -56,7 +56,7 @@ def main():
         parser.error(
             "Linux desktop packages require a native Linux runner of the target architecture"
         )
-    version = os.environ.get("POT_APP_VERSION", "0.1.0")
+    version = os.environ.get("POT_APP_VERSION", "0.0.0")
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         parser.error("POT_APP_VERSION must be major.minor.patch")
     BUILD.mkdir(parents=True, exist_ok=True)

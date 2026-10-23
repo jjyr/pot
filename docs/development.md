@@ -37,6 +37,12 @@ uses the production identity. Do not replace a running product's files implicitl
 layout and checksums. Standalone and embedded Runtime locate trusted tool assets
 independently of workspace preparation.
 
+Local packaging defaults to development version `0.0.0`, matching CI builds from
+unversioned refs. Set `POT_APP_VERSION=MAJOR.MINOR.PATCH` to build a specific version;
+`scripts/release VERSION` and official CI set it explicitly. The CLI, App bundle,
+package metadata and container labels use that version. Plain `go build` without
+the packaging linker flags reports `development`.
+
 For cross-platform tool packages:
 
 ```sh

@@ -91,10 +91,10 @@ install build and smoke prerequisites:
 sudo apt install build-essential pkg-config binutils libgtk-3-dev \
   libwebkit2gtk-4.1-dev dbus-user-session bubblewrap socat xvfb xauth
 mise install
-POT_APP_VERSION=0.1.0 POT_BUILD_REVISION=local \
+POT_APP_VERSION=0.0.0 POT_BUILD_REVISION=local \
   mise exec -- python scripts/build-desktop --platform linux-amd64 --output .local/go/dist
 xvfb-run -a mise exec -- python scripts/smoke-desktop \
-  --platform linux-amd64 --archive .local/go/dist/pot-desktop_0.1.0_linux_amd64.deb
+  --platform linux-amd64 --archive .local/go/dist/pot-desktop_0.0.0_linux_amd64.deb
 ```
 
 Use `linux-arm64` on a native arm64 runner. Cross-compiling a CGO desktop requires
