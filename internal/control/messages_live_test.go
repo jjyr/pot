@@ -97,7 +97,7 @@ func TestDeepSeekTaskGuidanceLive(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	if _, err = s.Registry.Create(ctx, "main-create", "Guidance observation"); err != nil {
+	if _, err = legacyMainAssistant(ctx, s, "main-create", "Guidance observation"); err != nil {
 		t.Fatal(err)
 	}
 	none, provider := "none", "deepseek"

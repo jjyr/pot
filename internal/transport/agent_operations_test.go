@@ -48,7 +48,7 @@ func TestUnifiedHTTPPortRunsLinkedTaskWithoutLocalAssistant(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := value.(agentlink.Connection)
-	owner := "agent-link:" + link.ID + ":main"
+	owner := "agent-link:" + link.ID + ":" + localAssistantID(t, receiver.Control)
 	query := "?assistant_id=" + url.QueryEscape(owner)
 	server := httptest.NewServer(Handler(&Application{Control: source, RuntimeID: "http-user-source", BootID: "boot"}, "private"))
 	defer server.Close()

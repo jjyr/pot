@@ -81,7 +81,7 @@ func TestLocalControlAgentApprovalCommandPersistenceAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer service.Close()
-	if _, err = service.Registry.Create(ctx, "create-assistant", "Pot"); err != nil {
+	if _, err = legacyMainAssistant(ctx, service, "create-assistant", "Pot"); err != nil {
 		t.Fatal(err)
 	}
 	profile, err := service.Profiles.Save(ctx, SaveProfile{RequestID: "configure", ProfileID: "test", Name: "Test", Model: "test", Endpoint: server.URL, Protocol: "openai_chat", APIKey: "test-key", MaxOutputTokens: 100})

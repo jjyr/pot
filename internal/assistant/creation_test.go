@@ -20,7 +20,7 @@ func TestCreationBindsAllInputsAndDoesNotResolveRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = r.Rename(ctx, first.ID, "Renamed", 1); err != nil {
+	if _, err = r.Rename(ctx, first.ID, "Renamed", first.Revision); err != nil {
 		t.Fatal(err)
 	}
 	r.Close()

@@ -72,7 +72,7 @@ func TestConfiguredModelTaskResultsLive(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	if _, err := s.Registry.Create(ctx, "create", "Task result qualification"); err != nil {
+	if _, err := legacyMainAssistant(ctx, s, "create", "Task result qualification"); err != nil {
 		t.Fatal(err)
 	}
 	settings := core.ModelSettings{}

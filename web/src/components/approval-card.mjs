@@ -20,9 +20,9 @@ export function createApprovalCard({locale,machineLabel=()=>translate(locale(),'
     if(signature===next)return;signature=next;
     command.hidden=!request.args?.cmd;command.textContent=request.args?.cmd||'';
     reason.hidden=!request.args?.justification;reason.textContent=`${t('justification')}: ${request.args?.justification||''}`;
-    consent.textContent=approval.once_only?translate(locale(),'agentLinks.reviewConsent'):t(request.tool==='update_agent_instructions'?'instructionConsent':'hostConsent');
+    consent.textContent=approval.once_only?translate(locale(),'agentLinks.reviewConsent'):t(request.tool==='apply_patch'?'fileConsent':'hostConsent');
     exact.textContent=`${machine.textContent} · ${request.tool}\n${JSON.stringify(approval.details||request.command_context||request.args,null,2)}`;
-    const names=approval.once_only||request.tool==='update_agent_instructions'?['allow_once','deny']:['allow_always','allow_task','deny'];
+    const names=approval.once_only||request.tool==='apply_patch'?['allow_once','deny']:['allow_always','allow_task','deny'];
     for(const name of names) {
       if(!buttons.has(name))buttons.set(name,action('',async()=>{
         if(busy)return;busy=true;error.textContent='';buttons.forEach(button=>button.disabled=true);

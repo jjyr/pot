@@ -38,7 +38,7 @@ func agentControl(t *testing.T, id string) *agentControlFixture {
 	}
 	fixture.endpoint = controlPeerEndpoint(fixture.service)
 	t.Cleanup(func() { fixture.service.Close() })
-	if _, err = fixture.service.Registry.Create(context.Background(), "create-main", "Main"); err != nil {
+	if _, err = legacyMainAssistant(context.Background(), fixture.service, "create-main", "Main"); err != nil {
 		t.Fatal(err)
 	}
 	return fixture

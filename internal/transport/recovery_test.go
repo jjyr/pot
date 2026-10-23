@@ -31,11 +31,11 @@ func TestRecoveryOwnerAcceptsOnlyIdentityAndIntent(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "original run not found") {
 		t.Fatal("owner recovery route unavailable", err)
 	}
-	_, err = app.Call(ctx, Request{Method: "POST", Path: "/api/v1/turn/recovery", Body: json.RawMessage(`{"action":"reconcile","user_message_id":"original","cleanup_confirmed":true}`)})
+	_, err = app.Call(ctx, Request{Method: "POST", Path: "/api/v1/turn/recovery?assistant_id=missing", Body: json.RawMessage(`{"action":"reconcile","user_message_id":"original","cleanup_confirmed":true}`)})
 	if err == nil || !strings.Contains(err.Error(), "cleanup_confirmed") {
 		t.Fatal("Main caller supplied cleanup accepted", err)
 	}
-	_, err = app.Call(ctx, Request{Method: "POST", Path: "/api/v1/turn/continue", Body: json.RawMessage(`{"request_id":"continue","user_message_id":"original","attempt_id":"original","cleanup_confirmed":true}`)})
+	_, err = app.Call(ctx, Request{Method: "POST", Path: "/api/v1/turn/continue?assistant_id=missing", Body: json.RawMessage(`{"request_id":"continue","user_message_id":"original","attempt_id":"original","cleanup_confirmed":true}`)})
 	if err == nil || !strings.Contains(err.Error(), "cleanup_confirmed") {
 		t.Fatal("continuation accepted caller-supplied cleanup", err)
 	}
@@ -55,10 +55,11 @@ func TestAllowanceResumeRequiresDisplayedOriginalTurnAndWaitToken(t *testing.T) 
 	}
 	defer service.Close()
 	ctx := context.Background()
-	if _, err = service.Registry.Create(ctx, "create", "Pot"); err != nil {
+	owner, err := service.Registry.Create(ctx, "create", "Pot")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err = service.Usage.Wait(ctx, usage.WaitRequest{Scope: "main", Turn: "new-turn", AtMS: 100, Required: 1}); err != nil {
+	if err = service.Usage.Wait(ctx, usage.WaitRequest{Scope: owner.ID, Turn: "new-turn", AtMS: 100, Required: 1}); err != nil {
 		t.Fatal(err)
 	}
 	app := Application{Control: service, RuntimeID: "local", BootID: "boot"}
@@ -67,7 +68,7 @@ func TestAllowanceResumeRequiresDisplayedOriginalTurnAndWaitToken(t *testing.T) 
 			t.Fatal("stale/unbound allowance action admitted", body)
 		}
 	}
-	waiting, err := service.Usage.Waiting(ctx, "main")
+	waiting, err := service.Usage.Waiting(ctx, owner.ID)
 	if err != nil || waiting == nil || waiting.Released {
 		t.Fatal(waiting, err)
 	}

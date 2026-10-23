@@ -21,7 +21,7 @@ func taskControl(t *testing.T, id, url string) *Service {
 			t.Fatal(err)
 		}
 		ctx := context.Background()
-		s.Registry.Create(ctx, "create", "Pot")
+		legacyMainAssistant(ctx, s, "create", "Pot")
 		profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "test", Name: "Test", Model: "model", Endpoint: url, Protocol: "openai_chat", APIKey: "owner-key", MaxOutputTokens: 100})
 		if err != nil {
 			t.Fatal(err)

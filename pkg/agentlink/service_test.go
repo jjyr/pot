@@ -471,6 +471,7 @@ func TestNodeIdentityUpgradeReopensOriginalSignedPairAndReceipts(t *testing.T) {
 	// Recreate the exact previous persisted format, including encrypted outgoing
 	// pair intent. Every database and key belongs to this private test fixture.
 	for _, fixture := range []*fixture{a, b} {
+		restoreAssistantSchemaForLegacyUpgrade(t, fixture.db)
 		links, err := fixture.service.List(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -604,6 +605,7 @@ func TestEstablishedAssistantAnchorUpgradeRetainsSignedConnection(t *testing.T) 
 	b.stop()
 	endpoints := []string{a.endpoint, b.endpoint}
 	for _, side := range []*fixture{a, b} {
+		restoreAssistantSchemaForLegacyUpgrade(t, side.db)
 		connection, err := side.service.Get(ctx, c.ID)
 		if err != nil {
 			t.Fatal(err)
@@ -649,5 +651,25 @@ DROP TABLE agent_link_chat_sessions; DROP TABLE agent_link_endpoints; ALTER TABL
 	}
 	if mailCount(t, b, next.ID) != 1 {
 		t.Fatal("upgraded connection could not deliver")
+	}
+}
+
+// These link fixtures have no registered assistants. Restore the pre-file tables
+// before reconstructing a historical database, so current destructive migrations
+// can run again against the actual predecessor shape rather than current tables.
+func restoreAssistantSchemaForLegacyUpgrade(t *testing.T, db *sql.DB) {
+	t.Helper()
+	var count int
+	if err := db.QueryRow("SELECT count(*) FROM assistant_definitions").Scan(&count); err != nil || count != 0 {
+		t.Fatal("legacy link fixture unexpectedly contains assistant data", count, err)
+	}
+	if _, err := db.Exec(`DROP TABLE assistant_file_export;
+ALTER TABLE assistant_definitions ADD COLUMN name TEXT NOT NULL DEFAULT '';
+ALTER TABLE assistant_definitions ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE assistant_definitions ADD COLUMN created_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE assistant_initial ADD COLUMN rules TEXT NOT NULL DEFAULT '';
+CREATE TABLE assistant_profiles(assistant_id TEXT PRIMARY KEY,avatar TEXT NOT NULL,character TEXT NOT NULL DEFAULT '');
+CREATE TABLE assistant_profile_requests(id TEXT PRIMARY KEY,input_hash TEXT NOT NULL,response TEXT NOT NULL);`); err != nil {
+		t.Fatal(err)
 	}
 }

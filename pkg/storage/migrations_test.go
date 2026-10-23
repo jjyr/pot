@@ -41,7 +41,7 @@ func TestCharacterAvatarUpgrade(t *testing.T) {
  ('custom','custom-hash','{"id":"custom","name":"My custom","revision":3,"request_id":"seed-custom","avatar":"uploaded-image"}');`)
 	// A failed conversion must roll back both new metadata and rewritten images.
 	execMigrationSQL(t, db, `CREATE TRIGGER fail_character_conversion BEFORE UPDATE ON assistant_profiles BEGIN SELECT RAISE(ABORT,'test interrupted upgrade'); END;`)
-	if err := Migrate(ctx, db, ControlDatabase); err == nil {
+	if err := migrateDatabase(ctx, db, ControlDatabase, migrationsBefore(t, ControlDatabase, "0032_")); err == nil {
 		t.Fatal("failed migration accepted")
 	}
 	if migrationCount(t, db) != count {
@@ -53,7 +53,7 @@ func TestCharacterAvatarUpgrade(t *testing.T) {
 	}
 	execMigrationSQL(t, db, "DROP TRIGGER fail_character_conversion")
 	for range 2 {
-		if err := Migrate(ctx, db, ControlDatabase); err != nil {
+		if err := migrateDatabase(ctx, db, ControlDatabase, migrationsBefore(t, ControlDatabase, "0032_")); err != nil {
 			t.Fatal(err)
 		}
 		for id, character := range map[string]string{"renamed": "mug", "custom": "cup", "missing": "pot", "deleted": "glass"} {
@@ -124,7 +124,7 @@ INSERT INTO assistant_profile_requests VALUES
 	// A bad historical receipt must roll back the profile images and receipt
 	// together. Correcting that input allows the same pending version to retry.
 	execMigrationSQL(t, db, `INSERT INTO assistant_profile_requests VALUES('bad','bad-hash','{"id":"missing"}');`)
-	if err := Migrate(ctx, db, ControlDatabase); err == nil {
+	if err := migrateDatabase(ctx, db, ControlDatabase, migrationsBefore(t, ControlDatabase, "0032_")); err == nil {
 		t.Fatal("invalid historical seed accepted")
 	}
 	var created int
@@ -133,7 +133,7 @@ INSERT INTO assistant_profile_requests VALUES
 	}
 	execMigrationSQL(t, db, "DELETE FROM assistant_profile_requests WHERE id='bad'")
 	for range 2 {
-		if err := Migrate(ctx, db, ControlDatabase); err != nil {
+		if err := migrateDatabase(ctx, db, ControlDatabase, migrationsBefore(t, ControlDatabase, "0032_")); err != nil {
 			t.Fatal(err)
 		}
 		for _, id := range []string{"missing", "empty", "custom"} {
@@ -189,7 +189,7 @@ func TestDisplayResourcesUpgradePreservesExistingControl(t *testing.T) {
 	}
 	execMigrationSQL(t, db, `INSERT INTO assistant_definitions(id,name,revision,request_id,created_name) VALUES('kept','Kept',7,'kept-request','Kept')`)
 	for range 2 {
-		if err := Migrate(ctx, db, ControlDatabase); err != nil {
+		if err := migrateDatabase(ctx, db, ControlDatabase, migrationsBefore(t, ControlDatabase, "0032_")); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -608,7 +608,7 @@ func TestAssistantDeletionUpgradePreservesExistingIdentity(t *testing.T) {
 			}
 			execMigrationSQL(t, db, "INSERT INTO assistant_definitions(id,name,revision,request_id,created_name) VALUES('main','Keep',7,'original','Keep')")
 			for range 2 {
-				if err = Migrate(ctx, db, ControlDatabase); err != nil {
+				if err = migrateDatabase(ctx, db, ControlDatabase, migrationsBefore(t, ControlDatabase, "0032_")); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -622,7 +622,7 @@ func TestAssistantDeletionUpgradePreservesExistingIdentity(t *testing.T) {
 				t.Fatal(name, revision, request, deleted)
 			}
 			execMigrationSQL(t, db, "UPDATE assistant_definitions SET deleted=1 WHERE id='main'")
-			if err = Migrate(ctx, db, ControlDatabase); err != nil {
+			if err = migrateDatabase(ctx, db, ControlDatabase, migrationsBefore(t, ControlDatabase, "0032_")); err != nil {
 				t.Fatal(err)
 			}
 			if err = db.QueryRow("SELECT deleted FROM assistant_definitions WHERE id='main'").Scan(&deleted); err != nil || !deleted {

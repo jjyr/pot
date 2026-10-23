@@ -12,7 +12,7 @@ import (
 func TestCompletionsUseOwnerResourcesAndBoundMetadataWithoutExecution(t *testing.T) {
 	s := taskResourceService(t)
 	ctx := context.Background()
-	if _, err := s.Registry.Create(ctx, "create", "Pot"); err != nil {
+	if _, err := legacyMainAssistant(ctx, s, "create", "Pot"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Machines.SetLabels(ctx, "local", []string{"desktop", "task-runner"}); err != nil {

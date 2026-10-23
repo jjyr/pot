@@ -16,6 +16,15 @@ import (
 	"time"
 )
 
+func localAssistantID(t testing.TB, service *control.Service) string {
+	t.Helper()
+	definitions, err := service.Registry.Definitions(t.Context())
+	if err != nil || len(definitions) == 0 {
+		t.Fatalf("missing fixture assistant: %v", err)
+	}
+	return definitions[0].ID
+}
+
 func TestSocketProductCreateEventsAuthAndRestart(t *testing.T) {
 	ctx := context.Background()
 	temporary, err := os.MkdirTemp("/tmp", "pot-api-")
@@ -66,7 +75,7 @@ func TestSocketProductCreateEventsAuthAndRestart(t *testing.T) {
 	if code, _ := call("GET", "/api/v1/assistants/default-avatar?assistant_id=missing", "", endpoint.Token); code < 400 {
 		t.Fatal("missing assistant accepted")
 	}
-	body := `{"request_id":"create","name":"First","text":"Initial rules"}`
+	body := `{"request_id":"create","text":"Initial rules"}`
 	code, data := call("POST", "/api/v1/assistants", body, endpoint.Token)
 	if code != 200 {
 		t.Fatal(code, string(data))
@@ -74,6 +83,17 @@ func TestSocketProductCreateEventsAuthAndRestart(t *testing.T) {
 	var definition map[string]any
 	if err = json.Unmarshal(data, &definition); err != nil {
 		t.Fatal(err)
+	}
+	if definition["id"] != strings.ToLower(strings.ReplaceAll(definition["name"].(string), " ", "-")) || strings.Count(definition["id"].(string), "-") != 1 {
+		t.Fatal("first assistant did not use a shared two-word ID and initial name")
+	}
+	for _, path := range []string{"/api/v1/snapshot", "/api/v1/instructions", "/api/v1/agent"} {
+		if code, _ := call("GET", path, "", endpoint.Token); code != 200 {
+			t.Fatal("default route did not resolve generated assistant ID", path, code)
+		}
+		if code, _ := call("GET", path+"?assistant_id=missing", "", endpoint.Token); code < 400 {
+			t.Fatal("explicit missing assistant silently fell back", path)
+		}
 	}
 	code, data = call("GET", "/api/v1/assistants/default-avatar?assistant_id="+definition["id"].(string), "", endpoint.Token)
 	var preview map[string]string
@@ -121,7 +141,7 @@ func TestSocketProductCreateEventsAuthAndRestart(t *testing.T) {
 	}
 	streamctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	request, _ := http.NewRequestWithContext(streamctx, "GET", "http://runtime/api/v1/events?assistant_id=main", nil)
+	request, _ := http.NewRequestWithContext(streamctx, "GET", "http://runtime/api/v1/events?assistant_id="+definition["id"].(string), nil)
 	request.Header.Set("Authorization", "Bearer "+endpoint.Token)
 	response, err := client.Do(request)
 	if err != nil {
@@ -162,11 +182,12 @@ func TestSocketProductCreateEventsAuthAndRestart(t *testing.T) {
 	}
 	client = endpoint.Client()
 	assertAppearanceSeed()
-	if code, data := call("POST", "/api/v1/assistants/"+definition["id"].(string), `{"name":"Renamed","revision":1}`, endpoint.Token); code != 200 {
+	renameBody, _ := json.Marshal(map[string]any{"name": "Renamed", "revision": definition["revision"]})
+	if code, data := call("POST", "/api/v1/assistants/"+definition["id"].(string), string(renameBody), endpoint.Token); code != 200 {
 		t.Fatal(code, string(data))
 	}
 	assertAppearanceSeed()
-	c, err = runtime.Control.Conversation(ctx, "main")
+	c, err = runtime.Control.Conversation(ctx, definition["id"].(string))
 	if err != nil {
 		t.Fatal(err)
 	}

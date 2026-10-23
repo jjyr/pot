@@ -226,24 +226,38 @@ func TestRulesDenyHostBeforeTrustedAndManualCRUD(t *testing.T) {
 		t.Fatal("re-enrollment retained old grants")
 	}
 }
-func TestInstructionReviewCannotBecomeCommandGrant(t *testing.T) {
+func TestHostPatchUsesNormalPolicyAndExactOneTimeApproval(t *testing.T) {
 	for _, policy := range []string{"ask", "allow", "deny"} {
 		t.Run(policy, func(t *testing.T) {
 			p := permissionFixture(t)
 			if err := p.Configure("machine", MachinePolicy{ExecutionAccess: policy}); err != nil {
 				t.Fatal(err)
 			}
-			r := hostRequest("instructions")
-			r.Tool = "update_agent_instructions"
+			r := hostRequest("patch")
+			r.Tool = "apply_patch"
 			r.Command = nil
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			r.Args = json.RawMessage(`{"patch":"exact patch","cwd":"/project"}`)
+			if policy == "allow" {
+				mode, err := p.Authorize(t.Context(), r)
+				if err != nil || mode != "host" {
+					t.Fatal(mode, err)
+				}
+				return
+			}
+			if policy == "deny" {
+				if _, err := p.Authorize(t.Context(), r); !errors.Is(err, ErrHostDenied) {
+					t.Fatal(err)
+				}
+				return
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 			defer cancel()
 			done := make(chan error, 1)
-			go func() { _, e := p.Authorize(ctx, r); done <- e }()
+			go func() { _, err := p.Authorize(ctx, r); done <- err }()
 			a := waitApproval(t, p)
 			for _, action := range []string{"allow_task", "allow_always"} {
 				if err := p.Decide(r.Owner, a.ID, action); err == nil {
-					t.Fatal("instruction broad approval accepted")
+					t.Fatal("patch gained broad command grant")
 				}
 			}
 			if err := p.Decide(r.Owner, a.ID, "allow_once"); err != nil {
@@ -255,6 +269,7 @@ func TestInstructionReviewCannotBecomeCommandGrant(t *testing.T) {
 		})
 	}
 }
+
 func TestPersistenceFailureAndPendingApplicationFailClosed(t *testing.T) {
 	p := permissionFixture(t)
 	r := hostRequest("write-failure")

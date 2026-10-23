@@ -10,15 +10,16 @@ import (
 
 func TestSendReceiptHTTPIdentityAndAuthorization(t *testing.T) {
 	app := historyApplication(t, 0)
+	ownerID := localAssistantID(t, app.Control)
 	handler := Handler(app, "private")
 	for _, test := range []struct {
 		query, token string
 		code         int
 	}{
-		{"request_id=not-sent&conversation_id=main", "wrong", 401},
+		{"request_id=not-sent&conversation_id=" + ownerID, "wrong", 401},
 		{"request_id=not-sent&conversation_id=other", "private", 400},
-		{"request_id=not-sent&conversation_id=main&assistant_id=missing", "private", 400},
-		{"request_id=not-sent&conversation_id=main", "private", 200},
+		{"request_id=not-sent&conversation_id=" + ownerID + "&assistant_id=missing", "private", 400},
+		{"request_id=not-sent&conversation_id=" + ownerID, "private", 200},
 	} {
 		r := httptest.NewRequest("GET", "/api/v1/messages/receipt?"+test.query, nil)
 		r.Header.Set("Authorization", "Bearer "+test.token)
@@ -32,7 +33,7 @@ func TestSendReceiptHTTPIdentityAndAuthorization(t *testing.T) {
 			if err := json.Unmarshal(w.Body.Bytes(), &value); err != nil {
 				t.Fatal(err)
 			}
-			if value.State != "unconfirmed" || value.RequestID != "not-sent" || value.ConversationID != "main" || value.OwnerID != "main" || value.RuntimeID != "history-fixture" {
+			if value.State != "unconfirmed" || value.RequestID != "not-sent" || value.ConversationID != ownerID || value.OwnerID != ownerID || value.RuntimeID != "history-fixture" {
 				t.Fatal(value)
 			}
 		}

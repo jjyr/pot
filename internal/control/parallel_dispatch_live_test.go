@@ -86,7 +86,7 @@ func TestDeepSeekParallelDispatchObservationLive(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	if _, err = s.Registry.Create(ctx, "live-create", "Parallel observation"); err != nil {
+	if _, err = legacyMainAssistant(ctx, s, "live-create", "Parallel observation"); err != nil {
 		t.Fatal(err)
 	}
 	none := "none"

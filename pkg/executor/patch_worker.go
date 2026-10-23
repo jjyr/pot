@@ -16,7 +16,7 @@ import (
 
 const PatchWorkerArgument = "--internal-patch-worker"
 
-// ServePatchWorker performs only the supplied workspace-confined patch. Hosts
+// ServePatchWorker performs only the supplied authorized patch under its filesystem sandbox. Hosts
 // dispatch the private worker argument before parsing their public CLI flags.
 func ServePatchWorker(input io.Reader, output io.Writer) error {
 	var request struct {

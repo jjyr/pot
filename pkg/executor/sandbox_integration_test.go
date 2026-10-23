@@ -81,6 +81,48 @@ func TestRealSandboxCommandAndPatchWorker(t *testing.T) {
 		t.Fatal("protected file changed", string(data), err)
 	}
 }
+
+func TestRealSandboxExternalPatchRequiresWritePermission(t *testing.T) {
+	e, r := sandboxFixture(t)
+	outside := t.TempDir()
+	path := filepath.Join(outside, "profile.json")
+	sibling := filepath.Join(outside, "private.sqlite")
+	for _, name := range []string{path, sibling} {
+		if err := os.WriteFile(name, []byte("old\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.Operation = "apply_patch"
+	r.Args = map[string]any{"patch": "*** Begin Patch\n*** Update File: " + path + "\n@@\n-old\n+new\n*** End Patch"}
+	if _, err := e.Execute(t.Context(), r, nil); err == nil {
+		t.Fatal("external file was writable without permission")
+	}
+	e.options.SandboxRead = []string{path}
+	if _, err := e.Execute(t.Context(), r, nil); err == nil {
+		t.Fatal("read permission granted writes")
+	}
+	if data, _ := os.ReadFile(path); string(data) != "old\n" {
+		t.Fatal("denied patch changed the host file")
+	}
+	e.options.SandboxWrite = []string{path}
+	if _, err := e.Execute(t.Context(), r, nil); err != nil {
+		t.Fatal("exact file grant did not allow external patch", err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "new\n" {
+		t.Fatal("patch succeeded without changing the actual host file")
+	}
+	r.Args["patch"] = "*** Begin Patch\n*** Update File: " + sibling + "\n@@\n-old\n+changed\n*** End Patch"
+	if _, err := e.Execute(t.Context(), r, nil); err == nil {
+		t.Fatal("one file grant exposed its sibling")
+	}
+	if data, _ := os.ReadFile(sibling); string(data) != "old\n" {
+		t.Fatal("sibling host file changed")
+	}
+	r.Mode = "host"
+	if _, err := e.Execute(t.Context(), r, nil); err != nil {
+		t.Fatal("authorized host mode could not edit the external file", err)
+	}
+}
 func TestRealSandboxTTYAndInput(t *testing.T) {
 	e, r := sandboxFixture(t)
 	result := call(t, e, r, "exec_command", map[string]any{"cmd": "test -t 0 && echo terminal; read -r value; stty size; echo received:$value", "tty": true, "yield_time_ms": 20})

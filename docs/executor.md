@@ -112,7 +112,9 @@ test commands can use pipes and a live session without allocating a PTY.
 directory from an existing working directory in a separate call first. A missing
 or non-directory workdir rejects the command without creating files.
 
-`apply_patch` retains workspace/path checks. Protected patches run in a dedicated
+`apply_patch` accepts absolute paths and workspace-relative paths. OS filesystem
+permissions determine accessible targets. Exact file grants allow in-place writes;
+directory grants also permit atomic replacement. Protected patches run in a dedicated
 Go worker under the same OS policy, so direct Go file writes do not bypass it.
 Persistent plugin sessions pin bundle, observation mode, execution mode, revision
 and environment. Policy changes invalidate them rather than upgrading JS memory.

@@ -34,8 +34,7 @@ The chat UI can update one local installation and its running hosts; see
 [Updates](updates.md). Remote installations require separate coordination.
 
 The default root is `~/.pot` on macOS and Linux. Use `-root /absolute/path`
-for an independent instance. New roots may contain extension files and a global
-`AGENTS.md` before initialization and receive a stable node identity. App and standalone Runtime cannot open the same root
+for an independent instance. New roots may contain extension packages and configuration before initialization. Each root receives a stable node identity. App and standalone Runtime cannot open the same root
 concurrently.
 Keep each root private and preserve its identity and secret master key across
 restarts. See [Secrets](secrets.md).
@@ -92,9 +91,12 @@ pot api -root "$HOME/.pot-node" /api/v1/runtime
 Each node owns its Providers, credentials, assistants, permissions and workspaces.
 Configure Providers through App or the local API when creating a local assistant.
 First-use Chat offers Add assistant: API, another Pot, then Codex. An explicit
-API creation action creates a kitchen-named assistant; linked chat and task
-submission need no local assistant or Provider. Assistant creation uses a stable `request_id` and
-`name`; deleting an idle assistant retains its history and retires its schedules.
+API creation action creates an assistant with a random two-word slug ID such as
+`amber-otter` and a default name such as `Amber Otter`; linked chat and task
+submission need no local assistant or Provider. Assistant creation uses a stable
+`request_id` and an optional display `name`; deleting an idle assistant retains its
+history and retires its schedules.
+An omitted local API assistant selector uses the first active local assistant.
 An explicit missing assistant never falls back to another identity.
 
 Local workspace and installed resource paths can be persisted:
@@ -188,14 +190,17 @@ accepted at creation, and terminal bytes are never stored in product databases,
 transcripts or usage records.
 
 ```sh
-pot chat -root "$HOME/.pot-control" -assistant main "Investigate the build"
-pot tasks list -root "$HOME/.pot-control" -assistant main
-pot tasks show TASK-ID -root "$HOME/.pot-control" -assistant main
-pot tasks interrupt TASK-ID -root "$HOME/.pot-control" -assistant main
-pot tasks cancel TASK-ID -root "$HOME/.pot-control" -assistant main
+pot chat -root "$HOME/.pot-control" "Investigate the build"
+pot tasks list -root "$HOME/.pot-control"
+pot tasks show TASK-ID -root "$HOME/.pot-control"
+pot tasks interrupt TASK-ID -root "$HOME/.pot-control"
+pot tasks cancel TASK-ID -root "$HOME/.pot-control"
 pot doctor -root "$HOME/.pot-control"
-pot config get agent -root "$HOME/.pot-control" -assistant main
+pot config get agent -root "$HOME/.pot-control"
 ```
+
+These commands select the first active local assistant by default. Use
+`-assistant ASSISTANT-ID` to select a specific assistant from the node's directory.
 
 Configuration sections are `providers`, `agent`, `routing`, `usage-policy` and
 `instructions`. `config set SECTION JSON_FILE` uses the same revision checks as

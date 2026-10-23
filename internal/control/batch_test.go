@@ -37,7 +37,7 @@ func batchService(t *testing.T, handler http.HandlerFunc, capacity int) (*Servic
 	}
 	t.Cleanup(func() { s.Close(); server.Close(); manager.Stop() })
 	ctx := context.Background()
-	if _, err = s.Registry.Create(ctx, "main", "Main"); err != nil {
+	if _, err = legacyMainAssistant(ctx, s, "main", "Main"); err != nil {
 		t.Fatal(err)
 	}
 	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "test", Name: "Test", Model: "model", Endpoint: server.URL, Protocol: "openai_chat", APIKey: "test-key", MaxOutputTokens: 100})

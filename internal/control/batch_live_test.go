@@ -166,7 +166,7 @@ func TestDeepSeekCategoryBatchesLive(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	if _, err = s.Registry.Create(ctx, "main-create", "Batch observation"); err != nil {
+	if _, err = legacyMainAssistant(ctx, s, "main-create", "Batch observation"); err != nil {
 		t.Fatal(err)
 	}
 	alpha, err := s.Registry.Create(ctx, "alpha-create", "Alpha")

@@ -24,7 +24,11 @@ func TestAttachmentHTTPAuthenticationAndFinalCapabilityCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer service.Close()
-	service.Registry.Create(ctx, "create", "Pot")
+	owner, err := service.Registry.Create(ctx, "create", "Pot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerID := owner.ID
 	profile, err := service.Profiles.Save(ctx, control.SaveProfile{RequestID: "provider", ProfileID: "test", Name: "Test", Model: "gpt-4.1", Endpoint: "https://fixture.invalid/v1", Protocol: "openai_chat", APIKey: "fake", MaxOutputTokens: 100})
 	if err != nil {
 		t.Fatal(err)
@@ -33,7 +37,7 @@ func TestAttachmentHTTPAuthenticationAndFinalCapabilityCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := service.Conversation(ctx, "main")
+	c, err := service.Conversation(ctx, ownerID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +61,7 @@ func TestAttachmentHTTPAuthenticationAndFinalCapabilityCheck(t *testing.T) {
 	pdf := []byte("%PDF-1.7\n%%EOF")
 	begin["size"] = len(pdf)
 	for _, body := range []any{begin, map[string]any{"action": "chunk", "id": "pdf", "data": base64.StdEncoding.EncodeToString(pdf)}, map[string]any{"action": "finish", "id": "pdf"}} {
-		w := call("POST", "/api/v1/attachments?assistant_id=main", body, "secret")
+		w := call("POST", "/api/v1/attachments?assistant_id="+ownerID, body, "secret")
 		if w.Code != 200 {
 			t.Fatal(w.Code, w.Body.String())
 		}
@@ -65,17 +69,17 @@ func TestAttachmentHTTPAuthenticationAndFinalCapabilityCheck(t *testing.T) {
 	var status struct {
 		Attachment core.Attachment `json:"attachment"`
 	}
-	w := call("POST", "/api/v1/attachments?assistant_id=main", map[string]any{"action": "finish", "id": "pdf"}, "secret")
+	w := call("POST", "/api/v1/attachments?assistant_id="+ownerID, map[string]any{"action": "finish", "id": "pdf"}, "secret")
 	if err = json.Unmarshal(w.Body.Bytes(), &status); err != nil {
 		t.Fatal(err)
 	}
-	if w := call("GET", "/api/v1/attachments/pdf?assistant_id=main", nil, "wrong"); w.Code != 401 {
+	if w := call("GET", "/api/v1/attachments/pdf?assistant_id="+ownerID, nil, "wrong"); w.Code != 401 {
 		t.Fatal("unauthenticated read", w.Code)
 	}
 	if w := call("GET", "/api/v1/attachments/pdf?assistant_id=other", nil, "secret"); w.Code == 200 {
 		t.Fatal("cross-owner read")
 	}
-	if w := call("GET", "/api/v1/attachments/pdf?assistant_id=main&offset=0", nil, "secret"); w.Code != 200 {
+	if w := call("GET", "/api/v1/attachments/pdf?assistant_id="+ownerID+"&offset=0", nil, "secret"); w.Code != 200 {
 		t.Fatal("owner read", w.Code, w.Body.String())
 	}
 	config, _ := c.Configuration(ctx)
@@ -86,11 +90,11 @@ func TestAttachmentHTTPAuthenticationAndFinalCapabilityCheck(t *testing.T) {
 	if err = c.Configure(ctx, spec, config.Generation); err != nil {
 		t.Fatal(err)
 	}
-	request := protocol.SendMessage{RequestID: "bypass-ui", ConversationID: "main", Attachments: []core.Attachment{status.Attachment}}
-	if w := call("POST", "/api/v1/messages?assistant_id=main", request, "secret"); w.Code == 200 {
+	request := protocol.SendMessage{RequestID: "bypass-ui", ConversationID: ownerID, Attachments: []core.Attachment{status.Attachment}}
+	if w := call("POST", "/api/v1/messages?assistant_id="+ownerID, request, "secret"); w.Code == 200 {
 		t.Fatal("unsupported attachment submission bypass")
 	}
-	if w := call("POST", "/api/v1/attachments?assistant_id=main", begin, "secret"); w.Code == 200 {
+	if w := call("POST", "/api/v1/attachments?assistant_id="+ownerID, begin, "secret"); w.Code == 200 {
 		t.Fatal("unsupported upload retry bypass")
 	}
 	snapshot, _ := c.Snapshot(ctx)

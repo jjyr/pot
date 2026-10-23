@@ -28,7 +28,7 @@ func TestSettingsProfileEditSharesRevisionAndCanRestoreDefault(t *testing.T) {
 	custom, _ := assistantavatar.Render("glass", "custom-image")
 	name := "My helper"
 	changed, err := r.UpdateProfile(ctx, d.ID, ProfileUpdate{Name: &name, Avatar: &custom}, d.Revision)
-	if err != nil || changed.Name != name || changed.Avatar != custom || changed.Revision != d.Revision+1 {
+	if err != nil || changed.Name != name || changed.Avatar != custom || changed.Revision == d.Revision {
 		t.Fatal("settings edit was not atomic", changed, err)
 	}
 	if _, err = r.UpdateProfile(ctx, d.ID, ProfileUpdate{Avatar: &d.Avatar}, d.Revision); err == nil {
@@ -85,7 +85,7 @@ func TestAvatarNormalizationAndProfilePersistence(t *testing.T) {
 	if err := ValidateAvatar(d.Avatar); err != nil {
 		t.Fatal("creation did not persist a normalized default image", err)
 	}
-	changed, err := r.UpdateProfileOnce(ctx, d.ID, ProfileUpdate{Avatar: &avatar}, "avatar", "input-hash")
+	changed, err := r.UpdateProfile(ctx, d.ID, ProfileUpdate{Avatar: &avatar}, d.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,12 +107,8 @@ func TestAvatarNormalizationAndProfilePersistence(t *testing.T) {
 	if err != nil || replay.Avatar != avatar {
 		t.Fatal("creation retry lost avatar", err)
 	}
-	receipt, err := r.ProfileReceipt(ctx, "avatar", "input-hash")
-	if err != nil || *receipt != changed {
-		t.Fatal("receipt lost", err)
-	}
 	empty := ""
-	reset, err := r.UpdateProfileOnce(ctx, d.ID, ProfileUpdate{Avatar: &empty}, "reset", "reset-hash")
+	reset, err := r.UpdateProfile(ctx, d.ID, ProfileUpdate{Avatar: &empty}, renamed.Revision)
 	if err != nil || reset.Avatar != d.Avatar || reset.Name != "Renamed" {
 		t.Fatal("reset did not restore the persisted creation image", err)
 	}

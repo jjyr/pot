@@ -30,7 +30,7 @@ func TestExtensionsUpgradePreservesExistingControlAndRepeatedStartup(t *testing.
 	}
 	execMigrationSQL(t, db, "INSERT INTO assistant_definitions(id,name,revision,request_id,created_name) VALUES('main','Original',7,'original','Original')")
 	for range 2 {
-		if err = Migrate(ctx, db, ControlDatabase); err != nil {
+		if err = migrateDatabase(ctx, db, ControlDatabase, migrationsBefore(t, ControlDatabase, "0032_")); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -40,7 +40,7 @@ func TestExtensionsUpgradePreservesExistingControlAndRepeatedStartup(t *testing.
 		t.Fatal(name, revision, err)
 	}
 	execMigrationSQL(t, db, "INSERT INTO retired_extension_settings VALUES('plugins','github',0,1,'');INSERT INTO retired_mcp_servers VALUES('test',1,'{}')")
-	if err = Migrate(ctx, db, ControlDatabase); err != nil {
+	if err = migrateDatabase(ctx, db, ControlDatabase, migrationsBefore(t, ControlDatabase, "0032_")); err != nil {
 		t.Fatal(err)
 	}
 	var count int

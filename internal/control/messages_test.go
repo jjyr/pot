@@ -51,7 +51,7 @@ func TestUnifiedMessageToolBindsSenderAndRemovesWaitAndGuide(t *testing.T) {
 func TestTaskMessageAutomaticallyBindsGuidanceAndPeerReference(t *testing.T) {
 	s := taskResourceService(t)
 	ctx := context.Background()
-	if _, err := s.Registry.Create(ctx, "main-create", "Main"); err != nil {
+	if _, err := legacyMainAssistant(ctx, s, "main-create", "Main"); err != nil {
 		t.Fatal(err)
 	}
 	// Hold the Worker before preparation; this test exercises actual task inputs

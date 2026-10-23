@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -112,7 +113,7 @@ func TestAtomicSaveRollbackAndContextCorruption(t *testing.T) {
 		t.Fatal("missing context silently replaced")
 	}
 }
-func TestInstructionRevisionCASAcrossHandlesAndABA(t *testing.T) {
+func TestInstructionContentCASAcrossHandlesAndExternalEdits(t *testing.T) {
 	ctx := context.Background()
 	s, path := testStore(t)
 	original, err := s.Instructions(ctx)
@@ -147,11 +148,14 @@ func TestInstructionRevisionCASAcrossHandlesAndABA(t *testing.T) {
 	}
 	current, _ := s.Instructions(ctx)
 	reverted, err := s.SaveInstructions(ctx, "", current.Revision)
-	if err != nil || reverted.Revision == original.Revision {
+	if err != nil || reverted.Revision != original.Revision {
 		t.Fatal(reverted, err)
 	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "AGENTS.md"), []byte("external edit"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.SaveInstructions(ctx, "stale", original.Revision); err == nil {
-		t.Fatal("ABA write accepted")
+		t.Fatal("external file edit was overwritten")
 	}
 }
 func TestScopedMailboxRecoveryAndDedup(t *testing.T) {

@@ -21,18 +21,13 @@ func patchPath(root, name string) (string, error) {
 	if name == "" || strings.ContainsRune(name, 0) {
 		return "", errors.New("empty or invalid patch path")
 	}
-	for _, part := range strings.Split(filepath.ToSlash(name), "/") {
-		if part == ".." {
-			return "", errors.New("patch path must stay in workspace")
-		}
-	}
 	target := name
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(root, target)
 	}
 	target = filepath.Clean(target)
-	if target == root || !strings.HasPrefix(target, root+string(filepath.Separator)) {
-		return "", errors.New("patch path must stay in workspace")
+	if target == filepath.VolumeName(target)+string(filepath.Separator) {
+		return "", errors.New("cannot patch filesystem root")
 	}
 	if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		return "", errors.New("cannot patch a symlink")
@@ -50,12 +45,8 @@ func patchPath(root, name string) (string, error) {
 		}
 		existing = parent
 	}
-	canonical, err := filepath.EvalSymlinks(existing)
-	if err != nil {
+	if _, err := filepath.EvalSymlinks(existing); err != nil {
 		return "", err
-	}
-	if canonical != root && !strings.HasPrefix(canonical, root+string(filepath.Separator)) {
-		return "", errors.New("patch symlink escapes workspace")
 	}
 	return target, nil
 }
@@ -68,8 +59,9 @@ func textLines(text string) []string {
 }
 
 // ApplyPatch validates all paths and hunks before the first mutation. Each write
-// is fsynced and atomically renamed; a multi-file patch is not a filesystem-wide
-// transaction and OS errors during commit must be reported as partial effects.
+// is fsynced. Directory write permission permits atomic replacement; a file-only
+// grant permits an in-place write. Multi-file patches are not transactions and
+// OS errors during commit must be reported as partial effects.
 func ApplyPatch(workspace, patch string) (string, error) {
 	if len(patch) > patchLimit || !utf8.ValidString(patch) {
 		return "", errors.New("patch exceeds 4 MiB or invalid UTF-8")
@@ -294,6 +286,19 @@ func ApplyPatch(workspace, patch string) (string, error) {
 func writeAtomic(path string, data []byte, mode os.FileMode) error {
 	file, err := os.CreateTemp(filepath.Dir(path), ".pot-patch-")
 	if err != nil {
+		if os.IsPermission(err) {
+			// Do not require permission to create a sibling when the OS grants
+			// writing only this file. The open still enforces that exact grant.
+			file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+			if err != nil {
+				return err
+			}
+			_, err = file.Write(data)
+			if err == nil {
+				err = file.Sync()
+			}
+			return errors.Join(err, file.Close())
+		}
 		return err
 	}
 	defer os.Remove(file.Name())

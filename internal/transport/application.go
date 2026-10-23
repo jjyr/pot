@@ -38,6 +38,16 @@ func decode(data json.RawMessage, destination any) error {
 	}
 	return protocol.DecodeStrict(data, destination)
 }
+
+// An omitted selector uses the first active local assistant. An explicit
+// selector is never replaced, including when its assistant was deleted.
+func (a *Application) resolveOwner(ctx context.Context, owner string) (string, error) {
+	if owner != "" {
+		return owner, nil
+	}
+	return a.Control.Registry.FirstID(ctx)
+}
+
 func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	if a.Control == nil {
 		return nil, errors.New("Control unavailable")
@@ -50,11 +60,11 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	if method != "GET" && method != "POST" && !(method == "DELETE" && strings.HasPrefix(u.Path, "/api/v1/integrations/")) {
 		return nil, protocol.APIError{Code: "method_not_allowed", Message: "method not allowed"}
 	}
-	owner := u.Query().Get("assistant_id")
-	if owner == "" {
-		owner = "main"
+	owner, err := a.resolveOwner(ctx, u.Query().Get("assistant_id"))
+	if err != nil {
+		return nil, err
 	}
-	if !control.ValidAgentKey(owner) {
+	if owner != "" && !control.ValidAgentKey(owner) {
 		return nil, errors.New("invalid assistant identity")
 	}
 	path := u.Path

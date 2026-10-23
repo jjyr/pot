@@ -28,7 +28,7 @@ func linkBackendFixture(t *testing.T) (potLinkBackend, string) {
 	}
 	t.Cleanup(func() { s.Close() })
 	ctx := context.Background()
-	main, err := s.Registry.Create(ctx, "main", "Main")
+	main, err := legacyMainAssistant(ctx, s, "main", "Main")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestPotLinkBackendDeletedDefaultDoesNotRetargetOrHideHistory(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = b.s.Registry.Delete(ctx, "main", 1); err != nil {
+	if err = b.s.Registry.Delete(ctx, "main", currentAssistantRevision(t, b.s, "main")); err != nil {
 		t.Fatal(err)
 	}
 	directory, err := b.Directory(ctx)
@@ -89,7 +89,7 @@ func TestPotLinkBackendDeletedDefaultDoesNotRetargetOrHideHistory(t *testing.T) 
 	if err != nil || cancelled.Receiver.Address != accepted.Receiver.Address || cancelled.State != "cancelled" {
 		t.Fatal(cancelled, err)
 	}
-	if err = b.s.Registry.Delete(ctx, second, 1); err != nil {
+	if err = b.s.Registry.Delete(ctx, second, currentAssistantRevision(t, b.s, second)); err != nil {
 		t.Fatal(err)
 	}
 	directory, err = b.Directory(ctx)
@@ -125,4 +125,19 @@ func TestLocalBackendCannotClaimLinkedExecution(t *testing.T) {
 	if err != nil || stored.Info.Phase != protocol.TaskRunning || stored.Result != nil || stored.Execution.StopRequested {
 		t.Fatal(stored, err)
 	}
+}
+
+func currentAssistantRevision(t *testing.T, s *Service, id string) uint64 {
+	t.Helper()
+	defs, err := s.Registry.Definitions(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range defs {
+		if d.ID == id {
+			return d.Revision
+		}
+	}
+	t.Fatal("assistant not found", id)
+	return 0
 }

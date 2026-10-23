@@ -97,9 +97,10 @@ func writeError(w http.ResponseWriter, status int, err protocol.APIError) {
 	_ = json.NewEncoder(w).Encode(err)
 }
 func streamSnapshots(w http.ResponseWriter, r *http.Request, app *Application) {
-	owner := r.URL.Query().Get("assistant_id")
-	if owner == "" {
-		owner = "main"
+	owner, err := app.resolveOwner(r.Context(), r.URL.Query().Get("assistant_id"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, protocol.APIError{Code: "owner_unavailable", Message: err.Error()})
+		return
 	}
 	subscription, err := app.Control.SubscribeAgent(r.Context(), owner, r.URL.Query().Get("locale"))
 	if err != nil {

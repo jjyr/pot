@@ -57,7 +57,7 @@ func TestAssistantMailUsesOwningConversationAndExplicitPeerReplies(t *testing.T)
 		w.Write([]byte("data: " + string(event) + "\n\n"))
 	}))
 	defer server.Close()
-	if _, err := s.Registry.Create(ctx, "create-main", "Main"); err != nil {
+	if _, err := legacyMainAssistant(ctx, s, "create-main", "Main"); err != nil {
 		t.Fatal(err)
 	}
 	peer, err := s.Registry.Create(ctx, "create-peer", "Peer")

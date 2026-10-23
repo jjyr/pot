@@ -487,7 +487,6 @@ func (p *PermissionStore) authorize(ctx context.Context, r HostRequest, pending 
 		p.mu.Unlock()
 		return "", errors.New("machine enrollment changed")
 	}
-	review := r.Tool == "update_agent_instructions"
 	var stdin struct {
 		Chars string `json:"chars"`
 	}
@@ -504,48 +503,46 @@ func (p *PermissionStore) authorize(ctx context.Context, r HostRequest, pending 
 		p.mu.Unlock()
 		return "", ErrHostDenied
 	}
-	if !review {
-		if policy.ExecutionAccess == "deny" {
-			p.mu.Unlock()
+	if policy.ExecutionAccess == "deny" {
+		p.mu.Unlock()
+		return "", ErrHostDenied
+	}
+	if state, ok := p.applied[r.MachineID]; ok && state.State != "applied" {
+		p.mu.Unlock()
+		return "", fmt.Errorf("permission update %s: %s", state.State, state.Error)
+	}
+	if r.Tool == "write_stdin" {
+		p.mu.Unlock()
+		return "session", nil
+	}
+	rule := CommandRule{}
+	if r.Command != nil {
+		rule = p.state.Rules[ruleID(r.MachineID, r.EnrollmentEpoch, *r.Command)]
+	}
+	if rule.Policy == "deny_host" {
+		p.mu.Unlock()
+		if r.Host {
 			return "", ErrHostDenied
 		}
-		if state, ok := p.applied[r.MachineID]; ok && state.State != "applied" {
-			p.mu.Unlock()
-			return "", fmt.Errorf("permission update %s: %s", state.State, state.Error)
-		}
-		if r.Tool == "write_stdin" {
-			p.mu.Unlock()
-			return "session", nil
-		}
-		rule := CommandRule{}
-		if r.Command != nil {
-			rule = p.state.Rules[ruleID(r.MachineID, r.EnrollmentEpoch, *r.Command)]
-		}
-		if rule.Policy == "deny_host" {
-			p.mu.Unlock()
-			if r.Host {
-				return "", ErrHostDenied
-			}
-			return "sandbox", nil
-		}
-		if policy.ExecutionAccess == "allow" || rule.Policy == "allow_host" {
+		return "sandbox", nil
+	}
+	if policy.ExecutionAccess == "allow" || rule.Policy == "allow_host" {
+		p.mu.Unlock()
+		return "host", nil
+	}
+	if r.Command != nil {
+		if _, ok := p.grants[grantID(r)]; ok {
 			p.mu.Unlock()
 			return "host", nil
 		}
-		if r.Command != nil {
-			if _, ok := p.grants[grantID(r)]; ok {
-				p.mu.Unlock()
-				return "host", nil
-			}
-		}
-		if !r.Host {
-			p.mu.Unlock()
-			return "sandbox", nil
-		}
-		if r.Command == nil {
-			p.mu.Unlock()
-			return "", errors.New("host exception requires an exact shell command; plugin host exceptions are not supported")
-		}
+	}
+	if !r.Host {
+		p.mu.Unlock()
+		return "sandbox", nil
+	}
+	if r.Command == nil && r.Tool != "apply_patch" {
+		p.mu.Unlock()
+		return "", errors.New("host exception requires an exact command or patch; plugin host exceptions are not supported")
 	}
 	d := p.pending[hash]
 	if d == nil {
@@ -569,7 +566,7 @@ func (p *PermissionStore) authorize(ctx context.Context, r HostRequest, pending 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	current, exists := p.state.Machines[r.MachineID]
-	if d.invalid || !exists || p.state.Epochs[r.MachineID] != r.EnrollmentEpoch || !review && current.ExecutionAccess == "deny" {
+	if d.invalid || !exists || p.state.Epochs[r.MachineID] != r.EnrollmentEpoch || current.ExecutionAccess == "deny" {
 		return "", errors.New("execution authorization expired")
 	}
 	if !d.allow {
@@ -605,11 +602,10 @@ func (p *PermissionStore) Decide(owner, id, action string) error {
 		return errors.New("approval already decided differently")
 	}
 	r := d.approval.Request
-	review := r.Tool == "update_agent_instructions"
-	if review && (action == "allow_task" || action == "allow_always") {
-		return errors.New("instruction changes require exact review")
+	if r.Command == nil && action != "allow_once" && action != "deny" {
+		return errors.New("this operation requires one-time authorization")
 	}
-	if !review && action == "allow_once" {
+	if r.Command != nil && action == "allow_once" {
 		return errors.New("command authorization requires task or permanent scope")
 	}
 	if action == "allow_always" {

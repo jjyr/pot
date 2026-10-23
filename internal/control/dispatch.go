@@ -190,7 +190,10 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 			return nil, err
 		}
 	}
-	hostRequested := call.Name == "exec_command" && args["request_unsandboxed"] == true
+	hostRequested := (call.Name == "exec_command" || call.Name == "apply_patch") && args["request_unsandboxed"] == true
+	if call.Name == "apply_patch" {
+		prepared, _ = json.Marshal(map[string]any{"patch": args["patch"], "cwd": cwd, "request_unsandboxed": hostRequested, "justification": args["justification"]})
+	}
 	mode, err := d.Permissions.authorize(ctx, HostRequest{Owner: approvalOwner, Task: d.Task, Turn: d.Turn, Generation: d.Generation, CallID: call.ID, MachineID: target.RuntimeID, EnrollmentEpoch: epoch, Tool: call.Name, Args: prepared, Command: commandContext, Host: hostRequested}, func() error { return state("waiting_approval", &target, displayCWD) })
 	if err != nil {
 		if errors.Is(err, ErrHostDenied) {
@@ -288,7 +291,7 @@ func (d *Dispatcher) target(selector any) (core.ExecutionTarget, error) {
 func (d *Dispatcher) prepare(name string, args map[string]any, target core.ExecutionTarget) (string, map[string]any, error) {
 	switch name {
 	case "exec_command", "write_stdin", "apply_patch":
-		if name == "exec_command" {
+		if name == "exec_command" || name == "apply_patch" {
 			if err := validateHostAccessRequest(args); err != nil {
 				return "", nil, err
 			}

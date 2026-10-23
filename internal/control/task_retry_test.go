@@ -40,7 +40,7 @@ func TestFailedTaskRecoveryIsSilentAndReplacementReportsOnce(t *testing.T) {
 						for _, tool := range body.Tools {
 							names[tool.Function.Name] = true
 						}
-						for _, name := range []string{"exec_command", "create_task", "send_message", "update_agent_profile"} {
+						for _, name := range []string{"exec_command", "create_task", "send_message"} {
 							if !names[name] {
 								t.Error("result handling lost assistant tool", name)
 							}

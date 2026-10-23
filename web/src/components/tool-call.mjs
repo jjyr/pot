@@ -64,7 +64,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     metadata.hidden=isGroup;raw.hidden=isGroup;
 
     const phase=pending?'waiting_approval':tool.phase;
-    const names={exec_command:'command',write_stdin:'session',apply_patch:'patch',exec:'script',wait:'wait',cua_repl:'computer',create_task:'createTask',set_task_dispositions:'setTaskDispositions',get_task:'getTask',wait_task:'waitTask',update_agent_profile:'updateProfile',register_resource:'registerResource',present_resource:'presentResource'};
+    const names={exec_command:'command',write_stdin:'session',apply_patch:'patch',exec:'script',wait:'wait',cua_repl:'computer',create_task:'createTask',set_task_dispositions:'setTaskDispositions',get_task:'getTask',wait_task:'waitTask',register_resource:'registerResource',present_resource:'presentResource'};
     const messaging=messageTitle(tool);root.classList.toggle('message-tool',messaging);
     if(!messaging)title.textContent=names[tool.name]?t(names[tool.name]):tool.name;
     const preview=messaging?'':toolSummary(tool);

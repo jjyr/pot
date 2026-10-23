@@ -11,6 +11,7 @@ import (
 
 func TestSchedulePreviewHTTP(t *testing.T) {
 	app := historyApplication(t, 0)
+	ownerID := localAssistantID(t, app.Control)
 	handler := Handler(app, "private")
 	for _, test := range []struct{ body, field string }{
 		{`{"kind":"cron","cron":"0 8-20 * * *","timezone":"Europe/Berlin"}`, ""},
@@ -18,7 +19,7 @@ func TestSchedulePreviewHTTP(t *testing.T) {
 		{`{"kind":"cron","cron":"0 8 * * *","timezone":"Local"}`, "timezone"},
 		{`{"kind":"cron","cron":"0 0 31 FEB *","timezone":"UTC"}`, "cron"},
 	} {
-		r := httptest.NewRequest("POST", "/api/v1/schedules/preview?assistant_id=main", strings.NewReader(test.body))
+		r := httptest.NewRequest("POST", "/api/v1/schedules/preview?assistant_id="+ownerID, strings.NewReader(test.body))
 		r.Header.Set("Authorization", "Bearer private")
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, r)
@@ -30,11 +31,11 @@ func TestSchedulePreviewHTTP(t *testing.T) {
 			t.Fatal(result)
 		}
 	}
-	page, err := app.Control.Schedules.Page(t.Context(), "main", schedule.Query{})
+	page, err := app.Control.Schedules.Page(t.Context(), ownerID, schedule.Query{})
 	if err != nil || page.Total != 0 {
 		t.Fatal("preview wrote schedules", page, err)
 	}
-	r := httptest.NewRequest("POST", "/api/v1/schedules/preview?assistant_id=main", strings.NewReader(`{}`))
+	r := httptest.NewRequest("POST", "/api/v1/schedules/preview?assistant_id="+ownerID, strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)
 	if w.Code != 401 {

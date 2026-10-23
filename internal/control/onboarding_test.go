@@ -2,17 +2,11 @@ package control
 
 import (
 	"context"
-	"encoding/json"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/jjyr/pot/pkg/core"
-	"github.com/jjyr/pot/pkg/modelprotocol"
 	webassets "github.com/jjyr/pot/web"
-
-	"github.com/jjyr/pot/pkg/assistantavatar"
 )
 
 func TestBootstrapWaitsForProviderAndCreatesExactlyOneRandomAssistant(t *testing.T) {
@@ -38,7 +32,7 @@ func TestBootstrapWaitsForProviderAndCreatesExactlyOneRandomAssistant(t *testing
 	}
 	wg.Wait()
 	definitions, err := s.Registry.Definitions(ctx)
-	if err != nil || len(definitions) != 1 || !slices.Contains(assistantavatar.Names(), definitions[0].Name) {
+	if err != nil || len(definitions) != 1 || strings.ToLower(strings.ReplaceAll(definitions[0].Name, " ", "-")) != definitions[0].ID || strings.Count(definitions[0].ID, "-") != 1 {
 		t.Fatal(definitions, err)
 	}
 	a := definitions[0]
@@ -106,47 +100,5 @@ func TestQuickCreationUsesDefaultsAndLocalizedWelcomeOnce(t *testing.T) {
 		if len(snapshot.Messages) != 1 {
 			t.Fatal("retry repeated welcome", snapshot.Messages)
 		}
-	}
-}
-
-func TestChatRenameIsOwnerScopedAndRetrySafe(t *testing.T) {
-	s, _ := configurationService(t)
-	ctx := context.Background()
-	a, err := s.CreateAssistant(ctx, CreateAssistant{RequestID: "create", Name: "Pot"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	c, _ := s.Conversation(ctx, a.ID)
-	thread, _ := c.Thread(ctx)
-	call := modelprotocol.ToolCall{ID: "rename", Name: "update_agent_profile", Arguments: json.RawMessage(`{"name":"小白"}`)}
-	dispatch := s.productDispatch(a.ID, "turn", thread.Generation, false)[call.Name]
-	if _, err = dispatch(ctx, core.ExecutionContext{Owner: a.ID}, call, nil); err != nil {
-		t.Fatal(err)
-	}
-	definitions, _ := s.Registry.Definitions(ctx)
-	renamed := definitions[0]
-	if renamed.Name != "小白" || renamed.Revision != 2 {
-		t.Fatal(renamed)
-	}
-	if _, err = s.Registry.Rename(ctx, a.ID, "Later", renamed.Revision); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = dispatch(ctx, core.ExecutionContext{Owner: a.ID}, call, nil); err != nil {
-		t.Fatal(err)
-	}
-	definitions, _ = s.Registry.Definitions(ctx)
-	if definitions[0].Name != "Later" || definitions[0].Revision != 3 {
-		t.Fatal("retry overwrote later name", definitions)
-	}
-	peer := s.productDispatchBound(a.ID, "peer-chat", "turn", thread.Generation, false)[call.Name]
-	if _, err = peer(ctx, core.ExecutionContext{Owner: "peer-chat"}, call, nil); err == nil {
-		t.Fatal("peer renamed assistant")
-	}
-	stale := s.productDispatch(a.ID, "stale-turn", thread.Generation+1, false)[call.Name]
-	if _, err = stale(ctx, core.ExecutionContext{Owner: a.ID}, call, nil); err == nil {
-		t.Fatal("stale generation renamed assistant")
-	}
-	if len(s.productTools(true)) != 3 {
-		t.Fatal("worker inherited rename tool")
 	}
 }

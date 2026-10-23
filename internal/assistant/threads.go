@@ -19,12 +19,6 @@ const emptyContext = `{"type":"context","version":2,"messages":[]}`
 
 type Rules = storage.Rules
 
-func LoadInstructions(ctx context.Context, store *storage.Store) (Rules, error) {
-	return store.Instructions(ctx)
-}
-func SaveInstructions(ctx context.Context, store *storage.Store, text, revision string) (Rules, error) {
-	return store.SaveInstructions(ctx, text, revision)
-}
 func Profiles(ctx context.Context, store *storage.Store) ([]core.Profile, error) {
 	body, exists, err := store.Get(ctx, ProfileKey)
 	if err != nil {

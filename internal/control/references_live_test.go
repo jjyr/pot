@@ -49,7 +49,7 @@ func TestConfiguredModelMessageReferencesLive(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	if _, err = service.Registry.Create(ctx, "create", "Reference qualification"); err != nil {
+	if _, err = legacyMainAssistant(ctx, service, "create", "Reference qualification"); err != nil {
 		t.Fatal(err)
 	}
 	low := "low"

@@ -32,7 +32,8 @@ collaboration capabilities, never remote operator access or credentials.
 
 Fresh roots contain no assistants. First-use Chat and the directory + action
 open the same Add assistant page, ordered API, another Pot, then Codex. Only an
-explicit API creation action creates a kitchen-named local assistant. Linked
+explicit API creation action creates a local assistant with a random two-word slug
+ID such as `amber-otter` and a default name such as `Amber Otter`. Linked
 assistants and user-originated linked tasks need neither a local Provider nor a
 local assistant. Provider storage alone creates no assistant. Each root retains
 its stable signing identity and secret master key. App and standalone Runtime

@@ -17,9 +17,10 @@ func (a *Application) download(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	task := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/tasks/"), "/file-download")
-	owner := r.URL.Query().Get("assistant_id")
-	if owner == "" {
-		owner = "main"
+	owner, err := a.resolveOwner(r.Context(), r.URL.Query().Get("assistant_id"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, protocol.APIError{Code: "owner_unavailable", Message: err.Error()})
+		return true
 	}
 	name := r.URL.Query().Get("path")
 	if !core.Identifier(task) || !core.Identifier(owner) || !protocol.ValidFilePath(name) {

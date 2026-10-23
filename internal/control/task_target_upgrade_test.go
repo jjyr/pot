@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/jjyr/pot/pkg/agentlink"
@@ -29,7 +30,13 @@ func TestTaskReceiverUpgradePreservesRetriesAndCallerScope(t *testing.T) {
 	if _, err = backend.s.integrationDB.Exec("UPDATE agent_link_node_settings SET default_assistant_id=? WHERE singleton=1", second); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = backend.s.integrationDB.Exec("DELETE FROM pot_migrations WHERE id LIKE '0031_%'"); err != nil {
+	// Exercise the frozen conversion without punching a hole in newer migration
+	// history or replaying later destructive file-export migrations.
+	conversion, err := os.ReadFile("../../pkg/storage/migrations/control/0031_task_targets.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = backend.s.integrationDB.Exec(string(conversion)); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {

@@ -83,6 +83,11 @@ def main():
                 f"Linked approvals: {width}, {locale}, live locale, resolved request removal and one-shot approval passed",
                 flush=True,
             )
+        cli("run-code", "--filename", str(ROOT / "scripts/tests/go-ui-patch-approvals-browser.js"))
+        print(
+            "External patch approvals: exact review, one-time decisions and bilingual recovery passed",
+            flush=True,
+        )
     finally:
         cli("close")
         server.shutdown()
