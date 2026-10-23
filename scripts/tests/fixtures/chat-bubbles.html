@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en" data-platform="browser">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Synthetic chat bubbles</title>
+<link rel="stylesheet" href="../../../web/src/styles.css">
+<div id="app"></div>
+<script>
+addEventListener('error',event=>{const error=document.createElement('pre');error.textContent=event.message;document.body.append(error);});
+addEventListener('unhandledrejection',event=>{const error=document.createElement('pre');error.textContent=String(event.reason);document.body.append(error);});
+</script>
+<script type="module" src="../go-ui-chat-bubbles-fixture.mjs"></script>
+</html>

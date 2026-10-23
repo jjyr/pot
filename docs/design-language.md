@@ -10,7 +10,8 @@ and build and regression commands in [Development](development.md#checks).
 Use warm paper surfaces, charcoal text, system typography and fine gray-green
 dividers. Terracotta identifies assistant mentions and navigation selection. Blue
 continues to identify actions, links and focus; status colors accompany text or icons.
-Assistant replies use quiet neutral bubbles; user messages use a soft blue fill. Reserve
+Assistant replies use transparent natural prose with a small avatar and assistant name.
+User messages align right in a single warm neutral bubble without a name row. Reserve
 cards for related controls or details, rather than wrapping every row.
 
 ### Color and surfaces
@@ -33,13 +34,16 @@ System / Light / Dark appearance is available in General settings.
 | Communication line | `#869477` | `#9CAE86` |
 | Primary action / link | `#0068DA` | `#4D9FFF` |
 | Secondary control | `#EEEEE6` | `#464B3F` |
-| User message fill | `#E7F2FF` | `#243A52` |
+| User message fill (`--message-user-fill`) | `#EDE8DF` | `#34332C` |
 | Success | `#247844` | `#78BE8A` |
 | Attention | `#885B13` | `#D7AF66` |
 | Error / destructive action | `#BD342D` | `#FF6961` |
 
-Conversation Markdown uses 15 px text with a 24 px line height. Tool headings stay
-compact at 12 px; communication bodies use 14 px text with a 1.8 line height
+Assistant prose uses 15 px text with a 1.8 line height, capped at 66ch; narrow
+conversation containers use 14 px. User bubbles are capped at 570 px and 88% of
+the column (93% in narrow containers), with 14 px corners (12 px when narrow).
+Reply failures emphasize the status and diagnostics while retaining normal prose.
+Tool headings stay compact at 12 px; communication bodies use 14 px text with a 1.8 line height
 (13 px in narrow communication containers).
 Task, approval and resource components keep their existing placement and controls.
 
@@ -72,9 +76,9 @@ Desktop mouse controls stay compact. Wide iPad windows retain touch density.
 Wrap secondary actions and keep labels readable rather than shrinking buttons.
 Chat keeps attachment, input and send controls in one compact row by default;
 references and attachments expand above it and multiline input grows naturally.
-Desktop copy actions appear beside messages on hover or keyboard focus without
-reserving an extra row; touch actions stay visible. Copy success acknowledges in
-place for 1.6 seconds, retaining the current language.
+Assistant copy actions sit below the body. Desktop user copy actions appear
+beside messages on hover or keyboard focus; touch actions stay visible. Copy success
+acknowledges in place for 1.6 seconds, retaining the current language.
 Chat and Task composers share compact floating selectors above the input.
 `/` lists Skills without icons; `@` lists assistant avatars, names and sources.
 Rows are 28 px on desktop and at least 44 px on narrow/touch surfaces. Names and

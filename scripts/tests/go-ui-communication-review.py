@@ -11,19 +11,26 @@ import subprocess
 import tarfile
 
 ROOT = Path(__file__).resolve().parents[2]
-FIXTURES = [
-    "scripts/tests/fixtures/communication-review.html",
-    "scripts/tests/go-ui-communication-review-fixture.mjs",
-]
+FIXTURES = {
+    "communication": [
+        "scripts/tests/fixtures/communication-review.html",
+        "scripts/tests/go-ui-communication-review-fixture.mjs",
+    ],
+    "chat-bubbles": [
+        "scripts/tests/fixtures/chat-bubbles.html",
+        "scripts/tests/go-ui-chat-bubbles-fixture.mjs",
+    ],
+}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--before", required=True)
     parser.add_argument("--after", required=True)
+    parser.add_argument("--fixture", choices=FIXTURES, default="communication")
     parser.add_argument("--port", type=int, default=17723)
     args = parser.parse_args()
-    sources = ROOT / "output/pr-images/communication-review-sources"
+    sources = ROOT / f"output/pr-images/{args.fixture}-review-sources"
     for label, ref in [("before", args.before), ("after", args.after)]:
         commit = subprocess.check_output(
             ["git", "rev-parse", "--verify", ref + "^{commit}"], cwd=ROOT, text=True
@@ -32,10 +39,12 @@ def main():
         if target.exists():
             shutil.rmtree(target)
         target.mkdir(parents=True)
-        archive = subprocess.check_output(["git", "archive", commit, "web"], cwd=ROOT)
+        archive = subprocess.check_output(
+            ["git", "archive", commit, "web", "pkg/storage/migrations/ui-cache"], cwd=ROOT
+        )
         with tarfile.open(fileobj=io.BytesIO(archive)) as tree:
             tree.extractall(target, filter="data")
-        for fixture in FIXTURES:
+        for fixture in FIXTURES[args.fixture]:
             destination = target / fixture
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / fixture, destination)
@@ -43,7 +52,7 @@ def main():
     handler = partial(SimpleHTTPRequestHandler, directory=str(sources))
     with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:
         print(
-            f"http://127.0.0.1:{server.server_port}/after/scripts/tests/fixtures/communication-review.html?locale=en&theme=light",
+            f"http://127.0.0.1:{server.server_port}/after/{FIXTURES[args.fixture][0]}?locale=en&theme=light",
             flush=True,
         )
         try:

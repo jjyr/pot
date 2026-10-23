@@ -254,6 +254,18 @@ captures into the source branch's [PR image directory](pr-images/README.md).
 Stop the fixture server with Ctrl-C. This export route is separate from the
 computer-use API's inline observations and uses no tool browser session/profile.
 
+For ordinary chat bubble review, use the same two-source server with
+`--fixture chat-bubbles --before COMMIT --after COMMIT --port 17729`, then run
+`scripts/tests/go-ui-chat-bubbles-capture.mjs` with the Playwright module configured
+as above. The server includes each version's UI cache migration modules, which
+are imported by Chat. The identical in-memory fixture uses production Chat with
+long Markdown/code, synthetic attachments/results, local send rejection and
+partial output failure. It makes no model or transport calls. The capture script
+exports desktop light and phone dark before/after pairs and checks copying,
+keyboard disclosure, theme/language changes, width reflow, retained streaming
+nodes, stop/retry, references and resource/Task entrances. Pass the origin and
+output directory as positional arguments to select another server or destination.
+
 For message-body, multi-source batching, acceptance, delegation and identity
 presentation checks, open `/scripts/tests/fixtures/communication.html` on that
 loopback server. It runs shared DOM assertions with synthetic complete addresses,

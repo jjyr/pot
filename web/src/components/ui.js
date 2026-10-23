@@ -769,6 +769,15 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       record.text = message.text; record.role = message.role;
       row.className = `message role-${message.role}`;
     }
+    if(message.role==='assistant'){
+      const name=selectedAssistant?.name||'Pot',image=selectedAssistant?.avatar;
+      if(!record.speaker||record.speakerName!==name||record.speakerImage!==image){
+        record.speaker?.remove();record.speakerName=name;record.speakerImage=image;
+        record.speaker=el('div','message-speaker');
+        record.speaker.append(assistantAvatar(selectedAssistant,25),el('span','',name));
+        row.prepend(record.speaker);
+      }
+    }
     const source=message.role==='assistant'?bubble.querySelector('.reply-content'):message.role==='user'?bubble.querySelector('.message-prose'):null;
     if(source&&message.text&&!message.id.startsWith('pending:'))source.dataset.referenceSource=message.id;
     const referenceSignature=JSON.stringify([message.references||[],locale]);
