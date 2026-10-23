@@ -20,10 +20,16 @@ import (
 // Retry only a confirmed capacity rejection, which precedes remote execution;
 // retain the exact original request and return every other outcome unchanged.
 func callAgentWhenReady(ctx context.Context, service *Service, owner string, operation agentlink.Operation, call agentlink.Call) (any, error) {
+	return retryAgentCapacity(ctx, func(ctx context.Context) (any, error) {
+		return service.CallAgent(ctx, owner, operation, call)
+	})
+}
+
+func retryAgentCapacity(ctx context.Context, call func(context.Context) (any, error)) (any, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	for {
-		value, err := service.CallAgent(ctx, owner, operation, call)
+		value, err := call(ctx)
 		var api protocol.APIError
 		if !errors.Is(err, agentlink.ErrCapacity) && !(errors.As(err, &api) && api.Code == agentlink.ErrCapacity.Error()) {
 			return value, err
@@ -33,6 +39,52 @@ func callAgentWhenReady(ctx context.Context, service *Service, owner string, ope
 			return nil, ctx.Err()
 		case <-time.After(20 * time.Millisecond):
 		}
+	}
+}
+
+func TestRetryAgentCapacityPreservesOtherOutcomes(t *testing.T) {
+	transport := errors.New("transport outcome unknown")
+	for _, tc := range []struct {
+		name  string
+		err   error
+		retry bool
+	}{
+		{name: "capacity", err: agentlink.ErrCapacity, retry: true},
+		{name: "api capacity", err: protocol.APIError{Code: agentlink.ErrCapacity.Error()}, retry: true},
+		{name: "success"},
+		{name: "transport", err: transport},
+		{name: "deadline", err: context.DeadlineExceeded},
+		{name: "cancelled", err: context.Canceled},
+		{name: "conflict", err: agentlink.ErrConflict},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			value, err := retryAgentCapacity(t.Context(), func(context.Context) (any, error) {
+				calls++
+				if calls == 1 {
+					return "original", tc.err
+				}
+				return "accepted", nil
+			})
+			if tc.retry {
+				if calls != 2 || value != "accepted" || err != nil {
+					t.Fatal(calls, value, err)
+				}
+			} else if calls != 1 || value != "original" || err != tc.err {
+				t.Fatal("changed non-capacity outcome", calls, value, err)
+			}
+		})
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	calls := 0
+	_, err := retryAgentCapacity(ctx, func(context.Context) (any, error) {
+		calls++
+		cancel()
+		return nil, agentlink.ErrCapacity
+	})
+	if !errors.Is(err, context.Canceled) || calls != 1 {
+		t.Fatal("retried after cancellation", calls, err)
 	}
 }
 
