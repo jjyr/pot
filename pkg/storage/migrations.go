@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/jjyr/pot/pkg/assistantavatar"
+	"github.com/jjyr/pot/pkg/storage/migrations"
 	migrate "github.com/rubenv/sql-migrate"
 	"modernc.org/sqlite"
 )
@@ -22,6 +23,13 @@ import (
 // Historical migrations retain their exact renderer. New conversions use the
 // current character catalog. Registration precedes every storage connection.
 func init() {
+	sqlite.MustRegisterDeterministicScalarFunction("pot_idle_model_spec", 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+		raw, ok := args[0].(string)
+		if !ok {
+			return nil, fmt.Errorf("model timeout upgrade requires JSON text")
+		}
+		return migrations.UpgradeModelIdleSpec(raw)
+	})
 	sqlite.MustRegisterDeterministicScalarFunction("pot_default_avatar", 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
 		seed, ok := args[0].(string)
 		if !ok || seed == "" {

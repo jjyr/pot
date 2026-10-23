@@ -28,6 +28,8 @@ type CompactionReport struct {
 	Evidence json.RawMessage `json:"evidence,omitempty"`
 }
 
+// A repeated message_started with the same ID restarts that incomplete message,
+// clearing its displayed text without starting a second reply.
 type Update struct {
 	ExecutionMode string           `json:"execution_mode,omitempty"`
 	ParentID      string           `json:"parent_id,omitempty"`

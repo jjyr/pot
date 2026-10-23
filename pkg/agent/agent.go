@@ -301,7 +301,7 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 		if tokens > thread.Config.ContextWindow || input.MaxOutputTokens > thread.Config.ContextWindow-tokens || settings.MaxInputTokens != nil && tokens > *settings.MaxInputTokens {
 			return fmt.Errorf("context exceeds configured model limits")
 		}
-		messageID := ""
+		messageID := newID()
 		if a.MessageID != nil {
 			messageID, err = a.MessageID(ctx)
 			if err != nil {
@@ -311,7 +311,12 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 		if err := emit(core.Update{Type: "message_started", ID: messageID}); err != nil {
 			return err
 		}
-		response, err := a.sample(ctx, thread, &state, input, nil, emit)
+		response, err := a.sample(ctx, thread, &state, input, nil, func(update core.Update) error {
+			if update.Type == "message_started" {
+				update.ID = messageID
+			}
+			return emit(update)
+		})
 		if err != nil {
 			return err
 		}
@@ -546,6 +551,37 @@ func failedResult(raw json.RawMessage) bool {
 	return reason
 }
 func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoint, input m.Request, compactionID *string, emit func(core.Update) error) (response m.Message, result error) {
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return response, err
+		}
+		response, result = a.sampleOnce(ctx, thread, state, input, compactionID, emit)
+		if result != nil && ctx.Err() != nil {
+			return response, errors.Join(ctx.Err(), result)
+		}
+		// Only a direct transient error is retryable. Joined errors mean that
+		// checkpoint persistence or observation also failed; never hide those.
+		if _, transient := result.(*core.TransientModelError); !transient || attempt == 3 || state.ModelRequestID != nil || ctx.Err() != nil {
+			return response, result
+		}
+		timer := time.NewTimer((2 * time.Second) << attempt)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return response, ctx.Err()
+		case <-timer.C:
+		}
+		if compactionID == nil {
+			// Restart the same incomplete message; completed history and tool
+			// receipts remain untouched. Each sample gets a new metered ID.
+			if err := emit(core.Update{Type: "message_started"}); err != nil {
+				return response, err
+			}
+		}
+	}
+}
+
+func (a *Agent) sampleOnce(ctx context.Context, thread core.Thread, state *Checkpoint, input m.Request, compactionID *string, emit func(core.Update) error) (response m.Message, result error) {
 	body, err := m.Encode(input)
 	if err != nil {
 		return response, err
@@ -617,19 +653,34 @@ func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoin
 			observedUsage.OutputTokens = &response.Usage.Output
 		}
 		observation.Usage = &observedUsage
-		if err := a.Feedback.Observe(ctx, observation); err != nil && result == nil {
-			result = err
+		if err := a.Feedback.Observe(ctx, observation); err != nil {
+			result = errors.Join(result, err)
 		}
 	}()
-	requestCtx, cancel := context.WithTimeout(ctx, time.Duration(thread.Config.Params.Agent.RequestTimeoutMS)*time.Millisecond)
-	defer cancel()
+	idle := newModelIdleContext(ctx, time.Duration(thread.Config.Params.Agent.RequestTimeoutMS)*time.Millisecond)
+	defer idle.close()
+	requestCtx := idle.ctx
+	defer func() {
+		if result != nil && ctx.Err() == nil && errors.Is(context.Cause(requestCtx), errModelIdleTimeout) {
+			// Normalize even a socket-close error: inactivity closes the body
+			// concurrently with Read, which can otherwise hide the real cause.
+			result = &core.TransientModelError{Cause: fmt.Errorf("model response inactive for %s: %w", idle.timeout, errModelIdleTimeout)}
+		}
+	}()
 	stream, err := a.Services.Model(requestCtx, core.ModelRequest{ID: requestID, Protocol: string(input.Protocol), Provider: thread.Config.Provider, Model: input.Model, Body: body, CompactionID: compactionID})
 	if err != nil {
+		var rejected *core.ModelRequestError
+		if errors.As(err, &rejected) && rejected.Disposition == "rejected" {
+			if transient, ok := rejected.Cause.(*core.TransientModelError); ok {
+				return response, transient
+			}
+		}
 		return response, err
 	}
 	defer stream.Close()
 	stopClose := context.AfterFunc(requestCtx, func() { _ = stream.Close() })
 	defer stopClose()
+	idle.touch() // Receiving response headers is activity too.
 	parser := m.SSE{}
 	decoder := m.NewDecoder(input.Protocol)
 	buffer := make([]byte, 16384)
@@ -639,6 +690,9 @@ func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoin
 			return response, err
 		}
 		n, readErr := stream.Read(buffer)
+		if n > 0 {
+			idle.touch()
+		}
 		if compactionID != nil {
 			native.Write(buffer[:n])
 		}
@@ -700,10 +754,13 @@ func (a *Agent) sample(ctx context.Context, thread core.Thread, state *Checkpoin
 		}
 	}
 	if err := parser.Finish(); err != nil {
-		return response, err
+		return response, &core.TransientModelError{Cause: err}
 	}
 	response, err = decoder.Finish()
 	if err != nil {
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			return response, &core.TransientModelError{Cause: err}
+		}
 		return response, err
 	}
 	replayRoute := route(thread.Config)

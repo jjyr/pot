@@ -150,6 +150,66 @@ func TestValidatorRecomputesReportsRejectsTamperingAndPathEscapes(t *testing.T) 
 	}
 }
 
+func TestValidatorAcceptsRestartOfSameIncompleteMessage(t *testing.T) {
+	s, err := ReadScenario("../../eval/scenarios/short-chat.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "run")
+	if _, err := Run(context.Background(), s, path, RunOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(path, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []Event
+	inserted := false
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var event Event
+		if err := core.DecodeJSON([]byte(line), &event); err != nil {
+			t.Fatal(err)
+		}
+		events = append(events, event)
+		if event.Payload.Type == "agent" && !inserted {
+			var update core.AgentEvent
+			if err := core.DecodeJSON(event.Payload.Data, &update); err != nil {
+				t.Fatal(err)
+			}
+			if update.Update.Type == "message_started" {
+				events = append(events, event)
+				inserted = true
+			}
+		}
+	}
+	if !inserted {
+		t.Fatal("fixture has no message start")
+	}
+	agentSequence := uint64(0)
+	var body strings.Builder
+	for index, event := range events {
+		event.Seq = uint64(index + 1)
+		if event.Payload.Type == "agent" {
+			var update core.AgentEvent
+			if err := core.DecodeJSON(event.Payload.Data, &update); err != nil {
+				t.Fatal(err)
+			}
+			agentSequence++
+			update.Seq = agentSequence
+			event.Payload.Data, _ = json.Marshal(update)
+		}
+		line, _ := json.Marshal(event)
+		body.Write(line)
+		body.WriteByte('\n')
+	}
+	if err := os.WriteFile(filepath.Join(path, "events.jsonl"), []byte(body.String()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if report, err := Validate(path); err != nil || !report.Success {
+		t.Fatal("message retry failed validation", report, err)
+	}
+}
+
 func TestSmallSuiteRunsMemoryCacheDelegationAndFaults(t *testing.T) {
 	report, err := RunSuite(context.Background(), filepath.Join(t.TempDir(), "suite"), nil, nil)
 	if err != nil {
