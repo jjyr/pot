@@ -41,7 +41,3 @@ export function toolForest(messages){
   return {roots,byID};
 }
 function rootsForParent(parent,child,byID){const seen=new Set([child.message.tool.id]);for(let entry=parent;entry;entry=byID.get(`${entry.message.tool.turn_id}:${entry.message.tool.parent_id}`)){if(seen.has(entry.message.tool.id))return false;seen.add(entry.message.tool.id);}return true;}
-
-export function patchFiles(patch=''){
-  return [...String(patch).matchAll(/^\*\*\* (Add File|Update File|Delete File|Move to): (.+)$/gm)].map(([,operation,path])=>({operation:({'Add File':'added','Update File':'modified','Delete File':'deleted','Move to':'moved'})[operation],path}));
-}

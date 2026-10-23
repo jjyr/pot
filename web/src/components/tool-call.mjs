@@ -1,6 +1,7 @@
-import {activeTool,toolResult,toolSummary,toolFailure,patchFiles} from '../state/tool-calls.mjs';
+import {activeTool,toolResult,toolSummary,toolFailure} from '../state/tool-calls.mjs';
 import {translate} from '../locales/messages.mjs';
-import {renderMarkdown} from './markdown.mjs';
+import {createToolContent} from './tool-content.mjs';
+import {toolKind,presentationLabel,presentationPreview} from '../state/tool-presentation.mjs';
 import {createApprovalCard} from './approval-card.mjs';
 import {messageAddresses} from '../state/message-identities.mjs';
 import {assistantMention} from './assistant-mention.mjs';
@@ -25,7 +26,8 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
   summary.append(communicationView.summary);body.insertBefore(communicationView.body,sections);
   let current,options={},signature='',approvalID='',approvalCard=null,rawSignature='',autoOpened=false,building=false,refreshStatus=()=>{};
   let bodyVersion=[];
-  const sectionsByKey=new Map();
+  const contentView=createToolContent({locale,downloadFile,acquireFileImage,onOpenTask,resolveTask});
+  sections.append(contentView.element);
   // Ordinary communication starts collapsed; only explicit reading/navigation or
   // the existing approval path opens it. Updates never reapply a default.
   root.open=memory.get(key)?.open||false;raw.open=memory.get(key)?.raw||false;
@@ -50,30 +52,19 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     title.title=title.textContent;return true;
   }
   const remember=()=>{if(!building)memory.set(key,{...memory.get(key),open:root.open,raw:raw.open});};root.addEventListener('toggle',()=>{remember();refreshStatus();if(current)update(current,options);});raw.addEventListener('toggle',()=>{remember();if(current)update(current,options);});
+  // Populate on activation, before a second click can target an empty disclosure
+  // whose position will change when its deferred toggle event renders content.
+  summary.addEventListener('click',event=>{if(event.defaultPrevented||event.target.closest('button,a,input,select,textarea'))return;event.preventDefault();root.open=!root.open;remember();refreshStatus();if(current)update(current,options);});
+  // Commit before ResizeObserver/virtual-window recycling can detach this row.
+  rawTitle.addEventListener('click',event=>{event.preventDefault();onInteract(event);raw.open=!raw.open;remember();if(current)update(current,options);});
   function copyButton(label,get){const button=n('button','tool-action',label);button.type='button';button.onclick=async()=>{try{await navigator.clipboard.writeText(get());button.textContent=t('copied');}catch{button.textContent=t('copyFailed');}};return button;}
-  function section(id,label,value,{output=false,markdown=false}={}){
-    let item=sectionsByKey.get(id);
-    if(!item){const box=n('section','tool-section'),head=n('div','tool-section-heading'),heading=n('strong'),pre=n('pre','tool-code');const copy=copyButton(t('copy'),()=>item.value);head.append(heading,copy);let follow;
-      if(output){follow=n('button','tool-action');follow.type='button';head.append(follow);}
-      const truncated=n('p','tool-truncated');box.append(head,pre,truncated);item={box,heading,copy,pre,truncated,value:'',following:true,follow};sectionsByKey.set(id,item);sections.append(box);
-      if(output){pre.addEventListener('scroll',()=>{item.following=pre.scrollHeight-pre.clientHeight-pre.scrollTop<24;follow.textContent=t(item.following?'following':'latest');});follow.onclick=()=>{item.following=true;bodyVersion=[];update(current,options);pre.scrollTop=pre.scrollHeight;follow.textContent=t('following');};}
-    }
-    item.heading.textContent=label;item.copy.textContent=t('copy');item.box.hidden=false;
-    const text=pretty(value);item.value=text;
-    const visible=output?(item.following?text.slice(-LIMIT):(text.length>LIMIT?item.displayed??text.slice(0,LIMIT):text)):text.slice(0,LIMIT);
-    if(item.displayed!==visible){const top=item.pre.scrollTop;item.displayed=visible;if(markdown)item.pre.replaceChildren(renderMarkdown(visible,{downloadFile,acquireFileImage}));else item.pre.textContent=visible;if(output&&item.following)item.pre.scrollTop=item.pre.scrollHeight;else item.pre.scrollTop=top;}
-
-    item.truncated.hidden=text.length<=LIMIT;item.truncated.textContent=t('displayTruncated');
-    if(item.follow)item.follow.textContent=t(item.following?'following':'latest');
-    return item;
-  }
   function update(message,next={}){
     current=message;options=next;const tool=message.tool;if(!tool)return;
     const result=tool.process?tool.process.result:toolResult(tool),pending=next.approval,script=tool.script,isGroup=tool.name==='script_group';
     root.classList.toggle('script-group',isGroup);root.classList.toggle('script-run',!!script&&!isGroup);
     const model=communication(tool,messageActor()),summaryModel=model||(!isGroup&&script?.focus?communication(script.focus,messageActor()):null);
     metadata.hidden=isGroup;raw.hidden=isGroup;
-    if(model){if(metadata.parentElement!==rawBody)rawBody.prepend(metadata);}else if(metadata.parentElement!==body)body.insertBefore(metadata,approval);
+    if(metadata.parentElement!==rawBody)rawBody.prepend(metadata);
     communicationView.update(summaryModel,{expanded:root.open&&!pending,summaryOnly:!model,preparing:tool.phase==='preparing'});
     communicationView.body.hidden=!model||!!pending;
     root.classList.toggle('communication-tool',!!summaryModel);
@@ -81,10 +72,9 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     duration.hidden=model?.kind==='receive';
 
     const phase=pending?'waiting_approval':tool.phase;
-    const names={exec_command:'command',write_stdin:'session',apply_patch:'patch',exec:'script',wait:'wait',cua_repl:'computer',create_task:'createTask',set_task_dispositions:'setTaskDispositions',get_task:'getTask',wait_task:'waitTask',register_resource:'registerResource',present_resource:'presentResource'};
     const messaging=messageTitle(tool);root.classList.toggle('message-tool',messaging);
-    if(!messaging)title.textContent=names[tool.name]?t(names[tool.name]):tool.name;
-    const preview=messaging?'':toolSummary(tool);
+    if(!messaging)title.textContent=t(presentationLabel(tool));
+    const preview=messaging?'':presentationPreview(tool,{resolveTask})||(['terminal','patch','script','browser'].includes(toolKind(tool))?toolSummary(tool):'');
     excerpt.textContent=preview===tool.name||preview===title.textContent?'':preview;excerpt.title=excerpt.textContent;excerpt.hidden=!excerpt.textContent;
     const childTools=(next.children||[]).map(child=>child.tool);
     // A tool failure is execution detail, not a request for the user's attention.
@@ -102,7 +92,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     };
     refreshStatus();
     if(script){
-      const focus=script.focus,label=focus?.name==='exec_command'?focus.args?.cmd?.trim().split('\n')[0]:focus?(names[focus.name]?t(names[focus.name]):focus.name):'';
+      const focus=script.focus,label=focus?.name==='exec_command'?focus.args?.cmd?.trim().split('\n')[0]:focus?t(presentationLabel(focus)):'';
       title.textContent=isGroup?t('executionHistory'):label||t('script');
       if(!isGroup&&focus&&messageTitle(focus))root.classList.add('message-tool');
       excerpt.hidden=true;excerpt.textContent='';title.title=title.textContent;
@@ -131,46 +121,15 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     // Collapsed cards need only their summary and approval identity. Defer
     // output Markdown, media and raw JSON until the reader asks to see them.
     if(!root.open)return;
-    const version=[tool,tool.phase,tool.args,tool.result,tool.output?.length,tool.output?.at(-1)?.text,script?.output,tool.process?.result,locale(),pending,raw.open];
+    contentView.element.hidden=!!model||isGroup;
+    const version=[tool,tool.phase,tool.args,tool.result,tool.output?.length,tool.output?.at(-1)?.text,script?.output,tool.process?.result,locale(),pending,raw.open,next.children?.length,targetLabel];
     if(version.every((value,index)=>value===bodyVersion[index]))return;
     bodyVersion=version;
-    for(const item of sectionsByKey.values())item.box.hidden=true;
     if(isGroup)return;
-    const args=tool.args||{};
-    if(model){/* Message text is rendered once, above the secondary raw disclosure. */}
-    else if(pending){/* The exact approval arguments above are the operation preview. */}
-    else if(tool.name==='exec_command')section('input',t('command'),args.cmd||'');
-    else if(['exec','cua_repl'].includes(tool.name))section('input',t('code'),args.code||'');
-    else if(tool.name==='apply_patch'){
-      const patch=args.patch||'';const files=patchFiles(patch);if(files.length)section('files',t('files'),files.map(file=>`${file.path} · ${t(file.operation)}`).join('\n'));
-      const item=section('input',t('changes'),patch||pretty(args));
-      if(item.patch!==patch){item.patch=patch;item.pre.replaceChildren();for(const line of patch.slice(0,LIMIT).split('\n'))item.pre.append(n('span',line.startsWith('+')?'tool-diff-add':line.startsWith('-')?'tool-diff-remove':'',line+'\n'));}
-    }
-    else if(tool.name==='write_stdin'){
-      const actions=[args.chars?`${t('sendInput')}\n${args.chars}`:'',args.interrupt?t('interruptProcess'):'',args.terminate?t('terminateProcess'):'',args.close_stdin?t('closeInput'):'',args.rows||args.cols?t('resizeTerminal').replace('{rows}',args.rows||'—').replace('{cols}',args.cols||'—'):''].filter(Boolean);
-      if(actions.length)section('input',t('sessionActions'),actions.join('\n'));
-    }else section('input',t('arguments'),args);
-    const output=(tool.output||[]).map(chunk=>`${chunk.stream?`[${chunk.stream}]\n`:''}${chunk.text}`).join('\n');
-    if(!model){
-    if(output)section('output',t('output'),output,{output:true});
-    else if(activeTool(tool)&&!pending&&phase!=='waiting_approval'&&!['exec','wait'].includes(tool.name))section('output',t('output'),t('noOutput'),{output:true});
-    if(result!==undefined){
-      if(result&&typeof result==='object'&&('stdout'in result||'stderr'in result||['exec_command','write_stdin'].includes(tool.name))){
-        if(!output)section('output',t('output'),[result.stdout,result.stderr?`[stderr]\n${result.stderr}`:''].filter(Boolean).join('\n')||t('emptyOutput'),{output:true});
-        const info=[result.exit_code!=null?`${t('exitCode')} ${result.exit_code}`:'',result.truncated?t('sourceTruncated'):''].filter(Boolean).join(' · ');if(info)section('result',t('result'),info);
-      }else if(['exec','wait'].includes(tool.name)&&typeof result?.output==='string'){
-        section('result',t('scriptOutput'),script?.output||result.output||t('emptyOutput'),{output:true});
-      }else if(Array.isArray(result?.content)){
-        const texts=result.content.filter(block=>block.type==='text').map(block=>block.text).join('\n');section('result',t('result'),texts||result,{markdown:!!texts});
-        let media=sectionsByKey.get('media');if(!media){const box=n('div','tool-media');media={box};sectionsByKey.set('media',media);sections.append(box);}media.box.hidden=false;
-        const images=result.content.filter(block=>block.type==='image'&&/^image\/(png|jpeg|webp|gif)$/.test(block.mimeType)&&typeof block.data==='string');
-        if(media.result!==result){media.result=result;media.box.replaceChildren();for(const block of images){const img=n('img');img.alt=t('image');img.loading='lazy';img.src=`data:${block.mimeType};base64,${block.data}`;media.box.append(img);}}
-      }else section('result',t('result'),result);
-    }
-    }
+    if(!model)contentView.update(tool,{result,pending,targetLabel,hasChildren:!!next.children?.length});
     rawTitle.textContent=t(model?'callDetails':'raw');if(!raw.open)return;
     const calls=tool.process?.calls||script?.calls||[tool],rawValue=JSON.stringify([locale(),calls]);
-    if(rawSignature!==rawValue){rawSignature=rawValue;rawBody.replaceChildren(...(model?[metadata]:[]));for(const call of calls){rawBody.append(n('p','tool-call-id',`${call.name} · ${call.id}`),n('p','tool-call-time',call.started_at_ms?new Date(call.started_at_ms).toLocaleString(locale()):''));for(const [label,value]of [[t('arguments'),call.args],[t('result'),call.result],...(model?[[t('output'),call.output]]:[])])if(value!==undefined){const text=pretty(value),head=n('div','tool-section-heading');head.append(n('strong','',label),copyButton(t('copyJSON'),()=>text));rawBody.append(head,n('pre','tool-code',text.slice(0,LIMIT)));if(text.length>LIMIT)rawBody.append(n('p','tool-truncated',t('displayTruncated')));}}}
+    if(rawSignature!==rawValue){rawSignature=rawValue;rawBody.replaceChildren(metadata);for(const call of calls){rawBody.append(n('p','tool-call-id',`${call.name} · ${call.id}`),n('p','tool-call-time',call.started_at_ms?new Date(call.started_at_ms).toLocaleString(locale()):''));for(const [label,value]of [[t('arguments'),call.args],[t('result'),call.result],[t('output'),call.output]])if(value!==undefined){const text=pretty(value),head=n('div','tool-section-heading');head.append(n('strong','',label),copyButton(t('copyJSON'),()=>text));rawBody.append(head,n('pre','tool-code',text.slice(0,LIMIT)));if(text.length>LIMIT)rawBody.append(n('p','tool-truncated',t('displayTruncated')));}}}
   }
   function tick(){if(!root.isConnected||!activeTool(current?.tool))return false;if(document.hidden)return true;const tool=current.tool,waiting=options.approval||tool.phase==='waiting_approval',start=tool.script?tool.started_at_ms:waiting?(tool.waiting_at_ms||tool.started_at_ms):tool.running_at_ms||tool.started_at_ms;if(start)duration.textContent=`${waiting&&!tool.script?t('waited')+' ':''}${Math.max(0,Math.floor((Date.now()-start)/1000))}s`;return true;}
   return {element:root,children,update};

@@ -611,6 +611,29 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 
 .tool-diff-add{color:var(--success);}.tool-diff-remove{color:var(--danger);}
 
+/* Semantic activity views; raw protocol metadata stays behind the second disclosure. */
+.tool-content{min-width:0;}.tool-content [hidden]{display:none!important;}
+.tool-terminal{border:1px solid var(--divider);border-radius:8px;overflow:hidden;background:var(--navigation);}
+.tool-terminal-bar,.tool-terminal-footer{display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap;padding:9px 12px;font-size:12px;color:var(--muted);}
+.tool-terminal-bar{border-bottom:1px solid var(--divider);}.tool-terminal-location{flex:1;min-width:0;overflow-wrap:anywhere;}.tool-terminal-shell{overflow-wrap:anywhere;}
+.tool-terminal-footer{border-top:1px solid var(--divider);}.tool-terminal-footer .tool-truncated{margin:0;}
+.tool-terminal .tool-section{margin:0;}.tool-terminal .tool-section-heading{padding:5px 9px;margin:0;}.tool-terminal .tool-section-heading strong{font-weight:400;color:var(--muted);}
+.tool-terminal .tool-code{background:transparent;border-radius:0;padding:9px 12px 14px;}.tool-terminal .tool-truncated{padding-inline:12px;}
+.tool-command,.tool-session-input{font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere;padding:8px 12px;}
+.tool-command:before{content:'$ ';color:var(--muted);user-select:none;}.tool-content[data-kind=terminal] .tool-section-content:not(.tool-command){padding:8px 12px;}
+.tool-exit-success{color:var(--success);}.tool-exit-failure{color:var(--danger);}
+.tool-section-content{min-width:0;overflow-wrap:anywhere;white-space:pre-wrap;}.tool-section-content:has(.tool-fields),.tool-section-content:has(.tool-value-list){white-space:normal;}
+.tool-fields{display:grid;grid-template-columns:minmax(90px,max-content) minmax(0,1fr);gap:6px 14px;margin:0;}
+.tool-fields dt{color:var(--muted);font-size:12px;overflow-wrap:anywhere;}.tool-fields dd{margin:0;min-width:0;overflow-wrap:anywhere;}
+.tool-fields .tool-fields{border-left:1px solid var(--divider);padding-left:10px;grid-template-columns:minmax(70px,max-content) minmax(0,1fr);}
+.tool-value{white-space:pre-wrap;}.tool-value-list{margin:0;padding-left:20px;}.tool-value-list>li{margin-bottom:10px;}.tool-value-list>li:last-child{margin-bottom:0;}.tool-empty{color:var(--muted);}
+.tool-file-diff{border:1px solid var(--divider);border-radius:6px;overflow:hidden;margin:8px 0;}.tool-file-heading{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:12px;flex-wrap:wrap;overflow-wrap:anywhere;background:var(--navigation);}.tool-file-heading>span:first-child{flex:1;min-width:0;}.tool-file-counts{white-space:nowrap;font-variant-numeric:tabular-nums;}.tool-file-destination{flex-basis:100%;}
+.tool-call .tool-diff{padding:8px 0;border-radius:0;background:transparent;}.tool-diff>span{display:block;padding-inline:12px;min-height:1.6em;}.tool-diff>.tool-diff-add{background:color-mix(in srgb,var(--success) 9%,transparent);}.tool-diff>.tool-diff-remove{background:color-mix(in srgb,var(--danger) 9%,transparent);}
+.tool-script-code{font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre;overflow:auto;max-height:280px;padding:12px;background:var(--navigation);border-radius:6px;}
+.tool-task-heading{display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;margin-bottom:10px;}.tool-task-heading>strong{flex:1;overflow-wrap:anywhere;}.tool-task-phase{font-size:12px;color:var(--muted);}
+.tool-content img{max-width:100%;height:auto;border-radius:5px;}.tool-content .tool-section-content .message-body{padding:0;border:0;background:transparent;}
+@media(max-width:719px){.tool-fields,.tool-fields .tool-fields{grid-template-columns:minmax(0,1fr);gap:2px;}.tool-fields dd{margin-bottom:7px;}.tool-fields dd:last-child{margin-bottom:0;}.tool-terminal-bar{align-items:flex-start;}.tool-terminal .tool-section-heading{gap:6px;}.tool-body:has(.tool-terminal:not([hidden])){padding:8px;}.tool-value-list{padding-left:16px;}}
+
 .tool-context{order:5;}
 .script-group>.tool-body{background:transparent;border:0;border-radius:0;padding:0 0 0 12px;margin-top:6px;}
 .script-group>.tool-summary>.tool-title,.script-run>.tool-summary>.tool-title{flex:1;min-width:0;}
