@@ -119,9 +119,10 @@ performed by the website. Result previews use synthetic notes, a documentation
 change excerpt and real shared-UI screenshots with isolated synthetic records.
 See [screenshot provenance](../docs/images/README.md).
 
-The header's inline GitHub Mark links to the repository. It reuses the existing
-product icon from [Primer Octicons](https://github.com/primer/octicons/blob/main/icons/mark-github-16.svg)
-under the MIT license; the notice is included in `assets/Octicons-LICENSE.txt`. On static pages a single
+The header's GitHub Invertocat links to the repository. It uses the unmodified
+black SVG from the [GitHub Brand Toolkit](https://brand.github.com/foundations/logo),
+served locally with its original 98:96 proportions. Source and trademark terms
+are recorded in `assets/GitHub-NOTICE.txt`. On static pages a single
 unauthenticated request to `https://api.github.com/repos/jjyr/pot` can add the
 public star count, cached in localStorage for six hours. Requests omit credentials
 and referrers and time out after three seconds. Failed requests, rate limits,
@@ -138,6 +139,7 @@ screen reader announcements.
 | Brand | Local file | Source |
 | --- | --- | --- |
 | Pot | `assets/pot.png` | Existing Pot release PotCompanion character. |
+| GitHub | `assets/github-invertocat-black.svg` | Unmodified `GitHub Logos/SVG/GitHub_Invertocat_Black.svg` from the [official logo download](https://brand.github.com/GitHub_Logos.zip), linked by the [GitHub Brand Toolkit](https://brand.github.com/foundations/logo) (the destination of `https://github.com/logos`). See `assets/GitHub-NOTICE.txt`. |
 | Codex | `assets/codex.png` | Existing product asset from the official ChatGPT.app distribution's `icon-codex-light.png`; see `assets/Codex-NOTICE.txt`. Product identity: [OpenAI Codex](https://openai.com/codex/). |
 | Claude | `assets/claude.svg` | [Official Claude favicon](https://claude.ai/favicon.svg). |
 | Grok | `assets/grok.svg` | [Official Grok favicon](https://grok.com/images/favicon.svg), identified by the [Grok website](https://grok.com/). Only an empty exported foreignObject blur layer was removed; brand paths, proportions and colors are retained. |

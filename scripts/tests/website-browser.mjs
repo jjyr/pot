@@ -27,10 +27,11 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  for(const width of [1280,390]){
   await page.setViewportSize({width,height:width===390?844:900});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} overflow at ${width}`);
-  const mark=page.locator('.github-star svg');
+  const mark=page.locator('.github-star img');
   assert.equal(await mark.count(),1);
   assert.equal(await mark.getAttribute('aria-hidden'),'true');
-  assert(await mark.evaluate(e=>{const rect=e.getBoundingClientRect(),style=getComputedStyle(e);return rect.width===16&&rect.height===16&&style.fill===style.color&&style.stroke==='none';}),`${locale} GitHub Mark is filled and keeps its proportions at ${width}`);
+  assert.equal(await mark.getAttribute('alt'),'');
+  assert(await mark.evaluate(e=>{const rect=e.getBoundingClientRect();return e.complete&&e.naturalWidth===98&&e.naturalHeight===96&&rect.height===16&&Math.abs(rect.width/rect.height-98/96)<0.001;}),`${locale} official Invertocat loads and keeps its proportions at ${width}`);
   assert(await page.locator('.github-star').getAttribute('aria-label'));
   if(width===390)assert(await page.evaluate(()=>{const star=document.querySelector('.github-star').getBoundingClientRect(),start=document.querySelector('.nav-cta').getBoundingClientRect();return star.right<=start.left&&Math.abs((star.top+star.bottom-start.top-start.bottom)/2)<2;}),`${locale} header actions share a row`);
   for(const [channel,id] of [['agent','agent-prompt'],['macos','brew-command'],['linux',null],['web','docker-image'],['web','server-command']]){
@@ -134,6 +135,7 @@ await offline.locator('[data-install="web"]').click();await offline.selectOption
 assert.equal(await offline.locator('[role=tab][aria-selected=true]').getAttribute('data-install'),'web');
 assert(await offline.locator('#install-web .web-server').isVisible());
 assert(await offline.locator('#install-web .web-docker').isVisible());
+assert(await offline.locator('.github-star img').evaluate(e=>e.src.startsWith('data:image/svg+xml;base64,')&&e.complete&&e.naturalWidth===98&&e.naturalHeight===96));
 const noJS=await browser.newPage({javaScriptEnabled:false});await noJS.goto(origin+'/website/en/');assert.equal(await noJS.locator('#agent-prompt').textContent(),install.prompt);assert.equal(await noJS.locator('.project-task').count(),3);assert.equal(await noJS.locator('.install-panel:visible').count(),4);
 assert.equal(await noJS.locator('#install-linux #docker-image').count(),0);
 assert(await noJS.locator('#install-web .web-docker').isVisible());
