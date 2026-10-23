@@ -331,7 +331,10 @@ selected local bundles beneath the node's `cache/resources/skills/<digest>/`.
 The digest identifies prepared content, not a user-requested version. Injected paths are absolute destination-local paths; no mount or HOME
 translation is performed. Project Skills remain independently discovered.
 
-Skills grant no execution authority. Instructions and Skills use the same local
+Protected Main execution exposes the global user and builtin Skill directories
+read-only so advertised instructions and supporting assets can be loaded. Adjacent
+Runtime state stays private. Workers receive only their selected Skill snapshots.
+Skills grant no host execution authority. Instructions and Skills use the same local
 filesystem rules for execution on the owning node. Runtime asset
 paths are set by host composition.
 See [Permissions](permissions.md) and [Executor](executor.md).

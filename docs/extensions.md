@@ -34,6 +34,11 @@ Magpie supplies one connection with its visible models and quotas. See
 [Model connections](model-directory.md#provider-contributions).
 Other background-service routing remains under third-party accounts.
 
+MCP JSON import, extension removal and discarding unsaved edits require an
+explicit in-page confirmation. Cancel or Escape keeps the current editor and
+draft. These confirmations work in both the native WebView and browser UI, and
+follow language changes while open.
+
 ## Plugins and icons
 
 The catalogue discovers packaged `PluginRoot` directories and user installations
