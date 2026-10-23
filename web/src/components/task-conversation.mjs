@@ -18,7 +18,7 @@ import {createMessageWindow} from './message-window.mjs';
 import {createReadingCursor} from './reading-cursor.mjs';
 import {copyFeedback} from './motion.mjs';
 
-export function createTaskConversation({root,task,record:initial,locale,client,scope,draft,onDraft,downloadFile,toolMemory,approvalFor,onDecision,onSend,onStop,onPause,onCancel,onArchive,onUsage,onRefresh,onSettings,onOpenTask,assistantName}){
+export function createTaskConversation({root,task,record:initial,locale,client,scope,draft,onDraft,downloadFile:downloadTaskFile,toolMemory,approvalFor,onDecision,onSend,onStop,onPause,onCancel,onArchive,onUsage,onRefresh,onSettings,onOpenTask,assistantName}){
   const machineLabel=id=>machinePresentation(client).label(id,scope,locale());
   const acquireFileImage=client.acquireFileImage?({task,path})=>client.acquireFileImage(task,path,scope):undefined;
   const resourceOptions={acquireResource:client.acquireResource?resource=>client.acquireResource(resource,scope):undefined,downloadResource:client.downloadResource?resource=>client.downloadResource(resource,scope):undefined};
@@ -31,14 +31,27 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   goal.dataset.scrollAnchor='task-goal';goal.dataset.cacheKey='task-goal';goalSummary.append(icon('chevron-right'),n('span','task-goal-label',tr('Task goal','任务目标')),goalPreview);goal.append(goalSummary,goalBody);
   goalPreview.textContent=(initial.request?.text||'').replace(/\s+/g,' ');goalBody.append(renderMarkdown(initial.request?.text||'',{downloadFile,acquireFileImage}));
   const transcript=n('div','task-transcript'),files=n('div','task-files');files.dataset.scrollAnchor='task-files';transcript.setAttribute('role','log');transcript.setAttribute('aria-label',tr('Task conversation','任务对话'));
-  const approvalHost=n('div','task-unmatched-approvals');column.append(goal,approvalHost,transcript,files);history.append(column);
+  const downloadNotice=n('div','task-download-error');downloadNotice.hidden=true;downloadNotice.setAttribute('role','alert');
+  const approvalHost=n('div','task-unmatched-approvals');column.append(goal,approvalHost,transcript,files,downloadNotice);history.append(column);
   const composerArea=n('div','composer-area task-composer-area'),form=n('form','composer'),input=n('textarea','composer-input'),send=iconButton('stop',tr('Stop task','停止任务'),'send-button'),latest=iconButton('down',t('latest'),'latest-button'),footer=n('p','task-ended'),error=n('p','task-action-error');
   input.rows=1;input.id=`task-composer-${task.id}`;input.setAttribute('autocapitalize','sentences');input.setAttribute('aria-label',t('tasks.followupLabel'));input.placeholder=t('tasks.followupPlaceholder');
   input.value=draft;form.append(input,send);composerArea.append(latest,form,footer,error);latest.hidden=true;footer.hidden=true;error.hidden=true;error.setAttribute('role','alert');
   root.classList.add('task-conversation');root.append(stage,history,composerArea);
   const dialog=n('dialog','preferences product-actions task-actions');dialog.setAttribute('aria-label',tr('Task actions','任务操作'));root.append(dialog);
   let record=initial,state,inputs=[],approvals=[],unavailable=false,connectionError='',busy=false,disposed=false,restored=false,frame=0,menuMode='actions',menuSignature='',fileSignature='',draftVersion=0;
-  let forest,projection,restoringPosition=false;
+  let forest,projection,restoringPosition=false,downloadFailure;
+  function renderDownloadFailure(){
+    downloadNotice.hidden=!downloadFailure;downloadNotice.replaceChildren();
+    if(!downloadFailure)return;
+    const details=n('details');details.append(n('summary','',t('errorDetails')),n('pre','',downloadFailure.diagnostic));
+    downloadNotice.append(n('p','hint',t('resource.downloadFailed')),action(t('retry'),()=>downloadFile(downloadFailure.file)),details);
+  }
+  async function downloadFile(file){
+    if(disposed)return;
+    downloadFailure=null;renderDownloadFailure();
+    try{await downloadTaskFile(file);}
+    catch(reason){if(!disposed){downloadFailure={file,diagnostic:reason?.message||String(reason)};renderDownloadFailure();}}
+  }
   const reading=createReadingCursor(history,{active:()=>!disposed&&root.isConnected&&!!history.clientHeight,requestRender:scheduleFollow,changed:()=>{latest.hidden=reading.following;}});
   const editor=bindComposer(input,{layout:work=>reading.layout(work),onInput:text=>{draftVersion++;onDraft(completion.value());updateComposer();},onSend:submit,onCompositionEnd:updateComposer});
   const completion=bindCompletions(input,{client:{scope:()=>scope,resources:client.resources,read:client.read?(path,options)=>client.read(path,options):undefined,request:(path,options)=>client.request(path,options)},host:composerArea,locale,mobile:editor.mobile,id:`pot-task-${task.id}-completions`,setText:text=>editor.setValue(text)});
@@ -171,6 +184,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
       projection=null;
       if(next.record)record=next.record;if(next.state)state=next.state;if(next.inputs)inputs=next.inputs;if(next.approvals)approvals=next.approvals;if(next.unavailable!==undefined)unavailable=next.unavailable;if(next.connectionError!==undefined)connectionError=next.connectionError;
       renderStage();renderTranscript();scheduleFollow();updateComposer();renderMenu();
+      renderDownloadFailure();
       const attachments=record.outcome?.artifacts?.map(path=>({path}))||record.files||[],artifactError=record.outcome?.artifacts_error||'';
       const signature=JSON.stringify([attachments,artifactError,locale()]);if(fileSignature!==signature){
         fileSignature=signature;files.replaceChildren();

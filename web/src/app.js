@@ -25,6 +25,7 @@ try {
   }
   if(client.production&&!desktop){client.access=access;installPWA().catch(()=>{});retireBrowserPush();}
   document.title = client.production ? 'Pot' : 'Pot — Go developer preview';
+  window.potErrors?.configureIssueReport({version: client.runtime?.version, desktop, openExternal: client.openExternal});
   const dispose = mountApp(root, client, {surface: params.get('surface') === 'tray' ? 'tray' : 'main'});
   window.addEventListener('pagehide', event => { if (!event.persisted) dispose(); });
 } catch (error) {
