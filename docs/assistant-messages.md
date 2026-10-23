@@ -225,9 +225,10 @@ inspection, including the collapsed history record.
 A confirmed failed handling turn does not block later queued correspondence from
 the same sender, including a new wire conversation. Active, waiting and interrupted
 attempts retain their existing receiver fences, and the conversation's uncertain
-cleanup gate still prevents execution. A verified continuation restores only its
-original delivery journal members before resuming the checkpoint; it does not
-claim later arrivals. Cancellation and turn completion retire the old sender
+cleanup gate still prevents execution. A verified continuation or safe allowance
+resume (including after restart) restores only its original delivery journal
+members before resuming the checkpoint; it does not claim later arrivals.
+Cancellation and turn completion retire the old sender
 binding. Parent-state validation and new mail insertion share a transaction;
 an already accepted request retains its immutable receipt after the parent ends.
 

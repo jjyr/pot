@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"path/filepath"
 
+	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/pkg/agent"
+	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/storage"
 	"sync/atomic"
 	"testing"
@@ -231,5 +233,86 @@ func TestAcceptedSendSurvivesTranscriptWriteFailureWithoutResend(t *testing.T) {
 	history, _ = s.Mailbox.History(ctx, "main", 0)
 	if len(history) != 1 || history[0].Message.ID != receipt.ID || calls.Load() != 2 {
 		t.Fatal("transcript failure resent accepted message", len(history), calls.Load())
+	}
+}
+
+func TestAssistantMailAllowanceResumeAfterRestartRestoresDelivery(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var calls atomic.Int32
+	var peerID string
+	s, _ := batchService(t, func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			args, _ := json.Marshal(protocol.SendMail{To: protocol.AgentRef{NodeID: "local", Kind: "assistant", AgentID: peerID}, Text: "reply after allowance restart"})
+			event, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "allowance-reply", "type": "function", "function": map[string]any{"name": "send_message", "arguments": string(args)}}}}, "finish_reason": "tool_calls"}}})
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: "+string(event)+"\n\ndata: [DONE]\n\n")
+			return
+		}
+		batchReply(w, "done")
+	}, 2)
+	peer, err := s.Registry.Create(ctx, "peer", "Peer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	peerID = peer.ID
+	if err = s.Usage.SetPolicy(ctx, usage.Policy{Period: "day", Limit: 1, Timezone: "UTC", AutoResume: false}); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := s.Conversation(ctx, "main")
+	incoming, err := s.Mailbox.Send(ctx, "allowance-incoming", protocol.AgentRef{NodeID: "local", Kind: "assistant", AgentID: peerID}, protocol.SendMail{To: protocol.AgentRef{NodeID: "local", Kind: "assistant", AgentID: "main"}, Text: "request"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	awaitConversation(t, c, func(p protocol.Snapshot) bool { return p.Turn != nil && p.Turn.State == "waiting" })
+	waiting, err := s.Usage.Waiting(ctx, "main")
+	if err != nil || waiting == nil {
+		t.Fatal(waiting, err)
+	}
+	if calls.Load() != 0 {
+		t.Fatal("allowance wait invoked model")
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := execution.New("local", "reboot", execution.DefaultLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := s.options
+	options.Manager = manager
+	options.BootID = "reboot"
+	s, err = Open(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	defer manager.Stop()
+	if err = s.Mailbox.Processing(ctx, incoming); err == nil {
+		t.Fatal("restart did not fence old mail attempt")
+	}
+	if err = s.Usage.SetPolicy(ctx, usage.Policy{Period: "day", Limit: 100000, Timezone: "UTC", AutoResume: false}); err != nil {
+		t.Fatal(err)
+	}
+	c, _ = s.Conversation(ctx, "main")
+	q := ResumeAllowanceCommand{RequestID: "resume-allowance", Turn: waiting.Turn, Since: waiting.Since}
+	if err = s.ResumeAllowance(ctx, "main", q); err != nil {
+		t.Fatal(err)
+	}
+	done := awaitConversation(t, c, func(p protocol.Snapshot) bool { return p.Turn == nil })
+	for _, m := range done.Messages {
+		if m.Tool != nil && m.Tool.Name == "send_message" && m.Tool.Phase != "completed" {
+			t.Fatal("restarted allowance send fenced", m.Tool)
+		}
+	}
+	history, err := s.Mailbox.History(ctx, "main", 0)
+	if err != nil || len(history) != 2 || history[0].State != "processed" || history[1].Message.ReplyTo == nil || *history[1].Message.ReplyTo != incoming.ID {
+		t.Fatal(history, err)
+	}
+	if err = s.ResumeAllowance(ctx, "main", q); err != nil {
+		t.Fatal("allowance receipt not idempotent", err)
+	}
+	if calls.Load() != 2 {
+		t.Fatal("allowance resume replayed model", calls.Load())
 	}
 }

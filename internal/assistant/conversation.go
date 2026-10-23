@@ -48,7 +48,7 @@ type ConversationOptions struct {
 	InitialIntent                            json.RawMessage
 	RefreshConfiguration                     func(context.Context, core.Thread, json.RawMessage) (*core.ResolvedSpec, error)
 	OnFinished                               func(context.Context, protocol.SendMessage, execution.Result) error
-	OnRetryStarting                          func(context.Context, protocol.SendMessage) error
+	OnResumeStarting                         func(context.Context, protocol.SendMessage) error
 	MaxRequests, MaxTurnRequests             uint64 // zero is unlimited; independent of token allowances
 	ValidateAttachments                      func(context.Context, core.ResolvedSpec, []core.Attachment) error
 	Prepare                                  func(context.Context, core.Thread, core.TurnRequest) (RunOptions, error)
@@ -861,11 +861,11 @@ func (c *Conversation) Execute(ctx context.Context, request protocol.SendMessage
 	}
 	thread := *threadPointer
 	resuming := c.turn.Resuming
-	// Retry admission has already verified the original checkpoint and cleanup.
-	// Restore its receiver claim before any resumed model or tool can run. Doing
-	// this here also covers restart after the retry turn was durably admitted.
-	if c.turn.AttemptID != "" && c.options.OnRetryStarting != nil {
-		if err := c.options.OnRetryStarting(ctx, request); err != nil {
+	// Resume admission has already verified the original checkpoint and cleanup.
+	// Restore its receiver claim before any resumed model or tool can run,
+	// including a stopped allowance checkpoint retained across restart.
+	if (c.turn.AttemptID != "" || c.turn.Resuming) && c.options.OnResumeStarting != nil {
+		if err := c.options.OnResumeStarting(ctx, request); err != nil {
 			c.mu.Unlock()
 			return execution.Result{Phase: execution.Failed, Err: err}
 		}

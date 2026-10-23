@@ -228,7 +228,7 @@ func (s *Service) Conversation(ctx context.Context, id string) (*assistant.Conve
 		return s.finishAgentDelivery(ctx, id, r, result)
 	}}
 	options.IdlePolicy = s.idleCompactPolicy
-	options.OnRetryStarting = func(ctx context.Context, request protocol.SendMessage) error {
+	options.OnResumeStarting = func(ctx context.Context, request protocol.SendMessage) error {
 		if !strings.HasPrefix(request.RequestID, "pot-result-") {
 			return nil
 		}
