@@ -172,6 +172,44 @@ phone-width iframe. `?locale=zh-CN` starts in Chinese; each run also switches th
 locale of mounted titles. Add `verify=1` to the correspondence fixture above to
 check Chat names, directory renames and draft preservation automatically.
 
+For reproducible communication screenshots across two actual source versions,
+`scripts/tests/go-ui-communication-review.py --before COMMIT --after COMMIT`
+archives each version's `web/` into ignored `output/pr-images/` and serves both
+on loopback port 17723. It copies the **same** review fixture into each tree;
+the fixture mounts production Chat without extra styling. Open
+`/before/scripts/tests/fixtures/communication-review.html?locale=en&theme=light`
+or `/after/scripts/tests/fixtures/communication-review.html?locale=en&theme=dark`.
+Use `scenario=send`, `receive` or `details` to select the native disclosure;
+at phone widths, select Pot first. Pot and Code reviewer are synthetic directory
+identities; the latter is explicitly a Codex peer using the product brand assets.
+Accepted/received records and the connected peer state are simulated. Requests
+are handled in memory, writes are rejected, and no actual message, Task, approval,
+notification or model call is made. The script never checks out another worktree.
+
+To export actual Chromium PNGs, install a disposable Playwright toolchain in the
+workspace (no permanent dependency is required), keep the fixture server running,
+then use its public `page.screenshot({path})` API:
+
+```sh
+npm install --no-save --package-lock=false --prefix output/pr-images/toolchain playwright@1.64.1
+PLAYWRIGHT_BROWSERS_PATH="$PWD/output/pr-images/toolchain/browsers" \
+  node output/pr-images/toolchain/node_modules/playwright/cli.js install chromium --only-shell
+PLAYWRIGHT_BROWSERS_PATH="$PWD/output/pr-images/toolchain/browsers" \
+  POT_PLAYWRIGHT_MODULE="$PWD/output/pr-images/toolchain/node_modules/playwright/index.mjs" \
+  node scripts/tests/go-ui-communication-review-capture.mjs
+```
+
+Run these Node commands through `mise exec --` when the pinned toolchain is not
+already on PATH. The capture script accepts an origin and output directory as
+positional arguments. It uses independent fresh pages with equal data, locale,
+theme and dimensions for each pair: 1280×1000 send/receive/dark, 1280×1400 expanded
+details, and 390×1000 phone receive, all at device scale 1. It checks safe Markdown,
+send/receive direction, native disclosure state, loaded images and horizontal fit.
+Draft PNGs go to `output/pr-images/communication-review/`; copy only reviewed
+captures into the source branch's [PR image directory](pr-images/README.md).
+Stop the fixture server with Ctrl-C. This export route is separate from the
+computer-use API's inline observations and uses no tool browser session/profile.
+
 For message-body, multi-source batching, acceptance, delegation and identity
 presentation checks, open `/scripts/tests/fixtures/communication.html` on that
 loopback server. It runs shared DOM assertions with synthetic complete addresses,
