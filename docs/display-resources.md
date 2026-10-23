@@ -7,6 +7,33 @@ existing owner-bound byte adapter; model input capabilities remain independent.
 Raster Markdown references retain their existing image renderer. Raw Markdown
 HTML remains literal and remote images remain explicit links.
 
+Text resources whose immutable `entry` ends in `.md` or `.markdown` (case
+insensitive) default to the shared safe Markdown reader when their MIME type is
+`text/plain` or `text/html`. The latter handles HTML sniffed from Markdown that
+begins with raw HTML; it never grants Markdown an interactive HTML frame.
+Explicit `text/markdown` and `text/x-markdown` MIME types also select Markdown
+(parameters are ignored). Other MIME types keep their existing viewer, so binary
+types take precedence over an entry suffix. Display labels and derived download
+names never choose a viewer. Existing registered Markdown with `text/plain`
+works without registration again or changes to stored manifests. Registration
+continues to record its detected MIME type; no persisted format changes.
+
+The reader offers **Show source / Show Markdown**. Switching preserves the loaded
+source and only changes presentation; selecting and copying source retains its
+text. A newly mounted/reopened view defaults to Markdown. Expansion, download,
+locale changes and load errors retain their existing behavior. Other plain text,
+including `.txt` and logs, stays plain text with no Markdown guessing or switch.
+The existing 16 MiB chunk-preview limit and UTF-8 Blob text decoding apply to
+both text views; originals up to the 64 MiB registration limit remain downloadable.
+Neither view changes the original bytes or the download filename.
+
+Markdown uses the DOM renderer, never the interactive HTML document or bridge.
+Raw HTML is literal, unsafe link protocols are rejected, and remote images are
+explicit links without automatic requests. Markdown gets no workspace-file
+adapter. Undeclared relative images and links remain literal text and do not
+fetch local or remote files. The existing bundle contract only permits HTML
+bundles; Markdown does not add an asset-bundle contract or bypass path limits.
+
 ## Tools and durable replies
 
 `register_resource` imports an existing workspace-relative file and returns its

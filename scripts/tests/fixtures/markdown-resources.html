@@ -1,0 +1,20 @@
+<!doctype html><html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Markdown resource preview</title>
+<style>html,body{height:auto;overflow:auto}body{background:var(--canvas)}main{max-width:900px;margin:32px auto;padding:0 20px}.message-body{min-width:0}h1.fixture-title{font-size:22px;font-weight:550;margin-bottom:24px}@media(max-width:720px){main{margin:20px auto;padding:0 12px}}</style></head><body><main><h1 class="fixture-title">Resource preview</h1><div id="resources"></div></main><script type="module">
+const params=new URLSearchParams(location.search),root=params.has('before')?'/output/markdown-before/web/src':'/web/src';
+const style=document.createElement('link');style.rel='stylesheet';style.href=root+'/styles.css';document.head.prepend(style);
+const [{createProductionClient},{createReplyBubble},{translate}]=await Promise.all([import(root+'/adapters/production.mjs'),import(root+'/components/reply.mjs'),import(root+'/locales/messages.mjs')]);
+document.documentElement.lang=params.get('locale')||'en';document.documentElement.dataset.theme=params.get('theme')||'light';
+const client=await createProductionClient();
+const snapshot=await client.snapshot(),owner=snapshot.conversation_id;client.setScope({owner,space:''});
+const messages=snapshot.messages.filter(message=>message.presentation),options={t:key=>translate(document.documentElement.lang,key),acquireResource:resource=>client.acquireResource(resource,{owner,space:''}),downloadResource:resource=>client.downloadResource(resource,{owner,space:''})};
+const views=[];
+for(const message of messages){
+  // Read through the real authenticated resource-info API as well as the durable presentation.
+  const resource=await fetch(`/api/v1/resources/${message.presentation.resource.id}`).then(response=>response.json());
+  const host=document.createElement('article');host.className='message-body';host.dataset.entry=resource.entry;
+  if(params.has('capture')&&resource.entry!=='review.md')continue;
+  document.querySelector('#resources').append(host);const reply=createReplyBubble(host);
+  reply.update({...message,presentation:{...message.presentation,resource},phase:'complete'},options);views.push({host,reply,message:{...message,presentation:{...message.presentation,resource}}});
+}
+window.markdownFixture={client,messages,options,views};window.fixtureReady=true;
+</script></body></html>

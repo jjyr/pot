@@ -30,8 +30,12 @@ import (
 
 func resourceApplication(t *testing.T, displayLabels ...string) (*Application, []resources.Resource) {
 	t.Helper()
+	return resourceApplicationSources(t, []string{"landscape.png", "pulse.gif", "voice.wav", "sample.webm", "notes.pdf", "demo.html", "report.txt"}, displayLabels...)
+}
+
+func resourceApplicationSources(t *testing.T, sources []string, displayLabels ...string) (*Application, []resources.Resource) {
+	t.Helper()
 	ctx := context.Background()
-	sources := []string{"landscape.png", "pulse.gif", "voice.wav", "sample.webm", "notes.pdf", "demo.html", "report.txt"}
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Messages []struct {
@@ -288,6 +292,10 @@ func writeResourceFixtures(t *testing.T, workspace string) {
 	save("demo.html", []byte(`<!doctype html><html lang="zh-CN"><head><link rel="stylesheet" href="demo.css"></head><body><div class="eyebrow">INTERACTIVE DEMO</div><h2>每月存一点，看看会怎样</h2><p>调整金额，立即预览你的储蓄计划。</p><label>每月储蓄 <output id="amount">¥2,000</output><input id="budget" type="range" min="500" max="10000" step="500" value="2000"></label><div class="total"><span>一年后累计</span><strong id="total">¥24,000</strong><div class="bars"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><button id="confirm">采用这个计划</button><span id="saved" role="status"></span><script src="demo.js"></script></body></html>`))
 	save("demo.css", []byte(`*{box-sizing:border-box}body{margin:0;padding:22px;background:#f3f7f1;color:#294b3d;font:14px system-ui}.eyebrow{font-size:10px;letter-spacing:.15em;color:#64836c}h2{font-size:21px;margin:9px 0}p{font-size:12px;color:#6c7f70;margin:0 0 18px}label{display:block;font-size:12px}output{float:right;font-weight:600}input{width:100%;accent-color:#4c795f;margin:10px 0}.total{position:relative;border-radius:10px;background:#e3eddf;padding:13px 16px;margin:8px 0 14px;overflow:hidden}.total span{font-size:11px;display:block}.total strong{font-size:28px;display:block}.bars{position:absolute;right:16px;bottom:0;display:flex;gap:7px;align-items:end;height:74px}.bars i{width:15px;background:#a5bca0;height:20%}.bars i:nth-child(2){height:35%}.bars i:nth-child(3){height:50%}.bars i:nth-child(4){height:65%}.bars i:nth-child(5){height:80%}.bars i:nth-child(6){height:100%;background:#65895f}button{border:0;border-radius:7px;padding:9px 15px;color:white;background:#426f51;font:12px system-ui;cursor:pointer}#saved{font-size:11px;margin-left:10px}`))
 	save("demo.js", []byte(`const input=document.querySelector('#budget');input.oninput=()=>{document.querySelector('#amount').textContent='¥'+Number(input.value).toLocaleString();document.querySelector('#total').textContent='¥'+(Number(input.value)*12).toLocaleString();};document.querySelector('#confirm').onclick=()=>{document.querySelector('#saved').textContent='已采用';window.pot.result({monthly:Number(input.value),annual:Number(input.value)*12});};try{parent.document.body.dataset.escape='yes';}catch{document.body.dataset.isolated='yes';}window.pot.resize(350);`))
+	save("review.md", []byte(markdownResourceSource))
+	save("review.MARKDOWN", []byte(markdownResourceSource))
+	save("plain.txt", []byte(markdownResourceSource))
+	save("raw.md", []byte(`<script>window.markdownExecuted=true</script>`+"\n\n# Literal HTML\n\n<img src=\"https://resource-isolation.invalid/raw\" onerror=\"window.markdownExecuted=true\">"))
 	save("report.txt", []byte("Savings plan\nMonthly: 2000\nAnnual: 24000\n"))
 }
 
@@ -334,7 +342,12 @@ func TestResourceBrowserFixture(t *testing.T) {
 	if urlFile == "" {
 		t.Skip("opt-in local browser fixture")
 	}
-	app, _ := resourceApplication(t)
+	var app *Application
+	if os.Getenv("POT_MARKDOWN_RESOURCE_FIXTURE") == "1" {
+		app, _ = resourceApplicationSources(t, markdownResourceSources, "Quarterly review.html")
+	} else {
+		app, _ = resourceApplication(t)
+	}
 	upstream := httptest.NewServer(Handler(app, "operator"))
 	defer upstream.Close()
 	config := webui.NewConfig()
@@ -362,7 +375,7 @@ func TestResourceBrowserFixture(t *testing.T) {
 			return
 		}
 		r.AddCookie(cookie)
-		if strings.HasPrefix(r.URL.Path, "/scripts/") || strings.HasPrefix(r.URL.Path, "/web/") {
+		if strings.HasPrefix(r.URL.Path, "/scripts/") || strings.HasPrefix(r.URL.Path, "/web/") || strings.HasPrefix(r.URL.Path, "/output/markdown-before/") {
 			w.Header().Set("Content-Security-Policy", "frame-src 'self' blob:; object-src 'none'")
 			files.ServeHTTP(w, r)
 			return
