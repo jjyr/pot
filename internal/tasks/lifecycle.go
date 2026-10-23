@@ -295,7 +295,7 @@ func (s *Service) Stop(ctx context.Context, assistant, id, mode string) error {
 
 func (r Record) local(node string) bool {
 	target := core.RuntimeTarget(node)
-	return r.Execution == nil && r.Request.MachineID == node &&
+	return r.Execution == nil && r.NodeID == node &&
 		(r.Info.ExecutionTarget == nil || *r.Info.ExecutionTarget == target) &&
 		(r.Launch == nil || (r.Launch.ControlID == node && r.Launch.RuntimeID == node && r.Launch.ExecutionTarget == target))
 }

@@ -365,5 +365,22 @@ import, current and historical Task requests, caller request digests and receive
 job payloads. Receiver payloads use the frozen TaskRequest encoding so exact
 retries still match, including escaped text. Task/run IDs, session bindings,
 results, delivery cursors, cancellation intent and uncertain cleanup evidence
-survive. The migration never starts work. The public API accepts only the generic
-selector; historical selectors are storage upgrade input only.
+survive. The migration never starts work. This frozen intermediate format is
+consumed by the subsequent target-address upgrade; historical selectors are storage upgrade input only.
+
+## Unified Task target addresses
+
+`tasks/0026_task_targets` and `control/0031_task_targets` replace Task executor,
+connection and machine selectors with one receiver address. Task record format 13
+retains the original execution node internally. Cached directories become target
+entries with their own capabilities; Task receipts have one receiver identity.
+Caller digests, receiver payloads, snapshots and archived import inputs are
+converted together with their original destinations. Exact retries retain the
+accepted Task, session, run, cancellation, result and delivery bindings.
+
+Historical default-directed submissions with no reconstructable receiver retain
+their original request evidence and an unknown outcome. Upgrade never resolves a
+new default for them, starts work or resets uncertain cleanup. Saved connections
+remain transport and trust records; removing their selector from Task requests
+does not remove an accepted Task's pinned route. Connected Adapters must upgrade
+together; retired request fields are rejected by the current protocol.

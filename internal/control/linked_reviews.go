@@ -30,12 +30,11 @@ func (s *Service) linkedReviews(ctx context.Context, owner string) []linkedRevie
 	if err != nil {
 		return result
 	}
-	target, err := AgentTarget(owner)
-	if err != nil || target.LinkID != "" {
+	if !ValidAgentKey(owner) || strings.HasPrefix(owner, "agent-link:") {
 		return result
 	}
 	for _, c := range connections {
-		if c.State == "revoked" || c.Directory == nil || c.Directory.TaskExecutor == nil || !c.Directory.TaskExecutor.Supports(agentlink.Approvals) {
+		if c.State == "revoked" || c.Directory == nil || !c.Directory.Capabilities(agentlink.NodeTarget(c.Directory.NodeID)).Supports(agentlink.Approvals) {
 			continue
 		}
 		var delegated bool

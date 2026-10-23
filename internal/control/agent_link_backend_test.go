@@ -59,10 +59,10 @@ func TestPotLinkBackendDeduplicatesBeforeDefaultChangesAndScopesCaller(t *testin
 	b, second := linkBackendFixture(t)
 	ctx := context.Background()
 	directory, err := b.Directory(ctx)
-	if err != nil || directory.DefaultAssistantID != "main" {
+	if err != nil || directory.DefaultAssistant() != "main" {
 		t.Fatal(directory, err)
 	}
-	request := agentlink.TaskRequest{RequestID: "request-one", From: protocol.AgentRef{NodeID: "peer", Kind: "assistant", AgentID: "sender"}, Text: "One task\nKeep the original binding"}
+	request := agentlink.TaskRequest{RequestID: "request-one", From: protocol.AgentRef{NodeID: "peer", Kind: "assistant", AgentID: "sender"}, Text: "One task\nKeep the original binding", Target: agentlink.AssistantTarget(b.s.options.RuntimeID, "main")}
 	first, err := b.Submit(ctx, request)
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func TestPotLinkBackendDeduplicatesBeforeDefaultChangesAndScopesCaller(t *testin
 		t.Fatal(err)
 	}
 	again, err := b.Submit(ctx, request)
-	if err != nil || again.ID != first.ID || again.Assistant.Address.AgentID != "main" {
+	if err != nil || again.ID != first.ID || again.Receiver.Address.AgentID != "main" {
 		t.Fatal(first, again, err)
 	}
 	conflict := request
@@ -89,7 +89,7 @@ func TestPotLinkBackendDeduplicatesBeforeDefaultChangesAndScopesCaller(t *testin
 	}
 	request.From = outsider
 	separate, err := b.Submit(ctx, request)
-	if err != nil || separate.ID == first.ID || separate.Assistant.Address.AgentID != second {
+	if err != nil || separate.ID == first.ID || separate.Receiver.Address.AgentID != "main" {
 		t.Fatal(separate, err)
 	}
 }
@@ -99,7 +99,7 @@ func TestPotLinkBackendDeletedDefaultDoesNotRetargetOrHideHistory(t *testing.T) 
 	if _, err := b.Directory(ctx); err != nil {
 		t.Fatal(err)
 	}
-	request := agentlink.TaskRequest{RequestID: "original", From: protocol.AgentRef{NodeID: "peer", Kind: "assistant", AgentID: "sender"}, Text: "Original task\nRetain its original owner"}
+	request := agentlink.TaskRequest{RequestID: "original", From: protocol.AgentRef{NodeID: "peer", Kind: "assistant", AgentID: "sender"}, Text: "Original task\nRetain its original owner", Target: agentlink.AssistantTarget(b.s.options.RuntimeID, "main")}
 	accepted, err := b.Submit(ctx, request)
 	if err != nil {
 		t.Fatal(err)
@@ -108,30 +108,30 @@ func TestPotLinkBackendDeletedDefaultDoesNotRetargetOrHideHistory(t *testing.T) 
 		t.Fatal(err)
 	}
 	directory, err := b.Directory(ctx)
-	if err != nil || len(directory.Assistants) != 1 || directory.DefaultAssistantID != "" {
+	if err != nil || len(directory.Assistants()) != 1 || directory.DefaultAssistant() != "" {
 		t.Fatal(directory, err)
 	}
 	request.RequestID = "new-default-request"
 	if _, err = b.Submit(ctx, request); !errors.Is(err, agentlink.ErrNotFound) {
 		t.Fatal("missing default silently retargeted", err)
 	}
-	request.AssistantID = second
+	request.Target.AgentID = second
 	if _, err = b.Submit(ctx, request); err != nil {
 		t.Fatal("explicit surviving assistant unavailable", err)
 	}
 	historical, err := b.Status(ctx, acceptedFrom(), accepted.ID)
-	if err != nil || historical.Assistant.Address != accepted.Assistant.Address {
+	if err != nil || historical.Receiver.Address != accepted.Receiver.Address {
 		t.Fatal(historical, err)
 	}
 	cancelled, err := b.Cancel(ctx, acceptedFrom(), accepted.ID)
-	if err != nil || cancelled.Assistant.Address != accepted.Assistant.Address || cancelled.State != "cancelled" {
+	if err != nil || cancelled.Receiver.Address != accepted.Receiver.Address || cancelled.State != "cancelled" {
 		t.Fatal(cancelled, err)
 	}
 	if err = b.s.Registry.Delete(ctx, second, 1); err != nil {
 		t.Fatal(err)
 	}
 	directory, err = b.Directory(ctx)
-	if err != nil || len(directory.Assistants) != 0 || directory.DefaultAssistantID != "" {
+	if err != nil || len(directory.Assistants()) != 0 || directory.DefaultAssistant() != "" {
 		t.Fatal(directory, err)
 	}
 	if _, err = b.Status(ctx, acceptedFrom(), accepted.ID); err != nil {

@@ -53,7 +53,7 @@ func exercisePotHumanReview(t *testing.T, ctx context.Context, pot *control.Serv
 	}
 	a, _ := h.backend.resolve(ctx, "codex")
 	marker := filepath.Join(a.Workspace, "approval-executed")
-	task, err := pot.CreateTask(ctx, owner.ID, protocol.CreateTask{Executor: "agent", LinkID: link.ID, RequestID: "direct-task", Text: "approve\nReview this operation"})
+	task, err := pot.CreateTask(ctx, owner.ID, protocol.CreateTask{Target: &protocol.AgentRef{NodeID: h.identity.Address.NodeID, Kind: "node", AgentID: h.identity.Address.NodeID}, RequestID: "direct-task", Text: "approve\nReview this operation"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestAutomaticReviewDoesNotPublishApprovalHistory(t *testing.T) {
 	}
 	// Automatic review stays on Codex. No manual operation or history is
 	// exposed by the receiver review endpoint or Pot's existing approval API.
-	automatic, err := pot.CreateTask(ctx, owner.ID, protocol.CreateTask{Executor: "agent", LinkID: link.ID, RequestID: "automatic-task", Text: "auto-review\nAn operation handled by Codex's reviewer"})
+	automatic, err := pot.CreateTask(ctx, owner.ID, protocol.CreateTask{Target: &protocol.AgentRef{NodeID: h.identity.Address.NodeID, Kind: "node", AgentID: h.identity.Address.NodeID}, RequestID: "automatic-task", Text: "auto-review\nAn operation handled by Codex's reviewer"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"context"
 	"encoding/json"
 	"path/filepath"
 	"reflect"
@@ -18,7 +17,7 @@ func TestGenericExecutorUpgradePreservesTaskReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	nodeMigrationPrefix(t, db, TasksDatabase, 24)
-	request := protocol.CreateTask{Executor: "codex", RequestID: "request", Text: "任务 <tag> & \"quoted\"\n继续", LinkID: "connection"}
+	request := legacyCreateTask{Executor: "codex", RequestID: "request", Text: "任务 <tag> & \"quoted\"\n继续", LinkID: "connection"}
 	origin := protocol.TaskOrigin{Kind: "manual"}
 	body := map[string]any{
 		"schema_version": 12, "request": request, "origin": origin,
@@ -38,14 +37,14 @@ func TestGenericExecutorUpgradePreservesTaskReceipts(t *testing.T) {
 	}
 	execMigrationSQL(t, db, `INSERT INTO tasks VALUES('owner','local','running',1,'{"request":{"request_id":"local"}}'); INSERT INTO task_writes VALUES('owner','local','unchanged','local')`)
 	for range 2 {
-		if err = Migrate(context.Background(), db, TasksDatabase); err != nil {
+		if err = migrateThrough(db, TasksDatabase, 25); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err = db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err = OpenDatabase(path, TasksDatabase)
+	db, err = OpenSQLite(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +95,7 @@ func TestGenericExecutorUpgradeRollsBackRequestBindingsAndRetries(t *testing.T) 
 		t.Fatal(err)
 	}
 	execMigrationSQL(t, db, `INSERT INTO task_writes VALUES('owner','request','original-digest','task'); INSERT INTO codex_link_jobs(id,caller,request_id,payload,data) VALUES('job','caller','request','{"executor":"codex","from":"corrupt"}','{"request":{"executor":"codex"},"cleanup_uncertain":true}')`)
-	if err = Migrate(context.Background(), db, TasksDatabase); err == nil {
+	if err = migrateThrough(db, TasksDatabase, 25); err == nil {
 		t.Fatal("corrupt immutable payload accepted")
 	}
 	var body, digest string
@@ -111,7 +110,7 @@ func TestGenericExecutorUpgradeRollsBackRequestBindingsAndRetries(t *testing.T) 
 		t.Fatal("committed failed migration", receipts, err)
 	}
 	execMigrationSQL(t, db, `UPDATE codex_link_jobs SET payload='{"executor":"codex","request_id":"request","from":{"node_id":"caller","kind":"assistant","agent_id":"owner"},"text":"work"}' WHERE id='job'`)
-	if err = Migrate(context.Background(), db, TasksDatabase); err != nil {
+	if err = migrateThrough(db, TasksDatabase, 25); err != nil {
 		t.Fatal(err)
 	}
 	var selector string

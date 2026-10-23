@@ -6,9 +6,10 @@ status, cancellation and result notification. Each receiver owns its models,
 credentials, workspaces, permissions and execution supervision. A connection
 never grants owner HTTP APIs, model proxying or raw process launch access.
 
-A node may advertise a caller-scoped `task_executor` independently of its
-assistant directory. `executor: "agent"` selects this capability regardless of the
-Adapter implementation. The receiving Adapter owns task sessions and execution.
+A node may advertise assistant and node task-execution endpoints in one `targets`
+catalogue. Each entry carries its address, identity and versioned capabilities.
+`create_task.target` selects the endpoint; the receiving Adapter owns task sessions
+and execution.
 Only their original directing assistant's authenticated user may approve their
 operations. Assistant messages never carry approval authority or request user
 approval; the receiving assistant declines operations outside its permissions and
@@ -24,29 +25,24 @@ addresses are `{node_id, kind: assistant, agent_id}`. Node IDs, connection IDs,
 assistant IDs and execution IDs are distinct. Names and origin icons are display
 metadata. One machine can host several autonomous nodes.
 
-`Directory` advertises current assistants, a persisted default assistant ID,
-per-assistant operation descriptions and an optional caller-scoped `task_executor`.
-Adapter identifiers are bounded identifiers describing the implementation. They
-do not grant capabilities. Directory and Task receipts must match the connected
-node and Adapter identity; execution receipts also bind their original Task ID.
-A node may expose assistant messaging, independent Task execution or both. The
-receiving Adapter owns their execution contexts. See the
-[Codex Adapter](../integrations/codex/README.md) for its separate task and message
-sessions.
+`Directory.targets` binds each receiver's identity directly to its capability
+description. Assistant endpoints have peer scope; independent node execution has
+caller scope. The optional `default_target` is used by receiver-owned presentation
+and messaging policy. Task creation always selects the current assistant when its
+target is omitted; other Task receivers are explicit.
 
-For ordinary assistant Task routing, an explicit target wins. An omitted target
-uses the receiver's persisted default, initially its first assistant. Resolution
-occurs once at durable acceptance.
-Exact retries return that original receipt even after the default changes or the
-assistant is removed. Removing the default does not silently select another:
-the directory advertises an empty default until the owner chooses a valid one.
-Accepted tasks retain their original owner and historical reference.
+Adapter identifiers describe implementations and grant no capabilities. Directory
+and Task receipts must match the connected node and Adapter identity. Task receipts
+have one `receiver`, whose address is an assistant or independently owned Task.
+Exact retries return the original receipt even after directory changes or identity
+retirement. Node, caller, Task, run and saved connection identities remain distinct.
 
 ## Product operation port
 
 `agentlink.Port` defines `Describe(Target)`, `Call(Target, Operation, params)`
 and capability-checked `Subscribe(Target)` for cursor-based chat frames.
-A target contains an assistant ID and an optional saved link ID. Both local and
+A target is the shared `{node_id, kind, agent_id}` receiver address. Connection
+routing and locale are invocation context rather than parts of that address. Both local and
 linked chat, task and assistant-scoped schedule routes use this port. HTTP and
 native adapters only translate typed requests; there is no separate linked-chat
 HTTP API or unexported native task payload. The local adapter remains in the
@@ -56,8 +52,8 @@ current process; this change does not introduce an agent or scheduler plugin.
 for admission and dispatches operations to their implementations. Owner and peer
 describe authorization scope; dispatch follows the requested capability and target.
 
-Directories advertise a version-1 operation description per assistant under
-`operations`, with explicit `peer` scope. The authenticated local operator sees
+Directories attach a version-1 capability description to each endpoint. Assistant
+endpoints use explicit `peer` scope. The authenticated local operator sees
 an `owner` description. `GET /api/v1/agent-links/capabilities?assistant_id=...`
 returns the effective description; assistant catalogue rows carry the same data.
 The frontend chooses controls from these descriptions and uses the shared chat

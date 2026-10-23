@@ -57,7 +57,7 @@ func TestNodeIdentityUpgradeRetainsInputHashWithoutStoredParent(t *testing.T) {
 	// parent is deliberately absent; its complete content cannot be reconstructed.
 	_, err = s.DB().Exec(`UPDATE agent_messages SET envelope=replace(envelope,'"node_id":','"control_id":');
 UPDATE agent_messages SET envelope=json_set(envelope,'$.digest',?) WHERE json_extract(envelope,'$.request_id')='retained-request';
-UPDATE tasks SET body=replace(json_set(body,'$.schema_version',9),'"node_id":','"control_id":');
+UPDATE tasks SET body=replace(json_set(json_remove(body,'$.node_id'),'$.schema_version',9,'$.request.machine_id','machine'),'"node_id":','"control_id":');
 DROP INDEX agent_messages_outbox_route; ALTER TABLE agent_messages DROP COLUMN accepted_at_ms; ALTER TABLE assistant_mail_identity RENAME COLUMN node_id TO control_id;
 ALTER TABLE assistant_contacts RENAME COLUMN node TO control;
 DROP TABLE plugin_background_writes; DROP TABLE task_input_digest_formats; DROP TABLE codex_task_inputs; DROP TABLE codex_task_sessions; DROP TABLE codex_task_executor; DROP TABLE codex_link_jobs; DROP TABLE codex_link_assistants; DROP INDEX agent_link_user_chat_routes; DROP INDEX agent_chat_replies;

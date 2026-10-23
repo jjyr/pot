@@ -11,13 +11,13 @@ import (
 // Match the same ownership facts as Record.local without loading model snapshots
 // or run histories for activity reads. Historical targets remain authoritative.
 const localExecutionFilter = `json_extract(body,'$.execution') IS NULL
- AND json_extract(body,'$.request.machine_id')=?
+ AND json_extract(body,'$.node_id')=?
  AND (json_extract(body,'$.info.execution_target') IS NULL OR
-      json_extract(body,'$.info.execution_target.runtime_id')=json_extract(body,'$.request.machine_id'))
+      json_extract(body,'$.info.execution_target.runtime_id')=json_extract(body,'$.node_id'))
  AND (json_extract(body,'$.launch') IS NULL OR (
-      json_extract(body,'$.launch.control_id')=json_extract(body,'$.request.machine_id') AND
-      json_extract(body,'$.launch.runtime_id')=json_extract(body,'$.request.machine_id') AND
-      json_extract(body,'$.launch.execution_target.runtime_id')=json_extract(body,'$.request.machine_id')))`
+      json_extract(body,'$.launch.control_id')=json_extract(body,'$.node_id') AND
+      json_extract(body,'$.launch.runtime_id')=json_extract(body,'$.node_id') AND
+      json_extract(body,'$.launch.execution_target.runtime_id')=json_extract(body,'$.node_id')))`
 
 // LocalActive enumerates this Pot executor's work, including retired assistants.
 // Linked submissions and historical remote launches cannot enter maintenance or

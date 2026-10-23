@@ -11,10 +11,10 @@ import (
 
 // Assistant session tests admit inbox work without using the explicit task port.
 func submitMessageFixture(b *backend, ctx context.Context, r agentlink.TaskRequest) (agentlink.Task, error) {
-	if r.AssistantID == "" {
-		r.AssistantID = "codex"
+	if r.Target.AgentID == "" {
+		r.Target = agentlink.AssistantTarget(b.nodeID, "codex")
 	}
-	parent := protocol.Envelope{ID: "fixture-" + r.RequestID, Kind: "message", From: r.From, To: protocol.AgentRef{NodeID: b.nodeID, Kind: "assistant", AgentID: r.AssistantID}, ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: r.Text}
+	parent := protocol.Envelope{ID: "fixture-" + r.RequestID, Kind: "message", From: r.From, To: protocol.AgentRef{NodeID: b.nodeID, Kind: "assistant", AgentID: r.Target.AgentID}, ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: r.Text}
 	return b.submitMessage(ctx, r, parent)
 }
 
@@ -25,13 +25,13 @@ func TestDirectTasksOwnIndependentPersistentSessions(t *testing.T) {
 	go func() { b.run(ctx); close(done) }()
 	defer func() { cancel(); <-done }()
 	from := protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}
-	request := agentlink.TaskRequest{From: from, Executor: "agent", RequestID: "first", Text: "approve"}
+	request := agentlink.TaskRequest{From: from, Target: agentlink.NodeTarget(b.nodeID), RequestID: "first", Text: "approve"}
 	first, err := b.Submit(ctx, request)
-	if err != nil || first.Execution == nil || first.Assistant.Address.Valid() {
+	if err != nil || first.Receiver.Address.Kind != "task" {
 		t.Fatal(first, err)
 	}
 	pending := awaitReview(t, b, reviewQuery(from))
-	second, err := b.Submit(ctx, agentlink.TaskRequest{From: from, Executor: "agent", RequestID: "second", Text: "parallel"})
+	second, err := b.Submit(ctx, agentlink.TaskRequest{From: from, Target: agentlink.NodeTarget(b.nodeID), RequestID: "second", Text: "parallel"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,9 +117,9 @@ func TestCodexTaskRequiresExplicitExecutionAndAssistantOwner(t *testing.T) {
 	b := testBackend(t)
 	ctx := context.Background()
 	for _, r := range []agentlink.TaskRequest{
-		{From: protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}, AssistantID: "codex", RequestID: "assistant-target", Text: "work"},
-		{From: protocol.AgentRef{NodeID: "pot", Kind: "user", AgentID: "user"}, Executor: "agent", RequestID: "direct-user", Text: "work"},
-		{From: protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}, Executor: "agent", AssistantID: "codex", RequestID: "mixed", Text: "work"},
+		{From: protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}, Target: agentlink.AssistantTarget(b.nodeID, "codex"), RequestID: "assistant-target", Text: "work"},
+		{From: protocol.AgentRef{NodeID: "pot", Kind: "user", AgentID: "user"}, Target: agentlink.NodeTarget(b.nodeID), RequestID: "direct-user", Text: "work"},
+		{From: protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}, Target: agentlink.AssistantTarget("foreign-node", "codex"), RequestID: "mixed", Text: "work"},
 	} {
 		if _, err := b.Submit(ctx, r); err == nil {
 			t.Fatal("ambiguous execution accepted", r)
@@ -135,7 +135,7 @@ func TestDirectTaskDoesNotRequireCodexAssistant(t *testing.T) {
 		t.Fatal(err)
 	}
 	from := protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}
-	task, err := b.Submit(ctx, agentlink.TaskRequest{From: from, Executor: "agent", RequestID: "no-assistant", Text: "execute independently"})
+	task, err := b.Submit(ctx, agentlink.TaskRequest{From: from, Target: agentlink.NodeTarget(b.nodeID), RequestID: "no-assistant", Text: "execute independently"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestDirectTaskDoesNotRequireCodexAssistant(t *testing.T) {
 	b.runTask(ctx, j)
 	awaitTask(t, b, from, task.ID, "completed")
 	directory, err := b.Directory(ctx)
-	if err != nil || len(directory.Assistants) != 0 || directory.TaskExecutor == nil {
+	if err != nil || len(directory.Assistants()) != 0 || !directory.Capabilities(agentlink.NodeTarget(b.nodeID)).Supports(agentlink.TaskSubmit) {
 		t.Fatal(directory, err)
 	}
 }

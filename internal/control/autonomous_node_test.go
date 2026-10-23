@@ -14,7 +14,7 @@ func TestRetiredRemoteLaunchRemainsBoundAndNeverReplaysLocally(t *testing.T) {
 	s := taskControl(t, "node", "")
 	ctx := context.Background()
 	launch := tasks.Launch{ControlID: "node", AssistantID: "main", RuntimeID: "retired-runner", TaskID: "historic-task", RunID: "original-run", Generation: 1, ExecutionTarget: core.RuntimeTarget("retired-runner"), Config: taskConfig(t), Plugins: []string{}, Text: "original work"}
-	record := tasks.Record{SchemaVersion: 12, AssistantID: "main", Info: protocol.TaskInfo{ID: launch.TaskID, AssistantID: "main", RunID: launch.RunID, MachineID: launch.RuntimeID, Phase: protocol.TaskRunning, ExecutionTarget: &launch.ExecutionTarget}, Request: protocol.CreateTask{MachineID: launch.RuntimeID, Text: launch.Text}, Config: &launch.Config, Plugins: []string{}, RunID: launch.RunID, Generation: 1, Launch: &launch}
+	record := tasks.Record{SchemaVersion: 13, NodeID: launch.RuntimeID, AssistantID: "main", Info: protocol.TaskInfo{ID: launch.TaskID, AssistantID: "main", RunID: launch.RunID, MachineID: launch.RuntimeID, Phase: protocol.TaskRunning, ExecutionTarget: &launch.ExecutionTarget}, Request: protocol.CreateTask{Text: launch.Text}, Config: &launch.Config, Plugins: []string{}, RunID: launch.RunID, Generation: 1, Launch: &launch}
 	raw, err := json.Marshal(record)
 	if err != nil {
 		t.Fatal(err)

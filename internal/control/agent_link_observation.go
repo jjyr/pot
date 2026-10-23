@@ -20,7 +20,7 @@ func (b potLinkBackend) Observe(ctx context.Context, peerNode string) (agentlink
 		return value, err
 	}
 	byID := map[string]*agentlink.Activity{}
-	for _, assistant := range d.Assistants {
+	for _, assistant := range d.Assistants() {
 		id := assistant.Address.AgentID
 		activity := agentlink.Activity{AssistantID: id, ChatState: "unknown"}
 		b.s.mu.Lock()

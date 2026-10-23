@@ -90,7 +90,7 @@ func TestTaskAdmissionStaysLocalAndKeepsOriginalReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer service.Close()
-	if _, err := service.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "remote", MachineID: "remote", Text: "Work"}); err == nil || calls != 0 {
+	if _, err := service.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "remote", Target: &protocol.AgentRef{NodeID: "remote", Kind: "assistant", AgentID: "main"}, Text: "Work"}); err == nil || calls != 0 {
 		t.Fatal("remote machine reached model selection", err, calls)
 	}
 	request := protocol.CreateTask{RequestID: "admit", Text: "Work"}
@@ -99,7 +99,7 @@ func TestTaskAdmissionStaysLocalAndKeepsOriginalReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := service.AcceptLocal(ctx, "main", request)
-	if err != nil || first.Info.ID != second.Info.ID || second.Request.MachineID != "local" || calls != 1 {
+	if err != nil || first.Info.ID != second.Info.ID || second.NodeID != "local" || calls != 1 {
 		t.Fatal(first, second, calls, err)
 	}
 }

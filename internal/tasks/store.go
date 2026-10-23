@@ -127,7 +127,7 @@ func (s *Service) validateStored(ctx context.Context) error {
 		if err := core.DecodeJSON([]byte(raw), &r); err != nil {
 			return err
 		}
-		if r.SchemaVersion != 12 || r.AssistantID != assistant || r.Info.AssistantID != assistant || r.Info.ID != id || r.Info.RunID != r.RunID || !core.Identifier(assistant) || !core.Identifier(id) {
+		if r.SchemaVersion != 13 || r.AssistantID != assistant || r.Info.AssistantID != assistant || r.Info.ID != id || r.Info.RunID != r.RunID || !core.Identifier(assistant) || !core.Identifier(id) {
 			return fmt.Errorf("invalid stored Task ownership/schema")
 		}
 		if err := r.Origin.Validate(); err != nil {
@@ -164,7 +164,7 @@ func (s *Service) GetTx(ctx context.Context, tx *sql.Tx, assistant, id string) (
 }
 
 func (s *Service) Prepare(ctx context.Context, assistant string, request protocol.CreateTask) (Selection, error) {
-	if request.Executor != "" {
+	if request.Target != nil && *request.Target != (protocol.AgentRef{NodeID: s.options.NodeID, Kind: "assistant", AgentID: assistant}) {
 		return Selection{}, fmt.Errorf("explicit executor must use Agent Link submission")
 	}
 	if !core.Identifier(assistant) {
@@ -175,10 +175,6 @@ func (s *Service) Prepare(ctx context.Context, assistant string, request protoco
 	}
 	if s.options.ResolveModel == nil {
 		return Selection{}, fmt.Errorf("Control model selection unavailable")
-	}
-	_, err := s.LocalMachine(ctx, request.MachineID)
-	if err != nil {
-		return Selection{}, err
 	}
 	selection, err := s.options.ResolveModel(ctx, assistant, request)
 	if err != nil {
@@ -277,9 +273,9 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Record{}, err
 	}
-	request.MachineID, err = s.LocalMachine(ctx, request.MachineID)
-	if err != nil {
-		return Record{}, err
+
+	if request.Target != nil && *request.Target != (protocol.AgentRef{NodeID: s.options.NodeID, Kind: "assistant", AgentID: assistant}) {
+		return Record{}, protocol.APIError{Code: "local_node_required"}
 	}
 
 	var count int
@@ -294,7 +290,7 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	}
 	plugins := append([]string{}, selection.Plugins...)
 	id, runID := ID(), ID()
-	probe := Launch{ControlID: s.options.NodeID, AssistantID: assistant, RuntimeID: request.MachineID, TaskID: id, RunID: runID, Generation: 1, ExecutionTarget: core.RuntimeTarget(request.MachineID), Config: selection.Config, Plugins: plugins, Skills: request.Skills, Workspace: request.Workspace, Text: request.Text}
+	probe := Launch{ControlID: s.options.NodeID, AssistantID: assistant, RuntimeID: s.options.NodeID, TaskID: id, RunID: runID, Generation: 1, ExecutionTarget: core.RuntimeTarget(s.options.NodeID), Config: selection.Config, Plugins: plugins, Skills: request.Skills, Workspace: request.Workspace, Text: request.Text}
 	if err := probe.Validate(s.options.NodeID); err != nil {
 		return Record{}, err
 	}
@@ -303,8 +299,8 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, assistant string, r
 	if len(runes) > 80 {
 		title = string(runes[:80])
 	}
-	record := Record{SchemaVersion: 12, Origin: origin, AssistantID: assistant, Info: protocol.TaskInfo{Address: &protocol.AgentRef{NodeID: s.options.NodeID, Kind: "task", AgentID: id}, ID: id, AssistantID: assistant, Title: title, Phase: protocol.TaskQueued, CreatedAtMS: at, UpdatedAtMS: at, Routing: &protocol.TaskRouting{Profile: selection.Config.SourceProfileID, Revision: selection.Config.SourceProfileRevision, Provider: selection.Config.Provider, Reason: "assistant selection", SelectionReason: request.SelectionReason}}, Request: request, Config: &selection.Config, Plugins: plugins, RunID: runID, Generation: 1}
-	record.Info.MachineID = request.MachineID
+	record := Record{SchemaVersion: 13, NodeID: s.options.NodeID, Origin: origin, AssistantID: assistant, Info: protocol.TaskInfo{Address: &protocol.AgentRef{NodeID: s.options.NodeID, Kind: "task", AgentID: id}, ID: id, AssistantID: assistant, Title: title, Phase: protocol.TaskQueued, CreatedAtMS: at, UpdatedAtMS: at, Routing: &protocol.TaskRouting{Profile: selection.Config.SourceProfileID, Revision: selection.Config.SourceProfileRevision, Provider: selection.Config.Provider, Reason: "assistant selection", SelectionReason: request.SelectionReason}}, Request: request, Config: &selection.Config, Plugins: plugins, RunID: runID, Generation: 1}
+	record.Info.MachineID = s.options.NodeID
 	record.Info.RunID = runID
 	if err := write(ctx, tx, &record); err != nil {
 		return Record{}, err

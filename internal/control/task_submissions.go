@@ -23,13 +23,11 @@ func (s *Service) CreateTask(ctx context.Context, owner string, request protocol
 func (s *Service) createTaskFrom(ctx context.Context, owner string, from protocol.AgentRef, request protocol.CreateTask) (protocol.TaskInfo, error) {
 	s.linkMu.Lock()
 	defer s.linkMu.Unlock()
-	originalRequest := request
-	// Resolve an accepted submission before consulting mutable directories or
-	// capabilities. A retry can return its receipt after target/link removal,
-	// without gaining authority to submit any replacement work.
-	if request.Target != nil && request.LinkID == "" && request.Target.NodeID == s.options.RuntimeID && request.Target.AgentID == owner {
+	self := agentlink.AssistantTarget(s.options.RuntimeID, owner)
+	if request.Target != nil && *request.Target == self {
 		request.Target = nil
 	}
+	// Exact retries resolve their original receipt before mutable routes or capabilities.
 	record, previousErr := s.Tasks.FindRequest(ctx, owner, request)
 	if previousErr == nil {
 		if record.Execution != nil && record.Execution.Request.From != from {
@@ -40,114 +38,64 @@ func (s *Service) createTaskFrom(ctx context.Context, owner string, from protoco
 	if !errors.Is(previousErr, sql.ErrNoRows) {
 		return protocol.TaskInfo{}, previousErr
 	}
-	if request.LinkID == "" && request.Target == nil && request.Executor == "" {
-		accepted, e := s.agentLinks.service.Submit(ctx, "", agentlink.TaskRequest{Configuration: &request, RequestID: request.RequestID, From: from, AssistantID: owner, Text: request.Text})
-		if e != nil {
-			return protocol.TaskInfo{}, e
+	if err := request.Validate(); err != nil {
+		return protocol.TaskInfo{}, err
+	}
+	target := self
+	if request.Target != nil {
+		target = *request.Target
+	}
+	r := agentlink.TaskRequest{Target: target, RequestID: request.RequestID, From: from, Text: request.Text, Workspace: request.Workspace.ProjectDir}
+	if target == self && from.Kind == "assistant" {
+		r.Configuration = &request
+		accepted, err := s.agentLinks.service.Submit(ctx, "", r)
+		if err != nil {
+			return protocol.TaskInfo{}, err
 		}
-		record, e := s.Tasks.Get(ctx, owner, accepted.ID)
-		if e != nil {
-			return protocol.TaskInfo{}, e
+		record, err = s.Tasks.Get(ctx, owner, accepted.ID)
+		if err != nil {
+			return protocol.TaskInfo{}, err
 		}
 		if record == nil {
 			return protocol.TaskInfo{}, agentlink.ErrNotFound
 		}
 		return record.Info, nil
-
 	}
-	if e := request.Validate(); e != nil {
-		return protocol.TaskInfo{}, e
-	}
-	// Models and permissions belong to the receiver; never forward local secrets,
-	// provider profiles or executable model settings to a connected node.
-	if request.MachineID != "" || request.Profile != nil || request.Model != nil || request.Skills != nil || request.Workspace.Mode() == "worktree" || request.Requirements != (protocol.TaskRequirements{}) || request.Executor != "" && request.Workspace.ProjectDir != "" {
+	if request.Profile != nil || request.Model != nil || request.Skills != nil || request.Workspace.Mode() == "worktree" || request.Requirements != (protocol.TaskRequirements{}) || target.Kind == "node" && request.Workspace.ProjectDir != "" {
 		return protocol.TaskInfo{}, agentlink.ErrUnsupported
 	}
-	links, e := s.agentLinks.service.List(ctx)
-	if e != nil {
-		return protocol.TaskInfo{}, e
+	link, err := s.agentLinkRoute(ctx, target)
+	if err != nil {
+		return protocol.TaskInfo{}, err
 	}
-	if request.Executor == "agent" && request.LinkID == "" {
-		chosen := ""
-		for _, c := range links {
-			if c.State == "revoked" || c.State == "disconnected" {
-				continue
-			}
-			directory, err := s.agentLinks.service.Directory(ctx, c.ID)
-			if err != nil || directory.TaskExecutor == nil || !directory.TaskExecutor.Supports(agentlink.TaskSubmit) {
-				continue
-			}
-			if chosen != "" {
-				return protocol.TaskInfo{}, agentlink.ErrConflict
-			}
-			chosen = c.ID
-		}
-		request.LinkID = chosen
-		if chosen == "" {
-			return protocol.TaskInfo{}, agentlink.ErrNotFound
-		}
+	directory, err := s.agentLinks.service.Directory(ctx, link)
+	if err != nil {
+		return protocol.TaskInfo{}, err
 	}
-	var selected *agentlink.Connection
-	if request.LinkID == "" && request.Target != nil && request.Target.NodeID == s.options.RuntimeID {
-		identity, err := s.agentLinkIdentity(ctx, request.Target.AgentID)
-		if err != nil {
-			return protocol.TaskInfo{}, err
-		}
-		host, _ := s.Machines.TransportIdentity()
-		selected = &agentlink.Connection{ID: "local", PeerHost: host, Peer: identity}
+	if !directory.Capabilities(target).Supports(agentlink.TaskSubmit) {
+		return protocol.TaskInfo{}, agentlink.ErrUnsupported
 	}
-	for _, c := range links {
-		if c.State == "revoked" {
-			continue
+	identity := agentlink.Identity{Address: agentlink.NodeTarget(s.options.RuntimeID), Adapter: "local", Name: "Pot"}
+	savedLink := "local"
+	if link != "" {
+		connection, e := s.agentLinks.service.Get(ctx, link)
+		if e != nil {
+			return protocol.TaskInfo{}, e
 		}
-		if request.LinkID != "" && c.ID == request.LinkID || request.LinkID == "" && request.Target != nil && c.PeerHost.NodeID == request.Target.NodeID {
-			copy := c
-			selected = &copy
-			break
-		}
-	}
-	if selected == nil {
-		return protocol.TaskInfo{}, agentlink.ErrNotFound
-	}
-	if request.Target != nil && selected.PeerHost.NodeID != request.Target.NodeID {
-		return protocol.TaskInfo{}, agentlink.ErrConflict
-	}
-	if request.Executor == "agent" {
-		if from.Kind != "assistant" || request.Target != nil {
-			return protocol.TaskInfo{}, agentlink.ErrUnsupported
-		}
-		directory, err := s.agentLinks.service.Directory(ctx, selected.ID)
-		if err != nil {
-			return protocol.TaskInfo{}, err
-		}
-		if directory.TaskExecutor == nil || !directory.TaskExecutor.Supports(agentlink.TaskSubmit) {
-			return protocol.TaskInfo{}, agentlink.ErrUnsupported
-		}
-	} else {
-		directory, err := s.agentLinks.service.Directory(ctx, taskLinkID(selected.ID))
-		if err != nil {
-			return protocol.TaskInfo{}, err
-		}
-		assistant := directory.DefaultAssistantID
-		if request.Target != nil {
-			assistant = request.Target.AgentID
-		}
-		if !directory.Operations[assistant].Supports(agentlink.TaskSubmit) {
-			return protocol.TaskInfo{}, agentlink.ErrUnsupported
-		}
-	}
-	r := agentlink.TaskRequest{Executor: request.Executor, RequestID: request.RequestID, From: from, Text: request.Text, Workspace: request.Workspace.ProjectDir}
-	if request.Target != nil {
-		r.AssistantID = request.Target.AgentID
+		identity = connection.Peer
+		savedLink = link
 	}
 	id, _ := core.HashJSON([]string{"agent-link-task", owner, request.RequestID})
 	now := time.Now().UnixMilli()
-	origin := &protocol.AgentLinkOrigin{LinkID: selected.ID, NodeID: selected.PeerHost.NodeID, AssistantID: r.AssistantID, Kind: selected.Peer.Adapter, Name: selected.Peer.Name}
-	if selected.ID == "local" {
+	origin := &protocol.AgentLinkOrigin{LinkID: savedLink, NodeID: target.NodeID, AssistantID: target.AgentID, Kind: identity.Adapter, Name: identity.Name}
+	if target.Kind != "assistant" {
+		origin.AssistantID = ""
+	}
+	if savedLink == "local" {
 		origin.Kind = "local"
 	}
-	record = &tasks.Record{AssistantID: owner, Request: originalRequest, Info: protocol.TaskInfo{ID: id, AssistantID: owner, Title: strings.SplitN(request.Text, "\n", 2)[0], Phase: protocol.TaskQueued, RemoteWaiting: true, CreatedAtMS: now, UpdatedAtMS: now, AgentLink: origin, ExecutorIcon: origin.Kind}, Execution: &tasks.Execution{Request: r}}
-	e = s.Tasks.AcceptExecution(ctx, *record)
+	record = &tasks.Record{AssistantID: owner, Request: request, Info: protocol.TaskInfo{ID: id, AssistantID: owner, Title: strings.SplitN(request.Text, "\n", 2)[0], Phase: protocol.TaskQueued, RemoteWaiting: true, CreatedAtMS: now, UpdatedAtMS: now, AgentLink: origin, ExecutorIcon: origin.Kind}, Execution: &tasks.Execution{Request: r}}
+	e := s.Tasks.AcceptExecution(ctx, *record)
 	if e == nil {
 		s.wakeTasks()
 		s.Changes.Notify("tasks")
@@ -279,7 +227,7 @@ func (s *Service) syncTaskExecutions(ctx context.Context) {
 				remote = cancelled
 			}
 		}
-		if d.Execution.Receipt.ID != "" && (d.Execution.Receipt.ID != remote.ID || d.Execution.Receipt.RequestID != remote.RequestID || d.Execution.Receipt.Receiver().Address != remote.Receiver().Address) {
+		if d.Execution.Receipt.ID != "" && (d.Execution.Receipt.ID != remote.ID || d.Execution.Receipt.RequestID != remote.RequestID || d.Execution.Receipt.Receiver.Address != remote.Receiver.Address) {
 			continue
 		}
 		projectTaskReceipt(d, remote)
@@ -308,7 +256,7 @@ func (s *Service) taskExecutionNotification(ctx context.Context, id, owner strin
 		run = linkRunID(id)
 	}
 	eventID := id
-	if d.Execution.Request.Executor == "agent" {
+	if d.Execution.Request.Target.Kind == "node" {
 		eventID, _ = core.HashJSON([]string{id, run})
 	}
 	result := protocol.TaskResultEvent{TaskID: id, RunID: run, Title: d.Info.Title, Phase: d.Info.Phase, Text: d.Execution.Receipt.Result, Error: d.Execution.Receipt.Error, Origin: protocol.TaskOrigin{Kind: "manual"}}
@@ -415,21 +363,7 @@ func (s *Service) taskExecutionCapabilities(ctx context.Context, record *tasks.R
 	if directory == nil {
 		return result
 	}
-	var advertised agentlink.Description
-	if record.Execution.Request.Executor != "" {
-		if directory.TaskExecutor != nil {
-			advertised = *directory.TaskExecutor
-		}
-	} else {
-		assistant := record.Info.AgentLink.AssistantID
-		if receiver := record.Execution.Receipt.Receiver(); receiver.Address.Valid() {
-			assistant = receiver.Address.AgentID
-		}
-		if assistant == "" {
-			assistant = directory.DefaultAssistantID
-		}
-		advertised = directory.Operations[assistant]
-	}
+	advertised := directory.Capabilities(record.Execution.Request.Target)
 	for _, op := range []agentlink.Operation{agentlink.TaskCancel, agentlink.TaskInput} {
 		if advertised.Supports(op) {
 			result.Operations = append(result.Operations, op)
@@ -460,8 +394,8 @@ func projectTaskReceipt(record *tasks.Record, receipt agentlink.Task) {
 	if record.Info.UpdatedAtMS <= 0 {
 		record.Info.UpdatedAtMS = record.Info.CreatedAtMS
 	}
-	if receiver := receipt.Receiver(); receiver.Address.Valid() {
-		if receipt.Execution == nil {
+	if receiver := receipt.Receiver; receiver.Address.Valid() {
+		if receipt.Receiver.Address.Kind == "assistant" {
 			record.Info.AgentLink.AssistantID = receiver.Address.AgentID
 		}
 		record.Info.AgentLink.Name = receiver.Name

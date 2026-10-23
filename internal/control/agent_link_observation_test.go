@@ -23,7 +23,7 @@ func TestLinkObservationCountsCompleteTaskSetAndScopesOutbox(t *testing.T) {
 	// Only metadata is queried; no execution or model request is started.
 	for index, phase := range []string{"running", "queued", "queued", "waiting", "waiting_approval", "complete", "failed"} {
 		id := "fixture-" + strconv.Itoa(index)
-		body, _ := json.Marshal(map[string]any{"request": protocol.CreateTask{MachineID: "observation-node"}, "info": protocol.TaskInfo{ID: id, AssistantID: "main", Phase: protocol.TaskPhase(phase)}})
+		body, _ := json.Marshal(map[string]any{"node_id": "observation-node", "request": protocol.CreateTask{}, "info": protocol.TaskInfo{ID: id, AssistantID: "main", Phase: protocol.TaskPhase(phase)}})
 		if _, err := s.Tasks.DB().Exec("INSERT INTO tasks(assistant_id,id,phase,created,body)VALUES('main',?,?,1,?)", id, phase, string(body)); err != nil {
 			t.Fatal(err)
 		}
@@ -39,7 +39,7 @@ func TestLinkObservationCountsCompleteTaskSetAndScopesOutbox(t *testing.T) {
 	}
 	for _, kind := range []string{"target", "launch", "unavailable"} {
 		info := protocol.TaskInfo{ID: kind, AssistantID: "main", Phase: protocol.TaskRunning}
-		body := map[string]any{"request": protocol.CreateTask{MachineID: "observation-node"}, "info": info}
+		body := map[string]any{"node_id": "observation-node", "request": protocol.CreateTask{}, "info": info}
 		if kind == "target" {
 			target := core.RuntimeTarget("retired-node")
 			info.ExecutionTarget = &target

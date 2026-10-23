@@ -75,9 +75,9 @@ and the [Codex adapter](../integrations/codex/README.md).
 
 Every Agent invocation enters the Agent Link abstraction, including local work.
 Local adapters call in-process; peer adapters use authenticated transport. A Task
-can target an assistant or a node advertising `task_executor`, independently of
-the Adapter implementation. `executor: "agent"` selects the latter capability;
-concrete runtimes such as Codex remain behind their Adapters.
+selects one advertised assistant or node endpoint through its `target` address.
+The host resolves transport; each endpoint carries its own capability description.
+Concrete runtimes such as Codex remain behind their Adapters.
 The receiver selects models, prepares resources and enforces permissions on its
 own filesystem. Agent receives injected execution services rather than discovering
 product or machine infrastructure. Main and Worker instruction boundaries are

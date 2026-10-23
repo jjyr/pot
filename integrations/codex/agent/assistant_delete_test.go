@@ -62,7 +62,7 @@ func TestLinkedCodexDeletionThroughAuthenticatedBrowser(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	d, err := h.backend.Directory(ctx)
-	if err != nil || len(d.Assistants) != 1 || d.Assistants[0].Address.AgentID != "survivor" {
+	if err != nil || len(d.Assistants()) != 1 || d.Assistants()[0].Address.AgentID != "survivor" {
 		t.Fatal(d, err)
 	}
 	if _, err = h.backend.resolve(ctx, "codex"); !errors.Is(err, agentlink.ErrNotFound) {
@@ -83,7 +83,7 @@ func TestAssistantRetirementPreservesHistoryAndCannotResurrect(t *testing.T) {
 	if err = b.ownerConfigure(ctx, assistant{ID: "other", Workspace: t.TempDir(), Mode: "read-only"}); err != nil {
 		t.Fatal(err)
 	}
-	r := agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "peer", Kind: "assistant", AgentID: "main"}, RequestID: "history", AssistantID: a.ID, Text: "task"}
+	r := agentlink.TaskRequest{From: protocol.AgentRef{NodeID: "peer", Kind: "assistant", AgentID: "main"}, RequestID: "history", Target: agentlink.AssistantTarget(b.nodeID, a.ID), Text: "task"}
 	j, err := submitMessageFixture(b, ctx, r)
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ func TestAssistantRetirementPreservesHistoryAndCannotResurrect(t *testing.T) {
 		}
 	}
 	d, err := b.Directory(ctx)
-	if err != nil || len(d.Assistants) != 1 || d.Assistants[0].Address.AgentID != "other" || d.DefaultAssistantID != "" {
+	if err != nil || len(d.Assistants()) != 1 || d.Assistants()[0].Address.AgentID != "other" || d.DefaultAssistant() != "" {
 		t.Fatal("directory/default", d, err)
 	}
 	if _, err = b.resolve(ctx, a.ID); !errors.Is(err, agentlink.ErrNotFound) {

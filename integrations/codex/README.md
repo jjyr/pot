@@ -18,7 +18,7 @@ in reported task counts. Directional pending-message summaries are scoped to the
 authenticated peer. Pot displays these summaries in the existing icon topology.
 
 ```text
-Pot assistant -- create_task(executor=agent) --> task T --> Codex thread T
+Pot assistant -- create_task(target=node address) --> task T --> Codex thread T
       ^                    | approval / result                 |
       +--------------------+-----------------------------------+
 Pot assistant -- send_message --> Codex assistant --> message thread
@@ -145,11 +145,12 @@ upgrade rules.
 
 ### Human approvals in Pot
 
-`create_task({executor:"agent", text:"Title\nInstructions"})` chooses the sole
-reachable node advertising `task_executor`; set `link_id` to choose this Codex
-Adapter explicitly when several capable nodes are connected.
-Do not supply an assistant target. Omission of `executor` retains existing task
-execution. Unavailable or ambiguous selection fails without fallback.
+Select this Adapter's advertised node address with
+`create_task({target:{node_id:"<node>",kind:"node",agent_id:"<node>"},text:"Title\nInstructions"})`.
+Copy the address from `list_execution_targets`; connection routing is internal.
+An omitted target uses the current assistant. Assistant targets and node task
+execution are distinct advertised endpoints. Unavailable or unsupported targets
+fail without fallback.
 
 The host's independent task execution scope initially uses its isolated read-only
 workspace. Configure future tasks locally with:

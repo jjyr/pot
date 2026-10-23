@@ -40,7 +40,7 @@ func TestUpdateInterruptsAllQueuedTasksAcrossRestart(t *testing.T) {
 	}
 	// More than one page, with no destination launch or model request.
 	for i := range 55 {
-		record := tasks.Record{SchemaVersion: 12, Origin: protocol.TaskOrigin{Kind: "manual"}, AssistantID: owner.ID, Config: &config, Plugins: []string{}, RunID: fmt.Sprintf("00000000-0000-4000-8000-%012d", i), Generation: 1, Info: protocol.TaskInfo{RunID: fmt.Sprintf("00000000-0000-4000-8000-%012d", i), ID: fmt.Sprintf("task%d", i), AssistantID: owner.ID, Title: "Queued work", Phase: protocol.TaskQueued}, Request: protocol.CreateTask{MachineID: r.Control.Tasks.NodeID(), RequestID: fmt.Sprintf("request%d", i), Text: "retained task input"}}
+		record := tasks.Record{SchemaVersion: 13, NodeID: r.Control.Tasks.NodeID(), Origin: protocol.TaskOrigin{Kind: "manual"}, AssistantID: owner.ID, Config: &config, Plugins: []string{}, RunID: fmt.Sprintf("00000000-0000-4000-8000-%012d", i), Generation: 1, Info: protocol.TaskInfo{RunID: fmt.Sprintf("00000000-0000-4000-8000-%012d", i), ID: fmt.Sprintf("task%d", i), AssistantID: owner.ID, Title: "Queued work", Phase: protocol.TaskQueued}, Request: protocol.CreateTask{RequestID: fmt.Sprintf("request%d", i), Text: "retained task input"}}
 		data, _ := json.Marshal(record)
 		if _, err = r.Control.Tasks.DB().Exec("INSERT INTO tasks(assistant_id,id,phase,created,body) VALUES(?,?,?,?,?)", owner.ID, record.Info.ID, record.Info.Phase, i, string(data)); err != nil {
 			t.Fatal(err)

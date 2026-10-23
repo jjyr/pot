@@ -3,7 +3,7 @@ import {projectLinkedAssistants,linkedAssistantID,supportsCapability,agentFailur
 import {createProductionClient} from '../../web/src/adapters/production.mjs';
 const capabilities={version:1,operations:['chat.read','chat.send','chat.receipt','chat.subscribe','task.submit','task.read','task.list','task.cancel','task.archive','task.outcomes']};
 const space={id:'local',control_id:'local-node'},directory=[{address:{node_id:'peer-node',kind:'assistant',agent_id:'review:one'},name:'Reviewer',capabilities,adapter:'codex',reply_id:'reply-one',reply_count:2,last_reply_at_ms:3}];
-const links={items:[{id:'first',peer:{node_id:'peer-node',kind:'codex',name:'Codex'},status:'connected',assistants:directory},{id:'second',peer:{node_id:'peer-two',kind:'codex',name:'Codex'},status:'disconnected',directory:{assistants:directory}}]};
+const links={items:[{id:'first',peer:{node_id:'peer-node',kind:'codex',name:'Codex'},status:'connected',assistants:directory},{id:'second',peer:{node_id:'peer-two',kind:'codex',name:'Codex'},status:'disconnected',directory:{targets:directory}}]};
 const projected=projectLinkedAssistants(links,space);
 assert.equal(projected.length,2);
 assert.equal(projected[0].reply_id,'reply-one');assert.equal(projected[0].reply_count,2);assert.equal(projected[0].last_reply_at_ms,3);
@@ -57,4 +57,4 @@ assert.equal(agentFailureKey('arbitrary provider diagnostic'),null);
 assert.equal(agentFailureKey('codex_thread_in_use: codex_rpc_rejected_thread_resume (-32600): thread busy-thread already has an active writer'),'agentLinks.codexSessionInUse');
 assert.equal(agentFailureKey('codex_thread_open_failed: codex_rpc_rejected_thread_resume (-32600): session unavailable'),'agentLinks.codexSessionFailed','Other resume failures do not claim another client owns the conversation');
 
-assert.equal(projectLinkedAssistants({items:[{id:'executor',peer:{node_id:'codex',kind:'codex'},status:'connected',directory:{assistants:[{address:{agent_id:'worker'},name:'Worker'}],operations:{worker:{version:1,scope:'peer',operations:['assistant.profile','assistant.delete']}},task_executor:{version:1,scope:'caller',operations:['task.submit']}}}]},space).length,0,'A message-only assistant is not a direct user chat');
+assert.equal(projectLinkedAssistants({items:[{id:'executor',peer:{node_id:'codex',kind:'codex'},status:'connected',directory:{targets:[{address:{kind:'assistant',agent_id:'worker'},name:'Worker',capabilities:{version:1,scope:'peer',operations:['assistant.profile','assistant.delete']}},{address:{kind:'node',node_id:'codex',agent_id:'codex'},capabilities:{version:1,scope:'caller',operations:['task.submit']}}]}}]},space).length,0,'A message-only assistant is not a direct user chat');

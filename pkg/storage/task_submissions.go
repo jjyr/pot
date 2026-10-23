@@ -41,10 +41,11 @@ func ImportTaskSubmissions(root string) error {
 				return err
 			}
 			var old struct {
-				Info     protocol.TaskInfo `json:"info"`
-				Request  json.RawMessage   `json:"request"`
-				Remote   json.RawMessage   `json:"remote"`
-				Archived bool              `json:"archived"`
+				Info              protocol.TaskInfo `json:"info"`
+				Request           json.RawMessage   `json:"request"`
+				Remote            json.RawMessage   `json:"remote"`
+				Archived          bool              `json:"archived"`
+				UnresolvedRequest json.RawMessage   `json:"unresolved_request,omitempty"`
 			}
 			if err = json.Unmarshal([]byte(body), &old); err != nil {
 				return err
@@ -57,7 +58,10 @@ func ImportTaskSubmissions(root string) error {
 				return err
 			}
 			origin := protocol.TaskOrigin{Kind: "manual"}
-			record := map[string]any{"schema_version": 12, "plugins": []string{}, "assistant_id": owner, "info": old.Info, "request": request, "run_id": old.Info.RunID, "generation": 1, "revision": 1, "origin": origin, "execution": map[string]any{"request": old.Request, "receipt": old.Remote, "notified": notified != 0, "stop_requested": stop != 0}}
+			record := map[string]any{"schema_version": 13, "plugins": []string{}, "assistant_id": owner, "info": old.Info, "request": request, "run_id": old.Info.RunID, "generation": 1, "revision": 1, "origin": origin, "execution": map[string]any{"request": old.Request, "receipt": old.Remote, "notified": notified != 0, "stop_requested": stop != 0}}
+			if len(old.UnresolvedRequest) > 0 {
+				record["execution"].(map[string]any)["unresolved_request"] = old.UnresolvedRequest
+			}
 			var receipt struct {
 				Result string `json:"result"`
 				RunID  string `json:"run_id"`

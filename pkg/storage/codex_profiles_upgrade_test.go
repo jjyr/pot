@@ -69,7 +69,7 @@ func TestDirectoryAvatarUpgradePreservesRoutesAndCustomImages(t *testing.T) {
 		}
 	}
 	var first, second, node, secret, key, route string
-	err := db.QueryRow(`SELECT json_extract(metadata,'$.directory.assistants[0].avatar'),json_extract(metadata,'$.directory.assistants[1].avatar'),json_extract(metadata,'$.peer_host.node_id'),secret_ref,peer_key,route FROM agent_link_connections`).Scan(&first, &second, &node, &secret, &key, &route)
+	err := db.QueryRow(`SELECT json_extract(metadata,'$.directory.targets[0].avatar'),json_extract(metadata,'$.directory.targets[1].avatar'),json_extract(metadata,'$.peer_host.node_id'),secret_ref,peer_key,route FROM agent_link_connections`).Scan(&first, &second, &node, &secret, &key, &route)
 	if err != nil || first != "" || second != "custom-image" || node != "pinned-node" || secret != "encrypted-secret" || key != "pinned-key" || route != "route" {
 		t.Fatal(first, second, node, secret, key, route, err)
 	}

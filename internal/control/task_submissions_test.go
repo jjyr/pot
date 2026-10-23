@@ -25,7 +25,7 @@ func TestAgentToolsShareTaskPortAndCatalogueAcrossLocalAndPeer(t *testing.T) {
 	a := &agentControlFixture{service: source, endpoint: controlPeerEndpoint(source)}
 	b := &agentControlFixture{service: receiver, endpoint: controlPeerEndpoint(receiver)}
 	link := connectAgentControls(t, a, b)
-	requests := []protocol.CreateTask{{Text: "Local task\nReturn a result."}, {Text: "Peer task\nReturn a result.", LinkID: link.ID}}
+	requests := []protocol.CreateTask{{Text: "Local task\nReturn a result."}, {Text: "Peer task\nReturn a result.", Target: &protocol.AgentRef{NodeID: link.PeerHost.NodeID, Kind: "assistant", AgentID: "main"}}}
 	ids := []string{}
 	for i, request := range requests {
 		body, _ := json.Marshal(request)
@@ -85,7 +85,7 @@ func TestAcceptedTaskCancellationPersistsThroughDisconnectAndRestart(t *testing.
 	peer := agentControl(t, "cancel-peer")
 	connection := connectAgentControls(t, source, peer)
 	from := protocol.AgentRef{NodeID: "node", Kind: "assistant", AgentID: "main"}
-	record := tasks.Record{AssistantID: "main", Request: protocol.CreateTask{RequestID: "cancel-request", Text: "Remote work"}, Info: protocol.TaskInfo{ID: "cancel-task", AssistantID: "main", Phase: protocol.TaskRunning, AgentLink: &protocol.AgentLinkOrigin{LinkID: connection.ID, NodeID: "cancel-peer", AssistantID: "main"}}, Execution: &tasks.Execution{Request: agentlink.TaskRequest{From: from, RequestID: "cancel-request"}, Receipt: agentlink.Task{ID: "accepted-task", RequestID: "cancel-request", RunID: "original-run", State: "running"}}}
+	record := tasks.Record{AssistantID: "main", Request: protocol.CreateTask{RequestID: "cancel-request", Text: "Remote work"}, Info: protocol.TaskInfo{ID: "cancel-task", AssistantID: "main", Phase: protocol.TaskRunning, AgentLink: &protocol.AgentLinkOrigin{LinkID: connection.ID, NodeID: "cancel-peer", AssistantID: "main"}}, Execution: &tasks.Execution{Request: agentlink.TaskRequest{From: from, Target: agentlink.AssistantTarget(connection.PeerHost.NodeID, "main"), RequestID: "cancel-request"}, Receipt: agentlink.Task{ID: "accepted-task", RequestID: "cancel-request", RunID: "original-run", State: "running"}}}
 	if err := backend.s.Tasks.AcceptExecution(ctx, record); err != nil {
 		t.Fatal(err)
 	}
@@ -94,11 +94,11 @@ func TestAcceptedTaskCancellationPersistsThroughDisconnectAndRestart(t *testing.
 		t.Fatal(capabilities)
 	}
 	// A type label cannot grant an executor capability absent from the directory.
-	record.Execution.Request.Executor = "agent"
+	record.Execution.Request.Target = agentlink.NodeTarget(connection.PeerHost.NodeID)
 	if backend.s.taskExecutionCapabilities(ctx, &record).Supports(agentlink.TaskInput) {
 		t.Fatal("invented Codex input capability")
 	}
-	record.Execution.Request.Executor = ""
+	record.Execution.Request.Target = agentlink.AssistantTarget(connection.PeerHost.NodeID, "main")
 	if err := backend.s.agentLinks.service.Disconnect(ctx, connection.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -172,8 +172,8 @@ func TestLinkedSubmissionRejectsLocalConfigurationBeforeAdmission(t *testing.T) 
 	profile, model := "local-profile", "local-model"
 	skills := []string{"local-skill"}
 	cases := []protocol.CreateTask{
-		{MachineID: "node"}, {Profile: &profile}, {Model: &model}, {Skills: &skills},
-		{Executor: "agent", Workspace: protocol.TaskWorkspace{Kind: "directory", ProjectDir: "/peer/project"}},
+		{Profile: &profile}, {Model: &model}, {Skills: &skills},
+		{Target: &protocol.AgentRef{NodeID: peer.service.options.RuntimeID, Kind: "node", AgentID: peer.service.options.RuntimeID}, Workspace: protocol.TaskWorkspace{Kind: "directory", ProjectDir: "/peer/project"}},
 		{Requirements: protocol.TaskRequirements{Tools: true}},
 		{Workspace: protocol.TaskWorkspace{Kind: "worktree", ProjectDir: "/peer/project"}},
 	}
@@ -181,7 +181,9 @@ func TestLinkedSubmissionRejectsLocalConfigurationBeforeAdmission(t *testing.T) 
 	for i, request := range cases {
 		request.RequestID = fmt.Sprintf("rejected-%d", i)
 		request.Text = "Remote work"
-		request.LinkID = connection.ID
+		if request.Target == nil {
+			request.Target = &protocol.AgentRef{NodeID: connection.PeerHost.NodeID, Kind: "assistant", AgentID: "main"}
+		}
 		if _, err := backend.s.CreateTask(ctx, "main", request); !errors.Is(err, agentlink.ErrUnsupported) {
 			t.Fatal(request, err)
 		}

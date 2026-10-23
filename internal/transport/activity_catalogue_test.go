@@ -30,7 +30,7 @@ func TestAssistantCatalogueProjectsLocalOwnerScopedTaskExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := json.Marshal(tasks.Record{SchemaVersion: 12, AssistantID: first.ID, Plugins: []string{}, Origin: protocol.TaskOrigin{Kind: "manual"}, Request: protocol.CreateTask{MachineID: runtime.Control.Tasks.NodeID(), RequestID: "activity-request", Text: "Activity"}, Info: protocol.TaskInfo{ID: "activity", AssistantID: first.ID, Phase: protocol.TaskQueued}})
+	body, _ := json.Marshal(tasks.Record{SchemaVersion: 13, NodeID: runtime.Control.Tasks.NodeID(), AssistantID: first.ID, Plugins: []string{}, Origin: protocol.TaskOrigin{Kind: "manual"}, Request: protocol.CreateTask{RequestID: "activity-request", Text: "Activity"}, Info: protocol.TaskInfo{ID: "activity", AssistantID: first.ID, Phase: protocol.TaskQueued}})
 	_, err = runtime.Control.Tasks.DB().ExecContext(ctx, "INSERT INTO tasks(assistant_id,id,phase,created,body) VALUES(?,?,'queued',1,?)", first.ID, "activity", string(body))
 	if err != nil {
 		t.Fatal(err)

@@ -88,7 +88,7 @@ func (h *agentHost) tool(ctx context.Context, in hostToolInput) (any, error) {
 					return nil, err
 				}
 				target := in.AssistantID
-				for _, a := range directory.Assistants {
+				for _, a := range directory.Assistants() {
 					if a.Address.AgentID == target {
 						return h.mailbox.sendFrom(ctx, h.backend.identity(from).Address, a.Address, in.RequestID, in.Text, in.JobID)
 					}

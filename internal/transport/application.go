@@ -54,7 +54,7 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 	if owner == "" {
 		owner = "main"
 	}
-	if _, err := control.AgentTarget(owner); err != nil {
+	if !control.ValidAgentKey(owner) {
 		return nil, errors.New("invalid assistant identity")
 	}
 	path := u.Path

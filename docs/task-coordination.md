@@ -25,8 +25,7 @@ Tasks store their original caller-bound execution reference and last observation
 without requiring a local Provider or a Pot model snapshot. Exact retries return
 the original Task before consulting mutable directories or defaults.
 
-A `machine_id` in a local Pot configuration must be omitted or identify its own
-node. Scheduled and retry admissions obey the same receiving-adapter rule.
+Execution nodes are selected by target addresses, never a separate machine selector.
 Historical raw remote launches retain their original recovery fences and cannot
 be converted into a new local execution.
 
@@ -39,13 +38,17 @@ catalogue and original conversation use the same retained task reference.
 
 ## Linked execution
 
-`create_task` accepts `link_id` and an optional assistant `target` address.
-Explicit targets select that assistant; otherwise the receiving node resolves its
-persisted default once. The receiver owns execution, model selection and local
-permissions. Linked submission rejects local `machine_id`, model, Skills and
-execution requirements before admission. Assistant targets may accept a
-destination directory hint; explicit node executors choose their own workspace.
-Local provider credentials and model snapshots are never forwarded.
+`create_task` accepts a single optional `target` address. Omission selects the
+current assistant. An assistant address selects that exact assistant; a node
+address selects its independent task execution endpoint. A node address uses the
+node ID as its `agent_id`. The host resolves transport internally. Task requests
+never carry connection IDs, executor modes or machine selectors.
+
+The receiver owns execution, model selection and local permissions. Other
+receivers reject local profile, model, Skills and execution requirements before
+admission. Assistant targets may accept a destination directory hint; node targets
+choose their own workspace. Local credentials and model snapshots never cross
+nodes.
 The directing node stores an idempotent Task and execution reference rather
 than launching a local worker copy. Assistant-directed results notify the
 original directing assistant through its inbox and task-outcome projection;
@@ -63,14 +66,12 @@ Disconnected nodes retain the last accepted state without replaying work.
 ## Agent execution
 
 Every Task invokes the Agent Link port, including the in-process local Adapter.
-The assistant selects a receiver using instructions and advertised capabilities.
-Omitting `executor` preserves ordinary assistant Task routing. Explicit
-`executor: "agent"` selects a node's caller-scoped `task_executor` capability,
-independently of its Adapter name. `link_id` chooses a connection; without it
-exactly one reachable, capable connected node must exist. Ambiguous or unavailable
-selection fails without falling back to ordinary Tasks. `target`, local model
-configuration, Skills and workspace overrides cannot accompany an explicit
-executor request; the receiving owner controls execution scope.
+The assistant copies a target address from the advertised catalogue. Capabilities
+are attached directly to each target, independently of its Adapter name. The
+sender does not search for a sole remote executor or infer an execution mode from
+a connection. Missing, unsupported or disconnected destinations fail without
+fallback. Exact retries resolve their original receipt before consulting current
+routes, capabilities or defaults.
 
 ```text
 User <--> directing assistant A
@@ -88,14 +89,14 @@ User <--> directing assistant A
           Task status / outcome
 ```
 
-`task_executor` and per-assistant operation descriptions are separate capabilities;
-a node may advertise both. Adapter identifiers describe implementations, not
-execution policy. Exact submission retries return the original accepted Task,
-including after a directory change. Cancellation, guidance and approval forwarding
-require the receiving Adapter's advertised operations. Owner guidance cannot be
-synthesized from a peer reference or a forwarded message. Continuations preserve
-the Task identity and produce distinct run identities and completion notifications.
-Restart never replays uncertain work.
+A node may advertise assistant and node endpoints together, each with its own
+capability scope. The same address type is used by Task submission and the product
+operation port. Task receipts contain one `receiver` identity; a node executor
+returns its independently owned Task address. Task identity remains distinct from
+run identity. Cancellation, guidance and approval forwarding require the selected
+endpoint's operations. Owner guidance cannot be synthesized from a peer reference
+or forwarded message. Continuations retain the Task identity and produce distinct
+run identities and completion notifications. Restart never replays uncertain work.
 
 The [Codex Adapter](../integrations/codex/README.md) currently implements independent
 persistent task sessions and terminal-run continuation. Its workspace, session and

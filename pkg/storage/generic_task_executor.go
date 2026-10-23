@@ -10,17 +10,33 @@ import (
 	"modernc.org/sqlite"
 )
 
+// The preceding creation contract is frozen for historical request hashes.
+type legacyCreateTask struct {
+	Executor        string                    `json:"executor,omitempty"`
+	LinkID          string                    `json:"link_id,omitempty"`
+	Target          *protocol.AgentRef        `json:"target,omitempty"`
+	Workspace       protocol.TaskWorkspace    `json:"workspace"`
+	MachineID       string                    `json:"machine_id"`
+	Skills          *[]string                 `json:"skills"`
+	RequestID       string                    `json:"request_id"`
+	Text            string                    `json:"text"`
+	Profile         *string                   `json:"profile"`
+	Model           *string                   `json:"model"`
+	Requirements    protocol.TaskRequirements `json:"requirements"`
+	SelectionReason *string                   `json:"selection_reason,omitempty"`
+}
+
 // Frozen Agent Link TaskRequest field order for the generic-executor upgrade.
 // Receiver payload receipts compare the exact encoding, including omitempty and
 // HTML escaping. Storage cannot import agentlink, which itself uses storage.
 type executorUpgradeRequest struct {
-	Executor      string               `json:"executor,omitempty"`
-	Configuration *protocol.CreateTask `json:"configuration,omitempty"`
-	RequestID     string               `json:"request_id"`
-	From          protocol.AgentRef    `json:"from"`
-	AssistantID   string               `json:"assistant_id,omitempty"`
-	Text          string               `json:"text"`
-	Workspace     string               `json:"workspace,omitempty"`
+	Executor      string            `json:"executor,omitempty"`
+	Configuration *legacyCreateTask `json:"configuration,omitempty"`
+	RequestID     string            `json:"request_id"`
+	From          protocol.AgentRef `json:"from"`
+	AssistantID   string            `json:"assistant_id,omitempty"`
+	Text          string            `json:"text"`
+	Workspace     string            `json:"workspace,omitempty"`
 }
 
 func init() {
@@ -46,7 +62,7 @@ func init() {
 			return nil, fmt.Errorf("task record must be JSON text")
 		}
 		var record struct {
-			Request protocol.CreateTask `json:"request"`
+			Request legacyCreateTask    `json:"request"`
 			Origin  protocol.TaskOrigin `json:"origin"`
 		}
 		if err := json.Unmarshal([]byte(raw), &record); err != nil {

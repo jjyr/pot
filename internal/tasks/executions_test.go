@@ -16,8 +16,8 @@ func TestTaskCatalogueSharesLocalAndAgentLinkLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := protocol.CreateTask{RequestID: "linked", Executor: "agent", Text: "Codex work"}
-	linked := Record{AssistantID: "assistant", Request: request, Info: protocol.TaskInfo{ID: "linked-task", AssistantID: "assistant", Title: "Codex work", Phase: protocol.TaskQueued, AgentLink: &protocol.AgentLinkOrigin{LinkID: "connection", NodeID: "codex", Kind: "codex"}}, Execution: &Execution{Request: agentlink.TaskRequest{Executor: "agent", RequestID: "linked", Text: "Codex work", From: protocol.AgentRef{NodeID: "machine", Kind: "assistant", AgentID: "assistant"}}}}
+	request := protocol.CreateTask{RequestID: "linked", Target: &protocol.AgentRef{NodeID: "codex", Kind: "node", AgentID: "codex"}, Text: "Codex work"}
+	linked := Record{AssistantID: "assistant", Request: request, Info: protocol.TaskInfo{ID: "linked-task", AssistantID: "assistant", Title: "Codex work", Phase: protocol.TaskQueued, AgentLink: &protocol.AgentLinkOrigin{LinkID: "connection", NodeID: "codex", Kind: "codex"}}, Execution: &Execution{Request: agentlink.TaskRequest{Target: agentlink.NodeTarget("codex"), RequestID: "linked", Text: "Codex work", From: protocol.AgentRef{NodeID: "machine", Kind: "assistant", AgentID: "assistant"}}}}
 	if err = s.AcceptExecution(ctx, linked); err != nil {
 		t.Fatal(err)
 	}
@@ -126,8 +126,8 @@ func TestLinkedTaskDoesNotRequireLocalExecutionServices(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	request := protocol.CreateTask{RequestID: "codex", Text: "work", Executor: "agent"}
-	record := Record{AssistantID: "assistant", Request: request, Info: protocol.TaskInfo{ID: "task", AssistantID: "assistant", Phase: protocol.TaskQueued, AgentLink: &protocol.AgentLinkOrigin{LinkID: "connection", NodeID: "codex", Kind: "codex"}}, Execution: &Execution{Request: agentlink.TaskRequest{Executor: "agent", RequestID: "codex", Text: "work", From: protocol.AgentRef{NodeID: "source", Kind: "assistant", AgentID: "assistant"}}}}
+	request := protocol.CreateTask{RequestID: "codex", Text: "work", Target: &protocol.AgentRef{NodeID: "codex", Kind: "node", AgentID: "codex"}}
+	record := Record{AssistantID: "assistant", Request: request, Info: protocol.TaskInfo{ID: "task", AssistantID: "assistant", Phase: protocol.TaskQueued, AgentLink: &protocol.AgentLinkOrigin{LinkID: "connection", NodeID: "codex", Kind: "codex"}}, Execution: &Execution{Request: agentlink.TaskRequest{Target: agentlink.NodeTarget("codex"), RequestID: "codex", Text: "work", From: protocol.AgentRef{NodeID: "source", Kind: "assistant", AgentID: "assistant"}}}}
 	if err = s.AcceptExecution(ctx, record); err != nil {
 		t.Fatal(err)
 	}

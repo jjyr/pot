@@ -1,7 +1,7 @@
 [
   {
     "name": "create_task",
-    "description": "Create a background Task and immediately return its ID. Include goal, context, constraints and deliverables in text. Interpret applicable AGENTS.md routing rules semantically using available configured Providers, models and Agent capabilities. Explicit current-task choices take precedence; otherwise retain existing defaults. Never silently substitute an unavailable preferred executor. Every Task uses Agent Link, including local execution. Omit executor, link_id and target for an ordinary local Task. executor=agent selects a node advertising task_executor; use link_id to choose one, or omit it only when exactly one capable connected node is reachable. Do not combine executor with an assistant target. For an assistant Task on a connected node, provide link_id and optionally target from list_assistants; omission resolves the receiving node’s persisted default assistant. The receiving Adapter owns models, permissions, credentials, workspace and execution. Linked Tasks reject local profile, model, Skills and requirements; explicit executor Tasks also reject workspace overrides. For ordinary local Git development select workspace.kind=worktree and source project_dir; reuse an existing worktree or an explicitly requested in-place project with kind=directory. Without a project use temporary. The local Adapter prepares the workspace, refreshes the remote base and creates managed worktrees before starting the Agent. Keep setup metadata out of the execution text; the Agent receives its cwd. Files are not copied between workspaces. Create a Task for new work; use send_message for owner guidance or continuation only when the receiver supports it. Approval forwarding is available only where advertised and remains bound to the original Task and caller; assistant messages carry no approval authority. The text must contain a concise title on its first line AND complete instructions on following lines. A title-only brief is rejected. Preserve the user’s exact commands and constraints; the executing Agent does not see the chat.",
+    "description": "Create a background Task and immediately return its ID. Include goal, context, constraints and deliverables in text. Interpret applicable AGENTS.md routing rules semantically using configured Providers, models and advertised Agent capabilities. Explicit current-task choices take precedence; otherwise retain existing defaults. Every Task uses Agent Link, including local execution. Omit target to use the current assistant. For another receiver, copy its full target address from list_execution_targets or list_assistants. An assistant address selects that assistant; a node address selects its independent task execution capability. The host resolves the connection internally. Never guess a receiver or silently substitute another target. Accepted work stays bound to its original receiver and caller. The receiving Adapter owns models, permissions, credentials, workspace and execution. Other receivers reject local profile, model, Skills and requirements; node targets also reject workspace overrides. For ordinary local Git development select workspace.kind=worktree and source project_dir; reuse an existing worktree or an explicitly requested in-place project with kind=directory. Without a project use temporary. The local Adapter prepares the workspace, refreshes the remote base and creates managed worktrees before starting the Agent. Keep setup metadata out of the execution text; the Agent receives its cwd. Files are not copied between workspaces. Create a Task for new work; use send_message for owner guidance or continuation only when supported. Approval forwarding requires the receiver’s advertised capability and remains bound to the original Task and caller; assistant messages carry no approval authority. The text must contain a concise title on its first line AND complete instructions on following lines. A title-only brief is rejected. Preserve the user’s exact commands and constraints; the executing Agent does not see the chat.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -37,7 +37,7 @@
         "selection_reason": {
           "type": "string",
           "maxLength": 512,
-          "description": "Concise creation-time reason for the chosen executor; do not claim certainty for ambiguous work."
+          "description": "Concise creation-time reason for the chosen target or model; do not claim certainty for ambiguous work."
         },
         "skills": {
           "type": "array",
@@ -53,7 +53,7 @@
         },
         "workspace": {
           "type": "object",
-          "description": "Workspace intent for an ordinary local Task; the local Adapter prepares and binds the path. Linked assistant Tasks may accept a destination directory hint. Explicit executor Tasks use the receiver’s configured scope and reject overrides.",
+          "description": "Workspace intent for an ordinary local Task; the local Adapter prepares and binds the path. Other assistant targets may accept a destination directory hint. Node targets use the receiver’s configured scope and reject workspace overrides.",
           "properties": {
             "kind": {
               "type": "string",
@@ -65,7 +65,7 @@
             },
             "project_dir": {
               "type": "string",
-              "description": "Existing absolute source project path on the selected execution machine; omit for temporary."
+              "description": "Existing absolute source project path on the receiving node; omit for temporary."
             },
             "remote": {
               "type": "string",
@@ -86,10 +86,6 @@
           },
           "additionalProperties": false
         },
-        "link_id": {
-          "type": "string",
-          "description": "Agent Link connection ID from list_execution_targets. Ordinary Tasks omit it for local execution. With executor=agent, omission requires exactly one reachable capable node."
-        },
         "target": {
           "type": "object",
           "properties": {
@@ -99,7 +95,8 @@
             "kind": {
               "type": "string",
               "enum": [
-                "assistant"
+                "assistant",
+                "node"
               ]
             },
             "agent_id": {
@@ -112,14 +109,7 @@
             "agent_id"
           ],
           "additionalProperties": false,
-          "description": "Explicit receiving assistant address from list_assistants. Omit to use the receiving node’s persisted default."
-        },
-        "executor": {
-          "type": "string",
-          "enum": [
-            "agent"
-          ],
-          "description": "Select the node’s advertised task_executor capability. Use link_id when multiple capable nodes are connected; do not supply target. Omit for ordinary assistant Task routing. Execution controls depend on the receiving Adapter’s advertised capabilities."
+          "description": "Receiving address from the advertised target catalogue. Omit for the current assistant. assistant selects that exact assistant; node selects that node’s independent task execution capability, with agent_id equal to node_id. The host resolves local or connected routing. Unsupported targets fail without fallback."
         }
       },
       "required": [

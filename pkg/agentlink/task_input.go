@@ -61,13 +61,11 @@ func (s *Service) input(ctx context.Context, directory Directory, r TaskGuidance
 	if err != nil {
 		return Task{}, err
 	}
-	capabilities := directory.Operations[task.Assistant.Address.AgentID]
-	if task.Execution != nil {
-		capabilities = Description{}
-		if directory.TaskExecutor != nil {
-			capabilities = *directory.TaskExecutor
-		}
+	target := task.Receiver.Address
+	if target.Kind == "task" {
+		target = NodeTarget(target.NodeID)
 	}
+	capabilities := directory.Capabilities(target)
 	if !capabilities.Supports(TaskInput) {
 		return Task{}, ErrUnsupported
 	}

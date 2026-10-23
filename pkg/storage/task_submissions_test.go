@@ -51,10 +51,10 @@ func TestTaskSubmissionUpgradePreservesAcceptedExecutionAndDelivery(t *testing.T
 	}
 	execution := doc["execution"].(map[string]any)
 	receipt := execution["receipt"].(map[string]any)
-	if doc["request"].(map[string]any)["executor"] != "agent" || execution["request"].(map[string]any)["executor"] != "agent" {
+	if doc["request"].(map[string]any)["executor"] != nil || doc["request"].(map[string]any)["target"].(map[string]any)["kind"] != "node" || execution["request"].(map[string]any)["target"].(map[string]any)["node_id"] != "codex" {
 		t.Fatal("historical selector was not converted before import", raw)
 	}
-	if record.SchemaVersion != 12 || record.RunID != "original-run" || receipt["id"] != "original-thread" || receipt["run_id"] != "original-turn" || receipt["state"] != "completed" || execution["notified"] != true || execution["stop_requested"] != true {
+	if record.SchemaVersion != 13 || record.RunID != "original-run" || receipt["id"] != "original-thread" || receipt["run_id"] != "original-turn" || receipt["state"] != "completed" || execution["notified"] != true || execution["stop_requested"] != true {
 		t.Fatal(raw)
 	}
 	if doc["result"].(map[string]any)["text"] != "retained" || doc["outcome"].(map[string]any)["text"] != "retained" {

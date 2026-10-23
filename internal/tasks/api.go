@@ -54,14 +54,16 @@ type Input struct {
 // Execution binds a caller-owned Task to the original Agent Link execution.
 // Local Pot execution details remain private to the receiving adapter.
 type Execution struct {
-	ObservedAtMS  int64                 `json:"observed_at_ms"`
-	Request       agentlink.TaskRequest `json:"request"`
-	Receipt       agentlink.Task        `json:"receipt"`
-	Notified      bool                  `json:"notified"`
-	StopRequested bool                  `json:"stop_requested"`
+	UnresolvedRequest json.RawMessage       `json:"unresolved_request,omitempty"`
+	ObservedAtMS      int64                 `json:"observed_at_ms"`
+	Request           agentlink.TaskRequest `json:"request"`
+	Receipt           agentlink.Task        `json:"receipt"`
+	Notified          bool                  `json:"notified"`
+	StopRequested     bool                  `json:"stop_requested"`
 }
 
 type Record struct {
+	NodeID        string                    `json:"node_id,omitempty"`
 	Execution     *Execution                `json:"execution,omitempty"`
 	SchemaVersion uint32                    `json:"schema_version"`
 	AssistantID   string                    `json:"assistant_id"`

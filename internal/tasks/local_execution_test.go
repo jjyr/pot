@@ -32,7 +32,7 @@ func TestTaskNodeIdentitySurvivesReopenAndRejectsAnotherNode(t *testing.T) {
 			t.Fatal(err)
 		}
 		stored, err := s.Get(ctx, "assistant", r.Info.ID)
-		if err != nil || s.NodeID() != "machine" || stored.RunID != r.RunID || stored.Request.MachineID != "machine" {
+		if err != nil || s.NodeID() != "machine" || stored.RunID != r.RunID || stored.NodeID != "machine" {
 			t.Fatal("task ownership changed", stored, err)
 		}
 		s.Close()
@@ -42,7 +42,7 @@ func TestTaskNodeIdentitySurvivesReopenAndRejectsAnotherNode(t *testing.T) {
 func TestPreparedTaskCannotEnqueueOnAnotherNode(t *testing.T) {
 	s, executor, _ := fixture(t)
 	ctx := context.Background()
-	request := protocol.CreateTask{RequestID: "remote", MachineID: "another-node", Text: "work"}
+	request := protocol.CreateTask{RequestID: "remote", Target: &protocol.AgentRef{NodeID: "another-node", Kind: "assistant", AgentID: "assistant"}, Text: "work"}
 	err := storage.Transaction(ctx, s.DB(), func(tx *sql.Tx) error {
 		_, err := s.EnqueueTx(ctx, tx, "assistant", request, selection(t), protocol.TaskOrigin{Kind: "manual"}, 1)
 		return err
@@ -83,7 +83,7 @@ func TestHistoricalRemoteTaskCannotUseLocalExecutorAfterRestart(t *testing.T) {
 			}
 			// Keep an identically addressed local execution in the fake executor.
 			// A retired remote record must never inspect, stop or resume that run.
-			r.Request.MachineID, r.Info.MachineID = "retired-runner", "retired-runner"
+			r.NodeID, r.Info.MachineID = "retired-runner", "retired-runner"
 			target := core.RuntimeTarget("retired-runner")
 			r.Info.ExecutionTarget = &target
 			if r.Launch != nil {
@@ -123,7 +123,7 @@ func TestHistoricalRemoteTaskCannotUseLocalExecutorAfterRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 			retained, err := s.AcceptLocal(ctx, "assistant", request)
-			if err != nil || retained.RunID != r.RunID || retained.Request.MachineID != "retired-runner" || retained.Info.Phase != protocol.TaskWaiting {
+			if err != nil || retained.RunID != r.RunID || retained.NodeID != "retired-runner" || retained.Info.Phase != protocol.TaskWaiting {
 				t.Fatal("historical retry changed original destination or outcome", retained, err)
 			}
 			wantLaunches := 0

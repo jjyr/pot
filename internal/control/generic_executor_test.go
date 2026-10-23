@@ -24,7 +24,7 @@ type fixtureTaskExecutor struct {
 }
 
 func (b *fixtureTaskExecutor) Directory(context.Context) (agentlink.Directory, error) {
-	return agentlink.Directory{NodeID: b.node, Name: "Fixture Agent", Adapter: b.adapter, Operations: map[string]agentlink.Description{}, TaskExecutor: &agentlink.Description{Version: 1, Scope: "caller", Operations: []agentlink.Operation{agentlink.TaskSubmit, agentlink.TaskRead, agentlink.TaskCancel, agentlink.TaskInput}}}, nil
+	return agentlink.Directory{NodeID: b.node, Name: "Fixture Agent", Adapter: b.adapter, Targets: []agentlink.Endpoint{{Identity: agentlink.Identity{Address: agentlink.NodeTarget(b.node), Name: "Fixture Agent", Adapter: b.adapter}, Capabilities: agentlink.Description{Version: 1, Scope: "caller", Operations: []agentlink.Operation{agentlink.TaskSubmit, agentlink.TaskRead, agentlink.TaskCancel, agentlink.TaskInput}}}}}, nil
 }
 func (b *fixtureTaskExecutor) Observe(context.Context, string) (agentlink.Observation, error) {
 	return agentlink.Observation{NodeID: b.node, Executor: &agentlink.Activity{ChatState: "idle"}}, nil
@@ -32,7 +32,7 @@ func (b *fixtureTaskExecutor) Observe(context.Context, string) (agentlink.Observ
 func (b *fixtureTaskExecutor) Submit(_ context.Context, r agentlink.TaskRequest) (agentlink.Task, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if r.Executor != "agent" {
+	if r.Target != agentlink.NodeTarget(b.node) {
 		return agentlink.Task{}, agentlink.ErrUnsupported
 	}
 	if old, ok := b.requests[r.RequestID]; ok {
@@ -42,7 +42,7 @@ func (b *fixtureTaskExecutor) Submit(_ context.Context, r agentlink.TaskRequest)
 		return b.tasks[r.RequestID], nil
 	}
 	identity := agentlink.Identity{Address: protocol.AgentRef{NodeID: b.node, Kind: "task", AgentID: r.RequestID}, Name: "Fixture Agent", Adapter: b.adapter}
-	task := agentlink.Task{ID: r.RequestID, RequestID: r.RequestID, RunID: "run-" + r.RequestID, Execution: &identity, State: "completed", Result: r.Text}
+	task := agentlink.Task{ID: r.RequestID, RequestID: r.RequestID, RunID: "run-" + r.RequestID, Receiver: identity, State: "completed", Result: r.Text}
 	b.requests[r.RequestID], b.tasks[r.RequestID] = r, task
 	return task, nil
 }
@@ -110,14 +110,14 @@ func TestTaskExecutorSelectionUsesCapabilitiesAcrossAdapters(t *testing.T) {
 	source := agentControl(t, "source").service
 	ctx := context.Background()
 	first := connectFixtureExecutor(t, source, "first", "fixture-agent")
-	request := protocol.CreateTask{Executor: "agent", RequestID: "generic-task", Text: "Generic task\nExecute through the advertised capability"}
+	request := protocol.CreateTask{Target: &protocol.AgentRef{NodeID: "first", Kind: "node", AgentID: "first"}, RequestID: "generic-task", Text: "Generic task\nExecute through the advertised capability"}
 	accepted, err := source.CreateTask(ctx, "main", request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	source.syncTaskExecutions(ctx)
 	record, err := source.Tasks.Get(ctx, "main", accepted.ID)
-	if err != nil || record.Info.Phase != protocol.TaskComplete || record.Info.AgentLink.LinkID != first.ID || record.Execution.Receipt.Receiver().Adapter != "fixture-agent" {
+	if err != nil || record.Info.Phase != protocol.TaskComplete || record.Info.AgentLink.LinkID != first.ID || record.Execution.Receipt.Receiver.Adapter != "fixture-agent" {
 		t.Fatal(record, err)
 	}
 	guidance := protocol.TaskInput{RequestID: "next-run", Text: "Continue"}
@@ -129,16 +129,13 @@ func TestTaskExecutorSelectionUsesCapabilitiesAcrossAdapters(t *testing.T) {
 		t.Fatal(record, err)
 	}
 	second := connectFixtureExecutor(t, source, "second", "another-agent")
-	request.RequestID = "ambiguous"
-	if _, err = source.CreateTask(ctx, "main", request); !errors.Is(err, agentlink.ErrConflict) {
-		t.Fatal("ambiguous capabilities silently selected", err)
-	}
-	request.LinkID = second.ID
+	request.RequestID = "second-task"
+	request.Target = &protocol.AgentRef{NodeID: "second", Kind: "node", AgentID: "second"}
 	if _, err = source.CreateTask(ctx, "main", request); err != nil {
 		t.Fatal(err)
 	}
 	// Accepted retries remain bound to the first receiver after directory changes.
-	request.LinkID = ""
+	request.Target = &protocol.AgentRef{NodeID: "first", Kind: "node", AgentID: "first"}
 	request.RequestID = "generic-task"
 	if retry, err := source.CreateTask(ctx, "main", request); err != nil || retry.ID != accepted.ID {
 		t.Fatal(retry, err)
@@ -146,18 +143,15 @@ func TestTaskExecutorSelectionUsesCapabilitiesAcrossAdapters(t *testing.T) {
 	if err = source.agentLinks.service.Disconnect(ctx, first.ID); err != nil {
 		t.Fatal(err)
 	}
-	request.RequestID = "only-reachable"
+	request.RequestID = "disconnected-target"
+	if _, err = source.CreateTask(ctx, "main", request); !errors.Is(err, agentlink.ErrDisconnected) {
+		t.Fatal("retargeted disconnected work", err)
+	}
+	request.Target = &protocol.AgentRef{NodeID: "second", Kind: "node", AgentID: "second"}
 	if task, err := source.CreateTask(ctx, "main", request); err != nil || task.AgentLink.LinkID != second.ID {
 		t.Fatal(task, err)
 	}
-	request.Executor = "codex"
-	request.RequestID = "retired-selector"
-	if _, err = source.CreateTask(ctx, "main", request); err == nil {
-		t.Fatal("retired selector accepted")
-	}
-	// A Task executor does not imply an ordinary assistant Task capability.
-	request.Executor = ""
-	request.LinkID = second.ID
+	request.Target = &protocol.AgentRef{NodeID: "second", Kind: "assistant", AgentID: "absent"}
 	request.RequestID = "no-assistant"
 	if _, err = source.CreateTask(ctx, "main", request); !errors.Is(err, agentlink.ErrUnsupported) {
 		t.Fatal(err)

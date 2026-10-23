@@ -89,7 +89,7 @@ func TestPotLinkDelegationOwnsTaskOnReceiverAndNotifiesOriginalAssistant(t *test
 	receiver := taskControl(t, "receiver", upstream.URL)
 	b := &agentControlFixture{service: receiver, endpoint: controlPeerEndpoint(receiver)}
 	c := connectAgentControls(t, a, b)
-	request := protocol.CreateTask{RequestID: "delegation", Text: "Read report\nReturn the result.", LinkID: c.ID}
+	request := protocol.CreateTask{RequestID: "delegation", Text: "Read report\nReturn the result.", Target: &protocol.AgentRef{NodeID: c.PeerHost.NodeID, Kind: "assistant", AgentID: "main"}}
 	info, e := a.service.CreateTask(ctx, "main", request)
 	if e != nil {
 		t.Fatal(e)
@@ -108,7 +108,7 @@ func TestPotLinkDelegationOwnsTaskOnReceiverAndNotifiesOriginalAssistant(t *test
 			t.Fatal(e)
 		}
 		if terminalLinkTask(d.Execution.Receipt.State) {
-			if d.Execution.Receipt.Result != "receiver-result" || d.Execution.Receipt.Assistant.Address.NodeID != "receiver" {
+			if d.Execution.Receipt.Result != "receiver-result" || d.Execution.Receipt.Receiver.Address.NodeID != "receiver" {
 				t.Fatal(d)
 			}
 			break
@@ -154,7 +154,7 @@ func TestPotLinkDelegationOwnsTaskOnReceiverAndNotifiesOriginalAssistant(t *test
 	}
 	backend := potLinkBackend{receiver}
 	from := protocol.AgentRef{NodeID: "sender", Kind: "assistant", AgentID: "main"}
-	r := agentlink.TaskRequest{RequestID: "default-bound", From: from, Text: "Read\nReturn result"}
+	r := agentlink.TaskRequest{RequestID: "default-bound", From: from, Text: "Read\nReturn result", Target: agentlink.AssistantTarget(receiver.options.RuntimeID, "main")}
 	first, e := backend.Submit(ctx, r)
 	if e != nil {
 		t.Fatal(e)
@@ -167,7 +167,7 @@ func TestPotLinkDelegationOwnsTaskOnReceiverAndNotifiesOriginalAssistant(t *test
 		t.Fatal(e)
 	}
 	same, e := backend.Submit(ctx, r)
-	if e != nil || same.ID != first.ID || same.Assistant.Address.AgentID != "main" {
+	if e != nil || same.ID != first.ID || same.Receiver.Address.AgentID != "main" {
 		t.Fatal("default change retargeted accepted work", same, e)
 	}
 	if _, e = backend.Status(ctx, protocol.AgentRef{NodeID: "another", Kind: "assistant", AgentID: "main"}, same.ID); !errors.Is(e, agentlink.ErrNotFound) {
