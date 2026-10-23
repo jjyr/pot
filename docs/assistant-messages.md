@@ -7,6 +7,17 @@ credentials or grant execution permissions.
 
 ## Addresses and provenance
 
+Assistant mention completions read undeleted local definitions and the current
+Agent Link directory snapshots. Contacts and the bounded name/avatar cache used
+to display historical messages are not selection directories. Opening an `@`
+query waits for a current completion read; assistant and Agent Link invalidations
+retire visible options and fence pending reads before refreshing both Chat and
+Task guidance. Existing inline references and drafts keep their full addresses.
+Remote deletion becomes known when the receiver's directory is refreshed by the
+existing Agent Link lifecycle. An unreachable peer without deletion evidence
+retains its cached directory and the existing offline indication; opening the
+picker does not connect to peers or infer deletion from connectivity.
+
 An Agent address is `{node_id, kind, agent_id}`. Model recipients may have
 kind `assistant` or `task`, or the original `user` address when replying to a
 direct Agent Link chat; Task addresses belong to their owning Control,

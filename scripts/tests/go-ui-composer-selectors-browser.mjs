@@ -1,5 +1,7 @@
 // Shared production Chat with synthetic directories and receipts. No model or
 // product data: these checks qualify the browser's composer/draft behavior.
+import {createResourceReads} from '../../web/src/state/resource-cache.mjs';
+import {messageIdentities} from '../../web/src/state/message-identities.mjs';
 import {mountApp} from '../../web/src/components/ui.js';
 import {createTaskConversation} from '../../web/src/components/task-conversation.mjs';
 import {createTaskTranscript} from '../../web/src/state/task-transcript.mjs';
@@ -17,7 +19,7 @@ function photo(color,letter){const canvas=document.createElement('canvas');canva
 const images=[photo('#466c52','研'),photo('#7c5c37','码'),photo('#68567c','写')];
 const skills=[{token:'/skill:code-review',label:'code-review',detail:'检查代码质量、潜在问题与测试覆盖'},{token:'/skill:research-note',label:'research-note',detail:'整理研究材料，生成结构化笔记'},{token:'/skill:playwright',label:'playwright',detail:'操作浏览器，验证页面交互'},{token:'/machine:forbidden',label:'Machine',detail:'Must not appear'},{token:'/tag:forbidden',label:'Label',detail:'Must not appear'}];
 const assistants=[{token:'@assistant:local/research',label:'研究助手',detail:'本机 · Pot',avatar:images[0]},{token:'@assistant:workstation/code',label:'代码助手',detail:'工作站 · Codex',avatar:images[1]},{token:'@assistant:cached/research',label:'研究助手',detail:'缓存节点 · Pot',avatar:images[2],offline:true},{token:'@assistant:remote/research',label:'研究助手',detail:'远程节点 · Pot',avatar:images[2]},{token:'@assistant:remote/unicode',label:'设计 师 [托尼] 🙂',detail:'远程节点 · Pot',avatar:images[2]}];
-let scope={space:'one',owner:'alpha'},cursor=1,receive,release,reject=false;
+let scope={space:'one',owner:'alpha'},cursor=1,receive,release,reject=false,mentionGate;
 const frame=()=>({kind:'reset',runtime_id:'fixture',boot_id:'boot',owner_id:JSON.stringify(['one',scope.owner]),conversation_id:scope.owner,cursor:String(cursor),replies:[],running:false,turn_id:null,messages:[{id:'welcome',sequence:'1',role:'assistant',text:'我会结合代码变更，整理需要关注的问题。',status:'complete'}],history:{has_more:false,has_newer:false}});
 const client={production:true,runtime:{runtime_id:'fixture',boot_id:'boot'},scope:()=>({...scope}),setScope:value=>scope={...scope,...value},changes:()=>()=>{},
  subscribe(callback,status){receive=callback;const timer=setTimeout(()=>{status('connected');receive(frame());},10);return()=>clearTimeout(timer);},
@@ -25,11 +27,12 @@ const client={production:true,runtime:{runtime_id:'fixture',boot_id:'boot'},scop
  async request(path){const url=new URL(path,location.href);
   if(url.pathname==='/api/v1/spaces')return {active_space_id:'one',items:[{id:'one',name:'Fixture',control_id:'fixture',connected:true}]};
   if(url.pathname==='/api/v1/assistants')return {items:[{id:'alpha',name:'工作助手',avatar:images[1]},{id:'beta',name:'写作助手',avatar:images[2]}].map(item=>({...item,capabilities:{version:1,scope:'owner',operations:['chat.read','chat.send','chat.completions']}}))};
-  if(url.pathname==='/api/v1/completions'){const q=url.searchParams.get('q');if(q==='/slow'){await new Promise(resolve=>release=resolve);return {items:skills};}const items=q.startsWith('@')?assistants:skills;return {items:items.filter(item=>q==='/'||q==='@'||(item.token+' '+item.label+' '+item.detail).includes(q.slice(1)))};}
+  if(url.pathname==='/api/v1/completions'){const q=url.searchParams.get('q');if(q==='/slow'){await new Promise(resolve=>release=resolve);return {items:skills};}const items=q.startsWith('@')?assistants:skills;const result={items:structuredClone(items.filter(item=>q==='/'||q==='@'||(item.token+' '+item.label+' '+item.detail).includes(q.slice(1))))};if(q.startsWith('@')&&mentionGate)await new Promise(resolve=>mentionGate=resolve);return result;}
   return {items:[],pending:[],policy:{}};
  }};
+client.resources=createResourceReads(client);client.read=(path,options)=>client.resources.read(path,options);
 mountApp(root,client);
-const input=()=>root.querySelector('#pot-composer'),menu=()=>root.querySelector('.completion-list'),options=()=>[...root.querySelectorAll('.completion-option')],chips=()=>[...root.querySelectorAll('.composer-selector')];
+const input=()=>root.querySelector('#pot-composer'),menu=()=>root.querySelector('.completion-list'),options=()=>menu()?.hidden?[]:[...root.querySelectorAll('.completion-option')],chips=()=>[...root.querySelectorAll('.composer-selector')];
 function type(value,caret=value.length){input().focus();input().value=value;input().setSelectionRange(caret,caret);input().dispatchEvent(new Event('input',{bubbles:true}));}
 function press(key){const event=new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true});input().dispatchEvent(event);input().dispatchEvent(new KeyboardEvent('keyup',{key,bubbles:true}));return event;}
 async function select(owner){if(matchMedia('(max-width:719px)').matches&&!root.classList.contains('show-directory')){root.querySelector('.narrow-navigation').click();await pause(30);}root.querySelector(`.assistant-row[data-view-key='["one","${owner}"]']`).click();await wait(()=>scope.owner===owner&&!input().disabled);await pause(70);}
@@ -50,7 +53,47 @@ async function taskChecks(){
  check(saved==='/skill:code-review\n指导 '+code+' 继续 结束','Task draft serializes the complete inline address with unchanged Skill prefix');
  host.querySelector('.send-button').click();await wait(()=>sent===saved||editor.value==='');
  check(sent==='/skill:code-review\n指导 '+code+' 继续 结束','Task send receives the inline mention in place');
- await pause(30);view.dispose();host.remove();
+ await pause(30);
+ editor.focus();editor.value='@';editor.setSelectionRange(1,1);editor.dispatchEvent(new Event('input',{bubbles:true}));
+ await wait(()=>!host.querySelector('.completion-list').hidden&&host.querySelectorAll('.completion-option').length===5);
+ client.resources.invalidate(['assistants'],{space:'unrelated'});
+ check(!host.querySelector('.completion-list').hidden,'Task guidance ignores invalidation from another scope');
+ const deleted=assistants.splice(1,1)[0];client.resources.invalidate(['agent-links'],scope);
+ check(host.querySelector('.completion-list').hidden,'Task guidance immediately retires obsolete options on directory invalidation');
+ await wait(()=>host.querySelectorAll('.completion-option').length===4&&!host.querySelector('.completion-list').hidden);
+ check(!host.querySelector('.completion-list').textContent.includes(deleted.label),'Task guidance shares the current directory after deletion');
+ assistants.splice(1,0,deleted);client.resources.invalidate(['agent-links'],scope);
+ await wait(()=>!host.querySelector('.completion-list').hidden&&host.querySelectorAll('.completion-option').length===5);
+ view.dispose();host.remove();
+}
+async function directoryChecks(){
+ const original=structuredClone(assistants),profile=messageIdentities(client);
+ client.assistants=[...(client.assistants||[]),{id:'research',control_id:'local',name:'研究助手',avatar:images[0]}];
+ check(profile.resolve({node_id:'local',kind:'assistant',agent_id:'research'}).name==='研究助手','History learns the original complete identity');
+ type('@研究');await wait(()=>options().length===3);
+ const obsoleteOption=options()[0];assistants.splice(0,1);mentionGate=true;
+ client.resources.invalidate(['assistants'],{space:'one'});
+ check(menu().hidden,'Local delete immediately hides the old options before the replacement read');
+ obsoleteOption.click();check(input().value==='@研究','A retired option cannot insert through a detached click handler');
+ await wait(()=>typeof mentionGate==='function');const stale=mentionGate;mentionGate=null;
+ assistants.splice(assistants.findIndex(item=>item.token==='@assistant:remote/research'),1);
+ client.resources.invalidate(['agent-links'],{space:'one'});stale();
+ await wait(()=>!menu().hidden&&options().length===1);
+ check(options()[0].getAttribute('aria-disabled')==='true'&&options()[0].title.includes('@assistant:cached/research'),'Late pre-delete search cannot revive either node; unrelated offline same-ID assistant remains');
+ type('');type('@研究');await wait(()=>!menu().hidden&&options().length===1);
+ check(options()[0].title.includes('@assistant:cached/research'),'Reopening the same cached query does not revive deleted definitions');
+ client.assistants=client.assistants.filter(item=>!(item.control_id==='local'&&item.id==='research'));
+ check(profile.resolve({node_id:'local',kind:'assistant',agent_id:'research'}).name==='研究助手','History keeps a known author name after deletion');
+ check(renderMarkdown(local).querySelector('.assistant-mention').title==='local · research','Historical inline reference retains its original full address after deletion');
+ client.resources.invalidate([],{space:'one',reset:true});
+ await wait(()=>!menu().hidden&&options().length===1);
+ check(!menu().textContent.includes('代码助手'),'Reconnect refresh retains only current directory candidates');
+ client.resources.invalidate(['usage'],{space:'one',boot:'next-boot'});
+ check(menu().hidden,'A new Runtime boot retires candidates even on an unrelated topic');
+ await wait(()=>!menu().hidden&&options().length===1);
+ type(local+' 旧引用');await select('beta');await select('alpha');
+ check(input().value===local+' 旧引用','Existing references survive draft switches after target deletion');
+ assistants.splice(0,assistants.length,...original);client.resources.invalidate(['assistants','agent-links'],scope);
 }
 async function run(){
  await wait(()=>input()&&!input().disabled&&!root.querySelector('.history').hidden);await pause(100);
@@ -82,11 +125,20 @@ async function run(){
  type('/slow');await pause(10);type('@');await wait(()=>options().length===5);release();release=null;await pause(30);check(menu().textContent.includes('代码助手')&&!menu().textContent.includes('code-review'),'Late slash result cannot overwrite mention results');
  const locale=parameters.get('locale')||'en',alternate=locale==='en'?'zh-CN':'en';window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-go-preview-locale',value:alternate}}));await pause(30);check(menu().textContent.includes(alternate==='en'?'Assistants':'助手'),'Open picker updates locale without losing its query');window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-go-preview-locale',value:locale}}));await pause(30);
  const box=menu().getBoundingClientRect(),composer=root.querySelector('.composer').getBoundingClientRect();check(box.left>=0&&box.right<=innerWidth&&box.top>=0&&box.bottom<=composer.top,'Picker stays above the composer within the viewport');
- await taskChecks();
+ await taskChecks();await directoryChecks();
  check(document.documentElement.scrollWidth<=innerWidth,'No horizontal overflow at the current width');check(errors.length===0,errors.join('\n'));
  type('/code');await wait(()=>options().length===1);await choose();type('请 @代 帮忙检查',4);await wait(()=>options().length===1);await choose();insert('一起');
  check(chips().length===1&&input().value==='请 '+code+' 一起 帮忙检查','Final interactive composer retains the Skill above the inline mention');
  window.composerSelectorResults={passed:true,checks,errors};document.title='PASS: '+checks.length+' composer checks ('+innerWidth+'px, '+(mobile?'mobile':'desktop')+', '+locale+')';
  const result=document.createElement('output');result.textContent=document.title;result.style.cssText='position:fixed;top:0;right:0;background:#fff;color:#000;font-size:11px;z-index:999';document.body.append(result);
 }
-run().catch(error=>{window.composerSelectorResults={passed:false,checks,errors:[...errors,String(error.stack||error)]};document.title='FAIL: '+error.message;const result=document.createElement('pre');result.textContent=JSON.stringify(window.composerSelectorResults,null,2);result.style.cssText='position:fixed;inset:0;background:white;color:black;z-index:999;overflow:auto';document.body.append(result);});
+async function review(){
+ await wait(()=>input()&&!input().disabled&&!root.querySelector('.history').hidden);await pause(100);
+ type('请 @');await wait(()=>options().length===5);
+ // Retire only local/research in the fake source after its search result is
+ // visible. The exact same fixture runs against the before and after sources.
+ assistants.splice(0,1);client.resources.invalidate(['assistants'],{space:'one'});
+ await pause(200);
+ window.mentionDirectoryReview={ready:true,candidates:options().map(option=>option.title),draft:input().value};
+}
+(parameters.has('review')?review():run()).catch(error=>{window.composerSelectorResults={passed:false,checks,errors:[...errors,String(error.stack||error)]};document.title='FAIL: '+error.message;const result=document.createElement('pre');result.textContent=JSON.stringify(window.composerSelectorResults,null,2);result.style.cssText='position:fixed;inset:0;background:white;color:black;z-index:999;overflow:auto';document.body.append(result);});
