@@ -9,7 +9,7 @@ async page => {
  let releaseTaskResume,taskResumeArrived;const taskResumeReady=new Promise(resolve=>taskResumeArrived=resolve);
  let failDefault=false,holdDefault=false,releaseDefault,defaultArrived;const defaultReady=new Promise(resolve=>defaultArrived=resolve);
  const scheduleExecutions=new Set();let allowanceFixture=false,mainWaitTurn='main-original',mainWaitSince=11;
- const schedulePlan=index=>({id:index?'plan-'+index:'plan-proof',next_at_ms:index+1,spec:{title:index?'Extra schedule '+index:'Schedule proof',goal:'Full goal retained only in selected schedule',enabled:true,timezone:'UTC',kind:'cron',cron:'0 9 * * *',misfire:'coalesce',notify:'changes'},next_label:'Tomorrow'});
+ const schedulePlan=index=>({id:index?'plan-'+index:'plan-proof',next_at_ms:index+1,spec:{title:index?'Extra schedule '+index:'Schedule proof',goal:'Full goal retained only in selected schedule',enabled:true,timezone:'UTC',kind:'cron',cron:'0 9 * * *',misfire:'coalesce',notify:'all'},next_label:'Tomorrow'});
  const usageBuckets=days=>{
   const buckets=[];
   for(let offset=0;offset<days;offset++){

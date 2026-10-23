@@ -150,7 +150,7 @@ func TestCronConcurrentOccurrenceRestartPauseAndEdit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A time-only edit fences an already admitted run from overwriting baseline.
+	// A time-only edit must survive completion of an already admitted run.
 	spec.Cron = "30 8-20 * * *"
 	if _, err = f.schedule.Manage(ctx, "assistant", Request{RequestID: "edit-cron", Action: "update", ScheduleID: info.ID, Spec: &spec}, at+61000); err != nil {
 		t.Fatal(err)
@@ -170,8 +170,8 @@ func TestCronConcurrentOccurrenceRestartPauseAndEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan, err = f.schedule.Get(ctx, "assistant", info.ID)
-	if err != nil || plan.Info.Baseline != nil {
-		t.Fatal("old run changed baseline", plan, err)
+	if err != nil || plan.Info.Spec.Cron != spec.Cron {
+		t.Fatal("old run changed definition", plan, err)
 	}
 	// Reopen the real task database; the fixed zone and due survive process recovery.
 	selection, err := f.tasks.Prepare(ctx, "assistant", protocol.CreateTask{RequestID: "restart-check", Text: "Fixture"})

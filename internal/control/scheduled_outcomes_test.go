@@ -78,7 +78,7 @@ func TestScheduledAndManualOutcomesShareSummaryDelivery(t *testing.T) {
 				case <-r.Context().Done():
 					return
 				}
-				batchReply(w, "worker finished")
+				batchReply(w, "observed-scheduled-fact https://example.com/evidence")
 			}, 4)
 			c, err := s.Conversation(ctx, "main")
 			if err != nil {
@@ -92,7 +92,7 @@ func TestScheduledAndManualOutcomesShareSummaryDelivery(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())
 			}
-			spec := protocol.ScheduleSpec{Title: "Scheduled monitor", Goal: "Check the scheduled observation", Timezone: "Asia/Shanghai", Kind: "interval", EveryMinutes: 60, Misfire: "coalesce", Notify: "changes", Enabled: false}
+			spec := protocol.ScheduleSpec{Title: "Scheduled monitor", Goal: "Check the scheduled observation", Timezone: "Asia/Shanghai", Kind: "interval", EveryMinutes: 60, Misfire: "coalesce", Notify: "all", Enabled: false}
 			raw, err := s.Schedules.Manage(ctx, "main", schedule.Request{RequestID: "create-monitor", Action: "create", Spec: &spec}, storage.Now())
 			if err != nil {
 				t.Fatal(err)
@@ -127,11 +127,20 @@ func TestScheduledAndManualOutcomesShareSummaryDelivery(t *testing.T) {
 				case <-time.After(5 * time.Millisecond):
 				}
 			}
-			if err := os.MkdirAll(root, 0700); err != nil {
+			if err := os.MkdirAll(filepath.Join(root, ".pot-artifacts"), 0700); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(root, ".pot-schedule-result.json"), []byte(`{"summary":"observed-scheduled-fact","fingerprint":"v1","evidence":["https://example.com/evidence"],"artifacts":["report.txt"]}`), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(root, ".pot-artifacts", "report.txt"), []byte("Detailed scheduled findings"), 0600); err != nil {
 				t.Fatal(err)
+			}
+			// An old or task-specific JSON report has no scheduler semantics.
+			if err := os.WriteFile(filepath.Join(root, ".pot-schedule-result.json"), []byte(`{"tool_failures_observed":3,"status":"success_with_observability_limits"}`), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if failSummary {
+				if err := os.Symlink(t.TempDir(), filepath.Join(root, ".pot-artifacts", "escape")); err != nil {
+					t.Fatal(err)
+				}
 			}
 			close(workerRelease)
 			sub := s.Tasks.Subscribe()
@@ -147,6 +156,10 @@ func TestScheduledAndManualOutcomesShareSummaryDelivery(t *testing.T) {
 					ended = ended && task.Info.Phase == protocol.TaskComplete
 				}
 				if ended {
+					stored, err := s.Tasks.Get(ctx, "main", accepted.TaskID)
+					if err != nil || stored.Outcome == nil || stored.Outcome.Error != "" || (stored.Outcome.ArtifactsError != "") != failSummary {
+						t.Fatal("attachment error changed execution outcome", stored, err)
+					}
 					break
 				}
 				if _, err := sub.Next(ctx); err != nil {

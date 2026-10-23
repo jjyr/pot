@@ -7,32 +7,7 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
-	"strings"
 )
-
-func ParseResult(data []byte) (ResultFile, error) {
-	if len(data) > 16384 {
-		return ResultFile{}, fmt.Errorf("result exceeds 16 KiB")
-	}
-	var result ResultFile
-	if err := core.DecodeJSON(data, &result); err != nil {
-		return result, err
-	}
-	if strings.TrimSpace(result.Summary) == "" || len(result.Summary) > 4000 || strings.TrimSpace(result.Fingerprint) == "" || len(result.Fingerprint) > 2048 || len(result.Evidence) == 0 || len(result.Evidence) > 16 || len(result.Artifacts) > 16 {
-		return result, fmt.Errorf("result needs bounded summary, stable fingerprint and evidence")
-	}
-	for _, evidence := range result.Evidence {
-		if strings.TrimSpace(evidence) == "" || len(evidence) > 1000 {
-			return result, fmt.Errorf("invalid result evidence")
-		}
-	}
-	for _, path := range result.Artifacts {
-		if !protocol.ValidFilePath(path) || len(path) > 1000 {
-			return result, fmt.Errorf("invalid artifact path")
-		}
-	}
-	return result, nil
-}
 
 // Tick takes an explicit clock. Occurrence identity, queue entry and next due
 // time commit atomically. Task coordination finalizes results independently of
@@ -97,7 +72,7 @@ func (s *Service) trigger(ctx context.Context, owner string, plan Plan, at int64
 	var prepared resolved
 	if !busy && !missed {
 		hash, _ := core.HashJSON([]string{owner, occurrence})
-		prepared, err = s.resolve(ctx, owner, plan.Info.Spec, "schedule:"+hash, plan.Info.Baseline)
+		prepared, err = s.resolve(ctx, owner, plan.Info.Spec, "schedule:"+hash)
 		if err != nil {
 			return s.lastError(ctx, owner, plan.Info.ID, err.Error())
 		}

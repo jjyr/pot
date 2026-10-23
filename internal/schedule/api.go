@@ -29,17 +29,10 @@ type Options struct {
 	SystemTimezone func() (string, error)
 	Tasks          *tasks.Service
 	Ready          func(context.Context, string) (bool, error)
-	Results        tasks.ResultReader
 }
 type Service struct {
 	db      *sql.DB
 	options Options
-}
-type ResultFile struct {
-	Summary     string   `json:"summary" required:"true"`
-	Fingerprint string   `json:"fingerprint" required:"true"`
-	Evidence    []string `json:"evidence" required:"true"`
-	Artifacts   []string `json:"artifacts,omitempty"`
 }
 type resolved struct {
 	Request   protocol.CreateTask

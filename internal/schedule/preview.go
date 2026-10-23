@@ -31,7 +31,7 @@ func Preview(request PreviewRequest, at int64) PreviewResult {
 	if _, err := cronexpr.Location(request.Timezone); err != nil {
 		return fail("timezone", "timezone", err)
 	}
-	spec := protocol.ScheduleSpec{Title: "Preview", Goal: "Preview", Kind: request.Kind, Cron: request.Cron, Timezone: request.Timezone, At: request.At, EveryMinutes: request.EveryMinutes, Notify: "changes", Misfire: "coalesce"}
+	spec := protocol.ScheduleSpec{Title: "Preview", Goal: "Preview", Kind: request.Kind, Cron: request.Cron, Timezone: request.Timezone, At: request.At, EveryMinutes: request.EveryMinutes, Notify: "all", Misfire: "coalesce"}
 	field := map[string]string{"cron": "cron", "once": "at", "interval": "every_minutes"}[request.Kind]
 	if field == "" {
 		field = "kind"

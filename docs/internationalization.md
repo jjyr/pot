@@ -1,7 +1,8 @@
 # Internationalization
 
-This is the shared i18n rule for App and browser UI. Supported languages are
-English (`en`) and Simplified Chinese (`zh-CN`).
+This is the shared i18n rule for App and product browser UI. Supported languages
+are English (`en`) and Simplified Chinese (`zh-CN`). The standalone marketing
+website has its own catalog and build boundary, described below.
 
 ## Required for new or changed UI text
 
@@ -70,3 +71,21 @@ changed flow in both languages, including permission/error/empty states and a
 language switch while asynchronous work is pending; check visible and accessible
 labels. Catalog validation alone does not detect hardcoded UI text or stale locale
 captures.
+
+## Standalone website
+
+`website/` is an independent static marketing site with six locales: `en`,
+`zh-CN`, `zh-TW`, `ja`, `ko` and `es`. It must not import the application runtime
+or its two-language frontend catalog. Its shared catalogs are
+`website/i18n/{locale}.json`: both the Python generator and browser demo use these
+files for static text, SEO, accessibility labels and dynamic content. Put wording
+changes in all six catalogs in the same change. The `page` lookup uses source
+phrases as keys; `demo` groups structured example content.
+
+Run `python3 website/build-site.py` after editing website sources. It checks
+catalog structure and uncatalogued template text, then regenerates complete
+localized HTML and the offline preview. Check that committed pages match the
+generator, exercise language switches with demo state, and inspect desktop and
+narrow layouts. Root language selection uses saved preference, browser preference,
+then English; explicit locale paths remain fixed. See the
+[website README](../website/README.md) for paths, script mapping and preview use.

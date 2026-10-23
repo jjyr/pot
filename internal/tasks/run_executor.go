@@ -291,11 +291,10 @@ func (e *Executor) Execute(ctx context.Context, control, task, runID string) (te
 				return err
 			}
 
-			if event.Update.Type == "message_finished" && event.Update.Text != "" {
-				if final.Text != "" {
-					final.Text += "\n"
-				}
-				final.Text += event.Update.Text
+			if event.Update.Type == "message_finished" {
+				// Earlier replies stay in the transcript; only the last reply is
+				// the terminal summary, including an intentionally empty reply.
+				final.Text = event.Update.Text
 			}
 			if event.Update.Type == "turn_finished" && event.Update.Outcome != nil {
 				finalOutcome = *event.Update.Outcome

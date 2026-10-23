@@ -39,6 +39,7 @@ Code defines actual behavior.
 | Shared UI, language and licenses | [Shared UI](shared-ui.md), [i18n rules](internationalization.md), [licenses](licenses-and-about.md) |
 | Agent evaluation | [CLI](../eval/README.md), [measurement design](token-evaluation.md), [small-budget suite](token-evaluation-next-suite.md) |
 | Product goals | [Product](product-design.md) |
+| Product website, six locales and static builds | [Website](../website/README.md) |
 
 ## Maintenance
 
