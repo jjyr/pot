@@ -16,6 +16,7 @@ import (
 )
 
 func TestTaskArtifactCollection(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for _, scenario := range []string{"absent", "empty", "nested", "symlinks", "directory-link", "oversized", "too-many"} {
 		t.Run(scenario, func(t *testing.T) {
@@ -88,6 +89,7 @@ func TestTaskArtifactCollection(t *testing.T) {
 }
 
 func TestTaskArtifactErrorsPreserveFinalReplyAndStatus(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := taskResourceService(t)
 	root := filepath.Join(s.options.Workspace, "tasks", "worker")

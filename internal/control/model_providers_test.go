@@ -42,6 +42,7 @@ func installMetadataFixture(t *testing.T, s *Service) string {
 }
 
 func TestProviderContributionCatalogCacheAndDisableGates(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, _ := configurationService(t)
 	target := installMetadataFixture(t, s)
@@ -110,6 +111,7 @@ func TestProviderContributionCatalogCacheAndDisableGates(t *testing.T) {
 }
 
 func TestBuiltinProvidersUseTheSameEnabledContributionRegistry(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, profile := configurationService(t)
 	snapshot := s.Profiles.Snapshot()
@@ -138,6 +140,7 @@ func TestBuiltinProvidersUseTheSameEnabledContributionRegistry(t *testing.T) {
 }
 
 func TestAutomaticPluginCatalogProjectionTracksCurrentModels(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, _ := configurationService(t)
 	target := installMetadataFixture(t, s)
@@ -175,6 +178,7 @@ func TestAutomaticPluginCatalogProjectionTracksCurrentModels(t *testing.T) {
 }
 
 func TestExactConnectionLimitsPrecedePublicSuffixFactsBeforeSaving(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, _ := configurationService(t)
 	target := installMetadataFixture(t, s)
@@ -213,6 +217,7 @@ func TestExactConnectionLimitsPrecedePublicSuffixFactsBeforeSaving(t *testing.T)
 }
 
 func TestPluginCatalogRefreshCancelsWithItsOwner(t *testing.T) {
+	t.Parallel()
 	s, _ := configurationService(t)
 	target := installMetadataFixture(t, s)
 	if _, err := s.Profiles.Save(context.Background(), SaveProfile{RequestID: "cancel-catalog", Name: "Slow", Model: "acme/text", ProviderTypeID: "acme/aggregate", Endpoint: "https://aggregate.invalid/v1", Protocol: "openai_chat", APIKey: "isolated-token"}); err != nil {
@@ -231,6 +236,7 @@ func TestPluginCatalogRefreshCancelsWithItsOwner(t *testing.T) {
 }
 
 func TestDisabledProviderBlocksFreshDefaultTasksAndUnpreparedResources(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, profile := configurationService(t)
 	if _, err := legacyMainAssistant(ctx, s, "task-owner", "Pot"); err != nil {
@@ -290,6 +296,7 @@ func TestDisabledProviderBlocksFreshDefaultTasksAndUnpreparedResources(t *testin
 }
 
 func TestLocalExecutionRejectsAnotherNodesModelConfiguration(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	source, profile := configurationService(t)
 	spec, err := source.Profiles.Resolve(profile.ID)
@@ -310,6 +317,7 @@ func TestLocalExecutionRejectsAnotherNodesModelConfiguration(t *testing.T) {
 }
 
 func TestSavedCredentialRotationFencesBothDiscoveryReaders(t *testing.T) {
+	t.Parallel()
 	for _, pluginReader := range []bool{false, true} {
 		name := "http"
 		if pluginReader {
@@ -394,6 +402,7 @@ func TestSavedCredentialRotationFencesBothDiscoveryReaders(t *testing.T) {
 }
 
 func TestMissingAdapterDoesNotDisableUnrelatedProviderTypes(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, standard := configurationService(t)
 	target := installMetadataFixture(t, s)
@@ -432,6 +441,7 @@ func TestMissingAdapterDoesNotDisableUnrelatedProviderTypes(t *testing.T) {
 }
 
 func TestDeclarativeDirectoryReaderUsesLocalFactsWithoutCredentials(t *testing.T) {
+	t.Parallel()
 	s, _ := configurationService(t)
 	// Use the bundled, ready-connection directory rather than the limits-only
 	// fixture that deliberately excludes inference-ready model declarations.
@@ -450,6 +460,7 @@ func TestDeclarativeDirectoryReaderUsesLocalFactsWithoutCredentials(t *testing.T
 }
 
 func TestProviderEndpointPreviewOffersCorrectionWithoutPermittingMismatch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, _ := configurationService(t)
 	value, err := s.Profiles.ResolveProviderEndpoint(ctx, CheckProvider{ProviderTypeID: customProviderType, Endpoint: "https://fixture.invalid/v1/responses", Protocol: "openai_chat"})

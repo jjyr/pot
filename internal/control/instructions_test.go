@@ -8,6 +8,7 @@ import (
 )
 
 func TestHostInstructionPriorityIgnoresSharedRulesAndKeepsActualSkillPaths(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
 	repo := filepath.Join(root, "repo")

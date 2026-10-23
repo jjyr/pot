@@ -62,9 +62,11 @@ func fixtureGit(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 func TestTaskWorkspaceRefreshesBaseAndUnifiesProjectTools(t *testing.T) {
+	t.Parallel()
 	testTaskWorkspaceProjectTools(t, false)
 }
 func TestRealTaskWorktreePreparation(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("POT_SANDBOX_INTEGRATION") != "1" {
 		t.Skip("requires real sandbox qualification")
 	}
@@ -169,6 +171,7 @@ func testTaskWorkspaceProjectTools(t *testing.T, protected bool) {
 	t.Cleanup(func() { fixtureGit(t, source, "worktree", "remove", "--force", w.Path) })
 }
 func TestTemporaryWorkspaceRetainsOriginalAndFencesLostPreparation(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	tmp := t.TempDir()

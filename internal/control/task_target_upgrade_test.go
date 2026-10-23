@@ -11,6 +11,7 @@ import (
 )
 
 func TestTaskReceiverReopenPreservesRetriesAndCallerScope(t *testing.T) {
+	t.Parallel()
 	backend, second := linkBackendFixture(t)
 	source := agentControl(t, "caller")
 	receiver := &agentControlFixture{service: backend.s, endpoint: controlPeerEndpoint(backend.s)}

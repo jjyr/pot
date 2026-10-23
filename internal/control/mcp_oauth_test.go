@@ -14,6 +14,7 @@ import (
 )
 
 func TestMCPOAuthPKCEStateRevisionAndSecretStorage(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	var origin, challenge string

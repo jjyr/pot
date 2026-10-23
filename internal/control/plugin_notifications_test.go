@@ -34,6 +34,7 @@ func (notificationLogin) Authorize(context.Context, integrations.Challenge) (int
 }
 
 func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	var updated atomic.Bool
@@ -79,13 +80,6 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 	fakeURL = github.URL
 	foregroundStarted := make(chan struct{})
 	release := make(chan struct{})
-	defer func() {
-		select {
-		case <-release:
-		default:
-			close(release)
-		}
-	}()
 	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		call := modelCalls.Add(1)
@@ -122,6 +116,14 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 		fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%q},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", text)
 	}))
 	defer model.Close()
+	// Release the held request before closing the server, including on failure.
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
 	root := t.TempDir()
 	pluginRoot := filepath.Join(t.TempDir(), "plugins")
 	packageRoot := filepath.Join(pluginRoot, "github")
@@ -147,6 +149,10 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
+	// Explicit future ticks own this fixture's clock. Keep the real ticker from
+	// polling between the baseline, update and debounce-flush observations.
+	s.pluginMu.Lock()
+	defer s.pluginMu.Unlock()
 	legacyMainAssistant(ctx, s, "create", "Pot")
 	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "profile", ProfileID: "test", Name: "Test", Model: "model", Endpoint: model.URL, Protocol: "openai_chat", APIKey: "model-fixture", MaxOutputTokens: 100})
 	if err != nil {
@@ -181,9 +187,7 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 		case <-time.After(time.Millisecond):
 		}
 	}
-	s.pluginMu.Lock()
 	err = s.ensurePluginNotifications(ctx)
-	s.pluginMu.Unlock()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +195,7 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 	if err != nil || len(defaults) != 1 || !defaults[0].Enabled || defaults[0].Assistant != "" {
 		t.Fatal(defaults, err)
 	}
-	s.runBackgrounds(ctx, now)
+	s.runBackgroundsLocked(ctx, now)
 	if modelCalls.Load() != 0 {
 		t.Fatal("baseline woke model")
 	}
@@ -204,13 +208,13 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 		t.Fatal("foreground did not start")
 	}
 	before := ghCalls.Load()
-	s.runBackgrounds(ctx, now+89000)
+	s.runBackgroundsLocked(ctx, now+89000)
 	if ghCalls.Load() != before {
 		t.Fatal("host ignored plugin poll interval")
 	}
 	updated.Store(true)
-	s.runBackgrounds(ctx, now+90000)
-	s.runBackgrounds(ctx, now+180000)
+	s.runBackgroundsLocked(ctx, now+90000)
+	s.runBackgroundsLocked(ctx, now+180000)
 	events, err := s.Mailbox.Notifications(ctx, "main")
 	if err != nil || len(events) != 1 {
 		b, _ := s.Mailbox.Backgrounds(ctx)
@@ -233,7 +237,7 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 			t.Fatal("notification became user authority")
 		}
 	}
-	s.runBackgrounds(ctx, now+270000)
+	s.runBackgroundsLocked(ctx, now+270000)
 	s.deliverNotifications(ctx, "main")
 	if modelCalls.Load() != 3 {
 		t.Fatalf("model calls=%d, GitHub calls=%d", modelCalls.Load(), ghCalls.Load())

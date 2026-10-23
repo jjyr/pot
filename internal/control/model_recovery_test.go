@@ -16,6 +16,7 @@ import (
 )
 
 func TestModelDisconnectRetryPreservesUnknownUsageReservation(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int64
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)

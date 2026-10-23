@@ -11,6 +11,7 @@ import (
 )
 
 func TestIdleCompactionCanonicalOutcomeGate(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	db := s.Tasks.DB()
@@ -77,6 +78,7 @@ func TestIdleCompactionCanonicalOutcomeGate(t *testing.T) {
 	check(true)
 }
 func TestIdleCompactionDelayConnection(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	minutes := uint64(20)

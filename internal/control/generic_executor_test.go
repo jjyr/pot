@@ -107,6 +107,7 @@ func connectFixtureExecutor(t *testing.T, source *Service, node, adapter string)
 }
 
 func TestTaskExecutorSelectionUsesCapabilitiesAcrossAdapters(t *testing.T) {
+	t.Parallel()
 	source := agentControl(t, "source").service
 	ctx := context.Background()
 	first := connectFixtureExecutor(t, source, "first", "fixture-agent")

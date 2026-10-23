@@ -13,6 +13,7 @@ import (
 )
 
 func TestDirectTCPAgentListenerPersistsAndKeepsOwnerAPIsPrivate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, b := agentControl(t, "plain-a"), agentControl(t, "plain-b")
 	available, err := net.Listen("tcp", "127.0.0.1:0")
@@ -67,6 +68,7 @@ func TestDirectTCPAgentListenerPersistsAndKeepsOwnerAPIsPrivate(t *testing.T) {
 }
 
 func TestMissingVPNInterfaceKeepsControlAndAccessSetupAvailable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := agentControl(t, "vpn-loss")
 	if _, err := f.service.integrationDB.Exec(`UPDATE agent_link_host SET listen='100.127.255.254:63001',endpoint='tcp://100.127.255.254:63001',mode='address'`); err != nil {
@@ -93,6 +95,7 @@ func TestMissingVPNInterfaceKeepsControlAndAccessSetupAvailable(t *testing.T) {
 }
 
 func TestAgentAccessRejectsRetiredTailscaleMode(t *testing.T) {
+	t.Parallel()
 	f := agentControl(t, "ordinary-tcp")
 	f.service.agentLinks.mu.Lock()
 	before := f.service.agentLinks.config

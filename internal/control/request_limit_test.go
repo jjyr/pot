@@ -17,6 +17,7 @@ import (
 )
 
 func TestMainConversationHasNoDefaultRequestCountCutoff(t *testing.T) {
+	t.Parallel()
 	entered, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	finish := func() { once.Do(func() { close(release) }) }
@@ -64,6 +65,7 @@ func TestMainConversationHasNoDefaultRequestCountCutoff(t *testing.T) {
 }
 
 func TestAutomaticTurnsContinueBeyondFormerRequestCutoffs(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		kind   string
 		rounds int32

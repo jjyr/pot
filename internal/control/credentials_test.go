@@ -24,6 +24,7 @@ func TestGitHubLoginAvailableWithoutDeploymentConfiguration(t *testing.T) {
 }
 
 func TestCredentialCommandEnvironmentAndNonsecretReceipts(t *testing.T) {
+	t.Parallel()
 	d, execution, _ := localDispatcher(t)
 	d.Credentials = fixedCredentials("injected-fixture-token")
 	call := modelprotocol.ToolCall{ID: "credential-command", Name: "exec_command", Arguments: json.RawMessage(`{"cmd":"test -n \"$GH_TOKEN\" && printf injected","credentials":{"GH_TOKEN":{"service":"github"}}}`)}
@@ -45,6 +46,7 @@ func TestCredentialCommandEnvironmentAndNonsecretReceipts(t *testing.T) {
 	}
 }
 func TestBundledGitHubPluginContract(t *testing.T) {
+	t.Parallel()
 	p, err := plugin.Load("../../plugins/github")
 	if err != nil {
 		t.Fatal(err)

@@ -18,6 +18,7 @@ import (
 )
 
 func TestContinueMainReconcilesCrashAndResumesOriginalProgress(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, c := mainRecoveryFixture(t, true, true, true, "previous-boot", func(checkpoint *agent.Checkpoint) {
 		checkpoint.Messages = []m.Message{m.TextMessage("user", "original goal"), m.TextMessage("assistant", "")}
@@ -62,6 +63,7 @@ func TestContinueMainReconcilesCrashAndResumesOriginalProgress(t *testing.T) {
 }
 
 func TestContinueMainRejectsUnresolvedEffectsAndStaleTarget(t *testing.T) {
+	t.Parallel()
 	s, c := mainRecoveryFixture(t, true, false, true, "previous-boot")
 	ctx := context.Background()
 	if _, err := s.ContinueMain(ctx, "main", ContinueMainCommand{RequestID: "wrong-target", UserMessageID: "different", AttemptID: "original"}); err == nil {

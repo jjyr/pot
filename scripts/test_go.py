@@ -107,7 +107,7 @@ def main():
         commands = [command + ["-race", "./..."]]
     else:
         packages = decode_packages(
-            subprocess.check_output(["go", "list", "-json", "./..."], cwd=ROOT, text=True)
+            subprocess.check_output(["go", "list", "-race", "-json", "./..."], cwd=ROOT, text=True)
         )
         full, selected = race_plan(packages, exclusions)
         commands = [command + ["-race"] + full] if full else []

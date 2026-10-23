@@ -12,6 +12,7 @@ import (
 )
 
 func TestLinkObservationCountsCompleteTaskSetAndScopesOutbox(t *testing.T) {
+	t.Parallel()
 	s := agentControl(t, "observation-node").service
 	ctx := context.Background()
 	s.cancel()

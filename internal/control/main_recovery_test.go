@@ -101,6 +101,7 @@ func mainRecoveryFixture(t *testing.T, issued, known, proof bool, boot string, c
 }
 
 func TestMainRecoveryInterruptedModelRequiresKnownEffectsAndCleanup(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name                            string
 		issued, known, proof, recovered bool
@@ -125,6 +126,7 @@ func TestMainRecoveryInterruptedModelRequiresKnownEffectsAndCleanup(t *testing.T
 	}
 }
 func TestMainRecoveryOwnerSafeBoundaryAndOriginalKnownReceipt(t *testing.T) {
+	t.Parallel()
 	for _, issued := range []bool{false, true} {
 		t.Run(map[bool]string{false: "safe-paused", true: "known-receipt"}[issued], func(t *testing.T) {
 			s, c := mainRecoveryFixture(t, issued, true, issued, "previous-boot")
@@ -172,6 +174,7 @@ func TestMainRecoveryOwnerSafeBoundaryAndOriginalKnownReceipt(t *testing.T) {
 	}
 }
 func TestMainRecoveryMissingReceiptAndOldHostCleanupStayFenced(t *testing.T) {
+	t.Parallel()
 	for _, known := range []bool{false, true} {
 		t.Run(map[bool]string{false: "unknown-effect", true: "unproven-cleanup"}[known], func(t *testing.T) {
 			s, c := mainRecoveryFixture(t, true, known, false, "previous-boot")

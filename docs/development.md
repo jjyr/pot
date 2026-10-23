@@ -103,6 +103,20 @@ Selection uses active Go test files and exact function names; it does not infer
 coverage from name fragments. An unlisted test in an otherwise serial package
 or existing test file automatically enters race, and stale/duplicate exceptions
 fail validation. `python scripts/test_go.py race --list` prints the actual plan.
+Discovery uses the race build constraints, including tests in race-only files
+and packages.
+
+Control tests with independent roots, listeners and execution managers run in
+parallel, bounded by eight active cases and the available Go parallelism.
+Tests changing process-wide environment variables stay serial. The schedule
+probe matrix has independent fixtures; a separate serial case checks ambient
+secret isolation. Accepted probe tasks pause at preparation after their real run
+receipts exist; lifecycle tests cover subsequent model execution and delivery.
+The GitHub notification fixture holds the polling lock across its explicit clock
+sequence so the automatic ticker cannot overwrite simulated debounce windows.
+Override the bound with `go test -parallel=N` when diagnosing
+contention. Parallelism does not share mutable fixtures, skip assertions or
+change the normal/race selection.
 
 Full-package race remains on task scheduling/cancellation/recovery, execution
 and process supervision, assistant/inbox queues and compaction, concurrent storage,

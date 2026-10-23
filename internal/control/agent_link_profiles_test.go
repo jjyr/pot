@@ -8,6 +8,7 @@ import (
 )
 
 func TestLinkedPotRetiresOnlySelectedAssistant(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, b := agentControl(t, "delete-source"), agentControl(t, "delete-receiver")
 	other, err := b.service.Registry.Create(ctx, "other", "Other")

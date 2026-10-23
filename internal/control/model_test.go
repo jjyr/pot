@@ -50,6 +50,7 @@ func request(id string) core.ModelRequest {
 	return core.ModelRequest{ID: id, Protocol: "openai_chat", Provider: "test", Model: "test", Body: json.RawMessage(`{"model":"test","stream":true,"messages":[{"role":"user","content":"hello"}],"max_tokens":100}`)}
 }
 func TestModelReservationSettlementAndDuplicateFence(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -86,6 +87,7 @@ func TestModelReservationSettlementAndDuplicateFence(t *testing.T) {
 	}
 }
 func TestModelPartialUsageAndAllowanceBeforeNetwork(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -120,6 +122,7 @@ func TestModelPartialUsageAndAllowanceBeforeNetwork(t *testing.T) {
 }
 
 func TestDeepSeekCompatibilityUsesPinnedServiceMetadataInsteadOfRouteID(t *testing.T) {
+	t.Parallel()
 	var thinking atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]json.RawMessage
@@ -158,6 +161,7 @@ func TestDeepSeekCompatibilityUsesPinnedServiceMetadataInsteadOfRouteID(t *testi
 }
 
 func TestModelManualWaitGateSurvivesLateTaskResumeAndMailInvocation(t *testing.T) {
+	t.Parallel()
 	for _, role := range []string{"task", "mail"} {
 		t.Run(role, func(t *testing.T) {
 			var calls atomic.Int32
@@ -226,6 +230,7 @@ func TestModelManualWaitGateSurvivesLateTaskResumeAndMailInvocation(t *testing.T
 }
 
 func TestCompactionEvidenceCapturesFinalWireBodyWithoutCredential(t *testing.T) {
+	t.Parallel()
 	var sent []byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sent, _ = io.ReadAll(r.Body)
@@ -283,6 +288,7 @@ func TestCompactionEvidenceCapturesFinalWireBodyWithoutCredential(t *testing.T) 
 }
 
 func TestIdleCompactionAllowanceDoesNotLeaveOrphanForegroundWait(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "data: [DONE]\n\n") }))
 	defer server.Close()
 	s := modelSession(t, server.URL)

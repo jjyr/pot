@@ -17,7 +17,7 @@ class RacePlanTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.root = Path(self.directory.name)
+        self.root = Path(self.directory.name).resolve()
         patcher = patch.object(PLAN, "ROOT", self.root)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -26,7 +26,8 @@ class RacePlanTests(unittest.TestCase):
         directory = self.root / name
         directory.mkdir(parents=True)
         (directory / "case_test.go").write_text(
-            "package fixture\n" + "\n".join(f"func {test}(t *testing.T) {{}}" for test in tests)
+            'package fixture\nimport "testing"\n'
+            + "\n".join(f"func {test}(t *testing.T) {{}}" for test in tests)
         )
         return {"Dir": str(directory), "TestGoFiles": ["case_test.go"]}
 
@@ -39,6 +40,48 @@ class RacePlanTests(unittest.TestCase):
     def test_new_package_gets_full_race(self):
         package = self.package("pkg/new", ["TestConcurrent"])
         self.assertEqual(PLAN.race_plan([package], {}), (["./pkg/new"], []))
+
+    def test_race_only_files_enter_the_actual_plan(self):
+        (self.root / "go.mod").write_text("module example.com/race-plan\n\ngo 1.27\n")
+        package = self.package("pkg/mixed", ["TestSerial", "TestConcurrent"])
+        directory = Path(package["Dir"])
+        (directory / "race_test.go").write_text(
+            '//go:build race\n\npackage fixture\nimport "testing"\n'
+            "func TestRaceOnly(t *testing.T) {}\n"
+        )
+        only = self.root / "pkg/raceonly"
+        only.mkdir()
+        (only / "fixture.go").write_text("package fixture\n")
+        (only / "race_test.go").write_text(
+            '//go:build race\n\npackage fixture\nimport "testing"\n'
+            "func TestRaceOnly(t *testing.T) {}\n"
+        )
+        manifest = self.root / "normal-only.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "normal_only": [
+                        {
+                            "package": "./pkg/mixed",
+                            "reason": "Serial contract",
+                            "tests": ["TestSerial"],
+                        }
+                    ]
+                }
+            )
+        )
+        with (
+            patch.object(PLAN, "MANIFEST", manifest),
+            patch.object(PLAN.sys, "argv", ["test_go.py", "race"]),
+            patch.object(PLAN, "run", return_value=0) as run,
+        ):
+            with self.assertRaises(SystemExit) as result:
+                PLAN.main()
+        self.assertEqual(result.exception.code, 0)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertTrue(any("./pkg/raceonly" in command for command in commands))
+        mixed = next(command for command in commands if "./pkg/mixed" in command)
+        self.assertEqual(mixed[mixed.index("-run") + 1], "^(TestConcurrent|TestRaceOnly)$")
 
     def test_entirely_serial_package_skips_only_named_tests(self):
         package = self.package("pkg/values", ["TestValue"])

@@ -9,6 +9,7 @@ import (
 )
 
 func TestHostAssistantWorkspaceAndInstructionDiscoveryAreOwnerScoped(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	a, err := s.ExecutionWorkspace("first")

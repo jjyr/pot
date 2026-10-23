@@ -9,6 +9,7 @@ import (
 )
 
 func TestTaskChunksBoundMemoryPreserveRevisionAndConfineLinks(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	root := filepath.Join(s.options.Workspace, "tasks", "worker")

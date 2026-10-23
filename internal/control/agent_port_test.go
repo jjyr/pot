@@ -22,6 +22,7 @@ func operationBody(t *testing.T, value any) json.RawMessage {
 }
 
 func TestAgentPortEmptyNodeUserTaskResultAndRetrySurviveRestart(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { batchReply(w, "remote-user-task-result") }))
@@ -135,6 +136,7 @@ func TestAgentPortEmptyNodeUserTaskResultAndRetrySurviveRestart(t *testing.T) {
 }
 
 func TestAgentLinkTaskConfigurationUsesSerializableOwnerCapability(t *testing.T) {
+	t.Parallel()
 	b, _ := linkBackendFixture(t)
 	ctx := context.Background()
 	request := protocol.CreateTask{RequestID: "configured-task", Text: "Configured task\nUse the existing owner model."}
@@ -166,6 +168,7 @@ func TestAgentLinkTaskConfigurationUsesSerializableOwnerCapability(t *testing.T)
 }
 
 func TestAgentLinkUserTaskReceiptRetainsFullCallerScope(t *testing.T) {
+	t.Parallel()
 	b, _ := linkBackendFixture(t)
 	ctx := context.Background()
 	from := protocol.AgentRef{NodeID: "remote-user-node", Kind: "user", AgentID: "session"}
