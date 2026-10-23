@@ -109,8 +109,6 @@
     "关闭预览": "Cerrar vista previa",
     "下载示例报告": "Descargar informe de ejemplo",
     "示例内容，用于体验交付方式": "Contenido de ejemplo para mostrar cómo se entregan los resultados",
-    "在 GitHub 上 Star Pot": "Dar una estrella a Pot en GitHub",
-    "GitHub Star": "GitHub Star",
     "一个目标，三项后台任务": "Un objetivo. Tres tareas en segundo plano.",
     "帮我把这个项目准备到可以对外展示：验证 Linux 安装流程，补齐入门文档，再准备几张有代表性的产品截图。": "Prepara este proyecto para compartirlo: verifica la instalación en Linux, completa la guía inicial y prepara capturas representativas del producto.",
     "我会并行处理安装、文档和截图，再把成果汇总到这里。你可以随时补充要求。": "Trabajaré en instalación, documentación y capturas en paralelo y reuniré los resultados aquí. Puedes añadir detalles en cualquier momento.",
@@ -173,7 +171,15 @@
     "直接运行服务端": "Ejecutar el servidor directamente",
     "下载 Release 后直接运行服务端。": "Descarga una versión y ejecuta el servidor directamente.",
     "使用本仓库作为 Homebrew tap，依次运行：": "Añade este repositorio como tap de Homebrew y ejecuta:",
-    "首次 macOS 发布并合并 cask 更新后即可安装；Homebrew 保留首次启动安全检查。": "La instalación estará disponible tras la primera versión de macOS y la integración del cask; Homebrew conserva las comprobaciones de seguridad del primer inicio."
+    "首次 macOS 发布并合并 cask 更新后即可安装；Homebrew 保留首次启动安全检查。": "La instalación estará disponible tras la primera versión de macOS y la integración del cask; Homebrew conserva las comprobaciones de seguridad del primer inicio.",
+    "Star": "Star",
+    "在 GitHub 上查看 Pot 仓库": "Ver el repositorio de Pot en GitHub",
+    "在 GitHub 上查看 Pot 仓库，Star 数 {count}": "Ver el repositorio de Pot en GitHub, {count} estrellas",
+    "{count}k": "{count}k",
+    "{count}m": "{count}m",
+    "{count}b": "{count}b",
+    "{count}t": "{count}t",
+    "{count}q": "{count}q"
   },
   "demo": {
     "language": "Idioma",

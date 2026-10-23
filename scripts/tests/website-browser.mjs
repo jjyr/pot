@@ -115,15 +115,16 @@ for(const mode of ['ok','missing','limited','network','invalid','zero','timeout'
  await page.goto(`${origin}/website/en/`);if(failure)await failure;await page.waitForTimeout(150);
  const label=await page.locator('.github-star').innerText();
  assert.equal(await page.locator('.github-star').getAttribute('href'),'https://github.com/jjyr/pot');
- assert.equal(label.includes('1.2K'),mode==='ok',mode);
- if(mode!=='ok')assert.equal(label.trim(),'GitHub Star');
+ assert.equal(label.includes('1,234'),mode==='ok',mode);
+ if(mode!=='ok'&&mode!=='zero')assert.equal(label.trim(),'Star');
+ if(mode==='zero')assert.match(label,/0/);
  console.log('Star',mode,'passed');
 }
 // Cached and unavailable storage must leave the UI usable.
 await page.evaluate(()=>localStorage.setItem('pot-github-stars-v1',JSON.stringify({time:Date.now(),count:987})));
 const before=starRequests;await page.reload();await page.waitForTimeout(100);assert.equal(starRequests,before);assert.match(await page.locator('.github-star').innerText(),/987/);
 await page.addInitScript(()=>{Object.defineProperty(window,'localStorage',{configurable:true,get(){throw Error('Unavailable storage')}})});
-starMode='limited';await page.reload();await page.waitForTimeout(100);assert.equal((await page.locator('.github-star').innerText()).trim(),'GitHub Star');
+starMode='limited';await page.reload();await page.waitForTimeout(100);assert.equal((await page.locator('.github-star').innerText()).trim(),'Star');
 await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw Error('Denied')}}}));
 await page.locator('[data-install="agent"]').click();await page.locator('[data-copy="agent-prompt"]').click();assert.equal(await page.evaluate(()=>getSelection().toString()),install.prompt);assert.match(await page.locator('#copy-status').innerText(),/Select and copy/);
 // Keyboard activation and modal focus restoration use native controls.
