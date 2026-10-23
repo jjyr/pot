@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/jjyr/pot/internal/resources"
@@ -106,10 +105,10 @@ func (s *Service) readResourceChunk(ctx context.Context, id, owner, space, path 
 	return chunk, err
 }
 func (s *Service) DownloadResource(ctx context.Context, id, name, owner, space, path string) (bool, error) {
-	if !core.Identifier(id) || !core.Identifier(owner) || name == "" || len(name) > 255 || strings.ContainsAny(name, "/\\") || !protocol.ValidFilePath(path) {
+	if !core.Identifier(id) || !core.Identifier(owner) || !protocol.ValidFilePath(path) {
 		return false, errors.New("invalid resource download")
 	}
-	return s.saveDownload(ctx, name, func(ctx context.Context, offset uint64, revision string) (protocol.FileChunk, error) {
+	return s.saveDownload(ctx, core.DownloadFilename(name), func(ctx context.Context, offset uint64, revision string) (protocol.FileChunk, error) {
 		return s.readResourceChunk(ctx, id, owner, space, path, offset)
 	})
 }

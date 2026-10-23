@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import {registerHooks} from 'node:module';
+import {createProductionClient} from '../../web/src/adapters/production.mjs';
 import {createDisplayResources,resourcePresentation,projectResourceMessages} from '../../web/src/state/display-resources.mjs';
 import {projectChatReplies} from '../../web/src/state/chat-replies.mjs';
 
@@ -19,4 +21,33 @@ assert.equal(completedResource[1].presentation,persisted.presentation,'Completed
 assert.equal(completedResource[1].phase,'complete');
 const broken=createDisplayResources(async()=>({size:6,revision:'different',offset:0,data:btoa('report')}),()=>scope,()=>'/content')(resource);
 await assert.rejects(broken.read(file.path));broken.release();
+
+// Both adapters use the server's download basename, independently of the label.
+const labelled={...resource,name:'Pot A/B \\ '+ '中文'.repeat(300),download:{...file,path:'Pot A_B _.zip'}};
+const labelledMessage={...message,tool:{...message.tool,result:{presentation:{resource:labelled,mode:'download'}}}};
+assert.equal(projectResourceMessages([labelledMessage])[1].presentation.resource.name,labelled.name);
+const previousFetch=globalThis.fetch,previousDocument=globalThis.document,requests=[],anchors=[],nativeCalls=[];
+globalThis.fetch=async url=>{requests.push(String(url));return {ok:true,status:200,json:async()=>({runtime_id:'fixture'})};};
+globalThis.document={createElement:()=>({click(){anchors.push({...this});},remove(){}}),body:{append(){}}};
+globalThis.resourceDownloadNativeCall=async(method,...args)=>{
+  nativeCalls.push({method,args});
+  return method.endsWith('.Call')?{runtime_id:'fixture'}:method.endsWith('.AssistantReads')?[]:true;
+};
+const hooks=registerHooks({resolve(specifier,context,next){
+  if(specifier==='/wails/runtime.js')return {url:'data:text/javascript,export const Call={ByName:(...args)=>globalThis.resourceDownloadNativeCall(...args)};',shortCircuit:true};
+  return next(specifier,context);
+}});
+try{
+  const browser=await createProductionClient();browser.setScope({owner:'alice',space:'remote'});
+  const desktop=await createProductionClient({desktop:true});desktop.setScope({owner:'alice',space:'remote'});
+  for(const value of [labelled,{...labelled,download:file}]){
+    await browser.downloadResource(value);await desktop.downloadResource(value);
+    assert.equal(anchors.at(-1).download,value.download.path);
+    assert.match(anchors.at(-1).href,/assistant_id=alice&space_id=remote/);
+    assert.match(requests.at(-1),/path=%40download/);
+    assert.deepEqual(nativeCalls.at(-1),{method:'github.com/jjyr/pot/internal/desktop.Service.DownloadResource',args:[value.id,value.download.path,'alice','remote','@download']});
+  }
+}finally{
+  hooks.deregister();globalThis.fetch=previousFetch;globalThis.document=previousDocument;delete globalThis.resourceDownloadNativeCall;
+}
 console.log('Display resources: immutable identity, captured owner/Space, sharing/disposal, explicit intent and resource-only replies passed');
