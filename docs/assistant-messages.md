@@ -58,6 +58,15 @@ do not interrupt commands. Assistant replies to peers use `send_message`; final
 model text can report to the user in the owning conversation and is not
 automatically forwarded to the peer. Incoming envelopes appear as collapsed
 receive-message records, like tool calls, rather than ordinary chat prose.
+Chat and Task tool disclosures label incoming assistant messages as
+`Receive message from @name` and outgoing `send_message` calls as `Send message to @name`.
+The shared UI resolves names from the existing directory using the complete
+node, kind and agent address, with the same mention and linked-source display
+used elsewhere. Directory refreshes update names; offline or removed entries can
+retain a known name in a bounded, memory-only cache for the current Runtime.
+Without a known name the disclosure says `Assistant unavailable`; Task and user
+targets retain their type labels. An incomplete target says `Recipient unavailable`.
+Expanded execution details retain original tool names and full addresses.
 User chat remains serial, while background Tasks execute independently under
 Runtime capacity and model admission limits.
 
