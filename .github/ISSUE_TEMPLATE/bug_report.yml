@@ -1,0 +1,66 @@
+name: Bug report
+description: Report a problem with Pot. Use a short issue title, e.g. "Desktop app closes when opening settings".
+body:
+  - type: dropdown
+    id: affected-area
+    attributes:
+      label: Where does the problem happen?
+      options:
+        - Desktop app
+        - Web browser
+        - Server or Docker
+        - Installation or upgrade
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: pot-version
+    attributes:
+      label: Pot version
+      description: Enter the version or commit. If Pot cannot start, use the installer filename.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include your operating system and version. For the web app, also include your browser and version.
+      placeholder: "e.g. macOS 15.4; Chrome 135"
+    validations:
+      required: true
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to reproduce
+      description: List the steps that lead to the problem. If it happens only sometimes, describe what you did just before it happened.
+      placeholder: |
+        1. Open...
+        2. Click...
+        3. The problem happens when...
+    validations:
+      required: true
+  - type: textarea
+    id: expected-and-actual-behavior
+    attributes:
+      label: Expected and actual behavior
+      description: Describe what you expected to happen and what actually happened.
+      placeholder: |
+        Expected:
+
+        Actual:
+    validations:
+      required: true
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Screenshots, logs, and additional context
+      description: Drag screenshots here or share relevant log excerpts and context. Remove API keys, tokens, and other sensitive information before sharing.
+    validations:
+      required: false
+  - type: textarea
+    id: model-and-connection-details
+    attributes:
+      label: Model and connection details
+      description: For model calls, tools, or assistant collaboration issues only, include the provider, model, and relevant Agent Link type or setup. Do not include secrets.
+    validations:
+      required: false

@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest an improvement to Pot and explain the problem it would solve.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe what you are trying to do and what makes it difficult today.
+    validations:
+      required: true
+  - type: textarea
+    id: desired-behavior
+    attributes:
+      label: What would you like Pot to do?
+      description: Describe the behavior you would like, with an example if helpful. You do not need to propose a technical implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: current-workaround
+    attributes:
+      label: Current workaround
+      description: How do you handle this today, if at all?
+    validations:
+      required: false
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add screenshots, sketches, references, or links to related issues.
+    validations:
+      required: false
