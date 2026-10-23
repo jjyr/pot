@@ -26,7 +26,9 @@ func ID() string {
 	b[8] = (b[8] & 63) | 128
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
-func Open(path string, options Options) (*Service, error) {
+
+// Open borrows an already migrated Tasks database. The caller owns Close.
+func Open(db *sql.DB, options Options) (*Service, error) {
 	if !core.Identifier(options.NodeID) {
 		return nil, fmt.Errorf("invalid Task node identity")
 	}
@@ -36,31 +38,25 @@ func Open(path string, options Options) (*Service, error) {
 	if options.MaxTasks < 1 {
 		return nil, fmt.Errorf("invalid task limit")
 	}
-	db, err := storage.OpenDatabase(path, storage.TasksDatabase)
-	if err != nil {
-		return nil, err
+	if db == nil {
+		return nil, fmt.Errorf("Task service requires a Tasks database")
 	}
 	s := &Service{db: db, options: options}
 	if _, err := db.Exec("INSERT INTO task_node(singleton,node_id) SELECT 1,? WHERE NOT EXISTS(SELECT 1 FROM task_node)", options.NodeID); err != nil {
-		db.Close()
 		return nil, err
 	}
 	var savedNode string
 	if err := db.QueryRow("SELECT node_id FROM task_node WHERE singleton=1").Scan(&savedNode); err != nil || savedNode != options.NodeID {
-		db.Close()
 		return nil, fmt.Errorf("Task data belongs to another node")
 	}
 	if err := s.initializeOutcomes(); err != nil {
-		db.Close()
 		return nil, err
 	}
 	if err := s.validateStored(context.Background()); err != nil {
-		db.Close()
 		return nil, err
 	}
 	return s, nil
 }
-func (s *Service) Close() error   { return s.db.Close() }
 func (s *Service) DB() *sql.DB    { return s.db }
 func (s *Service) NodeID() string { return s.options.NodeID }
 

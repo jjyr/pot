@@ -64,11 +64,11 @@ func (*models) Compaction(context.Context, json.RawMessage) error { return nil }
 
 func TestExecutorRejectsForeignCoordinatorAndRetiredRun(t *testing.T) {
 	ctx := context.Background()
-	j, err := OpenJournal(filepath.Join(t.TempDir(), "tasks.sqlite"), "runtime", "boot")
+	j, err := openJournal(t, filepath.Join(t.TempDir(), "tasks.sqlite"), "runtime", "boot")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer j.Close()
+	defer j.db.Close()
 	manager, err := execution.New("runtime", "boot", execution.Limits{MaxActive: 1, MaxQueued: 8})
 	if err != nil {
 		t.Fatal(err)
@@ -120,11 +120,11 @@ func TestExecutorRejectsForeignCoordinatorAndRetiredRun(t *testing.T) {
 
 func TestUnsettledEffectsRetainsSharedExecutionCapacity(t *testing.T) {
 	ctx := context.Background()
-	j, err := OpenJournal(filepath.Join(t.TempDir(), "tasks.sqlite"), "runtime", "boot")
+	j, err := openJournal(t, filepath.Join(t.TempDir(), "tasks.sqlite"), "runtime", "boot")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer j.Close()
+	defer j.db.Close()
 	manager, err := execution.New("runtime", "boot", execution.Limits{MaxActive: 1, MaxQueued: 8})
 	if err != nil {
 		t.Fatal(err)
@@ -152,11 +152,11 @@ func TestUnsettledEffectsRetainsSharedExecutionCapacity(t *testing.T) {
 }
 func TestExecutorUsesSharedCapacityAndJournalFeedbackWithoutResampling(t *testing.T) {
 	ctx := context.Background()
-	j, err := OpenJournal(filepath.Join(t.TempDir(), "tasks.sqlite"), "runtime", "boot")
+	j, err := openJournal(t, filepath.Join(t.TempDir(), "tasks.sqlite"), "runtime", "boot")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer j.Close()
+	defer j.db.Close()
 	manager, err := execution.New("runtime", "boot", execution.Limits{MaxActive: 1, MaxQueued: 8})
 	if err != nil {
 		t.Fatal(err)

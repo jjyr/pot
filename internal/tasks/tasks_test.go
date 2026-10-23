@@ -85,11 +85,11 @@ func fixture(t *testing.T) (*Service, *fakePort, string) {
 	p := &fakePort{runs: map[string]Run{}}
 	path := filepath.Join(t.TempDir(), "tasks.sqlite")
 	selected := selection(t)
-	s, err := Open(path, Options{NodeID: "machine", Executor: p, ResolveModel: func(context.Context, string, protocol.CreateTask) (Selection, error) { return selected, nil }})
+	s, err := openTasks(t, path, Options{NodeID: "machine", Executor: p, ResolveModel: func(context.Context, string, protocol.CreateTask) (Selection, error) { return selected, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.db.Close() })
 	return s, p, path
 }
 func TestOriginalStartTimeFromDelayedReceiptsSurvivesRestart(t *testing.T) {
@@ -125,12 +125,12 @@ func TestOriginalStartTimeFromDelayedReceiptsSurvivesRestart(t *testing.T) {
 				t.Fatal("delayed receipt lost execution start", current, err)
 			}
 			options := s.options
-			s.Close()
-			restored, err := Open(path, options)
+			s.db.Close()
+			restored, err := openTasks(t, path, options)
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer restored.Close()
+			defer restored.db.Close()
 			current, err = restored.Get(ctx, "assistant", record.Info.ID)
 			if err != nil || current.Info.StartedAtMS != run.StartedAtMS {
 				t.Fatal("Control restart lost execution start", current, err)
@@ -177,12 +177,12 @@ func TestUnconfirmedLocalLaunchInspectsOriginalAcrossRestart(t *testing.T) {
 		t.Fatal(current, p.launches)
 	}
 	options := s.options
-	s.Close()
-	restored, err := Open(path, options)
+	s.db.Close()
+	restored, err := openTasks(t, path, options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer restored.Close()
+	defer restored.db.Close()
 	if err := restored.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}

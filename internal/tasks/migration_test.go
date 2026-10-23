@@ -24,9 +24,9 @@ func TestBaselineReopenPreservesAcceptedRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	options := s.options
-	s.Close()
+	s.db.Close()
 	for range 2 {
-		s, err = Open(path, options)
+		s, err = openTasks(t, path, options)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -44,13 +44,13 @@ func TestBaselineReopenPreservesAcceptedRun(t *testing.T) {
 		if !reflect.DeepEqual(original, current) {
 			t.Fatal("reopen changed the accepted Task snapshot")
 		}
-		s.Close()
+		s.db.Close()
 	}
-	s, err = Open(path, options)
+	s, err = openTasks(t, path, options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer s.db.Close()
 	if err := s.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}

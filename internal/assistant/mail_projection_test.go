@@ -25,12 +25,12 @@ func TestCorrespondenceReceiptSurvivesCompletionAndRestart(t *testing.T) {
 	if err := m.FinishChat(ctx, "main", turn, seed.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	m.Close()
-	reopened, err := OpenMailbox(path, "local")
+	m.db.Close()
+	reopened, err := openMailbox(t, path, "local")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.Close()
+	defer reopened.db.Close()
 	mail, err := reopened.DeliveryMail(ctx, "main", turn)
 	if err != nil || len(mail) != 1 || !sameEnvelope(mail[0], seed) {
 		t.Fatal("history lost the immutable incoming receipt", mail, err)
@@ -131,12 +131,12 @@ func TestInterruptedCorrespondenceRetainsReceiptWithoutReactivation(t *testing.T
 	if _, err := m.ClaimMailBatch(ctx, seed); err != nil {
 		t.Fatal(err)
 	}
-	m.Close()
-	reopened, err := OpenMailbox(path, "local")
+	m.db.Close()
+	reopened, err := openMailbox(t, path, "local")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.Close()
+	defer reopened.db.Close()
 	if err := reopened.Processing(ctx, seed); err == nil {
 		t.Fatal("uncertain execution was reactivated")
 	}
@@ -160,12 +160,12 @@ func TestConfirmedFailureDoesNotStarveQueuedMailAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	next := sendMail(t, m, "new", old.From, old.To, nil)
-	m.Close()
-	reopened, err := OpenMailbox(path, "local")
+	m.db.Close()
+	reopened, err := openMailbox(t, path, "local")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.Close()
+	defer reopened.db.Close()
 	candidates, err := reopened.Candidates(ctx, "main")
 	if err != nil || len(candidates) != 1 || candidates[0].ID != next.ID {
 		t.Fatal("failed history starved queued mail after restart", candidates, err)

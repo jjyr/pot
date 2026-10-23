@@ -90,6 +90,7 @@ type Service struct {
 	Tasks               *tasks.Service
 	Schedules           *schedule.Service
 	Mailbox             *assistant.Mailbox
+	tasksDB             *sql.DB
 	Terminals           *terminal.Hub
 	taskLife            *taskLifecycle
 }
@@ -477,14 +478,8 @@ func (s *Service) Close() error {
 	if s.Machines != nil {
 		result = errors.Join(result, s.Machines.Close())
 	}
-	if s.RunJournal != nil {
-		result = errors.Join(result, s.RunJournal.Close())
-	}
-	if s.Tasks != nil {
-		result = errors.Join(result, s.Tasks.Close())
-	}
-	if s.Mailbox != nil {
-		result = errors.Join(result, s.Mailbox.Close())
+	if s.tasksDB != nil {
+		result = errors.Join(result, s.tasksDB.Close())
 	}
 	if s.Operations != nil {
 		result = errors.Join(result, s.Operations.Close())

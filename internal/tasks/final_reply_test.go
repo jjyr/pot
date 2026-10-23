@@ -34,11 +34,11 @@ func TestTaskResultUsesOnlyTheFinalReply(t *testing.T) {
 	for _, final := range []string{"Final report.", ""} {
 		t.Run(map[bool]string{true: "empty-final", false: "text-final"}[final == ""], func(t *testing.T) {
 			ctx := context.Background()
-			journal, err := OpenJournal(filepath.Join(t.TempDir(), "tasks.sqlite"), "runtime", "boot")
+			journal, err := openJournal(t, filepath.Join(t.TempDir(), "tasks.sqlite"), "runtime", "boot")
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer journal.Close()
+			defer journal.db.Close()
 			manager, err := execution.New("runtime", "boot", execution.Limits{MaxActive: 1, MaxQueued: 8})
 			if err != nil {
 				t.Fatal(err)

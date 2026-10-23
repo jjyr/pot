@@ -75,12 +75,12 @@ func TestOutcomeCursorSkipsArchiveAndReadsBoundedOwnerTransitions(t *testing.T) 
 		t.Fatal(err)
 	}
 	options := s.options
-	s.Close()
-	reopened, err := Open(path, options)
+	s.db.Close()
+	reopened, err := openTasks(t, path, options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.Close()
+	defer reopened.db.Close()
 	restored, err := reopened.Outcomes(ctx, "other", nil)
 	if err != nil || restored.Cursor != last.Cursor || len(restored.Items) != 0 {
 		t.Fatal("restart lost cursor", restored, err)

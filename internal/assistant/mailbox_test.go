@@ -14,11 +14,11 @@ func address(control, assistant string) protocol.AgentRef {
 func mailbox(t *testing.T, control string) (*Mailbox, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "mail.sqlite")
-	m, err := OpenMailbox(path, control)
+	m, err := openMailbox(t, path, control)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { m.Close() })
+	t.Cleanup(func() { m.db.Close() })
 	return m, path
 }
 func sendMail(t *testing.T, m *Mailbox, id string, from, to protocol.AgentRef, parent *protocol.Envelope) protocol.Envelope {
@@ -68,12 +68,12 @@ func TestRemoteMailDurableReceiptDedupAndRestartFence(t *testing.T) {
 	if err := b.Claim(ctx, message.ID); err != nil {
 		t.Fatal(err)
 	}
-	b.Close()
-	b, err = OpenMailbox(bpath, "control-b")
+	b.db.Close()
+	b, err = openMailbox(t, bpath, "control-b")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer b.Close()
+	defer b.db.Close()
 	deliver(t, b, message)
 	if next, err := b.Next(ctx, "bob"); err != nil || next != nil {
 		t.Fatal("uncertain message replayed", next, err)
@@ -85,8 +85,8 @@ func TestRemoteMailDurableReceiptDedupAndRestartFence(t *testing.T) {
 	if history, err := b.History(ctx, "unrelated", 0); err != nil || len(history) != 0 {
 		t.Fatal("mail leaked across owners", history, err)
 	}
-	if wrong, err := OpenMailbox(bpath, "wrong-control"); err == nil {
-		wrong.Close()
+	if wrong, err := openMailbox(t, bpath, "wrong-control"); err == nil {
+		wrong.db.Close()
 		t.Fatal("mailbox rebound")
 	}
 }
@@ -107,13 +107,13 @@ func TestPeerFenceDoesNotBlockOtherAgent(t *testing.T) {
 	}
 	two := sendMail(t, a, "two", alice, bob, &reply)
 	deliver(t, b, two)
-	b.Close()
+	b.db.Close()
 	var err error
-	b, err = OpenMailbox(bpath, "control-b")
+	b, err = openMailbox(t, bpath, "control-b")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer b.Close()
+	defer b.db.Close()
 	if next, err := b.Next(ctx, "bob"); err != nil || next != nil {
 		t.Fatal("same conversation escaped fence", next, err)
 	}

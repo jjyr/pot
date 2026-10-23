@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"time"
 
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -21,6 +22,7 @@ type ChatServices interface {
 	Identity(protocol.SendMessage) execution.Identity
 	Execute(context.Context, protocol.SendMessage) execution.Result
 	Failed(error)
+	FinalizationFailed(error)
 	FinishTurn(context.Context, protocol.SendMessage, execution.Result) error
 }
 type Driver struct {
@@ -62,10 +64,32 @@ func (d Driver) Serve(ctx context.Context, input <-chan protocol.SendMessage) er
 			}
 			// Final persistence must still run after cancellation. It is bounded by the
 			// owning adapter's cleanup policy, not the already cancelled invocation ctx.
-			if err := d.Services.FinishTurn(context.WithoutCancel(ctx), request, result); err != nil {
-				d.Services.Failed(err)
+			if err := d.finish(ctx, request, result); err != nil {
 				return err
 			}
 		}
+	}
+}
+
+// Retry only idempotent completion persistence. Execute is never re-entered.
+// Each DB attempt is bounded; backoff leaves the UI and shutdown responsive.
+func (d Driver) finish(ctx context.Context, request protocol.SendMessage, result execution.Result) error {
+	delay := 100 * time.Millisecond
+	for {
+		attempt, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		err := d.Services.FinishTurn(attempt, request, result)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		d.Services.FinalizationFailed(err)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+		delay = min(delay*2, 2*time.Second)
 	}
 }

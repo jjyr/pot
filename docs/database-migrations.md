@@ -1,11 +1,17 @@
 # Database migrations
 
-`pkg/storage` owns every product SQLite schema. Business components call
+`pkg/storage` owns every product SQLite schema. Database owners call
 `storage.OpenDatabase(path, storage.<Kind>Database)` and receive a connection only
 after pending migrations commit. A caller-owned connection can use
 `storage.Migrate(ctx, db, kind)` before starting transactions or receivers.
 `OpenSQLite` is a low-level primitive for tests and external consumers managing
 their own schemas. Schema DDL belongs in `pkg/storage/migrations/`.
+
+Control owns one single-connection pool for `tasks.sqlite` and lends it to the
+Task service, run journal, Mailbox and scheduler. Borrowers never close it; Control
+closes it after all consumers stop. Cross-component transactions pass the existing
+`sql.Tx` instead of reacquiring the pool. Query-only snapshots use
+`sql.TxOptions{ReadOnly: true}`; write transactions retain `BEGIN IMMEDIATE`.
 
 ```text
 Service startup (exclusive data-root lock)
@@ -144,3 +150,15 @@ complete-root backup with the matching binary. The [self-update path](updates.md
 requires an identical migration fingerprint for package-only rollback. Restore
 the complete pre-upgrade backup and binary together to roll back a schema change.
 Never force an older binary to accept newer data or erase migration history.
+
+## Conversation completion recovery
+
+`conversation/0002_turn_completion` initializes the private
+`conversation.completion` journal. Before final persistence, it records the
+original accepted turn and terminal execution phase/error. This receipt permits
+only idempotent completion writes and inbox acknowledgement, never another model
+or tool invocation. Clearing the receipt and the active turn shares one local
+transaction after acknowledgement succeeds. A crash before that commit repeats
+only completion; executions without a receipt retain the existing uncertainty
+and recovery fences. A successfully acknowledged inbox batch may already be
+`interrupted` after a restart and is settled under its original batch identity.

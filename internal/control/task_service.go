@@ -40,12 +40,16 @@ func (s *Service) openTasks() error {
 	if err = storage.ImportTaskSubmissions(s.options.Root); err != nil {
 		return err
 	}
-	s.RunJournal, err = tasks.OpenJournal(filepath.Join(s.options.Root, "tasks.sqlite"), s.options.RuntimeID, s.options.BootID)
+	s.tasksDB, err = storage.OpenDatabase(filepath.Join(s.options.Root, "tasks.sqlite"), storage.TasksDatabase)
+	if err != nil {
+		return err
+	}
+	s.RunJournal, err = tasks.OpenJournal(s.tasksDB, filepath.Join(s.options.Root, "cache", "resources"), s.options.RuntimeID, s.options.BootID)
 	if err != nil {
 		return err
 	}
 	s.TaskRuns = &tasks.Executor{Journal: s.RunJournal, Executions: s.options.Manager, Context: s.ctx, Prepare: s.prepareTask}
-	s.Tasks, err = tasks.Open(filepath.Join(s.options.Root, "tasks.sqlite"), tasks.Options{OwnerAvailable: func(ctx context.Context, owner string) error {
+	s.Tasks, err = tasks.Open(s.tasksDB, tasks.Options{OwnerAvailable: func(ctx context.Context, owner string) error {
 		deleted, err := s.Registry.Deleted(ctx, owner)
 		if err != nil {
 			return err
@@ -64,7 +68,7 @@ func (s *Service) openTasks() error {
 	if err != nil {
 		return err
 	}
-	s.Mailbox, err = assistant.OpenMailbox(filepath.Join(s.options.Root, "tasks.sqlite"), s.options.RuntimeID)
+	s.Mailbox, err = assistant.OpenMailbox(s.tasksDB, s.options.RuntimeID)
 	if err != nil {
 		return err
 	}

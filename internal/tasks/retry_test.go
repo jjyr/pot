@@ -56,11 +56,11 @@ func TestRetryPreservesScopeAndHasOneDurableReplacementPerSource(t *testing.T) {
 	}
 	// Reopening storage retains the original receipt without consuming recovery
 	// opportunities for later failed replacements.
-	reopened, err := Open(filepath.Clean(path), s.options)
+	reopened, err := openTasks(t, filepath.Clean(path), s.options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.Close()
+	defer reopened.db.Close()
 	again, err := reopened.Retry(ctx, "assistant", original.Info.ID, "Do not create another replacement.")
 	if err != nil || again.Info.ID != retry.Info.ID {
 		t.Fatal(again, err)

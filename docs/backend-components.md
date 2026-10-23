@@ -41,7 +41,10 @@ an isolated composition worker for embedding applications. Components are librar
 same process unless a deployment or process-isolation boundary is explicit.
 Agent and task execution receive injected services. They neither import Control/Gateway
 nor acquire provider credentials. Runtime composes components through their APIs;
-HTTP adapters and databases stay with their owning components.
+HTTP adapters stay with their owning components. Control owns the single
+`tasks.sqlite` connection pool and lends it to the Task service, run journal,
+Mailbox and scheduler. Borrowers share transactions when an operation crosses
+those components; shutdown closes the pool after consumers stop.
 
 Every local Pot Agent invocation, including correspondence and result handling in
 its owning conversation, passes through the shared execution manager. The owning

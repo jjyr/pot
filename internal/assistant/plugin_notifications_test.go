@@ -21,7 +21,7 @@ import (
 func TestPluginAcceptanceDurableConcurrentIdempotentAndBound(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "mail.sqlite")
-	m, err := OpenMailbox(path, "control")
+	m, err := openMailbox(t, path, "control")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,14 +77,14 @@ func TestPluginAcceptanceDurableConcurrentIdempotentAndBound(t *testing.T) {
 	if m.CommitBackground(ctx, foreign, identity, response, 0) == nil {
 		t.Fatal("foreign route accepted")
 	}
-	if err = m.Close(); err != nil {
+	if err = m.db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	m, err = OpenMailbox(path, "control")
+	m, err = openMailbox(t, path, "control")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
+	defer m.db.Close()
 	bindings, _ = m.Backgrounds(ctx)
 	if string(bindings[0].State) != `{"cursor":1}` {
 		t.Fatal("cursor lost", bindings)
@@ -139,7 +139,7 @@ func TestPluginAcceptanceDurableConcurrentIdempotentAndBound(t *testing.T) {
 func TestPluginInterruptedAttemptFencedAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "mail.sqlite")
-	m, _ := OpenMailbox(path, "control")
+	m, _ := openMailbox(t, path, "control")
 	b := BackgroundBinding{ID: "example", PluginID: "example", Enabled: true, Assistant: "main", Config: []byte(`{}`)}
 	m.ConfigureBackground(ctx, b)
 	stored, _ := m.Backgrounds(ctx)
@@ -152,12 +152,12 @@ func TestPluginInterruptedAttemptFencedAfterRestart(t *testing.T) {
 	if err := m.ClaimEventBatch(ctx, "main", []string{events[0].ID}); err != nil {
 		t.Fatal(err)
 	}
-	m.Close()
-	m, err := OpenMailbox(path, "control")
+	m.db.Close()
+	m, err := openMailbox(t, path, "control")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
+	defer m.db.Close()
 	events, _ = m.Notifications(ctx, "main")
 	if len(events) != 0 {
 		t.Fatal("uncertain attempt replayed")
@@ -170,11 +170,11 @@ func TestPluginInterruptedAttemptFencedAfterRestart(t *testing.T) {
 
 func TestPluginCapacityRetryAndImmediateReclaim(t *testing.T) {
 	ctx := context.Background()
-	m, err := OpenMailbox(filepath.Join(t.TempDir(), "mail.sqlite"), "control")
+	m, err := openMailbox(t, filepath.Join(t.TempDir(), "mail.sqlite"), "control")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
+	defer m.db.Close()
 	b := BackgroundBinding{ID: "example", PluginID: "example", Enabled: true, Assistant: "main", Config: []byte(`{}`)}
 	if err = m.ConfigureBackground(ctx, b); err != nil {
 		t.Fatal(err)
@@ -317,16 +317,16 @@ func TestPluginNotificationBatchCountsCanonicalPayloadBytes(t *testing.T) {
 func TestPluginDefaultInitializationConcurrent(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "mail.sqlite")
-	m, err := OpenMailbox(path, "local")
+	m, err := openMailbox(t, path, "local")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
-	other, err := OpenMailbox(path, "local")
+	defer m.db.Close()
+	other, err := openMailbox(t, path, "local")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer other.Close()
+	defer other.db.Close()
 	var wg sync.WaitGroup
 	for i := 0; i < 12; i++ {
 		wg.Add(1)
@@ -386,7 +386,7 @@ func TestPluginDefaultInitializationConcurrent(t *testing.T) {
 func TestPluginBackgroundFailureDiagnosticSurvivesRestartAndClearsOnSuccess(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "mail.sqlite")
-	m, err := OpenMailbox(path, "control")
+	m, err := openMailbox(t, path, "control")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,12 +398,12 @@ func TestPluginBackgroundFailureDiagnosticSurvivesRestartAndClearsOnSuccess(t *t
 	if err = m.BackgroundError(ctx, b, "unavailable", "background exchange timed out", 1000); err != nil {
 		t.Fatal(err)
 	}
-	m.Close()
-	m, err = OpenMailbox(path, "control")
+	m.db.Close()
+	m, err = openMailbox(t, path, "control")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
+	defer m.db.Close()
 	bindings, _ = m.Backgrounds(ctx)
 	if bindings[0].Diagnostic != "background exchange timed out" || bindings[0].Next != 301000 {
 		t.Fatal(bindings)
@@ -421,7 +421,7 @@ func TestPluginBackgroundFailureDiagnosticSurvivesRestartAndClearsOnSuccess(t *t
 func TestPluginInstancesIsolateIdentityQueuesAndRetargetFences(t *testing.T) {
 	ctx := context.Background()
 	m, _ := mailbox(t, "local")
-	defer m.Close()
+	defer m.db.Close()
 	for _, id := range []string{"provider-first", "provider-second"} {
 		if err := m.EnsureBackgroundInstance(ctx, BackgroundBinding{ID: id, PluginID: "gateway", ConnectionID: id, Enabled: true, Assistant: "main", Config: json.RawMessage(`{}`)}); err != nil {
 			t.Fatal(err)
@@ -508,7 +508,7 @@ func TestPluginInstancesIsolateIdentityQueuesAndRetargetFences(t *testing.T) {
 func TestBackgroundWaitingInstanceCanCommitCheckpointWithoutEvents(t *testing.T) {
 	ctx := context.Background()
 	m, _ := mailbox(t, "local")
-	defer m.Close()
+	defer m.db.Close()
 	if err := m.EnsureBackgroundInstance(ctx, BackgroundBinding{ID: "provider-waiting", PluginID: "gateway", ConnectionID: "waiting", Enabled: true, Config: json.RawMessage(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
@@ -535,7 +535,7 @@ func TestBackgroundWaitingInstanceCanCommitCheckpointWithoutEvents(t *testing.T)
 func TestBackgroundWritesFenceInflightAndRetainOpaqueProgress(t *testing.T) {
 	ctx := context.Background()
 	m, _ := mailbox(t, "local")
-	defer m.Close()
+	defer m.db.Close()
 	if err := m.EnsureBackgroundInstance(ctx, BackgroundBinding{ID: "example", PluginID: "example", Enabled: true, Assistant: "main", Config: json.RawMessage(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
@@ -582,11 +582,11 @@ func TestBackgroundWritesFenceInflightAndRetainOpaqueProgress(t *testing.T) {
 // capacity exhaustion on the last receiver rolls back the earlier enqueue.
 func TestPluginFanoutAtomicBackpressureRevisionAndRetry(t *testing.T) {
 	ctx := context.Background()
-	m, err := OpenMailbox(filepath.Join(t.TempDir(), "mail.sqlite"), "control")
+	m, err := openMailbox(t, filepath.Join(t.TempDir(), "mail.sqlite"), "control")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
+	defer m.db.Close()
 	b := BackgroundBinding{ID: "fanout", PluginID: "fanout", Enabled: true, Config: json.RawMessage(`{}`)}
 	if err = m.ConfigureBackground(ctx, b); err != nil {
 		t.Fatal(err)

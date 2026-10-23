@@ -11,7 +11,7 @@ import (
 func TestOriginalPreparedResourcesSurviveResumeAndRestartWithoutReplacement(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "tasks.sqlite")
-	j, err := OpenJournal(path, "runtime", "boot")
+	j, err := openJournal(t, path, "runtime", "boot")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,14 +42,14 @@ func TestOriginalPreparedResourcesSurviveResumeAndRestartWithoutReplacement(t *t
 	if err != nil || same != digest || string(original) != string(reused) {
 		t.Fatal("allowance resume resampled resources", err)
 	}
-	if err = j.Close(); err != nil {
+	if err = j.db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	j, err = OpenJournal(path, "runtime", "nextboot")
+	j, err = openJournal(t, path, "runtime", "nextboot")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer j.Close()
+	defer j.db.Close()
 	reused, same, err = j.PreparedResources(ctx, "runtime", "task", "run")
 	if err != nil || same != digest || string(original) != string(reused) {
 		t.Fatal("restart lost original resource evidence", err)

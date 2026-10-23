@@ -17,13 +17,48 @@ func TestCompletionInboxClaimsAndReportsTheSameResultOnce(t *testing.T) {
 	}
 }
 
-func testCompletionInboxClaimsAndReportsTheSameResultOnce(t *testing.T, origin protocol.TaskOrigin) {
+func TestCompletionAcknowledgesOriginalInterruptedBatchAfterRestart(t *testing.T) {
 	ctx := context.Background()
-	m, err := OpenMailbox(filepath.Join(t.TempDir(), "messages.sqlite"), "control")
+	path := filepath.Join(t.TempDir(), "tasks.sqlite")
+	m, err := openMailbox(t, path, "control")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
+	event := protocol.Envelope{ID: "completion", Kind: "task_result", From: protocol.AgentRef{NodeID: "control", Kind: "runtime", AgentID: "runtime"}, To: address("control", "main"), ConversationID: newConversation(), Text: "done", Result: &protocol.TaskResultEvent{Origin: protocol.TaskOrigin{Kind: "manual"}, TaskID: "task", RunID: newConversation(), Title: "A", Phase: protocol.TaskComplete, Text: "done"}}
+	if err = storage.Transaction(ctx, m.db, func(tx *sql.Tx) error { return inbox.EnqueueTx(ctx, tx, event, "in", "queued") }); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.ClaimEvent(ctx, "main", event.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	m, err = openMailbox(t, path, "control")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	if err = m.db.QueryRow("SELECT state FROM agent_messages WHERE id=?", event.ID).Scan(&state); err != nil || state != "interrupted" {
+		t.Fatal(state, err)
+	}
+	for range 2 {
+		if err = m.FinishChat(ctx, "main", "pot-result-"+event.ID, event.ID, true); err != nil {
+			t.Fatal(err)
+		}
+		if err = m.db.QueryRow("SELECT state FROM agent_messages WHERE id=?", event.ID).Scan(&state); err != nil || state != "processed" {
+			t.Fatal(state, err)
+		}
+	}
+}
+
+func testCompletionInboxClaimsAndReportsTheSameResultOnce(t *testing.T, origin protocol.TaskOrigin) {
+	ctx := context.Background()
+	m, err := openMailbox(t, filepath.Join(t.TempDir(), "messages.sqlite"), "control")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.db.Close()
 	event := protocol.Envelope{ID: "completion", Kind: "task_result", From: protocol.AgentRef{NodeID: "control", Kind: "runtime", AgentID: "runtime"}, To: address("control", "main"), ConversationID: newConversation(), Text: "done", Result: &protocol.TaskResultEvent{Origin: origin, TaskID: "task-a", RunID: newConversation(), Title: "A", Phase: protocol.TaskComplete, Text: "done"}}
 	enqueue := func() error {
 		return storage.Transaction(ctx, m.db, func(tx *sql.Tx) error { return inbox.EnqueueTx(ctx, tx, event, "in", "queued") })
