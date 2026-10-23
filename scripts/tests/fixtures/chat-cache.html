@@ -1,0 +1,5 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>IndexedDB chat cache contract</title><pre id="results">Running…</pre><script type="module">
+import {chatCacheContract} from '../chat-cache-contract.mjs';
+const output=document.querySelector('#results');
+chatCacheContract({report:line=>output.textContent+='\n'+line}).catch(reason=>output.textContent+='\nFAIL '+reason.stack);
+</script></html>

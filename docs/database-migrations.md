@@ -25,6 +25,15 @@ Service startup (exclusive data-root lock)
 
 ## Schema ownership and versions
 
+The rebuildable frontend Chat cache uses versioned IndexedDB migrations in
+`pkg/storage/migrations/ui-cache/`. The browser and Wails asset filesystem expose
+only these JavaScript migrations at the same path; backend SQL is not served.
+`0001_chat_cache.mjs` initializes the conversation, message and per-view stores,
+with scope and sequence indexes. Each persisted frontend contract change must
+add a new migration and cover upgrades as well as reopening existing data. Cache
+versions are independent of product SQLite versions; clearing frontend storage
+never modifies authoritative history or initiates work.
+
 All migration SQL is embedded from `pkg/storage/migrations/<kind>/`. A sequence
 belongs to the complete database, including tables used by other components:
 

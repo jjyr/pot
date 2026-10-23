@@ -4,6 +4,9 @@ package webassets
 import (
 	"embed"
 	"io/fs"
+	"strings"
+
+	"github.com/jjyr/pot/pkg/storage/migrations"
 )
 
 //go:embed all:src
@@ -16,5 +19,15 @@ func FS() fs.FS {
 	if err != nil {
 		panic(err)
 	}
-	return root
+	return frontendAssets{root}
+}
+
+type frontendAssets struct{ fs.FS }
+
+func (f frontendAssets) Open(name string) (fs.File, error) {
+	const prefix = "pkg/storage/migrations/"
+	if strings.HasPrefix(name, prefix+"ui-cache/") {
+		return migrations.FrontendSchemas().Open(strings.TrimPrefix(name, prefix))
+	}
+	return f.FS.Open(name)
 }

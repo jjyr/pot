@@ -126,19 +126,46 @@ base-cursor gap or boot change. Read versions prevent a concurrent older page
 from overwriting newer token text. A bounded recent-update map also covers
 updates received while a page is in flight.
 
-The UI retains at most 640 messages and a 16 MiB estimated body budget per cached
-owner, with at most eight owner snapshots. Reading farther back evicts distant
-messages; scrolling down pages the newer interval, and Latest reads a recent
-window directly. References resolve by ID, without traversing intervening pages.
-Returning to cached Chat shows its projection immediately and refreshes it from
-the stream. A reset while reading an older message reloads that message's window.
+Main Chat uses IndexedDB as its only retained transcript cache in browsers and
+Wails. The scope includes local node, connection, assistant and conversation
+identity. Message bodies, versions, reply lifecycles and the accepted cursor
+commit together before the renderer reads the committed projection. Streaming
+deltas coalesce in short batches; the pending transport buffer is bounded and
+cannot publish uncommitted output. A failed cache write retains the existing
+view and shows a localized retry error; it never creates a memory-cache fallback.
+
+```text
+HTTP/SSE or Wails -> scoped synchronization -> IndexedDB transaction
+                                                 |
+                                            commit complete
+                                                 |
+                                      read current view window
+                                                 |
+                                      measure + position -> reveal
+```
+
+Only the selected assistant's bounded projection stays in application memory:
+at most 640 messages and a 16 MiB estimated body budget. IndexedDB retains up to
+2048 messages / 32 MiB per assistant and 256 MiB globally; older inactive scopes
+are evicted first. Cached history intervals are used before backend reads, and
+unknown or evicted intervals are fetched again. Reset gaps invalidate cached
+interval provenance. Versions fence late pages, transactions serialize writers,
+and retired boot identities cannot restore an earlier projection. This is a
+rebuildable UI cache, never the authoritative conversation store or a send queue.
+
+Reading position, disclosure state and bounded height hints persist per view;
+main/tray windows and browser tabs have independent positions. Returning to Chat
+reads its target window from disk while the subscription refreshes it. A reset
+while reading an older message reloads that message's window. References resolve
+by ID, without traversing intervening pages.
 All Chat entry paths share a scoped positioning intent: restore the saved reading
 position, locate an explicit message, or follow Latest. Page returns, assistant
 switches and browser history prepare the composer, mount the destination window,
 measure its rows and restore the viewport before exposing the first Chat frame.
-Hidden rows do not overwrite measured heights. Each of the eight cached owners
-can retain its bounded height estimates; width and content changes remeasure the
-mounted rows. Explicit message/Latest actions supersede prior positioning, and
+Hidden rows do not overwrite measured heights. The destination remains visually
+hidden through mounting, measurement and position restoration; only the prepared
+viewport is exposed. Persisted height hints are qualified by width, locale, theme
+and font revision; content changes remeasure mounted rows. Explicit message/Latest actions supersede prior positioning, and
 navigation or deliberate upward reading retires an in-flight locate so its late
 response cannot replace the current history window or move the reader.
 An explicit message destination stays anchored through delayed preview loading;
@@ -180,10 +207,13 @@ the cached history boundary, where the browser can no longer produce a delta.
 
 Expanded tools have range-only child virtualizers sharing the chat scroller;
 only the outer window performs automatic scroll compensation. Focus and selected
-text pin mounted rows through a custom range extractor. A window retains up to
-32 detached rows within a 2 MiB estimate of message content and DOM text for nearby
-returns. Data eviction and owner changes retire these rows too. Detached media
-release their leases; reconnecting them uses the shared resource cache.
+text pin mounted rows through a custom range extractor. Navigation targets resolve
+by message identity against each current window; trimming, replacing or reordering
+rows never reuses a previous numeric target index. Retiring a row immediately
+disposes its DOM, nested window and attachment leases. No detached transcript DOM
+or inactive assistant projection remains cached in application memory. Returning
+to a recycled row renders it from its persisted message and disclosure state;
+resources use the shared resource cache.
 Scroll-only updates reuse the conversation's message projection and tool forest;
 new data, send state and connectivity invalidate that projection. Collapsed tools
 build their summaries and approval controls first; output and raw JSON render

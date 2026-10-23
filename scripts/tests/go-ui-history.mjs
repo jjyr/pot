@@ -46,3 +46,10 @@ lifecycle=mergeUIFrame(lifecycle,{...frame(3,'delta',[],2),replies:[{input_id:'m
 assert.equal(lifecycle.replies[0].state,'completed','An empty cleanup delta settles its input');
 lifecycle=mergeUIFrame(lifecycle,frame(4,'reset',[message(3)]));
 assert.deepEqual(lifecycle.replies,[],'Resets remove lifecycles from the previous window');
+
+const diskState=createConversationState(),diskEpoch=beginSubscription(diskState);
+acceptSnapshot(diskState,frame(1,'reset',[message(1,'unchanged',1),message(2,'initial',1)]),diskEpoch,{committed:true});
+const unchanged=diskState.snapshot.messages[0];
+acceptSnapshot(diskState,frame(2,'reset',[message(1,'unchanged',1),message(2,'streamed',2)]),diskEpoch,{committed:true});
+assert.equal(diskState.snapshot.messages[0],unchanged,'Committed disk reads retain the active identity of unchanged rows');
+assert.equal(diskState.snapshot.messages[1].text,'streamed');

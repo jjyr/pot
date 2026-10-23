@@ -4,37 +4,21 @@ import {Virtualizer, observeElementRect, observeElementOffset, defaultRangeExtra
 // owns the rendered nodes, disclosures and the logical reading destination.
 export function createMessageWindow({scroller, host, render, dispose, requestRender, reading, heights = new Map(), nested = false}) {
   let rows = [], mounted = new Map(), closed = false, suspended = false, updating = false, dirty = false;
-  let width = 0, margin = 0, target = null, targetIndex = -1, restore, reportRect;
-  const cached = new Map(), pending = new Set(), spacers = [];
+  let width = 0, margin = 0, target = null, restore, reportRect;
+  const pending = new Set(), spacers = [];
   const indexesByKey = new Map(), indexesByID = new Map();
-  const margins = new WeakMap(), sources = new WeakMap(), weights = new WeakMap();
-  let cachedBytes = 0;
-  function retainedBytes(record) {
-    const source = sources.get(record);
-    let bytes = weights.get(source);
-    if (bytes === undefined) {
-      bytes = 512;
-      const queue = [source], seen = new Set();
-      while (queue.length && bytes <= 2 * 1024 * 1024) {
-        const value = queue.pop();
-        if (typeof value === 'string') bytes += value.length * 2;
-        else if (value && typeof value === 'object' && !seen.has(value)) {
-          seen.add(value); bytes += 64;
-          if (Array.isArray(value)) bytes += value.length * 8;
-          if (bytes <= 2 * 1024 * 1024) for (const child of Object.values(value)) queue.push(child);
-        }
-      }
-      weights.set(source, bytes);
-    }
-    return bytes + record.row.textContent.length * 2;
+  const margins = new WeakMap(), sources = new WeakMap();
+  function navigationIndex() {
+    return !target ? -1 : target.end ? rows.length - 1 : (indexesByID.get(target.id) ?? indexesByKey.get(target.id) ?? -1);
   }
   function pinnedIndexes(range) {
     const indexes = new Set(defaultRangeExtractor(range)), selection = getSelection();
     // A navigation target must exist before the first paint, even while the
     // native scroll event still reports the previous conversation's offset.
-    if(target){
-      if(targetIndex>=0)for(const i of defaultRangeExtractor({...range,startIndex:targetIndex,endIndex:targetIndex}))indexes.add(i);
-    }
+    // A reset, history trim or reorder can move/remove the target. Resolve its
+    // identity in the current list before passing an index to TanStack.
+    const index=navigationIndex();
+    if(index>=0&&index<range.count)for(const i of defaultRangeExtractor({...range,startIndex:index,endIndex:index}))indexes.add(i);
     for (const record of mounted.values()) {
       if (record.row.contains(document.activeElement) || selection?.rangeCount && !selection.isCollapsed && (record.row.contains(selection.anchorNode) || record.row.contains(selection.focusNode))) {const index=indexesByKey.get(record.row.dataset.windowKey);if(index!==undefined)indexes.add(index);}
     }
@@ -93,7 +77,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       if(scroller.scrollHeight-scroller.clientHeight-scroller.scrollTop>.5)virtualizer.scrollToEnd();
     }else if(Math.abs(top-scroller.scrollTop)>.5)virtualizer.scrollToOffset(top);
   });
-  const cancel = ()=>{virtualizer.cancelScroll();target=null;targetIndex=-1;};
+  const cancel = ()=>{virtualizer.cancelScroll();target=null;};
   const gestures=nested?[]:['wheel','touchstart','pointerdown','keydown'];
   for(const name of gestures)scroller.addEventListener(name,cancel,{passive:true});
 
@@ -103,8 +87,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     for(const item of items){
       const start=item.start-margin;
       if(start>offset+.5||!layout.length&&start<-.5)layout.push({gap:start-offset});
-      const message=rows[item.index], retained=cached.get(item.key), old=mounted.get(item.key)||retained?.record;
-      if(retained){cached.delete(item.key);cachedBytes-=retained.bytes;}
+      const message=rows[item.index], old=mounted.get(item.key);
       const changed=!old||sources.get(old)!==message;
       const record=render(message,old);
       sources.set(record,message);
@@ -116,11 +99,8 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     if(total>offset+.5)layout.push({gap:total-offset});
     for(const [key,record]of mounted)if(!selected.has(key)){
       virtualizer.observer.unobserve(record.row);virtualizer.elementsCache.delete(key);
-      record.childrenWindow?.suspend();
-      record.row.remove();mounted.delete(key);pending.delete(record);
-      const bytes=retainedBytes(record);cached.set(key,{record,bytes});cachedBytes+=bytes;
+      mounted.delete(key);pending.delete(record);dispose(record);
     }
-    while(cached.size>32||cachedBytes>2*1024*1024){const [key,value]=cached.entries().next().value;cached.delete(key);cachedBytes-=value.bytes;dispose(value.record);}
     let index=0;
     for(const part of layout){
       let element;
@@ -157,11 +137,10 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     }
     if(rows!==next||Math.abs(nextMargin-margin)>.5){
       const list=next; margin=nextMargin;
-      virtualizer.setOptions({...virtualizer.options,count:list.length,getItemKey:index=>list[index].viewKey,estimateSize:index=>heights.get(list[index].viewKey)??(list[index].role==='user'?120:list[index].role==='tool'?70:180),scrollMargin:margin,followOnAppend:!nested&&(!reading||reading.following&&!reading.touchScrolling)});
+      virtualizer.setOptions({...virtualizer.options,count:list.length,getItemKey:index=>list[index].viewKey,estimateSize:index=>heights.get(list[index].viewKey)??(list[index].role==='user'?120:list[index].role==='tool'?70:180),rangeExtractor:range=>pinnedIndexes(range),scrollMargin:margin,followOnAppend:!nested&&(!reading||reading.following&&!reading.touchScrolling)});
       rows=next;
       const available=new Set(rows.map(item=>item.viewKey));
       for(const [key,record]of mounted)if(!available.has(key)){virtualizer.observer.unobserve(record.row);virtualizer.elementsCache.delete(key);mounted.delete(key);pending.delete(record);dispose(record);}
-      for(const [key,value]of cached)if(!available.has(key)){cached.delete(key);cachedBytes-=value.bytes;dispose(value.record);}
       for(const key of virtualizer.itemSizeCache.keys())if(!available.has(key))virtualizer.itemSizeCache.delete(key);
     }
   }
@@ -175,10 +154,9 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       configure(next);virtualizer._willUpdate();
       if(options.target&&!reading?.touchScrolling){
         target=options.target;
-        targetIndex=target.end?rows.length-1:(indexesByID.get(target.id)??indexesByKey.get(target.id)??-1);
         virtualizer.setOptions({...virtualizer.options,rangeExtractor:range=>pinnedIndexes(range)});
         if(target.end&&!nested&&!reading)virtualizer.scrollToEnd();
-        else if(target.id){const index=targetIndex;if(index>=0){const item=virtualizer.getMeasurements()[index];if(nested){virtualizer.scrollOffset=item.start-(target.offset??scroller.clientHeight/3);}else if(!reading){virtualizer.setOptions({...virtualizer.options,scrollPaddingStart:target.offset??scroller.clientHeight/3});virtualizer.scrollToIndex(index,{align:'start'});}}}
+        else if(target.id){const index=navigationIndex();if(index>=0){const item=virtualizer.getMeasurements()[index];if(nested){virtualizer.scrollOffset=item.start-(target.offset??scroller.clientHeight/3);}else if(!reading){virtualizer.setOptions({...virtualizer.options,scrollPaddingStart:target.offset??scroller.clientHeight/3});virtualizer.scrollToIndex(index,{align:'start'});}}}
       }
       draw();
       const changed=measure();
@@ -195,8 +173,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     closed=true;unbindScroll?.();virtualizer.cancelScroll();unmount();
     for(const name of gestures)scroller.removeEventListener(name,cancel);
     for(const record of mounted.values())dispose(record);
-    for(const value of cached.values())dispose(value.record);
-    mounted.clear();cached.clear();pending.clear();indexesByKey.clear();indexesByID.clear();cachedBytes=0;
+    mounted.clear();pending.clear();indexesByKey.clear();indexesByID.clear();
     for(const spacer of spacers)spacer.remove();
   }};
 }

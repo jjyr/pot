@@ -22,8 +22,8 @@ async function run(){
       const count=counts[owner],messages=Array.from({length:count},(_,index)=>({id:`${owner}-${index+1}`,sequence:String(index+1),role:index%2?'assistant':'user',...(index%2?{reply_to:`${owner}-${index}`} : {}),...(index===count-2?{references:[{message_id:`${owner}-2`,quote:'Jump to the earlier answer'}]}:{}),text:`${owner} message ${index+1}. `+'Synthetic chat text for checking assistant navigation. '.repeat(10),status:'complete'}));
       return {kind:'reset',base_cursor:0,runtime_id:'fixture',boot_id:'boot',owner_id:JSON.stringify(['one',owner]),conversation_id:owner,cursor:String(versions[owner]),replies:[],running:false,turn_id:null,messages,history:{before:'1',after:String(count),has_more:false,has_newer:false}};
     };
-    const client={production:true,runtime:{runtime_id:'fixture',boot_id:'boot'},scope:()=>({...scope}),setScope:value=>scope={...scope,...value},
-      changes:()=>()=>{},subscribe(receive,status){const owner=scope.owner,record={owner,receive};subscription=record;const timer=setTimeout(()=>{status('connected');receive(snapshot(owner));},200);return()=>clearTimeout(timer);},
+    const client={chatCacheName:'pot-switching-'+crypto.randomUUID(),production:true,runtime:{runtime_id:'fixture',boot_id:'boot'},scope:()=>({...scope}),setScope:value=>scope={...scope,...value},
+      changes:()=>()=>{},subscribe(receive,status){const owner=scope.owner,record={owner,receive};subscription=record;const timer=setTimeout(()=>{status('connected');receive(snapshot(owner));record.ready=true;},200);return()=>clearTimeout(timer);},
       history:async query=>{historyReads.push(query);return snapshot(scope.owner);},
       async request(path){
         const url=new URL(path,location.href);
@@ -43,13 +43,13 @@ async function run(){
       }
       root.querySelector(`.assistant-row[data-view-key='["one","${owner}"]']`).click();
       await wait(()=>scope.owner===owner);
-      if(!beforeSnapshot)await wait(()=>root.querySelector('.connection-status')?.textContent.match(/Connected|已连接/));
+      if(!beforeSnapshot)await wait(()=>subscription?.ready);
       await settle();
     };
     const latest=async()=>{root.querySelector('.latest-button').click();await settle();};
     let passed=false;
     try{
-      await wait(()=>root.querySelector('.connection-status')?.textContent.match(/Connected|已连接/));await settle();
+      await wait(()=>subscription?.ready);await settle();
       check(bottom(),`Initial long Chat follows latest (tasks delayed ${taskDelay}ms)`);
       await select('beta');
       counts.alpha+=20;versions.alpha++;
@@ -70,7 +70,7 @@ async function run(){
       const before=history().scrollTop;counts.alpha+=2;versions.alpha++;subscription.receive(snapshot('alpha'));await settle();
       check(bottom()&&history().scrollTop>before,'New reply continues following after returning');
       await select('beta',{beforeSnapshot:true});await select('alpha',{beforeSnapshot:true});
-      await wait(()=>root.querySelector('.connection-status')?.textContent.match(/Connected|已连接/));await settle();
+      await wait(()=>subscription?.ready);await settle();
       check(bottom(),'Switching back before the intermediate subscription responds retains latest');
       // Deliberate reading still survives both owner navigation and refresh.
       await pause(taskDelay+100);
@@ -106,7 +106,7 @@ run().catch(error=>results.textContent+='FAIL '+error.message+'\n'+error.stack+'
 // The first visible frame must already have the correct measured message window.
 async function navigationFrames({root,client,select,snapshot,historyReads,emit}){
   const history=()=>root.querySelector('.history');
-  const visible=()=>!history().hidden&&!root.classList.contains('show-directory');
+  const visible=()=>!history().hidden&&getComputedStyle(history()).visibility!=='hidden'&&!root.classList.contains('show-directory');
   const row=id=>[...root.querySelectorAll('article.message')].find(node=>node.dataset.messageId===id);
   const offset=id=>row(id)?.getBoundingClientRect().top-history().getBoundingClientRect().top;
   const capture=()=>{const top=history().getBoundingClientRect().top;const node=[...history().querySelectorAll('article.message')].find(node=>{const box=node.getBoundingClientRect();return box.height&&box.bottom>top&&box.top<top+history().clientHeight;});return {id:node?.dataset.messageId,offset:node?.getBoundingClientRect().top-top};};
@@ -203,18 +203,19 @@ async function navigationFrames({root,client,select,snapshot,historyReads,emit})
   check(historyReads.length===0,'Cached navigation and loaded references do not fetch history');
   // A delayed locate completing after an explicit Latest action cannot pull back.
   const read=client.history;let release;
-  client.history=query=>query.around?new Promise(resolve=>{const frame=snapshot(client.scope().owner);release=()=>resolve({...frame,cursor:'100',messages:[{id:'missing-target',sequence:'2',role:'assistant',reply_to:'alpha-1',text:'Late destination',status:'complete'}],history:{before:'2',after:'2',has_more:true,has_newer:true}});}):Promise.resolve({...snapshot(client.scope().owner),cursor:'100'});
+  const openReference=async title=>{await wait(()=>[...root.querySelectorAll('.message-reference-open')].some(node=>node.title===title));[...root.querySelectorAll('.message-reference-open')].find(node=>node.title===title).click();};
+  client.history=query=>query.around?new Promise(resolve=>{const frame=snapshot(client.scope().owner);release=()=>resolve({...frame,cursor:'100',messages:[{id:query.around,sequence:'2',role:'assistant',reply_to:'alpha-1',text:'Late destination',status:'complete'}],history:{before:'2',after:'2',has_more:true,has_newer:true}});}):Promise.resolve({...snapshot(client.scope().owner),cursor:'100'});
   root.querySelector('.latest-button').click();await settle();
   const projected=snapshot(client.scope().owner);projected.cursor='100';projected.messages.at(-2).references=[{message_id:'missing-target',quote:'Delayed target'}];
-  emit(projected);await settle();root.querySelector('.message-reference-open').click();await wait(()=>!!release);
+  emit(projected);await openReference('Delayed target');await wait(()=>!!release);
   await frames('Delayed reference mounts its destination before positioning',async()=>{release();await wait(()=>!!row('missing-target'));},()=>{if(!row('missing-target'))throw Error('Fetched reference destination is not mounted');});
   root.querySelector('.latest-button').click();await settle();atLatest();
-  projected.cursor='101';emit(projected);await settle();release=null;root.querySelector('.message-reference-open').click();await wait(()=>!!release);
+  projected.cursor='101';projected.messages.at(-2).references=[{message_id:'superseded-target',quote:'Superseded target'}];emit(projected);release=null;await openReference('Superseded target');await wait(()=>!!release);
   await frames('Latest supersedes an in-flight reference lookup',async()=>{root.querySelector('.latest-button').click();release();await settle();},atLatest);
-  const again=snapshot(client.scope().owner);again.cursor='102';again.messages.at(-2).references=[{message_id:'missing-target',quote:'Delayed target'}];emit(again);await settle();
-  release=null;root.querySelector('.message-reference-open').click();await wait(()=>!!release);
+  const again=snapshot(client.scope().owner);again.cursor='102';again.messages.at(-2).references=[{message_id:'retired-owner-target',quote:'Retired owner target'}];emit(again);
+  release=null;await openReference('Retired owner target');await wait(()=>!!release);
   await select('beta');await select('alpha');release();await settle();
-  check(client.scope().owner==='alpha'&&!row('missing-target'),'A late reference cannot overwrite a later A → B → A navigation');
+  check(client.scope().owner==='alpha'&&!row('retired-owner-target'),'A late reference cannot overwrite a later A → B → A navigation');
   client.history=read;
   input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));await settle();
 }
