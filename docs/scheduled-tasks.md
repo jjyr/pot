@@ -31,6 +31,21 @@ Shared Agent inbox -> eligible outcomes -> shared main chat summary
 
 Describe the goal and timing in main chat; the assistant can write a Cron rule and create the schedule. Tasks -> Schedules also creates, views and directly edits definitions. The editor shows the Cron expression, an editable IANA time zone and up to five upcoming executions from the backend before saving. Preview errors identify the relevant field; stale responses cannot replace newer input. Tools: `list_schedules`, `get_schedule`, `manage_schedule`. Lists return summaries; details/history are loaded on demand.
 
+`manage_schedule.spec.goal` must contain non-whitespace text and accepts at most
+512 KiB = 524288 UTF-8 bytes (512 x 1024). This is a byte limit, not a character
+limit: a Chinese character commonly uses three UTF-8 bytes. Create, update and
+persisted-definition validation use the same limit. Oversized goals report
+`spec.goal` with the actual and allowed UTF-8 byte counts. The title remains
+nonempty, not whitespace-only, and limited to 80 Unicode characters.
+
+Scheduled Task admission, initial input envelopes and execution snapshots
+accommodate the full goal plus the title and run instructions, including JSON
+escaping. Ordinary task submission and continuation input limits remain unchanged.
+This parameter/storage capacity
+is separate from the selected model's token context window and output allowance;
+a saved goal may exceed that model's executable context. Goals are not truncated
+or summarized to fit the byte limit.
+
 The shared UI shows a bounded, independently scrolling schedule list with a
 visible count and page controls. Cards retain the owning assistant and Space
 badge. Opening a card loads the full definition and paginated history; editing
