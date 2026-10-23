@@ -36,8 +36,11 @@ returns assistant addresses; Task metadata includes its address. Worker context
 contains its own address and its owning assistant's address.
 
 `send_message({to, text})` returns durable acceptance, never execution
-completion. Control binds the envelope's `from` identity to the current
-execution; models cannot provide a sender, impersonate a user or produce Runtime
+completion. A recipient's model activity or compaction does not gate inbox
+acceptance. Queued correspondence enters the conversation and its receive-message
+UI record when the owning serial lane is ready; acceptance alone does not mean
+the recipient has seen the message. Control binds the envelope's `from` identity
+to the current execution; models cannot provide a sender, impersonate a user or produce Runtime
 events. Owner-origin messages guide active Tasks at a model boundary. Peer
 information is reference data, not new user authority. Owner guidance to an
 ended Task reopens the same Task and starts a new Run using retained context and
@@ -228,6 +231,16 @@ Allowance continuation uses the owning assistant conversation and reuses only a
 stopped checkpoint with no started model/tool effects. Uncertain correspondence
 is not automatically replayed. Its immutable receipt remains available for
 inspection, including the collapsed history record.
+
+A confirmed failed handling turn does not block later queued correspondence from
+the same sender, including a new wire conversation. Active, waiting and interrupted
+attempts retain their existing receiver fences, and the conversation's uncertain
+cleanup gate still prevents execution. A verified continuation or safe allowance
+resume (including after restart) restores only its original delivery journal
+members before resuming the checkpoint; it does not claim later arrivals.
+Cancellation and turn completion retire the old sender
+binding. Parent-state validation and new mail insertion share a transaction;
+an already accepted request retains its immutable receipt after the parent ends.
 
 ## Durable identity migration
 

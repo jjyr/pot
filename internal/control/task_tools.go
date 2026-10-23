@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/core"
@@ -43,6 +44,9 @@ func (s *Service) productDispatchBound(owner, executionOwner, turn string, gener
 	}
 	for _, d := range s.productTools(worker) {
 		out[d.Name] = func(ctx context.Context, e core.ExecutionContext, call modelprotocol.ToolCall, emit func(core.Update) error) (json.RawMessage, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			if e.Owner != executionOwner || generation == 0 {
 				return nil, errors.New("stale product tool binding")
 			}
@@ -89,13 +93,17 @@ func (s *Service) productDispatchBound(owner, executionOwner, turn string, gener
 						}
 					}
 					if parent != nil {
-						if err := s.Mailbox.Processing(ctx, *parent); err != nil {
-							return nil, err
+						if send.To.Kind == "task" {
+							if err := s.Mailbox.Processing(ctx, *parent); err != nil {
+								return nil, err
+							}
 						}
 						ctx = context.WithValue(ctx, mailParentKey{}, *parent)
 					}
 				}
-				result, err := s.sendAgentMessage(ctx, id, owner, sender, send)
+				result, err := assistant.GuardMessageSend(ctx, func() (any, error) {
+					return s.sendAgentMessage(ctx, id, owner, sender, send)
+				})
 				if err != nil {
 					return nil, err
 				}

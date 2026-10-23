@@ -38,8 +38,14 @@ func TestAgentLinkEmptyNodeChatSurvivesAssistantDeletionAndRestart(t *testing.T)
 		if m.From.Kind != "user" {
 			t.Fatal("chat used assistant identity", m)
 		}
+		if err := b.service.Mailbox.Claim(ctx, m.ID); err != nil {
+			t.Fatal(err)
+		}
 		replyCtx := context.WithValue(ctx, mailParentKey{}, m)
 		if _, err = b.service.sendAssistantMail(replyCtx, "reply-"+request, "main", protocol.SendMail{To: m.From, Text: "answer " + request}); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.service.Mailbox.Finish(ctx, m.ID, true, ""); err != nil {
 			t.Fatal(err)
 		}
 		deadline := time.Now().Add(10 * time.Second)

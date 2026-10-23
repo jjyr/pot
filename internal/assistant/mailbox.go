@@ -168,6 +168,17 @@ func (m *Mailbox) Send(ctx context.Context, id string, from protocol.AgentRef, s
 			if stored == nil || !sameEnvelope(*stored, *parent) || parent.To != from {
 				return errors.New("invalid processing parent binding")
 			}
+			if from.Kind == "assistant" {
+				// Fence and enqueue share the writer transaction. Completion cannot
+				// retire this parent between the check and durable acceptance.
+				var state, direction string
+				if err := tx.QueryRowContext(ctx, "SELECT state,direction FROM agent_messages WHERE id=?", parent.ID).Scan(&state, &direction); err != nil {
+					return err
+				}
+				if state != "processing" || direction != "in" {
+					return errors.New("mail processing attempt is fenced")
+				}
+			}
 			hops, err = protocol.NextMailHop(parent.Hops)
 			if err != nil {
 				return err
