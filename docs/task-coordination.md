@@ -343,7 +343,7 @@ silently selecting another directory or destination. A previous run with uncerta
 effects must be reconciled before a continuation can execute. Subsequent tools
 always use the machine's current execution authorization.
 
-Task and execution record payloads use schema versions 12 and 7. Database schemas and
+Task and execution record payloads use schema versions 13 and 7. Database schemas and
 automatic upgrades are owned by the [DB migration layer](database-migrations.md).
 Development builds use an independent data root; unsupported pre-migration formats
 are rejected.

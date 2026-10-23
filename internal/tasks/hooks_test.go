@@ -185,7 +185,7 @@ func TestTaskStoreRejectsPreviousSchema(t *testing.T) {
 	}
 	s.Close()
 	_, err = Open(path, Options{NodeID: "machine"})
-	if err == nil || !strings.Contains(err.Error(), "unsupported legacy task_schema") {
+	if err == nil || !strings.Contains(err.Error(), "unsupported pre-release or untracked schema") {
 		t.Fatal(err)
 	}
 }

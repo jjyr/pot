@@ -284,9 +284,9 @@ Space; chat choices and instructions belong to each assistant.
 
 A fresh registry has no assistants. AI settings can be saved before explicitly
 creating the first assistant; configuration saves and restarts never register one.
-Existing registered assistants retain their conversations and Tasks. Assistant rules and profiles are read exclusively from their files. The recorded
-upgrade exports existing DB content before removing it; repeated startup never
-restores database copies. Project AGENTS.md files continue to be discovered independently for
+Existing registered assistants retain their conversations and Tasks. Assistant rules and profiles are read exclusively from their files. The first public baseline rejects older development databases; see
+[Database migrations](database-migrations.md). Repeated startup never restores
+database copies. Project AGENTS.md files continue to be discovered independently for
 both assistants and workers.
 
 Configured Provider identity/model/capabilities determine available candidates.

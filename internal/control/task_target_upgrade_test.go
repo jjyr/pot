@@ -4,14 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"testing"
 
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/storage"
 )
 
-func TestTaskReceiverUpgradePreservesRetriesAndCallerScope(t *testing.T) {
+func TestTaskReceiverReopenPreservesRetriesAndCallerScope(t *testing.T) {
 	backend, second := linkBackendFixture(t)
 	source := agentControl(t, "caller")
 	receiver := &agentControlFixture{service: backend.s, endpoint: controlPeerEndpoint(backend.s)}
@@ -22,21 +21,7 @@ func TestTaskReceiverUpgradePreservesRetriesAndCallerScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := map[string]any{"request_id": request.RequestID, "from": request.From, "text": request.Text}
-	payload, _ := json.Marshal(old)
-	if _, err = backend.s.integrationDB.Exec("UPDATE agent_link_received_tasks SET payload=? WHERE id=?", string(payload), first.ID); err != nil {
-		t.Fatal(err)
-	}
 	if _, err = backend.s.integrationDB.Exec("UPDATE agent_link_node_settings SET default_assistant_id=? WHERE singleton=1", second); err != nil {
-		t.Fatal(err)
-	}
-	// Exercise the frozen conversion without punching a hole in newer migration
-	// history or replaying later destructive file-export migrations.
-	conversion, err := os.ReadFile("../../pkg/storage/migrations/control/0031_task_targets.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = backend.s.integrationDB.Exec(string(conversion)); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {
@@ -46,7 +31,7 @@ func TestTaskReceiverUpgradePreservesRetriesAndCallerScope(t *testing.T) {
 	}
 	retry, err := backend.Submit(ctx, request)
 	if err != nil || retry.ID != first.ID || retry.Receiver.Address != request.Target {
-		t.Fatal("upgraded retry changed receiver", retry, err)
+		t.Fatal("reopened retry changed receiver", retry, err)
 	}
 	conflict := request
 	conflict.Text = "Changed intent"
@@ -68,7 +53,7 @@ func TestTaskReceiverUpgradePreservesRetriesAndCallerScope(t *testing.T) {
 	}
 	var count int
 	if err = backend.s.Tasks.DB().QueryRow("SELECT count(*) FROM tasks").Scan(&count); err != nil || count != 1 {
-		t.Fatal("upgrade duplicated work", count, err)
+		t.Fatal("reopen duplicated work", count, err)
 	}
 	var canonical string
 	encoded, _ := json.Marshal(request)

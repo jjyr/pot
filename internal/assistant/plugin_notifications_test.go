@@ -217,67 +217,6 @@ func TestPluginCapacityRetryAndImmediateReclaim(t *testing.T) {
 	}
 }
 
-func TestPluginStoredFormatUpgradePreservesBindingAndReceipts(t *testing.T) {
-	ctx := context.Background()
-	m, path := mailbox(t, "local")
-	b := BackgroundBinding{ID: "example", PluginID: "example", Enabled: true, Assistant: "main", Config: []byte(`{"reasons":["mention"]}`)}
-	if err := m.ConfigureBackground(ctx, b); err != nil {
-		t.Fatal(err)
-	}
-	bindings, _ := m.Backgrounds(ctx)
-	b = bindings[0]
-	checkpoint := `{"account":"123","baseline":true,"since":"cursor","pending":{"thread":{"items":["kept"]}}}`
-	r := core.BackgroundResponse{State: []byte(checkpoint), DelaySeconds: 90, Status: "permission"}
-	for _, id := range []string{"queued", "processed", "interrupted"} {
-		r.Events = append(r.Events, core.PluginEvent{ID: id, Title: "Update", Body: "body", OccurredAt: "2026-01-01T00:00:00Z"})
-	}
-	if err := m.CommitBackground(ctx, b, core.PluginIdentity{ID: b.ID, Version: "1"}, r, 100); err != nil {
-		t.Fatal(err)
-	}
-	// Recreate only the removed fields/table from the previous PR format.
-	if _, err := m.db.Exec(`DROP INDEX agent_messages_outbox_route; ALTER TABLE agent_messages DROP COLUMN accepted_at_ms; ALTER TABLE assistant_mail_identity RENAME COLUMN node_id TO control_id; ALTER TABLE assistant_contacts RENAME COLUMN node TO control; DROP TABLE task_input_digest_formats; DROP TABLE codex_mail_consumers; DROP TABLE codex_task_inputs; DROP TABLE codex_task_sessions; DROP TABLE codex_task_executor; DROP TABLE codex_link_jobs; DROP TABLE codex_link_assistants; DROP TABLE pot_migrations; DROP TABLE schedule_probes; DROP TABLE run_workspaces; DROP TABLE task_runs; DROP TABLE task_events; DROP TABLE retired_execution_receipts; DROP TABLE journal_file_import; DROP TABLE task_submission_import; DROP INDEX task_outcomes_run; ALTER TABLE task_outcomes DROP COLUMN run_id; DROP TABLE task_node; ALTER TABLE retired_task_authority RENAME TO task_authority; DROP TABLE plugin_background_writes; DROP INDEX agent_link_user_chat_routes; DROP INDEX agent_chat_replies; DROP INDEX agent_plugin_instance_state; ALTER TABLE plugin_background DROP COLUMN diagnostic; ALTER TABLE plugin_background DROP COLUMN plugin_id; ALTER TABLE plugin_background DROP COLUMN connection_id; CREATE TABLE plugin_delivery_rates(owner TEXT PRIMARY KEY,next INTEGER NOT NULL); INSERT INTO plugin_delivery_rates VALUES('main',9999999999999);
- UPDATE agent_messages SET envelope=json_set(envelope,'$.plugin.event.group','thread','$.text','old duplicate');
- UPDATE agent_messages SET state=json_extract(envelope,'$.plugin.event.id');`); err != nil {
-		t.Fatal(err)
-	}
-	m.Close()
-	m, err := OpenMailbox(path, "local")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer m.Close()
-	bindings, err = m.Backgrounds(ctx)
-	if err != nil || len(bindings) != 1 {
-		t.Fatal(bindings, err)
-	}
-	got := bindings[0]
-	if !got.Enabled || got.Assistant != b.Assistant || got.Revision != b.Revision || string(got.Config) != string(b.Config) || string(got.State) != checkpoint || got.Next != 90100 || got.Status != "permission" || got.Queued != 1 || got.Attention != 1 {
-		t.Fatal("binding or checkpoint changed", got)
-	}
-	events, err := m.Notifications(ctx, "main")
-	if err != nil || len(events) != 1 || events[0].Text != "" || events[0].Plugin.Event.ID != "queued" {
-		t.Fatal(events, err)
-	}
-	var removed int
-	if err = m.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='plugin_delivery_rates'`).Scan(&removed); err != nil || removed != 0 {
-		t.Fatal(removed, err)
-	}
-	for _, event := range r.Events {
-		id, _ := core.HashJSON([]string{"local", b.ID, event.ID})
-		var state string
-		if err = m.db.QueryRow("SELECT state FROM agent_messages WHERE id=?", id).Scan(&state); err != nil || state != event.ID {
-			t.Fatal("receipt changed", state, err)
-		}
-	}
-	if err = m.CommitBackground(ctx, b, core.PluginIdentity{ID: b.ID, Version: "2"}, r, 100); err != nil {
-		t.Fatal("upgrade broke identical retry", err)
-	}
-	events, err = m.Notifications(ctx, "main")
-	if err != nil || len(events) != 1 {
-		t.Fatal("upgrade replayed receipts", events, err)
-	}
-}
-
 func TestPluginUnstartedReportReleaseCanRetryImmediately(t *testing.T) {
 	ctx := context.Background()
 	m, _ := mailbox(t, "local")

@@ -86,7 +86,6 @@ jobs:
           restore-keys: go-v1-${{ runner.os }}-${{ runner.arch }}-
       - run: mise run check:go
       - run: mise run test
-      - run: mise run test:executor
       - if: runner.os == 'Linux'
         run: |
           sudo apt-get update

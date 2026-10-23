@@ -1,0 +1,119 @@
+{
+  "Objects": [
+    {
+      "Type": "index",
+      "Name": "assistant_model_turn",
+      "Table": "assistant_model_attempts",
+      "SQL": "CREATE INDEX assistant_model_turn ON assistant_model_attempts(turn_id)"
+    },
+    {
+      "Type": "index",
+      "Name": "ui_resource_identity",
+      "Table": "messages",
+      "SQL": "CREATE INDEX ui_resource_identity ON messages(json_extract(body,'$.presentation.resource.id'))\n WHERE json_extract(body,'$.presentation.resource.id') IS NOT NULL"
+    },
+    {
+      "Type": "index",
+      "Name": "ui_tool_identity",
+      "Table": "messages",
+      "SQL": "CREATE INDEX ui_tool_identity ON messages(json_extract(body,'$.tool.turn_id'),json_extract(body,'$.tool.id')) WHERE json_extract(body,'$.role')='tool'"
+    },
+    {
+      "Type": "table",
+      "Name": "assistant_configuration_requests",
+      "Table": "assistant_configuration_requests",
+      "SQL": "CREATE TABLE assistant_configuration_requests(id TEXT PRIMARY KEY,input_hash TEXT NOT NULL,response TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "assistant_idle_compaction",
+      "Table": "assistant_idle_compaction",
+      "SQL": "CREATE TABLE assistant_idle_compaction(singleton INTEGER PRIMARY KEY CHECK(singleton=1),request_id TEXT NOT NULL DEFAULT '',finished_at INTEGER NOT NULL DEFAULT 0,route TEXT NOT NULL DEFAULT '',attempt_for TEXT NOT NULL DEFAULT '',prefix TEXT NOT NULL DEFAULT '{}', started_at INTEGER NOT NULL DEFAULT 0, cache_read INTEGER, cache_write INTEGER)"
+    },
+    {
+      "Type": "table",
+      "Name": "assistant_instruction_file_export",
+      "Table": "assistant_instruction_file_export",
+      "SQL": "CREATE TABLE assistant_instruction_file_export(singleton INTEGER PRIMARY KEY CHECK(singleton=1),body TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "assistant_model_attempts",
+      "Table": "assistant_model_attempts",
+      "SQL": "CREATE TABLE assistant_model_attempts(id TEXT PRIMARY KEY,owner TEXT NOT NULL,generation INTEGER NOT NULL,turn_id TEXT NOT NULL,at INTEGER NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "assistant_observations",
+      "Table": "assistant_observations",
+      "SQL": "CREATE TABLE assistant_observations(sequence INTEGER PRIMARY KEY AUTOINCREMENT,turn_id TEXT NOT NULL,generation INTEGER NOT NULL,body TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "assistant_steering",
+      "Table": "assistant_steering",
+      "SQL": "CREATE TABLE assistant_steering(id TEXT PRIMARY KEY,turn_id TEXT NOT NULL,text TEXT NOT NULL,at INTEGER NOT NULL,acknowledged INTEGER NOT NULL DEFAULT 0)"
+    },
+    {
+      "Type": "table",
+      "Name": "chat_user_inbox",
+      "Table": "chat_user_inbox",
+      "SQL": "CREATE TABLE chat_user_inbox(sequence INTEGER PRIMARY KEY AUTOINCREMENT,request TEXT NOT NULL,message TEXT NOT NULL UNIQUE)"
+    },
+    {
+      "Type": "table",
+      "Name": "context_history",
+      "Table": "context_history",
+      "SQL": "CREATE TABLE context_history(sequence INTEGER PRIMARY KEY AUTOINCREMENT,classification TEXT NOT NULL,body TEXT NOT NULL,at INTEGER NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "events",
+      "Table": "events",
+      "SQL": "CREATE TABLE events(cursor INTEGER PRIMARY KEY AUTOINCREMENT,body TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "mail",
+      "Table": "mail",
+      "SQL": "CREATE TABLE mail(scope TEXT NOT NULL,id TEXT NOT NULL,body TEXT NOT NULL,state TEXT NOT NULL,sequence INTEGER PRIMARY KEY AUTOINCREMENT,UNIQUE(scope,id))"
+    },
+    {
+      "Type": "table",
+      "Name": "main_message_outbox",
+      "Table": "main_message_outbox",
+      "SQL": "CREATE TABLE main_message_outbox(sequence INTEGER PRIMARY KEY AUTOINCREMENT,message_id TEXT UNIQUE NOT NULL,body TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "messages",
+      "Table": "messages",
+      "SQL": "CREATE TABLE messages(id TEXT PRIMARY KEY,request_id TEXT UNIQUE,body TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "metadata",
+      "Table": "metadata",
+      "SQL": "CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)"
+    }
+  ],
+  "Rows": {
+    "assistant_configuration_requests": [],
+    "assistant_idle_compaction": [
+      "1,'',0,'','','{}',0,NULL,NULL"
+    ],
+    "assistant_instruction_file_export": [],
+    "assistant_model_attempts": [],
+    "assistant_observations": [],
+    "assistant_steering": [],
+    "chat_user_inbox": [],
+    "context_history": [],
+    "events": [],
+    "mail": [],
+    "main_message_outbox": [],
+    "messages": [],
+    "metadata": []
+  },
+  "UserVersion": 0,
+  "ApplicationID": 0
+}

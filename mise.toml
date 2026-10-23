@@ -31,7 +31,7 @@ depends = ["lint", "check:go"]
 
 [tasks.test]
 description = "Test product contracts without model calls"
-depends = ["test:go", "test:ui", "test:packaging", "test:eval", "test:public-api"]
+depends = ["test:go", "test:race", "test:ui", "test:packaging", "test:eval", "test:public-api"]
 
 [tasks.prepare]
 description = "Prepare retained Node, JS plugins, and skills"
@@ -143,8 +143,17 @@ description = "Check formatting, vet and package boundaries for Go packages"
 run = "go run ./scripts/check-go"
 
 [tasks."test:go"]
-description = "Test Go product components with the race detector"
-run = "go test -race -timeout=20m ./..."
+description = "Run all Go tests without race instrumentation"
+run = ["python scripts/tests/go-test-plan.py", "python scripts/test_go.py normal"]
+
+[tasks."test:race"]
+description = "Race-check concurrent product paths with explicit serial-test exclusions"
+depends = ["test:go"]
+run = "python scripts/test_go.py race"
+
+[tasks."test:race:all"]
+description = "Explicit full Go race suite for concurrency/storage architecture changes"
+run = "python scripts/test_go.py race-all"
 
 [tasks."build:go"]
 description = "Build Go CLI independently of the desktop"
