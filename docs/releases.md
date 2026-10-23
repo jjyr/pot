@@ -150,7 +150,11 @@ For manual publication, select the existing stable tag as the workflow ref as we
 as the source ref, so the environment sees an allowed tag. Only official publication
 calls can request writes. Linux/macOS publishers use `contents: write`; the GHCR
 publisher has `contents: read` and `packages: write`. Checks and packaging receive
-no signing secrets. GHCR must permit this repository's Actions token to publish
+no signing secrets. Ordinary macOS packaging also exercises the ad-hoc sealing
+path and checks final extracted signatures before native smoke, so a manual
+validation run can qualify that path without publication or Apple credentials.
+The official macOS workflow subsequently applies its explicitly selected release
+mode to those artifacts. GHCR must permit this repository's Actions token to publish
 `ghcr.io/jjyr/pot`; an existing package may require repository access to be granted.
 No extra registry secret is required for the configured GHCR path.
 

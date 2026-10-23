@@ -148,6 +148,8 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 60
     env:
+      # Validation always exercises ad-hoc sealing without release credentials.
+      POT_MACOS_RELEASE_MODE: unsigned
       POT_APP_VERSION: ${{ needs.source.outputs.version }}
       POT_BUILD_REVISION: ${{ needs.source.outputs.sha }}
       POT_UPDATE_PUBLIC_KEY: ${{ needs.source.outputs.public-key }}
@@ -163,6 +165,10 @@ jobs:
           install_args: go python node
       - run: mise exec -- python scripts/release "$POT_APP_VERSION" --app-only --output dist
       - run: mise exec -- python scripts/package-server --platform darwin-arm64 --output dist
+      - name: Exercise unsigned sealing before native smoke
+        run: |
+          mise exec -- python scripts/sign-macos-release "$POT_APP_VERSION" dist --mode unsigned
+          mise exec -- python scripts/generate-cask "$POT_APP_VERSION" dist
       - run: mise exec -- python scripts/tests/server-package-smoke.py dist/pot-go-${{ env.POT_APP_VERSION }}-darwin-arm64.tar.gz
       - run: ruby -c dist/pot.rb
       - run: mise exec -- python scripts/tests/macos-package-smoke.py dist/Pot-${{ env.POT_APP_VERSION }}-arm64.zip
