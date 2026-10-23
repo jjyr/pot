@@ -1,5 +1,6 @@
 import {createMermaidBlock} from './mermaid.mjs';
 import {createFileImage} from './file-image.mjs';
+import {assistantMentionSource,parseAssistantMention} from './composer-selectors.mjs';
 
 // Native DOM Markdown. Raw HTML is literal; link protocols are allowlisted.
 export function allowedLink(value) {
@@ -18,11 +19,12 @@ export function parseFileLink(value) {
 function element(tag,text) {const node=document.createElement(tag);if(text!==undefined)node.textContent=text;return node;}
 function inline(parent,source,depth=0,options={}) {
   if(depth>8){parent.append(document.createTextNode(source));return;}
-  const pattern=/(`+[^`\n]+`+|!\[[^\]\n]*\]\([^\s)]+\)|\*\*[^*\n]+\*\*|__[^_\n]+__|~~[^~\n]+~~|(?<!\*)\*[^*\n]+\*(?!\*)|\[[^\]\n]+\]\([^\s)]+\)|https?:\/\/[^\s<>]+)/g;
+  const pattern=new RegExp('(`+[^`\\n]+`+|'+assistantMentionSource+String.raw`|!\[[^\]\n]*\]\([^\s)]+\)|\*\*[^*\n]+\*\*|__[^_\n]+__|~~[^~\n]+~~|(?<!\*)\*[^*\n]+\*(?!\*)|\[[^\]\n]+\]\([^\s)]+\)|https?:\/\/[^\s<>]+)`,'gu');
   let offset=0;
   for(const match of source.matchAll(pattern)) {
-    parent.append(document.createTextNode(source.slice(offset,match.index)));const token=match[0];
+    parent.append(document.createTextNode(source.slice(offset,match.index)));const token=match[0],mention=parseAssistantMention(token);
     if(token.startsWith('`'))parent.append(element('code',token.replace(/^`+|`+$/g,'')));
+    else if(mention){const node=element('span','@'+mention.label);node.className='assistant-mention';node.title=mention.node+' · '+mention.agent;parent.append(node);}
     else if(token.startsWith('**')||token.startsWith('__')){const node=element('strong');inline(node,token.slice(2,-2),depth+1,options);parent.append(node);}
     else if(token.startsWith('~~')){const node=element('del');inline(node,token.slice(2,-2),depth+1,options);parent.append(node);}
     else if(token.startsWith('*')){const node=element('em');inline(node,token.slice(1,-1),depth+1,options);parent.append(node);}

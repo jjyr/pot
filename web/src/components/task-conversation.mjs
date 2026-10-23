@@ -39,8 +39,9 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   let record=initial,state,inputs=[],approvals=[],unavailable=false,connectionError='',busy=false,disposed=false,restored=false,frame=0,menuMode='actions',menuSignature='',fileSignature='',draftVersion=0;
   let forest,projection,restoringPosition=false;
   const reading=createReadingCursor(history,{active:()=>!disposed&&root.isConnected&&!!history.clientHeight,requestRender:scheduleFollow,changed:()=>{latest.hidden=reading.following;}});
-  const editor=bindComposer(input,{layout:work=>reading.layout(work),onInput:text=>{draftVersion++;onDraft(text);updateComposer();},onSend:submit,onCompositionEnd:updateComposer});
-  const completion=bindCompletions(input,{client:{scope:()=>scope,request:(path,options)=>client.request(path,options)},host:composerArea,locale,mobile:editor.mobile,id:`pot-task-${task.id}-completions`});
+  const editor=bindComposer(input,{layout:work=>reading.layout(work),onInput:text=>{draftVersion++;onDraft(completion.value());updateComposer();},onSend:submit,onCompositionEnd:updateComposer});
+  const completion=bindCompletions(input,{client:{scope:()=>scope,request:(path,options)=>client.request(path,options)},host:composerArea,locale,mobile:editor.mobile,id:`pot-task-${task.id}-completions`,setText:text=>editor.setValue(text)});
+  input.value='';completion.setValue(draft);
   const can=operation=>supportsCapability(record,operation);
   const linked=()=>record.info?.agent_link||task.agent_link;
   const active=()=>['queued','running','waiting','waiting_approval'].includes(record.info?.phase||task.phase);
@@ -55,15 +56,16 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     finally{busy=false;if(!disposed){updateComposer();renderMenu();}}
   }
   async function submit(){
-    if(!can('task.input')||busy||editor.composing||!input.value.trim()||connectionError)return;
-    const text=input.value,version=draftVersion;
-    await run(async()=>{await onSend(text);if(disposed)return;if(input.value===text&&version===draftVersion){editor.setValue('');onDraft('');}completion.reset();});
+    if(!can('task.input')||busy||editor.composing||!completion.value().trim()||connectionError)return;
+    const text=completion.value(),version=draftVersion;
+    await run(async()=>{await onSend(text);if(disposed)return;if(completion.value()===text&&version===draftVersion){completion.setValue('');onDraft('');}completion.reset();});
   }
-  form.onsubmit=event=>{event.preventDefault();if(!editor.mobile)submit();};send.onclick=()=>input.value.trim()?submit():run(onStop);
+  form.onsubmit=event=>{event.preventDefault();if(!editor.mobile)submit();};send.onclick=()=>completion.value().trim()?submit():run(onStop);
   function updateComposer(){return reading.layout(updateComposerLayout);}
   function updateComposerLayout(){
-    const running=active(),hasText=!!input.value.trim(),stop=running&&!hasText;
+    const running=active(),hasText=!!completion.value().trim(),stop=running&&!hasText;
     form.hidden=!can('task.input')&&!can('task.interrupt');input.readOnly=!can('task.input');input.setAttribute('aria-label',t('tasks.followupLabel'));input.placeholder=t('tasks.followupPlaceholder');
+    completion.refresh();
     send.hidden=false;send.replaceChildren(icon(stop?'stop':'send'));label(send,stop?tr('Stop task','停止任务'):t('tasks.sendFollowup'));
     send.disabled=busy||(!running&&!hasText)||!!connectionError||(stop?!can('task.interrupt'):!can('task.input'));retry.disabled=busy;
     footer.hidden=running||!can('task.input');footer.textContent=t(record.info?.archived?'tasks.archivedHint':'tasks.followupHint');

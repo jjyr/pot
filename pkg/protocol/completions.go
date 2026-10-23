@@ -17,9 +17,12 @@ func ValidLabel(value string) bool {
 }
 
 type Completion struct {
-	Token  string `json:"token"`
-	Label  string `json:"label"`
-	Detail string `json:"detail"`
+	Token   string `json:"token"`
+	Label   string `json:"label"`
+	Detail  string `json:"detail"`
+	Avatar  string `json:"avatar,omitempty"`
+	Offline bool   `json:"offline,omitempty"`
+	Local   bool   `json:"local,omitempty"`
 }
 
 func (c Completion) Matches(query string) bool {
