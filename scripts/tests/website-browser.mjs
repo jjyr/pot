@@ -32,6 +32,13 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
   assert.equal(await mark.getAttribute('aria-hidden'),'true');
   assert.equal(await mark.getAttribute('alt'),'');
   assert(await mark.evaluate(e=>{const rect=e.getBoundingClientRect();return e.complete&&e.naturalWidth===98&&e.naturalHeight===96&&rect.height===16&&Math.abs(rect.width/rect.height-98/96)<0.001;}),`${locale} official Invertocat loads and keeps its proportions at ${width}`);
+  assert.equal(await mark.getAttribute('height'),'16');
+  assert(await mark.evaluate(e=>{
+   const sheets=[...document.styleSheets],disabled=sheets.map(s=>s.disabled);
+   try{for(const sheet of sheets)sheet.disabled=true;const rect=e.getBoundingClientRect();return rect.height===16&&Math.abs(rect.width/rect.height-98/96)<0.001;}
+   finally{sheets.forEach((s,i)=>{s.disabled=disabled[i];});}
+  }),`${locale} Invertocat stays compact without the stylesheet at ${width}`);
+  assert(await page.locator('.github-star').evaluate(e=>e.getBoundingClientRect().height>=44&&getComputedStyle(e).cursor==='pointer'));
   assert(await page.locator('.github-star').getAttribute('aria-label'));
   if(width===390)assert(await page.evaluate(()=>{const star=document.querySelector('.github-star').getBoundingClientRect(),start=document.querySelector('.nav-cta').getBoundingClientRect();return star.right<=start.left&&Math.abs((star.top+star.bottom-start.top-start.bottom)/2)<2;}),`${locale} header actions share a row`);
   for(const [channel,id] of [['agent','agent-prompt'],['macos','brew-command'],['linux',null],['web','docker-image'],['web','server-command']]){
