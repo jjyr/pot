@@ -49,6 +49,7 @@ func (s *Service) Page(ctx context.Context, owner string, query Query) (protocol
 		}
 		info := plan.Info
 		info.Spec.Goal = ""
+		info.Spec.BeforeRun = nil
 		if info.NextAtMS != nil {
 			info.NextLabel = label(*info.NextAtMS, info.Spec)
 		}

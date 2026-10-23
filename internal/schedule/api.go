@@ -25,12 +25,15 @@ type Plan struct {
 	Generation uint64                `json:"generation"`
 }
 type Options struct {
+	Context context.Context
+	Probes  ProbeRunner
 	// SystemTimezone resolves the owning Control, never the destination Runtime.
 	SystemTimezone func() (string, error)
 	Tasks          *tasks.Service
 	Ready          func(context.Context, string) (bool, error)
 }
 type Service struct {
+	probes  probeLife
 	db      *sql.DB
 	options Options
 }

@@ -1,8 +1,8 @@
 # Scheduled tasks
 
 Each node owns persistent schedules, triggering, deduplication, task admission and
-notifications. Each trigger creates an independent local background task/Agent
-session. Main Agent manages schedules through tools without a resident model or
+notifications. Each admitted trigger creates an independent local background Task/Agent
+session, unless its optional before-run probe skips the occurrence. Main Agent manages schedules through tools without a resident model or
 sleep/cron commands.
 
 Assistant-scoped schedule UI/API calls enter the Agent Link operation port under
@@ -16,7 +16,7 @@ Chat / tasks -> schedules
              | Create, edit, pause, run now, delete
              ▼
 Local scheduler -> SQLite tasks.sqlite (schedules + triggers + task queue)
-             | Due: create one run transactionally
+             | Due: reserve occurrence; optional probe before Task creation
              ▼
 Shared task queue (default concurrency 8) -> independent Task / current machine execution policy
              │ final reply + .pot-artifacts/ files
@@ -141,3 +141,149 @@ At most 100 undeleted definitions, with the latest 100 ended/skipped records per
 API: paginated `GET /api/v1/schedules`; `POST /api/v1/schedules` accepts `request_id`, `action`, `schedule_id`, `spec`. Reuse the same write request ID for creation and management retries; reject changed content under the same ID. Run records link to task details and share task states/archive behavior.
 
 Tests and operating commands are documented in [Development](development.md#checks).
+
+## Before-run probes
+
+An optional `spec.before_run` runs one local script **before any Task or Agent
+session is created**. Use `manage_schedule` create/update or the schedule editor;
+both save the same definition. `get_schedule` includes the complete configuration
+and paginated hook results. List responses omit the script and goal. On update,
+omitting `before_run` preserves it; explicit `null` removes it. A script controls
+only whether this occurrence runs. It cannot change the goal, model, profile,
+machine, prompt or notification policy.
+
+```json
+{
+  "action": "update",
+  "schedule_id": "SCHEDULE_ID",
+  "spec": {
+    "title": "Release monitor",
+    "goal": "Report relevant new releases with evidence",
+    "kind": "cron",
+    "cron": "0 8-20 * * *",
+    "timezone": "Asia/Shanghai",
+    "before_run": {
+      "command": ["python3", "/path/to/check_updates.py"],
+      "cwd": "/path/to/project",
+      "timeout_seconds": 30
+    }
+  }
+}
+```
+
+Provide the other intended definition fields on update as usual. The command is
+an argv array (1–64 strings, at most 16 KiB including cwd), never implicit shell
+syntax. Explicit `bash`/`sh` argv is supported. Timeout defaults to 30 seconds;
+0 also selects that default; the maximum is 300 seconds. `cwd` is at most 4096
+bytes. Omitted/empty cwd uses the owning assistant's persistent execution workspace
+(`WORKSPACE/assistants/ASSISTANT_ID`); relative cwd resolves against that workspace,
+never the scheduler's process directory or a future Task directory. Symlinks are
+resolved before launch. The directory must already exist. Relative script/file
+arguments resolve in the resulting cwd. No tilde, environment or shell expansion
+is added.
+
+The saved machine must still be the node's local execution target. The current
+machine policy and execution admission apply. Protected policy uses the existing
+sandbox with cwd as its workspace and Runtime state excluded; full-access policy
+uses supervised host execution. Denied policy or missing sandbox support records
+a hook error, then follows normal Task admission. Saving a script grants no
+execution authority. Shell exact-command grants do not authorize this separate
+argv command. Probes do not ask for unattended host exceptions. They receive the
+executor's reviewed environment, without credential injection, model history,
+plugin credentials or login-shell initialization. The script itself is responsible
+for any data or credentials it explicitly reads under that machine policy.
+
+Stdin is a single bounded JSON object (at most 4 KiB), followed by EOF:
+
+```json
+{"schedule_id":"...","occurrence_id":"...","trigger":"scheduled","scheduled_at":"2026-10-16T00:00:00Z","timezone":"Asia/Shanghai"}
+```
+
+`occurrence_id` is stable across retries. `trigger` is `scheduled` or `manual`;
+`scheduled_at` is the original trigger instant in UTC RFC 3339, not script start
+time. Stdout must contain only one JSON object:
+
+```json
+{"status":"run"}
+```
+
+```json
+{"status":"skip","reason":"No new content"}
+```
+
+`status` is only `run` or `skip`; `reason` is an optional string of at most 1000
+UTF-8 bytes. Empty stdout, `{}`, or an object without `status` defaults to run.
+Unknown/duplicate fields, nulls, arrays, multiple objects, invalid UTF-8/JSON or
+other status values are errors. A nonzero exit remains an error even with valid
+skip stdout. Each output stream is bounded to 16 KiB; truncating either is an
+error. Stderr is diagnostic only: successful probes discard it; failed probes
+retain at most 2000 bytes of diagnostic information in history. Do not print
+secrets. Script output is untrusted display data and never enters the Task prompt.
+
+Only a successful, valid skip consumes this trigger without creating a Task,
+Agent session, model request, business checkpoint or assistant inbox event.
+It enters history as `skipped_hook`. A recurring plan remains enabled; a scheduled
+one-off occurrence is consumed even when skipped. Manual Run now also runs the
+probe and remains available while paused; it does not consume the regular next
+due time. Run-now responses with probes return `occurrence_id`; use detail/history
+to follow it. Retrying the same request ID returns its original receipt.
+
+```text
+scheduled / Run now
+    -> existing readiness, misfire, overlap and identity checks
+    -> transaction: reserve occurrence + advance scheduled next due
+    -> bounded async probe -> existing policy / executor / supervisor
+           | skip -> history only
+           | run or known error after cleanup
+           v
+       transaction: generation fence + enqueue original Task
+           -> existing Task queue -> final reply / artifacts / inbox policy
+```
+
+The scheduler runs at most eight probe workers concurrently without holding a DB
+transaction while a script executes. An unfinished probe reserves its schedule
+against other occurrences, including manual runs. For plans with probes, pause/resume, edit and delete
+advance the generation: an old result cannot create a new Task. Existing Tasks
+already created retain their ordinary lifecycle. Misfire and previous-active
+checks precede the probe; a skipped missed/overlapping trigger runs no script.
+
+Occurrences and immutable operation receipts survive restart. Completed receipts
+can finish the original occurrence without repeating the script. A receipt whose
+effects or process cleanup are unknown is **not** replayed, and cannot default to
+run: history becomes `hook_blocked`, with no Task. The unfinished reservation and
+existing operation-scope fence prevent subsequent scripts/Tasks from bypassing
+it, even after editing the plan. There is no automatic retry loop, replacement
+process or automatic assertion that the old process is gone. Reconciliation of
+the original execution/receipt is an operator recovery boundary; no new probe
+recovery UI is introduced. A model-selection/admission preparation failure after
+the probe also records a blocked occurrence for inspection. Ordinary timeout or
+execution errors continue only after the executor confirms process-tree cleanup.
+A crash before the executor's durable effect receipt can safely proceed to its
+first launch; a crash after that boundary requires a complete receipt or stays
+blocked. The tasks migration adds absent probe configuration and hook results
+without resetting next due times, generation, history or write digests. Migration
+`0027_task_reply_artifacts` retires scheduler baselines; probes do not maintain or update
+a scheduler comparison baseline.
+
+A minimal probe for a local source marker can be saved as
+`/path/to/check_updates.py` (replace paths with your own):
+
+```python
+import json
+from pathlib import Path
+import sys
+
+context = json.load(sys.stdin)
+# A separate collector maintains these files. Let the successful reporting
+# workflow update reported-version.txt; the probe does not consume the baseline.
+current = Path("current-version.txt").read_text().strip()
+reported = Path("reported-version.txt")
+if reported.exists() and reported.read_text().strip() == current:
+    print(json.dumps({"status": "skip", "reason": "No new version"}))
+else:
+    print(json.dumps({"status": "run"}))
+```
+
+Errors reading these files exit nonzero and therefore allow the normal Task to
+investigate. No built-in scanner, external subscription or report queue is added.
+These scripts are distinct from trusted lifecycle [event hooks](hooks.md).

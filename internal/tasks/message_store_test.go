@@ -65,7 +65,7 @@ ALTER TABLE plugin_background DROP COLUMN diagnostic;
 DROP INDEX agent_plugin_instance_state;
 ALTER TABLE plugin_background DROP COLUMN plugin_id;
 ALTER TABLE plugin_background DROP COLUMN connection_id;
-DROP TABLE run_workspaces; DROP TABLE task_runs; DROP TABLE task_events; DROP TABLE retired_execution_receipts; DROP TABLE journal_file_import; DROP TABLE task_submission_import; DROP INDEX task_outcomes_run; ALTER TABLE task_outcomes DROP COLUMN run_id; DROP TABLE task_node; ALTER TABLE retired_task_authority RENAME TO task_authority; DELETE FROM pot_migrations WHERE id >= '0006_';`, legacyHash)
+DROP TABLE schedule_probes; DROP TABLE run_workspaces; DROP TABLE task_runs; DROP TABLE task_events; DROP TABLE retired_execution_receipts; DROP TABLE journal_file_import; DROP TABLE task_submission_import; DROP INDEX task_outcomes_run; ALTER TABLE task_outcomes DROP COLUMN run_id; DROP TABLE task_node; ALTER TABLE retired_task_authority RENAME TO task_authority; DELETE FROM pot_migrations WHERE id >= '0006_';`, legacyHash)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -60,7 +60,7 @@ func (s *Service) openTasks() error {
 	if err != nil {
 		return err
 	}
-	s.Schedules, err = schedule.New(schedule.Options{Tasks: s.Tasks, Ready: s.taskReady})
+	s.Schedules, err = schedule.New(schedule.Options{Context: s.ctx, Probes: scheduleProbes{s}, Tasks: s.Tasks, Ready: s.taskReady})
 	if err != nil {
 		return err
 	}

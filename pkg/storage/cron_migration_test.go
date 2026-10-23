@@ -111,7 +111,7 @@ func TestCronSchedulesUpgrade(t *testing.T) {
 					t.Fatal(receipt, receiptDigest, err)
 				}
 				var run string
-				if err = db.QueryRow("SELECT body FROM schedule_runs").Scan(&run); err != nil || run != `{"id":"occurrence","generation":7,"state":"running","task_id":"task"}` {
+				if err = db.QueryRow("SELECT body FROM schedule_runs").Scan(&run); err != nil || run != `{"id":"occurrence","generation":7,"state":"running","task_id":"task","hook":null}` {
 					t.Fatal(run, err)
 				}
 			}

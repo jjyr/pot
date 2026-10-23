@@ -16,6 +16,9 @@ func (s *Service) Tick(ctx context.Context, at int64) error {
 	if at < 0 || uint64(at) > core.MaxSafeInteger {
 		return fmt.Errorf("invalid scheduler clock")
 	}
+	if err := s.resumeProbes(ctx); err != nil {
+		return err
+	}
 	rows, err := s.db.QueryContext(ctx, "SELECT assistant_id,id FROM schedules ORDER BY rowid")
 	if err != nil {
 		return err
@@ -70,7 +73,7 @@ func (s *Service) trigger(ctx context.Context, owner string, plan Plan, at int64
 	}
 	missed := at-due >= 60000 && plan.Info.Spec.Misfire == "skip"
 	var prepared resolved
-	if !busy && !missed {
+	if !busy && !missed && plan.Info.Spec.BeforeRun == nil {
 		hash, _ := core.HashJSON([]string{owner, occurrence})
 		prepared, err = s.resolve(ctx, owner, plan.Info.Spec, "schedule:"+hash)
 		if err != nil {
@@ -116,7 +119,11 @@ func (s *Service) trigger(ctx context.Context, owner string, plan Plan, at int64
 			if busy && !busyNow {
 				return nil
 			}
-			if _, err := s.launchTx(ctx, tx, owner, *current, due, occurrence, prepared); err != nil {
+			if current.Info.Spec.BeforeRun != nil {
+				if err := s.reserveProbeTx(ctx, tx, owner, *current, due, occurrence, "scheduled"); err != nil {
+					return err
+				}
+			} else if _, err := s.launchTx(ctx, tx, owner, *current, due, occurrence, prepared); err != nil {
 				return err
 			}
 		}
@@ -129,6 +136,7 @@ func (s *Service) trigger(ctx context.Context, owner string, plan Plan, at int64
 	})
 	if err == nil {
 		s.options.Tasks.Notify()
+		err = s.resumeProbes(ctx)
 	}
 	return err
 }
