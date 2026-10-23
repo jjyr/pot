@@ -7,11 +7,10 @@ import (
 	"testing"
 
 	"github.com/jjyr/pot/pkg/agentlink"
-	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 )
 
-func TestTaskTargetReceiverUpgradeReturnsOriginalAcceptedTask(t *testing.T) {
+func TestTaskReceiverUpgradePreservesRetriesAndCallerScope(t *testing.T) {
 	backend, second := linkBackendFixture(t)
 	source := agentControl(t, "caller")
 	receiver := &agentControlFixture{service: backend.s, endpoint: controlPeerEndpoint(backend.s)}
@@ -42,6 +41,19 @@ func TestTaskTargetReceiverUpgradeReturnsOriginalAcceptedTask(t *testing.T) {
 	if err != nil || retry.ID != first.ID || retry.Receiver.Address != request.Target {
 		t.Fatal("upgraded retry changed receiver", retry, err)
 	}
+	conflict := request
+	conflict.Text = "Changed intent"
+	if _, err = backend.Submit(ctx, conflict); !errors.Is(err, agentlink.ErrConflict) {
+		t.Fatal("changed request accepted", err)
+	}
+	outsider := request.From
+	outsider.NodeID = "other-caller"
+	if _, err = backend.Status(ctx, outsider, first.ID); !errors.Is(err, agentlink.ErrNotFound) {
+		t.Fatal("foreign caller read original task", err)
+	}
+	if _, err = backend.Cancel(ctx, outsider, first.ID); !errors.Is(err, agentlink.ErrNotFound) {
+		t.Fatal("foreign caller cancelled original task", err)
+	}
 	changed := request
 	changed.Target.AgentID = second
 	if _, err = backend.Submit(ctx, changed); !errors.Is(err, agentlink.ErrConflict) {
@@ -56,8 +68,9 @@ func TestTaskTargetReceiverUpgradeReturnsOriginalAcceptedTask(t *testing.T) {
 	if err = backend.s.integrationDB.QueryRow("SELECT payload FROM agent_link_received_tasks WHERE id=?", first.ID).Scan(&canonical); err != nil || canonical != string(encoded) {
 		t.Fatal(canonical, string(encoded), err)
 	}
-	var decoded protocol.CreateTask
-	if err = protocol.DecodeStrict([]byte(`{"request_id":"legacy","text":"work","link_id":"connection"}`), &decoded); err == nil {
-		t.Fatal("retired task selector accepted")
+	request.From = outsider
+	separate, err := backend.Submit(ctx, request)
+	if err != nil || separate.ID == first.ID || separate.Receiver.Address != first.Receiver.Address {
+		t.Fatal("callers shared an accepted task", separate, err)
 	}
 }

@@ -193,13 +193,19 @@ func TestUnconfirmedLocalLaunchInspectsOriginalAcrossRestart(t *testing.T) {
 func TestIdempotencyOwnershipGuidanceReferencesAndStop(t *testing.T) {
 	ctx := context.Background()
 	s, p, _ := fixture(t)
+	calls := 0
+	resolve := s.options.ResolveModel
+	s.options.ResolveModel = func(ctx context.Context, owner string, request protocol.CreateTask) (Selection, error) {
+		calls++
+		return resolve(ctx, owner, request)
+	}
 	request := protocol.CreateTask{RequestID: "create", Text: "work"}
 	record, err := s.AcceptLocal(ctx, "assistant", request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	again, err := s.AcceptLocal(ctx, "assistant", request)
-	if err != nil || again.Info.ID != record.Info.ID {
+	if err != nil || again.Info.ID != record.Info.ID || calls != 1 {
 		t.Fatal(again, err)
 	}
 	request.Text = "changed"

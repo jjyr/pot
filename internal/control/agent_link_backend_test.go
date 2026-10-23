@@ -55,44 +55,6 @@ func linkBackendFixture(t *testing.T) (potLinkBackend, string) {
 	}
 	return potLinkBackend{s}, second.ID
 }
-func TestPotLinkBackendDeduplicatesBeforeDefaultChangesAndScopesCaller(t *testing.T) {
-	b, second := linkBackendFixture(t)
-	ctx := context.Background()
-	directory, err := b.Directory(ctx)
-	if err != nil || directory.DefaultAssistant() != "main" {
-		t.Fatal(directory, err)
-	}
-	request := agentlink.TaskRequest{RequestID: "request-one", From: protocol.AgentRef{NodeID: "peer", Kind: "assistant", AgentID: "sender"}, Text: "One task\nKeep the original binding", Target: agentlink.AssistantTarget(b.s.options.RuntimeID, "main")}
-	first, err := b.Submit(ctx, request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = b.s.integrationDB.ExecContext(ctx, "UPDATE agent_link_node_settings SET default_assistant_id=? WHERE singleton=1", second); err != nil {
-		t.Fatal(err)
-	}
-	again, err := b.Submit(ctx, request)
-	if err != nil || again.ID != first.ID || again.Receiver.Address.AgentID != "main" {
-		t.Fatal(first, again, err)
-	}
-	conflict := request
-	conflict.Text = "changed"
-	if _, err = b.Submit(ctx, conflict); !errors.Is(err, agentlink.ErrConflict) {
-		t.Fatal("changed request accepted", err)
-	}
-	outsider := request.From
-	outsider.NodeID = "other-peer"
-	if _, err = b.Status(ctx, outsider, first.ID); !errors.Is(err, agentlink.ErrNotFound) {
-		t.Fatal("foreign caller read original task", err)
-	}
-	if _, err = b.Cancel(ctx, outsider, first.ID); !errors.Is(err, agentlink.ErrNotFound) {
-		t.Fatal("foreign caller cancelled original task", err)
-	}
-	request.From = outsider
-	separate, err := b.Submit(ctx, request)
-	if err != nil || separate.ID == first.ID || separate.Receiver.Address.AgentID != "main" {
-		t.Fatal(separate, err)
-	}
-}
 func TestPotLinkBackendDeletedDefaultDoesNotRetargetOrHideHistory(t *testing.T) {
 	b, second := linkBackendFixture(t)
 	ctx := context.Background()

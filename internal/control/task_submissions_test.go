@@ -33,7 +33,18 @@ func TestAgentToolsShareTaskPortAndCatalogueAcrossLocalAndPeer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ids = append(ids, accepted.(protocol.TaskInfo).ID)
+		info := accepted.(protocol.TaskInfo)
+		ids = append(ids, info.ID)
+		// Both routes retain accepted identity and reject changed intent.
+		retry, err := source.productCall(ctx, "main", []string{"local-request", "peer-request"}[i], "create_task", body)
+		if err != nil || retry.(protocol.TaskInfo).ID != info.ID {
+			t.Fatal(retry, err)
+		}
+		request.RequestID = []string{"local-request", "peer-request"}[i]
+		request.Text = "Changed task"
+		if _, err = source.CreateTask(ctx, "main", request); !errors.Is(err, agentlink.ErrConflict) {
+			t.Fatal("changed request accepted", err)
+		}
 	}
 	deadline := time.Now().Add(20 * time.Second)
 	for {
@@ -71,10 +82,38 @@ func TestAgentToolsShareTaskPortAndCatalogueAcrossLocalAndPeer(t *testing.T) {
 			t.Fatal(summary)
 		}
 	}
+	// Linked execution belongs to the receiver; only the caller's catalogue
+	// outcome and original assistant notification are projected back.
+	var count int
+	if err := source.Tasks.DB().QueryRow("SELECT COUNT(*) FROM task_runs WHERE task_id=?", ids[1]).Scan(&count); err != nil || count != 0 {
+		t.Fatal("caller launched peer work locally", count, err)
+	}
+	deadline = time.Now().Add(20 * time.Second)
+	for {
+		err := source.Tasks.DB().QueryRow(`SELECT COUNT(*) FROM agent_messages WHERE recipient='main' AND direction='in' AND json_extract(envelope,'$.kind')='task_result' AND json_extract(envelope,'$.result.task_id')=? AND json_extract(envelope,'$.to.agent_id')='main'`, ids[1]).Scan(&count)
+		if err != nil || count > 1 {
+			t.Fatal("duplicate result notification", count, err)
+		}
+		if count == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("peer result did not notify original assistant")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	local, _ := source.Tasks.Get(ctx, "main", ids[0])
 	peer, _ := source.Tasks.Get(ctx, "main", ids[1])
 	if local.Config == nil || local.Execution != nil || peer.Config != nil || peer.Launch != nil || peer.Execution.Receipt.ID == "" {
 		t.Fatal("adapter state leaked into generic task", local, peer)
+	}
+	if peer.Execution.Receipt.Result != "task result" || peer.Execution.Receipt.Receiver.Address != *requests[1].Target {
+		t.Fatal("peer result lost receiver binding", peer)
+	}
+	decisions := []protocol.TaskDisposition{{TaskID: ids[0], RunID: local.Info.RunID, Archived: true}, {TaskID: ids[1], RunID: peer.Info.RunID, Archived: true}}
+	archived, err := source.Tasks.SetDispositions(ctx, "main", decisions)
+	if err != nil || len(archived) != 2 || !archived[0].Archived || !archived[1].Archived {
+		t.Fatal(archived, err)
 	}
 }
 

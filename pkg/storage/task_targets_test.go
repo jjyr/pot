@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -16,7 +17,7 @@ func TestTaskTargetUpgradePinsReceiversAndFencesUnresolvedDefaults(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	nodeMigrationPrefix(t, db, TasksDatabase, 25)
+	nodeMigrationPrefix(t, db, TasksDatabase, 24)
 	execMigrationSQL(t, db, "INSERT INTO task_node VALUES(1,'local')")
 	from := targetAssistant("local", "owner")
 	for _, kind := range []string{"node", "assistant", "unresolved"} {
@@ -24,8 +25,8 @@ func TestTaskTargetUpgradePinsReceiversAndFencesUnresolvedDefaults(t *testing.T)
 		wire := executorUpgradeRequest{RequestID: kind, From: from, Text: request.Text}
 		receipt := map[string]any{"id": "receiver-task-" + kind, "run_id": "run-" + kind, "state": "completed", "result": "saved result"}
 		if kind == "node" {
-			request.Executor = "agent"
-			wire.Executor = "agent"
+			request.Executor = "codex"
+			wire.Executor = "codex"
 			receipt["execution"] = map[string]any{"address": protocol.AgentRef{NodeID: "remote", Kind: "task", AgentID: "receiver-task-node"}, "adapter": "fixture-agent", "name": "Agent"}
 		}
 		if kind == "assistant" {
@@ -86,7 +87,7 @@ func TestTaskTargetUpgradePinsReceiversAndFencesUnresolvedDefaults(t *testing.T)
 			receipt := targetField[targetDocument](execution, "receipt")
 			request := targetField[protocol.CreateTask](doc, "request")
 			wire := targetField[targetTaskRequest](execution, "request")
-			if targetField[int](doc, "schema_version") != 13 || !targetField[bool](execution, "notified") || !targetField[bool](execution, "stop_requested") || targetField[string](doc, "run_id") != "catalogue-run" {
+			if !targetField[bool](targetField[targetDocument](doc, "info"), "archived") || targetField[int](doc, "schema_version") != 13 || !targetField[bool](execution, "notified") || !targetField[bool](execution, "stop_requested") || targetField[string](doc, "run_id") != "catalogue-run" {
 				t.Fatal(raw)
 			}
 			if kind == "unresolved" {
@@ -161,40 +162,50 @@ func TestTaskTargetControlUpgradeBindsDirectoryCapabilitiesAndOriginalReceiver(t
 	}
 }
 
+// Assert rollback for each pending stage while upgrading to the final contract.
 func TestTaskTargetUpgradeFailureRollsBackBindingsAndCanRetry(t *testing.T) {
-	db, err := OpenSQLite(filepath.Join(t.TempDir(), "tasks.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	nodeMigrationPrefix(t, db, TasksDatabase, 25)
-	original := `{"schema_version":12,"request":{"machine_id":"local","request_id":"request","text":"work"},"origin":{"kind":"manual"}}`
-	if _, err = db.Exec("INSERT INTO tasks VALUES('owner','task','queued',1,?)", original); err != nil {
-		t.Fatal(err)
-	}
-	execMigrationSQL(t, db, `INSERT INTO task_writes VALUES('owner','request','original-digest','task'); INSERT INTO codex_link_jobs(id,caller,request_id,payload,data) VALUES('job','caller','request','{}','{"task":{"execution":{"address":{"node_id":"remote","kind":"task","agent_id":"job"}}},"request":{"executor":"agent","from":"corrupt"},"cleanup_uncertain":true}')`)
-	if err = Migrate(context.Background(), db, TasksDatabase); err == nil {
-		t.Fatal("corrupt request converted")
-	}
-	var body, digest string
-	if err = db.QueryRow("SELECT body FROM tasks WHERE id='task'").Scan(&body); err != nil || body != original {
-		t.Fatal("partially converted task", body, err)
-	}
-	if err = db.QueryRow("SELECT digest FROM task_writes").Scan(&digest); err != nil || digest != "original-digest" {
-		t.Fatal("partially converted binding", digest, err)
-	}
-	var receipts int
-	if err = db.QueryRow("SELECT count(*) FROM pot_migrations WHERE id LIKE '0026_%'").Scan(&receipts); err != nil || receipts != 0 {
-		t.Fatal(receipts, err)
-	}
-	execMigrationSQL(t, db, `UPDATE codex_link_jobs SET data=json_set(data,'$.request.from',json('{"node_id":"local","kind":"assistant","agent_id":"owner"}'))`)
-	for range 2 {
-		if err = Migrate(context.Background(), db, TasksDatabase); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err = db.QueryRow("SELECT json_extract(body,'$.node_id') FROM tasks WHERE id='task'").Scan(&body); err != nil || body != "local" {
-		t.Fatal(body, err)
+	for _, stage := range []int{25, 26} {
+		t.Run(fmt.Sprint(stage), func(t *testing.T) {
+			db, err := OpenSQLite(filepath.Join(t.TempDir(), "tasks.sqlite"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			nodeMigrationPrefix(t, db, TasksDatabase, 24)
+			original := `{"schema_version":12,"request":{"executor":"codex","machine_id":"local","request_id":"request","text":"work"},"origin":{"kind":"manual"}}`
+			if _, err = db.Exec("INSERT INTO tasks VALUES('owner','task','queued',1,?)", original); err != nil {
+				t.Fatal(err)
+			}
+			execMigrationSQL(t, db, `INSERT INTO task_writes VALUES('owner','request','original-digest','task'); INSERT INTO codex_link_jobs(id,caller,request_id,payload,data) VALUES('job','caller','request','{}','{"task":{"execution":{"address":{"node_id":"remote","kind":"task","agent_id":"job"}}},"request":{"executor":"codex","from":"corrupt"},"cleanup_uncertain":true}')`)
+			if stage == 25 {
+				execMigrationSQL(t, db, `UPDATE codex_link_jobs SET payload='{"executor":"codex","from":"corrupt"}'`)
+			} else if err = migrateThrough(db, TasksDatabase, 25); err != nil {
+				t.Fatal(err)
+			}
+			var before, beforeDigest, body, digest string
+			if err = db.QueryRow("SELECT body,digest FROM tasks JOIN task_writes ON task_id=id").Scan(&before, &beforeDigest); err != nil {
+				t.Fatal(err)
+			}
+			if err = Migrate(context.Background(), db, TasksDatabase); err == nil {
+				t.Fatal("corrupt request converted")
+			}
+			if err = db.QueryRow("SELECT body,digest FROM tasks JOIN task_writes ON task_id=id").Scan(&body, &digest); err != nil || body != before || digest != beforeDigest {
+				t.Fatal("partially converted task or binding", body, digest, err)
+			}
+			var receipts int
+			if err = db.QueryRow("SELECT count(*) FROM pot_migrations WHERE id LIKE ?", fmt.Sprintf("%04d_%%", stage)).Scan(&receipts); err != nil || receipts != 0 {
+				t.Fatal("committed failed migration", receipts, err)
+			}
+			execMigrationSQL(t, db, `UPDATE codex_link_jobs SET payload='{"executor":"codex","request_id":"request","from":{"node_id":"local","kind":"assistant","agent_id":"owner"},"text":"work"}',data=json_set(data,'$.request.from',json('{"node_id":"local","kind":"assistant","agent_id":"owner"}'))`)
+			for range 2 {
+				if err = Migrate(context.Background(), db, TasksDatabase); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err = db.QueryRow("SELECT json_extract(body,'$.node_id') FROM tasks WHERE id='task'").Scan(&body); err != nil || body != "local" {
+				t.Fatal(body, err)
+			}
+		})
 	}
 }
 

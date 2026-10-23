@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func TestFirstExecutionTimeSurvivesResumeAndRestart(t *testing.T) {
+func TestExecutionStartAndCleanupProofSurviveResumeAndRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "tasks.sqlite")
 	j, err := OpenJournal(path, "runtime", "boot")
@@ -51,6 +51,9 @@ func TestFirstExecutionTimeSurvivesResumeAndRestart(t *testing.T) {
 	if err != nil || duplicate.StartedAtMS != started {
 		t.Fatal("resume/duplicate acceptance reset start", duplicate, err)
 	}
+	if err := j.RecordCleanup(ctx, "runtime", "task", "run"); err != nil {
+		t.Fatal(err)
+	}
 	if err := j.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -60,8 +63,11 @@ func TestFirstExecutionTimeSurvivesResumeAndRestart(t *testing.T) {
 	}
 	defer j.Close()
 	restored, err := j.Inspect(ctx, "runtime", "task", "run")
-	if err != nil || restored.StartedAtMS != started || restored.Phase != RecoveryRequired {
-		t.Fatal("restart lost the original start", restored, err)
+	if err != nil || restored.StartedAtMS != started || restored.Phase != RecoveryRequired || !restored.CleanupConfirmed {
+		t.Fatal("restart lost execution start or cleanup proof", restored, err)
+	}
+	if err := j.ReconcileRecovered(ctx, "runtime", "task", "run", nil, true); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -192,39 +198,5 @@ func TestWorkerCannotSelectAnotherTarget(t *testing.T) {
 	bound, err := BindTarget(raw, target)
 	if err != nil || string(bound) != string(raw) {
 		t.Fatal(string(bound), err)
-	}
-}
-
-func TestRestartRetainsOriginalCleanupProof(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "tasks.sqlite")
-	j, err := OpenJournal(path, "runtime", "original-boot")
-	if err != nil {
-		t.Fatal(err)
-	}
-	l := launchFixture(t)
-	if _, err = j.Accept(ctx, l); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = j.Claim(ctx, l.ControlID, l.TaskID, l.RunID); err != nil {
-		t.Fatal(err)
-	}
-	if err = j.RecordCleanup(ctx, l.ControlID, l.TaskID, l.RunID); err != nil {
-		t.Fatal(err)
-	}
-	if err = j.Close(); err != nil {
-		t.Fatal(err)
-	}
-	j, err = OpenJournal(path, "runtime", "next-boot")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer j.Close()
-	run, err := j.Inspect(ctx, l.ControlID, l.TaskID, l.RunID)
-	if err != nil || run.Phase != RecoveryRequired || !run.CleanupConfirmed {
-		t.Fatal(run, err)
-	}
-	if err = j.ReconcileRecovered(ctx, l.ControlID, l.TaskID, l.RunID, nil, true); err != nil {
-		t.Fatal(err)
 	}
 }

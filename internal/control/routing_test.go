@@ -10,7 +10,6 @@ import (
 
 	"github.com/jjyr/pot/internal/tasks"
 	"github.com/jjyr/pot/pkg/core"
-	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 )
 
@@ -76,31 +75,6 @@ func TestRoutingCASQuotaFencesAndCompleteCatalog(t *testing.T) {
 	summary := s.modelContext()
 	if len(summary) > 4100 || !strings.Contains(summary, "model-004") || strings.Contains(summary, "model-079") {
 		t.Fatal("routing summary is unbounded or lost configured models")
-	}
-}
-func TestTaskAdmissionStaysLocalAndKeepsOriginalReceipt(t *testing.T) {
-	ctx := context.Background()
-	calls := 0
-	spec := taskConfig(t)
-	service, err := tasks.Open(t.TempDir()+"/tasks.sqlite", tasks.Options{NodeID: "local", ResolveModel: func(context.Context, string, protocol.CreateTask) (tasks.Selection, error) {
-		calls++
-		return tasks.Selection{Config: spec, Plugins: []string{}}, nil
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer service.Close()
-	if _, err := service.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "remote", Target: &protocol.AgentRef{NodeID: "remote", Kind: "assistant", AgentID: "main"}, Text: "Work"}); err == nil || calls != 0 {
-		t.Fatal("remote machine reached model selection", err, calls)
-	}
-	request := protocol.CreateTask{RequestID: "admit", Text: "Work"}
-	first, err := service.AcceptLocal(ctx, "main", request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := service.AcceptLocal(ctx, "main", request)
-	if err != nil || first.Info.ID != second.Info.ID || second.NodeID != "local" || calls != 1 {
-		t.Fatal(first, second, calls, err)
 	}
 }
 func taskConfig(t *testing.T) core.ResolvedSpec {

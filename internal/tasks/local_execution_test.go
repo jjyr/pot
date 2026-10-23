@@ -43,6 +43,13 @@ func TestPreparedTaskCannotEnqueueOnAnotherNode(t *testing.T) {
 	s, executor, _ := fixture(t)
 	ctx := context.Background()
 	request := protocol.CreateTask{RequestID: "remote", Target: &protocol.AgentRef{NodeID: "another-node", Kind: "assistant", AgentID: "assistant"}, Text: "work"}
+	s.options.ResolveModel = func(context.Context, string, protocol.CreateTask) (Selection, error) {
+		t.Fatal("remote target reached local model selection")
+		return Selection{}, nil
+	}
+	if _, err := s.AcceptLocal(ctx, "assistant", request); err == nil {
+		t.Fatal("remote target reached local admission")
+	}
 	err := storage.Transaction(ctx, s.DB(), func(tx *sql.Tx) error {
 		_, err := s.EnqueueTx(ctx, tx, "assistant", request, selection(t), protocol.TaskOrigin{Kind: "manual"}, 1)
 		return err
