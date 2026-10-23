@@ -14,7 +14,7 @@ await page.route('https://api.github.com/repos/jjyr/pot',async route=>{
  starRequests++;
  if(starMode==='network')return route.abort();
  if(starMode==='timeout')return;
- await route.fulfill({status:starMode==='limited'?403:200,contentType:'application/json',body:JSON.stringify({stargazers_count:starMode==='invalid'?'wrong':starMode==='zero'?0:1234})});
+ await route.fulfill({status:starMode==='missing'?404:starMode==='limited'?403:200,contentType:'application/json',body:JSON.stringify({stargazers_count:starMode==='invalid'?'wrong':starMode==='zero'?0:1234})});
 });
 await page.addInitScript(()=>{Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.copied=text;}}});});
 for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
@@ -27,6 +27,11 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  for(const width of [1280,390]){
   await page.setViewportSize({width,height:width===390?844:900});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} overflow at ${width}`);
+  const mark=page.locator('.github-star svg');
+  assert.equal(await mark.count(),1);
+  assert.equal(await mark.getAttribute('aria-hidden'),'true');
+  assert(await mark.evaluate(e=>{const rect=e.getBoundingClientRect(),style=getComputedStyle(e);return rect.width===16&&rect.height===16&&style.fill===style.color&&style.stroke==='none';}),`${locale} GitHub Mark is filled and keeps its proportions at ${width}`);
+  assert(await page.locator('.github-star').getAttribute('aria-label'));
   if(width===390)assert(await page.evaluate(()=>{const star=document.querySelector('.github-star').getBoundingClientRect(),start=document.querySelector('.nav-cta').getBoundingClientRect();return star.right<=start.left&&Math.abs((star.top+star.bottom-start.top-start.bottom)/2)<2;}),`${locale} header actions share a row`);
   for(const [channel,id] of [['agent','agent-prompt'],['macos','brew-command'],['linux',null],['web','docker-image'],['web','server-command']]){
    await page.locator(`[data-install="${channel}"]`).click();
@@ -88,7 +93,7 @@ assert(await page.locator('#install-web .web-docker').isVisible());
 console.log('Static language switch preserves selected installation channel');
 await page.setViewportSize({width:1280,height:900});
 if(!installOnly){
-for(const mode of ['ok','limited','network','invalid','zero','timeout']){
+for(const mode of ['ok','missing','limited','network','invalid','zero','timeout']){
  starMode=mode;
  await page.evaluate(()=>localStorage.removeItem('pot-github-stars-v1'));
  const failure=mode==='timeout'?page.waitForEvent('requestfailed',{predicate:r=>r.url()==='https://api.github.com/repos/jjyr/pot',timeout:5000}):null;
