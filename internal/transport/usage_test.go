@@ -122,6 +122,15 @@ func TestBrowserReadRoutesReachApplication(t *testing.T) {
 			if w.Code != http.StatusOK || !json.Valid(w.Body.Bytes()) {
 				t.Fatalf("browser/application route mismatch: %d %s", w.Code, w.Body.String())
 			}
+			if path == "/api/v1/machines" {
+				var machines []struct {
+					RuntimeID string `json:"runtime_id"`
+					Name      string `json:"name"`
+				}
+				if err := json.Unmarshal(w.Body.Bytes(), &machines); err != nil || len(machines) != 1 || machines[0].RuntimeID != "local" || machines[0].Name == "" {
+					t.Fatal("browser machine inventory must remain an array with local identity and display metadata", w.Body.String(), err)
+				}
+			}
 			// Check persisted data and the policy consumed by the frontend editor.
 			if path == "/api/v1/usage/requests?scope=main&timezone=UTC&offset=0" {
 				var page struct{ Items []usage.RequestRecord }
