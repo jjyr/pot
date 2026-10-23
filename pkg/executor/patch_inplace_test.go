@@ -212,3 +212,28 @@ func TestPatchInPlaceReportsRestorationFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPatchAtomicErrorsDoNotSwitchToInPlace(t *testing.T) {
+	for _, failure := range []error{unix.EBUSY, unix.EACCES, unix.EROFS} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			path, original := inplaceFixture(t)
+			err := replacePatchAtomically(path, []byte("replacement\n"), 0750, func(from, to string) error {
+				return &os.LinkError{Op: "rename", Old: from, New: to, Err: failure}
+			})
+			if !errors.Is(err, failure) {
+				t.Fatal("atomic failure not preserved", err)
+			}
+			info, err := os.Stat(path)
+			if err != nil || !os.SameFile(info, original.file) {
+				t.Fatal("failed atomic patch changed identity", err)
+			}
+			if data, err := os.ReadFile(path); err != nil || string(data) != string(original.data) {
+				t.Fatal("failed atomic patch changed contents", string(data), err)
+			}
+			entries, err := os.ReadDir(filepath.Dir(path))
+			if err != nil || len(entries) != 1 {
+				t.Fatal("temporary file left behind", entries, err)
+			}
+		})
+	}
+}

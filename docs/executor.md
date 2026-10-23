@@ -116,6 +116,21 @@ or non-directory workdir rejects the command without creating files.
 permissions determine accessible targets. Exact file grants allow in-place writes;
 directory grants also permit atomic replacement. Protected patches run in a dedicated
 Go worker under the same OS policy, so direct Go file writes do not bypass it.
+Before any mutation, the worker selects a strategy for each target from a private
+executor-supplied snapshot of the workspace and configured sandbox write roots.
+Only an existing regular-file content update covered by an exact file grant and
+no directory write grant selects in-place writing. Creates, move destinations,
+workspace/directory writes and host `ApplyPatch` calls retain atomic replacement;
+deletes still remove directory entries and cannot use in-place permission.
+Unknown or unresolvable grants never select in-place writing. The snapshot is
+strategy information, not an OS permission override or model-selectable mode.
+For patch launches, file write entries already covered by a directory grant are
+omitted from the mount list; redundant Linux file binds would otherwise obstruct
+atomic replacement. This does not add any writable paths.
+Once selected, a strategy's errors are returned without trying another strategy,
+including `EBUSY`, permission and read-only filesystem errors. There is no
+temporary-file probe or mount-table inference of authorization.
+
 On Linux, a writable file bind mount cannot be replaced by `rename` (`EBUSY`),
 even when its hidden parent accepts temporary files. Updates to existing files
 can instead write through the granted inode. This path pins and verifies the

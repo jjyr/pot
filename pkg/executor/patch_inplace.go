@@ -9,18 +9,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"golang.org/x/sys/unix"
 )
-
-func patchMountBusy(err error) bool {
-	return runtime.GOOS == "linux" && errors.Is(err, unix.EBUSY)
-}
-
-func patchTempDenied(err error) bool {
-	return os.IsPermission(err) || errors.Is(err, unix.EROFS)
-}
 
 // A file-only grant cannot replace a directory entry. Keep the inode and its
 // metadata, and never create/truncate a path before verifying the preflight

@@ -16,6 +16,7 @@ type patchEdit struct {
 	content           *string
 	mode              os.FileMode
 	original          *patchOriginal
+	inPlace           bool
 }
 
 type patchOriginal struct {
@@ -65,11 +66,15 @@ func textLines(text string) []string {
 }
 
 // ApplyPatch validates all paths and hunks before the first mutation. Each write
-// is fsynced. Directory write permission permits atomic replacement; a file-only
-// grant permits a verified in-place write, which is not crash-atomic.
+// is fsynced and atomically replaced. Protected workers use applyPatch with a
+// trusted write scope to select verified, non-crash-atomic file-only updates.
 // Multi-file patches are not transactions and
 // OS errors during commit must be reported as partial effects.
 func ApplyPatch(workspace, patch string) (string, error) {
+	return applyPatch(workspace, patch, patchWriteScope{})
+}
+
+func applyPatch(workspace, patch string, scope patchWriteScope) (string, error) {
 	if len(patch) > patchLimit || !utf8.ValidString(patch) {
 		return "", errors.New("patch exceeds 4 MiB or invalid UTF-8")
 	}
@@ -259,6 +264,11 @@ func ApplyPatch(workspace, patch string) (string, error) {
 			seen[path] = true
 		}
 	}
+	// Select every write strategy before the first mutation. Scope comes only
+	// from the executor's private worker input, never from patch/tool arguments.
+	for i := range edits {
+		edits[i].inPlace = scope.inPlace(edits[i])
+	}
 	report := []string{}
 	for _, edit := range edits {
 		// Recheck before mutation because another tool may have changed the workspace
@@ -283,11 +293,13 @@ func ApplyPatch(workspace, patch string) (string, error) {
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 			return strings.Join(report, "\n"), err
 		}
-		original := edit.original
-		if edit.destination != "" {
-			original = nil
+		var err error
+		if edit.inPlace {
+			err = writePatchInPlace(target, []byte(*edit.content), edit.original)
+		} else {
+			err = writeAtomic(target, []byte(*edit.content), edit.mode)
 		}
-		if err := writeAtomic(target, []byte(*edit.content), edit.mode, original); err != nil {
+		if err != nil {
 			return strings.Join(report, "\n"), err
 		}
 		if edit.destination != "" {
@@ -299,12 +311,13 @@ func ApplyPatch(workspace, patch string) (string, error) {
 	}
 	return strings.Join(report, "\n"), nil
 }
-func writeAtomic(path string, data []byte, mode os.FileMode, original *patchOriginal) error {
+func writeAtomic(path string, data []byte, mode os.FileMode) error {
+	return replacePatchAtomically(path, data, mode, os.Rename)
+}
+
+func replacePatchAtomically(path string, data []byte, mode os.FileMode, rename func(string, string) error) error {
 	file, err := os.CreateTemp(filepath.Dir(path), ".pot-patch-")
 	if err != nil {
-		if patchTempDenied(err) && original != nil {
-			return writePatchInPlace(path, data, original)
-		}
 		return err
 	}
 	defer os.Remove(file.Name())
@@ -321,12 +334,7 @@ func writeAtomic(path string, data []byte, mode os.FileMode, original *patchOrig
 	if err := file.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(file.Name(), path); err != nil {
-		// Linux exact-file write grants are bind mounts. Their hidden parent
-		// can accept a private temporary file, but the mount cannot be replaced.
-		if patchMountBusy(err) && original != nil {
-			return writePatchInPlace(path, data, original)
-		}
+	if err := rename(file.Name(), path); err != nil {
 		return err
 	}
 	directory, err := os.Open(filepath.Dir(path))

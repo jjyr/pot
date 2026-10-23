@@ -105,6 +105,10 @@ func TestRealSandboxExternalPatchRequiresWritePermission(t *testing.T) {
 		t.Fatal("denied patch changed the host file")
 	}
 	e.options.SandboxWrite = []string{path}
+	beforeExact, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := e.Execute(t.Context(), r, nil); err != nil {
 		t.Fatal("exact file grant did not allow external patch", err)
 	}
@@ -113,6 +117,9 @@ func TestRealSandboxExternalPatchRequiresWritePermission(t *testing.T) {
 	}
 	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0600 {
 		t.Fatal("exact file patch changed permissions", info, err)
+	}
+	if after, err := os.Stat(path); err != nil || !os.SameFile(beforeExact, after) {
+		t.Fatal("exact file grant did not use in-place update", err)
 	}
 	// A failed hunk must not reach the in-place commit path.
 	if _, err := e.Execute(t.Context(), r, nil); err == nil {
@@ -201,12 +208,52 @@ func TestRealSandboxExternalPatchRequiresWritePermission(t *testing.T) {
 	if data, _ := os.ReadFile(path); string(data) != "atomic\n" {
 		t.Fatal("atomic patch did not reach host file")
 	}
+	for _, grants := range [][]string{{path, outside}, {outside, path}} {
+		before, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.options.SandboxWrite = grants
+		r.Args["patch"] = "*** Begin Patch\n*** Update File: " + path + "\n@@\n-atomic\n+atomic\n*** End Patch"
+		if _, err := e.Execute(t.Context(), r, nil); err != nil {
+			t.Fatal("combined directory/file grants failed", grants, err)
+		}
+		after, err := os.Stat(path)
+		if err != nil || os.SameFile(before, after) {
+			t.Fatal("directory/file grants did not retain atomic replacement", grants, err)
+		}
+	}
 	r.Args["patch"] = "*** Begin Patch\n*** Update File: " + sibling + "\n@@\n-old\n+changed\n*** End Patch"
 	r.Mode = "host"
 	if _, err := e.Execute(t.Context(), r, nil); err != nil {
 		t.Fatal("authorized host mode could not edit the external file", err)
 	}
 }
+func TestRealSandboxWorkspacePatchWithExactGrantIsAtomic(t *testing.T) {
+	e, r := sandboxFixture(t)
+	path := filepath.Join(r.CWD, "workspace-file")
+	if err := os.WriteFile(path, []byte("old\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.options.SandboxWrite = []string{path}
+	r.Operation = "apply_patch"
+	r.Args = map[string]any{"patch": "*** Begin Patch\n*** Update File: workspace-file\n@@\n-old\n+new\n*** End Patch"}
+	if _, err := e.Execute(t.Context(), r, nil); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(path)
+	if err != nil || os.SameFile(before, after) {
+		t.Fatal("workspace write did not retain atomic replacement", err)
+	}
+	if data, err := os.ReadFile(path); err != nil || string(data) != "new\n" {
+		t.Fatal("workspace patch did not change actual contents", string(data), err)
+	}
+}
+
 func TestRealSandboxTTYAndInput(t *testing.T) {
 	e, r := sandboxFixture(t)
 	result := call(t, e, r, "exec_command", map[string]any{"cmd": "test -t 0 && echo terminal; read -r value; stty size; echo received:$value", "tty": true, "yield_time_ms": 20})

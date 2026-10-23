@@ -16,17 +16,22 @@ import (
 
 const PatchWorkerArgument = "--internal-patch-worker"
 
+// Private executor-to-worker input, supplied on stdin before workload startup.
+// WriteScope is not a model-visible tool argument or an OS permission override.
+type patchWorkerRequest struct {
+	Workspace  string          `json:"workspace"`
+	Patch      string          `json:"patch"`
+	WriteScope patchWriteScope `json:"write_scope"`
+}
+
 // ServePatchWorker performs only the supplied authorized patch under its filesystem sandbox. Hosts
 // dispatch the private worker argument before parsing their public CLI flags.
 func ServePatchWorker(input io.Reader, output io.Writer) error {
-	var request struct {
-		Workspace string `json:"workspace"`
-		Patch     string `json:"patch"`
-	}
+	var request patchWorkerRequest
 	if err := json.NewDecoder(io.LimitReader(input, patchLimit+1024*1024)).Decode(&request); err != nil {
 		return err
 	}
-	report, err := ApplyPatch(request.Workspace, request.Patch)
+	report, err := applyPatch(request.Workspace, request.Patch, request.WriteScope)
 	result := struct {
 		Report string `json:"report"`
 		Error  string `json:"error,omitempty"`
@@ -48,7 +53,8 @@ func (e *Engine) sandboxPatch(ctx context.Context, r Request) (string, error) {
 	command := exec.Command(worker[0], worker[1:]...)
 	command.Dir = r.CWD
 	command.Env = sandbox.Environment()
-	body, err := json.Marshal(map[string]string{"workspace": r.CWD, "patch": r.Args["patch"].(string)})
+	scope, write := patchScope(r.CWD, e.options.SandboxWrite)
+	body, err := json.Marshal(patchWorkerRequest{Workspace: r.CWD, Patch: r.Args["patch"].(string), WriteScope: scope})
 	if err != nil {
 		return "", err
 	}
@@ -56,7 +62,7 @@ func (e *Engine) sandboxPatch(ctx context.Context, r Request) (string, error) {
 	var output, diagnostic bytes.Buffer
 	command.Stdout = &output
 	command.Stderr = &diagnostic
-	finish, err := e.sandboxLauncher().Prepare(ctx, command, r.CWD, e.options.SandboxRead, e.options.SandboxWrite, false)
+	finish, err := e.sandboxLauncher().Prepare(ctx, command, r.CWD, e.options.SandboxRead, write, false)
 	if err != nil {
 		return "", &PreparationError{Cause: err}
 	}
