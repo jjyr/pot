@@ -3,20 +3,14 @@ package storage
 import (
 	"context"
 	"testing"
-	"testing/fstest"
 )
 
 func TestTurnCompletionUpgradePreservesExistingTurn(t *testing.T) {
-	baseline, err := migrationFiles.ReadFile("migrations/conversation/0001_initial_schema.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
 	for _, receipt := range []string{"null", `{"turn":{"request":{"request_id":"original"}},"phase":"succeeded","error":""}`} {
 		t.Run(receipt, func(t *testing.T) {
 			db := migrationDB(t)
 			ctx := context.Background()
-			files := fstest.MapFS{"migrations/conversation/0001_initial_schema.sql": &fstest.MapFile{Data: baseline}}
-			if err := migrateDatabase(ctx, db, ConversationDatabase, files); err != nil {
+			if err := migrateDatabase(ctx, db, ConversationDatabase, initialSchema(t, ConversationDatabase)); err != nil {
 				t.Fatal(err)
 			}
 			turn := `{"owner":"main","request":{"request_id":"original"},"state":"running"}`

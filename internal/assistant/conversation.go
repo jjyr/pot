@@ -331,10 +331,11 @@ func OpenConversation(path string, options ConversationOptions) (*Conversation, 
 		c.finalizing = true
 	}
 	go c.idleLoop()
+	pending := c.completion
 	go func() {
 		defer close(c.done)
 		driver := Driver{Manager: options.Manager, Services: c}
-		if pending := c.completion; pending != nil {
+		if pending != nil {
 			if err := driver.finish(ctx, pending.Turn.Request, pending.result()); err != nil {
 				return
 			}
@@ -645,7 +646,9 @@ func (c *Conversation) Cancel(ctx context.Context, request protocol.CancelTurn) 
 	}
 	previous := *c.turn
 	c.turn.Cancelling = true
-	if c.turn.State == "waiting" {
+	// A failed completion write still belongs to the driver's retry loop.
+	// Record cancellation intent without retiring the turn underneath that loop.
+	if c.turn.State == "waiting" && !c.finalizing {
 		c.turn = nil
 		if err := c.appendTurnMetadataLocked(ctx, map[string]string{key: request.UserMessageID}); err != nil {
 			c.turn = &previous
@@ -675,9 +678,26 @@ func (c *Conversation) Cancel(ctx context.Context, request protocol.CancelTurn) 
 		}
 		return c.startNextUserLocked(ctx)
 	}
-	if err := c.appendTurnMetadataLocked(ctx, map[string]string{key: request.UserMessageID}); err != nil {
+	metadata := map[string]string{key: request.UserMessageID}
+	var completion *turnCompletion
+	if c.turn.State == "waiting" && c.completion == nil {
+		// Commit the cancellation and its terminal receipt together, so a restart
+		// before the driver's next retry cannot strand a cancelling waiting turn.
+		pending := turnCompletion{Turn: *c.turn, Phase: execution.Cancelled, Error: context.Canceled.Error()}
+		raw, err := json.Marshal(pending)
+		if err != nil {
+			c.turn = &previous
+			return err
+		}
+		metadata["conversation.completion"] = string(raw)
+		completion = &pending
+	}
+	if err := c.appendTurnMetadataLocked(ctx, metadata); err != nil {
 		c.turn = &previous
 		return err
+	}
+	if completion != nil {
+		c.completion = completion
 	}
 	if c.runCancel != nil {
 		c.runCancel()
@@ -1006,6 +1026,9 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 		return c.startNextUserLocked(ctx)
 	}
 
+	if c.completion != nil {
+		result = c.completion.result()
+	}
 	if IsWaiting(result.Err) && !c.turn.Cancelling {
 		c.turn.State = "waiting"
 		if err := c.appendTurnLocked(ctx); err != nil {
@@ -1015,6 +1038,9 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 		c.lastError = result.Err
 		c.changedLocked()
 		return nil
+	}
+	if IsWaiting(result.Err) && c.turn.Cancelling {
+		result = execution.Result{Phase: execution.Cancelled, Err: context.Canceled}
 	}
 	if err := c.recordCompletionLocked(ctx, result); err != nil {
 		return err

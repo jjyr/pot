@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"path/filepath"
@@ -236,5 +237,159 @@ func TestCompletionFailureShutdownIsBounded(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("retry backoff blocked shutdown")
+	}
+}
+
+func TestWaitingCompletionFailureCancellationAdvancesNextInput(t *testing.T) {
+	for _, queued := range []bool{false, true} {
+		t.Run(map[bool]string{false: "send-after-cancel", true: "queued-before-cancel"}[queued], func(t *testing.T) {
+			ctx := context.Background()
+			var calls, preparations, acknowledgements atomic.Int32
+			options := completionOptions(t, "boot", &calls)
+			options.OnFinished = func(_ context.Context, request protocol.SendMessage, result execution.Result) error {
+				if request.RequestID == "first" {
+					acknowledgements.Add(1)
+					if result.Phase != execution.Cancelled {
+						t.Errorf("cancelled waiting invocation acknowledged as %s", result.Phase)
+					}
+				}
+				return nil
+			}
+			normal := options.Prepare
+			var c *Conversation
+			options.Prepare = func(ctx context.Context, thread core.Thread, request core.TurnRequest) (RunOptions, error) {
+				if request.RequestID != "first" {
+					return normal(ctx, thread, request)
+				}
+				preparations.Add(1)
+				// Keep rejecting the allowance-wait write through every retry.
+				// Cancellation and later turns can still persist normally.
+				_, err := c.store.DB().Exec(`CREATE TRIGGER fail_waiting_completion BEFORE INSERT ON events
+ WHEN json_extract(NEW.body,'$.type')='turn'
+ AND json_extract(NEW.body,'$.turn.state')='waiting'
+ AND json_extract(NEW.body,'$.turn.cancelling')=0
+ BEGIN SELECT RAISE(ABORT,'waiting completion unavailable'); END`)
+				if err != nil {
+					return RunOptions{}, err
+				}
+				return RunOptions{}, protocol.APIError{Code: "pot_token_limit", Message: "allowance unavailable"}
+			}
+			var err error
+			c, err = OpenConversation(filepath.Join(t.TempDir(), "conversation.sqlite"), options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			first, err := c.Send(ctx, protocol.SendMessage{RequestID: "first", ConversationID: "main", Text: "first"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitSnapshot(t, c, func(s protocol.Snapshot) bool {
+				return s.Turn != nil && s.Turn.State == "unknown"
+			})
+			c.mu.Lock()
+			finishErr := c.finishError
+			c.mu.Unlock()
+			if finishErr == nil || !strings.Contains(finishErr.Error(), "waiting completion unavailable") {
+				t.Fatal("did not inject waiting persistence failure", finishErr)
+			}
+			next := protocol.SendMessage{RequestID: "next", ConversationID: "main", Text: "next"}
+			if queued {
+				if _, err = c.Send(ctx, next); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cancel := protocol.CancelTurn{RequestID: "cancel-first", UserMessageID: first.MessageID}
+			if err = c.Cancel(ctx, cancel); err != nil {
+				t.Fatal(err)
+			}
+			if !queued {
+				if _, err = c.Send(ctx, next); err != nil {
+					t.Fatal(err)
+				}
+			}
+			finished := waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil && calls.Load() > 0 })
+			if calls.Load() != 1 || preparations.Load() != 1 || acknowledgements.Load() != 1 || finished.Agent.Detail != nil {
+				t.Fatal("replayed waiting invocation or retained completion failure", calls.Load(), preparations.Load(), acknowledgements.Load(), finished.Agent)
+			}
+			replies := protocol.ProjectChatReplies(finished.Messages, finished.Turn)
+			if len(replies) != 2 || replies[0].State != "cancelled" || replies[1].State != "completed" {
+				t.Fatal(replies)
+			}
+			if err := c.Cancel(ctx, cancel); err != nil {
+				t.Fatal("lost cancellation receipt", err)
+			}
+			if receipt, _, err := c.store.Get(ctx, "conversation.completion"); err != nil || receipt != "null" {
+				t.Fatal("retained completion journal", receipt, err)
+			}
+		})
+	}
+}
+
+func TestWaitingCancellationIsDurableBeforeCompletionRetry(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "conversation.sqlite")
+	var calls atomic.Int32
+	options := completionOptions(t, "first-boot", &calls)
+	c, err := OpenConversation(path, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	request := protocol.SendMessage{RequestID: "first", ConversationID: "main", Text: "first"}
+	// Stage an invocation at its completed allowance boundary without waking the
+	// driver. This gives a deterministic restart before its next completion retry.
+	c.mu.Lock()
+	c.turn = &savedTurn{Owner: "main", BootID: "first-boot", Generation: c.thread.Generation, Request: request, UserMessageID: "first-user", State: "running"}
+	raw, _ := json.Marshal(c.turn)
+	err = c.putMessageLocked(ctx, protocol.Message{ID: "first-user", ConversationID: "main", Role: protocol.User, RequestID: &request.RequestID, Text: request.Text, Status: protocol.Accepted}, map[string]string{"conversation.turn": string(raw)})
+	c.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = c.store.DB().Exec(`CREATE TRIGGER fail_waiting_completion BEFORE INSERT ON events
+ WHEN json_extract(NEW.body,'$.type')='turn'
+ AND json_extract(NEW.body,'$.turn.state')='waiting'
+ AND json_extract(NEW.body,'$.turn.cancelling')=0
+ BEGIN SELECT RAISE(ABORT,'waiting completion unavailable'); END`); err != nil {
+		t.Fatal(err)
+	}
+	err = c.FinishTurn(ctx, request, execution.Result{Phase: execution.Failed, Err: protocol.APIError{Code: "pot_token_limit"}})
+	if err == nil || !strings.Contains(err.Error(), "waiting completion unavailable") {
+		t.Fatal("did not inject completion failure", err)
+	}
+	c.FinalizationFailed(err)
+	if err = c.Cancel(ctx, protocol.CancelTurn{RequestID: "cancel-first", UserMessageID: "first-user"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = c.Send(ctx, protocol.SendMessage{RequestID: "next", ConversationID: "main", Text: "next"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	options = completionOptions(t, "second-boot", &calls)
+	var acknowledgements atomic.Int32
+	options.OnFinished = func(_ context.Context, request protocol.SendMessage, result execution.Result) error {
+		if request.RequestID == "first" {
+			acknowledgements.Add(1)
+			if result.Phase != execution.Cancelled {
+				t.Errorf("lost durable cancellation: %+v", result)
+			}
+		}
+		return nil
+	}
+	c, err = OpenConversation(path, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	finished := waitSnapshot(t, c, func(s protocol.Snapshot) bool { return s.Turn == nil && calls.Load() > 0 })
+	if calls.Load() != 1 || acknowledgements.Load() != 1 {
+		t.Fatal("lost cancellation or replayed original execution", calls.Load(), acknowledgements.Load())
+	}
+	replies := protocol.ProjectChatReplies(finished.Messages, finished.Turn)
+	if len(replies) != 2 || replies[0].State != "cancelled" || replies[1].State != "completed" {
+		t.Fatal(replies)
 	}
 }

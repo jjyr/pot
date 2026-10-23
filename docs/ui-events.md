@@ -92,6 +92,9 @@ user inputs remain queued. Once persistence succeeds, the original outcome and
 queued work advance normally. The private completion journal also supports
 restart without replaying model or tool work. If the durable cursor cannot
 advance during a storage failure, reset frames can refresh the retained cursor.
+Cancelling an allowance-waiting turn during completion recovery records the
+intent under its original identity. The completion loop persists cancellation
+and acknowledges it before admitting the next queued input.
 Lifecycle placeholders without a durable message sequence stay after their
 input's last loaded output or tool call. Later messages follow them; lifecycle
 array order and subsequent refreshes do not move old outcomes to the chat tail.
