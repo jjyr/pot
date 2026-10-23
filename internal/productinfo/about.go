@@ -47,6 +47,7 @@ func Read(directory string) (About, error) {
 		{"IBM Plex Sans", "FrontendFontLicense.txt", true},
 		{"Frontend icons", "FrontendIconLicense.txt", true},
 		{"Pele diagrams and bundled icons", "FrontendDiagramLicense.txt", true},
+		{"TanStack Virtual", "FrontendVirtualizerLicense.txt", true},
 		{"models.dev catalog and artwork", "ModelDirectoryLicense.txt", true},
 		{"Node.js and bundled dependencies", "node/LICENSE", true},
 		{"SRT sandbox and dependencies", "sandbox/THIRD-PARTY-NOTICES.txt", true},
@@ -80,7 +81,7 @@ func Read(directory string) (About, error) {
 		out.Licenses = append(out.Licenses, Notice{Name: file.name, Text: string(data)})
 	}
 	// All required notices must be present before the UI labels the set available.
-	required := map[string]bool{"Pot": false, "Go dependencies and runtime": false, "IBM Plex Sans": false, "Frontend icons": false, "Pele diagrams and bundled icons": false, "models.dev catalog and artwork": false, "Node.js and bundled dependencies": false}
+	required := map[string]bool{"Pot": false, "Go dependencies and runtime": false, "IBM Plex Sans": false, "Frontend icons": false, "Pele diagrams and bundled icons": false, "TanStack Virtual": false, "models.dev catalog and artwork": false, "Node.js and bundled dependencies": false}
 	for _, notice := range out.Licenses {
 		if _, ok := required[notice.Name]; ok {
 			required[notice.Name] = true

@@ -149,24 +149,47 @@ task rows do not turn following into a saved historical reading position. Only
 paused reading restores a message or task anchor; restoration callbacks are
 scoped to the originating navigation generation.
 
-Main Chat mounts measured windows around the viewport with pixel overscan.
-The overscan covers two viewports in each direction and grows ahead of fast
-scrolling by up to two more. A window prepares incoming rows before retiring
-outgoing rows and retains up to 32 detached rows within a 2 MiB estimate of message
-content and DOM text for nearby returns. Data eviction and owner changes retire
-these rows too. Detached
-media release their leases; reconnecting them uses the shared resource cache.
+Main Chat and Task transcripts use the vendored TanStack Virtual Core, following
+its [Chat guide](https://tanstack.com/virtual/latest/docs/chat). Stable message
+keys, `anchorTo: 'end'` and conditional append following preserve the visible
+message through historical prepends and streaming growth. Pot retains the normal
+message DOM/CSS and renders virtual gaps as flow spacers. Twelve extra items on
+each side cover fast reversals. Native scroll notifications commit the range
+synchronously instead of waiting behind the ordinary animation-frame queue.
+Held iOS corrections may give the first mounted row a negative offset; a
+negative leading spacer margin preserves it without a native scroll write.
+
+Only newly mounted or updated rows need synchronous initial measurement;
+TanStack batches subsequent ResizeObserver size changes into an animation frame;
+offset corrections and their rendered ranges commit together before paint.
+Item margins are included in measured heights. Width changes invalidate
+mounted measurements; each cached owner retains its bounded height estimates.
+The adapter commits the measured range once more after initial measurement,
+rather than repeatedly scanning and measuring all rows until pixel offsets settle.
+Pot's logical cursor resolves explicit destinations, nested reading anchors and
+layout changes outside the virtual list into positioning requests. TanStack is
+the sole scroll writer: the cursor and position resolver never assign
+`scrollTop`. Native writes acknowledge their resulting offset to the cursor, so
+they do not become reader gestures. Deliberate wheel, pointer, touch or keyboard
+input cancels outstanding scroll commands. Touch dragging and the momentum tail
+suspend new positioning requests while TanStack arbitrates resize corrections;
+a native pointer cancellation that hands the gesture to scrolling does not end
+reading input. No-op native writes are skipped and do not acknowledge a reader's
+pending native movement. Downward gestures also trigger newer-page prefetch at
+the cached history boundary, where the browser can no longer produce a delta.
+
+Expanded tools have range-only child virtualizers sharing the chat scroller;
+only the outer window performs automatic scroll compensation. Focus and selected
+text pin mounted rows through a custom range extractor. A window retains up to
+32 detached rows within a 2 MiB estimate of message content and DOM text for nearby
+returns. Data eviction and owner changes retire these rows too. Detached media
+release their leases; reconnecting them uses the shared resource cache.
 Scroll-only updates reuse the conversation's message projection and tool forest;
-new data, send state and connectivity invalidate that projection. Task transcripts
-likewise reuse their projection until their next update. Collapsed tools build
-their summaries and approval controls first; output and raw JSON render only when
-their respective disclosures open.
-Expanded tool children have their own windows sharing the chat scroller. Resize
-observers update placeholders; message-ID anchors compensate for prepend,
-attachment decoding, disclosure, viewport and font changes. Focus and selected
-text pin mounted rows. Recycling disconnects observers and releases attachment
-leases, while shared viewers/downloads retain their own leases. Rendering merges
-wakeups into animation frames; unchanged replies retain their Markdown nodes.
+new data, send state and connectivity invalidate that projection. Collapsed tools
+build their summaries and approval controls first; output and raw JSON render
+only when their disclosures open. Recycling releases observers and attachment
+leases, while shared viewers/downloads retain their own leases. Unchanged replies
+retain their Markdown nodes.
 
 Main Chat and Task conversations share one reading-cursor controller per history.
 The cursor owns Latest following, an anchored reading position (stable row key
@@ -178,7 +201,11 @@ destinations. Conversation and page caches retain the logical cursor, including
 Task history, rather than inferring reading intent from restored pixel offsets.
 
 Composers publish synchronous layout transactions without knowing the history's
-reading mode. Input resizing, draft/reference/attachment controls, row measurement,
+reading mode. While following Latest, input growth shrinks the history viewport
+and moves the latest message upward by the same amount; clearing the draft
+restores the space and keeps Latest at the bottom. Historical reading retains
+its top message anchor instead of following the latest message. Input resizing,
+draft/reference/attachment controls, row measurement,
 history paging and viewport reflow preserve the existing cursor and project it
 back before paint. This includes a textarea temporarily shrinking and returning
 to the same height within one input event, which need not deliver a resize

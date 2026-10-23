@@ -1,145 +1,202 @@
-// Measured DOM windows share the chat scroller, including nested tool lists.
-// Data, disclosure memory and send lifecycle live outside recycled DOM nodes.
-export function createMessageWindow({scroller, host, render, dispose, requestRender, compensate, heights = new Map()}) {
-  let rows = [], mounted = new Map(), closed = false, previousTop = 0, previousTime = 0, previousFrame = -1, travel = 0;
-  const cached = new Map();
-  const sources = new WeakMap(), weights = new WeakMap();
+import {Virtualizer, observeElementRect, observeElementOffset, defaultRangeExtractor} from '../vendor/tanstack-virtual-core.mjs';
+
+// TanStack owns item offsets, end anchoring and dynamic size corrections. Pot
+// owns the rendered nodes, disclosures and the logical reading destination.
+export function createMessageWindow({scroller, host, render, dispose, requestRender, reading, heights = new Map(), nested = false}) {
+  let rows = [], mounted = new Map(), closed = false, suspended = false, updating = false, dirty = false;
+  let width = 0, margin = 0, target = null, targetIndex = -1, restore, reportRect;
+  const cached = new Map(), pending = new Set(), spacers = [];
+  const indexesByKey = new Map(), indexesByID = new Map();
+  const margins = new WeakMap(), sources = new WeakMap(), weights = new WeakMap();
   let cachedBytes = 0;
-  const spacers = [];
   function retainedBytes(record) {
     const source = sources.get(record);
     let bytes = weights.get(source);
     if (bytes === undefined) {
       bytes = 512;
-      const pending = [source], seen = new Set();
-      while (pending.length && bytes <= 2 * 1024 * 1024) {
-        const value = pending.pop();
+      const queue = [source], seen = new Set();
+      while (queue.length && bytes <= 2 * 1024 * 1024) {
+        const value = queue.pop();
         if (typeof value === 'string') bytes += value.length * 2;
         else if (value && typeof value === 'object' && !seen.has(value)) {
           seen.add(value); bytes += 64;
           if (Array.isArray(value)) bytes += value.length * 8;
-          if (bytes <= 2 * 1024 * 1024) for (const child of Object.values(value)) pending.push(child);
+          if (bytes <= 2 * 1024 * 1024) for (const child of Object.values(value)) queue.push(child);
         }
       }
       weights.set(source, bytes);
     }
     return bytes + record.row.textContent.length * 2;
   }
-  function measure() {
-    let changed = false;
-    for (const [key, record] of mounted) {
-      changed = record.childrenWindow?.measure() || changed;
-      const style = getComputedStyle(record.row), box = record.row.getBoundingClientRect();
-      const height = box.height + parseFloat(style.marginBottom || 0) + parseFloat(style.marginTop || 0);
-      if (box.height > 0 && Math.abs((heights.get(key) ?? -1) - height) > .5) { heights.set(key, height); changed = true; }
+  function pinnedIndexes(range) {
+    const indexes = new Set(defaultRangeExtractor(range)), selection = getSelection();
+    // A navigation target must exist before the first paint, even while the
+    // native scroll event still reports the previous conversation's offset.
+    if(target){
+      if(targetIndex>=0)for(const i of defaultRangeExtractor({...range,startIndex:targetIndex,endIndex:targetIndex}))indexes.add(i);
     }
-    return changed;
+    for (const record of mounted.values()) {
+      if (record.row.contains(document.activeElement) || selection?.rangeCount && !selection.isCollapsed && (record.row.contains(selection.anchorNode) || record.row.contains(selection.focusNode))) {const index=indexesByKey.get(record.row.dataset.windowKey);if(index!==undefined)indexes.add(index);}
+    }
+    return [...indexes].filter(index=>index>=0&&index<rows.length).sort((a,b)=>a-b);
   }
-  const observer = new ResizeObserver(() => {
-    // display:none has no usable measurement. Margins alone must never replace
-    // the last visible height while a conversation is behind another page.
-    const changed = measure();
+  function sizeOf(row, entry) {
+    const height = entry?.borderBoxSize?.[0]?.blockSize ?? row.getBoundingClientRect().height;
+    // Hidden conversations and collapsed ancestors have no usable measurement.
+    const key = row.dataset.windowKey;
+    if (!height) return heights.get(key) ?? 70;
+    let extra = margins.get(row);
+    if (extra === undefined) {
+      const style = getComputedStyle(row);
+      extra = parseFloat(style.marginTop || 0) + parseFloat(style.marginBottom || 0);
+      margins.set(row, extra);
+    }
+    const size = height + extra;
+    heights.delete(key); heights.set(key, size);
     while (heights.size > 1280) heights.delete(heights.keys().next().value);
-    if (changed && !closed) requestRender(true);
-  });
-  const estimate=item=>heights.get(item.viewKey)??(item.role==='user'?120:item.role==='tool'?70:180);
-  function set(next,{anchor,target}={}) {
-    let shift=0;
-    if(anchor){
-      const root=rows.find(item=>item.id===anchor||[...(mounted.get(item.viewKey)?.row.querySelectorAll('article.message')||[])].some(row=>row.dataset.messageId===anchor));
-      if(root&&next.some(item=>item.viewKey===root.viewKey)){
-        const prefix=list=>{let offset=0;for(const item of list){if(item.viewKey===root.viewKey)return offset;offset+=estimate(item);}return offset;};
-        shift=prefix(next)-prefix(rows);
-      }
-    }
-    rows = next;
-    const viewport = scroller.getBoundingClientRect(), box = host.getBoundingClientRect();
-    let start = viewport.top - box.top + shift;
-    const now = performance.now(), stamp = document.timeline?.currentTime ?? now;
-    // All measurement passes in one frame share the same look-ahead. Anchor
-    // compensation must not replace the reader's direction mid-layout.
-    if (stamp !== previousFrame) {
-      const elapsed = now - previousTime;
-      travel = elapsed > 0 && elapsed < 200 ? (scroller.scrollTop - previousTop) / elapsed * 120 : 0;
-      previousTop = scroller.scrollTop; previousTime = now; previousFrame = stamp;
-    }
-    if (!rows.length) { previousTime = 0; previousFrame = -1; travel = 0; }
-    if (target) {
-      let offset = 0;
-      for (const item of rows) {
-        if (item.id === target.id || item.viewKey === target.id) { start = offset - (target.offset ?? scroller.clientHeight / 3); break; }
-        offset += estimate(item);
-      }
-      if (target.end) start = Math.max(0, offset - scroller.clientHeight);
-    }
-    const overscan = Math.max(600, scroller.clientHeight * 2);
-    const ahead = Math.min(scroller.clientHeight * 2, Math.abs(travel));
-    const end = start + scroller.clientHeight + overscan + (travel > 0 ? ahead : 0);
-    start -= overscan + (travel < 0 ? ahead : 0);
-    let offset = 0, gap = 0, spacerIndex = 0;
-    const selected = new Set(), layout = [];
-    const selection = getSelection();
-    for (const item of rows) {
-      const key = item.viewKey, record = mounted.get(key);
-      const height = heights.get(key) ?? (item.role === 'user' ? 120 : item.role === 'tool' ? 70 : 180);
-      const pinned = record && (record.row.contains(document.activeElement) || selection?.rangeCount && !selection.isCollapsed && (record.row.contains(selection.anchorNode) || record.row.contains(selection.focusNode)));
-      if (offset + height >= start && offset <= end || pinned) {
-        if (gap) { layout.push({gap}); gap = 0; }
-        selected.add(key); layout.push({item});
-      } else gap += height;
-      offset += height;
-    }
-    if (gap) layout.push({gap});
-    // Prepare incoming rows before retiring the old window. A nearby return
-    // reuses its prose/disclosures; disconnected media release their own leases.
-    for (const part of layout) if (part.item) {
-      const key = part.item.viewKey, retained = cached.get(key);
-      if (retained) { cached.delete(key); cachedBytes -= retained.bytes; }
-      part.record = render(part.item, mounted.get(key) || retained?.record);
-      sources.set(part.record, part.item);
-    }
-    const available = new Set(rows.map(item => item.viewKey));
-    for (const [key, record] of mounted) if (!selected.has(key)) {
-      observer.unobserve(record.row); record.row.remove(); mounted.delete(key);
-      if (available.has(key)) {
-        const bytes = retainedBytes(record);
-        cached.set(key, {record, bytes}); cachedBytes += bytes;
-      } else dispose(record);
-    }
-    for (const [key, value] of cached) if (!available.has(key)) { cached.delete(key); cachedBytes -= value.bytes; dispose(value.record); }
-    while (cached.size > 32 || cachedBytes > 2 * 1024 * 1024) {
-      const [key, value] = cached.entries().next().value;
-      cached.delete(key); cachedBytes -= value.bytes; dispose(value.record);
-    }
-    let index = 0;
-    for (const part of layout) {
-      let element;
-      if (part.gap) {
-        element = spacers[spacerIndex];
-        if (!element) { element = document.createElement('div'); element.className = 'message-window-spacer'; element.setAttribute('aria-hidden', 'true'); spacers[spacerIndex] = element; }
-        spacerIndex++; element.style.height = `${part.gap}px`;
-      } else {
-        const key = part.item.viewKey;
-        const record = part.record;
-        mounted.set(key, record); element = record.row; element.dataset.windowKey = key; observer.observe(element);
-      }
-      if (host.children[index] !== element) host.insertBefore(element, host.children[index] || null);
-      index++;
-    }
-    while (host.children.length > index) host.lastElementChild.remove();
-    if(shift)compensate(shift);
+    return size;
   }
-  return {set, measure, layout(next,{anchor,target,restore}={}) {
-    // Resolve estimates, mount the destination and measure it in the same paint.
-    // The bound keeps pathological content from monopolising the UI thread;
-    // later media/font resizes still use the ordinary observer/anchor path.
-    let top = scroller.scrollTop;
-    for (let pass = 0; pass < 6; pass++) {
-      set(next,{anchor,target});
-      const changed = measure();
-      restore?.();
-      if (!changed && Math.abs(scroller.scrollTop - top) < .5) break;
-      top = scroller.scrollTop;
+  const virtualizer = new Virtualizer({
+    count: 0, getScrollElement:()=>scroller,
+    getItemKey:index=>rows[index].viewKey,
+    estimateSize:index=>heights.get(rows[index].viewKey)??(rows[index].role==='user'?120:rows[index].role==='tool'?70:180),
+    observeElementRect(instance,callback){reportRect=callback;return observeElementRect(instance,callback);},
+    observeElementOffset,
+    indexAttribute:'data-virtual-index', measureElement:sizeOf,
+    useAnimationFrameWithResizeObserver:true,
+    rangeExtractor:pinnedIndexes, overscan:12,
+    anchorTo:nested?'start':'end', followOnAppend:!nested, scrollEndThreshold:1,
+    initialOffset:()=>scroller.scrollTop,
+    scrollToFn(offset,{adjustments=0}) {
+      // The only writer for a conversation's native scroll position. Every
+      // command and resize correction is arbitrated by TanStack first.
+      if(nested||closed||suspended)return;
+      const top=Math.max(0,Math.min(offset+adjustments,scroller.scrollHeight-scroller.clientHeight));
+      if(Math.abs(top-scroller.scrollTop)>.5){scroller.scrollTop=top;reading?.acceptScroll();}
+    },
+    onChange(_instance, sync) {
+      if (closed || suspended) return;
+      dirty = true;
+      if (!updating) {
+        // Native scrolling and resize corrections must commit their ranges in
+        // the same frame as the offset change, retaining existing nodes.
+        if (sync && rows.length && host.isConnected && host.getClientRects().length) update();
+        else requestRender();
+      }
+    },
+  });
+  if (nested) virtualizer.shouldAdjustScrollPositionOnItemSizeChange=()=>false;
+  const unmount = virtualizer._didMount();
+  const unbindScroll = nested?undefined:reading?.bindScroll(({mode,top})=>{
+    if(closed||suspended||reading.touchScrolling)return;
+    if(mode==='latest'){
+      if(scroller.scrollHeight-scroller.clientHeight-scroller.scrollTop>.5)virtualizer.scrollToEnd();
+    }else if(Math.abs(top-scroller.scrollTop)>.5)virtualizer.scrollToOffset(top);
+  });
+  const cancel = ()=>{virtualizer.cancelScroll();target=null;targetIndex=-1;};
+  const gestures=nested?[]:['wheel','touchstart','pointerdown','keydown'];
+  for(const name of gestures)scroller.addEventListener(name,cancel,{passive:true});
+
+  function draw() {
+    const items = virtualizer.getVirtualItems(), selected = new Set(items.map(item=>item.key));
+    const layout = []; let offset=0, spacerIndex=0;
+    for(const item of items){
+      const start=item.start-margin;
+      if(start>offset+.5||!layout.length&&start<-.5)layout.push({gap:start-offset});
+      const message=rows[item.index], retained=cached.get(item.key), old=mounted.get(item.key)||retained?.record;
+      if(retained){cached.delete(item.key);cachedBytes-=retained.bytes;}
+      const changed=!old||sources.get(old)!==message;
+      const record=render(message,old);
+      sources.set(record,message);
+      record.row.dataset.windowKey=item.key;record.row.dataset.virtualIndex=String(item.index);
+      layout.push({record});if(changed||!record.row.isConnected)pending.add(record);
+      offset=item.end-margin;
     }
-  }, close() { closed = true; observer.disconnect(); for (const record of mounted.values()) dispose(record); for (const value of cached.values()) dispose(value.record); mounted.clear(); cached.clear(); cachedBytes = 0; for (const spacer of spacers) spacer.remove(); }};
+    const total=virtualizer.getTotalSize();
+    if(total>offset+.5)layout.push({gap:total-offset});
+    for(const [key,record]of mounted)if(!selected.has(key)){
+      virtualizer.observer.unobserve(record.row);virtualizer.elementsCache.delete(key);
+      record.childrenWindow?.suspend();
+      record.row.remove();mounted.delete(key);pending.delete(record);
+      const bytes=retainedBytes(record);cached.set(key,{record,bytes});cachedBytes+=bytes;
+    }
+    while(cached.size>32||cachedBytes>2*1024*1024){const [key,value]=cached.entries().next().value;cached.delete(key);cachedBytes-=value.bytes;dispose(value.record);}
+    let index=0;
+    for(const part of layout){
+      let element;
+      if(part.gap){element=spacers[spacerIndex];if(!element){element=document.createElement('div');element.className='message-window-spacer';element.setAttribute('aria-hidden','true');spacers[spacerIndex]=element;}spacerIndex++;element.style.height=`${Math.max(0,part.gap)}px`;element.style.marginTop=`${Math.min(0,part.gap)}px`;}
+      else{element=part.record.row;mounted.set(element.dataset.windowKey,part.record);}
+      if(host.children[index]!==element)host.insertBefore(element,host.children[index]||null);index++;
+    }
+    while(host.children.length>index)host.lastElementChild.remove();
+  }
+  function measure() {
+    let changed=false;
+    for(const record of mounted.values())changed=record.childrenWindow?.measure()||changed;
+    // Only new/updated rows need a synchronous first measurement. Subsequent
+    // size changes arrive through TanStack's batched ResizeObserver entries.
+    for(const record of pending){
+      if(!record.row.isConnected)continue;
+      const index=Number(record.row.dataset.virtualIndex),before=virtualizer.itemSizeCache.get(record.row.dataset.windowKey);
+      virtualizer.measureElement(record.row);
+      changed=before!==virtualizer.itemSizeCache.get(record.row.dataset.windowKey)||changed;
+    }
+    pending.clear();return changed;
+  }
+  function configure(next) {
+    const viewport=scroller.getBoundingClientRect(),box=host.getBoundingClientRect();
+    const nextMargin=scroller.scrollTop+box.top-viewport.top;
+    const nextWidth=host.clientWidth;
+    const rect={width:scroller.clientWidth,height:scroller.clientHeight};
+    if(virtualizer.scrollRect?.width!==rect.width||virtualizer.scrollRect?.height!==rect.height)reportRect?.(rect);
+    if(width&&nextWidth&&width!==nextWidth){marginsForMounted();virtualizer.measure();for(const record of mounted.values())pending.add(record);}
+    if(nextWidth)width=nextWidth;
+    if(rows!==next){
+      indexesByKey.clear();indexesByID.clear();
+      next.forEach((item,index)=>{indexesByKey.set(item.viewKey,index);indexesByID.set(item.id,index);});
+    }
+    if(rows!==next||Math.abs(nextMargin-margin)>.5){
+      const list=next; margin=nextMargin;
+      virtualizer.setOptions({...virtualizer.options,count:list.length,getItemKey:index=>list[index].viewKey,estimateSize:index=>heights.get(list[index].viewKey)??(list[index].role==='user'?120:list[index].role==='tool'?70:180),scrollMargin:margin,followOnAppend:!nested&&(!reading||reading.following&&!reading.touchScrolling)});
+      rows=next;
+      const available=new Set(rows.map(item=>item.viewKey));
+      for(const [key,record]of mounted)if(!available.has(key)){virtualizer.observer.unobserve(record.row);virtualizer.elementsCache.delete(key);mounted.delete(key);pending.delete(record);dispose(record);}
+      for(const [key,value]of cached)if(!available.has(key)){cached.delete(key);cachedBytes-=value.bytes;dispose(value.record);}
+      for(const key of virtualizer.itemSizeCache.keys())if(!available.has(key))virtualizer.itemSizeCache.delete(key);
+    }
+  }
+  function marginsForMounted(){for(const record of mounted.values())margins.delete(record.row);}
+  function update(next=rows,options={}) {
+    if(closed||updating)return;
+    suspended=false;updating=true;
+    if(options.restore)restore=options.restore;
+    try{
+      if(!next.length)virtualizer.cancelScroll();
+      configure(next);virtualizer._willUpdate();
+      if(options.target&&!reading?.touchScrolling){
+        target=options.target;
+        targetIndex=target.end?rows.length-1:(indexesByID.get(target.id)??indexesByKey.get(target.id)??-1);
+        virtualizer.setOptions({...virtualizer.options,rangeExtractor:range=>pinnedIndexes(range)});
+        if(target.end&&!nested&&!reading)virtualizer.scrollToEnd();
+        else if(target.id){const index=targetIndex;if(index>=0){const item=virtualizer.getMeasurements()[index];if(nested){virtualizer.scrollOffset=item.start-(target.offset??scroller.clientHeight/3);}else if(!reading){virtualizer.setOptions({...virtualizer.options,scrollPaddingStart:target.offset??scroller.clientHeight/3});virtualizer.scrollToIndex(index,{align:'start'});}}}
+      }
+      draw();
+      const changed=measure();
+      // One commit after the first measurements; later resizes are incremental.
+      if(changed||dirty){dirty=false;draw();measure();}
+      virtualizer._willUpdate();
+      restore?.();
+    }finally{updating=false;}
+  }
+  return {set:update,measure,layout:update,cancelScroll:cancel,suspend(){
+    suspended=true;virtualizer.cancelScroll();unmount();
+    for(const record of mounted.values())record.childrenWindow?.suspend();
+  },close(){
+    closed=true;unbindScroll?.();virtualizer.cancelScroll();unmount();
+    for(const name of gestures)scroller.removeEventListener(name,cancel);
+    for(const record of mounted.values())dispose(record);
+    for(const value of cached.values())dispose(value.record);
+    mounted.clear();cached.clear();pending.clear();indexesByKey.clear();indexesByID.clear();cachedBytes=0;
+    for(const spacer of spacers)spacer.remove();
+  }};
 }

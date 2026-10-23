@@ -10,12 +10,11 @@ export function captureReadingPosition(history,{ignoreToggle=false}={}) {
   return {top:history.scrollTop,anchors};
 }
 
-export function restoreReadingPosition(history,position) {
+export function resolveReadingPosition(history,position) {
   const nodes=new Map([...history.querySelectorAll('[data-scroll-anchor]')].map(node=>[node.dataset.scrollAnchor,node]));
   const anchor=position?.anchors.find(item=>nodes.get(item.key)?.getBoundingClientRect().height>0);
-  if(anchor){const top=history.getBoundingClientRect().top;history.scrollTop+=nodes.get(anchor.key).getBoundingClientRect().top-top-anchor.offset;}
-  else if(position)history.scrollTop=position.top;
-  return anchor;
+  const top=anchor?history.scrollTop+nodes.get(anchor.key).getBoundingClientRect().top-history.getBoundingClientRect().top-anchor.offset:position?.top;
+  return {anchor,top};
 }
 
 export function readingAnchor(scroller) {

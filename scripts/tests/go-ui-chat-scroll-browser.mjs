@@ -58,16 +58,16 @@ async function run(){
     check(h.querySelector(`[data-message-id="${saved.id}"]`)===saved.node,'nearby round trip reuses message DOM');
     const timings=[];let blanks=0,gaps=0,maxMounted=0;
     for(let i=0;i<90;i++){
-      const start=performance.now();scroll(Math.max(0,h.scrollTop+(i%30<15?-1:1)*h.clientHeight*.8));await frame();await frame();
+      const start=performance.now();scroll(Math.max(0,h.scrollTop+(i%30<15?-1:1)*h.clientHeight*.8));await frame();
       timings.push(performance.now()-start);if(!anchor())blanks++;
       const viewport=h.getBoundingClientRect();if([...h.querySelectorAll('.message-window-spacer')].some(e=>{const r=e.getBoundingClientRect();return r.height>1&&r.bottom>viewport.top+1&&r.top<viewport.top+h.clientHeight-1;}))gaps++;
       maxMounted=Math.max(maxMounted,h.querySelectorAll('article.message').length);
     }
-    check(blanks===0,'rapid bidirectional scrolling keeps a visible message every sampled frame');
+    check(blanks===0,'rapid bidirectional scrolling keeps a visible message on every frame');
     check(gaps===0,'virtual spacers never enter the sampled viewport');
     check(maxMounted<180,`mounted rows stay bounded (${maxMounted})`);
     check(maxInflight<=1,'history prefetch serializes delayed reads');
-    const ordered=timings.sort((a,b)=>a-b);results.textContent+=`Scroll sample p95: ${ordered[Math.floor(ordered.length*.95)].toFixed(1)}ms (two frames); pages: ${reads.length}\n`;
+    const ordered=timings.sort((a,b)=>a-b);results.textContent+=`Scroll sample p95: ${ordered[Math.floor(ordered.length*.95)].toFixed(1)}ms (one frame); pages: ${reads.length}\n`;
     for(let i=0;i<10;i++){scroll(100);await pause(190);await settle();}
     check(reads.filter(query=>query.before).length>=9,'traversal pages beyond the 640-message data window');
     const countBefore=reads.length;scroll(h.scrollHeight-h.clientHeight*2.5);await pause(30);
@@ -81,7 +81,8 @@ async function run(){
     root.querySelector('.latest-button').click();await pause(250);await settle();
     check(h.scrollHeight-h.clientHeight-h.scrollTop<2,'Latest follows the newest message');
     await componentChecks();
-    check(errors.length===0,'no browser exceptions');
+    await virtualizerChecks();
+    check(errors.length===0,'no browser exceptions: '+errors.join('; '));
     results.textContent+='DONE scrolling checks\n';
   }catch(error){results.textContent+='STOP '+error.stack+'\n';}
 }
@@ -92,7 +93,7 @@ async function componentChecks(){
   const scroller=document.createElement('div'),host=document.createElement('div'),live=new Set();
   scroller.style.cssText='position:fixed;left:-20000px;top:0;width:600px;height:240px;overflow:auto';host.className='message-window';scroller.append(host);document.body.append(scroller);
   const rows=Array.from({length:240},(_,i)=>({id:`bounded-${i}`,viewKey:`bounded-${i}`,role:'user'})),heights=new Map(rows.map(row=>[row.viewKey,136]));
-  const windowed=createMessageWindow({scroller,host,heights,requestRender:()=>{},compensate:()=>{},render(item,existing){if(existing)return existing;const row=document.createElement('article');row.className='message';row.style.cssText='height:120px;overflow:hidden;white-space:pre';row.textContent='Synthetic retained text. '.repeat(12000);const entry={row};live.add(entry);return entry;},dispose(entry){entry.row.remove();live.delete(entry);}});
+  const windowed=createMessageWindow({scroller,host,heights,requestRender:()=>{},render(item,existing){if(existing)return existing;const row=document.createElement('article');row.className='message';row.style.cssText='height:120px;overflow:hidden;white-space:pre';row.textContent='Synthetic retained text. '.repeat(12000);const entry={row};live.add(entry);return entry;},dispose(entry){entry.row.remove();live.delete(entry);}});
   try{
     for(let i=0;i<18;i++){
       scroller.scrollTop=i*1300;windowed.layout(rows);
@@ -132,4 +133,38 @@ async function componentChecks(){
     const row=taskRoot.querySelector('[data-message-id="task-live"]');taskUI.history.dispatchEvent(new Event('scroll'));await settle();
     check(taskRoot.querySelector('[data-message-id="task-live"]')===row,'Task viewport refresh retains its current message node');
   }finally{taskUI.dispose();taskRoot.remove();}
+}
+
+// Exercise the shared adapter's Chat contract independently of server paging.
+async function virtualizerChecks(){
+  const scroller=document.createElement('div'),host=document.createElement('div');
+  scroller.style.cssText='position:fixed;left:-20000px;top:0;width:600px;height:240px;overflow:auto;overflow-anchor:none';
+  host.className='message-window';scroller.append(host);document.body.append(scroller);
+  let rows=Array.from({length:160},(_,index)=>({id:`anchor-${index}`,viewKey:`anchor-${index}`,role:'user',height:80+index%4*35}));
+  let windowed,renderFrame=0;
+  windowed=createMessageWindow({scroller,host,requestRender:()=>{if(!renderFrame)renderFrame=requestAnimationFrame(()=>{renderFrame=0;windowed.layout(rows);});},render(item,record){
+    if(!record){const row=document.createElement('article');row.className='message';row.append(document.createElement('button'));record={row};}
+    record.row.style.height=`${item.height}px`;record.row.dataset.messageId=item.id;return record;
+  },dispose:record=>record.row.remove()});
+  const visible=()=>[...host.querySelectorAll('article')].find(row=>{const box=row.getBoundingClientRect(),top=scroller.getBoundingClientRect().top;return box.bottom>top&&box.top<top+scroller.clientHeight;});
+  const offset=row=>row.getBoundingClientRect().top-scroller.getBoundingClientRect().top;
+  const move=async top=>{scroller.dispatchEvent(new WheelEvent('wheel',{deltaY:top-scroller.scrollTop||-1}));scroller.scrollTop=top;scroller.dispatchEvent(new Event('scroll'));await settle();};
+  try{
+    windowed.layout(rows,{target:{end:true}});await settle();
+    check(scroller.scrollHeight-scroller.clientHeight-scroller.scrollTop<2,'TanStack opens a dynamic-height list at its end');
+    await move(scroller.scrollHeight*.45);const saved=visible(),savedOffset=offset(saved);
+    rows=[...Array.from({length:30},(_,index)=>({id:`prepend-${index}`,viewKey:`prepend-${index}`,role:'user',height:110+index%3*20})),...rows];
+    windowed.layout(rows);await settle();
+    check(saved.isConnected&&Math.abs(offset(saved)-savedOffset)<2,`historical prepend preserves the keyed visible message (${savedOffset} → ${offset(saved)})`);
+    const focused=visible();focused.querySelector('button').focus({preventScroll:true});await move(scroller.scrollTop+5000);
+    check(focused.isConnected&&focused.contains(document.activeElement),'focused message remains mounted outside the virtual range');
+    rows=[{id:'focused-prepend',viewKey:'focused-prepend',role:'user',height:150},...rows];windowed.layout(rows);await settle();
+    check(focused.isConnected&&focused.contains(document.activeElement),'prepending history retains focus by message key after indexes shift');
+    document.activeElement.blur();windowed.layout(rows,{target:{end:true}});await settle();
+    rows=rows.map((row,index)=>index===rows.length-1?{...row,height:row.height+300}:row);windowed.layout(rows);await settle();
+    check(scroller.scrollHeight-scroller.clientHeight-scroller.scrollTop<2,'streaming row growth keeps an end-pinned viewport at the end');
+    await move(scroller.scrollTop-1000);const reading=visible(),readingOffset=offset(reading);
+    rows=[...rows,{id:'appended',viewKey:'appended',role:'user',height:180}];windowed.layout(rows);await settle();
+    check(reading.isConnected&&Math.abs(offset(reading)-readingOffset)<2,'appended output does not pull a historical reader to the end');
+  }finally{cancelAnimationFrame(renderFrame);windowed.close();scroller.remove();}
 }
