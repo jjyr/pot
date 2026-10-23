@@ -1,60 +1,66 @@
 <p align="center">
   <img src="resources/app/assets/Pot384.png" width="96" height="96" alt="Pot">
 </p>
+<h1 align="center">Pot</h1>
+<p align="center"><strong>Your AI assistant. From a conversation to completed work.</strong></p>
 
-# Pot
+[Website](https://pot.jjylab.com) · [Getting started](#install) · [Documentation](docs/README.md) · [Releases](https://github.com/jjyr/pot/releases)
 
-**Your AI assistant, connected to other assistants, ready to get things done.**
+Pot helps you turn a goal into work you can use. Your assistant can run background
+tasks, bring their results back to your conversation, and keep working with you.
+**Agent Link** brings your other assistants into that conversation across computers.
 
-Pot turns conversations into completed work. Ask your assistant to research,
-work with files or automate recurring tasks. **Agent Link** connects Pot,
-Codex and other agents through compatible adapters to exchange messages and
-delegate work across computers.
+## From a conversation to completed work
 
-[Documentation](docs/README.md) · [Codex setup](integrations/codex/README.md) · [Releases](https://github.com/jjyr/pot/releases)
+“Get this project ready to share: verify Linux installation, complete the
+getting-started docs, and prepare representative product screenshots.”
 
-## Main features
+Pot can split that goal into background tasks for installation, documentation
+and screenshots. Results return to the same conversation: acceptance notes with
+remaining checks, a documentation draft, and images you can preview. Keep talking
+to refine the work: “Make the mobile screenshots larger; keep this docs version.”
 
-### Assistants
+[![Pot conversation with returned work and three background tasks](docs/images/conversation-tasks.png)](docs/images/conversation-tasks.png)
 
-Give an assistant an ongoing goal: research a topic, follow a project or keep
-track of changes. It can break work into background tasks, dispatch them, receive
-progress and results, and follow up in your conversation. Files and workspaces
-persist between tasks, so research can build on earlier work.
+*Pot’s shared product UI with synthetic project work and background tasks. Click to enlarge.*
 
-Assistants can also respond to events from enabled plugins, including your
-[GitHub personal notifications](docs/plugins.md#github-notifications), and
-receive task updates automatically. Ask for [scheduled research](docs/scheduled-tasks.md)
-or recurring checks to keep following a topic while Pot is running. Choose your
-model providers and extend assistants with plugins, MCP servers and Skills.
+## Bring your other agents into the conversation
 
-### Agent Link
+Connect another Pot or **Codex** through Agent Link. Talk to a connected assistant
+directly, or let Pot delegate work and collect the result. Each agent retains its
+own models, credentials, workspace and permissions. Pot-to-Pot connections and
+the [Codex adapter](integrations/codex/README.md) are included; Claude, Grok bot,
+Pi and other agents need compatible adapters of their own. Codex tasks use
+independent persistent threads and can run in parallel.
 
-Work with the agents you already use—**Claude, Codex, Grok bot, Pi** and
-others—through Agent Link adapters. Connected assistants can exchange messages
-and delegate tasks across computers, while each agent keeps its own models,
-credentials, workspace and permissions.
+[![Pot using Agent Link to request a Codex review and receive the result](docs/images/agent-link.png)](docs/images/agent-link.png)
 
-Pot-to-Pot connections and a [Codex adapter](integrations/codex/README.md) are
-included. Claude, Grok bot and Pi require their own compatible adapters; this
-repository does not bundle them. Explicit Codex tasks each have an independent
-persistent thread and can run in parallel. See [Agent Link](docs/agent-links.md)
-for the collaboration protocol and supported capabilities.
+*Agent Link messages and returned review in the actual product UI, using synthetic records. Click to enlarge.*
 
 ## Install
 
-Start from source today; packaged distribution is pending.
+Give this prompt to your agent to install and configure Pot on this computer:
+
+```text
+Read https://github.com/jjyr/pot/blob/main/docs/install-with-agent.md and help me install and configure Pot on this computer.
+```
+
+The [shared installation guide](docs/install-with-agent.md) helps your agent check
+existing data, choose Desktop, Docker or Server, and verify the current release
+channel. Prefer to install it yourself? Choose a path below. Start from source
+today; packaged distribution is pending. Source builds and GitHub-hosted guides
+currently require access to this private repository.
 
 | Platform | Install / download | Availability |
 |---|---|---|
-| macOS desktop / Homebrew | [Build guide](docs/development.md#toolchains-and-workflow) · [Downloads](https://github.com/jjyr/pot/releases) | Apple Silicon, macOS 26+. Homebrew distribution is pending. |
+| macOS desktop | [Build guide](docs/development.md#toolchains-and-workflow) · [Downloads](https://github.com/jjyr/pot/releases) | Apple Silicon, macOS 26+. Homebrew distribution is pending. |
 | Linux server / Web UI | [Quick start](#linux-server--web-ui) · [Deployment guide](docs/deployment.md) | Available from source on a glibc-based amd64 or arm64 host. |
 | Docker | [Build and installation guide](docs/docker.md) · [Releases](https://github.com/jjyr/pot/releases) | Image not yet published. |
 | Linux desktop (Experimental) | [Build and installation guide](docs/desktop-installation.md#linux-experimental) · [Releases](https://github.com/jjyr/pot/releases) | Native `.deb` packaging is experimental; no desktop package is published yet. |
 
 Windows is currently unsupported.
 
-## Quick start
+## First run
 
 ### Desktop
 
@@ -94,5 +100,18 @@ ssh -L 17703:127.0.0.1:17703 user@your-server
 `pot serve` runs the Runtime; `-ui` adds its local browser interface.
 `pot web-ui-server` is an independent browser service with a separate data root.
 See [deployment](docs/deployment.md) for that setup, TLS and services.
+
+## More ways to work
+
+Keep separate assistants for different goals, retain files and workspaces between
+tasks, and arrange [scheduled work](docs/scheduled-tasks.md). Choose model
+providers and extend your assistants with [plugins, MCP servers and Skills](docs/plugins.md).
+Optional [GitHub account setup](docs/credentials.md) and
+[notification filters](docs/plugins.md#github-notifications) can bring project
+updates into the conversation. GitHub is not required to run Pot.
+
+See [installation and first configuration](docs/install-with-agent.md),
+[Agent Link](docs/agent-links.md), [Docker](docs/docker.md) and the
+[documentation index](docs/README.md) for operating instructions.
 
 Licensed under the [MIT License](LICENSE).

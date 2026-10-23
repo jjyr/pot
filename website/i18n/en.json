@@ -42,27 +42,8 @@
     "也接着把事做完。": "And follows through.",
     "说清目标，Pot 就能建立后台任务，推进工作，": "Describe your goal. Pot can start a background task, move it forward,",
     "并把进度和结果带回对话。你可以随时继续沟通。": "and bring progress and results back to the conversation. Keep talking whenever you need to.",
-    "试试一句话，启动一件事": "One request. Something gets started.",
-    "帮我调研建站方案，": "Research website-building options",
-    "整理成一份对比报告。": "and put together a comparison report.",
-    "从理解需求、收集资料到整理交付，": "From understanding the brief and gathering information to delivery,",
-    "让过程有迹可循，让结果触手可及。": "follow the progress and keep the results close at hand.",
-    "选择任务示例": "Choose a task example",
-    "方案调研": "Research",
-    "整理资料": "Organize",
-    "定时追踪": "Track changes",
-    "播放任务过程": "Play task demo",
-    "本地演示，不会创建真实任务": "Local demo. No real task is created.",
     "后台任务": "Background task",
     "已完成": "Completed",
-    "理解目标，建立任务": "Understand the goal and create a task",
-    "明确使用场景与比较维度": "Define the use case and comparison criteria",
-    "收集资料，推进调研": "Gather information and research options",
-    "整理方案、成本与维护方式": "Compare approaches, costs and maintenance",
-    "整理结论，带回成果": "Summarize findings and return results",
-    "在对话中交付可继续使用的文件": "Deliver a usable file in the conversation",
-    "建站方案对比报告": "Website options comparison",
-    "REPORT · 点击预览示例成果": "REPORT · Preview the example result",
     "02 / AGENT LINK": "02 / AGENT LINK",
     "一条连接，打开更多可能": "One connection. More possibilities.",
     "你的助手，": "Your assistant",
@@ -121,21 +102,66 @@
     "和 Pot 一起做。": "Make it with Pot.",
     "先认识助手，再连接你的 Agent 伙伴。": "Meet your assistant. Then connect your agent partners.",
     "开始使用 Pot": "Get started with Pot",
-    "已有 Pot？打开你的 Pot，进入助手对话即可开始。需要协作时，在「Agent Link」中添加对方提供的连接。": "Already have Pot? Open a conversation with your assistant. When you want to collaborate, add the connection supplied by the other node in Agent Link.",
-    "首次安装：公开安装入口确认后将在此提供。当前可通过已有的 Pot 应用或 Web UI 开始。": "Installing for the first time? A public installation link will be added once verified. For now, start with your existing Pot app or web interface.",
-    "先体验助手任务示例": "Try an assistant task example",
-    "Agent Link 使用指南": "Agent Link guide",
-    "打开 Agent Link → 添加连接 → 填写对方提供的连接信息 → 选择可用助手。你可以直接发起对话，也可以请 Pot 委派任务。": "Open Agent Link → add a connection → enter the details supplied by the other node → choose an available assistant. Talk directly or ask Pot to delegate a task.",
-    "Pot 和 Codex 的互联已核实。Claude、Grok bot、Devin 在本页展示生态协作构想，具体接入取决于对应桥接与节点能力。": "Pot and Codex interconnection has been verified. Claude, Grok bot and Devin appear here as ecosystem collaboration concepts. Actual access depends on the bridge and node capabilities.",
-    "文档与源码入口": "Documentation and source code",
-    "公开文档与 GitHub 源码入口正在确认中。你可以先阅读本页的 Agent Link 使用指南，或通过任务与协作示例了解 Pot。": "Public documentation and GitHub source links are still being confirmed. Start with the Agent Link guide here, or explore the task and collaboration examples.",
     "一个助手，更多可能。": "One assistant. More possibilities.",
     "回到顶部 ↑": "Back to top ↑",
     "为想法留一点空间。": "Make a little room for ideas.",
     "示例成果 · 本地预览": "Example result · Local preview",
     "关闭预览": "Close preview",
     "下载示例报告": "Download example report",
-    "示例内容，用于体验交付方式": "Example content to show how results are delivered"
+    "示例内容，用于体验交付方式": "Example content to show how results are delivered",
+    "在 GitHub 上 Star Pot": "Star Pot on GitHub",
+    "GitHub Star": "GitHub Star",
+    "一个目标，三项后台任务": "One goal. Three background tasks.",
+    "帮我把这个项目准备到可以对外展示：验证 Linux 安装流程，补齐入门文档，再准备几张有代表性的产品截图。": "Get this project ready to share: verify Linux installation, complete the getting-started docs, and prepare a few representative product screenshots.",
+    "我会并行处理安装、文档和截图，再把成果汇总到这里。你可以随时补充要求。": "I’ll work on installation, docs and screenshots in parallel, then bring the results back here. You can add details along the way.",
+    "播放工作过程": "Play the workflow",
+    "直接看成果": "See completed work",
+    "根据真实工作流程改编的本地示例，不会创建真实任务或发送消息。": "Local example adapted from a real workflow. No real tasks or messages are created.",
+    "三项并行任务": "Three parallel tasks",
+    "回到同一段对话": "Back in the same conversation",
+    "安装核心流程通过，另有两项桌面行为待补测；文档和截图已准备好。": "The core installation flow passed; two desktop behaviors still need checking. Docs and screenshots are ready.",
+    "安装验收记录 ↗": "Installation notes ↗",
+    "文档修改 PR ↗": "Documentation PR ↗",
+    "预览产品截图 ↗": "Preview product screenshots ↗",
+    "手机端截图再放大一点，文档先保留这个版本。": "Make the mobile screenshots a little larger. Keep this version of the docs.",
+    "收到。我会调整手机端截图，保留当前文档版本。": "Got it. I’ll resize the mobile screenshots and keep the current docs.",
+    "04 / GET STARTED": "04 / GET STARTED",
+    "选一种适合你的开始方式": "Choose how to get started",
+    "让助手帮你安装，或选择桌面、Docker、Server。Windows 暂不支持。": "Ask an agent to install it, or choose Desktop, Docker or Server. Windows is unsupported.",
+    "让助手安装": "Install with an agent",
+    "把这段英文交给你使用的助手，它会读取统一指南，检查环境并帮你选择安装方式。": "Give this English prompt to your agent. It will read the shared guide, check your computer and help choose an installation.",
+    "复制 Prompt": "Copy prompt",
+    "安装与首次配置指南 ↗": "Installation and first setup ↗",
+    "桌面应用": "Desktop app",
+    "macOS 26+ · Apple Silicon。Linux 原生桌面为 Experimental。目前从源码构建。": "macOS 26+ · Apple Silicon. Native Linux desktop is Experimental. Build from source today.",
+    "桌面平台": "Desktop platform",
+    "macOS": "macOS",
+    "Linux · Experimental": "Linux · Experimental",
+    "复制命令": "Copy commands",
+    "桌面安装文档 ↗": "Desktop installation guide ↗",
+    "Docker": "Docker",
+    "Linux amd64 / arm64。镜像尚未发布；在仓库内本地构建，再用 Compose 启动。": "Linux amd64 / arm64. No published image yet; build locally in the checkout and start with Compose.",
+    "Docker 指南 ↗": "Docker guide ↗",
+    "Server / Web UI": "Server / Web UI",
+    "glibc Linux amd64 / arm64。从源码启动，通过本机浏览器或 SSH 转发访问。": "glibc Linux amd64 / arm64. Run from source, then open locally or through an SSH tunnel.",
+    "部署与运行指南 ↗": "Deployment and operation guide ↗",
+    "源码命令需要 Git、mise 和新 checkout；先克隆仓库并运行 mise install。已有实例请先确认数据位置。": "Source commands require Git, mise and a fresh checkout: clone the repository and run mise install first. Check existing data before changing an installation.",
+    "查看正式版本与发布说明 ↗": "Check stable releases and release notes ↗",
+    "模型 Provider、GitHub 与首次配置 ↗": "Model providers, GitHub and first setup ↗",
+    "源码 ↗": "Source code ↗",
+    "已复制。": "Copied.",
+    "无法自动复制，请选择代码后复制。": "Copy unavailable. Select and copy the code.",
+    "验证 Linux 安装": "Verify Linux installation",
+    "启动、模型连接、重开持久化": "Startup, model connection, persistence after reopening",
+    "整理入门文档": "Complete getting-started docs",
+    "平台、安装步骤、首次配置": "Platforms, installation steps, first configuration",
+    "准备产品截图": "Prepare product screenshots",
+    "助手工作、后台任务、Agent Link": "Assistant work, background tasks, Agent Link",
+    "逐项推进，成果会回到这里。": "Work is progressing; results will return here.",
+    "查看示例成果": "View example result",
+    "示例命令使用 amd64；arm64 请按指南替换平台和文件名。0.1.0 / local 是本地构建标记。": "Example commands use amd64; for arm64, follow the guide to change the platform and filenames. 0.1.0 / local identify a local build.",
+    "在另一个终端中获取登录 token：": "Get the login token in another terminal:",
+    "源码与 GitHub 指南目前需要仓库访问权限；没有权限时，请向项目维护者获取可用版本。": "Source builds and GitHub guides currently require repository access. If you do not have access, ask the project maintainer for an available build."
   },
   "demo": {
     "language": "Language",
@@ -181,44 +207,6 @@
         "Ask Devin to break the website brief into engineering steps and list the deliverables and checks for each."
       ]
     ],
-    "extraTasks": {
-      "organize": {
-        "prompt": "Turn these scattered materials\ninto a project brief.",
-        "title": "Project materials brief",
-        "steps": [
-          [
-            "Identify the content and create a task",
-            "Set the scope and brief structure"
-          ],
-          [
-            "Organize information and extract key points",
-            "Summarize background, decisions and actions"
-          ],
-          [
-            "Prepare the brief and deliver the file",
-            "Return organized project materials"
-          ]
-        ]
-      },
-      "watch": {
-        "prompt": "Check project progress each week\nand send me a summary of changes.",
-        "title": "Project progress summary",
-        "steps": [
-          [
-            "Define the scope and schedule the work",
-            "Agree what to follow and how often"
-          ],
-          [
-            "Check on schedule and summarize changes",
-            "Review progress using available information"
-          ],
-          [
-            "Deliver the summary and flag follow-up",
-            "Bring this update back to the conversation"
-          ]
-        ]
-      }
-    },
     "flowEyebrows": [
       "A SHARED START",
       "THE RIGHT PARTNER",
@@ -245,106 +233,81 @@
     "siteBundle": "Product website · Example delivery",
     "siteBundleSub": "Page structure / Interactions / Validation notes",
     "siteReportTitle": "Product website · Example delivery notes",
-    "reports": [
+    "projectReports": [
       {
-        "intro": "Example result: comparing three common ways to build a product website by content scale, interaction needs and maintenance.",
-        "table": [
-          [
-            "Approach",
-            "Best suited to",
-            "Trade-offs"
-          ],
-          [
-            "Static HTML / CSS / JS",
-            "Product and showcase websites",
-            "Few dependencies; content changes require editing files"
-          ],
-          [
-            "Static site generator",
-            "Documentation and content sites",
-            "Consistent structure; build tools need maintenance"
-          ],
-          [
-            "Content management system",
-            "Frequent editing by several people",
-            "Easy editing; services and permissions need maintenance"
-          ]
-        ],
+        "title": "Installation acceptance · example",
+        "intro": "A sample review of a Linux desktop build, not certification of your computer.",
         "sections": [
           {
-            "title": "Recommendation",
+            "title": "Checked in this example",
             "paragraphs": [
-              "For a clear product introduction with a few reliable interactions, start with a lightweight static page. Consider content management as the site grows.",
-              "This simplified example demonstrates the delivery format. No real research has been performed."
+              "The app starts, the configured model connects, and the assistant and settings remain after reopening."
+            ]
+          },
+          {
+            "title": "Still to check",
+            "paragraphs": [
+              "Wayland window behavior and notification clicks need testing on the target desktop."
             ]
           }
         ]
       },
       {
-        "intro": "Example result: organize scattered materials into background, agreed decisions and next actions.",
+        "title": "Getting-started documentation PR · example",
+        "intro": "A synthetic documentation change for the project in this demo; no GitHub PR is created.",
         "sections": [
           {
-            "title": "Project background",
+            "title": "Proposed changes",
             "paragraphs": [
-              "Create a Chinese-language product website focused on assistant capabilities and Agent Link."
+              "Separate Linux desktop Experimental status from Server and Docker. Put requirements before commands and explain first configuration."
             ]
           },
           {
-            "title": "Agreed decisions",
-            "items": [
-              "A warm, restrained design that clearly explains the product and collaboration.",
-              "Local examples explicitly marked as interactive demonstrations.",
-              "Readable connection diagrams and usable conversations on mobile."
-            ]
-          },
-          {
-            "title": "Next steps",
+            "title": "Review excerpt",
             "paragraphs": [
-              "Confirm the official public documentation link and keep agent access information up to date."
+              "Before: “Install Pot and start chatting.” After: “Choose your platform, verify the artifact, open Pot, then add a model provider. Keep keys in the local UI.”"
             ]
           }
         ]
       },
       {
-        "intro": "Example result: check information on an agreed schedule and turn changes into an actionable summary.",
+        "title": "Product screenshots · example",
+        "intro": "The actual shared product UI below uses isolated synthetic records. No real conversations or tasks were accessed.",
         "sections": [
           {
-            "title": "What changed",
-            "items": [
-              "The page now shows task progress and result previews.",
-              "The Agent Link diagram lets you switch agents and collaboration modes.",
-              "Some ecosystem connection methods still need confirmation."
+            "title": "Prepared views",
+            "paragraphs": [
+              "Assistant conversation with three background tasks and returned work; Agent Link delegation and reply."
             ]
           },
           {
-            "title": "What to watch",
+            "title": "Next edit",
             "paragraphs": [
-              "Public installation and documentation links, supported connections and changes to the actual product capabilities.",
-              "No real scheduled task or external project monitoring has been set up here."
-            ]
-          }
-        ]
-      },
-      {
-        "intro": "From a goal to a file, results return with context. This preview shows the kind of content an agent could deliver after completing a task.",
-        "sections": [
-          {
-            "title": "Delivery contents",
-            "items": [
-              "A responsive product introduction in Chinese.",
-              "Assistant task demos, an Agent Link diagram and collaboration examples.",
-              "Preview instructions, interaction notes and validation records."
-            ]
-          },
-          {
-            "title": "Continue collaborating",
-            "paragraphs": [
-              "Give specific feedback in the conversation, such as ‘make the mobile diagram clearer’. Pot can use it to move the next round forward.",
-              "This is a collaboration demo. No message is sent to Codex or any other agent."
+              "Enlarge the mobile crop while keeping the approved documentation version."
             ]
           }
         ]
       }
-    ]
+    ],
+    "siteReport": {
+      "intro": "From a goal to a file, results return with context. This preview shows the kind of content an agent could deliver after completing a task.",
+      "sections": [
+        {
+          "title": "Delivery contents",
+          "items": [
+            "A responsive product introduction in Chinese.",
+            "Assistant task demos, an Agent Link diagram and collaboration examples.",
+            "Preview instructions, interaction notes and validation records."
+          ]
+        },
+        {
+          "title": "Continue collaborating",
+          "paragraphs": [
+            "Give specific feedback in the conversation, such as ‘make the mobile diagram clearer’. Pot can use it to move the next round forward.",
+            "This is a collaboration demo. No message is sent to Codex or any other agent."
+          ]
+        }
+      ]
+    }
   }
 }

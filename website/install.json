@@ -1,0 +1,7 @@
+{
+  "prompt": "Read https://github.com/jjyr/pot/blob/main/docs/install-with-agent.md and help me install and configure Pot on this computer.",
+  "mac": "mise run prepare\nmise run build\nmise run open",
+  "linux": "sudo apt install build-essential pkg-config binutils libgtk-3-dev libwebkit2gtk-4.1-dev dbus-user-session bubblewrap socat xvfb xauth\nPOT_APP_VERSION=0.1.0 POT_BUILD_REVISION=local mise exec -- python scripts/build-desktop --platform linux-amd64 --output .local/go/dist\ncd .local/go/dist\nsha256sum -c pot-desktop_0.1.0_linux_amd64.deb.sha256\nsudo apt install ./pot-desktop_0.1.0_linux_amd64.deb\npot-desktop",
+  "docker": "docker buildx build --platform linux/amd64 --load \\\n  --build-arg POT_APP_VERSION=0.1.0 \\\n  --build-arg POT_BUILD_REVISION=\"$(git rev-parse HEAD)\" \\\n  -t pot-server:local .\ndocker compose -f docker/compose.yaml up -d --no-build\ndocker compose -f docker/compose.yaml exec pot pot access -browser-root /home/pot/.pot-web token",
+  "server": "mise run prepare\nmise run build:go\n.local/go/bin/pot serve -root \"$HOME/.pot-node\" -ui 127.0.0.1:17703\n# {anotherTerminal}\n.local/go/bin/pot access -root \"$HOME/.pot-node\" token"
+}

@@ -42,27 +42,8 @@
     "也接着把事做完。": "Y lo lleva a cabo.",
     "说清目标，Pot 就能建立后台任务，推进工作，": "Explica tu objetivo. Pot puede crear una tarea en segundo plano, hacerla avanzar",
     "并把进度和结果带回对话。你可以随时继续沟通。": "y traer el progreso y los resultados a la conversación. Puedes seguir hablando cuando quieras.",
-    "试试一句话，启动一件事": "Una petición. Un trabajo en marcha.",
-    "帮我调研建站方案，": "Investiga opciones para crear una web",
-    "整理成一份对比报告。": "y prepara un informe comparativo.",
-    "从理解需求、收集资料到整理交付，": "Desde entender la petición y reunir información hasta entregar el resultado,",
-    "让过程有迹可循，让结果触手可及。": "sigue el proceso y ten los resultados a mano.",
-    "选择任务示例": "Elegir un ejemplo de tarea",
-    "方案调研": "Investigar",
-    "整理资料": "Organizar",
-    "定时追踪": "Seguimiento",
-    "播放任务过程": "Reproducir demo",
-    "本地演示，不会创建真实任务": "Demo local. No se crea ninguna tarea real.",
     "后台任务": "Tarea en segundo plano",
     "已完成": "Completada",
-    "理解目标，建立任务": "Entender el objetivo y crear la tarea",
-    "明确使用场景与比较维度": "Definir el uso y los criterios de comparación",
-    "收集资料，推进调研": "Reunir información e investigar opciones",
-    "整理方案、成本与维护方式": "Comparar enfoques, costes y mantenimiento",
-    "整理结论，带回成果": "Resumir las conclusiones y entregar el resultado",
-    "在对话中交付可继续使用的文件": "Entregar un archivo útil en la conversación",
-    "建站方案对比报告": "Comparativa de opciones para crear una web",
-    "REPORT · 点击预览示例成果": "INFORME · Ver el resultado de ejemplo",
     "02 / AGENT LINK": "02 / Agent Link",
     "一条连接，打开更多可能": "Una conexión. Más posibilidades.",
     "你的助手，": "Tu asistente",
@@ -121,21 +102,66 @@
     "和 Pot 一起做。": "Hazla con Pot.",
     "先认识助手，再连接你的 Agent 伙伴。": "Conoce a tu asistente. Después, conecta a tus agentes aliados.",
     "开始使用 Pot": "Empieza con Pot",
-    "已有 Pot？打开你的 Pot，进入助手对话即可开始。需要协作时，在「Agent Link」中添加对方提供的连接。": "¿Ya tienes Pot? Abre una conversación con tu asistente. Para colaborar, añade en Agent Link la conexión que te facilite el otro nodo.",
-    "首次安装：公开安装入口确认后将在此提供。当前可通过已有的 Pot 应用或 Web UI 开始。": "¿Es tu primera instalación? Añadiremos un enlace público cuando esté verificado. Por ahora, puedes usar tu aplicación de Pot o su interfaz web actual.",
-    "先体验助手任务示例": "Prueba una tarea de ejemplo",
-    "Agent Link 使用指南": "Guía de Agent Link",
-    "打开 Agent Link → 添加连接 → 填写对方提供的连接信息 → 选择可用助手。你可以直接发起对话，也可以请 Pot 委派任务。": "Abre Agent Link → añade una conexión → introduce los datos facilitados por el otro nodo → elige un asistente disponible. Habla directamente o pide a Pot que delegue una tarea.",
-    "Pot 和 Codex 的互联已核实。Claude、Grok bot、Devin 在本页展示生态协作构想，具体接入取决于对应桥接与节点能力。": "La conexión entre Pot y Codex está verificada. Claude, Grok bot y Devin se muestran como conceptos de colaboración del ecosistema. El acceso real depende del puente y de las capacidades de cada nodo.",
-    "文档与源码入口": "Documentación y código fuente",
-    "公开文档与 GitHub 源码入口正在确认中。你可以先阅读本页的 Agent Link 使用指南，或通过任务与协作示例了解 Pot。": "Los enlaces públicos a la documentación y al código en GitHub siguen pendientes de confirmación. Consulta la guía de Agent Link de esta página o explora los ejemplos de tareas y colaboración.",
     "一个助手，更多可能。": "Un asistente. Más posibilidades.",
     "回到顶部 ↑": "Volver arriba ↑",
     "为想法留一点空间。": "Un poco de espacio para las ideas.",
     "示例成果 · 本地预览": "Resultado de ejemplo · Vista previa local",
     "关闭预览": "Cerrar vista previa",
     "下载示例报告": "Descargar informe de ejemplo",
-    "示例内容，用于体验交付方式": "Contenido de ejemplo para mostrar cómo se entregan los resultados"
+    "示例内容，用于体验交付方式": "Contenido de ejemplo para mostrar cómo se entregan los resultados",
+    "在 GitHub 上 Star Pot": "Dar una estrella a Pot en GitHub",
+    "GitHub Star": "GitHub Star",
+    "一个目标，三项后台任务": "Un objetivo. Tres tareas en segundo plano.",
+    "帮我把这个项目准备到可以对外展示：验证 Linux 安装流程，补齐入门文档，再准备几张有代表性的产品截图。": "Prepara este proyecto para compartirlo: verifica la instalación en Linux, completa la guía inicial y prepara capturas representativas del producto.",
+    "我会并行处理安装、文档和截图，再把成果汇总到这里。你可以随时补充要求。": "Trabajaré en instalación, documentación y capturas en paralelo y reuniré los resultados aquí. Puedes añadir detalles en cualquier momento.",
+    "播放工作过程": "Reproducir el trabajo",
+    "直接看成果": "Ver los resultados",
+    "根据真实工作流程改编的本地示例，不会创建真实任务或发送消息。": "Ejemplo local basado en un flujo real. No crea tareas ni mensajes reales.",
+    "三项并行任务": "Tres tareas en paralelo",
+    "回到同一段对话": "De vuelta en la misma conversación",
+    "安装核心流程通过，另有两项桌面行为待补测；文档和截图已准备好。": "El flujo básico de instalación pasó; faltan dos comprobaciones de escritorio. La documentación y las capturas están listas.",
+    "安装验收记录 ↗": "Notas de instalación ↗",
+    "文档修改 PR ↗": "PR de documentación ↗",
+    "预览产品截图 ↗": "Ver capturas del producto ↗",
+    "手机端截图再放大一点，文档先保留这个版本。": "Amplía un poco las capturas móviles. Conserva esta versión de la documentación.",
+    "收到。我会调整手机端截图，保留当前文档版本。": "De acuerdo. Ajustaré las capturas móviles y conservaré los documentos actuales.",
+    "04 / GET STARTED": "04 / EMPEZAR",
+    "选一种适合你的开始方式": "Elige cómo empezar",
+    "让助手帮你安装，或选择桌面、Docker、Server。Windows 暂不支持。": "Pide ayuda a un agente o elige Escritorio, Docker o Server. Windows no está soportado.",
+    "让助手安装": "Instalar con un agente",
+    "把这段英文交给你使用的助手，它会读取统一指南，检查环境并帮你选择安装方式。": "Dale este prompt en inglés a tu agente. Leerá la guía, comprobará tu equipo y te ayudará a elegir la instalación.",
+    "复制 Prompt": "Copiar prompt",
+    "安装与首次配置指南 ↗": "Instalación y configuración inicial ↗",
+    "桌面应用": "Aplicación de escritorio",
+    "macOS 26+ · Apple Silicon。Linux 原生桌面为 Experimental。目前从源码构建。": "macOS 26+ · Apple Silicon. El escritorio nativo de Linux es Experimental. Por ahora se compila desde el código.",
+    "桌面平台": "Plataforma de escritorio",
+    "macOS": "macOS",
+    "Linux · Experimental": "Linux · Experimental",
+    "复制命令": "Copiar comandos",
+    "桌面安装文档 ↗": "Guía de instalación de escritorio ↗",
+    "Docker": "Docker",
+    "Linux amd64 / arm64。镜像尚未发布；在仓库内本地构建，再用 Compose 启动。": "Linux amd64 / arm64. Aún no hay imagen publicada; compila localmente en el repositorio e inicia con Compose.",
+    "Docker 指南 ↗": "Guía de Docker ↗",
+    "Server / Web UI": "Server / Web UI",
+    "glibc Linux amd64 / arm64。从源码启动，通过本机浏览器或 SSH 转发访问。": "glibc Linux amd64 / arm64. Ejecuta desde el código y accede localmente o mediante un túnel SSH.",
+    "部署与运行指南 ↗": "Guía de despliegue y operación ↗",
+    "源码命令需要 Git、mise 和新 checkout；先克隆仓库并运行 mise install。已有实例请先确认数据位置。": "Necesitas Git, mise y un checkout nuevo: clona el repositorio y ejecuta mise install primero. Comprueba los datos de instalaciones existentes.",
+    "查看正式版本与发布说明 ↗": "Ver versiones estables y notas ↗",
+    "模型 Provider、GitHub 与首次配置 ↗": "Proveedores, GitHub y configuración inicial ↗",
+    "源码 ↗": "Código fuente ↗",
+    "已复制。": "Copiado.",
+    "无法自动复制，请选择代码后复制。": "No se pudo copiar. Selecciona y copia el código.",
+    "验证 Linux 安装": "Verificar la instalación en Linux",
+    "启动、模型连接、重开持久化": "Inicio, conexión al modelo y persistencia al reabrir",
+    "整理入门文档": "Completar la guía inicial",
+    "平台、安装步骤、首次配置": "Plataformas, pasos de instalación y configuración",
+    "准备产品截图": "Preparar capturas del producto",
+    "助手工作、后台任务、Agent Link": "Asistente, tareas en segundo plano y Agent Link",
+    "逐项推进，成果会回到这里。": "El trabajo avanza; los resultados volverán aquí.",
+    "查看示例成果": "Ver resultado de ejemplo",
+    "示例命令使用 amd64；arm64 请按指南替换平台和文件名。0.1.0 / local 是本地构建标记。": "Los ejemplos usan amd64; para arm64 cambia la plataforma y los archivos según la guía. 0.1.0 / local identifican una compilación local.",
+    "在另一个终端中获取登录 token：": "Obtén el token de acceso en otra terminal:",
+    "源码与 GitHub 指南目前需要仓库访问权限；没有权限时，请向项目维护者获取可用版本。": "El código y las guías de GitHub requieren acceso al repositorio. Si no lo tienes, solicita una compilación disponible al responsable del proyecto."
   },
   "demo": {
     "language": "Idioma",
@@ -181,44 +207,6 @@
         "Pide a Devin que divida los requisitos de la web en pasos de ingeniería y enumere sus entregables y criterios de validación."
       ]
     ],
-    "extraTasks": {
-      "organize": {
-        "prompt": "Organiza estos materiales dispersos\nen un resumen del proyecto.",
-        "title": "Resumen de materiales del proyecto",
-        "steps": [
-          [
-            "Identificar el contenido y crear la tarea",
-            "Definir el alcance y la estructura del resumen"
-          ],
-          [
-            "Organizar la información y extraer lo importante",
-            "Resumir el contexto, las decisiones y las acciones"
-          ],
-          [
-            "Preparar el resumen y entregar el archivo",
-            "Devolver los materiales del proyecto organizados"
-          ]
-        ]
-      },
-      "watch": {
-        "prompt": "Revisa el progreso del proyecto cada semana\ny envíame un resumen de los cambios.",
-        "title": "Resumen del progreso del proyecto",
-        "steps": [
-          [
-            "Definir el alcance y programar el trabajo",
-            "Acordar qué seguir y con qué frecuencia"
-          ],
-          [
-            "Revisar a tiempo y resumir los cambios",
-            "Recoger el progreso con la información disponible"
-          ],
-          [
-            "Entregar el resumen y señalar próximos pasos",
-            "Traer la actualización a la conversación"
-          ]
-        ]
-      }
-    },
     "flowEyebrows": [
       "UN COMIENZO COMPARTIDO",
       "EL ALIADO ADECUADO",
@@ -245,106 +233,81 @@
     "siteBundle": "Web de producto · Entrega de ejemplo",
     "siteBundleSub": "Estructura / Interacciones / Validación",
     "siteReportTitle": "Web de producto · Notas de entrega de ejemplo",
-    "reports": [
+    "projectReports": [
       {
-        "intro": "Resultado de ejemplo: tres formas habituales de crear una web de producto, comparadas por volumen de contenido, interacciones y mantenimiento.",
-        "table": [
-          [
-            "Enfoque",
-            "Uso adecuado",
-            "Ventajas y compromisos"
-          ],
-          [
-            "HTML / CSS / JS estático",
-            "Webs de producto y presentación",
-            "Pocas dependencias; actualizar el contenido requiere editar archivos"
-          ],
-          [
-            "Generador de sitios estáticos",
-            "Documentación y sitios de contenido",
-            "Estructura uniforme; hay que mantener las herramientas de compilación"
-          ],
-          [
-            "Sistema de gestión de contenidos",
-            "Edición frecuente por varias personas",
-            "Edición sencilla; hay que mantener servicios y permisos"
-          ]
-        ],
+        "title": "Notas de instalación · ejemplo",
+        "intro": "Revisión de ejemplo de una compilación de escritorio Linux; no certifica tu equipo.",
         "sections": [
           {
-            "title": "Recomendación",
+            "title": "Comprobado en este ejemplo",
             "paragraphs": [
-              "Si el objetivo es presentar el producto con claridad y ofrecer unas pocas interacciones fiables, empieza con una página estática ligera. Valora un gestor de contenidos cuando el sitio crezca.",
-              "Este ejemplo simplificado muestra el formato de entrega. No se ha realizado una investigación real."
+              "La app inicia, el modelo configurado conecta y el asistente y los ajustes persisten al reabrir."
+            ]
+          },
+          {
+            "title": "Pendiente",
+            "paragraphs": [
+              "Comprobar las ventanas de Wayland y los clics de notificaciones en el escritorio de destino."
             ]
           }
         ]
       },
       {
-        "intro": "Resultado de ejemplo: organizar materiales dispersos en contexto, decisiones acordadas y próximas acciones para seguir avanzando.",
+        "title": "PR de documentación inicial · ejemplo",
+        "intro": "Cambio de documentación ficticio para el proyecto de la demo; no crea un PR en GitHub.",
         "sections": [
           {
-            "title": "Contexto del proyecto",
+            "title": "Cambios propuestos",
             "paragraphs": [
-              "Crear una web de producto en chino centrada en las capacidades del asistente y la conexión mediante Agent Link."
+              "Separar el estado Experimental del escritorio Linux de Server y Docker. Mostrar requisitos antes de los comandos y explicar la configuración."
             ]
           },
           {
-            "title": "Decisiones acordadas",
-            "items": [
-              "Diseño cálido y sobrio que explique el producto y la colaboración.",
-              "Ejemplos locales identificados claramente como demostraciones interactivas.",
-              "Diagramas legibles y conversaciones utilizables en el móvil."
-            ]
-          },
-          {
-            "title": "Próximos pasos",
+            "title": "Extracto de revisión",
             "paragraphs": [
-              "Confirmar el enlace a la documentación pública oficial y mantener actualizadas las instrucciones de acceso de los agentes."
+              "Antes: «Instala Pot y empieza a hablar». Después: «Elige plataforma, verifica el paquete, abre Pot y añade un proveedor. Introduce las claves en la interfaz local»."
             ]
           }
         ]
       },
       {
-        "intro": "Resultado de ejemplo: revisar información con la frecuencia acordada y convertir los cambios en un resumen que ayude a actuar.",
+        "title": "Capturas del producto · ejemplo",
+        "intro": "La interfaz real del producto usa datos sintéticos aislados. No se accedió a conversaciones ni tareas reales.",
         "sections": [
           {
-            "title": "Qué ha cambiado",
-            "items": [
-              "La página incorpora el progreso de las tareas y la vista previa de resultados.",
-              "El diagrama de Agent Link permite cambiar de agente y de modo de colaboración.",
-              "Algunos métodos de conexión del ecosistema siguen pendientes de confirmación."
+            "title": "Vistas preparadas",
+            "paragraphs": [
+              "Conversación con tres tareas y sus resultados; delegación y respuesta por Agent Link."
             ]
           },
           {
-            "title": "Qué conviene seguir",
+            "title": "Siguiente ajuste",
             "paragraphs": [
-              "Los enlaces públicos de instalación y documentación, las conexiones compatibles y los cambios en las capacidades reales del producto.",
-              "Aquí no se ha programado ninguna tarea real ni se monitoriza un proyecto externo."
-            ]
-          }
-        ]
-      },
-      {
-        "intro": "Del objetivo al archivo: los resultados vuelven con su contexto. Esta vista previa muestra qué podría entregar un agente al terminar una tarea.",
-        "sections": [
-          {
-            "title": "Contenido de la entrega",
-            "items": [
-              "Una presentación del producto en chino con diseño adaptable.",
-              "Demos de tareas, un diagrama de Agent Link y ejemplos de colaboración.",
-              "Instrucciones de vista previa, notas de interacción y registros de validación."
-            ]
-          },
-          {
-            "title": "Cómo seguir colaborando",
-            "paragraphs": [
-              "Da comentarios concretos en la conversación, como «haz más claro el diagrama del móvil». Pot puede usarlos para avanzar con la siguiente revisión.",
-              "Esta es una demostración. No se envían mensajes reales a Codex ni a otros agentes."
+              "Ampliar el recorte móvil y conservar la versión aprobada de los documentos."
             ]
           }
         ]
       }
-    ]
+    ],
+    "siteReport": {
+      "intro": "Del objetivo al archivo: los resultados vuelven con su contexto. Esta vista previa muestra qué podría entregar un agente al terminar una tarea.",
+      "sections": [
+        {
+          "title": "Contenido de la entrega",
+          "items": [
+            "Una presentación del producto en chino con diseño adaptable.",
+            "Demos de tareas, un diagrama de Agent Link y ejemplos de colaboración.",
+            "Instrucciones de vista previa, notas de interacción y registros de validación."
+          ]
+        },
+        {
+          "title": "Cómo seguir colaborando",
+          "paragraphs": [
+            "Da comentarios concretos en la conversación, como «haz más claro el diagrama del móvil». Pot puede usarlos para avanzar con la siguiente revisión.",
+            "Esta es una demostración. No se envían mensajes reales a Codex ni a otros agentes."
+          ]
+        }
+      ]
+    }
   }
 }
