@@ -111,6 +111,16 @@ func TestRealSandboxExternalPatchRequiresWritePermission(t *testing.T) {
 	if data, _ := os.ReadFile(path); string(data) != "new\n" {
 		t.Fatal("patch succeeded without changing the actual host file")
 	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0600 {
+		t.Fatal("exact file patch changed permissions", info, err)
+	}
+	// A failed hunk must not reach the in-place commit path.
+	if _, err := e.Execute(t.Context(), r, nil); err == nil {
+		t.Fatal("accepted stale patch context")
+	}
+	if data, _ := os.ReadFile(path); string(data) != "new\n" {
+		t.Fatal("failed patch changed the original contents")
+	}
 	r.Args["patch"] = "*** Begin Patch\n*** Update File: " + sibling + "\n@@\n-old\n+changed\n*** End Patch"
 	if _, err := e.Execute(t.Context(), r, nil); err == nil {
 		t.Fatal("one file grant exposed its sibling")
@@ -118,6 +128,80 @@ func TestRealSandboxExternalPatchRequiresWritePermission(t *testing.T) {
 	if data, _ := os.ReadFile(sibling); string(data) != "old\n" {
 		t.Fatal("sibling host file changed")
 	}
+	r.Args["patch"] = "*** Begin Patch\n*** Update File: " + path + "\n@@\n-new\n+again\n*** End Patch"
+	if runtime.GOOS == "linux" {
+		// The pinned SDK overlays a broader read-only parent after the file
+		// write bind. That combination still fails closed; patch must not
+		// bypass a read-only target or retry on the host.
+		e.options.SandboxRead = []string{outside}
+		if _, err := e.Execute(t.Context(), r, nil); err == nil {
+			t.Fatal("patch bypassed read-only target mount")
+		}
+		if data, _ := os.ReadFile(path); string(data) != "new\n" {
+			t.Fatal("read-only mount denial changed host file")
+		}
+	}
+	e.options.SandboxRead = []string{path, sibling}
+	if _, err := e.Execute(t.Context(), r, nil); err != nil {
+		t.Fatal("exact grant with read-only sibling failed", err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "again\n" {
+		t.Fatal("exact grant patch did not reach host file")
+	}
+	link := filepath.Join(r.CWD, "external-link")
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatal(err)
+	}
+	r.Args["patch"] = "*** Begin Patch\n*** Update File: " + link + "\n@@\n-again\n+changed\n*** End Patch"
+	if _, err := e.Execute(t.Context(), r, nil); err == nil {
+		t.Fatal("patch followed a symlink to the granted file")
+	}
+	for _, patch := range []string{
+		"*** Update File: " + sibling + "\n@@\n-old\n+changed\n",
+		"*** Update File: " + path + "\n*** Move to: " + filepath.Join(outside, "moved") + "\n@@\n-again\n+changed\n",
+		"*** Delete File: " + path + "\n",
+	} {
+		r.Args["patch"] = "*** Begin Patch\n" + patch + "*** End Patch"
+		if _, err := e.Execute(t.Context(), r, nil); err == nil {
+			t.Fatal("exact file grant allowed a directory mutation", patch)
+		}
+	}
+	for _, name := range []string{"new-file", "new-dir/file"} {
+		r.Args["patch"] = "*** Begin Patch\n*** Add File: " + filepath.Join(outside, name) + "\n+changed\n*** End Patch"
+		// Linux may allow this only in its private hidden-parent overlay.
+		// The host tree below must remain unchanged regardless of the result.
+		result, err := e.Execute(t.Context(), r, nil)
+		t.Logf("ungranted creation %s: result=%v error=%v; checking host tree", name, result, err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "again\n" {
+		t.Fatal("denied directory mutations changed granted file")
+	}
+	if data, _ := os.ReadFile(sibling); string(data) != "old\n" {
+		t.Fatal("read-only sibling changed")
+	}
+	for _, name := range []string{"new-file", "new-dir", "moved"} {
+		if _, err := os.Lstat(filepath.Join(outside, name)); !os.IsNotExist(err) {
+			t.Fatal("exact file grant created host path", name, err)
+		}
+	}
+	// A directory grant continues to replace atomically, with a new inode.
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.options.SandboxWrite = []string{outside}
+	r.Args["patch"] = "*** Begin Patch\n*** Update File: " + path + "\n@@\n-again\n+atomic\n*** End Patch"
+	if _, err := e.Execute(t.Context(), r, nil); err != nil {
+		t.Fatal("directory grant patch failed", err)
+	}
+	after, err := os.Stat(path)
+	if err != nil || os.SameFile(before, after) {
+		t.Fatal("directory grant did not use atomic replacement", err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "atomic\n" {
+		t.Fatal("atomic patch did not reach host file")
+	}
+	r.Args["patch"] = "*** Begin Patch\n*** Update File: " + sibling + "\n@@\n-old\n+changed\n*** End Patch"
 	r.Mode = "host"
 	if _, err := e.Execute(t.Context(), r, nil); err != nil {
 		t.Fatal("authorized host mode could not edit the external file", err)

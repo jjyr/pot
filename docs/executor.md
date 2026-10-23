@@ -116,6 +116,25 @@ or non-directory workdir rejects the command without creating files.
 permissions determine accessible targets. Exact file grants allow in-place writes;
 directory grants also permit atomic replacement. Protected patches run in a dedicated
 Go worker under the same OS policy, so direct Go file writes do not bypass it.
+On Linux, a writable file bind mount cannot be replaced by `rename` (`EBUSY`),
+even when its hidden parent accepts temporary files. Updates to existing files
+can instead write through the granted inode. This path pins and verifies the
+parent and file identities, refuses symlinks and multiple hard links, and takes a
+nonblocking advisory lock before comparing the original contents. It preserves
+the inode and its metadata, subject to the OS's normal write rules (for example,
+clearing set-ID bits or file capabilities). File-only grants do not
+authorize creating, moving or deleting directory entries in the host parent.
+The pinned Linux SDK can overlay a separately allowed read-only ancestor over
+a file write mount; that combination remains read-only and fails explicitly.
+
+In-place updates write before truncating and fsync the result. An I/O error
+attempts to restore and fsync the original contents; restoration errors report
+possible partial effects. These updates are not atomic for readers or crashes,
+and the advisory lock only serializes cooperating in-place patch writers.
+Uncooperative writers may race after the content check. Directory grants retain
+atomic replacement; multi-file patches remain nontransactional. No failure
+automatically retries outside the sandbox.
+
 Persistent plugin sessions pin bundle, observation mode, execution mode, revision
 and environment. Policy changes invalidate them rather than upgrading JS memory.
 Plugin processes start in their configured execution workspace in both host and

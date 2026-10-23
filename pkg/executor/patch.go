@@ -15,6 +15,12 @@ type patchEdit struct {
 	path, destination string
 	content           *string
 	mode              os.FileMode
+	original          *patchOriginal
+}
+
+type patchOriginal struct {
+	file, parent os.FileInfo
+	data         []byte
 }
 
 func patchPath(root, name string) (string, error) {
@@ -60,7 +66,8 @@ func textLines(text string) []string {
 
 // ApplyPatch validates all paths and hunks before the first mutation. Each write
 // is fsynced. Directory write permission permits atomic replacement; a file-only
-// grant permits an in-place write. Multi-file patches are not transactions and
+// grant permits a verified in-place write, which is not crash-atomic.
+// Multi-file patches are not transactions and
 // OS errors during commit must be reported as partial effects.
 func ApplyPatch(workspace, patch string) (string, error) {
 	if len(patch) > patchLimit || !utf8.ValidString(patch) {
@@ -129,6 +136,11 @@ func ApplyPatch(workspace, patch string) (string, error) {
 			if !utf8.Valid(original) {
 				return "", errors.New("patch target is not UTF-8")
 			}
+			parent, err := os.Stat(filepath.Dir(target))
+			if err != nil {
+				return "", err
+			}
+			edit.original = &patchOriginal{file: info, parent: parent, data: original}
 			content := textLines(string(original))
 			cursor, hunks := 0, 0
 			if index < len(lines) && strings.HasPrefix(lines[index], "*** Move to: ") {
@@ -271,7 +283,11 @@ func ApplyPatch(workspace, patch string) (string, error) {
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 			return strings.Join(report, "\n"), err
 		}
-		if err := writeAtomic(target, []byte(*edit.content), edit.mode); err != nil {
+		original := edit.original
+		if edit.destination != "" {
+			original = nil
+		}
+		if err := writeAtomic(target, []byte(*edit.content), edit.mode, original); err != nil {
 			return strings.Join(report, "\n"), err
 		}
 		if edit.destination != "" {
@@ -283,21 +299,11 @@ func ApplyPatch(workspace, patch string) (string, error) {
 	}
 	return strings.Join(report, "\n"), nil
 }
-func writeAtomic(path string, data []byte, mode os.FileMode) error {
+func writeAtomic(path string, data []byte, mode os.FileMode, original *patchOriginal) error {
 	file, err := os.CreateTemp(filepath.Dir(path), ".pot-patch-")
 	if err != nil {
-		if os.IsPermission(err) {
-			// Do not require permission to create a sibling when the OS grants
-			// writing only this file. The open still enforces that exact grant.
-			file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
-			if err != nil {
-				return err
-			}
-			_, err = file.Write(data)
-			if err == nil {
-				err = file.Sync()
-			}
-			return errors.Join(err, file.Close())
+		if patchTempDenied(err) && original != nil {
+			return writePatchInPlace(path, data, original)
 		}
 		return err
 	}
@@ -316,6 +322,11 @@ func writeAtomic(path string, data []byte, mode os.FileMode) error {
 		return err
 	}
 	if err := os.Rename(file.Name(), path); err != nil {
+		// Linux exact-file write grants are bind mounts. Their hidden parent
+		// can accept a private temporary file, but the mount cannot be replaced.
+		if patchMountBusy(err) && original != nil {
+			return writePatchInPlace(path, data, original)
+		}
 		return err
 	}
 	directory, err := os.Open(filepath.Dir(path))
