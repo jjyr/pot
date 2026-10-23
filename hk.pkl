@@ -1,6 +1,6 @@
 amends "package://github.com/jdx/hk/releases/download/v2.4.0/hk@2.4.0#/Config.pkl"
 
-// Independent portable product, native Helper, script and notice checks.
+// Independent portable product, macOS, script and notice checks.
 jobs = 4
 
 hooks {
