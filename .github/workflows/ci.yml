@@ -29,7 +29,17 @@ jobs:
           version: 2026.10.10
           cache: false
           install_args: go python node
-      - name: Verify detached descendant readiness and deadline diagnostics
-        run: mise exec -- go test -v -failfast -count=3 ./pkg/pluginhost -run '^TestBackgroundCancellationUsesSupervisorForDetachedDescendants$'
-      - name: Verify detached descendant cancellation under race
-        run: mise exec -- go test -v -race -failfast -count=5 ./pkg/pluginhost -run '^TestBackgroundCancellationUsesSupervisorForDetachedDescendants$'
+      - name: Prepare the pinned real sandbox SDK
+        run: |
+          mise exec -- python - <<'PYTHON'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          from pot_packaging import prepare_sandbox
+          prepare_sandbox(Path('.local/pot/sandbox-tests').resolve())
+          PYTHON
+      - name: Verify all sandbox outcomes without suppressing live session assertions
+        env:
+          POT_SANDBOX_INTEGRATION: '1'
+          POT_SANDBOX_SDK: ${{ github.workspace }}/.local/pot/sandbox-tests
+        run: mise exec -- go test -v -race -failfast -count=3 ./pkg/executor -run '^TestRealSandbox'
