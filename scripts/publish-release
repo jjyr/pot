@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+from urllib.parse import quote
 
 from release_contract import (
     checksum,
@@ -18,7 +19,7 @@ from release_contract import (
 )
 
 
-def publish(version, output, channel, macos_mode=None):
+def publish(version, output, channel, macos_mode=None, release_id=None):
     version = version_number(version)
     repository = os.environ["GITHUB_REPOSITORY"]
     tag = "v" + version
@@ -50,7 +51,22 @@ def publish(version, output, channel, macos_mode=None):
         if (output / (name + ".sha256")).read_text() != f"{checksum(output / name)}  {name}\n":
             raise ValueError(f"checksum sidecar mismatch: {name}")
 
-    def get_release():
+    def read_release(selected_id):
+        selected = subprocess.run(
+            ["gh", "api", f"repos/{repository}/releases/{selected_id}"],
+            capture_output=True,
+            text=True,
+        )
+        if selected.returncode:
+            raise RuntimeError("Cannot read selected release: " + selected.stderr)
+        release = json.loads(selected.stdout)
+        if release["id"] != selected_id or release["tag_name"] != tag:
+            raise ValueError("Selected release ID does not match this tag")
+        if release["draft"] and release["target_commitish"] != sha:
+            raise ValueError("Selected draft does not target the validated source")
+        return release
+
+    def get_tag_release():
         result = subprocess.run(
             ["gh", "api", f"repos/{repository}/releases/tags/{tag}"], capture_output=True, text=True
         )
@@ -59,6 +75,33 @@ def publish(version, output, channel, macos_mode=None):
         if result.stdout and json.loads(result.stdout).get("status") in (404, "404"):
             return None
         raise RuntimeError("Cannot read release metadata: " + result.stderr)
+
+    def get_release():
+        if release_id is not None:
+            return read_release(release_id)
+        release = get_tag_release()
+        if release is not None:
+            return read_release(release["id"])
+        # The tag endpoint does not expose an unpublished draft. Discover
+        # it before creating another release, then read its current assets.
+        listed = subprocess.run(
+            ["gh", "api", f"repos/{repository}/releases?per_page=100", "--paginate", "--slurp"],
+            capture_output=True,
+            text=True,
+        )
+        if listed.returncode:
+            raise RuntimeError("Cannot list releases: " + listed.stderr)
+        matches = [
+            release
+            for page in json.loads(listed.stdout)
+            for release in page
+            if release["tag_name"] == tag
+        ]
+        if len(matches) > 1:
+            raise ValueError("Multiple releases use this tag; review their IDs before publishing")
+        if not matches:
+            return None
+        return read_release(matches[0]["id"])
 
     def identical(path, release):
         asset = next((a for a in release["assets"] if a["name"] == path.name), None)
@@ -105,6 +148,13 @@ def publish(version, output, channel, macos_mode=None):
         release = get_release()
         if release is None:
             raise RuntimeError("Unable to create release: " + result.stderr)
+    # Keep every subsequent read and write on the reviewed release, even if
+    # another writer creates or publishes a release with the same tag.
+    release_id = release["id"]
+    if release["draft"]:
+        published = get_tag_release()
+        if published is not None and published["id"] != release_id:
+            raise ValueError("Another release is already published for this tag")
     # target_commitish is only a tag-creation hint and may name the default
     # branch even for an existing stable tag. Recheck the canonical tag instead.
     current_sha = subprocess.check_output(
@@ -115,8 +165,19 @@ def publish(version, output, channel, macos_mode=None):
     # Establish all existing digests before the first upload; never clobber.
     missing = [path for path in assets if not identical(path, release)]
     for path in missing:
+        command = [
+            "gh",
+            "api",
+            "--method",
+            "POST",
+            "-H",
+            "Content-Type: application/octet-stream",
+            f"https://uploads.github.com/repos/{repository}/releases/{release_id}/assets?name={quote(path.name, safe='')}",
+            "--input",
+            str(path),
+        ]
         result = subprocess.run(
-            ["gh", "release", "upload", tag, "--repo", repository, str(path)],
+            command,
             capture_output=True,
             text=True,
         )
@@ -129,10 +190,22 @@ def publish(version, output, channel, macos_mode=None):
     latest = get_release()
     if latest is None:
         raise RuntimeError("Release disappeared before channel completion")
+    if not all(identical(path, latest) for path in assets):
+        raise RuntimeError("Channel assets are incomplete; keeping release unpublished")
     if latest["draft"]:
-        subprocess.run(
-            ["gh", "release", "edit", tag, "--repo", repository, "--draft=false"], check=True
-        )
+        published = get_tag_release()
+        if published is not None and published["id"] != release_id:
+            raise ValueError("Another release is already published for this tag")
+        command = [
+            "gh",
+            "api",
+            "--method",
+            "PATCH",
+            f"repos/{repository}/releases/{release_id}",
+            "-F",
+            "draft=false",
+        ]
+        subprocess.run(command, check=True)
     print(f"Published {channel} assets for {tag}")
 
 
@@ -142,5 +215,6 @@ if __name__ == "__main__":
     parser.add_argument("output", type=Path)
     parser.add_argument("--channel", required=True, choices=["server", "desktop", "macos"])
     parser.add_argument("--macos-mode", choices=["unsigned", "signed"])
+    parser.add_argument("--release-id", type=int, help="Recover a reviewed existing release by ID")
     args = parser.parse_args()
-    publish(args.version, args.output.resolve(), args.channel, args.macos_mode)
+    publish(args.version, args.output.resolve(), args.channel, args.macos_mode, args.release_id)

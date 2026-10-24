@@ -411,13 +411,227 @@ class CompleteDistribution(AssetsFixture, unittest.TestCase):
 
 
 class GitHubPublication(AssetsFixture, unittest.TestCase):
+    def test_new_draft_is_discovered_and_published_after_complete_upload(self):
+        self.exercise_draft([])
+
+    def test_existing_draft_is_reused_without_creation(self):
+        self.exercise_draft([1])
+
+    def test_ambiguous_drafts_stop_before_writes(self):
+        self.exercise_draft([1, 2], rejected="Multiple releases")
+
+    def test_reviewed_release_id_binds_uploads_and_publication(self):
+        self.exercise_draft([1, 2], selected=1)
+
+    def test_reviewed_draft_must_target_validated_source(self):
+        self.exercise_draft([1], selected=1, target=OTHER, rejected="validated source")
+
+    def test_incomplete_draft_remains_unpublished(self):
+        self.exercise_draft([1], selected=1, omit=True, rejected="incomplete")
+
+    def test_discovered_draft_must_target_validated_source(self):
+        self.exercise_draft([1], target=OTHER, rejected="validated source")
+
+    def test_discovery_follows_all_pages(self):
+        self.exercise_draft([1], paginated=True)
+
+    def test_ambiguity_on_later_page_blocks_writes(self):
+        self.exercise_draft([1, 2], paginated=True, rejected="Multiple releases")
+
+    def test_selected_release_must_match_tag(self):
+        self.exercise_draft([1], selected=1, tag="v9.9.9", rejected="does not match")
+
+    def test_discovered_release_tag_change_blocks_writes(self):
+        self.exercise_draft([1], tag="v9.9.9", rejected="does not match")
+
+    def test_public_release_is_preferred_over_leftover_draft(self):
+        self.exercise_draft([1, 2], public=1)
+
+    def test_selected_draft_cannot_publish_over_public_release(self):
+        self.exercise_draft([1, 2], public=2, selected=1, rejected="already published")
+
+    def test_listing_failure_blocks_creation(self):
+        self.exercise_draft([], fail="list", rejected="Cannot list")
+
+    def test_id_read_failure_blocks_writes(self):
+        self.exercise_draft([1], fail="read", rejected="Cannot read selected")
+
+    def test_tag_lookup_failure_blocks_creation(self):
+        self.exercise_draft([], fail="tag", rejected="Cannot read release metadata")
+
+    def test_failed_upload_with_identical_bytes_is_reused(self):
+        self.exercise_draft([1], fail="upload-identical")
+
+    def test_failed_upload_without_asset_keeps_draft(self):
+        self.exercise_draft([1], fail="upload", rejected="Unable to upload")
+
+    def test_tag_move_before_upload_blocks_writes(self):
+        self.exercise_draft([1], moved=True, rejected="tag moved before")
+
+    def test_publication_during_upload_keeps_selected_draft_unpublished(self):
+        self.exercise_draft([1, 2], selected=1, fail="public-race", rejected="already published")
+
+    def test_changed_id_in_response_blocks_writes(self):
+        self.exercise_draft([1], selected=1, fail="id", rejected="does not match")
+
+    def exercise_draft(
+        self,
+        ids,
+        selected=None,
+        target=SHA,
+        omit=False,
+        rejected=None,
+        paginated=False,
+        public=None,
+        tag="v1.2.3",
+        fail=None,
+        moved=False,
+    ):
+        publish = runpy.run_path(str(ROOT / "scripts/publish-release"))["publish"]
+        releases = [
+            {
+                "id": value,
+                "tag_name": "v1.2.3",
+                "target_commitish": target,
+                "draft": value != public,
+                "assets": [],
+            }
+            for value in ids
+        ]
+        writes = []
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.fixture(root)
+            prepare("1.2.3", root, channel="server")
+
+            def run(arguments, **options):
+                if arguments[:2] == ["gh", "api"]:
+                    if "--method" not in arguments:
+                        endpoint = arguments[2]
+                        if "/releases/tags/" in endpoint:
+                            if fail == "tag":
+                                return subprocess.CompletedProcess(
+                                    arguments, 1, '{"status": 403}', "denied"
+                                )
+                            published = next((r for r in releases if not r["draft"]), None)
+                            return subprocess.CompletedProcess(
+                                arguments,
+                                0 if published else 1,
+                                json.dumps(published or {"status": "404"}),
+                                "",
+                            )
+                        if endpoint.endswith("releases?per_page=100"):
+                            self.assertIn("--paginate", arguments)
+                            self.assertIn("--slurp", arguments)
+                            if fail == "list":
+                                return subprocess.CompletedProcess(arguments, 1, "", "list failure")
+                            pages = [[r] for r in releases] if paginated else [releases]
+                            return subprocess.CompletedProcess(arguments, 0, json.dumps(pages), "")
+                        release = next(
+                            r for r in releases if r["id"] == int(endpoint.rsplit("/", 1)[1])
+                        )
+                        if fail == "read":
+                            return subprocess.CompletedProcess(arguments, 1, "", "read failure")
+                        metadata = dict(release, tag_name=tag)
+                        if fail == "id":
+                            metadata["id"] = 99
+                        return subprocess.CompletedProcess(arguments, 0, json.dumps(metadata), "")
+                    method = arguments[arguments.index("--method") + 1]
+                    endpoint = next(a for a in arguments if "/releases/" in a)
+                    value = int(endpoint.split("/releases/", 1)[1].split("/", 1)[0])
+                    release = next(r for r in releases if r["id"] == value)
+                    self.assertEqual(value, selected or 1)
+                    if method == "PATCH":
+                        self.assertEqual(len(release["assets"]), 5)
+                        release["draft"] = False
+                        writes.append(("publish", value))
+                        return subprocess.CompletedProcess(arguments, 0, "{}", "")
+                    self.assertEqual(method, "POST")
+                    path = Path(arguments[-1])
+                elif arguments[:3] == ["gh", "release", "create"]:
+                    self.assertFalse(releases)
+                    releases.append(
+                        {
+                            "id": 1,
+                            "tag_name": "v1.2.3",
+                            "target_commitish": SHA,
+                            "draft": True,
+                            "assets": [],
+                        }
+                    )
+                    writes.append(("create", 1))
+                    return subprocess.CompletedProcess(arguments, 0, "", "")
+                else:
+                    self.fail(f"Unexpected command: {arguments}")
+                writes.append(("upload", release["id"]))
+                if fail == "public-race":
+                    releases[1]["draft"] = False
+                if not omit and fail != "upload":
+                    release["assets"].append(
+                        {
+                            "name": path.name,
+                            "digest": "sha256:" + checksum(path),
+                            "size": path.stat().st_size,
+                        }
+                    )
+                return subprocess.CompletedProcess(
+                    arguments,
+                    1 if fail in {"upload", "upload-identical"} else 0,
+                    "{}",
+                    "upload failure",
+                )
+
+            with (
+                mock.patch.dict(os.environ, GITHUB_REPOSITORY="jjyr/pot", RELEASE_SHA=SHA),
+                mock.patch("subprocess.run", side_effect=run),
+                mock.patch(
+                    "subprocess.check_output",
+                    side_effect=[SHA, OTHER] if moved else None,
+                    return_value=SHA,
+                ),
+                mock.patch("builtins.print"),
+            ):
+                if rejected:
+                    with self.assertRaisesRegex((RuntimeError, ValueError), rejected):
+                        publish(
+                            "1.2.3",
+                            root,
+                            "server",
+                            **({"release_id": selected} if selected is not None else {}),
+                        )
+                    self.assertFalse(any(w[0] in {"publish", "create"} for w in writes))
+                    if fail not in {"upload", "public-race"} and not omit:
+                        self.assertEqual(writes, [])
+                else:
+                    publish(
+                        "1.2.3",
+                        root,
+                        "server",
+                        **({"release_id": selected} if selected is not None else {}),
+                    )
+                    self.assertEqual(
+                        [w for w in writes if w[0] == "publish"],
+                        [] if public == 1 else [("publish", 1)],
+                    )
+                    count = len(writes)
+                    publish(
+                        "1.2.3",
+                        root,
+                        "server",
+                        **({"release_id": selected} if selected is not None else {}),
+                    )
+                    self.assertEqual(len(writes), count)
+                    if len(releases) > 1:
+                        self.assertEqual(releases[1]["assets"], [])
+                        self.assertTrue(releases[1]["draft"])
+
     def test_independent_channels_add_assets_without_overwriting_other_checksums(self):
         self.exercise()
 
     def test_conflicting_existing_asset_blocks_before_upload(self):
         with self.assertRaisesRegex(ValueError, "Refusing to replace"):
             self.exercise(conflict=True)
-        self.assertFalse(any(call[:3] == ["gh", "release", "upload"] for call in self.calls))
+        self.assertFalse(any(call[:4] == ["gh", "api", "--method", "POST"] for call in self.calls))
 
     def test_moved_tag_blocks_all_writes(self):
         with self.assertRaisesRegex(ValueError, "tag moved"):
@@ -428,7 +642,13 @@ class GitHubPublication(AssetsFixture, unittest.TestCase):
         publish = runpy.run_path(str(ROOT / "scripts/publish-release"))["publish"]
         self.calls = []
         sentinel = {"name": "SHA256SUMS-macos", "digest": "sha256:" + "f" * 64, "size": 7}
-        release = {"target_commitish": "main", "draft": False, "assets": [sentinel.copy()]}
+        release = {
+            "id": 1,
+            "tag_name": "v1.2.3",
+            "target_commitish": "main",
+            "draft": False,
+            "assets": [sentinel.copy()],
+        }
         real_run = subprocess.run
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -448,9 +668,9 @@ class GitHubPublication(AssetsFixture, unittest.TestCase):
                 self.calls.append(arguments)
                 if arguments[0] == "sha256sum":
                     return real_run(arguments, stdout=subprocess.DEVNULL, **options)
-                if arguments[:2] == ["gh", "api"]:
+                if arguments[:2] == ["gh", "api"] and "--method" not in arguments:
                     return subprocess.CompletedProcess(arguments, 0, json.dumps(release), "")
-                self.assertEqual(arguments[:3], ["gh", "release", "upload"])
+                self.assertEqual(arguments[:4], ["gh", "api", "--method", "POST"])
                 path = Path(arguments[-1])
                 release["assets"].append(
                     {
@@ -469,10 +689,10 @@ class GitHubPublication(AssetsFixture, unittest.TestCase):
             ):
                 publish("1.2.3", root, "server")
                 publish("1.2.3", root, "desktop")
-                count = sum(call[:3] == ["gh", "release", "upload"] for call in self.calls)
+                count = sum(call[:4] == ["gh", "api", "--method", "POST"] for call in self.calls)
                 publish("1.2.3", root, "server")
                 self.assertEqual(
-                    count, sum(call[:3] == ["gh", "release", "upload"] for call in self.calls)
+                    count, sum(call[:4] == ["gh", "api", "--method", "POST"] for call in self.calls)
                 )
             self.assertIn(sentinel, release["assets"])
             names = [asset["name"] for asset in release["assets"]]
@@ -518,15 +738,15 @@ class MacOSPublication(AssetsFixture, unittest.TestCase):
                 path = root / artifact["url"].split("/")[-1]
                 self.assertEqual(artifact["sha256"], checksum(path))
                 self.assertEqual(artifact["size"], path.stat().st_size)
-            release = {"draft": False, "assets": []}
+            release = {"id": 1, "tag_name": "v1.2.3", "draft": False, "assets": []}
             uploads = []
             fail = True
 
             def run(arguments, **options):
                 nonlocal fail
-                if arguments[:2] == ["gh", "api"]:
+                if arguments[:2] == ["gh", "api"] and "--method" not in arguments:
                     return subprocess.CompletedProcess(arguments, 0, json.dumps(release), "")
-                self.assertEqual(arguments[:3], ["gh", "release", "upload"])
+                self.assertEqual(arguments[:4], ["gh", "api", "--method", "POST"])
                 path = Path(arguments[-1])
                 if fail and len(uploads) == 2:
                     fail = False
