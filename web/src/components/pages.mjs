@@ -199,7 +199,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const current=editor,taskReturn=taskView?.returnTo||taskOrigin,returnToConversation=!editor&&usageOwner;
     if(!await leave({toParent:true}))return false;
     if(skipPicker&&editorParents.at(-1)?.kind==='picker')editorParents.pop();
-    if(editorParents.length){editor=editorParents.pop();host.replaceChildren(editor.root);heading(editor.label);history.replaceState({...history.state,potEditor:editor.id},'',location.href);host.scrollTop=editor.scroll||0;editor.focus?.focus({preventScroll:true});return true;}
+    if(editorParents.length){editor=editorParents.pop();host.replaceChildren(editor.root);heading(editor.label);editor.lifecycle.locale?.();history.replaceState({...history.state,potEditor:editor.id},'',location.href);host.scrollTop=editor.scroll||0;editor.focus?.focus({preventScroll:true});return true;}
     if(returnToConversation&&usageOwner.returnTask){const task=usageOwner.returnTask,returnTo=usageOwner.taskReturn;usageOwner=null;route='tasks';routeChanged('tasks');const state={potRoute:'tasks',potScope:{space:task._space_id,owner:task.assistant_id},potTask:task,potTaskReturn:returnTo};history.replaceState(state,'',location.href);await taskDetail(task,{recordHistory:false,returnTo});return true;}
     if(!current&&taskReturn?.route==='chat'){const target=taskReturn.scope;usageOwner=null;detailParent=false;route='';history.replaceState({potRoute:'chat',potScope:target,potDirectory:false},'',location.href);await openChat(target);return true;}
     if(returnToConversation){usageOwner=null;const state={...history.state,potRoute:'chat'};delete state.potUsage;history.replaceState(state,'',location.href);openChat();return true;}
@@ -912,6 +912,19 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const view={root,token,topics:['agent-links','assistants','spaces'],space:captured.space};view.queue=createRefreshQueue(refresh,{active:()=>!disposed&&pageView===view&&gate.current(token)});pageView=view;await view.queue.run();
     async function connection() {
       if(!gate.current(token))return;
+      const picker=renderEditor(t('connectTitle'),{},[],()=>{}, {capturedScope:captured});
+      picker.root.classList.add('agent-kind-picker');
+      picker.form.querySelector('.editor-actions .primary').hidden=true;
+      const fields=picker.form.querySelector('.editor-fields'),description=n('p','hint'),choices=n('div','assistant-runtime-list');fields.append(description,choices);
+      const entries=[];
+      for(const kind of ['codex','antigravity','pot']){
+        const row=n('div','assistant-runtime-row'),button=action('',()=>{suspendEditor();openConnection(kind);}),info=n('span','assistant-runtime-info'),title=n('strong'),detail=n('span','hint');
+        button.classList.add('assistant-runtime-choice','agent-kind-choice');button.dataset.agentKind=kind;info.append(title,detail);button.append(connectionBrand(kind),info,icon('chevron-right'));row.append(button);choices.append(row);entries.push({kind,button,title,detail});
+      }
+      picker.lifecycle.locale=()=>{picker.lifecycle.setTitle(t('connectTitle'));description.textContent=t('connectDescription');picker.form.querySelector('.editor-actions button:not(.primary)').textContent=translate(locale(),'integrations.cancel');for(const entry of entries){entry.title.textContent=entry.kind==='pot'?t('potTitle'):translate(locale(),'agentLinks.source'+(entry.kind==='antigravity'?'Antigravity':'Codex'));entry.detail.textContent=t('connectDescription.'+entry.kind);entry.button.setAttribute('aria-label',t(entry.kind+'Action'));}};
+      picker.lifecycle.locale();
+    }
+    function openConnection(kind) {
       let connectedID='';const lifetime=new AbortController();
       const connections=createAgentLinks({root:n('div'),request,locale,scope:()=>captured,signal:lifetime.signal,
         edit:({title,initial,fields,save,scope:context,submitLabel})=>{
@@ -923,7 +936,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
         try{const snapshot=await request('/api/v1/agent-links',captured);if(disposed||host.firstElementChild!==list)return;const link=snapshot.items?.find(item=>item.id===connectedID);if(link?.directory?.targets?.some(item=>item.address?.kind==='node'&&item.capabilities?.operations?.includes('assistant.management'))){await linkedAssistantEditor(connectedID,captured.space,'',linkDisplayName(link),link.peer?.kind);}else{list.append(n('p','hint',t('unsupportedDescription')),action(t('manage'),()=>show('machines')),action(t('back'),()=>show('add-assistant',{force:true})));}}
         catch{if(host.firstElementChild===list)list.append(n('p','inline-error',t('connectionsFailed')),action(translate(locale(),'retry'),openConnected));}
       }
-      const form=connections.addAgent(),dispose=form.lifecycle.dispose;
+      const form=connections.addAgent({kind,onChangeKind:()=>back()}),dispose=form.lifecycle.dispose;
       form.lifecycle.dispose=()=>{dispose?.();lifetime.abort();};
     }
   }

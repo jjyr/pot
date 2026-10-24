@@ -3,6 +3,7 @@
 
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -111,6 +112,28 @@ def main():
                 "async page => { await page.evaluate(() => window.nativeAssistantCaptureContinue()); await page.waitForFunction(() => !!window.assistantStartResults); const result = await page.evaluate(() => window.assistantStartResults); if (!result.passed) throw Error(JSON.stringify(result)); }",
             )
             print(f"Antigravity editor capture: {width}, {locale} passed", flush=True)
+        first_connection = (ROOT / "scripts/tests/pot-ui-first-connection-browser.js").read_text()
+        for kind in ["codex", "antigravity"]:
+            for width, locale in [
+                (1200, "en"),
+                (1200, "zh-CN"),
+                (390, "en"),
+                (390, "zh-CN"),
+                (320, "en"),
+                (320, "zh-CN"),
+            ]:
+                result = cli(
+                    "run-code",
+                    first_connection.replace(
+                        "STATE",
+                        json.dumps(
+                            {"origin": origin, "kind": kind, "locale": locale, "width": width}
+                        ),
+                    ),
+                )
+                if '"passed":true' not in result:
+                    raise RuntimeError(result[:3000])
+                print(f"First connection: {kind}, {width}, {locale} passed", flush=True)
     finally:
         cli("close")
         server.shutdown()

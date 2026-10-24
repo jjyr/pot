@@ -90,8 +90,14 @@ this Pot and each connected node separately, including multiple nodes of the sam
 brand. Offline and unsupported nodes retain their names, status explanations and
 connection-management actions. Only online nodes advertising node-level
 `assistant.management` open a creation form. The local API provider is selected
-inside that form. The secondary connection entry returns to creation with the new
-node selected; connecting from Link returns to Link instead.
+inside that form. **＋ Connect a new Agent** opens a type picker for Codex,
+Antigravity or another Pot. Each native Agent has installation and invitation
+instructions; invitation verification rejects a different Agent type and supports
+retry without leaving the guide. Cancel returns through the type picker to the
+runtime list. Once pairing is accepted, wait for its result before navigating.
+Successful connection preselects the new node in the creation form. Only an
+explicit successful creation opens the returned assistant; the advertised default
+assistant is not opened automatically. Connecting from Link returns to Link.
 
 The shared form consumes a versioned, typed receiver catalog and only renders
 known supported fields. Models, reasoning effort and workspace scopes belong to

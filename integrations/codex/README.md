@@ -88,8 +88,11 @@ restored independently on restart. An unavailable address does not prevent the
 local page or other addresses from working. A firewall or remote network can
 still prevent access; discovery does not prove remote reachability.
 
-Copy the connection segment on one side and paste it into **Add Agent** on the
-other side. Only one side needs a reachable address; the same connection carries
+In Pot, choose **Add assistant > ＋ Connect a new Agent > Codex** for installation
+and invitation guidance. Paste the complete invitation, then configure and
+explicitly create the new assistant after connecting. **Link > Add Agent** pairs
+the node and returns to connection management. Only one side needs a reachable
+address; the same connection carries
 traffic in both directions. The directory advertises assistant profile/deletion
 controls and a separate caller-scoped task executor. A local Pot assistant owns
 its explicit Codex task receipts, results and pending human approvals. Messages

@@ -85,12 +85,13 @@ export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({
     form.onsubmit=async event=>{event.preventDefault();if(pending||!form.reportValidity())return;pending=true;cancel.disabled=submit.disabled=true;for(const input of controls.values())input.disabled=true;error.replaceChildren();const values=Object.fromEntries([...controls].map(([name,input])=>[name,input.value]));try{await save(values,{...captured(),request_id:requestID});finish();}catch(reason){failure(reason,error);}finally{pending=false;cancel.disabled=submit.disabled=false;for(const input of controls.values())input.disabled=false;result.lifecycle.settled?.();}};
     const result={root:panel,form,controls,lifecycle:{setTitle:value=>{heading.textContent=value;}},session:{values:initial}};localEditor=result;return result;
   }
-  function addAgent({guideKey}={}){
+  function addAgent({guideKey,kind,onChangeKind}={}){
     closePicker();
+    const guided=['codex','antigravity','pot'].includes(kind),titleKey=guided?'assistantStart.'+kind+'Action':'agentLinks.add';
     const initial={address:''},ownerScope={...captured()};
     const definitions=[{name:'address',label:t('agentLinks.peerAddress'),required:true,placeholder:t('agentLinks.pasteAddress')}];
     let verified=null,verifiedAddress='',phase='empty',previewTimer,previewRequest,previewVersion=0,closed=false,previewError=null;
-    const form=openEditor(t('agentLinks.add'),initial,definitions,async(values,context)=>{
+    const form=openEditor(t(titleKey),initial,definitions,async(values,context)=>{
       if(!verified||verifiedAddress!==values.address.trim())throw uiError(null,'agentLinks.verifyFirst');
       phase='adding';paint();
       let result;try{result=await request(base,{...ownerScope,...context,method:'POST',body:{action:'connect',address:values.address.trim(),request_id:context.request_id}});}
@@ -103,11 +104,19 @@ export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({
     const intro=n('div','connection-intro'),heading=n('h2'),description=n('p','hint'),inputGroup=n('span','connection-input-group'),paste=action('',pasteAddress),hint=n('p','hint connection-field-hint'),checking=n('p','connection-checking'),error=n('div','inline-error connection-preview-error'),preview=n('div','connection-peer-preview'),note=n('p','hint connection-scope-note');
     checking.setAttribute('role','status');error.setAttribute('role','alert');preview.setAttribute('aria-live','polite');
     intro.append(heading,description);fields.prepend(intro);body.append(inputGroup);inputGroup.append(input,paste);row.after(hint,checking,error,preview);fields.append(note);
+    const guide=n('section','agent-setup-guide'),summary=n('div','assistant-runtime-summary'),brand=n('strong'),change=onChangeKind?action('',onChangeKind):null,steps=n('ol','agent-setup-steps'),items=[];
+    if(guided){
+      summary.append(connectionBrand(kind),brand);if(change)summary.append(change);guide.append(summary,steps);intro.after(guide);
+      for(const step of (kind==='pot'?['page','paste']:['install','page','paste'])){const item=n('li'),title=n('h3'),text=n('p','hint');item.append(title,text);const entry={step,title,text};if(step==='install'){const command=n('pre','agent-setup-command');command.append(n('code','',`mise exec -- python integrations/${kind}/install.py`));const link=n('a','agent-setup-docs');link.href=`https://github.com/jjyr/pot/blob/main/integrations/${kind}/README.md#install-and-connect`;link.target='_blank';link.rel='noopener noreferrer';item.append(command,link);entry.link=link;}steps.append(item);items.push(entry);}
+    }
     input.autocomplete='off';input.spellcheck=false;
+    // The page request gate closes when its editor opens. The editor owns its
+    // own lifetime and disposes pending invitation previews when it leaves.
     const alive=()=>!closed&&form.root.isConnected;
     function paint(){
       if(!alive())return;
-      heading.textContent=t('agentLinks.addHeading');description.textContent=t(guideKey||'agentLinks.addDescription');hint.textContent=t('agentLinks.addressHint');note.textContent=t(verified?.peer?.kind==='antigravity'?'agentLinks.managementScope':'agentLinks.nodeScope');
+      heading.textContent=t(guided?titleKey:'agentLinks.addHeading');description.textContent=t(guideKey||(guided?'agentLinks.setupDescription':'agentLinks.addDescription'));hint.textContent=t('agentLinks.addressHint');note.textContent=t(verified?.peer?.kind==='antigravity'?'agentLinks.managementScope':'agentLinks.nodeScope');
+      if(guided){const name=t('agentLinks.source'+(kind==='antigravity'?'Antigravity':kind==='codex'?'Codex':'Pot'));brand.textContent=name;if(change){change.textContent=t('agentLinks.changeKind');change.disabled=phase==='adding';}for(const entry of items){const suffix=kind==='pot'&&entry.step==='page'?'.pot':'';entry.title.textContent=t('agentLinks.setup.'+entry.step+suffix);entry.text.textContent=t('agentLinks.setup.'+entry.step+'Description'+suffix).replace('{agent}',name);if(entry.link)entry.link.textContent=t('agentLinks.installGuide');}}
       row.querySelector('.form-label').textContent=t('agentLinks.peerAddress');input.setAttribute('aria-label',t('agentLinks.peerAddress'));input.placeholder=t('agentLinks.pasteAddress');
       paste.replaceChildren(icon('copy'),n('span','',t('agentLinks.paste')));paste.disabled=phase==='adding';
       submit.hidden=true;submit.textContent=t(phase==='adding'?'agentLinks.pending':'agentLinks.add');submit.disabled=phase==='adding'||!verified||verifiedAddress!==input.value.trim();cancel.textContent=t('integrations.cancel');
@@ -123,6 +132,7 @@ export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({
       const controller=previewRequest=new AbortController();form.form.querySelector(':scope > .inline-error')?.replaceChildren();phase='checking';paint();
       try{const result=await request(base,{...ownerScope,signal:controller.signal,method:'POST',body:{action:'preview',address:value}});if(!alive()||version!==previewVersion||controller.signal.aborted)return;
         if(typeof result?.peer?.node_id!=='string'||!result.peer.node_id.trim()||!result.peer.name||!['pot','codex','antigravity'].includes(result.peer.kind)||!result.endpoint||!result.fingerprint)throw uiError(null,'agentLinks.failed');
+        if(guided&&result.peer.kind!==kind)throw uiError(null,'agentLinks.kindMismatch');
         verified=result;verifiedAddress=value;phase='identified';paint();form.form.requestSubmit();
       }catch(reason){if(!alive()||version!==previewVersion||controller.signal.aborted)return;previewError=reason;phase='error';}paint();
     }
@@ -130,7 +140,7 @@ export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({
     async function pasteAddress(){const version=previewVersion;try{const value=await navigator.clipboard.readText();if(!alive()||phase==='adding'||version!==previewVersion)return;input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));clearTimeout(previewTimer);await verifyAddress();}catch(reason){if(alive()){previewError=uiError(reason,'agentLinks.pasteFailed');paint();input.focus();}}}
     input.addEventListener('input',changedAddress);
     form.lifecycle.settled=()=>{if(phase==='adding')phase=verified?'identified':'error';paint();};
-    form.lifecycle.locale=()=>{form.lifecycle.setTitle?.(t('agentLinks.add'));paint();};
+    form.lifecycle.locale=()=>{form.lifecycle.setTitle?.(t(titleKey));paint();};
     form.lifecycle.dispose=()=>{closed=true;clearTimeout(previewTimer);previewRequest?.abort();previewVersion++;};
     paint();return form;
   }

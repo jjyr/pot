@@ -40,7 +40,9 @@ Stop the host before upgrading its executable.
 
 Run `pot-setup` in Antigravity. It returns a private, short-lived connection-page
 URL. Open that page and copy an invitation into Pot's **Add assistant >
-Antigravity** flow, or paste a Pot invitation into the connection page. Pairing
+＋ Connect a new Agent > Antigravity** guide, or paste a Pot invitation into the
+connection page. The guide shows installation and invitation steps; after
+connecting, configure and create the new assistant explicitly. Pairing
 allows messaging and user-only assistant management within existing local scope
 choices. It grants no arbitrary filesystem path selection or credentials.
 

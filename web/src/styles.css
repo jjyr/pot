@@ -909,6 +909,7 @@ pot-message-file:has(> pot-resource) { display: block; margin-block: 12px; }
 .task-filters{align-items:center;margin-bottom:12px;flex:none;}
 .record-search-line{align-items:center;flex:none;gap:12px;margin-bottom:8px;}
 .record-search-line .task-search{margin:0;min-width:0;}
+.agent-kind-picker button,.agent-connection-setup button{min-height:44px;}.agent-kind-picker .editor-fields{display:block;}.agent-kind-picker .assistant-runtime-list{margin-top:16px;}.agent-kind-picker .assistant-runtime-choice{min-height:64px;}.agent-setup-guide{min-width:0;}.agent-setup-guide .assistant-runtime-summary{margin-bottom:16px;}.agent-setup-guide .assistant-runtime-summary>strong{flex:1;min-width:0;overflow-wrap:anywhere;}.agent-setup-steps{margin:0 0 20px;padding-left:24px;}.agent-setup-steps>li+li{margin-top:18px;}.agent-setup-steps h3{font-size:14px;margin:0 0 6px;}.agent-setup-steps p{margin:0;line-height:1.6;}.agent-setup-command{padding:12px;margin:10px 0;background:var(--surface);font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;}.agent-setup-docs{display:inline-flex;align-items:center;min-height:44px;font-size:13px;}.agent-setup-docs:focus-visible{outline:2px solid var(--primary);outline-offset:3px;}
 .record-search-line .field-input,.record-filter .field-input{min-height:44px;max-width:100%;}
 .record-filter{display:flex;margin:0;min-width:0;max-width:100%;}
 .record-filter>.form-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);}
