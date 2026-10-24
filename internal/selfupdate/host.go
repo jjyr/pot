@@ -231,11 +231,19 @@ func (h *Host) handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "host is not stopped", 409)
 			return
 		}
+		// Exec replaces every server goroutine. Put the acknowledgement on the
+		// connection before allowing Run to restart, or the worker can see EOF
+		// after a successful restart and incorrectly enter rollback.
+		if err := json.NewEncoder(w).Encode(map[string]bool{"accepted": true}); err != nil {
+			return
+		}
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			return
+		}
 		select {
 		case h.resume <- struct{}{}:
 		default:
 		}
-		_ = json.NewEncoder(w).Encode(map[string]bool{"accepted": true})
 	default:
 		http.NotFound(w, r)
 	}
