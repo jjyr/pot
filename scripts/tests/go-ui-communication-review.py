@@ -12,6 +12,10 @@ import tarfile
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = {
+    "task-communication": [
+        "scripts/tests/fixtures/task-communication.html",
+        "scripts/tests/task-communication-fixture.mjs",
+    ],
     "communication": [
         "scripts/tests/fixtures/communication-review.html",
         "scripts/tests/go-ui-communication-review-fixture.mjs",

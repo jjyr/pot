@@ -261,6 +261,31 @@ an unsaved choice onto a different revision.
 
 Conversation and Task stream contracts are in [UI events](ui-events.md).
 
+Chat and Task transcripts project consecutive completed Task `send_message` and
+`receive_message` records through `components/communication-window.mjs` before
+virtualization. Two or more eligible siblings share a native disclosure; its
+summary retains each distinct direction and Task identity, and separately counts
+records, messages and Tasks. A receive batch remains one record with its original
+message order. Prose, other tools, mixed assistant mail, incomplete calls,
+approvals and failures break the stack. Individual calls and failure labels stay
+visible independently. Expanding a stack shows every original message body, with
+call details available in a second disclosure. This is a UI projection only;
+model history, correspondence, transport receipts and Task lifecycle are unchanged.
+
+The adapter retains group keys by membership and original record nodes across
+append, prepend and splits, giving the existing reading cursor and virtualizer
+stable member targets. Disclosures are scoped to the conversation and survive
+virtual recycling. `state/task-identity.mjs` is shared with Task views: complete
+`node_id / kind / agent_id` addresses identify Tasks, session labels start at four
+characters and only lengthen on collisions, and equal IDs on different nodes
+include a node suffix. The session registry covers identities discovered in
+catalogue pages and loaded history; unseen identities cannot be disambiguated in
+advance. Only a confirmed TaskInfo address mapping permits icon color. Linked
+catalogue IDs are never treated as remote address IDs. UTF-8 FNV-1a32 selects one
+of the six fixed families in `state/task-palette.json`; only the small Task mark
+uses the same family across light, dark and system themes. Missing mappings use
+neutral marks, and short labels remain visible when names are long.
+
 ## Read state and activity
 
 Completed replies have a durable reply ID/count. Initial catalogue history becomes

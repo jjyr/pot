@@ -29,7 +29,7 @@ try{
   for(const kind of ['task','user']){
     const view=card(message(kind,'send_message',{to:address('local',kind)}));
     check(!view.element.querySelector('.assistant-mention'),'non-assistant never becomes an assistant mention');
-    check(title(view)===expected('sendMessageTo',translate(locale,kind==='task'?'tool.messageTask':'tool.messageUser')),'kind-specific fallback');
+    check(title(view)===expected('sendMessageTo',translate(locale,kind==='task'?'tool.messageTask':'tool.messageUser')+(kind==='task'?' #same':'')),'kind-specific fallback and stable task address ID');
   }
   const streaming=card(message('streaming','send_message',{}));
   for(const args of [null,'{"to":',{}, {to:{kind:'assistant'}}, {to:remote}])streaming.update(message('streaming','send_message',args));

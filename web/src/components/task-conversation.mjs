@@ -14,7 +14,7 @@ import {renderMarkdown} from './markdown.mjs';
 import {toolForest} from '../state/tool-calls.mjs';
 import {projectScriptRuns} from '../state/script-runs.mjs';
 import {projectTaskMessages} from '../state/task-transcript.mjs';
-import {createMessageWindow} from './message-window.mjs';
+import {createCommunicationWindow} from './communication-window.mjs';
 import {createReadingCursor} from './reading-cursor.mjs';
 import {copyFeedback} from './motion.mjs';
 
@@ -117,10 +117,10 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
         if(!entry.tool){entry.tool=createToolCall({messageActor:()=>record.info?.address||task.address,onOpenTask,resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key:JSON.stringify([scope,task.id,message.id]),locale,machineLabel,onDecision,onInteract:event=>reading.engage(event),onLocate:(call,turn)=>{const target=forest.byID.get(turn+':'+call)?.message;if(target){reading.locate({id:target.id,expand:true});renderTranscript();}},downloadFile,acquireFileImage});entry.element.append(entry.tool.element);}
         const children=forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children||[];
         const approvalDescendant=children.some(function pending(entry){return !!approvalFor(entry.message.tool)||entry.children.some(pending);});
-        entry.tool.update(message,{approval:approvalFor(message.tool),approvalDescendant,offline:unavailable||!!connectionError,children:children.map(child=>child.message)});
+        entry.tool.update(message,{stacked:message.communicationStacked,approval:approvalFor(message.tool),approvalDescendant,offline:unavailable||!!connectionError,children:children.map(child=>child.message)});
         if((reading.destination||restoringPosition)&&destinations.has(message.id)||reading.destination?.expand&&reading.destination.id===message.id)entry.tool.element.open=true;
         if(children.length||entry.childrenWindow){
-          if(!entry.childrenWindow){entry.childrenWindow=createMessageWindow({scroller:history,host:entry.tool.children,nested:true,render:renderMessage,dispose:disposeMessage,requestRender:()=>reading.reflow(),reading,heights});entry.tool.element.addEventListener('toggle',scheduleFollow);}
+          if(!entry.childrenWindow){entry.childrenWindow=createCommunicationWindow({locale,actor:()=>record.info?.address||task.address,resolveIdentity:address=>messageIdentities(client).resolve(address),blocked:message=>!!approvalFor(message.tool),memory:toolMemory,scope:JSON.stringify([scope,task.id]),scroller:history,host:entry.tool.children,nested:true,render:renderMessage,dispose:disposeMessage,requestRender:()=>reading.reflow(),reading,heights});entry.tool.element.addEventListener('toggle',scheduleFollow);}
           entry.childrenWindow.set(entry.tool.element.open?children.map(child=>({...child.message,viewKey:child.message.id})):[],{target:destinations.has(message.id)?{id:destinations.get(message.id)}:undefined});
         }
       }else{
@@ -138,7 +138,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
       }
       return entry;
   }
-  const transcriptWindow=createMessageWindow({scroller:history,host:transcript,render:renderMessage,dispose:disposeMessage,requestRender:()=>reading.reflow(),reading,heights});
+  const transcriptWindow=createCommunicationWindow({locale,actor:()=>record.info?.address||task.address,resolveIdentity:address=>messageIdentities(client).resolve(address),blocked:message=>!!approvalFor(message.tool),memory:toolMemory,scope:JSON.stringify([scope,task.id]),scroller:history,host:transcript,render:renderMessage,dispose:disposeMessage,requestRender:()=>reading.reflow(),reading,heights});
   let destinations=new Map();
   function renderTranscript(){
     if(!state)return;
@@ -182,7 +182,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     update(next){
       if(disposed)return;
       projection=null;
-      if(next.record)record=next.record;if(next.state)state=next.state;if(next.inputs)inputs=next.inputs;if(next.approvals)approvals=next.approvals;if(next.unavailable!==undefined)unavailable=next.unavailable;if(next.connectionError!==undefined)connectionError=next.connectionError;
+      if(next.record)record=next.record;messageIdentities(client).rememberTasks([record.info||task]);if(next.state)state=next.state;if(next.inputs)inputs=next.inputs;if(next.approvals)approvals=next.approvals;if(next.unavailable!==undefined)unavailable=next.unavailable;if(next.connectionError!==undefined)connectionError=next.connectionError;
       renderStage();renderTranscript();scheduleFollow();updateComposer();renderMenu();
       renderDownloadFailure();
       const attachments=record.outcome?.artifacts?.map(path=>({path}))||record.files||[],artifactError=record.outcome?.artifacts_error||'';

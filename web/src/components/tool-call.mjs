@@ -8,6 +8,7 @@ import {assistantMention} from './assistant-mention.mjs';
 import {communication} from '../state/communication.mjs';
 import {createCommunication} from './communication.mjs';
 import {agentSource} from './connection-visuals.mjs';
+import {taskIdentities} from '../state/task-identity.mjs';
 const n=(tag,cls='',text)=>{const node=document.createElement(tag);node.className=cls;if(text!==undefined)node.textContent=text;return node;};
 const pretty=value=>typeof value==='string'?value:JSON.stringify(value??null,null,2);
 const LIMIT=24000;
@@ -25,7 +26,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
   const communicationView=createCommunication({locale,resolveIdentity:resolveMessageIdentity,downloadFile,acquireFileImage,onOpenTask,resolveTask});
   summary.append(communicationView.summary);body.insertBefore(communicationView.body,sections);
   let current,options={},signature='',approvalID='',approvalCard=null,rawSignature='',autoOpened=false,building=false,refreshStatus=()=>{};
-  let bodyVersion=[];
+  let bodyVersion=[],stacked=false,standaloneOpen=false;
   const contentView=createToolContent({locale,downloadFile,acquireFileImage,onOpenTask,resolveTask});
   sections.append(contentView.element);
   // Ordinary communication starts collapsed; only explicit reading/navigation or
@@ -44,22 +45,25 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
       if(address?.kind==='assistant'&&profile?.name){
         participants.append(assistantMention({label:profile.name,node:address.node_id,agent:address.agent_id}));
         const source=agentSource(profile.origin,locale());if(source)participants.append(source);
-      }else participants.append(document.createTextNode(t(address?.kind==='task'?'messageTask':address?.kind==='user'?'messageUser':address?.kind==='assistant'?'messageAssistantUnavailable':'messageRecipientUnavailable')));
+      }else participants.append(document.createTextNode(address?.kind==='task'?[profile?.name||t('messageTask'),taskIdentities.short(address)||t('messageTaskIDMissing')].join(' '):t(address?.kind==='user'?'messageUser':address?.kind==='assistant'?'messageAssistantUnavailable':'messageRecipientUnavailable')));
     }
     const [prefix,suffix]=t(tool.name==='receive_message'?'receiveMessageFrom':'sendMessageTo').split('{name}');
     title.replaceChildren(document.createTextNode(prefix),...participants.childNodes,document.createTextNode(suffix));
     if(model?.kind==='receive'&&model.count>1)title.append(document.createTextNode(t('messageCount').replace('{count}',model.count.toLocaleString(locale()))));
     title.title=title.textContent;return true;
   }
-  const remember=()=>{if(!building)memory.set(key,{...memory.get(key),open:root.open,raw:raw.open});};root.addEventListener('toggle',()=>{remember();refreshStatus();if(current)update(current,options);});raw.addEventListener('toggle',()=>{remember();if(current)update(current,options);});
+  const remember=()=>{if(!building)memory.set(key,{...memory.get(key),open:stacked?standaloneOpen:root.open,raw:raw.open});};root.addEventListener('toggle',()=>{remember();refreshStatus();if(current)update(current,options);});raw.addEventListener('toggle',()=>{remember();if(current)update(current,options);});
   // Populate on activation, before a second click can target an empty disclosure
   // whose position will change when its deferred toggle event renders content.
-  summary.addEventListener('click',event=>{if(event.defaultPrevented||event.target.closest('button,a,input,select,textarea'))return;event.preventDefault();root.open=!root.open;remember();refreshStatus();if(current)update(current,options);});
+  summary.addEventListener('click',event=>{if(event.defaultPrevented||event.target.closest('button,a,input,select,textarea'))return;event.preventDefault();if(stacked)return;root.open=!root.open;remember();refreshStatus();if(current)update(current,options);});
   // Commit before ResizeObserver/virtual-window recycling can detach this row.
   rawTitle.addEventListener('click',event=>{event.preventDefault();onInteract(event);raw.open=!raw.open;remember();if(current)update(current,options);});
   function copyButton(label,get){const button=n('button','tool-action',label);button.type='button';button.onclick=async()=>{try{await navigator.clipboard.writeText(get());button.textContent=t('copied');}catch{button.textContent=t('copyFailed');}};return button;}
   function update(message,next={}){
     current=message;options=next;const tool=message.tool;if(!tool)return;
+    if(!!next.stacked!==stacked){if(next.stacked)standaloneOpen=root.open;stacked=!!next.stacked;root.open=stacked||standaloneOpen;}
+    root.classList.toggle('communication-stacked-record',stacked);
+    summary.tabIndex=stacked?-1:0;
     const result=tool.process?tool.process.result:toolResult(tool),pending=next.approval,script=tool.script,isGroup=tool.name==='script_group';
     root.classList.toggle('script-group',isGroup);root.classList.toggle('script-run',!!script&&!isGroup);
     const model=communication(tool,messageActor()),summaryModel=model||(!isGroup&&script?.focus?communication(script.focus,messageActor()):null);
@@ -81,7 +85,7 @@ export function createToolCall({memory=new Map(),key='',locale=()=> 'en',resolve
     // Keep the original phase and reveal its precise label when the call is open.
     refreshStatus=()=>{
       let shown=phase;
-      if((isGroup&&['completed','failed','denied'].includes(phase))||(!root.open&&['failed','denied'].includes(phase)))shown='ended';
+      if((isGroup&&['completed','failed','denied'].includes(phase))||(!model&&!root.open&&['failed','denied'].includes(phase)))shown='ended';
       if(phase==='completed'&&result?.completed===false&&result?.exec_id&&!script)shown='scriptYielded';
       if(model?.kind==='receive'&&phase==='completed')shown='messageReceived';
       else if(model?.kind==='send'&&model.accepted)shown='messageAccepted';

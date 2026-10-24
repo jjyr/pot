@@ -1,3 +1,4 @@
+import {moveConversationNode} from './conversation-dom.mjs';
 import {Virtualizer, observeElementRect, observeElementOffset, defaultRangeExtractor} from '../vendor/tanstack-virtual-core.mjs';
 
 // TanStack owns item offsets, end anchoring and dynamic size corrections. Pot
@@ -117,7 +118,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       let element;
       if(part.gap){element=spacers[spacerIndex];if(!element){element=document.createElement('div');element.className='message-window-spacer';element.setAttribute('aria-hidden','true');spacers[spacerIndex]=element;}spacerIndex++;element.style.height=`${Math.max(0,part.gap)}px`;element.style.marginTop=`${Math.min(0,part.gap)}px`;}
       else{element=part.record.row;mounted.set(element.dataset.windowKey,part.record);}
-      if(host.children[index]!==element)host.insertBefore(element,host.children[index]||null);index++;
+      if(host.children[index]!==element)moveConversationNode(host,element,host.children[index]||null);index++;
     }
     while(host.children.length>index)host.lastElementChild.remove();
   }
@@ -144,7 +145,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     if(nextWidth)width=nextWidth;
     if(rows!==next){
       indexesByKey.clear();indexesByID.clear();
-      next.forEach((item,index)=>{indexesByKey.set(item.viewKey,index);indexesByID.set(item.id,index);});
+      next.forEach((item,index)=>{indexesByKey.set(item.viewKey,index);indexesByID.set(item.id,index);for(const member of item.members||[])indexesByID.set(member.id,index);});
     }
     if(rows!==next||Math.abs(nextMargin-margin)>.5){
       const list=next; margin=nextMargin;

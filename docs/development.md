@@ -268,6 +268,16 @@ At phone widths, select Pot from the assistant list first. Repeat with
 `locale=zh-CN`; `before=1` shows the previous private-correspondence presentation
 for comparison. This fixture uses production Chat components and synthetic data.
 
+For adjacent Task communication, run `mise run test:task-communication`, serve the
+repository on loopback and open `/scripts/tests/fixtures/task-communication.html`.
+The fixture mounts production Chat with synthetic records and rejects writes.
+`scenario=collapsed` keeps the disclosure closed; `locale` and `theme` select the
+shared presentation. With a disposable Playwright installation, run
+`scripts/tests/task-communication-browser.mjs` against that origin using
+`POT_PLAYWRIGHT_MODULE` and optional `POT_CHROMIUM_EXECUTABLE`. It covers grouping,
+batch counts, identity, native keyboard disclosure, append/prepend, retained text
+selection, failures and virtual recycling. No real Task or model is started.
+
 For message-title identity, streaming-argument, disclosure and Task checks, open
 `/scripts/tests/fixtures/message-titles.html` on the same loopback server. The
 fixture runs shared DOM assertions with synthetic full addresses and includes a

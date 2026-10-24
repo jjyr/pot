@@ -2,6 +2,11 @@ import serverMessages from './server.json' with {type:'json'};
 
 export const messages = {
   en: {
+    'tool.communicationStack':'{records} records · {messages} messages · {tasks} tasks',
+    'tool.communicationStackOneTask':'{records} records · {messages} messages · {tasks} task',
+    'tool.communicationRouteCount':'{count} messages',
+    'tool.communicationRouteOne':'{count} message',
+    'tool.messageTaskIDMissing':'(ID unavailable)',
     'completions.skills':'Skills',
     'completions.assistants':'Assistants',
     'completions.count':'{count} results',
@@ -939,6 +944,11 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'tool.communicationStack':'{records} 条记录 · {messages} 条消息 · {tasks} 个任务',
+    'tool.communicationStackOneTask':'{records} 条记录 · {messages} 条消息 · {tasks} 个任务',
+    'tool.communicationRouteCount':'{count} 条消息',
+    'tool.communicationRouteOne':'{count} 条消息',
+    'tool.messageTaskIDMissing':'（ID 缺失）',
     'completions.skills':'Skills',
     'completions.assistants':'助手',
     'completions.count':'{count} 项',
