@@ -131,7 +131,10 @@ consumer so local projection changes do not mutate other views.
 Task lists read the local operator catalogue and cache backend pages; assistant
 count does not multiply reads. Delegated tasks retain their remote references in
 that catalogue. Counts represent complete totals. Schedule pagination retains
-complete source collections.
+complete source collections. Tasks and schedules grow with their grouped records;
+the page host scrolls the filters, list and both pagers together. Background
+refresh retains that page position and keyed records/disclosures; pagination
+keeps its initiating pager focused and visible.
 Task detail keeps a bounded transcript cache and resumes events from
 its cursor, reading messages and record updates concurrently. Usage page offsets,
 scroll positions and disclosures remain view state. Chat restores confirmed
