@@ -47,7 +47,7 @@ const client={production:true,runtime:{runtime_id:space.id,boot_id:'review'},spa
     requests.push({path:name,space:options.space,owner:options.owner});
     if(name==='/api/v1/spaces')return {items:[space],active_space_id:space.id};
     if(name==='/api/v1/tasks/query')return {items:catalogue};
-    if(name==='/api/v1/machines')return [];
+    if(name==='/api/v1/runtime')return {runtime_id:'fixture',host:{}};
     const task=catalogue.find(task=>name==='/api/v1/tasks/'+encodeURIComponent(task.id));
     if(task)return {info:task,request:{text:task.title},capabilities:{version:1,operations:['task.read']}};
     if(name==='/api/v1/assistants')return {items:[{id:'pot',name:'Pot',capabilities:{version:1,operations:['chat.read','task.list']}}]};

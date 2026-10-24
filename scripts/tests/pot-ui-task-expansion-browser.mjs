@@ -26,7 +26,7 @@ async function mountFixture(){
       const url=new URL(path,location.href),space=options.space||scope.space,items=f.items.get(space)||[];
       if(url.pathname==='/api/v1/spaces')return {active_space_id:'one',items:[{id:'one',name:'Fixture A',control_id:'control-a',connected:true},{id:'two',name:'Fixture B',control_id:'control-b',connected:true}]};
       if(url.pathname==='/api/v1/assistants')return [{id:'alpha',name:'Pot',revision:1,reply_count:0,capabilities}];
-      if(url.pathname==='/api/v1/machines')return [];
+      if(url.pathname==='/api/v1/runtime')return {runtime_id:'fixture',host:{}};
       if(url.pathname==='/api/v1/permissions')return {pending:items.filter(task=>task.phase==='waiting_approval').map(task=>({id:'approval-'+task.id,request:{owner:'alpha',task:task.id,call_id:'call',turn:'run',machine_id:'fixture',tool:'exec_command',args:{cmd:'read fixture'}}})),policy:{machines:{}}};
       if((url.pathname==='/api/v1/tasks/query'||url.pathname==='/api/v1/tasks/catalog')){
         const offset=Number(url.searchParams.get('offset')||0),limit=Number(url.searchParams.get('limit')||50);

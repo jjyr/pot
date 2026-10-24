@@ -45,7 +45,7 @@ const calls=[];let resolveLate;
 globalThis.fetch=async(url,options)=>{
  calls.push({url,options});
  if(url==='/api/v1/runtime')return new Response(JSON.stringify({runtime_id:'runtime',boot_id:'boot'}));
- if(url.startsWith('/api/v1/machines?'))return new Response(JSON.stringify([{id:'runtime',runtime_id:'runtime',hostname:'devpc',ip_addresses:['192.168.1.24']}]));
+ if(url.startsWith('/api/v1/runtime?'))return new Response(JSON.stringify({runtime_id:'runtime',boot_id:'boot',host:{hostname:'devpc',ip_addresses:['192.168.1.24']}}));
  if(url.includes('/snapshot'))return new Promise(resolve=>{resolveLate=()=>resolve(new Response(JSON.stringify(toUIFrame(raw))));});
  if(url.includes('/denied'))return new Response(JSON.stringify({code:'denied',message:'Remote denied'}),{status:403});
  return new Response(JSON.stringify({message_id:'m',duplicate:false}));
@@ -54,14 +54,15 @@ const client=await createProductionClient();client.setScope({owner:'a',space:'re
 client.spaces=[{id:'local',control_id:'runtime',boot_id:'boot'}];
 const machineInfo=machinePresentation(client),machineScope={space:'local',owner:'b'};
 assert.equal(machineInfo.label('runtime',machineScope,'zh-CN'),'机器信息不可用');
-assert.equal((await machineInfo.load(machineScope)).length,1,'The production HTTP array response reaches the presentation inventory through cached reads');
-assert.equal(calls.at(-1).url,'/api/v1/machines?space_id=local','Machine metadata is read in the owning Space without an assistant selector');
+assert.equal((await machineInfo.load(machineScope)).length,1,'Runtime host metadata reaches execution labels through cached reads');
+assert.equal(calls.at(-1).url,'/api/v1/runtime?space_id=local','Machine metadata is read in the owning Space without an assistant selector');
 assert.equal(machineInfo.label('runtime',machineScope,'zh-CN'),'devpc · 192.168.1.24','A completed load replaces the missing-machine label for the matching runtime ID');
 assert.equal(machineInfo.label('other-runtime',machineScope,'zh-CN'),'机器信息不可用','A different runtime ID cannot borrow the host label');
 assert.equal(machineInfo.label('runtime',{space:'remote',owner:'a'},'zh-CN'),'机器信息不可用','A different Space cannot borrow the local inventory');
 const machineRevision=machineInfo.revision;
 await machineInfo.load(machineScope);
 assert.equal(machineInfo.revision,machineRevision,'An unchanged cached inventory does not advance the display revision');
+assert.equal(calls.filter(call=>call.url.includes('/machines')).length,0,'Execution labels never request the retired machine-list API');
 const pending=client.snapshot();client.setScope({owner:'b',space:'local'});resolveLate();
 assert.equal((await pending).owner_id,JSON.stringify(['remote','a']),'in-flight snapshot retains captured owner');
 await client.send({boot_id:'boot',request_id:'req',conversation_id:'c',text:'hello'});

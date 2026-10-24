@@ -11,7 +11,7 @@ async page => {
   const client={desktop:false,runtime:{boot_id:'fixture-boot'},spaces:[{id:'local',control_id:'local-node',name:'Local Pot',connected:true}],scope:()=>({space:'local',owner:'selected-assistant'}),request:async(path,options)=>{
    fixture.calls.push({path,...options});
    if(path.startsWith('/api/v1/agent-links'))return {self:{node_id:'local-node',kind:'pot',status:'needs_access'},items:[]};
-   if(path==='/api/v1/machines')return [{id:'host',name:'Local machine',connected:true}];
+   if(path==='/api/v1/runtime')return {runtime_id:'host',host:{hostname:'Local machine'}};
    if(path==='/api/v1/permissions'){
     if(options.method==='POST'){
      if(fixture.hold)await new Promise(resolve=>fixture.release=resolve);
