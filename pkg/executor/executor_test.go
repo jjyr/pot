@@ -254,19 +254,31 @@ func TestTimeoutIdleCancellationAndNoDescendants(t *testing.T) {
 	r.Policy.SessionIdleTimeoutMS = 1800000
 	e3 := New(Options{Home: r.CWD})
 	defer e3.Close()
+	// Start the deadline only after the descendant has atomically published its
+	// PID. Cancellation during startup need not finish a shell's file write.
+	result = call(t, e3, r, "exec_command", map[string]any{"cmd": "sleep 60 & printf '%s\\n' \"$!\" > child.pid.tmp; mv child.pid.tmp child.pid; wait", "yield_time_ms": 10})
+	var pid int
+	readyDeadline := time.Now().Add(5 * time.Second)
+	for {
+		data, err := os.ReadFile(filepath.Join(r.CWD, "child.pid"))
+		if err == nil {
+			if n, err := fmt.Sscanf(string(data), "%d", &pid); err != nil || n != 1 || pid <= 0 {
+				t.Fatalf("invalid descendant PID %q: %v", data, err)
+			}
+			break
+		}
+		if !os.IsNotExist(err) || time.Now().After(readyDeadline) {
+			t.Fatalf("descendant readiness: %v", err)
+		}
+		time.Sleep(time.Millisecond)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	r.Operation = "exec_command"
-	r.Args = map[string]any{"cmd": "sleep 60 & echo $! > child.pid; wait"}
+	r.Operation = "write_stdin"
+	r.Args = map[string]any{"session_id": result["session_id"], "yield_time_ms": 1000}
 	if _, err := e3.Execute(ctx, r, nil); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(r.CWD, "child.pid"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var pid int
-	fmt.Sscanf(string(data), "%d", &pid)
 	for range 100 {
 		if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
 			return
