@@ -12,6 +12,10 @@ on:
         description: Reviewed exact candidate commit (must match v0.0.1 and merged main tree)
         required: true
         type: string
+      tag-object:
+        description: Exact original annotated v0.0.1 tag object (lease)
+        required: true
+        type: string
       baseline:
         description: Reviewed release snapshot JSON (id, tag_name, target_commitish, assets with id/name/size/digest)
         required: true
@@ -31,7 +35,7 @@ concurrency:
 
 jobs:
   refresh:
-    if: github.ref == 'refs/tags/v0.0.1'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     environment: release
     timeout-minutes: 45
@@ -45,6 +49,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       CANDIDATE_RUN: ${{ inputs.run-id }}
       RELEASE_BASELINE: ${{ inputs.baseline }}
+      PREVIOUS_TAG_OBJECT: ${{ inputs.tag-object }}
       PREVIOUS_IMAGE_DIGEST: ${{ inputs.image-digest }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -76,6 +81,8 @@ jobs:
           mise exec -- python scripts/prepare-release 0.0.1 dist --channel desktop
           mise exec -- python scripts/prepare-release 0.0.1 dist --channel container
           mise exec -- python scripts/prepare-release 0.0.1 dist --channel macos --macos-mode unsigned --sign-feed
+      - name: Move the qualified tag with an exact lease and suppress recursive tag CI
+        run: python3 scripts/refresh-release retag dist
       - name: Preserve exact replacement plan and original assets before changing public names
         run: python3 scripts/refresh-release stage dist
       - name: Retain original bytes and qualified signed replacement set

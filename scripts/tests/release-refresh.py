@@ -66,6 +66,71 @@ class RefreshFences(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "source revision"):
                 refresh["verify_build"](b"fixture", "b" * 40)
 
+    def test_retag_entry_validates_candidate_before_requiring_replacement_tag(self):
+        # The old published tag necessarily differs before the retag phase.
+        with mock.patch.object(sys, "argv", ["refresh-release", "retag", "dist"]):
+            with mock.patch.dict(self.namespace, baseline=lambda: self.old):
+                with mock.patch.dict(
+                    self.namespace,
+                    check_source=mock.Mock(side_effect=AssertionError("early tag check")),
+                    retag=mock.Mock(),
+                ) as namespace:
+                    refresh["main"]()
+                    namespace["retag"].assert_called_once_with(self.old)
+
+    def test_retag_stale_object_never_pushes_and_success_uses_exact_lease(self):
+        expected, replacement = "e" * 40, "f" * 40
+        current = {"object": {"sha": "b" * 40}}
+        with tempfile.TemporaryDirectory() as temporary:
+            before = Path.cwd()
+            os.chdir(temporary)
+            try:
+                with mock.patch.dict(
+                    os.environ,
+                    GITHUB_ACTIONS="true",
+                    GITHUB_REF="refs/heads/main",
+                    PREVIOUS_TAG_OBJECT=expected,
+                ):
+                    with mock.patch.dict(
+                        self.namespace,
+                        check_source=lambda **kwargs: SHA,
+                        check_baseline=lambda *args: None,
+                        selected_release=lambda: {},
+                        api=lambda endpoint: current,
+                    ):
+                        with mock.patch(
+                            "subprocess.check_output", side_effect=["123\n", replacement + "\n"]
+                        ):
+                            with mock.patch("subprocess.run") as push:
+                                with self.assertRaisesRegex(
+                                    ValueError, "Original tag object changed"
+                                ):
+                                    refresh["retag"](self.old)
+                                push.assert_not_called()
+                        current["object"]["sha"] = expected
+
+                        def pushed(*args, **kwargs):
+                            current["object"]["sha"] = replacement
+
+                        with mock.patch(
+                            "subprocess.check_output", side_effect=["123\n", replacement + "\n"]
+                        ):
+                            with mock.patch("subprocess.run", side_effect=pushed) as push:
+                                refresh["retag"](self.old)
+                                command = push.call_args.args[0]
+                                self.assertIn(
+                                    "--force-with-lease=refs/tags/v0.0.1:" + expected, command
+                                )
+                                self.assertIn(replacement + ":refs/tags/v0.0.1", command)
+                                self.assertEqual(
+                                    json.loads(Path("recovery/tag-before.json").read_text())[
+                                        "object"
+                                    ]["sha"],
+                                    expected,
+                                )
+            finally:
+                os.chdir(before)
+
     def test_stale_original_stops_before_any_mutation(self):
         self.assets[0]["size"] = 99
         with self.assertRaises(ValueError):

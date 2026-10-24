@@ -58,11 +58,11 @@ def selected_release():
     return release
 
 
-def check_source():
+def check_source(require_tag=True):
     source = os.environ["POT_BUILD_REVISION"]
     if not re.fullmatch(r"[a-f0-9]{40}", source):
         raise ValueError("Refresh needs an exact source SHA")
-    if api(f"commits/refs/tags/{TAG}")["sha"] != source:
+    if require_tag and api(f"commits/refs/tags/{TAG}")["sha"] != source:
         raise ValueError("Tag no longer matches candidate source")
     candidate = api(f"commits/{source}")
     main = api("commits/main")
@@ -79,6 +79,59 @@ def check_source():
         or run["conclusion"] != "success"
     ):
         raise ValueError("Candidate must be a successful CI run at the exact source")
+    return source
+
+
+def retag(original):
+    # The workflow GITHUB_TOKEN suppresses recursive tag-push CI. A user's token
+    # must not run this phase locally: it would start the ordinary publisher.
+    if (
+        os.environ.get("GITHUB_ACTIONS") != "true"
+        or os.environ.get("GITHUB_REF") != "refs/heads/main"
+    ):
+        raise ValueError("Tag refresh must run in the dedicated main workflow")
+    source = check_source(require_tag=False)
+    expected = os.environ["PREVIOUS_TAG_OBJECT"]
+    if not re.fullmatch(r"[a-f0-9]{40}", expected):
+        raise ValueError("Tag refresh needs the exact original object")
+    check_baseline(selected_release(), original)
+    current = api(f"git/ref/tags/{TAG}")
+    timestamp = subprocess.check_output(
+        ["git", "show", "-s", "--format=%ct", source], text=True
+    ).strip()
+    annotation = (
+        f"object {source}\ntype commit\ntag {TAG}\n"
+        f"tagger jjy <jjyruby@gmail.com> {timestamp} +0000\n\n"
+        "Refresh Pot 0.0.1 naming from the validated candidate\n"
+    )
+    replacement = subprocess.check_output(["git", "mktag"], input=annotation, text=True).strip()
+    if current["object"]["sha"] == replacement:
+        return source
+    if current["object"]["sha"] != expected:
+        raise ValueError("Original tag object changed before refresh")
+    recovery = Path("recovery")
+    recovery.mkdir(exist_ok=True)
+    (recovery / "tag-before.json").write_text(json.dumps(current, indent=2) + "\n")
+    # Credential helper is scoped to this command and expands the token only in
+    # its child environment; no credential, token or identity is persisted.
+    helper = '!f() { printf "username=x-access-token\npassword=%s\n" "$GH_TOKEN"; }; f'
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "credential.helper=",
+            "-c",
+            "credential.helper=" + helper,
+            "push",
+            f"--force-with-lease=refs/tags/{TAG}:{expected}",
+            "origin",
+            f"{replacement}:refs/tags/{TAG}",
+        ],
+        check=True,
+    )
+    if api(f"git/ref/tags/{TAG}")["object"]["sha"] != replacement:
+        raise ValueError("Refreshed tag does not match the exact replacement object")
+    check_source()
     return source
 
 
@@ -183,7 +236,7 @@ def stage(output, original, source):
     recovery = Path("recovery")
     recovery.mkdir(exist_ok=True)
     (recovery / "release-before.json").write_text(json.dumps(release, indent=2) + "\n")
-    (recovery / "tag-before.json").write_text(
+    (recovery / "tag-active.json").write_text(
         json.dumps(api(f"git/ref/tags/{TAG}"), indent=2) + "\n"
     )
     # Back up every original byte before uploading anything. Never reconstruct an old feed.
@@ -267,13 +320,18 @@ def activate(original, source):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=["check", "stage", "activate"])
+    parser.add_argument("phase", choices=["retag", "check", "stage", "activate"])
     parser.add_argument("output", type=Path)
     args = parser.parse_args()
-    source = check_source()
     original = baseline()
+    if args.phase == "retag":
+        retag(original)
+        return
+    source = check_source(require_tag=args.phase != "check")
     if args.phase == "check":
         check_baseline(selected_release(), original)
+        if api(f"git/ref/tags/{TAG}")["object"]["sha"] != os.environ["PREVIOUS_TAG_OBJECT"]:
+            raise ValueError("Original tag object changed before qualification")
     elif args.phase == "stage":
         stage(args.output, original, source)
     else:

@@ -244,8 +244,11 @@ this same-version naming correction. Ordinary publishers keep all immutable-byte
 checks. It accepts a successful nonpublishing CI run built with
 `validation-version=0.0.1`, its exact reviewed source, the original public release
 snapshot and the exact previous image index digest. The source must match both
-the tag and the merged main tree. Run it from `v0.0.1` after reviewing the candidate
-and moving that tag with an exact old-object lease.
+the tag and the merged main tree. Run it from `main` with the exact original
+annotated tag object after reviewing the candidate. The workflow first validates
+the successful candidate, merged tree and original asset snapshot, then moves
+`v0.0.1` with an exact old-object lease. Its workflow token suppresses recursive
+tag-push CI; do not push the replacement tag separately with a personal token.
 
 The workflow checks all distributions, signs the final feed with the existing
 controlled release key, saves every original asset, uploads and verifies the new
