@@ -147,9 +147,11 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       indexesByKey.clear();indexesByID.clear();
       next.forEach((item,index)=>{indexesByKey.set(item.viewKey,index);indexesByID.set(item.id,index);for(const member of item.members||[])indexesByID.set(member.id,index);});
     }
-    if(rows!==next||Math.abs(nextMargin-margin)>.5){
+    const followOnAppend=!nested&&(!reading||reading.following&&!virtualizer.isTouchScrolling);
+    const anchorTo=!nested&&(!reading||reading.following)?'end':'start';
+    if(rows!==next||Math.abs(nextMargin-margin)>.5||virtualizer.options.followOnAppend!==followOnAppend||virtualizer.options.anchorTo!==anchorTo){
       const list=next; margin=nextMargin;
-      virtualizer.setOptions({...virtualizer.options,count:list.length,getItemKey:index=>list[index].viewKey,estimateSize:index=>heights.get(list[index].viewKey)??(list[index].role==='user'?120:list[index].role==='tool'?70:180),rangeExtractor:range=>pinnedIndexes(range),scrollMargin:margin,followOnAppend:!nested&&(!reading||reading.following&&!virtualizer.isTouchScrolling)});
+      virtualizer.setOptions({...virtualizer.options,count:list.length,getItemKey:index=>list[index].viewKey,estimateSize:index=>heights.get(list[index].viewKey)??(list[index].role==='user'?120:list[index].role==='tool'?70:180),rangeExtractor:range=>pinnedIndexes(range),scrollMargin:margin,followOnAppend,anchorTo});
       rows=next;
       const available=new Set(rows.map(item=>item.viewKey));
       for(const [key,record]of mounted)if(!available.has(key)){virtualizer.observer.unobserve(record.row);virtualizer.elementsCache.delete(key);mounted.delete(key);pending.delete(record);dispose(record);}
