@@ -20,41 +20,15 @@ import (
 
 const userServiceLabel = "com.jjyr.pot.runtime"
 
-// Reuse an installed 0.0.1 service in place. Never create a second supervisor
-// or rewrite an operator's unit, plist, environment file or data root.
 func userServiceDefinition(home, goos string) (path, name, label string, err error) {
 	directory := filepath.Join(home, ".config/systemd/user")
-	name, legacy := "pot-runtime.service", "pot-go-runtime.service"
+	name = "pot-runtime.service"
 	label = userServiceLabel
 	if goos == "darwin" {
 		directory = filepath.Join(home, "Library/LaunchAgents")
-		name, legacy = userServiceLabel+".plist", "com.jjyr.pot.go.runtime.plist"
+		name = userServiceLabel + ".plist"
 	} else if goos != "linux" {
 		return "", "", "", errors.New("user services require macOS or Linux")
-	}
-	exists := func(name string) (bool, error) {
-		_, e := os.Lstat(filepath.Join(directory, name))
-		if os.IsNotExist(e) {
-			return false, nil
-		}
-		return e == nil, e
-	}
-	current, err := exists(name)
-	if err != nil {
-		return "", "", "", err
-	}
-	old, err := exists(legacy)
-	if err != nil {
-		return "", "", "", err
-	}
-	if current && old {
-		return "", "", "", errors.New("both current and legacy Pot service definitions exist; resolve the duplicate before managing services")
-	}
-	if old {
-		name = legacy
-		if goos == "darwin" {
-			label = strings.TrimSuffix(legacy, ".plist")
-		}
 	}
 	return filepath.Join(directory, name), name, label, nil
 }
@@ -106,7 +80,7 @@ func renderUserService(goos, binary, root string) (string, error) {
 	}
 	if goos == "linux" {
 		quote := func(s string) string { return strconv.Quote(strings.ReplaceAll(s, "%", "%%")) }
-		return fmt.Sprintf("# pot-root:%s\n[Unit]\nDescription=Pot Runtime\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart=%s serve -root %s\nEnvironmentFile=-%%h/.config/pot-go/runtime.env\nEnvironmentFile=-%%h/.config/pot/runtime.env\nUMask=0077\nRestart=on-failure\nRestartSec=3\nTimeoutStopSec=45\nKillMode=mixed\n\n[Install]\nWantedBy=default.target\n", marker, quote(binary), quote(root)), nil
+		return fmt.Sprintf("# pot-root:%s\n[Unit]\nDescription=Pot Runtime\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart=%s serve -root %s\nEnvironmentFile=-%%h/.config/pot/runtime.env\nUMask=0077\nRestart=on-failure\nRestartSec=3\nTimeoutStopSec=45\nKillMode=mixed\n\n[Install]\nWantedBy=default.target\n", marker, quote(binary), quote(root)), nil
 	}
 	return "", errors.New("user services require macOS or Linux")
 }

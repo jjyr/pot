@@ -18,9 +18,7 @@ mise run open
 
 `prepare` supplies pinned Node, tool plugins, Skills and license assets.
 `build`/`bundle` create `.local/pot/PotPreview.app`, an independent development
-bundle retaining the legacy ID `dev.pot.go-preview` for existing OS/WebView
-preferences. Release packaging
-uses the production identity. Do not replace a running product's files implicitly.
+bundle identified as `dev.pot.preview`. Release packaging uses the production identity. Do not replace a running product's files implicitly.
 
 The macOS builder downloads the pinned Wails module before applying its
 checksum-verified patches to a disposable copy. A fresh module cache is supported;

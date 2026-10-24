@@ -13,6 +13,10 @@ on:
         description: PR number to check (mutually exclusive with ref)
         required: false
         type: string
+      validation-version:
+        description: Optional package version for a nonpublishing candidate (major.minor.patch)
+        required: false
+        type: string
       publish:
         description: Publish an existing stable tag after checks, packaging and release environment gates
         default: false
@@ -53,6 +57,7 @@ jobs:
           SOURCE_REF: ${{ inputs.ref }}
           PR_NUMBER: ${{ inputs.pr }}
           PUBLISH: ${{ inputs.publish || false }}
+          VALIDATION_VERSION: ${{ inputs.validation-version }}
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/release-plan
 

@@ -58,12 +58,9 @@ complete packages manually. Configuration files contain no credential values;
 credentials remain in the encrypted secret store. See [Extensions](extensions.md)
 and [Plugin packages](plugins.md). Remote work uses Agent Link delegation.
 
-Existing installations using `~/.pot-go` must explicitly select that root with
-`-root`, or stop all hosts and move the complete root to `~/.pot` before starting
-the new build. Preserve identity, keys and all databases together. Pot does not
-silently open or merge a different root. On upgrade, former `agent/plugins` and
-`agent/skills` move into the root, and SQLite extension settings export once to
-files. Conflicting nonempty destinations stop startup for resolution.
+On upgrade, former `agent/plugins` and `agent/skills` move into the root, and
+SQLite extension settings export once to files. Conflicting nonempty destinations
+stop startup for resolution.
 
 ## Standalone node
 
@@ -231,25 +228,20 @@ Use the existing assistant chat and task delegation interactions. Disconnect
 pauses the link; delete removes the saved connection while retaining history.
 Neither action silently stops accepted work. See [Agent Links](agent-links.md).
 
-## Naming and existing installations
+## Installation names
 
-New CLI packages contain `pot-PLATFORM/bin/pot`, `Resources/` and
-`service/pot-runtime.service`. Published 0.0.1 packages retain `pot-go-PLATFORM`.
-Keep the complete installation separate from the data root. Renaming a package
-must not move an existing root or change the root passed to its supervisor.
+CLI packages contain `pot-PLATFORM/bin/pot`, `Resources/` and
+`service/pot-runtime.service`. Keep the complete installation separate from the
+data root. Package naming does not move an existing data root.
 
-`pot service` creates `pot-runtime.service` on Linux or
-`com.jjyr.pot.runtime.plist` on macOS. If the corresponding 0.0.1 definition
-(`pot-go-runtime.service` or `com.jjyr.pot.go.runtime.plist`) exists, management
-continues using it in place; installation refuses to overwrite it. If both names
-exist, management stops for operator resolution. No automatic rename, second
-service or data migration occurs. To adopt the new name, explicitly stop and
-uninstall the old service, then install/start with the same root. Do not install
-the packaged template beside an existing legacy unit.
+`pot service` manages `pot-runtime.service` on Linux or
+`com.jjyr.pot.runtime.plist` on macOS. Linux units read optional
+`~/.config/pot/runtime.env`. Installation refuses to overwrite a service definition.
+Service configuration is an explicit operator action; the application does not
+copy, rename or migrate old service definitions, environment files or roots.
 
-New Linux units read optional `~/.config/pot-go/runtime.env` first for 0.0.1
-compatibility and `~/.config/pot/runtime.env` second; new values take precedence.
-Existing units retain their original contents. Move configuration only as an
-explicit operator action; the application does not copy or overwrite these files.
-The persisted identity `format: "pot-go"` and update storage-format prefix remain
-immutable compatibility IDs, requiring no database or JSON format migration.
+This build requires the `pot` root identity discriminator. Roots made with the
+previous discriminator are rejected before database startup and are not converted
+or overwritten. Keep an old development root with its matching binary, and select
+a separate unused root for this build. Do not edit identity markers or copy old
+databases into a fresh root. This naming refresh provides no data migration.

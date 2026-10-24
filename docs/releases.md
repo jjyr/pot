@@ -9,12 +9,9 @@ The first public release is 0.0.1; the root `Casks/pot.rb` installs its App.
 Release workflows propose a cask update PR after successful macOS publication;
 they never push the default branch or change repository/registry visibility.
 
-New builds use the names below. **Published 0.0.1 CLI assets remain
-`pot-go-0.0.1-PLATFORM.tar.gz`**, with `pot-go-PLATFORM` inside, and retain their
-original checksum sidecars and signed `update.json`. Do not rename, reupload or
-re-sign them. App ZIP, Homebrew and image names are unchanged. The updater selects
-artifacts by signed kind/platform metadata and validates the extracted metadata,
-so either directory name works without changing the existing installation path.
+CLI builds use `pot-VERSION-PLATFORM.tar.gz`, containing `pot-PLATFORM/bin/pot`
+and the complete `Resources/` directory. App ZIP, Homebrew and image names retain
+their existing Pot branding.
 
 | Channel | Versioned distribution | Publication boundary |
 |---|---|---|
@@ -239,6 +236,34 @@ does not install this workflow; the code must be merged before tagging a release
 Runner availability, pinned toolchains, package repositories, upstream downloads
 and standard Actions minutes/billing remain execution prerequisites. A job refused
 before startup does not establish a code failure. Paid model tests are not enabled.
+
+## Explicit 0.0.1 naming refresh
+
+The `Refresh reviewed v0.0.1 naming` workflow is a separate, manual operation for
+this same-version naming correction. Ordinary publishers keep all immutable-byte
+checks. It accepts a successful nonpublishing CI run built with
+`validation-version=0.0.1`, its exact reviewed source, the original public release
+snapshot and the exact previous image index digest. The source must match both
+the tag and the merged main tree. Run it from `v0.0.1` after reviewing the candidate
+and moving that tag with an exact old-object lease.
+
+The workflow checks all distributions, signs the final feed with the existing
+controlled release key, saves every original asset, uploads and verifies the new
+assets under temporary names, and retains the replacement plan and recovery bytes
+as Actions artifacts. It replaces only the specified old image digest, activates
+archives before references, and updates release metadata last. GitHub cannot switch
+multiple same-name assets atomically: existing App downloads can briefly require
+a retry while the ZIP, sidecar and feed switch. Original assets remain available
+under their preserved IDs until final verification and cask synchronization; only
+then remove the exact original IDs and temporary backups. Never delete the entire
+release, bypass immutable-release settings, relax normal publisher checks or
+regenerate the previous signed feed for rollback. Save recovery artifacts beyond
+the seven-day Actions retention if needed.
+
+The refreshed build uses only current service/configuration/browser names and
+rejects earlier root/storage discriminators. It does not convert data or migrate
+running services. Equal-version self-update remains disabled; manual installation
+requires a separate unused root. See [Updates](updates.md).
 
 ## Homebrew generation
 

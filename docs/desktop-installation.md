@@ -62,7 +62,7 @@ same first-launch guidance applies to cask installations.
 
 The macOS CLI archive uses the same release mode. When macOS blocks a trusted,
 verified extracted CLI installation, apply any quarantine exception only to that
-specific extracted `pot-darwin-arm64` directory (`pot-go-darwin-arm64` in 0.0.1), never to a parent containing
+specific extracted `pot-darwin-arm64` directory, never to a parent containing
 other applications. Pot's [signed update feed](updates.md) authenticates package
 origin separately from Apple signing in both modes; it does not grant Gatekeeper
 approval. Published downloads and successful native smoke are prerequisites for

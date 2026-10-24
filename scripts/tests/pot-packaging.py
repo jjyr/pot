@@ -323,7 +323,7 @@ class GoPackaging(unittest.TestCase):
                     "--binary",
                     binary,
                     "--root",
-                    root / "fresh-go-data",
+                    root / "fresh-pot-data",
                     "--output",
                     output,
                 ],
@@ -332,13 +332,11 @@ class GoPackaging(unittest.TestCase):
             )
             unit = output.read_text()
             self.assertIn(str(binary), unit)
-            self.assertIn(str(root / "fresh-go-data"), unit)
+            self.assertIn(str(root / "fresh-pot-data"), unit)
             self.assertIn("UMask=0077", unit)
             self.assertIn("unit named pot-runtime.service", unit)
-            self.assertLess(
-                unit.index(".config/pot-go/runtime.env"), unit.index(".config/pot/runtime.env")
-            )
-            self.assertFalse((root / "fresh-go-data").exists())
+            self.assertIn("EnvironmentFile=-%h/.config/pot/runtime.env", unit)
+            self.assertFalse((root / "fresh-pot-data").exists())
             self.assertFalse((root / ".config/systemd/user").exists())
 
 

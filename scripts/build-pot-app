@@ -79,7 +79,7 @@ with tempfile.TemporaryDirectory(prefix=".pot-app-", dir=BUILD) as temporary:
         plistlib.dumps(
             {
                 # Keep the preview's OS/WebView preferences on their existing identity.
-                "CFBundleIdentifier": "dev.pot.app" if release else "dev.pot.go-preview",
+                "CFBundleIdentifier": "dev.pot.app" if release else "dev.pot.preview",
                 "CFBundleName": "Pot" if release else "Pot Go",
                 "CFBundleDisplayName": "Pot" if release else "Pot Go",
                 "CFBundleExecutable": binary.name,

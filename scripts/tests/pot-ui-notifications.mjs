@@ -268,10 +268,10 @@ const workerSource=await readFile(new URL('../../web/src/service-worker.js',impo
 const workerHandlers=new Map(),deleted=[],cached=[];let skipped=0,claimed=0;
 runInNewContext(workerSource,{
  self:{addEventListener:(name,handler)=>workerHandlers.set(name,handler),skipWaiting:async()=>{skipped++;},clients:{claim:async()=>{claimed++;}}},
- caches:{open:async()=>({addAll:async assets=>{cached.push(...assets);}}),keys:async()=>['pot-go-ui-v1','pot-go-ui-v2','pot-ui-v2','pot-ui-v3','other-app'],delete:async key=>{deleted.push(key);}},
+ caches:{open:async()=>({addAll:async assets=>{cached.push(...assets);}}),keys:async()=>['pot-ui-v2','pot-ui-v3','other-app'],delete:async key=>{deleted.push(key);}},
 });
 for(const name of ['install','activate']){let effect;workerHandlers.get(name)({waitUntil:promise=>{effect=promise;}});await effect;}
-assert.equal(skipped,1);assert.equal(claimed,1);assert.deepEqual(deleted,['pot-go-ui-v1','pot-go-ui-v2','pot-ui-v2']);assert(cached.includes('/app.js'));
+assert.equal(skipped,1);assert.equal(claimed,1);assert.deepEqual(deleted,['pot-ui-v2']);assert(cached.includes('/app.js'));
 assert.equal(workerHandlers.has('push'),false);assert.equal(workerHandlers.has('notificationclick'),false);assert(workerHandlers.has('fetch'));
 
 // No browser permission state can implicitly grant permission during delivery.

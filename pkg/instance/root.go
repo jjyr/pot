@@ -12,9 +12,9 @@ import (
 	"syscall"
 )
 
-// IdentityFormat is the immutable 0.0.1 persisted format ID, not a product name.
-// Retain it so roots and package-only rollback require no JSON migration.
-const IdentityFormat = "pot-go"
+// IdentityFormat identifies Pot roots. Other discriminators are rejected before
+// opening any databases; naming refresh does not adopt or convert those roots.
+const IdentityFormat = "pot"
 
 type Identity struct {
 	Format    string `json:"format"`

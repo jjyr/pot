@@ -20,8 +20,6 @@ root = "%h/.pot" if args.template else str(args.root.resolve())
 working = "@POT_PREFIX@" if args.template else str(args.binary.resolve().parent.parent)
 args.output.parent.mkdir(parents=True, exist_ok=True)
 args.output.write_text(f'''# Review paths and install explicitly as a user unit named pot-runtime.service.
-# If pot-go-runtime.service already exists, manage it in place with pot service;
-# do not install a second unit for the same runtime.
 # This file does not replace any existing Pot service or read its data directory.
 [Unit]
 Description=Pot Runtime
@@ -32,7 +30,6 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory="{working}"
 ExecStart="{binary}" serve -root "{root}"
-EnvironmentFile=-%h/.config/pot-go/runtime.env
 EnvironmentFile=-%h/.config/pot/runtime.env
 UMask=0077
 Restart=on-failure

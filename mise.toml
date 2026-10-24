@@ -170,7 +170,7 @@ python scripts/build-pot-plugins --platform linux-amd64 --output .local/pot/linu
 
 [tasks."test:packaging"]
 description = "Verify package layout, immutable export and service artifact generation"
-run = ["python scripts/tests/pot-packaging.py", "python integrations/codex/install_test.py"]
+run = ["python scripts/tests/pot-packaging.py", "python scripts/tests/release-refresh.py", "python integrations/codex/install_test.py"]
 
 [tasks.preview]
 description = "Run the disposable loopback shared UI preview (no model or product data)"

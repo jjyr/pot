@@ -27,7 +27,7 @@ func TestRootExclusiveAndStableIdentity(t *testing.T) {
 	}
 }
 
-func TestReleasedIdentityRemainsUnchanged(t *testing.T) {
+func TestPreviousRootFormatRejectedWithoutRewriting(t *testing.T) {
 	path := t.TempDir()
 	if err := os.Chmod(path, 0700); err != nil {
 		t.Fatal(err)
@@ -37,13 +37,9 @@ func TestReleasedIdentityRemainsUnchanged(t *testing.T) {
 	if err := os.WriteFile(file, []byte(original), 0600); err != nil {
 		t.Fatal(err)
 	}
-	root, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer root.Close()
-	if root.Identity.RuntimeID != "released-node" {
-		t.Fatal("changed node identity")
+	if root, err := Open(path); err == nil {
+		root.Close()
+		t.Fatal("adopted previous root format")
 	}
 	contents, err := os.ReadFile(file)
 	if err != nil || string(contents) != original {

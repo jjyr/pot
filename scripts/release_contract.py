@@ -85,7 +85,7 @@ def release_assets(version, channel):
 
 
 def cli_installation(extracted):
-    """Locate a new package or the immutable 0.0.1 layout by its metadata."""
+    """Locate the single Pot installation and validate its platform metadata."""
     entries = list(extracted.iterdir())
     if len(entries) != 1 or not entries[0].is_dir():
         raise ValueError("CLI archive must contain exactly one installation")
@@ -94,10 +94,7 @@ def cli_installation(extracted):
     platform = metadata["platform"]
     if metadata["kind"] != "cli" or platform not in {"darwin-arm64", "linux-amd64", "linux-arm64"}:
         raise ValueError("unsupported CLI package metadata")
-    names = {f"pot-{platform}"}
-    if metadata["version"] == "0.0.1":
-        names.add(f"pot-go-{platform}")
-    if installation.name not in names:
+    if installation.name != f"pot-{platform}":
         raise ValueError("CLI directory does not match package metadata")
     if not (installation / "bin/pot").is_file():
         raise ValueError("CLI package has no bin/pot")

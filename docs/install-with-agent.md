@@ -78,9 +78,9 @@ constructing a download URL. The
   its checksum, then `sudo apt install ./THE_DOWNLOADED_FILE.deb` and launch
   `pot-desktop`. Use the actual downloaded filename. Do not offer arm64 until a
   corresponding qualified asset exists.
-- Web UI / Server: `pot-VERSION-linux-ARCH.tar.gz` (0.0.1: `pot-go-0.0.1-linux-ARCH.tar.gz`), with `ARCH` matching
+- Web UI / Server: `pot-VERSION-linux-ARCH.tar.gz`, with `ARCH` matching
   `amd64` or `arm64`. Verify the checksum and extract into a new directory. From
-  the extracted `pot-linux-ARCH/bin` (`pot-go-linux-ARCH/bin` for 0.0.1), run
+  the extracted `pot-linux-ARCH/bin`, run
   `./pot serve -root "$HOME/.pot-node" -ui 127.0.0.1:17703`. In another terminal
   use `./pot access -root "$HOME/.pot-node" token` locally. See the server section
   below for browser access, stopping, backups and first verification.

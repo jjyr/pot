@@ -23,9 +23,7 @@ import (
 
 // StorageFormat versions non-SQL persisted contracts. The build additionally pins
 // the centralized SQL migration fingerprint; automatic schema changes are rejected.
-// The legacy prefix is an immutable compatibility ID shared with 0.0.1.
-// Renaming it would prevent those installed clients from accepting future feeds.
-const StorageFormat = "pot-go-2026-10-5"
+const StorageFormat = "pot-2026-10-5"
 const releaseOrigin = "https://github.com/jjyr/pot/releases/download/"
 
 var versionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)

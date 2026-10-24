@@ -21,7 +21,7 @@ supply explicit build provenance. Unpackaged Go builds identify themselves as
 development builds. `pot --version` uses the same metadata.
 
 The default macOS bundle is independently identified as
-`.local/pot/PotPreview.app` / `dev.pot.go-preview` (retained for OS/WebView preference compatibility). A local release build uses
+`.local/pot/PotPreview.app` / `dev.pot.preview`. A local release build uses
 `.local/pot/Pot.app` / `dev.pot.app`. Building a bundle does not open or replace an
 installed App. The release task creates local ZIP/checksum/cask artifacts;
 publication is a separate workflow.
