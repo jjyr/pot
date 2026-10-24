@@ -210,11 +210,38 @@ func TestTemporaryWorkspaceRetainsOriginalAndFencesLostPreparation(t *testing.T)
 	if _, err = s.taskWorkspacePath(ctx, l.TaskID); err != nil {
 		t.Fatal(err)
 	}
-	os.RemoveAll(w.Path)
+	// Keep the original inode allocated: this verifies the current device/inode
+	// contract, not identity after deletion and immediate inode reuse.
+	retained := w.Path + "-retained"
+	if err := os.Rename(w.Path, retained); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(retained); err != nil {
+			t.Error(err)
+		}
+	})
 	if _, err = s.prepareTaskWorkspace(ctx, l, MachinePolicy{ExecutionAccess: "allow"}); err == nil {
 		t.Fatal("lost workspace silently recreated")
 	}
-	os.MkdirAll(w.Path, 0700)
+	if _, err := os.Stat(w.Path); !os.IsNotExist(err) {
+		t.Fatal("missing workspace path was recreated", err)
+	}
+	if root, e := s.openTaskWorkspace(ctx, l.TaskID); e == nil {
+		root.Close()
+		t.Fatal("missing directory accepted for downloads")
+	}
+	if err := os.Mkdir(w.Path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	original, err := os.Stat(retained)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := os.Stat(w.Path)
+	if err != nil || os.SameFile(original, replacement) {
+		t.Fatal("fixture did not create a distinct replacement directory", err)
+	}
 	if root, e := s.openTaskWorkspace(ctx, l.TaskID); e == nil {
 		root.Close()
 		t.Fatal("replaced directory accepted for downloads")

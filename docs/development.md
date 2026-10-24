@@ -121,8 +121,8 @@ change the normal/race selection.
 Full-package race remains on task scheduling/cancellation/recovery, execution
 and process supervision, assistant/inbox queues and compaction, concurrent storage,
 transport, Agent Link, plugin hosting and mutable provider caches. Control keeps
-these integration paths, including real workspace replacement and creation
-identity tests, approval/effect fences, cancellation, peer delivery, catalog
+these integration paths, including workspace preparation and device/inode
+replacement tests, approval/effect fences, cancellation, peer delivery, catalog
 refresh cancellation and credential rotation. Its explicitly listed serial
 configuration, resource/text and request-count contracts run in the complete
 normal suite. Pure value/encoding/rendering helpers also run normally. No normal
