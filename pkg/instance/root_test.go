@@ -26,6 +26,30 @@ func TestRootExclusiveAndStableIdentity(t *testing.T) {
 		t.Fatal("replaced identity")
 	}
 }
+
+func TestReleasedIdentityRemainsUnchanged(t *testing.T) {
+	path := t.TempDir()
+	if err := os.Chmod(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(path, "identity.json")
+	const original = "{\"format\":\"pot-go\",\"version\":1,\"runtime_id\":\"released-node\"}\n"
+	if err := os.WriteFile(file, []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if root.Identity.RuntimeID != "released-node" {
+		t.Fatal("changed node identity")
+	}
+	contents, err := os.ReadFile(file)
+	if err != nil || string(contents) != original {
+		t.Fatal("rewrote released identity", err)
+	}
+}
 func TestOldDataPreserved(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old")
 	os.Mkdir(path, 0700)

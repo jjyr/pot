@@ -55,7 +55,7 @@ def sign_tree(root, identity, keychain=None):
 
 
 def seal_archives(version, output, root, identity, keychain=None):
-    for name in [f"Pot-{version}-arm64.zip", f"pot-go-{version}-darwin-arm64.tar.gz"]:
+    for name in [f"Pot-{version}-arm64.zip", f"pot-{version}-darwin-arm64.tar.gz"]:
         archive = output / name
         if archive.with_name(name + ".sha256").read_text() != f"{checksum(archive)}  {name}\n":
             raise ValueError(f"input checksum mismatch: {name}")
@@ -67,7 +67,7 @@ def seal_archives(version, output, root, identity, keychain=None):
         else:
             with tarfile.open(archive) as packed:
                 packed.extractall(stage, filter="data")
-            tree = stage / "pot-go-darwin-arm64"
+            tree = stage / "pot-darwin-arm64"
         sign_tree(tree, identity, keychain)
         if identity != "-":
             notary_zip = root / "notary.zip"

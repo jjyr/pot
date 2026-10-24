@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 from release_contract import (
     distribution_names,
+    cli_installation,
     generate_cask,
     checksum,
     checksum_name,
@@ -34,6 +35,31 @@ prepare = runpy.run_path(str(ROOT / "scripts/prepare-release"))["prepare"]
 sign = runpy.run_path(str(ROOT / "scripts/update-release"))["sign"]
 SHA = "a" * 40
 OTHER = "b" * 40
+
+
+class CLINaming(unittest.TestCase):
+    def test_new_and_published_legacy_layouts_require_matching_metadata(self):
+        for directory, version, platform, accepted in [
+            ("pot-linux-amd64", "0.0.2", "linux-amd64", True),
+            ("pot-go-linux-amd64", "0.0.1", "linux-amd64", True),
+            ("pot-go-linux-amd64", "0.0.2", "linux-amd64", False),
+            ("pot-linux-arm64", "0.0.2", "linux-amd64", False),
+        ]:
+            with self.subTest(directory=directory, version=version):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    tree = root / directory
+                    (tree / "Resources").mkdir(parents=True)
+                    (tree / "bin").mkdir()
+                    (tree / "bin/pot").write_bytes(b"fixture")
+                    (tree / "Resources/update.json").write_text(
+                        json.dumps({"kind": "cli", "version": version, "platform": platform})
+                    )
+                    if accepted:
+                        self.assertEqual(cli_installation(root), tree)
+                        (root / "extra").mkdir()
+                    with self.assertRaises(ValueError):
+                        cli_installation(root)
 
 
 class ReleaseIntent(unittest.TestCase):
@@ -863,10 +889,10 @@ class MacOSSealing(unittest.TestCase):
                 (app / "Contents/MacOS/pot-app").write_bytes(bytes.fromhex("cffaedfe") + b"fixture")
                 with zipfile.ZipFile(output / "Pot-1.2.3-arm64.zip", "w") as packed:
                     packed.write(app / "Contents/MacOS/pot-app", "Pot.app/Contents/MacOS/pot-app")
-                cli = root / "pot-go-darwin-arm64"
+                cli = root / "pot-darwin-arm64"
                 cli.mkdir()
                 (cli / "pot").write_bytes(bytes.fromhex("cffaedfe") + b"fixture")
-                with tarfile.open(output / "pot-go-1.2.3-darwin-arm64.tar.gz", "w:gz") as packed:
+                with tarfile.open(output / "pot-1.2.3-darwin-arm64.tar.gz", "w:gz") as packed:
                     packed.add(cli, arcname=cli.name)
                 for path in output.iterdir():
                     write_checksum(path)

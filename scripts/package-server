@@ -19,7 +19,7 @@ version = version_number(os.environ["POT_APP_VERSION"])
 subprocess.run(
     [
         sys.executable,
-        str(ROOT / "scripts/build-go-cli"),
+        str(ROOT / "scripts/build-pot-cli"),
         "--platform",
         args.platform,
         "--output",
@@ -27,8 +27,8 @@ subprocess.run(
     ],
     check=True,
 )
-original = args.output / f"pot-go-{args.platform}.tar.gz"
-archive = args.output / f"pot-go-{version}-{args.platform}.tar.gz"
+original = args.output / f"pot-{args.platform}.tar.gz"
+archive = args.output / f"pot-{version}-{args.platform}.tar.gz"
 original.replace(archive)
 original.with_name(original.name + ".sha256").unlink()
 write_checksum(archive)

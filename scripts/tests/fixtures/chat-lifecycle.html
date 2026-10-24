@@ -35,7 +35,7 @@ for(const [label,run] of [
  ['Reconnected',()=>{fixture.offline=false;fixture.uncertain=false;for(const status of fixture.statuses)status('connected');}],
  ['Failed',()=>{fixture.output=null;fixture.phase='failed';}],['Empty result',()=>{fixture.output=null;fixture.phase='completed';}],
  ['Reply',()=>{fixture.phase='completed';fixture.output={id:`output-${fixture.input.id}`,reply_to:fixture.input.id,role:'assistant',text:'The reply arrived.',status:'complete',sequence:String(fixture.history.length+2),version:fixture.version};}],
- ['Chinese',()=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-go-preview-locale',value:'zh-CN'}}))],
- ['English',()=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-go-preview-locale',value:'en'}}))]
+ ['Chinese',()=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:'zh-CN'}}))],
+ ['English',()=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:'en'}}))]
 ]){const button=document.createElement('button');button.textContent=label;button.onclick=()=>{run();publish();};controls.append(button);}
 </script></html>

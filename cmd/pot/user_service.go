@@ -18,7 +18,46 @@ import (
 	"strings"
 )
 
-const userServiceLabel = "com.jjyr.pot.go.runtime"
+const userServiceLabel = "com.jjyr.pot.runtime"
+
+// Reuse an installed 0.0.1 service in place. Never create a second supervisor
+// or rewrite an operator's unit, plist, environment file or data root.
+func userServiceDefinition(home, goos string) (path, name, label string, err error) {
+	directory := filepath.Join(home, ".config/systemd/user")
+	name, legacy := "pot-runtime.service", "pot-go-runtime.service"
+	label = userServiceLabel
+	if goos == "darwin" {
+		directory = filepath.Join(home, "Library/LaunchAgents")
+		name, legacy = userServiceLabel+".plist", "com.jjyr.pot.go.runtime.plist"
+	} else if goos != "linux" {
+		return "", "", "", errors.New("user services require macOS or Linux")
+	}
+	exists := func(name string) (bool, error) {
+		_, e := os.Lstat(filepath.Join(directory, name))
+		if os.IsNotExist(e) {
+			return false, nil
+		}
+		return e == nil, e
+	}
+	current, err := exists(name)
+	if err != nil {
+		return "", "", "", err
+	}
+	old, err := exists(legacy)
+	if err != nil {
+		return "", "", "", err
+	}
+	if current && old {
+		return "", "", "", errors.New("both current and legacy Pot service definitions exist; resolve the duplicate before managing services")
+	}
+	if old {
+		name = legacy
+		if goos == "darwin" {
+			label = strings.TrimSuffix(legacy, ".plist")
+		}
+	}
+	return filepath.Join(directory, name), name, label, nil
+}
 
 func openUserBrowser(ctx context.Context, root, owner string) error {
 	endpoint, err := access.ReadOperator(root)
@@ -67,7 +106,7 @@ func renderUserService(goos, binary, root string) (string, error) {
 	}
 	if goos == "linux" {
 		quote := func(s string) string { return strconv.Quote(strings.ReplaceAll(s, "%", "%%")) }
-		return fmt.Sprintf("# pot-root:%s\n[Unit]\nDescription=Pot Go Runtime\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart=%s serve -root %s\nEnvironmentFile=-%%h/.config/pot-go/runtime.env\nUMask=0077\nRestart=on-failure\nRestartSec=3\nTimeoutStopSec=45\nKillMode=mixed\n\n[Install]\nWantedBy=default.target\n", marker, quote(binary), quote(root)), nil
+		return fmt.Sprintf("# pot-root:%s\n[Unit]\nDescription=Pot Runtime\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart=%s serve -root %s\nEnvironmentFile=-%%h/.config/pot-go/runtime.env\nEnvironmentFile=-%%h/.config/pot/runtime.env\nUMask=0077\nRestart=on-failure\nRestartSec=3\nTimeoutStopSec=45\nKillMode=mixed\n\n[Install]\nWantedBy=default.target\n", marker, quote(binary), quote(root)), nil
 	}
 	return "", errors.New("user services require macOS or Linux")
 }
@@ -79,15 +118,11 @@ func userService(ctx context.Context, root, action string, out io.Writer) error 
 	if err != nil {
 		return err
 	}
-	directory := filepath.Join(home, ".config/systemd/user")
-	name := "pot-go-runtime.service"
-	if runtime.GOOS == "darwin" {
-		directory = filepath.Join(home, "Library/LaunchAgents")
-		name = userServiceLabel + ".plist"
-	} else if runtime.GOOS != "linux" {
-		return errors.New("user services require macOS or Linux")
+	path, name, label, err := userServiceDefinition(home, runtime.GOOS)
+	if err != nil {
+		return err
 	}
-	path := filepath.Join(directory, name)
+	directory := filepath.Dir(path)
 	run := func(program string, args ...string) error {
 		command := exec.CommandContext(ctx, program, args...)
 		command.Stdout = out
@@ -148,7 +183,7 @@ func userService(ctx context.Context, root, action string, out io.Writer) error 
 		domain := "gui/" + strconv.Itoa(os.Getuid())
 		start = func() error { return run("launchctl", "bootstrap", domain, path) }
 		stop = func() error {
-			probe := exec.CommandContext(ctx, "launchctl", "print", domain+"/"+userServiceLabel)
+			probe := exec.CommandContext(ctx, "launchctl", "print", domain+"/"+label)
 			if err := probe.Run(); err != nil {
 				return nil
 			}

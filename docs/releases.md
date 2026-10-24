@@ -5,17 +5,22 @@ checks pass. Docker, Linux server and the experimental Linux desktop do not depe
 on macOS signing. Each channel requires its own build, smoke, checksum and
 applicable signing gates. Windows is currently unsupported.
 
-Source builds remain available until public artifacts exist. This repository is
-also the Homebrew tap: root `Casks/pot.rb` starts disabled until the first macOS
-release is published and its reviewed cask update lands. Release workflows propose
-a cask update PR after successful macOS publication; they never push the default branch or
-change repository/registry visibility.
+The first public release is 0.0.1; the root `Casks/pot.rb` installs its App.
+Release workflows propose a cask update PR after successful macOS publication;
+they never push the default branch or change repository/registry visibility.
+
+New builds use the names below. **Published 0.0.1 CLI assets remain
+`pot-go-0.0.1-PLATFORM.tar.gz`**, with `pot-go-PLATFORM` inside, and retain their
+original checksum sidecars and signed `update.json`. Do not rename, reupload or
+re-sign them. App ZIP, Homebrew and image names are unchanged. The updater selects
+artifacts by signed kind/platform metadata and validates the extracted metadata,
+so either directory name works without changing the existing installation path.
 
 | Channel | Versioned distribution | Publication boundary |
 |---|---|---|
-| Linux server, amd64/arm64 | `pot-go-VERSION-linux-ARCH.tar.gz` | Both native CLI builds and extracted-package smoke; GitHub Release assets |
+| Linux server, amd64/arm64 | `pot-VERSION-linux-ARCH.tar.gz` | Both native CLI builds and extracted-package smoke; GitHub Release assets |
 | Linux desktop (Experimental), amd64 | `pot-desktop_VERSION_linux_amd64.deb` | Native GTK/WebKit build and real WebView smoke; GitHub Release assets; manual upgrades |
-| macOS 26+, Apple Silicon | `Pot-VERSION-arm64.zip`, `pot-go-VERSION-darwin-arm64.tar.gz` | Native App/CLI smoke and explicit `unsigned` (ad-hoc) or `signed` (Developer ID + notarization) mode; GitHub assets, cask and signed update feed |
+| macOS 26+, Apple Silicon | `Pot-VERSION-arm64.zip`, `pot-VERSION-darwin-arm64.tar.gz` | Native App/CLI smoke and explicit `unsigned` (ad-hoc) or `signed` (Developer ID + notarization) mode; GitHub assets, cask and signed update feed |
 | Container, Linux amd64/arm64 | `pot-container-VERSION.oci.tar`, `ghcr.io/jjyr/pot:VERSION` | Native image build/smoke on both architectures, OCI integrity and metadata verification; GHCR |
 | Homebrew | Root `Casks/pot.rb` in `jjyr/pot` | Published final App ZIP verified before a same-repository cask update PR; merge makes installation/upgrades available |
 
@@ -147,7 +152,7 @@ manifest: `SHA256SUMS-server`, `SHA256SUMS-desktop`, `SHA256SUMS-macos` or
 manifest. The unsigned aggregate validation bundle uses `SHA256SUMS`. Artifacts
 are retained for seven days. `POT_APP_VERSION` and `POT_BUILD_REVISION` set matching
 version/revision metadata across all builds. Versioned CLI filenames retain the
-internal installation directory `pot-go-PLATFORM`.
+internal installation directory `pot-PLATFORM`.
 
 Channel publication is intentionally independent, not a transaction across GitHub
 and GHCR. An environment refusal, registry error or platform failure may leave

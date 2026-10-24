@@ -35,22 +35,22 @@ depends = ["test:go", "test:race", "test:ui", "test:packaging", "test:eval", "te
 
 [tasks.prepare]
 description = "Prepare retained Node, JS plugins, and skills"
-run = "python scripts/prepare-go-resources"
+run = "python scripts/prepare-pot-resources"
 
 [tasks.build]
-description = "Build the isolated Go/Wails macOS app with local execution"
-run = "python scripts/build-go-app"
+description = "Build the isolated Pot/Wails macOS app with local execution"
+run = "python scripts/build-pot-app"
 
 [tasks.bundle]
 description = "Create a fresh complete macOS development bundle"
-run = "python scripts/build-go-app"
+run = "python scripts/build-pot-app"
 
 [tasks.open]
-description = "Open the isolated Go/Wails preview bundle"
+description = "Open the isolated Pot/Wails preview bundle"
 run = "python scripts/pot open"
 
 [tasks.server]
-description = "Run the Go Runtime service"
+description = "Run the Pot Runtime service"
 run = "go run ./cmd/pot serve"
 
 [tasks.release]
@@ -70,12 +70,12 @@ description = "Verify and embed the shared HTML/CSS/JS product frontend"
 run = "go build -mod=readonly ./web"
 
 [tasks."build:cli"]
-description = "Build a portable Go CLI archive with retained runtime assets"
-run = "python scripts/build-go-cli"
+description = "Build a portable Pot CLI archive with retained runtime assets"
+run = "python scripts/build-pot-cli"
 
 [tasks."build:plugins"]
 description = "Package tool plugins"
-run = "python scripts/build-go-plugins"
+run = "python scripts/build-pot-plugins"
 
 [tasks.licenses]
 description = "Collect notices for actual linked Go dependencies and runtime"
@@ -84,7 +84,7 @@ run = "python scripts/go-notices --output .local/licenses/go-dependencies.txt ./
 [tasks."test:ui"]
 description = "Verify shared DOM composer and production owner-scoped state contracts"
 depends = ["test:ui-fluid", "test:assistant-creation"]
-run = ["node --test pkg/mcp/node_runtime.test.mjs", "node scripts/tests/go-ui-updates.mjs", "node scripts/tests/go-ui-extensions.mjs", "node scripts/tests/go-ui-history.mjs", "node scripts/tests/go-ui-scroll-input.mjs", "node scripts/tests/go-ui-chat-sync.mjs", "node scripts/tests/go-ui-resource-cache.mjs", "node scripts/tests/go-ui-display-resources.mjs", "node scripts/tests/go-ui-topology.mjs", "node scripts/tests/go-ui-agent-links.mjs", "node scripts/tests/go-ui-state.mjs", "node scripts/tests/go-ui-schedule-probe.mjs", "node scripts/tests/go-ui-send-confirmation.mjs", "node scripts/tests/go-ui-production-state.mjs", "node scripts/tests/go-ui-provider-plugins.mjs", "node scripts/tests/go-ui-usage.mjs", "node scripts/tests/script-runs.mjs", "node scripts/tests/go-ui-notifications.mjs", "node scripts/tests/go-ui-github-subscriptions.mjs", "node --test plugins/github/*.test.mjs", "node scripts/tests/go-ui-attachments.mjs", "node scripts/tests/go-ui-file-images.mjs", "node scripts/tests/go-ui-references.mjs", "node scripts/tests/go-ui-message-identities.mjs", "node scripts/tests/go-ui-communication.mjs", "node scripts/tests/go-ui-composer-selectors.mjs", "node scripts/tests/web-errors.js"]
+run = ["node scripts/tests/pot-ui-preferences.mjs", "node --test pkg/mcp/node_runtime.test.mjs", "node scripts/tests/pot-ui-updates.mjs", "node scripts/tests/pot-ui-extensions.mjs", "node scripts/tests/pot-ui-history.mjs", "node scripts/tests/pot-ui-scroll-input.mjs", "node scripts/tests/pot-ui-chat-sync.mjs", "node scripts/tests/pot-ui-resource-cache.mjs", "node scripts/tests/pot-ui-display-resources.mjs", "node scripts/tests/pot-ui-topology.mjs", "node scripts/tests/pot-ui-agent-links.mjs", "node scripts/tests/pot-ui-state.mjs", "node scripts/tests/pot-ui-schedule-probe.mjs", "node scripts/tests/pot-ui-send-confirmation.mjs", "node scripts/tests/pot-ui-production-state.mjs", "node scripts/tests/pot-ui-provider-plugins.mjs", "node scripts/tests/pot-ui-usage.mjs", "node scripts/tests/script-runs.mjs", "node scripts/tests/pot-ui-notifications.mjs", "node scripts/tests/pot-ui-github-subscriptions.mjs", "node --test plugins/github/*.test.mjs", "node scripts/tests/pot-ui-attachments.mjs", "node scripts/tests/pot-ui-file-images.mjs", "node scripts/tests/pot-ui-references.mjs", "node scripts/tests/pot-ui-message-identities.mjs", "node scripts/tests/pot-ui-communication.mjs", "node scripts/tests/pot-ui-composer-selectors.mjs", "node scripts/tests/web-errors.js"]
 
 
 [tasks."test:executor"]
@@ -93,11 +93,11 @@ run = "go test -race ./pkg/executor ./pkg/pluginhost"
 
 [tasks."test:ui-fluid"]
 description = "Verify bounded task catalogues, progressive loading and targeted invalidation"
-run = "node scripts/tests/go-ui-task-pages.mjs"
+run = "node scripts/tests/pot-ui-task-pages.mjs"
 
 [tasks."test:assistant-creation"]
 description = "Verify one-click assistant creation, retries and Space ownership"
-run = "node scripts/tests/go-ui-assistant-creation.mjs"
+run = "node scripts/tests/pot-ui-assistant-creation.mjs"
 
 [tasks."test:hooks"]
 description = "Verify hook timing and failure propagation"
@@ -157,20 +157,20 @@ run = "python scripts/test_go.py race-all"
 
 [tasks."build:go"]
 description = "Build Go CLI independently of the desktop"
-run = "go build -mod=readonly -trimpath -o .local/go/bin/ ./cmd/pot"
+run = "go build -mod=readonly -trimpath -o .local/pot/bin/ ./cmd/pot"
 
 [tasks."build:linux"]
 description = "Cross-build Go headless entry points without CGO or GUI dependencies"
 run = '''
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -mod=readonly -trimpath -o .local/go/linux-arm64/ ./cmd/pot
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -mod=readonly -trimpath -o .local/go/linux-amd64/ ./cmd/pot
-python scripts/build-go-plugins --platform linux-arm64 --output .local/go/linux-arm64/Resources/plugins
-python scripts/build-go-plugins --platform linux-amd64 --output .local/go/linux-amd64/Resources/plugins
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -mod=readonly -trimpath -o .local/pot/linux-arm64/ ./cmd/pot
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -mod=readonly -trimpath -o .local/pot/linux-amd64/ ./cmd/pot
+python scripts/build-pot-plugins --platform linux-arm64 --output .local/pot/linux-arm64/Resources/plugins
+python scripts/build-pot-plugins --platform linux-amd64 --output .local/pot/linux-amd64/Resources/plugins
 '''
 
 [tasks."test:packaging"]
 description = "Verify package layout, immutable export and service artifact generation"
-run = ["python scripts/tests/go-packaging.py", "python integrations/codex/install_test.py"]
+run = ["python scripts/tests/pot-packaging.py", "python integrations/codex/install_test.py"]
 
 [tasks.preview]
 description = "Run the disposable loopback shared UI preview (no model or product data)"
@@ -179,7 +179,7 @@ run = "go run ./cmd/pot preview"
 [tasks."preview:app"]
 description = "Run the disposable Wails main-window and tray preview"
 depends = ["build"]
-run = "open .local/go/PotGoPreview.app"
+run = "open .local/pot/PotPreview.app"
 
 [tasks.icons]
 description = "Generate brand assets from the retained native vector master"
@@ -193,7 +193,7 @@ xcrun swiftc -module-cache-path .local/icons/modules resources/app/PotIcon.swift
 
 [tasks."test:ui-http-integration"]
 description = "Opt-in real local browser/HTTP/SSE integration (cached Playwright CLI and browser required)"
-run = ["python scripts/tests/go-ui-http-integration.py", "python scripts/tests/go-ui-assistant-start-browser.py", "python scripts/tests/go-ui-assistant-settings-browser.py", "python scripts/tests/go-ui-linked-approvals-browser.py", "python scripts/tests/go-ui-composer-selectors-browser.py", "python scripts/tests/go-ui-usage-browser.py"]
+run = ["python scripts/tests/pot-ui-http-integration.py", "python scripts/tests/pot-ui-assistant-start-browser.py", "python scripts/tests/pot-ui-assistant-settings-browser.py", "python scripts/tests/pot-ui-linked-approvals-browser.py", "python scripts/tests/pot-ui-composer-selectors-browser.py", "python scripts/tests/pot-ui-usage-browser.py"]
 
 [tasks."test:public-api"]
 description = "Verify reusable Go libraries from an independent external module"

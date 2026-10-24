@@ -93,3 +93,9 @@ default, opens automatically; otherwise the page offers a choice. A connected
 Codex task executor returns to a connection confirmation explaining how the
 current assistant can delegate a task; it does not open a Codex chat. Empty remote
 chat directories offer refresh, and failed directory reads offer recovery.
+
+Browser language and appearance use `pot-ui-locale` and `pot-ui-theme` per origin.
+On first read, missing keys fall back to the 0.0.1 `pot-go-preview-*` keys and copy
+the value when storage permits. Existing new values win, and old keys are retained.
+The `pot-ui-v3` service worker cache replaces obsolete `pot-go-ui-*` asset caches;
+this does not clear preferences, IndexedDB history or other applications' caches.

@@ -41,7 +41,7 @@ func TestDeepSeekUnsandboxLive(t *testing.T) {
 	}
 	sdk := os.Getenv("POT_SANDBOX_SDK")
 	if sdk == "" {
-		sdk, err = filepath.Abs("../../.local/go/sandbox-tests")
+		sdk, err = filepath.Abs("../../.local/pot/sandbox-tests")
 		if err != nil {
 			t.Fatal(err)
 		}

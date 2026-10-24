@@ -157,6 +157,35 @@ func TestDownloadRejectsChecksumAndPreservesInstalledFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Both package generations use authenticated metadata, never a guessed basename.
+func TestCLIPackageNamingCompatibility(t *testing.T) {
+	if StorageFormat != "pot-go-2026-10-5" {
+		t.Fatal("0.0.1 update compatibility changed")
+	}
+	for _, fixture := range []struct{ version, name, directory string }{
+		{"0.0.1", "pot-go-0.0.1-linux-arm64.tar.gz", "pot-go-linux-arm64"},
+		{"0.0.2", "pot-0.0.2-linux-arm64.tar.gz", "pot-linux-arm64"},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			metadata, _ := json.Marshal(Installation{Version: fixture.version, Kind: "cli", Platform: "linux-arm64", StorageFormat: storageFormat()})
+			data := archiveBytes(t, []*tar.Header{{Name: fixture.directory + "/Resources/update.json", Mode: 0644, Size: int64(len(metadata)), Typeflag: tar.TypeReg}}, []string{string(metadata)})
+			sum := sha256.Sum256(data)
+			artifact := Artifact{Kind: "cli", Platform: "linux-arm64", URL: releaseOrigin + "v" + fixture.version + "/" + fixture.name, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(data))}
+			envelope, key := signed(t, Release{Version: fixture.version, StorageFormat: storageFormat(), Artifacts: []Artifact{artifact}})
+			if _, err := Verify(envelope, key); err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(data) }))
+			defer server.Close()
+			artifact.URL = server.URL
+			m := &Manager{Host: &Host{Directory: t.TempDir()}, client: server.Client(), release: &Release{Version: fixture.version}}
+			if err := m.download(context.Background(), artifact, fixture.version); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
 func TestConfirmationAndUnsupportedHost(t *testing.T) {
 	m := New(context.Background(), nil, nil)
 	status, _ := m.Status()

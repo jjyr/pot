@@ -54,7 +54,7 @@ def write_checksum(path):
 def update_artifacts(version):
     version_number(version)
     return [("app", "darwin-arm64", f"Pot-{version}-arm64.zip")] + [
-        ("cli", target, f"pot-go-{version}-{target}.tar.gz")
+        ("cli", target, f"pot-{version}-{target}.tar.gz")
         for target in ("darwin-arm64", "linux-amd64", "linux-arm64")
     ]
 
@@ -62,7 +62,7 @@ def update_artifacts(version):
 def distribution_names(version, channel="validation"):
     version_number(version)
     channels = {
-        "server": [f"pot-go-{version}-linux-{arch}.tar.gz" for arch in ("amd64", "arm64")],
+        "server": [f"pot-{version}-linux-{arch}.tar.gz" for arch in ("amd64", "arm64")],
         "desktop": [f"pot-desktop_{version}_linux_amd64.deb"],
         "macos": [name for _, _, name in update_artifacts(version)],
         "container": [f"pot-container-{version}.oci.tar"],
@@ -82,6 +82,26 @@ def release_assets(version, channel):
     if channel == "macos":
         assets += ["update.json", "MACOS-RELEASE.txt"]
     return assets
+
+
+def cli_installation(extracted):
+    """Locate a new package or the immutable 0.0.1 layout by its metadata."""
+    entries = list(extracted.iterdir())
+    if len(entries) != 1 or not entries[0].is_dir():
+        raise ValueError("CLI archive must contain exactly one installation")
+    installation = entries[0]
+    metadata = json.loads((installation / "Resources/update.json").read_text())
+    platform = metadata["platform"]
+    if metadata["kind"] != "cli" or platform not in {"darwin-arm64", "linux-amd64", "linux-arm64"}:
+        raise ValueError("unsupported CLI package metadata")
+    names = {f"pot-{platform}"}
+    if metadata["version"] == "0.0.1":
+        names.add(f"pot-go-{platform}")
+    if installation.name not in names:
+        raise ValueError("CLI directory does not match package metadata")
+    if not (installation / "bin/pot").is_file():
+        raise ValueError("CLI package has no bin/pot")
+    return installation
 
 
 def verify_oci(archive, version, revision=None):

@@ -16,12 +16,13 @@ import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from macos_release import verify_resources, verify_signatures  # noqa: E402
+from release_contract import cli_installation  # noqa: E402
 
 with tempfile.TemporaryDirectory(prefix="pot-server-smoke-") as temporary:
     root = Path(temporary)
     with tarfile.open(sys.argv[1]) as archive:
         archive.extractall(root, filter="data")
-    installation = next(root.glob("pot-go-*"))
+    installation = cli_installation(root)
     binary = installation / "bin/pot"
     metadata = json.loads((installation / "Resources/update.json").read_text())
     if metadata["platform"] == "darwin-arm64":

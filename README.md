@@ -53,7 +53,7 @@ existing data, choose a channel and complete first setup. To install it yourself
 | macOS (Homebrew) | Use the two commands below; [tap instructions](docs/releases.md#homebrew-generation) | Apple Silicon, macOS 26+; [first launch](docs/desktop-installation.md#macos) |
 | Linux desktop · Experimental | [Download .deb](https://github.com/jjyr/pot/releases) — select `pot-desktop_VERSION_linux_amd64.deb` | Debian / Ubuntu amd64; [requirements](docs/desktop-installation.md#linux-experimental) |
 | Web UI (Docker) | [View Docker image](https://github.com/users/jjyr/packages/container/package/pot) · `ghcr.io/jjyr/pot` | Linux amd64 / arm64; [installation and running](docs/docker.md) |
-| Web UI (Server) | [Download Web UI / Server](https://github.com/jjyr/pot/releases) — select `pot-go-VERSION-linux-ARCH.tar.gz` | glibc Linux amd64 / arm64; [configuration and running](docs/deployment.md) |
+| Web UI (Server) | [Download Web UI / Server](https://github.com/jjyr/pot/releases) — select `pot-VERSION-linux-ARCH.tar.gz` (0.0.1: `pot-go-0.0.1-linux-ARCH.tar.gz`) | glibc Linux amd64 / arm64; [configuration and running](docs/deployment.md) |
 
 ```sh
 brew tap jjyr/pot https://github.com/jjyr/pot.git
@@ -98,13 +98,13 @@ cd pot
 mise install
 mise run prepare
 mise run build:go
-.local/go/bin/pot serve -root "$HOME/.pot-node" -ui 127.0.0.1:17703
+.local/pot/bin/pot serve -root "$HOME/.pot-node" -ui 127.0.0.1:17703
 ```
 
 Leave it running. In another terminal in the checkout, get your login token:
 
 ```sh
-.local/go/bin/pot access -root "$HOME/.pot-node" token
+.local/pot/bin/pot access -root "$HOME/.pot-node" token
 ```
 
 Open <http://127.0.0.1:17703>, sign in with the token and add an assistant as above.

@@ -13,7 +13,7 @@ a scrollable modal contains the font license link and expandable plain-text
 dependency notices. The modal closes with **Close** or Escape. Browser clients use
 the same read-only `/api/v1/about` projection for their connected Control.
 
-`scripts/build-go-app` and `scripts/build-go-cli` set
+`scripts/build-pot-app` and `scripts/build-pot-cli` set
 `internal/buildinfo.Version` and `Revision` through Go linker flags. The App
 version is `POT_APP_VERSION` (default `0.1.0`); its revision is the Git commit,
 with a dirty suffix when tracked source changes exist. `POT_BUILD_REVISION` can
@@ -21,8 +21,8 @@ supply explicit build provenance. Unpackaged Go builds identify themselves as
 development builds. `pot --version` uses the same metadata.
 
 The default macOS bundle is independently identified as
-`.local/go/PotGoPreview.app` / `dev.pot.go-preview`. A local release build uses
-`.local/go/Pot.app` / `dev.pot.app`. Building a bundle does not open or replace an
+`.local/pot/PotPreview.app` / `dev.pot.go-preview` (retained for OS/WebView preference compatibility). A local release build uses
+`.local/pot/Pot.app` / `dev.pot.app`. Building a bundle does not open or replace an
 installed App. The release task creates local ZIP/checksum/cask artifacts;
 publication is a separate workflow.
 

@@ -88,7 +88,7 @@ def run(command):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=["normal", "race", "race-all"])
-    parser.add_argument("--timeout", default=os.environ.get("POT_GO_TEST_TIMEOUT", "20m"))
+    parser.add_argument("--timeout", default=os.environ.get("POT_TEST_TIMEOUT", "20m"))
     parser.add_argument("--count", type=int)
     parser.add_argument("--json", action="store_true")
     parser.add_argument(

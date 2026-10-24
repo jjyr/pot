@@ -230,3 +230,26 @@ and supported collaboration operations; it grants no node administration access.
 Use the existing assistant chat and task delegation interactions. Disconnect
 pauses the link; delete removes the saved connection while retaining history.
 Neither action silently stops accepted work. See [Agent Links](agent-links.md).
+
+## Naming and existing installations
+
+New CLI packages contain `pot-PLATFORM/bin/pot`, `Resources/` and
+`service/pot-runtime.service`. Published 0.0.1 packages retain `pot-go-PLATFORM`.
+Keep the complete installation separate from the data root. Renaming a package
+must not move an existing root or change the root passed to its supervisor.
+
+`pot service` creates `pot-runtime.service` on Linux or
+`com.jjyr.pot.runtime.plist` on macOS. If the corresponding 0.0.1 definition
+(`pot-go-runtime.service` or `com.jjyr.pot.go.runtime.plist`) exists, management
+continues using it in place; installation refuses to overwrite it. If both names
+exist, management stops for operator resolution. No automatic rename, second
+service or data migration occurs. To adopt the new name, explicitly stop and
+uninstall the old service, then install/start with the same root. Do not install
+the packaged template beside an existing legacy unit.
+
+New Linux units read optional `~/.config/pot-go/runtime.env` first for 0.0.1
+compatibility and `~/.config/pot/runtime.env` second; new values take precedence.
+Existing units retain their original contents. Move configuration only as an
+explicit operator action; the application does not copy or overwrite these files.
+The persisted identity `format: "pot-go"` and update storage-format prefix remain
+immutable compatibility IDs, requiring no database or JSON format migration.

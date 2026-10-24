@@ -1,12 +1,13 @@
 import {createAgentLinks} from './components/agent-links.mjs';
 import {translate} from './locales/messages.mjs';
+import {storedPreference} from './state/preferences.mjs';
 
 const token=location.hash.slice(1)||sessionStorage.getItem('pot-agent-page')||'';
 if(location.hash){sessionStorage.setItem('pot-agent-page',token);history.replaceState(null,'',location.pathname+location.search);}
 const parameters=new URLSearchParams(location.search);
-const locale=()=>{const value=parameters.get('locale')||localStorage.getItem('pot-go-preview-locale')||(navigator.language.startsWith('zh')?'zh-CN':'en');return value==='zh-CN'?'zh-CN':'en';};
+const locale=()=>{const value=parameters.get('locale')||storedPreference('pot-ui-locale',navigator.language.startsWith('zh')?'zh-CN':'en');return value==='zh-CN'?'zh-CN':'en';};
 document.documentElement.lang=locale();document.documentElement.dataset.platform='browser';
-document.documentElement.dataset.theme=parameters.get('theme')||localStorage.getItem('pot-go-preview-theme')||'system';
+document.documentElement.dataset.theme=parameters.get('theme')||storedPreference('pot-ui-theme','system');
 const root=document.getElementById('connections');
 root.style.cssText='width:100%;max-width:820px;height:100%;overflow-y:auto;margin:0 auto;padding:32px 24px;box-sizing:border-box';
 const heading=document.createElement('h1');heading.textContent=translate(locale(),'agentLinks.title');root.append(heading);

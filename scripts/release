@@ -11,7 +11,7 @@ import subprocess
 from release_contract import generate_cask, version_number, write_checksum
 
 REPO = Path(__file__).resolve().parents[1]
-APP = REPO / ".local/go/Pot.app"
+APP = REPO / ".local/pot/Pot.app"
 
 
 def package(app, output, version):
@@ -47,7 +47,7 @@ def main():
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         parser.error("release builds require Apple Silicon macOS")
     env = dict(os.environ, POT_APP_RELEASE="1", POT_APP_VERSION=version)
-    subprocess.run(["python3", str(REPO / "scripts/build-go-app")], check=True, env=env)
+    subprocess.run(["python3", str(REPO / "scripts/build-pot-app")], check=True, env=env)
     package(APP, args.output.resolve(), version)
     if args.app_only:
         return

@@ -17,8 +17,9 @@ mise run open
 ```
 
 `prepare` supplies pinned Node, tool plugins, Skills and license assets.
-`build`/`bundle` create `.local/go/PotGoPreview.app`, an independent development
-bundle with ID `dev.pot.go-preview`. Release packaging
+`build`/`bundle` create `.local/pot/PotPreview.app`, an independent development
+bundle retaining the legacy ID `dev.pot.go-preview` for existing OS/WebView
+preferences. Release packaging
 uses the production identity. Do not replace a running product's files implicitly.
 
 The macOS builder downloads the pinned Wails module before applying its
@@ -29,7 +30,7 @@ the original cache and repository module files remain unchanged.
 
 | Command | Output |
 |---|---|
-| `mise run build:go` | CLI under `.local/go/bin` |
+| `mise run build:go` | CLI under `.local/pot/bin` |
 | `mise run build:linux` | CGO-free Linux amd64/arm64 CLI and tool packages |
 | `mise run build:cli` | Target CLI archive with Node, tools and Skills |
 | `mise run build` | Complete Wails macOS bundle |
@@ -37,7 +38,7 @@ the original cache and repository module files remain unchanged.
 | `mise run build:plugins` | Tool manifests and declared sources |
 | `mise run release -- VERSION` | App/CLI archives, checksums, cask and configured signed update feed; publishing is separate |
 
-`scripts/build-go-app`, `scripts/build-go-cli` and `scripts/go_packaging.py` own
+`scripts/build-pot-app`, `scripts/build-pot-cli` and `scripts/pot_packaging.py` own
 layout and checksums. Standalone and embedded Runtime locate trusted tool assets
 independently of workspace preparation.
 
@@ -50,7 +51,7 @@ the packaging linker flags reports `development`.
 For cross-platform tool packages:
 
 ```sh
-mise exec -- python scripts/build-go-plugins --platform linux-amd64 \
+mise exec -- python scripts/build-pot-plugins --platform linux-amd64 \
   --output /absolute/plugin-packages
 ```
 
@@ -95,7 +96,7 @@ those checks.
 `check:go` verifies formatting, vet and architectural imports. `test:go` runs all
 Go tests without race instrumentation. `test` also runs `test:race` after that
 normal suite. Both paths use a configurable 20-minute per-package timeout
-(`POT_GO_TEST_TIMEOUT`, or `scripts/test_go.py --timeout`); CI bounds each product
+(`POT_TEST_TIMEOUT`, or `scripts/test_go.py --timeout`); CI bounds each product
 job to 60 minutes. `test:race:all` is the explicit complete race suite for changes
 to concurrency, persistence or lifecycle architecture. Run it when changing
 shared state or the scope of the focused plan.
@@ -174,8 +175,8 @@ and a real isolated Agent Link peer, start
 `POT_CODEX_PROFILE_FIXTURE_URL_FILE=/tmp/pot-profile-url mise exec -- go test
 ./integrations/codex/agent -run '^TestCodexProfileBrowserFixture$' -count=1 -v
 -timeout=20m`. Open the origin written to that file with the cached Playwright CLI,
-then run `scripts/tests/go-ui-codex-profile-browser.js` or
-`scripts/tests/go-ui-linked-assistant-delete-browser.js` using `run-code --filename`.
+then run `scripts/tests/pot-ui-codex-profile-browser.js` or
+`scripts/tests/pot-ui-linked-assistant-delete-browser.js` using `run-code --filename`.
 The latter retires the disposable remote assistant; restart the fixture before
 repeating it. The fixture login grants only its temporary browser session; product
 routes still pass through the real browser allowlist. Stop with `POST /fixture/stop`.
@@ -197,7 +198,7 @@ For Markdown resource previews, start `POT_MARKDOWN_RESOURCE_FIXTURE=1
 POT_RESOURCE_FIXTURE_URL_FILE=/tmp/pot-markdown-url mise exec -- go test
 ./internal/transport -run '^TestResourceBrowserFixture$' -count=1 -v -timeout=30m`.
 Open the written origin at `/scripts/tests/fixtures/markdown-resources.html` and
-run `scripts/tests/go-ui-markdown-resources-browser.js` with Playwright's
+run `scripts/tests/pot-ui-markdown-resources-browser.js` with Playwright's
 `run-code --filename`. This uses synthetic files, production registration and
 presentation tools, and the authenticated resource APIs. It checks the reader,
 source switch, copying, original download, safety boundaries and load failures.
@@ -237,7 +238,7 @@ Run at desktop and phone widths, including `locale=zh-CN&theme=dark`. Capture
 reading position leaves a synthetic conversation available for manual wheel,
 touchpad, keyboard and scrollbar checks.
 
-For composer resizing, run `scripts/tests/go-ui-chat-composer-browser.js` with
+For composer resizing, run `scripts/tests/pot-ui-chat-composer-browser.js` with
 Playwright CLI `run-code --filename` against that fixture, on desktop and in an
 iPhone WebKit context. Trusted textarea edits cover empty, multiline, height-cap
 overflow and clearing cycles. Per-frame assertions check Latest following,
@@ -247,7 +248,7 @@ multiline drafts and their reading positions on page and assistant returns.
 
 For long mobile touch regressions, open the scrolling fixture with Playwright
 CLI in an iPhone device context and run
-`scripts/tests/go-ui-chat-touch-browser.js` via `run-code --filename`.
+`scripts/tests/pot-ui-chat-touch-browser.js` via `run-code --filename`.
 Chromium uses trusted touch gestures, including long swipes and reversals beyond
 the 640-message data window and back through evicted history;
 the initial reversals run without a quiet interval between gestures.
@@ -256,7 +257,7 @@ position input. The checks assert progress, viewport coverage and a single
 TanStack scroll writer without writes during finger contact or the moving
 momentum tail (ending at `scrollend` or 150 ms of quiet). Neither mode
 qualifies physical iPhone Safari momentum or installed home-screen behavior.
-`scripts/tests/go-ui-scroll-input.mjs`, included in `mise run test:ui`, separately
+`scripts/tests/pot-ui-scroll-input.mjs`, included in `mise run test:ui`, separately
 exercises contact before movement, rapid gesture handoff, cancellation, held
 measurement corrections, explicit Latest priority and the quiet-time fallback
 with a deterministic clock against the actual vendored virtualizer.
@@ -276,7 +277,7 @@ locale of mounted titles. Add `verify=1` to the correspondence fixture above to
 check Chat names, directory renames and draft preservation automatically.
 
 For reproducible communication screenshots across two actual source versions,
-`scripts/tests/go-ui-communication-review.py --before COMMIT --after COMMIT`
+`scripts/tests/pot-ui-communication-review.py --before COMMIT --after COMMIT`
 archives each version's `web/` into ignored `output/pr-images/` and serves both
 on loopback port 17723. It copies the **same** review fixture into each tree;
 the fixture mounts production Chat without extra styling. Open
@@ -299,7 +300,7 @@ PLAYWRIGHT_BROWSERS_PATH="$PWD/output/pr-images/toolchain/browsers" \
   node output/pr-images/toolchain/node_modules/playwright/cli.js install chromium --only-shell
 PLAYWRIGHT_BROWSERS_PATH="$PWD/output/pr-images/toolchain/browsers" \
   POT_PLAYWRIGHT_MODULE="$PWD/output/pr-images/toolchain/node_modules/playwright/index.mjs" \
-  node scripts/tests/go-ui-communication-review-capture.mjs
+  node scripts/tests/pot-ui-communication-review-capture.mjs
 ```
 
 Run these Node commands through `mise exec --` when the pinned toolchain is not
@@ -316,7 +317,7 @@ computer-use API's inline observations and uses no tool browser session/profile.
 
 For ordinary chat bubble review, use the same two-source server with
 `--fixture chat-bubbles --before COMMIT --after COMMIT --port 17729`, then run
-`scripts/tests/go-ui-chat-bubbles-capture.mjs` with the Playwright module configured
+`scripts/tests/pot-ui-chat-bubbles-capture.mjs` with the Playwright module configured
 as above. The server includes each version's UI cache migration modules, which
 are imported by Chat. The identical in-memory fixture uses production Chat with
 long Markdown/code, synthetic attachments/results, local send rejection and
@@ -340,7 +341,7 @@ Open the written origin in the browser, or its
 `/scripts/tests/fixtures/display-resources.html` shared-component showcase. The
 fixture uses a disposable Control, authenticated browser proxy, synthetic media
 and a deterministic local provider that invokes the real resource tools.
-`scripts/tests/go-ui-display-resources-browser.js` can be run with the cached
+`scripts/tests/pot-ui-display-resources-browser.js` can be run with the cached
 Playwright CLI's `run-code --filename` option against that origin. Stop the
 fixture with `POST /fixture/stop`. No product data or paid model calls are used.
 
@@ -352,7 +353,7 @@ results, bounded rendering, safe content, approvals and live locale changes.
 Repeat at 390 px with `locale=zh-CN&theme=dark`. `review=1` leaves deterministic
 receipts for screenshots; `scenario=terminal` opens the command and patch, while
 `scenario=details` opens Task, schedule and registration results.
-`scripts/tests/go-ui-tool-content-capture.mjs` runs the four locale/theme/width
+`scripts/tests/pot-ui-tool-content-capture.mjs` runs the four locale/theme/width
 combinations, existing communication checks and exports component screenshots.
 Its positional arguments are the repository-server origin, an optional URL prefix
 for an archived baseline containing `web/` plus the same fixture, an output
@@ -579,7 +580,7 @@ directory for the observation; request headers and credentials are never recorde
 
 The Add assistant browser fixture is included in `test:ui-http-integration` and can
 also run independently with `mise exec -- python
-scripts/tests/go-ui-assistant-start-browser.py`. It uses synthetic node directories
+scripts/tests/pot-ui-assistant-start-browser.py`. It uses synthetic node directories
 and no model credentials. Desktop/mobile, English/Chinese and light/dark cases
 cover explicit API creation, conversation draft restoration, source-specific
 connection instructions, remote default/explicit selection, empty-directory
@@ -587,7 +588,7 @@ refresh and directory-load failure recovery. Screenshots stay under ignored
 `output/playwright/`.
 
 The composer selector browser fixture is also part of `test:ui-http-integration`:
-`mise exec -- python scripts/tests/go-ui-composer-selectors-browser.py`.
+`mise exec -- python scripts/tests/pot-ui-composer-selectors-browser.py`.
 It exercises the shared Chat DOM with synthetic skill/assistant directories,
 saved avatars and receipts at desktop/phone widths in both languages and themes.
 It covers query boundaries, compact rows, keyboard/IME selection, unavailable
