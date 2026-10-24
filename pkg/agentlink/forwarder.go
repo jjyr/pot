@@ -13,6 +13,12 @@ import (
 
 const connectionQueueCapacity = 64
 
+const (
+	forwardQueued uint32 = iota
+	forwardStarted
+	forwardCanceled
+)
+
 type connectionTransport interface {
 	Call(context.Context, peer.Request) (json.RawMessage, error)
 	Close()
@@ -29,7 +35,7 @@ type forwardRequest struct {
 	control  bool
 	accepted chan error
 	result   chan forwardResult
-	started  atomic.Bool
+	state    atomic.Uint32
 	stop     func() bool
 	session  connectionTransport
 }
@@ -88,11 +94,12 @@ func (f *connectionForwarder) submit(r *forwardRequest) error {
 		r.stop()
 		return ErrUnavailable
 	}
+	// Ownership has transferred to the actor. It acknowledges admission without
+	// waiting for network I/O; cancellation must not overtake that acknowledgement
+	// and hide a transport result from a request that has already started.
 	select {
 	case err := <-r.accepted:
 		return err
-	case <-r.ctx.Done():
-		return r.ctx.Err()
 	case <-f.done:
 		select {
 		case err := <-r.accepted:
@@ -111,7 +118,7 @@ func (f *connectionForwarder) call(ctx context.Context, request peer.Request, co
 	case result := <-r.result:
 		return result, result.err
 	case <-ctx.Done():
-		if !r.started.Load() {
+		if r.state.CompareAndSwap(forwardQueued, forwardCanceled) {
 			return forwardResult{}, ctx.Err()
 		}
 		// A sent request may have an uncertain outcome. Preserve the transport's
@@ -228,6 +235,10 @@ func (f *connectionForwarder) run() {
 			finish(r, forwardResult{err: ErrUnavailable})
 			return
 		}
+		if !r.state.CompareAndSwap(forwardQueued, forwardStarted) {
+			finish(r, forwardResult{err: r.ctx.Err()})
+			return
+		}
 		if r.request.Method == "" {
 			finish(r, forwardResult{session: session})
 			return
@@ -237,7 +248,6 @@ func (f *connectionForwarder) run() {
 			kind = 1
 		}
 		active[kind]++
-		r.started.Store(true)
 		r.session = session
 		f.wg.Add(1)
 		go func() {
