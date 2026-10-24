@@ -2,12 +2,17 @@
 # Run with: brew ruby scripts/tests/homebrew-formula.rb Formula/pot-cli.rb dist/pot-cli.rb
 require "formula"
 require "formulary"
+# Match the Pathname behavior used by Homebrew's build subprocess.
+Pathname.activate_extensions!
 require "tmpdir"
 require "digest"
 require "English"
 
 ARGV.each do |path|
-  formula = Formulary.factory(Pathname.new(File.expand_path(path)))
+  source = Pathname.new(File.expand_path(path))
+  # Validate checkout/generated files without registering a tap. Homebrew only
+  # permits factory(path) for files already inside its managed tap directories.
+  formula = Formulary.from_contents("pot-cli", source, source.read)
   raise "Unexpected formula name" unless formula.name == "pot-cli"
   raise "Missing fixed version" unless formula.version.to_s.match?(/\A\d+\.\d+\.\d+\z/)
   raise "Missing archive digest" unless formula.stable.checksum.to_s.match?(/\A[a-f0-9]{64}\z/)

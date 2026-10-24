@@ -97,7 +97,7 @@ func signed(t *testing.T, r Release) ([]byte, string) {
 	return data, base64.StdEncoding.EncodeToString(pub)
 }
 func TestSignedReleaseTrustAndFormat(t *testing.T) {
-	r := Release{Version: "0.2.0", StorageFormat: StorageFormat, Artifacts: []Artifact{{"cli", "linux-arm64", releaseOrigin + "v0.2.0/pot.tar.gz", strings.Repeat("ab", 32), 123}}}
+	r := Release{Version: "0.2.0", StorageFormat: storageFormat(), Artifacts: []Artifact{{"cli", "linux-arm64", releaseOrigin + "v0.2.0/pot.tar.gz", strings.Repeat("ab", 32), 123}}}
 	data, key := signed(t, r)
 	if _, err := Verify(data, key); err != nil {
 		t.Fatal(err)
@@ -176,7 +176,7 @@ func TestArchiveConfinementAndRelocatableLinks(t *testing.T) {
 }
 func TestDownloadRejectsChecksumAndPreservesInstalledFiles(t *testing.T) {
 	directory := t.TempDir()
-	metadata, _ := json.Marshal(Installation{Version: "0.2.0", Kind: "cli", Platform: "linux-arm64", StorageFormat: StorageFormat})
+	metadata, _ := json.Marshal(Installation{Version: "0.2.0", Kind: "cli", Platform: "linux-arm64", StorageFormat: storageFormat()})
 	data := archiveBytes(t, []*tar.Header{{Name: "pot/Resources/update.json", Mode: 0644, Size: int64(len(metadata)), Typeflag: tar.TypeReg}}, []string{string(metadata)})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(data) }))
 	defer server.Close()

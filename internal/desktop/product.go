@@ -172,16 +172,27 @@ func runProduct(parent context.Context, root string) (result error) {
 	service.spaces = manager
 	files := service.resourceAssets(application.AssetFileServerFS(assets.FS()))
 
-	app := application.New(application.Options{Name: "Pot", Description: "Pot " + buildinfo.Version, Icon: appIcon, Services: []application.Service{application.NewService(service), application.NewService(notifier)}, Assets: application.AssetOptions{Handler: files}, Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false}, OnShutdown: func() {
-		stop()
-		service.mu.Lock()
-		for _, cancel := range service.subscriptions {
-			cancel()
-		}
-		service.mu.Unlock()
-		_ = manager.Close()
-		_ = runtime.Close()
-	}})
+	var cleanupOnce sync.Once
+	var cleanupResult error
+	cleanup := func() error {
+		cleanupOnce.Do(func() {
+			stop()
+			service.mu.Lock()
+			for _, cancel := range service.subscriptions {
+				cancel()
+			}
+			service.mu.Unlock()
+			cleanupResult = errors.Join(manager.Close(), runtime.Close())
+			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			cleanupResult = errors.Join(cleanupResult, socket.Close(closeCtx))
+		})
+		return cleanupResult
+	}
+	app := application.New(application.Options{Name: "Pot", Description: "Pot " + buildinfo.Version, Icon: appIcon, Services: []application.Service{application.NewService(service), application.NewService(notifier)}, Assets: application.AssetOptions{Handler: files}, Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false}, OnShutdown: func() { _ = cleanup() }})
+	if host := selfupdate.FromContext(ctx); host != nil {
+		host.AppLifecycle(cleanup, app.Quit)
+	}
 	service.mu.Lock()
 	service.app = app
 	service.mu.Unlock()
@@ -231,7 +242,9 @@ func runProduct(parent context.Context, root string) (result error) {
 		}()
 
 	})
-	go func() { <-ctx.Done(); app.Quit() }()
+	if selfupdate.FromContext(ctx) == nil {
+		go func() { <-ctx.Done(); app.Quit() }()
+	}
 	if smoke {
 		return service.runSmoke(app)
 	}

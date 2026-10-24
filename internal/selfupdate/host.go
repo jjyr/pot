@@ -61,6 +61,9 @@ type Host struct {
 	registration                   string
 	lock                           *os.File
 	resume                         chan struct{}
+	appPrepare                     func() error
+	appQuit                        func()
+	appPrepareOnce                 sync.Once
 }
 type hostKey struct{}
 
@@ -196,9 +199,34 @@ func (h *Host) Maintaining() bool {
 	}
 	return state.Phase == "installing" || state.Phase == "restarting" || state.Phase == "blocked"
 }
+
+// AppLifecycle separates closing business resources from Cocoa termination.
+// Unlike a CLI callback, NSApp.run does not return when NSApp terminates.
+func (h *Host) AppLifecycle(prepare func() error, quit func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.appPrepare, h.appQuit = prepare, quit
+}
+
 func (h *Host) handle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch {
+	case r.Method == "GET" && r.URL.Path == "/restart":
+		h.mu.Lock()
+		native := h.appPrepare != nil
+		h.mu.Unlock()
+		command := restartCommand{App: native}
+		if native {
+			var err error
+			command.Directory, err = os.Getwd()
+			if err != nil {
+				http.Error(w, err.Error(), 409)
+				return
+			}
+			command.PID, command.Executable = os.Getpid(), h.Executable
+			command.Args, command.Environment = os.Args, os.Environ()
+		}
+		_ = json.NewEncoder(w).Encode(command)
 	case r.Method == "GET" && r.URL.Path == "/status":
 		p, err := h.status()
 		if err != nil {
@@ -208,6 +236,20 @@ func (h *Host) handle(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(p)
 	case r.Method == "POST" && r.URL.Path == "/prepare":
 		h.mu.Lock()
+		if prepare := h.appPrepare; prepare != nil {
+			h.stopped.Store(true)
+			h.mu.Unlock()
+			h.appPrepareOnce.Do(func() {
+				h.result = prepare()
+				close(h.done)
+			})
+			if h.result != nil {
+				http.Error(w, h.result.Error(), 409)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]bool{"ready": true})
+			return
+		}
 		if h.cancel == nil {
 			h.mu.Unlock()
 			http.Error(w, "host is not ready", 409)
@@ -226,7 +268,39 @@ func (h *Host) handle(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		}
+	case r.Method == "POST" && r.URL.Path == "/exit":
+		h.mu.Lock()
+		quit := h.appQuit
+		h.mu.Unlock()
+		if quit == nil || !h.stopped.Load() {
+			http.Error(w, "native App is not prepared", 409)
+			return
+		}
+		select {
+		case <-h.done:
+			if h.result != nil {
+				http.Error(w, "native App cleanup failed", 409)
+				return
+			}
+		default:
+			http.Error(w, "native App cleanup is incomplete", 409)
+			return
+		}
+		if err := json.NewEncoder(w).Encode(map[string]bool{"accepted": true}); err != nil {
+			return
+		}
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			return
+		}
+		go quit()
 	case r.Method == "POST" && r.URL.Path == "/resume":
+		h.mu.Lock()
+		native := h.appPrepare != nil
+		h.mu.Unlock()
+		if native {
+			http.Error(w, "native Apps are relaunched by the installer", 409)
+			return
+		}
 		if !h.stopped.Load() {
 			http.Error(w, "host is not stopped", 409)
 			return
@@ -262,7 +336,14 @@ func (h *Host) Run(ctx context.Context, run func(context.Context) error) error {
 	h.mu.Lock()
 	h.cancel = cancel
 	h.mu.Unlock()
-	h.result = run(runctx)
+	result := run(runctx)
+	h.mu.Lock()
+	native := h.appPrepare != nil
+	h.mu.Unlock()
+	if native {
+		return result
+	}
+	h.result = result
 	if !h.stopped.Load() {
 		return h.result
 	}

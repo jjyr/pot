@@ -71,6 +71,11 @@ func Worker(path string) (result error) {
 		save("failed", err)
 		return err
 	}
+	hosts, err := restartHosts(job.Install, peers)
+	if err != nil {
+		save("failed", err)
+		return err
+	}
 	defer func() {
 		if result != nil {
 			if state.Phase == "blocked" {
@@ -79,8 +84,11 @@ func Worker(path string) (result error) {
 			}
 			save("failed", result)
 		}
-		for _, p := range peers {
-			_ = localCall(context.Background(), p.Socket, "POST", "/resume", nil)
+		for _, host := range hosts {
+			if err := host.resume(); err != nil {
+				save("blocked", err)
+				result = errors.Join(result, err)
+			}
 		}
 	}()
 	for _, p := range peers {
@@ -110,8 +118,11 @@ func Worker(path string) (result error) {
 	}
 	// Ask every host to close its servers, stores and execution scopes, and wait
 	// for its full shutdown result. A timeout or uncertain cleanup aborts install.
-	for _, p := range peers {
-		if err = localCall(context.Background(), p.Socket, "POST", "/prepare", nil); err != nil {
+	for _, host := range hosts {
+		if err = host.prepare(job.Directory); err != nil {
+			if host.command.App {
+				state.Phase = "blocked"
+			}
 			return fmt.Errorf("cannot stop local host: %w", err)
 		}
 	}
@@ -148,13 +159,13 @@ func Worker(path string) (result error) {
 	}
 	save("restarting", nil)
 	exclusive.Close()
-	for _, p := range peers {
-		if err = localCall(context.Background(), p.Socket, "POST", "/resume", nil); err != nil {
+	for _, host := range hosts {
+		if err = host.resume(); err != nil {
 			break
 		}
 	}
 	if err == nil {
-		err = healthy(peers, job.Version)
+		err = healthy(hosts, job.Directory, job.Version)
 	}
 	if err == nil {
 		save("current", nil)
@@ -162,8 +173,8 @@ func Worker(path string) (result error) {
 	}
 	// No business admission is allowed while restarting. Stop new hosts before
 	// restoring the previous complete package; retain all original task receipts.
-	for _, p := range peers {
-		if stopErr := localCall(context.Background(), p.Socket, "POST", "/prepare", nil); stopErr != nil {
+	for _, host := range hosts {
+		if stopErr := host.prepare(job.Directory); stopErr != nil {
 			state.Phase = "blocked"
 			return errors.Join(err, errors.New("rollback blocked: new host cleanup unconfirmed"))
 		}
@@ -209,16 +220,29 @@ func checkInstallation(install string, expected Installation) error {
 	return nil
 }
 
-func healthy(peers []Participant, version string) error {
+func healthy(hosts []*restartHost, directory, version string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), healthTimeout)
 	defer cancel()
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		ok := true
-		for _, old := range peers {
+		for _, host := range hosts {
+			if host.command.App {
+				if host.childDone != nil {
+					select {
+					case <-host.childDone:
+						return errors.New("updated native App exited before readiness")
+					default:
+					}
+				}
+				if err := host.discover(directory); err != nil {
+					ok = false
+					break
+				}
+			}
 			var current Participant
-			if err := localCall(ctx, old.Socket, "GET", "/status", &current); err != nil || !current.Ready || current.Version != version || current.Root != old.Root {
+			if err := localCall(ctx, host.Socket, "GET", "/status", &current); err != nil || !current.Ready || current.Version != version || current.Root != host.Root {
 				ok = false
 				break
 			}

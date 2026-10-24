@@ -33,12 +33,14 @@ UI -> selected Control update port -> signed package download/staging
                          exclusive installation lock + data snapshots
                          replace complete installation
                                        |
-                         hosts exec their original command in place
+                         CLI hosts exec in place; worker relaunches native Apps
                          verify versions/readiness -> release maintenance
 ```
 
-Hosts retain their supervisor's PID, original arguments and environment when
-restarting. For macOS Apps the installer is `Contents/MacOS/pot-app _update-worker JOB` in
+CLI hosts retain their supervisor's PID when restarting. Native macOS Apps exit
+and are relaunched by the installer with a new PID. Both preserve their original
+arguments, environment and working directory. For macOS Apps the installer is
+`Contents/MacOS/pot-app _update-worker JOB` in
 an independent process. This dispatch runs before flag parsing and Wails/Cocoa
 application initialization; the App does not bundle the complete `pot` CLI. The
 running worker keeps executing while the old bundle is moved to the backup path.
@@ -56,6 +58,19 @@ The resume endpoint flushes its acknowledgement before waking the host to exec.
 A failed response write or flush leaves that host stopped. This prevents a
 successful restart from cutting off the acknowledgement and appearing to the
 installer as an uncertain EOF that requires rollback.
+
+Native Apps use separate preparation and exit requests. Preparation stops
+business admission and closes executions, stores and business sockets while the
+update socket and Cocoa process remain alive. Only successful preparation allows
+the exit endpoint to flush its acknowledgement and ask Cocoa to quit. The worker
+arms an OS process-exit watch before that request and waits for the actual exit;
+EOF alone never proves successful cleanup. It then acquires the installation
+lock, replaces the package and starts the exact original App executable. Restart
+commands are exchanged only over the private live socket and are never written
+to registration files or jobs. Readiness rediscovery binds the new PID to the
+same data root rather than reusing the old PID's socket. Failed launch/readiness
+restores and relaunches the previous package only after new-process exit or
+cleanup is confirmed. Uncertain native cleanup leaves maintenance blocked.
 
 The installed directory must be replaceable by its service account. Its private
 sibling `<installation>.updates` holds the state, staged package, worker log,
