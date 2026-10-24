@@ -13,7 +13,11 @@ on:
         required: true
         type: string
       source:
-        description: Reviewed exact candidate commit (must match v0.0.1 and merged main tree)
+        description: Reviewed exact candidate commit (matches v0.0.1 and fixed merge tree)
+        required: true
+        type: string
+      merged-source:
+        description: Exact reviewed PR 280 merge SHA (candidate parent and identical tree required)
         required: true
         type: string
       tag-object:
@@ -49,6 +53,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       POT_BUILD_REVISION: ${{ inputs.source }}
       CANDIDATE_RUN: ${{ inputs.run-id }}
+      REVIEWED_MERGE: ${{ inputs.merged-source }}
       RELEASE_BASELINE: ${{ inputs.baseline }}
       PREVIOUS_TAG_OBJECT: ${{ inputs.tag-object }}
     steps:
@@ -80,6 +85,7 @@ jobs:
       POT_UPDATE_PUBLIC_KEY: ${{ vars.POT_UPDATE_PUBLIC_KEY }}
       GH_TOKEN: ${{ github.token }}
       CANDIDATE_RUN: ${{ inputs.run-id }}
+      REVIEWED_MERGE: ${{ inputs.merged-source }}
       RELEASE_BASELINE: ${{ inputs.baseline }}
       PREVIOUS_TAG_OBJECT: ${{ inputs.tag-object }}
       PREVIOUS_IMAGE_DIGEST: ${{ inputs.image-digest }}

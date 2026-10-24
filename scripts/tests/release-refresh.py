@@ -178,29 +178,60 @@ class RefreshFences(unittest.TestCase):
         writes = [(endpoint, body) for endpoint, method, body in self.calls if method == "PATCH"]
         self.assertEqual(writes[0], ("releases/assets/3", {"name": archive["name"]}))
 
-    def test_candidate_must_be_successful_exact_source_and_merged_tree(self):
-        run = {
-            "path": ".github/workflows/ci.yml",
-            "head_sha": SHA,
-            "event": "workflow_dispatch",
-            "conclusion": "success",
-        }
+    def test_candidate_binds_fixed_pr_merge_without_following_later_main(self):
+        reviewed = "b" * 40
         responses = {
             "commits/refs/tags/v0.0.1": {"sha": SHA},
             "commits/" + SHA: {"commit": {"tree": {"sha": "tree"}}},
-            "commits/main": {"commit": {"tree": {"sha": "tree"}}},
-            "actions/runs/123": run,
+            "commits/" + reviewed: {
+                "commit": {"tree": {"sha": "tree"}},
+                "parents": [{"sha": "c" * 40}, {"sha": SHA}],
+            },
+            "pulls/280": {
+                "merged": True,
+                "base": {"ref": "main"},
+                "head": {"sha": SHA},
+                "merge_commit_sha": reviewed,
+            },
+            "actions/runs/123": {
+                "path": ".github/workflows/ci.yml",
+                "head_sha": SHA,
+                "event": "workflow_dispatch",
+                "conclusion": "success",
+            },
         }
-        with mock.patch.dict(os.environ, POT_BUILD_REVISION=SHA, CANDIDATE_RUN="123"):
+        # No commits/main response: publication must survive later independent
+        # main commits while remaining bound to the exact reviewed merge tree.
+        with mock.patch.dict(
+            os.environ, POT_BUILD_REVISION=SHA, REVIEWED_MERGE=reviewed, CANDIDATE_RUN="123"
+        ):
             with mock.patch.dict(self.namespace, api=lambda endpoint: responses[endpoint]):
                 self.assertEqual(refresh["check_source"](), SHA)
-                run["conclusion"] = "failure"
-                with self.assertRaises(ValueError):
-                    refresh["check_source"]()
-                run["conclusion"] = "success"
-                responses["commits/main"]["commit"]["tree"]["sha"] = "other"
-                with self.assertRaises(ValueError):
-                    refresh["check_source"]()
+            for label, endpoint, path, value in [
+                ("not merged", "pulls/280", ("merged",), False),
+                ("wrong base", "pulls/280", ("base", "ref"), "other"),
+                ("wrong head", "pulls/280", ("head", "sha"), "d" * 40),
+                ("wrong merge", "pulls/280", ("merge_commit_sha",), "d" * 40),
+                (
+                    "candidate not parent",
+                    "commits/" + reviewed,
+                    ("parents",),
+                    [{"sha": "c" * 40}, {"sha": "d" * 40}],
+                ),
+                ("tree changed", "commits/" + reviewed, ("commit", "tree", "sha"), "other"),
+                ("failed run", "actions/runs/123", ("conclusion",), "failure"),
+                ("different run source", "actions/runs/123", ("head_sha",), "d" * 40),
+                ("tag moved", "commits/refs/tags/v0.0.1", ("sha",), "d" * 40),
+            ]:
+                with self.subTest(label):
+                    invalid = copy.deepcopy(responses)
+                    target = invalid[endpoint]
+                    for key in path[:-1]:
+                        target = target[key]
+                    target[path[-1]] = value
+                    with mock.patch.dict(self.namespace, api=lambda endpoint: invalid[endpoint]):
+                        with self.assertRaises(ValueError):
+                            refresh["check_source"]()
 
 
 if __name__ == "__main__":

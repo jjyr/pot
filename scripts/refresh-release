@@ -64,10 +64,23 @@ def check_source(require_tag=True):
         raise ValueError("Refresh needs an exact source SHA")
     if require_tag and api(f"commits/refs/tags/{TAG}")["sha"] != source:
         raise ValueError("Tag no longer matches candidate source")
+    reviewed = os.environ["REVIEWED_MERGE"]
+    if not re.fullmatch(r"[a-f0-9]{40}", reviewed):
+        raise ValueError("Refresh needs the exact reviewed PR 280 merge SHA")
+    pr = api("pulls/280")
+    if (
+        not pr["merged"]
+        or pr["base"]["ref"] != "main"
+        or pr["head"]["sha"] != source
+        or pr["merge_commit_sha"] != reviewed
+    ):
+        raise ValueError("Reviewed source does not identify the merged PR 280")
     candidate = api(f"commits/{source}")
-    main = api("commits/main")
-    if candidate["commit"]["tree"]["sha"] != main["commit"]["tree"]["sha"]:
-        raise ValueError("Candidate tree does not match reviewed merged main")
+    merged = api(f"commits/{reviewed}")
+    if len(merged["parents"]) != 2 or source not in {parent["sha"] for parent in merged["parents"]}:
+        raise ValueError("Reviewed merge does not contain the exact candidate parent")
+    if candidate["commit"]["tree"]["sha"] != merged["commit"]["tree"]["sha"]:
+        raise ValueError("Candidate tree does not match the fixed reviewed merge")
     run_id = os.environ["CANDIDATE_RUN"]
     if not run_id.isdecimal():
         raise ValueError("Invalid candidate run")

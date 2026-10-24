@@ -243,8 +243,10 @@ The `Refresh reviewed v0.0.1 naming` workflow is a separate, manual operation fo
 this same-version naming correction. Ordinary publishers keep all immutable-byte
 checks. It accepts a successful nonpublishing CI run built with
 `validation-version=0.0.1`, its exact reviewed source, the original public release
-snapshot and the exact previous image index digest. The source must match both
-the tag and the merged main tree. First run it from `main` with
+snapshot, the exact previous image index digest and `merged-source`, the reviewed
+PR 280 merge SHA. The source must match the tag, the merged PR head and a parent of
+that normal merge, with an identical tree. This fixed merge remains the boundary
+if main later advances; later UI changes cannot enter the selected artifacts. First run it from `main` with
 `lease-tag-only=true` and the exact original annotated tag object. This job has no
 release environment or signing secrets: it validates the successful candidate,
 merged tree and original asset snapshot, then moves `v0.0.1` with an exact
