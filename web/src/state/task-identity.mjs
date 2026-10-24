@@ -21,42 +21,27 @@ export function taskColorIndex(value) {
   for (const byte of new TextEncoder().encode(addressKey(address))) hash = Math.imul(hash ^ byte, 16777619) >>> 0;
   return hash % 6;
 }
-// Keep one registry for the UI session. Discovering a collision only lengthens labels.
+// Display labels deliberately allow equal prefixes; full addresses own identity/routing.
+export function taskShortID(value) {
+  const address=value?.kind==='task'?value:taskAddress(value);
+  return address?.kind==='task'&&addressKey(address)?'#'+address.agent_id.slice(0,4):'';
+}
+
+// Keep confirmed catalogue IDs, scope and owner independently of the short label.
 export function createTaskIdentityRegistry() {
-  const entries = new Map(), records = new Map();
+  const records = new Map();
   const register = values => {
-    let added = false;
     for (const value of values) {
-      const address = value?.kind === 'task' ? value : taskAddress(value), key = addressKey(address);
-      if (key && address.kind === 'task' && !entries.has(key)) { entries.set(key, {id: address.agent_id, node: address.node_id, length: 4, sourceLength: 0}); added = true; }
-      if (key && value?.id && taskAddress(value)) {
+      const address = taskAddress(value), key = addressKey(address);
+      if (key && value.id) {
         const previous=records.get(key),title=value.title||'',space=value._space_id??previous?._space_id,owner=value.assistant_id??previous?.assistant_id;
         records.delete(key); records.set(key, previous?.id===value.id&&previous.title===title&&previous._space_id===space&&previous.assistant_id===owner?previous:{id: value.id, address: {...address}, title, _space_id:space, assistant_id:owner});
         if (records.size > 512) records.delete(records.keys().next().value);
       }
     }
-    if (!added) return;
-    const all = [...entries.values()];
-    for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) {
-      const a = all[i], b = all[j];
-      // Equal full Task IDs require the node in the shared display label.
-      if (a.id === b.id) {
-        let length = 4;
-        while (a.node.slice(0, length) === b.node.slice(0, length)) length++;
-        a.sourceLength = Math.max(a.sourceLength, length);
-        b.sourceLength = Math.max(b.sourceLength, length);
-        continue;
-      }
-      let length = 4;
-      while (a.id.slice(0, length) === b.id.slice(0, length)) length++;
-      if (length > 4) { a.length = Math.max(a.length, length); b.length = Math.max(b.length, length); }
-    }
   };
   return {register, resolve(address) { return records.get(addressKey(address)); }, short(value) {
-    const address = value?.kind === 'task' ? value : taskAddress(value);
-    register([value]);
-    const entry = entries.get(addressKey(address));
-    return entry ? '#' + entry.id.slice(0, entry.length) + (entry.sourceLength ? '@' + entry.node.slice(0, entry.sourceLength) : '') : '';
+    register([value]);return taskShortID(value);
   }};
 }
 export const taskIdentities = createTaskIdentityRegistry();
