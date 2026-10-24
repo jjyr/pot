@@ -1,6 +1,7 @@
 /* Fixed six-color task marks; semantic statuses and assistant avatars stay independent. */
-.task-identity-mark{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;flex:none;border:1px solid var(--divider);border-radius:7px;background:var(--surface);color:var(--muted);}
+.task-identity-mark{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;flex:none;border:0;border-radius:6px;background:var(--secondary);color:var(--muted);}
 .task-identity-mark svg{width:15px;height:15px;}
+.task-identity-short{flex:none;white-space:nowrap;color:var(--muted);font:11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:-.025em;}
 .task-identity-mark[data-task-color="0"]{--task-bg:#f0e9d9;--task-border:#b4a27c;--task-ink:#756035}
 .task-identity-mark[data-task-color="1"]{--task-bg:#e5ebf1;--task-border:#9aafc1;--task-ink:#46637d}
 .task-identity-mark[data-task-color="2"]{--task-bg:#ece7f1;--task-border:#af9bc0;--task-ink:#6b557f}
