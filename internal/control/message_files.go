@@ -255,7 +255,7 @@ func (s *Service) snapshotMessageFile(ctx context.Context, ref resources.Message
 		if err != nil {
 			return nil, err
 		}
-		data, err := readBoundRoot(ctx, handle, path, limit, config)
+		data, err := readBoundRoot(ctx, handle, path, limit, config, before)
 		if err != nil {
 			return nil, err
 		}
@@ -307,7 +307,7 @@ func (s *Service) snapshotMessageFile(ctx context.Context, ref resources.Message
 	}
 	return &saved, nil
 }
-func readBoundRoot(ctx context.Context, root *os.Root, path string, limit int, config bool) ([]byte, error) {
+func readBoundRoot(ctx context.Context, root *os.Root, path string, limit int, config bool, expected string) ([]byte, error) {
 	if limit < 0 {
 		return nil, errFileTooLarge
 	}
@@ -345,6 +345,9 @@ func readBoundRoot(ctx context.Context, root *os.Root, path string, limit int, c
 	revision, err := taskFileRevision(before)
 	if err != nil {
 		return nil, err
+	}
+	if revision != expected {
+		return nil, errFileChanged
 	}
 	data, err := io.ReadAll(io.LimitReader(file, int64(limit)+1))
 	if err != nil {

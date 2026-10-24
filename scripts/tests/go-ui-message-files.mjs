@@ -3,7 +3,7 @@ import {inlineLinks,fileHref} from '../../web/src/state/markdown-links.mjs';
 const source='See [中文](</project/有 空格/a(b).md:12>) and ![图](artifacts/a(b).png) `![code](/no)` \\[escaped](/no).';
 assert.deepEqual(inlineLinks(source).map(({href,image})=>({href,image})),[{href:'/project/有 空格/a(b).md:12',image:false},{href:'artifacts/a(b).png',image:true}]);
 for(const href of ['relative.md','relative.md:12','/project/a.go:120','pot-file://task/report.md'])assert(fileHref(href),href);
-for(const href of ['http://localhost:3000','https://example.com','javascript:alert(1)','#heading','//example.com/x'])assert(!fileHref(href),href);
+for(const href of ['http:120','https:120','javascript:120','file:120','http://localhost:3000','https://example.com','javascript:alert(1)','#heading','//example.com/x'])assert(!fileHref(href),href);
 assert.equal(inlineLinks('[nested [title]](a\\(b\\).md)')[0].href,'a(b).md');
 assert.equal(inlineLinks('[title](<path with (spaces).md> "optional title")')[0].href,'path with (spaces).md');
 assert.equal(inlineLinks('[title](path.md "optional title")')[0].href,'path.md');

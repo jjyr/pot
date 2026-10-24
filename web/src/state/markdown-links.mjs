@@ -15,4 +15,4 @@ export function inlineLinks(s){
     if(!href){i=start;continue;}out.push({start,end:k+1,href:unescape(href),label:unescape(s.slice(begin,j)),image});i=k;
   }return out;
 }
-export function fileHref(href){if(href.startsWith('pot-file://'))return true;href=href.replace(/:[1-9][0-9]*$/,'');return !!href&&!/^[a-z][a-z0-9+.-]*:/i.test(href)&&!href.startsWith('#')&&!href.startsWith('//');}
+export function fileHref(href){if(href.startsWith('pot-file://'))return true;if(/^(?:https?|javascript|data|file|mailto|ftp|ssh|tel):/i.test(href))return false;href=href.replace(/:[1-9][0-9]*$/,'');return !!href&&!/^[a-z][a-z0-9+.-]*:/i.test(href)&&!href.startsWith('#')&&!href.startsWith('//');}

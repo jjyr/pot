@@ -227,3 +227,30 @@ func TestMessageFileCompletionPinsExecutionRootBeforeModelRuns(t *testing.T) {
 		t.Fatal("execution root was rebound", rows)
 	}
 }
+
+func TestMessageFileReadRejectsReplacementBetweenStatAndOpen(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "source.txt")
+	os.WriteFile(path, []byte("before"), 0600)
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	info, err := root.Stat("source.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision, err := taskFileRevision(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := filepath.Join(directory, "replacement")
+	os.WriteFile(replacement, []byte("after!"), 0600)
+	if err := os.Rename(replacement, path); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := readBoundRoot(context.Background(), root, "source.txt", 1024, false, revision); err != errFileChanged || len(data) != 0 {
+		t.Fatal("opened an uncaptured file revision", string(data), err)
+	}
+}

@@ -65,11 +65,15 @@ func (s *Store) BindMessageSources(ctx context.Context, owner, conversation, mes
 }
 
 var hrefLine = regexp.MustCompile(`:[1-9][0-9]*$`)
+var reservedHrefScheme = regexp.MustCompile(`(?i)^(?:https?|javascript|data|file|mailto|ftp|ssh|tel):`)
 var hrefScheme = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*:`)
 
 func FileHref(href string) bool {
 	if strings.HasPrefix(href, "pot-file://") {
 		return true
+	}
+	if reservedHrefScheme.MatchString(href) {
+		return false
 	}
 	href = hrefLine.ReplaceAllString(href, "")
 	return href != "" && !strings.HasPrefix(href, "#") && !strings.HasPrefix(href, "//") && !hrefScheme.MatchString(href)

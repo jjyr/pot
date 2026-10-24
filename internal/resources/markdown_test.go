@@ -65,3 +65,11 @@ func TestMarkdownContainerFencesAreNeverFileReads(t *testing.T) {
 		}
 	}
 }
+
+func TestNumericURIsDoNotBecomeFileLineReferences(t *testing.T) {
+	for _, href := range []string{"http:120", "https:120", "javascript:120", "file:120", "mailto:120", "ssh:120"} {
+		if FileHref(href) {
+			t.Fatal("URI became file read", href)
+		}
+	}
+}
