@@ -329,11 +329,16 @@ ownership stays in a neutral group and never uses the selected Chat as its owner
 
 Task display marks use the explicit `TaskInfo.address`; a linked catalogue ID can
 be a local hash and is never substituted for the remote address. Missing mappings
-stay neutral. Session-stable short IDs start at four characters and only lengthen
-for collisions; equal Task IDs on different nodes gain a node suffix. The shared
+stay neutral. Short IDs display `#` and the first four characters of the real
+Task ID (or all available characters for a shorter ID). Equal prefixes, including
+the same Task ID on different nodes, keep the same short label. Full addresses
+remain authoritative for identity, color, scope and routing. The shared
 UTF-8 FNV-1a 32-bit hash of `[node_id,"task",agent_id]` selects one of six fixed
 light/dark icon palettes. Colors are decorative, may collide, and never route
 requests or change assistant avatars, body text or semantic status colors.
+Task and schedule groups load the owning assistant's saved PNG avatar from its
+scoped local or Agent Link directory profile. Missing or undecodable images use
+the neutral person icon; profile image changes refresh mounted group headings.
 
 The assistant's `set_task_dispositions({decisions})` accepts 1–8 decisions in one
 atomic batch. Each decision supplies `task_id`, current `run_id`, `archived` and

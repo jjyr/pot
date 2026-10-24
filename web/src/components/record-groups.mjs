@@ -21,7 +21,9 @@ export function ownerChoices(client,locale) {
 }
 export function groupHeading(group,locale,expanded=new Map()) {
   const t=key=>translate(locale,key),head=n('header','record-group-heading'),photo=avatar(34,group.profile?.avatar);
-  if(!photo.children.length)photo.append(icon('person'));
+  const image=photo.querySelector('img');
+  if(image)image.onerror=event=>event.currentTarget.replaceWith(icon('person'));
+  else photo.append(icon('person'));
   const info=n('div','record-group-info'),title=n('h2','',group.profile?(group.profile.origin?group.profile.profile_name||group.profile.name:group.profile.name):t('tasks.ownerUnknown'));
   title.id='record-owner-'+encodeURIComponent(group.key);
   const source=n('div','record-group-source',group.address?`${group.space?.name||group.address.node_id} · ${t(group.profile.offline?'tasks.sourceOffline':'tasks.sourceOnline')}`:t('tasks.ownerMissing'));

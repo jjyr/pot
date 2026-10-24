@@ -1,7 +1,7 @@
 // Patch a read-only projection without replacing its live controls or containers.
 // Event handlers must use event.currentTarget or persistent view state, never
 // references to the temporary projection's nodes. Stateful forms use view models.
-const handlers=['onclick','onchange','oninput','onsubmit','onkeydown','onpointerenter','onpointerleave','onfocus','onblur'];
+const handlers=['onclick','onchange','oninput','onsubmit','onkeydown','onpointerenter','onpointerleave','onfocus','onblur','onerror'];
 const key=node=>node.nodeType===1?(node.dataset.viewKey||node.id||''):'';
 const compatible=(a,b)=>a.nodeType===b.nodeType&&(a.nodeType!==1||(a.tagName===b.tagName&&key(a)===key(b)));
 const disabledState=new WeakMap();
