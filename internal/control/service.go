@@ -460,6 +460,9 @@ func (s *Service) Close() error {
 	s.mu.Unlock()
 	linkErr := s.closeAgentLinks()
 	s.pluginWG.Wait()
+	if s.agentLinks != nil {
+		s.agentLinks.service.Close()
+	}
 	s.fileWG.Wait()
 	var result error = linkErr
 	if s.Terminals != nil {

@@ -320,6 +320,8 @@ func taskCaller(from protocol.AgentRef) bool {
 
 // Disconnect pauses communication without deleting keys, history or work.
 func (s *Service) Disconnect(ctx context.Context, id string) error {
+	s.dialMu.Lock()
+	defer s.dialMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, e := s.Get(ctx, id)

@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"database/sql"
+	"sync"
 	"sync/atomic"
 
 	"encoding/base64"
@@ -127,7 +128,7 @@ func (f *fixture) start(address string) {
 }
 func (f *fixture) stop() { f.cancel(); f.listener.Close(); f.service.closeSessions(); <-f.done }
 func (f *fixture) close() {
-	f.service.closeSessions()
+	f.service.Close()
 	f.mail.db.Close()
 	f.secret.Close()
 	f.db.Close()
@@ -573,5 +574,52 @@ func TestInitialSchemaReopenRetainsSignedConnection(t *testing.T) {
 	}
 	if mailCount(t, b, next.ID) != 1 {
 		t.Fatal("reopened connection could not deliver")
+	}
+}
+
+func TestConcurrentReconnectUsesOneAuthenticatedSession(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	a, b := newFixture(t, "dial-a"), newFixture(t, "dial-b")
+	connection := connect(t, a, b)
+	a.service.closeSessions()
+	before := b.accepted.Load()
+	const workers = 16
+	start := make(chan struct{})
+	type result struct {
+		session *peer.Session
+		err     error
+	}
+	results := make(chan result, workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			session, err := a.service.ensureSession(ctx, connection)
+			results <- result{session, err}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	var first *peer.Session
+	for value := range results {
+		if value.err != nil {
+			t.Fatal(value.err)
+		}
+		if first == nil {
+			first = value.session
+		}
+		if value.session != first {
+			t.Fatal("concurrent callers replaced each other's authenticated session")
+		}
+	}
+	if got := b.accepted.Load() - before; got != 1 {
+		t.Fatalf("opened %d reconnect sessions, want 1", got)
+	}
+	if _, err := first.Call(ctx, peer.Request{ID: "identity-after-reconnect", Method: "identity", Params: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal("shared session was closed", err)
 	}
 }

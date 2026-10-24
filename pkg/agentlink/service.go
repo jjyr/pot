@@ -28,8 +28,10 @@ type Service struct {
 	sessions                 map[string]*peer.Session
 	pendingSessions          map[*peer.Session]bool
 	mu                       sync.Mutex
+	closed                   bool
 	running                  sync.Mutex
 	syncMu                   sync.Mutex
+	dialMu                   sync.Mutex
 	rates                    map[string]rate
 	observations             map[string]ObservationSample
 	observationNotifications map[string]int64

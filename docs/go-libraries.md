@@ -38,6 +38,14 @@ Use `Server` with a caller-created listener and `Dial` with a trusted expected
 identity. Business permissions and durable recovery remain in the service;
 uncertain calls are never automatically replayed. See [Peer protocol](peer-protocol.md).
 
+Agent Link owners stop its `Run` loop and close incoming listeners before calling
+`agentlink.Service.Close`, then release their database and secret-store handles.
+Close fences session attachment and connectivity-state callbacks with the service
+lock, so a late session closure cannot write SQLite after host shutdown. It does
+not cancel backend tasks or replay business operations. Concurrent connection
+requests share one authenticated session instead of replacing each other's newly
+opened transport; pause and shutdown serialize with pending dials.
+
 ## Third-party integrations
 
 `pkg/integrations` provides account and OAuth session lifecycle behind injected
