@@ -60,10 +60,10 @@ read. Waiting foreground callers honor cancellation; mailbox exchange remains in
 `Adapter`, `AccountStore` and `SecretStore` ports. `SQLAccounts` accepts a
 caller-owned database. `CredentialResolver` provides scoped reads for execution
 callers. `pkg/integrations/github` implements GitHub browser device authorization.
-Codex is an autonomous Agent Link adapter in `integrations/codex/agent`,
-with executable `cmd/pot-codex-agent`. It exposes persistent virtual assistants
+Codex and Antigravity are autonomous Agent Link adapters sharing `internal/agenthost`,
+with executables `cmd/pot-codex-agent` and `cmd/pot-antigravity-agent`. They expose persistent virtual assistants
 for messages and an independent task executor through `pkg/agentlink.Backend`.
-Direct user chat is an optional `ChatBackend` capability implemented by Pot
+Direct user chat is an optional `ChatBackend` capability implemented by Pot and Antigravity
 adapters. Codex is not an
 OAuth account or a separate Bridge service. See the
 [integration guide](../integrations/codex/README.md) and [Integrations](credentials.md) for API and lifecycle contracts.

@@ -18,4 +18,3 @@ export function taskIdentityShort(value, fallback='') {
   const label=document.createElement('span');label.className='task-identity-short';
   label.textContent=taskIdentities.short(value)||fallback;return label;
 }
-

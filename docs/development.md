@@ -191,7 +191,7 @@ or remote transport behavior.
 For linked profile editing and deletion through the authenticated browser gateway
 and a real isolated Agent Link peer, start
 `POT_CODEX_PROFILE_FIXTURE_URL_FILE=/tmp/pot-profile-url mise exec -- go test
-./integrations/codex/agent -run '^TestCodexProfileBrowserFixture$' -count=1 -v
+./internal/agenthost -run '^TestCodexProfileBrowserFixture$' -count=1 -v
 -timeout=20m`. Open the origin written to that file with the cached Playwright CLI,
 then run `scripts/tests/pot-ui-codex-profile-browser.js` or
 `scripts/tests/pot-ui-linked-assistant-delete-browser.js` using `run-code --filename`.
@@ -722,7 +722,7 @@ App Server protocol fixture. Run the task/approval and automatic-review boundary
 coverage without model credentials:
 
 ```sh
-mise exec -- go test -race ./integrations/codex/agent \
+mise exec -- go test -race ./internal/agenthost \
   -run 'Test(CodexTaskAndPeerApprovalFromPot|AutomaticReviewDoesNotPublishApprovalHistory|DirectTasksOwnIndependentPersistentSessions)'
 ```
 

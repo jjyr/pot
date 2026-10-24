@@ -42,7 +42,7 @@
       "TestSocketProductCreateEventsAuthAndRestart",
       "TestSendReceiptHTTPIdentityAndAuthorization"
     ],
-    "./integrations/codex/agent": [
+    "./internal/agenthost": [
       "TestCodexTaskAndPeerApprovalFromPot",
       "TestAutomaticReviewDoesNotPublishApprovalHistory"
     ]

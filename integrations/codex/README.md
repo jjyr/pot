@@ -117,7 +117,7 @@ configuration. Directory refreshes distribute the receiver's saved image and nam
 The plugin's `pot_update_profile` tool supports reading the current profile,
 changing `name`, importing `avatar_path` (workspace-relative PNG, JPEG or WebP,
 at most 8 MiB), or `reset_avatar: true`. A running virtual assistant is bound to
-its own identity through `POT_CODEX_ASSISTANT_ID`; an ordinary Codex chat must
+its own identity through `POT_AGENT_ASSISTANT_ID`; an ordinary Codex chat must
 explicitly select an `assistant_id` from `pot_assistants`. It never selects the
 node default implicitly. Images are normalized to 128px PNGs; escaping workspace
 paths and symlinks are rejected. Rename and avatar changes retain the original
@@ -237,7 +237,7 @@ model configuration remain local to Codex. The protocol fixture runs without
 model credentials; see [development](../../docs/development.md) for its commands.
 
 ```sh
-mise exec -- go test -race ./integrations/codex/agent
+mise exec -- go test -race ./internal/agenthost
 mise exec -- python3 integrations/codex/install_test.py
 ```
 

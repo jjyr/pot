@@ -306,7 +306,7 @@ func Allowed(method, path string) bool {
 	if path == "/api/v1/agent-links/capabilities" {
 		return method == "GET"
 	}
-	if path == "/api/v1/agent-links/invitation" {
+	if path == "/api/v1/agent-links/invitation" || path == "/api/v1/agent-links/assistants" {
 		return method == "POST"
 	}
 	if path == "/api/v1/extensions" {

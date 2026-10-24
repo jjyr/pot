@@ -162,3 +162,14 @@ transaction after acknowledgement succeeds. A crash before that commit repeats
 only completion; executions without a receipt retain the existing uncertainty
 and recovery fences. A successfully acknowledged inbox batch may already be
 `interrupted` after a restart and is settled under its original batch identity.
+
+## Shared native adapter storage
+
+`control/0003_agent_adapter` renames Codex host and endpoint tables to shared
+adapter tables and records the runtime kind. `tasks/0002_agent_adapter` renames
+assistant, job, executor, task-session and continuation tables; adds model/effort
+columns; and introduces caller-bound assistant-management receipts. Existing Codex
+node keys, owner secrets, assistant revisions, native threads, immutable requests,
+results and uncertain-cleanup fences remain intact. Old jobs are not rewritten or
+replayed. Antigravity uses a separate root and the same schema; opening a root with
+the wrong runtime is rejected.

@@ -14,7 +14,7 @@ Chat / tasks / schedules / agent tools
        |                     |
  local owner adapter   authenticated peer adapter
        |                     |
- local Pot execution   Pot / Codex execution
+ local Pot execution   Pot / Codex / Antigravity execution
        |                     |
        +----------+----------+
                   |
@@ -31,7 +31,7 @@ session-authenticated access to one local node. Peer connections grant
 collaboration capabilities, never remote operator access or credentials.
 
 Fresh roots contain no assistants. First-use Chat and the directory + action
-open the same Add assistant page, ordered API, another Pot, then Codex. Only an
+open the same Add assistant page, ordered API, another Pot, then Codex and Antigravity. Only an
 explicit API creation action creates a local assistant with a random two-word slug
 ID such as `amber-otter` and a default name such as `Amber Otter`. Linked
 assistants and user-originated linked tasks need neither a local Provider nor a
@@ -72,13 +72,20 @@ See [Agent Links](agent-links.md),
 [assistant messages](assistant-messages.md), [task lifecycle](task-coordination.md)
 and the [Codex adapter](../integrations/codex/README.md).
 
+The Codex and Antigravity plugins share `internal/agenthost` for transport,
+identity, durable mail, queues and supervision. Codex drives App Server JSON-RPC;
+Antigravity drives `agy` streaming JSON. Each runtime retains its own root and
+listeners. Antigravity additionally advertises user-only assistant management:
+model selection and creation within locally configured workspace scopes. See the
+[Antigravity integration](../integrations/antigravity/README.md).
+
 ## Execution and recovery
 
 Every Agent invocation enters the Agent Link abstraction, including local work.
 Local adapters call in-process; peer adapters use authenticated transport. A Task
 selects one advertised assistant or node endpoint through its `target` address.
 The host resolves transport; each endpoint carries its own capability description.
-Concrete runtimes such as Codex remain behind their Adapters.
+Concrete runtimes such as Codex and Antigravity remain behind their Adapters.
 The receiver selects models, prepares resources and enforces permissions on its
 own filesystem. Agent receives injected execution services rather than discovering
 product or machine infrastructure. Main and Worker instruction boundaries are

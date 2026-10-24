@@ -1,5 +1,5 @@
 // Production settings DOM with controlled failures; transport is covered by the
-// authenticated browser-to-peer integration test in integrations/codex/agent.
+// authenticated browser-to-peer integration test in internal/agenthost.
 import {createPages} from '../../web/src/components/pages.mjs';
 import {translate} from '../../web/src/locales/messages.mjs';
 

@@ -536,3 +536,13 @@ func (s *Service) PeerListenAddress() string {
 	defer s.agentLinks.mu.Unlock()
 	return s.agentLinks.server.Addr()
 }
+
+// ManageLinkedAssistant is an operator entry point, never an agent tool.
+func (s *Service) ManageLinkedAssistant(ctx context.Context, link string, input agentlink.AssistantManagementRequest) (agentlink.AssistantManagementResult, error) {
+	input.From = protocol.AgentRef{NodeID: s.options.RuntimeID, Kind: "user", AgentID: "operator"}
+	result, err := s.agentLinks.service.ManageAssistant(ctx, link, input)
+	if err == nil {
+		s.Changes.Notify("agent-links")
+	}
+	return result, err
+}

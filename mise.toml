@@ -203,7 +203,7 @@ python scripts/build-pot-plugins --platform linux-amd64 --output .local/pot/linu
 
 [tasks."test:packaging"]
 description = "Verify package layout, immutable export and service artifact generation"
-run = ["python scripts/tests/pot-packaging.py", "python scripts/tests/release-refresh.py", "python integrations/codex/install_test.py"]
+run = ["python scripts/tests/pot-packaging.py", "python scripts/tests/release-refresh.py", "python integrations/codex/install_test.py", "python integrations/antigravity/install_test.py"]
 
 [tasks.preview]
 description = "Run the disposable loopback shared UI preview (no model or product data)"
@@ -242,4 +242,8 @@ run = "python scripts/tests/sandbox-linux.py"
 
 [tasks."test:codex-agent"]
 description = "Verify Codex MCP stdio, supervised App Server and durable inbox integration"
-run = ["go test -race ./integrations/codex/agent ./cmd/pot-codex-agent ./pkg/pluginhost", "python integrations/codex/install_test.py"]
+run = ["go test -race ./internal/agenthost ./cmd/pot-codex-agent ./pkg/pluginhost", "python integrations/codex/install_test.py", "python integrations/antigravity/install_test.py"]
+
+[tasks."test:antigravity-agent"]
+description = "Verify native Antigravity sessions, scoped management and plugin installation"
+run = ["go test -race ./internal/agenthost ./pkg/agentlink ./pkg/storage", "python integrations/antigravity/install_test.py"]

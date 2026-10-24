@@ -9,8 +9,9 @@ Read https://github.com/jjyr/pot/blob/main/docs/connect-with-agent.md and help m
 
 This guide helps an installation assistant set up the local Codex plugin with
 the user. It does not change instructions for assistants running inside Pot.
-Codex and Pot-to-Pot connections are supported; Claude, Grok and Antigravity
-are coming soon. For another Pot, use the [Agent Link guide](agent-links.md).
+Codex, Antigravity and Pot-to-Pot connections are supported; Claude and Grok
+are coming soon. For Antigravity, use the [Antigravity integration guide](../integrations/antigravity/README.md).
+For another Pot, use the [Agent Link guide](agent-links.md).
 
 The [Codex integration guide](../integrations/codex/README.md#install-and-connect)
 is the authoritative reference for installation, network access, workspace

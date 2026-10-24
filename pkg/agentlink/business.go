@@ -246,6 +246,16 @@ func (s *Service) business(ctx context.Context, c Connection, remote peer.Identi
 			return nil, ErrInvalid
 		}
 		result = d
+	case "assistant.management":
+		var input AssistantManagementRequest
+		if decodeJSON(r.Params, &input) != nil || !input.From.Valid() || input.From.Kind != "user" || input.From.NodeID != remote.NodeID {
+			return nil, ErrUnauthorized
+		}
+		backend, ok := s.options.Backend.(AssistantManagementBackend)
+		if !ok || !d.Capabilities(NodeTarget(d.NodeID)).Supports(AssistantManagement) {
+			return nil, ErrUnsupported
+		}
+		result, e = backend.ManageAssistant(ctx, input)
 	case "assistant.delete":
 		var input DeleteAssistantRequest
 		if decodeJSON(r.Params, &input) != nil || input.From.Kind != "user" || !input.From.Valid() || input.From.NodeID != remote.NodeID || input.AssistantID == "" || input.Revision == 0 {

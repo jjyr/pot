@@ -1,0 +1,5 @@
+{
+  "pot-execution-scope": {
+    "PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "__POT_POLICY_COMMAND__", "timeout": 10}]}]
+  }
+}

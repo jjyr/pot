@@ -24,7 +24,7 @@ export function createCommunication({locale,resolveIdentity,downloadFile,acquire
       mark.classList.add('communication-mark');
     }
     else if(profile?.avatar?.startsWith('data:image/png;base64,'))mark.append(avatar(23,profile.avatar));
-    else if(['pot','codex'].includes(profile?.brand||brand))mark.append(connectionBrand(profile?.brand||brand));
+    else if(['pot','codex','antigravity'].includes(profile?.brand||brand))mark.append(connectionBrand(profile?.brand||brand));
     else mark.append(icon(address?.kind==='task'?'tasks':'topology'));
     const name=address?.kind==='task'?displayName(address,profile):label||displayName(address,profile,fallback);
     box.append(mark);
@@ -45,7 +45,7 @@ export function createCommunication({locale,resolveIdentity,downloadFile,acquire
   }
   function taskTarget(model){
     const task=model.task,source=task?.agent_link;
-    const name=resolveIdentity(model.messages[0]?.to)?.name||(['pot','codex'].includes(source?.kind||task?.executor_icon)?translate(locale(),'agentLinks.source'+((source?.kind||task?.executor_icon)==='pot'?'Pot':'Codex')):null);
+    const name=resolveIdentity(model.messages[0]?.to)?.name||(['pot','codex','antigravity'].includes(source?.kind||task?.executor_icon)?translate(locale(),'agentLinks.source'+((source?.kind||task?.executor_icon)==='antigravity'?'Antigravity':(source?.kind||task?.executor_icon)==='pot'?'Pot':'Codex')):null);
     return {label:name||t('messageTask'),named:!!name,brand:source?.kind||task?.executor_icon};
   }
   function update(model,{expanded=false,preparing=false,summaryOnly=false}={}){

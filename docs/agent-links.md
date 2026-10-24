@@ -1,6 +1,6 @@
 # Agent Link
 
-Agent Link connects autonomous nodes. Pot, another Pot and the Codex adapter use
+Agent Link connects autonomous nodes. Pot, another Pot, Codex and Antigravity adapters use
 one collaboration contract: assistant directory, messages, task submission,
 status, cancellation and result notification. Each receiver owns its models,
 credentials, workspaces, permissions and execution supervision. A connection
@@ -305,3 +305,15 @@ adapters together. Admission requiring a new invitation stays fenced until the
 user reconnects; upgrades never replay unfinished execution. See the
 [Codex adapter](../integrations/codex/README.md) for installation, local execution
 scope and conservative restart behavior.
+
+## User-managed native assistants
+
+A node may advertise `assistant.management` on its node endpoint. This narrow
+capability accepts only authenticated `user` callers, never assistants or tasks.
+The receiver returns its model catalog and opaque, locally configured workspace
+scope IDs. Creation is idempotent by caller and request ID; conflicting retries
+fail. Model/name edits require an idle assistant and its current revision and
+retain its native conversation. The operation cannot select arbitrary paths,
+credentials, tool policies or a different sender. Pairing with a host advertising
+this capability grants those bounded management operations to the peer's user.
+The Antigravity adapter implements it; Codex does not advertise it.

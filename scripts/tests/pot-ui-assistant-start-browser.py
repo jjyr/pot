@@ -16,8 +16,13 @@ class FixtureServer(ThreadingHTTPServer):
     request_queue_size = 128
 
 
+class QuietHandler(SimpleHTTPRequestHandler):
+    def log_message(self, *_args):
+        pass
+
+
 def main():
-    server = FixtureServer(("127.0.0.1", 0), partial(SimpleHTTPRequestHandler, directory=str(ROOT)))
+    server = FixtureServer(("127.0.0.1", 0), partial(QuietHandler, directory=str(ROOT)))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     session = "pot-add-" + uuid.uuid4().hex[:10]
@@ -53,6 +58,11 @@ def main():
             (390, 844, "en", "light"),
             (390, 844, "zh-CN", "dark"),
         ]:
+            # Every scenario starts with independent local preference/cache state.
+            cli(
+                "run-code",
+                "async page => { if (page.url().startsWith('http')) await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); }); }",
+            )
             cli("resize", str(width), str(height))
             cli(
                 "goto",
@@ -68,6 +78,29 @@ def main():
                 str(images / f"assistant-start-{width}-{locale}-after.png"),
             )
             print(f"Add assistant browser: {width}x{height}, {locale}, {theme} passed", flush=True)
+        for width, height, locale, theme in [
+            (1200, 820, "en", "light"),
+            (390, 844, "zh-CN", "dark"),
+        ]:
+            cli("resize", str(width), str(height))
+            cli(
+                "goto",
+                f"{origin}/scripts/tests/fixtures/assistant-start.html?locale={locale}&theme={theme}&capture=native",
+            )
+            cli(
+                "run-code",
+                "async page => { await page.waitForFunction(() => window.nativeAssistantCaptureReady || window.assistantStartResults?.passed === false); const error = await page.evaluate(() => window.assistantStartResults); if (error?.passed === false) throw Error(JSON.stringify(error)); }",
+            )
+            cli(
+                "screenshot",
+                "--filename",
+                str(images / f"antigravity-assistant-{width}-{locale}-after.png"),
+            )
+            cli(
+                "run-code",
+                "async page => { await page.evaluate(() => window.nativeAssistantCaptureContinue()); await page.waitForFunction(() => !!window.assistantStartResults); const result = await page.evaluate(() => window.assistantStartResults); if (!result.passed) throw Error(JSON.stringify(result)); }",
+            )
+            print(f"Antigravity editor capture: {width}, {locale} passed", flush=True)
     finally:
         cli("close")
         server.shutdown()
