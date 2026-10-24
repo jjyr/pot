@@ -244,11 +244,16 @@ CLI in an iPhone device context and run
 `scripts/tests/go-ui-chat-touch-browser.js` via `run-code --filename`.
 Chromium uses trusted touch gestures, including long swipes and reversals beyond
 the 640-message data window and back through evicted history;
+the initial reversals run without a quiet interval between gestures.
 WebKit simulates drag, pointer cancellation and momentum with native scroll
 position input. The checks assert progress, viewport coverage and a single
 TanStack scroll writer without writes during finger contact or the moving
 momentum tail (ending at `scrollend` or 150 ms of quiet). Neither mode
 qualifies physical iPhone Safari momentum or installed home-screen behavior.
+`scripts/tests/go-ui-scroll-input.mjs`, included in `mise run test:ui`, separately
+exercises contact before movement, rapid gesture handoff, cancellation, held
+measurement corrections, explicit Latest priority and the quiet-time fallback
+with a deterministic clock against the actual vendored virtualizer.
 
 For incoming correspondence disclosure checks, open
 `/scripts/tests/fixtures/correspondence.html?locale=en&theme=light` on the loopback

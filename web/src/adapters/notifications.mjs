@@ -4,19 +4,25 @@ import {supportsCapability} from '../state/agent-links.mjs';
 import {createRefreshQueue} from '../state/refresh.mjs';
 
 const preferenceKey='pot-system-notifications-browser-v1';
+const failureText=reason=>reason?.message||String(reason??'Unknown notification failure');
 // A read/write IndexedDB transaction serializes claims across same-origin tabs,
 // including browsers without Web Locks. No server/account preference is written.
 export async function claimBrowserNotification(id,indexedDB=globalThis.indexedDB) {
   return new Promise((resolve,reject)=>{
     const open=indexedDB.open('pot-system-notifications',1);
     open.onupgradeneeded=()=>open.result.createObjectStore('events');
-    open.onerror=()=>reject(open.error);
+    open.onerror=()=>reject(open.error||Error('Notification storage could not be opened'));
     open.onsuccess=()=>{
-      const db=open.result,tx=db.transaction('events','readwrite'),store=tx.objectStore('events');let claimed=false;
-      const get=store.get(id);get.onsuccess=()=>{if(get.result===undefined){claimed=true;store.put(Date.now(),id);}};
-      // Keep recent claims through reload/reconnect without unbounded storage.
-      const cursor=store.openCursor();cursor.onsuccess=()=>{const row=cursor.result;if(!row)return;if(row.value<Date.now()-7*86400000)row.delete();row.continue();};
-      tx.oncomplete=()=>{db.close();resolve(claimed);};tx.onabort=tx.onerror=()=>{db.close();reject(tx.error);};
+      const db=open.result;let tx;
+      try{
+        tx=db.transaction('events','readwrite');const store=tx.objectStore('events');let claimed=false;
+        const get=store.get(id);get.onsuccess=()=>{if(get.result===undefined){claimed=true;store.put(Date.now(),id);}};
+        // Keep recent claims through reload/reconnect without unbounded storage.
+        const cursor=store.openCursor();cursor.onsuccess=()=>{const row=cursor.result;if(!row)return;if(row.value<Date.now()-7*86400000)row.delete();row.continue();};
+        tx.oncomplete=()=>{db.close();resolve(claimed);};
+        // Request errors bubble before tx.error is necessarily populated.
+        tx.onabort=tx.onerror=event=>{db.close();reject(event.target?.error||tx.error||Error('Notification storage transaction failed'));};
+      }catch(reason){try{tx?.abort();}catch{}db.close();reject(reason instanceof Error?reason:Error(failureText(reason)));}
     };
   });
 }
@@ -50,7 +56,7 @@ export function createSystemNotifications({client,surface,view,open,locale,host=
         try{nextEnabled=host.localStorage.getItem(preferenceKey)!=='false';}catch{}
         nextPermission=browserNotificationPermission(host);
       }
-    }catch(reason){nextPermission='unavailable';nextError=reason.message;}
+    }catch(reason){nextPermission='unavailable';nextError=failureText(reason);}
     if(disposed||ticket!==statusEpoch)return;
     enabled=nextEnabled;permission=nextPermission;error=nextError;
     if(!enabled||permission!=='default')onboarding=false;
@@ -95,6 +101,7 @@ export function createSystemNotifications({client,surface,view,open,locale,host=
   async function deliver(event,current=()=>!disposed) {
     if(!current())return;
     if(client.desktop){await client.notifySystem({...event,...notificationText(event,locale())});return;}
+    if(!enabled||browserNotificationPermission(host)!=='granted')return;
     const visible=await browserViewing(event);
     if(!current()||!await claim(event.id,host.indexedDB)||!current())return;
     if(visible||!enabled||browserNotificationPermission(host)!=='granted')return;
@@ -102,7 +109,7 @@ export function createSystemNotifications({client,surface,view,open,locale,host=
     const notification=new host.Notification(text.title,{body:text.body,tag:event.id,icon:'/assets/PotCompanion.png'});
     notification.onclick=()=>{notification.close();host.focus();Promise.resolve(open(event)).catch(fail);};
   }
-  const fail=reason=>{error=reason.message||String(reason);emit();};
+  const fail=reason=>{if(disposed)return;error=failureText(reason);emit();};
   const ownerKey=item=>JSON.stringify([item.control_id||item.space_id,item.space_id,item.id]);
   const bootOf=item=>(client.spaces||[]).find(space=>space.id===item.space_id)?.boot_id||'';
   function stopOwner(entry){entry.abort.abort();entry.tasks.close();entry.approvals.close();owners.delete(entry.key);}
@@ -165,7 +172,7 @@ export function createSystemNotifications({client,surface,view,open,locale,host=
         else if(browserNotificationPermission(host)==='default')request=host.Notification.requestPermission();
       }catch(reason){request=Promise.reject(reason);}
       emit();
-      authorization=Promise.resolve(request).then(()=>status(),async reason=>{await status();fail(reason);throw reason;}).finally(()=>{authorization=null;authorizing=false;emit();});
+      authorization=Promise.resolve(request).then(()=>status(),async reason=>{await status();fail(reason);throw reason instanceof Error?reason:Error(failureText(reason));}).finally(()=>{authorization=null;authorizing=false;emit();});
       return authorization;
     },
     refresh({reset=false,space='',topics=[]}={}){

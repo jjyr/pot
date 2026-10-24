@@ -7,7 +7,7 @@ export function createRefreshQueue(work,{active=()=>true,onError=()=>{}}={}) {
     run(){
       if(!current())return Promise.resolve();
       if(pending){again=true;return pending;}
-      pending=(async()=>{try{await work();}catch(error){if(current()&&error.name!=='AbortError')onError(error);}})().finally(()=>{
+      pending=(async()=>{try{await work();}catch(error){if(current()&&error?.name!=='AbortError')onError(error);}})().finally(()=>{
         pending=null;if(again&&current()){again=false;queueMicrotask(()=>queue.run());}
       });
       return pending;
