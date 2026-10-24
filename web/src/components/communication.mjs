@@ -27,8 +27,9 @@ export function createCommunication({locale,resolveIdentity,downloadFile,acquire
     else if(['pot','codex'].includes(profile?.brand||brand))mark.append(connectionBrand(profile?.brand||brand));
     else mark.append(icon(address?.kind==='task'?'tasks':'topology'));
     const name=address?.kind==='task'?displayName(address,profile):label||displayName(address,profile,fallback);
-    box.append(mark,n('span','communication-name',name));
+    box.append(mark);
     if(address?.kind==='task'){box.classList.add('communication-task-endpoint');const short=taskIdentityShort(address,t('messageTaskIDMissing'));short.classList.add('communication-short');box.append(short);}
+    box.append(n('span','communication-name',name));
     box.title=[name,profile?.origin?.name,...(address?.kind==='task'?[address.node_id,address.agent_id]:[])].filter(Boolean).join(' · ');
     if(task&&onOpenTask){
       box.type='button';box.setAttribute('aria-label',t('viewMessageTask').replace('{title}',name));

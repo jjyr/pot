@@ -495,8 +495,8 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 .background-tasks{margin-top:12px;padding-top:12px;border-top:1px solid var(--divider);width:100%;max-width:720px;}
 .background-tasks-heading{margin:0 0 4px;padding:0 8px;font-size:12px;font-weight:400;color:var(--muted);}
 .background-task-list{display:flex;flex-direction:column;gap:2px;}
-.background-task{border:0;border-radius:var(--radius);background:transparent;padding:8px;display:grid;grid-template-columns:22px minmax(0,1fr) auto auto;column-gap:8px;align-items:center;color:var(--muted);text-align:left;font-size:13px;line-height:20px;width:100%;max-width:100%;min-height:44px;}
-.background-task-title{min-width:0;display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--text);}
+.background-task{border:0;border-radius:var(--radius);background:transparent;padding:8px;display:grid;grid-template-columns:22px auto minmax(0,1fr) auto;column-gap:8px;align-items:center;color:var(--muted);text-align:left;font-size:13px;line-height:20px;width:100%;max-width:100%;min-height:44px;}
+.background-task-title{min-width:0;margin-inline-start:4px;display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--text);}
 .background-task-meta{display:flex;flex-wrap:nowrap;white-space:nowrap;align-items:center;justify-self:end;gap:4px;color:var(--muted);font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;}
 .background-task-status{color:inherit;}.background-task.needs-approval .background-task-status{color:var(--attention);}.background-task-elapsed{white-space:nowrap;}
 .background-tasks-toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:44px;margin-top:4px;padding:8px;border:0;border-radius:var(--radius);background:transparent;color:var(--muted);font-size:13px;text-align:left;text-decoration:none;}
@@ -931,7 +931,7 @@ button.communication-task-endpoint:focus-visible{outline:2px solid var(--primary
 @media(prefers-reduced-motion:reduce){.background-task-meta .task-activity-dot{animation:none!important;}}
 
 .communication-task-endpoint{flex-wrap:wrap;}
-.communication-task-endpoint>.communication-name{flex:1;min-width:28px;}
+.communication-task-endpoint>.communication-name{flex:1;min-width:28px;margin-inline-start:4px;}
 .communication-short{font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere;max-width:100%;color:var(--muted);}
 .communication-stack .communication-name{font-size:12px;}
 .communication-tool[data-phase=failed]>.tool-summary>.tool-status,.communication-tool[data-phase=denied]>.tool-summary>.tool-status{color:var(--danger);}

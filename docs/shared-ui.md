@@ -296,9 +296,12 @@ outline; task names and labels stay neutral. Runtime activity and semantic
 status remain separate from the fixed identity color. A confirmed endpoint and
 its background row open the same existing Task detail with the catalogue ID;
 unknown addresses retain a neutral mark without inventing a navigation target.
-Each background row keeps the icon, ellipsized title, short ID and activity/status
-on one line, including narrow layouts. Source and elapsed time remain in the
-accessible description and Task details. The original three-row preview and
+Each background row keeps the icon, neutral monospace short ID, ellipsized title
+and right-aligned activity/status on one line, including narrow layouts. IDs align
+directly after the icons, with a slightly larger gap before the titles.
+Communication endpoints use the same icon, ID and title order.
+Source and elapsed time remain in the accessible description and Task details.
+The original three-row preview and
 expand/collapse control retain task ordering and counts without a second summary.
 Keyed projections retain live controls through title, status, locale and
 short-label updates.

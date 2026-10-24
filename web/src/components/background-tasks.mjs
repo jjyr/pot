@@ -37,7 +37,7 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
     for(const task of state.expanded?ordered:ordered.slice(0,3)){
       const open=node('button','background-task');open.type='button';open.dataset.viewKey=taskKey(task);open.dataset.scrollAnchor=`task:${taskKey(task)}`;open.title=[task.title,task.address?.node_id,task.address?.agent_id].filter(Boolean).join(' · ');
       const waiting=needsApproval(task.id,task.phase),meta=node('span','background-task-meta');open.classList.toggle('needs-approval',waiting);
-      open.append(taskIdentityMark(task),node('span','background-task-title',task.title),taskIdentityShort(task,t('tool.messageTaskIDMissing')));
+      open.append(taskIdentityMark(task),taskIdentityShort(task,t('tool.messageTaskIDMissing')),node('span','background-task-title',task.title));
       const description=node('span','background-task-description visually-hidden');
       description.id=`${id}-description-${list.children.length}`;
       open.setAttribute('aria-describedby',description.id);
