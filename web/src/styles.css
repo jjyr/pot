@@ -494,12 +494,14 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 .unread-badge{background:var(--brand);color:var(--canvas);border-radius:10px;min-width:16px;padding:0 4px;text-align:center;font-size:10px;line-height:16px;flex:none;}.has-unread .assistant-title{font-weight:600;}.avatar.is-arriving{animation:avatar-rebound 650ms ease-out;transform-origin:50% 90%;}@keyframes avatar-rebound{0%,100%{transform:translateY(0) scale(1)}22%{transform:translateY(-5px) scale(1.06,.94)}48%{transform:translateY(0) scale(.96,1.04)}70%{transform:translateY(-2px) scale(1.02,.98)}}
 .background-tasks{margin-top:12px;padding-top:12px;border-top:1px solid var(--divider);width:100%;max-width:720px;}
 .background-tasks-heading{margin:0 0 4px;padding:0 8px;font-size:12px;font-weight:400;color:var(--muted);}
-.background-task-list{display:flex;flex-direction:column;gap:2px;}
-.background-task{border:0;border-radius:var(--radius);background:transparent;padding:8px;display:grid;grid-template-columns:22px auto minmax(0,1fr) auto;column-gap:8px;align-items:center;color:var(--muted);text-align:left;font-size:13px;line-height:20px;width:100%;max-width:100%;min-height:44px;}
+/* Rows share identity/status/time tracks; edge tracks include button padding. */
+.background-task-list{--task-row-padding:8px;--task-row-gap:8px;display:grid;grid-template-columns:calc(22px + var(--task-row-padding)) max-content minmax(0,1fr) 13px max-content 4px minmax(calc(8ch + var(--task-row-padding)),max-content);column-gap:var(--task-row-gap);row-gap:2px;}
+.background-task-list:lang(zh-CN){grid-template-columns:calc(22px + var(--task-row-padding)) max-content minmax(0,1fr) 13px max-content 4px minmax(calc(9ch + var(--task-row-padding)),max-content);}
+.background-task{border:0;border-radius:var(--radius);background:transparent;padding:8px var(--task-row-padding);display:grid;grid-column:1/-1;grid-template-columns:subgrid;column-gap:var(--task-row-gap);align-items:center;color:var(--muted);text-align:left;font-size:13px;line-height:20px;width:100%;max-width:100%;min-height:44px;}
 .background-task-title{min-width:0;margin-inline-start:4px;display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--text);}
-.background-task-meta{display:flex;flex-wrap:nowrap;white-space:nowrap;align-items:center;justify-self:end;gap:4px;color:var(--muted);font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;}
+.background-task-meta{grid-column:4/-1;display:grid;grid-template-columns:subgrid;white-space:nowrap;align-items:center;justify-self:stretch;column-gap:4px;color:var(--muted);font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;}
 .background-task-status{color:inherit;}.background-task.needs-approval .background-task-status{color:var(--attention);}.background-task-elapsed{white-space:nowrap;font-variant-numeric:tabular-nums;min-width:8ch;text-align:start;} .background-task-elapsed:lang(zh-CN){min-width:9ch;}
-@media(max-width:420px){.background-task{column-gap:4px;padding-inline:6px;}}
+@media(max-width:420px){.background-task-list{--task-row-padding:6px;--task-row-gap:4px;}}
 .background-tasks-toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:44px;margin-top:4px;padding:8px;border:0;border-radius:var(--radius);background:transparent;color:var(--muted);font-size:13px;text-align:left;text-decoration:none;}
 .background-tasks-toggle svg{width:16px;height:16px;flex:none;}.background-tasks-toggle[aria-expanded='true'] svg{transform:rotate(180deg);}
 .background-task:hover,.background-tasks-toggle:hover{background:var(--button-hover);}.background-task:active,.background-tasks-toggle:active{background:var(--button-active);}
@@ -990,7 +992,7 @@ pot-message-file:has(> pot-resource) { display: block; margin-block: 12px; }
 button.communication-task-endpoint{border:0;padding:0;background:transparent;text-align:left;font:inherit;cursor:pointer;}
 button.communication-task-endpoint:hover .communication-name{text-decoration:underline;text-underline-offset:3px;}
 button.communication-task-endpoint:focus-visible{outline:2px solid var(--primary);outline-offset:3px;border-radius:4px;}
-.background-task-meta .task-activity-dot{flex:none;align-self:center;margin:0 2px 0 0;}
+.background-task-meta .task-activity-dot{flex:none;align-self:center;justify-self:start;margin:0;}
 .background-task-meta .task-activity-dot[data-phase=running]{width:11px;height:11px;border:1.5px solid var(--primary);border-right-color:transparent;border-radius:50%;background:transparent;animation:task-spin 1s linear infinite;}
 .background-task-meta .task-activity-dot[data-phase=queued],.background-task-meta .task-activity-dot[data-phase=waiting]{width:9px;height:9px;border:1px solid var(--muted);background:transparent;animation:none;}
 .background-task-meta .task-activity-dot[data-phase=complete]{background:var(--success);animation:none;}

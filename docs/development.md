@@ -323,7 +323,11 @@ its assertions on the page and includes 720/390/320px containers. Repeat with
 fixture selects that source with `before=1`. With the disposable Playwright
 module described below, run `scripts/tests/background-task-time-capture.mjs ORIGIN`
 to check 1280/390/320px browser viewports and export paired PNGs. These are
-Chromium checks, not physical-device qualification.
+Chromium checks, not physical-device qualification. For an alignment comparison,
+extract the pre-correction PR head's `web/` into ignored
+`output/task-alignment-before/` and pass `ORIGIN OUTPUT_DIRECTORY alignment` to
+the same capture command. It checks mixed-status column starts, missing/short/long
+durations and timer updates, then exports matched 720/390/320px strip pairs.
 
 For message-title identity, streaming-argument, disclosure and Task checks, open
 `/scripts/tests/fixtures/message-titles.html` on the same loopback server. The

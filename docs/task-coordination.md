@@ -330,7 +330,9 @@ then filter and paginate the complete returned collection. Unresolved schedule
 ownership stays in a neutral group and never uses the selected Chat as its owner.
 
 Chat's background Task row shows status and elapsed time on the same line; long
-labels truncate before identity, status or time. The shared view clock changes
+labels truncate before identity, status or time. Rows share grid columns so status
+indicators and labels start at the same position, with a separate reserved elapsed
+column even for queued Tasks or missing timestamps. The shared view clock changes
 only timer text, pauses when hidden/inactive and is disposed with the view.
 Elapsed wall time starts at the executing Runner's first claim (`started_at_ms`),
 excludes initial queuing and includes subsequent waits/pauses. `finished_at_ms`

@@ -5,7 +5,8 @@ import {mkdir} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 const {chromium}=await import(process.env.POT_PLAYWRIGHT_MODULE?pathToFileURL(resolve(process.env.POT_PLAYWRIGHT_MODULE)).href:'playwright');
-const [origin='http://127.0.0.1:17743',directory='output/pr-images/background-task-time']=process.argv.slice(2);
+const [origin='http://127.0.0.1:17743',directory='output/pr-images/background-task-time',comparison='elapsed']=process.argv.slice(2);
+const alignment=comparison==='alignment';
 await mkdir(directory,{recursive:true});
 const browser=await chromium.launch({headless:true,...(process.env.POT_CHROMIUM_EXECUTABLE?{executablePath:process.env.POT_CHROMIUM_EXECUTABLE}:{})});
 try{
@@ -36,13 +37,20 @@ try{
   console.log('PASS production Chat → completed Task details: final duration uses authoritative finish');
   await page.close();
  }
- for(const [name,theme,locale,index]of [['desktop-light','light','zh-CN',0],['narrow-dark','dark','en',2]]){
+ for(const [name,theme,locale,index]of [['desktop-light','light','zh-CN',0],['phone-light','light','zh-CN',1],['narrow-dark','dark','en',2]]){
   for(const version of ['before','after']){
    const page=await browser.newPage({viewport:{width:1280,height:1100},colorScheme:theme,reducedMotion:'reduce',deviceScaleFactor:1});
-   await page.goto(`${origin}/scripts/tests/fixtures/background-task-time.html?capture=1&locale=${locale}&theme=${theme}${version==='before'?'&before=1':''}`);
+   await page.goto(`${origin}/scripts/tests/fixtures/background-task-time.html?capture=1${alignment?'&alignment=1':''}&locale=${locale}&theme=${theme}${version==='before'?'&before=1':''}`);
    await page.waitForFunction(()=>window.backgroundTaskTime);
    assert.deepEqual(await page.evaluate(()=>window.backgroundTaskTime.failures),[]);
-   await page.locator('.probe').nth(index).screenshot({path:`${directory}/background-task-time-${name}-${version}.png`});
+   if(alignment){
+    const aligned=await page.locator('.probe').nth(index).evaluate(host=>{
+     const positions=[...host.querySelectorAll('.background-task-status')].map(status=>status.getBoundingClientRect().x);
+     return positions.every(x=>Math.abs(x-positions[0])<0.5);
+    });
+    assert.equal(aligned,version==='after','alignment comparison must reproduce the drift before and shared columns after');
+   }
+   await page.locator('.probe').nth(index).screenshot({path:`${directory}/background-task-${alignment?'alignment':'time'}-${name}-${version}.png`});
    await page.close();
   }
  }
