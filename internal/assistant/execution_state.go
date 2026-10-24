@@ -5,7 +5,7 @@ package assistant
 func (c *Conversation) ExecutionState() (string, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.blocked {
+	if c.blocked || c.finishError != nil {
 		return "failed", true
 	}
 	if c.turn != nil {

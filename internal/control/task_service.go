@@ -40,12 +40,16 @@ func (s *Service) openTasks() error {
 	if err = storage.ImportTaskSubmissions(s.options.Root); err != nil {
 		return err
 	}
-	s.RunJournal, err = tasks.OpenJournal(filepath.Join(s.options.Root, "tasks.sqlite"), s.options.RuntimeID, s.options.BootID)
+	s.tasksDB, err = storage.OpenDatabase(filepath.Join(s.options.Root, "tasks.sqlite"), storage.TasksDatabase)
+	if err != nil {
+		return err
+	}
+	s.RunJournal, err = tasks.OpenJournal(s.tasksDB, filepath.Join(s.options.Root, "cache", "resources"), s.options.RuntimeID, s.options.BootID)
 	if err != nil {
 		return err
 	}
 	s.TaskRuns = &tasks.Executor{Journal: s.RunJournal, Executions: s.options.Manager, Context: s.ctx, Prepare: s.prepareTask}
-	s.Tasks, err = tasks.Open(filepath.Join(s.options.Root, "tasks.sqlite"), tasks.Options{OwnerAvailable: s.assistantAvailable, NodeID: s.options.RuntimeID, Executor: s.TaskRuns, ResolveModel: s.selectTask, ValidateRequirements: s.validateTaskRequirements, AdmitModel: s.admitTaskModel, AwaitingApproval: s.taskAwaitingApproval, PublishHook: s.publishHook, OutcomesChanged: func() { s.Changes.Notify("task-outcomes") }, PrepareOutcome: func(ctx context.Context, record tasks.Record, event protocol.TaskResultEvent) (tasks.OutcomeCommit, error) {
+	s.Tasks, err = tasks.Open(s.tasksDB, tasks.Options{OwnerAvailable: s.assistantAvailable, NodeID: s.options.RuntimeID, Executor: s.TaskRuns, ResolveModel: s.selectTask, ValidateRequirements: s.validateTaskRequirements, AdmitModel: s.admitTaskModel, AwaitingApproval: s.taskAwaitingApproval, PublishHook: s.publishHook, OutcomesChanged: func() { s.Changes.Notify("task-outcomes") }, PrepareOutcome: func(ctx context.Context, record tasks.Record, event protocol.TaskResultEvent) (tasks.OutcomeCommit, error) {
 		return s.prepareTaskOutcome(ctx, record, event)
 	}})
 	if err != nil {
@@ -55,7 +59,7 @@ func (s *Service) openTasks() error {
 	if err != nil {
 		return err
 	}
-	s.Mailbox, err = assistant.OpenMailbox(filepath.Join(s.options.Root, "tasks.sqlite"), s.options.RuntimeID, assistant.MailboxOptions{OwnerAvailable: s.assistantAvailable})
+	s.Mailbox, err = assistant.OpenMailbox(s.tasksDB, s.options.RuntimeID, assistant.MailboxOptions{OwnerAvailable: s.assistantAvailable})
 	if err != nil {
 		return err
 	}

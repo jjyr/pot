@@ -94,7 +94,7 @@ func (c *Conversation) UIFrame(ctx context.Context, after int64, reset bool) (pr
 	state.Messages = []protocol.Message{}
 	frame := protocol.UIFrame{Kind: "delta", BaseCursor: after, UISnapshot: protocol.UISnapshot{Snapshot: state}}
 	var err error
-	if reset || after > c.cursor || c.cursor-after > storage.UIMaxChanges {
+	if reset || c.finishError != nil || after > c.cursor || c.cursor-after > storage.UIMaxChanges {
 		frame.Kind = "reset"
 		frame.Messages, frame.History, err = c.store.UIWindow(ctx, 0, 0, "", storage.UIPageSize)
 	} else {
@@ -120,6 +120,9 @@ func (c *Conversation) UIFrame(ctx context.Context, after int64, reset bool) (pr
 	frame.Replies = []protocol.ChatReply{}
 	for _, reply := range replies {
 		if inputs[reply.InputID] {
+			if c.finishError != nil && state.Turn != nil && reply.InputID == state.Turn.UserMessageID {
+				reply.Error = c.finishError.Error()
+			}
 			frame.Replies = append(frame.Replies, reply)
 		}
 	}

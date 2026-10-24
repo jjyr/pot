@@ -217,11 +217,11 @@ func TestScheduledPolicySnapshotSurvivesRestart(t *testing.T) {
 	if err := f.tasks.DB().QueryRow("PRAGMA database_list").Scan(&sequence, &database, &path); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.tasks.Close(); err != nil {
+	if err := f.tasks.DB().Close(); err != nil {
 		t.Fatal(err)
 	}
 	var schedules *Service
-	restored, err := tasks.Open(path, tasks.Options{NodeID: "machine", Executor: f.destination,
+	restored, err := openTasks(t, path, tasks.Options{NodeID: "machine", Executor: f.destination,
 		PrepareOutcome: func(ctx context.Context, task tasks.Record, event protocol.TaskResultEvent) (tasks.OutcomeCommit, error) {
 			return schedules.PrepareOutcome(ctx, task, event)
 		},
@@ -229,7 +229,7 @@ func TestScheduledPolicySnapshotSurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer restored.Close()
+	defer restored.DB().Close()
 	schedules, err = New(Options{Tasks: restored, Ready: func(context.Context, string) (bool, error) { return true, nil }})
 	if err != nil {
 		t.Fatal(err)

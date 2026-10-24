@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
@@ -74,7 +75,7 @@ func (s *Service) page(ctx context.Context, assistant string, query protocol.Tas
 		args = append(args, string(raw), target.RuntimeID)
 	}
 	// One read transaction keeps counts, clamped offsets and rows consistent.
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return page, err
 	}

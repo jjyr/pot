@@ -23,7 +23,10 @@ func (c *Conversation) Catalogue(ctx context.Context) (CatalogueState, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	out := CatalogueState{Responding: c.turn != nil, Running: c.turn != nil, Failed: c.blocked || c.lastError != nil, NeedsConfiguration: c.thread == nil}
-	out.Executing = c.turn != nil && c.turn.State == "running" && !c.turn.Paused
+	out.Executing = c.finishError == nil && c.completion == nil && c.turn != nil && c.turn.State == "running" && !c.turn.Paused
+	if c.finishError != nil {
+		out.Responding, out.Running = false, false
+	}
 	count, err := c.store.NotificationCount(ctx)
 	if err != nil {
 		return out, err

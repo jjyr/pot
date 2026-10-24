@@ -173,7 +173,8 @@ func (f *driverFixture) Execute(ctx context.Context, input protocol.SendMessage)
 	f.inputs = append(f.inputs, input)
 	return execution.Result{Phase: execution.Succeeded}
 }
-func (f *driverFixture) Failed(err error) { f.errors = append(f.errors, err) }
+func (f *driverFixture) FinalizationFailed(err error) { f.errors = append(f.errors, err) }
+func (f *driverFixture) Failed(err error)             { f.errors = append(f.errors, err) }
 func (f *driverFixture) FinishTurn(_ context.Context, _ protocol.SendMessage, result execution.Result) error {
 	f.results = append(f.results, result)
 	return f.finishError

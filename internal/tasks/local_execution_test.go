@@ -19,15 +19,15 @@ func TestTaskNodeIdentitySurvivesReopenAndRejectsAnotherNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	options := s.options
-	s.Close()
+	s.db.Close()
 	foreign := options
 	foreign.NodeID = "another-node"
-	if other, err := Open(path, foreign); err == nil {
-		other.Close()
+	if other, err := openTasks(t, path, foreign); err == nil {
+		other.db.Close()
 		t.Fatal("opened another node's task store")
 	}
 	for range 2 {
-		s, err = Open(path, options)
+		s, err = openTasks(t, path, options)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -35,7 +35,7 @@ func TestTaskNodeIdentitySurvivesReopenAndRejectsAnotherNode(t *testing.T) {
 		if err != nil || s.NodeID() != "machine" || stored.RunID != r.RunID || stored.NodeID != "machine" {
 			t.Fatal("task ownership changed", stored, err)
 		}
-		s.Close()
+		s.db.Close()
 	}
 }
 
@@ -104,12 +104,12 @@ func TestHistoricalRemoteTaskCannotUseLocalExecutorAfterRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 			options := s.options
-			s.Close()
-			s, err = Open(path, options)
+			s.db.Close()
+			s, err = openTasks(t, path, options)
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer s.Close()
+			defer s.db.Close()
 			for range 2 {
 				if err := s.Tick(ctx); err != nil {
 					t.Fatal(err)
@@ -151,11 +151,11 @@ func TestTaskAdmissionAndRunCreationRollbackTogether(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	journal, err := OpenJournal(path, "machine", "boot")
+	journal, err := openJournal(t, path, "machine", "boot")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer journal.Close()
+	defer journal.db.Close()
 	s.options.Executor = &Executor{Journal: journal}
 	if _, err := s.db.Exec(`CREATE TRIGGER fail_admission BEFORE UPDATE ON tasks WHEN json_extract(NEW.body,'$.launch') IS NOT NULL BEGIN SELECT RAISE(ABORT,'admission write failed'); END`); err != nil {
 		t.Fatal(err)

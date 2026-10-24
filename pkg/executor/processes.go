@@ -3,7 +3,6 @@ package executor
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -105,17 +104,10 @@ func killGroup(pid int) error {
 	return err
 }
 func confirmGroupGone(pid int, deadline time.Time) error {
-	for time.Now().Before(deadline) {
-		err := syscall.Kill(-pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
-			return nil
-		}
-		if err != nil {
-			return errors.Join(ErrCleanupUnconfirmed, err)
-		}
-		time.Sleep(10 * time.Millisecond)
+	if err := processscope.KillGroup(pid, deadline); err != nil {
+		return errors.Join(ErrCleanupUnconfirmed, err)
 	}
-	return fmt.Errorf("%w: process group %d remains", ErrCleanupUnconfirmed, pid)
+	return nil
 }
 func (p *process) run(idle time.Duration) {
 	waited := make(chan error, 1)
@@ -154,7 +146,9 @@ waiting:
 	if p.supervisor != nil && !exited {
 		cleanupErr = p.supervisor.Stop(p.cmd.Process.Pid)
 	} else {
-		cleanupErr = killGroup(p.cmd.Process.Pid)
+		// This is a stop request; confirmGroupGone below supplies cleanup proof.
+		// In particular, a zombie-only Darwin group can transiently return EPERM.
+		_ = killGroup(p.cmd.Process.Pid)
 	}
 	if !exited {
 		select {

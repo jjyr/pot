@@ -173,6 +173,12 @@ handles, plugin/browser sessions and SDK helpers. Missing/failed cleanup receipt
 are errors. Only confirmed cleanup permits temporary directories to be removed;
 project files persist. This is not VM/cgroup isolation or CPU/memory/disk quotas.
 
+Process-group cleanup retries signals within its deadline and requires `ESRCH`
+before accepting that the group is gone. On macOS a group containing only zombies
+can return `EPERM` until the OS reaps them. This response is retried, never treated
+as cleanup proof; persistent permission failures still retain the cleanup fence
+and private temporary files.
+
 Uncertain outcomes retain capacity and durable receipt fences. Restart/disconnect
 never launches a replacement or moves work. Inspect the original identity and
 explicitly reconcile recovery; stopping computation does not prove external

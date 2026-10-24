@@ -88,12 +88,12 @@ func TestTaskCatalogueSharesLocalAndAgentLinkLifecycle(t *testing.T) {
 		t.Fatal("duplicate or missing outcomes", outcomes, err)
 	}
 	options := s.options
-	s.Close()
-	s, err = Open(path, options)
+	s.db.Close()
+	s, err = openTasks(t, path, options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer s.db.Close()
 	updated, err = s.Get(ctx, "assistant", linked.Info.ID)
 	if err != nil || updated.Config != nil || updated.Execution.Receipt.ID != "thread" || !updated.Info.Archived {
 		t.Fatal("reopen changed execution binding", updated, err)
@@ -121,11 +121,11 @@ func TestTaskCatalogueSharesLocalAndAgentLinkLifecycle(t *testing.T) {
 
 func TestLinkedTaskDoesNotRequireLocalExecutionServices(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(t.TempDir()+"/tasks.sqlite", Options{NodeID: "source"})
+	s, err := openTasks(t, t.TempDir()+"/tasks.sqlite", Options{NodeID: "source"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer s.db.Close()
 	request := protocol.CreateTask{RequestID: "codex", Text: "work", Target: &protocol.AgentRef{NodeID: "codex", Kind: "node", AgentID: "codex"}}
 	record := Record{AssistantID: "assistant", Request: request, Info: protocol.TaskInfo{ID: "task", AssistantID: "assistant", Phase: protocol.TaskQueued, AgentLink: &protocol.AgentLinkOrigin{LinkID: "connection", NodeID: "codex", Kind: "codex"}}, Execution: &Execution{Request: agentlink.TaskRequest{Target: agentlink.NodeTarget("codex"), RequestID: "codex", Text: "work", From: protocol.AgentRef{NodeID: "source", Kind: "assistant", AgentID: "assistant"}}}}
 	if err = s.AcceptExecution(ctx, record); err != nil {

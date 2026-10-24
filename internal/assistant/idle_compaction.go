@@ -148,8 +148,13 @@ func (c *Conversation) abandonIdleLocked(ctx context.Context) error {
 	if err = c.finishCompactionMessagesLocked(ctx, "failed"); err != nil {
 		return err
 	}
+	previous := c.turn
 	c.turn = nil
-	return c.appendTurnLocked(ctx)
+	if err := c.appendTurnLocked(ctx); err != nil {
+		c.turn = previous
+		return err
+	}
+	return nil
 }
 
 func (c *Conversation) idlePolicyLocked(ctx context.Context) (IdleCompactionPolicy, error) {

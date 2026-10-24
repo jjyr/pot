@@ -249,12 +249,12 @@ func TestRetiredCorrespondenceWaitsArePreservedWithoutReplay(t *testing.T) {
 	if _, err := m.db.Exec("UPDATE agent_messages SET state='waiting',detail='original allowance' WHERE id=?", original.ID); err != nil {
 		t.Fatal(err)
 	}
-	m.Close()
-	reopened, err := OpenMailbox(path, "local", MailboxOptions{})
+	m.db.Close()
+	reopened, err := openMailbox(t, path, "local")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.Close()
+	defer reopened.db.Close()
 	candidates, err := reopened.Candidates(ctx, "main")
 	if err != nil || len(candidates) != 0 {
 		t.Fatal("retired private checkpoint became executable", candidates, err)
@@ -289,13 +289,13 @@ func TestResultBatchConcurrentClaimAndRestartFence(t *testing.T) {
 	if winners != 1 {
 		t.Fatal("duplicate batch execution admitted", winners)
 	}
-	m.Close()
+	m.db.Close()
 	var err error
-	m, err = OpenMailbox(path, "local", MailboxOptions{})
+	m, err = openMailbox(t, path, "local")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
+	defer m.db.Close()
 	if err = m.ClaimEventBatch(ctx, "main", []string{a.ID, b.ID}); err == nil {
 		t.Fatal("uncertain batch replayed after restart")
 	}

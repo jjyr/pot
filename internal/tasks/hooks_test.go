@@ -118,14 +118,14 @@ func TestStartedHookRequiresRunnerStartAndIsUIOnlyAcrossRestart(t *testing.T) {
 	if notices, err := s.Notifications(ctx, "assistant"); err != nil || len(notices) != 0 {
 		t.Fatal(notices, err)
 	}
-	if err := s.Close(); err != nil {
+	if err := s.db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restored, err := Open(path, Options{NodeID: "machine", Executor: port, PublishHook: func(event hooks.Event) { events = append(events, event) }})
+	restored, err := openTasks(t, path, Options{NodeID: "machine", Executor: port, PublishHook: func(event hooks.Event) { events = append(events, event) }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer restored.Close()
+	defer restored.db.Close()
 	if err := restored.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -176,15 +176,15 @@ func TestPreparedOutcomeCannotCommitAfterConcurrentTaskChange(t *testing.T) {
 
 func TestTaskStoreRejectsPreviousSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.sqlite")
-	s, err := Open(path, Options{NodeID: "machine"})
+	s, err := openTasks(t, path, Options{NodeID: "machine"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DB().Exec("DROP TABLE pot_migrations; CREATE TABLE task_schema(version INTEGER NOT NULL); INSERT INTO task_schema VALUES(6)"); err != nil {
 		t.Fatal(err)
 	}
-	s.Close()
-	_, err = Open(path, Options{NodeID: "machine"})
+	s.db.Close()
+	_, err = openTasks(t, path, Options{NodeID: "machine"})
 	if err == nil || !strings.Contains(err.Error(), "unsupported pre-release or untracked schema") {
 		t.Fatal(err)
 	}

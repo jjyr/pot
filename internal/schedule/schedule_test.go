@@ -119,7 +119,7 @@ func setup(t *testing.T) fixture {
 	var readsMu sync.Mutex
 	var service *Service
 	var events []hooks.Event
-	queue, err := tasks.Open(filepath.Join(t.TempDir(), "tasks.sqlite"), tasks.Options{NodeID: "machine", Executor: port, PublishHook: func(event hooks.Event) { events = append(events, event) }, PrepareOutcome: func(ctx context.Context, record tasks.Record, event protocol.TaskResultEvent) (tasks.OutcomeCommit, error) {
+	queue, err := openTasks(t, filepath.Join(t.TempDir(), "tasks.sqlite"), tasks.Options{NodeID: "machine", Executor: port, PublishHook: func(event hooks.Event) { events = append(events, event) }, PrepareOutcome: func(ctx context.Context, record tasks.Record, event protocol.TaskResultEvent) (tasks.OutcomeCommit, error) {
 		return service.PrepareOutcome(ctx, record, event)
 	}, ResolveModel: func(context.Context, string, protocol.CreateTask) (tasks.Selection, error) {
 		readsMu.Lock()
@@ -130,7 +130,7 @@ func setup(t *testing.T) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { queue.Close() })
+	t.Cleanup(func() { queue.DB().Close() })
 	ready := true
 	service, err = New(Options{Tasks: queue, Ready: func(context.Context, string) (bool, error) { return ready, nil }})
 	if err != nil {

@@ -10,9 +10,22 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 var databaseKinds = []Database{ControlDatabase, TasksDatabase, RunnerDatabase, ConversationDatabase, MachinesDatabase, UsageDatabase, OperationsDatabase}
+
+// Freeze this contract at the initial schema; later migrations have their own
+// upgrade tests and must not rewrite the pre-release snapshot fixtures.
+func initialSchema(t *testing.T, kind Database) fstest.MapFS {
+	t.Helper()
+	name := fmt.Sprintf("migrations/%s/0001_initial_schema.sql", kind)
+	body, err := migrationFiles.ReadFile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fstest.MapFS{name: &fstest.MapFile{Data: body}}
+}
 
 type schemaObject struct{ Type, Name, Table, SQL string }
 type schemaSnapshot struct {
@@ -106,8 +119,12 @@ func TestInitialSchemasMatchPreReleaseFinalState(t *testing.T) {
 			}
 			path := filepath.Join(t.TempDir(), "db.sqlite")
 			for range 2 {
-				db, err := OpenDatabase(path, kind)
+				db, err := OpenSQLite(path)
 				if err != nil {
+					t.Fatal(err)
+				}
+				if err := migrateDatabase(t.Context(), db, kind, initialSchema(t, kind)); err != nil {
+					db.Close()
 					t.Fatal(err)
 				}
 				got := snapshotDatabase(t, db)

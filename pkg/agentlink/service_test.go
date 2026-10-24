@@ -73,12 +73,13 @@ func (f *fixture) open() {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	mail, err := assistant.OpenMailbox(filepath.Join(f.root, "tasks.sqlite"), f.id, assistant.MailboxOptions{})
+	db, err := storage.OpenDatabase(filepath.Join(f.root, "tasks.sqlite"), storage.TasksDatabase)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	db, err := storage.OpenDatabase(filepath.Join(f.root, "tasks.sqlite"), storage.TasksDatabase)
+	mail, err := assistant.OpenMailbox(db, f.id, assistant.MailboxOptions{})
 	if err != nil {
+		db.Close()
 		f.t.Fatal(err)
 	}
 	f.mail = sqlMailbox{mail, db}
@@ -127,7 +128,6 @@ func (f *fixture) start(address string) {
 func (f *fixture) stop() { f.cancel(); f.listener.Close(); f.service.closeSessions(); <-f.done }
 func (f *fixture) close() {
 	f.service.closeSessions()
-	f.mail.Mailbox.Close()
 	f.mail.db.Close()
 	f.secret.Close()
 	f.db.Close()

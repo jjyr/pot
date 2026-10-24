@@ -10,7 +10,6 @@ import (
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
-	"path/filepath"
 	"time"
 )
 
@@ -24,18 +23,17 @@ type Journal struct {
 	resources storage.ResourceFiles
 }
 
-func OpenJournal(path, nodeID, bootID string) (*Journal, error) {
+// OpenJournal borrows an already migrated Tasks database. The caller owns Close.
+func OpenJournal(db *sql.DB, cache, nodeID, bootID string) (*Journal, error) {
 	if !core.Identifier(nodeID) || !core.Identifier(bootID) {
 		return nil, fmt.Errorf("invalid local task node identity")
 	}
-	db, err := storage.OpenDatabase(path, storage.TasksDatabase)
-	if err != nil {
-		return nil, err
+	if db == nil {
+		return nil, fmt.Errorf("run journal requires a Tasks database")
 	}
-	cache := filepath.Join(filepath.Dir(path), "cache", "resources")
 
 	j := &Journal{db: db, NodeID: nodeID, BootID: bootID, resources: storage.ResourceFiles{Root: cache}}
-	err = storage.Transaction(context.Background(), db, func(tx *sql.Tx) error {
+	err := storage.Transaction(context.Background(), db, func(tx *sql.Tx) error {
 		rows, err := tx.Query("SELECT control_id,task_id,run_id,body FROM task_runs")
 		if err != nil {
 			return err
@@ -81,12 +79,10 @@ func OpenJournal(path, nodeID, bootID string) (*Journal, error) {
 		return nil
 	})
 	if err != nil {
-		db.Close()
 		return nil, err
 	}
 	return j, nil
 }
-func (j *Journal) Close() error { return j.db.Close() }
 
 // CheckPolicyCleanup prevents a fresh node boot from acknowledging revocation
 // while prior execution still requires authoritative cleanup reconciliation.

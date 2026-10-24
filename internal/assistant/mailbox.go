@@ -28,15 +28,15 @@ type MailboxOptions struct {
 	OwnerAvailable func(context.Context, string) error
 }
 
-func OpenMailbox(path, nodeID string, options MailboxOptions) (*Mailbox, error) {
+// OpenMailbox borrows an already migrated Tasks database. The caller owns Close.
+func OpenMailbox(db *sql.DB, nodeID string, options MailboxOptions) (*Mailbox, error) {
 	if !(protocol.AgentRef{NodeID: nodeID, Kind: "assistant", AgentID: "identity"}).Valid() {
 		return nil, errors.New("invalid Control identity")
 	}
-	db, err := storage.OpenDatabase(path, storage.TasksDatabase)
-	if err != nil {
-		return nil, err
+	if db == nil {
+		return nil, errors.New("mailbox requires a Tasks database")
 	}
-	err = storage.Transaction(context.Background(), db, func(tx *sql.Tx) error {
+	err := storage.Transaction(context.Background(), db, func(tx *sql.Tx) error {
 		if _, err := tx.Exec("INSERT OR IGNORE INTO assistant_mail_identity VALUES (1,?)", nodeID); err != nil {
 			return err
 		}
@@ -51,12 +51,10 @@ func OpenMailbox(path, nodeID string, options MailboxOptions) (*Mailbox, error) 
 		return err
 	})
 	if err != nil {
-		db.Close()
 		return nil, err
 	}
 	return &Mailbox{db: db, nodeID: nodeID, options: options}, nil
 }
-func (m *Mailbox) Close() error   { return m.db.Close() }
 func (m *Mailbox) NodeID() string { return m.nodeID }
 func (m *Mailbox) Register(ctx context.Context, directory protocol.Directory) error {
 	if directory.NodeID == m.nodeID || !(protocol.AgentRef{NodeID: directory.NodeID, Kind: "assistant", AgentID: "identity"}).Valid() {

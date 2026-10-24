@@ -126,6 +126,9 @@ type Conversation struct {
 	modelCount                  uint64
 	blocked, closed, finalizing bool
 	lastError                   error
+	finishError                 error
+	completion                  *turnCompletion
+	finishedRequest             string
 	subscribers                 map[chan protocol.Snapshot]struct{}
 	uiSubscribers               map[chan struct{}]struct{}
 	closeOnce                   sync.Once
@@ -268,6 +271,21 @@ func OpenConversation(path string, options ConversationOptions) (*Conversation, 
 		}
 		c.recovery = &recovered
 	}
+	if raw, exists, err := store.Get(context.Background(), "conversation.completion"); err != nil {
+		stop()
+		return nil, err
+	} else if exists && raw != "null" {
+		var completion turnCompletion
+		if err := core.DecodeJSON([]byte(raw), &completion); err != nil {
+			stop()
+			return nil, err
+		}
+		if err := completion.validate(options, thread); err != nil {
+			stop()
+			return nil, err
+		}
+		c.completion = &completion
+	}
 	if raw, exists, err := store.Get(context.Background(), "conversation.turn"); err != nil {
 		stop()
 		return nil, err
@@ -282,7 +300,12 @@ func OpenConversation(path string, options ConversationOptions) (*Conversation, 
 			return nil, errors.New("persisted turn binding mismatch")
 		}
 		c.turn = &turn
-		if isCompactRequest(turn.Request.RequestID) {
+		if c.completion != nil {
+			if c.completion.Turn.Request.RequestID != turn.Request.RequestID {
+				stop()
+				return nil, errors.New("completion differs from active turn")
+			}
+		} else if isCompactRequest(turn.Request.RequestID) {
 			if err := c.abandonIdleLocked(context.Background()); err != nil {
 				stop()
 				return nil, err
@@ -302,8 +325,23 @@ func OpenConversation(path string, options ConversationOptions) (*Conversation, 
 			}
 		}
 	}
+	if c.completion != nil {
+		turn := c.completion.Turn
+		c.turn = &turn
+		c.finalizing = true
+	}
 	go c.idleLoop()
-	go func() { defer close(c.done); _ = (Driver{Manager: options.Manager, Services: c}).Serve(ctx, c.input) }()
+	pending := c.completion
+	go func() {
+		defer close(c.done)
+		driver := Driver{Manager: options.Manager, Services: c}
+		if pending != nil {
+			if err := driver.finish(ctx, pending.Turn.Request, pending.result()); err != nil {
+				return
+			}
+		}
+		_ = driver.Serve(ctx, c.input)
+	}()
 	ok = true
 	return c, nil
 }
@@ -313,7 +351,7 @@ func (c *Conversation) stateLocked() protocol.Snapshot {
 	if c.thread == nil {
 		phase = protocol.NeedsConfiguration
 	}
-	if c.blocked || c.lastError != nil && c.turn == nil {
+	if c.blocked || c.finishError != nil || c.lastError != nil && c.turn == nil {
 		phase = protocol.AgentFailed
 	}
 	if c.lastError != nil {
@@ -323,6 +361,9 @@ func (c *Conversation) stateLocked() protocol.Snapshot {
 	var turn *protocol.TurnState
 	if c.turn != nil {
 		turn = &protocol.TurnState{UserMessageID: c.turn.UserMessageID, Cancelling: c.turn.Cancelling, Paused: c.turn.Paused, State: c.turn.State}
+		if c.finishError != nil {
+			turn.State = "unknown"
+		}
 		if c.turn.Paused {
 			message := "Paused before the next model request"
 			detail = &message
@@ -605,7 +646,9 @@ func (c *Conversation) Cancel(ctx context.Context, request protocol.CancelTurn) 
 	}
 	previous := *c.turn
 	c.turn.Cancelling = true
-	if c.turn.State == "waiting" {
+	// A failed completion write still belongs to the driver's retry loop.
+	// Record cancellation intent without retiring the turn underneath that loop.
+	if c.turn.State == "waiting" && !c.finalizing {
 		c.turn = nil
 		if err := c.appendTurnMetadataLocked(ctx, map[string]string{key: request.UserMessageID}); err != nil {
 			c.turn = &previous
@@ -635,9 +678,26 @@ func (c *Conversation) Cancel(ctx context.Context, request protocol.CancelTurn) 
 		}
 		return c.startNextUserLocked(ctx)
 	}
-	if err := c.appendTurnMetadataLocked(ctx, map[string]string{key: request.UserMessageID}); err != nil {
+	metadata := map[string]string{key: request.UserMessageID}
+	var completion *turnCompletion
+	if c.turn.State == "waiting" && c.completion == nil {
+		// Commit the cancellation and its terminal receipt together, so a restart
+		// before the driver's next retry cannot strand a cancelling waiting turn.
+		pending := turnCompletion{Turn: *c.turn, Phase: execution.Cancelled, Error: context.Canceled.Error()}
+		raw, err := json.Marshal(pending)
+		if err != nil {
+			c.turn = &previous
+			return err
+		}
+		metadata["conversation.completion"] = string(raw)
+		completion = &pending
+	}
+	if err := c.appendTurnMetadataLocked(ctx, metadata); err != nil {
 		c.turn = &previous
 		return err
+	}
+	if completion != nil {
+		c.completion = completion
 	}
 	if c.runCancel != nil {
 		c.runCancel()
@@ -943,22 +1003,47 @@ func IsWaiting(err error) bool {
 func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMessage, result execution.Result) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.finishedRequest == request.RequestID && (c.turn == nil || c.turn.Request.RequestID != request.RequestID) {
+		if err := c.startNextUserLocked(ctx); err != nil {
+			return err
+		}
+		c.finishError, c.lastError = nil, result.Err
+		return c.appendTurnLocked(ctx)
+	}
 	if c.turn == nil || c.turn.Request.RequestID != request.RequestID {
 		return errors.New("turn completion binding changed")
 	}
 	c.runCancel = nil
-	c.finalizing = false
+	c.finalizing = true
 	if isCompactRequest(request.RequestID) {
 		c.lastError = nil
 		if err := c.abandonIdleLocked(ctx); err != nil {
 			return err
 		}
+		c.finishedRequest = request.RequestID
+		c.finalizing, c.finishError = false, nil
+		c.changedLocked()
 		return c.startNextUserLocked(ctx)
 	}
 
+	if c.completion != nil {
+		result = c.completion.result()
+	}
 	if IsWaiting(result.Err) && !c.turn.Cancelling {
 		c.turn.State = "waiting"
-		return c.appendTurnLocked(ctx)
+		if err := c.appendTurnLocked(ctx); err != nil {
+			return err
+		}
+		c.finalizing, c.finishError = false, nil
+		c.lastError = result.Err
+		c.changedLocked()
+		return nil
+	}
+	if IsWaiting(result.Err) && c.turn.Cancelling {
+		result = execution.Result{Phase: execution.Cancelled, Err: context.Canceled}
+	}
+	if err := c.recordCompletionLocked(ctx, result); err != nil {
+		return err
 	}
 	if result.Phase == execution.Interrupted {
 		c.blocked = true
@@ -1013,7 +1098,8 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 			}
 		}
 		if reply.ID == "" {
-			reply = protocol.Message{ID: storage.ID(), ConversationID: c.options.ConversationID, Role: protocol.Assistant, CreatedAtMS: storage.Now()}
+			digest, _ := core.HashJSON([]string{"completion", c.turn.attemptID()})
+			reply = protocol.Message{ID: "finish-" + digest, ConversationID: c.options.ConversationID, Role: protocol.Assistant, CreatedAtMS: storage.Now()}
 		}
 		reply.ReplyTo = c.turn.UserMessageID
 		reply.Status = protocol.Failed
@@ -1025,6 +1111,7 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 		if err := c.putMessageLocked(ctx, reply, nil); err != nil {
 			return err
 		}
+		c.turn.ReplyMessageID = reply.ID
 	}
 	if (result.Phase == execution.Failed || result.Phase == execution.Cancelled) && !c.blocked {
 		raw, _ := json.Marshal(c.turn)
@@ -1041,10 +1128,17 @@ func (c *Conversation) FinishTurn(ctx context.Context, request protocol.SendMess
 			return err
 		}
 	}
+	previous := c.turn
 	c.turn = nil
-	if err := c.appendTurnLocked(ctx); err != nil {
+	if err := c.appendTurnMetadataLocked(ctx, map[string]string{"conversation.completion": "null"}); err != nil {
+		c.turn = previous
 		return err
 	}
+	c.completion = nil
+	c.finishedRequest = request.RequestID
+	c.finalizing, c.finishError = false, nil
+	c.lastError = result.Err
+	c.changedLocked()
 	return c.startNextUserLocked(ctx)
 }
 

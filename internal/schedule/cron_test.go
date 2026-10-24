@@ -183,14 +183,14 @@ func TestCronConcurrentOccurrenceRestartPauseAndEdit(t *testing.T) {
 	if err := f.tasks.DB().QueryRow("PRAGMA database_list").Scan(&sequence, &database, &path); err != nil {
 		t.Fatal(err)
 	}
-	if err = f.tasks.Close(); err != nil {
+	if err = f.tasks.DB().Close(); err != nil {
 		t.Fatal(err)
 	}
-	queue, err := tasks.Open(path, tasks.Options{NodeID: "machine", Executor: f.destination, ResolveModel: func(context.Context, string, protocol.CreateTask) (tasks.Selection, error) { return selection, nil }})
+	queue, err := openTasks(t, path, tasks.Options{NodeID: "machine", Executor: f.destination, ResolveModel: func(context.Context, string, protocol.CreateTask) (tasks.Selection, error) { return selection, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer queue.Close()
+	defer queue.DB().Close()
 	service, err := New(Options{Tasks: queue, Ready: func(context.Context, string) (bool, error) { return true, nil }, SystemTimezone: func() (string, error) { return "Asia/Tokyo", nil }})
 	if err != nil {
 		t.Fatal(err)

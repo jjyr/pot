@@ -12,6 +12,7 @@ func TestChatReplyLifecycleUsesExecutionRatherThanOutputCompletion(t *testing.T)
 		{&TurnState{UserMessageID: "input", Paused: true}, "paused"},
 		{&TurnState{UserMessageID: "input", State: "waiting"}, "waiting"},
 		{&TurnState{UserMessageID: "input", Cancelling: true}, "cancelling"},
+		{&TurnState{UserMessageID: "input", State: "unknown"}, "unknown"},
 		{nil, "completed"},
 	} {
 		rows := ProjectChatReplies(messages, test.turn)

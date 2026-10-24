@@ -70,7 +70,9 @@ func ProjectChatReplies(messages []Message, turn *TurnState) []ChatReply {
 	}
 	if turn != nil {
 		state := "running"
-		if turn.Cancelling {
+		if turn.State == "unknown" {
+			state = "unknown"
+		} else if turn.Cancelling {
 			state = "cancelling"
 		} else if turn.Paused {
 			state = "paused"

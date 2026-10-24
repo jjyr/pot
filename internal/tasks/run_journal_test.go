@@ -15,11 +15,11 @@ import (
 func TestExecutionStartAndCleanupProofSurviveResumeAndRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "tasks.sqlite")
-	j, err := OpenJournal(path, "runtime", "boot")
+	j, err := openJournal(t, path, "runtime", "boot")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer j.Close()
+	defer j.db.Close()
 	launch := launchFixture(t)
 	accepted, err := j.Accept(ctx, launch)
 	if err != nil || accepted.StartedAtMS != 0 {
@@ -54,14 +54,14 @@ func TestExecutionStartAndCleanupProofSurviveResumeAndRestart(t *testing.T) {
 	if err := j.RecordCleanup(ctx, "runtime", "task", "run"); err != nil {
 		t.Fatal(err)
 	}
-	if err := j.Close(); err != nil {
+	if err := j.db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	j, err = OpenJournal(path, "runtime", "nextboot")
+	j, err = openJournal(t, path, "runtime", "nextboot")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer j.Close()
+	defer j.db.Close()
 	restored, err := j.Inspect(ctx, "runtime", "task", "run")
 	if err != nil || restored.StartedAtMS != started || restored.Phase != RecoveryRequired || !restored.CleanupConfirmed {
 		t.Fatal("restart lost execution start or cleanup proof", restored, err)
@@ -86,16 +86,16 @@ func launchFixture(t *testing.T) Launch {
 func TestImmutableLaunchDuplicateClaimsAndTerminalReceipt(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "tasks.sqlite")
-	a, err := OpenJournal(path, "runtime", "boot")
+	a, err := openJournal(t, path, "runtime", "boot")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer a.Close()
-	b, err := OpenJournal(path, "runtime", "boot")
+	defer a.db.Close()
+	b, err := openJournal(t, path, "runtime", "boot")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer b.Close()
+	defer b.db.Close()
 	launch := launchFixture(t)
 	accepted, err := a.Accept(ctx, launch)
 	if err != nil {
@@ -140,7 +140,7 @@ func TestImmutableLaunchDuplicateClaimsAndTerminalReceipt(t *testing.T) {
 func TestRestartFencesOriginalRunAndNeverReclaims(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "tasks.sqlite")
-	j, err := OpenJournal(path, "runtime", "boot-one")
+	j, err := openJournal(t, path, "runtime", "boot-one")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,12 +152,12 @@ func TestRestartFencesOriginalRunAndNeverReclaims(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	j.Close()
-	j, err = OpenJournal(path, "runtime", "boot-two")
+	j.db.Close()
+	j, err = openJournal(t, path, "runtime", "boot-two")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer j.Close()
+	defer j.db.Close()
 	record, err := j.Inspect(ctx, "runtime", "task", "run")
 	if err != nil || record.Phase != RecoveryRequired {
 		t.Fatal(record, err)

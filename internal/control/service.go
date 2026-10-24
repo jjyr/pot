@@ -90,6 +90,7 @@ type Service struct {
 	Tasks               *tasks.Service
 	Schedules           *schedule.Service
 	Mailbox             *assistant.Mailbox
+	tasksDB             *sql.DB
 	Terminals           *terminal.Hub
 	taskLife            *taskLifecycle
 }
@@ -251,10 +252,19 @@ func (s *Service) Conversation(ctx context.Context, id string) (*assistant.Conve
 	options.ValidateAttachments = func(ctx context.Context, spec core.ResolvedSpec, items []core.Attachment) error {
 		return s.Attachments.Validate(id, items, spec.AttachmentCapabilities())
 	}
+	// Restart completion can admit a queued input before OpenConversation returns.
+	// Publish the captured receiver before any resumed preparation can use it.
+	ready := make(chan struct{})
 	options.Prepare = func(ctx context.Context, thread core.Thread, request core.TurnRequest) (assistant.RunOptions, error) {
-		return s.prepare(ctx, conversation, thread, request)
+		select {
+		case <-ready:
+			return s.prepare(ctx, conversation, thread, request)
+		case <-ctx.Done():
+			return assistant.RunOptions{}, ctx.Err()
+		}
 	}
 	conversation, err = assistant.OpenConversation(filepath.Join(s.options.Root, "assistants", id, "conversation.sqlite"), options)
+	close(ready)
 	if err != nil {
 		return nil, err
 	}
@@ -477,14 +487,8 @@ func (s *Service) Close() error {
 	if s.Machines != nil {
 		result = errors.Join(result, s.Machines.Close())
 	}
-	if s.RunJournal != nil {
-		result = errors.Join(result, s.RunJournal.Close())
-	}
-	if s.Tasks != nil {
-		result = errors.Join(result, s.Tasks.Close())
-	}
-	if s.Mailbox != nil {
-		result = errors.Join(result, s.Mailbox.Close())
+	if s.tasksDB != nil {
+		result = errors.Join(result, s.tasksDB.Close())
 	}
 	if s.Operations != nil {
 		result = errors.Join(result, s.Operations.Close())

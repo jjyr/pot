@@ -3,7 +3,6 @@ package control
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -78,7 +77,7 @@ func TestAssistantRetirementSerializesMailboxAdmission(t *testing.T) {
 	defer unblock()
 	// Pause after validating the recipient, while the actual inbox writer
 	// transaction is still held. Deletion must wait and then see this mail.
-	mail, err := assistant.OpenMailbox(filepath.Join(s.options.Root, "tasks.sqlite"), s.options.RuntimeID, assistant.MailboxOptions{OwnerAvailable: func(ctx context.Context, owner string) error {
+	mail, err := assistant.OpenMailbox(s.tasksDB, s.options.RuntimeID, assistant.MailboxOptions{OwnerAvailable: func(ctx context.Context, owner string) error {
 		if err := s.assistantAvailable(ctx, owner); err != nil {
 			return err
 		}
@@ -93,7 +92,6 @@ func TestAssistantRetirementSerializesMailboxAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { unblock(); mail.Close() }()
 	delivered := make(chan error, 1)
 	go func() { _, err := mail.Deliver(ctx, retirementMail(s)); delivered <- err }()
 	select {
@@ -102,11 +100,12 @@ func TestAssistantRetirementSerializesMailboxAdmission(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 	revision := currentAssistantRevision(t, s, "main")
+	waits := s.Tasks.DB().Stats().WaitCount
 	deleted := make(chan error, 1)
 	go func() { deleted <- s.DeleteAssistant(ctx, "main", revision) }()
-	// The maintenance fixture has no dispatcher. A borrowed connection here
-	// proves retirement has reached the competing writer transaction.
-	for s.Tasks.DB().Stats().InUse == 0 {
+	// The maintenance fixture has no dispatcher. A new pool wait proves
+	// retirement has reached the shared connection held by admission.
+	for s.Tasks.DB().Stats().WaitCount == waits {
 		select {
 		case err := <-deleted:
 			t.Fatalf("retirement escaped the inbox transaction: %v", err)

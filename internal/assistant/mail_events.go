@@ -88,7 +88,7 @@ func (m *Mailbox) FinishChat(ctx context.Context, owner, turn, event string, suc
 			if success {
 				state = "processed"
 			}
-			_, err := tx.ExecContext(ctx, "UPDATE agent_messages SET state=? WHERE (id=? OR id IN (SELECT message FROM agent_delivery_items WHERE batch=?)) AND recipient=? AND state='processing' AND json_extract(envelope,'$.kind') IN ('task_result','plugin_event','message')", state, event, event, owner)
+			_, err := tx.ExecContext(ctx, "UPDATE agent_messages SET state=?,detail=NULL WHERE (id=? OR id IN (SELECT message FROM agent_delivery_items WHERE batch=?)) AND recipient=? AND state IN ('processing','interrupted') AND json_extract(envelope,'$.kind') IN ('task_result','plugin_event','message')", state, event, event, owner)
 			return err
 		}
 		return nil

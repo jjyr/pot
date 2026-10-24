@@ -12,20 +12,20 @@ import (
 func TestScheduledLaunchCapacitySurvivesJournalRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "tasks.sqlite")
-	j, err := OpenJournal(path, "runtime", "boot")
+	j, err := openJournal(t, path, "runtime", "boot")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { j.Close() })
+	t.Cleanup(func() { j.db.Close() })
 	launch := launchFixture(t)
 	launch.Text = "a" + strings.Repeat("\x00", protocol.MaxScheduledTaskTextBytes-1)
 	if _, err := j.Accept(ctx, launch); err != nil {
 		t.Fatal(err)
 	}
-	if err := j.Close(); err != nil {
+	if err := j.db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	j, err = OpenJournal(path, "runtime", "nextboot")
+	j, err = openJournal(t, path, "runtime", "nextboot")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -70,12 +70,12 @@ func TestOwnerBatchArchiveAndContinuationPreserveTaskAndReceipts(t *testing.T) {
 		t.Fatal("failed batch partially committed")
 	}
 	options := s.options
-	s.Close()
-	restored, err := Open(path, options)
+	s.db.Close()
+	restored, err := openTasks(t, path, options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer restored.Close()
+	defer restored.db.Close()
 	if err = restored.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}

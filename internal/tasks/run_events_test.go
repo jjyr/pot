@@ -10,7 +10,7 @@ import (
 func TestRunnerTranscriptIsOrderedPagedAndSurvivesRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "tasks.sqlite")
-	journal, err := OpenJournal(path, "runtime", "boot")
+	journal, err := openJournal(t, path, "runtime", "boot")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,12 +32,12 @@ func TestRunnerTranscriptIsOrderedPagedAndSurvivesRestart(t *testing.T) {
 	if err != nil || len(first.Events) != 2 || first.Cursor != 2 || !first.HasMore {
 		t.Fatal(first, err)
 	}
-	journal.Close()
-	journal, err = OpenJournal(path, "runtime", "next-boot")
+	journal.db.Close()
+	journal, err = openJournal(t, path, "runtime", "next-boot")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer journal.Close()
+	defer journal.db.Close()
 	last, err := journal.Events(ctx, "runtime", "task", "run", first.Cursor, 2)
 	if err != nil || len(last.Events) != 1 || last.Cursor != 3 || last.HasMore {
 		t.Fatal(last, err)
