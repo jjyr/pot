@@ -202,11 +202,8 @@ func supervise() int {
 	case <-done:
 	case <-signals:
 		interrupted = true
-		_ = child.Process.Kill()
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			err = errors.New("original process did not exit")
+		if stopErr := cancelOriginal(observer, child.Process, done); stopErr != nil {
+			err = stopErr
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -234,4 +231,14 @@ func supervise() int {
 		return 128
 	}
 	return code
+}
+
+func stopOriginal(original *os.Process, done <-chan error) error {
+	_ = original.Kill()
+	select {
+	case <-done:
+		return nil
+	case <-time.After(5 * time.Second):
+		return errors.New("original process did not exit")
+	}
 }

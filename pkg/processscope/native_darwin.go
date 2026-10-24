@@ -45,12 +45,18 @@ func prepareNative() error { return nil }
 
 type nativeObserver struct {
 	mu          sync.Mutex
+	root        uint64
 	known       map[uint64]bool
 	markers     Markers
 	allow, deny *C.char
 	stop        chan struct{}
 	done        chan struct{}
 	err         error
+}
+
+type nativeMember struct {
+	pid        int
+	id, parent uint64
 }
 
 func identity(pid int) (uint64, uint64, bool) {
@@ -65,7 +71,7 @@ func observeNative(pid int, markers Markers) (*nativeObserver, error) {
 	if !ok {
 		return nil, errors.New("process identity unavailable")
 	}
-	o := &nativeObserver{known: map[uint64]bool{id: true}, markers: markers, stop: make(chan struct{}), done: make(chan struct{})}
+	o := &nativeObserver{root: id, known: map[uint64]bool{id: true}, markers: markers, stop: make(chan struct{}), done: make(chan struct{})}
 	if markers.Allow != "" {
 		o.allow = C.CString(markers.Allow)
 		o.deny = C.CString(markers.Deny)
@@ -88,21 +94,17 @@ func observeNative(pid int, markers Markers) (*nativeObserver, error) {
 	}()
 	return o, nil
 }
-func (o *nativeObserver) members() ([]int, error) {
+func (o *nativeObserver) members() ([]nativeMember, error) {
 	rows, err := unix.SysctlKinfoProcSlice("kern.proc.uid", unix.Getuid())
 	if err != nil {
 		return nil, err
 	}
-	type entry struct {
-		pid        int
-		id, parent uint64
-	}
-	entries := []entry{}
+	entries := []nativeMember{}
 	for _, row := range rows {
 		pid := int(row.Proc.P_pid)
 		id, parent, ok := identity(pid)
 		if ok {
-			entries = append(entries, entry{pid, id, parent})
+			entries = append(entries, nativeMember{pid, id, parent})
 		}
 	}
 	// Stable original-parent identities continue identifying detached children
@@ -116,7 +118,7 @@ func (o *nativeObserver) members() ([]int, error) {
 			}
 		}
 	}
-	found := []int{}
+	found := []nativeMember{}
 	for _, item := range entries {
 		member := o.known[item.id]
 		if o.allow != nil {
@@ -130,7 +132,7 @@ func (o *nativeObserver) members() ([]int, error) {
 			member = member || result == 1
 		}
 		if member {
-			found = append(found, item.pid)
+			found = append(found, item)
 		}
 	}
 	return found, nil
@@ -153,8 +155,8 @@ func (o *nativeObserver) Drain(ctx context.Context) error {
 		} else {
 			stable = 0
 		}
-		for _, pid := range members {
-			if err := unix.Kill(pid, unix.SIGKILL); err != nil && !errors.Is(err, unix.ESRCH) {
+		for _, member := range members {
+			if err := unix.Kill(member.pid, unix.SIGKILL); err != nil && !errors.Is(err, unix.ESRCH) {
 				return err
 			}
 		}

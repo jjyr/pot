@@ -168,6 +168,14 @@ identities and per-sandbox policy membership probes, including detached members;
 these native interfaces are qualified by the real sandbox suite. Host authority
 is broader than this protection and is not an OS isolation guarantee.
 
+On macOS, cancellation skips the reaping window when its first membership scan
+finds no descendants and force-stops the original workload immediately. Otherwise,
+it stops leaf descendants first and gives their parents a shared 250 ms window
+to reap them and handle exit notifications, even after the descendants disappear.
+The trusted supervisor stays alive and drains all remaining tracked members
+before issuing a cleanup receipt. The window is bounded independently of tree depth.
+Linux keeps its original workload-first termination and subreaper drain sequence.
+
 Cancellation/timeout stops the original execution and drains descendants, terminal
 handles, plugin/browser sessions and SDK helpers. Missing/failed cleanup receipts
 are errors. Only confirmed cleanup permits temporary directories to be removed;
