@@ -26,6 +26,7 @@ concurrency:
 
 env:
   MISE_AUTO_INSTALL: 'false'
+  POT_TEST_TIMEOUT_SCALE: '4'
 
 jobs:
   product:
@@ -41,7 +42,7 @@ jobs:
           - {name: Race 3/4, mode: race, shard: '3/4'}
           - {name: Race 4/4, mode: race, shard: '4/4'}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:

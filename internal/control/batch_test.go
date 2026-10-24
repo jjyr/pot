@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/core"
 	"io"
 	"net/http"
@@ -66,7 +67,7 @@ func batchReply(w http.ResponseWriter, text string) {
 
 func TestQueuedUserAndTaskOutcomesUseSeparateAggregatedModelTurns(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 15*time.Second))
 	defer cancel()
 	entered, release := make(chan struct{}), make(chan struct{})
 	var users, summaries atomic.Int32
@@ -182,7 +183,7 @@ func TestQueuedUserAndTaskOutcomesUseSeparateAggregatedModelTurns(t *testing.T) 
 
 func TestAgentCommunicationBatchesBySenderInSharedAssistantHistory(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 12*time.Second))
 	defer cancel()
 	var calls atomic.Int32
 	s, _ := batchService(t, func(w http.ResponseWriter, r *http.Request) {
@@ -266,7 +267,7 @@ func TestBatchRequestCategoryPreservesOriginalInputs(t *testing.T) {
 
 func TestNotificationsShareOrderedBatchAfterUserInput(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 12*time.Second))
 	defer cancel()
 	entered, release := make(chan struct{}), make(chan struct{})
 	var users, summaries atomic.Int32

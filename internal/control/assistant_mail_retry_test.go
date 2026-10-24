@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"path/filepath"
 
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/execution"
@@ -24,7 +25,7 @@ import (
 // confirmed model failure can be continued without replaying completed tools.
 func TestAssistantMailContinuationRestoresOriginalDelivery(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 15*time.Second))
 	defer cancel()
 	var calls atomic.Int32
 	var peerID string
@@ -105,7 +106,7 @@ func TestAssistantMailContinuationRestoresOriginalDelivery(t *testing.T) {
 
 func TestFailedAssistantMailDoesNotStarveLaterConversation(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 10*time.Second))
 	defer cancel()
 	var calls atomic.Int32
 	s, _ := batchService(t, func(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +175,7 @@ func TestFailedAssistantMailDoesNotStarveLaterConversation(t *testing.T) {
 
 func TestAcceptedSendSurvivesTranscriptWriteFailureWithoutResend(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 10*time.Second))
 	defer cancel()
 	var calls atomic.Int32
 	var peerID string
@@ -241,7 +242,7 @@ func TestAcceptedSendSurvivesTranscriptWriteFailureWithoutResend(t *testing.T) {
 
 func TestAssistantMailAllowanceResumeAfterRestartRestoresDelivery(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 15*time.Second))
 	defer cancel()
 	var calls atomic.Int32
 	var peerID string

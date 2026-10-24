@@ -98,7 +98,7 @@ Go tests without race instrumentation. `test` runs the normal and focused race
 suites independently, alongside UI/packaging/API checks. `test:race` no longer
 implicitly repeats the normal suite. Both paths use a configurable 20-minute
 per-package timeout (`POT_GO_TEST_TIMEOUT`, or `scripts/test_go.py --timeout`);
-CI bounds each product job to 20 minutes. `test:race:all` is the explicit complete race suite for changes
+CI bounds each product job to 60 minutes. `test:race:all` is the explicit complete race suite for changes
 to concurrency, persistence or lifecycle architecture. Run it when changing
 shared state or the scope of the focused plan.
 
@@ -120,6 +120,15 @@ selection is applied inside each shard without changing its exclusions or test
 patterns. Empty shards exit successfully without falling back to `./...`.
 Independent full-package and selected-package race commands run with at most two
 workers, so Control does not wait behind all other packages.
+
+Asynchronous integration-test waits use `internal/testutil.Timeout`. Local runs
+retain their normal budgets; CI sets `POT_TEST_TIMEOUT_SCALE=4` so a five-second
+wait gets twenty seconds and a fifteen-second end-to-end fixture gets a minute.
+Set the same variable locally to reproduce a slow-runner budget. This scales
+test harness waits only, never product deadlines, polling intervals, timeout
+inputs under test or the Darwin cancellation grace. A fixture with an overall
+context should pass that context to its wait helper instead of adding a shorter
+independent deadline. All assertions and fail-on-error behavior remain enabled.
 
 Control tests with independent roots, listeners and execution managers run in
 parallel, bounded by eight active cases and the available Go parallelism.

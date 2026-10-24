@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/executor"
 	"github.com/jjyr/pot/pkg/modelprotocol"
@@ -155,7 +156,7 @@ func TestRealUnixSocketRequiresHostApproval(t *testing.T) {
 			args["justification"] = "Connect to the synthetic host agent socket"
 		}
 		encoded, _ := json.Marshal(args)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 10*time.Second))
 		defer cancel()
 		approvals := 0
 		raw, err := d.Dispatch(ctx, execution, modelprotocol.ToolCall{ID: id, Name: "exec_command", Arguments: encoded}, func(update core.Update) error {

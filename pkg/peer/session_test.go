@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jjyr/pot/internal/testutil"
 	"io"
 	"net"
 	"strings"
@@ -23,7 +24,7 @@ func TestMalformedStreamDoesNotPoisonSession(t *testing.T) {
 		mu.Unlock()
 		return r.Params, nil
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 	defer cancel()
 	for _, tc := range []struct {
 		id     string
@@ -78,7 +79,7 @@ func TestCapacityAndAbandonedWaitsDoNotCancelBusinessWork(t *testing.T) {
 		}
 		return r.Params, nil
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 8*time.Second))
 	defer cancel()
 	calls, stop := context.WithCancel(ctx)
 	defer stop()
@@ -142,7 +143,7 @@ func TestCapacityAndAbandonedWaitsDoNotCancelBusinessWork(t *testing.T) {
 func TestNotifyDeliversOnlyEventHint(t *testing.T) {
 	events := make(chan Request, 1)
 	client, _ := sessionPair(t, func(_ context.Context, r Request) (json.RawMessage, error) { events <- r; return nil, nil })
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 	defer cancel()
 	if err := client.Notify(ctx, Request{"hint", "event.changed", json.RawMessage(`{"revision":2}`)}); err != nil {
 		t.Fatal(err)

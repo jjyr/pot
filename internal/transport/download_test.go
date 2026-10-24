@@ -5,6 +5,7 @@ import (
 	"github.com/jjyr/pot/internal/control"
 	product "github.com/jjyr/pot/internal/runtime"
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/internal/webui"
 	"github.com/jjyr/pot/pkg/protocol"
 	"io"
@@ -19,7 +20,7 @@ import (
 )
 
 func TestCompletedTaskDownloadStreamsBeyondOldProxyLimit(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 15*time.Second))
 	defer cancel()
 	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
