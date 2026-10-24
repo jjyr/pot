@@ -35,7 +35,7 @@ func TestDarwinCancellationPreservesParentExitHandling(t *testing.T) {
 }
 
 func TestDarwinCancellationReapsNestedDescendants(t *testing.T) {
-	branch := cancellationFixture + detachedSleeper + `child.on('exit',()=>{fs.writeFileSync('leaf-reaped','yes');process.exit(0)});`
+	branch := cancellationFixture + detachedSleeper + `child.on('exit',()=>setTimeout(()=>{fs.writeFileSync('leaf-reaped','yes');process.exit(0)},50));`
 	source := `const child=spawn(process.execPath,['-e',` + strconv.Quote(branch) + `],{stdio:'ignore'});child.on('exit',()=>{fs.writeFileSync('reaped','yes');process.exit(0)});`
 	directory, _ := testDarwinCancellation(t, source, true)
 	if body, err := os.ReadFile(filepath.Join(directory, "leaf-reaped")); err != nil || string(body) != "yes" {
