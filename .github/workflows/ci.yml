@@ -80,8 +80,10 @@ jobs:
           version: 2026.10.10
           cache: false
           install_args: go
-      - name: Verify per-connection forwarder lifecycle and real TLS reuse
-        run: mise exec -- go test -v -race -failfast ./pkg/agentlink -run '^(TestForwarder.*|TestConcurrentReconnectUsesOneAuthenticatedSession|TestEnsureSessionAfterCloseDoesNotReadReleasedStores|TestPromotedPairSessionSurvivesPendingHandshakeExpiry)$' -count=50
+      - name: Verify foreground and periodic fault ownership over real TLS
+        run: mise exec -- go test -v -race -failfast ./pkg/agentlink -run '^(TestMetadataFaultBelongsToItsActualCaller|TestInitialForegroundMetadataCoalescesPeriodicSampling)$' -count=20
+      - name: Verify browser deletion against the actual held RPC outcome and order
+        run: mise exec -- go test -v -race -failfast ./integrations/codex/agent -run '^TestCodexBrowserDeletion' -count=10
 
   product:
     if: inputs.diagnose-lifecycle != true
