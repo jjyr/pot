@@ -156,7 +156,7 @@ if mode=='timeout':
 		want = "skip"
 	}
 	if run.Hook == nil || run.Hook.Status != want || run.Hook.ExecutionMode != "host" {
-		t.Fatal(mode, run)
+		t.Fatalf("%s run=%+v hook=%+v", mode, run, run.Hook)
 	}
 	page, err := s.Tasks.Page(context.Background(), "main", protocol.TaskQuery{Scope: "all"})
 	if err != nil {
