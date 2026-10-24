@@ -207,11 +207,26 @@ func TestPipePTYResizeInterruptAndFinishedRead(t *testing.T) {
 	if result["session_id"] != nil {
 		t.Fatalf("interrupt did not settle: %v", result)
 	}
-	result = call(t, e, r, "exec_command", map[string]any{"cmd": "sleep .05; printf late", "yield_time_ms": 10})
+	// Keep this fixture alive until its session is retained, then wait for real
+	// completion before exercising a finished session's unread output.
+	result = call(t, e, r, "exec_command", map[string]any{"cmd": "read -r line; test \"$line\" = finish && printf late", "yield_time_ms": 10})
 	id = result["session_id"].(string)
-	time.Sleep(100 * time.Millisecond)
+	e.mu.Lock()
+	p := e.sessions[id]
+	e.mu.Unlock()
+	if p == nil {
+		t.Fatal("fixture session was not retained")
+	}
+	if _, err := fmt.Fprintln(p.input, "finish"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-p.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fixture did not finish before reading retained output")
+	}
 	result = call(t, e, r, "write_stdin", map[string]any{"session_id": id, "yield_time_ms": 100})
-	if result["stdout"] != "late" || result["session_id"] != nil {
+	if result["stdout"] != "late" || result["session_id"] != nil || result["execution_status"] != "finished" || result["exit_code"] != 0 {
 		t.Fatal(result)
 	}
 }

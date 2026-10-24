@@ -136,6 +136,8 @@ normal-only exception requires an explicit rationale in the reviewed manifest.
 The standalone `test:executor` remains available for local diagnosis; CI gets
 that full package coverage through `test:race` and does not run it twice.
 Any nonzero exit fails the check; no failing tests are retried.
+Finished-session output tests release a fixture through stdin and await its actual
+completion before reading retained output; a yield interval does not promise exit.
 UI tests cover owner-scoped state, drafts, IME, navigation and
 streamed output. Eval uses the production Agent with deterministic local fixtures;
 paid model calls run only through explicit live commands. Public API tests build
