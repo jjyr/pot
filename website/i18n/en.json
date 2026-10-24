@@ -183,7 +183,12 @@
     "成果回到对话": "Results in the conversation",
     "这是展示「从对话进入成果、再回到对话修改」的本地示例。它不代表助手已完成官网设计，也不创建任务。关闭后可继续查看下方的修改意见。": "This local example illustrates opening a result from a conversation, then returning to discuss changes. It does not represent completed assistant work or create a task. Close it to continue reading the feedback.",
     "send_message": "send_message",
-    "receive_message": "receive_message"
+    "receive_message": "receive_message",
+    "助手连接支持状态": "Assistant connection support",
+    "已支持": "Supported",
+    "即将支持": "Coming soon",
+    "查看 Codex 连接指南": "View Codex connection guide",
+    "查看连接指南": "View connection guide"
   },
   "demo": {
     "language": "Language",

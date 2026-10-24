@@ -24,7 +24,7 @@ META_DESCRIPTION_KEY = html.unescape(
 INSTALL = json.loads((ROOT / "install.json").read_text())
 REFERENCE = CATALOGS["en"]
 # Every meaningful template string must have an explicit catalog entry or be a brand.
-BRANDS = {"Pot", "Codex", "Claude", "Grok bot", "Devin", "Agent Link", "Pot.", "Pot → Codex"}
+BRANDS = {"Pot", "Codex", "Claude", "Grok", "Grok bot", "Antigravity", "Devin", "Agent Link", "Pot.", "Pot → Codex"}
 for match in re.finditer(r'>([^<>]+)<|(?:aria-label|alt|content)="([^"]*)"', TEMPLATE):
     key = html.unescape((match[1] or match[2]).strip())
     if re.search(r"[A-Za-z\u3400-\u9fff]", key) and not key.startswith(("width=", "#")):

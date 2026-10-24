@@ -126,3 +126,12 @@ html[lang="es"] .small-label{max-width:45%;text-align:right;line-height:1.7}
 .a01-dialog::backdrop{background:#282924aa}
 .assistant-section .section-heading h2{font-size:clamp(30px,3.5vw,46px)}.assistant-section .section-heading p{max-width:420px;color:#62655c;font-size:14px;line-height:1.95}.a01-story p,.a01-result-preview p{margin:0}.a01-story .a01-communication-body{margin:6px 0 8px 15px}.a01-story .a01-call-details p{font-size:11px}.a01-communication>summary,.a01-call-details>summary{cursor:pointer}.a01-result-preview>p{margin-top:20px}.a01-story{color:var(--ink)}.a01-dialog-top button{min-height:44px}
 @media(max-width:720px){.assistant-section{width:calc(100% - 40px)}.assistant-section .section-heading{display:block}.assistant-section .section-heading p{margin-top:16px}.a01-script-label{display:block;margin-bottom:16px}.a01-script-label h2{font-size:19px}.a01-script-label span{display:block;margin-top:6px}.a01-story{padding:20px 17px}.a01-story-top{font-size:11px}.a01-user{font-size:14px;max-width:96%;padding:10px 12px}.a01-communication>summary{padding-block:9px}.a01-route{gap:5px;font-size:10px;padding-left:10px}.a01-result-preview{padding:25px 20px}.a01-mini-site{padding:22px}.a01-mini-site h2{font-size:29px}.a01-mini-site p{font-size:13px}.a01-dialog-top{padding:12px 15px}.a01-dialog-top strong{font-size:12px}}
+
+.assistant-connections{margin-top:28px;font-size:13px;line-height:1.7}
+.assistant-support{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px 28px}
+.assistant-support li{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0}
+.assistant-support b{font-weight:600}
+.assistant-support li>span{color:#62655c}
+.assistant-support a,.connection-guide{color:var(--accent);text-decoration:underline;text-underline-offset:4px;min-height:44px;display:inline-flex;align-items:center}
+.connection-guide{margin-top:8px;font-size:13px}
+@media(max-width:580px){.assistant-support{display:grid;gap:8px}.assistant-support li{min-height:36px}.assistant-support li:first-child a{flex-basis:100%}}
