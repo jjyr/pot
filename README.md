@@ -4,7 +4,7 @@
 <h1 align="center">Pot</h1>
 <p align="center"><strong>Your AI assistant. From a conversation to completed work.</strong></p>
 
-[Website](https://pot.jjylab.com) · [Getting started](#install) · [Documentation](docs/README.md) · [Releases](https://github.com/jjyr/pot/releases)
+[Website](https://pot.jjylab.com) · [Getting started](#install) · [Connect other assistants](#connect-other-assistants) · [Documentation](docs/README.md) · [Releases](https://github.com/jjyr/pot/releases)
 
 Pot helps you turn a goal into work you can use. Your assistant can run background
 tasks, bring their results back to your conversation, and keep working with you.
@@ -29,8 +29,9 @@ to refine the work: “Make the mobile screenshots larger; keep this docs versio
 Connect another Pot or **Codex** through Agent Link. Talk to a connected assistant
 directly, or let Pot delegate work and collect the result. Each agent retains its
 own models, credentials, workspace and permissions. Pot-to-Pot connections and
-the [Codex adapter](integrations/codex/README.md) are included; Claude, Grok bot,
-Pi and other agents need compatible adapters of their own. Codex tasks use
+the [Codex adapter](integrations/codex/README.md) are supported. See
+[Connect other assistants](#connect-other-assistants) for setup and the status
+of Claude, Grok and Antigravity. Codex tasks use
 independent persistent threads and can run in parallel.
 
 [![Pot using Agent Link to request a Codex review and receive the result](docs/images/agent-link.png)](docs/images/agent-link.png)
@@ -118,6 +119,53 @@ ssh -L 17703:127.0.0.1:17703 user@your-server
 `pot serve` runs the Runtime; `-ui` adds its local browser interface.
 `pot web-ui-server` is an independent browser service with a separate data root.
 See [deployment](docs/deployment.md) for that setup, TLS and services.
+
+## Connect other assistants
+
+Agent Link supports Pot-to-Pot connections as well as Codex. To connect another
+Pot, follow the [Agent Link guide](docs/agent-links.md). External assistant
+support is listed below.
+
+### Codex
+
+**Supported.** Install the local Pot plugin on the computer running Codex:
+
+1. Use a Pot source checkout at the same revision as your Pot installation, with
+   [mise](https://mise.jdx.dev/getting-started.html) and the repository toolchain
+   installed (`mise install`). Install and sign in to Codex locally; the adapter
+   targets Codex CLI 0.163.0's App Server and requires plugin support.
+2. From that checkout, install the plugin:
+
+   ```sh
+   mise exec -- python3 integrations/codex/install.py
+   ```
+
+   The installer builds the Agent Link host, registers the local plugin source,
+   and enables Pot when the Codex CLI supports it. Otherwise, enable the
+   registered Pot plugin through Codex's plugin directory.
+3. Start a new Codex chat and run `pot-setup` to open the local connection page
+   inside Codex. Keep its temporary management URL private.
+4. Choose **Copy connection address**, then **Get connection address** for an
+   address Pot can reach: loopback on the same computer, or a suitable LAN,
+   public or Tailscale address across computers. Copy the complete connection
+   information shown.
+5. In Pot's **Add Agent**, paste that connection information and add the agent.
+
+The initial Codex assistant is read-only. See the
+[complete Codex guide](integrations/codex/README.md#install-and-connect) for
+workspace permissions, network details and the system-browser fallback.
+
+### Claude
+
+Coming soon.
+
+### Grok
+
+Coming soon.
+
+### Antigravity
+
+Coming soon.
 
 ## More ways to work
 

@@ -112,6 +112,10 @@ available at `https://jjyr.github.io/pot/zh-CN/`. The production website is avai
 The Pot/Codex connection, conversation and delegation capabilities are verified.
 Claude, Grok bot and Devin are explicitly labeled ecosystem concepts, rather than
 released native adapters. Nodes retain their own tools, credentials and approvals.
+Below the Agent Link demo, a compact list links to the root README's Codex
+connection steps and general assistant guide. Codex is supported; Claude, Grok
+and Antigravity are marked Coming soon. Setup instructions live in the README
+and the linked full Codex guide rather than being duplicated on the website.
 All website tasks, conversations, scheduled work and reports are local examples;
 they do not call real agents or contain real connection information.
 
