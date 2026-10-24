@@ -38,6 +38,11 @@ run = ["python scripts/tests/go-test-plan.py", "python scripts/test_go.py core -
 description = "Run normal tests and ancillary CI gates concurrently on one runner"
 depends = ["test:go:ci", "check:ci", "test:contracts", "test:release", "test:sandbox"]
 
+[tasks."ci:light"]
+description = "Run automatic PR/main core and static contracts on one Linux runner"
+depends = ["lint", "test:i18n", "test:core", "test:ui", "test:packaging"]
+run = ["go run ./scripts/check-go", "go test ./scripts/check-go", "python scripts/tests/ci-release.py", "python scripts/tests/homebrew-cask.py", "python scripts/tests/docker-entrypoint.py"]
+
 [tasks."test:go:ci"]
 description = "Run complete normal Go coverage without test-result caching"
 run = "python scripts/test_go.py normal --count=1"

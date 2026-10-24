@@ -33,8 +33,10 @@ platform requirements, installation boundaries and source-build instructions.
 ## Triggers and source selection
 
 The release/build `CI` workflow starts automatically only on tag pushes. The
-separate `Tests` workflow checks PRs and pushes to `main`; see
-[Development](development.md#ci-and-manual-pr-checks) for its parallel test gates.
+separate `Tests` workflow runs one Linux lightweight check on PRs and pushes to
+`main`. Release/build calls and manual `Tests` runs always use the complete
+Linux/macOS normal/static and race matrix, regardless of `publish`; see
+[Development](development.md#ci-and-manual-pr-checks) for both coverage boundaries.
 Every tag runs checks, including Unicode
 names and tags outside the release pattern. Only exact `vMAJOR.MINOR.PATCH` tags
 without leading zeroes select publication. Other tags build validation artifacts

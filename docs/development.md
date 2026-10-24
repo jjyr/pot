@@ -435,27 +435,41 @@ build cache.
 core selection focused on these contracts when adding or replacing tests.
 
 `mise run test` retains the complete normal suite and focused race suite; neither
-depends on the local core selection. CI runs them on Linux and macOS. The separate
+depends on the local core selection. Full CI runs them on Linux and macOS. The separate
 `test:executor` diagnostic is already covered by that race suite and is not repeated
 by pre-push. Hook group timings are appended to `.local/hooks/timings.jsonl`.
 
 ## CI and manual PR checks
 
-`Tests` (`.github/workflows/tests.yml`) runs full product tests on PRs and pushes
-to `main`, with cancellation of superseded runs. It is also reusable by the
-release/build workflow and can be run manually. Each OS starts five jobs:
+`Tests` (`.github/workflows/tests.yml`) automatically runs **Lightweight checks
+(Linux)** on PRs and pushes to `main`. One runner executes `mise run ci:light`:
+source formatting and import boundaries, shared translations, the existing core
+Go plan, UI and packaging contracts, release/cask/Docker contracts and workflow
+validation. The core runner validates both its selections and the normal-only
+race manifest before executing. This detects deleted test entries and naming,
+configuration and translation integration errors without claiming full product
+coverage. It does not run the complete normal/race matrix, real OS sandbox suite,
+native packages or containers.
+
+Manual `Tests` runs and release/build callers use **Full product** checks. A
+reusable call requires the resolved source SHA; it always selects the full matrix,
+including for `publish=false` candidates. Publication intent never selects test
+coverage. Automatic lightweight runs and full runs use separate concurrency
+families; only superseded automatic lightweight runs are canceled.
 
 ```text
-                          Tests (Linux + macOS)
-                 +-----------+--------+--------+--------+
-                 |           |        |        |        |
-          normal + checks  race 1/4 race 2/4 race 3/4 race 4/4
-          + UI/API/sandbox
-                 |           |        |        |        |
-                 +-----------+--------+--------+--------+
-                                   |
-                    all product gates must pass
+PR / main push -> one Linux lightweight job
+
+manual Tests / resolved release or candidate SHA -> Linux + macOS
+                    | normal + static/UI/API/sandbox
+                    | race 1/4 + 2/4 + 3/4 + 4/4
+                    + all product gates required
+                                  |
+                         native distribution gates
 ```
+
+Run `gh workflow run tests.yml --ref main` for complete product checks without
+packaging, or use `ci.yml` below for complete product and distribution validation.
 
 The normal/checks job runs `mise run ci:normal`, which schedules the complete normal
 suite, static/architecture/localization checks, UI/API/packaging contracts,
@@ -476,7 +490,7 @@ are checked, while exact stable version tags enter controlled per-channel releas
 paths after shared checks and the corresponding native package and smoke gates
 succeed. Ordinary manual runs do not publish.
 Branch pushes and PR events do not start the release/build workflow.
-That workflow calls the same `Tests` gate for its resolved source SHA. Headless
+That workflow always calls the full `Tests` gate for its resolved source SHA. Headless
 and cross-platform builds run afterward as a separate build gate, before native
 packaging. Explicit ref/PR validation still disables shared caches.
 
