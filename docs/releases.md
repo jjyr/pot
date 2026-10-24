@@ -251,8 +251,11 @@ this same-version naming correction. Ordinary publishers keep all immutable-byte
 checks. It accepts a successful nonpublishing CI run built with
 `validation-version=0.0.1`, its exact reviewed source, the original public release
 snapshot, the exact previous image index digest and `merged-source`, the reviewed
-PR 280 merge SHA. The source must match the tag, the merged PR head and a parent of
-that normal merge, with an identical tree. This fixed merge remains the boundary
+qualification PR 291 merge SHA. PR280 must remain merged at
+`5225cdf82c0f04fd49b5938c62c43ef3fd7a412d`, and that exact naming merge must be an
+ancestor of the candidate. Only the fixed qualification PR291 in `jjyr/pot`,
+merged into `main`, can supply the final head. The source must match the tag,
+that PR head and a parent of its normal merge, with an identical tree. This fixed merge remains the boundary
 if main later advances; later UI changes cannot enter the selected artifacts. First run it from `main` with
 `lease-tag-only=true` and the exact original annotated tag object. This job has no
 release environment or signing secrets: it validates the successful candidate,

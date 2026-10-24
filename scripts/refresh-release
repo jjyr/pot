@@ -18,6 +18,8 @@ REPOSITORY = "jjyr/pot"
 RELEASE = 422513414
 VERSION = "0.0.1"
 TAG = "v" + VERSION
+NAMING_MERGE = "5225cdf82c0f04fd49b5938c62c43ef3fd7a412d"
+QUALIFICATION_PR = 291
 
 
 def api(endpoint, method="GET", body=None):
@@ -66,15 +68,28 @@ def check_source(require_tag=True):
         raise ValueError("Tag no longer matches candidate source")
     reviewed = os.environ["REVIEWED_MERGE"]
     if not re.fullmatch(r"[a-f0-9]{40}", reviewed):
-        raise ValueError("Refresh needs the exact reviewed PR 280 merge SHA")
-    pr = api("pulls/280")
+        raise ValueError("Refresh needs the exact reviewed PR 291 merge SHA")
+    naming = api("pulls/280")
+    if (
+        not naming["merged"]
+        or naming["base"]["ref"] != "main"
+        or naming["base"]["repo"]["full_name"] != REPOSITORY
+        or naming["merge_commit_sha"] != NAMING_MERGE
+    ):
+        raise ValueError("Original reviewed PR 280 naming merge changed")
+    ancestry = api(f"compare/{NAMING_MERGE}...{source}")
+    if ancestry["status"] != "ahead" or ancestry["merge_base_commit"]["sha"] != NAMING_MERGE:
+        raise ValueError("Qualification source does not descend from the naming merge")
+    pr = api(f"pulls/{QUALIFICATION_PR}")
     if (
         not pr["merged"]
         or pr["base"]["ref"] != "main"
+        or pr["base"]["repo"]["full_name"] != REPOSITORY
+        or pr["head"]["repo"]["full_name"] != REPOSITORY
         or pr["head"]["sha"] != source
         or pr["merge_commit_sha"] != reviewed
     ):
-        raise ValueError("Reviewed source does not identify the merged PR 280")
+        raise ValueError("Reviewed source does not identify the merged qualification PR 291")
     candidate = api(f"commits/{source}")
     merged = api(f"commits/{reviewed}")
     if len(merged["parents"]) != 2 or source not in {parent["sha"] for parent in merged["parents"]}:

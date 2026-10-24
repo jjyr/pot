@@ -178,21 +178,31 @@ class RefreshFences(unittest.TestCase):
         writes = [(endpoint, body) for endpoint, method, body in self.calls if method == "PATCH"]
         self.assertEqual(writes[0], ("releases/assets/3", {"name": archive["name"]}))
 
-    def test_candidate_binds_fixed_pr_merge_without_following_later_main(self):
+    def test_candidate_binds_exact_qualification_pr_and_naming_ancestry(self):
         reviewed = "b" * 40
+        naming = refresh["NAMING_MERGE"]
+        qualification = "pulls/" + str(refresh["QUALIFICATION_PR"])
+        compare = "compare/" + naming + "..." + SHA
+        repo = {"full_name": "jjyr/pot"}
         responses = {
             "commits/refs/tags/v0.0.1": {"sha": SHA},
             "commits/" + SHA: {"commit": {"tree": {"sha": "tree"}}},
             "commits/" + reviewed: {
                 "commit": {"tree": {"sha": "tree"}},
-                "parents": [{"sha": "c" * 40}, {"sha": SHA}],
+                "parents": [{"sha": naming}, {"sha": SHA}],
             },
             "pulls/280": {
                 "merged": True,
-                "base": {"ref": "main"},
-                "head": {"sha": SHA},
+                "base": {"ref": "main", "repo": dict(repo)},
+                "merge_commit_sha": naming,
+            },
+            qualification: {
+                "merged": True,
+                "base": {"ref": "main", "repo": dict(repo)},
+                "head": {"sha": SHA, "repo": dict(repo)},
                 "merge_commit_sha": reviewed,
             },
+            compare: {"status": "ahead", "merge_base_commit": {"sha": naming}},
             "actions/runs/123": {
                 "path": ".github/workflows/ci.yml",
                 "head_sha": SHA,
@@ -200,27 +210,37 @@ class RefreshFences(unittest.TestCase):
                 "conclusion": "success",
             },
         }
-        # No commits/main response: publication must survive later independent
-        # main commits while remaining bound to the exact reviewed merge tree.
+        self.assertEqual(qualification, "pulls/291")
+        # No rolling-main lookup or generic PR selection. Both reviewed anchors
+        # and the actual candidate/merge relationship remain mandatory.
         with mock.patch.dict(
             os.environ, POT_BUILD_REVISION=SHA, REVIEWED_MERGE=reviewed, CANDIDATE_RUN="123"
         ):
             with mock.patch.dict(self.namespace, api=lambda endpoint: responses[endpoint]):
                 self.assertEqual(refresh["check_source"](), SHA)
             for label, endpoint, path, value in [
-                ("not merged", "pulls/280", ("merged",), False),
-                ("wrong base", "pulls/280", ("base", "ref"), "other"),
-                ("wrong head", "pulls/280", ("head", "sha"), "d" * 40),
-                ("wrong merge", "pulls/280", ("merge_commit_sha",), "d" * 40),
+                ("not merged", qualification, ("merged",), False),
+                ("wrong base", qualification, ("base", "ref"), "other"),
+                ("wrong repository", qualification, ("base", "repo", "full_name"), "other/pot"),
+                ("fork head", qualification, ("head", "repo", "full_name"), "other/pot"),
+                ("wrong head", qualification, ("head", "sha"), "d" * 40),
+                ("wrong merge", qualification, ("merge_commit_sha",), "d" * 40),
+                ("naming not merged", "pulls/280", ("merged",), False),
+                ("naming merge changed", "pulls/280", ("merge_commit_sha",), "d" * 40),
+                ("naming wrong base", "pulls/280", ("base", "ref"), "other"),
+                ("not descendant", compare, ("status",), "diverged"),
+                ("wrong ancestor", compare, ("merge_base_commit", "sha"), "d" * 40),
                 (
                     "candidate not parent",
                     "commits/" + reviewed,
                     ("parents",),
-                    [{"sha": "c" * 40}, {"sha": "d" * 40}],
+                    [{"sha": naming}, {"sha": "d" * 40}],
                 ),
+                ("not normal merge", "commits/" + reviewed, ("parents",), [{"sha": SHA}]),
                 ("tree changed", "commits/" + reviewed, ("commit", "tree", "sha"), "other"),
                 ("failed run", "actions/runs/123", ("conclusion",), "failure"),
                 ("different run source", "actions/runs/123", ("head_sha",), "d" * 40),
+                ("wrong workflow", "actions/runs/123", ("path",), ".github/workflows/tests.yml"),
                 ("tag moved", "commits/refs/tags/v0.0.1", ("sha",), "d" * 40),
             ]:
                 with self.subTest(label):
