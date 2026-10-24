@@ -1,5 +1,5 @@
 // Display identity only. Catalogue IDs and short labels must never route requests.
-export const addressKey = address => address?.node_id && address?.kind && address?.agent_id
+export const addressKey = address => [address?.node_id,address?.kind,address?.agent_id].every(value => typeof value === 'string' && value.length > 0)
   ? JSON.stringify([address.node_id, address.kind, address.agent_id]) : null;
 
 // An explicit address is authoritative even when a linked catalogue has a local hash ID.
