@@ -403,9 +403,7 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 		}
 		definitions = append(definitions, retryTools...)
 	}
-	return assistant.RunOptions{MessageCompleted: func(message, text string) {
-		s.bindMessageFiles(principal, "", "", message, text, executionContext.Workspace)
-	}, ResolveAttachments: s.resolveAttachments(principal, request.RequestID), Composer: s.options.Composer, Execution: executionContext, Services: ports, Dispatch: dispatch.Dispatch, Tools: definitions, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
+	return assistant.RunOptions{MessageCompleted: s.messageFileCompletion(principal, "", request.RequestID, executionContext.Workspace), ResolveAttachments: s.resolveAttachments(principal, request.RequestID), Composer: s.options.Composer, Execution: executionContext, Services: ports, Dispatch: dispatch.Dispatch, Tools: definitions, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
 		s.Integrations.Forget(credentialScope(thread.Owner, request.RequestID, thread.Generation))
 		s.Permissions.Expire(principal, request.RequestID, thread.Generation)
 		err := engine.Drain()

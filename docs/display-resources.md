@@ -44,8 +44,9 @@ indented code do not enqueue reads. The inline-node parser supports Unicode,
 escaped punctuation, spaces, balanced destination parentheses and angle-wrapped
 paths; reference-style definitions are not a file-delivery interface.
 
-A completed message binds its references to the actual execution node, assistant,
-Task/run and directory identity. A durable projection queue in `control.sqlite`
+Execution preparation pins the actual node, assistant, Task/run and directory
+identity before model or tool execution. A completed message binds its references
+to that captured source. A durable projection queue in `control.sqlite`
 resolves files asynchronously into the existing immutable resource Store. Neither
 streaming tokens nor history loads initiate source reads. Reference identity binds
 message ID, text revision, source span and href; repeated paths in one revision

@@ -200,3 +200,30 @@ func TestOwnConfigurationMappingRejectsDirectoryAliases(t *testing.T) {
 		t.Fatal("configuration alias escaped owner scope", rows)
 	}
 }
+
+// Direct completed-message fixtures use the same host binding callback.
+func (s *Service) bindMessageFiles(owner, task, run, message, text, root string) {
+	s.messageFileCompletion(owner, task, run, root)(message, text)
+}
+func TestMessageFileCompletionPinsExecutionRootBeforeModelRuns(t *testing.T) {
+	s, _ := configurationService(t)
+	a, err := s.CreateAssistant(context.Background(), CreateAssistant{RequestID: "pinned-execution", Name: "Pinned"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, _ := s.ExecutionWorkspace(a.ID)
+	completed := s.messageFileCompletion(a.ID, "", "actual-turn", root)
+	foreign := t.TempDir()
+	os.WriteFile(filepath.Join(foreign, "private.txt"), []byte("not in the execution root"), 0600)
+	if err := os.Rename(root, root+"-original"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(foreign, root); err != nil {
+		t.Fatal(err)
+	}
+	completed("reply", "[file](private.txt)")
+	rows := awaitFiles(t, s, a.ID, "reply")
+	if rows[0].State != "forbidden" || rows[0].Source.Run != "actual-turn" {
+		t.Fatal("execution root was rebound", rows)
+	}
+}

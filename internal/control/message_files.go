@@ -23,11 +23,11 @@ var errFileForbidden = errors.New("file reference forbidden")
 var errFileTooLarge = errors.New("file reference too large")
 var errFileChanged = errors.New("file reference changed")
 
-// bindMessageFiles captures provenance before enqueueing any asynchronous reads.
-// Projection failure must never fail a model reply or feed bytes to the model.
-func (s *Service) bindMessageFiles(owner, task, run, message, text, root string) {
+// messageFileCompletion freezes the host execution identity before model/tool
+// execution. A later directory replacement cannot become a newly allowed root.
+func (s *Service) messageFileCompletion(owner, task, run, root string) func(string, string) {
 	source := resources.Source{Node: s.options.RuntimeID, Owner: owner, Task: task, Run: run, Root: root}
-	if info, err := os.Stat(root); err == nil {
+	if info, err := os.Lstat(root); err == nil && info.IsDir() {
 		source.RootID, _ = taskDirectoryIdentity(info)
 	}
 	if task == "" {
@@ -36,6 +36,12 @@ func (s *Service) bindMessageFiles(owner, task, run, message, text, root string)
 		}
 		source.Config = filepath.Join(s.Registry.Directory(owner), "AGENTS.md")
 	}
+	return func(message, text string) { s.bindMessageFileSource(source, message, text) }
+}
+
+// Projection failure never fails a model reply or feeds file bytes to the model.
+func (s *Service) bindMessageFileSource(source resources.Source, message, text string) {
+	owner, task := source.Owner, source.Task
 	conversation := "main"
 	if task != "" {
 		conversation = "task:" + task
