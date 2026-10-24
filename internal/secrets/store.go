@@ -154,3 +154,5 @@ func read(ctx context.Context, db queryer, id string, aead cipher.AEAD) ([]byte,
 	}
 	return value, true, nil
 }
+
+func (s *Store) DBStatsForDiagnostic() sql.DBStats { return s.db.Stats() }

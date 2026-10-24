@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -136,9 +138,14 @@ func (s *Service) Attach(session *peer.Session) {
 		time.AfterFunc(5*time.Second, session.Close)
 		return
 	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		session.Close()
+		return
+	}
 	connection, err := s.Get(context.Background(), auth.ID)
 	if errors.Is(err, ErrNotFound) && auth.Pair != nil {
-		s.mu.Lock()
 		s.pendingSessions[session] = true
 		s.mu.Unlock()
 		time.AfterFunc(10*time.Second, func() {
@@ -154,10 +161,10 @@ func (s *Service) Attach(session *peer.Session) {
 		return
 	}
 	if err != nil || connection.PeerHost != session.Remote() {
+		s.mu.Unlock()
 		session.Close()
 		return
 	}
-	s.mu.Lock()
 	delete(s.pendingSessions, session)
 	previous := s.sessions[auth.ID]
 	s.sessions[auth.ID] = session
@@ -175,6 +182,9 @@ func (s *Service) Attach(session *peer.Session) {
 			return
 		}
 		delete(s.sessions, auth.ID)
+		if s.closed {
+			return
+		}
 		current, err := s.Get(ctx, auth.ID)
 		if err == nil && current.State != "revoked" && current.State != "disconnected" {
 			current.State = "offline"
@@ -250,6 +260,7 @@ func (s *Service) call(ctx context.Context, session *peer.Session, method string
 }
 
 func transportError(err error) error {
+	fmt.Fprintf(os.Stderr, "DIAGNOSTIC peer transport: %T %v\n", err, err)
 	if errors.Is(err, peer.ErrUnauthorized) {
 		return ErrUnauthorized
 	}
@@ -273,6 +284,16 @@ func (s *Service) session(id string) *peer.Session {
 		}
 	}
 	return nil
+}
+
+// Close fences session attachments and their persisted connectivity callbacks.
+// Stop Run and close incoming listeners first, then Close before releasing the DB.
+// Backend work remains owned by the host and is not cancelled by connectivity.
+func (s *Service) Close() {
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+	s.closeSessions()
 }
 
 func (s *Service) closeSessions() {

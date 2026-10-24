@@ -127,7 +127,7 @@ func (f *fixture) start(address string) {
 }
 func (f *fixture) stop() { f.cancel(); f.listener.Close(); f.service.closeSessions(); <-f.done }
 func (f *fixture) close() {
-	f.service.closeSessions()
+	f.service.Close()
 	f.mail.db.Close()
 	f.secret.Close()
 	f.db.Close()

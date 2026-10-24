@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -165,6 +166,19 @@ func testHost(t *testing.T) (*agentHost, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		control, tasks, secret := h.db.Stats(), h.tasks.Stats(), h.secrets.DBStatsForDiagnostic()
+		entries, _ := os.ReadDir(root)
+		var names []string
+		for _, entry := range entries {
+			names = append(names, entry.Name())
+		}
+		if control.OpenConnections != 0 || tasks.OpenConnections != 0 || secret.OpenConnections != 0 {
+			stack := make([]byte, 1<<20)
+			n := runtime.Stack(stack, true)
+			t.Errorf("host close left connections: control=%+v tasks=%+v secrets=%+v files=%v\n%s", control, tasks, secret, names, stack[:n])
+		}
+	})
 	return h, root
 }
 func TestAgentHostRestartStableIdentityAndMailbox(t *testing.T) {

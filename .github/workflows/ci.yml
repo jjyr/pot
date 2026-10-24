@@ -13,6 +13,10 @@ on:
         description: PR number to check (mutually exclusive with ref)
         required: false
         type: string
+      diagnose-lifecycle:
+        description: Run only targeted macOS lifecycle diagnostics (never publishes)
+        default: false
+        type: boolean
       validation-version:
         description: Optional package version for a nonpublishing candidate (major.minor.patch)
         required: false
@@ -61,7 +65,29 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/release-plan
 
+  lifecycle-diagnostics:
+    if: inputs.diagnose-lifecycle == true
+    needs: source
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+        with:
+          version: 2026.10.10
+          cache: false
+          install_args: go
+      - name: Reproduce fixture shutdown with database-pool evidence
+        run: mise exec -- go test -v -failfast ./integrations/codex/agent -run '^(TestAgentHostPreviewDoesNotConnectOrConsumeInvitation|TestCodexProfileThroughPotBrowserKeepsMessageSessionScope)$' -count=100
+      - name: Reproduce reconnect with underlying transport diagnostics
+        if: always()
+        run: mise exec -- go test -v -race -failfast ./internal/control -run '^TestPotLinkDirectChatUsesExistingMailboxAndSeparateUserProjection$' -count=30
+
   product:
+    if: inputs.diagnose-lifecycle != true
     needs: source
     name: Product checks (${{ matrix.os }})
     strategy:
