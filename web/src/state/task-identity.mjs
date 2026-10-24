@@ -23,11 +23,15 @@ export function taskColorIndex(value) {
 }
 // Keep one registry for the UI session. Discovering a collision only lengthens labels.
 export function createTaskIdentityRegistry() {
-  const entries = new Map();
+  const entries = new Map(), records = new Map();
   const register = values => {
     for (const value of values) {
       const address = value?.kind === 'task' ? value : taskAddress(value), key = addressKey(address);
       if (key && address.kind === 'task' && !entries.has(key)) entries.set(key, {id: address.agent_id, node: address.node_id, length: 4, sourceLength: 0});
+      if (key && value?.id && taskAddress(value)) {
+        records.delete(key); records.set(key, {id: value.id, address: {...address}, title: value.title || ''});
+        if (records.size > 512) records.delete(records.keys().next().value);
+      }
     }
     const all = [...entries.values()];
     for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) {
@@ -45,7 +49,7 @@ export function createTaskIdentityRegistry() {
       if (length > 4) { a.length = Math.max(a.length, length); b.length = Math.max(b.length, length); }
     }
   };
-  return {register, short(value) {
+  return {register, resolve(address) { return records.get(addressKey(address)); }, short(value) {
     const address = value?.kind === 'task' ? value : taskAddress(value);
     register([value]);
     const entry = entries.get(addressKey(address));

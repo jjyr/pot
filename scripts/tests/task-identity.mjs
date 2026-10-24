@@ -14,3 +14,6 @@ console.log('Task identity: authoritative linked mapping, UTF-8 FNV, collisions 
 
 assert.equal(r.short(a),'#a81f2@node');
 const prefix=createTaskIdentityRegistry();prefix.register([task('abcd'),task('abcde')]);assert.equal(prefix.short(task('abcd')),'#abcd');assert.equal(prefix.short(task('abcde')),'#abcde');
+
+assert.equal(r.resolve(a.address).id,'catalogue-hash');r.register([a.address]);assert.equal(r.resolve(a.address).id,'catalogue-hash');
+assert.equal(r.resolve({node_id:'unknown',kind:'task',agent_id:'missing'}),undefined);
