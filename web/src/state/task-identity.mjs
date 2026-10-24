@@ -25,14 +25,16 @@ export function taskColorIndex(value) {
 export function createTaskIdentityRegistry() {
   const entries = new Map(), records = new Map();
   const register = values => {
+    let added = false;
     for (const value of values) {
       const address = value?.kind === 'task' ? value : taskAddress(value), key = addressKey(address);
-      if (key && address.kind === 'task' && !entries.has(key)) entries.set(key, {id: address.agent_id, node: address.node_id, length: 4, sourceLength: 0});
+      if (key && address.kind === 'task' && !entries.has(key)) { entries.set(key, {id: address.agent_id, node: address.node_id, length: 4, sourceLength: 0}); added = true; }
       if (key && value?.id && taskAddress(value)) {
         records.delete(key); records.set(key, {id: value.id, address: {...address}, title: value.title || ''});
         if (records.size > 512) records.delete(records.keys().next().value);
       }
     }
+    if (!added) return;
     const all = [...entries.values()];
     for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) {
       const a = all[i], b = all[j];
