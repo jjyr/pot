@@ -61,7 +61,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, execution core.ExecutionConte
 			if len(data) == 0 {
 				data = json.RawMessage("null")
 			}
-			err := d.Usage.Tool(context.WithoutCancel(ctx), scope, d.Turn, usage.ToolEvent{CallID: call.ID, Name: call.Name, Action: "end", Content: data, IsError: resultErr != nil}, storage.Now())
+			err := d.Usage.Tool(context.WithoutCancel(ctx), scope, d.Turn, usage.ToolEvent{CallID: call.ID, Name: call.Name, Action: "end", Content: data, IsError: resultErr != nil || agent.ToolResultFailed(data)}, storage.Now())
 			resultErr = errors.Join(resultErr, err)
 		}()
 	}
