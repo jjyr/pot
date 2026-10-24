@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -90,12 +91,25 @@ func testCodexBrowserDirectoryRetirement(t *testing.T, scenario string) {
 	var hold atomic.Bool
 	var rejectDelete atomic.Bool
 	captured, release := make(chan struct{}), make(chan struct{})
+	type heldDirectory struct {
+		id    string
+		err   error
+		order uint64
+	}
+	heldResult := make(chan heldDirectory, 1)
+	freshAfterHeld := make(chan heldDirectory, 1)
+	var directoryOrder atomic.Uint64
+	var heldFinished atomic.Uint64
 	defer close(release)
 	h, app, linkedOwner := profileApplication(t, func(server *peer.Server) {
 		authorize := server.Authorize
 		server.Authorize = func(ctx context.Context, remote peer.Identity, service string, auth json.RawMessage) (peer.Handler, error) {
 			handler, err := authorize(ctx, remote, service, auth)
 			return func(ctx context.Context, request peer.Request) (json.RawMessage, error) {
+				var directoryStarted uint64
+				if request.Method == "directory" {
+					directoryStarted = directoryOrder.Add(1)
+				}
 				if request.Method == "assistant.delete" && rejectDelete.Load() {
 					return nil, agentlink.ErrUnavailable
 				}
@@ -108,10 +122,22 @@ func testCodexBrowserDirectoryRetirement(t *testing.T, scenario string) {
 					select {
 					case <-release:
 					case <-ctx.Done():
+						heldResult <- heldDirectory{id: request.ID, err: ctx.Err(), order: directoryOrder.Add(1)}
 						return nil, ctx.Err()
 					}
 					if scenario == "late-failure" {
-						return nil, agentlink.ErrUnavailable
+						err = agentlink.ErrUnavailable
+						result = nil
+					}
+					order := directoryOrder.Add(1)
+					heldFinished.Store(order)
+					heldResult <- heldDirectory{id: request.ID, err: err, order: order}
+					return result, err
+				}
+				if request.Method == "directory" && err == nil && heldFinished.Load() != 0 && directoryStarted > heldFinished.Load() {
+					select {
+					case freshAfterHeld <- heldDirectory{id: request.ID, order: directoryStarted}:
+					default:
 					}
 				}
 				if request.Method == "assistant.delete" && err == nil {
@@ -209,10 +235,38 @@ func testCodexBrowserDirectoryRetirement(t *testing.T, scenario string) {
 	lookup() // Immediately after the receipt, before releasing the old Sync.
 	if delayed {
 		release <- struct{}{}
+		var held heldDirectory
+		select {
+		case held = <-heldResult:
+			if held.id == "" || (scenario == "late-failure" && !errors.Is(held.err, agentlink.ErrUnavailable)) || (scenario != "late-failure" && held.err != nil) {
+				t.Fatal("held directory did not execute the intended outcome", held.id, held.err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("held directory did not finish")
+		}
 		select {
 		case err = <-synced:
-			if (err != nil) != (scenario == "late-failure") {
-				t.Fatal("unexpected sync result", err)
+			if scenario != "late-failure" && err != nil {
+				t.Fatal("successful held directory failed sync", err)
+			}
+			if scenario == "late-failure" {
+				var apiError protocol.APIError
+				if err != nil && !errors.Is(err, agentlink.ErrUnavailable) && !(errors.As(err, &apiError) && apiError.Code == agentlink.ErrUnavailable.Error()) {
+					t.Fatal("unexpected sync failure", err)
+				}
+				if err == nil {
+					// The first directory can belong to the periodic sampler. A
+					// foreground Sync waiting behind it must make a later successful
+					// RPC, rather than inherit or swallow that sampler's error.
+					select {
+					case fresh := <-freshAfterHeld:
+						if fresh.id == held.id || fresh.order <= held.order {
+							t.Fatal("sync did not follow the held failure with a fresh successful RPC", held, fresh)
+						}
+					default:
+						t.Fatal("nil sync result without a successful RPC after the held failure")
+					}
+				}
 			}
 		case <-time.After(10 * time.Second):
 			t.Fatal("old sync did not finish")

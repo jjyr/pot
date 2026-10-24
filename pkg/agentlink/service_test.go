@@ -735,3 +735,101 @@ func TestInitialForegroundMetadataCoalescesPeriodicSampling(t *testing.T) {
 	}
 	workers.Wait()
 }
+
+type firstMetadataFault struct {
+	*testBackend
+	calls                    atomic.Int32
+	entered, release, failed chan struct{}
+}
+
+func (b *firstMetadataFault) Directory(ctx context.Context) (Directory, error) {
+	if b.calls.Add(1) == 1 {
+		close(b.entered)
+		select {
+		case <-b.release:
+		case <-ctx.Done():
+			return Directory{}, ctx.Err()
+		}
+		close(b.failed)
+		return Directory{}, ErrUnavailable
+	}
+	return b.testBackend.Directory(ctx)
+}
+func TestMetadataFaultBelongsToItsActualCaller(t *testing.T) {
+	for _, periodicFirst := range []bool{false, true} {
+		name := "foreground-failure"
+		if periodicFirst {
+			name = "periodic-failure-then-foreground-success"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			a, b := newFixture(t, "fault-a"), newFixture(t, "fault-b")
+			c := connect(t, a, b)
+			a.service.options.Backend = &testBackend{f: a}
+			fault := &firstMetadataFault{testBackend: &testBackend{f: b}, entered: make(chan struct{}), release: make(chan struct{}), failed: make(chan struct{})}
+			b.service.options.Backend = fault
+			var workers sync.WaitGroup
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { close(fault.release) }) }
+			defer workers.Wait()
+			defer release()
+			result := make(chan error, 1)
+			if periodicFirst {
+				// Force a real foreground control pass; ready idle Sync otherwise
+				// correctly skips an empty exchange.
+				c.State = "offline"
+				if err := a.service.update(ctx, c); err != nil {
+					t.Fatal(err)
+				}
+				if !a.service.tryRefreshMetadata(ctx, c, &workers) {
+					t.Fatal("periodic sample was not admitted")
+				}
+				select {
+				case <-fault.entered:
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+				controlFinished := make(chan struct{})
+				var controlOnce sync.Once
+				a.service.options.Changed = func() { controlOnce.Do(func() { close(controlFinished) }) }
+				go func() { result <- a.service.Sync(ctx, c.ID) }()
+				select {
+				case <-controlFinished:
+				case <-ctx.Done():
+					t.Fatal("foreground control phase did not progress independently", ctx.Err())
+				}
+			} else {
+				go func() { result <- a.service.Sync(ctx, c.ID) }()
+				select {
+				case <-fault.entered:
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+			}
+			release()
+			select {
+			case <-fault.failed:
+			case <-ctx.Done():
+				t.Fatal("fault was not executed")
+			}
+			select {
+			case err := <-result:
+				if periodicFirst && err != nil {
+					t.Fatal("background fault escaped into a later foreground read", err)
+				}
+				if !periodicFirst && !errors.Is(err, ErrUnavailable) {
+					t.Fatal("foreground fault was swallowed", err)
+				}
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			if periodicFirst {
+				current, err := a.service.Get(ctx, c.ID)
+				if err != nil || current.Directory == nil || current.Directory.NodeID != b.id || fault.calls.Load() < 2 {
+					t.Fatal("foreground did not fetch and save a new directory", current.Directory, err, fault.calls.Load())
+				}
+			}
+		})
+	}
+}
