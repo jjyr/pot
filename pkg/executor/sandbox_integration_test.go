@@ -44,6 +44,36 @@ func sandboxFixture(t *testing.T) (*Engine, Request) {
 	r.Mode = "sandbox"
 	return e, r
 }
+
+// Collect only calls whose test requires completion. Interactive/cancellation
+// probes keep their initial running session and opt in after sending input.
+func completedSandboxResult(t *testing.T, e *Engine, r Request, result map[string]any) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(testutil.Timeout(t, 15*time.Second))
+	var stdout, stderr strings.Builder
+	truncated := false
+	for {
+		stdout.WriteString(result["stdout"].(string))
+		stderr.WriteString(result["stderr"].(string))
+		truncated = truncated || result["truncated"] == true
+		if result["session_id"] == nil {
+			result["stdout"], result["stderr"], result["truncated"] = stdout.String(), stderr.String(), truncated
+			return result
+		}
+		if time.Now().After(deadline) {
+			cleanupErr := e.Close()
+			t.Fatalf("sandbox fixture did not finish: result=%v stdout=%q stderr=%q cleanup=%v", result, stdout.String(), stderr.String(), cleanupErr)
+		}
+		result = call(t, e, r, "write_stdin", map[string]any{"session_id": result["session_id"], "yield_time_ms": 1000})
+	}
+}
+
+func completedSandboxCommand(t *testing.T, e *Engine, r Request, command string) map[string]any {
+	t.Helper()
+	// A short yield deliberately exercises the real asynchronous result contract.
+	return completedSandboxResult(t, e, r, call(t, e, r, "exec_command", map[string]any{"cmd": command, "yield_time_ms": 1}))
+}
+
 func TestRealSandboxCommandAndPatchWorker(t *testing.T) {
 	e, r := sandboxFixture(t)
 	// Production workspaces live below the protected Control root. The workspace
@@ -53,11 +83,11 @@ func TestRealSandboxCommandAndPatchWorker(t *testing.T) {
 	if err := os.WriteFile(secret, []byte("fake-secret"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	probe := call(t, e, r, "exec_command", map[string]any{"cmd": "if cat " + shellQuote(secret) + "; then exit 9; fi; printf confined"})
+	probe := completedSandboxCommand(t, e, r, "if cat "+shellQuote(secret)+"; then exit 9; fi; printf confined")
 	if probe["exit_code"] != 0 || probe["stdout"] != "confined" {
 		t.Fatal("protected root exposure", probe)
 	}
-	result := call(t, e, r, "exec_command", map[string]any{"cmd": "printf sandbox; printf ok > proof"})
+	result := completedSandboxCommand(t, e, r, "printf sandbox; printf ok > proof")
 	if result["stdout"] != "sandbox" || result["exit_code"] != 0 {
 		t.Fatal(result)
 	}
@@ -203,12 +233,8 @@ func TestRealSandboxTTYAndInput(t *testing.T) {
 		t.Fatal(result)
 	}
 	result = call(t, e, r, "write_stdin", map[string]any{"session_id": id, "rows": 40, "cols": 100, "chars": "hello\n", "yield_time_ms": 1000})
+	result = completedSandboxResult(t, e, r, result)
 	output := result["stdout"].(string)
-	for result["session_id"] != nil {
-		next := call(t, e, r, "write_stdin", map[string]any{"session_id": id, "yield_time_ms": 1000})
-		output += next["stdout"].(string)
-		result = next
-	}
 	if !strings.Contains(output, "40 100") || !strings.Contains(output, "received:hello") {
 		t.Fatal(output)
 	}
@@ -237,7 +263,7 @@ for i in range(1,501):
 	encoded, _ := json.Marshal(code)
 	script := "import json; exec(json.loads(" + strconv.Quote(string(encoded)) + "))"
 	command := shellQuote(python) + " -c " + shellQuote(script)
-	result := call(t, e, r, "exec_command", map[string]any{"cmd": command})
+	result := completedSandboxCommand(t, e, r, command)
 	if result["exit_code"] != 0 {
 		t.Fatal(result)
 	}
@@ -339,13 +365,8 @@ func TestRealSandboxChromiumQualification(t *testing.T) {
 	defer server.Close()
 	url, _ := json.Marshal(server.URL)
 	script := `import {operation,close} from './browser.mjs'; try { const result=await operation({action:'open',url:` + string(url) + `,screenshot:true}); console.log('BROWSER_OK:'+result.content[0].text); await close(); } catch(e) { console.error('BROWSER_UNSUPPORTED:'+e.message); process.exitCode=42; }`
-	result := call(t, e, r, "exec_command", map[string]any{"cmd": "node --input-type=module -e " + shellQuote(script), "yield_time_ms": 1000})
+	result := completedSandboxCommand(t, e, r, "node --input-type=module -e "+shellQuote(script))
 	stdout, stderr := result["stdout"].(string), result["stderr"].(string)
-	for result["session_id"] != nil {
-		result = call(t, e, r, "write_stdin", map[string]any{"session_id": result["session_id"], "yield_time_ms": 1000})
-		stdout += result["stdout"].(string)
-		stderr += result["stderr"].(string)
-	}
 	if result["exit_code"] == 42 && strings.Contains(stderr, "BROWSER_UNSUPPORTED:") {
 		t.Log("Chromium rejected protected execution; no host fallback: " + stderr)
 	} else if result["exit_code"] != 0 || !strings.Contains(stdout, "Sandbox browser proof") || !strings.Contains(stdout, "Proof") {
@@ -378,12 +399,8 @@ func TestRealSandboxCommandPreservesToolchainPATH(t *testing.T) {
 	}
 	// Keep Linux SRT dependencies (rg, socat, bwrap) available to the helper.
 	t.Setenv("PATH", strings.Join(paths, string(os.PathListSeparator)))
-	result := call(t, e, r, "exec_command", map[string]any{"cmd": "node --version && npm --version && npx --version", "yield_time_ms": 1000})
+	result := completedSandboxCommand(t, e, r, "node --version && npm --version && npx --version")
 	stdout := result["stdout"].(string)
-	for result["session_id"] != nil {
-		result = call(t, e, r, "write_stdin", map[string]any{"session_id": result["session_id"], "yield_time_ms": 1000})
-		stdout += result["stdout"].(string)
-	}
 	if result["exit_code"] != 0 || stdout != "project-node\nproject-npm\nproject-npx\n" {
 		t.Fatal(result, stdout)
 	}
@@ -404,18 +421,8 @@ func TestRealSandboxSharedToolBinDoesNotCoverWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	deadline := time.Now().Add(testutil.Timeout(t, 15*time.Second))
-	result := call(t, e, r, "exec_command", map[string]any{"cmd": "if cat " + shellQuote(secret) + "; then exit 77; fi; printf written > tool-proof; gh", "yield_time_ms": 1})
-	stdout := result["stdout"].(string)
-	stderr := result["stderr"].(string)
-	for result["session_id"] != nil {
-		if time.Now().After(deadline) {
-			t.Fatal("shared tool probe did not finish", result, stdout, stderr)
-		}
-		result = call(t, e, r, "write_stdin", map[string]any{"session_id": result["session_id"], "yield_time_ms": 1000})
-		stdout += result["stdout"].(string)
-		stderr += result["stderr"].(string)
-	}
+	result := completedSandboxCommand(t, e, r, "if cat "+shellQuote(secret)+"; then exit 77; fi; printf written > tool-proof; gh")
+	stdout, stderr := result["stdout"].(string), result["stderr"].(string)
 	if result["exit_code"] != 0 || stdout != "tool" {
 		t.Fatal("shared tool root exposed siblings or covered workspace writes", result, stdout, stderr)
 	}
