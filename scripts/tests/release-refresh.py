@@ -168,6 +168,16 @@ class RefreshFences(unittest.TestCase):
         self.assertEqual(writes[-1], ("releases/422513414", {"target_commitish": SHA}))
         self.assertFalse(any(method == "DELETE" for _, method, _ in self.calls))
 
+    def test_new_archive_names_are_live_before_switching_same_name_archives(self):
+        archive = dict(
+            self.plan[0], id=3, name="pot-0.0.1-linux-amd64.tar.gz", staged_name="staged-cli"
+        )
+        self.plan.append(archive)
+        self.assets.append(dict(archive, name="staged-cli"))
+        self.activate()
+        writes = [(endpoint, body) for endpoint, method, body in self.calls if method == "PATCH"]
+        self.assertEqual(writes[0], ("releases/assets/3", {"name": archive["name"]}))
+
     def test_candidate_must_be_successful_exact_source_and_merged_tree(self):
         run = {
             "path": ".github/workflows/ci.yml",

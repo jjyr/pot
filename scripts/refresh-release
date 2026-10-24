@@ -293,6 +293,7 @@ def activate(original, source):
             r["name"] == "update.json",
             r["name"].startswith("SHA256SUMS"),
             r["name"].endswith(".sha256"),
+            any(old["name"] == r["name"] for old in original["assets"]),
             r["name"],
         ),
     )
