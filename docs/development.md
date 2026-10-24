@@ -21,6 +21,10 @@ mise run open
 bundle with ID `dev.pot.go-preview`. Release packaging
 uses the production identity. Do not replace a running product's files implicitly.
 
+The macOS builder downloads the pinned Wails module before applying its
+checksum-verified patches to a disposable copy. A fresh module cache is supported;
+the original cache and repository module files remain unchanged.
+
 ## Builds and packaging
 
 | Command | Output |

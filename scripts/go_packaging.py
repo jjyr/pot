@@ -93,7 +93,13 @@ def prepare_wails_module(work):
     )
     if module.get("Version") != WAILS_VERSION or module.get("Replace"):
         raise ValueError("Pinned Wails beta.30 without an existing replacement required")
-    original = Path(module["Dir"])
+    # go list can describe a selected module before its source is cached.
+    downloaded = json.loads(
+        subprocess.check_output(
+            ["go", "mod", "download", "-json", "github.com/wailsapp/wails/v3"], cwd=ROOT
+        )
+    )
+    original = Path(downloaded["Dir"])
     modifications = [
         (
             "pkg/application/systemtray_darwin.m",
