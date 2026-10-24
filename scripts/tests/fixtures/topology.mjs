@@ -40,7 +40,7 @@ const client={desktop:true,production:true,runtime:{boot_id:'fixture-boot'},spac
   if(!fixture.freezeObservations){fixture.localObservation.observed_at_ms=Date.now();for(const link of fixture.links)if(link.observation)link.observation.observed_at_ms=Date.now();}
   return {addresses:fixture.addresses||[{kind:'tailscale',endpoint:'tcp://local-pot.fixture-tailnet.ts.net:8793'},{kind:'public',interface:'en0',endpoint:'tcp://203.0.113.10:8793'},{kind:'private',interface:'en0',endpoint:'tcp://192.168.1.24:8793'},{kind:'loopback',endpoint:'tcp://127.0.0.1:8793'}],self:{node_id:'local-id',kind:'pot',name:'Local Pot',address:endpoint,endpoint,status:needsAccess?'needs_access':'ready',observation:fixture.localObservation},items:fixture.links,network:{...network,endpoint}};
  }
- if(path==='/api/v1/machines')return [{id:'my-mac',name:'my-mac',hostname:'mac-studio.local',ip_addresses:['192.168.1.24','fd00::24'],os:'darwin',connected:true}];
+ if(path==='/api/v1/runtime')return {runtime_id:'my-mac',host:{hostname:'mac-studio.local',ip_addresses:['192.168.1.24','fd00::24'],os:'darwin'}};
  if(path==='/api/v1/permissions')return {policy:policy()};
  return {};
 }};

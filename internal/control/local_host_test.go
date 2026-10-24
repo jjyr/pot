@@ -1,7 +1,6 @@
 package control
 
 import (
-	"context"
 	"net"
 	"os"
 	"reflect"
@@ -29,24 +28,20 @@ func TestMachineInterfaceAddresses(t *testing.T) {
 	}
 }
 
-func TestMachineInventoryUsesHostnameWithoutChangingIdentity(t *testing.T) {
+func TestLocalHostMetadata(t *testing.T) {
 	t.Parallel()
 	service := agentControl(t, "opaque-node-identity").service
-	items, err := service.MachineList(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 || items[0]["id"] != "opaque-node-identity" || items[0]["runtime_id"] != "opaque-node-identity" {
-		t.Fatalf("machine routing identity changed: %v", items)
-	}
+	host := service.LocalHost()
 	hostname, _ := os.Hostname()
-	if hostname = strings.TrimSpace(hostname); hostname != "" && (items[0]["name"] != hostname || items[0]["hostname"] != hostname) {
-		t.Fatalf("machine did not use current OS hostname: %v", items[0])
+	if host["hostname"] != strings.TrimSpace(hostname) {
+		t.Fatalf("host did not use current OS hostname: %v", host)
 	}
-	if items[0]["name"] == "opaque-node-identity" || items[0]["name"] == "" {
-		t.Fatalf("machine has no recognizable name: %v", items[0])
+	if _, ok := host["ip_addresses"].([]string); !ok {
+		t.Fatalf("host IPs must be an array: %v", host)
 	}
-	if _, ok := items[0]["ip_addresses"].([]string); !ok {
-		t.Fatalf("machine IPs must be an array: %v", items[0])
+	for _, key := range []string{"id", "runtime_id", "policy"} {
+		if _, ok := host[key]; ok {
+			t.Fatalf("host metadata must not duplicate node identity or permissions: %v", host)
+		}
 	}
 }

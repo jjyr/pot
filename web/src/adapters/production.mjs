@@ -51,7 +51,6 @@ export function mutationTopics(path,body,value) {
   if(path.startsWith('/api/v1/usage'))return ['usage','settings'];
   if(path.startsWith('/api/v1/agent')||path==='/api/v1/instructions')return ['settings','assistants','conversation'];
   if(path==='/api/v1/messages'||path.startsWith('/api/v1/turn/'))return ['conversation','assistants'];
-  if(path.startsWith('/api/v1/machines'))return ['machines','permissions'];
   if(path.startsWith('/api/v1/spaces'))return ['spaces','machines'];
   return [];
 }

@@ -11,7 +11,7 @@ async page=>{
   const capabilities={version:1,scope:'owner',operations:['task.read','task.list','task.events','task.input','schedules.manage','approvals.manage']};
   const task={id:'task-one',title:'Machine identity task',assistant_id:'assistant',machine_id:'opaque-machine',phase:'running'};
   f.client={runtime:{boot_id:'fixture'},spaces:[{id:'local',control_id:'opaque-node',name:'Local',kind:'local'}],assistants:[{id:'assistant',space_id:'local',name:'Assistant',capabilities}],scope:()=>({space:'local',owner:'assistant'}),request:async(path,options={})=>{
-   if(path==='/api/v1/machines')return [{id:'opaque-machine',hostname:'dev-box.local',ip_addresses:['192.168.1.24']}];
+   if(path==='/api/v1/runtime')return {runtime_id:'opaque-machine',host:{hostname:'dev-box.local',ip_addresses:['192.168.1.24']}};
    if(path==='/api/v1/permissions')return {pending:[]};
    if(path.includes('/tasks/catalog'))return {items:[task],counts:{active:1},total:1};
    if(path==='/api/v1/tasks/task-one')return {capabilities,info:task,request:{text:'Synthetic task goal'}};

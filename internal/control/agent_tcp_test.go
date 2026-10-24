@@ -54,7 +54,7 @@ func TestDirectTCPAgentListenerPersistsAndKeepsOwnerAPIsPrivate(t *testing.T) {
 	}
 	identity, key := a.service.Machines.TransportIdentity()
 	expected, _ := b.service.Machines.TransportIdentity()
-	for _, service := range []string{"owner", "/api/v1/machines"} {
+	for _, service := range []string{"owner", "/api/v1/runtime"} {
 		session, e := peer.Dial(ctx, endpoint, peer.DialOptions{Identity: identity, PrivateKey: key, Expected: &expected, Service: service, Auth: json.RawMessage(`{}`)})
 		if e == nil {
 			session.Close()

@@ -80,6 +80,7 @@ func TestAuthenticationAllowlistCredentialSeparationAndRotation(t *testing.T) {
 		{"POST", "/api/v1/desktop/sessions"},
 		{"GET", "/desktop/retired/rfb"},
 		{"GET", "/desktop-assets/rfb.js"},
+		{"GET", "/api/v1/machines"},
 		{"POST", "/api/v1/machines"},
 	} {
 		if denied := invoke(endpoint.method, endpoint.path, "", cookie.String(), "http://localhost"); denied.Code != 404 {

@@ -104,7 +104,7 @@ func TestBrowserReadRoutesReachApplication(t *testing.T) {
 		"/api/v1/runtime", "/api/v1/control", "/api/v1/spaces", "/api/v1/assistants",
 		"/api/v1/providers", "/api/v1/agent", "/api/v1/agent/routing", "/api/v1/instructions", "/api/v1/about",
 		"/api/v1/integrations", "/api/v1/agent/diagnostics",
-		"/api/v1/snapshot", "/api/v1/permissions", "/api/v1/machines", "/api/v1/schedules",
+		"/api/v1/snapshot", "/api/v1/permissions", "/api/v1/schedules",
 		"/api/v1/tasks/query", "/api/v1/tasks/catalog", "/api/v1/tasks/outcomes", "/api/v1/tasks/outcomes?after=0", "/api/v1/usage/providers",
 		"/api/v1/usage/summary?scope=main&timezone=UTC",
 		"/api/v1/usage/summary?scope=main&timezone=UTC&start=2024-01-01&end=2024-12-31",
@@ -122,13 +122,17 @@ func TestBrowserReadRoutesReachApplication(t *testing.T) {
 			if w.Code != http.StatusOK || !json.Valid(w.Body.Bytes()) {
 				t.Fatalf("browser/application route mismatch: %d %s", w.Code, w.Body.String())
 			}
-			if path == "/api/v1/machines" {
-				var machines []struct {
+			if path == "/api/v1/runtime" {
+				var runtime struct {
 					RuntimeID string `json:"runtime_id"`
-					Name      string `json:"name"`
+					Host      struct {
+						Hostname    string   `json:"hostname"`
+						IPAddresses []string `json:"ip_addresses"`
+						OS          string   `json:"os"`
+					} `json:"host"`
 				}
-				if err := json.Unmarshal(w.Body.Bytes(), &machines); err != nil || len(machines) != 1 || machines[0].RuntimeID != "local" || machines[0].Name == "" {
-					t.Fatal("browser machine inventory must remain an array with local identity and display metadata", w.Body.String(), err)
+				if err := json.Unmarshal(w.Body.Bytes(), &runtime); err != nil || runtime.RuntimeID != "local" || runtime.Host.OS == "" || runtime.Host.IPAddresses == nil {
+					t.Fatal("runtime must include local host metadata", w.Body.String(), err)
 				}
 			}
 			// Check persisted data and the policy consumed by the frontend editor.
@@ -195,6 +199,11 @@ func TestBrowserReadRoutesReachApplication(t *testing.T) {
 		browser.ServeHTTP(w, r)
 		if w.Code != http.StatusNotFound {
 			t.Fatal("private or unsupported route published", path, w.Code, w.Body.String())
+		}
+	}
+	for _, method := range []string{"GET", "POST"} {
+		if _, err := app.Call(ctx, Request{Method: method, Path: "/api/v1/machines"}); err == nil {
+			t.Fatal("retired machine-list route still available", method)
 		}
 	}
 	for _, query := range []string{"after=", "after=-1", "after=9007199254740992", "after=nope"} {

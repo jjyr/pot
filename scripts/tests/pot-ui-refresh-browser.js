@@ -23,7 +23,7 @@ async page=>{
      return {};
     }
     const url=new URL(path,location.origin),name=url.pathname;
-    if(name==='/api/v1/machines')return f.machines;
+    if(name==='/api/v1/runtime')return {runtime_id:f.machines[0].runtime_id,host:{hostname:f.machines[0].name,tags:f.machines[0].tags}};
     if(name==='/api/v1/agent-links')return {items:f.links};
     if(name==='/api/v1/permissions')return {policy:f.policy,pending:f.approvals};
     if(name==='/api/v1/providers')return f.providers;

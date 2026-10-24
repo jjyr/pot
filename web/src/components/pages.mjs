@@ -1,7 +1,7 @@
 import {taskIdentityMark,taskIdentityShort} from './task-identity.mjs';
 import {recordOwner,groupRecords,groupHeading,ownerChoices,createRecordPagination} from './record-groups.mjs';
 import {taskIdentities,taskAddress} from '../state/task-identity.mjs';
-import {machinePresentation,machineDisplayName} from '../state/machine-identity.mjs';
+import {machinePresentation,machineDisplayName,runtimeMachine} from '../state/machine-identity.mjs';
 import {connectionBrand} from './connection-visuals.mjs';
 import {createExtensions} from './extensions.mjs';
 import {browserTimezone,connectScheduleEditor,beforeRunDraft,hookHistory} from './schedule-editor.mjs';
@@ -957,7 +957,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       data.permissionsPending=true;
       const permissions=across('/api/v1/permissions',token).catch(()=>[]).then(pages=>{data.permissionPages=pages;data.permissionsPending=false;if(data.inventory.length)return update(data);});
       const links=across('/api/v1/agent-links',token,{errorTarget:connectionRoot}).then(pages=>{data.linkPages=pages;linkNotice.hidden=true;}).catch(reason=>{if(reason.name==='AbortError')return;linkNotice.hidden=false;linkNotice.replaceChildren(n('span','',t('topology.connectionUnavailable')),action(t('retry'),()=>pageView?.queue.run()));});
-      data.inventory=await across('/api/v1/machines',token);await links;await update(data);await permissions;await connectionRequest;return data;
+      data.inventory=(await across('/api/v1/runtime',token)).map(page=>{const machine=runtimeMachine(page.value);return {...page,value:machine?[machine]:[]};});await links;await update(data);await permissions;await connectionRequest;return data;
     },update,{topics:['machines','spaces','permissions','agent-links','tasks','assistant-mail','runtime'],space:client.spaces?.length===1?client.spaces[0].id:''});
   }
   const approvalScope=()=>taskView?.scope||scope();

@@ -1,7 +1,6 @@
 package control
 
 import (
-	"context"
 	"net"
 	"net/netip"
 	"os"
@@ -10,11 +9,9 @@ import (
 	"strings"
 )
 
-func (s *Service) localMachine(_ context.Context) (map[string]any, error) {
-	policy, _, err := s.Permissions.Policy(s.options.RuntimeID)
-	if err != nil {
-		return nil, err
-	}
+// LocalHost describes this node's host for presentation, never remote execution
+// destinations or permission policy.
+func (s *Service) LocalHost() map[string]any {
 	hostname, _ := os.Hostname()
 	hostname = strings.TrimSpace(hostname)
 	addresses := []net.Addr{}
@@ -27,14 +24,7 @@ func (s *Service) localMachine(_ context.Context) (map[string]any, error) {
 		addresses = append(addresses, values...)
 	}
 	ips := machineIPAddresses(addresses)
-	name := hostname
-	if name == "" && len(ips) > 0 {
-		name = ips[0]
-	}
-	if name == "" {
-		name = runtime.GOOS
-	}
-	return map[string]any{"id": s.options.RuntimeID, "runtime_id": s.options.RuntimeID, "name": name, "hostname": hostname, "ip_addresses": ips, "os": runtime.GOOS, "connected": true, "role": "node", "tags": s.Machines.LocalLabels(), "policy": policy}, nil
+	return map[string]any{"hostname": hostname, "ip_addresses": ips, "os": runtime.GOOS, "tags": s.Machines.LocalLabels()}
 }
 
 // These are observed local interface addresses, not advertised peer endpoints
@@ -61,12 +51,4 @@ func machineIPAddresses(values []net.Addr) []string {
 		result = append(result, ip.String())
 	}
 	return result
-}
-func (s *Service) MachineList(ctx context.Context) ([]map[string]any, error) {
-	local, err := s.localMachine(ctx)
-	if err != nil {
-		return nil, err
-	}
-	items := []map[string]any{local}
-	return items, nil
 }
