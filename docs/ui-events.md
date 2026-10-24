@@ -316,6 +316,9 @@ failures before the first model event. Chat projects a single reply bubble from
 the local send through its receipt and first assistant output. Pending sends are
 scoped by owner, preserve drafts and retain request identity across reconciliation.
 Turn `state` distinguishes allowance waiting from active thinking.
+Connection status and reconnect actions stay in the Chat header, including while
+a reply is running. Reply bubbles retain their available text without a separate
+connection notice; Task conversations use their existing stage status.
 Subscription errors retain their available diagnostics; a
 frontend rendering exception is reported by the interface error handler rather
 than being classified as a service disconnection.

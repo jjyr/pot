@@ -125,7 +125,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
         }
       }else{
         if(!entry.body){entry.body=n('div','message-body');entry.element.append(entry.body);if(message.role==='assistant')entry.reply=createReplyBubble(entry.body);}
-        if(message.role==='assistant')entry.reply.update(message,{t,downloadFile,acquireFileImage,...resourceOptions,onReconnect:can('task.read')?()=>run(onRefresh):undefined,onSettings:can('assistant.configure')?onSettings:undefined});
+        if(message.role==='assistant')entry.reply.update(message,{t,downloadFile,acquireFileImage,...resourceOptions,onSettings:can('assistant.configure')?onSettings:undefined});
         else{
           if(!entry.source){entry.source=n('div','task-message-source');entry.element.prepend(entry.source);}
           const sender=message.input?.sender,name=sender===task.assistant_id?assistantName:(client.assistants||[]).find(item=>item.id===sender&&item.space_id===scope.space)?.name||sender;
