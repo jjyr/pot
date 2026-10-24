@@ -174,7 +174,7 @@ results and uncertain-cleanup fences remain intact. Old jobs are not rewritten o
 replayed. Antigravity uses a separate root and the same schema; opening a root with
 the wrong runtime is rejected.
 
-`tasks/0003_management_scopes` registers independent workspace scope IDs for
+`tasks/0004_management_scopes` registers independent workspace scope IDs for
 existing owner paths/modes and converts saved management results to those scopes
 and the receiver's saved avatar.
 Optional effort remains a JSON string when present; omission preserves the stored

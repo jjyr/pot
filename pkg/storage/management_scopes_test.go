@@ -21,12 +21,13 @@ func TestManagementScopesUpgradeRetainsRequestsAndReceipts(t *testing.T) {
 				}
 				execMigrationSQL(t, db, `INSERT INTO codex_link_assistants(id,name,workspace,mode,revision,thread_id) VALUES('first','One','/owner/read','read-only',8,'thread-one'),('second','Two','/owner/read','read-only',9,'thread-two'),('write','Write','/owner/write','workspace-write',3,'thread-write')`)
 			} else {
-				name := "migrations/tasks/0002_agent_adapter.sql"
-				body, e := migrationFiles.ReadFile(name)
-				if e != nil {
-					t.Fatal(e)
+				for _, name := range []string{"migrations/tasks/0002_agent_adapter.sql", "migrations/tasks/0003_task_finish_time.sql"} {
+					body, e := migrationFiles.ReadFile(name)
+					if e != nil {
+						t.Fatal(e)
+					}
+					prior[name] = &fstest.MapFile{Data: body}
 				}
-				prior[name] = &fstest.MapFile{Data: body}
 				if e = migrateDatabase(t.Context(), db, TasksDatabase, prior); e != nil {
 					t.Fatal(e)
 				}
