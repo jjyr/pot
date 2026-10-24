@@ -21,6 +21,10 @@ mise run open
 bundle with ID `dev.pot.go-preview`. Release packaging
 uses the production identity. Do not replace a running product's files implicitly.
 
+The macOS builder downloads the pinned Wails module before applying its
+checksum-verified patches to a disposable copy. A fresh module cache is supported;
+the original cache and repository module files remain unchanged.
+
 ## Builds and packaging
 
 | Command | Output |
@@ -121,8 +125,8 @@ change the normal/race selection.
 Full-package race remains on task scheduling/cancellation/recovery, execution
 and process supervision, assistant/inbox queues and compaction, concurrent storage,
 transport, Agent Link, plugin hosting and mutable provider caches. Control keeps
-these integration paths, including real workspace replacement and creation
-identity tests, approval/effect fences, cancellation, peer delivery, catalog
+these integration paths, including workspace preparation and device/inode
+replacement tests, approval/effect fences, cancellation, peer delivery, catalog
 refresh cancellation and credential rotation. Its explicitly listed serial
 configuration, resource/text and request-count contracts run in the complete
 normal suite. Pure value/encoding/rendering helpers also run normally. No normal
@@ -132,6 +136,8 @@ normal-only exception requires an explicit rationale in the reviewed manifest.
 The standalone `test:executor` remains available for local diagnosis; CI gets
 that full package coverage through `test:race` and does not run it twice.
 Any nonzero exit fails the check; no failing tests are retried.
+Finished-session output tests release a fixture through stdin and await its actual
+completion before reading retained output; a yield interval does not promise exit.
 UI tests cover owner-scoped state, drafts, IME, navigation and
 streamed output. Eval uses the production Agent with deterministic local fixtures;
 paid model calls run only through explicit live commands. Public API tests build

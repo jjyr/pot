@@ -345,6 +345,62 @@ func TestTCPRevokeFencesMailAndPropagatesAcrossReconnect(t *testing.T) {
 		t.Fatal("reused revoked connection identity")
 	}
 }
+func TestTCPFailedRevocationDiscardsSessionAndPreservesPending(t *testing.T) {
+	ctx := context.Background()
+	a, b := newFixture(t, "control-a"), newFixture(t, "control-b")
+	connection := connect(t, a, b)
+	if err := a.service.revokeLocal(ctx, connection, true); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := a.service.Get(ctx, connection.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := a.service.ensureSession(ctx, pending)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Cancel before sending, with an authenticated session already registered.
+	// The pending revocation must survive and the next attempt must reconnect.
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := a.service.propagateRevoke(canceled, pending); !errors.Is(err, ErrUnavailable) {
+		t.Fatal(err)
+	}
+	select {
+	case <-session.Done():
+	default:
+		t.Fatal("failed revocation retained its session for immediate reuse")
+	}
+	pending, err = a.service.Get(ctx, connection.ID)
+	if err != nil || pending.State != "revoked" || !pending.RevocationPending {
+		t.Fatal("failed attempt cleared the durable revocation", pending, err)
+	}
+	remote, err := b.service.Get(ctx, connection.ID)
+	if err != nil || remote.State == "revoked" || remote.RevocationPending {
+		t.Fatal("canceled request reached the remote", remote, err)
+	}
+	// The receiver closes its session while applying revocation. If that loses
+	// the response, a subsequent fresh handshake observes the durable tombstone.
+	for range 2 {
+		err = a.service.propagateRevoke(ctx, pending)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, ErrUnavailable) {
+			t.Fatal(err)
+		}
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []*fixture{a, b} {
+		value, err := f.service.Get(ctx, connection.ID)
+		if err != nil || value.State != "revoked" || value.RevocationPending {
+			t.Fatal(value, err)
+		}
+	}
+}
 func TestTCPListenerRevocationAndPendingBacklogIsolation(t *testing.T) {
 	ctx := context.Background()
 	a, b := newFixture(t, "control-a"), newFixture(t, "control-b")

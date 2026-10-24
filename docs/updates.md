@@ -44,6 +44,11 @@ not stop a download or installation; a pending interruption confirmation still
 requires a user. Starting another host during installation is serialized by the
 installation lock.
 
+The resume endpoint flushes its acknowledgement before waking the host to exec.
+A failed response write or flush leaves that host stopped. This prevents a
+successful restart from cutting off the acknowledgement and appearing to the
+installer as an uncertain EOF that requires rollback.
+
 The installed directory must be replaceable by its service account. Its private
 sibling `<installation>.updates` holds the state, staged package, worker log,
 previous package and data snapshots. These may contain private metadata and must

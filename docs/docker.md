@@ -37,7 +37,7 @@ On an arm64 server, replace `linux/amd64` with `linux/arm64`. The Dockerfile
 cross-builds the CGO-free Go CLI and packages the corresponding checksum-pinned
 Node distribution. It accepts `POT_APP_VERSION`, `POT_BUILD_REVISION` and
 `POT_UPDATE_PUBLIC_KEY` (the public Ed25519 update verification key, never a
-private signing key). Go and build-host Node image versions must match
+private signing key). Go and build-host Node/Python image versions must match
 `mise.toml`; target Node versions/checksums come from `scripts/go_packaging.py`.
 Both architectures are part of the build contract. Producing a multiarch OCI
 archive locally requires a builder supporting multi-platform output:

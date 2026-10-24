@@ -350,11 +350,35 @@ func TestTaskApprovalStateWakesWaitAndResumesOriginalRun(t *testing.T) {
 	if err != nil || page.Total != 1 || page.Counts.Active != 1 {
 		t.Fatalf("approval missing from active tasks: %+v %v", page, err)
 	}
+	t.Run("deadline_during_snapshot", func(t *testing.T) {
+		// Occupy the single database connection so the snapshot cannot finish
+		// before the deadline. No sleep or scheduler timing selects this path.
+		connection, err := s.db.Conn(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer connection.Close()
+		query, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+		defer cancel()
+		snapshot, err := s.Wait(query, "assistant", []WaitTarget{{record.Info.ID, items[0].Cursor}})
+		if !errors.Is(query.Err(), context.DeadlineExceeded) || !errors.Is(err, query.Err()) || len(snapshot) != 0 {
+			t.Fatal("blocked snapshot did not preserve its context deadline", snapshot, err)
+		}
+	})
 	repeat, stop := context.WithTimeout(ctx, 10*time.Millisecond)
 	defer stop()
-	_, err = s.Wait(repeat, "assistant", []WaitTarget{{record.Info.ID, items[0].Cursor}})
-	if err != nil || repeat.Err() == nil {
+	again, err := s.Wait(repeat, "assistant", []WaitTarget{{record.Info.ID, items[0].Cursor}})
+	// The same deadline can expire during the initial database read or during
+	// subscription waiting. Neither path may report an unchanged approval early.
+	if !errors.Is(repeat.Err(), context.DeadlineExceeded) || (err != nil && !errors.Is(err, repeat.Err())) {
 		t.Fatal("unchanged approval should be suppressed by its cursor", err)
+	}
+	if err == nil && (len(again) != 1 || again[0].Cursor != items[0].Cursor || again[0].Info.Phase != protocol.TaskWaitingApproval) {
+		t.Fatal("deadline returned a changed approval snapshot", again)
+	}
+	unchanged, err := s.Get(ctx, "assistant", record.Info.ID)
+	if err != nil || unchanged == nil || unchanged.Revision != items[0].Cursor || unchanged.Info.Phase != protocol.TaskWaitingApproval {
+		t.Fatal("cursor wait changed the approval", unchanged, err)
 	}
 	pending = false
 	if err = s.Tick(ctx); err != nil {
