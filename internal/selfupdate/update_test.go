@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -19,7 +20,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -205,6 +208,7 @@ func TestHostProcess(t *testing.T) {
 	}
 	json.Unmarshal(data, &metadata)
 	buildinfo.Version = metadata.Version
+	fmt.Fprintf(os.Stderr, "FIXTURE host boot pid=%d version=%s at=%s\n", os.Getpid(), metadata.Version, time.Now().UTC().Format(time.RFC3339Nano))
 	buildinfo.UpdatePublicKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
 	h, err := OpenHost()
 	if err != nil {
@@ -221,8 +225,10 @@ func TestHostProcess(t *testing.T) {
 		}
 		if !(metadata.Version == "0.2.0" && os.Getenv("POT_UPDATE_TEST_FAIL") == "1") {
 			h.Ready()
+			fmt.Fprintf(os.Stderr, "FIXTURE host ready pid=%d version=%s at=%s\n", os.Getpid(), metadata.Version, time.Now().UTC().Format(time.RFC3339Nano))
 		}
 		<-ctx.Done()
+		fmt.Fprintf(os.Stderr, "FIXTURE host run stopped pid=%d version=%s cleanup=%s at=%s\n", os.Getpid(), metadata.Version, os.Getenv("POT_UPDATE_TEST_CLEANUP"), time.Now().UTC().Format(time.RFC3339Nano))
 		if os.Getenv("POT_UPDATE_TEST_CLEANUP") == "1" {
 			return errors.New("cleanup unconfirmed")
 		}
@@ -248,6 +254,65 @@ func copyTestBinary(t *testing.T, destination string) {
 		t.Fatal(err)
 	}
 }
+
+// Diagnostic branch only: retain Kill-then-Wait ordering, record both results,
+// and fail visibly rather than waiting indefinitely on a fixture-owned child.
+func diagnosticFixtureCleanup(t *testing.T, process *exec.Cmd, logPath string) {
+	t.Helper()
+	pid := process.Process.Pid
+	snapshot := func(stage string) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		body, err := exec.CommandContext(ctx, "ps", "-p", strconv.Itoa(pid), "-o", "pid=,ppid=,state=,etime=,comm=").CombinedOutput()
+		t.Logf("FIXTURE ps stage=%s owned_pid=%d result=%q error=%v", stage, pid, body, err)
+	}
+	logHost := func() {
+		body, err := os.ReadFile(logPath)
+		if len(body) > 16384 {
+			body = body[len(body)-16384:]
+		}
+		t.Logf("FIXTURE synthetic host.log owned_pid=%d error=%v:\n%s", pid, err, body)
+	}
+	started := time.Now()
+	killErr := process.Process.Kill()
+	t.Logf("FIXTURE Kill owned_pid=%d returned=%T(%v) elapsed=%s", pid, killErr, killErr, time.Since(started))
+	if killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
+		t.Errorf("fixture Kill failed: %v", killErr)
+	}
+	waited := make(chan error, 1)
+	go func() { waited <- process.Wait() }() // Exactly one Wait for this Cmd.
+	select {
+	case waitErr := <-waited:
+		t.Logf("FIXTURE Wait owned_pid=%d returned=%T(%v) elapsed=%s state=%v", pid, waitErr, waitErr, time.Since(started), process.ProcessState)
+		var exited *exec.ExitError
+		if waitErr != nil && !errors.As(waitErr, &exited) {
+			t.Errorf("fixture Wait failed: %v", waitErr)
+		}
+		logHost()
+		return
+	case <-time.After(3 * time.Second):
+		t.Errorf("fixture owned_pid=%d did not exit within 3s after Kill", pid)
+	}
+	snapshot("stalled-after-kill")
+	quitErr := process.Process.Signal(syscall.SIGQUIT)
+	t.Logf("FIXTURE diagnostic SIGQUIT owned_pid=%d returned=%T(%v)", pid, quitErr, quitErr)
+	select {
+	case waitErr := <-waited:
+		t.Logf("FIXTURE Wait after SIGQUIT owned_pid=%d error=%v", pid, waitErr)
+	case <-time.After(2 * time.Second):
+		// Cleanup only the original Cmd's process, never arbitrary PIDs or groups.
+		retryErr := process.Process.Kill()
+		t.Logf("FIXTURE final cleanup Kill owned_pid=%d returned=%T(%v)", pid, retryErr, retryErr)
+		select {
+		case waitErr := <-waited:
+			t.Logf("FIXTURE Wait after final Kill owned_pid=%d error=%v", pid, waitErr)
+		case <-time.After(3 * time.Second):
+			t.Errorf("fixture child remains unconfirmed after bounded cleanup: pid=%d", pid)
+		}
+	}
+	logHost()
+}
+
 func TestWorkerRestartsWholeInstallationAndRollsBack(t *testing.T) {
 	for _, scenario := range []string{"success", "confirmation", "cleanup", "rollback"} {
 		t.Run(scenario, func(t *testing.T) {
@@ -284,7 +349,7 @@ func TestWorkerRestartsWholeInstallationAndRollsBack(t *testing.T) {
 			if err = process.Start(); err != nil {
 				t.Fatal(err)
 			}
-			defer func() { process.Process.Kill(); process.Wait() }()
+			defer diagnosticFixtureCleanup(t, process, log.Name())
 			wait := func(predicate func() bool) {
 				t.Helper()
 				deadline := time.Now().Add(10 * time.Second)
@@ -310,7 +375,7 @@ func TestWorkerRestartsWholeInstallationAndRollsBack(t *testing.T) {
 				if err = browser.Start(); err != nil {
 					t.Fatal(err)
 				}
-				defer func() { browser.Process.Kill(); browser.Wait() }()
+				defer diagnosticFixtureCleanup(t, browser, log.Name())
 				expectedPeers = 2
 				wait(func() bool {
 					peers, _ = participants(directory)

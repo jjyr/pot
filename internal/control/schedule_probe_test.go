@@ -139,6 +139,7 @@ if mode=='timeout':
 		t.Fatal(err)
 	}
 	run := waitScheduleProbe(t, s, info.ID)
+	t.Logf("FIXTURE native probe mode=%s hook=%+v state=%s", mode, run.Hook, run.State)
 	second, err := s.productCall(context.Background(), "main", "run", "manage_schedule", args)
 	if err != nil {
 		t.Fatal(err)
