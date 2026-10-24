@@ -128,32 +128,15 @@ support is listed below.
 
 ### Codex
 
-**Supported.** Install the local Pot plugin on the computer running Codex:
+**Supported.** Give this prompt to your agent on the computer running Codex:
 
-1. Use a Pot source checkout at the same revision as your Pot installation, with
-   [mise](https://mise.jdx.dev/getting-started.html) and the repository toolchain
-   installed (`mise install`). Install and sign in to Codex locally; the adapter
-   targets Codex CLI 0.163.0's App Server and requires plugin support.
-2. From that checkout, install the plugin:
+```text
+Read https://github.com/jjyr/pot/blob/main/docs/connect-with-agent.md and help me connect Codex to Pot on this computer.
+```
 
-   ```sh
-   mise exec -- python3 integrations/codex/install.py
-   ```
-
-   The installer builds the Agent Link host, registers the local plugin source,
-   and enables Pot when the Codex CLI supports it. Otherwise, enable the
-   registered Pot plugin through Codex's plugin directory.
-3. Start a new Codex chat and run `pot-setup` to open the local connection page
-   inside Codex. Keep its temporary management URL private.
-4. Choose **Copy connection address**, then **Get connection address** for an
-   address Pot can reach: loopback on the same computer, or a suitable LAN,
-   public or Tailscale address across computers. Copy the complete connection
-   information shown.
-5. In Pot's **Add Agent**, paste that connection information and add the agent.
-
-The initial Codex assistant is read-only. See the
-[complete Codex guide](integrations/codex/README.md#install-and-connect) for
-workspace permissions, network details and the system-browser fallback.
+The [assistant connection guide](docs/connect-with-agent.md) covers prerequisites,
+local plugin installation and pairing in Pot's **Add Agent**. For manual setup,
+see the [complete Codex guide](integrations/codex/README.md#install-and-connect).
 
 ### Claude
 

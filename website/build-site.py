@@ -143,6 +143,7 @@ def embedded_assets():
         "codex": "codex.png",
         "claude": "claude.svg",
         "grok": "grok.svg",
+        "antigravity": "antigravity.svg",
         "devin": "devin.png",
         "github": "github-invertocat-black.svg",
     }.items():
@@ -164,6 +165,7 @@ def preview():
             "codex": "codex.png",
             "claude": "claude.svg",
             "grok": "grok.svg",
+            "antigravity": "antigravity.svg",
             "devin": "devin.png",
             "github": "github-invertocat-black.svg",
         }.items():
