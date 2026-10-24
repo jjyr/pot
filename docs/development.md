@@ -233,7 +233,14 @@ with synthetic records and captures images under `output/pr-images/` by default.
 For a before comparison, extract the chosen base commit's `web/` and
 `pkg/storage/migrations/ui-cache/` into ignored `output/tasks-before/`; the same
 fixture and data select that source tree with `?before=1`. It does not read product
-state, call a model or create real Tasks. The backend catalogue contract is covered
+state, call a model or create real Tasks. For computer-use checks, open
+`/scripts/tests/fixtures/tasks-schedules-scroll.html?width=390&small=1&locale=zh-CN&theme=dark`.
+The fixed-width iframe checks actual page/list scroll ranges, bottom reachability,
+refresh/disclosure retention, pagination focus and page position restoration.
+Use `width=320&long=1` for long titles or omit `small` for paginated collections.
+These are narrow container checks inside the browser, not physical device tests.
+The browser runner also exercises these checks at actual Chromium viewport sizes.
+The backend catalogue contract is covered
 separately by `TestCatalog*` and `TestTaskCatalogHTTPFiltersAndValidation`.
 
 For assistant-switching scroll checks without a backend, serve the repository

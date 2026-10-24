@@ -21,6 +21,9 @@ f.profiles={one:[{id:'alpha',name:'Pot',avatar:f.avatars.local,revision:1,reply_
 const phases=['running','queued','waiting','waiting_approval','complete','failed','interrupted','cancelled'];
 f.tasks=Array.from({length:94},(_,i)=>{const space=i%3===0?'two':'one',node=space==='one'?'node-a':'node-b',realID=(0xa810+i*0x17).toString(16)+'c820-a9bc-4def-8abc-'+i.toString(16).padStart(12,'0'),id=space==='two'?'catalogue-task-'+i:realID;return {id,title:['核查周报中的引用与来源','整理项目进展与后续步骤','检查隔离工作区内的构建输出','Review reference links and follow-up notes'][i%4]+' '+(i+1),assistant_id:routeOwner(space,i%5===0?'beta':'alpha'),phase:phases[i%8],archived:i>80,paused:i===8,pending:0,started_at_ms:now-123000,updated_at_ms:now-i*1000,created_at_ms:now-300000,address:{node_id:node,kind:'task',agent_id:realID},space};});
 f.schedules=Array.from({length:46},(_,i)=>({id:'schedule-'+i,space:i%3===0?'two':'one',assistant_id:i===45?'missing-owner':routeOwner(i%3===0?'two':'one',i%5===0?'beta':'alpha'),spec:{title:['每日项目回顾','每周参考资料检查','工作区健康摘要'][i%3]+' '+(i+1),goal:'Review only the synthetic fixture workspace.',kind:i%2?'interval':'cron',cron:'0 9 * * *',every_minutes:60,timezone:i%2?'Asia/Shanghai':'UTC',enabled:i%4!==0,misfire:'coalesce',notify:'all'},next_at_ms:now+i*60000,next_label:'2026-07-11 09:00',created_at_ms:now}));
+// Reproduce a small catalogue with three records across two fixture directory identities.
+if(params.has('small')){f.tasks=f.tasks.slice(0,3);f.schedules=f.schedules.slice(0,3);}
+if(params.has('long')){f.tasks[0].title+=' '+('Long unbroken title '.repeat(12))+'x'.repeat(100);f.schedules[0].spec.title+=' '+('Long schedule title '.repeat(12))+'x'.repeat(100);}
 const snapshot=()=>({runtime_id:'fixture',boot_id:'boot',owner_id:JSON.stringify([scope.space,scope.owner]),conversation_id:'fixture',cursor:'1',replies:[],running:false,agent:{phase:'ready'},messages:[]});
 f.client={production:true,runtime:{runtime_id:'fixture',boot_id:'boot'},scope:()=>({...scope}),setScope:v=>scope={...scope,...v},snapshot:async()=>snapshot(),subscribe:(cb,status)=>{queueMicrotask(()=>{status('connected');cb(snapshot());});return()=>{};},changes:cb=>{changes.add(cb);return()=>changes.delete(cb);},request:async(path,options={})=>{
  f.calls.push({path,options:structuredClone({...options,signal:undefined})});const u=new URL(path,location.href),space=options.space||scope.space;
@@ -61,3 +64,5 @@ f.change=(domains=['tasks','schedules'])=>{for(const cb of changes)cb(domains,{s
 f.preference=(key,value)=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:`pot-ui-${key}`,value}}));
 f.dispose=mountApp(document.querySelector('#app'),f.client);
 f.ready=true;
+
+if(params.has('verify-scroll'))import('./tasks-schedules-scroll.mjs').then(({verifyScroll})=>verifyScroll(f));
