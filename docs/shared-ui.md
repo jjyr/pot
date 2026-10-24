@@ -286,6 +286,19 @@ of the six fixed families in `state/task-palette.json`; only the small Task mark
 uses the same family across light, dark and system themes. Missing mappings use
 neutral marks, and short labels remain visible when names are long.
 
+`components/task-identity.mjs` renders the shared 22 px folded-file line mark
+and neutral monospace short label. Communication endpoints, expanded records,
+background rows and the collapsed background summary use the same mark and
+authoritative address mapping. The small tinted background has no colored
+outline; task names and labels stay neutral. Runtime activity and semantic
+status remain separate from the fixed identity color. A confirmed endpoint and
+its background row open the same existing Task detail with the catalogue ID;
+unknown addresses retain a neutral mark without inventing a navigation target.
+The collapsed summary fits an ordered prefix and exposes the remainder as `+N`,
+which expands the existing list. The three-row preview, task ordering and counts
+remain independent of summary width. Keyed projections retain live controls
+through title, status, locale and short-label updates.
+
 ## Read state and activity
 
 Completed replies have a durable reply ID/count. Initial catalogue history becomes

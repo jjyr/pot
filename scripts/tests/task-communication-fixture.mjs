@@ -32,13 +32,23 @@ window.addEventListener('unhandledrejection',event=>errors.push(String(event.rea
 localStorage.setItem('pot-system-notifications-browser-v1','false');
 const snapshot=()=>({kind:'reset',runtime_id:space.id,boot_id:'review',owner_id:JSON.stringify([space.id,scope.owner]),conversation_id:'main',cursor:String(cursor),running:false,turn_id:null,replies:[],messages,history:{before:'1',after:String(messages.length),has_more:false,has_newer:false}});
 const catalogue=[{id:taskA.agent_id,address:taskA,title:'Layout review',phase:'complete'},{id:taskB.agent_id,address:taskB,title:'Responsive checks',phase:'complete'},{id:'local-hash',address:taskC,title:'Remote review',phase:'complete'}];
-const client={production:true,runtime:{runtime_id:space.id,boot_id:'review'},spaces:[space],scope:()=>({...scope}),setScope:value=>scope={...scope,...value},changes:()=>()=>{},
+if(params.has('identity')){
+  catalogue[0].phase='running';catalogue[1].phase='queued';catalogue[2].phase='waiting';
+  catalogue[0].title='Layout review · Long task title that truncates while keeping its identity visible';
+  catalogue.push({id:'unknown-catalogue',title:'Unconfirmed address',phase:'queued'},...Array.from({length:3},(_,index)=>({id:'extra-'+index,address:{node_id:'review-local',kind:'task',agent_id:'extra-'+index},title:'Background check '+(index+1),phase:'running'})));
+}
+const changes=new Set(),requests=[];
+const client={production:true,runtime:{runtime_id:space.id,boot_id:'review'},spaces:[space],scope:()=>({...scope}),setScope:value=>scope={...scope,...value},changes:callback=>{changes.add(callback);return()=>changes.delete(callback);},
   subscribe(receive,status){emit=receive;queueMicrotask(()=>{status('connected');receive(snapshot());});return()=>{};},
   async request(path,options={}){
     if(options.method&&options.method!=='GET')throw Error('Review fixture rejects mutations');
     const name=new URL(path,location.href).pathname;
+    requests.push({path:name,space:options.space,owner:options.owner});
     if(name==='/api/v1/spaces')return {items:[space],active_space_id:space.id};
     if(name==='/api/v1/tasks/query')return {items:catalogue};
+    if(name==='/api/v1/machines')return [];
+    const task=catalogue.find(task=>name==='/api/v1/tasks/'+encodeURIComponent(task.id));
+    if(task)return {info:task,request:{text:task.title},capabilities:{version:1,operations:['task.read']}};
     if(name==='/api/v1/assistants')return {items:[{id:'pot',name:'Pot',capabilities:{version:1,operations:['chat.read','task.list']}}]};
     if(name==='/api/v1/agent-links')return {items:[{id:'review-link',peer:{node_id:remote.node_id,kind:'codex',name:'Codex'},status:'connected',assistants:[{address:remote,name:'Code reviewer',adapter:'codex'}]}]};
     return {items:[],pending:[],policy:{}};
@@ -46,7 +56,8 @@ const client={production:true,runtime:{runtime_id:space.id,boot_id:'review'},spa
 };
 mountApp(document.querySelector('#app'),client);
 const frame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-window.taskCommunication={errors,messages,send,receive,taskA,taskB,taskC,client,catalogue,
+window.taskCommunication={errors,messages,send,receive,taskA,taskB,taskC,client,catalogue,requests,
+  async tasks(change){change(catalogue);for(const callback of changes)callback(['tasks'],{space:space.id});await frame();await frame();},
   async update(change){change(messages);cursor++;emit(snapshot());await frame();await frame();},
   async prepare(){
     for(let i=0;i<180&&!document.querySelector('.communication-stack, [data-call-id="mail-1"]');i++)await frame();

@@ -40,7 +40,7 @@ try{
     assert.match(await page.locator('.communication-stack-title').innerText(),/8.*9.*3/);
     await page.evaluate(()=>getSelection().removeAllRanges());
     const raw=page.locator('[data-call-id="mail-3"] .tool-raw');await raw.locator('summary').click();
-    await page.locator('.communication-stack-summary').click();await page.locator('.communication-stack-summary').click();
+    await page.locator('.communication-stack-title').click();await page.locator('.communication-stack-title').click();
     assert.equal(await raw.getAttribute('open'),'','secondary disclosure survives collapse');
     assert.equal(await page.locator('.communication-text').count(),9);
     await page.evaluate(()=>window.taskCommunication.update(messages=>{const i=messages.findIndex(message=>message.id==='mail-4');messages.splice(i,0,{id:'boundary',role:'assistant',status:'complete',text:'A real transcript boundary',sequence:'5',version:1});}));

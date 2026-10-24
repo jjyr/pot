@@ -9,7 +9,7 @@ import {translate} from '../locales/messages.mjs';
 const node=(tag,cls='')=>{const value=document.createElement(tag);value.className=cls;return value;};
 // The virtualizer still owns scrolling. This adapter only projects adjacent
 // logical records and retains the original render records across regrouping.
-export function createCommunicationWindow({locale=()=> 'en',actor=()=>undefined,resolveIdentity=()=>undefined,blocked,
+export function createCommunicationWindow({locale=()=> 'en',actor=()=>undefined,resolveIdentity=()=>undefined,onOpenTask,blocked,
   memory=new Map(),scope='',...options}) {
   let project=createCommunicationProjection(),currentScope;
   const records=new Map();
@@ -48,7 +48,7 @@ export function createCommunicationWindow({locale=()=> 'en',actor=()=>undefined,
     const counts=communicationCounts(message.members,actor()),format=value=>value.toLocaleString(locale());
     group.title.textContent=translate(locale(),counts.tasks===1?'tool.communicationStackOneTask':'tool.communicationStack').replace('{records}',format(counts.records)).replace('{messages}',format(counts.messages)).replace('{tasks}',format(counts.tasks));
     counts.routes.forEach(({mail,count},index)=>{
-      if(!group.views[index]){const view=createCommunication({locale,resolveIdentity});const route=node('div','communication-stack-route'),label=node('span','communication-stack-count');route.append(view.summary,label);group.views[index]={view,route,label};group.routes.append(route);}
+      if(!group.views[index]){const view=createCommunication({locale,resolveIdentity,onOpenTask});const route=node('div','communication-stack-route'),label=node('span','communication-stack-count');route.append(view.summary,label);group.views[index]={view,route,label};group.routes.append(route);}
       const {view,route,label}=group.views[index];route.hidden=false;
       view.update({kind:'send',messages:[mail],sources:[],count:1},{summaryOnly:true});
       label.textContent=translate(locale(),count===1?'tool.communicationRouteOne':'tool.communicationRouteCount').replace('{count}',format(count));
