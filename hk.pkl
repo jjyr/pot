@@ -20,7 +20,10 @@ hooks {
     fix = false
     steps {
       ["go"] {
-        check = "python scripts/timed-check pre-push:go sh -c 'mise run check:go && mise run test'"
+        check = "python scripts/timed-check pre-push:go sh -c 'mise run check:go && mise run test:core'"
+      }
+      ["contracts"] {
+        check = "python scripts/timed-check pre-push:contracts mise run test:contracts"
       }
       ["macos"] {
         check = new Script {
@@ -28,7 +31,7 @@ hooks {
         }
       }
       ["scripts"] {
-        check = "python scripts/timed-check pre-push:scripts sh -c 'mise run test:hooks && mise run test:executor'"
+        check = "python scripts/timed-check pre-push:scripts mise run test:hooks"
       }
       ["licenses"] {
         check = "python scripts/timed-check pre-push:licenses sh -c 'mise run licenses'"

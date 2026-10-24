@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/protocol"
 )
@@ -19,7 +20,7 @@ func reviewQuery(from protocol.AgentRef) agentlink.ReviewRequest {
 
 func awaitReview(t *testing.T, b *backend, r agentlink.ReviewRequest) agentlink.ReviewState {
 	t.Helper()
-	end := time.Now().Add(10 * time.Second)
+	end := time.Now().Add(testutil.Timeout(t, 10*time.Second))
 	for time.Now().Before(end) {
 		value, err := b.Review(context.Background(), r)
 		if err != nil {

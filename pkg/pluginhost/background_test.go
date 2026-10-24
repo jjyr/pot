@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/plugin"
 )
@@ -42,7 +43,7 @@ func TestBackgroundProtocolCannotForgeRouteOrLeakCredential(t *testing.T) {
 			if _, err = p.ToolBundle(); err == nil {
 				t.Fatal("service became transferable tool")
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 			defer cancel()
 			worker, _ := os.Executable()
 			_, err = RunBackground(ctx, "", p, core.BackgroundRequest{Version: 1, Config: []byte(`{}`), State: []byte(`null`)}, map[string]string{"SERVICE_TOKEN": "fixture-private-token"}, []string{worker})
@@ -87,7 +88,7 @@ func TestBackgroundStreamAcknowledgesOnlyCommittedFrames(t *testing.T) {
 	}
 	p := plugin.Package{Root: root, Manifest: core.PluginManifest{SchemaVersion: 2, ID: "example", Version: "1", Contributes: core.PluginContributions{Background: &core.PluginBackground{Runtime: "node", Execution: "control", Mode: "stream", Entrypoint: "service.mjs", Files: []string{"service.mjs"}}}}}
 	worker, _ := os.Executable()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 	defer cancel()
 	count := 0
 	rejected := errors.New("transaction_rejected")

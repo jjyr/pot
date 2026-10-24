@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/assistantavatar"
 	"io"
 	"net/http"
@@ -22,7 +23,7 @@ import (
 
 func TestTaskResultExecutesCommandAndImportsTaskAvatar(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 15*time.Second))
 	defer cancel()
 	var rounds atomic.Int32
 	var s *Service

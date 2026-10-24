@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Complete normal tests and conservative, explicit race selection."""
+"""Local core tests, complete normal tests and conservative race selection."""
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "scripts/go-test-normal-only.json"
+CORE_MANIFEST = ROOT / "scripts/go-test-core.json"
 TEST_FUNCTION = re.compile(r"^func ((?:Test|Fuzz|Example)\w*)\s*\(", re.MULTILINE)
 
 
@@ -73,6 +75,73 @@ def race_plan(packages, exclusions):
     return sorted(full), sorted(selected)
 
 
+def core_plan(packages, manifest):
+    """Explicit local coverage; reject removed or platform-inactive selections."""
+    active = {
+        "./" + Path(package["Dir"]).relative_to(ROOT).as_posix(): package for package in packages
+    }
+    full = manifest["packages"]
+    selected = manifest["selected"]
+    names = full + list(selected)
+    if not names or len(names) != len(set(names)):
+        raise ValueError("core packages must be nonempty and unique")
+    for name in names:
+        if name not in active:
+            raise ValueError(f"unknown core package: {name}")
+        package = active[name]
+        files = package.get("TestGoFiles", []) + package.get("XTestGoFiles", [])
+        tests = test_names(Path(package["Dir"]) / file for file in files)
+        if name in selected:
+            wanted = selected[name]
+            if not wanted or len(wanted) != len(set(wanted)):
+                raise ValueError(f"core test selection must be nonempty and unique: {name}")
+            for test in wanted:
+                if test not in tests:
+                    raise ValueError(f"unknown core test: {name}:{test}")
+        elif not tests:
+            raise ValueError(f"core package has no active tests: {name}")
+    return full, sorted(selected.items())
+
+
+def selected_commands(command, full, selected):
+    commands = [command + full] if full else []
+    for package, tests in selected:
+        pattern = "^(" + "|".join(re.escape(test) for test in tests) + ")$"
+        commands.append(command + [package, "-run", pattern])
+    return commands
+
+
+def parse_shard(value):
+    match = re.fullmatch(r"([1-9][0-9]*)/([1-9][0-9]*)", value)
+    if not match or int(match[1]) > int(match[2]):
+        raise argparse.ArgumentTypeError("shard must be INDEX/TOTAL with 1 <= INDEX <= TOTAL")
+    return int(match[1]), int(match[2])
+
+
+def shard_packages(packages, shard):
+    """Keep packages intact; balance by active test count without a timing manifest."""
+    index, total = shard
+    weighted = []
+    for package in packages:
+        directory = Path(package["Dir"])
+        name = "./" + directory.relative_to(ROOT).as_posix()
+        files = package.get("TestGoFiles", []) + package.get("XTestGoFiles", [])
+        weight = max(1, len(test_names(directory / file for file in files)))
+        weighted.append((name, weight))
+    loads = [0] * total
+    assigned = set()
+    for name, weight in sorted(weighted, key=lambda item: (-item[1], item[0])):
+        bucket = min(range(total), key=lambda slot: (loads[slot], slot))
+        loads[bucket] += weight
+        if bucket == index - 1:
+            assigned.add(name)
+    return [
+        package
+        for package in packages
+        if "./" + Path(package["Dir"]).relative_to(ROOT).as_posix() in assigned
+    ]
+
+
 def run(command):
     print("+ " + shlex.join(command), file=sys.stderr, flush=True)
     started = time.monotonic()
@@ -87,40 +156,56 @@ def run(command):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=["normal", "race", "race-all"])
+    parser.add_argument("mode", choices=["core", "normal", "race", "race-all"])
     parser.add_argument("--timeout", default=os.environ.get("POT_GO_TEST_TIMEOUT", "20m"))
     parser.add_argument("--count", type=int)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--shard", type=parse_shard, help="run one disjoint package shard: 1/4")
     parser.add_argument(
-        "--list", action="store_true", help="print race plan without executing tests"
+        "--list", action="store_true", help="print test plan without executing tests"
     )
     args = parser.parse_args()
+    if args.shard and args.mode == "core":
+        parser.error("the local core suite is not sharded")
     exclusions = normal_only(json.loads(MANIFEST.read_text()))
     command = ["go", "test", f"-timeout={args.timeout}"]
     if args.count is not None:
         command.append(f"-count={args.count}")
     if args.json:
         command.append("-json")
-    if args.mode == "normal":
+    if args.mode == "normal" and not args.shard:
         commands = [command + ["./..."]]
-    elif args.mode == "race-all":
+    elif args.mode == "race-all" and not args.shard:
         commands = [command + ["-race", "./..."]]
-    else:
+    elif args.mode == "core":
         packages = decode_packages(
-            subprocess.check_output(["go", "list", "-race", "-json", "./..."], cwd=ROOT, text=True)
+            subprocess.check_output(["go", "list", "-json", "./..."], cwd=ROOT, text=True)
         )
-        full, selected = race_plan(packages, exclusions)
-        commands = [command + ["-race"] + full] if full else []
-        for package, tests in selected:
-            pattern = "^(" + "|".join(re.escape(test) for test in tests) + ")$"
-            commands.append(command + ["-race", package, "-run", pattern])
+        full, selected = core_plan(packages, json.loads(CORE_MANIFEST.read_text()))
+        commands = selected_commands(command, full, selected)
+    else:
+        flags = [] if args.mode == "normal" else ["-race"]
+        packages = decode_packages(
+            subprocess.check_output(["go", "list", *flags, "-json", "./..."], cwd=ROOT, text=True)
+        )
+        if args.shard:
+            packages = shard_packages(packages, args.shard)
+        if args.mode == "race":
+            full, selected = race_plan(packages, exclusions)
+        else:
+            full = sorted("./" + Path(p["Dir"]).relative_to(ROOT).as_posix() for p in packages)
+            selected = []
+        commands = selected_commands(command + flags, full, selected)
     if args.list:
         for command in commands:
             print(shlex.join(command))
         return
     if not commands:
         return
-    results = [run(command) for command in commands]
+    # These commands own independent fixtures; don't make Control wait for every
+    # other race package. Package/test coverage is identical to serial execution.
+    with ThreadPoolExecutor(max_workers=4 if args.mode == "core" else 2) as pool:
+        results = list(pool.map(run, commands))
     raise SystemExit(next((code for code in results if code), 0))
 
 

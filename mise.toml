@@ -29,9 +29,34 @@ run = "python scripts/dev-check lint"
 description = "Check Go compilation, component boundaries and source formatting"
 depends = ["lint", "check:go"]
 
+[tasks."check:ci"]
+description = "Run full source, architecture, localization and workflow contracts"
+depends = ["check", "test:i18n", "test:hooks", "licenses"]
+run = ["python scripts/tests/go-test-plan.py", "python scripts/test_go.py core --list", "python scripts/tests/ci-release.py", "python scripts/tests/homebrew-cask.py", "python scripts/tests/docker-entrypoint.py"]
+
+[tasks."ci:normal"]
+description = "Run normal tests and ancillary CI gates concurrently on one runner"
+depends = ["test:go:ci", "check:ci", "test:contracts", "test:release", "test:sandbox"]
+
+[tasks."test:go:ci"]
+description = "Run complete normal Go coverage without test-result caching"
+run = "python scripts/test_go.py normal --count=1"
+
 [tasks.test]
 description = "Test product contracts without model calls"
 depends = ["test:go", "test:race", "test:ui", "test:packaging", "test:eval", "test:public-api"]
+
+[tasks."test:core"]
+description = "Run local core logic and selected lifecycle/security integration tests"
+run = ["python scripts/tests/go-test-plan.py", "python scripts/test_go.py core --count=1"]
+
+[tasks."test:contracts"]
+description = "Verify UI, packaging, deterministic CLI and public API contracts"
+depends = ["test:ui", "test:packaging", "test:eval", "test:public-api"]
+
+[tasks."check:push"]
+description = "Run the local pre-push gate (full normal/race suites run in CI)"
+run = "hk run pre-push --all"
 
 [tasks.prepare]
 description = "Prepare retained Node, JS plugins, and skills"
@@ -93,7 +118,7 @@ run = "go test -race ./pkg/executor ./pkg/pluginhost"
 
 [tasks."test:ui-fluid"]
 description = "Verify bounded task catalogues, progressive loading and targeted invalidation"
-run = "node scripts/tests/go-ui-task-pages.mjs"
+run = ["node scripts/tests/go-ui-task-pages.mjs", "node scripts/tests/task-identity.mjs", "node scripts/tests/record-groups.mjs"]
 
 [tasks."test:assistant-creation"]
 description = "Verify one-click assistant creation, retries and Space ownership"
@@ -152,7 +177,6 @@ run = ["python scripts/tests/go-test-plan.py", "python scripts/test_go.py normal
 
 [tasks."test:race"]
 description = "Race-check concurrent product paths with explicit serial-test exclusions"
-depends = ["test:go"]
 run = "python scripts/test_go.py race"
 
 [tasks."test:race:all"]

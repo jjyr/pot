@@ -48,15 +48,32 @@ func (s *Service) page(ctx context.Context, assistant string, query protocol.Tas
 	if limit > 50 {
 		return page, fmt.Errorf("Task page limit exceeds 50")
 	}
+	if query.AssistantID != "" {
+		if !core.Identifier(query.AssistantID) {
+			return page, fmt.Errorf("invalid assistant identity")
+		}
+		if assistant != "" && assistant != query.AssistantID {
+			return page, fmt.Errorf("assistant filter outside owner scope")
+		}
+		assistant = query.AssistantID
+	}
+	if query.Phase != nil && query.Phase.Scope() == "" {
+		return page, fmt.Errorf("invalid Task phase")
+	}
 	scope := query.Scope
 	if scope == "" {
 		scope = "active"
 	}
 	archived := "(CASE WHEN json_valid(body) THEN json_extract(body,'$.info.archived') ELSE 0 END)"
 	phases := map[string]string{
-		"active":    archived + " IS NOT TRUE AND phase IN ('queued','waiting','running','waiting_approval')",
-		"attention": archived + " IS NOT TRUE AND phase IN ('failed','interrupted','complete','cancelled')",
-		"archived":  archived + " IS TRUE", "all": "1=1",
+		"complete":         archived + " IS NOT TRUE AND phase='complete'",
+		"unarchived":       archived + " IS NOT TRUE",
+		"failed":           archived + " IS NOT TRUE AND phase='failed'",
+		"interrupted":      archived + " IS NOT TRUE AND phase='interrupted'",
+		"waiting_approval": archived + " IS NOT TRUE AND phase='waiting_approval'",
+		"active":           archived + " IS NOT TRUE AND phase IN ('queued','waiting','running','waiting_approval')",
+		"attention":        archived + " IS NOT TRUE AND phase IN ('failed','interrupted','complete','cancelled')",
+		"archived":         archived + " IS TRUE", "all": "1=1",
 	}
 	if phases[scope] == "" {
 		return page, fmt.Errorf("invalid Task scope")
@@ -81,17 +98,24 @@ func (s *Service) page(ctx context.Context, assistant string, query protocol.Tas
 	}
 	defer tx.Rollback()
 	ownerWhere := "(?='' OR assistant_id=?)"
-	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(SUM("+phases["active"]+"),0),COALESCE(SUM("+phases["attention"]+"),0),COALESCE(SUM("+phases["archived"]+"),0) FROM tasks WHERE "+ownerWhere, assistant, assistant).Scan(&page.Counts.Active, &page.Counts.Attention, &page.Counts.Archived); err != nil {
+	// Scope counts share owner/search/target filters, independent of the selected
+	// scope and phase so other views and exception reminders remain discoverable.
+	if query.Q != "" {
+		where += " AND instr(pot_task_lower(id || ' ' || json_extract(body,'$.info.title') || ' ' || json_extract(body,'$.request.text')),?)>0"
+		args = append(args, strings.ToLower(query.Q))
+	}
+	countScopes := []string{"active", "attention", "archived", "complete", "failed", "interrupted", "waiting_approval"}
+	columns := make([]string, 0, len(countScopes))
+	for _, name := range countScopes {
+		columns = append(columns, "COALESCE(SUM("+phases[name]+"),0)")
+	}
+	if err := tx.QueryRowContext(ctx, "SELECT "+strings.Join(columns, ",")+" FROM tasks WHERE "+where, args...).Scan(&page.Counts.Active, &page.Counts.Attention, &page.Counts.Archived, &page.Counts.Complete, &page.Counts.Failed, &page.Counts.Interrupted, &page.Counts.WaitingApproval); err != nil {
 		return page, err
 	}
 	where += " AND " + phases[scope]
 	if query.Phase != nil {
 		where += " AND phase=?"
 		args = append(args, *query.Phase)
-	}
-	if query.Q != "" {
-		where += " AND instr(pot_task_lower(id || ' ' || json_extract(body,'$.info.title') || ' ' || json_extract(body,'$.request.text')),?)>0"
-		args = append(args, strings.ToLower(query.Q))
 	}
 	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks WHERE "+where, args...).Scan(&page.Total); err != nil {
 		return page, err

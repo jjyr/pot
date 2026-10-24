@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"github.com/jjyr/pot/internal/testutil"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -68,7 +69,7 @@ func TestDeviceAuthorizationIdentityAndRefresh(t *testing.T) {
 	defer server.Close()
 	base, _ := url.Parse(server.URL)
 	adapter := New(Options{ClientID: "fixture-client", HTTPClient: &http.Client{Transport: redirectTransport{base}}})
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 	defer cancel()
 	challenge, err := adapter.Begin(ctx)
 	if err != nil {

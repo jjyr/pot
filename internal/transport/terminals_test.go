@@ -12,11 +12,12 @@ import (
 	"github.com/coder/websocket"
 	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/execution"
 )
 
 func TestNativeTerminalAuthenticatedSocketAndOriginBoundary(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 10*time.Second))
 	defer cancel()
 	manager, _ := execution.New("local", "boot", execution.DefaultLimits())
 	keys, _ := secrets.NewMemoryKey(make([]byte, 32))

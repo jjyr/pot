@@ -30,11 +30,14 @@ platform requirements, installation boundaries and source-build instructions.
 
 ## Triggers and source selection
 
-Only tag pushes start CI automatically. Every tag runs checks, including Unicode
+The release/build `CI` workflow starts automatically only on tag pushes. The
+separate `Tests` workflow checks PRs and pushes to `main`; see
+[Development](development.md#ci-and-manual-pr-checks) for its parallel test gates.
+Every tag runs checks, including Unicode
 names and tags outside the release pattern. Only exact `vMAJOR.MINOR.PATCH` tags
 without leading zeroes select publication. Other tags build validation artifacts
 with version `0.0.0`; they do not push images or create releases. Branch pushes,
-PR events and Release events do not start CI.
+PR events and Release events do not start the release/build workflow.
 
 Ordinary manual runs never publish, including when selecting a stable version tag.
 The optional `ref` and `pr` inputs are mutually exclusive. Leave both empty to
@@ -63,7 +66,9 @@ bypasses checks.
 ```text
 resolve one source SHA + version + publication intent
                          |
-              shared Linux/macOS product checks
+              shared Linux/macOS Tests workflow
+                         |
+               headless/cross-platform builds
                          |
        +-----------------+----------------+------------------+
        |                 |                |                  |

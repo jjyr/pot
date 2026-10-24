@@ -16,6 +16,7 @@ import (
 
 	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/internal/tasks"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -175,7 +176,7 @@ if mode=='timeout':
 		}
 		// Schedule acceptance precedes asynchronous run creation. Preparation
 		// signals that the real run receipt exists, without completing the task.
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 10*time.Second))
 		defer cancel()
 		select {
 		case <-prepared:

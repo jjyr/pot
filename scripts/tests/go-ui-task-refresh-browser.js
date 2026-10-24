@@ -11,7 +11,7 @@ async page=>{
    const f=window.taskFixture={calls:[],pending:[],notices:[]};
    f.capabilities={version:1,scope:'owner',operations:['chat.read','chat.send','chat.subscribe','assistant.configure','assistant.usage','approvals.manage','task.read','task.list','task.cancel','task.interrupt','task.control','task.events','task.input','task.archive','task.outcomes','task.files','schedules.manage']};
    f.items=Array.from({length:12},(_,index)=>({id:String(index),title:'分析任务 '+(index+1),phase:'running',assistant_id:'a',updated_at_ms:100-index}));
-   f.client={spaces:[{id:'local',name:'本机'}],assistants:[{id:'a',space_id:'local',name:'项目助手',capabilities:f.capabilities}],runtime:{boot_id:'fixture'},scope:()=>({space:'local',owner:'a'}),request:(path,options={})=>{
+   f.client={spaces:[{id:'local',control_id:'fixture-node',name:'本机'}],assistants:[{id:'a',space_id:'local',control_id:'fixture-node',name:'项目助手',capabilities:f.capabilities}],runtime:{boot_id:'fixture'},scope:()=>({space:'local',owner:'a'}),request:(path,options={})=>{
     if(path==='/api/v1/machines')return Promise.resolve([{id:'fixture-machine',hostname:'fixture.local',ip_addresses:['192.168.1.24']}]);
     if(path.includes('/permissions'))return Promise.resolve({items:[]});
     if(/^\/api\/v1\/tasks\/[^/]+$/.test(path)&&f.detailRecord)return Promise.resolve({...structuredClone(f.detailRecord),capabilities:f.capabilities});
@@ -36,7 +36,7 @@ async page=>{
   await page.evaluate(async()=>{const f=taskFixture;f.items[0].phase='waiting';f.items[0].pending=2;f.reply();await f.refresh;});
   await page.waitForFunction(()=>taskFixture.calls.length===3);
   await page.evaluate(()=>taskFixture.reply());
-  await page.waitForFunction(()=>document.querySelector('.task-phase').textContent==='等待中');
+  await page.waitForFunction(()=>document.querySelector('.task-phase').textContent==='等待配额');
   assert(await page.evaluate(()=>{const f=taskFixture;return f.calls.length===3&&f.rows.querySelector('.task-row')===f.row&&f.rows.scrollTop===f.scroll&&document.activeElement===f.input&&f.input.value==='未提交的搜索'&&f.input.selectionStart===2&&f.input.selectionEnd===4&&f.row.textContent.includes('2 条待处理指令');}),'One follow-up updates metadata while preserving nodes, draft, selection and scroll');
   // Cached offline rows are retained and recover without repeated warnings.
   for(let attempt=0;attempt<2;attempt++){
@@ -49,11 +49,11 @@ async page=>{
   assert(await page.evaluate(()=>taskFixture.rows.querySelector('.task-row')===taskFixture.focused&&document.activeElement===taskFixture.focused),'Reordering retains row identity and keyboard focus');
   // Pagination and removals still update controls and row membership.
   await page.evaluate(async()=>{const f=taskFixture;f.items.push(...Array.from({length:10},(_,index)=>({id:'extra-'+index,title:'新增任务 '+index,assistant_id:'a',phase:'running',updated_at_ms:50-index})));f.refresh=f.pages.refresh(['tasks']);f.reply();await f.refresh;});
-  await page.getByRole('button',{name:'下一页',exact:true}).click();
+  await page.getByRole('button',{name:'下一页 →',exact:true}).first().click();
   await page.evaluate(()=>taskFixture.reply());
   await page.waitForFunction(()=>document.querySelectorAll('.task-row').length===2);
-  assert(await page.getByRole('button',{name:'下一页',exact:true}).isDisabled()&&await page.getByRole('button',{name:'上一页',exact:true}).isEnabled(),'Pagination uses the latest total and offset');
-  await page.getByRole('button',{name:'上一页',exact:true}).click();await page.evaluate(()=>taskFixture.reply());
+  assert(await page.getByRole('button',{name:'下一页 →',exact:true}).first().isDisabled()&&await page.getByRole('button',{name:'← 上一页',exact:true}).first().isEnabled(),'Pagination uses the latest total and offset');
+  await page.getByRole('button',{name:'← 上一页',exact:true}).first().click();await page.evaluate(()=>taskFixture.reply());
   await page.waitForFunction(()=>document.querySelectorAll('.task-row').length===20);
   await page.evaluate(async()=>{const f=taskFixture;f.items=[];f.refresh=f.pages.refresh(['tasks']);f.reply();await f.refresh;f.input=document.querySelector('input');});
   assert(await page.locator('.task-row').count()===0&&await page.locator('.page-empty').count()===1,'Removed tasks reconcile to the empty state');
@@ -65,7 +65,7 @@ async page=>{
   await page.evaluate(()=>{for(const call of taskFixture.retired)call.resolve({items:[{id:'stale',title:'过期任务'}]});});
   assert(await page.getByRole('button',{name:'当前筛选任务',exact:true}).count()===1&&await page.getByRole('button',{name:'过期任务',exact:true}).count()===0,'Late responses cannot repaint the new view');
   // The same task ID on another assistant remains a distinct row and owner.
-  await page.evaluate(async()=>{const f=taskFixture;f.client.assistants.push({id:'b',space_id:'local',name:'第二助手'});f.refresh=f.pages.refresh(['assistants']);for(const call of f.pending.splice(0))call.resolve({items:['a','b'].map(owner=>({...f.items[0],assistant_id:owner,title:'助手 '+owner})),total:2,counts:{active:2}});await f.refresh;});
+  await page.evaluate(async()=>{const f=taskFixture;f.client.assistants.push({id:'b',space_id:'local',control_id:'fixture-node',name:'第二助手'});f.refresh=f.pages.refresh(['assistants']);for(const call of f.pending.splice(0))call.resolve({items:['a','b'].map(owner=>({...f.items[0],assistant_id:owner,title:'助手 '+owner})),total:2,counts:{active:2}});await f.refresh;});
   assert(await page.locator('.task-row').count()===2,'Row identity includes assistant identity');
   await page.getByRole('button',{name:'助手 b',exact:true}).click();
   await page.evaluate(()=>{taskFixture.pages.refresh(['tasks']);});
