@@ -55,6 +55,7 @@ try{
  await actions.goto(fixtureURL('after','light','en'));await openTasks(actions);
  await actions.locator('.task-row').first().click();await actions.locator('.task-goal').waitFor();
  assert.ok(await actions.locator('.task-goal .task-identity-mark[data-task-color]').count());
+ const confirmed=await actions.evaluate(async()=>{const {taskIdentities}=await import('/web/src/state/task-identity.mjs');return taskIdentities.resolve(window.tasksSchedulesFixture.tasks[0].address);});assert.equal(confirmed._space_id,'two');assert.equal(confirmed.assistant_id,'beta','Detail refresh retains the confirmed catalogue owner');
  await actions.getByRole('button',{name:'Task actions',exact:true}).click();await actions.getByRole('button',{name:'Pause task',exact:true}).click();
  await actions.waitForFunction(()=>window.tasksSchedulesFixture.calls.some(c=>c.options.body?.action==='pause'&&c.path.endsWith('/control')));
  let call=await actions.evaluate(()=>window.tasksSchedulesFixture.calls.find(c=>c.path.endsWith('/control')));assert.equal(call.options.owner,'beta');assert.equal(call.options.space,'two');assert.equal(call.options.body.run_id,'fixture-run');

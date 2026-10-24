@@ -531,7 +531,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     finally{if(current())view.rows.setAttribute('aria-busy','false');}
   }
   function updateTaskList(view,pages,loading,partial=false){
-    const result=combineTasks(pages,{offset:filter.taskOffset,limit:20});rememberTasks(pages.flatMap(page=>page.value.items||[]));
+    const result=combineTasks(pages,{offset:filter.taskOffset,limit:20});rememberTasks(pages.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner)));
     if(!view.result)view.rows.replaceChildren();view.result=result;
     const text=(node,value)=>{if(node.textContent!==value)node.textContent=value;},t=key=>translate(locale(),key);
     for(const [index,value]of ['active','complete','archived'].entries()){const button=view.scopes.children[index];text(button,`${t(`tasks.scope.${value}`)}${partial?'':' '+result.counts[value].toLocaleString(locale())}`);button.classList.toggle('selected',filter.taskScope===value);button.setAttribute('aria-pressed',String(filter.taskScope===value));}
@@ -622,7 +622,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       })();
       const updates=await Promise.allSettled([view.initialRead?Promise.resolve(view.record):request(path,options),can('task.input')?request(`${path}/messages`,options):Promise.resolve([]),events]);view.initialRead=false;
       if(!current())return;
-      if(updates[0].status==='fulfilled'){view.record=updates[0].value;rememberTasks([view.record.info]);}if(updates[1].status==='fulfilled')view.inputs=list(updates[1].value);
+      if(updates[0].status==='fulfilled'){view.record=updates[0].value;rememberTasks([{...view.record.info,_space_id:view.scope.space,assistant_id:view.scope.owner,_assistant_id:view.scope.owner}]);}if(updates[1].status==='fulfilled')view.inputs=list(updates[1].value);
       view.connectionError=updates.filter(update=>update.status==='rejected'&&update.reason.name!=='AbortError').map(update=>update.reason.message).join('\n');
       const page=updates[2].status==='fulfilled'?updates[2].value:{};
       view.unavailable=!!page?.unavailable;render=true;
