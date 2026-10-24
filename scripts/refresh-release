@@ -123,9 +123,10 @@ def verify_build(binary, source):
         file.write(binary)
         file.flush()
         metadata = subprocess.check_output(["go", "version", "-m", file.name], text=True)
-    for key, value in (("Version", VERSION), ("Revision", source)):
-        if f"-X=github.com/jjyr/pot/internal/buildinfo.{key}={value}" not in metadata:
-            raise ValueError(f"Candidate binary has a different {key}")
+    # Trimpath builds omit linker flags from build info. CI's native --version
+    # gates check the product version; the VCS receipt binds these exact binaries.
+    if "\tbuild\tvcs.revision=" + source not in metadata.splitlines():
+        raise ValueError("Candidate binary has a different source revision")
 
 
 def verify_candidate_builds(output, source):

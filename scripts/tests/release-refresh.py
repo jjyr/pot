@@ -57,6 +57,15 @@ class RefreshFences(unittest.TestCase):
             finally:
                 os.chdir(before)
 
+    def test_binary_source_uses_vcs_receipt_without_assuming_linker_flags(self):
+        with mock.patch(
+            "subprocess.check_output",
+            return_value="binary: go1.27.2\n\tbuild\tvcs.revision=" + SHA + "\n",
+        ):
+            refresh["verify_build"](b"fixture", SHA)
+            with self.assertRaisesRegex(ValueError, "source revision"):
+                refresh["verify_build"](b"fixture", "b" * 40)
+
     def test_stale_original_stops_before_any_mutation(self):
         self.assets[0]["size"] = 99
         with self.assertRaises(ValueError):
