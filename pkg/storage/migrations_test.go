@@ -246,3 +246,28 @@ func TestMigrationCancellationDoesNotWrite(t *testing.T) {
 		t.Fatal(exists, err)
 	}
 }
+
+func TestMessageFilesUpgradePreservesResources(t *testing.T) {
+	db := migrationDB(t)
+	ctx := context.Background()
+	first, err := migrationFiles.ReadFile("migrations/control/0001_initial_schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := fstest.MapFS{"migrations/control/0001_initial_schema.sql": {Data: first}}
+	if err = migrateDatabase(ctx, db, ControlDatabase, files); err != nil {
+		t.Fatal(err)
+	}
+	execMigrationSQL(t, db, `INSERT INTO display_resources VALUES('old','main','request','hash','{"id":"old"}',0,1)`)
+	if err = migrateDatabase(ctx, db, ControlDatabase, migrationFiles); err != nil {
+		t.Fatal(err)
+	}
+	var metadata string
+	if err = db.QueryRow(`SELECT metadata FROM display_resources WHERE id='old'`).Scan(&metadata); err != nil || metadata != `{"id":"old"}` {
+		t.Fatal(metadata, err)
+	}
+	execMigrationSQL(t, db, `INSERT INTO message_files(owner,conversation,message,revision,ref,start,end,href,label,block,source,state) VALUES('main','main','reply','rev','ref',0,12,'file.txt','File',1,'{}','pending')`)
+	if err = migrateDatabase(ctx, db, ControlDatabase, migrationFiles); err != nil {
+		t.Fatal(err)
+	}
+}

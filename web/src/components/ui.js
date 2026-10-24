@@ -729,6 +729,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   };
   let renderingSnapshot=null,renderingSending=null,renderingForest=null,navigationPath=new Map();
   const markdownFiles=scope=>({
+    messageFiles:client.messageFiles?(message,options)=>client.messageFiles(message,{...scope,...options}):undefined,
+    retryMessageFile:client.retryMessageFile?(message,ref,options)=>client.retryMessageFile(message,ref,{...scope,...options}):undefined,
     acquireResource:client.acquireResource?resource=>client.acquireResource(resource,scope):undefined,
     downloadResource:client.downloadResource?resource=>client.downloadResource(resource,scope):undefined,
     acquireFileImage:client.acquireFileImage?({task,path})=>client.acquireFileImage(task,path,scope):undefined,

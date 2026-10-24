@@ -31,6 +31,18 @@ func resourceRoute(path string) (string, string, bool) {
 	return parts[0], parts[1], parts[1] == "chunk" || parts[1] == "content" || parts[1] == "download" || parts[1] == "render"
 }
 func (a *Application) resourceCall(ctx context.Context, method string, u *url.URL, owner string) (any, error, bool) {
+	if strings.HasPrefix(u.Path, "/api/v1/message-files/") {
+		parts := strings.Split(strings.TrimPrefix(u.Path, "/api/v1/message-files/"), "/")
+		if len(parts) == 1 && method == "GET" {
+			value, err := a.Control.MessageFiles(ctx, owner, u.Query().Get("task_id"), parts[0])
+			return value, err, true
+		}
+		if len(parts) == 2 && method == "POST" {
+			err := a.Control.RetryMessageFile(ctx, owner, u.Query().Get("task_id"), parts[0], parts[1])
+			return map[string]bool{"accepted": err == nil}, err, true
+		}
+		return nil, errors.New("invalid message file request"), true
+	}
 	id, operation, ok := resourceRoute(u.Path)
 	if !ok {
 		return nil, nil, false

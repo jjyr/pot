@@ -6,8 +6,10 @@ import {createReplyBubble} from '/web/src/components/reply.mjs';
 import {translate} from '/web/src/locales/messages.mjs';
 const params=new URLSearchParams(location.search),client=await createProductionClient();client.setScope({owner:'main',space:''});
 document.documentElement.lang=params.get('locale')||'zh-CN';document.documentElement.dataset.theme=params.get('theme')||'light';
-const snapshot=await client.snapshot(),messages=snapshot.messages.filter(message=>message.presentation);
-const options={t:key=>translate(document.documentElement.lang,key),acquireResource:resource=>client.acquireResource(resource,{owner:'main',space:''}),downloadResource:resource=>client.downloadResource(resource,{owner:'main',space:''})};
+const snapshot=await client.snapshot();client.setScope({owner:snapshot.conversation_id,space:''});
+const references=(await Promise.all(snapshot.messages.filter(m=>m.role==='assistant').map(m=>client.messageFiles(m.id)))).flat();
+const messages=references.filter(r=>r.state==='ready'&&r.block).map(r=>({id:r.id,text:'',presentation:{resource:r.resource,mode:r.resource.entry==='report.txt'?'download':'preview',caption:r.label}}));
+const options={t:key=>translate(document.documentElement.lang,key),acquireResource:resource=>client.acquireResource(resource,{owner:snapshot.conversation_id,space:''}),downloadResource:resource=>client.downloadResource(resource,{owner:snapshot.conversation_id,space:''})};
 const order=[0,1,2,3,4,5,6],placement={0:'left',1:'left',2:'left',3:'right',4:'right',5:'right',6:'left'};
 const before=params.has('before');document.querySelector('#showcase').classList.toggle('before',before);
 const views=[];
@@ -17,7 +19,7 @@ for(const index of order){
   const reply=createReplyBubble(host),resource=message.presentation.resource;
   if(before){
     const task='21cfe7c9-34cc-41a8-9156-39a8341ad3dc',source=`${message.presentation.caption}\n\n[${resource.name}](pot-file://${task}/${resource.entry})`;
-    reply.update({text:source,phase:'complete'},{...options,acquireFileImage:()=>{const lease=client.acquireResource(resource,{owner:'main',space:''});return {url:lease.blobURL(resource.entry),release:()=>lease.release()};},downloadFile:()=>options.downloadResource(resource)});
+    reply.update({text:source,phase:'complete'},{...options,acquireFileImage:()=>{const lease=client.acquireResource(resource,{owner:snapshot.conversation_id,space:''});return {url:lease.blobURL(resource.entry),release:()=>lease.release()};},downloadFile:()=>options.downloadResource(resource)});
   }else reply.update({...message,phase:'complete'},options);
   views.push({host,reply,message});
 }

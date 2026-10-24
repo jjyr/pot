@@ -188,8 +188,10 @@ final reply, execution status and execution diagnostics survive; an attachment
 problem never reruns or changes the success/failure of the work. The task view
 shows the delivery diagnostic separately. Attachment paths do not snapshot bytes;
 subsequent downloads retain the original workspace and file revision checks.
-The owning assistant can use `register_resource` and `present_resource` to import
-and deliver an actual attachment through the durable resource store.
+The owning assistant can reference an actual attachment with an explicit
+`[Title](pot-file://TaskID/relative-path)` Markdown link. Completed-message
+references capture the original Task binding and snapshot through the
+[display resource service](display-resources.md).
 
 During execution, workers may send an owner message when useful. The owner may
 inspect or guide a Task during its own turns, with no required polling cadence.

@@ -323,7 +323,11 @@ func (f *turnFeedback) event(event core.AgentEvent) error {
 					m.Text = update.Text
 					m.Status = protocol.Complete
 				}
-				return c.putMessageLocked(ctx, m, nil)
+				err := c.putMessageLocked(ctx, m, nil)
+				if err == nil && update.Type == "message_finished" && f.options.MessageCompleted != nil {
+					f.options.MessageCompleted(m.ID, m.Text)
+				}
+				return err
 			}
 		}
 		return errors.New("assistant output projection is missing")
@@ -353,19 +357,6 @@ func (f *turnFeedback) event(event core.AgentEvent) error {
 					m.Status = protocol.Complete
 					if update.Failed {
 						m.Status = protocol.Failed
-					}
-					if !update.Failed && tool.Name == "present_resource" && tool.Phase == "completed" {
-						var result struct {
-							Presentation *core.ResourcePresentation `json:"presentation"`
-						}
-						if err := json.Unmarshal(tool.Result, &result); err != nil {
-							return err
-						}
-						if result.Presentation == nil {
-							return errors.New("resource presentation missing")
-						}
-						reply := protocol.Message{ID: "resource-" + id, ConversationID: c.options.ConversationID, Role: protocol.Assistant, Status: protocol.Complete, ReplyTo: c.turn.UserMessageID, CreatedAtMS: update.AtMS, Presentation: result.Presentation}
-						return c.putMessagesLocked(ctx, []protocol.Message{m, reply}, nil)
 					}
 				}
 				return c.putMessageLocked(ctx, m, nil)

@@ -6,7 +6,8 @@ const [{createProductionClient},{createReplyBubble},{translate}]=await Promise.a
 document.documentElement.lang=params.get('locale')||'en';document.documentElement.dataset.theme=params.get('theme')||'light';
 const client=await createProductionClient();
 const snapshot=await client.snapshot(),owner=snapshot.conversation_id;client.setScope({owner,space:''});
-const messages=snapshot.messages.filter(message=>message.presentation),options={t:key=>translate(document.documentElement.lang,key),acquireResource:resource=>client.acquireResource(resource,{owner,space:''}),downloadResource:resource=>client.downloadResource(resource,{owner,space:''})};
+const references=(await Promise.all(snapshot.messages.filter(m=>m.role==='assistant').map(m=>client.messageFiles(m.id)))).flat();
+const messages=references.filter(r=>r.state==='ready').map(r=>({id:r.id,text:'',presentation:{resource:r.resource,mode:'preview',caption:r.label}})),options={t:key=>translate(document.documentElement.lang,key),acquireResource:resource=>client.acquireResource(resource,{owner,space:''}),downloadResource:resource=>client.downloadResource(resource,{owner,space:''})};
 const views=[];
 for(const message of messages){
   // Read through the real authenticated resource-info API as well as the durable presentation.

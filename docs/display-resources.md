@@ -12,8 +12,8 @@ insensitive) default to the shared safe Markdown reader when their MIME type is
 `text/plain` or `text/html`. The latter handles HTML sniffed from Markdown that
 begins with raw HTML; it never grants Markdown an interactive HTML frame.
 Explicit `text/markdown` and `text/x-markdown` MIME types also select Markdown
-(parameters are ignored). Other MIME types keep their existing viewer, so binary
-types take precedence over an entry suffix. Display labels and derived download
+(parameters are ignored). Other inert `text/*` types, including JavaScript and CSS source, use the plain
+text reader. Binary types take precedence over an entry suffix. Display labels and derived download
 names never choose a viewer. Existing registered Markdown with `text/plain`
 works without registration again or changes to stored manifests. Registration
 continues to record its detected MIME type; no persisted format changes.
@@ -34,73 +34,92 @@ adapter. Undeclared relative images and links remain literal text and do not
 fetch local or remote files. The existing bundle contract only permits HTML
 bundles; Markdown does not add an asset-bundle contract or bypass path limits.
 
-## Tools and durable replies
+## Message file references
 
-`register_resource` imports an existing workspace-relative file and returns its
-resource identity and immutable manifest. Main may select one of its own Tasks
-with `task_id`; a Worker can import only its own Task workspace. HTML bundles
-declare their additional workspace-relative `assets`. Registration does not show
-the resource. Source reads retain the original Task launch and revision when the
-workspace is remote; failed remote reads never fall back to a local path.
+Assistants deliver files using explicit Markdown links or images, for example
+`[Report](artifacts/report.md)`, `[Source](/project/a.go:120)` or
+`![Result](<artifacts/image (1).png>)`. Labels are titles. HTTP/HTTPS (including
+localhost) remain ordinary links. Bare paths, inline code, fenced code and
+indented code do not enqueue reads. The inline-node parser supports Unicode,
+escaped punctuation, spaces, balanced destination parentheses and angle-wrapped
+paths; reference-style definitions are not a file-delivery interface.
 
-The optional `name` is a display label, preserved verbatim, including Unicode,
-slashes and backslashes. It has no filename character restrictions or separate
-255-byte/character limit; overall transport and resource limits still apply.
-Omitting it or passing an empty string uses the source basename. The label never
-selects a workspace path, stored blob path or ZIP entry.
-
-Download filenames are derived separately with `core.DownloadFilename`. A single
-file keeps its original entry basename when portable; its label does not rename
-the download. An HTML bundle uses the label with its final extension replaced by
-`.zip` (dotfile labels keep their stem). Separators, control characters (including NUL) and Windows-forbidden
-filename characters become underscores; trailing dots/spaces are removed and
-Windows device names are prefixed with an underscore. Empty or dot-only names
-fall back to `resource`. Filenames fit 255 UTF-8 bytes, truncating only at rune
-boundaries and retaining the final extension when it fits. An extension that alone
-exceeds the limit retains its prefix, with room for a nonempty stem. The manifest's
-`download.path` carries this suggested basename to browser and native clients;
-HTTP headers and native save dialogs apply the same conversion at their boundary.
-Original `entry`/`files[].path` values and ZIP entries retain their declared paths
-and existing path validation.
-
-`present_resource` accepts a registered `resource_id`, `mode: preview | download`
-and optional caption. Preview displays the appropriate component; download shows
-a file delivery card. Both require a separate user action to save a file.
-Download failures have their own localized retry notice and leave a working
-preview intact.
-Multi-file HTML originals download as a ZIP containing all declared originals.
-The isolated rendering transformation never replaces the downloadable originals.
+Execution preparation pins the actual node, assistant, Task/run and directory
+identity before model or tool execution. A completed message binds its references
+to that captured source. A durable projection queue in `control.sqlite`
+resolves files asynchronously into the existing immutable resource Store. Neither
+streaming tokens nor history loads initiate source reads. Reference identity binds
+message ID, text revision, source span and href; repeated paths in one revision
+share an idempotent resource receipt. The projection does not modify message text,
+model correspondence or model history, and original file bytes never become model
+input. Old messages without captured provenance remain unavailable; the UI cannot
+supply replacement paths or manufacture a source binding.
 
 ```text
-local workspace / original run -- snapshot --> node resource store
-                                                   |
-                                        register_resource -> resource ID
-                                                   |
-                                        present_resource -> durable reply
-                                                   |
-                                shared ResourceView + explicit Download
+execution completion -> explicit Markdown nodes -> provenance + pending references
+                                                         |
+                                              background confined reads
+                                                         |
+                                                immutable resource Store
+                                                         |
+message/ref ID -> owner/Space checked status -> existing ResourceView + Download
 ```
 
-Control stores manifests and idempotent registration receipts in `control.sqlite`
-and originals in private `resources/` directories. A retry of the same registered
-call returns its original receipt even if the source has changed or disappeared.
-Changed inputs under the same receipt identity fail. Resource reads require the
-owning assistant and authenticated channel; IDs are references, not credentials.
-Referenced originals are retained independently of Task workspace lifetime.
-Retiring an assistant makes its resource metadata, originals and registration
-receipts inaccessible, while retaining private history on disk.
-Storage is bounded to 1 GiB and 4096 resources; exhaustion rejects registration
-without deleting earlier deliveries. Files/resources are at most 64 MiB; HTML
-bundles are at most 16 MiB and 64 files. Preview and browser codec limits can be
-stricter than registration limits. Unsupported previews retain a download action.
-Raster originals are limited to 16 MiB, 8192 pixels per dimension and 32 megapixels.
+Relative paths resolve under the captured execution directory. Absolute paths must
+map into that same root. The only extra mapping is the originating main assistant's
+exact configuration `AGENTS.md`; sibling configuration files are excluded and
+symlinks are refused for this mapping. Task reads retain the existing verified
+workspace handle and directory identity checks. A main message can reference an
+owned Task with `pot-file://TaskID/relative`; its original Task/run/node binding is
+captured at completion. Workers can reference only their own Task. File reads use
+regular-file checks, bounded reads and before/after revisions; HTML dependency
+sets are rechecked before registration. Replaced directory identities fail closed.
 
-A successful Main presentation atomically persists its completed tool result and
-an assistant message with a typed `presentation`. Resource-only replies are
-included in history, unread counts and sidebar previews. Provider/model history
-keeps tool receipts and does not automatically receive the original bytes.
-Task views derive the same presentation from the run's durable tool event.
-Ordinary screenshots and arbitrary HTML-looking tool output are not promoted.
+Remote original-execution reads are currently unavailable in Control. A bound
+remote source reports `source_offline`; it is never substituted with a local path.
+Linked transcripts without a captured source binding report unavailable. This
+change does not add a remote file-transfer operation or infer a workspace from the
+currently selected UI assistant.
+
+Reference states are `pending`, `resolving`, `ready`, `not_found`, `forbidden`,
+`source_offline`, `too_large`, `changed`, `unsupported_dependency` and `unavailable`.
+Failures remain local to each reference and can be retried; retries recheck source
+and permissions. Ready references continue to show the saved version after source
+mutation or deletion. There is no implicit refresh to the current file version.
+
+Inline references open a file viewer, with optional source-line positioning.
+HTML references with a line number use inert source text rather than an interactive
+frame.
+A sole reference in a paragraph uses the existing image, bounded Markdown/text,
+PDF, audio/video or sandboxed HTML preview. Unsupported types show a download
+card. Media never autoplay and no file is automatically saved to the device.
+Repeated ready resources do not stack full previews in the same message. Component
+updates preserve message identity and retain mounted media and resource leases.
+
+New model tool catalogs and dispatchers expose neither `register_resource` nor
+`present_resource`. Internal Store registration remains available to host services.
+Historical completed presentation results and typed presentation messages continue
+to render without rewriting their resources. The built-in main prompt directs
+file delivery through Markdown links using the same source and preview rules.
+
+Resource labels never choose a viewer or executable capability. Download names
+are derived separately with `core.DownloadFilename`; separators, control and
+nonportable filename characters are sanitized, names fit 255 UTF-8 bytes, and
+single-file downloads retain the entry basename. HTML bundles download as ZIPs
+containing the original files. Rendering transformations never replace originals.
+
+Control stores resource manifests and registration receipts in `control.sqlite`
+and originals in private `resources/` directories. Resource reads require the
+owning assistant and authenticated channel; IDs are references, not credentials.
+Retiring an assistant makes its resources and references inaccessible. Resources
+survive Task workspace cleanup. Storage remains bounded to 1 GiB/4096 resources,
+64 MiB per file/resource and 16 MiB/64 files per HTML bundle. Raster limits remain
+16 MiB, 8192 pixels per dimension and 32 megapixels. Preview limits can be stricter.
+
+`GET /api/v1/message-files/{message}?task_id=` returns only stored references for
+the authenticated assistant and optional owned Task conversation.
+`POST /api/v1/message-files/{message}/{ref}?task_id=` retries that saved reference.
+Neither API accepts a source path, source node or workspace from the frontend.
 
 ## Reading and platform adapters
 
@@ -126,14 +145,21 @@ and a response CSP sandbox, without `allow-same-origin`. It is never inserted
 into the application's DOM. The host permits only same-origin/blob frame
 navigation. The child policy denies network subresources, connections, nested
 frames, objects, forms and base URLs. Camera, microphone, location and clipboard
-permissions are disabled. Local declared script/style/image assets are embedded
-as data URLs; CSS `url(...)` references are resolved within the manifest. External
-dependencies and relative JavaScript module imports are unsupported; bundle them
-before registration. HTML output and dependency expansion are bounded.
+permissions are disabled. Local statically discovered script/style/image assets are embedded
+as data URLs; CSS `url(...)` references are resolved within the manifest. External dependencies, CSS imports, srcset, nested documents and JavaScript
+modules and statically recognized dynamic dependencies report a dependency failure.
+Runtime attempts to load additional dependencies remain blocked by CSP and show a
+local dependency notice in the component. Arbitrary script expressions are not
+executed or guessed by the dependency collector.
+Missing static assets report a file failure. Static dependency traversal is bounded
+to eight levels; cycles fail explicitly. No dependency resolution starts commands,
+fetches a network URL or guesses a local service. HTML output and expansion remain
+bounded.
 
 The only component bridge methods are `window.pot.resize(height)` (clamped to
 180–960 px) and `window.pot.result(value)` (at most 16 KiB of serialized JSON).
 Results are displayed locally below the component. They do not send a message,
-invoke a model or execute a tool. The parent verifies the frame's window, a fresh
-per-mount token and the allowed message action. Reloading a component cannot
+invoke a model or execute a tool. The frame also reports CSP dependency violations as a local notice. The parent
+verifies the frame's window, a fresh per-mount token and the allowed message
+action. Reloading a component cannot
 replay a privileged action because no privileged action exists on this bridge.

@@ -89,7 +89,7 @@ func TestConfiguredModelTaskResultsLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	allowed := []string{"exec_command", "apply_patch", "write_stdin", "send_message", "get_task", "list_tasks", "set_task_dispositions", "register_resource", "present_resource"}
+	allowed := []string{"exec_command", "apply_patch", "write_stdin", "send_message", "get_task", "list_tasks", "set_task_dispositions"}
 	spec.Params.MaxOutputTokens = output
 	spec.Params.Agent.AllowedTools = &allowed
 	spec.Params.Agent.BuiltinTools = []string{"exec_command", "apply_patch", "write_stdin"}

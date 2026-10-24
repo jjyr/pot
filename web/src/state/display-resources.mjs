@@ -36,8 +36,8 @@ export function createDisplayResources(request,getScope,contentURL){
   };
 }
 
-// Only a successful, explicit presentation tool is promoted into the reply.
-// A generated screenshot or HTML-looking tool string is never auto-executed.
+// Historical successful presentation receipts retain their saved resource view.
+// New message-file projections are bound by the completion host, not tool text.
 export function resourcePresentation(message){
   if(message?.tool?.name!=='present_resource'||message.tool.phase!=='completed')return null;
   let result=message.tool.result;if(typeof result==='string'){try{result=JSON.parse(result);}catch{return null;}}

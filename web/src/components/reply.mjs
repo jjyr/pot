@@ -1,3 +1,4 @@
+import {createMessageFile} from './message-file.mjs';
 import {agentFailureKey} from '../state/agent-links.mjs';
 import {icon} from './icons.mjs';
 import {createMarkdownView} from './markdown.mjs';
@@ -13,10 +14,16 @@ export function createReplyBubble(host) {
   status.setAttribute('aria-live','polite');
   host.classList.add('reply-bubble');host.append(content,status);
   const markdown=createMarkdownView(content);
-  let text,signature,resourceKey,resourceNode;
+  let text,signature,resourceKey,resourceNode;const previewClaims=new Map();
   return {
-    update(message,{t,downloadFile,acquireFileImage,acquireResource,downloadResource,onSettings,onRetrySend,canRetrySend}){
-      if(text!==message.text){markdown.update(message.text,{downloadFile,acquireFileImage});text=message.text;}
+    update(message,{messageFiles,retryMessageFile,t,downloadFile,acquireFileImage,acquireResource,downloadResource,onSettings,onRetrySend,canRetrySend}){
+      const complete=message.phase==='complete'||message.status==='complete';
+      const version=JSON.stringify([message.text,complete]);
+      if(text!==version){const shown=new Set();markdown.update(message.text,{downloadFile,acquireFileImage,revision:complete,renderFileReference:messageFiles?reference=>{
+        const normalized=reference.href.replace(/:[1-9][0-9]*$/,'');
+        if(reference.block&&shown.has(normalized))reference={...reference,block:false};if(reference.block)shown.add(normalized);
+        return complete?createMessageFile(reference,message.id,{messageFiles,retryMessageFile,acquireResource,downloadResource,previewClaims}):Object.assign(document.createElement('span'),{textContent:reference.label||reference.href});
+      }:undefined});text=version;}
       const nextResource=JSON.stringify(message.presentation||null);
       if(resourceKey!==nextResource){resourceNode?.remove();resourceNode=null;resourceKey=nextResource;if(message.presentation){resourceNode=createResourceView(message.presentation,{acquireResource,downloadResource});content.append(resourceNode);}}
       content.hidden=!message.text&&!message.presentation;
