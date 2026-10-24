@@ -56,6 +56,12 @@ async function run(){
       await select('alpha');
       check(bottom(),'Cached assistant remains at latest after a newer reset');
       check(root.querySelector('.latest-button').hidden,'Following remains active after cached return');
+      // Remounts and row measurement can produce a delayed native offset after
+      // Latest was already applied. No reader gesture authorized leaving it.
+      history().scrollTop-=350;history().dispatchEvent(new Event('scroll'));await settle();
+      check(bottom()&&root.querySelector('.latest-button').hidden,'A native layout scroll after cached return does not replace Latest');
+      await select('beta');await select('alpha');
+      check(bottom()&&root.querySelector('.latest-button').hidden,'Returning again retains Latest after a native layout scroll');
       // Leave at latest while the task region is visible; returning must not
       // reinterpret its saved visible anchor as intentional historical reading.
       taskCount=4;await select('beta');await pause(taskDelay+50);await latest();
@@ -85,6 +91,9 @@ async function run(){
       check(restored&&Math.abs(restoredOffset-offset)<3,`Intentional historical reading restores its message anchor (${id}: ${offset} → ${restoredOffset})`);
       check(!root.querySelector('.latest-button').hidden,'Historical reading keeps Latest available');
       await latest();check(bottom(),'Latest resumes following');
+      history().scrollTop-=350;history().dispatchEvent(new Event('scroll'));await settle();
+      await select('beta');await select('alpha');
+      check(bottom()&&root.querySelector('.latest-button').hidden,'Latest retires earlier reading input across the next assistant switch');
       document.dispatchEvent(new KeyboardEvent('keydown',{key:',',ctrlKey:true,bubbles:true}));
       await wait(()=>history().hidden);window.history.back();await wait(()=>!history().hidden);await settle();
       check(bottom()&&root.querySelector('.latest-button').hidden,'Settings return retains latest following');
