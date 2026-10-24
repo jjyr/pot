@@ -372,13 +372,12 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const label=text=>{const value=el('span','',text);value.title=text;return value;};
     projection.classList.toggle('has-error', Boolean(error || connectionError) || visibleConnection === 'offline');
     projection.classList.toggle('is-connected',!pending&&!error&&!connectionError&&visibleConnection==='connected');
-    const replyOwnsConnection=state.snapshot?.running||state.sends.has(editorOwner);
     if(pending){
       projection.append(label(t(pending.phase==='uncertain'?'send.unknown':'send.confirming')));
       if(pending.recoverable){const retry=el('button','text-button',t('send.checkRetry'));retry.type='button';retry.disabled=visibleConnection!=='connected';retry.onclick=()=>confirmations.recover(pending);projection.append(retry);}
     }
-    if(error||!replyOwnsConnection)projection.append(label(error || connectionError || (visibleConnection === 'connected' ? t(client.production?'connected':'preview') : t(visibleConnection))));
-    if (visibleConnection === 'offline'&&!replyOwnsConnection) {
+    projection.append(label(error || connectionError || (visibleConnection === 'connected' ? t(client.production?'connected':'preview') : t(visibleConnection))));
+    if (visibleConnection === 'offline') {
       const retry = el('button', 'text-button', t('retry'));
       retry.type = 'button';
       retry.onclick = () => loadSnapshot(true);
@@ -759,7 +758,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       const scope=client.scope?.();
       record.reply.update(message,{t,...markdownFiles(scope),
         onSettings:async()=>{if(!await pages?.leave())return;route='settings';await pages.showProviders();renderShell();},
-        onReconnect:()=>loadSnapshot(true),onRetrySend:submit,canRetrySend:connection==='connected'&&!pendingSend()&&draft(state)===sending?.request.text});
+        onRetrySend:submit,canRetrySend:connection==='connected'&&!pendingSend()&&draft(state)===sending?.request.text});
       record.text=message.text;record.role=message.role;
     }else if (record.text !== message.text || record.role !== message.role) {
       bubble.replaceChildren();

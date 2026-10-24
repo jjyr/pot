@@ -170,7 +170,7 @@ pot-mermaid[data-state='error'] .mermaid-canvas { color: var(--danger); }
 .reply-status-title { display: flex; align-items: center; gap: 8px; }
 .reply-status-title svg { width: 17px; height: 17px; flex: none; }
 .is-failed .reply-status-title { color: var(--danger); font-weight: 500; }
-.reply-error-summary,.reply-connection-detail { margin-top: 8px; color: var(--text); font-size: var(--description-size); }
+.reply-error-summary { margin-top: 8px; color: var(--text); font-size: var(--description-size); }
 .reply-error-details { margin-top: 12px; color: var(--muted); font-size: var(--description-size); }
 .reply-error-details summary { cursor: pointer; }
 .reply-error-details pre { min-width: 0; margin-top: 8px; padding: 10px; white-space: pre-wrap; border: 0; background: color-mix(in srgb,var(--danger) 5%,var(--canvas)); color: var(--text); }
