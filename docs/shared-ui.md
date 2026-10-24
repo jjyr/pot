@@ -261,6 +261,51 @@ an unsaved choice onto a different revision.
 
 Conversation and Task stream contracts are in [UI events](ui-events.md).
 
+Chat and Task transcripts project consecutive completed Task `send_message` and
+`receive_message` records through `components/communication-window.mjs` before
+virtualization. Two or more eligible siblings share a native disclosure; its
+summary retains each distinct direction and Task identity, and separately counts
+records, messages and Tasks. A receive batch remains one record with its original
+message order. Prose, other tools, mixed assistant mail, incomplete calls,
+approvals and failures break the stack. Individual calls and failure labels stay
+visible independently. Expanding a stack shows every original message body, with
+call details available in a second disclosure. This is a UI projection only;
+model history, correspondence, transport receipts and Task lifecycle are unchanged.
+
+The adapter retains group keys by membership and original record nodes across
+append, prepend and splits, giving the existing reading cursor and virtualizer
+stable member targets. Disclosures are scoped to the conversation and survive
+virtual recycling. `state/task-identity.mjs` is shared with Task views: complete
+`node_id / kind / agent_id` addresses identify Tasks. The shared `taskShortID`
+helper displays `#` followed by the first four
+characters of the real `address.agent_id` (or the entire ID when shorter).
+Equal prefixes deliberately share the same short label, including equal IDs on
+different nodes. Full addresses, catalogue scope and owner still determine
+identity and navigation; labels never route requests. Only a confirmed TaskInfo
+address mapping permits icon color. Linked
+catalogue IDs are never treated as remote address IDs. UTF-8 FNV-1a32 selects one
+of the six fixed families in `state/task-palette.json`; only the small Task mark
+uses the same family across light, dark and system themes. Missing mappings use
+neutral marks, and short labels remain visible when names are long.
+
+`components/task-identity.mjs` renders the original `icon('tasks')` inside a
+22 px tinted container and a neutral monospace short label. Communication
+endpoints, expanded records and background rows use the same mark and
+authoritative address mapping. The small tinted background has no colored
+outline; task names and labels stay neutral. Runtime activity and semantic
+status remain separate from the fixed identity color. A confirmed endpoint and
+its background row open the same existing Task detail with the catalogue ID;
+unknown addresses retain a neutral mark without inventing a navigation target.
+Each background row keeps the icon, neutral monospace short ID, ellipsized title
+and right-aligned activity/status on one line, including narrow layouts. IDs align
+directly after the icons, with a slightly larger gap before the titles.
+Communication endpoints use the same icon, ID and title order.
+Source and elapsed time remain in the accessible description and Task details.
+The original three-row preview and
+expand/collapse control retain task ordering and counts without a second summary.
+Keyed projections retain live controls through title, status, locale and
+short-label updates.
+
 ## Read state and activity
 
 Completed replies have a durable reply ID/count. Initial catalogue history becomes

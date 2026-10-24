@@ -4,7 +4,7 @@
 <h1 align="center">Pot</h1>
 <p align="center"><strong>Your AI assistant. From a conversation to completed work.</strong></p>
 
-[Website](https://pot.jjylab.com) · [Getting started](#install) · [Documentation](docs/README.md) · [Releases](https://github.com/jjyr/pot/releases)
+[Website](https://pot.jjylab.com) · [Getting started](#install) · [Connect other assistants](#connect-other-assistants) · [Documentation](docs/README.md) · [Releases](https://github.com/jjyr/pot/releases)
 
 Pot helps you turn a goal into work you can use. Your assistant can run background
 tasks, bring their results back to your conversation, and keep working with you.
@@ -29,8 +29,9 @@ to refine the work: “Make the mobile screenshots larger; keep this docs versio
 Connect another Pot or **Codex** through Agent Link. Talk to a connected assistant
 directly, or let Pot delegate work and collect the result. Each agent retains its
 own models, credentials, workspace and permissions. Pot-to-Pot connections and
-the [Codex adapter](integrations/codex/README.md) are included; Claude, Grok bot,
-Pi and other agents need compatible adapters of their own. Codex tasks use
+the [Codex adapter](integrations/codex/README.md) are supported. See
+[Connect other assistants](#connect-other-assistants) for setup and the status
+of Claude, Grok and Antigravity. Codex tasks use
 independent persistent threads and can run in parallel.
 
 [![Pot using Agent Link to request a Codex review and receive the result](docs/images/agent-link.png)](docs/images/agent-link.png)
@@ -118,6 +119,36 @@ ssh -L 17703:127.0.0.1:17703 user@your-server
 `pot serve` runs the Runtime; `-ui` adds its local browser interface.
 `pot web-ui-server` is an independent browser service with a separate data root.
 See [deployment](docs/deployment.md) for that setup, TLS and services.
+
+## Connect other assistants
+
+Agent Link supports Pot-to-Pot connections as well as Codex. To connect another
+Pot, follow the [Agent Link guide](docs/agent-links.md). External assistant
+support is listed below.
+
+### Codex
+
+**Supported.** Give this prompt to your agent on the computer running Codex:
+
+```text
+Read https://github.com/jjyr/pot/blob/main/docs/connect-with-agent.md and help me connect Codex to Pot on this computer.
+```
+
+The [assistant connection guide](docs/connect-with-agent.md) covers prerequisites,
+local plugin installation and pairing in Pot's **Add Agent**. For manual setup,
+see the [complete Codex guide](integrations/codex/README.md#install-and-connect).
+
+### Claude
+
+Coming soon.
+
+### Grok
+
+Coming soon.
+
+### Antigravity
+
+Coming soon.
 
 ## More ways to work
 
