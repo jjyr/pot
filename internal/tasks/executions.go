@@ -27,7 +27,7 @@ func (s *Service) AcceptExecution(ctx context.Context, record Record) error {
 		return fmt.Errorf("invalid Task execution binding")
 	}
 	record.Plugins = []string{}
-	record.SchemaVersion = 13
+	record.SchemaVersion = 14
 	record.Generation = 1
 	record.Origin = protocol.TaskOrigin{Kind: "manual"}
 	record.RunID = record.Info.RunID

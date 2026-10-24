@@ -271,3 +271,67 @@ func TestMessageFilesUpgradePreservesResources(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTaskFinishTimeUpgrade(t *testing.T) {
+	for _, preceding := range []int{1, 2} {
+		t.Run(fmt.Sprint(preceding), func(t *testing.T) {
+			dbPath := filepath.Join(t.TempDir(), "tasks.sqlite")
+			db, err := OpenSQLite(dbPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { db.Close() })
+			ctx := context.Background()
+			files := fstest.MapFS{}
+			for _, name := range []string{"0001_initial_schema.sql", "0002_agent_adapter.sql"}[:preceding] {
+				path := "migrations/tasks/" + name
+				raw, err := migrationFiles.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				files[path] = &fstest.MapFile{Data: raw}
+			}
+			if err := migrateDatabase(ctx, db, TasksDatabase, files); err != nil {
+				t.Fatal(err)
+			}
+			execMigrationSQL(t, db, `INSERT INTO tasks VALUES('owner','task','complete',1,'{"schema_version":13,"info":{"id":"task","started_at_ms":123,"updated_at_ms":999},"run_id":"run"}');
+    INSERT INTO task_run_history VALUES('owner','task','run','{"schema_version":13,"info":{"started_at_ms":123},"run_id":"run"}');
+    INSERT INTO task_runs VALUES('node','task','run','digest','complete','boot','{"schema_version":7,"started_at_ms":123,"result":{"text":"keep"}}');`)
+			for range 2 {
+				if err := Migrate(ctx, db, TasksDatabase); err != nil {
+					t.Fatal(err)
+				}
+			}
+			db.Close()
+			db, err = OpenDatabase(dbPath, TasksDatabase)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, table := range []string{"tasks", "task_run_history", "task_runs"} {
+				path, version := "$.info.finished_at_ms", 14
+				if table == "task_runs" {
+					path, version = "$.finished_at_ms", 8
+				}
+				var gotVersion, finish, start int
+				startPath := "$.info.started_at_ms"
+				if table == "task_runs" {
+					startPath = "$.started_at_ms"
+				}
+				if err := db.QueryRow("SELECT json_extract(body,'$.schema_version'),json_extract(body,?),json_extract(body,?) FROM "+table, path, startPath).Scan(&gotVersion, &finish, &start); err != nil {
+					t.Fatal(err)
+				}
+				var retained string
+				retainedPath, expected := "$.run_id", "run"
+				if table == "task_runs" {
+					retainedPath, expected = "$.result.text", "keep"
+				}
+				if err := db.QueryRow("SELECT json_extract(body,?) FROM "+table, retainedPath).Scan(&retained); err != nil || retained != expected {
+					t.Fatal(table, retained, err)
+				}
+				if gotVersion != version || finish != 0 || start != 123 {
+					t.Fatal(table, gotVersion, finish, start)
+				}
+			}
+		})
+	}
+}
