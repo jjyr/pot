@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/peer"
 )
 
@@ -138,7 +139,7 @@ func (b *peerAdmissionBackend) Directory(ctx context.Context) (Directory, error)
 }
 
 func TestBusinessAdmissionOverAuthenticatedPeer(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 15*time.Second))
 	defer cancel()
 	a, b := newFixture(t, "sender"), newFixture(t, "receiver")
 	a.service.options.Backend = &testBackend{f: a}

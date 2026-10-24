@@ -1,3 +1,4 @@
+import {inlineLinks,fileHref} from '../state/markdown-links.mjs';
 import {createMermaidBlock} from './mermaid.mjs';
 import {createFileImage} from './file-image.mjs';
 import {assistantMentionSource,parseAssistantMention} from './composer-selectors.mjs';
@@ -20,32 +21,30 @@ export function parseFileLink(value) {
 function element(tag,text) {const node=document.createElement(tag);if(text!==undefined)node.textContent=text;return node;}
 function inline(parent,source,depth=0,options={}) {
   if(depth>8){parent.append(document.createTextNode(source));return;}
-  const pattern=new RegExp('(`+[^`\\n]+`+|'+assistantMentionSource+String.raw`|!\[[^\]\n]*\]\([^\s)]+\)|\*\*[^*\n]+\*\*|__[^_\n]+__|~~[^~\n]+~~|(?<!\*)\*[^*\n]+\*(?!\*)|\[[^\]\n]+\]\([^\s)]+\)|https?:\/\/[^\s<>]+)`,'gu');
+  const pattern=new RegExp('(`+[^`\\n]+`+|'+assistantMentionSource+String.raw`|\*\*[^*\n]+\*\*|__[^_\n]+__|~~[^~\n]+~~|(?<!\*)\*[^*\n]+\*(?!\*)|https?:\/\/[^\s<>]+)`,'gu');
+  const tokens=[...source.matchAll(pattern)].map(match=>({start:match.index,end:match.index+match[0].length,token:match[0]}));
+  for(const link of inlineLinks(source))tokens.push({...link,token:source.slice(link.start,link.end),link});
+  tokens.sort((a,b)=>a.start-b.start||b.end-a.end);
   let offset=0;
-  for(const match of source.matchAll(pattern)) {
-    parent.append(document.createTextNode(source.slice(offset,match.index)));const token=match[0],mention=parseAssistantMention(token);
-    if(token.startsWith('`'))parent.append(element('code',token.replace(/^`+|`+$/g,'')));
+  for(const value of tokens){
+    if(value.start<offset)continue;
+    parent.append(document.createTextNode(source.slice(offset,value.start)));
+    const {token,link}=value,mention=parseAssistantMention(token);
+    if(link){
+      const file=parseFileLink(link.href);
+      if(fileHref(link.href)&&options.renderFileReference)parent.append(options.renderFileReference({...link,block:!!options.standalone&&source.trim()===token}));
+      else if(file&&options.acquireFileImage&&options.downloadFile&&(link.image||/\.(png|jpe?g|webp|gif)$/i.test(file.path)))parent.append(createFileImage(file,link.label,options));
+      else if(file&&options.downloadFile){const a=element('a',link.label||file.path);a.href='#';a.onclick=event=>{event.preventDefault();options.downloadFile(file);};parent.append(a);}
+      else if(allowedLink(link.href)){const a=element('a',link.label||link.href);a.href=link.href;a.target='_blank';a.rel='noopener noreferrer';parent.append(a);}
+      else parent.append(document.createTextNode(token));
+    }else if(token.startsWith('`'))parent.append(element('code',token.replace(/^`+|`+$/g,'')));
     else if(mention)parent.append(assistantMention(mention));
-    else if(token.startsWith('**')||token.startsWith('__')){const node=element('strong');inline(node,token.slice(2,-2),depth+1,options);parent.append(node);}
-    else if(token.startsWith('~~')){const node=element('del');inline(node,token.slice(2,-2),depth+1,options);parent.append(node);}
-    else if(token.startsWith('*')){const node=element('em');inline(node,token.slice(1,-1),depth+1,options);parent.append(node);}
-    else if(token.startsWith('![')) {
-      // Remote images are links until explicitly opened, avoiding invisible
-      // requests from model content and matching host-controlled navigation.
-      const [,label,href]=token.match(/^!\[([^\]]*)\]\((.+)\)$/);
-      const file=parseFileLink(href);
-      if(file&&options.acquireFileImage&&options.downloadFile)parent.append(createFileImage(file,label,options));
-      else if(file&&options.downloadFile){const link=element('a',label||file.path);link.href='#';link.onclick=event=>{event.preventDefault();options.downloadFile(file);};parent.append(link);}
-      else if(allowedLink(href)){const link=element('a',label||href);link.href=href;link.target='_blank';link.rel='noopener noreferrer';parent.append(link);}else parent.append(document.createTextNode(token));
-    }else {
-      const parsed=token.startsWith('[')?token.match(/^\[([^\]]+)\]\((.+)\)$/):[null,token,token];
-      const [,label,href]=parsed;
-      const file=parseFileLink(href);
-      if(file&&options.acquireFileImage&&options.downloadFile&&/\.(png|jpe?g|webp|gif)$/i.test(file.path))parent.append(createFileImage(file,label,options));
-      else if(file&&options.downloadFile){const link=element('a',label);link.href='#';link.onclick=event=>{event.preventDefault();options.downloadFile(file);};parent.append(link);}
-      else if(allowedLink(href)){const link=element('a',label);link.href=href;link.target='_blank';link.rel='noopener noreferrer';parent.append(link);}else parent.append(document.createTextNode(token));
-    }
-    offset=match.index+token.length;
+    else if(token.startsWith('**')||token.startsWith('__')){const node=element('strong');inline(node,token.slice(2,-2),depth+1,{...options,standalone:false});parent.append(node);}
+    else if(token.startsWith('~~')){const node=element('del');inline(node,token.slice(2,-2),depth+1,{...options,standalone:false});parent.append(node);}
+    else if(token.startsWith('*')){const node=element('em');inline(node,token.slice(1,-1),depth+1,{...options,standalone:false});parent.append(node);}
+    else if(allowedLink(token)){const a=element('a',token);a.href=token;a.target='_blank';a.rel='noopener noreferrer';parent.append(a);}
+    else parent.append(document.createTextNode(token));
+    offset=value.end;
   }
   parent.append(document.createTextNode(source.slice(offset)));
 }
@@ -68,6 +67,7 @@ export function renderMarkdown(source,options={}) {
       append(closed&&fence[2].trim().split(/\s+/)[0].toLowerCase()==='mermaid'?createMermaidBlock(code.textContent,pre):pre,start);
       continue;
     }
+    if(/^(?: {4}|\t)/.test(line)){const pre=element('pre'),code=element('code'),body=[];while(index<lines.length&&(/^(?: {4}|\t)/.test(lines[index])||!lines[index].trim()))body.push(lines[index++].replace(/^(?: {4}|\t)/,''));code.textContent=body.join('\n').trimEnd();pre.append(code);append(pre,start);continue;}
     const heading=line.match(/^ {0,3}(#{1,6})\s+(.+?)(?:\s+#+)?$/);
     if(heading){const node=element(`h${heading[1].length}`);inline(node,heading[2],0,options);append(node,start);index++;continue;}
     if(/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)){append(element('hr'),start);index++;continue;}
@@ -88,17 +88,18 @@ export function renderMarkdown(source,options={}) {
       while(index<lines.length&&lines[index].includes('|')&&lines[index].trim()){const row=element('tr');for(const cell of split(lines[index++])){const td=element('td');inline(td,cell,0,options);row.append(td);}body.append(row);}table.append(body);const wrap=element('div');wrap.className='markdown-table';wrap.append(table);append(wrap,start);continue;
     }
     const paragraph=element('p'),body=[line];for(index++;index<lines.length&&lines[index].trim()&&!isBlock(lines[index]);index++) {if(index+1<lines.length&&lines[index].includes('|')&&/^\s*\|?\s*:?-{3,}/.test(lines[index+1]))break;body.push(lines[index]);}
-    const joined=body.join('\n').split(/ {2,}\n|\\\n/);for(const [partIndex,part]of joined.entries()){if(partIndex)paragraph.append(element('br'));inline(paragraph,part.replace(/\n/g,' '),0,options);}append(paragraph,start);
+    const joined=body.join('\n').split(/ {2,}\n|\\\n/);for(const [partIndex,part]of joined.entries()){if(partIndex)paragraph.append(element('br'));inline(paragraph,part.replace(/\n/g,' '),0,{...options,standalone:body.length===1});}append(paragraph,start);
   }return result;
 }
 
 // Appended output reparses only the last (potentially incomplete) block. Keep
 // completed blocks and live media, selections and code/table scroll positions.
 export function createMarkdownView(host) {
-  let source='',blocks=[];
+  let source='',blocks=[],revision;
   function patch(old,next) {
     if(!old||old.nodeType!==next.nodeType||old.nodeName!==next.nodeName)return next;
     if(old.nodeType===3){if(old.data!==next.data)old.data=next.data;return old;}
+    if(old.localName==='pot-message-file')return old.identity===next.identity?old:next;
     if(old.localName==='pot-mermaid')return old.sourceText===next.sourceText?old:next;
     if(old.localName==='pot-file-image')return old.file.task===next.file.task&&old.file.path===next.file.path&&old.label===next.label?old:next;
     if(old.isEqualNode(next))return old;
@@ -115,8 +116,8 @@ export function createMarkdownView(host) {
     return old;
   }
   return {update(text,options={}){
-    const next=String(text||'').replace(/\r\n/g,'\n');if(next===source)return;
-    const retained=next.startsWith(source)&&blocks.length?blocks.length-1:0;
+    const next=String(text||'').replace(/\r\n/g,'\n');if(next===source&&revision===options.revision)return;
+    const retained=revision===options.revision&&next.startsWith(source)&&blocks.length?blocks.length-1:0;
     const offset=retained?blocks[retained].markdownOffset:0;
     const tail=[...renderMarkdown(next.slice(offset),options).childNodes];
     for(const [index,node]of tail.entries()){
@@ -126,6 +127,6 @@ export function createMarkdownView(host) {
       blocks[position]=value;
     }
     for(const block of blocks.splice(retained+tail.length))block.remove();
-    source=next;
+    source=next;revision=options.revision;
   }};
 }

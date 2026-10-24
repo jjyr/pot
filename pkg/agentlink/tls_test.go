@@ -3,6 +3,7 @@ package agentlink
 import (
 	"bytes"
 	"context"
+	"github.com/jjyr/pot/internal/testutil"
 	"io"
 	"net"
 	"sync"
@@ -22,7 +23,7 @@ func (w *wireCapture) Write(raw []byte) (int, error) {
 }
 
 func TestTLSPreviewPairAndMessagesDoNotExposeCapabilitiesOnWire(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 10*time.Second))
 	defer cancel()
 	a, b := newFixture(t, "tls-a"), newFixture(t, "tls-b")
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

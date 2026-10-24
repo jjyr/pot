@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/core"
 )
 
@@ -73,7 +74,7 @@ func TestForwardDoesNotLimitActiveResponseDuration(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 5*time.Second))
 	defer cancel()
 	response, err := Forward(ctx, provider(server.URL, "openai_chat"), []byte("fixture"), json.RawMessage(`{}`), "", 100*time.Millisecond)
 	if err != nil {

@@ -223,13 +223,13 @@ func DetectType(path string, data []byte) string {
 	}
 	// Active formats are explicit file kinds and are always read as inert bytes
 	// outside the isolated renderer. Raster/media types require signatures.
-	if extension == ".html" || extension == ".htm" {
+	if (extension == ".html" || extension == ".htm") && (detected == "text/plain" || detected == "text/html") {
 		return "text/html"
 	}
-	if extension == ".css" {
+	if extension == ".css" && detected == "text/plain" {
 		return "text/css"
 	}
-	if extension == ".js" || extension == ".mjs" {
+	if (extension == ".js" || extension == ".mjs") && detected == "text/plain" {
 		return "text/javascript"
 	}
 	if strings.HasPrefix(string(data), "%PDF-") {

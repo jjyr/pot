@@ -74,6 +74,7 @@ rollback; non-database persisted-format changes must also change the marker.
 ```sh
 mise run lint
 mise run check:go
+mise run check:push
 mise run test
 mise run test:executor
 mise run test:sandbox
@@ -92,10 +93,11 @@ those checks.
 `test:sandbox` runs real file, socket, network, terminal, plugin and cleanup tests with the pinned SDK. `test:sandbox-linux` uses a disposable non-root Docker host with namespace restrictions relaxed only on the outer test container; only test assets are mounted read-only.
 
 `check:go` verifies formatting, vet and architectural imports. `test:go` runs all
-Go tests without race instrumentation. `test` also runs `test:race` after that
-normal suite. Both paths use a configurable 20-minute per-package timeout
-(`POT_TEST_TIMEOUT`, or `scripts/test_go.py --timeout`); CI bounds each product
-job to 60 minutes. `test:race:all` is the explicit complete race suite for changes
+Go tests without race instrumentation. `test` runs the normal and focused race
+suites independently, alongside UI/packaging/API checks. `test:race` no longer
+implicitly repeats the normal suite. Both paths use a configurable 20-minute
+per-package timeout (`POT_TEST_TIMEOUT`, or `scripts/test_go.py --timeout`);
+CI bounds each product job to 60 minutes. `test:race:all` is the explicit complete race suite for changes
 to concurrency, persistence or lifecycle architecture. Run it when changing
 shared state or the scope of the focused plan.
 
@@ -108,6 +110,24 @@ or existing test file automatically enters race, and stale/duplicate exceptions
 fail validation. `python scripts/test_go.py race --list` prints the actual plan.
 Discovery uses the race build constraints, including tests in race-only files
 and packages.
+
+`scripts/test_go.py normal|race|race-all --shard INDEX/TOTAL` partitions packages
+into disjoint groups. It balances active top-level test counts, with a stable
+package-name tie break; package fixtures and `TestMain` remain intact. Every
+package belongs to exactly one shard, including newly added packages. The race
+selection is applied inside each shard without changing its exclusions or test
+patterns. Empty shards exit successfully without falling back to `./...`.
+Independent full-package and selected-package race commands run with at most two
+workers, so Control does not wait behind all other packages.
+
+Asynchronous integration-test waits use `internal/testutil.Timeout`. Local runs
+retain their normal budgets; CI sets `POT_TEST_TIMEOUT_SCALE=4` so a five-second
+wait gets twenty seconds and a fifteen-second end-to-end fixture gets a minute.
+Set the same variable locally to reproduce a slow-runner budget. This scales
+test harness waits only, never product deadlines, polling intervals, timeout
+inputs under test or the Darwin cancellation grace. A fixture with an overall
+context should pass that context to its wait helper instead of adding a shorter
+independent deadline. All assertions and fail-on-error behavior remain enabled.
 
 Control tests with independent roots, listeners and execution managers run in
 parallel, bounded by eight active cases and the available Go parallelism.
@@ -205,6 +225,17 @@ For before/after captures, put the baseline's actual `web/src` tree at
 against the same registered Markdown. `?capture=1` shows one resource; `theme` and
 `locale` select the visual scenario. Stop with `POST /fixture/stop` at its origin.
 
+For Tasks/Schedules layout and query-adapter checks, serve the repository on a
+loopback static server and run `node scripts/tests/tasks-schedules-browser.mjs
+ORIGIN`. Set `POT_PLAYWRIGHT_MODULE` and `POT_CHROMIUM_EXECUTABLE` when using an
+existing browser installation. The fixture renders the actual shared shell/pages
+with synthetic records and captures images under `output/pr-images/` by default.
+For a before comparison, extract the chosen base commit's `web/` and
+`pkg/storage/migrations/ui-cache/` into ignored `output/tasks-before/`; the same
+fixture and data select that source tree with `?before=1`. It does not read product
+state, call a model or create real Tasks. The backend catalogue contract is covered
+separately by `TestCatalog*` and `TestTaskCatalogHTTPFiltersAndValidation`.
+
 For assistant-switching scroll checks without a backend, serve the repository
 root on loopback and open
 `/scripts/tests/fixtures/chat-switching.html?conversation=alpha&locale=en`.
@@ -266,6 +297,22 @@ server and run `await window.correspondenceFixture.verify()` in the browser.
 At phone widths, select Pot from the assistant list first. Repeat with
 `locale=zh-CN`; `before=1` shows the previous private-correspondence presentation
 for comparison. This fixture uses production Chat components and synthetic data.
+
+For adjacent Task communication, run `mise run test:task-communication`, serve the
+repository on loopback and open `/scripts/tests/fixtures/task-communication.html`.
+Add `?identity=1` for the matching communication/background identity fixture,
+including linked addresses, missing mappings and normal UUID-shaped IDs.
+Add `edge=1` separately for repeated prefixes and equal IDs across nodes; both
+keep the same four-character label while full addresses retain detail routing.
+Run `scripts/tests/task-identity-browser.mjs` against the same origin to exercise
+the shared marks, authoritative detail navigation and keyed background updates.
+The fixture mounts production Chat with synthetic records and rejects writes.
+`scenario=collapsed` keeps the disclosure closed; `locale` and `theme` select the
+shared presentation. With a disposable Playwright installation, run
+`scripts/tests/task-communication-browser.mjs` against that origin using
+`POT_PLAYWRIGHT_MODULE` and optional `POT_CHROMIUM_EXECUTABLE`. It covers grouping,
+batch counts, identity, native keyboard disclosure, append/prepend, retained text
+selection, failures and virtual recycling. No real Task or model is started.
 
 For message-title identity, streaming-argument, disclosure and Task checks, open
 `/scripts/tests/fixtures/message-titles.html` on the same loopback server. The
@@ -365,14 +412,73 @@ in the task/PR, not repository validation reports. Store only reviewed UI compar
 screenshots under [PR image conventions](pr-images/README.md).
 
 `hk.pkl` owns pre-commit and pre-push checks. Run commands through `mise`; do not
-bypass failed hooks. CI separates portable product and macOS packaging checks.
+bypass failed hooks. `mise run check:push` runs the same local gate without
+pushing. It targets about 30 seconds with installed tools, dependencies and a
+warm Go build cache; a first build or slower machine can take longer. It does not
+terminate or skip unfinished checks to meet that target.
+
+Pre-push retains full Go formatting, vet and architectural import checks, UI,
+packaging, deterministic CLI, public API, hook and license checks, plus macOS
+source/release checks. `test:core` replaces the complete normal/race suites in
+this local gate. Its explicit plan in
+[`scripts/go-test-core.json`](../scripts/go-test-core.json) runs the full Agent,
+model protocol, execution, process supervision, plugin host, peer/Agent Link,
+storage/migration, access, secrets, inbox and scheduler packages without race
+instrumentation. Selected integration tests cover Control approvals and exact
+command grants, task cancellation/idempotency/rollback/retry, conversation
+recovery and owner isolation, authenticated HTTP receipts and Codex approval
+transport. Independent integration groups run with at most four workers; missing,
+renamed, duplicate or inactive selections fail rather than silently losing coverage.
+The core task uses `-count=1` so every push executes its tests even with a warm
+build cache.
+`mise exec -- python scripts/test_go.py core --list` prints the plan. Keep the
+core selection focused on these contracts when adding or replacing tests.
+
+`mise run test` retains the complete normal suite and focused race suite; neither
+depends on the local core selection. CI runs them on Linux and macOS. The separate
+`test:executor` diagnostic is already covered by that race suite and is not repeated
+by pre-push. Hook group timings are appended to `.local/hooks/timings.jsonl`.
 
 ## CI and manual PR checks
 
-CI runs automatically only on tag pushes. All tags are checked, while exact stable
-version tags enter controlled per-channel release paths after shared checks and
-the corresponding native package and smoke gates succeed. Ordinary manual runs do not publish.
-Branch pushes and PR events do not start CI.
+`Tests` (`.github/workflows/tests.yml`) runs full product tests on PRs and pushes
+to `main`, with cancellation of superseded runs. It is also reusable by the
+release/build workflow and can be run manually. Each OS starts five jobs:
+
+```text
+                          Tests (Linux + macOS)
+                 +-----------+--------+--------+--------+
+                 |           |        |        |        |
+          normal + checks  race 1/4 race 2/4 race 3/4 race 4/4
+          + UI/API/sandbox
+                 |           |        |        |        |
+                 +-----------+--------+--------+--------+
+                                   |
+                    all product gates must pass
+```
+
+The normal/checks job runs `mise run ci:normal`, which schedules the complete normal
+suite, static/architecture/localization checks, UI/API/packaging contracts,
+release-script contracts and real OS sandbox tests concurrently. This keeps the
+matrix to five jobs per OS instead of creating a runner for every small check.
+Normal and race CI tests use `-count=1`; build caches do not replace execution.
+`mise run check:ci` runs the static and script contracts independently.
+
+The target is about 200 seconds with warm tool, module and build caches. Runner
+queues, first compilations and cache transfers can extend elapsed time; no gate
+is skipped or killed to satisfy the target. The shared setup action installs
+only each job's required tools. Module caches are shared independently of build
+caches; normal/race/build cache families include source hashes so changed sources
+can save refreshed build results instead of repeatedly restoring an old exact hit.
+
+The release/build `CI` workflow runs automatically only on tag pushes. All tags
+are checked, while exact stable version tags enter controlled per-channel release
+paths after shared checks and the corresponding native package and smoke gates
+succeed. Ordinary manual runs do not publish.
+Branch pushes and PR events do not start the release/build workflow.
+That workflow calls the same `Tests` gate for its resolved source SHA. Headless
+and cross-platform builds run afterward as a separate build gate, before native
+packaging. Explicit ref/PR validation still disables shared caches.
 
 ```sh
 gh workflow run ci.yml --ref main -f pr=123

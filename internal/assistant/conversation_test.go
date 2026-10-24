@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/agent"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
@@ -70,7 +71,7 @@ func conversationFixture(t *testing.T, path, boot string, model func(context.Con
 }
 func waitSnapshot(t *testing.T, c *Conversation, predicate func(protocol.Snapshot) bool) protocol.Snapshot {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 5*time.Second))
 	defer cancel()
 	updates, remove, err := c.Subscribe(ctx)
 	if err != nil {

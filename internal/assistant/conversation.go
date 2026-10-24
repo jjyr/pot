@@ -22,6 +22,7 @@ import (
 )
 
 type RunOptions struct {
+	MessageCompleted   func(message, text string)
 	Execution          core.ExecutionContext
 	Services           core.ExecutionServices
 	Dispatch           agent.Dispatch

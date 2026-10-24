@@ -11,13 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
 func TestAssistantMailUsesOwningConversationAndExplicitPeerReplies(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 15*time.Second))
 	defer cancel()
 	s := taskResourceService(t)
 	if err := s.Permissions.Configure("local", MachinePolicy{ExecutionAccess: "allow"}); err != nil {
@@ -131,7 +132,7 @@ func TestAssistantMailUsesOwningConversationAndExplicitPeerReplies(t *testing.T)
 
 func TestAssistantMailAllowanceUsesOwningConversation(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 12*time.Second))
 	defer cancel()
 	var calls atomic.Int32
 	s, _ := batchService(t, func(w http.ResponseWriter, r *http.Request) {

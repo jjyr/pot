@@ -146,6 +146,149 @@ class RacePlanTests(unittest.TestCase):
                 self.assertEqual(result.exception.code, 7)
                 self.assertEqual(run.call_count, 2)
 
+    def test_core_selection_rejects_missing_or_duplicate_coverage(self):
+        package = self.package("pkg/core", ["TestLifecycle", "TestOther"])
+        manifest = {"packages": [], "selected": {"./pkg/core": ["TestLifecycle"]}}
+        self.assertEqual(
+            PLAN.core_plan([package], manifest),
+            ([], [("./pkg/core", ["TestLifecycle"])]),
+        )
+        for invalid in [
+            {"packages": ["./pkg/missing"], "selected": {}},
+            {"packages": ["./pkg/core", "./pkg/core"], "selected": {}},
+            {"packages": ["./pkg/core"], "selected": {"./pkg/core": ["TestLifecycle"]}},
+            {"packages": [], "selected": {"./pkg/core": ["TestRemoved"]}},
+            {"packages": [], "selected": {"./pkg/core": []}},
+            {"packages": [], "selected": {"./pkg/core": ["TestLifecycle", "TestLifecycle"]}},
+        ]:
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                PLAN.core_plan([package], invalid)
+
+    def test_core_uses_active_files_and_keeps_new_tests_in_full_packages(self):
+        package = self.package("pkg/core", ["TestExisting", "TestNew"])
+        (Path(package["Dir"]) / "case_other_test.go").write_text("func TestInactive() {}")
+        self.assertEqual(
+            PLAN.core_plan([package], {"packages": ["./pkg/core"], "selected": {}}),
+            (["./pkg/core"], []),
+        )
+        with self.assertRaisesRegex(ValueError, "TestInactive"):
+            PLAN.core_plan(
+                [package], {"packages": [], "selected": {"./pkg/core": ["TestInactive"]}}
+            )
+
+    def test_core_failure_in_any_parallel_group_fails_the_check(self):
+        packages = [
+            self.package("pkg/core", ["TestCore"]),
+            self.package("internal/control", ["TestLifecycle", "TestOther"]),
+        ]
+        manifest = self.root / "core.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "packages": ["./pkg/core"],
+                    "selected": {"./internal/control": ["TestLifecycle"]},
+                }
+            )
+        )
+        for failed in ["./pkg/core", "./internal/control"]:
+            with (
+                self.subTest(failed=failed),
+                patch.object(PLAN, "CORE_MANIFEST", manifest),
+                patch.object(PLAN, "normal_only", return_value={}),
+                patch.object(PLAN.sys, "argv", ["test_go.py", "core"]),
+                patch.object(
+                    PLAN.subprocess,
+                    "check_output",
+                    return_value="\n".join(json.dumps(package) for package in packages),
+                ),
+                patch.object(
+                    PLAN, "run", side_effect=lambda command: 7 if failed in command else 0
+                ) as run,
+            ):
+                with self.assertRaises(SystemExit) as result:
+                    PLAN.main()
+                self.assertEqual(result.exception.code, 7)
+                selected = next(
+                    call.args[0]
+                    for call in run.call_args_list
+                    if "./internal/control" in call.args[0]
+                )
+                self.assertEqual(selected[selected.index("-run") + 1], "^(TestLifecycle)$")
+                self.assertEqual(run.call_count, 2)
+
+    def test_shard_arguments_reject_invalid_or_out_of_range_values(self):
+        self.assertEqual(PLAN.parse_shard("2/4"), (2, 4))
+        for value in ["0/4", "1/0", "5/4", "-1/4", "1", "1/2/3", "01/4"]:
+            with self.subTest(value=value), self.assertRaises(PLAN.argparse.ArgumentTypeError):
+                PLAN.parse_shard(value)
+
+    def test_package_shards_are_disjoint_complete_and_order_independent(self):
+        packages = [
+            self.package("pkg/large", [f"TestCase{i}" for i in range(12)]),
+            self.package("pkg/small", ["TestSmall"]),
+            self.package("pkg/external", ["TestInternal"]),
+        ]
+        external = Path(packages[-1]["Dir"])
+        (external / "external_test.go").write_text("func TestExternal() {}")
+        packages[-1]["XTestGoFiles"] = ["external_test.go"]
+        (external / "inactive_test.go").write_text("func TestInactive() {}")
+        empty = self.root / "pkg/no-tests"
+        empty.mkdir()
+        packages.append({"Dir": str(empty)})
+        chosen = []
+        for index in range(1, 5):
+            shard = PLAN.shard_packages(packages, (index, 4))
+            self.assertEqual(
+                {p["Dir"] for p in shard},
+                {p["Dir"] for p in PLAN.shard_packages(list(reversed(packages)), (index, 4))},
+            )
+            chosen.extend(p["Dir"] for p in shard)
+        self.assertCountEqual(chosen, [p["Dir"] for p in packages])
+        self.assertEqual(len(chosen), len(set(chosen)))
+        self.assertEqual(PLAN.shard_packages(packages[:1], (4, 4)), [])
+
+    def test_all_shards_preserve_normal_and_race_coverage_and_flags(self):
+        packages = [
+            self.package("pkg/full", ["TestFull"]),
+            self.package("pkg/mixed", ["TestConcurrent", "TestSerial"]),
+            self.package("pkg/serial", ["TestValue"]),
+        ]
+        exclusions = {"./pkg/mixed": {"TestSerial"}, "./pkg/serial": {"TestValue"}}
+
+        def coverage(mode, shard):
+            with (
+                patch.object(PLAN, "normal_only", return_value=exclusions),
+                patch.object(PLAN.sys, "argv", ["test_go.py", mode, "--shard", shard, "--count=1"]),
+                patch.object(
+                    PLAN.subprocess,
+                    "check_output",
+                    return_value="\n".join(json.dumps(p) for p in packages),
+                ),
+                patch.object(PLAN, "run", return_value=0) as run,
+            ):
+                try:
+                    PLAN.main()
+                except SystemExit as result:
+                    self.assertEqual(result.code, 0)
+            covered = []
+            for call in run.call_args_list:
+                command = call.args[0]
+                self.assertIn("-count=1", command)
+                pattern = command[command.index("-run") + 1] if "-run" in command else None
+                covered.extend(
+                    (package, pattern, "-race" in command)
+                    for package in command
+                    if package.startswith("./")
+                )
+            return covered
+
+        for mode in ["normal", "race", "race-all"]:
+            with self.subTest(mode=mode):
+                original = coverage(mode, "1/1")
+                split = [entry for i in range(1, 5) for entry in coverage(mode, f"{i}/4")]
+                self.assertCountEqual(original, split)
+                self.assertEqual(len(split), len(set(split)))
+
 
 if __name__ == "__main__":
     unittest.main()

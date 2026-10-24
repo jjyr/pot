@@ -1,3 +1,6 @@
+import {taskIdentityMark,taskIdentityShort} from './task-identity.mjs';
+import {reconcile} from './reconcile.mjs';
+import {taskIdentities,taskAddress} from '../state/task-identity.mjs';
 import {linkDisplayName,machinePresentation} from '../state/machine-identity.mjs';
 import {createCompaction} from './compaction.mjs';
 import {taskAgentSource} from './connection-visuals.mjs';
@@ -14,14 +17,14 @@ import {renderMarkdown} from './markdown.mjs';
 import {toolForest} from '../state/tool-calls.mjs';
 import {projectScriptRuns} from '../state/script-runs.mjs';
 import {projectTaskMessages} from '../state/task-transcript.mjs';
-import {createMessageWindow} from './message-window.mjs';
+import {createCommunicationWindow} from './communication-window.mjs';
 import {createReadingCursor} from './reading-cursor.mjs';
 import {copyFeedback} from './motion.mjs';
 
 export function createTaskConversation({root,task,record:initial,locale,client,scope,draft,onDraft,downloadFile:downloadTaskFile,toolMemory,approvalFor,onDecision,onSend,onStop,onPause,onCancel,onArchive,onUsage,onRefresh,onSettings,onOpenTask,assistantName}){
   const machineLabel=id=>machinePresentation(client).label(id,scope,locale());
   const acquireFileImage=client.acquireFileImage?({task,path})=>client.acquireFileImage(task,path,scope):undefined;
-  const resourceOptions={acquireResource:client.acquireResource?resource=>client.acquireResource(resource,scope):undefined,downloadResource:client.downloadResource?resource=>client.downloadResource(resource,scope):undefined};
+  const resourceOptions={messageFiles:client.messageFiles?(message,options)=>client.messageFiles(message,{...scope,...options,task:task.id}):undefined,retryMessageFile:client.retryMessageFile?(message,ref,options)=>client.retryMessageFile(message,ref,{...scope,...options,task:task.id}):undefined,acquireResource:client.acquireResource?resource=>client.acquireResource(resource,scope):undefined,downloadResource:client.downloadResource?resource=>client.downloadResource(resource,scope):undefined};
   const tr=(en,zh)=>locale()==='zh-CN'?zh:en,t=key=>translate(locale(),key);
   const label=(button,text)=>{button.title=text;button.setAttribute('aria-label',text);};
   const iconButton=(name,text,className='icon-button')=>{const button=action('',()=>{},{});button.className=className;button.append(icon(name));label(button,text);return button;};
@@ -29,6 +32,8 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   stage.setAttribute('role','status');stageInner.append(stageLabel,locate,retry);stage.append(stageInner);
   const history=n('div','task-history'),column=n('div','task-column'),goal=n('details','task-goal'),goalSummary=n('summary'),goalPreview=n('span','task-goal-preview'),goalBody=n('div','message-body task-goal-body');
   goal.dataset.scrollAnchor='task-goal';goal.dataset.cacheKey='task-goal';goalSummary.append(icon('chevron-right'),n('span','task-goal-label',tr('Task goal','任务目标')),goalPreview);goal.append(goalSummary,goalBody);
+  const initialIdentity={...(initial.info||task),_space_id:scope.space,assistant_id:scope.owner},identityMark=taskIdentityMark(initialIdentity),shortID=taskIdentityShort(initialIdentity,t('tasks.identityUnknown'));shortID.classList.add('task-short-id');goalSummary.insertBefore(identityMark,goalPreview);goalSummary.insertBefore(shortID,goalPreview);
+  function updateIdentity(){const info={...(record?.info||initial.info||task),_space_id:scope.space,assistant_id:scope.owner};taskIdentities.register([info]);shortID.textContent=taskIdentities.short(info)||t('tasks.identityUnknown');shortID.title=taskAddress(info)?JSON.stringify(taskAddress(info)):t('tasks.identityUnknown');reconcile(identityMark,taskIdentityMark(info));}
   goalPreview.textContent=(initial.request?.text||'').replace(/\s+/g,' ');goalBody.append(renderMarkdown(initial.request?.text||'',{downloadFile,acquireFileImage}));
   const transcript=n('div','task-transcript'),files=n('div','task-files');files.dataset.scrollAnchor='task-files';transcript.setAttribute('role','log');transcript.setAttribute('aria-label',tr('Task conversation','任务对话'));
   const downloadNotice=n('div','task-download-error');downloadNotice.hidden=true;downloadNotice.setAttribute('role','alert');
@@ -86,9 +91,9 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     if(!running&&record.info?.archive_reason)footer.textContent+=' · '+record.info.archive_reason;
   }
   function renderStage(){
-    const rawPhase=record.info?.phase||task.phase,pending=approvals.length,phase=rawPhase==='waiting_approval'?'running':rawPhase;
+    const rawPhase=record.info?.phase||task.phase,pending=approvals.length,phase=rawPhase;
     stage.dataset.phase=unavailable||connectionError?'offline':pending?'approval':record.info?.paused?'paused':phase;
-    const text=connectionError?tr('Connection interrupted · Showing retained history','连接中断 · 显示已有记录'):unavailable?tr('Original machine is offline · Showing cached output','原执行机器离线 · 显示缓存执行输出'):pending?tr(`Waiting for approval · ${pending} pending`,`等待授权 · ${pending} 项待处理`):record.info?.paused?tr('Paused','已暂停'):tr({running:'Running',queued:'Queued',waiting:'Waiting for allowance',complete:'Complete',failed:'Failed',interrupted:'Interrupted',cancelled:'Cancelled'}[phase]||phase,{running:'运行中',queued:'排队中',waiting:'等待配额',complete:'已完成',failed:'失败',interrupted:'已中断',cancelled:'已取消'}[phase]||phase);
+    const text=connectionError?tr('Connection interrupted · Showing retained history','连接中断 · 显示已有记录'):unavailable?tr('Original machine is offline · Showing cached output','原执行机器离线 · 显示缓存执行输出'):pending?tr(`Waiting for approval · ${pending} pending`,`等待授权 · ${pending} 项待处理`):record.info?.paused?tr('Paused','已暂停'):t(phase==='waiting'?'tasks.stage.waiting':`schedule.state.${phase}`);
     stageInner.querySelector('.agent-source')?.remove();const source=taskAgentSource({...task,agent_link:linked()},locale());if(source)stageInner.prepend(source);
     if(stageLabel.textContent!==text)stageLabel.textContent=text;stageLabel.title=connectionError;locate.hidden=!pending||!!connectionError;retry.hidden=!connectionError||!can('task.read');retry.disabled=busy;
   }
@@ -117,10 +122,10 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
         if(!entry.tool){entry.tool=createToolCall({messageActor:()=>record.info?.address||task.address,onOpenTask,resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key:JSON.stringify([scope,task.id,message.id]),locale,machineLabel,onDecision,onInteract:event=>reading.engage(event),onLocate:(call,turn)=>{const target=forest.byID.get(turn+':'+call)?.message;if(target){reading.locate({id:target.id,expand:true});renderTranscript();}},downloadFile,acquireFileImage});entry.element.append(entry.tool.element);}
         const children=forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children||[];
         const approvalDescendant=children.some(function pending(entry){return !!approvalFor(entry.message.tool)||entry.children.some(pending);});
-        entry.tool.update(message,{approval:approvalFor(message.tool),approvalDescendant,offline:unavailable||!!connectionError,children:children.map(child=>child.message)});
+        entry.tool.update(message,{stacked:message.communicationStacked,approval:approvalFor(message.tool),approvalDescendant,offline:unavailable||!!connectionError,children:children.map(child=>child.message)});
         if((reading.destination||restoringPosition)&&destinations.has(message.id)||reading.destination?.expand&&reading.destination.id===message.id)entry.tool.element.open=true;
         if(children.length||entry.childrenWindow){
-          if(!entry.childrenWindow){entry.childrenWindow=createMessageWindow({scroller:history,host:entry.tool.children,nested:true,render:renderMessage,dispose:disposeMessage,requestRender:()=>reading.reflow(),reading,heights});entry.tool.element.addEventListener('toggle',scheduleFollow);}
+          if(!entry.childrenWindow){entry.childrenWindow=createCommunicationWindow({onOpenTask,locale,actor:()=>record.info?.address||task.address,resolveIdentity:address=>messageIdentities(client).resolve(address),blocked:message=>!!approvalFor(message.tool),memory:toolMemory,scope:JSON.stringify([scope,task.id]),scroller:history,host:entry.tool.children,nested:true,render:renderMessage,dispose:disposeMessage,requestRender:()=>reading.reflow(),reading,heights});entry.tool.element.addEventListener('toggle',scheduleFollow);}
           entry.childrenWindow.set(entry.tool.element.open?children.map(child=>({...child.message,viewKey:child.message.id})):[],{target:destinations.has(message.id)?{id:destinations.get(message.id)}:undefined});
         }
       }else{
@@ -138,7 +143,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
       }
       return entry;
   }
-  const transcriptWindow=createMessageWindow({scroller:history,host:transcript,render:renderMessage,dispose:disposeMessage,requestRender:()=>reading.reflow(),reading,heights});
+  const transcriptWindow=createCommunicationWindow({onOpenTask,locale,actor:()=>record.info?.address||task.address,resolveIdentity:address=>messageIdentities(client).resolve(address),blocked:message=>!!approvalFor(message.tool),memory:toolMemory,scope:JSON.stringify([scope,task.id]),scroller:history,host:transcript,render:renderMessage,dispose:disposeMessage,requestRender:()=>reading.reflow(),reading,heights});
   let destinations=new Map();
   function renderTranscript(){
     if(!state)return;
@@ -162,7 +167,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     const choice=(text,work,{danger=false}={})=>{const button=action(text,work,{danger});button.classList.add('menu-destination');button.disabled=busy;dialog.append(button);return button;};
     if(menuMode==='details'){
       heading.firstChild.textContent=tr('Task details','任务详情');const data=n('dl','task-info');
-      for(const [key,value]of [[tr('Assistant','助手'),assistantName],[t('agentLinks.executionSource'),linked()?linkDisplayName({peer:linked()}):null],[t('schedule.machine'),linked()?null:machineLabel(record.info?.machine_id||task.machine_id)],[tr('Model','模型'),linked()?null:record.config?.model],[tr('Started','开始时间'),record.info?.started_at_ms?new Date(record.info.started_at_ms).toLocaleString(locale()):null],[tr('Task ID','任务 ID'),task.id]])if(value)data.append(n('dt','',key),n('dd','',value));
+      for(const [key,value]of [[tr('Assistant','助手'),assistantName],[t('agentLinks.executionSource'),linked()?linkDisplayName({peer:linked()}):null],[t('schedule.machine'),linked()?null:machineLabel(record.info?.machine_id||task.machine_id)],[tr('Model','模型'),linked()?null:record.config?.model],[tr('Started','开始时间'),record.info?.started_at_ms?new Date(record.info.started_at_ms).toLocaleString(locale()):null],[t('tasks.taskIdentity'),taskAddress(record.info||task)?JSON.stringify(taskAddress(record.info||task)):task.id]])if(value)data.append(n('dt','',key),n('dd','',value));
       dialog.append(data);choice(tr('Back','返回'),()=>{menuMode='actions';renderMenu(true);});return;
     }
     if(menuMode==='cancel'){
@@ -176,14 +181,14 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     dialog.append(n('p','inline-error task-menu-error',error.hidden?'':error.textContent));
   }
   const onToggle=()=>scheduleFollow();goal.addEventListener('toggle',onToggle);
-  updateComposer();renderStage();
+  updateIdentity();updateComposer();renderStage();
   return {
     transcript,history,input,approvalHost,
     update(next){
       if(disposed)return;
       projection=null;
-      if(next.record)record=next.record;if(next.state)state=next.state;if(next.inputs)inputs=next.inputs;if(next.approvals)approvals=next.approvals;if(next.unavailable!==undefined)unavailable=next.unavailable;if(next.connectionError!==undefined)connectionError=next.connectionError;
-      renderStage();renderTranscript();scheduleFollow();updateComposer();renderMenu();
+      if(next.record)record=next.record;messageIdentities(client).rememberTasks([record.info||task]);if(next.state)state=next.state;if(next.inputs)inputs=next.inputs;if(next.approvals)approvals=next.approvals;if(next.unavailable!==undefined)unavailable=next.unavailable;if(next.connectionError!==undefined)connectionError=next.connectionError;
+      updateIdentity();renderStage();renderTranscript();scheduleFollow();updateComposer();renderMenu();
       renderDownloadFailure();
       const attachments=record.outcome?.artifacts?.map(path=>({path}))||record.files||[],artifactError=record.outcome?.artifacts_error||'';
       const signature=JSON.stringify([attachments,artifactError,locale()]);if(fileSignature!==signature){

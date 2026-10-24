@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jjyr/pot/internal/testutil"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -252,7 +253,7 @@ func TestRealMacOSCertificateTrust(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 20*time.Second))
 	defer cancel()
 	command := exec.CommandContext(ctx, worker, "-test.run=^TestRealMacOSCertificateTrust$")
 	command.Dir = workspace

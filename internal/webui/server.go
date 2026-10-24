@@ -288,6 +288,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.assets.ServeHTTP(w, r)
 }
 func Allowed(method, path string) bool {
+	if strings.HasPrefix(path, "/api/v1/message-files/") {
+		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/message-files/"), "/")
+		return len(parts) == 1 && method == "GET" && core.Identifier(parts[0]) || len(parts) == 2 && method == "POST" && core.Identifier(parts[0]) && core.Identifier(parts[1])
+	}
+
 	if method == "GET" && strings.HasPrefix(path, "/api/v1/resources/") {
 		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/resources/"), "/")
 		return core.Identifier(parts[0]) && (len(parts) == 1 || len(parts) == 2 && (parts[1] == "chunk" || parts[1] == "content" || parts[1] == "download" || parts[1] == "render"))

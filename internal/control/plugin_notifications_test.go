@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/integrations"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -35,7 +36,7 @@ func (notificationLogin) Authorize(context.Context, integrations.Challenge) (int
 
 func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 15*time.Second))
 	defer cancel()
 	var updated atomic.Bool
 	var ghCalls, modelCalls atomic.Int32
@@ -224,7 +225,9 @@ func TestGitHubPluginProtocolToBusyAssistantSummaryExactlyOnce(t *testing.T) {
 		t.Fatal("busy assistant interrupted")
 	}
 	close(release)
-	snapshot := awaitConversation(t, c, func(snapshot protocol.Snapshot) bool {
+	// Polling, foreground completion, MCP dispatch and the summary share this
+	// fixture's end-to-end deadline; don't impose another shorter wait on CI.
+	snapshot := awaitConversationContext(t, ctx, c, func(snapshot protocol.Snapshot) bool {
 		for _, m := range snapshot.Messages {
 			if m.Text == "GitHub update summarized" && snapshot.Turn == nil {
 				return true

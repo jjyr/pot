@@ -10,6 +10,7 @@ import (
 	"image/color"
 	"image/gif"
 	"image/png"
+	"io"
 	"math"
 	"mime"
 	"net/http"
@@ -47,52 +48,20 @@ func resourceApplicationSources(t *testing.T, sources []string, displayLabels ..
 			w.WriteHeader(400)
 			return
 		}
-		registered := map[string]resources.Resource{}
-		presented := 0
-		for _, message := range body.Messages {
-			if message.Role != "tool" {
-				continue
+		var links []string
+		for _, path := range sources {
+			label := path
+			if len(displayLabels) > 0 {
+				label = displayLabels[0]
 			}
-			text, _ := message.Content.(string)
-			var resource resources.Resource
-			if json.Unmarshal([]byte(text), &resource) == nil && resource.ID != "" {
-				registered[resource.Entry] = resource
-			}
-			if strings.Contains(text, `"presentation"`) {
-				presented++
-			}
+			links = append(links, "["+strings.ReplaceAll(label, "]", "\\]")+"]("+path+")")
 		}
-		var calls []any
-		add := func(name, id string, args any) {
-			raw, _ := json.Marshal(args)
-			calls = append(calls, map[string]any{"index": len(calls), "id": id, "type": "function", "function": map[string]any{"name": name, "arguments": string(raw)}})
+		intro := "这些资源可以直接查看和操作，下载按钮单独保存原文件。"
+		if len(sources) > 1 && sources[1] == "review.md" {
+			intro += " 也可以行内查看[报告源码](review.md:3)和[同一图片](landscape.png)。"
 		}
-		if len(registered) == 0 {
-			for index, path := range sources {
-				args := map[string]any{"path": path}
-				if len(displayLabels) > 0 {
-					args["name"] = displayLabels[0]
-				}
-				if path == "demo.html" {
-					args["assets"] = []string{"demo.css", "demo.js"}
-				}
-				add("register_resource", fmt.Sprintf("register-%d", index), args)
-			}
-		} else if presented == 0 {
-			for index, path := range sources {
-				mode := "preview"
-				if path == "report.txt" {
-					mode = "download"
-				}
-				add("present_resource", fmt.Sprintf("present-%d", index), map[string]string{"resource_id": registered[path].ID, "mode": mode, "caption": map[string]string{"landscape.png": "生成的图片", "pulse.gif": "GIF 动画", "voice.wav": "语音播报", "sample.webm": "视频演示", "notes.pdf": "PDF 文档", "demo.html": "预算模拟器 · 可直接调整参数", "report.txt": "导出文件"}[path]})
-			}
-		}
-		delta := map[string]any{"content": "这些资源可以直接查看和操作，下载按钮单独保存原文件。"}
+		delta := map[string]any{"content": intro + "\n\n" + strings.Join(links, "\n\n")}
 		reason := "stop"
-		if len(calls) > 0 {
-			delta = map[string]any{"tool_calls": calls}
-			reason = "tool_calls"
-		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		raw, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": reason}}, "usage": map[string]int{"prompt_tokens": 20, "completion_tokens": 20}})
 		fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", raw)
@@ -132,11 +101,6 @@ func resourceApplicationSources(t *testing.T, sources []string, displayLabels ..
 		t.Fatal(err)
 	}
 	app := &Application{Control: service, RuntimeID: "resource-fixture", BootID: "boot", Name: "Pot"}
-	sub, remove, err := c.SubscribeUI(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer remove()
 	if _, err = app.Call(ctx, Request{Method: "POST", Path: "/api/v1/messages", Body: json.RawMessage(fmt.Sprintf(`{"request_id":"resource-showcase","conversation_id":%q,"text":"请展示图片、GIF、语音、视频、PDF 和可操作的 HTML，并单独给出下载文件。"}`, ownerID))}); err != nil {
 		t.Fatal(err)
 	}
@@ -148,33 +112,35 @@ func resourceApplicationSources(t *testing.T, sources []string, displayLabels ..
 			t.Fatal(err)
 		}
 		var output []resources.Resource
+		seen := map[string]bool{}
 		for _, message := range snapshot.Messages {
-			if message.Tool != nil && message.Tool.Name == "present_resource" && message.Tool.Phase == "completed" {
-				var value struct {
-					Presentation resources.Presentation `json:"presentation"`
+			if message.Role != "assistant" {
+				continue
+			}
+			refs, e := service.MessageFiles(ctx, ownerID, "", message.ID)
+			if e != nil {
+				t.Fatal(e)
+			}
+			for _, ref := range refs {
+				if ref.State == "ready" {
+					if !seen[ref.Resource.ID] {
+						output = append(output, *ref.Resource)
+						seen[ref.Resource.ID] = true
+					}
+				} else if ref.State != "pending" && ref.State != "resolving" {
+					t.Fatalf("file resolution failed: %+v", ref)
 				}
-				json.Unmarshal(message.Tool.Result, &value)
-				output = append(output, value.Presentation.Resource)
 			}
 		}
 		if snapshot.Turn == nil && len(output) == len(sources) {
-			presentations := 0
-			for _, message := range snapshot.Messages {
-				if message.Presentation != nil {
-					presentations++
-				}
-			}
-			catalogue, err := c.Catalogue(ctx)
-			if err != nil || presentations != len(sources) || catalogue.ReplyCount != uint64(len(sources)+1) {
-				t.Fatal("resource replies were not durable unread messages", presentations, catalogue, err)
+			catalogue, e := c.Catalogue(ctx)
+			if e != nil || catalogue.ReplyCount != 1 {
+				t.Fatal("file projection changed message history", catalogue, e)
 			}
 			return app, output
 		}
-		if snapshot.Turn == nil && len(snapshot.Messages) > 1 {
-			t.Fatalf("resource tool turn failed: %+v", snapshot.Messages)
-		}
 		select {
-		case <-sub:
+		case <-time.After(10 * time.Millisecond):
 		case <-timer.C:
 			t.Fatal("resource fixture timed out")
 		}
@@ -189,6 +155,25 @@ func TestResourceHTTPDownloadsWithLongDisplayLabel(t *testing.T) {
 		t.Fatal("resource owner missing", err)
 	}
 	for _, resource := range items {
+		var paths []string
+		var contents [][]byte
+		for _, file := range resource.Files {
+			f, _, e := app.Control.Resources.OpenFile(context.Background(), owner, resource.ID, file.Path)
+			if e != nil {
+				t.Fatal(e)
+			}
+			raw, e := io.ReadAll(f)
+			f.Close()
+			if e != nil {
+				t.Fatal(e)
+			}
+			paths = append(paths, file.Path)
+			contents = append(contents, raw)
+		}
+		resource, err = app.Control.Resources.Register(context.Background(), owner, "label-"+resource.ID, "label", label, resource.Entry, paths, contents)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if resource.Name != label {
 			t.Fatal("tool or durable presentation changed display label")
 		}
@@ -292,6 +277,7 @@ func writeResourceFixtures(t *testing.T, workspace string) {
 	save("demo.html", []byte(`<!doctype html><html lang="zh-CN"><head><link rel="stylesheet" href="demo.css"></head><body><div class="eyebrow">INTERACTIVE DEMO</div><h2>每月存一点，看看会怎样</h2><p>调整金额，立即预览你的储蓄计划。</p><label>每月储蓄 <output id="amount">¥2,000</output><input id="budget" type="range" min="500" max="10000" step="500" value="2000"></label><div class="total"><span>一年后累计</span><strong id="total">¥24,000</strong><div class="bars"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><button id="confirm">采用这个计划</button><span id="saved" role="status"></span><script src="demo.js"></script></body></html>`))
 	save("demo.css", []byte(`*{box-sizing:border-box}body{margin:0;padding:22px;background:#f3f7f1;color:#294b3d;font:14px system-ui}.eyebrow{font-size:10px;letter-spacing:.15em;color:#64836c}h2{font-size:21px;margin:9px 0}p{font-size:12px;color:#6c7f70;margin:0 0 18px}label{display:block;font-size:12px}output{float:right;font-weight:600}input{width:100%;accent-color:#4c795f;margin:10px 0}.total{position:relative;border-radius:10px;background:#e3eddf;padding:13px 16px;margin:8px 0 14px;overflow:hidden}.total span{font-size:11px;display:block}.total strong{font-size:28px;display:block}.bars{position:absolute;right:16px;bottom:0;display:flex;gap:7px;align-items:end;height:74px}.bars i{width:15px;background:#a5bca0;height:20%}.bars i:nth-child(2){height:35%}.bars i:nth-child(3){height:50%}.bars i:nth-child(4){height:65%}.bars i:nth-child(5){height:80%}.bars i:nth-child(6){height:100%;background:#65895f}button{border:0;border-radius:7px;padding:9px 15px;color:white;background:#426f51;font:12px system-ui;cursor:pointer}#saved{font-size:11px;margin-left:10px}`))
 	save("demo.js", []byte(`const input=document.querySelector('#budget');input.oninput=()=>{document.querySelector('#amount').textContent='¥'+Number(input.value).toLocaleString();document.querySelector('#total').textContent='¥'+(Number(input.value)*12).toLocaleString();};document.querySelector('#confirm').onclick=()=>{document.querySelector('#saved').textContent='已采用';window.pot.result({monthly:Number(input.value),annual:Number(input.value)*12});};try{parent.document.body.dataset.escape='yes';}catch{document.body.dataset.isolated='yes';}window.pot.resize(350);`))
+	save("archive.zip", []byte("PK\x03\x04\x00\x00\x00\x00\x00\x00archived fixture bytes"))
 	save("review.md", []byte(markdownResourceSource))
 	save("review.MARKDOWN", []byte(markdownResourceSource))
 	save("plain.txt", []byte(markdownResourceSource))
@@ -343,7 +329,9 @@ func TestResourceBrowserFixture(t *testing.T) {
 		t.Skip("opt-in local browser fixture")
 	}
 	var app *Application
-	if os.Getenv("POT_MARKDOWN_RESOURCE_FIXTURE") == "1" {
+	if os.Getenv("POT_MESSAGE_FILE_FIXTURE") == "1" {
+		app, _ = resourceApplicationSources(t, []string{"landscape.png", "review.md", "pulse.gif", "voice.wav", "sample.webm", "notes.pdf", "demo.html", "report.txt", "archive.zip"})
+	} else if os.Getenv("POT_MARKDOWN_RESOURCE_FIXTURE") == "1" {
 		app, _ = resourceApplicationSources(t, markdownResourceSources, "Quarterly review.html")
 	} else {
 		app, _ = resourceApplication(t)
@@ -372,6 +360,10 @@ func TestResourceBrowserFixture(t *testing.T) {
 			case done <- struct{}{}:
 			default:
 			}
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/before/") && os.Getenv("POT_RESOURCE_BEFORE_ASSETS") != "" {
+			http.StripPrefix("/before/", http.FileServer(http.Dir(os.Getenv("POT_RESOURCE_BEFORE_ASSETS")))).ServeHTTP(w, r)
 			return
 		}
 		r.AddCookie(cookie)

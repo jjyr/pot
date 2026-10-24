@@ -32,3 +32,9 @@ assert.equal(mutationTopics('/api/v1/providers/check',{},{}),null);
 assert.deepEqual(mutationTopics('/api/v1/tasks/id/control',{},{}),['tasks','runner','usage']);
 assert.ok(!mutationTopics('/api/v1/providers',{},{}).includes('machines'),'Provider saves keep machine inventory fresh');
 console.log('Bounded task prefixes, progressive Spaces, global totals/order, cancellation, offline fencing and targeted invalidation passed');
+
+const ownerCalls=[];const ownerClient={spaces,assistants:[{id:'local-hash',space_id:'a',control_id:'ca',origin:{node_id:'remote',assistant_id:'real'}}],read:async(path,options)=>{ownerCalls.push({path,options});return {items:[],total:0,counts:{complete:73,failed:12}};}};
+const ownerPages=await createTaskPages(ownerClient)({scope:'complete',q:'report',phase:'complete',owner:JSON.stringify(['remote','assistant','real']),signal:new AbortController().signal});
+assert.equal(ownerCalls.length,1,'Complete addresses map to the owning catalogue; other nodes do not fan out');
+const ownerURL=new URL(ownerCalls[0].path,'http://fixture');assert.equal(ownerURL.searchParams.get('assistant_id'),'local-hash');assert.equal(ownerURL.searchParams.get('phase'),'complete');assert.equal(ownerURL.searchParams.get('scope'),'complete');
+assert.equal(combineTasks(ownerPages.pages).counts.complete,73,'Counts are backend aggregates, independent of empty visible rows');

@@ -15,7 +15,7 @@ async page=>{
    f.policy={machines:{host:{execution_access:'ask',revision:1}},rules:[],task_grants:[],application:{}};
    f.providers={profiles:[{id:'p',provider:'p',name:'Fixture Provider',model:'fixture-model',revision:1}],default_provider_id:'p',directory:[],connections:[]};
    f.usage={total:{input:10,output:2,cache:1,requests:1},agents:[{agent:'pot',input:10,output:2}],models:[{model:'fixture-model',input:10,output:2}],buckets:[{date:'2026-10-19',input:10,output:2,cache:1,agents:[{agent:'pot',input:10,output:2}]}],quota:{active:false,policy:{period:'none'}}};
-   f.schedule={id:'plan',spec:{title:'Nightly review',goal:'Review notes',enabled:true,timezone:'UTC'},next_label:'Tomorrow',next_at_ms:1};f.runs=[{id:'run',scheduled_label:'Today',state:'running',summary:'Reviewing'}];
+   f.schedule={id:'plan',spec:{title:'Nightly review',goal:'Review notes',enabled:true,timezone:'UTC',kind:'cron',cron:'0 9 * * *'},next_label:'Tomorrow',next_at_ms:1};f.runs=[{id:'run',scheduled_label:'Today',state:'running',summary:'Reviewing'}];
    f.integration={id:'github',name:'GitHub',login_available:true,status:'disconnected',login:{id:'login',status:'pending',user_code:'TEST-CODE',authorization_url:'https://example.invalid/authorize'}};
    f.response=(path,options)=>{
     if(options.method){const body=options.body||{};f.writes.push({path,body,...options});
@@ -35,7 +35,7 @@ async page=>{
     if(name==='/api/v1/usage/providers')return {providers:[]};
     return {items:[]};
    };
-   f.client={desktop:true,runtime:{boot_id:'fixture'},spaces:[{id:'local',control_id:'host',name:'Local',kind:'local',connected:true}],assistants:[{id:'a',name:'Assistant',space_id:'local'}],scope:()=>({space:'local',owner:'a'}),request:(path,options={})=>{
+   f.client={desktop:true,runtime:{boot_id:'fixture'},spaces:[{id:'local',control_id:'host',name:'Local',kind:'local',connected:true}],assistants:[{id:'a',name:'Assistant',space_id:'local',control_id:'host',capabilities:{version:1,operations:['schedules.manage','assistant.usage','approvals.manage','task.list','task.read','chat.read','chat.send']}}],scope:()=>({space:'local',owner:'a'}),request:(path,options={})=>{
     f.calls.push({path,options});if(options.method&&f.holdMutations)return new Promise((resolve,reject)=>f.pendingMutations.push({path,options,resolve,reject}));
     if(!options.method&&f.hold&&path.startsWith(f.hold))return new Promise((resolve,reject)=>f.pending.push({path,options,resolve,reject}));
     try{return Promise.resolve(structuredClone(f.response(path,options)));}catch(error){return Promise.reject(error);}
@@ -88,12 +88,12 @@ async page=>{
   assert(await page.evaluate(()=>refreshFixture.login===document.querySelector('.integration-row')&&refreshFixture.cancel===document.querySelector('.integration-actions button')&&document.activeElement===refreshFixture.cancel),'Login status timer retains row and focused action');
   await page.evaluate(async()=>{const f=refreshFixture;f.integration={id:'github',name:'GitHub',status:'connected',account:{revision:1,identity:{username:'fixture'}}};await f.pages.refresh(['integrations']);});await page.locator('.integration-toggle').click();await page.getByRole('button',{name:'Log out',exact:true}).waitFor();
   await page.evaluate(()=>refreshFixture.pages.show('tasks'));await page.getByRole('button',{name:'Schedules',exact:true}).click();await page.getByRole('button',{name:'Nightly review',exact:true}).waitFor();
-  await page.evaluate(async()=>{const f=refreshFixture;f.scheduleRow=document.querySelector('.schedule-card');f.schedule.spec.enabled=false;await f.pages.refresh(['schedules']);});
-  assert(await page.evaluate(()=>refreshFixture.scheduleRow===document.querySelector('.schedule-card')&&refreshFixture.scheduleRow.textContent.includes('Paused')),'Schedule lists patch existing cards');
+  await page.evaluate(async()=>{const f=refreshFixture;f.scheduleRow=document.querySelector('.schedule-record');f.schedule.spec.enabled=false;await f.pages.refresh(['schedules']);});
+  assert(await page.evaluate(()=>refreshFixture.scheduleRow===document.querySelector('.schedule-record')&&refreshFixture.scheduleRow.textContent.includes('Paused')),'Schedule lists patch existing cards');
   await page.getByRole('button',{name:'Nightly review',exact:true}).click();await page.getByRole('button',{name:'Run now',exact:true}).waitFor();
   await page.getByRole('button',{name:'Remove',exact:true}).click();
   await page.evaluate(async()=>{const f=refreshFixture;f.history=document.querySelector('tbody tr');f.runButton=document.querySelector('.page-card button');f.runs[0].state='complete';await f.pages.refresh(['schedules']);});
-  assert(await page.evaluate(()=>refreshFixture.history===document.querySelector('tbody tr')&&refreshFixture.history.textContent.includes('complete')&&refreshFixture.runButton===document.querySelector('.page-card button')),'Schedule history updates in place');
+  assert(await page.evaluate(()=>refreshFixture.history===document.querySelector('tbody tr')&&refreshFixture.history.textContent.includes('Complete')&&refreshFixture.runButton===document.querySelector('.page-card button')),'Schedule history updates in place');
   assert(await page.getByRole('button',{name:'Confirm removal',exact:true}).count()===1,'Background updates retain the removal confirmation');
   await page.evaluate(async()=>{const f=refreshFixture;f.approvals=[{id:'approval',request:{owner:'a',call_id:'call',turn:'turn',machine_id:'host',tool:'exec_command',args:{cmd:'pwd'}}}];await f.pages.permissions();document.querySelector('.approval-card').open=true;f.approvalButton=document.querySelector('.approval-actions button');f.approvalButton.focus();await f.pages.permissions();});
   assert(await page.evaluate(()=>refreshFixture.approvalButton===document.querySelector('.approval-actions button')&&document.activeElement===refreshFixture.approvalButton),'Repeated permission reads retain the same approval action');

@@ -15,6 +15,7 @@ import (
 
 	"github.com/jjyr/pot/internal/schedule"
 	"github.com/jjyr/pot/internal/tasks"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 )
@@ -23,7 +24,7 @@ func TestScheduledAndManualOutcomesShareSummaryDelivery(t *testing.T) {
 	t.Parallel()
 	for _, failSummary := range []bool{false, true} {
 		t.Run(fmt.Sprintf("summary-fails=%v", failSummary), func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 15*time.Second))
 			defer cancel()
 			foregroundEntered, foregroundRelease := make(chan struct{}), make(chan struct{})
 			workerRelease := make(chan struct{})

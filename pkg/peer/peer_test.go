@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"github.com/jjyr/pot/internal/testutil"
 	"io"
 	"net"
 	"strings"
@@ -48,7 +49,7 @@ func testServer(t *testing.T, authorize Authorizer, attached func(*Session)) (st
 	return "tcp://" + l.Addr().String(), id, server
 }
 func TestDuplexPinnedSessionLargeMessagesAndError(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 10*time.Second))
 	defer cancel()
 	clientID, key := testIdentity(t, "client")
 	accepted := make(chan *Session, 1)
@@ -187,7 +188,7 @@ func TestLateResponseCannotCompleteAnotherAttemptWithSameRequestID(t *testing.T)
 		}
 		return r.Params, nil
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 	defer cancel()
 	firstCtx, stop := context.WithCancel(ctx)
 	first := make(chan error, 1)
@@ -244,7 +245,7 @@ func sessionPair(t *testing.T, handler Handler) (*Session, *Session) {
 	accepted := make(chan *Session, 1)
 	endpoint, serverID, _ := testServer(t, func(context.Context, Identity, string, json.RawMessage) (Handler, error) { return handler, nil }, func(s *Session) { accepted <- s })
 	id, key := testIdentity(t, "client")
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 	defer cancel()
 	client, err := Dial(ctx, endpoint, DialOptions{Identity: id, PrivateKey: key, Expected: &serverID, Service: "svc", Handler: handler})
 	if err != nil {
@@ -270,7 +271,7 @@ func TestSlowBulkStreamDoesNotBlockDuplexControlOrHeartbeat(t *testing.T) {
 		}
 		return r.Params, nil
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 	defer cancel()
 	stream, err := client.mux.OpenStream(ctx)
 	if err != nil {

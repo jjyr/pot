@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/protocol"
 	"io"
@@ -19,7 +20,7 @@ import (
 
 func awaitConversation(t *testing.T, c *assistant.Conversation, predicate func(protocol.Snapshot) bool) protocol.Snapshot {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 5*time.Second))
 	defer cancel()
 	return awaitConversationContext(t, ctx, c, predicate)
 }
