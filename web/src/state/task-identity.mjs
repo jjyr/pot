@@ -27,13 +27,19 @@ export function createTaskIdentityRegistry() {
   const register = values => {
     for (const value of values) {
       const address = value?.kind === 'task' ? value : taskAddress(value), key = addressKey(address);
-      if (key && address.kind === 'task' && !entries.has(key)) entries.set(key, {id: address.agent_id, length: 4});
+      if (key && address.kind === 'task' && !entries.has(key)) entries.set(key, {id: address.agent_id, node: address.node_id, length: 4, sourceLength: 0});
     }
     const all = [...entries.values()];
     for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) {
       const a = all[i], b = all[j];
-      // Equal full IDs on different nodes are disambiguated by their source, never renumbered.
-      if (a.id === b.id) continue;
+      // Equal full Task IDs require the node in the shared display label.
+      if (a.id === b.id) {
+        let length = 4;
+        while (a.node.slice(0, length) === b.node.slice(0, length)) length++;
+        a.sourceLength = Math.max(a.sourceLength, length);
+        b.sourceLength = Math.max(b.sourceLength, length);
+        continue;
+      }
       let length = 4;
       while (a.id.slice(0, length) === b.id.slice(0, length)) length++;
       if (length > 4) { a.length = Math.max(a.length, length); b.length = Math.max(b.length, length); }
@@ -43,7 +49,7 @@ export function createTaskIdentityRegistry() {
     const address = value?.kind === 'task' ? value : taskAddress(value);
     register([value]);
     const entry = entries.get(addressKey(address));
-    return entry ? '#' + entry.id.slice(0, entry.length) : '';
+    return entry ? '#' + entry.id.slice(0, entry.length) + (entry.sourceLength ? '@' + entry.node.slice(0, entry.sourceLength) : '') : '';
   }};
 }
 export const taskIdentities = createTaskIdentityRegistry();
