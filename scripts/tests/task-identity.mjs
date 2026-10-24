@@ -17,3 +17,5 @@ const prefix=createTaskIdentityRegistry();prefix.register([task('abcd'),task('ab
 
 assert.equal(r.resolve(a.address).id,'catalogue-hash');r.register([a.address]);assert.equal(r.resolve(a.address).id,'catalogue-hash');
 assert.equal(r.resolve({node_id:'unknown',kind:'task',agent_id:'missing'}),undefined);
+
+for(const address of [{node_id:{},kind:'task',agent_id:'id'},{node_id:'node',kind:'task',agent_id:123}]){assert.equal(addressKey(address),null);assert.equal(r.short(address),'');assert.equal(taskColorIndex(address),-1);}
