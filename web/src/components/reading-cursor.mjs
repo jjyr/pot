@@ -4,7 +4,7 @@ import {captureReadingPosition,resolveReadingPosition,readingAnchor} from './rea
 // gestures and explicit navigation may replace it. Layout writes are outputs.
 export function createReadingCursor(history,{active=()=>true,requestRender=()=>{},changed=()=>{},interact=()=>{},upward=()=>{},downward=()=>{},scrolled=()=>{},canReadEarlier=()=>false}={}) {
   let cursor={mode:'latest'},appliedTop=history.scrollTop,width=0,height=0,depth=0,closed=false;
-  let touchY=null,scrollController,positionPending=false,layoutPending=false;
+  let touchY=null,scrollController,positionPending=false,layoutPending=false,readerEngaged=false;
   const scrolling=()=>scrollController?.scrolling||false;
   const listeners=[];
   const listen=(name,fn,target=history)=>{target.addEventListener(name,fn,{passive:true});listeners.push([target,name,fn]);};
@@ -57,7 +57,7 @@ export function createReadingCursor(history,{active=()=>true,requestRender=()=>{
       width=history.clientWidth;height=history.clientHeight;
     }finally{depth--;}
   }
-  function set(next){scrollController?.cancel();layoutPending=false;positionPending=true;cursor=structuredClone(next||{mode:'latest'});notify();}
+  function set(next){scrollController?.cancel();readerEngaged=false;layoutPending=false;positionPending=true;cursor=structuredClone(next||{mode:'latest'});notify();}
   function pause(options){layoutPending=false;positionPending=false;cursor={mode:'reading',position:capture(options)};notify();}
   function read(){layoutPending=false;cursor=atBottom()?{mode:'latest'}:{mode:'reading',position:capture()};notify();}
   // Width reflow can deliver several measurement batches. Keep its destination
@@ -69,7 +69,10 @@ export function createReadingCursor(history,{active=()=>true,requestRender=()=>{
     if(!closed&&!depth&&!positionPending&&!layoutPending&&cursor.mode==='reading')cursor={...cursor,position:capture()};
   }
   function flush({native=false}={}){
-    if(!active()||depth||positionPending||Math.abs(history.scrollTop-appliedTop)<.5)return false;
+    // Browser clamping and delayed native scroll events also occur while a
+    // conversation is remounted or measured. Only input since the most recent
+    // positioning command may turn those offsets into a new reading intent.
+    if(!active()||depth||positionPending||!readerEngaged||Math.abs(history.scrollTop-appliedTop)<.5)return false;
     if(!scrolling()&&width&&(history.clientWidth!==width||history.clientHeight!==height)){apply({layout:true});return false;}
     if(!native&&!scrolling()&&!scrollController?.moving)return false;
     const delta=history.scrollTop-appliedTop;
@@ -85,7 +88,7 @@ export function createReadingCursor(history,{active=()=>true,requestRender=()=>{
     // Native focus/reveal can scroll before pointerdown. Adopt that position
     // as part of this reader gesture before projecting anything, or the click
     // target would move between pointerdown and pointerup.
-    layoutPending=false;positionPending=false;flush({native:true});interact();
+    readerEngaged=true;layoutPending=false;positionPending=false;flush({native:true});interact();
     if(cursor.mode==='target')pause();
     if(history.scrollHeight<=history.clientHeight+1&&!canReadEarlier())return false;
     if(up)pause();

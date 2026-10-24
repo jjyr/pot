@@ -65,6 +65,15 @@ try{
  assert.deepEqual(commands,[],'ordinary renders never turn a saved historical anchor into a new scroll command');
  reading.latest();f.scroll(0);reading.observeScroll();
  assert.equal(reading.following,true,'native offsets from hidden/remounted history cannot replace pending Latest restoration');
+ reading.apply();f.history.scrollTop=700;reading.observeScroll();
+ assert.equal(reading.following,true,'native layout movement after Latest was applied cannot become historical reading without reader input');
+ reading.restore({mode:'reading',position:{top:700,anchors:[]}});reading.apply();
+ f.history.scrollTop=600;reading.observeScroll();
+ assert.equal(reading.snapshot().position.top,700,'native layout movement cannot replace a restored reading position');
+ f.history.dispatchEvent(new Event('pointerdown'));f.history.scrollTop=500;reading.observeScroll();
+ assert.equal(reading.snapshot().position.top,500,'reader input authorizes subsequent native movement');
+ reading.latest();reading.apply();f.history.scrollTop=400;reading.observeScroll();
+ assert.equal(reading.following,true,'Latest retires the preceding reader input before delayed native events');
  reading.dispose();f.close();
  // Width reflow can deliver multiple measurement batches. Retain the requested
  // message offset through those batches, then release it on the next gesture.

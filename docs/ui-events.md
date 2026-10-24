@@ -220,7 +220,9 @@ ordinary range renders never replay an old anchor. A native pointer cancellation
 that hands the gesture to scrolling does not end reading input.
 Width reflow retains its requested reading anchor through subsequent measurement
 batches until new reader input releases that layout destination. Native offsets
-from hidden or remounted history do not replace an outstanding restore intent.
+from hidden or remounted history do not replace a positioning intent, including
+after its initial restoration has completed. Only reader input since the latest
+Latest/message/restore command can adopt native movement as a reading position.
 No-op native writes are skipped and do not acknowledge a reader's
 pending native movement. Downward gestures also trigger newer-page prefetch at
 the cached history boundary, where the browser can no longer produce a delta.
