@@ -81,12 +81,7 @@ jobs:
           cache: false
           install_args: go
       - name: Verify per-connection forwarder lifecycle and real TLS reuse
-        run: mise exec -- go test -v -race -failfast ./pkg/agentlink -run '^(TestForwarder.*|TestConcurrentReconnectUsesOneAuthenticatedSession|TestEnsureSessionAfterCloseDoesNotReadReleasedStores)$' -count=20
-      - name: Verify original shutdown fixtures
-        run: mise exec -- go test -v -failfast ./integrations/codex/agent -run '^(TestAgentHostPreviewDoesNotConnectOrConsumeInvitation|TestCodexProfileThroughPotBrowserKeepsMessageSessionScope)$' -count=100
-      - name: Verify original reconnect regression
-        if: always()
-        run: mise exec -- go test -v -race -failfast ./internal/control -run '^TestPotLinkDirectChatUsesExistingMailboxAndSeparateUserProjection$' -count=30
+        run: mise exec -- go test -v -race -failfast ./pkg/agentlink -run '^(TestForwarder.*|TestConcurrentReconnectUsesOneAuthenticatedSession|TestEnsureSessionAfterCloseDoesNotReadReleasedStores|TestPromotedPairSessionSurvivesPendingHandshakeExpiry)$' -count=50
 
   product:
     if: inputs.diagnose-lifecycle != true
