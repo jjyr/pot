@@ -111,7 +111,7 @@ func (manager *compositionManager) call(name string, raw json.RawMessage, parent
 				if !json.Valid(value) {
 					return nil, fmt.Errorf("invalid composition child JSON result")
 				}
-				if err := manager.emit(core.Update{Type: "tool_finished", ID: callID, Name: toolName, Result: value, Failed: failedResult(value)}); err != nil {
+				if err := manager.emit(core.Update{Type: "tool_finished", ID: callID, Name: toolName, Result: value, Failed: ToolResultFailed(value)}); err != nil {
 					return nil, err
 				}
 				return json.RawMessage(value), nil
