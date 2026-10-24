@@ -146,6 +146,13 @@ predate this updater cannot bootstrap themselves into it. Key replacement also
 requires an explicit trust/bootstrap plan; the feed cannot change its own pinned
 verification key. Homebrew marks the App as self-updating.
 
+Native builds whose updater terminates Cocoa before acknowledging preparation
+also require a manual installation of the repaired App. A new download cannot
+repair the already running old host's shutdown protocol. Quit the old App before
+replacing its complete bundle. The native upgrade simulation builds both versions
+from the repaired source; it does not qualify an older released updater as a
+working upgrade origin.
+
 `GET /api/v1/updates` projects availability, phase and current work counts;
 `POST /api/v1/updates` accepts only typed download/install requests with a version,
 request ID and explicit interruption flag. Both use the existing authenticated
