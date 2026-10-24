@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const SchemaVersion = 7
+const SchemaVersion = 8
 
 type Journal struct {
 	db        *sql.DB
@@ -321,6 +321,7 @@ func (j *Journal) Finish(ctx context.Context, control, task, run string, result 
 		}
 
 		value.Phase = phase
+		value.FinishedAtMS = time.Now().UnixMilli()
 		value.Result = &result
 		value.CleanupConfirmed = true
 		return writeRun(ctx, tx, *value)
@@ -400,6 +401,7 @@ func (j *Journal) ReconcileRecovered(ctx context.Context, control, task, run str
 			value.Context = raw
 		}
 		value.Phase = Interrupted
+		value.FinishedAtMS = time.Now().UnixMilli()
 		value.Result = &Terminal{Outcome: core.Cancelled, Text: "Execution stopped after receipt reconciliation. Create a new task to continue."}
 		value.CleanupConfirmed = true
 		return nil

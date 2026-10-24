@@ -58,7 +58,7 @@ func ImportTaskSubmissions(root string) error {
 				return err
 			}
 			origin := protocol.TaskOrigin{Kind: "manual"}
-			record := map[string]any{"schema_version": 13, "plugins": []string{}, "assistant_id": owner, "info": old.Info, "request": request, "run_id": old.Info.RunID, "generation": 1, "revision": 1, "origin": origin, "execution": map[string]any{"request": old.Request, "receipt": old.Remote, "notified": notified != 0, "stop_requested": stop != 0}}
+			record := map[string]any{"schema_version": 14, "plugins": []string{}, "assistant_id": owner, "info": old.Info, "request": request, "run_id": old.Info.RunID, "generation": 1, "revision": 1, "origin": origin, "execution": map[string]any{"request": old.Request, "receipt": old.Remote, "notified": notified != 0, "stop_requested": stop != 0}}
 			if len(old.UnresolvedRequest) > 0 {
 				record["execution"].(map[string]any)["unresolved_request"] = old.UnresolvedRequest
 			}

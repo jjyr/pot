@@ -314,6 +314,17 @@ shared presentation. With a disposable Playwright installation, run
 batch counts, identity, native keyboard disclosure, append/prepend, retained text
 selection, failures and virtual recycling. No real Task or model is started.
 
+For background Task elapsed-time checks, serve the repository on loopback and open
+`/scripts/tests/fixtures/background-task-time.html?locale=zh-CN&theme=light`.
+It mounts the production rows and shared clock with synthetic records, reports
+its assertions on the page and includes 720/390/320px containers. Repeat with
+`locale=en&theme=dark` or `theme=system`. For matched baseline screenshots, extract
+`web/` from the chosen base commit into ignored `output/task-time-before/`; the
+fixture selects that source with `before=1`. With the disposable Playwright
+module described below, run `scripts/tests/background-task-time-capture.mjs ORIGIN`
+to check 1280/390/320px browser viewports and export paired PNGs. These are
+Chromium checks, not physical-device qualification.
+
 For message-title identity, streaming-argument, disclosure and Task checks, open
 `/scripts/tests/fixtures/message-titles.html` on the same loopback server. The
 fixture runs shared DOM assertions with synthetic full addresses and includes a

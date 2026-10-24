@@ -68,7 +68,7 @@ func TestTaskCatalogueSharesLocalAndAgentLinkLifecycle(t *testing.T) {
 	if ok, err := s.UpdateExecution(ctx, stale, "turn-one"); err != nil || ok {
 		t.Fatal("delayed poll reopened completed execution", ok, err)
 	}
-	if err = s.finish(ctx, local, protocol.TaskComplete, &Terminal{Outcome: core.Success, Text: "Local result"}, 0, ""); err != nil {
+	if err = s.finish(ctx, local, protocol.TaskComplete, &Terminal{Outcome: core.Success, Text: "Local result"}, 0, 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	decisions := []protocol.TaskDisposition{{TaskID: local.Info.ID, RunID: local.RunID, Archived: true}, {TaskID: linked.Info.ID, RunID: "wrong", Archived: true}}

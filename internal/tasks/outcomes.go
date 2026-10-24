@@ -32,7 +32,7 @@ func outcome(record Record, phase protocol.TaskPhase, result *Terminal) protocol
 
 // finish prepares domain data outside the transaction. A stale snapshot cannot
 // commit a result or enqueue a hook for a changed run.
-func (s *Service) finish(ctx context.Context, snapshot Record, phase protocol.TaskPhase, result *Terminal, started int64, stopMode string) error {
+func (s *Service) finish(ctx context.Context, snapshot Record, phase protocol.TaskPhase, result *Terminal, started, finished int64, stopMode string) error {
 	event := outcome(snapshot, phase, result)
 	var commit OutcomeCommit
 	var err error
@@ -66,6 +66,7 @@ func (s *Service) finish(ctx context.Context, snapshot Record, phase protocol.Ta
 			return fmt.Errorf("prepared Task outcome is not terminal")
 		}
 		current.Info.Phase = event.Phase
+		current.Info.FinishedAtMS = finished
 		current.Info.Paused = false
 		current.Info.RemoteWaiting = false
 		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM task_inputs WHERE assistant_id=? AND task_id=? AND state='pending' AND kind IN ('guidance','user_guidance')", current.AssistantID, current.Info.ID).Scan(&current.Info.Pending); err != nil {

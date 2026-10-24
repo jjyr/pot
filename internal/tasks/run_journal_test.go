@@ -48,7 +48,7 @@ func TestExecutionStartAndCleanupProofSurviveResumeAndRestart(t *testing.T) {
 		t.Fatal(claimed, err)
 	}
 	duplicate, err := j.Accept(ctx, launch)
-	if err != nil || duplicate.StartedAtMS != started {
+	if err != nil || duplicate.StartedAtMS != started || duplicate.FinishedAtMS != 0 {
 		t.Fatal("resume/duplicate acceptance reset start", duplicate, err)
 	}
 	if err := j.RecordCleanup(ctx, "runtime", "task", "run"); err != nil {
@@ -198,5 +198,43 @@ func TestWorkerCannotSelectAnotherTarget(t *testing.T) {
 	bound, err := BindTarget(raw, target)
 	if err != nil || string(bound) != string(raw) {
 		t.Fatal(string(bound), err)
+	}
+}
+
+func TestTerminalTimeSurvivesDuplicateFinishAndRestart(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "tasks.sqlite")
+	j, err := openJournal(t, path, "runtime", "boot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	launch := launchFixture(t)
+	if _, err := j.Accept(ctx, launch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := j.Claim(ctx, "runtime", "task", "run"); err != nil {
+		t.Fatal(err)
+	}
+	result := Terminal{Outcome: core.Success, Text: "done"}
+	before := time.Now().UnixMilli()
+	if err := j.Finish(ctx, "runtime", "task", "run", result); err != nil {
+		t.Fatal(err)
+	}
+	first, err := j.Inspect(ctx, "runtime", "task", "run")
+	if err != nil || first.FinishedAtMS < before || first.FinishedAtMS > time.Now().UnixMilli() {
+		t.Fatal(first, err)
+	}
+	if err := j.Finish(ctx, "runtime", "task", "run", result); err != nil {
+		t.Fatal(err)
+	}
+	j.db.Close()
+	j, err = openJournal(t, path, "runtime", "nextboot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.db.Close()
+	final, err := j.Inspect(ctx, "runtime", "task", "run")
+	if err != nil || final.FinishedAtMS != first.FinishedAtMS {
+		t.Fatal(final, first, err)
 	}
 }

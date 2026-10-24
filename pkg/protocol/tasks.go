@@ -58,6 +58,7 @@ type TaskInfo struct {
 	Pending       uint64       `json:"pending"`
 	CreatedAtMS   int64        `json:"created_at_ms"`
 	StartedAtMS   int64        `json:"started_at_ms"`
+	FinishedAtMS  int64        `json:"finished_at_ms"`
 	UpdatedAtMS   int64        `json:"updated_at_ms"`
 	Routing       *TaskRouting `json:"routing"`
 	ExecutorIcon  string       `json:"executor_icon"`

@@ -11,6 +11,7 @@ import (
 	m "github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/protocol"
 	"sync"
+	"time"
 )
 
 type Prepared struct {
@@ -121,10 +122,14 @@ func (e *Executor) Stop(ctx context.Context, control, task, run, mode string) er
 			return core.ErrCleanupUnconfirmed
 		}
 		return e.Journal.change(ctx, control, task, run, func(value *Run) error {
+			if value.Phase.Ended() {
+				return nil
+			}
 			if value.Phase == Running {
 				return core.ErrCleanupUnconfirmed
 			}
 			value.Phase = Cancelled
+			value.FinishedAtMS = time.Now().UnixMilli()
 			value.Result = &Terminal{Outcome: core.Cancelled, Text: "Task stopped before execution."}
 			value.CleanupConfirmed = true
 			return nil

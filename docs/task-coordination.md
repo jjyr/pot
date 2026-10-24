@@ -329,6 +329,20 @@ Schedules retain the existing bounded collection reader, exhaust source cursors,
 then filter and paginate the complete returned collection. Unresolved schedule
 ownership stays in a neutral group and never uses the selected Chat as its owner.
 
+Chat's background Task row shows status and elapsed time on the same line; long
+labels truncate before identity, status or time. The shared view clock changes
+only timer text, pauses when hidden/inactive and is disposed with the view.
+Elapsed wall time starts at the executing Runner's first claim (`started_at_ms`),
+excludes initial queuing and includes subsequent waits/pauses. `finished_at_ms`
+is recorded by the executing node on its terminal transition and passed through
+the run receipt; completed, failed, interrupted and cancelled Tasks freeze at
+that time. A cancel request or lost connection is not a terminal transition.
+A new continuation Run clears both timestamps; archived Run snapshots retain them.
+Missing starts or terminal timestamps omit the elapsed label. Historical records
+and Agent Link adapters without authoritative timestamps remain unknown; neither
+updated/observed time nor catalogue IDs are used to infer elapsed time. Task
+details retain the same final duration after Chat removes an ended Task.
+
 Task display marks use the explicit `TaskInfo.address`; a linked catalogue ID can
 be a local hash and is never substituted for the remote address. Missing mappings
 stay neutral. Short IDs display `#` and the first four characters of the real
