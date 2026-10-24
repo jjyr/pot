@@ -244,11 +244,17 @@ this same-version naming correction. Ordinary publishers keep all immutable-byte
 checks. It accepts a successful nonpublishing CI run built with
 `validation-version=0.0.1`, its exact reviewed source, the original public release
 snapshot and the exact previous image index digest. The source must match both
-the tag and the merged main tree. Run it from `main` with the exact original
-annotated tag object after reviewing the candidate. The workflow first validates
-the successful candidate, merged tree and original asset snapshot, then moves
-`v0.0.1` with an exact old-object lease. Its workflow token suppresses recursive
-tag-push CI; do not push the replacement tag separately with a personal token.
+the tag and the merged main tree. First run it from `main` with
+`lease-tag-only=true` and the exact original annotated tag object. This job has no
+release environment or signing secrets: it validates the successful candidate,
+merged tree and original asset snapshot, then moves `v0.0.1` with an exact
+old-object lease. Its workflow token suppresses recursive tag-push CI; do not push
+the replacement tag separately with a personal token. Then dispatch the same
+workflow from `v0.0.1` with `lease-tag-only=false`. Signing and publication retain
+the existing `release` environment's `v*` tag policy. No additional tag, environment
+policy change or Actions-write permission is needed. If signing fails, the original
+public assets and signed feed are still intact; inspect the saved tag objects and
+partial effects before any recovery.
 
 The workflow checks all distributions, signs the final feed with the existing
 controlled release key, saves every original asset, uploads and verifies the new

@@ -4,6 +4,10 @@ name: Refresh reviewed v0.0.1 naming
 on:
   workflow_dispatch:
     inputs:
+      lease-tag-only:
+        description: Prepare only the exact v0.0.1 source tag from main; then run again from v0.0.1
+        default: false
+        type: boolean
       run-id:
         description: Successful nonpublishing CI run with validation-version=0.0.1
         required: true
@@ -34,8 +38,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  lease-tag:
+    if: github.ref == 'refs/heads/main' && inputs.lease-tag-only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      POT_BUILD_REVISION: ${{ inputs.source }}
+      CANDIDATE_RUN: ${{ inputs.run-id }}
+      RELEASE_BASELINE: ${{ inputs.baseline }}
+      PREVIOUS_TAG_OBJECT: ${{ inputs.tag-object }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.source }}
+          persist-credentials: false
+      - name: Lease the reviewed tag without recursive tag-push CI
+        run: python3 scripts/refresh-release retag dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: v001-tag-recovery
+          path: recovery/*
+          if-no-files-found: error
+          retention-days: 7
+
   refresh:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/tags/v0.0.1' && !inputs.lease-tag-only
     runs-on: ubuntu-24.04
     environment: release
     timeout-minutes: 45
@@ -81,8 +113,6 @@ jobs:
           mise exec -- python scripts/prepare-release 0.0.1 dist --channel desktop
           mise exec -- python scripts/prepare-release 0.0.1 dist --channel container
           mise exec -- python scripts/prepare-release 0.0.1 dist --channel macos --macos-mode unsigned --sign-feed
-      - name: Move the qualified tag with an exact lease and suppress recursive tag CI
-        run: python3 scripts/refresh-release retag dist
       - name: Preserve exact replacement plan and original assets before changing public names
         run: python3 scripts/refresh-release stage dist
       - name: Retain original bytes and qualified signed replacement set

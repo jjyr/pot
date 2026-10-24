@@ -327,11 +327,9 @@ def main():
     if args.phase == "retag":
         retag(original)
         return
-    source = check_source(require_tag=args.phase != "check")
+    source = check_source()
     if args.phase == "check":
         check_baseline(selected_release(), original)
-        if api(f"git/ref/tags/{TAG}")["object"]["sha"] != os.environ["PREVIOUS_TAG_OBJECT"]:
-            raise ValueError("Original tag object changed before qualification")
     elif args.phase == "stage":
         stage(args.output, original, source)
     else:

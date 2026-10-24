@@ -78,6 +78,23 @@ class RefreshFences(unittest.TestCase):
                     refresh["main"]()
                     namespace["retag"].assert_called_once_with(self.old)
 
+    def test_release_environment_is_reached_only_from_the_existing_version_tag(self):
+        workflow = (ROOT / ".github/workflows/refresh-release.yml").read_text()
+        lease, publication = workflow.split("  refresh:\n", 1)
+        self.assertIn("github.ref == 'refs/heads/main' && inputs.lease-tag-only", lease)
+        self.assertNotIn("environment:", lease)
+        self.assertNotIn("secrets.", lease)
+        self.assertIn("github.ref == 'refs/tags/v0.0.1' && !inputs.lease-tag-only", publication)
+        self.assertIn("environment: release", publication)
+        self.assertNotIn("refresh-release retag", publication)
+        self.assertNotIn("actions: write", workflow)
+
+    def test_retag_rejects_local_and_release_environment_execution(self):
+        for ref in ("", "refs/tags/v0.0.1"):
+            with mock.patch.dict(os.environ, GITHUB_ACTIONS="true", GITHUB_REF=ref):
+                with self.assertRaisesRegex(ValueError, "dedicated main workflow"):
+                    refresh["retag"](self.old)
+
     def test_retag_stale_object_never_pushes_and_success_uses_exact_lease(self):
         expected, replacement = "e" * 40, "f" * 40
         current = {"object": {"sha": "b" * 40}}
