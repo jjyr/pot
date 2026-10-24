@@ -4,7 +4,7 @@ export function ownedItems(value, space, stale = false, owner = '') {
 }
 export function combineTasks(pages,{offset=0,limit=20}={}) {
   const items=pages.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner)).sort((a,b)=>b.updated_at_ms-a.updated_at_ms||(a.id<b.id?-1:a.id>b.id?1:0)||a._space_id.localeCompare(b._space_id)||a._assistant_id.localeCompare(b._assistant_id));
-  const counts={active:0,attention:0,archived:0};for(const page of pages)for(const key of Object.keys(counts))counts[key]+=page.value.counts?.[key]||0;
+  const counts={active:0,attention:0,archived:0,complete:0,failed:0,interrupted:0,waiting_approval:0};for(const page of pages)for(const key of Object.keys(counts))counts[key]+=page.value.counts?.[key]||0;
   const total=pages.reduce((sum,page)=>sum+(page.value.total??page.value.items?.length??0),0);
   return {items:items.slice(offset,offset+limit),total,next_offset:offset+limit<total?offset+limit:null,counts};
 }

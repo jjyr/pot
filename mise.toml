@@ -93,7 +93,7 @@ run = "go test -race ./pkg/executor ./pkg/pluginhost"
 
 [tasks."test:ui-fluid"]
 description = "Verify bounded task catalogues, progressive loading and targeted invalidation"
-run = "node scripts/tests/go-ui-task-pages.mjs"
+run = ["node scripts/tests/go-ui-task-pages.mjs", "node scripts/tests/task-identity.mjs", "node scripts/tests/record-groups.mjs"]
 
 [tasks."test:assistant-creation"]
 description = "Verify one-click assistant creation, retries and Space ownership"

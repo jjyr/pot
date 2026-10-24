@@ -1,3 +1,4 @@
+@import './components/task-identity.css';
 @import url("./styles/extensions.css");
 @import url("./styles/agent-links.css");
 @import url("./styles/topology.css");
@@ -891,3 +892,63 @@ pot-resource.is-expanded .resource-text{max-height:75vh}
 
 @container(max-width:430px){.tool-call .communication-text{padding-left:0;font-size:13px;}.communication-identity{gap:4px 8px;}}
 @media(max-width:719px){.communication-tool>.tool-body>.tool-raw{margin-left:0;}}
+
+/* Tasks and schedules: group the current global page by full assistant identity. */
+.tasks-content,.schedules-content{min-height:0;}
+.tasks-content>.segments{flex:none;}
+.tasks-content>.segments .control,.task-filters .segments .control{min-height:44px;}
+.task-filters{align-items:center;margin-bottom:12px;flex:none;}
+.record-search-line{align-items:center;flex:none;gap:12px;margin-bottom:8px;}
+.record-search-line .task-search{margin:0;min-width:0;}
+.record-search-line .field-input,.record-filter .field-input{min-height:44px;max-width:100%;}
+.record-filter{display:flex;margin:0;min-width:0;max-width:100%;}
+.record-filter>.form-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);}
+.record-filter .field-body{min-width:0;max-width:100%;}
+.record-owner-filter{max-width:48%;flex:1;}
+.record-owner-filter .field-input{width:100%;text-overflow:ellipsis;}
+.record-view-help{color:var(--muted);font-size:13px;margin:0 0 8px;flex:none;}
+.task-reminders{display:flex;align-items:center;gap:4px 12px;flex-wrap:wrap;color:var(--muted);font-size:12px;flex:none;}
+.task-reminders .control{min-height:44px;padding:6px 4px;border:0;background:transparent;color:var(--muted);font-size:12px;}
+.record-group-list.task-list,.record-group-list.schedule-list{border:0;border-radius:0;background:transparent;min-height:180px;overflow:auto;flex:1;}
+.record-group{border:1px solid var(--divider);border-radius:12px;background:var(--surface);overflow:clip;margin-bottom:18px;}
+.record-group-heading{display:flex;align-items:flex-start;gap:12px;padding:16px 18px;background:var(--navigation);border-bottom:1px solid var(--divider);}
+.record-group-heading .avatar{display:flex;align-items:center;justify-content:center;background:var(--surface);color:var(--muted);flex:none;}
+.record-group-info{min-width:0;flex:1;}
+.record-group-info h2{font-size:15px;margin:0;line-height:1.5;overflow-wrap:anywhere;}
+.record-group-source,.record-group-count{font-size:12px;color:var(--muted);overflow-wrap:anywhere;}
+.record-group-count{padding-top:2px;white-space:nowrap;}
+.record-owner-identity{font-size:12px;color:var(--muted);}
+.record-owner-identity summary{cursor:pointer;min-height:44px;display:flex;flex-direction:column;justify-content:center;width:fit-content;max-width:100%;}
+.record-owner-identity code{display:block;overflow-wrap:anywhere;white-space:normal;max-width:100%;padding:4px 0;}
+.record-group .task-row{height:auto;min-height:86px;padding:15px 18px;background:transparent;gap:6px 10px;}
+.record-group .task-row:last-child{border-bottom:0;}
+.record-group .task-row:hover,.schedule-record:hover{background:var(--navigation);}
+.record-group .task-title{font-size:15px;white-space:normal;overflow-wrap:anywhere;}
+.record-group .task-meta{align-items:center;gap:7px 10px;}
+.task-short-id{font-size:12px;color:var(--muted);overflow-wrap:anywhere;}
+.task-phase.phase-waiting_approval{color:var(--attention);}
+.phase-interrupted{color:var(--attention);}
+.task-archived{color:var(--muted);}
+.record-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0;flex:none;}
+.record-page-summary{font-size:12px;color:var(--muted);margin:0;}
+.record-page-buttons{display:flex;gap:8px;flex:none;}
+.record-page-buttons .control{min-height:44px;padding:8px 12px;font-size:13px;background:var(--surface);border:1px solid var(--divider);}
+.record-page-buttons .control:disabled{opacity:.4;cursor:default;}
+.tasks-content button:focus-visible,.tasks-content select:focus-visible,.tasks-content input:focus-visible,.tasks-content summary:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
+.record-page-note{font-size:12px;color:var(--muted);margin:2px 0 0;flex:none;}
+.record-continuation{font-size:12px;color:var(--muted);padding:8px 18px;margin:0;border-bottom:1px solid var(--divider);}
+.schedule-projection{display:flex;flex-direction:column;min-height:0;flex:1;}
+.schedule-record{display:grid;grid-template-columns:minmax(0,1fr) auto;text-align:left;width:100%;border:0;border-bottom:1px solid var(--divider);border-radius:0;background:transparent;padding:15px 18px;gap:8px;min-height:100px;color:var(--text);}
+.schedule-record:last-child{border-bottom:0;}
+.schedule-record-title{font-size:15px;overflow-wrap:anywhere;}
+.schedule-record-chevron{color:var(--muted);}
+.schedule-record-meta{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 12px;grid-column:1/-1;font-size:12px;color:var(--muted);}
+.schedule-enabled{color:var(--success);}
+.schedule-record-rule{grid-column:1/-1;color:var(--muted);font-size:12px;overflow-wrap:anywhere;}
+@media(max-width:719px){
+ .task-filters{gap:8px;}.task-filters>.segments{width:100%;}.task-filters>.record-filter{width:100%;}.task-filters>.record-filter .field-body{width:100%;}.task-filters>.record-filter select{width:100%;}
+ .record-search-line{flex-wrap:wrap;gap:8px;}.record-search-line .task-search{flex:1 1 100%;}.record-owner-filter{flex:1 1 100%;max-width:100%;}
+ .record-pagination{align-items:stretch;flex-direction:column;gap:8px;}.record-page-buttons{width:100%;}.record-page-buttons .control{flex:1;min-width:0;}
+ .record-group-heading{padding:14px 12px;gap:10px;}.record-group-count{white-space:normal;max-width:70px;text-align:right;}.record-group .task-row,.schedule-record{padding:14px 12px;}.record-group .task-row{min-height:100px;}.record-group-info h2{font-size:15px;}.record-owner-identity summary{min-height:44px;}
+ .record-group .task-meta{grid-column:1/-1;padding-right:46px;}.record-group .task-list-elapsed{grid-row:2;align-self:center;}.record-view-help{font-size:12px;}.task-reminders{gap:0 10px;}.task-reminders .control{font-size:12px;}
+}

@@ -206,6 +206,17 @@ For before/after captures, put the baseline's actual `web/src` tree at
 against the same registered Markdown. `?capture=1` shows one resource; `theme` and
 `locale` select the visual scenario. Stop with `POST /fixture/stop` at its origin.
 
+For Tasks/Schedules layout and query-adapter checks, serve the repository on a
+loopback static server and run `node scripts/tests/tasks-schedules-browser.mjs
+ORIGIN`. Set `POT_PLAYWRIGHT_MODULE` and `POT_CHROMIUM_EXECUTABLE` when using an
+existing browser installation. The fixture renders the actual shared shell/pages
+with synthetic records and captures images under `output/pr-images/` by default.
+For a before comparison, extract the chosen base commit's `web/` and
+`pkg/storage/migrations/ui-cache/` into ignored `output/tasks-before/`; the same
+fixture and data select that source tree with `?before=1`. It does not read product
+state, call a model or create real Tasks. The backend catalogue contract is covered
+separately by `TestCatalog*` and `TestTaskCatalogHTTPFiltersAndValidation`.
+
 For assistant-switching scroll checks without a backend, serve the repository
 root on loopback and open
 `/scripts/tests/fixtures/chat-switching.html?conversation=alpha&locale=en`.
