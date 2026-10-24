@@ -2,6 +2,10 @@ import {translate} from '../locales/messages.mjs';
 import {renderMarkdown} from './markdown.mjs';
 
 const node=(tag,cls='',text)=>{const element=document.createElement(tag);element.className=cls;if(text!==undefined)element.textContent=text;return element;};
+function sourceText(pre,text,line){
+  pre.textContent=text;if(!line)return;const lines=text.split('\n'),index=Math.min(lines.length-1,Math.max(0,line-1)),before=lines.slice(0,index).join('\n');
+  const target=document.createElement('mark');target.textContent=lines[index];pre.replaceChildren(document.createTextNode(before+(index?'\n':'')),target,document.createTextNode((index<lines.length-1?'\n':'')+lines.slice(index+1).join('\n')));requestAnimationFrame(()=>{pre.scrollTop=target.offsetTop-pre.offsetTop;});
+}
 const previewKind=type=>/^image\/(png|jpeg|webp|gif)$/.test(type)?'image':/^audio\/(mpeg|aac|wav|wave|x-wav|ogg|mp4|webm|flac)$/.test(type)?'audio':/^video\/(mp4|webm|ogg)$/.test(type)?'video':type==='application/pdf'?'pdf':type==='text/html'?'html':type==='text/plain'?'text':'file';
 
 // Entry is the immutable source path. Display labels and download basenames do
@@ -53,23 +57,24 @@ function register(){
       }else if(kind==='markdown'){
         const prose=node('div','resource-markdown message-body'),pre=node('pre','resource-text'),toggle=node('button','resource-action');
         toggle.type='button';toggle.disabled=true;pre.hidden=true;body.append(prose,pre);actions.prepend(toggle);
-        let source=false;
+        let source=!!this.line;prose.hidden=source;pre.hidden=!source;
         const refreshToggle=()=>{toggle.textContent=t(source?'showMarkdown':'showSource');toggle.setAttribute('aria-pressed',String(source));};
         toggle.onclick=()=>{source=!source;prose.hidden=source;pre.hidden=!source;refreshToggle();};
         refreshToggle();window.addEventListener('pot:locale',refreshToggle);const stop=this.stopLocale;this.stopLocale=()=>{stop();window.removeEventListener('pot:locale',refreshToggle);};
         lease.read(resource.entry).then(blob=>blob.text()).then(text=>{if(current()){
           // No workspace image/download adapters: raw HTML stays literal, remote
           // images stay links, and undeclared relative paths cannot fetch bytes.
-          pre.textContent=text;prose.append(renderMarkdown(text));toggle.disabled=false;ready();
+          sourceText(pre,text,this.line);prose.append(renderMarkdown(text));toggle.disabled=false;ready();
         }}).catch(fail);
       }else if(kind==='text'){
-        const pre=node('pre','resource-text');body.append(pre);lease.read(resource.entry).then(blob=>blob.text()).then(text=>{if(current()){pre.textContent=text;ready();}}).catch(fail);
+        const pre=node('pre','resource-text');body.append(pre);lease.read(resource.entry).then(blob=>blob.text()).then(text=>{if(current()){sourceText(pre,text,this.line);ready();}}).catch(fail);
       }else if(kind==='html'){
         const frame=node('iframe','resource-interactive');frame.title=caption||resource.name;frame.setAttribute('sandbox','allow-scripts');frame.setAttribute('allow',"camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'");frame.referrerPolicy='no-referrer';body.append(frame);
         const token=crypto.randomUUID();
         const onMessage=event=>{
           if(!current()||event.source!==frame.contentWindow||event.data?.type!=='pot-resource'||event.data.token!==token)return;
           if(event.data.action==='ready')ready();
+          if(event.data.action==='dependency_error'){this.noticeKey='fileReference.unsupported_dependency';notice.hidden=false;refresh();}
           if(event.data.action==='resize'&&Number.isFinite(event.data.value))frame.style.setProperty('--resource-height',`${Math.min(960,Math.max(180,event.data.value))}px`);
           if(event.data.action==='result'){
             let value;try{value=JSON.stringify(event.data.value);}catch{return;}if(!value||value.length>16384)return;

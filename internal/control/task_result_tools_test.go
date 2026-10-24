@@ -44,7 +44,7 @@ func TestTaskResultExecutesCommandAndImportsTaskAvatar(t *testing.T) {
 		for _, tool := range body.Tools {
 			names[tool.Function.Name] = true
 		}
-		for _, name := range []string{"exec_command", "exec", "wait", "create_task", "send_message", "manage_schedule", "register_resource", "present_resource"} {
+		for _, name := range []string{"exec_command", "exec", "wait", "create_task", "send_message", "manage_schedule"} {
 			if !names[name] {
 				t.Error("notification lost configured assistant tool", name)
 			}

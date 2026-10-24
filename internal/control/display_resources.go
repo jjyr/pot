@@ -11,16 +11,8 @@ import (
 
 	"github.com/jjyr/pot/internal/resources"
 	"github.com/jjyr/pot/pkg/core"
-	"github.com/jjyr/pot/pkg/modelprotocol"
 	"github.com/jjyr/pot/pkg/protocol"
 )
-
-func resourceTools() []modelprotocol.ToolDefinition {
-	return []modelprotocol.ToolDefinition{
-		{Name: "register_resource", Description: "Save an immutable display resource from existing workspace files. path is relative to your workspace, or an owned Task workspace when task_id is given. HTML can use up to 63 additional relative assets, resolved from the same workspace. HTML runs isolated with no network, parent DOM, native bridge or tool access; use self-contained JS and CSS. Returns a resource ID, never original bytes. Registration does not display or download. name is a display label; download filenames are derived separately. Maximum 64 MiB per file/resource, 16 MiB HTML bundle. Reuse resource IDs for later displays.", InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","minLength":1,"maxLength":4096},"task_id":{"type":"string","maxLength":128},"name":{"type":"string","description":"Optional display label, preserved verbatim; defaults to the source basename when empty. Download filenames are derived separately."},"assets":{"type":"array","maxItems":63,"items":{"type":"string","minLength":1,"maxLength":4096}}},"required":["path"],"additionalProperties":false}`)},
-		{Name: "present_resource", Description: "Show an existing registered resource directly in this conversation. preview displays an image/GIF, audio/video player, PDF/Markdown/text viewer or isolated interactive HTML component; download shows a file delivery card with an explicit save action. Neither mode automatically downloads. UI also offers an independent download action on previews. Use only actual resource IDs returned by register_resource. Do not repeat a shown resource as a download link.", InputSchema: json.RawMessage(`{"type":"object","properties":{"resource_id":{"type":"string","minLength":1,"maxLength":128},"mode":{"type":"string","enum":["preview","download"]},"caption":{"type":"string","maxLength":1000}},"required":["resource_id","mode"],"additionalProperties":false}`)},
-	}
-}
 
 type resourceSource struct {
 	Path   string   `json:"path"`
@@ -86,24 +78,6 @@ func (s *Service) registerResource(ctx context.Context, owner, executionOwner, r
 		return nil, err
 	}
 	return json.Marshal(saved)
-}
-func (s *Service) presentResource(ctx context.Context, owner string, args json.RawMessage) (json.RawMessage, error) {
-	var input struct {
-		ResourceID string `json:"resource_id"`
-		Mode       string `json:"mode"`
-		Caption    string `json:"caption"`
-	}
-	if err := core.DecodeJSON(args, &input); err != nil {
-		return nil, err
-	}
-	if input.Mode != "preview" && input.Mode != "download" || len(input.Caption) > 1000 {
-		return nil, errors.New("invalid resource presentation")
-	}
-	resource, err := s.Resources.Get(ctx, owner, input.ResourceID)
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(map[string]any{"presentation": resources.Presentation{Resource: resource, Mode: input.Mode, Caption: input.Caption}})
 }
 func (s *Service) readResourceSource(ctx context.Context, owner, task, path string, limit int) ([]byte, error) {
 	if limit < 0 {

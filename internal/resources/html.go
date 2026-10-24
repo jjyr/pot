@@ -147,7 +147,7 @@ func RenderHTML(resource Resource, read func(string) ([]byte, error), token stri
 	}
 	encoded, _ := json.Marshal(token)
 	script := &html.Node{Type: html.ElementNode, Data: "script"}
-	script.AppendChild(&html.Node{Type: html.TextNode, Data: `Object.defineProperty(window,'pot',{value:Object.freeze({resize:value=>parent.postMessage({type:'pot-resource',token:` + string(encoded) + `,action:'resize',value},'*'),result:value=>parent.postMessage({type:'pot-resource',token:` + string(encoded) + `,action:'result',value},'*')})});parent.postMessage({type:'pot-resource',token:` + string(encoded) + `,action:'ready'},'*');`})
+	script.AppendChild(&html.Node{Type: html.TextNode, Data: `document.addEventListener('securitypolicyviolation',()=>parent.postMessage({type:'pot-resource',token:` + string(encoded) + `,action:'dependency_error'},'*'));Object.defineProperty(window,'pot',{value:Object.freeze({resize:value=>parent.postMessage({type:'pot-resource',token:` + string(encoded) + `,action:'resize',value},'*'),result:value=>parent.postMessage({type:'pot-resource',token:` + string(encoded) + `,action:'result',value},'*')})});parent.postMessage({type:'pot-resource',token:` + string(encoded) + `,action:'ready'},'*');`})
 	if head != nil {
 		head.InsertBefore(script, head.FirstChild)
 	}

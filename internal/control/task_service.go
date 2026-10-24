@@ -312,7 +312,9 @@ func (s *Service) prepareTask(ctx context.Context, r tasks.Run) (tasks.Prepared,
 		}
 		return result
 	}}
-	return tasks.Prepared{Agent: loop, Context: execution, Thread: core.Thread{Owner: l.TaskID, Generation: l.Generation, Config: config}, ResourceDigest: revision}, nil
+	return tasks.Prepared{MessageCompleted: func(message, text string) {
+		s.bindMessageFiles(l.AssistantID, l.TaskID, l.RunID, message, text, execution.Workspace)
+	}, Agent: loop, Context: execution, Thread: core.Thread{Owner: l.TaskID, Generation: l.Generation, Config: config}, ResourceDigest: revision}, nil
 }
 
 type taskFeedback struct {

@@ -14,10 +14,11 @@ import (
 )
 
 type Prepared struct {
-	Agent          *agent.Agent
-	Context        core.ExecutionContext
-	Thread         core.Thread
-	ResourceDigest string
+	MessageCompleted func(message, text string)
+	Agent            *agent.Agent
+	Context          core.ExecutionContext
+	Thread           core.Thread
+	ResourceDigest   string
 }
 
 // Prepare pins local resources at original execution, then returns only
@@ -286,15 +287,22 @@ func (e *Executor) Execute(ctx context.Context, control, task, runID string) (te
 		if record.Launch.InputID != "" {
 			request.Inputs = []core.ConversationInput{{ID: record.Launch.InputID, Text: record.Launch.Text}}
 		}
+		activeMessage := ""
 		err = engine.Execute(ctx, prepared.Context, prepared.Thread, request, resuming, func(event core.AgentEvent) error {
 			if err := e.Journal.AppendEvent(context.WithoutCancel(ctx), control, task, runID, event); err != nil {
 				return err
 			}
 
+			if event.Update.Type == "message_started" {
+				activeMessage = "message-" + event.Update.ID
+			}
 			if event.Update.Type == "message_finished" {
 				// Earlier replies stay in the transcript; only the last reply is
 				// the terminal summary, including an intentionally empty reply.
 				final.Text = event.Update.Text
+				if prepared.MessageCompleted != nil {
+					prepared.MessageCompleted(activeMessage, event.Update.Text)
+				}
 			}
 			if event.Update.Type == "turn_finished" && event.Update.Outcome != nil {
 				finalOutcome = *event.Update.Outcome

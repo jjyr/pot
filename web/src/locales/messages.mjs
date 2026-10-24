@@ -2,6 +2,16 @@ import serverMessages from './server.json' with {type:'json'};
 
 export const messages = {
   en: {
+    'fileReference.savedVersion':'Saved version from this reply',
+    'fileReference.pending':'Preparing file…',
+    'fileReference.resolving':'Preparing file…',
+    'fileReference.not_found':'File not found',
+    'fileReference.forbidden':'File access unavailable',
+    'fileReference.source_offline':'File source offline',
+    'fileReference.too_large':'File exceeds size limit',
+    'fileReference.changed':'File changed while being read',
+    'fileReference.unsupported_dependency':'Unsupported HTML dependency',
+    'fileReference.unavailable':'File unavailable',
     'completions.skills':'Skills',
     'completions.assistants':'Assistants',
     'completions.count':'{count} results',
@@ -939,6 +949,16 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'fileReference.savedVersion':'此回复保存的文件版本',
+    'fileReference.pending':'正在准备文件…',
+    'fileReference.resolving':'正在准备文件…',
+    'fileReference.not_found':'找不到文件',
+    'fileReference.forbidden':'无法访问此文件',
+    'fileReference.source_offline':'文件来源离线',
+    'fileReference.too_large':'文件超出大小限制',
+    'fileReference.changed':'读取时文件已变化',
+    'fileReference.unsupported_dependency':'HTML 依赖不受支持',
+    'fileReference.unavailable':'文件不可用',
     'completions.skills':'Skills',
     'completions.assistants':'助手',
     'completions.count':'{count} 项',

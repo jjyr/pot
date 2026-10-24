@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"github.com/jjyr/pot/internal/resources"
 	"github.com/jjyr/pot/internal/secrets"
 	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/pkg/execution"
@@ -40,7 +41,7 @@ func TestLocalTaskUsesSharedCapacityOwnerModelAndSummary(t *testing.T) {
 		} else if calls.Add(1) == 1 {
 			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "task-command", "type": "function", "function": map[string]any{"name": "exec_command", "arguments": `{"cmd":"printf proof > artifact.txt; printf worker-ok","login":false}`}}}}, "finish_reason": "tool_calls"}}}
 		} else {
-			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "Completed task artifact"}, "finish_reason": "stop"}}}
+			event = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "Completed task [artifact](artifact.txt)"}, "finish_reason": "stop"}}}
 		}
 		event.(map[string]any)["usage"] = map[string]any{"prompt_tokens": 20, "completion_tokens": 5}
 		data, _ := json.Marshal(event)
@@ -105,6 +106,58 @@ func TestLocalTaskUsesSharedCapacityOwnerModelAndSummary(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(taskRoot, "artifact.txt"))
 	if err != nil || string(data) != "proof" {
 		t.Fatalf("fixed worker artifact: %s %v", data, err)
+	}
+	// Completed worker messages capture their own original run and workspace.
+	events, err := s.TaskEvents(ctx, "main", accepted.Info.ID, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := ""
+	for _, event := range events.Events {
+		if event.Event.Update.Type == "message_started" {
+			message = "message-" + event.Event.Update.ID
+		}
+	}
+	var ref resources.MessageFile
+	for {
+		rows, e := s.MessageFiles(ctx, "main", accepted.Info.ID, message)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if len(rows) > 0 && rows[0].State != "pending" && rows[0].State != "resolving" {
+			ref = rows[0]
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("worker file timeout")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if ref.State != "ready" || ref.Source.Task != accepted.Info.ID || ref.Source.Root != taskRoot {
+		t.Fatalf("worker file source %+v", ref)
+	}
+	// Main may reference the owned Task; a worker cannot select another Task.
+	mainRoot, _ := s.ExecutionWorkspace("main")
+	s.bindMessageFiles("main", "", "", "owned-file", "[file](pot-file://"+accepted.Info.ID+"/artifact.txt)", mainRoot)
+	owned := awaitFiles(t, s, "main", "owned-file")
+	if owned[0].State != "ready" || owned[0].Source.Run != ref.Source.Run {
+		t.Fatal(owned)
+	}
+	s.bindMessageFiles("main", accepted.Info.ID, ref.Source.Run, "foreign-file", "[file](pot-file://another-task/artifact.txt)", taskRoot)
+	for {
+		rows, e := s.MessageFiles(ctx, "main", accepted.Info.ID, "foreign-file")
+		if e != nil {
+			t.Fatal(e)
+		}
+		if len(rows) > 0 && rows[0].State == "forbidden" {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("foreign worker reference not rejected")
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 	snapshot := awaitConversation(t, c, func(snapshot protocol.Snapshot) bool {
 		return snapshot.Turn == nil && strings.Contains(func() string {
