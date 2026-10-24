@@ -317,3 +317,50 @@ retain its native conversation. The operation cannot select arbitrary paths,
 credentials, tool policies or a different sender. Pairing with a host advertising
 this capability grants those bounded management operations to the peer's user.
 The Antigravity adapter implements it; Codex does not advertise it.
+
+## Operator assistant management
+
+Codex and Antigravity advertise node-level `assistant.management`. This operation
+is available to the authenticated user interface, never an assistant tool. Control
+replaces supplied `from` data with its authenticated operator identity; the peer
+receiver independently checks the authenticated node and user kind.
+
+```text
+Authenticated UI -> Control -> Agent Link -> receiver
+                                catalog / create / update
+                                assistant.profile / assistant.delete
+                                             |
+                              receiver-owned workspace scopes
+                              assistant + atomic request receipt
+```
+
+Catalog schema version 1 returns runtime kind/name, supported actions and typed
+fields (`name`, `model`, `workspace`, optionally `effort`), required/editable/default
+metadata, model effort choices, workspace IDs/modes, and complete assistant
+addresses/configuration/revisions. Required fields apply to creation. Updates send only changed
+editable fields and preserve omitted name, model and effort. An omitted effort
+preserves the receiver setting on update;
+an explicit empty effort selects the model default when the field is supported.
+Unknown actions and unsupported fields are
+rejected. It carries no scripts or arbitrary form definitions. Codex discovers
+models through App Server `model/list` without opening a thread or turn;
+Antigravity uses `agy models`, whose slugs already encode reasoning choices.
+Neither receiver advertises a separate instructions field in this version.
+
+A workspace ID identifies a persistent owner-registered path and mode, independently
+of any assistant ID. Remote creation can reuse these scopes but cannot submit new
+paths or broaden permissions. Workspace selection is immutable for an existing
+session; create another assistant to use another scope. Each assistant has its own
+identity, saved avatar, model, revision and native conversation. Model/effort changes
+require an idle assistant and revision CAS; presentation-only edits can apply while
+busy. Profile/avatar and retirement use the existing operations and busy fences.
+Creating an assistant never configures the separate node task executor.
+
+Mutation receipts are scoped by authenticated caller and request ID. Identical
+retries return the original result before checking today's catalog/revision;
+different content conflicts. Assistant insertion and its result commit together.
+Unconfirmed responses require the same request ID. A later directory failure does
+not undo creation, and ordinary periodic synchronization updates all clients.
+Errors distinguish unsupported, unauthorized, unreachable, unavailable model or
+workspace, revision conflict, busy, capacity and invalid requests. The UI translates
+these identifiers and retains raw diagnostics in a disclosure.

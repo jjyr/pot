@@ -254,3 +254,21 @@ queue. The host admits, runs and acknowledges them automatically, then publishes
 one terminal reply through the ordinary Agent Link mailbox. The adapter does not
 offer direct user chat or a manual inbox consumer. Explicit Codex task execution
 uses the independent node executor described above.
+
+## Create assistants on an existing connection
+
+Add assistant lists each connected Codex node as a separate runtime. Select it to
+load the receiver's current App Server model catalog, reasoning effort choices and
+owner-registered workspace scopes. Creation saves a separate identity and
+configuration without starting a native thread, model turn or another connection.
+The returned assistant opens in Chat and advertises direct user chat, profile and
+delete operations. The initial task-only assistant remains task-only until it has
+an explicit model. Existing node task executor defaults and approval policy are
+unaffected. Native execution applies the assistant model and effort to its own
+persistent session.
+
+The Link inspector offers the same creation form and revision-checked model
+settings. Workspace scope remains immutable for a session; use another assistant
+to choose another scope. Names/avatars and deletion reuse the existing profile
+and retirement operations. See [Agent Link management](../../docs/agent-links.md#operator-assistant-management)
+for authorization, retries, error codes and directory synchronization.

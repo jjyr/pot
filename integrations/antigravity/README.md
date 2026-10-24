@@ -7,7 +7,7 @@ and exchange assistant messages across connected nodes. The receiving machine
 owns the Antigravity login, native permissions and allowed workspace scopes.
 
 ```text
-Pot user -> assistant management -> model / effort / existing workspace scope
+Pot user -> assistant management -> model / existing workspace scope
                                       |
 Pot chat / assistant mail <-> authenticated Agent Link <-> shared adapter host
                                                             |
@@ -102,8 +102,8 @@ Receipts mean durable acceptance, not model completion. Direct user replies ente
 Pot's existing chat projection without waking a local Pot model.
 
 The independent node executor snapshots its own workspace, mode and model for
-each task. The first explicit model selection initializes an otherwise unconfigured
-executor. Further changes are local owner operations:
+each task. Creating or updating an assistant does not configure this executor. Its model and
+permissions are separate local owner operations:
 
 ```sh
 ~/.config/pot-antigravity/plugin/bin/pot-antigravity-agent executor \

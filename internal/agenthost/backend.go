@@ -43,6 +43,7 @@ type backend struct {
 	db                   *sql.DB
 	nodeID, binary, root string
 	worker               []string
+	managementMu         sync.Mutex
 	mu                   sync.Mutex
 	active               map[string]context.CancelFunc
 	workers              map[string]bool
@@ -76,6 +77,9 @@ func newBackend(db *sql.DB, nodeID, root string, runtimes ...Runtime) (*backend,
 	if _, err = db.Exec("INSERT INTO agent_adapter_executor(singleton,workspace,mode) VALUES(1,?,'read-only') ON CONFLICT DO NOTHING", workspace); err != nil {
 		return nil, err
 	}
+	if _, err = db.Exec("INSERT INTO agent_adapter_workspaces(id,workspace,mode) VALUES(?,?,?) ON CONFLICT(workspace,mode) DO NOTHING", scopeID(workspace, "read-only"), workspace, "read-only"); err != nil {
+		return nil, err
+	}
 	return b, nil
 }
 func (b *backend) list(ctx context.Context) ([]assistant, error) {
@@ -102,8 +106,9 @@ func (b *backend) Directory(ctx context.Context) (agentlink.Directory, error) {
 	d := agentlink.Directory{NodeID: b.nodeID, Name: b.runtime().Name, Adapter: b.runtime().Kind, Targets: []agentlink.Endpoint{}}
 	nodeOps := []agentlink.Operation{agentlink.TaskSubmit, agentlink.TaskRead, agentlink.TaskCancel, agentlink.TaskInput, agentlink.Approvals}
 	if b.runtime().Kind == "antigravity" {
-		nodeOps = []agentlink.Operation{agentlink.AssistantManagement, agentlink.TaskSubmit, agentlink.TaskRead, agentlink.TaskCancel, agentlink.TaskInput}
+		nodeOps = []agentlink.Operation{agentlink.TaskSubmit, agentlink.TaskRead, agentlink.TaskCancel, agentlink.TaskInput}
 	}
+	nodeOps = append(nodeOps, agentlink.AssistantManagement)
 	d.Targets = append(d.Targets, agentlink.Endpoint{Identity: agentlink.Identity{Address: agentlink.NodeTarget(b.nodeID), Name: d.Name, Adapter: d.Adapter}, Capabilities: agentlink.Description{Version: 1, Scope: "caller", Operations: nodeOps}})
 	for _, a := range list {
 		if b.runtime().Kind == "antigravity" && a.Model == "" {
@@ -112,7 +117,7 @@ func (b *backend) Directory(ctx context.Context) (agentlink.Directory, error) {
 		identity := b.identity(a)
 		identity.Avatar = a.Avatar
 		assistantOps := []agentlink.Operation{agentlink.AssistantProfile, agentlink.AssistantDelete}
-		if b.runtime().Kind == "antigravity" {
+		if a.Model != "" {
 			assistantOps = append(assistantOps, agentlink.ChatRead, agentlink.ChatSend, agentlink.ChatReceipt, agentlink.ChatSubscribe)
 		}
 		d.Targets = append(d.Targets, agentlink.Endpoint{Identity: identity, Capabilities: agentlink.Description{Version: 1, Scope: "peer", Operations: assistantOps}})
@@ -138,6 +143,8 @@ func (b *backend) resolve(ctx context.Context, id string) (assistant, error) {
 	return a, err
 }
 func (b *backend) ownerConfigure(ctx context.Context, a assistant) error {
+	b.managementMu.Lock()
+	defer b.managementMu.Unlock()
 	if !validID(a.ID) || !filepath.IsAbs(a.Workspace) || (a.Mode != "read-only" && a.Mode != "workspace-write") {
 		return agentlink.ErrInvalid
 	}
@@ -156,6 +163,9 @@ func (b *backend) ownerConfigure(ctx context.Context, a assistant) error {
 		}
 	}
 	return storage.Transaction(ctx, b.db, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO agent_adapter_workspaces(id,workspace,mode) VALUES(?,?,?) ON CONFLICT(workspace,mode) DO NOTHING", scopeID(a.Workspace, a.Mode), a.Workspace, a.Mode); err != nil {
+			return err
+		}
 		var workspace, mode, existingName, existingModel, existingEffort string
 		var retired bool
 		if err := tx.QueryRowContext(ctx, "SELECT deleted FROM agent_adapter_assistants WHERE id=?", a.ID).Scan(&retired); err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -245,7 +255,7 @@ func (b *backend) submitMessage(ctx context.Context, r agentlink.TaskRequest, me
 		return agentlink.Task{}, agentlink.ErrUnsupported
 	}
 	if !validID(r.RequestID) || message.Validate() != nil || message.Kind != "message" ||
-		(message.From.Kind != "assistant" && message.From.Kind != "task" && !(b.runtime().Kind == "antigravity" && message.From.Kind == "user")) || message.To.NodeID != b.nodeID || message.To.Kind != "assistant" ||
+		(message.From.Kind != "assistant" && message.From.Kind != "task" && message.From.Kind != "user") || message.To.NodeID != b.nodeID || message.To.Kind != "assistant" ||
 		message.From != r.From || message.To.AgentID != r.Target.AgentID || message.Text != r.Text {
 		return agentlink.Task{}, agentlink.ErrInvalid
 	}

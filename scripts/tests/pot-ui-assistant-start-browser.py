@@ -57,6 +57,8 @@ def main():
             (1200, 820, "zh-CN", "dark"),
             (390, 844, "en", "light"),
             (390, 844, "zh-CN", "dark"),
+            (320, 844, "en", "light"),
+            (320, 844, "zh-CN", "dark"),
         ]:
             # Every scenario starts with independent local preference/cache state.
             cli(
@@ -76,6 +78,14 @@ def main():
                 "screenshot",
                 "--filename",
                 str(images / f"assistant-start-{width}-{locale}-after.png"),
+            )
+            cli(
+                "goto",
+                f"{origin}/scripts/tests/fixtures/assistant-start.html?locale={locale}&theme={theme}",
+            )
+            cli(
+                "run-code",
+                "async page => { await page.waitForFunction(() => !!window.assistantStartResults); const result = await page.evaluate(() => window.assistantStartResults); if (!result.passed) throw Error(JSON.stringify(result)); return result; }",
             )
             print(f"Add assistant browser: {width}x{height}, {locale}, {theme} passed", flush=True)
         for width, height, locale, theme in [

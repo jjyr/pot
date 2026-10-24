@@ -294,7 +294,7 @@ func TestCodexProfileBrowserFixture(t *testing.T) {
 	_, app, _ := profileApplication(t)
 	upstream := httptest.NewServer(transport.Handler(app, "private"))
 	defer upstream.Close()
-	repo, err := filepath.Abs("../../..")
+	repo, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
 	}

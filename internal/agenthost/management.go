@@ -2,10 +2,13 @@ package agenthost
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"strings"
+	"os"
+	"path/filepath"
 
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/assistantavatar"
@@ -13,121 +16,247 @@ import (
 	"github.com/jjyr/pot/pkg/storage"
 )
 
-func (b *backend) validateModel(ctx context.Context, model, effort string) error {
-	if effort != "" && effort != "low" && effort != "medium" && effort != "high" && effort != "xhigh" && effort != "max" {
-		return agentlink.ErrInvalid
-	}
-	models, err := b.models(ctx)
-	if err != nil {
-		return err
-	}
+func scopeID(path, mode string) string {
+	digest := sha256.Sum256([]byte(path + "\x00" + mode))
+	return "scope-" + hex.EncodeToString(digest[:16])
+}
+func validateModelChoice(models []agentlink.ExecutionModel, model, effort string) error {
 	for _, m := range models {
 		if m.ID == model {
-			return nil
+			if effort == "" {
+				return nil
+			}
+			for _, value := range m.Efforts {
+				if effort == value {
+					return nil
+				}
+			}
+			return agentlink.ErrInvalid
 		}
 	}
-	return errors.New("antigravity_model_unavailable")
+	return agentlink.ErrModelUnavailable
 }
-func managed(a assistant) agentlink.ManagedAssistant {
-	return agentlink.ManagedAssistant{ID: a.ID, Name: a.Name, Model: a.Model, Effort: a.Effort, Workspace: a.ID, Revision: a.Revision}
+func supportsEffort(models []agentlink.ExecutionModel) bool {
+	for _, model := range models {
+		if len(model.Efforts) > 0 {
+			return true
+		}
+	}
+	return false
+}
+func (b *backend) validateModel(ctx context.Context, model, effort string) error {
+	models, err := b.models(ctx)
+	if err != nil {
+		return agentlink.ErrModelUnavailable
+	}
+	// The local owner CLI retains the native Antigravity global option. Remote
+	// management only accepts effort choices explicitly advertised by its catalog.
+	if b.runtime().Kind == "antigravity" {
+		switch effort {
+		case "", "low", "medium", "high", "xhigh", "max":
+		default:
+			return agentlink.ErrInvalid
+		}
+		return validateModelChoice(models, model, "")
+	}
+	return validateModelChoice(models, model, effort)
+}
+func (b *backend) managed(a assistant, workspace string) agentlink.ManagedAssistant {
+	ops := []agentlink.Operation{agentlink.AssistantProfile, agentlink.AssistantDelete}
+	if a.Model != "" {
+		ops = append(ops, agentlink.ChatRead, agentlink.ChatSend, agentlink.ChatReceipt, agentlink.ChatSubscribe)
+	}
+	return agentlink.ManagedAssistant{Avatar: a.Avatar, Capabilities: agentlink.Description{Version: 1, Scope: "peer", Operations: ops}, Address: agentlink.AssistantTarget(b.nodeID, a.ID), ID: a.ID, Name: a.Name, Model: a.Model, Effort: a.Effort, Workspace: workspace, Revision: a.Revision}
 }
 
-// Pairing authorizes this narrow user-only surface. Workspaces come from local
-// owner-created assistant scopes, never arbitrary paths supplied by a peer.
+// Management is an operator RPC. Transport binds From to the authenticated peer;
+// model tools never expose this interface. Scopes only originate with the owner.
 func (b *backend) ManageAssistant(ctx context.Context, r agentlink.AssistantManagementRequest) (out agentlink.AssistantManagementResult, err error) {
-	if b.runtime().Kind != "antigravity" {
-		return out, agentlink.ErrUnsupported
-	}
 	if !r.From.Valid() || r.From.Kind != "user" {
 		return out, agentlink.ErrUnauthorized
 	}
 	if r.Action == "catalog" {
+		out.SchemaVersion = 1
+		out.Runtime = agentlink.ManagementRuntime{Kind: b.runtime().Kind, Name: b.runtime().Name}
+		out.Actions = []string{"catalog", "create", "update"}
+		out.Fields = []agentlink.ManagementField{{Name: "name", Required: true, Editable: true}, {Name: "model", Required: true, Editable: true}, {Name: "workspace", Required: true, Editable: false}}
 		out.Models, err = b.models(ctx)
 		if err != nil {
-			return out, err
+			return out, agentlink.ErrModelUnavailable
+		}
+		for _, model := range out.Models {
+			if len(model.Efforts) > 0 {
+				out.Fields = append(out.Fields, agentlink.ManagementField{Name: "effort", Editable: true})
+				break
+			}
+		}
+		b.managementMu.Lock()
+		defer b.managementMu.Unlock()
+		out.Workspaces = []agentlink.ExecutionWorkspace{}
+		out.Assistants = []agentlink.ManagedAssistant{}
+		scopes := map[string]string{}
+		rows, e := b.db.QueryContext(ctx, "SELECT id,workspace,mode FROM agent_adapter_workspaces ORDER BY rowid")
+		if e != nil {
+			return out, e
+		}
+		for rows.Next() {
+			var id, path, mode string
+			if e = rows.Scan(&id, &path, &mode); e != nil {
+				rows.Close()
+				return out, e
+			}
+			scopes[path+"\x00"+mode] = id
+			out.Workspaces = append(out.Workspaces, agentlink.ExecutionWorkspace{ID: id, Name: filepath.Base(path), Description: path, Mode: mode})
+		}
+		e = rows.Err()
+		rows.Close()
+		if e != nil {
+			return out, e
 		}
 		list, e := b.list(ctx)
 		if e != nil {
 			return out, e
 		}
-		out.Assistants = []agentlink.ManagedAssistant{}
-		out.Workspaces = []agentlink.ExecutionWorkspace{}
 		for _, a := range list {
-			out.Workspaces = append(out.Workspaces, agentlink.ExecutionWorkspace{ID: a.ID, Name: a.Name + " (" + a.Mode + ")"})
-			if a.Model != "" {
-				out.Assistants = append(out.Assistants, managed(a))
+			if b.runtime().Kind != "antigravity" || a.Model != "" {
+				out.Assistants = append(out.Assistants, b.managed(a, scopes[a.Workspace+"\x00"+a.Mode]))
 			}
+		}
+		if len(out.Models) > 0 {
+			out.Fields[1].Default = out.Models[0].ID
+		}
+		if len(out.Workspaces) > 0 {
+			out.Fields[2].Default = out.Workspaces[0].ID
 		}
 		return out, nil
 	}
 	if r.Action != "create" && r.Action != "update" {
+		return out, agentlink.ErrUnsupported
+	}
+	if !validID(r.RequestID) || !validID(r.ID) {
 		return out, agentlink.ErrInvalid
 	}
-	if !validID(r.RequestID) || !validID(r.ID) || len(r.Name) > 80 || strings.TrimSpace(r.Name) == "" {
-		return out, agentlink.ErrInvalid
-	}
-	// Retry lookup precedes today's catalog and revision checks.
+	b.managementMu.Lock()
+	defer b.managementMu.Unlock()
+	// Resolve committed retries before today's model catalog or revision checks.
 	var payload, prior string
 	e := b.db.QueryRowContext(ctx, "SELECT payload,result FROM agent_adapter_management WHERE caller=? AND request_id=?", callerKey(r.From), r.RequestID).Scan(&payload, &prior)
 	if e == nil {
 		if payload != encoded(r) {
 			return out, agentlink.ErrConflict
 		}
-		return out, json.Unmarshal([]byte(prior), &out)
+		err = json.Unmarshal([]byte(prior), &out)
+		if out.Assistant != nil {
+			value := b.managed(assistant{ID: out.Assistant.ID, Name: out.Assistant.Name, Avatar: out.Assistant.Avatar, Model: out.Assistant.Model, Effort: out.Assistant.Effort, Revision: out.Assistant.Revision}, out.Assistant.Workspace)
+			out.Assistant = &value
+		}
+		return out, err
 	}
 	if !errors.Is(e, sql.ErrNoRows) {
 		return out, e
 	}
-	if err = b.validateModel(ctx, r.Model, r.Effort); err != nil {
+	if r.Action == "create" && (r.Name == nil || r.Model == nil) {
+		return out, agentlink.ErrInvalid
+	}
+	current := assistant{}
+	if r.Action == "update" {
+		current, err = b.resolve(ctx, r.ID)
+		if err != nil {
+			return out, err
+		}
+		if r.Revision != current.Revision {
+			return out, agentlink.ErrAssistantChanged
+		}
+		if r.Workspace != "" {
+			return out, agentlink.ErrUnsupported
+		}
+	}
+	effectiveName, effectiveModel := current.Name, current.Model
+	if r.Name != nil {
+		effectiveName = *r.Name
+	}
+	if r.Model != nil {
+		effectiveModel = *r.Model
+	}
+	if err = validateProfileName(effectiveName); err != nil {
 		return out, err
+	}
+	// Omitted optional configuration preserves the receiver's stored value. An
+	// explicit empty effort selects the native model default, only when supported.
+	effectiveEffort := current.Effort
+	if r.Effort != nil {
+		effectiveEffort = *r.Effort
+	}
+	if r.Action == "create" || r.Effort != nil || effectiveModel != current.Model || effectiveEffort != current.Effort {
+		models, e := b.models(ctx)
+		if e != nil {
+			return out, agentlink.ErrModelUnavailable
+		}
+		if r.Effort != nil && !supportsEffort(models) {
+			return out, agentlink.ErrUnsupported
+		}
+		if err = validateModelChoice(models, effectiveModel, effectiveEffort); err != nil {
+			return out, err
+		}
 	}
 	err = storage.Transaction(ctx, b.db, func(tx *sql.Tx) error {
 		if e := tx.QueryRowContext(ctx, "SELECT payload,result FROM agent_adapter_management WHERE caller=? AND request_id=?", callerKey(r.From), r.RequestID).Scan(&payload, &prior); e == nil {
 			if payload != encoded(r) {
 				return agentlink.ErrConflict
 			}
-			return json.Unmarshal([]byte(prior), &out)
+			if e = json.Unmarshal([]byte(prior), &out); e != nil {
+				return e
+			}
+			if out.Assistant != nil {
+				value := b.managed(assistant{ID: out.Assistant.ID, Name: out.Assistant.Name, Avatar: out.Assistant.Avatar, Model: out.Assistant.Model, Effort: out.Assistant.Effort, Revision: out.Assistant.Revision}, out.Assistant.Workspace)
+				out.Assistant = &value
+			}
+			return nil
 		} else if !errors.Is(e, sql.ErrNoRows) {
 			return e
 		}
 		switch r.Action {
 		case "create":
-			if !validID(r.Workspace) {
-				return agentlink.ErrInvalid
+			var path, mode string
+			if e := tx.QueryRowContext(ctx, "SELECT workspace,mode FROM agent_adapter_workspaces WHERE id=?", r.Workspace).Scan(&path, &mode); errors.Is(e, sql.ErrNoRows) {
+				return agentlink.ErrWorkspaceUnavailable
+			} else if e != nil {
+				return e
 			}
-			var workspace, mode string
-			if e := tx.QueryRowContext(ctx, "SELECT workspace,mode FROM agent_adapter_assistants WHERE id=? AND deleted=0", r.Workspace).Scan(&workspace, &mode); e != nil {
-				return agentlink.ErrNotFound
+			resolved, e := filepath.EvalSymlinks(path)
+			if e != nil || resolved != path {
+				return agentlink.ErrWorkspaceUnavailable
+			}
+			info, e := os.Stat(path)
+			if e != nil || !info.IsDir() {
+				return agentlink.ErrWorkspaceUnavailable
 			}
 			var count int
-			if e := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM agent_adapter_assistants").Scan(&count); e != nil {
+			if e = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM agent_adapter_assistants").Scan(&count); e != nil {
 				return e
 			}
 			if count >= 256 {
 				return agentlink.ErrCapacity
 			}
-			character := assistantavatar.ForName(r.Name, r.ID)
+			character := assistantavatar.ForName(effectiveName, r.ID)
 			avatar, e := assistantavatar.Render(character, r.ID)
 			if e != nil {
 				return e
 			}
-			_, e = tx.ExecContext(ctx, "INSERT INTO agent_adapter_assistants(id,name,workspace,mode,avatar,character,model,effort) VALUES(?,?,?,?,?,?,?,?)", r.ID, r.Name, workspace, mode, avatar, character, r.Model, r.Effort)
-			if e != nil {
+			if _, e = tx.ExecContext(ctx, "INSERT INTO agent_adapter_assistants(id,name,workspace,mode,avatar,character,model,effort) VALUES(?,?,?,?,?,?,?,?)", r.ID, effectiveName, path, mode, avatar, character, effectiveModel, effectiveEffort); e != nil {
 				return agentlink.ErrConflict
 			}
-			// First explicit model selection also initializes the independent executor.
-			if _, e = tx.ExecContext(ctx, "UPDATE agent_adapter_executor SET model=?,effort=? WHERE singleton=1 AND model=''", r.Model, r.Effort); e != nil {
-				return e
-			}
 		case "update":
-			var busy bool
-			if e := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_adapter_jobs WHERE assistant_id=? AND (json_extract(data,'$.task.state') NOT IN ('completed','failed','cancelled') OR json_extract(data,'$.cleanup_uncertain')=1)) OR EXISTS(SELECT 1 FROM agent_messages WHERE direction='incoming' AND state IN ('queued','read') AND json_extract(envelope,'$.to.agent_id')=?)`, r.ID, r.ID).Scan(&busy); e != nil {
-				return e
+			if effectiveModel != current.Model || effectiveEffort != current.Effort {
+				var busy bool
+				if e := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_adapter_jobs WHERE assistant_id=? AND (json_extract(data,'$.task.state') NOT IN ('completed','failed','cancelled') OR json_extract(data,'$.cleanup_uncertain')=1)) OR EXISTS(SELECT 1 FROM agent_messages WHERE direction='incoming' AND state IN ('queued','read') AND json_extract(envelope,'$.to.agent_id')=?)`, r.ID, r.ID).Scan(&busy); e != nil {
+					return e
+				}
+				if busy {
+					return agentlink.ErrAssistantBusy
+				}
 			}
-			if busy {
-				return agentlink.ErrAssistantBusy
-			}
-			res, e := tx.ExecContext(ctx, "UPDATE agent_adapter_assistants SET name=?,model=?,effort=?,revision=revision+1 WHERE id=? AND revision=? AND deleted=0", r.Name, r.Model, r.Effort, r.ID, r.Revision)
+			res, e := tx.ExecContext(ctx, "UPDATE agent_adapter_assistants SET name=?,model=?,effort=?,revision=revision+1 WHERE id=? AND revision=? AND deleted=0", effectiveName, effectiveModel, effectiveEffort, r.ID, r.Revision)
 			if e != nil {
 				return e
 			}
@@ -135,16 +264,17 @@ func (b *backend) ManageAssistant(ctx context.Context, r agentlink.AssistantMana
 			if n != 1 {
 				return agentlink.ErrAssistantChanged
 			}
-		default:
-			return agentlink.ErrInvalid
 		}
 		a := assistant{ID: r.ID}
-		if e := tx.QueryRowContext(ctx, "SELECT name,model,effort,revision FROM agent_adapter_assistants WHERE id=?", r.ID).Scan(&a.Name, &a.Model, &a.Effort, &a.Revision); e != nil {
+		var workspace string
+		if e := tx.QueryRowContext(ctx, "SELECT a.name,a.model,a.effort,a.revision,w.id,a.avatar FROM agent_adapter_assistants a JOIN agent_adapter_workspaces w ON w.workspace=a.workspace AND w.mode=a.mode WHERE a.id=?", r.ID).Scan(&a.Name, &a.Model, &a.Effort, &a.Revision, &workspace, &a.Avatar); e != nil {
 			return e
 		}
-		value := managed(a)
+		value := b.managed(a, workspace)
 		out.Assistant = &value
-		_, e := tx.ExecContext(ctx, "INSERT INTO agent_adapter_management(caller,request_id,payload,result) VALUES(?,?,?,?)", callerKey(r.From), r.RequestID, encoded(r), encoded(out))
+		// Private durable receipt format is independent of the wire catalog schema.
+		receipt := map[string]any{"assistant": map[string]any{"id": value.ID, "name": value.Name, "model": value.Model, "effort": value.Effort, "workspace": value.Workspace, "revision": value.Revision, "avatar": value.Avatar}}
+		_, e := tx.ExecContext(ctx, "INSERT INTO agent_adapter_management(caller,request_id,payload,result) VALUES(?,?,?,?)", callerKey(r.From), r.RequestID, encoded(r), encoded(receipt))
 		return e
 	})
 	return out, err
@@ -152,9 +282,6 @@ func (b *backend) ManageAssistant(ctx context.Context, r agentlink.AssistantMana
 
 func (b *backend) ChatStatus(ctx context.Context, q agentlink.ChatLookup) (out agentlink.ChatStatus, err error) {
 	out.Messages = []protocol.Envelope{}
-	if b.runtime().Kind != "antigravity" {
-		return out, agentlink.ErrUnsupported
-	}
 	var raw string
 	err = b.db.QueryRowContext(ctx, "SELECT envelope FROM agent_messages WHERE id=? AND direction='incoming'", q.MessageID).Scan(&raw)
 	if err != nil {

@@ -132,7 +132,7 @@ func TestAntigravityLive(t *testing.T) {
 	workspace := catalog.Workspaces[0].ID
 	create := func(id, model string) {
 		t.Helper()
-		r := agentlink.AssistantManagementRequest{Action: "create", RequestID: "create-" + id, ID: id, Name: id, Model: model, Workspace: workspace}
+		r := agentlink.AssistantManagementRequest{Action: "create", RequestID: "create-" + id, ID: id, Name: managementValue(id), Model: managementValue(model), Workspace: workspace}
 		v, e := pot.ManageLinkedAssistant(ctx, link.ID, r)
 		if e != nil || v.Assistant == nil {
 			t.Fatal(v, e)
@@ -215,7 +215,7 @@ func TestAntigravityLive(t *testing.T) {
 				revision = a.Revision
 			}
 		}
-		_, e = pot.ManageLinkedAssistant(ctx, link.ID, agentlink.AssistantManagementRequest{Action: "update", RequestID: "switch-to-claude", ID: "gemini-live", Name: "gemini-live", Model: "claude-sonnet-5-5-low", Revision: revision})
+		_, e = pot.ManageLinkedAssistant(ctx, link.ID, agentlink.AssistantManagementRequest{Action: "update", RequestID: "switch-to-claude", ID: "gemini-live", Name: managementValue("gemini-live"), Model: managementValue("claude-sonnet-5-5-low"), Revision: revision})
 		if e != nil {
 			t.Fatal(e)
 		}

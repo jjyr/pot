@@ -387,7 +387,7 @@ func transportError(err error) error {
 	if errors.Is(err, peer.ErrUnauthorized) {
 		return ErrUnauthorized
 	}
-	for _, known := range []error{ErrAssistantBusy, ErrAssistantChanged, ErrInvalid, ErrNotFound, ErrUnauthorized, ErrExpired, ErrUsed, ErrConflict, ErrRevoked, ErrReconnectRequired, ErrDisconnected, ErrUnsupported, ErrCapacity, ErrFenced} {
+	for _, known := range []error{ErrModelUnavailable, ErrWorkspaceUnavailable, ErrAssistantBusy, ErrAssistantChanged, ErrInvalid, ErrNotFound, ErrUnauthorized, ErrExpired, ErrUsed, ErrConflict, ErrRevoked, ErrReconnectRequired, ErrDisconnected, ErrUnsupported, ErrCapacity, ErrFenced} {
 		if errors.Is(err, known) || strings.Contains(err.Error(), known.Error()) {
 			return known
 		}
