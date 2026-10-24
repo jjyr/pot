@@ -12,8 +12,8 @@ insensitive) default to the shared safe Markdown reader when their MIME type is
 `text/plain` or `text/html`. The latter handles HTML sniffed from Markdown that
 begins with raw HTML; it never grants Markdown an interactive HTML frame.
 Explicit `text/markdown` and `text/x-markdown` MIME types also select Markdown
-(parameters are ignored). Other MIME types keep their existing viewer, so binary
-types take precedence over an entry suffix. Display labels and derived download
+(parameters are ignored). Other inert `text/*` types, including JavaScript and CSS source, use the plain
+text reader. Binary types take precedence over an entry suffix. Display labels and derived download
 names never choose a viewer. Existing registered Markdown with `text/plain`
 works without registration again or changes to stored manifests. Registration
 continues to record its detected MIME type; no persisted format changes.

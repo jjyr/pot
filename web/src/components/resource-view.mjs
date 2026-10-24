@@ -6,7 +6,7 @@ function sourceText(pre,text,line){
   pre.textContent=text;if(!line)return;const lines=text.split('\n'),index=Math.min(lines.length-1,Math.max(0,line-1)),before=lines.slice(0,index).join('\n');
   const target=document.createElement('mark');target.textContent=lines[index];pre.replaceChildren(document.createTextNode(before+(index?'\n':'')),target,document.createTextNode((index<lines.length-1?'\n':'')+lines.slice(index+1).join('\n')));requestAnimationFrame(()=>{pre.scrollTop=target.offsetTop-pre.offsetTop;});
 }
-const previewKind=type=>/^image\/(png|jpeg|webp|gif)$/.test(type)?'image':/^audio\/(mpeg|aac|wav|wave|x-wav|ogg|mp4|webm|flac)$/.test(type)?'audio':/^video\/(mp4|webm|ogg)$/.test(type)?'video':type==='application/pdf'?'pdf':type==='text/html'?'html':type==='text/plain'?'text':'file';
+const previewKind=type=>/^image\/(png|jpeg|webp|gif)$/.test(type)?'image':/^audio\/(mpeg|aac|wav|wave|x-wav|ogg|mp4|webm|flac)$/.test(type)?'audio':/^video\/(mp4|webm|ogg)$/.test(type)?'video':type==='application/pdf'?'pdf':type==='text/html'?'html':type.startsWith('text/')?'text':'file';
 
 // Entry is the immutable source path. Display labels and download basenames do
 // not select a renderer. Retain old text/plain manifests without rewriting them.
