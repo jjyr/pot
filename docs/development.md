@@ -94,10 +94,11 @@ those checks.
 `test:sandbox` runs real file, socket, network, terminal, plugin and cleanup tests with the pinned SDK. `test:sandbox-linux` uses a disposable non-root Docker host with namespace restrictions relaxed only on the outer test container; only test assets are mounted read-only.
 
 `check:go` verifies formatting, vet and architectural imports. `test:go` runs all
-Go tests without race instrumentation. `test` also runs `test:race` after that
-normal suite. Both paths use a configurable 20-minute per-package timeout
-(`POT_GO_TEST_TIMEOUT`, or `scripts/test_go.py --timeout`); CI bounds each product
-job to 60 minutes. `test:race:all` is the explicit complete race suite for changes
+Go tests without race instrumentation. `test` runs the normal and focused race
+suites independently, alongside UI/packaging/API checks. `test:race` no longer
+implicitly repeats the normal suite. Both paths use a configurable 20-minute
+per-package timeout (`POT_GO_TEST_TIMEOUT`, or `scripts/test_go.py --timeout`);
+CI bounds each product job to 20 minutes. `test:race:all` is the explicit complete race suite for changes
 to concurrency, persistence or lifecycle architecture. Run it when changing
 shared state or the scope of the focused plan.
 
@@ -110,6 +111,15 @@ or existing test file automatically enters race, and stale/duplicate exceptions
 fail validation. `python scripts/test_go.py race --list` prints the actual plan.
 Discovery uses the race build constraints, including tests in race-only files
 and packages.
+
+`scripts/test_go.py normal|race|race-all --shard INDEX/TOTAL` partitions packages
+into disjoint groups. It balances active top-level test counts, with a stable
+package-name tie break; package fixtures and `TestMain` remain intact. Every
+package belongs to exactly one shard, including newly added packages. The race
+selection is applied inside each shard without changing its exclusions or test
+patterns. Empty shards exit successfully without falling back to `./...`.
+Independent full-package and selected-package race commands run with at most two
+workers, so Control does not wait behind all other packages.
 
 Control tests with independent roots, listeners and execution managers run in
 parallel, bounded by eight active cases and the available Go parallelism.
@@ -397,14 +407,43 @@ by pre-push. Hook group timings are appended to `.local/hooks/timings.jsonl`.
 ## CI and manual PR checks
 
 `Tests` (`.github/workflows/tests.yml`) runs full product tests on PRs and pushes
-to `main`, with Linux/macOS jobs and cancellation of superseded runs. This is the
-full-test gate paired with the local core checks. It can also be run manually.
+to `main`, with cancellation of superseded runs. It is also reusable by the
+release/build workflow and can be run manually. Each OS starts five jobs:
+
+```text
+                          Tests (Linux + macOS)
+                 +-----------+--------+--------+--------+
+                 |           |        |        |        |
+          normal + checks  race 1/4 race 2/4 race 3/4 race 4/4
+          + UI/API/sandbox
+                 |           |        |        |        |
+                 +-----------+--------+--------+--------+
+                                   |
+                    all product gates must pass
+```
+
+The normal/checks job runs `mise run ci:normal`, which schedules the complete normal
+suite, static/architecture/localization checks, UI/API/packaging contracts,
+release-script contracts and real OS sandbox tests concurrently. This keeps the
+matrix to five jobs per OS instead of creating a runner for every small check.
+Normal and race CI tests use `-count=1`; build caches do not replace execution.
+`mise run check:ci` runs the static and script contracts independently.
+
+The target is about 200 seconds with warm tool, module and build caches. Runner
+queues, first compilations and cache transfers can extend elapsed time; no gate
+is skipped or killed to satisfy the target. The shared setup action installs
+only each job's required tools. Module caches are shared independently of build
+caches; normal/race/build cache families include source hashes so changed sources
+can save refreshed build results instead of repeatedly restoring an old exact hit.
 
 The release/build `CI` workflow runs automatically only on tag pushes. All tags
 are checked, while exact stable version tags enter controlled per-channel release
 paths after shared checks and the corresponding native package and smoke gates
 succeed. Ordinary manual runs do not publish.
 Branch pushes and PR events do not start the release/build workflow.
+That workflow calls the same `Tests` gate for its resolved source SHA. Headless
+and cross-platform builds run afterward as a separate build gate, before native
+packaging. Explicit ref/PR validation still disables shared caches.
 
 ```sh
 gh workflow run ci.yml --ref main -f pr=123

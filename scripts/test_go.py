@@ -111,6 +111,37 @@ def selected_commands(command, full, selected):
     return commands
 
 
+def parse_shard(value):
+    match = re.fullmatch(r"([1-9][0-9]*)/([1-9][0-9]*)", value)
+    if not match or int(match[1]) > int(match[2]):
+        raise argparse.ArgumentTypeError("shard must be INDEX/TOTAL with 1 <= INDEX <= TOTAL")
+    return int(match[1]), int(match[2])
+
+
+def shard_packages(packages, shard):
+    """Keep packages intact; balance by active test count without a timing manifest."""
+    index, total = shard
+    weighted = []
+    for package in packages:
+        directory = Path(package["Dir"])
+        name = "./" + directory.relative_to(ROOT).as_posix()
+        files = package.get("TestGoFiles", []) + package.get("XTestGoFiles", [])
+        weight = max(1, len(test_names(directory / file for file in files)))
+        weighted.append((name, weight))
+    loads = [0] * total
+    assigned = set()
+    for name, weight in sorted(weighted, key=lambda item: (-item[1], item[0])):
+        bucket = min(range(total), key=lambda slot: (loads[slot], slot))
+        loads[bucket] += weight
+        if bucket == index - 1:
+            assigned.add(name)
+    return [
+        package
+        for package in packages
+        if "./" + Path(package["Dir"]).relative_to(ROOT).as_posix() in assigned
+    ]
+
+
 def run(command):
     print("+ " + shlex.join(command), file=sys.stderr, flush=True)
     started = time.monotonic()
@@ -129,19 +160,22 @@ def main():
     parser.add_argument("--timeout", default=os.environ.get("POT_GO_TEST_TIMEOUT", "20m"))
     parser.add_argument("--count", type=int)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--shard", type=parse_shard, help="run one disjoint package shard: 1/4")
     parser.add_argument(
         "--list", action="store_true", help="print test plan without executing tests"
     )
     args = parser.parse_args()
+    if args.shard and args.mode == "core":
+        parser.error("the local core suite is not sharded")
     exclusions = normal_only(json.loads(MANIFEST.read_text()))
     command = ["go", "test", f"-timeout={args.timeout}"]
     if args.count is not None:
         command.append(f"-count={args.count}")
     if args.json:
         command.append("-json")
-    if args.mode == "normal":
+    if args.mode == "normal" and not args.shard:
         commands = [command + ["./..."]]
-    elif args.mode == "race-all":
+    elif args.mode == "race-all" and not args.shard:
         commands = [command + ["-race", "./..."]]
     elif args.mode == "core":
         packages = decode_packages(
@@ -150,23 +184,28 @@ def main():
         full, selected = core_plan(packages, json.loads(CORE_MANIFEST.read_text()))
         commands = selected_commands(command, full, selected)
     else:
+        flags = [] if args.mode == "normal" else ["-race"]
         packages = decode_packages(
-            subprocess.check_output(["go", "list", "-race", "-json", "./..."], cwd=ROOT, text=True)
+            subprocess.check_output(["go", "list", *flags, "-json", "./..."], cwd=ROOT, text=True)
         )
-        full, selected = race_plan(packages, exclusions)
-        commands = selected_commands(command + ["-race"], full, selected)
+        if args.shard:
+            packages = shard_packages(packages, args.shard)
+        if args.mode == "race":
+            full, selected = race_plan(packages, exclusions)
+        else:
+            full = sorted("./" + Path(p["Dir"]).relative_to(ROOT).as_posix() for p in packages)
+            selected = []
+        commands = selected_commands(command + flags, full, selected)
     if args.list:
         for command in commands:
             print(shlex.join(command))
         return
     if not commands:
         return
-    if args.mode == "core":
-        # Bound independent integration groups instead of serializing their I/O.
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            results = list(pool.map(run, commands))
-    else:
-        results = [run(command) for command in commands]
+    # These commands own independent fixtures; don't make Control wait for every
+    # other race package. Package/test coverage is identical to serial execution.
+    with ThreadPoolExecutor(max_workers=4 if args.mode == "core" else 2) as pool:
+        results = list(pool.map(run, commands))
     raise SystemExit(next((code for code in results if code), 0))
 
 
