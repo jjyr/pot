@@ -457,25 +457,17 @@ func (c *Client) stop(force bool) error {
 			return err
 		}
 	}
-	for range 100 {
-		err := syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
-			if c.finishSandbox != nil {
-				c.cleanupErr = c.finishSandbox()
-				if c.cleanupErr != nil {
-					return c.cleanupErr
-				}
-			}
-			c.cleanupErr = os.RemoveAll(c.directory)
-			return c.cleanupErr
-		}
-		if err != nil {
-			c.cleanupErr = fmt.Errorf("plugin cleanup unconfirmed: %w", err)
-			return c.cleanupErr
-		}
-		time.Sleep(10 * time.Millisecond)
+	if err := processscope.KillGroup(c.cmd.Process.Pid, time.Now().Add(time.Second)); err != nil {
+		c.cleanupErr = fmt.Errorf("plugin cleanup unconfirmed; temporary files retained: %w", err)
+		return c.cleanupErr
 	}
-	c.cleanupErr = errors.New("plugin process-group cleanup unconfirmed; temporary files retained")
+	if c.finishSandbox != nil {
+		c.cleanupErr = c.finishSandbox()
+		if c.cleanupErr != nil {
+			return c.cleanupErr
+		}
+	}
+	c.cleanupErr = os.RemoveAll(c.directory)
 	return c.cleanupErr
 }
 
