@@ -55,7 +55,7 @@ Storage failures do not prevent use.
 - `locale.js` normalizes languages, saves preferences and detects language only
   at the root entry.
 - `style.css` provides responsive layout, keyboard focus and reduced-motion support.
-- `assets/` contains local brand images and the Codex provenance notice.
+- `assets/` contains local brand images and their source/trademark notices.
 
 The root and localized HTML files are committed so `website/` is ready for a static
 server. Regenerate them whenever a source changes. The larger self-contained
@@ -112,6 +112,12 @@ available at `https://jjyr.github.io/pot/zh-CN/`. The production website is avai
 The Pot/Codex connection, conversation and delegation capabilities are verified.
 Claude, Grok bot and Devin are explicitly labeled ecosystem concepts, rather than
 released native adapters. Nodes retain their own tools, credentials and approvals.
+Below the Agent Link demo, a compact list uses local brand icons and links to
+the root README's Codex guide and assistant status sections. Codex is supported;
+Claude, Grok and Antigravity are marked Coming soon. Their links open the README
+status sections, not connection actions. The README offers a copyable prompt for
+the [agent-assisted connection guide](../docs/connect-with-agent.md) and links to
+the full Codex guide; setup steps are not duplicated on the website.
 All website tasks, conversations, scheduled work and reports are local examples;
 they do not call real agents or contain real connection information.
 
@@ -178,6 +184,7 @@ screen reader announcements.
 | Codex | `assets/codex.png` | Existing product asset from the official ChatGPT.app distribution's `icon-codex-light.png`; see `assets/Codex-NOTICE.txt`. Product identity: [OpenAI Codex](https://openai.com/codex/). |
 | Claude | `assets/claude.svg` | [Official Claude favicon](https://claude.ai/favicon.svg). |
 | Grok | `assets/grok.svg` | [Official Grok favicon](https://grok.com/images/favicon.svg), identified by the [Grok website](https://grok.com/). Only an empty exported foreignObject blur layer was removed; brand paths, proportions and colors are retained. |
+| Antigravity | `assets/antigravity.svg` | Unmodified [official Antigravity favicon](https://antigravity.google/favicon.svg), declared by the [Google Antigravity website](https://antigravity.google/). See `assets/Antigravity-NOTICE.txt`. |
 | Devin | `assets/devin.png` | [Official Devin PWA icon](https://app.devin.ai/assets/pwa/pwa-icon-192.png), identified by the [Devin application](https://app.devin.ai/) apple-touch-icon declaration. |
 
 Trademarks and images belong to their respective owners. Their use identifies

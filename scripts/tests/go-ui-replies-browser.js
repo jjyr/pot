@@ -65,7 +65,8 @@ async page=>{
  assert(await page.locator('.waiting-dots i').first().evaluate(node=>getComputedStyle(node).animationName)==='none','Reduced Motion disables thinking animation');
  await page.emulateMedia({reducedMotion:'no-preference'});
  await page.evaluate(()=>replyFixture.status('offline'));
- await page.getByText('连接中断，正在重新连接…',{exact:true}).waitFor();
+ await page.locator('.connection-status').getByText('实时连接已中断，正在重新连接…',{exact:true}).waitFor();
+ await page.locator('.reply-bubble .reply-status').waitFor({state:'hidden'});
  assert(await page.locator('.reply-bubble.is-failed').count()===0,'An interrupted connection does not declare the reply failed');
  assert(await page.evaluate(()=>replyFixture.requests.length)===1,'Connection failure never resends input');
  await page.evaluate(()=>replyFixture.status('connected'));
@@ -82,7 +83,8 @@ async page=>{
   // window must replace both subscriptions and fetch the terminal snapshot.
   replyFixture.snapshot={...replyFixture.snapshot,cursor:String(Number(replyFixture.snapshot.cursor)+1),messages:[replyFixture.input,{id:'reply',reply_to:'input',role:'assistant',status:'complete',text:'切回后同步完成'}],running:false,turn_id:null};
  });
- await page.getByText('连接中断，正在重新连接…',{exact:true}).waitFor();
+ await page.locator('.connection-status').getByText('实时连接已中断，正在重新连接…',{exact:true}).waitFor();
+ await page.locator('.reply-bubble .reply-status').waitFor({state:'hidden'});
  await page.evaluate(()=>{window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));});
  await page.getByText('切回后同步完成',{exact:true}).waitFor();
  assert(await page.evaluate(()=>replyFixture.subscriptions===replyFixture.beforeResume.subscriptions+1&&replyFixture.changeSubscriptions===replyFixture.beforeResume.changes+1),'Returning renews both streams once for paired lifecycle events');

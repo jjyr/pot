@@ -3,6 +3,8 @@ import {icon} from './icons.mjs';
 import {reconcile} from './reconcile.mjs';
 import {taskElapsed} from './task-time.mjs';
 import {translate} from '../locales/messages.mjs';
+import {taskIdentities} from '../state/task-identity.mjs';
+import {taskIdentityMark,taskIdentityShort} from './task-identity.mjs';
 
 const node=(tag,className='',text)=>{const value=document.createElement(tag);value.className=className;if(text!==undefined)value.textContent=text;return value;};
 const taskKey=task=>JSON.stringify([task._space_id,task.assistant_id,task.id]);
@@ -17,7 +19,8 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
     let state=states.get(scope);
     if(!tasks.length){const changed=current===scope&&signature!=='';states.delete(scope);element.remove();current=null;signature='';return changed;}
     if(!state){state={expanded:false,order:[]};states.set(scope,state);}
-    const nextSignature=JSON.stringify([scope,locale(),state.expanded,tasks.map(task=>[taskKey(task),task.title,task.phase,task.started_at_ms,task.agent_link,needsApproval(task.id,task.phase)])]);
+    taskIdentities.register(tasks);
+    const nextSignature=JSON.stringify([scope,locale(),state.expanded,tasks.map(task=>[taskKey(task),task.address,taskIdentities.short(task),task.title,task.phase,task.started_at_ms,task.agent_link,needsApproval(task.id,task.phase)])]);
     if(current===scope&&signature===nextSignature)return false;
     signature=nextSignature;
     const byID=new Map(tasks.map(task=>[taskKey(task),task]));
@@ -32,19 +35,24 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
     heading.id=`${id}-heading`;heading.dataset.scrollAnchor='background-tasks-heading';
     const list=node('div','background-task-list');list.id=id;
     for(const task of state.expanded?ordered:ordered.slice(0,3)){
-      const open=node('button','background-task');open.type='button';open.dataset.viewKey=taskKey(task);open.dataset.scrollAnchor=`task:${taskKey(task)}`;open.title=task.title;
+      const open=node('button','background-task');open.type='button';open.dataset.viewKey=taskKey(task);open.dataset.scrollAnchor=`task:${taskKey(task)}`;open.title=[task.title,task.address?.node_id,task.address?.agent_id].filter(Boolean).join(' · ');
       const waiting=needsApproval(task.id,task.phase),meta=node('span','background-task-meta');open.classList.toggle('needs-approval',waiting);
-      open.append(node('span','task-activity-dot'),node('span','background-task-title',task.title));
-      const status=waiting?'tool.waiting_approval':task.phase==='queued'?'tasks.queued':task.phase==='waiting'?'tasks.waiting':'tool.running';
-      const source=taskAgentSource(task,locale());if(source)meta.append(source);
-      meta.append(node('span','background-task-status',t(status)));
+      open.append(taskIdentityMark(task),taskIdentityShort(task,t('tool.messageTaskIDMissing')),node('span','background-task-title',task.title));
+      const description=node('span','background-task-description visually-hidden');
+      description.id=`${id}-description-${list.children.length}`;
+      open.setAttribute('aria-describedby',description.id);
+      if(task.address?.node_id)description.append(node('span','',t('tool.messageFromSource').replace('{source}',task.address.node_id)+' · '));
+      const status=waiting?'tool.waiting_approval':task.phase==='queued'?'tasks.queued':task.phase==='waiting'?'tasks.waiting':task.phase==='complete'?'tasks.complete':task.phase==='failed'?'tasks.failed':'tool.running';
+      const source=taskAgentSource(task,locale());if(source)description.append(node('span','',source.getAttribute('aria-label')+' · '));
+      const activity=node('span','task-activity-dot');activity.setAttribute('aria-hidden','true');activity.dataset.phase=waiting?'waiting_approval':task.phase;
+      meta.append(activity,node('span','background-task-status',t(status)));
       const time=taskElapsed(task.started_at_ms,Date.now(),locale());
       if(time){
         const separator=node('span','','·');separator.setAttribute('aria-hidden','true');
         const elapsed=node('span','background-task-elapsed',time);elapsed.dataset.startedAt=task.started_at_ms;elapsed.setAttribute('role','timer');elapsed.setAttribute('aria-live','off');elapsed.title=t('tasks.elapsedDescription');
-        meta.append(separator,elapsed);
+        description.append(separator,elapsed);
       }
-      open.append(meta);open.onclick=()=>onOpen(task);list.append(open);
+      open.append(meta,description);open.onclick=()=>onOpen(task);list.append(open);
     }
     projection.append(heading,list);
     if(tasks.length>3){
@@ -58,5 +66,5 @@ export function createBackgroundTasks({locale,onOpen,onToggle}) {
     if(current!==scope)element.replaceChildren();current=scope;
     reconcile(element,projection);return true;
   }
-  return {element,update};
+  return {element,update,close(){}};
 }

@@ -1,0 +1,8 @@
+[
+ {"name":"砂金","light":{"bg":"#f0e9d9","border":"#b4a27c","ink":"#756035"},"dark":{"bg":"#39352b","border":"#70654b","ink":"#d8c59b"}},
+ {"name":"雾蓝","light":{"bg":"#e5ebf1","border":"#9aafc1","ink":"#46637d"},"dark":{"bg":"#2a343e","border":"#526b80","ink":"#adc7dd"}},
+ {"name":"灰紫","light":{"bg":"#ece7f1","border":"#af9bc0","ink":"#6b557f"},"dark":{"bg":"#34303e","border":"#695980","ink":"#c9b7dc"}},
+ {"name":"可可","light":{"bg":"#eee6df","border":"#bba18e","ink":"#765b49"},"dark":{"bg":"#39312c","border":"#78604e","ink":"#d8baa4"}},
+ {"name":"岩灰","light":{"bg":"#e6e9ea","border":"#9cabad","ink":"#53666c"},"dark":{"bg":"#2f3638","border":"#617479","ink":"#b5c8cc"}},
+ {"name":"藕紫","light":{"bg":"#efe6ec","border":"#b89daf","ink":"#795d70"},"dark":{"bg":"#3b3039","border":"#7e6275","ink":"#d7b9cd"}}
+]

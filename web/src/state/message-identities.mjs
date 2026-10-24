@@ -1,4 +1,5 @@
 import {communicationArgs} from './communication.mjs';
+import {taskIdentities} from './task-identity.mjs';
 
 // Presentation only: never use directory names or synthetic UI IDs for routing.
 const presentations=new WeakMap();
@@ -12,8 +13,10 @@ export function messageAddresses(tool){
 export function messageIdentities(client){
   if(presentations.has(client))return presentations.get(client);
   let directory,epoch,index=new Map();
-  const cache=new Map();
-  const presentation={actor(scope){
+  const cache=new Map(),taskProfiles=new WeakMap();
+  const presentation={rememberTasks(items){
+    taskIdentities.register(items);
+  },actor(scope){
     const control=(client.spaces||[]).find(item=>item.id===scope?.space)?.control_id||scope?.space;
     const item=(client.assistants||[]).find(item=>item.id===scope?.owner&&item.control_id===control);
     return item?.origin?{node_id:item.origin.node_id,kind:'assistant',agent_id:item.origin.assistant_id}:item?.control_id&&item?.id?{node_id:item.control_id,kind:'assistant',agent_id:item.id}:undefined;
@@ -33,6 +36,11 @@ export function messageIdentities(client){
         cache.delete(key);cache.set(key,profile);
         if(cache.size>512)cache.delete(cache.keys().next().value);
       }
+    }
+    if(address?.kind==='task'){
+      const task=taskIdentities.resolve(address);if(!task)return undefined;
+      if(!taskProfiles.has(task))taskProfiles.set(task,{name:task.title,task});
+      return taskProfiles.get(task);
     }
     return address?.kind==='assistant'?(index.get(addressKey(address))||cache.get(addressKey(address))):undefined;
   }};

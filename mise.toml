@@ -148,6 +148,10 @@ run = ["node --test plugins/github/*.test.mjs", "go test -race ./internal/assist
 description = "Verify shared product translation completeness"
 run = "python scripts/tests/localization.py"
 
+[tasks."test:task-communication"]
+description = "Verify task mail grouping and shared display identities"
+run = ["node scripts/tests/task-identity.mjs", "node scripts/tests/task-communication.mjs", "node scripts/tests/go-ui-communication.mjs", "node scripts/tests/go-ui-message-identities.mjs"]
+
 [tasks."test:eval"]
 description = "Run deterministic CLI contracts without credentials or model calls"
 run = """
