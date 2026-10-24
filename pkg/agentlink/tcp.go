@@ -186,7 +186,7 @@ func (s *Service) Attach(session *peer.Session) {
 // Caller holds mu. Pending handshakes do not own a persisted connection yet.
 func (s *Service) trackPending(session *peer.Session, lifetime time.Duration) {
 	s.pendingSessions[session] = true
-	timer := time.AfterFunc(lifetime, session.Close)
+	timer := time.AfterFunc(lifetime, func() { s.expirePending(session) })
 	s.pendingWG.Add(1)
 	go func() {
 		defer s.pendingWG.Done()
@@ -197,6 +197,19 @@ func (s *Service) trackPending(session *peer.Session, lifetime time.Duration) {
 		s.mu.Unlock()
 	}()
 }
+
+// Promotion removes the pending marker. Its handshake timeout must then leave
+// the selected, long-lived session alone.
+func (s *Service) expirePending(session *peer.Session) {
+	s.mu.Lock()
+	pending := s.pendingSessions[session]
+	delete(s.pendingSessions, session)
+	s.mu.Unlock()
+	if pending {
+		session.Close()
+	}
+}
+
 func (s *Service) forwarder(c Connection) (*connectionForwarder, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

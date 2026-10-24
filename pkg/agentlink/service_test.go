@@ -659,3 +659,20 @@ func TestForwarderRejectedColdDialReturnsErrorWithoutTypedNilTransport(t *testin
 		t.Fatal(err)
 	}
 }
+
+func TestPromotedPairSessionSurvivesPendingHandshakeExpiry(t *testing.T) {
+	a, b := newFixture(t, "expiry-a"), newFixture(t, "expiry-b")
+	c := connect(t, a, b)
+	session := b.service.session(c.ID)
+	if session == nil {
+		t.Fatal("pair was not promoted")
+	}
+	// Invoke the actual expiry callback deterministically after promotion.
+	b.service.expirePending(session)
+	if _, err := session.Call(t.Context(), peer.Request{ID: "after-handshake-expiry", Method: "identity", Params: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal("pending timer retired an authenticated session", err)
+	}
+	if b.service.session(c.ID) != session {
+		t.Fatal("expiry replaced the promoted session")
+	}
+}
