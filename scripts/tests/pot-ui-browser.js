@@ -1,4 +1,4 @@
-// Playwright CLI run-code expression. Operates only on the disposable Go preview.
+// Playwright CLI run-code expression. Operates only on the disposable Pot preview.
 // Screenshots stay outside the repository; they are evidence, not a parity claim.
 async page => {
   const base = 'http://127.0.0.1:17702';

@@ -80,8 +80,8 @@ with tempfile.TemporaryDirectory(prefix=".pot-app-", dir=BUILD) as temporary:
             {
                 # Keep the preview's OS/WebView preferences on their existing identity.
                 "CFBundleIdentifier": "dev.pot.app" if release else "dev.pot.preview",
-                "CFBundleName": "Pot" if release else "Pot Go",
-                "CFBundleDisplayName": "Pot" if release else "Pot Go",
+                "CFBundleName": "Pot",
+                "CFBundleDisplayName": "Pot",
                 "CFBundleExecutable": binary.name,
                 "CFBundlePackageType": "APPL",
                 "CFBundleShortVersionString": version,
