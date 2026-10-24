@@ -559,7 +559,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     const current=()=>gate.current(token)&&taskView===view;
     const mutate=async(suffix,body)=>{if(!current())return;await request(path+suffix,{...fileScope,method:'POST',body});if(current())await refreshTaskEvents(view);};
     const ui=createTaskConversation({root,task,record,locale,client,scope:fileScope,draft:taskDrafts.get(draftKey)||'',onDraft:text=>{taskDraftVersions.set(draftKey,(taskDraftVersions.get(draftKey)||0)+1);if(text)taskDrafts.set(draftKey,text);else taskDrafts.delete(draftKey);},
-      onOpenTask:child=>taskDetail({...child,_space_id:fileScope.space,assistant_id:fileScope.owner}),
+      onOpenTask:child=>taskDetail({...child,_space_id:child._space_id||fileScope.space,assistant_id:child.assistant_id||fileScope.owner}),
       assistantName:(client.assistants||[]).find(item=>item.id===task.assistant_id&&item.space_id===task._space_id)?.name||task.assistant_id,
       downloadFile:({task:id,path})=>client.downloadFile(id,path,fileScope),toolMemory,approvalFor:tool=>approvalFor(tool,task.id),onDecision:decideApproval,
       onSend:async text=>{

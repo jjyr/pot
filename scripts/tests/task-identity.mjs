@@ -17,6 +17,8 @@ const prefix=createTaskIdentityRegistry();prefix.register([task('abcd'),task('ab
 
 assert.equal(r.resolve(a.address).id,'catalogue-hash');r.register([a.address]);assert.equal(r.resolve(a.address).id,'catalogue-hash');
 const retained=r.resolve(a.address);r.register([{...a,phase:'running'}]);assert.equal(r.resolve(a.address),retained,'phase-only updates retain the display profile');
+r.register([{...a,_space_id:'catalogue-space',assistant_id:'catalogue-owner'}]);r.register([a]);
+assert.equal(r.resolve(a.address)._space_id,'catalogue-space');assert.equal(r.resolve(a.address).assistant_id,'catalogue-owner','unscoped display refreshes retain confirmed navigation scope');
 assert.equal(r.resolve({node_id:'unknown',kind:'task',agent_id:'missing'}),undefined);
 
 for(const address of [{node_id:{},kind:'task',agent_id:'id'},{node_id:'node',kind:'task',agent_id:123}]){assert.equal(addressKey(address),null);assert.equal(r.short(address),'');assert.equal(taskColorIndex(address),-1);}

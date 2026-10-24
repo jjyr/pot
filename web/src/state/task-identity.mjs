@@ -30,8 +30,8 @@ export function createTaskIdentityRegistry() {
       const address = value?.kind === 'task' ? value : taskAddress(value), key = addressKey(address);
       if (key && address.kind === 'task' && !entries.has(key)) { entries.set(key, {id: address.agent_id, node: address.node_id, length: 4, sourceLength: 0}); added = true; }
       if (key && value?.id && taskAddress(value)) {
-        const previous=records.get(key),title=value.title||'';
-        records.delete(key); records.set(key, previous?.id===value.id&&previous.title===title?previous:{id: value.id, address: {...address}, title});
+        const previous=records.get(key),title=value.title||'',space=value._space_id??previous?._space_id,owner=value.assistant_id??previous?.assistant_id;
+        records.delete(key); records.set(key, previous?.id===value.id&&previous.title===title&&previous._space_id===space&&previous.assistant_id===owner?previous:{id: value.id, address: {...address}, title, _space_id:space, assistant_id:owner});
         if (records.size > 512) records.delete(records.keys().next().value);
       }
     }
