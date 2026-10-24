@@ -416,7 +416,7 @@ func (a *Agent) run(ctx context.Context, execution core.ExecutionContext, thread
 				return err
 			}
 			display := value
-			if err := emit(core.Update{Type: "tool_finished", ID: call.ID, Name: call.Name, Result: display, Failed: failedResult(value)}); err != nil {
+			if err := emit(core.Update{Type: "tool_finished", ID: call.ID, Name: call.Name, Result: display, Failed: ToolResultFailed(value)}); err != nil {
 				return err
 			}
 		}
@@ -536,7 +536,12 @@ func sameJSON(a, b json.RawMessage) bool {
 	right, err := core.CanonicalJSON(b)
 	return err == nil && string(left) == string(right)
 }
-func failedResult(raw json.RawMessage) bool {
+
+// ToolResultFailed classifies a tool receipt using the Agent's outcome semantics.
+// Callers that meter tool results should use the same classification as events.
+// A failed receipt does not by itself indicate a product defect or a unique
+// failed process; running receipts without a failure marker are not failures.
+func ToolResultFailed(raw json.RawMessage) bool {
 	var result map[string]any
 	if json.Unmarshal(raw, &result) != nil {
 		return true
