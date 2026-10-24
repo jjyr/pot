@@ -45,7 +45,13 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     getItemKey:index=>rows[index].viewKey,
     estimateSize:index=>heights.get(rows[index].viewKey)??(rows[index].role==='user'?120:rows[index].role==='tool'?70:180),
     observeElementRect(instance,callback){reportRect=callback;return observeElementRect(instance,callback);},
-    observeElementOffset,
+    observeElementOffset(instance,callback){
+      return observeElementOffset(instance,(offset,scrolling)=>{
+        // Capture reader movement before TanStack commits a different DOM range.
+        if(!nested)reading?.observeScroll();
+        callback(offset,scrolling);
+      });
+    },
     indexAttribute:'data-virtual-index', measureElement:sizeOf,
     useAnimationFrameWithResizeObserver:true,
     rangeExtractor:pinnedIndexes, overscan:12,
@@ -71,13 +77,18 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
   });
   if (nested) virtualizer.shouldAdjustScrollPositionOnItemSizeChange=()=>false;
   const unmount = virtualizer._didMount();
-  const unbindScroll = nested?undefined:reading?.bindScroll(({mode,top})=>{
-    if(closed||suspended||reading.touchScrolling)return;
-    if(mode==='latest'){
-      if(scroller.scrollHeight-scroller.clientHeight-scroller.scrollTop>.5)virtualizer.scrollToEnd();
-    }else if(Math.abs(top-scroller.scrollTop)>.5)virtualizer.scrollToOffset(top);
-  });
   const cancel = ()=>{virtualizer.cancelScroll();target=null;};
+  const unbindScroll = nested?undefined:reading?.bindScroll({
+    get scrolling(){return virtualizer.isTouchScrolling;},
+    get moving(){return virtualizer.isScrolling;},
+    cancel,
+    project({mode,top,explicit}){
+      if(closed||suspended||!explicit&&virtualizer.isTouchScrolling)return;
+      if(mode==='latest'){
+        if(scroller.scrollHeight-scroller.clientHeight-scroller.scrollTop>.5)virtualizer.scrollToEnd();
+      }else if(Math.abs(top-scroller.scrollTop)>.5)virtualizer.scrollToOffset(top);
+    },
+  });
   const gestures=nested?[]:['wheel','touchstart','pointerdown','keydown'];
   for(const name of gestures)scroller.addEventListener(name,cancel,{passive:true});
 
@@ -129,7 +140,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     const nextWidth=host.clientWidth;
     const rect={width:scroller.clientWidth,height:scroller.clientHeight};
     if(virtualizer.scrollRect?.width!==rect.width||virtualizer.scrollRect?.height!==rect.height)reportRect?.(rect);
-    if(width&&nextWidth&&width!==nextWidth){marginsForMounted();virtualizer.measure();for(const record of mounted.values())pending.add(record);}
+    if(width&&nextWidth&&width!==nextWidth){if(!nested)reading?.resize();marginsForMounted();virtualizer.measure();for(const record of mounted.values())pending.add(record);}
     if(nextWidth)width=nextWidth;
     if(rows!==next){
       indexesByKey.clear();indexesByID.clear();
@@ -137,7 +148,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     }
     if(rows!==next||Math.abs(nextMargin-margin)>.5){
       const list=next; margin=nextMargin;
-      virtualizer.setOptions({...virtualizer.options,count:list.length,getItemKey:index=>list[index].viewKey,estimateSize:index=>heights.get(list[index].viewKey)??(list[index].role==='user'?120:list[index].role==='tool'?70:180),rangeExtractor:range=>pinnedIndexes(range),scrollMargin:margin,followOnAppend:!nested&&(!reading||reading.following&&!reading.touchScrolling)});
+      virtualizer.setOptions({...virtualizer.options,count:list.length,getItemKey:index=>list[index].viewKey,estimateSize:index=>heights.get(list[index].viewKey)??(list[index].role==='user'?120:list[index].role==='tool'?70:180),rangeExtractor:range=>pinnedIndexes(range),scrollMargin:margin,followOnAppend:!nested&&(!reading||reading.following&&!virtualizer.isTouchScrolling)});
       rows=next;
       const available=new Set(rows.map(item=>item.viewKey));
       for(const [key,record]of mounted)if(!available.has(key)){virtualizer.observer.unobserve(record.row);virtualizer.elementsCache.delete(key);mounted.delete(key);pending.delete(record);dispose(record);}
@@ -152,7 +163,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     try{
       if(!next.length)virtualizer.cancelScroll();
       configure(next);virtualizer._willUpdate();
-      if(options.target&&!reading?.touchScrolling){
+      if(options.target&&!virtualizer.isTouchScrolling){
         target=options.target;
         virtualizer.setOptions({...virtualizer.options,rangeExtractor:range=>pinnedIndexes(range)});
         if(target.end&&!nested&&!reading)virtualizer.scrollToEnd();
@@ -164,6 +175,7 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       if(changed||dirty){dirty=false;draw();measure();}
       virtualizer._willUpdate();
       restore?.();
+      if(!nested)reading?.commit();
     }finally{updating=false;}
   }
   return {set:update,measure,layout:update,cancelScroll:cancel,suspend(){

@@ -315,6 +315,11 @@ Windows and Linux are supported through the Web UI. Mobile browsers do not get
 this introduction or a misleading authorization button: the current constructor
 send path does not implement Android Service Worker delivery or verified iOS Home
 Screen delivery. Settings explains the specific environment limitation.
+Browser delivery checks permission and the local switch before opening the
+notification deduplication database. Unsupported mobile clients do not access
+that store. Storage failures preserve request diagnostics, always reject with an
+error, and remain handled by the notification coordinator rather than rejecting
+the assistant directory refresh.
 The macOS App uses Wails'
 UserNotifications service from a bundled, signed App, with the official
 `UNNotificationSettings.authorizationStatus` for permission presentation. Web and
