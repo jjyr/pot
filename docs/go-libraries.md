@@ -42,9 +42,14 @@ Agent Link owners stop its `Run` loop and close incoming listeners before callin
 `agentlink.Service.Close`, then release their database and secret-store handles.
 Close fences session attachment and connectivity-state callbacks with the service
 lock, so a late session closure cannot write SQLite after host shutdown. It does
-not cancel backend tasks or replay business operations. Concurrent connection
-requests share one authenticated session instead of replacing each other's newly
-opened transport; pause and shutdown serialize with pending dials.
+not cancel backend tasks or replay business operations. Each connection owns a
+request forwarder with 32 business calls in flight and 64 waiting positions.
+The forwarder shares one multiplexed session and one bounded dial among callers;
+different connections progress independently. Queued cancellation prevents sending,
+while a sent call retains the transport's possibly uncertain result. Disconnect,
+inbound attachment and dial completion are serialized by the forwarder; generation
+checks discard late dials. Close joins owned dial/call workers and admitted RPC
+handlers before returning. Session.Done alone does not join handlers.
 
 ## Third-party integrations
 

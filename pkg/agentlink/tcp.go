@@ -31,6 +31,10 @@ func decodeJSON(data []byte, value any) error {
 // Authorize is mounted in the host's shared peer.Server. It runs only after the
 // TLS transport has proved possession of the remote host's Ed25519 key.
 func (s *Service) Authorize(ctx context.Context, remote peer.Identity, service string, raw json.RawMessage) (peer.Handler, error) {
+	if !s.enterRPC() {
+		return nil, ErrUnavailable
+	}
+	defer s.rpcWG.Done()
 	if service != ServiceName || remote.Validate() != nil {
 		return nil, ErrUnauthorized
 	}
@@ -80,7 +84,7 @@ func (s *Service) authenticate(ctx context.Context, id string, remote peer.Ident
 }
 
 func (s *Service) handler(id string, remote peer.Identity) peer.Handler {
-	return func(ctx context.Context, request peer.Request) (json.RawMessage, error) {
+	return s.protectHandler(func(ctx context.Context, request peer.Request) (json.RawMessage, error) {
 		connection, err := s.authenticate(ctx, id, remote)
 		if err != nil && !(errors.Is(err, ErrRevoked) && request.Method == "revoke") {
 			return nil, err
@@ -119,7 +123,7 @@ func (s *Service) handler(id string, remote peer.Identity) peer.Handler {
 			return nil, err
 		}
 		return json.Marshal(result)
-	}
+	})
 }
 
 // Attach registers a successfully authenticated, long-lived session. The host
@@ -130,10 +134,7 @@ func (s *Service) Attach(session *peer.Session) {
 	}
 	var auth sessionAuth
 	if decodeJSON(session.Auth(), &auth) != nil {
-		return
-	}
-	if auth.Preview != nil {
-		time.AfterFunc(5*time.Second, session.Close)
+		session.Close()
 		return
 	}
 	s.mu.Lock()
@@ -142,76 +143,180 @@ func (s *Service) Attach(session *peer.Session) {
 		session.Close()
 		return
 	}
-	connection, err := s.Get(context.Background(), auth.ID)
-	if errors.Is(err, ErrNotFound) && auth.Pair != nil {
-		s.pendingSessions[session] = true
+	if auth.Preview != nil {
+		s.trackPending(session, 5*time.Second)
 		s.mu.Unlock()
-		time.AfterFunc(10*time.Second, func() {
-			s.mu.Lock()
-			pending := s.pendingSessions[session]
-			delete(s.pendingSessions, session)
-			s.mu.Unlock()
-			if pending {
-				session.Close()
-			}
-		})
-		go func() { <-session.Done(); s.mu.Lock(); delete(s.pendingSessions, session); s.mu.Unlock() }()
 		return
 	}
-	if err != nil || connection.PeerHost != session.Remote() {
+	connection, err := s.Get(context.Background(), auth.ID)
+	if errors.Is(err, ErrNotFound) && auth.Pair != nil {
+		s.trackPending(session, 10*time.Second)
+		s.mu.Unlock()
+		return
+	}
+	if err != nil || connection.PeerHost != session.Remote() || connection.State == "disconnected" || connection.State == "revoked" {
 		s.mu.Unlock()
 		session.Close()
 		return
 	}
 	delete(s.pendingSessions, session)
-	previous := s.sessions[auth.ID]
-	s.sessions[auth.ID] = session
 	s.mu.Unlock()
-	if previous != nil && previous != session {
-		previous.Close()
+	f, err := s.forwarder(connection)
+	if err != nil {
+		session.Close()
+		return
 	}
-	go func() {
-		<-session.Done()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+	_ = f.transition(s.ctx, nil, session, func() error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if s.sessions[auth.ID] != session {
+		if s.closed {
+			return ErrUnavailable
+		}
+		current, err := s.Get(s.ctx, auth.ID)
+		if err != nil {
+			return err
+		}
+		if current.State == "disconnected" || current.State == "revoked" || current.PeerHost != session.Remote() {
+			return ErrDisconnected
+		}
+		return nil
+	})
+}
+
+// Caller holds mu. Pending handshakes do not own a persisted connection yet.
+func (s *Service) trackPending(session *peer.Session, lifetime time.Duration) {
+	s.pendingSessions[session] = true
+	timer := time.AfterFunc(lifetime, session.Close)
+	s.pendingWG.Add(1)
+	go func() {
+		defer s.pendingWG.Done()
+		<-session.Done()
+		timer.Stop()
+		s.mu.Lock()
+		delete(s.pendingSessions, session)
+		s.mu.Unlock()
+	}()
+}
+func (s *Service) forwarder(c Connection) (*connectionForwarder, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, ErrUnavailable
+	}
+	if f := s.forwarders[c.ID]; f != nil {
+		return f, nil
+	}
+	f := newConnectionForwarder(s.ctx, func(ctx context.Context) (connectionTransport, error) {
+		session, err := s.dialSession(ctx, c)
+		if err != nil {
+			return nil, err
+		}
+		return session, nil
+	}, func(transport connectionTransport) {
+		session := transport.(*peer.Session)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.closed {
+			session.Close()
 			return
 		}
-		delete(s.sessions, auth.ID)
+		s.sessions[c.ID] = session
+	}, func(transport connectionTransport) {
+		session := transport.(*peer.Session)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.sessions[c.ID] != session {
+			return
+		}
+		delete(s.sessions, c.ID)
 		if s.closed {
 			return
 		}
-		current, err := s.Get(ctx, auth.ID)
+		current, err := s.Get(context.Background(), c.ID)
 		if err == nil && current.State != "revoked" && current.State != "disconnected" {
 			current.State = "offline"
 			current.LastError = ErrUnavailable.Error()
-			_ = s.update(ctx, current)
+			_ = s.update(context.Background(), current)
 		}
-	}()
+	})
+	s.forwarders[c.ID] = f
+	s.forwardWG.Add(1)
+	go func() { defer s.forwardWG.Done(); <-f.done }()
+	return f, nil
+}
+func (s *Service) callConnection(ctx context.Context, c Connection, method string, input, output any) error {
+	control := method == "identity" || method == "exchange" || method == "revoke"
+	if c.State == "disconnected" {
+		return ErrDisconnected
+	}
+	if c.State == "revoked" && method != "revoke" {
+		return ErrRevoked
+	}
+	data, err := json.Marshal(input)
+	if err != nil {
+		return err
+	}
+	if len(data) > peer.MaxPayload {
+		return ErrInvalid
+	}
+	f, err := s.forwarder(c)
+	if err != nil {
+		return err
+	}
+	result, err := f.call(ctx, peer.Request{ID: newID(), Method: method, Params: data}, control)
+	if err != nil {
+		return transportError(err)
+	}
+	if output != nil && decodeJSON(result.data, output) != nil {
+		return ErrConflict
+	}
+	return nil
 }
 
-func (s *Service) ensureSession(ctx context.Context, connection Connection) (*peer.Session, error) {
-	// Concurrent directory, business and background sync calls must share a dial.
-	// Otherwise Attach closes a session another caller has just started using.
-	s.dialMu.Lock()
-	defer s.dialMu.Unlock()
-	if session := s.session(connection.ID); session != nil {
-		return session, nil
+// Only transport integration tests inspect a connection directly. Production
+// callers submit typed requests through callConnection.
+func (s *Service) ensureSession(ctx context.Context, c Connection) (*peer.Session, error) {
+	f, err := s.forwarder(c)
+	if err != nil {
+		return nil, err
+	}
+	result, err := f.call(ctx, peer.Request{}, false)
+	if err != nil {
+		return nil, err
+	}
+	return result.session.(*peer.Session), nil
+}
+func (s *Service) dialSession(ctx context.Context, connection Connection) (*peer.Session, error) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil, ErrUnavailable
+	}
+	current, err := s.Get(ctx, connection.ID)
+	if err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	connection = current
+	if connection.State == "disconnected" {
+		s.mu.Unlock()
+		return nil, ErrDisconnected
 	}
 	if connection.SchemaVersion != 5 || connection.PeerHost.Validate() != nil {
+		s.mu.Unlock()
 		return nil, ErrReconnectRequired
 	}
 	if connection.Endpoint == "" {
+		s.mu.Unlock()
 		return nil, ErrUnavailable
 	}
 	auth := sessionAuth{ID: connection.ID}
 	var originalPair *pairRequest
 	if connection.LastSeen == nil {
-		credential, err := s.secret(ctx, connection.ID)
-		if err != nil {
-			return nil, err
+		credential, e := s.secret(ctx, connection.ID)
+		if e != nil {
+			s.mu.Unlock()
+			return nil, e
 		}
 		originalPair = credential.Pair
 		if originalPair != nil {
@@ -220,10 +325,9 @@ func (s *Service) ensureSession(ctx context.Context, connection Connection) (*pe
 			auth.Pair = &metadata
 		}
 	}
+	s.mu.Unlock()
 	raw, _ := json.Marshal(auth)
-	dialCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	session, err := peer.Dial(dialCtx, connection.Endpoint, peer.DialOptions{Identity: s.options.HostIdentity, PrivateKey: s.options.HostKey, Expected: &connection.PeerHost, Service: ServiceName, Auth: raw, Handler: s.handler(connection.ID, connection.PeerHost)})
+	session, err := peer.Dial(ctx, connection.Endpoint, peer.DialOptions{Identity: s.options.HostIdentity, PrivateKey: s.options.HostKey, Expected: &connection.PeerHost, Service: ServiceName, Auth: raw, Handler: s.handler(connection.ID, connection.PeerHost), Context: s.ctx})
 	if err != nil {
 		return nil, transportError(err)
 	}
@@ -231,7 +335,7 @@ func (s *Service) ensureSession(ctx context.Context, connection Connection) (*pe
 		var accepted Connection
 		err = s.call(ctx, session, "pair", struct {
 			Code string `json:"code"`
-		}{Code: originalPair.Code}, &accepted)
+		}{originalPair.Code}, &accepted)
 		if err == nil && (accepted.ID != connection.ID || !equalIdentity(accepted.Local, connection.Peer) || !equalIdentity(accepted.Peer, connection.Local) || accepted.PeerHost != s.options.HostIdentity) {
 			err = ErrConflict
 		}
@@ -240,7 +344,6 @@ func (s *Service) ensureSession(ctx context.Context, connection Connection) (*pe
 			return nil, err
 		}
 	}
-	s.Attach(session)
 	return session, nil
 }
 
@@ -262,6 +365,12 @@ func (s *Service) call(ctx context.Context, session *peer.Session, method string
 }
 
 func transportError(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	if errors.Is(err, peer.ErrUncertain) {
+		return err
+	}
 	if errors.Is(err, peer.ErrUnauthorized) {
 		return ErrUnauthorized
 	}
@@ -275,8 +384,11 @@ func transportError(err error) error {
 
 func (s *Service) session(id string) *peer.Session {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
 	session := s.sessions[id]
-	s.mu.Unlock()
 	if session != nil {
 		select {
 		case <-session.Done():
@@ -287,30 +399,67 @@ func (s *Service) session(id string) *peer.Session {
 	return nil
 }
 
-// Close fences session attachments and their persisted connectivity callbacks.
-// Stop Run and close incoming listeners first, then Close before releasing the DB.
-// Backend work remains owned by the host and is not cancelled by connectivity.
+// Close fences persisted callbacks and joins owned request/dial workers before
+// the caller releases databases. Hosts stop Run and incoming listeners first.
 func (s *Service) Close() {
-	s.dialMu.Lock()
-	defer s.dialMu.Unlock()
-	s.mu.Lock()
-	s.closed = true
-	s.mu.Unlock()
-	s.closeSessions()
+	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		s.closed = true
+		pending := make([]*peer.Session, 0, len(s.pendingSessions))
+		for session := range s.pendingSessions {
+			pending = append(pending, session)
+		}
+		s.mu.Unlock()
+		s.cancel()
+		for _, session := range pending {
+			session.Close()
+		}
+		s.forwardWG.Wait()
+		s.pendingWG.Wait()
+		s.rpcWG.Wait()
+	})
 }
-
 func (s *Service) closeSessions() {
 	s.mu.Lock()
-	sessions := make([]*peer.Session, 0, len(s.sessions))
-	for _, session := range s.sessions {
-		sessions = append(sessions, session)
+	values := make([]*connectionForwarder, 0, len(s.forwarders))
+	for _, f := range s.forwarders {
+		values = append(values, f)
 	}
+	pending := make([]*peer.Session, 0, len(s.pendingSessions))
 	for session := range s.pendingSessions {
-		sessions = append(sessions, session)
+		pending = append(pending, session)
 	}
 	s.mu.Unlock()
-	for _, session := range sessions {
+	for _, f := range values {
+		_ = f.change(context.Background(), ErrUnavailable, nil)
+	}
+	for _, session := range pending {
 		session.Close()
+	}
+}
+func (s *Service) changeConnection(ctx context.Context, c Connection, reason error) error {
+	f, err := s.forwarder(c)
+	if err != nil {
+		return err
+	}
+	return f.change(ctx, reason, nil)
+}
+func (s *Service) enterRPC() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	s.rpcWG.Add(1)
+	return true
+}
+func (s *Service) protectHandler(handler peer.Handler) peer.Handler {
+	return func(ctx context.Context, request peer.Request) (json.RawMessage, error) {
+		if !s.enterRPC() {
+			return nil, ErrUnavailable
+		}
+		defer s.rpcWG.Done()
+		return handler(ctx, request)
 	}
 }
 
@@ -320,35 +469,57 @@ const (
 	controlAdmission admissionKind = iota
 	businessAdmission
 
-	maxConcurrentBusinessRequests = 5
-	maxRequestsPerMinute          = 180
+	maxConcurrentBusinessRequests = 32
+	maxPreviewRequestsPerMinute   = 180
 )
 
 func (s *Service) admit(id string, kind admissionKind) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := time.Now()
-	value := s.rates[id]
-	if now.Sub(value.At) > time.Minute {
-		value.At = now
-		value.Count = 0
-	}
+	value := s.admissions[id]
 	limit := 1
 	if kind == businessAdmission {
 		limit = maxConcurrentBusinessRequests
 	}
-	if value.Count >= maxRequestsPerMinute || value.Active[kind] >= limit {
+	if value.Active[kind] >= limit {
 		return false
 	}
-	value.Count++
 	value.Active[kind]++
-	s.rates[id] = value
+	s.admissions[id] = value
 	return true
 }
 func (s *Service) release(id string, kind admissionKind) {
 	s.mu.Lock()
-	value := s.rates[id]
+	value := s.admissions[id]
 	value.Active[kind]--
-	s.rates[id] = value
+	s.admissions[id] = value
+	s.mu.Unlock()
+}
+
+func (s *Service) admitPreview(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.previewRates == nil {
+		s.previewRates = map[string]previewRate{}
+	}
+	value := s.previewRates[id]
+	now := time.Now()
+	if now.Sub(value.At) >= time.Minute {
+		value.At = now
+		value.Count = 0
+	}
+	if value.Active >= 1 || value.Count >= maxPreviewRequestsPerMinute {
+		return false
+	}
+	value.Active++
+	value.Count++
+	s.previewRates[id] = value
+	return true
+}
+func (s *Service) releasePreview(id string) {
+	s.mu.Lock()
+	value := s.previewRates[id]
+	value.Active--
+	s.previewRates[id] = value
 	s.mu.Unlock()
 }

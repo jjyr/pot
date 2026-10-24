@@ -357,21 +357,14 @@ func TestTCPFailedRevocationDiscardsSessionAndPreservesPending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := a.service.ensureSession(ctx, pending)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Cancel before sending, with an authenticated session already registered.
-	// The pending revocation must survive and the next attempt must reconnect.
+	// Cancelling an unsent notification preserves the pending tombstone.
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
-	if err := a.service.propagateRevoke(canceled, pending); !errors.Is(err, ErrUnavailable) {
+	if err := a.service.propagateRevoke(canceled, pending); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
-	select {
-	case <-session.Done():
-	default:
-		t.Fatal("failed revocation retained its session for immediate reuse")
+	if a.service.session(connection.ID) != nil {
+		t.Fatal("cancelled revocation retained a reusable transport")
 	}
 	pending, err = a.service.Get(ctx, connection.ID)
 	if err != nil || pending.State != "revoked" || !pending.RevocationPending {
@@ -388,7 +381,7 @@ func TestTCPFailedRevocationDiscardsSessionAndPreservesPending(t *testing.T) {
 		if err == nil {
 			break
 		}
-		if !errors.Is(err, ErrUnavailable) {
+		if !errors.Is(err, ErrUnavailable) && !errors.Is(err, peer.ErrUncertain) {
 			t.Fatal(err)
 		}
 	}
@@ -581,6 +574,8 @@ func TestConcurrentReconnectUsesOneAuthenticatedSession(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	a, b := newFixture(t, "dial-a"), newFixture(t, "dial-b")
+	a.service.options.Backend = &testBackend{f: a}
+	b.service.options.Backend = &testBackend{f: b}
 	connection := connect(t, a, b)
 	a.service.closeSessions()
 	before := b.accepted.Load()
@@ -597,8 +592,12 @@ func TestConcurrentReconnectUsesOneAuthenticatedSession(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			session, err := a.service.ensureSession(ctx, connection)
-			results <- result{session, err}
+			var accepted Directory
+			err := a.service.callConnection(ctx, connection, "directory", struct{}{}, &accepted)
+			if err == nil && accepted.NodeID != b.id {
+				err = ErrConflict
+			}
+			results <- result{a.service.session(connection.ID), err}
 		}()
 	}
 	close(start)
@@ -621,5 +620,42 @@ func TestConcurrentReconnectUsesOneAuthenticatedSession(t *testing.T) {
 	}
 	if _, err := first.Call(ctx, peer.Request{ID: "identity-after-reconnect", Method: "identity", Params: json.RawMessage(`{}`)}); err != nil {
 		t.Fatal("shared session was closed", err)
+	}
+}
+
+func TestEnsureSessionAfterCloseDoesNotReadReleasedStores(t *testing.T) {
+	a, b := newFixture(t, "closed-a"), newFixture(t, "closed-b")
+	connection := connect(t, a, b)
+	a.service.Close()
+	a.db.Close()
+	a.secret.Close()
+	a.service.options.DB = nil
+	connection.LastSeen = nil // A cold connection would otherwise read its persisted credential.
+	if session, err := a.service.ensureSession(context.Background(), connection); session != nil || !errors.Is(err, ErrUnavailable) {
+		t.Fatal("closed service accessed released stores", session, err)
+	}
+}
+
+func TestSyncWaitingForConnectionPassHonorsCancellation(t *testing.T) {
+	a, b := newFixture(t, "sync-a"), newFixture(t, "sync-b")
+	c := connect(t, a, b)
+	f, err := a.service.forwarder(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.syncGate <- struct{}{}
+	defer func() { <-f.syncGate }()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := a.service.Sync(ctx, c.ID); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
+
+func TestForwarderRejectedColdDialReturnsErrorWithoutTypedNilTransport(t *testing.T) {
+	a := newFixture(t, "cold-dial")
+	err := a.service.callConnection(t.Context(), Connection{ID: "missing-connection"}, "identity", struct{}{}, nil)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatal(err)
 	}
 }

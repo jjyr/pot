@@ -8,7 +8,7 @@ import (
 )
 
 func (s *Service) pairHandler(metadata pairRequest, remote peer.Identity) peer.Handler {
-	return func(ctx context.Context, input peer.Request) (json.RawMessage, error) {
+	return s.protectHandler(func(ctx context.Context, input peer.Request) (json.RawMessage, error) {
 		if input.Method != "pair" {
 			return s.handler(metadata.ID, remote)(ctx, input)
 		}
@@ -26,7 +26,7 @@ func (s *Service) pairHandler(metadata pairRequest, remote peer.Identity) peer.H
 		}
 		s.activatePending(metadata.ID, remote)
 		return json.Marshal(connection)
-	}
+	})
 }
 
 func (s *Service) activatePending(id string, remote peer.Identity) {

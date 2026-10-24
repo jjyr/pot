@@ -30,19 +30,25 @@ type Service struct {
 	mu                       sync.Mutex
 	closed                   bool
 	running                  sync.Mutex
-	syncMu                   sync.Mutex
-	dialMu                   sync.Mutex
-	rates                    map[string]rate
+	ctx                      context.Context
+	cancel                   context.CancelFunc
+	forwarders               map[string]*connectionForwarder
+	forwardWG                sync.WaitGroup
+	rpcWG                    sync.WaitGroup
+	pendingWG                sync.WaitGroup
+	closeOnce                sync.Once
+	admissions               map[string]admission
+	previewRates             map[string]previewRate
 	observations             map[string]ObservationSample
 	observationNotifications map[string]int64
 	// Protected by mu. Network directory reads must not overwrite a later read
 	// or a confirmed retirement with a snapshot captured before it.
 	directoryEpoch map[string]uint64
 }
-type rate struct {
-	At     time.Time
-	Count  int
-	Active [2]int
+type admission struct{ Active [2]int }
+type previewRate struct {
+	At            time.Time
+	Count, Active int
 }
 type address struct {
 	Version    int           `json:"version"`
@@ -83,7 +89,8 @@ func New(options Options) (*Service, error) {
 		return nil, ErrInvalid
 	}
 	options.HostKey = append(ed25519.PrivateKey(nil), options.HostKey...)
-	return &Service{options: options, sessions: map[string]*peer.Session{}, pendingSessions: map[*peer.Session]bool{}, rates: map[string]rate{}, observations: map[string]ObservationSample{}, observationNotifications: map[string]int64{}, directoryEpoch: map[string]uint64{}}, nil
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Service{options: options, ctx: ctx, cancel: cancel, forwarders: map[string]*connectionForwarder{}, sessions: map[string]*peer.Session{}, pendingSessions: map[*peer.Session]bool{}, admissions: map[string]admission{}, observations: map[string]ObservationSample{}, observationNotifications: map[string]int64{}, directoryEpoch: map[string]uint64{}}, nil
 }
 
 func validIdentity(identity Identity) bool {
@@ -139,6 +146,10 @@ func parseAddress(ctx context.Context, raw string) (address, error) {
 }
 
 func (s *Service) Invite(ctx context.Context, endpoint string) (Invitation, error) {
+	if !s.enterRPC() {
+		return Invitation{}, ErrUnavailable
+	}
+	defer s.rpcWG.Done()
 	identity, err := s.localIdentity(ctx)
 	if err != nil {
 		return Invitation{}, err
@@ -178,6 +189,10 @@ func (s *Service) Invite(ctx context.Context, endpoint string) (Invitation, erro
 }
 
 func (s *Service) List(ctx context.Context) ([]Connection, error) {
+	if !s.enterRPC() {
+		return nil, ErrUnavailable
+	}
+	defer s.rpcWG.Done()
 	rows, err := s.options.DB.QueryContext(ctx, `SELECT metadata FROM agent_link_connections ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -253,6 +268,10 @@ func (s *Service) update(ctx context.Context, c Connection) error {
 }
 
 func (s *Service) Connect(ctx context.Context, raw string) (Connection, error) {
+	if !s.enterRPC() {
+		return Connection{}, ErrUnavailable
+	}
+	defer s.rpcWG.Done()
 	address, err := parseAddress(ctx, raw)
 	if err != nil {
 		return Connection{}, err
@@ -394,6 +413,8 @@ func (s *Service) Run(ctx context.Context) {
 	}
 	defer s.running.Unlock()
 	defer s.closeSessions()
+	var workers sync.WaitGroup
+	defer workers.Wait()
 	ticker := time.NewTicker(s.options.PollInterval)
 	defer ticker.Stop()
 	for {
@@ -403,22 +424,36 @@ func (s *Service) Run(ctx context.Context) {
 				if ctx.Err() != nil {
 					return
 				}
-				if c.State == "disconnected" {
-					continue
-				}
-				if c.State == "revoked" {
-					if c.RevocationPending && c.Endpoint != "" {
-						_ = s.propagateRevoke(ctx, c)
-					}
-					continue
-				}
-				if c.PeerHost.Validate() != nil {
+				if c.State == "disconnected" || c.PeerHost.Validate() != nil {
 					continue
 				}
 				if s.session(c.ID) == nil && c.Endpoint == "" {
 					continue
 				}
-				_ = s.Sync(ctx, c.ID)
+				f, err := s.forwarder(c)
+				if err != nil {
+					continue
+				}
+				select {
+				case f.syncGate <- struct{}{}:
+					workers.Add(1)
+					go func(c Connection) {
+						defer workers.Done()
+						defer func() { <-f.syncGate }()
+						if c.State == "revoked" {
+							if c.RevocationPending && c.Endpoint != "" {
+								_ = s.propagateRevoke(ctx, c)
+							}
+						} else {
+							_ = s.syncConnection(ctx, c.ID)
+						}
+					}(c)
+				default:
+				}
+				if c.State != "revoked" && s.options.Backend != nil && f.metadataMu.TryLock() {
+					workers.Add(1)
+					go func(c Connection) { defer workers.Done(); defer f.metadataMu.Unlock(); _ = s.refreshMetadata(ctx, c) }(c)
+				}
 			}
 		}
 		select {

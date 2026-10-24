@@ -79,8 +79,46 @@ func (s *Service) exchange(ctx context.Context, connection Connection, request e
 // Sync performs one bounded delivery pass. Durable pending envelopes are the
 // recovery cursor: an interrupted pass resends the original, immutable message.
 func (s *Service) Sync(ctx context.Context, id string) error {
-	s.syncMu.Lock()
-	defer s.syncMu.Unlock()
+	if !s.enterRPC() {
+		return ErrUnavailable
+	}
+	defer s.rpcWG.Done()
+	c, err := s.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	f, err := s.forwarder(c)
+	if err != nil {
+		return err
+	}
+	select {
+	case f.syncGate <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.ctx.Done():
+		return ErrUnavailable
+	}
+	err = s.syncConnection(ctx, id)
+	<-f.syncGate
+	if err != nil {
+		return err
+	}
+	return s.refreshMetadata(ctx, c)
+}
+func (s *Service) refreshMetadata(ctx context.Context, c Connection) error {
+	if s.options.Backend == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	directory, err := s.readPeerDirectory(ctx, c)
+	if err != nil {
+		return err
+	}
+	s.sampleObservation(ctx, c, directory)
+	return nil
+}
+func (s *Service) syncConnection(ctx context.Context, id string) error {
 	connection, err := s.Get(ctx, id)
 	if err != nil {
 		return err
@@ -94,15 +132,10 @@ func (s *Service) Sync(ctx context.Context, id string) error {
 	if connection.PeerHost.Validate() != nil {
 		return ErrReconnectRequired
 	}
-	previous := s.session(id)
-	session, err := s.ensureSession(ctx, connection)
-	if err != nil {
-		return s.failed(ctx, connection, err)
-	}
-	fresh := previous != session || connection.State != "ready"
+	fresh := s.session(id) == nil || connection.State != "ready"
 	if fresh || connection.LastSeen == nil {
 		var accepted Connection
-		err = s.call(ctx, session, "identity", struct{}{}, &accepted)
+		err = s.callConnection(ctx, connection, "identity", struct{}{}, &accepted)
 		if err == nil && accepted.State == "revoked" {
 			err = ErrRevoked
 		}
@@ -112,14 +145,6 @@ func (s *Service) Sync(ctx context.Context, id string) error {
 		if err != nil {
 			return s.failed(ctx, connection, err)
 		}
-	}
-	if s.options.Backend != nil {
-		directory, readErr := s.readPeerDirectory(ctx, connection, session)
-		if readErr != nil {
-			return s.failed(ctx, connection, readErr)
-		}
-		connection.Directory = &directory
-		s.sampleObservation(ctx, connection, directory, session)
 	}
 	messages, err := s.pending(ctx, connection)
 	if err != nil {
@@ -137,7 +162,7 @@ func (s *Service) Sync(ctx context.Context, id string) error {
 		}
 	}
 	var response exchangeResponse
-	err = s.call(ctx, session, "exchange", exchangeRequest{ID: id, Messages: messages, Receipts: []protocol.Receipt{}}, &response)
+	err = s.callConnection(ctx, connection, "exchange", exchangeRequest{ID: id, Messages: messages, Receipts: []protocol.Receipt{}}, &response)
 	if err != nil {
 		return s.failed(ctx, connection, err)
 	}
@@ -195,7 +220,7 @@ func (s *Service) Sync(ctx context.Context, id string) error {
 	}
 	if len(receipts) > 0 {
 		var ack exchangeResponse
-		err = s.call(ctx, session, "exchange", exchangeRequest{ID: id, Messages: []protocol.Envelope{}, Receipts: receipts, AckOnly: true}, &ack)
+		err = s.callConnection(ctx, connection, "exchange", exchangeRequest{ID: id, Messages: []protocol.Envelope{}, Receipts: receipts, AckOnly: true}, &ack)
 		if err != nil {
 			return s.failed(ctx, connection, err)
 		}
@@ -243,6 +268,10 @@ func (s *Service) failed(ctx context.Context, connection Connection, err error) 
 // Revoke fences local delivery first. If offline, the encrypted credential is
 // retained only to notify the peer later; revocation never deletes mail history.
 func (s *Service) Revoke(ctx context.Context, id string) error {
+	if !s.enterRPC() {
+		return ErrUnavailable
+	}
+	defer s.rpcWG.Done()
 	connection, err := s.Get(ctx, id)
 	if err != nil {
 		return err
@@ -259,52 +288,48 @@ func (s *Service) Revoke(ctx context.Context, id string) error {
 	return nil
 }
 func (s *Service) revokeLocal(ctx context.Context, connection Connection, pending bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	current, err := s.Get(ctx, connection.ID)
+	f, err := s.forwarder(connection)
 	if err != nil {
 		return err
 	}
-	if (current.State == "revoked" || current.State == "disconnected") && pending && !current.RevocationPending {
-		return nil
-	}
-	current.State = "revoked"
-	current.LastError = ""
-	current.RevocationPending = pending
-	current.UpdatedAt = time.Now().UTC()
-	raw, _ := json.Marshal(current)
-	_, err = s.options.DB.ExecContext(ctx, `UPDATE agent_link_connections SET state='revoked',metadata=? WHERE id=?`, string(raw), current.ID)
-	if err != nil {
-		return err
-	}
-	if !pending {
-		if err = s.options.Secrets.Delete(ctx, "agent-link/connection/"+current.ID); err != nil {
+	return f.transition(ctx, ErrRevoked, nil, func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.closed {
+			return ErrUnavailable
+		}
+		current, err := s.Get(ctx, connection.ID)
+		if err != nil {
 			return err
 		}
-	}
-	if session := s.sessions[current.ID]; session != nil {
-		session.Close()
-	}
-	if s.options.Changed != nil {
-		s.options.Changed()
-	}
-	return nil
+		if (current.State == "revoked" || current.State == "disconnected") && pending && !current.RevocationPending {
+			return nil
+		}
+		current.State = "revoked"
+		current.LastError = ""
+		current.RevocationPending = pending
+		current.UpdatedAt = time.Now().UTC()
+		raw, _ := json.Marshal(current)
+		if _, err = s.options.DB.ExecContext(ctx, `UPDATE agent_link_connections SET state='revoked',metadata=? WHERE id=?`, string(raw), current.ID); err != nil {
+			return err
+		}
+		if !pending {
+			if err = s.options.Secrets.Delete(ctx, "agent-link/connection/"+current.ID); err != nil {
+				return err
+			}
+		}
+		if s.options.Changed != nil {
+			s.options.Changed()
+		}
+		return nil
+	})
 }
 func (s *Service) propagateRevoke(ctx context.Context, connection Connection) error {
-	session, err := s.ensureSession(ctx, connection)
-	if err != nil {
-		if errors.Is(err, ErrRevoked) {
-			return s.revokeLocal(ctx, connection, false)
-		}
-		return err
-	}
-	// The peer may close this session while persisting its revocation, before
-	// its response or EOF reaches us. Do not reuse it for a later pending attempt.
-	defer session.Close()
+	defer func() { _ = s.changeConnection(context.Background(), connection, ErrRevoked) }()
 	var response struct {
 		Status string `json:"status"`
 	}
-	err = s.call(ctx, session, "revoke", revokeRequest{connection.ID}, &response)
+	err := s.callConnection(ctx, connection, "revoke", revokeRequest{connection.ID}, &response)
 	if err != nil && !errors.Is(err, ErrRevoked) {
 		return err
 	}
