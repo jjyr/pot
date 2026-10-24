@@ -2,6 +2,11 @@ import serverMessages from './server.json' with {type:'json'};
 
 export const messages = {
   en: {
+    'tool.communicationStack':'{records} records · {messages} messages · {tasks} tasks',
+    'tool.communicationStackOneTask':'{records} records · {messages} messages · {tasks} task',
+    'tool.communicationRouteCount':'{count} messages',
+    'tool.communicationRouteOne':'{count} message',
+    'tool.messageTaskIDMissing':'(ID unavailable)',
     'completions.skills':'Skills',
     'completions.assistants':'Assistants',
     'completions.count':'{count} results',
@@ -583,6 +588,8 @@ export const messages = {
     'tasks.archivedHint':'Archived · Send a follow-up to continue this task.',
     'tasks.followupHint':'Run ended · This task is kept for follow-up.',
     'tasks.backgroundCount':'Background tasks · {count}',
+    'tasks.complete':'Complete',
+    'tasks.failed':'Failed',
     'tasks.queued':'Queued',
     'tasks.waiting':'Waiting',
     'tasks.expandOne':'Expand {count} more task', 'tasks.expandMore':'Expand {count} more tasks', 'tasks.collapse':'Collapse',
@@ -939,6 +946,11 @@ export const messages = {
     searchEmpty: 'No matching assistants', cancelError: 'Could not stop the turn. Please retry.',
   },
   'zh-CN': {
+    'tool.communicationStack':'{records} 条记录 · {messages} 条消息 · {tasks} 个任务',
+    'tool.communicationStackOneTask':'{records} 条记录 · {messages} 条消息 · {tasks} 个任务',
+    'tool.communicationRouteCount':'{count} 条消息',
+    'tool.communicationRouteOne':'{count} 条消息',
+    'tool.messageTaskIDMissing':'（ID 缺失）',
     'completions.skills':'Skills',
     'completions.assistants':'助手',
     'completions.count':'{count} 项',
@@ -1520,6 +1532,8 @@ export const messages = {
     'tasks.archivedHint':'已归档 · 发送追加要求可继续此任务。',
     'tasks.followupHint':'本轮已结束 · 任务保留待跟进。',
     'tasks.backgroundCount':'后台任务 · {count}',
+    'tasks.complete':'已完成',
+    'tasks.failed':'失败',
     'tasks.queued':'排队中',
     'tasks.waiting':'等待中',
     'tasks.expandOne':'展开其余 {count} 项任务', 'tasks.expandMore':'展开其余 {count} 项任务', 'tasks.collapse':'收起',
