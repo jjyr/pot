@@ -47,7 +47,7 @@ func TestCompletionRetriesSQLiteBusyWithoutReplayingAndKeepsSubscription(t *test
 		t.Fatal(err)
 	}
 	defer db.Close()
-	mail, err := OpenMailbox(db, "runtime")
+	mail, err := OpenMailbox(db, "runtime", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

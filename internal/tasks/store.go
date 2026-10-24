@@ -410,12 +410,21 @@ func (s *Service) LocalMachine(_ context.Context, machine string) (string, error
 	return s.options.NodeID, nil
 }
 
-// RetireOwner serializes identity retirement with Task admission, including a
-// schedule whose model selection completed before the owner was deleted.
+// RetireOwner serializes identity retirement with Task and mailbox admission,
+// including input whose preparation completed before the owner was deleted.
 func (s *Service) RetireOwner(ctx context.Context, owner string, commit func() error) error {
 	return storage.Transaction(ctx, s.db, func(tx *sql.Tx) error {
 		var busy bool
 		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM tasks WHERE assistant_id=? AND phase IN ('queued','waiting','running','waiting_approval'))", owner).Scan(&busy); err != nil {
+			return err
+		}
+		if busy {
+			return protocol.APIError{Code: "assistant_busy"}
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_messages
+ WHERE recipient=? AND direction='in' AND json_extract(envelope,'$.kind')='message'
+ AND json_extract(envelope,'$.to.kind')='assistant'
+ AND state IN ('queued','processing','waiting','interrupted'))`, owner).Scan(&busy); err != nil {
 			return err
 		}
 		if busy {

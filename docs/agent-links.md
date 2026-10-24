@@ -163,6 +163,12 @@ distributed execution services.
 
 ## Business contract and recovery
 
+Each connection admits five concurrent business handlers and one mailbox exchange,
+sharing a 180-admissions/minute budget. Excess business requests return
+`agent_link_capacity_exceeded` before backend execution. Slots remain held until
+handlers return, even if callers stop waiting. This counts handlers, not running Tasks.
+Invitation preview has its own single slot and 180-admissions/minute budget.
+
 `Backend` provides `Directory`, `Observe`, `Submit`, `Status` and `Cancel`. The same receiver
 implementation owns in-process calls and authenticated remote calls. The receiver
 enforces per-assistant operation support and caller ownership; unsupported

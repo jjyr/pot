@@ -221,10 +221,10 @@ func (s *Service) lookup(ctx context.Context, id string, from protocol.AgentRef,
 	return t, e
 }
 func (s *Service) business(ctx context.Context, c Connection, remote peer.Identity, r peer.Request) (json.RawMessage, error) {
-	if !s.admit(c.ID) {
+	if !s.admit(c.ID, businessAdmission) {
 		return nil, ErrCapacity
 	}
-	defer s.release(c.ID)
+	defer s.release(c.ID, businessAdmission)
 	d, e := s.localDirectory(ctx)
 	if e != nil {
 		return nil, e

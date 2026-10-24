@@ -17,11 +17,19 @@ import (
 type Mailbox struct {
 	db      *sql.DB
 	nodeID  string
+	options MailboxOptions
 	Changes core.Changes
 }
 
+type MailboxOptions struct {
+	// OwnerAvailable runs inside the inbox writer transaction for new local
+	// assistant input. Retirement must take the same database writer lock.
+	// Exact retries and direct-user reply projections retain their receipts.
+	OwnerAvailable func(context.Context, string) error
+}
+
 // OpenMailbox borrows an already migrated Tasks database. The caller owns Close.
-func OpenMailbox(db *sql.DB, nodeID string) (*Mailbox, error) {
+func OpenMailbox(db *sql.DB, nodeID string, options MailboxOptions) (*Mailbox, error) {
 	if !(protocol.AgentRef{NodeID: nodeID, Kind: "assistant", AgentID: "identity"}).Valid() {
 		return nil, errors.New("invalid Control identity")
 	}
@@ -45,7 +53,7 @@ func OpenMailbox(db *sql.DB, nodeID string) (*Mailbox, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Mailbox{db: db, nodeID: nodeID}, nil
+	return &Mailbox{db: db, nodeID: nodeID, options: options}, nil
 }
 func (m *Mailbox) NodeID() string { return m.nodeID }
 func (m *Mailbox) Register(ctx context.Context, directory protocol.Directory) error {
@@ -192,6 +200,11 @@ func (m *Mailbox) Send(ctx context.Context, id string, from protocol.AgentRef, s
 		direction := "out"
 		if message.To.NodeID == m.nodeID {
 			direction = "in"
+			if message.To.Kind == "assistant" && m.options.OwnerAvailable != nil {
+				if err := m.options.OwnerAvailable(ctx, message.To.AgentID); err != nil {
+					return err
+				}
+			}
 		}
 		return insertMail(ctx, tx, message, direction)
 	})
@@ -229,6 +242,11 @@ func (m *Mailbox) deliver(ctx context.Context, message protocol.Envelope, state 
 				return errors.New("conflicting delivery")
 			}
 			return nil
+		}
+		if state == "queued" && m.options.OwnerAvailable != nil {
+			if err := m.options.OwnerAvailable(ctx, message.To.AgentID); err != nil {
+				return err
+			}
 		}
 		if message.ReplyTo != nil {
 			parent, err := findMail(ctx, tx, *message.ReplyTo)

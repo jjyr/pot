@@ -13,5 +13,5 @@ func openMailbox(t *testing.T, path, node string) (*Mailbox, error) {
 		return nil, err
 	}
 	t.Cleanup(func() { db.Close() })
-	return OpenMailbox(db, node)
+	return OpenMailbox(db, node, MailboxOptions{})
 }

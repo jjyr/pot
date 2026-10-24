@@ -77,7 +77,7 @@ func (f *fixture) open() {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	mail, err := assistant.OpenMailbox(db, f.id)
+	mail, err := assistant.OpenMailbox(db, f.id, assistant.MailboxOptions{})
 	if err != nil {
 		db.Close()
 		f.t.Fatal(err)
