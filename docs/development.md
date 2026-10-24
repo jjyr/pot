@@ -75,6 +75,7 @@ rollback; non-database persisted-format changes must also change the marker.
 ```sh
 mise run lint
 mise run check:go
+mise run check:push
 mise run test
 mise run test:executor
 mise run test:sandbox
@@ -366,14 +367,44 @@ in the task/PR, not repository validation reports. Store only reviewed UI compar
 screenshots under [PR image conventions](pr-images/README.md).
 
 `hk.pkl` owns pre-commit and pre-push checks. Run commands through `mise`; do not
-bypass failed hooks. CI separates portable product and macOS packaging checks.
+bypass failed hooks. `mise run check:push` runs the same local gate without
+pushing. It targets about 30 seconds with installed tools, dependencies and a
+warm Go build cache; a first build or slower machine can take longer. It does not
+terminate or skip unfinished checks to meet that target.
+
+Pre-push retains full Go formatting, vet and architectural import checks, UI,
+packaging, deterministic CLI, public API, hook and license checks, plus macOS
+source/release checks. `test:core` replaces the complete normal/race suites in
+this local gate. Its explicit plan in
+[`scripts/go-test-core.json`](../scripts/go-test-core.json) runs the full Agent,
+model protocol, execution, process supervision, plugin host, peer/Agent Link,
+storage/migration, access, secrets, inbox and scheduler packages without race
+instrumentation. Selected integration tests cover Control approvals and exact
+command grants, task cancellation/idempotency/rollback/retry, conversation
+recovery and owner isolation, authenticated HTTP receipts and Codex approval
+transport. Independent integration groups run with at most four workers; missing,
+renamed, duplicate or inactive selections fail rather than silently losing coverage.
+The core task uses `-count=1` so every push executes its tests even with a warm
+build cache.
+`mise exec -- python scripts/test_go.py core --list` prints the plan. Keep the
+core selection focused on these contracts when adding or replacing tests.
+
+`mise run test` retains the complete normal suite and focused race suite; neither
+depends on the local core selection. CI runs them on Linux and macOS. The separate
+`test:executor` diagnostic is already covered by that race suite and is not repeated
+by pre-push. Hook group timings are appended to `.local/hooks/timings.jsonl`.
 
 ## CI and manual PR checks
 
-CI runs automatically only on tag pushes. All tags are checked, while exact stable
-version tags enter controlled per-channel release paths after shared checks and
-the corresponding native package and smoke gates succeed. Ordinary manual runs do not publish.
-Branch pushes and PR events do not start CI.
+`Tests` (`.github/workflows/tests.yml`) runs full product tests on PRs and pushes
+to `main`, with Linux/macOS jobs and cancellation of superseded runs. This is the
+full-test gate paired with the local core checks. It can also be run manually.
+
+The release/build `CI` workflow runs automatically only on tag pushes. All tags
+are checked, while exact stable version tags enter controlled per-channel release
+paths after shared checks and the corresponding native package and smoke gates
+succeed. Ordinary manual runs do not publish.
+Branch pushes and PR events do not start the release/build workflow.
 
 ```sh
 gh workflow run ci.yml --ref main -f pr=123

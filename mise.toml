@@ -33,6 +33,18 @@ depends = ["lint", "check:go"]
 description = "Test product contracts without model calls"
 depends = ["test:go", "test:race", "test:ui", "test:packaging", "test:eval", "test:public-api"]
 
+[tasks."test:core"]
+description = "Run local core logic and selected lifecycle/security integration tests"
+run = ["python scripts/tests/go-test-plan.py", "python scripts/test_go.py core --count=1"]
+
+[tasks."test:contracts"]
+description = "Verify UI, packaging, deterministic CLI and public API contracts"
+depends = ["test:ui", "test:packaging", "test:eval", "test:public-api"]
+
+[tasks."check:push"]
+description = "Run the local pre-push gate (full normal/race suites run in CI)"
+run = "hk run pre-push --all"
+
 [tasks.prepare]
 description = "Prepare retained Node, JS plugins, and skills"
 run = "python scripts/prepare-go-resources"

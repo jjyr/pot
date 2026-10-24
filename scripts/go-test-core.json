@@ -1,0 +1,50 @@
+{
+  "packages": [
+    "./pkg/agent",
+    "./pkg/modelprotocol",
+    "./pkg/protocol",
+    "./pkg/composition",
+    "./pkg/execution",
+    "./pkg/executor",
+    "./pkg/processscope",
+    "./pkg/pluginhost",
+    "./pkg/peer",
+    "./pkg/agentlink",
+    "./pkg/storage",
+    "./pkg/storage/migrations",
+    "./internal/access",
+    "./internal/secrets",
+    "./internal/inbox",
+    "./internal/schedule"
+  ],
+  "selected": {
+    "./internal/control": [
+      "TestLocalControlAgentApprovalCommandPersistenceAndRestart",
+      "TestAcceptedTaskCancellationPersistsThroughDisconnectAndRestart",
+      "TestModelReservationSettlementAndDuplicateFence",
+      "TestPermanentCommandIsExactAndEditable",
+      "TestDefaultSandboxAndExplicitMachineTrust",
+      "TestRulesDenyHostBeforeTrustedAndManualCRUD"
+    ],
+    "./internal/assistant": [
+      "TestConversationRealAgentStreamDedupRestartAndCounts",
+      "TestConversationCancelModelAllowsNewTurnAndOldCancelIsIdempotent",
+      "TestConversationCrashTurnNeverReplayedAndOwnerIsolation",
+      "TestMainRecoveryUsesExactCheckpointAndOriginalResult"
+    ],
+    "./internal/tasks": [
+      "TestTaskAdmissionAndRunCreationRollbackTogether",
+      "TestIdempotencyOwnershipGuidanceReferencesAndStop",
+      "TestTaskApprovalStateWakesWaitAndResumesOriginalRun",
+      "TestRetryPreservesScopeAndHasOneDurableReplacementPerSource"
+    ],
+    "./internal/transport": [
+      "TestSocketProductCreateEventsAuthAndRestart",
+      "TestSendReceiptHTTPIdentityAndAuthorization"
+    ],
+    "./integrations/codex/agent": [
+      "TestCodexTaskAndPeerApprovalFromPot",
+      "TestAutomaticReviewDoesNotPublishApprovalHistory"
+    ]
+  }
+}

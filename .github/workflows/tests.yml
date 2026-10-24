@@ -1,0 +1,53 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MISE_AUTO_INSTALL: 'false'
+
+jobs:
+  product:
+    name: Full tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.10.10
+          install_args: go python node ruff shfmt shellcheck swiftformat
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/Library/Caches/go-build
+            ~/go/pkg/mod
+          key: tests-go-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum', 'mise.toml') }}
+          restore-keys: tests-go-v1-${{ runner.os }}-${{ runner.arch }}-
+      - run: mise run check:go
+      - run: mise exec -- python scripts/test_go.py core --list
+      - run: mise run test
+      - run: mise run test:hooks
+      - run: mise run test:i18n
+      - run: mise run licenses
+      - if: runner.os == 'macOS'
+        run: mise run lint
+      - if: runner.os == 'macOS'
+        run: mise run test:release

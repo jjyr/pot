@@ -146,6 +146,76 @@ class RacePlanTests(unittest.TestCase):
                 self.assertEqual(result.exception.code, 7)
                 self.assertEqual(run.call_count, 2)
 
+    def test_core_selection_rejects_missing_or_duplicate_coverage(self):
+        package = self.package("pkg/core", ["TestLifecycle", "TestOther"])
+        manifest = {"packages": [], "selected": {"./pkg/core": ["TestLifecycle"]}}
+        self.assertEqual(
+            PLAN.core_plan([package], manifest),
+            ([], [("./pkg/core", ["TestLifecycle"])]),
+        )
+        for invalid in [
+            {"packages": ["./pkg/missing"], "selected": {}},
+            {"packages": ["./pkg/core", "./pkg/core"], "selected": {}},
+            {"packages": ["./pkg/core"], "selected": {"./pkg/core": ["TestLifecycle"]}},
+            {"packages": [], "selected": {"./pkg/core": ["TestRemoved"]}},
+            {"packages": [], "selected": {"./pkg/core": []}},
+            {"packages": [], "selected": {"./pkg/core": ["TestLifecycle", "TestLifecycle"]}},
+        ]:
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                PLAN.core_plan([package], invalid)
+
+    def test_core_uses_active_files_and_keeps_new_tests_in_full_packages(self):
+        package = self.package("pkg/core", ["TestExisting", "TestNew"])
+        (Path(package["Dir"]) / "case_other_test.go").write_text("func TestInactive() {}")
+        self.assertEqual(
+            PLAN.core_plan([package], {"packages": ["./pkg/core"], "selected": {}}),
+            (["./pkg/core"], []),
+        )
+        with self.assertRaisesRegex(ValueError, "TestInactive"):
+            PLAN.core_plan(
+                [package], {"packages": [], "selected": {"./pkg/core": ["TestInactive"]}}
+            )
+
+    def test_core_failure_in_any_parallel_group_fails_the_check(self):
+        packages = [
+            self.package("pkg/core", ["TestCore"]),
+            self.package("internal/control", ["TestLifecycle", "TestOther"]),
+        ]
+        manifest = self.root / "core.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "packages": ["./pkg/core"],
+                    "selected": {"./internal/control": ["TestLifecycle"]},
+                }
+            )
+        )
+        for failed in ["./pkg/core", "./internal/control"]:
+            with (
+                self.subTest(failed=failed),
+                patch.object(PLAN, "CORE_MANIFEST", manifest),
+                patch.object(PLAN, "normal_only", return_value={}),
+                patch.object(PLAN.sys, "argv", ["test_go.py", "core"]),
+                patch.object(
+                    PLAN.subprocess,
+                    "check_output",
+                    return_value="\n".join(json.dumps(package) for package in packages),
+                ),
+                patch.object(
+                    PLAN, "run", side_effect=lambda command: 7 if failed in command else 0
+                ) as run,
+            ):
+                with self.assertRaises(SystemExit) as result:
+                    PLAN.main()
+                self.assertEqual(result.exception.code, 7)
+                selected = next(
+                    call.args[0]
+                    for call in run.call_args_list
+                    if "./internal/control" in call.args[0]
+                )
+                self.assertEqual(selected[selected.index("-run") + 1], "^(TestLifecycle)$")
+                self.assertEqual(run.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
