@@ -23,13 +23,21 @@ func TestDarwinCancellationEscalatesUncooperativeParent(t *testing.T) {
 }
 
 func TestDarwinCancellationWithNoDescendants(t *testing.T) {
-	testDarwinCancellation(t, `ready(process.pid);`, false)
+	_, elapsed := testDarwinCancellation(t, `ready(process.pid);`, false)
+	t.Logf("childless cancellation: %.3f ms", float64(elapsed.Microseconds())/1000)
+	if elapsed >= darwinReapGrace {
+		t.Fatalf("childless workload waited for the reaping grace: %v", elapsed)
+	}
+}
+
+func TestDarwinCancellationPreservesParentExitHandling(t *testing.T) {
+	testDarwinCancellation(t, detachedSleeper+`child.on('exit',()=>setTimeout(()=>{fs.writeFileSync('reaped','yes');process.exit(0)},50));`, true)
 }
 
 func TestDarwinCancellationReapsNestedDescendants(t *testing.T) {
 	branch := cancellationFixture + detachedSleeper + `child.on('exit',()=>{fs.writeFileSync('leaf-reaped','yes');process.exit(0)});`
 	source := `const child=spawn(process.execPath,['-e',` + strconv.Quote(branch) + `],{stdio:'ignore'});child.on('exit',()=>{fs.writeFileSync('reaped','yes');process.exit(0)});`
-	directory := testDarwinCancellation(t, source, true)
+	directory, _ := testDarwinCancellation(t, source, true)
 	if body, err := os.ReadFile(filepath.Join(directory, "leaf-reaped")); err != nil || string(body) != "yes" {
 		t.Fatalf("intermediate parent did not reap its child: %q, %v", body, err)
 	}
@@ -38,7 +46,7 @@ func TestDarwinCancellationReapsNestedDescendants(t *testing.T) {
 const cancellationFixture = `const fs=require('node:fs');const {spawn}=require('node:child_process');setInterval(()=>{},1000);function ready(pid){fs.writeFileSync('ready.tmp',String(pid));fs.renameSync('ready.tmp','ready');}`
 const detachedSleeper = `const child=spawn('/bin/sleep',['90'],{detached:true,stdio:'ignore'});ready(child.pid);`
 
-func testDarwinCancellation(t *testing.T, behavior string, descendant bool) string {
+func testDarwinCancellation(t *testing.T, behavior string, descendant bool) (string, time.Duration) {
 	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -111,7 +119,8 @@ func testDarwinCancellation(t *testing.T, behavior string, descendant bool) stri
 	if err = scope.Finish(); err != nil {
 		t.Fatal(err)
 	}
-	if elapsed := time.Since(started); elapsed > 2*time.Second {
+	elapsed := time.Since(started)
+	if elapsed > 2*time.Second {
 		t.Fatalf("cancellation was not bounded: %v", elapsed)
 	}
 	if err = syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
@@ -122,5 +131,5 @@ func testDarwinCancellation(t *testing.T, behavior string, descendant bool) stri
 			t.Fatalf("parent did not reap its detached child before termination: %q, %v", body, err)
 		}
 	}
-	return directory
+	return directory, elapsed
 }

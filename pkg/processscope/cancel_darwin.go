@@ -19,6 +19,7 @@ func cancelOriginal(observer *nativeObserver, original *os.Process, done <-chan 
 	defer deadline.Stop()
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
+	firstScan := true
 	for {
 		select {
 		case <-done:
@@ -35,9 +36,17 @@ func cancelOriginal(observer *nativeObserver, original *os.Process, done <-chan 
 			return errors.Join(err, stopOriginal(original, done))
 		}
 		parents := make(map[uint64]bool, len(members))
+		hasDescendants := false
 		for _, member := range members {
 			parents[member.parent] = true
+			hasDescendants = hasDescendants || member.id != observer.root
 		}
+		// Only skip grace for an initially childless workload. Once descendants
+		// have exited, their parent may still be handling the exit notification.
+		if firstScan && !hasDescendants {
+			return stopOriginal(original, done)
+		}
+		firstScan = false
 		for _, member := range members {
 			select {
 			case <-deadline.C:
