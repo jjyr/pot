@@ -26,6 +26,26 @@ func TestRootExclusiveAndStableIdentity(t *testing.T) {
 		t.Fatal("replaced identity")
 	}
 }
+
+func TestPreviousRootFormatRejectedWithoutRewriting(t *testing.T) {
+	path := t.TempDir()
+	if err := os.Chmod(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(path, "identity.json")
+	const original = "{\"format\":\"pot-go\",\"version\":1,\"runtime_id\":\"released-node\"}\n"
+	if err := os.WriteFile(file, []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if root, err := Open(path); err == nil {
+		root.Close()
+		t.Fatal("adopted previous root format")
+	}
+	contents, err := os.ReadFile(file)
+	if err != nil || string(contents) != original {
+		t.Fatal("rewrote released identity", err)
+	}
+}
 func TestOldDataPreserved(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old")
 	os.Mkdir(path, 0700)

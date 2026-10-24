@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/jjyr/pot/internal/testutil"
 )
 
 func sandboxFixture(t *testing.T) (*Engine, Request) {
@@ -402,9 +404,20 @@ func TestRealSandboxSharedToolBinDoesNotCoverWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	result := call(t, e, r, "exec_command", map[string]any{"cmd": "if cat " + shellQuote(secret) + "; then exit 77; fi; printf written > tool-proof; gh"})
-	if result["exit_code"] != 0 || result["stdout"] != "tool" {
-		t.Fatal("shared tool root exposed siblings or covered workspace writes", result)
+	deadline := time.Now().Add(testutil.Timeout(t, 15*time.Second))
+	result := call(t, e, r, "exec_command", map[string]any{"cmd": "if cat " + shellQuote(secret) + "; then exit 77; fi; printf written > tool-proof; gh", "yield_time_ms": 1})
+	stdout := result["stdout"].(string)
+	stderr := result["stderr"].(string)
+	for result["session_id"] != nil {
+		if time.Now().After(deadline) {
+			t.Fatal("shared tool probe did not finish", result, stdout, stderr)
+		}
+		result = call(t, e, r, "write_stdin", map[string]any{"session_id": result["session_id"], "yield_time_ms": 1000})
+		stdout += result["stdout"].(string)
+		stderr += result["stderr"].(string)
+	}
+	if result["exit_code"] != 0 || stdout != "tool" {
+		t.Fatal("shared tool root exposed siblings or covered workspace writes", result, stdout, stderr)
 	}
 	if data, err := os.ReadFile(filepath.Join(r.CWD, "tool-proof")); err != nil || string(data) != "written" {
 		t.Fatal(string(data), err)

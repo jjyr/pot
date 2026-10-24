@@ -36,6 +36,6 @@ for(const value of ['preparing','running','completed','failed','denied','unknown
   const button=document.createElement('button');button.textContent=value;button.onclick=()=>{phase=value;publish();};controls.append(button);
 }
 for(const value of ['en','zh-CN']){
-  const button=document.createElement('button');button.textContent=value;button.onclick=()=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-go-preview-locale',value}}));controls.append(button);
+  const button=document.createElement('button');button.textContent=value;button.onclick=()=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value}}));controls.append(button);
 }
 </script></html>

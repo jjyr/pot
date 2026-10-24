@@ -1,0 +1,55 @@
+// Run only against TestCodexProfileBrowserFixture's disposable authenticated
+// browser server and real Agent Link peer. No product data or model requests.
+async page => {
+  page.on('dialog',dialog=>dialog.accept());
+  await page.unrouteAll({behavior:'wait'});
+  const checks=[],check=(value,message)=>{if(!value)throw Error(message);checks.push(message);};
+  const origin=new URL(page.url()).origin;
+  check((await page.request.post(origin+'/fixture/login')).ok(),'Fixture browser session authenticates');
+  await page.emulateMedia({reducedMotion:'reduce'});
+  await page.setViewportSize({width:1200,height:820});
+  await page.goto(origin+'/scripts/tests/fixtures/codex-profile.html?locale=zh-CN');
+  await page.locator('.role-assistant').waitFor();
+  const dismiss=page.getByRole('button',{name:'暂时不用',exact:true});if(await dismiss.count())await dismiss.click();
+  const selected=await page.evaluate(()=>window.codexProfileFixture.client.assistants[0]);
+  await page.getByRole('button',{name:'助手设置',exact:true}).click();
+  const name=page.locator('.editor-form input[required]').first(),more=page.locator('.assistant-delete'),remove=more.locator('button'),dialog=page.locator('dialog[open]');
+  await name.waitFor();
+  await page.screenshot({path:'output/pr-images/assistant-settings-connected-desktop-zh-cn-after.png'});
+  check(await more.count()===1&&!await remove.isVisible(),'Remote settings use the local More actions disclosure');
+  await name.fill('Unsaved remote draft');
+  await more.locator('summary').click();
+  await page.screenshot({path:'output/pr-images/linked-assistant-delete-desktop-zh-cn-after.png'});
+  await remove.click();await dialog.waitFor();
+  check((await dialog.innerText()).includes('所有连接的客户端'),'Confirmation explains remote deletion scope');
+  await dialog.getByRole('button',{name:'取消',exact:true}).click();
+  check(await name.inputValue()==='Unsaved remote draft','Cancel retains the remote profile draft');
+  const linkAction=async action=>{const response=await page.request.post(origin+'/api/v1/agent-links',{data:{action,id:selected.origin.link_id}});check(response.ok(),action+' succeeds through browser gateway');};
+  await linkAction('disconnect');
+  await page.waitForFunction(()=>window.codexProfileFixture.client.assistants[0]?.offline);
+  await page.waitForFunction(()=>document.querySelector('.assistant-delete button')?.disabled);
+  check(await remove.isDisabled(),'Disconnect disables deletion in the mounted editor');
+  const locale=async value=>page.evaluate(value=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value}})),value);
+  await locale('en');
+  check((await more.innerText()).includes('Reconnect to this assistant'),'Offline explanation follows live locale changes');
+  await linkAction('reconnect');
+  await page.waitForFunction(()=>!window.codexProfileFixture.client.assistants[0]?.offline&&!document.querySelector('.assistant-delete button')?.disabled);
+  let writes=0;
+  await page.route('**/api/v1/assistants/*/delete?**',async route=>{writes++;await route.fulfill({status:409,json:{code:'assistant_busy'}});});
+  await remove.click();await dialog.getByRole('button',{name:'Delete assistant',exact:true}).click();
+  await page.getByText('End this assistant’s ongoing reply and tasks before deleting it.',{exact:true}).waitFor();
+  check(writes===1&&await name.inputValue()==='Unsaved remote draft','Busy rejection sends once and retains draft');
+  await page.unroute('**/api/v1/assistants/*/delete?**');
+  await locale('zh-CN');await page.setViewportSize({width:390,height:844});
+  await remove.scrollIntoViewIfNeeded();
+  await page.screenshot({path:'output/pr-images/linked-assistant-delete-mobile-zh-cn-after.png'});
+  await remove.click();await dialog.waitFor();
+  await page.screenshot({path:'output/pr-images/linked-assistant-delete-confirm-mobile-zh-cn-after.png'});
+  await dialog.getByRole('button',{name:'删除助手',exact:true}).click();
+  await page.locator('.editor-form').waitFor({state:'detached'});
+  const directory=await(await page.request.get(origin+'/api/v1/agent-links')).json();
+  check(directory.items.length===1&&directory.items[0].assistants.length===0,'Real remote deletion removes the assistant and retains its connection');
+  await page.reload();await page.getByRole('heading',{name:'添加你的第一个助手',exact:true}).waitFor();
+  check(await page.locator('.assistant-row').count()===0,'Reload does not resurrect the retired remote assistant');
+  const result={checks};await page.evaluate(value=>window.linkedDeleteResults=value,result);return result;
+}

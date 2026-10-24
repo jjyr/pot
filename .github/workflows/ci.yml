@@ -13,6 +13,10 @@ on:
         description: PR number to check (mutually exclusive with ref)
         required: false
         type: string
+      validation-version:
+        description: Optional package version for a nonpublishing candidate (major.minor.patch)
+        required: false
+        type: string
       publish:
         description: Publish an existing stable tag after checks, packaging and release environment gates
         default: false
@@ -53,6 +57,7 @@ jobs:
           SOURCE_REF: ${{ inputs.ref }}
           PR_NUMBER: ${{ inputs.pr }}
           PUBLISH: ${{ inputs.publish || false }}
+          VALIDATION_VERSION: ${{ inputs.validation-version }}
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/release-plan
 
@@ -110,7 +115,7 @@ jobs:
           cache: false
           install_args: go python node
       - run: mise exec -- python scripts/package-server --platform ${{ matrix.platform }} --output dist
-      - run: mise exec -- python scripts/tests/server-package-smoke.py dist/pot-go-${{ env.POT_APP_VERSION }}-${{ matrix.platform }}.tar.gz
+      - run: mise exec -- python scripts/tests/server-package-smoke.py dist/pot-${{ env.POT_APP_VERSION }}-${{ matrix.platform }}.tar.gz
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: package-cli-${{ matrix.platform }}
@@ -145,7 +150,7 @@ jobs:
         run: |
           mise exec -- python scripts/sign-macos-release "$POT_APP_VERSION" dist --mode unsigned
           mise exec -- python scripts/generate-cask "$POT_APP_VERSION" dist
-      - run: mise exec -- python scripts/tests/server-package-smoke.py dist/pot-go-${{ env.POT_APP_VERSION }}-darwin-arm64.tar.gz
+      - run: mise exec -- python scripts/tests/server-package-smoke.py dist/pot-${{ env.POT_APP_VERSION }}-darwin-arm64.tar.gz
       - run: ruby -c dist/pot.rb
       - run: brew ruby scripts/tests/homebrew-cask.rb Casks/pot.rb dist/pot.rb
       - run: mise exec -- python scripts/tests/macos-package-smoke.py dist/Pot-${{ env.POT_APP_VERSION }}-arm64.zip

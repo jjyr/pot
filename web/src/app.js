@@ -19,7 +19,7 @@ try {
       if (desktop || !(error instanceof APIError) || error.status !== 404) throw error;
       const preview = createBrowserClient();
       const snapshot = await preview.snapshot();
-      if (snapshot.runtime_id !== 'go-ui-preview') throw error;
+      if (snapshot.runtime_id !== 'pot-ui-preview') throw error;
       client = preview;
     }
   }

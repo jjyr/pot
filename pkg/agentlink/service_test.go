@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"database/sql"
+	"sync"
 	"sync/atomic"
 
 	"encoding/base64"
@@ -127,7 +128,7 @@ func (f *fixture) start(address string) {
 }
 func (f *fixture) stop() { f.cancel(); f.listener.Close(); f.service.closeSessions(); <-f.done }
 func (f *fixture) close() {
-	f.service.closeSessions()
+	f.service.Close()
 	f.mail.db.Close()
 	f.secret.Close()
 	f.db.Close()
@@ -356,21 +357,14 @@ func TestTCPFailedRevocationDiscardsSessionAndPreservesPending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := a.service.ensureSession(ctx, pending)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Cancel before sending, with an authenticated session already registered.
-	// The pending revocation must survive and the next attempt must reconnect.
+	// Cancelling an unsent notification preserves the pending tombstone.
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
-	if err := a.service.propagateRevoke(canceled, pending); !errors.Is(err, ErrUnavailable) {
+	if err := a.service.propagateRevoke(canceled, pending); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
-	select {
-	case <-session.Done():
-	default:
-		t.Fatal("failed revocation retained its session for immediate reuse")
+	if a.service.session(connection.ID) != nil {
+		t.Fatal("cancelled revocation retained a reusable transport")
 	}
 	pending, err = a.service.Get(ctx, connection.ID)
 	if err != nil || pending.State != "revoked" || !pending.RevocationPending {
@@ -387,7 +381,7 @@ func TestTCPFailedRevocationDiscardsSessionAndPreservesPending(t *testing.T) {
 		if err == nil {
 			break
 		}
-		if !errors.Is(err, ErrUnavailable) {
+		if !errors.Is(err, ErrUnavailable) && !errors.Is(err, peer.ErrUncertain) {
 			t.Fatal(err)
 		}
 	}
@@ -573,5 +567,269 @@ func TestInitialSchemaReopenRetainsSignedConnection(t *testing.T) {
 	}
 	if mailCount(t, b, next.ID) != 1 {
 		t.Fatal("reopened connection could not deliver")
+	}
+}
+
+func TestConcurrentReconnectUsesOneAuthenticatedSession(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	a, b := newFixture(t, "dial-a"), newFixture(t, "dial-b")
+	a.service.options.Backend = &testBackend{f: a}
+	b.service.options.Backend = &testBackend{f: b}
+	connection := connect(t, a, b)
+	a.service.closeSessions()
+	before := b.accepted.Load()
+	const workers = 16
+	start := make(chan struct{})
+	type result struct {
+		session *peer.Session
+		err     error
+	}
+	results := make(chan result, workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			var accepted Directory
+			err := a.service.callConnection(ctx, connection, "directory", struct{}{}, &accepted)
+			if err == nil && accepted.NodeID != b.id {
+				err = ErrConflict
+			}
+			results <- result{a.service.session(connection.ID), err}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	var first *peer.Session
+	for value := range results {
+		if value.err != nil {
+			t.Fatal(value.err)
+		}
+		if first == nil {
+			first = value.session
+		}
+		if value.session != first {
+			t.Fatal("concurrent callers replaced each other's authenticated session")
+		}
+	}
+	if got := b.accepted.Load() - before; got != 1 {
+		t.Fatalf("opened %d reconnect sessions, want 1", got)
+	}
+	if _, err := first.Call(ctx, peer.Request{ID: "identity-after-reconnect", Method: "identity", Params: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal("shared session was closed", err)
+	}
+}
+
+func TestEnsureSessionAfterCloseDoesNotReadReleasedStores(t *testing.T) {
+	a, b := newFixture(t, "closed-a"), newFixture(t, "closed-b")
+	connection := connect(t, a, b)
+	a.service.Close()
+	a.db.Close()
+	a.secret.Close()
+	a.service.options.DB = nil
+	connection.LastSeen = nil // A cold connection would otherwise read its persisted credential.
+	if session, err := a.service.ensureSession(context.Background(), connection); session != nil || !errors.Is(err, ErrUnavailable) {
+		t.Fatal("closed service accessed released stores", session, err)
+	}
+}
+
+func TestSyncWaitingForConnectionPassHonorsCancellation(t *testing.T) {
+	a, b := newFixture(t, "sync-a"), newFixture(t, "sync-b")
+	c := connect(t, a, b)
+	f, err := a.service.forwarder(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.syncGate <- struct{}{}
+	defer func() { <-f.syncGate }()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := a.service.Sync(ctx, c.ID); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
+
+func TestForwarderRejectedColdDialReturnsErrorWithoutTypedNilTransport(t *testing.T) {
+	a := newFixture(t, "cold-dial")
+	err := a.service.callConnection(t.Context(), Connection{ID: "missing-connection"}, "identity", struct{}{}, nil)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatal(err)
+	}
+}
+
+func TestPromotedPairSessionSurvivesPendingHandshakeExpiry(t *testing.T) {
+	a, b := newFixture(t, "expiry-a"), newFixture(t, "expiry-b")
+	c := connect(t, a, b)
+	session := b.service.session(c.ID)
+	if session == nil {
+		t.Fatal("pair was not promoted")
+	}
+	// Invoke the actual expiry callback deterministically after promotion.
+	b.service.expirePending(session)
+	if _, err := session.Call(t.Context(), peer.Request{ID: "after-handshake-expiry", Method: "identity", Params: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal("pending timer retired an authenticated session", err)
+	}
+	if b.service.session(c.ID) != session {
+		t.Fatal("expiry replaced the promoted session")
+	}
+}
+
+type metadataBarrierBackend struct {
+	*testBackend
+	once    sync.Once
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *metadataBarrierBackend) Directory(ctx context.Context) (Directory, error) {
+	b.once.Do(func() { close(b.entered) })
+	select {
+	case <-b.release:
+		return b.testBackend.Directory(ctx)
+	case <-ctx.Done():
+		return Directory{}, ctx.Err()
+	}
+}
+func TestInitialForegroundMetadataCoalescesPeriodicSampling(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	a, b := newFixture(t, "metadata-a"), newFixture(t, "metadata-b")
+	c := connect(t, a, b) // No Backend yet: the initial saved directory is empty.
+	a.service.options.Backend = &testBackend{f: a}
+	backend := &metadataBarrierBackend{testBackend: &testBackend{f: b}, entered: make(chan struct{}, 2), release: make(chan struct{})}
+	b.service.options.Backend = backend
+	var once sync.Once
+	release := func() { once.Do(func() { close(backend.release) }) }
+	defer release()
+	first := make(chan error, 1)
+	go func() { first <- a.service.refreshMetadata(ctx, c) }()
+	select {
+	case <-backend.entered:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	var workers sync.WaitGroup
+	defer workers.Wait()
+	defer release()
+	if a.service.tryRefreshMetadata(ctx, c, &workers) {
+		t.Error("periodic metadata invalidated an unfinished first foreground directory")
+	}
+	cancelled, stop := context.WithCancel(ctx)
+	stop()
+	if err := a.service.refreshMetadata(cancelled, c); !errors.Is(err, context.Canceled) {
+		t.Error("metadata wait ignored cancellation", err)
+	}
+	release()
+	if err := <-first; err != nil {
+		t.Fatal("initial metadata failed", err)
+	}
+	current, err := a.service.Get(ctx, c.ID)
+	if err != nil || current.Directory == nil {
+		t.Fatal("initial directory missing", current.Directory, err)
+	}
+	if !a.service.tryRefreshMetadata(ctx, c, &workers) {
+		t.Fatal("periodic sampling did not resume")
+	}
+	workers.Wait()
+}
+
+type firstMetadataFault struct {
+	*testBackend
+	calls                    atomic.Int32
+	entered, release, failed chan struct{}
+}
+
+func (b *firstMetadataFault) Directory(ctx context.Context) (Directory, error) {
+	if b.calls.Add(1) == 1 {
+		close(b.entered)
+		select {
+		case <-b.release:
+		case <-ctx.Done():
+			return Directory{}, ctx.Err()
+		}
+		close(b.failed)
+		return Directory{}, ErrUnavailable
+	}
+	return b.testBackend.Directory(ctx)
+}
+func TestMetadataFaultBelongsToItsActualCaller(t *testing.T) {
+	for _, periodicFirst := range []bool{false, true} {
+		name := "foreground-failure"
+		if periodicFirst {
+			name = "periodic-failure-then-foreground-success"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			a, b := newFixture(t, "fault-a"), newFixture(t, "fault-b")
+			c := connect(t, a, b)
+			a.service.options.Backend = &testBackend{f: a}
+			fault := &firstMetadataFault{testBackend: &testBackend{f: b}, entered: make(chan struct{}), release: make(chan struct{}), failed: make(chan struct{})}
+			b.service.options.Backend = fault
+			var workers sync.WaitGroup
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { close(fault.release) }) }
+			defer workers.Wait()
+			defer release()
+			result := make(chan error, 1)
+			if periodicFirst {
+				// Force a real foreground control pass; ready idle Sync otherwise
+				// correctly skips an empty exchange.
+				c.State = "offline"
+				if err := a.service.update(ctx, c); err != nil {
+					t.Fatal(err)
+				}
+				if !a.service.tryRefreshMetadata(ctx, c, &workers) {
+					t.Fatal("periodic sample was not admitted")
+				}
+				select {
+				case <-fault.entered:
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+				controlFinished := make(chan struct{})
+				var controlOnce sync.Once
+				a.service.options.Changed = func() { controlOnce.Do(func() { close(controlFinished) }) }
+				go func() { result <- a.service.Sync(ctx, c.ID) }()
+				select {
+				case <-controlFinished:
+				case <-ctx.Done():
+					t.Fatal("foreground control phase did not progress independently", ctx.Err())
+				}
+			} else {
+				go func() { result <- a.service.Sync(ctx, c.ID) }()
+				select {
+				case <-fault.entered:
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+			}
+			release()
+			select {
+			case <-fault.failed:
+			case <-ctx.Done():
+				t.Fatal("fault was not executed")
+			}
+			select {
+			case err := <-result:
+				if periodicFirst && err != nil {
+					t.Fatal("background fault escaped into a later foreground read", err)
+				}
+				if !periodicFirst && !errors.Is(err, ErrUnavailable) {
+					t.Fatal("foreground fault was swallowed", err)
+				}
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			if periodicFirst {
+				current, err := a.service.Get(ctx, c.ID)
+				if err != nil || current.Directory == nil || current.Directory.NodeID != b.id || fault.calls.Load() < 2 {
+					t.Fatal("foreground did not fetch and save a new directory", current.Directory, err, fault.calls.Load())
+				}
+			}
+		})
 	}
 }

@@ -58,12 +58,9 @@ complete packages manually. Configuration files contain no credential values;
 credentials remain in the encrypted secret store. See [Extensions](extensions.md)
 and [Plugin packages](plugins.md). Remote work uses Agent Link delegation.
 
-Existing installations using `~/.pot-go` must explicitly select that root with
-`-root`, or stop all hosts and move the complete root to `~/.pot` before starting
-the new build. Preserve identity, keys and all databases together. Pot does not
-silently open or merge a different root. On upgrade, former `agent/plugins` and
-`agent/skills` move into the root, and SQLite extension settings export once to
-files. Conflicting nonempty destinations stop startup for resolution.
+On upgrade, former `agent/plugins` and `agent/skills` move into the root, and
+SQLite extension settings export once to files. Conflicting nonempty destinations
+stop startup for resolution.
 
 ## Standalone node
 
@@ -230,3 +227,21 @@ and supported collaboration operations; it grants no node administration access.
 Use the existing assistant chat and task delegation interactions. Disconnect
 pauses the link; delete removes the saved connection while retaining history.
 Neither action silently stops accepted work. See [Agent Links](agent-links.md).
+
+## Installation names
+
+CLI packages contain `pot-PLATFORM/bin/pot`, `Resources/` and
+`service/pot-runtime.service`. Keep the complete installation separate from the
+data root. Package naming does not move an existing data root.
+
+`pot service` manages `pot-runtime.service` on Linux or
+`com.jjyr.pot.runtime.plist` on macOS. Linux units read optional
+`~/.config/pot/runtime.env`. Installation refuses to overwrite a service definition.
+Service configuration is an explicit operator action; the application does not
+copy, rename or migrate old service definitions, environment files or roots.
+
+This build requires the `pot` root identity discriminator. Roots made with the
+previous discriminator are rejected before database startup and are not converted
+or overwritten. Keep an old development root with its matching binary, and select
+a separate unused root for this build. Do not edit identity markers or copy old
+databases into a fresh root. This naming refresh provides no data migration.

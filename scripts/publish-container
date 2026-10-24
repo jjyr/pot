@@ -6,14 +6,19 @@ import base64
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 
 from release_contract import checksum_name, version_number, verify_oci
 
 
-def publish(version, output):
+def publish(version, output, replace_digest=None):
     version = version_number(version)
+    if replace_digest is not None and (
+        version != "0.0.1" or not re.fullmatch(r"sha256:[a-f0-9]{64}", replace_digest)
+    ):
+        raise ValueError("image refresh requires version 0.0.1 and an exact previous digest")
     repository = os.environ["GITHUB_REPOSITORY"]
     sha = subprocess.check_output(
         ["gh", "api", f"repos/{repository}/commits/refs/tags/v{version}", "--jq", ".sha"], text=True
@@ -44,23 +49,33 @@ def publish(version, output):
         local = subprocess.check_output(["skopeo", "inspect", "--raw", source], **options)
         if remote.returncode == 0:
             if hashlib.sha256(remote.stdout).digest() != hashlib.sha256(local).digest():
-                raise ValueError("Refusing to replace an existing image version")
+                actual = "sha256:" + hashlib.sha256(remote.stdout).hexdigest()
+                if replace_digest != actual:
+                    raise ValueError("Refusing to replace an existing image version")
         elif (
             b"manifest unknown" not in remote.stderr.lower()
             and b"name unknown" not in remote.stderr.lower()
         ):
             raise RuntimeError("Cannot establish registry version state: " + remote.stderr.decode())
+        if remote.returncode != 0 and replace_digest is not None:
+            raise ValueError("Reviewed previous image is missing")
         subprocess.run(
             ["skopeo", "copy", "--all", "--preserve-digests", source, "docker://" + image],
             check=True,
             **options,
         )
-    print(f"Published {image}")
+        final = subprocess.check_output(
+            ["skopeo", "inspect", "--raw", "docker://" + image], **options
+        )
+        if hashlib.sha256(final).digest() != hashlib.sha256(local).digest():
+            raise ValueError("Published image digest does not match qualified OCI index")
+    print(f"Published {image}: sha256:{hashlib.sha256(local).hexdigest()}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("version")
     parser.add_argument("output", type=Path)
+    parser.add_argument("--replace-digest", help="Reviewed previous v0.0.1 image digest")
     args = parser.parse_args()
-    publish(args.version, args.output.resolve())
+    publish(args.version, args.output.resolve(), args.replace_digest)

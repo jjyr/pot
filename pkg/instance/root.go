@@ -1,4 +1,4 @@
-// Package instance establishes exclusive ownership of a fresh Go data root.
+// Package instance establishes exclusive ownership of a Pot data root.
 // It never imports or removes the previous release's data.
 package instance
 
@@ -11,6 +11,10 @@ import (
 	"path/filepath"
 	"syscall"
 )
+
+// IdentityFormat identifies Pot roots. Other discriminators are rejected before
+// opening any databases; naming refresh does not adopt or convert those roots.
+const IdentityFormat = "pot"
 
 type Identity struct {
 	Format    string `json:"format"`
@@ -32,7 +36,7 @@ func DefaultPath() (string, error) {
 }
 func Open(path string) (*Root, error) {
 	if path == "" {
-		return nil, errors.New("Go data root must be explicit")
+		return nil, errors.New("Pot data root must be explicit")
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -49,7 +53,7 @@ func Open(path string) (*Root, error) {
 		return nil, err
 	}
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
-		return nil, errors.New("Go data root must be a private directory")
+		return nil, errors.New("Pot data root must be a private directory")
 	}
 	// Resolve parent aliases such as macOS /tmp before deriving machine ownership
 	// and mount identities. The root itself must still be a real directory above.
@@ -78,10 +82,10 @@ func Open(path string) (*Root, error) {
 			switch entry.Name() {
 			case "runtime.lock", "skills", "plugins", "extensions.json", "mcp.json", "AGENTS.md":
 			default:
-				return fail(errors.New("unrecognized data root; choose an empty directory for the Go release"))
+				return fail(errors.New("unrecognized data root; choose an empty directory for Pot"))
 			}
 		}
-		identity = Identity{"pot-go", 1, rand.Text()}
+		identity = Identity{IdentityFormat, 1, rand.Text()}
 		if err = WriteJSON(file, identity); err != nil {
 			return fail(err)
 		}
@@ -90,8 +94,8 @@ func Open(path string) (*Root, error) {
 	} else if err = core.DecodeJSON(body, &identity); err != nil {
 		return fail(err)
 	}
-	if identity.Format != "pot-go" || identity.Version != 1 || !core.Identifier(identity.RuntimeID) {
-		return fail(errors.New("unsupported Go data-root identity"))
+	if identity.Format != IdentityFormat || identity.Version != 1 || !core.Identifier(identity.RuntimeID) {
+		return fail(errors.New("unsupported Pot data-root identity"))
 	}
 	return &Root{abs, identity, lock}, nil
 }

@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 from release_contract import (
     distribution_names,
+    cli_installation,
     generate_cask,
     checksum,
     checksum_name,
@@ -34,6 +35,31 @@ prepare = runpy.run_path(str(ROOT / "scripts/prepare-release"))["prepare"]
 sign = runpy.run_path(str(ROOT / "scripts/update-release"))["sign"]
 SHA = "a" * 40
 OTHER = "b" * 40
+
+
+class CLINaming(unittest.TestCase):
+    def test_cli_layout_requires_matching_metadata(self):
+        for directory, version, platform, accepted in [
+            ("pot-linux-amd64", "0.0.2", "linux-amd64", True),
+            ("pot-linux-amd64", "0.0.1", "linux-amd64", True),
+            ("unexpected-linux-amd64", "0.0.1", "linux-amd64", False),
+            ("pot-linux-arm64", "0.0.2", "linux-amd64", False),
+        ]:
+            with self.subTest(directory=directory, version=version):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    tree = root / directory
+                    (tree / "Resources").mkdir(parents=True)
+                    (tree / "bin").mkdir()
+                    (tree / "bin/pot").write_bytes(b"fixture")
+                    (tree / "Resources/update.json").write_text(
+                        json.dumps({"kind": "cli", "version": version, "platform": platform})
+                    )
+                    if accepted:
+                        self.assertEqual(cli_installation(root), tree)
+                        (root / "extra").mkdir()
+                    with self.assertRaises(ValueError):
+                        cli_installation(root)
 
 
 class ReleaseIntent(unittest.TestCase):
@@ -51,6 +77,31 @@ class ReleaseIntent(unittest.TestCase):
             with self.subTest(tag=tag):
                 result = plan("push", "refs/tags/" + tag, "", "", False, SHA, self.resolve)
                 self.assertEqual((result["official"], result["version"]), (official, version))
+
+    def test_candidate_version_is_never_allowed_to_override_publication(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            env = dict(
+                os.environ,
+                GITHUB_EVENT_NAME="workflow_dispatch",
+                GITHUB_REF="refs/heads/main",
+                GITHUB_SHA=SHA,
+                GITHUB_REPOSITORY="jjyr/pot",
+                GITHUB_OUTPUT=str(Path(temporary) / "output"),
+                VALIDATION_VERSION="0.0.1",
+                SOURCE_REF="",
+                PR_NUMBER="",
+                PUBLISH="false",
+            )
+            with mock.patch.dict(os.environ, env, clear=True):
+                main = plan.__globals__["main"]
+                main()
+                self.assertIn("version=0.0.1", Path(env["GITHUB_OUTPUT"]).read_text())
+                with mock.patch.dict(
+                    main.__globals__,
+                    plan=lambda *args: {"sha": SHA, "version": "1.2.3", "official": "true"},
+                ):
+                    with self.assertRaisesRegex(ValueError, "nonpublishing"):
+                        main()
 
     def test_manual_semantic_tag_defaults_to_validation(self):
         self.assertEqual(
@@ -97,7 +148,7 @@ class ReleaseIntent(unittest.TestCase):
 
 
 class AssetsFixture:
-    def oci_fixture(self, path, architectures=("amd64", "arm64")):
+    def oci_fixture(self, path, architectures=("amd64", "arm64"), version="1.2.3"):
         with tarfile.open(path, "w") as archive:
 
             def add(name, value):
@@ -119,7 +170,7 @@ class AssetsFixture:
                         "architecture": architecture,
                         "config": {
                             "Labels": {
-                                "org.opencontainers.image.version": "1.2.3",
+                                "org.opencontainers.image.version": version,
                                 "org.opencontainers.image.revision": SHA,
                             }
                         },
@@ -863,10 +914,10 @@ class MacOSSealing(unittest.TestCase):
                 (app / "Contents/MacOS/pot-app").write_bytes(bytes.fromhex("cffaedfe") + b"fixture")
                 with zipfile.ZipFile(output / "Pot-1.2.3-arm64.zip", "w") as packed:
                     packed.write(app / "Contents/MacOS/pot-app", "Pot.app/Contents/MacOS/pot-app")
-                cli = root / "pot-go-darwin-arm64"
+                cli = root / "pot-darwin-arm64"
                 cli.mkdir()
                 (cli / "pot").write_bytes(bytes.fromhex("cffaedfe") + b"fixture")
-                with tarfile.open(output / "pot-go-1.2.3-darwin-arm64.tar.gz", "w:gz") as packed:
+                with tarfile.open(output / "pot-1.2.3-darwin-arm64.tar.gz", "w:gz") as packed:
                     packed.add(cli, arcname=cli.name)
                 for path in output.iterdir():
                     write_checksum(path)
@@ -930,15 +981,27 @@ class ContainerPublication(AssetsFixture, unittest.TestCase):
             self.exercise(remote=b"different-manifest")
         self.assertFalse(any(call[:2] == ["skopeo", "copy"] for call in self.calls))
 
-    def exercise(self, remote=b""):
+    def test_refresh_requires_exact_old_digest_and_only_v001(self):
+        old = b"previous-manifest"
+        self.exercise(
+            remote=old, version="0.0.1", replace_digest="sha256:" + hashlib.sha256(old).hexdigest()
+        )
+        with self.assertRaisesRegex(ValueError, "existing image"):
+            self.exercise(remote=old, version="0.0.1", replace_digest="sha256:" + "0" * 64)
+        with self.assertRaisesRegex(ValueError, "version 0.0.1"):
+            self.exercise(remote=old, replace_digest="sha256:" + hashlib.sha256(old).hexdigest())
+        with self.assertRaisesRegex(ValueError, "missing"):
+            self.exercise(version="0.0.1", replace_digest="sha256:" + "0" * 64)
+
+    def exercise(self, remote=b"", version="1.2.3", replace_digest=None):
         publish = runpy.run_path(str(ROOT / "scripts/publish-container"))["publish"]
         self.calls = []
         real_run = subprocess.run
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            self.oci_fixture(root / "pot-container-1.2.3.oci.tar")
-            write_checksum(root / "pot-container-1.2.3.oci.tar")
-            prepare("1.2.3", root, channel="container")
+            self.oci_fixture(root / f"pot-container-{version}.oci.tar", version=version)
+            write_checksum(root / f"pot-container-{version}.oci.tar")
+            prepare(version, root, channel="container")
 
             def run(arguments, **options):
                 self.calls.append(arguments)
@@ -972,7 +1035,7 @@ class ContainerPublication(AssetsFixture, unittest.TestCase):
                 mock.patch("subprocess.check_output", side_effect=output),
                 mock.patch("builtins.print"),
             ):
-                publish("1.2.3", root)
+                publish(version, root, replace_digest)
 
 
 if __name__ == "__main__":

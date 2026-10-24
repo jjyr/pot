@@ -54,7 +54,7 @@ func RunPreview() error {
 	defer source.Close()
 	service := &PreviewService{source: source}
 	app := application.New(application.Options{
-		Name: "Pot Go Preview", Description: "Disposable Go/Wails UI migration preview", Icon: appIcon,
+		Name: "Pot", Description: "Pot", Icon: appIcon,
 		Services: []application.Service{application.NewService(service)},
 		Assets:   application.AssetOptions{Handler: application.AssetFileServerFS(webassets.FS())},
 		Mac:      application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},

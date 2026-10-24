@@ -29,6 +29,10 @@ type ProfileBackend interface {
 }
 
 func (s *Service) Profile(ctx context.Context, id string, input ProfileRequest) (Profile, error) {
+	if !s.enterRPC() {
+		return Profile{}, ErrUnavailable
+	}
+	defer s.rpcWG.Done()
 	if input.From.Kind != "user" || !input.From.Valid() || input.From.NodeID != s.options.HostIdentity.NodeID {
 		return Profile{}, ErrUnauthorized
 	}
@@ -36,12 +40,8 @@ func (s *Service) Profile(ctx context.Context, id string, input ProfileRequest) 
 	if err != nil {
 		return Profile{}, err
 	}
-	session, err := s.businessSession(ctx, c)
-	if err != nil {
-		return Profile{}, err
-	}
 	var profile Profile
-	err = s.call(ctx, session, "assistant.profile", input, &profile)
+	err = s.callConnection(ctx, c, "assistant.profile", input, &profile)
 	if err == nil && profile.ID != input.AssistantID {
 		err = ErrConflict
 	}

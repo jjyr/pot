@@ -8,7 +8,7 @@
 if(new URLSearchParams(location.search).has('mobile')){
   document.body.replaceChildren(Object.assign(document.createElement('iframe'),{title:'390px mobile Cron regression',src:location.pathname,style:'width:390px;height:844px;border:0'}));
 }else{
-  const {runCronRegression}=await import('../go-ui-cron.mjs');
+  const {runCronRegression}=await import('../pot-ui-cron.mjs');
   try{
     const checks=await runCronRegression();
     document.body.replaceChildren(Object.assign(document.createElement('h1'),{textContent:`PASS: ${checks.length} Cron UI checks`}),Object.assign(document.createElement('pre'),{textContent:checks.join('\n'),style:'white-space:pre-wrap'}));

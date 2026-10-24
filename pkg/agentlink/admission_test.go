@@ -41,7 +41,7 @@ func TestBusinessAdmissionReleasesCapacity(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			backend := &admissionBackend{entered: make(chan struct{}, 1), finish: make(chan error, 1)}
-			s := &Service{options: Options{Backend: backend, HostIdentity: peer.Identity{NodeID: "receiver"}}, rates: map[string]rate{}}
+			s := &Service{options: Options{Backend: backend, HostIdentity: peer.Identity{NodeID: "receiver"}}, admissions: map[string]admission{}}
 			done := make(chan error, 1)
 			go func() {
 				_, err := s.business(ctx, Connection{ID: "connection"}, peer.Identity{}, peer.Request{Method: "directory", Params: json.RawMessage(`{}`)})
@@ -60,7 +60,7 @@ func TestBusinessAdmissionReleasesCapacity(t *testing.T) {
 			if err := <-done; !errors.Is(err, tc.err) {
 				t.Fatalf("got %v, want %v", err, tc.err)
 			}
-			for range 5 {
+			for range maxConcurrentBusinessRequests {
 				if !s.admit("connection", businessAdmission) {
 					t.Fatal("handler leaked capacity")
 				}
@@ -69,48 +69,60 @@ func TestBusinessAdmissionReleasesCapacity(t *testing.T) {
 	}
 }
 
-func TestAdmissionControlSlotAndSharedRateBudget(t *testing.T) {
-	s := &Service{rates: map[string]rate{}}
+func TestAuthenticatedAdmissionHasNoAccumulatedRateLimit(t *testing.T) {
+	s := &Service{admissions: map[string]admission{}}
 	const id = "connection"
 	if !s.admit(id, controlAdmission) || s.admit(id, controlAdmission) {
-		t.Fatal("control requests must retain a single slot")
+		t.Fatal("control must retain one independent slot")
 	}
-	for range 5 {
+	for range maxConcurrentBusinessRequests {
 		if !s.admit(id, businessAdmission) {
-			t.Fatal("control request consumed business capacity")
+			t.Fatal("control consumed business slot")
 		}
 	}
-	if s.admit(id, businessAdmission) || !s.admit("other-connection", businessAdmission) {
-		t.Fatal("business capacity must be bounded per connection")
+	if s.admit(id, businessAdmission) {
+		t.Fatal("business limit exceeded")
 	}
-	s.release("other-connection", businessAdmission)
 	s.release(id, controlAdmission)
-	for range 5 {
+	for range maxConcurrentBusinessRequests {
 		s.release(id, businessAdmission)
 	}
-	// Include the six admissions above in the same per-connection rate window.
-	for i := 6; i < 180; i++ {
-		kind := admissionKind(i % 2)
-		if !s.admit(id, kind) {
-			t.Fatal("rate limit before 180 admissions", i)
+	for range 500 {
+		if !s.admit(id, businessAdmission) || !s.admit(id, controlAdmission) {
+			t.Fatal("authenticated calls retained old rate budget")
 		}
-		s.release(id, kind)
+		s.release(id, businessAdmission)
+		s.release(id, controlAdmission)
 	}
-	if s.admit(id, businessAdmission) || s.admit(id, controlAdmission) || s.rates[id].Count != 180 {
-		t.Fatal("180/minute limit changed", s.rates[id])
+}
+func TestPreviewKeepsIndependentAdmissionBudget(t *testing.T) {
+	s := &Service{admissions: map[string]admission{}}
+	if !s.admitPreview("invite") || s.admitPreview("invite") {
+		t.Fatal("preview must retain single slot")
 	}
-	if !s.admit("other-connection", businessAdmission) {
-		t.Fatal("rate budget was shared between connections")
+	s.releasePreview("invite")
+	for i := 1; i < maxPreviewRequestsPerMinute; i++ {
+		if !s.admitPreview("invite") {
+			t.Fatal("early preview rate limit", i)
+		}
+		s.releasePreview("invite")
 	}
-	s.release("other-connection", businessAdmission)
-	// Expiring the rate window must not release still-running handlers.
-	s.rates[id] = rate{At: time.Now().Add(-2 * time.Minute), Count: 180, Active: [2]int{0, 5}}
-	if s.admit(id, businessAdmission) {
-		t.Fatal("rate-window rollover released an active handler")
+	if s.admitPreview("invite") || !s.admitPreview("other") {
+		t.Fatal("preview rate budget is not scoped to invitation")
 	}
-	s.release(id, businessAdmission)
-	if !s.admit(id, businessAdmission) || s.rates[id].Count != 1 || s.rates[id].Active[businessAdmission] != 5 {
-		t.Fatal("rate window did not reset while retaining active handlers", s.rates[id])
+	for range 200 {
+		if !s.admit("invite", businessAdmission) {
+			t.Fatal("preview consumed connection budget")
+		}
+		s.release("invite", businessAdmission)
+	}
+	s.previewRates["invite"] = previewRate{At: time.Now().Add(-2 * time.Minute), Count: 180, Active: 1}
+	if s.admitPreview("invite") {
+		t.Fatal("rollover released active preview")
+	}
+	s.releasePreview("invite")
+	if !s.admitPreview("invite") {
+		t.Fatal("preview window did not roll over")
 	}
 }
 
@@ -138,13 +150,13 @@ func TestBusinessAdmissionOverAuthenticatedPeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gate := &admissionBackend{entered: make(chan struct{}, 5), finish: make(chan error, 5)}
+	gate := &admissionBackend{entered: make(chan struct{}, maxConcurrentBusinessRequests), finish: make(chan error, maxConcurrentBusinessRequests)}
 	backend.gate.Store(gate)
 	// Always unblock server handlers before fixture/session cleanup, even when
 	// an assertion fails. A caller timeout does not cancel a remote handler.
 	defer close(gate.finish)
-	done := make(chan error, 5)
-	for range 5 {
+	done := make(chan error, maxConcurrentBusinessRequests)
+	for range maxConcurrentBusinessRequests {
 		go func() {
 			var d Directory
 			done <- a.service.call(ctx, session, "directory", struct{}{}, &d)
@@ -159,15 +171,15 @@ func TestBusinessAdmissionOverAuthenticatedPeer(t *testing.T) {
 	}
 	var d Directory
 	if err := a.service.call(ctx, session, "directory", struct{}{}, &d); !errors.Is(err, ErrCapacity) {
-		t.Fatal("sixth peer request was not rejected", err)
+		t.Fatal("excess raw peer request was not rejected", err)
 	}
-	if gate.calls.Load() != 5 {
+	if gate.calls.Load() != maxConcurrentBusinessRequests {
 		t.Fatal("rejected peer request entered backend", gate.calls.Load())
 	}
-	for range 5 {
+	for range maxConcurrentBusinessRequests {
 		gate.finish <- nil
 	}
-	for range 5 {
+	for range maxConcurrentBusinessRequests {
 		select {
 		case err := <-done:
 			if err != nil {

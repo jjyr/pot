@@ -148,6 +148,9 @@ func (h *agentHost) close() {
 		listener.Close()
 	}
 	h.accessMu.Unlock()
+	if h.links != nil {
+		h.links.Close()
+	}
 	clear(h.peerKey)
 	if h.tasks != nil {
 		h.tasks.Close()

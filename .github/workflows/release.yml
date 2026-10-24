@@ -97,15 +97,15 @@ jobs:
           POT_MACOS_RELEASE_MODE: ${{ needs.preflight.outputs.mode }}
         run: |
           mise exec -- python scripts/tests/macos-package-smoke.py dist/Pot-${{ inputs.version }}-arm64.zip
-          mise exec -- python scripts/tests/server-package-smoke.py dist/pot-go-${{ inputs.version }}-darwin-arm64.tar.gz
+          mise exec -- python scripts/tests/server-package-smoke.py dist/pot-${{ inputs.version }}-darwin-arm64.tar.gz
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sealed-macos
           path: |
             dist/Pot-*.zip
             dist/Pot-*.zip.sha256
-            dist/pot-go-*-darwin-arm64.tar.gz
-            dist/pot-go-*-darwin-arm64.tar.gz.sha256
+            dist/pot-*-darwin-arm64.tar.gz
+            dist/pot-*-darwin-arm64.tar.gz.sha256
           if-no-files-found: error
           retention-days: 7
 

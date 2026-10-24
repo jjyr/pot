@@ -63,6 +63,10 @@ func (s *Service) pending(ctx context.Context, c Connection) ([]protocol.Envelop
 // Directory refreshes the remote node's advertised assistants. It grants no
 // access to its owner APIs, files, credentials or execution transport.
 func (s *Service) Directory(ctx context.Context, id string) (Directory, error) {
+	if !s.enterRPC() {
+		return Directory{}, ErrUnavailable
+	}
+	defer s.rpcWG.Done()
 	if id == "" {
 		return s.localDirectory(ctx)
 	}
@@ -70,22 +74,18 @@ func (s *Service) Directory(ctx context.Context, id string) (Directory, error) {
 	if e != nil {
 		return Directory{}, e
 	}
-	session, e := s.businessSession(ctx, c)
-	if e != nil {
-		return Directory{}, e
-	}
-	return s.readPeerDirectory(ctx, c, session)
+	return s.readPeerDirectory(ctx, c)
 }
 
 // Each request captures an epoch before network I/O. A confirmed deletion or
 // newer request fences its response, including the value returned to callers.
-func (s *Service) readPeerDirectory(ctx context.Context, c Connection, session *peer.Session) (Directory, error) {
+func (s *Service) readPeerDirectory(ctx context.Context, c Connection) (Directory, error) {
 	s.mu.Lock()
 	s.directoryEpoch[c.ID]++
 	epoch := s.directoryEpoch[c.ID]
 	s.mu.Unlock()
 	var d Directory
-	e := s.call(ctx, session, "directory", struct{}{}, &d)
+	e := s.callConnection(ctx, c, "directory", struct{}{}, &d)
 	if e == nil {
 		e = validateDirectory(d, c.PeerHost.NodeID)
 		if d.Adapter != c.Peer.Adapter {
@@ -113,15 +113,6 @@ func (s *Service) readPeerDirectory(ctx context.Context, c Connection, session *
 	}
 	return d, e
 }
-func (s *Service) businessSession(ctx context.Context, c Connection) (*peer.Session, error) {
-	if c.State == "revoked" {
-		return nil, ErrRevoked
-	}
-	if c.State == "disconnected" {
-		return nil, ErrDisconnected
-	}
-	return s.ensureSession(ctx, c)
-}
 
 type taskLookup struct {
 	From protocol.AgentRef `json:"from"`
@@ -129,6 +120,10 @@ type taskLookup struct {
 }
 
 func (s *Service) Submit(ctx context.Context, id string, r TaskRequest) (Task, error) {
+	if !s.enterRPC() {
+		return Task{}, ErrUnavailable
+	}
+	defer s.rpcWG.Done()
 	if !taskCaller(r.From) || r.From.NodeID != s.options.HostIdentity.NodeID {
 		return Task{}, ErrUnauthorized
 	}
@@ -165,12 +160,8 @@ func (s *Service) Submit(ctx context.Context, id string, r TaskRequest) (Task, e
 	if r.Target.NodeID != c.PeerHost.NodeID {
 		return Task{}, ErrConflict
 	}
-	session, e := s.businessSession(ctx, c)
-	if e != nil {
-		return Task{}, e
-	}
 	var t Task
-	e = s.call(ctx, session, "task.submit", r, &t)
+	e = s.callConnection(ctx, c, "task.submit", r, &t)
 	if e == nil {
 		e = validateSubmission(t, r, c.PeerHost.NodeID, c.Peer.Adapter)
 	}
@@ -183,6 +174,10 @@ func (s *Service) Cancel(ctx context.Context, id string, from protocol.AgentRef,
 	return s.lookup(ctx, id, from, task, "task.cancel")
 }
 func (s *Service) lookup(ctx context.Context, id string, from protocol.AgentRef, task, method string) (Task, error) {
+	if !s.enterRPC() {
+		return Task{}, ErrUnavailable
+	}
+	defer s.rpcWG.Done()
 	if !taskCaller(from) || from.NodeID != s.options.HostIdentity.NodeID {
 		return Task{}, ErrUnauthorized
 	}
@@ -209,12 +204,8 @@ func (s *Service) lookup(ctx context.Context, id string, from protocol.AgentRef,
 	if e != nil {
 		return Task{}, e
 	}
-	session, e := s.businessSession(ctx, c)
-	if e != nil {
-		return Task{}, e
-	}
 	var t Task
-	e = s.call(ctx, session, method, taskLookup{from, task}, &t)
+	e = s.callConnection(ctx, c, method, taskLookup{from, task}, &t)
 	if e == nil {
 		e = validateTask(t, c.PeerHost.NodeID, c.Peer.Adapter, task, "")
 	}
@@ -320,37 +311,63 @@ func taskCaller(from protocol.AgentRef) bool {
 
 // Disconnect pauses communication without deleting keys, history or work.
 func (s *Service) Disconnect(ctx context.Context, id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	c, e := s.Get(ctx, id)
-	if e != nil {
-		return e
+	if !s.enterRPC() {
+		return ErrUnavailable
 	}
-	if c.State == "revoked" {
-		return ErrRevoked
+	defer s.rpcWG.Done()
+	f, err := s.forwarder(Connection{ID: id})
+	if err != nil {
+		return err
 	}
-	c.State = "disconnected"
-	c.LastError = ""
-	e = s.update(ctx, c)
-	if session := s.sessions[id]; session != nil {
-		session.Close()
-	}
-	return e
+	return f.transition(ctx, ErrDisconnected, nil, func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.closed {
+			return ErrUnavailable
+		}
+		c, err := s.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		if c.State == "revoked" {
+			return ErrRevoked
+		}
+		c.State = "disconnected"
+		c.LastError = ""
+		return s.update(ctx, c)
+	})
 }
 func (s *Service) Reconnect(ctx context.Context, id string) error {
-	s.mu.Lock()
-	c, e := s.Get(ctx, id)
-	if e == nil && c.State == "revoked" {
-		e = ErrRevoked
+	if !s.enterRPC() {
+		return ErrUnavailable
 	}
-	if e == nil {
-		c.State = "offline"
-		raw, _ := json.Marshal(c)
-		_, e = s.options.DB.ExecContext(ctx, "UPDATE agent_link_connections SET state=?,metadata=? WHERE id=? AND state!='revoked'", c.State, string(raw), c.ID)
+	defer s.rpcWG.Done()
+	f, err := s.forwarder(Connection{ID: id})
+	if err != nil {
+		return err
 	}
-	s.mu.Unlock()
-	if e != nil {
-		return e
+	var c Connection
+	err = f.transition(ctx, nil, nil, func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.closed {
+			return ErrUnavailable
+		}
+		current, err := s.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		if current.State == "revoked" {
+			return ErrRevoked
+		}
+		current.State = "offline"
+		raw, _ := json.Marshal(current)
+		_, err = s.options.DB.ExecContext(ctx, "UPDATE agent_link_connections SET state=?,metadata=? WHERE id=? AND state!='revoked'", current.State, string(raw), current.ID)
+		c = current
+		return err
+	})
+	if err != nil {
+		return err
 	}
 	if c.Endpoint == "" {
 		if s.options.Changed != nil {

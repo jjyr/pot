@@ -86,7 +86,7 @@ func Save(root string, settings Settings) error {
 	defer anchor.Close()
 	identityInfo, err := anchor.Lstat("identity.json")
 	if err != nil || !identityInfo.Mode().IsRegular() || identityInfo.Mode().Perm()&0077 != 0 {
-		return errors.New("initialize the Go Runtime root before saving server settings")
+		return errors.New("initialize the Pot Runtime root before saving server settings")
 	}
 	raw, err := anchor.ReadFile("identity.json")
 	if err != nil {
@@ -96,8 +96,8 @@ func Save(root string, settings Settings) error {
 	if err = core.DecodeJSON(raw, &identity); err != nil {
 		return err
 	}
-	if identity.Format != "pot-go" || identity.Version != 1 || !core.Identifier(identity.RuntimeID) {
-		return errors.New("server settings require a recognized Go Runtime root")
+	if identity.Format != instance.IdentityFormat || identity.Version != 1 || !core.Identifier(identity.RuntimeID) {
+		return errors.New("server settings require a recognized Pot Runtime root")
 	}
 	return instance.WriteJSON(filepath.Join(root, "server.json"), settings)
 }

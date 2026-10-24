@@ -15,7 +15,7 @@ func (r *Runtime) prepareAssets(options Options, config *control.Options) error 
 		if info, err := os.Stat(filepath.Join(candidate, "skills")); err == nil && info.IsDir() {
 			resources = candidate
 		} else {
-			resources = ".local/go/runtime-resources"
+			resources = ".local/pot/runtime-resources"
 		}
 	}
 	resources, _ = filepath.Abs(resources)

@@ -15,9 +15,9 @@ ARG POT_UPDATE_PUBLIC_KEY=
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     test "$TARGETOS" = linux && case "$TARGETARCH" in amd64|arm64) ;; *) exit 1 ;; esac \
     && export POT_APP_VERSION POT_BUILD_REVISION POT_UPDATE_PUBLIC_KEY \
-    && python3 scripts/build-go-cli --platform "linux-$TARGETARCH" --output /tmp/packages \
+    && python3 scripts/build-pot-cli --platform "linux-$TARGETARCH" --output /tmp/packages \
     && mkdir /out \
-    && tar -xzf "/tmp/packages/pot-go-linux-$TARGETARCH.tar.gz" --strip-components=1 -C /out \
+    && tar -xzf "/tmp/packages/pot-linux-$TARGETARCH.tar.gz" --strip-components=1 -C /out \
     && CGO_ENABLED=0 GOOS=linux GOARCH="$TARGETARCH" go build -mod=readonly -trimpath \
        -ldflags='-s -w' -o /out/bin/pot-sandbox-check ./docker/sandbox-check \
     && rm -rf /out/service /out/Resources/node/include \

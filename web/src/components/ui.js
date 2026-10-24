@@ -1,4 +1,5 @@
 import {machinePresentation} from '../state/machine-identity.mjs';
+import {storedPreference} from '../state/preferences.mjs';
 import {createCompaction} from './compaction.mjs';
 import {projectLinkedAssistants,supportsCapability} from '../state/agent-links.mjs';
 import {agentSource} from './connection-visuals.mjs';
@@ -55,7 +56,7 @@ function button(name, label, className = 'icon-button') {
   return item;
 }
 function stored(key, fallback) {
-  try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
+  return storedPreference(key, fallback);
 }
 function persist(key, value) { try { localStorage.setItem(key, value); } catch { /* restricted WebView */ } }
 
@@ -68,10 +69,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     viewSurface='browser:'+tabID;
   }
   const params = new URLSearchParams(location.search);
-  let locale = params.get('locale') || stored('pot-go-preview-locale', navigator.language.startsWith('zh') ? 'zh-CN' : 'en');
+  let locale = params.get('locale') || stored('pot-ui-locale', navigator.language.startsWith('zh') ? 'zh-CN' : 'en');
   if (!messages[locale]) locale = 'en';
   client.uiLocale=()=>locale;
-  let theme = params.get('theme') || stored('pot-go-preview-theme', 'system');
+  let theme = params.get('theme') || stored('pot-ui-theme', 'system');
   if (!['system', 'light', 'dark'].includes(theme)) theme = 'system';
   const state = createConversationState();
   let initialReads=[];try{initialReads=client.desktop?client.readBaselines||[]:JSON.parse(stored('pot-ui-read-v1','[]'));}catch{}
@@ -428,8 +429,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         select.id = `preview-${key}`;
         label.htmlFor = select.id;
         select.onchange = () => {
-          if (key === 'language') { locale = select.value; persist('pot-go-preview-locale', locale); }
-          else { theme = select.value; persist('pot-go-preview-theme', theme); }
+          if (key === 'language') { locale = select.value; persist('pot-ui-locale', locale); }
+          else { theme = select.value; persist('pot-ui-theme', theme); }
           renderShell(); renderMessages(); if(client.production) window.dispatchEvent(new Event('pot:locale'));
         };
         label.append(text, select);
@@ -1089,8 +1090,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     } catch (reason) { if (ticket===directoryEpoch&&!disposed) {error = reason.message; connection='offline'; updateControls();if(!assistants.length){const empty=el('div','empty-chat',reason.message);const retry=el('button','control',t('retry'));retry.onclick=()=>loadDirectory();empty.append(document.createElement('br'),retry);messageColumn.replaceChildren(empty);}} }
   }
   const preferencesChanged = event => {
-    if(event.detail.key==='pot-go-preview-locale') locale=event.detail.value;
-    if(event.detail.key==='pot-go-preview-theme') theme=event.detail.value;
+    if(event.detail.key==='pot-ui-locale') locale=event.detail.value;
+    if(event.detail.key==='pot-ui-theme') theme=event.detail.value;
     renderShell();renderMessages();window.dispatchEvent(new Event('pot:locale'));
   };
   window.addEventListener('pot:preference',preferencesChanged);

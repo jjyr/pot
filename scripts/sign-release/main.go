@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -41,8 +42,31 @@ func run(args []string) error {
 		fmt.Println(base64.StdEncoding.EncodeToString(public))
 		return nil
 	}
+	if len(args) == 1 && args[0] == "verify" {
+		var envelope struct {
+			Payload   string `json:"payload"`
+			Signature string `json:"signature"`
+		}
+		if err := json.NewDecoder(io.LimitReader(os.Stdin, (1<<20)+1)).Decode(&envelope); err != nil {
+			return err
+		}
+		public, err := base64.StdEncoding.DecodeString(os.Getenv("POT_UPDATE_PUBLIC_KEY"))
+		if err != nil || len(public) != ed25519.PublicKeySize {
+			return errors.New("invalid release public key")
+		}
+		payload, err := base64.StdEncoding.DecodeString(envelope.Payload)
+		if err != nil {
+			return err
+		}
+		signature, err := base64.StdEncoding.DecodeString(envelope.Signature)
+		if err != nil || !ed25519.Verify(ed25519.PublicKey(public), payload, signature) {
+			return errors.New("invalid release signature")
+		}
+		_, err = os.Stdout.Write(payload)
+		return err
+	}
 	if len(args) != 1 || args[0] != "sign" {
-		return errors.New("usage: sign-release keygen PRIVATE_KEY_PATH | sign")
+		return errors.New("usage: sign-release keygen PRIVATE_KEY_PATH | sign | verify")
 	}
 	block, _ := pem.Decode([]byte(os.Getenv("POT_UPDATE_PRIVATE_KEY")))
 	if block == nil {

@@ -58,6 +58,6 @@ f.client={production:true,runtime:{runtime_id:'fixture',boot_id:'boot'},scope:()
  return {items:[]};
 },send:async()=>{throw Error('No model allowed in fixture');},cancel:async()=>{},markRead:async v=>v};
 f.change=(domains=['tasks','schedules'])=>{for(const cb of changes)cb(domains,{space:scope.space});};
-f.preference=(key,value)=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:`pot-go-preview-${key}`,value}}));
+f.preference=(key,value)=>window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:`pot-ui-${key}`,value}}));
 f.dispose=mountApp(document.querySelector('#app'),f.client);
 f.ready=true;

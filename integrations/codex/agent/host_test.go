@@ -166,6 +166,13 @@ func testHost(t *testing.T) (*agentHost, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		for name, db := range map[string]*sql.DB{"control": h.db, "tasks": h.tasks} {
+			if stats := db.Stats(); stats.OpenConnections != 0 {
+				t.Errorf("host close left %s database connections active: %+v", name, stats)
+			}
+		}
+	})
 	return h, root
 }
 func TestAgentHostRestartStableIdentityAndMailbox(t *testing.T) {

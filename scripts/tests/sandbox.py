@@ -8,9 +8,9 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
-from go_packaging import prepare_sandbox  # noqa: E402
+from pot_packaging import prepare_sandbox  # noqa: E402
 
-sdk = ROOT / ".local/go/sandbox-tests"
+sdk = ROOT / ".local/pot/sandbox-tests"
 prepare_sandbox(sdk)
 subprocess.run(
     ["go", "test", "-race", "-v", "./pkg/sandbox", "./pkg/executor", "./pkg/processscope"],

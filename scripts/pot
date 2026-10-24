@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the Go/Wails product build and its retained runtime asset preparation."""
+"""Run the Pot/Wails product build and its retained runtime asset preparation."""
 
 import argparse
 import subprocess
@@ -10,11 +10,11 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("command", choices=["prepare", "build", "bundle", "open"])
 args = parser.parse_args()
 if args.command == "prepare":
-    subprocess.run(["python3", ROOT / "scripts/prepare-go-resources"], cwd=ROOT, check=True)
+    subprocess.run(["python3", ROOT / "scripts/prepare-pot-resources"], cwd=ROOT, check=True)
 elif args.command in {"build", "bundle"}:
-    subprocess.run(["python3", ROOT / "scripts/build-go-app"], cwd=ROOT, check=True)
+    subprocess.run(["python3", ROOT / "scripts/build-pot-app"], cwd=ROOT, check=True)
 else:
-    bundle = ROOT / ".local/go/PotGoPreview.app"
+    bundle = ROOT / ".local/pot/PotPreview.app"
     if not bundle.is_dir():
         parser.error("Build the app with mise run build first")
     subprocess.run(["open", bundle], check=True)

@@ -13,7 +13,7 @@ if(!new URLSearchParams(location.search).has('app')){
   const style=document.createElement('link');style.rel='stylesheet';style.href='/web/src/styles.css';document.head.append(style);
   const {mountApp}=await import('/web/src/components/ui.js');
   const {createProductionClient}=await import('/web/src/adapters/production.mjs');
-  const {runAvatarRegression,verifyAvatarReload}=await import('/scripts/tests/go-ui-assistant-avatar-browser.mjs');
+  const {runAvatarRegression,verifyAvatarReload}=await import('/scripts/tests/pot-ui-assistant-avatar-browser.mjs');
   const probe={posts:[],errors:[],failNext:false};let dispose;
   window.addEventListener('error',event=>probe.errors.push(event.message));window.addEventListener('unhandledrejection',event=>probe.errors.push(String(event.reason)));
   probe.remount=async(surface='main')=>{

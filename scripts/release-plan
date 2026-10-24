@@ -6,7 +6,7 @@ import os
 import re
 import subprocess
 
-from release_contract import VERSION
+from release_contract import VERSION, version_number
 
 
 def plan(event, selected_ref, requested_ref, pr, publish, selected_sha, resolve):
@@ -61,6 +61,11 @@ def main():
         os.environ["GITHUB_SHA"],
         resolve,
     )
+    validation_version = os.environ.get("VALIDATION_VERSION", "")
+    if validation_version:
+        if result["official"] == "true":
+            raise ValueError("validation version is only allowed for nonpublishing runs")
+        result["version"] = version_number(validation_version)
     with open(os.environ["GITHUB_OUTPUT"], "a") as output:
         for name, value in result.items():
             output.write(f"{name}={value}\n")

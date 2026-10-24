@@ -10,7 +10,7 @@ on:
       ref:
         description: Resolved source SHA for release/build callers
         type: string
-        default: ''
+        required: true
       use-cache:
         description: Explicit source/PR validation may not use shared caches
         type: boolean
@@ -20,17 +20,36 @@ permissions:
   contents: read
 
 concurrency:
-  group: tests-${{ github.workflow }}-${{ github.ref }}-${{ inputs.ref }}
+  group: tests-${{ (github.event_name == 'workflow_dispatch' || inputs.ref != '') && 'full' || 'light' }}-${{ github.workflow }}-${{ github.ref }}-${{ inputs.ref }}
   # A release caller must not be cancelled by another validation run.
-  cancel-in-progress: ${{ inputs.ref == '' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && inputs.ref == '' }}
 
 env:
   MISE_AUTO_INSTALL: 'false'
   POT_TEST_TIMEOUT_SCALE: '4'
 
 jobs:
+  lightweight:
+    name: Lightweight checks (Linux)
+    if: github.event_name != 'workflow_dispatch' && inputs.ref == ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/test-setup
+        with:
+          scope: core
+          tools: go python node ruff shfmt shellcheck swiftformat
+      - name: Core, static, translation, UI and packaging contracts
+        run: mise run ci:light
+      - name: Validate all workflow interfaces
+        run: mise exec -- go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.11
+
   product:
-    name: ${{ matrix.plan.name }} (${{ matrix.os }})
+    name: Full product / ${{ matrix.plan.name }} (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch' || inputs.ref != ''
     strategy:
       fail-fast: false
       matrix:

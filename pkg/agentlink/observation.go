@@ -2,7 +2,6 @@ package agentlink
 
 import (
 	"context"
-	"github.com/jjyr/pot/pkg/peer"
 	"reflect"
 	"strings"
 	"time"
@@ -96,9 +95,9 @@ func (s *Service) Observation(id string) ObservationSample {
 	return value
 }
 
-func (s *Service) sampleObservation(ctx context.Context, connection Connection, directory Directory, session *peer.Session) {
+func (s *Service) sampleObservation(ctx context.Context, connection Connection, directory Directory) {
 	var value Observation
-	err := s.call(ctx, session, "observe", struct{}{}, &value)
+	err := s.callConnection(ctx, connection, "observe", struct{}{}, &value)
 	if err == nil {
 		err = validateObservation(value, directory)
 	}

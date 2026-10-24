@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Build portable Pot CLI/runtime archives with retained runtime assets."""
+
+import argparse
+from pathlib import Path
+import platform
+import shutil
+import tarfile
+import tempfile
+
+from pot_packaging import (
+    BUILD,
+    NODE_HASHES,
+    ROOT,
+    call,
+    digest,
+    go_build,
+    prepare_resources,
+    update_metadata,
+)
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument(
+    "--platform",
+    choices=NODE_HASHES,
+    default={
+        "Darwin": "darwin-arm64",
+        "Linux": "linux-"
+        + {"x86_64": "amd64", "aarch64": "arm64"}.get(platform.machine(), "unsupported"),
+    }.get(platform.system()),
+)
+parser.add_argument("--output", type=Path, default=BUILD / "releases")
+args = parser.parse_args()
+BUILD.mkdir(parents=True, exist_ok=True)
+args.output.mkdir(parents=True, exist_ok=True)
+with tempfile.TemporaryDirectory(prefix=".pot-cli-", dir=BUILD) as temporary:
+    staged = Path(temporary) / ("pot-" + args.platform)
+    resources = staged / "Resources"
+    prepare_resources(resources, args.platform)
+    update_metadata(resources, "cli", args.platform)
+    for name in ("pot",):
+        go_build("./cmd/" + name, staged / "bin" / name, args.platform)
+    call(
+        [
+            "python3",
+            ROOT / "scripts/render-pot-service",
+            "--binary",
+            staged / "bin/pot",
+            "--output",
+            staged / "service/pot-runtime.service",
+            "--template",
+        ]
+    )
+    archive = args.output / (staged.name + ".tar.gz")
+    with tarfile.open(archive, "w:gz") as target:
+        target.add(staged, arcname=staged.name)
+    archive.with_suffix(archive.suffix + ".sha256").write_text(
+        f"{digest(archive)}  {archive.name}\n"
+    )
+print(archive.resolve())

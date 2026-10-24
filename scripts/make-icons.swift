@@ -86,7 +86,7 @@ func color(_ value: UInt32, alpha: CGFloat = 1) -> NSColor {
             try renderMark(size: size).write(to: assets.appendingPathComponent("PotMenuBar-\(size).png"))
         }
         // The wallpaper is generated from the same native master, with no duplicate character geometry.
-        let iconset = root.appendingPathComponent(".local/go/Pot.iconset")
+        let iconset = root.appendingPathComponent(".local/pot/Pot.iconset")
         try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
         for size in [16, 32, 128, 256, 512] {
             try render(size: size).write(to: iconset.appendingPathComponent("icon_\(size)x\(size).png"))

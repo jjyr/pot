@@ -20,6 +20,10 @@ func validGuidance(r TaskGuidance, node string) bool {
 	return taskCaller(r.From) && r.From.NodeID == node && core.Identifier(r.ID) && core.Identifier(r.RequestID) && r.Text != "" && len(r.Text) <= 24000
 }
 func (s *Service) Input(ctx context.Context, link string, r TaskGuidance) (Task, error) {
+	if !s.enterRPC() {
+		return Task{}, ErrUnavailable
+	}
+	defer s.rpcWG.Done()
 	if !validGuidance(r, s.options.HostIdentity.NodeID) {
 		return Task{}, ErrInvalid
 	}
@@ -38,12 +42,8 @@ func (s *Service) Input(ctx context.Context, link string, r TaskGuidance) (Task,
 	if err != nil {
 		return Task{}, err
 	}
-	session, err := s.businessSession(ctx, c)
-	if err != nil {
-		return Task{}, err
-	}
 	var result Task
-	err = s.call(ctx, session, "task.input", r, &result)
+	err = s.callConnection(ctx, c, "task.input", r, &result)
 	if err == nil {
 		err = validateTask(result, c.PeerHost.NodeID, c.Peer.Adapter, r.ID, "")
 	}
