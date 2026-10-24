@@ -14,6 +14,7 @@ func completeRun(t *testing.T, s *Service, p *fakePort, task Record) {
 	}
 	p.mu.Lock()
 	r := p.runs[task.RunID]
+	r.FinishedAtMS = r.StartedAtMS + 138000
 	r.Phase, r.Result, r.CleanupConfirmed = Complete, &Terminal{Outcome: core.Success, Text: "done"}, true
 	p.runs[task.RunID] = r
 	p.mu.Unlock()
@@ -80,11 +81,11 @@ func TestOwnerBatchArchiveAndContinuationPreserveTaskAndReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	current, err := restored.Get(ctx, "assistant", original.Info.ID)
-	if err != nil || current.RunID == original.RunID || current.Info.ID != original.Info.ID || current.Info.Archived || current.Generation != original.Generation || current.Request.Workspace != original.Request.Workspace || current.Request.Text != original.Request.Text || current.Launch.Text != "modify the existing result" {
+	if err != nil || current.RunID == original.RunID || current.Info.ID != original.Info.ID || current.Info.Archived || current.Info.FinishedAtMS != 0 || current.Generation != original.Generation || current.Request.Workspace != original.Request.Workspace || current.Request.Text != original.Request.Text || current.Launch.Text != "modify the existing result" {
 		t.Fatal(current, err)
 	}
 	old, err := restored.Run(ctx, "assistant", original.Info.ID, original.RunID)
-	if err != nil || old.Info.Phase != protocol.TaskComplete || old.Result.Text != "done" {
+	if err != nil || old.Info.Phase != protocol.TaskComplete || old.Result.Text != "done" || old.Info.FinishedAtMS == 0 {
 		t.Fatal("old run overwritten", old, err)
 	}
 	if _, err = restored.SetDispositions(ctx, "assistant", decisions[:1]); err == nil {

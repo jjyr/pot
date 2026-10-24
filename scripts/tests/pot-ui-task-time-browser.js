@@ -23,23 +23,23 @@ async page=>{
   await page.emulateMedia({reducedMotion:'reduce'});await page.setViewportSize({width:1200,height:850});await page.goto(state.origin+'/?locale=zh-CN&theme=light&conversation=alpha');
   await page.locator('.background-task').first().waitFor();await page.locator('#pot-composer').fill('保留这条草稿');
   if(!state.before){
-   await elapsed().getByText('已用 12分34秒',{exact:true}).waitFor();
+   await elapsed().getByText('12分34秒',{exact:true}).waitFor();
    await page.locator('.background-task').filter({hasText:'独立 worktree'}).focus();
    await page.evaluate(()=>window.__retainedTimeRow=document.activeElement);await change();
    await page.waitForFunction(()=>document.activeElement===window.__retainedTimeRow&&document.activeElement.isConnected);
    const count=reads.length;
    await page.evaluate(()=>window.__taskTimeNow+=5000);
-   await elapsed().getByText('已用 12分39秒',{exact:true}).waitFor();
+   await elapsed().getByText('12分39秒',{exact:true}).waitFor();
    assert(reads.length===count,'Clock updates do not fetch backend projections');
    assert(await page.evaluate(()=>document.activeElement===window.__retainedTimeRow),'Clock updates preserve focused task');
    await page.evaluate(()=>window.__taskTimeNow-=5000);
-   await elapsed().getByText('已用 12分34秒',{exact:true}).waitFor();
+   await elapsed().getByText('12分34秒',{exact:true}).waitFor();
   }
   await page.locator('#pot-composer').focus();
   for(const [name,width]of [['desktop',1200],['mobile',390]]){
    await page.setViewportSize({width,height:850});await page.locator('.background-tasks').scrollIntoViewIfNeeded();
    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Tasks fit '+name);
-   if(!state.before){const bounds=await elapsed().boundingBox(),title=await page.locator('.background-task').filter({hasText:'独立 worktree'}).locator('.background-task-title').boundingBox();assert(bounds.y>=title.y+title.height,'Elapsed time stays in the task metadata below its title');}
+   if(!state.before){const bounds=await elapsed().boundingBox(),title=await page.locator('.background-task').filter({hasText:'独立 worktree'}).locator('.background-task-title').boundingBox();assert(Math.abs((bounds.y+bounds.height/2)-(title.y+title.height/2))<2,'Elapsed time stays on the title/status line');}
    if(state.screenshots)await page.screenshot({path:state.screenshots+'/chat-task-time-'+name+(state.before?'-before.png':'-after.png')});
   }
   await page.setViewportSize({width:1200,height:850});await page.getByRole('button',{name:'任务',exact:true}).first().click();await page.locator('.task-row').first().waitFor();
@@ -66,18 +66,18 @@ async page=>{
   tasks[0].phase='complete';await change();await listTime().waitFor({state:'hidden'});
   tasks[0].phase='running';tasks[0].started_at_ms=0;await change();await listRow().locator('.task-phase').getByText('运行中',{exact:true}).waitFor();assert(await listTime().isHidden(),'Unknown starts omit the Task-list clock');
   tasks[0].started_at_ms=started;await page.evaluate(()=>window.__taskTimeNow-=5000);await change();await listTime().getByText('已用 12分34秒',{exact:true}).waitFor();
-  await page.getByRole('button',{name:'聊天',exact:true}).first().click();await elapsed().getByText('已用 12分34秒',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'聊天',exact:true}).first().click();await elapsed().getByText('12分34秒',{exact:true}).waitFor();
   await page.setViewportSize({width:1200,height:850});
   await page.locator('.background-task').filter({hasText:'独立 worktree'}).click();await page.getByLabel('任务追加',{exact:true}).waitFor();
   await page.getByRole('button',{name:'任务操作',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'任务详情',exact:true}).click();
   await page.getByRole('dialog').getByText('开始时间',{exact:true}).waitFor();
   await page.getByRole('dialog').getByRole('button',{name:'关闭',exact:true}).click();await page.getByRole('button',{name:'返回',exact:true}).click();
   assert(await page.locator('#pot-composer').inputValue()==='保留这条草稿','Task navigation retains Chat draft');
-  await page.reload();await elapsed().getByText('已用 12分34秒',{exact:true}).waitFor();
+  await page.reload();await elapsed().getByText('12分34秒',{exact:true}).waitFor();
   tasks[0].started_at_ms=0;await change();await elapsed().waitFor({state:'detached'});
-  tasks[0].started_at_ms=now-5040000;await change();await elapsed().getByText('已用 1小时24分',{exact:true}).waitFor();
+  tasks[0].started_at_ms=now-5040000;await change();await elapsed().getByText('1小时24分',{exact:true}).waitFor();
   await page.locator('.assistant-row').filter({hasText:'其他助手'}).click();await page.locator('.background-tasks').waitFor({state:'detached'});
-  await page.locator('.assistant-row').filter({hasText:'Pot'}).click();await elapsed().getByText('已用 1小时24分',{exact:true}).waitFor();
+  await page.locator('.assistant-row').filter({hasText:'Pot'}).click();await elapsed().getByText('1小时24分',{exact:true}).waitFor();
   tasks=[];await change();await page.locator('.background-tasks').waitFor({state:'detached'});
   assert(errors.length===0,errors.join('; '));
   return {passed:true,task_list:true,clock_without_requests:true,responsive:true,reload:true,owner_scoping:true,navigation:true,errors};

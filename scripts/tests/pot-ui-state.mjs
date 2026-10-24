@@ -5,7 +5,7 @@ import {createEnterGuard, bindComposer} from '../../web/src/components/composer.
 import {isMobileBrowser} from '../../web/src/components/input-platform.mjs';
 import {messages,translate} from '../../web/src/locales/messages.mjs';
 import {projectChatReplies,replyFailureKind} from '../../web/src/state/chat-replies.mjs';
-import {taskElapsed} from '../../web/src/components/task-time.mjs';
+import {taskElapsed,taskClockEnd} from '../../web/src/components/task-time.mjs';
 import {bindResumeRecovery} from '../../web/src/state/resume.mjs';
 import {bindViewport} from '../../web/src/components/viewport.mjs';
 import {assistantActivity} from '../../web/src/components/assistant-activity.mjs';
@@ -69,6 +69,14 @@ for(const [seconds,zh,en]of [[0,'0秒','0s'],[59,'59秒','59s'],[60,'1分0秒','
 }
 for(const start of [undefined,null,0,-1,NaN,'1000000'])assert.equal(taskElapsed(start,taskStart),'','Unavailable starts never fall back to creation time');
 assert.equal(taskElapsed(taskStart,taskStart-1000,'zh-CN'),'已用 0秒','Clock skew cannot show a negative duration');
+
+for(const phase of ['complete','failed','cancelled','interrupted']){
+  assert.equal(taskClockEnd({phase,finished_at_ms:taskStart+138000},taskStart+999000),taskStart+138000);
+  assert.equal(taskElapsed(taskStart,taskClockEnd({phase}), 'en'),'');
+}
+assert.equal(taskElapsed(taskStart,taskStart+138000,'zh-CN',true),'2分18秒');
+assert.equal(taskElapsed(0,taskStart,'en',true),'');
+assert.equal(taskClockEnd({phase:'waiting',finished_at_ms:123},456),456);
 
 for(const [locale,catalog] of Object.entries(messages)){
   assert.deepEqual(Object.keys(catalog).sort(),Object.keys(messages.en).sort(),`Shared translation keys: ${locale}`);

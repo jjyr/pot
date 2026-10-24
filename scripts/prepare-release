@@ -13,6 +13,7 @@ from release_contract import (
     checksum_name,
     distribution_names,
     generate_cask,
+    generate_formula,
     macos_release_notes,
     version_number,
     verify_oci,
@@ -44,6 +45,7 @@ def prepare(version, output, sign_feed=False, channel="validation", macos_mode=N
         )
     if channel in {"macos", "validation"}:
         generate_cask(version, output)
+        generate_formula(version, output)
     if sign_feed:
         subprocess.run(
             [sys.executable, str(ROOT / "scripts/update-release"), version, str(output)], check=True

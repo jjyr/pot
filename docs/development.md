@@ -233,7 +233,14 @@ with synthetic records and captures images under `output/pr-images/` by default.
 For a before comparison, extract the chosen base commit's `web/` and
 `pkg/storage/migrations/ui-cache/` into ignored `output/tasks-before/`; the same
 fixture and data select that source tree with `?before=1`. It does not read product
-state, call a model or create real Tasks. The backend catalogue contract is covered
+state, call a model or create real Tasks. For computer-use checks, open
+`/scripts/tests/fixtures/tasks-schedules-scroll.html?width=390&small=1&locale=zh-CN&theme=dark`.
+The fixed-width iframe checks actual page/list scroll ranges, bottom reachability,
+refresh/disclosure retention, pagination focus and page position restoration.
+Use `width=320&long=1` for long titles or omit `small` for paginated collections.
+These are narrow container checks inside the browser, not physical device tests.
+The browser runner also exercises these checks at actual Chromium viewport sizes.
+The backend catalogue contract is covered
 separately by `TestCatalog*` and `TestTaskCatalogHTTPFiltersAndValidation`.
 
 For assistant-switching scroll checks without a backend, serve the repository
@@ -313,6 +320,21 @@ shared presentation. With a disposable Playwright installation, run
 `POT_PLAYWRIGHT_MODULE` and optional `POT_CHROMIUM_EXECUTABLE`. It covers grouping,
 batch counts, identity, native keyboard disclosure, append/prepend, retained text
 selection, failures and virtual recycling. No real Task or model is started.
+
+For background Task elapsed-time checks, serve the repository on loopback and open
+`/scripts/tests/fixtures/background-task-time.html?locale=zh-CN&theme=light`.
+It mounts the production rows and shared clock with synthetic records, reports
+its assertions on the page and includes 720/390/320px containers. Repeat with
+`locale=en&theme=dark` or `theme=system`. For matched baseline screenshots, extract
+`web/` from the chosen base commit into ignored `output/task-time-before/`; the
+fixture selects that source with `before=1`. With the disposable Playwright
+module described below, run `scripts/tests/background-task-time-capture.mjs ORIGIN`
+to check 1280/390/320px browser viewports and export paired PNGs. These are
+Chromium checks, not physical-device qualification. For an alignment comparison,
+extract the pre-correction PR head's `web/` into ignored
+`output/task-alignment-before/` and pass `ORIGIN OUTPUT_DIRECTORY alignment` to
+the same capture command. It checks mixed-status column starts, missing/short/long
+durations and timer updates, then exports matched 720/390/320px strip pairs.
 
 For message-title identity, streaming-argument, disclosure and Task checks, open
 `/scripts/tests/fixtures/message-titles.html` on the same loopback server. The
@@ -489,6 +511,20 @@ The release/build `CI` workflow runs automatically only on tag pushes. All tags
 are checked, while exact stable version tags enter controlled per-channel release
 paths after shared checks and the corresponding native package and smoke gates
 succeed. Ordinary manual runs do not publish.
+
+On an interactive Apple Silicon Mac, `mise run test:macos-update` builds the
+current source twice with versions `0.1.0` and `0.2.0` and an ephemeral update key.
+It runs the actual Wails Apps and App worker in disposable installations and
+data roots, simulating an already verified/staged package through the production
+install API. It checks successful upgrade, executable-launch failure and
+startup-exit rollback, new
+PID/boot, preserved root/identity/arguments/environment/working directory, and
+bundle signatures. It neither publishes releases nor opens existing product
+roots. Signed-feed discovery and download verification remain covered by the
+updater Go tests. The native macOS packaging job runs this simulation as well.
+For existing test builds, run `mise exec -- python
+scripts/tests/macos-update-smoke.py /absolute/Old.app /absolute/New.app`.
+
 Branch pushes and PR events do not start the release/build workflow.
 That workflow always calls the full `Tests` gate for its resolved source SHA. Headless
 and cross-platform builds run afterward as a separate build gate, before native

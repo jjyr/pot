@@ -63,6 +63,7 @@ func (s *Service) continuePending(ctx context.Context, owner, task string) error
 		r.Info.Archived, r.Info.Paused, r.Info.RemoteWaiting = false, false, false
 		r.Info.ArchiveReason = ""
 		r.Info.StartedAtMS = 0
+		r.Info.FinishedAtMS = 0
 		r.StopMode, r.Error = "", ""
 		r.Finalizing = false
 		r.Launch, r.Result, r.Outcome = nil, nil, nil

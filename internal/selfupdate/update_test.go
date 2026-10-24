@@ -2,6 +2,7 @@ package selfupdate
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -33,14 +34,51 @@ import (
 
 func TestMain(m *testing.M) {
 	buildinfo.Version = "0.1.0"
+	buildinfo.UpdateSchemaDigest = os.Getenv("POT_UPDATE_TEST_SCHEMA_DIGEST")
+	if os.Getenv("POT_UPDATE_TEST_FORMULA") == "1" {
+		buildinfo.UpdatePublicKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
+		host, err := OpenHost()
+		if err != nil || host != nil {
+			fmt.Fprintf(os.Stderr, "unregistered Formula host: %v, %v", host, err)
+			os.Exit(1)
+		}
+		manager := New(context.Background(), host, nil)
+		_, err = manager.Call(context.Background(), "POST", json.RawMessage(`{"action":"install","version":"0.2.0","request_id":"formula"}`))
+		var api protocol.APIError
+		if !errors.As(err, &api) || api.Code != "update_unavailable" {
+			os.Exit(2)
+		}
+		os.Exit(0)
+	}
 	if len(os.Args) == 3 && os.Args[1] == "_update-worker" {
-		if err := Worker(os.Args[2]); err != nil {
+		if err := fixtureWorker(os.Args[2]); err != nil {
 			fmt.Fprintf(os.Stderr, "FIXTURE worker failed: %v\n", err)
 			os.Exit(1)
 		}
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
+}
+
+// Native acceptance can exercise the built App's actual pre-GUI worker against
+// these disposable hosts, without opening product data or calling a model.
+func fixtureWorker(path string) error {
+	if binary := os.Getenv("POT_UPDATE_TEST_APP_WORKER"); binary != "" {
+		var job Job
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err = json.Unmarshal(data, &job); err != nil {
+			return err
+		}
+		if job.Package.Kind == "app" {
+			worker := exec.Command(binary, "_update-worker", path)
+			worker.Stdout, worker.Stderr = os.Stdout, os.Stderr
+			return worker.Run()
+		}
+	}
+	return Worker(path)
 }
 func mustWrite(t *testing.T, path string, value any) {
 	t.Helper()
@@ -59,7 +97,7 @@ func signed(t *testing.T, r Release) ([]byte, string) {
 	return data, base64.StdEncoding.EncodeToString(pub)
 }
 func TestSignedReleaseTrustAndFormat(t *testing.T) {
-	r := Release{Version: "0.2.0", StorageFormat: StorageFormat, Artifacts: []Artifact{{"cli", "linux-arm64", releaseOrigin + "v0.2.0/pot.tar.gz", strings.Repeat("ab", 32), 123}}}
+	r := Release{Version: "0.2.0", StorageFormat: storageFormat(), Artifacts: []Artifact{{"cli", "linux-arm64", releaseOrigin + "v0.2.0/pot.tar.gz", strings.Repeat("ab", 32), 123}}}
 	data, key := signed(t, r)
 	if _, err := Verify(data, key); err != nil {
 		t.Fatal(err)
@@ -138,7 +176,7 @@ func TestArchiveConfinementAndRelocatableLinks(t *testing.T) {
 }
 func TestDownloadRejectsChecksumAndPreservesInstalledFiles(t *testing.T) {
 	directory := t.TempDir()
-	metadata, _ := json.Marshal(Installation{Version: "0.2.0", Kind: "cli", Platform: "linux-arm64", StorageFormat: StorageFormat})
+	metadata, _ := json.Marshal(Installation{Version: "0.2.0", Kind: "cli", Platform: "linux-arm64", StorageFormat: storageFormat()})
 	data := archiveBytes(t, []*tar.Header{{Name: "pot/Resources/update.json", Mode: 0644, Size: int64(len(metadata)), Typeflag: tar.TypeReg}}, []string{string(metadata)})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(data) }))
 	defer server.Close()
@@ -352,8 +390,16 @@ func stopTestUpdateHost(t *testing.T, process *exec.Cmd, logPath string) {
 }
 
 func TestWorkerRestartsWholeInstallationAndRollsBack(t *testing.T) {
-	for _, scenario := range []string{"success", "confirmation", "cleanup", "rollback"} {
-		t.Run(scenario, func(t *testing.T) {
+	for _, name := range []string{"cli-success", "cli-confirmation", "cli-cleanup", "cli-rollback", "cli-permission", "app-success", "app-confirmation", "app-cleanup", "app-rollback", "app-permission"} {
+		kind, scenario, _ := strings.Cut(name, "-")
+		t.Run(name, func(t *testing.T) {
+			if scenario == "permission" && os.Geteuid() == 0 {
+				t.Skip("directory write restrictions require a non-root account")
+			}
+			binaryPath, resourcesPath := "bin/pot", "Resources"
+			if kind == "app" {
+				binaryPath, resourcesPath = "Contents/MacOS/pot-app", "Contents/Resources"
+			}
 			base := t.TempDir()
 			install := filepath.Join(base, "pot")
 			directory := install + ".updates"
@@ -361,12 +407,12 @@ func TestWorkerRestartsWholeInstallationAndRollsBack(t *testing.T) {
 			os.MkdirAll(root, 0700)
 			os.WriteFile(filepath.Join(root, "identity.json"), []byte(`{"id":"original"}`), 0600)
 			writePackage := func(target, version string) {
-				copyTestBinary(t, filepath.Join(target, "bin/pot"))
-				os.MkdirAll(filepath.Join(target, "Resources"), 0755)
-				mustWrite(t, filepath.Join(target, "Resources/update.json"), Installation{Version: version, Kind: "cli", Platform: "darwin-arm64", StorageFormat: StorageFormat})
+				copyTestBinary(t, filepath.Join(target, binaryPath))
+				os.MkdirAll(filepath.Join(target, resourcesPath), 0755)
+				mustWrite(t, filepath.Join(target, resourcesPath, "update.json"), Installation{Version: version, Kind: kind, Platform: "darwin-arm64", StorageFormat: storageFormat()})
 			}
 			writePackage(install, "0.1.0")
-			process := exec.Command(filepath.Join(install, "bin/pot"), "-test.run=^TestHostProcess$")
+			process := exec.Command(filepath.Join(install, binaryPath), "-test.run=^TestHostProcess$")
 			process.Env = append(os.Environ(), "POT_UPDATE_TEST_ROOT="+root)
 			if scenario == "confirmation" {
 				process.Env = append(process.Env, "POT_UPDATE_TEST_WORK=1")
@@ -426,7 +472,7 @@ func TestWorkerRestartsWholeInstallationAndRollsBack(t *testing.T) {
 			if scenario == "success" {
 				root2 := filepath.Join(base, "browser-data")
 				os.MkdirAll(root2, 0700)
-				browser := exec.Command(filepath.Join(install, "bin/pot"), "-test.run=^TestHostProcess$")
+				browser := exec.Command(filepath.Join(install, binaryPath), "-test.run=^TestHostProcess$")
 				browser.Env = append(os.Environ(), "POT_UPDATE_TEST_ROOT="+root2)
 				browser.Stdout = log
 				browser.Stderr = log
@@ -445,26 +491,51 @@ func TestWorkerRestartsWholeInstallationAndRollsBack(t *testing.T) {
 			writePackage(stage, "0.2.0")
 			mustWrite(t, filepath.Join(directory, "prepared.json"), struct{ Version, Path string }{"0.2.0", stage})
 			mustWrite(t, filepath.Join(directory, "state.json"), State{Version: "0.2.0", Phase: "installing"})
-			mustWrite(t, filepath.Join(directory, "job.json"), Job{Install: install, Directory: directory, Version: "0.2.0", Interrupt: scenario != "confirmation"})
+			mustWrite(t, filepath.Join(directory, "job.json"), Job{Install: install, Directory: directory, Version: "0.2.0", Interrupt: scenario != "confirmation", Package: Installation{Version: "0.1.0", Kind: kind, Platform: "darwin-arm64", StorageFormat: storageFormat()}})
 			oldTimeout := healthTimeout
 			healthTimeout = time.Second
 			defer func() { healthTimeout = oldTimeout }()
+			if scenario == "permission" {
+				if err := os.Chmod(base, 0500); err != nil {
+					t.Fatal(err)
+				}
+				defer os.Chmod(base, 0700)
+			}
 			if scenario == "success" {
-				binary, readErr := os.ReadFile(filepath.Join(stage, "bin/pot"))
+				binary, readErr := os.ReadFile(filepath.Join(stage, binaryPath))
 				if readErr != nil {
 					t.Fatal(readErr)
 				}
-				metadata, readErr := os.ReadFile(filepath.Join(stage, "Resources/update.json"))
+				metadata, readErr := os.ReadFile(filepath.Join(stage, resourcesPath, "update.json"))
 				if readErr != nil {
 					t.Fatal(readErr)
 				}
-				archive := archiveBytes(t, []*tar.Header{{Name: "pot/bin/pot", Mode: 0755, Size: int64(len(binary)), Typeflag: tar.TypeReg}, {Name: "pot/Resources/update.json", Mode: 0644, Size: int64(len(metadata)), Typeflag: tar.TypeReg}}, []string{string(binary), string(metadata)})
+				archive := archiveBytes(t, []*tar.Header{{Name: "pot/" + binaryPath, Mode: 0755, Size: int64(len(binary)), Typeflag: tar.TypeReg}, {Name: "pot/" + resourcesPath + "/update.json", Mode: 0644, Size: int64(len(metadata)), Typeflag: tar.TypeReg}}, []string{string(binary), string(metadata)})
+				if kind == "app" {
+					var buffer bytes.Buffer
+					packed := zip.NewWriter(&buffer)
+					for path, data := range map[string][]byte{binaryPath: binary, resourcesPath + "/update.json": metadata} {
+						header := &zip.FileHeader{Name: "pot/" + path, Method: zip.Deflate}
+						header.SetMode(0755)
+						file, err := packed.CreateHeader(header)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if _, err = file.Write(data); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if err := packed.Close(); err != nil {
+						t.Fatal(err)
+					}
+					archive = buffer.Bytes()
+				}
 				sum := sha256.Sum256(archive)
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(archive) }))
 				defer server.Close()
-				artifact := Artifact{Kind: "cli", Platform: "darwin-arm64", URL: server.URL, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(archive))}
+				artifact := Artifact{Kind: kind, Platform: "darwin-arm64", URL: server.URL, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(archive))}
 				mustWrite(t, filepath.Join(directory, "state.json"), State{Version: "0.2.0", Phase: "available"})
-				manager := New(context.Background(), &Host{Install: install, Directory: directory, Package: Installation{Kind: "cli", Platform: "darwin-arm64"}}, nil)
+				manager := New(context.Background(), &Host{Install: install, Directory: directory, Package: Installation{Version: "0.1.0", Kind: kind, Platform: "darwin-arm64", StorageFormat: storageFormat()}}, nil)
 				manager.release = &Release{Version: "0.2.0", Artifacts: []Artifact{artifact}}
 				manager.client = server.Client()
 				_, err = manager.Call(context.Background(), "POST", json.RawMessage(`{"action":"download","version":"0.2.0","request_id":"one-click","interrupt":false}`))
@@ -476,7 +547,7 @@ func TestWorkerRestartsWholeInstallationAndRollsBack(t *testing.T) {
 				wait(func() bool { return manager.state().Phase == "current" })
 			} else if scenario == "cleanup" {
 				result := make(chan error, 1)
-				go func() { result <- Worker(filepath.Join(directory, "job.json")) }()
+				go func() { result <- fixtureWorker(filepath.Join(directory, "job.json")) }()
 				_ = stopped.SetDeadline(time.Now().Add(10 * time.Second))
 				barrier, acceptErr := stopped.Accept()
 				if acceptErr != nil {
@@ -508,9 +579,9 @@ func TestWorkerRestartsWholeInstallationAndRollsBack(t *testing.T) {
 					t.Fatal("cleanup worker did not return after releasing the owned host")
 				}
 			} else {
-				err = Worker(filepath.Join(directory, "job.json"))
+				err = fixtureWorker(filepath.Join(directory, "job.json"))
 			}
-			if (scenario == "cleanup" || scenario == "rollback") != (err != nil) {
+			if (scenario == "cleanup" || scenario == "rollback" || scenario == "permission") != (err != nil) {
 				t.Fatal("unexpected update result", err)
 			}
 			expected := "0.2.0"
@@ -550,6 +621,64 @@ func TestProtectedDataRootsDisableReplacement(t *testing.T) {
 	h.Protect(filepath.Join(base, "pot", "data"))
 	if !h.unsupported {
 		t.Fatal("installation-contained user data could be replaced")
+	}
+}
+
+func TestFormulaInstallationDoesNotRegisterOrReplaceCellar(t *testing.T) {
+	install := filepath.Join(t.TempDir(), "Cellar/pot-cli/0.1.0/libexec")
+	binary := filepath.Join(install, "bin/pot")
+	copyTestBinary(t, binary)
+	if err := os.MkdirAll(filepath.Join(install, "Resources"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	process := exec.Command(binary)
+	process.Env = append(os.Environ(), "POT_UPDATE_TEST_FORMULA=1")
+	if output, err := process.CombinedOutput(); err != nil {
+		t.Fatalf("Formula CLI update API: %v, %s", err, output)
+	}
+	if _, err := os.Stat(install + ".updates"); !os.IsNotExist(err) {
+		t.Fatal("Formula created update state", err)
+	}
+	directory := install + ".updates"
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	info := Installation{Version: "0.1.0", Kind: "cli", Platform: "darwin-arm64", StorageFormat: StorageFormat}
+	job := filepath.Join(directory, "job.json")
+	mustWrite(t, job, Job{Install: install, Directory: directory, Version: "0.2.0", Package: info})
+	if err := Worker(job); !os.IsNotExist(err) {
+		t.Fatal("worker accepted unregistered Formula installation", err)
+	}
+	// Even a host retained from before unregistration cannot initiate a swap.
+	m := New(context.Background(), &Host{Install: install, Directory: directory, Package: info}, nil)
+	err := m.install(Command{Version: "0.2.0", RequestID: "stale-host"}, State{})
+	var api protocol.APIError
+	if !errors.As(err, &api) || api.Code != "update_unavailable" {
+		t.Fatal("retained host accepted unregistered installation", err)
+	}
+	if _, err := os.Stat(binary); err != nil {
+		t.Fatal("Formula installation was moved", err)
+	}
+}
+
+func TestUpdateDirectoryRejectsLinksAndSharedPermissions(t *testing.T) {
+	base := t.TempDir()
+	private := filepath.Join(base, "private")
+	if err := privateDirectory(private); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(private, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := privateDirectory(link); err == nil {
+		t.Fatal("accepted update state through a symlink")
+	}
+	if err := os.Chmod(private, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := privateDirectory(private); err == nil {
+		t.Fatal("accepted shared update state")
 	}
 }
 

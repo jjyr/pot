@@ -26,9 +26,22 @@ async function assertRecordLayout(page,selector){
  assert.equal(await rows.first().evaluate(n=>n===document.activeElement),true);
  for(const index of [0,await rows.count()-1]){
   if(index) {await rows.nth(index-1).focus();await page.keyboard.press('Tab');}
-  assert.ok(await rows.nth(index).evaluate(n=>{const r=n.getBoundingClientRect(),list=n.closest('.record-group-list').getBoundingClientRect(),s=getComputedStyle(n);return n===document.activeElement&&n.matches(':focus-visible')&&parseFloat(s.outlineWidth)>=2&&r.top>=list.top-1&&r.bottom<=list.bottom+1&&r.left>=list.left&&r.right<=list.right;}),'Keyboard focus remains visible inside the scroll container');
+  assert.ok(await rows.nth(index).evaluate(n=>{const r=n.getBoundingClientRect(),list=n.closest('.page-host').getBoundingClientRect(),s=getComputedStyle(n);return n===document.activeElement&&n.matches(':focus-visible')&&parseFloat(s.outlineWidth)>=2&&r.top>=list.top-1&&r.bottom<=list.bottom+1&&r.left>=list.left&&r.right<=list.right;}),'Keyboard focus remains visible inside the page host');
  }
  await page.locator('.record-owner-identity summary').first().focus();await page.keyboard.press('Enter');assert.ok(await page.locator('.record-owner-identity').first().evaluate(n=>n.open),'Full identity remains keyboard accessible');await page.keyboard.press('Enter');
+}
+async function assertPageScroll(page,selector){
+ const measurements=await page.locator('.record-group-list').evaluate(list=>{
+  const host=list.closest('.page-host'),last=list.querySelector('.record-group:last-child button:last-child'),pager=host.querySelector('[data-view-key="pagination-bottom"]');
+  list.scrollTop=1000;host.scrollTop=host.scrollHeight;
+  const h=host.getBoundingClientRect(),r=last.getBoundingClientRect(),p=pager.getBoundingClientRect();
+  return {height:list.clientHeight,content:list.scrollHeight,listTop:list.scrollTop,pageTop:host.scrollTop,pageRange:host.scrollHeight-host.clientHeight,lastVisible:r.bottom<=h.bottom&&r.top>=h.top,pagerVisible:p.bottom<=h.bottom&&p.top>=h.top,gap:p.top-list.getBoundingClientRect().bottom};
+ });
+ assert.ok(measurements.content<=measurements.height+1&&measurements.listTop===0,'Records have no independent scroll range '+JSON.stringify(measurements));
+ assert.ok(measurements.lastVisible&&measurements.pagerVisible,'The page reaches its last record and bottom pager '+JSON.stringify(measurements));
+ assert.ok(measurements.gap>=0&&measurements.gap<=12,'Bottom pager follows the natural list height');
+ assert.ok(measurements.pageRange<=0||measurements.pageTop>0,'Overflow belongs to the page host');
+ await assertRecordLayout(page,selector);
 }
 async function assertPhotos(page){
  await photosReady(page);
@@ -45,6 +58,36 @@ try{
   await page.getByRole('button',{name:'定时任务',exact:true}).click();await page.locator('.schedule-record').first().waitFor();
   await assertPhotos(page);const scheduleNames=await page.locator('.schedule-record').evaluateAll(rows=>rows.map(r=>r.getAttribute('aria-label')).sort());if(version==='before')captured.set('schedules-'+name,scheduleNames);else assert.deepEqual(scheduleNames,captured.get('schedules-'+name),'Before/after use the same global schedule page');await page.screenshot({path:resolve(directory,`schedules-${name}-${version}.png`)});await page.close();
  }
+ // Identical two-assistant / three-record catalogues exercise the reported clipping.
+ for(const [name,width,theme]of [['small-desktop-light',1280,'light'],['small-phone-dark',390,'dark'],['small-narrow-light',320,'light']])for(const version of ['before','after']){
+  const page=await browser.newPage({viewport:{width,height:800},colorScheme:theme,reducedMotion:'reduce'});page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(fixtureURL(version,theme)+'&small=1');await openTasks(page);await assertPhotos(page);
+  assert.equal(await page.locator('.task-row').count(),3);assert.equal(await page.locator('.record-group').count(),2);
+  await page.screenshot({path:resolve(directory,`tasks-${name}-${version}.png`)});
+  await page.locator('.page-host').evaluate(host=>{host.scrollTop=host.scrollHeight;});
+  await page.screenshot({path:resolve(directory,`tasks-${name}-page-end-${version}.png`)});
+  if(version==='after')await assertPageScroll(page,'.task-row');
+  await page.getByRole('button',{name:'定时任务',exact:true}).click();await page.locator('.schedule-record').first().waitFor();await assertPhotos(page);
+  assert.equal(await page.locator('.schedule-record').count(),3);assert.equal(await page.locator('.record-group').count(),2);
+  await page.screenshot({path:resolve(directory,`schedules-${name}-${version}.png`)});
+  await page.locator('.page-host').evaluate(host=>{host.scrollTop=host.scrollHeight;});
+  await page.screenshot({path:resolve(directory,`schedules-${name}-page-end-${version}.png`)});
+  if(version==='after')await assertPageScroll(page,'.schedule-record');await page.close();
+ }
+ for(const [width,theme,locale,query]of [[1280,'light','en',''],[390,'dark','zh-CN','&small=1'],[320,'light','en','&long=1']]){
+  const p=await browser.newPage({viewport:{width,height:800},colorScheme:theme,reducedMotion:'reduce'});
+  await p.goto(fixtureURL('after',theme,locale)+'&verify-scroll=1'+query);
+  await p.waitForFunction(()=>window.tasksSchedulesFixture?.scrollVerification,{timeout:30000});
+  const result=await p.evaluate(()=>window.tasksSchedulesFixture.scrollVerification);assert.ok(result.passed,result.error);await p.close();
+ }
+ const system=await browser.newPage({viewport:{width:390,height:800},colorScheme:'dark',reducedMotion:'reduce'});
+ await system.goto(fixtureURL('after','system','en')+'&small=1');await openTasks(system);
+ const darkCanvas=await system.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--canvas'));
+ await system.emulateMedia({colorScheme:'light'});
+ assert.notEqual(await system.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--canvas')),darkCanvas,'System appearance follows the browser preference');
+ await assertPageScroll(system,'.task-row');await system.getByRole('button',{name:'Schedules',exact:true}).click();await system.locator('.schedule-record').first().waitFor();
+ await system.emulateMedia({colorScheme:'dark'});assert.equal(await system.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--canvas')),darkCanvas);
+ await assertPageScroll(system,'.schedule-record');await system.close();
  const page=await browser.newPage({viewport:{width:1280,height:1000},reducedMotion:'reduce'});page.on('pageerror',e=>errors.push(e.message));
  await page.goto(fixtureURL('after','light'));await openTasks(page);
  assert.equal(await page.locator('.task-row').count(),20);
@@ -155,8 +198,8 @@ try{
   assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`${width}/${theme}/${locale} horizontal overflow`);
   const geometry=await p.locator('.record-pagination button').evaluateAll(nodes=>nodes.every(n=>n.getBoundingClientRect().height>=44));assert.ok(geometry);await assertPhotos(p);assert.ok(await p.locator('.task-short-id').evaluateAll(nodes=>nodes.every(n=>/^#[a-f0-9]{4}$/.test(n.textContent))));
   const color=await p.locator('.task-identity-mark[data-task-color]').first().evaluate(el=>({index:Number(el.dataset.taskColor),bg:getComputedStyle(el).getPropertyValue('--task-bg').trim()}));assert.equal(color.bg,palette[color.index][theme==='light'?'light':'dark'].bg);
-  await assertRecordLayout(p,'.task-row');
-  await p.getByRole('button',{name:locale==='en'?'Schedules':'定时任务',exact:true}).click();await p.locator('.schedule-record').first().waitFor();await assertPhotos(p);assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);assert.ok(await p.locator('.record-pagination button').evaluateAll(nodes=>nodes.every(n=>n.getBoundingClientRect().height>=44)));await assertRecordLayout(p,'.schedule-record');await p.close();
+  await assertPageScroll(p,'.task-row');
+  await p.getByRole('button',{name:locale==='en'?'Schedules':'定时任务',exact:true}).click();await p.locator('.schedule-record').first().waitFor();await assertPhotos(p);assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);assert.ok(await p.locator('.record-pagination button').evaluateAll(nodes=>nodes.every(n=>n.getBoundingClientRect().height>=44)));await assertPageScroll(p,'.schedule-record');await p.close();
  }
- assert.deepEqual(errors,[]);console.log('PASS: actual Tasks/Schedules pages, full-query adapter, global pagination, complete/phase/owner filters, retained DOM/disclosures, loading/empty/focus, unknown ownership, fixed four-character IDs with collisions/cross-node detail routing, loaded profile avatars/missing/decode failure/avatar-only refresh on both pages and 18 layout/locale/theme combinations.');
+ assert.deepEqual(errors,[]);console.log('PASS: actual Tasks/Schedules pages, full-query adapter, global pagination, complete/phase/owner filters, retained DOM/disclosures, loading/empty/focus, unknown ownership, fixed four-character IDs with collisions/cross-node detail routing, loaded profile avatars/missing/decode failure/avatar-only refresh on both pages 18 layout/locale/theme combinations, natural page scrolling for small/long catalogues, retained page position, visible pager focus and live system appearance.');
 }finally{await browser.close();}

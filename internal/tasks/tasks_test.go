@@ -113,6 +113,7 @@ func TestOriginalStartTimeFromDelayedReceiptsSurvivesRestart(t *testing.T) {
 			run.StartedAtMS = record.Info.CreatedAtMS + 60000
 			run.Phase = phase
 			if phase == Complete {
+				run.FinishedAtMS = run.StartedAtMS + 138000
 				run.Result = &Terminal{Outcome: core.Success, Text: "done"}
 				run.CleanupConfirmed = true
 			}
@@ -121,7 +122,7 @@ func TestOriginalStartTimeFromDelayedReceiptsSurvivesRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 			current, err = s.Get(ctx, "assistant", record.Info.ID)
-			if err != nil || current.Info.StartedAtMS != run.StartedAtMS {
+			if err != nil || current.Info.StartedAtMS != run.StartedAtMS || current.Info.FinishedAtMS != run.FinishedAtMS {
 				t.Fatal("delayed receipt lost execution start", current, err)
 			}
 			options := s.options
@@ -132,7 +133,7 @@ func TestOriginalStartTimeFromDelayedReceiptsSurvivesRestart(t *testing.T) {
 			}
 			defer restored.db.Close()
 			current, err = restored.Get(ctx, "assistant", record.Info.ID)
-			if err != nil || current.Info.StartedAtMS != run.StartedAtMS {
+			if err != nil || current.Info.StartedAtMS != run.StartedAtMS || current.Info.FinishedAtMS != run.FinishedAtMS {
 				t.Fatal("Control restart lost execution start", current, err)
 			}
 		})

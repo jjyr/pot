@@ -478,8 +478,9 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   }
   function focusPagination(pager,direction) {
     const selected=direction<0?pager.previous:pager.next,other=direction<0?pager.next:pager.previous;
-    (selected.disabled?other:selected).focus({preventScroll:true});
-    if(selected.disabled&&other.disabled){taskListView?.rows.focus({preventScroll:true});}
+    const target=selected.disabled&&other.disabled?taskListView?.rows:selected.disabled?other:selected;
+    target?.focus({preventScroll:true});
+    target?.scrollIntoView({block:'nearest'});
   }
   async function tasks(root,token) {
     const t=key=>translate(locale(),key);root.classList.add('tasks-content');
@@ -493,7 +494,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const owner=field(t('tasks.assistantFilter'),filter.listOwner,{choices:ownerChoices(client,locale()).filter(([key])=>key!=='unknown-owner')});owner.row.classList.add('record-filter','record-owner-filter');owner.input.onchange=()=>{filter.listOwner=owner.input.value;filter.taskOffset=0;restartTaskList();};
     const searchLine=toolbar(search.row,owner.row);searchLine.classList.add('record-search-line');root.append(controls,searchLine);
     const help=n('p','record-view-help'),reminders=n('div','task-reminders');reminders.setAttribute('aria-label',t('tasks.reminders'));root.append(help,reminders);
-    const rows=n('div','task-list record-group-list');rows.dataset.scrollKey='task-list';rows.tabIndex=-1;rows.append(n('p','hint',t('loading.pending')));
+    const rows=n('div','task-list record-group-list');rows.tabIndex=-1;rows.append(n('p','hint',t('loading.pending')));
     const pager=paginationPair(root,t('tasks.pagination'),(direction,origin)=>{filter.taskOffset=direction<0?Math.max(0,filter.taskOffset-20):taskListView.result.next_offset;taskListView.pageFocus={origin,direction};restartTaskList();});
     pager.update({loading:true});root.append(pager.top.root,rows,pager.bottom.root,n('p','record-page-note',t('tasks.pageNote')));
     const view={token,rows,scopes,phase:phase.input,help,reminders,pager,nodes:new Map(),groups:new Map(),seen:new Map(),result:null};taskListView=view;
@@ -512,7 +513,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
   async function readTaskList(view) {
     const token=view.token,offset=filter.taskOffset,current=()=>gate.current(token)&&taskListView===view;
     const queryKey=JSON.stringify([filter.taskScope,filter.taskQuery,filter.taskPhase,filter.listOwner,offset]);
-    if(view.queryKey!==queryKey){view.queryKey=queryKey;view.result=null;view.nodes.clear();view.groups.clear();view.rows.replaceChildren(n('p','hint',translate(locale(),'loading.pending')));}
+    if(view.queryKey!==queryKey){if(view.queryKey&&!view.pageFocus)host.scrollTop=0;view.queryKey=queryKey;view.result=null;view.nodes.clear();view.groups.clear();view.rows.replaceChildren(n('p','hint',translate(locale(),'loading.pending')));}
     for(const [index,value]of ['active','complete','archived'].entries()){const button=view.scopes.children[index];button.classList.toggle('selected',filter.taskScope===value);button.setAttribute('aria-pressed',String(filter.taskScope===value));}
     view.rows.setAttribute('aria-busy','true');view.pager.update({offset,loading:true});
     try {
@@ -540,7 +541,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const reminderProjection=n('div','task-reminders');reminderProjection.setAttribute('aria-label',t('tasks.reminders'));reminderProjection.append(n('span','',t('tasks.reminders')));
     for(const stage of ['failed','interrupted','waiting_approval']){const button=action(t('tasks.reminder').replace('{stage}',taskPhaseLabel(stage)).replace('{count}',partial?'—':result.counts[stage].toLocaleString(locale())),()=>{filter.taskScope='unarchived';filter.taskPhase=stage;filter.taskOffset=0;restartTaskList();});button.dataset.viewKey=stage;reminderProjection.append(button);}reconcile(view.reminders,reminderProjection);
     const signature=JSON.stringify([filter.taskScope,filter.taskQuery,filter.taskPhase,filter.listOwner]);if(view.seenSignature!==signature){view.seen.clear();view.seenSignature=signature;}
-    const groups=groupRecords(result.items,client),retainedGroups=new Set(),retainedTasks=new Set(),scroll=view.rows.scrollTop,focused=view.rows.contains(document.activeElement)?document.activeElement:null;
+    const groups=groupRecords(result.items,client),retainedGroups=new Set(),retainedTasks=new Set(),scroll=host.scrollTop,focused=view.rows.contains(document.activeElement)?document.activeElement:null;
     for(const [index,group]of groups.entries()){
       retainedGroups.add(group.key);let container=view.groups.get(group.key);
       if(!container){const row=n('section','record-group'),head=groupHeading(group,locale(),ownerDisclosures),records=n('div','record-group-records');row.dataset.viewKey=group.key;row.setAttribute('aria-labelledby',head.querySelector('h2').id);row.append(head,records);container={row,head,records};view.groups.set(group.key,container);}else reconcile(container.head,groupHeading(group,locale(),ownerDisclosures));
@@ -567,7 +568,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     for(const [key,entry]of view.nodes)if(!retainedTasks.has(key)){entry.row.remove();view.nodes.delete(key);}
     for(const [key,entry]of view.groups)if(!retainedGroups.has(key)){entry.row.remove();view.groups.delete(key);}
     let empty=view.rows.querySelector('.page-empty');if(!result.items.length){if(!empty){empty=n('div','page-empty');view.rows.append(empty);}empty.replaceChildren(n('h2','',t('tasks.emptyView')),n('p','hint',t('tasks.emptyHelp')));}else empty?.remove();
-    if(focused?.isConnected&&document.activeElement!==focused)focused.focus({preventScroll:true});view.rows.scrollTop=scroll;
+    if(focused?.isConnected&&document.activeElement!==focused)focused.focus({preventScroll:true});host.scrollTop=scroll;
     view.pager.update({offset:filter.taskOffset,count:result.items.length,total:result.total,nextOffset:result.next_offset,loading,partial});view.clock.refresh();
   }
   function closeTaskList(){taskListView?.stopSearch?.();taskListView?.queue.close();taskListView?.clock.dispose();taskListView=null;}
@@ -648,9 +649,9 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const owner=field(t('tasks.assistantFilter'),filter.listOwner,{choices:ownerChoices(client,locale())});owner.row.classList.add('record-filter','record-owner-filter');
     const line=toolbar(search.row,owner.row);line.classList.add('record-search-line');root.append(line,n('p','record-view-help',t('tasks.scheduleHelp')));
     const content=n('div','schedule-projection');root.append(content);let currentPages=null;
-    const render=()=>{if(!currentPages)return;const projection=n('div','schedule-projection');renderSchedules(projection,currentPages,render);currentViewKey=taskListKey();reconcile(content,projection);};
-    owner.input.onchange=()=>{filter.listOwner=owner.input.value;filter.scheduleOffset=0;render();};
-    const stopSearch=bindSearch(search.input,value=>{filter.scheduleQuery=value;filter.scheduleOffset=0;render();});
+    const render=()=>{if(!currentPages)return;const scroll=host.scrollTop,projection=n('div','schedule-projection');renderSchedules(projection,currentPages,render);currentViewKey=taskListKey();reconcile(content,projection);host.scrollTop=scroll;};
+    owner.input.onchange=()=>{filter.listOwner=owner.input.value;filter.scheduleOffset=0;render();host.scrollTop=0;};
+    const stopSearch=bindSearch(search.input,value=>{filter.scheduleQuery=value;filter.scheduleOffset=0;render();host.scrollTop=0;});
     const loading=paginationPair(content,t('tasks.schedulePagination'),()=>{});loading.update({loading:true});content.append(loading.top.root,n('p','hint',t('loading.pending')),loading.bottom.root);
     const connected=await connectView(root,token,()=>across('/api/v1/schedules?limit=50',token,{paginate:true,perAssistant:true}),pages=>{currentPages=pages;render();},{topics:['schedules','tasks','assistants','spaces','machines']});
     if(pageView&&gate.current(token)){const close=pageView.queue.close.bind(pageView.queue);pageView.queue.close=()=>{stopSearch();close();};}else stopSearch();return connected;
@@ -662,7 +663,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
     const query=filter.scheduleQuery.trim().toLocaleLowerCase(locale());
     const items=pages.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner)).filter(item=>(!filter.listOwner||recordOwner(item,client).key===filter.listOwner)&&(!query||item.spec.title.toLocaleLowerCase(locale()).includes(query))).sort((a,b)=>(a.next_at_ms||0)-(b.next_at_ms||0)||a._assistant_id.localeCompare(b._assistant_id)||a.id.localeCompare(b.id));
     filter.scheduleOffset=Math.min(filter.scheduleOffset,Math.max(0,Math.floor((items.length-1)/20)*20));
-    const visible=items.slice(filter.scheduleOffset,filter.scheduleOffset+20),rows=n('div','schedule-list record-group-list');rows.dataset.scrollKey='schedule-list';rows.tabIndex=-1;
+    const visible=items.slice(filter.scheduleOffset,filter.scheduleOffset+20),rows=n('div','schedule-list record-group-list');rows.tabIndex=-1;
     if(!visible.length)rows.append(n('div','page-empty',t('tasks.scheduleEmpty')));
     for(const group of groupRecords(visible,client)){
       const section=n('section','record-group');section.dataset.viewKey=group.key;const head=groupHeading(group,locale(),ownerDisclosures);section.setAttribute('aria-labelledby',head.querySelector('h2').id);section.append(head);const records=n('div','record-group-records');
@@ -677,7 +678,7 @@ export function createPages({onApprovalsChanged=()=>{},client, host, approvalHos
       }
       section.append(records);rows.append(section);
     }
-    const pager=paginationPair(root,t('tasks.schedulePagination'),(direction,origin)=>{const position=origin===pager.top?'pagination-top':'pagination-bottom';filter.scheduleOffset=Math.max(0,filter.scheduleOffset+direction*20);render();const nav=host.querySelector(`[data-view-key="${position}"]`),target=nav?.querySelector(`[data-page-direction="${direction<0?'previous':'next'}"]`),other=nav?.querySelector(`[data-page-direction="${direction<0?'next':'previous'}"]`);if(target&&!target.disabled)target.focus({preventScroll:true});else if(other&&!other.disabled)other.focus({preventScroll:true});else host.querySelector('.schedule-list')?.focus({preventScroll:true});});
+    const pager=paginationPair(root,t('tasks.schedulePagination'),(direction,origin)=>{const position=origin===pager.top?'pagination-top':'pagination-bottom';filter.scheduleOffset=Math.max(0,filter.scheduleOffset+direction*20);render();const nav=host.querySelector(`[data-view-key="${position}"]`),target=nav?.querySelector(`[data-page-direction="${direction<0?'previous':'next'}"]`),other=nav?.querySelector(`[data-page-direction="${direction<0?'next':'previous'}"]`);const focus=target&&!target.disabled?target:other&&!other.disabled?other:host.querySelector('.schedule-list');focus?.focus({preventScroll:true});focus?.scrollIntoView({block:'nearest'});});
     pager.update({offset:filter.scheduleOffset,total:items.length,count:visible.length,nextOffset:filter.scheduleOffset+20<items.length?filter.scheduleOffset+20:null,partial:!!partial});root.append(pager.top.root,rows,pager.bottom.root,n('p','record-page-note',t('tasks.pageNote')));
   }
   async function scheduleHistory(item,record=true,runsOffset=0) {

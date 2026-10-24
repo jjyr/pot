@@ -95,6 +95,10 @@ run = 'python scripts/release "$usage_version" --output "$usage_output"'
 description = "Verify macOS release packaging without building the App"
 run = "python scripts/tests/release-packaging.py"
 
+[tasks."test:macos-update"]
+description = "Build two disposable App versions and simulate native upgrade/recovery"
+run = "python scripts/tests/macos-update-smoke.py --build"
+
 [tasks."build:web-ui"]
 description = "Verify and embed the shared HTML/CSS/JS product frontend"
 run = "go build -mod=readonly ./web"

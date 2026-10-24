@@ -1,9 +1,19 @@
-// Elapsed wall time starts with the Runner's first claim, including later waits.
-export function taskElapsed(start,now,locale='en'){
-  if(!Number.isSafeInteger(start)||start<=0)return '';
-  const seconds=Math.max(0,Math.floor((now-start)/1000)),minutes=Math.floor(seconds/60),hours=Math.floor(minutes/60),days=Math.floor(hours/24),zh=locale==='zh-CN';
-  const value=days?(zh?`${days}天${hours%24}小时`:`${days}d ${hours%24}h`):hours?(zh?`${hours}小时${minutes%60}分`:`${hours}h ${minutes%60}m`):minutes?(zh?`${minutes}分${seconds%60}秒`:`${minutes}m ${seconds%60}s`):(zh?`${seconds}秒`:`${seconds}s`);
-  return zh?`已用 ${value}`:`Elapsed ${value}`;
+import {translate} from '../locales/messages.mjs';
+
+const terminal=new Set(['complete','failed','cancelled','interrupted']);
+// Use only the executing node's terminal receipt, never observation/updated time.
+export function taskClockEnd(task,now=Date.now()){
+  return terminal.has(task.phase)?task.finished_at_ms:now;
+}
+
+// Wall time since the Runner's first claim, including later waits.
+export function taskElapsed(start,end,locale='en',compact=false){
+  if(!Number.isSafeInteger(start)||start<=0||!Number.isSafeInteger(end)||end<=0)return '';
+  const seconds=Math.max(0,Math.floor((end-start)/1000)),minutes=Math.floor(seconds/60),hours=Math.floor(minutes/60),days=Math.floor(hours/24);
+  const unit=days?'days':hours?'hours':minutes?'minutes':'seconds';
+  const major=days||hours||minutes||seconds,minor=days?hours%24:hours?minutes%60:seconds%60;
+  const value=translate(locale,`tasks.duration.${unit}`).replace('{major}',major.toLocaleString(locale)).replace('{minor}',minor.toLocaleString(locale));
+  return compact?value:translate(locale,'tasks.elapsed').replace('{duration}',value);
 }
 
 // One presentation timer per mounted view; no projection reads or DOM rebuilds.
@@ -14,9 +24,10 @@ export function bindTaskClock(root,{locale,active}){
     if(disposed||document.hidden||!active())return;
     const now=Date.now();let delay=Infinity;
     for(const node of root.querySelectorAll('[data-started-at]')){
-      const start=Number(node.dataset.startedAt),text=taskElapsed(start,now,locale());
+      const start=Number(node.dataset.startedAt),finished=node.hasAttribute('data-finished-at'),end=finished?Number(node.dataset.finishedAt):now;
+      const text=taskElapsed(start,end,locale(),node.dataset.compact==='true');
       if(node.textContent!==text)node.textContent=text;
-      if(!text)continue;
+      if(!text||finished)continue;
       const elapsed=Math.max(0,now-start),unit=elapsed<3600000?1000:60000;
       delay=Math.min(delay,unit-elapsed%unit);
     }

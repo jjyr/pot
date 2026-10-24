@@ -23,6 +23,7 @@ from release_contract import (
     distribution_names,
     cli_installation,
     generate_cask,
+    generate_formula,
     checksum,
     checksum_name,
     verify_oci,
@@ -188,6 +189,17 @@ class AssetsFixture:
                         "Pot.app/Contents/Info.plist",
                         plistlib.dumps({"CFBundleShortVersionString": "1.2.3"}),
                     )
+            elif name.endswith("-darwin-arm64.tar.gz"):
+                with tarfile.open(path, "w:gz") as archive:
+                    for entry, data in {
+                        "bin/pot": b"fixture binary",
+                        "Resources/update.json": json.dumps(
+                            {"version": "1.2.3", "kind": "cli", "platform": "darwin-arm64"}
+                        ).encode(),
+                    }.items():
+                        header = tarfile.TarInfo("pot-darwin-arm64/" + entry)
+                        header.size, header.mode = len(data), 0o755
+                        archive.addfile(header, io.BytesIO(data))
             elif name.endswith(".oci.tar"):
                 self.oci_fixture(path)
             else:
@@ -196,6 +208,27 @@ class AssetsFixture:
 
 
 class CompleteDistribution(AssetsFixture, unittest.TestCase):
+    def test_formula_binds_verified_cli_metadata_and_archive(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.fixture(root)
+            archive = root / "pot-1.2.3-darwin-arm64.tar.gz"
+            generate_formula("1.2.3", root)
+            formula = (root / "pot-cli.rb").read_text()
+            self.assertIn(checksum(archive), formula)
+            self.assertIn("depends_on arch: :arm64", formula)
+            self.assertNotIn("pot-cli.rb", distribution_names("1.2.3", "macos"))
+            archive.with_name(archive.name + ".sha256").write_text("invalid")
+            with self.assertRaisesRegex(ValueError, "sidecar"):
+                generate_formula("1.2.3", root)
+            write_checksum(archive)
+            with mock.patch(
+                "release_contract.json.load",
+                return_value={"version": "9.9.9", "kind": "cli", "platform": "darwin-arm64"},
+            ):
+                with self.assertRaisesRegex(ValueError, "version/platform"):
+                    generate_formula("1.2.3", root)
+
     def test_cask_and_global_checksums_bind_exact_versioned_assets(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -18,7 +18,7 @@ func TestOutcomeCursorSkipsArchiveAndReadsBoundedOwnerTransitions(t *testing.T) 
 	config := selection(t).Config
 	if err := storage.Transaction(ctx, s.db, func(tx *sql.Tx) error {
 		for i := range 1000 {
-			r := Record{SchemaVersion: 13, Origin: protocol.TaskOrigin{Kind: "manual"}, AssistantID: "assistant", Config: &config, Plugins: []string{}, RunID: fmt.Sprint("run", i), Generation: 1,
+			r := Record{SchemaVersion: 14, Origin: protocol.TaskOrigin{Kind: "manual"}, AssistantID: "assistant", Config: &config, Plugins: []string{}, RunID: fmt.Sprint("run", i), Generation: 1,
 				Info:    protocol.TaskInfo{ID: fmt.Sprint("task", i), AssistantID: "assistant", Title: "History", Phase: protocol.TaskComplete, RunID: fmt.Sprint("run", i), Archived: true},
 				Request: protocol.CreateTask{Text: "private task goal"}}
 			if err := write(ctx, tx, &r); err != nil {
@@ -146,7 +146,7 @@ func TestPreparedOutcomePublishesOnlyFinalUnsuppressedPhase(t *testing.T) {
 					return nil
 				}, nil
 			}
-			if err := s.finish(ctx, r, protocol.TaskComplete, nil, 0, ""); err != nil {
+			if err := s.finish(ctx, r, protocol.TaskComplete, nil, 0, 0, ""); err != nil {
 				t.Fatal(err)
 			}
 			s.Notify()

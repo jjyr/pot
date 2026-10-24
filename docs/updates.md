@@ -33,12 +33,22 @@ UI -> selected Control update port -> signed package download/staging
                          exclusive installation lock + data snapshots
                          replace complete installation
                                        |
-                         hosts exec their original command in place
+                         CLI hosts exec in place; worker relaunches native Apps
                          verify versions/readiness -> release maintenance
 ```
 
-Hosts retain their supervisor's PID, original arguments and environment when
-restarting. The installer does not invoke arbitrary shell commands, create new
+CLI hosts retain their supervisor's PID when restarting. Native macOS Apps exit
+and are relaunched by the installer with a new PID. Both preserve their original
+arguments, environment and working directory. For macOS Apps the installer is
+`Contents/MacOS/pot-app _update-worker JOB` in
+an independent process. This dispatch runs before flag parsing and Wails/Cocoa
+application initialization; the App does not bundle the complete `pot` CLI. The
+running worker keeps executing while the old bundle is moved to the backup path.
+Both Homebrew cask and direct installations use this same signed update path;
+there is no installation-channel marker or Homebrew subprocess. The cask keeps
+`auto_updates true`.
+
+The installer does not invoke arbitrary shell commands, create new
 user services, or start previously stopped instances. Closing the browser does
 not stop a download or installation; a pending interruption confirmation still
 requires a user. Starting another host during installation is serialized by the
@@ -49,11 +59,30 @@ A failed response write or flush leaves that host stopped. This prevents a
 successful restart from cutting off the acknowledgement and appearing to the
 installer as an uncertain EOF that requires rollback.
 
+Native Apps use separate preparation and exit requests. Preparation stops
+business admission and closes executions, stores and business sockets while the
+update socket and Cocoa process remain alive. Only successful preparation allows
+the exit endpoint to flush its acknowledgement and ask Cocoa to quit. The worker
+arms an OS process-exit watch before that request and waits for the actual exit;
+EOF alone never proves successful cleanup. It then acquires the installation
+lock, replaces the package and starts the exact original App executable. Restart
+commands are exchanged only over the private live socket and are never written
+to registration files or jobs. Readiness rediscovery binds the new PID to the
+same data root rather than reusing the old PID's socket. Failed launch/readiness
+restores and relaunches the previous package only after new-process exit or
+cleanup is confirmed. Uncertain native cleanup leaves maintenance blocked.
+
 The installed directory must be replaceable by its service account. Its private
 sibling `<installation>.updates` holds the state, staged package, worker log,
 previous package and data snapshots. These may contain private metadata and must
 remain owner-only. Keep the installation separate from all data roots and
-workspaces. Source builds and builds without a pinned release key do not advertise
+workspaces. The Homebrew `pot-cli` Formula omits the CLI's update registration metadata, so
+its hosts do not expose internal installation updates. Use
+`brew upgrade jjyr/pot/pot-cli` with those hosts stopped. Both the install API and
+the independent worker recheck installed metadata before replacing files.
+Standalone CLI archives retain that metadata and their existing update behavior.
+
+Source builds and builds without a pinned release key do not advertise
 an update action. Development App previews remain independent installations.
 
 ## Verification and failure handling
@@ -116,6 +145,13 @@ Install the first build containing the pinned key manually. Existing builds that
 predate this updater cannot bootstrap themselves into it. Key replacement also
 requires an explicit trust/bootstrap plan; the feed cannot change its own pinned
 verification key. Homebrew marks the App as self-updating.
+
+Native builds whose updater terminates Cocoa before acknowledging preparation
+also require a manual installation of the repaired App. A new download cannot
+repair the already running old host's shutdown protocol. Quit the old App before
+replacing its complete bundle. The native upgrade simulation builds both versions
+from the repaired source; it does not qualify an older released updater as a
+working upgrade origin.
 
 `GET /api/v1/updates` projects availability, phase and current work counts;
 `POST /api/v1/updates` accepts only typed download/install requests with a version,

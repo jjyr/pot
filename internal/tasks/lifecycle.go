@@ -8,6 +8,7 @@ import (
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
+	"time"
 )
 
 // Tick reconciles local runs. It starts each launch once after committing its
@@ -170,7 +171,7 @@ func (s *Service) reconcile(ctx context.Context, assistant, id string) error {
 		if run.Result == nil || !run.CleanupConfirmed {
 			return core.ErrCleanupUnconfirmed
 		}
-		return s.finish(ctx, *record, terminal, run.Result, run.StartedAtMS, "")
+		return s.finish(ctx, *record, terminal, run.Result, run.StartedAtMS, run.FinishedAtMS, "")
 	}
 	return s.change(ctx, assistant, id, func(tx *sql.Tx, current *Record) error {
 		if current.RunID != run.Launch.RunID {
@@ -243,7 +244,7 @@ func (s *Service) Stop(ctx context.Context, assistant, id, mode string) error {
 		if mode == "interrupt" {
 			phase = protocol.TaskInterrupted
 		}
-		err = s.finish(ctx, *record, phase, &Terminal{Outcome: core.Cancelled, Text: "Task stopped before dispatch."}, 0, mode)
+		err = s.finish(ctx, *record, phase, &Terminal{Outcome: core.Cancelled, Text: "Task stopped before dispatch."}, 0, time.Now().UnixMilli(), mode)
 		if errors.Is(err, errOutcomeChanged) {
 			continue
 		}

@@ -1,3 +1,4 @@
+import {taskElapsed,taskClockEnd} from './task-time.mjs';
 import {taskIdentityMark,taskIdentityShort} from './task-identity.mjs';
 import {reconcile} from './reconcile.mjs';
 import {taskIdentities,taskAddress} from '../state/task-identity.mjs';
@@ -162,12 +163,12 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   }
   function renderMenu(force=false){
     if(!dialog.open&&!force)return;
-    const signature=JSON.stringify([menuMode,record.info?.phase,record.info?.paused,record.info?.archived,record.capabilities,linked(),machineLabel(record.info?.machine_id||task.machine_id),busy,locale()]);if(!force&&signature===menuSignature)return;menuSignature=signature;
+    const signature=JSON.stringify([menuMode,record.info?.phase,record.info?.paused,record.info?.archived,record.info?.started_at_ms,record.info?.finished_at_ms,record.capabilities,linked(),machineLabel(record.info?.machine_id||task.machine_id),busy,locale()]);if(!force&&signature===menuSignature)return;menuSignature=signature;
     const heading=n('div','task-menu-heading'),close=iconButton('close',t('close'));close.onclick=()=>dialog.close();heading.append(n('h2','',tr('Task actions','任务操作')),close);dialog.replaceChildren(heading);
     const choice=(text,work,{danger=false}={})=>{const button=action(text,work,{danger});button.classList.add('menu-destination');button.disabled=busy;dialog.append(button);return button;};
     if(menuMode==='details'){
       heading.firstChild.textContent=tr('Task details','任务详情');const data=n('dl','task-info');
-      for(const [key,value]of [[tr('Assistant','助手'),assistantName],[t('agentLinks.executionSource'),linked()?linkDisplayName({peer:linked()}):null],[t('schedule.machine'),linked()?null:machineLabel(record.info?.machine_id||task.machine_id)],[tr('Model','模型'),linked()?null:record.config?.model],[tr('Started','开始时间'),record.info?.started_at_ms?new Date(record.info.started_at_ms).toLocaleString(locale()):null],[t('tasks.taskIdentity'),taskAddress(record.info||task)?JSON.stringify(taskAddress(record.info||task)):task.id]])if(value)data.append(n('dt','',key),n('dd','',value));
+      for(const [key,value]of [[tr('Assistant','助手'),assistantName],[t('agentLinks.executionSource'),linked()?linkDisplayName({peer:linked()}):null],[t('schedule.machine'),linked()?null:machineLabel(record.info?.machine_id||task.machine_id)],[tr('Model','模型'),linked()?null:record.config?.model],[tr('Started','开始时间'),record.info?.started_at_ms?new Date(record.info.started_at_ms).toLocaleString(locale()):null],[t('tasks.elapsedLabel'),['complete','failed','cancelled','interrupted'].includes(record.info?.phase)?taskElapsed(record.info?.started_at_ms,taskClockEnd(record.info),locale(),true):null],[t('tasks.taskIdentity'),taskAddress(record.info||task)?JSON.stringify(taskAddress(record.info||task)):task.id]])if(value)data.append(n('dt','',key),n('dd','',value));
       dialog.append(data);choice(tr('Back','返回'),()=>{menuMode='actions';renderMenu(true);});return;
     }
     if(menuMode==='cancel'){
