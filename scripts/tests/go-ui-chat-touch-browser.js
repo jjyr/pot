@@ -17,7 +17,11 @@ async page=>{
     window.addEventListener('unhandledrejection',event=>trace.errors.push(String(event.reason?.stack||event.reason)));
     // Programmatic input in WebKit emits a separate native scrollend for each
     // simulated step. Suppress those and deliver one at the actual tail end.
-    history.addEventListener('scrollend',event=>{if(trace.simulating&&event.isTrusted)event.stopImmediatePropagation();else trace.momentum=false;},{capture:true});
+    // Observe the boundary before TanStack's element listener commits held
+    // corrections; writes inside scrollend are already outside moving momentum.
+    const scrollend=event=>{if(event.target!==history)return;if(trace.simulating&&event.isTrusted)event.stopImmediatePropagation();else trace.momentum=false;};
+    document.addEventListener('scrollend',scrollend,{capture:true});
+    trace.close=()=>document.removeEventListener('scrollend',scrollend,{capture:true});
     let quiet;
     for(const name of ['touchstart','touchmove','touchend','touchcancel','pointercancel','scroll','scrollend'])history.addEventListener(name,event=>{
       if(name==='touchstart'){trace.touching=true;trace.momentum=false;}
@@ -40,7 +44,7 @@ async page=>{
   const nativeTouch=!!cdp;
   try{
     const rect=await page.locator('.history').boundingBox(),x=rect.x+rect.width*.5,y=rect.y+rect.height*.5;
-    const gesture=async(distance,speed=2200)=>{
+    const gesture=async(distance,speed=2200,quiet=300)=>{
       const before=await page.evaluate(()=>window.chatTouchTrace.capture());
       if(cdp){
         await cdp.send('Input.synthesizeScrollGesture',{x,y,yDistance:distance,speed,gestureSourceType:'touch',preventFling:false});
@@ -61,10 +65,11 @@ async page=>{
           window.chatTouchTrace.simulating=false;history.dispatchEvent(new Event('scrollend'));
         },distance);
       }
-      await page.waitForTimeout(300);
+      if(quiet)await page.waitForTimeout(quiet);
       await page.evaluate(({before,distance})=>{const t=window.chatTouchTrace;t.gestures.push({before,after:t.capture(),distance});},{before,distance});
     };
-    for(const distance of [1800,2400,3200,-2400,-3200,3200,3200,-3200])await gesture(distance);
+    // Reverse immediately, without waiting for the preceding momentum timer.
+    for(const distance of [1800,2400,3200,-2400,-3200,3200,3200,-3200])await gesture(distance,2200,0);
     // Move beyond the 640-message data window, then return through evicted
     // history. These gestures also cross the bounded detached DOM cache.
     for(let i=0;i<24;i++){
@@ -97,7 +102,7 @@ async page=>{
     }
     return {...result,gestures:result.gestures.length,oldest:Math.min(...result.gestures.map(gesture=>gesture.after.sequence)),latest:result.gestures.at(-1).after.sequence};
   }finally{
-    await page.evaluate(()=>{if(window.chatTouchTrace)window.chatTouchTrace.active=false;});
+    await page.evaluate(()=>{if(window.chatTouchTrace){window.chatTouchTrace.active=false;window.chatTouchTrace.close();}});
     await cdp?.detach();
   }
 }

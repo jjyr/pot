@@ -193,7 +193,7 @@ message through historical prepends and streaming growth. Pot retains the normal
 message DOM/CSS and renders virtual gaps as flow spacers. Twelve extra items on
 each side cover fast reversals. Native scroll notifications commit the range
 synchronously instead of waiting behind the ordinary animation-frame queue.
-Held iOS corrections may give the first mounted row a negative offset; a
+Held touch corrections may give the first mounted row a negative offset; a
 negative leading spacer margin preserves it without a native scroll write.
 
 Only newly mounted or updated rows need synchronous initial measurement;
@@ -208,10 +208,20 @@ layout changes outside the virtual list into positioning requests. TanStack is
 the sole scroll writer: the cursor and position resolver never assign
 `scrollTop`. Native writes acknowledge their resulting offset to the cursor, so
 they do not become reader gestures. Deliberate wheel, pointer, touch or keyboard
-input cancels outstanding scroll commands. Touch dragging and the momentum tail
-suspend new positioning requests while TanStack arbitrates resize corrections;
-a native pointer cancellation that hands the gesture to scrolling does not end
-reading input. No-op native writes are skipped and do not acknowledge a reader's
+input cancels outstanding scroll commands. TanStack alone tracks touch ownership,
+from initial contact through dragging and the native momentum tail, on both iOS
+and Android. Its native `scrollend` listener or quiet-time fallback releases held
+resize corrections. A new touch retires the preceding tail immediately; explicit
+Latest/message commands can take priority, and cancelling a queued command also
+retires its pending momentum-stop operation. The reading cursor has no parallel
+motion timers. It captures TanStack's committed reading anchor and only projects
+saved positions for restoration, explicit navigation or layout outside the list;
+ordinary range renders never replay an old anchor. A native pointer cancellation
+that hands the gesture to scrolling does not end reading input.
+Width reflow retains its requested reading anchor through subsequent measurement
+batches until new reader input releases that layout destination. Native offsets
+from hidden or remounted history do not replace an outstanding restore intent.
+No-op native writes are skipped and do not acknowledge a reader's
 pending native movement. Downward gestures also trigger newer-page prefetch at
 the cached history boundary, where the browser can no longer produce a delta.
 

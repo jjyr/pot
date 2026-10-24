@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {createNotificationProjection,taskOutcomeNotifications,viewingNotification,notificationText} from '../../web/src/state/notifications.mjs';
-import {createSystemNotifications,browserNotificationPermission} from '../../web/src/adapters/notifications.mjs';
+import {createSystemNotifications,browserNotificationPermission,claimBrowserNotification} from '../../web/src/adapters/notifications.mjs';
 
 const owner={capabilities:{version:1,operations:['task.outcomes','approvals.manage']},id:'alpha',space_id:'space-a',control_id:'control-a',name:'Alpha',reply_id:'old',reply_count:4};
 const task=(phase,id='task')=>({id,title:'Build',phase});
@@ -340,5 +340,50 @@ assert.equal(browserNotificationPermission({isSecureContext:true,navigator:{user
 assert.equal(browserNotificationPermission({isSecureContext:true,Notification:function(){}}),'unsupported','object presence alone is insufficient');
 assert.equal(browserNotificationPermission({isSecureContext:true,Notification:Object.assign(function(){},{requestPermission(){}}),navigator:{platform:'MacIntel',maxTouchPoints:5}}),'ios','iPad desktop UA still requires mobile delivery');
 console.log('First-run notification eligibility, dismissal, gesture, pending/error, persistence fallback and native readiness checks passed');
+
+// Safari can bubble a failed IDB request while the transaction error is null.
+// Preserve the request diagnostic and always settle setup/abort failures.
+function failingNotificationStorage({requestError=null,setupError,openFailure=false}={}){
+ let closed=0;
+ const indexedDB={open(){const open={error:null};queueMicrotask(()=>{
+  if(openFailure){open.onerror();return;}
+  open.result={close(){closed++;},transaction(){
+   if(setupError)throw setupError;
+   const tx={error:null,objectStore:()=>({get:()=>({}),openCursor:()=>({})})};
+   queueMicrotask(()=>tx.onerror({target:{error:requestError}}));return tx;
+  }};open.onsuccess();
+ });return open;}};
+ return {indexedDB,get closed(){return closed;}};
+}
+const requestError=new DOMException('request storage failed','UnknownError');
+for(const options of [{requestError},{},{setupError:Error('database closed')},{openFailure:true}]){
+ const storage=failingNotificationStorage(options);
+ await assert.rejects(claimBrowserNotification('event',storage.indexedDB),reason=>{
+  assert(reason instanceof Error,'storage rejects with an Error, never null');
+  if(options.requestError)assert.equal(reason,requestError,'the original request error survives transaction bubbling');
+  if(options.setupError)assert.equal(reason,options.setupError);
+  return true;
+ });
+ assert.equal(storage.closed,options.openFailure?0:1,'failed opened databases are closed');
+}
+
+for(const nav of [{userAgent:'iPhone'},{userAgent:'Android'}]){
+ const testClient=client(),testHost=host();testHost.navigator=nav;
+ let claims=0;
+ const coordinator=createSystemNotifications({client:testClient,surface:'main',view:()=>route,open:()=>{},locale:()=> 'en',host:testHost,claim:async()=>{claims++;throw null;}});
+ await coordinator.directory();testClient.assistants[0]={...owner,reply_id:'mobile-new',reply_count:5};await coordinator.directory();
+ assert.equal(claims,0,'unsupported mobile delivery never accesses notification storage');coordinator.dispose();
+}
+
+permission='granted';storage.set('pot-system-notifications-browser-v1','true');
+for(const reason of [null,undefined,'storage failed',Error('storage failed')]){
+ const testClient=client(),testHost=host();
+ const coordinator=createSystemNotifications({client:testClient,surface:'main',view:()=>({route:'assistants'}),open:()=>{},locale:()=> 'en',host:testHost,claim:async()=>{throw reason;}});
+ await coordinator.directory();testClient.assistants[0]={...owner,reply_id:'failed-delivery',reply_count:5};
+ await coordinator.directory();assert(coordinator.state.error,'a failed delivery reports diagnostics without rejecting directory refresh');
+ testClient.request=async()=>{throw reason;};await coordinator.refresh();assert(coordinator.state.error,'null read failures are handled by the refresh queue');
+ coordinator.dispose();
+}
+console.log('Notification null failures, IDB request/setup failures and mobile storage bypass checks passed');
 
 }
