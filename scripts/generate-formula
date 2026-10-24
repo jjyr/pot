@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""Generate pot-cli Formula metadata from the verified macOS CLI release archive."""
+
+import argparse
+from pathlib import Path
+
+from release_contract import generate_formula, version_number
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("version", type=version_number)
+parser.add_argument("directory", type=Path)
+args = parser.parse_args()
+generate_formula(args.version, args.directory)

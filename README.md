@@ -51,7 +51,8 @@ existing data, choose a channel and complete first setup. To install it yourself
 
 | Channel | Download / install | Platform |
 |---|---|---|
-| macOS (Homebrew) | Use the two commands below; [tap instructions](docs/releases.md#homebrew-generation) | Apple Silicon, macOS 26+; [first launch](docs/desktop-installation.md#macos) |
+| macOS App (Homebrew) | Use the two commands below; [tap instructions](docs/releases.md#homebrew-generation) | Apple Silicon, macOS 26+; [first launch](docs/desktop-installation.md#macos) |
+| macOS CLI (Homebrew) | `brew install jjyr/pot/pot-cli` after the tap below | Apple Silicon, macOS 26+ for the current archive; [CLI installation](docs/desktop-installation.md#macos-cli) |
 | Linux desktop · Experimental | [Download .deb](https://github.com/jjyr/pot/releases) — select `pot-desktop_VERSION_linux_amd64.deb` | Debian / Ubuntu amd64; [requirements](docs/desktop-installation.md#linux-experimental) |
 | Web UI (Docker) | [View Docker image](https://github.com/users/jjyr/packages/container/package/pot) · `ghcr.io/jjyr/pot` | Linux amd64 / arm64; [installation and running](docs/docker.md) |
 | Web UI (Server) | [Download Web UI / Server](https://github.com/jjyr/pot/releases) — select `pot-VERSION-linux-ARCH.tar.gz` | glibc Linux amd64 / arm64; [configuration and running](docs/deployment.md) |
@@ -61,15 +62,25 @@ brew tap jjyr/pot https://github.com/jjyr/pot.git
 brew install --cask jjyr/pot/pot
 ```
 
-Upgrade with `brew upgrade --cask jjyr/pot/pot`.
+Install the independent headless CLI alongside the App with:
+
+```sh
+brew install jjyr/pot/pot-cli
+pot-cli --version
+# Upgrade the CLI through Homebrew:
+brew upgrade jjyr/pot/pot-cli
+```
+
+`pot-cli` uses the existing CLI package, including Node and all runtime resources.
+It has no GUI dependency. Use separate data roots when running it alongside the
+App; see [CLI installation](docs/desktop-installation.md#macos-cli).
 
 During the unsigned release phase, macOS installation is offered through Homebrew
 only. Homebrew may still require an App-specific Gatekeeper allowance; follow the
 [first-launch guide](docs/desktop-installation.md#macos).
 
 Linux download links open the official release selector; packages and the container
-image await their first publication. The cask in this repository is disabled until
-the first macOS release and its cask update PR are merged. The first `brew tap`
+image await their first publication. The first `brew tap`
 requires the explicit Git URL above. Once images are published,
 choose an explicit version tag; no `latest` tag is published. Check release
 notes and supplied checksums. If your package is unavailable, the

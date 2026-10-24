@@ -357,6 +357,9 @@ func (m *Manager) install(command Command, s State) error {
 	if status.Work.Active() && !command.Interrupt {
 		return protocol.APIError{Code: "update_confirmation_required"}
 	}
+	if err := checkInstallation(m.Host.Install, m.Host.Package); err != nil {
+		return protocol.APIError{Code: "update_unavailable"}
+	}
 	job := Job{Install: m.Host.Install, Directory: m.Host.Directory, Version: command.Version, Interrupt: command.Interrupt, Package: m.Host.Package}
 	path := filepath.Join(m.Host.Directory, "job.json")
 	if err = instance.WriteJSON(path, job); err != nil {
@@ -369,7 +372,7 @@ func (m *Manager) install(command Command, s State) error {
 	}
 	executable := filepath.Join(m.Host.Install, "bin/pot")
 	if m.Host.Package.Kind == "app" {
-		executable = filepath.Join(m.Host.Install, "Contents/MacOS/pot")
+		executable = filepath.Join(m.Host.Install, "Contents/MacOS/pot-app")
 	}
 	worker := exec.Command(executable, "_update-worker", path)
 	worker.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

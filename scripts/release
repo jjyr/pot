@@ -8,7 +8,7 @@ import platform
 import plistlib
 import subprocess
 
-from release_contract import generate_cask, version_number, write_checksum
+from release_contract import generate_cask, generate_formula, version_number, write_checksum
 
 REPO = Path(__file__).resolve().parents[1]
 APP = REPO / ".local/pot/Pot.app"
@@ -64,6 +64,7 @@ def main():
             check=True,
             env=env,
         )
+    generate_formula(version, args.output.resolve())
     if os.environ.get("POT_UPDATE_PUBLIC_KEY"):
         subprocess.run(
             ["python3", str(REPO / "scripts/update-release"), version, str(args.output.resolve())],

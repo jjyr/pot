@@ -159,3 +159,29 @@ def generate_cask(version, output):
     if re.search(r"@[A-Z_]+@", cask):
         raise ValueError("unexpanded cask template variable")
     (output / "pot.rb").write_text(cask)
+
+
+def generate_formula(version, output):
+    """Reuse the final macOS CLI archive; never build a second CLI artifact."""
+    version_number(version)
+    archive = output / f"pot-{version}-darwin-arm64.tar.gz"
+    expected = f"{checksum(archive)}  {archive.name}\n"
+    if archive.with_name(archive.name + ".sha256").read_text() != expected:
+        raise ValueError("CLI archive checksum does not match its sidecar")
+    root = "pot-darwin-arm64/"
+    with tarfile.open(archive) as packed:
+        metadata = json.load(packed.extractfile(root + "Resources/update.json"))
+        binary = packed.getmember(root + "bin/pot")
+        if not binary.isfile() or binary.mode & 0o111 == 0:
+            raise ValueError("CLI archive must contain executable bin/pot")
+    if (metadata["version"], metadata["kind"], metadata["platform"]) != (
+        version,
+        "cli",
+        "darwin-arm64",
+    ):
+        raise ValueError("CLI package metadata does not match formula version/platform")
+    template = (ROOT / "packaging/homebrew/pot-cli.rb.in").read_text()
+    formula = template.replace("@VERSION@", version).replace("@SHA256@", checksum(archive))
+    if re.search(r"@[A-Z_]+@", formula):
+        raise ValueError("unexpanded formula template variable")
+    (output / "pot-cli.rb").write_text(formula)

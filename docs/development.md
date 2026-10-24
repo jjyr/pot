@@ -496,6 +496,20 @@ The release/build `CI` workflow runs automatically only on tag pushes. All tags
 are checked, while exact stable version tags enter controlled per-channel release
 paths after shared checks and the corresponding native package and smoke gates
 succeed. Ordinary manual runs do not publish.
+
+On an interactive Apple Silicon Mac, `mise run test:macos-update` builds the
+current source twice with versions `0.1.0` and `0.2.0` and an ephemeral update key.
+It runs the actual Wails Apps and App worker in disposable installations and
+data roots, simulating an already verified/staged package through the production
+install API. It checks successful upgrade, executable-launch failure and
+startup-exit rollback, new
+PID/boot, preserved root/identity/arguments/environment/working directory, and
+bundle signatures. It neither publishes releases nor opens existing product
+roots. Signed-feed discovery and download verification remain covered by the
+updater Go tests. The native macOS packaging job runs this simulation as well.
+For existing test builds, run `mise exec -- python
+scripts/tests/macos-update-smoke.py /absolute/Old.app /absolute/New.app`.
+
 Branch pushes and PR events do not start the release/build workflow.
 That workflow always calls the full `Tests` gate for its resolved source SHA. Headless
 and cross-platform builds run afterward as a separate build gate, before native

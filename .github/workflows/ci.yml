@@ -150,10 +150,15 @@ jobs:
         run: |
           mise exec -- python scripts/sign-macos-release "$POT_APP_VERSION" dist --mode unsigned
           mise exec -- python scripts/generate-cask "$POT_APP_VERSION" dist
+          mise exec -- python scripts/generate-formula "$POT_APP_VERSION" dist
       - run: mise exec -- python scripts/tests/server-package-smoke.py dist/pot-${{ env.POT_APP_VERSION }}-darwin-arm64.tar.gz
       - run: ruby -c dist/pot.rb
+      - run: ruby -c dist/pot-cli.rb
       - run: brew ruby scripts/tests/homebrew-cask.rb Casks/pot.rb dist/pot.rb
+      - run: brew ruby scripts/tests/homebrew-formula.rb Formula/pot-cli.rb dist/pot-cli.rb
       - run: mise exec -- python scripts/tests/macos-package-smoke.py dist/Pot-${{ env.POT_APP_VERSION }}-arm64.zip
+      - name: Simulate native App upgrade and launch-failure rollback
+        run: mise run test:macos-update
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: package-macos
