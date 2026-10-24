@@ -26,14 +26,18 @@ brew install --cask jjyr/pot/pot
 ```
 
 The first tap needs the explicit Git URL because this repository is named `pot`.
-The root `Casks/pot.rb` is disabled until the first macOS release is published and
-its cask update PR is merged. See [cask maintenance](releases.md#homebrew-generation).
+The root `Casks/pot.rb` points to the published App. See
+[Homebrew maintenance](releases.md#homebrew-generation).
 Homebrew installs `Pot.app` in Applications from the release ZIP and verifies its
 SHA-256. The ZIP remains a required release asset while its direct download entry
 is hidden; `pot.rb` is maintained in source and is not a Release asset.
-Upgrade with `brew upgrade --cask jjyr/pot/pot` after the corresponding cask PR is
-merged. Until a matching release exists, see [Development](development.md) to
-build the independently identified development bundle with `mise run build`.
+Both cask and directly downloaded Apps use the same [signed in-app updater](updates.md).
+The cask keeps `auto_updates true`: normal `brew upgrade` skips self-updating
+casks. Users can explicitly opt into cask replacement with
+`brew upgrade --cask --greedy jjyr/pot/pot` after its package PR is merged.
+Updating needs permission to replace the actual installation directory; Pot does
+not request elevation. See [Development](development.md) to build the independently
+identified development bundle with `mise run build`.
 
 Read `MACOS-RELEASE.txt` in the selected release for its signing status.
 `unsigned` releases are ad-hoc signed for executable integrity;
@@ -67,6 +71,39 @@ other applications. Pot's [signed update feed](updates.md) authenticates package
 origin separately from Apple signing in both modes; it does not grant Gatekeeper
 approval. Published downloads and successful native smoke are prerequisites for
 release availability, not claims about packages that have not been published.
+
+## macOS CLI
+
+The independent Formula installs the existing `pot-VERSION-darwin-arm64.tar.gz`
+archive and exposes `pot-cli`. It can coexist with the `pot` App cask:
+
+```sh
+brew tap jjyr/pot https://github.com/jjyr/pot.git
+brew install jjyr/pot/pot-cli
+pot-cli --version
+pot-cli serve -root "$HOME/.pot-cli" -ui 127.0.0.1:17703
+# Stop the CLI host before upgrading its complete installation:
+brew upgrade jjyr/pot/pot-cli
+```
+
+The current 0.0.1 CLI archive supports Apple Silicon and requires macOS 26+:
+its actual `bin/pot` Mach-O declares 26.0, while bundled Node declares 13.5. The
+headless CLI does not use Wails or WKWebView. Intel macOS and Linux are not
+supported by this Formula; Linux continues to use its own archives.
+
+Homebrew stores the full `bin/pot` and `Resources` tree in the Formula's
+`libexec`. The small `pot-cli` shell launcher execs the real binary with unchanged
+arguments, so the published CLI locates resources relative to `libexec/bin/pot`,
+even on macOS where `os.Executable` may retain a symlink path. It does not install
+a `pot` shell command or copy the CLI into the App.
+
+The Formula removes the CLI archive's `Resources/update.json` registration file;
+it leaves the signed executables intact. Formula hosts therefore do not advertise
+or accept internal updates; Homebrew owns their Cellar installation. Manually
+extracted CLI archives retain their original signed self-update support. Keep
+separate data roots for concurrent App and CLI hosts; the App defaults to
+`~/.pot`, while the example above uses `~/.pot-cli`. Both use the same CLI
+commands and runtime resources documented in [Deployment](deployment.md).
 
 ## Linux (Experimental)
 

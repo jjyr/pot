@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Propose a same-repository cask update from an already published macOS ZIP."""
+"""Propose cask and Formula updates from already published macOS archives."""
 
 import argparse
 import base64
@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 from urllib.parse import quote
 
-from release_contract import checksum, generate_cask, version_number
+from release_contract import checksum, generate_cask, generate_formula, version_number
 
 
 def api(repository, endpoint, data=None, missing=False):
@@ -33,19 +33,25 @@ def api(repository, endpoint, data=None, missing=False):
     return json.loads(result.stdout)
 
 
-def propose(repository, version, cask):
+def propose(repository, version, cask, formula):
     """Create a branch once. Never update an existing branch, PR, or default ref."""
     base = api(repository, "")["default_branch"]
     base_sha = api(repository, f"commits/{quote(base, safe='')}")["sha"]
-    current = api(repository, f"contents/Casks/pot.rb?ref={base_sha}")
-    current_text = base64.b64decode(current["content"]).decode()
-    if current_text == cask:
-        return "Cask already synchronized on the default branch."
-    current_version = re.search(r'^  version "([0-9.]+)"$', current_text, re.M)
-    if current_version and tuple(map(int, current_version[1].split("."))) >= tuple(
-        map(int, version.split("."))
-    ):
-        raise ValueError("Refusing to replace an equal or newer default-branch cask")
+    desired = {"Casks/pot.rb": cask, "Formula/pot-cli.rb": formula}
+    changes = {}
+    for path, text in desired.items():
+        current = api(repository, f"contents/{path}?ref={base_sha}")
+        current_text = base64.b64decode(current["content"]).decode()
+        if current_text == text:
+            continue
+        current_version = re.search(r'^  version "([0-9.]+)"$', current_text, re.M)
+        if current_version and tuple(map(int, current_version[1].split("."))) >= tuple(
+            map(int, version.split("."))
+        ):
+            raise ValueError("Refusing to replace an equal or newer default-branch package")
+        changes[path] = text
+    if not changes:
+        return "Homebrew packages already synchronized on the default branch."
     branch = f"homebrew/pot-v{version}"
     prs = api(
         repository,
@@ -53,16 +59,19 @@ def propose(repository, version, cask):
     )
     for pr in prs:
         if pr["base"]["ref"] != base:
-            raise ValueError("Existing cask PR targets a different base; review it manually")
+            raise ValueError("Existing Homebrew PR targets a different base; review it manually")
         if pr["state"] == "closed":
-            raise ValueError("Cask PR was closed or merged; review default-branch state manually")
+            raise ValueError(
+                "Homebrew PR was closed or merged; review default-branch state manually"
+            )
     existing = api(repository, f"git/ref/heads/{branch}", missing=True)
     if existing:
-        content = api(repository, f"contents/Casks/pot.rb?ref={existing['object']['sha']}")
-        if base64.b64decode(content["content"]).decode() != cask:
-            raise ValueError("Existing cask branch differs; refusing to rewrite it")
+        for path, text in desired.items():
+            content = api(repository, f"contents/{path}?ref={existing['object']['sha']}")
+            if base64.b64decode(content["content"]).decode() != text:
+                raise ValueError("Existing Homebrew branch differs; refusing to rewrite it")
         comparison = api(repository, f"compare/{base_sha}...{existing['object']['sha']}")
-        if [f["filename"] for f in comparison["files"]] != ["Casks/pot.rb"]:
+        if sorted(f["filename"] for f in comparison["files"]) != sorted(changes):
             raise ValueError("Existing branch contains other changes; review it manually")
     else:
         commit = api(repository, f"git/commits/{base_sha}")
@@ -72,7 +81,8 @@ def propose(repository, version, cask):
             {
                 "base_tree": commit["tree"]["sha"],
                 "tree": [
-                    {"path": "Casks/pot.rb", "mode": "100644", "type": "blob", "content": cask}
+                    {"path": path, "mode": "100644", "type": "blob", "content": text}
+                    for path, text in changes.items()
                 ],
             },
         )
@@ -80,31 +90,31 @@ def propose(repository, version, cask):
             repository,
             "git/commits",
             {
-                "message": f"Update Homebrew cask to Pot {version}",
+                "message": f"Update Homebrew packages to Pot {version}",
                 "tree": tree["sha"],
                 "parents": [base_sha],
             },
         )
         api(repository, "git/refs", {"ref": "refs/heads/" + branch, "sha": commit["sha"]})
     if prs:
-        return "Existing cask PR: " + prs[0]["html_url"]
-    print(f"Verified cask branch: https://github.com/{repository}/tree/{branch}")
+        return "Existing Homebrew PR: " + prs[0]["html_url"]
+    print(f"Verified Homebrew branch: https://github.com/{repository}/tree/{branch}")
     pr = api(
         repository,
         "pulls",
         {
-            "title": f"Update Homebrew cask to Pot {version}",
+            "title": f"Update Homebrew packages to Pot {version}",
             "head": branch,
             "base": base,
             "body": (
-                f"Install Pot {version} from the published macOS App ZIP. The shared cask generator "
-                "verified its bundle version, checksum sidecar and GitHub asset digest against the downloaded final bytes.\n\n"
-                "This changes only Casks/pot.rb. Merge after review to enable Homebrew installation/upgrades; "
+                f"Install Pot {version} from the published App ZIP and CLI archive. The shared generators "
+                "verified package versions, checksum sidecars and GitHub asset digests against the final bytes.\n\n"
+                "This updates Casks/pot.rb and Formula/pot-cli.rb. Merge after review to enable Homebrew installation/upgrades; "
                 "the release tag and assets remain immutable. Homebrew preserves quarantine."
             ),
         },
     )
-    return "Created cask PR: " + pr["html_url"]
+    return "Created Homebrew PR: " + pr["html_url"]
 
 
 def sync(version, revision, repository):
@@ -116,11 +126,11 @@ def sync(version, revision, repository):
         raise ValueError("Release tag moved after validation")
     release = api(repository, f"releases/tags/{tag}")
     if release["draft"] or release["prerelease"]:
-        raise ValueError("Cask sync requires a published stable release")
-    name = f"Pot-{version}-arm64.zip"
-    asset = next((a for a in release["assets"] if a["name"] == name), None)
-    if asset is None:
-        raise ValueError("Published release is missing the final macOS App ZIP")
+        raise ValueError("Homebrew sync requires a published stable release")
+    names = [f"Pot-{version}-arm64.zip", f"pot-{version}-darwin-arm64.tar.gz"]
+    assets = {a["name"]: a for a in release["assets"] if a["name"] in names}
+    if set(assets) != set(names):
+        raise ValueError("Published release is missing a final macOS archive")
     with tempfile.TemporaryDirectory(prefix="pot-cask-") as temporary:
         output = Path(temporary)
         subprocess.run(
@@ -131,25 +141,33 @@ def sync(version, revision, repository):
                 tag,
                 "--repo",
                 repository,
-                "--pattern",
-                name,
-                "--pattern",
-                name + ".sha256",
+                *[
+                    arg
+                    for name in names
+                    for arg in ("--pattern", name, "--pattern", name + ".sha256")
+                ],
                 "--dir",
                 temporary,
             ],
             check=True,
         )
-        archive = output / name
-        if (
-            asset.get("digest") != "sha256:" + checksum(archive)
-            or asset["size"] != archive.stat().st_size
-        ):
-            raise ValueError("Downloaded ZIP does not match published asset digest/size")
+        for name, asset in assets.items():
+            archive = output / name
+            if (
+                asset.get("digest") != "sha256:" + checksum(archive)
+                or asset["size"] != archive.stat().st_size
+            ):
+                raise ValueError("Downloaded archive does not match published asset digest/size")
         generate_cask(version, output)
+        generate_formula(version, output)
         if api(repository, f"commits/refs/tags/{tag}")["sha"] != revision:
-            raise ValueError("Release tag moved before cask proposal")
-        return propose(repository, version, (output / "pot.rb").read_text())
+            raise ValueError("Release tag moved before Homebrew proposal")
+        return propose(
+            repository,
+            version,
+            (output / "pot.rb").read_text(),
+            (output / "pot-cli.rb").read_text(),
+        )
 
 
 def main():

@@ -38,7 +38,15 @@ UI -> selected Control update port -> signed package download/staging
 ```
 
 Hosts retain their supervisor's PID, original arguments and environment when
-restarting. The installer does not invoke arbitrary shell commands, create new
+restarting. For macOS Apps the installer is `Contents/MacOS/pot-app _update-worker JOB` in
+an independent process. This dispatch runs before flag parsing and Wails/Cocoa
+application initialization; the App does not bundle the complete `pot` CLI. The
+running worker keeps executing while the old bundle is moved to the backup path.
+Both Homebrew cask and direct installations use this same signed update path;
+there is no installation-channel marker or Homebrew subprocess. The cask keeps
+`auto_updates true`.
+
+The installer does not invoke arbitrary shell commands, create new
 user services, or start previously stopped instances. Closing the browser does
 not stop a download or installation; a pending interruption confirmation still
 requires a user. Starting another host during installation is serialized by the
@@ -53,7 +61,13 @@ The installed directory must be replaceable by its service account. Its private
 sibling `<installation>.updates` holds the state, staged package, worker log,
 previous package and data snapshots. These may contain private metadata and must
 remain owner-only. Keep the installation separate from all data roots and
-workspaces. Source builds and builds without a pinned release key do not advertise
+workspaces. The Homebrew `pot-cli` Formula omits the CLI's update registration metadata, so
+its hosts do not expose internal installation updates. Use
+`brew upgrade jjyr/pot/pot-cli` with those hosts stopped. Both the install API and
+the independent worker recheck installed metadata before replacing files.
+Standalone CLI archives retain that metadata and their existing update behavior.
+
+Source builds and builds without a pinned release key do not advertise
 an update action. Development App previews remain independent installations.
 
 ## Verification and failure handling

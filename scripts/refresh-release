@@ -215,8 +215,7 @@ def verify_candidate_builds(output, source):
         with tarfile.open(output / f"pot-{VERSION}-{platform}.tar.gz") as archive:
             verify_build(archive.extractfile(f"pot-{platform}/bin/pot").read(), source)
     with zipfile.ZipFile(output / f"Pot-{VERSION}-arm64.zip") as archive:
-        for binary in ("pot", "pot-app"):
-            verify_build(archive.read("Pot.app/Contents/MacOS/" + binary), source)
+        verify_build(archive.read("Pot.app/Contents/MacOS/pot-app"), source)
     with tempfile.TemporaryDirectory() as temporary:
         subprocess.run(
             [

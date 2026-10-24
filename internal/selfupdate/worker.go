@@ -34,6 +34,11 @@ func Worker(path string) (result error) {
 	if !filepath.IsAbs(job.Install) || job.Directory != job.Install+".updates" || path != filepath.Join(job.Directory, "job.json") || !versionPattern.MatchString(job.Version) {
 		return errors.New("invalid update job")
 	}
+	// Recheck eligibility in the independent process as well as in OpenHost.
+	// Formula installations deliberately omit this self-update registration.
+	if err = checkInstallation(job.Install, job.Package); err != nil {
+		return err
+	}
 	if err = privateDirectory(job.Directory); err != nil {
 		return err
 	}
@@ -182,6 +187,27 @@ func Worker(path string) (result error) {
 }
 
 var healthTimeout = 45 * time.Second
+
+func checkInstallation(install string, expected Installation) error {
+	metadata := filepath.Join(install, "Resources/update.json")
+	if expected.Kind == "app" {
+		metadata = filepath.Join(install, "Contents/Resources/update.json")
+	} else if expected.Kind != "cli" {
+		return errors.New("invalid update installation kind")
+	}
+	data, err := os.ReadFile(metadata)
+	if err != nil {
+		return err
+	}
+	var installed Installation
+	if err = json.Unmarshal(data, &installed); err != nil {
+		return err
+	}
+	if installed != expected || installed.StorageFormat != storageFormat() {
+		return errors.New("update job does not match installed package")
+	}
+	return nil
+}
 
 func healthy(peers []Participant, version string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), healthTimeout)

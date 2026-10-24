@@ -6,7 +6,7 @@ on macOS signing. Each channel requires its own build, smoke, checksum and
 applicable signing gates. Windows is currently unsupported.
 
 The first public release is 0.0.1; the root `Casks/pot.rb` installs its App.
-Release workflows propose a cask update PR after successful macOS publication;
+Release workflows propose a cask and Formula update PR after successful macOS publication;
 they never push the default branch or change repository/registry visibility.
 
 CLI builds use `pot-VERSION-PLATFORM.tar.gz`, containing `pot-PLATFORM/bin/pot`
@@ -19,7 +19,7 @@ their existing Pot branding.
 | Linux desktop (Experimental), amd64 | `pot-desktop_VERSION_linux_amd64.deb` | Native GTK/WebKit build and real WebView smoke; GitHub Release assets; manual upgrades |
 | macOS 26+, Apple Silicon | `Pot-VERSION-arm64.zip`, `pot-VERSION-darwin-arm64.tar.gz` | Native App/CLI smoke and explicit `unsigned` (ad-hoc) or `signed` (Developer ID + notarization) mode; GitHub assets, cask and signed update feed |
 | Container, Linux amd64/arm64 | `pot-container-VERSION.oci.tar`, `ghcr.io/jjyr/pot:VERSION` | Native image build/smoke on both architectures, OCI integrity and metadata verification; GHCR |
-| Homebrew | Root `Casks/pot.rb` in `jjyr/pot` | Published final App ZIP verified before a same-repository cask update PR; merge makes installation/upgrades available |
+| Homebrew | Root `Casks/pot.rb` and `Formula/pot-cli.rb` in `jjyr/pot` | Published App ZIP and macOS CLI tar verified before a same-repository package update PR; merge makes installation/upgrades available |
 
 The experimental designation applies only to the new Linux native desktop `.deb`.
 Its amd64 build and native WebView smoke have been exercised locally; native
@@ -290,41 +290,50 @@ requires a separate unused root. See [Updates](updates.md).
 
 The website and README expose macOS through Homebrew only. Release assets retain
 App ZIP/CLI archives, their SHA-256 sidecars, `MACOS-RELEASE.txt`,
-`SHA256SUMS-macos` and the Ed25519-signed update feed. `pot.rb` is not uploaded.
+`SHA256SUMS-macos` and the Ed25519-signed update feed. `pot.rb` and `pot-cli.rb` are generated metadata, not uploaded assets.
 Both `unsigned` and `signed` modes use the same tap path and final-byte checks.
 
 ```sh
 brew tap jjyr/pot https://github.com/jjyr/pot.git
 brew install --cask jjyr/pot/pot
-# Later, after the next cask update PR is merged:
-brew upgrade --cask jjyr/pot/pot
+brew install jjyr/pot/pot-cli
+# App updates itself; explicitly opt into cask replacement if desired:
+brew upgrade --cask --greedy jjyr/pot/pot
+# Stop Formula hosts first, then let Homebrew upgrade the CLI:
+brew upgrade jjyr/pot/pot-cli
 ```
 
 The initial tap must include the explicit URL: the repository is `pot`, not
 `homebrew-pot`. Homebrew supports an arbitrary Git URL with its two-argument tap
 command; see [Homebrew Taps](https://docs.brew.sh/Taps). Casks live in root
-`Casks/`. No separate tap repository is used. Private repository/assets require
+`Casks/`; the independent CLI Formula lives in `Formula/`. No separate tap repository is used. Private repository/assets require
 GitHub access; normal public installation requires the repository and artifacts
 to be public. These workflows never change visibility.
 
-Before the first release, `Casks/pot.rb` is explicitly disabled and has no archive
-version, URL or checksum: no installable artifact exists. It cannot silently
-install a development build. After publication, `scripts/sync-homebrew-cask`
-downloads the final versioned App ZIP and checksum sidecar using `github.token`,
-checks GitHub's SHA-256 digest and byte size, and uses the shared
-`release_contract.generate_cask` template/version/sidecar validation. Sealing and
-notarization happen before these final bytes are published. There is no `latest`
-URL or unchecked checksum. `packaging/homebrew/pot.rb.in` remains the single
-installable cask template; repository license terms apply to generated casks.
+`Casks/pot.rb` and `Formula/pot-cli.rb` point to published, fixed-version assets.
+`scripts/sync-homebrew` downloads the final App ZIP, macOS CLI tar and checksum
+sidecars using `github.token`, checks GitHub's SHA-256 digests and byte sizes,
+and calls shared `generate_cask` / `generate_formula` validation. Both versions
+and layouts must match. Sealing and notarization happen before publication.
+The templates are `packaging/homebrew/pot.rb.in` and `pot-cli.rb.in`; neither uses
+`latest` or an unchecked checksum. The Formula reuses the existing CLI archive,
+with no duplicate release asset. Its current macOS 26 minimum reflects the
+published CLI Mach-O, rather than a dependency on the App's GUI frameworks.
+
+The App cask keeps `auto_updates true` for the shared signed in-app updater.
+Homebrew normally skips these casks during upgrade; `--greedy` explicitly opts
+in to cask replacement. The Formula is Homebrew-managed: its launcher execs
+`libexec/bin/pot`, and installation removes `libexec/Resources/update.json` to
+prevent internal replacement of the Cellar tree. See [CLI installation](desktop-installation.md#macos-cli).
 
 ```text
 validated source SHA -> final macOS sealing/smoke -> immutable Release assets
                                                         |
-                                             download + verify final ZIP
+                                             download + verify final ZIP + CLI tar
                                                         |
                                 same-repository homebrew/pot-vVERSION branch
                                                         |
-                                    reviewed PR -> Casks/pot.rb on main
+                                    reviewed PR -> Casks/pot.rb + Formula/pot-cli.rb
                                                         |
                                                 brew install / upgrade
 ```
@@ -332,17 +341,17 @@ validated source SHA -> final macOS sealing/smoke -> immutable Release assets
 The separate `homebrew` job runs only after macOS publication succeeds. It requests
 `contents: write` for a new branch and `pull-requests: write` for its PR, with no
 new PAT. It creates a branch from the current default branch and changes only
-`Casks/pot.rb`. It never moves a release tag. Its source implementation remains
+`Casks/pot.rb` and `Formula/pot-cli.rb`. It never moves a release tag. Its source implementation remains
 pinned to the validated release SHA; the distribution pointer commit necessarily
-comes later. First installation becomes available **after the cask PR is merged**.
+comes later. First installation becomes available **after the Homebrew PR is merged**.
 
 Retries reuse an identical existing branch/open PR. A different branch, closed PR,
-equal/newer conflicting cask or unexpected changes stop for manual review; no
+equal/newer conflicting package or unexpected changes stop for manual review; no
 existing branch is rewritten and no automatic merge/retry loop occurs. An older
-release cannot downgrade the default-branch cask. Protected branch policies still
+release cannot downgrade the default-branch packages. Protected branch policies still
 apply when reviewing/merging the PR.
 
-A cask synchronization error does not undo or relabel successful asset publication.
+A Homebrew synchronization error does not undo or relabel successful asset publication.
 The job logs the actual error and emits a warning and Actions summary with a
 recovery command. If repository settings prohibit Actions PR creation, the branch
 may exist without a PR; a maintainer can open its PR manually. To retry after
@@ -350,10 +359,10 @@ resolving permissions or reviewing the branch/PR, use an authorized `gh` session
 from the released source revision (substitute its exact version and SHA):
 
 ```sh
-GITHUB_REPOSITORY=jjyr/pot python3 scripts/sync-homebrew-cask 1.2.3 VALIDATED_40_CHARACTER_SHA
+GITHUB_REPOSITORY=jjyr/pot python3 scripts/sync-homebrew 1.2.3 VALIDATED_40_CHARACTER_SHA
 ```
 
-This recovery command only reads published assets and proposes the cask PR; it
+This recovery command only reads published assets and proposes the Homebrew PR; it
 never publishes assets. It fails visibly if branch creation or PR permission is
 missing. A maintainer must explicitly allow Actions to create PRs in repository
 Actions settings for automatic PR creation, or open the generated branch's PR
@@ -365,9 +374,10 @@ For local artifact validation before publication, the existing generator remains
 ```sh
 mise exec -- python scripts/generate-cask 1.2.3 /absolute/artifacts
 mise exec -- python scripts/generate-cask 1.2.3 /absolute/artifacts --verify-url
+mise exec -- python scripts/generate-formula 1.2.3 /absolute/artifacts
 ```
 
-These commands create internal `pot.rb` metadata, not a Release asset or user
+These commands create internal `pot.rb` and `pot-cli.rb` metadata, not a Release asset or user
 installation step. Homebrew preserves quarantine; an unnotarized App can still
 need the [App-specific first-launch allowance](desktop-installation.md#macos).
 Never disable Gatekeeper globally.

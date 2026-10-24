@@ -26,7 +26,8 @@ output. Never ask the user to paste an API key or token into the conversation.
 2. Establish whether the user wants a **Desktop app** or **Web UI**. For Web UI,
    choose a directly installed **Linux Server** or a **Docker** deployment; both
    provide browser access. Agent-assisted installation can help with either path.
-   macOS desktop requires Apple Silicon and macOS 26+.
+   macOS desktop and the current macOS CLI archive require Apple Silicon and macOS 26+.
+   The independent `pot-cli` Formula also provides headless CLI and Web UI on macOS.
    Native Linux desktop is **Experimental**, with separate GTK/WebKit and display
    requirements. Linux server/Web UI works from source on glibc amd64/arm64;
    Docker uses a Linux Engine. Windows is currently unsupported. See
@@ -63,9 +64,10 @@ constructing a download URL. The
   brew install --cask jjyr/pot/pot
   ```
 
-  Upgrade with `brew upgrade --cask jjyr/pot/pot`. The cask is disabled until the
-  first macOS release and its cask update PR are merged; see
-  [cask maintenance](releases.md#homebrew-generation). The cask installs the
+  The App uses the same signed in-app updater for cask and direct installations.
+  The cask declares `auto_updates true`, so normal `brew upgrade` skips it;
+  `brew upgrade --cask --greedy jjyr/pot/pot` explicitly opts into cask replacement.
+  See [Homebrew maintenance](releases.md#homebrew-generation). The cask installs the
   release's `Pot-VERSION-arm64.zip`, which remains published with its checksums
   even while the App download entry is hidden. Read `MACOS-RELEASE.txt`:
   `unsigned` means ad-hoc integrity signing without Developer ID or Apple
@@ -74,6 +76,12 @@ constructing a download URL. The
   checksum-verified downloads; do not disable Gatekeeper globally.
   Homebrew preserves quarantine and may require that same App-specific first-launch
   allowance. Use the same-repository tap commands above after verifying availability.
+- macOS CLI: after the same tap command, run `brew install jjyr/pot/pot-cli`.
+  It reuses the published `pot-VERSION-darwin-arm64.tar.gz` and exposes `pot-cli`.
+  Stop CLI hosts before `brew upgrade jjyr/pot/pot-cli`; the Formula does not
+  self-update inside Cellar. It can coexist with the App; use a separate root
+  such as `pot-cli serve -root "$HOME/.pot-cli" -ui 127.0.0.1:17703` for a
+  concurrent host. See [CLI installation](desktop-installation.md#macos-cli).
 - Linux desktop: `pot-desktop_VERSION_linux_amd64.deb` is Experimental. Check
   its checksum, then `sudo apt install ./THE_DOWNLOADED_FILE.deb` and launch
   `pot-desktop`. Use the actual downloaded filename. Do not offer arm64 until a
