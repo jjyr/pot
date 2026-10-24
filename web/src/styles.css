@@ -925,7 +925,7 @@ pot-resource.is-expanded .resource-text{max-height:75vh}
 .record-group .task-row:hover,.schedule-record:hover{background:var(--navigation);}
 .record-group .task-title{font-size:15px;white-space:normal;overflow-wrap:anywhere;}
 .record-group .task-meta{align-items:center;gap:7px 10px;}
-.task-short-id{font-size:12px;color:var(--muted);overflow-wrap:anywhere;}
+.task-short-id{font-size:11px;color:var(--muted);white-space:normal;overflow-wrap:anywhere;}
 .task-phase.phase-waiting_approval{color:var(--attention);}
 .phase-interrupted{color:var(--attention);}
 .task-archived{color:var(--muted);}

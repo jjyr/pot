@@ -1,4 +1,6 @@
-import {taskIdentities,taskColorIndex,taskAddress} from '../state/task-identity.mjs';
+import {taskIdentityMark,taskIdentityShort} from './task-identity.mjs';
+import {reconcile} from './reconcile.mjs';
+import {taskIdentities,taskAddress} from '../state/task-identity.mjs';
 import {linkDisplayName,machinePresentation} from '../state/machine-identity.mjs';
 import {createCompaction} from './compaction.mjs';
 import {taskAgentSource} from './connection-visuals.mjs';
@@ -30,8 +32,8 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   stage.setAttribute('role','status');stageInner.append(stageLabel,locate,retry);stage.append(stageInner);
   const history=n('div','task-history'),column=n('div','task-column'),goal=n('details','task-goal'),goalSummary=n('summary'),goalPreview=n('span','task-goal-preview'),goalBody=n('div','message-body task-goal-body');
   goal.dataset.scrollAnchor='task-goal';goal.dataset.cacheKey='task-goal';goalSummary.append(icon('chevron-right'),n('span','task-goal-label',tr('Task goal','任务目标')),goalPreview);goal.append(goalSummary,goalBody);
-  const identityMark=n('span','task-identity-mark'),shortID=n('code','task-short-id');identityMark.setAttribute('aria-hidden','true');identityMark.append(icon('tasks'));goalSummary.insertBefore(identityMark,goalPreview);goalSummary.insertBefore(shortID,goalPreview);
-  function updateIdentity(){const info=record?.info||initial.info||task;taskIdentities.register([info]);shortID.textContent=taskIdentities.short(info)||t('tasks.identityUnknown');shortID.title=taskAddress(info)?JSON.stringify(taskAddress(info)):t('tasks.identityUnknown');const color=taskColorIndex(info);if(color>=0)identityMark.dataset.taskColor=String(color);else delete identityMark.dataset.taskColor;}
+  const identityMark=taskIdentityMark(initial.info||task),shortID=taskIdentityShort(initial.info||task,t('tasks.identityUnknown'));shortID.classList.add('task-short-id');goalSummary.insertBefore(identityMark,goalPreview);goalSummary.insertBefore(shortID,goalPreview);
+  function updateIdentity(){const info=record?.info||initial.info||task;taskIdentities.register([info]);shortID.textContent=taskIdentities.short(info)||t('tasks.identityUnknown');shortID.title=taskAddress(info)?JSON.stringify(taskAddress(info)):t('tasks.identityUnknown');reconcile(identityMark,taskIdentityMark(info));}
   goalPreview.textContent=(initial.request?.text||'').replace(/\s+/g,' ');goalBody.append(renderMarkdown(initial.request?.text||'',{downloadFile,acquireFileImage}));
   const transcript=n('div','task-transcript'),files=n('div','task-files');files.dataset.scrollAnchor='task-files';transcript.setAttribute('role','log');transcript.setAttribute('aria-label',tr('Task conversation','任务对话'));
   const downloadNotice=n('div','task-download-error');downloadNotice.hidden=true;downloadNotice.setAttribute('role','alert');

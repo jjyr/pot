@@ -1,5 +1,6 @@
+import {taskIdentityMark,taskIdentityShort} from './task-identity.mjs';
 import {recordOwner,groupRecords,groupHeading,ownerChoices,createRecordPagination} from './record-groups.mjs';
-import {taskIdentities,taskColorIndex,taskAddress} from '../state/task-identity.mjs';
+import {taskIdentities,taskAddress} from '../state/task-identity.mjs';
 import {machinePresentation,machineDisplayName} from '../state/machine-identity.mjs';
 import {connectionBrand} from './connection-visuals.mjs';
 import {createExtensions} from './extensions.mjs';
@@ -470,10 +471,6 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     form.lifecycle.dispose=()=>{typeVersion++;typeController?.abort();priorDispose?.();};
   }
   const taskListKey=()=>JSON.stringify(['tasks',[filter.taskTab,filter.taskScope,filter.taskQuery,filter.taskPhase,filter.listOwner,filter.scheduleQuery,filter.taskOffset,filter.scheduleOffset]]);
-  function taskMark(task) {
-    const mark=n('span','task-identity-mark');mark.setAttribute('aria-hidden','true');
-    const color=taskColorIndex(task);if(color>=0)mark.dataset.taskColor=String(color);mark.append(icon('tasks'));return mark;
-  }
   function paginationPair(root,label,move) {
     const top=createRecordPagination({locale,label,move:direction=>move(direction,top)}),bottom=createRecordPagination({locale,label,move:direction=>move(direction,bottom)});
     top.root.dataset.viewKey='pagination-top';bottom.root.dataset.viewKey='pagination-bottom';
@@ -555,12 +552,12 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
         const taskKey=JSON.stringify([task._space_id,task._assistant_id,task.id]);retainedTasks.add(taskKey);let entry=view.nodes.get(taskKey);
         if(!entry){
           const row=n('button','task-row');row.type='button';row.dataset.viewKey=taskKey;
-          const line=n('span','task-title-line'),title=n('span','task-title'),elapsed=n('span','task-list-elapsed'),chevron=n('span','hint task-chevron','›'),detail=n('span','task-meta'),phase=n('span'),mark=taskMark(task),short=n('code','task-short-id'),meta=n('span','hint'),archived=n('span','task-archived');
-          elapsed.setAttribute('role','timer');elapsed.setAttribute('aria-live','off');line.append(title);detail.append(phase,mark,short,archived,meta);row.append(line,elapsed,chevron,detail);entry={row,title,phase,mark,short,meta,elapsed,archived};view.nodes.set(taskKey,entry);
+          const line=n('span','task-title-line'),title=n('span','task-title'),elapsed=n('span','task-list-elapsed'),chevron=n('span','hint task-chevron','›'),detail=n('span','task-meta'),phase=n('span'),mark=taskIdentityMark(task),short=taskIdentityShort(task),meta=n('span','hint'),archived=n('span','task-archived');
+          short.classList.add('task-short-id');elapsed.setAttribute('role','timer');elapsed.setAttribute('aria-live','off');line.append(title);detail.append(phase,mark,short,archived,meta);row.append(line,elapsed,chevron,detail);entry={row,title,phase,mark,short,meta,elapsed,archived};view.nodes.set(taskKey,entry);
         }
         entry.row.setAttribute('aria-label',task.title);entry.row.disabled=task._stale;entry.row.title=task.title;entry.row.dataset.phase=task.phase;entry.row.onclick=()=>taskDetail(task,{returnTo:{route:'tasks'}});
         text(entry.title,task.title);entry.phase.className=`task-phase phase-${task.phase}`;text(entry.phase,taskPhaseLabel(task.phase)+(task.paused?' · '+t('tasks.schedulePaused'):''));
-        reconcile(entry.mark,taskMark(task));text(entry.short,taskIdentities.short(task)||t('tasks.identityUnknown'));entry.short.title=taskAddress(task)?JSON.stringify(taskAddress(task)):t('tasks.identityUnknown');text(entry.archived,task.archived?t('tasks.scope.archived'):'');
+        reconcile(entry.mark,taskIdentityMark(task));text(entry.short,taskIdentities.short(task)||t('tasks.identityUnknown'));entry.short.title=taskAddress(task)?JSON.stringify(taskAddress(task)):t('tasks.identityUnknown');text(entry.archived,task.archived?t('tasks.scope.archived'):'');
         const time=['queued','running','waiting','waiting_approval'].includes(task.phase)?taskElapsed(task.started_at_ms,Date.now(),locale()):'';entry.elapsed.hidden=!time;text(entry.elapsed,time);entry.elapsed.id=`task-elapsed-${encodeURIComponent(taskKey)}`;
         if(time){entry.row.setAttribute('aria-describedby',entry.elapsed.id);entry.elapsed.dataset.startedAt=task.started_at_ms;}else{entry.row.removeAttribute('aria-describedby');delete entry.elapsed.dataset.startedAt;}entry.elapsed.title=t('tasks.elapsedHelp');
         text(entry.meta,[task.machine_id?machineInfo.label(task.machine_id,{space:task._space_id},locale()):'',task.pending?t('tasks.pendingInstructions').replace('{count}',task.pending):'',task._stale?t('loading.stale'):''].filter(Boolean).join(' · '));
@@ -1021,7 +1018,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     captureView();viewReady=false;pageView?.queue.close();pageView=null;
 
     closeTaskView();taskOrigin=null;closeTaskList();scheduleView=null;detailParent=false;if(!keepUsageOwner)usageOwner=null;
-    route=next;heading(next==='extensions'?translate(locale(),'extensions.title'):tr({tasks:filter.taskTab==='schedules'?'Schedules':'Tasks',machines:translate(locale(),'topology.title'),usage:'Usage',settings:'Settings'}[next]||next,{tasks:filter.taskTab==='schedules'?'定时计划':'任务',machines:translate(locale(),'topology.title'),usage:'用量',settings:'设置'}[next]||next));
+    route=next;heading(next==='tasks'?translate(locale(),filter.taskTab==='schedules'?'tasks.schedulesTab':'tasks.tab'):next==='extensions'?translate(locale(),'extensions.title'):tr({tasks:filter.taskTab==='schedules'?'Schedules':'Tasks',machines:translate(locale(),'topology.title'),usage:'Usage',settings:'Settings'}[next]||next,{tasks:filter.taskTab==='schedules'?'定时计划':'任务',machines:translate(locale(),'topology.title'),usage:'用量',settings:'设置'}[next]||next));
     const version=++pageVersion,token=gate.next(),root=body();currentViewKey=viewKey;
     root.append(n('p','hint',tr('Loading…','正在加载…')));
     try {root.replaceChildren();await ({settings,tasks,machines,usage,extensions,'add-assistant':addAssistantPage}[next]||settings)(root,token);if(gate.current(token))restoreView(viewKey,token);}
