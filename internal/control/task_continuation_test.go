@@ -131,11 +131,11 @@ func TestTaskArchiveBatchAndContinuedWorkspace(t *testing.T) {
 			if !strings.Contains(string(raw), "original nonce KEEP_42") || !strings.Contains(string(raw), "file delivered") {
 				t.Error("continuation lost original model context")
 			}
-			lifecycleToolReply(w, "exec_command", map[string]any{"cmd": "printf -- '-followup' >> result.txt", "login": false})
+			lifecycleToolReply(w, "exec_command", map[string]any{"cmd": "git branch -m renamed-again && printf -- '-followup' >> result.txt", "login": false})
 			return
 		}
 		if strings.Contains(last.Content, "Task A") {
-			lifecycleToolReply(w, "exec_command", map[string]any{"cmd": "printf initial > result.txt", "login": false})
+			lifecycleToolReply(w, "exec_command", map[string]any{"cmd": "git branch -m renamed-by-worker && printf initial > result.txt", "login": false})
 			return
 		}
 		batchReply(w, "READY_B")
@@ -210,6 +210,9 @@ func TestTaskArchiveBatchAndContinuedWorkspace(t *testing.T) {
 	after, err := s.RunJournal.TaskWorkspace(ctx, a.Info.ID)
 	if err != nil || after.Path != before.Path || after.Branch != before.Branch || after.Commit != before.Commit {
 		t.Fatal("workspace changed", before, after, err)
+	}
+	if fixtureGit(t, after.Path, "symbolic-ref", "--short", "HEAD") != "renamed-again" {
+		t.Fatal("continued Worker did not rename its branch")
 	}
 	contents, err := os.ReadFile(filepath.Join(after.Path, "result.txt"))
 	if err != nil || string(contents) != "initial-followup" {

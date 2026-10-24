@@ -207,9 +207,8 @@ func (s *Service) prepareTaskWorkspace(ctx context.Context, l tasks.Launch, poli
 			return nil, errors.New("original workspace directory identity changed")
 		}
 		if saved.Kind == "worktree" {
-			branch, e := gitWorkspace(ctx, saved.Path, "symbolic-ref", "--short", "HEAD")
-			if e != nil || branch != saved.Branch {
-				return nil, errors.New("original managed worktree identity changed")
+			if e := verifyManagedWorktree(ctx, *saved); e != nil {
+				return nil, fmt.Errorf("original managed worktree identity changed: %w", e)
 			}
 		}
 		return saved, nil
@@ -448,6 +447,39 @@ func (s *Service) prepareTaskWorkspace(ctx context.Context, l tasks.Launch, poli
 	}
 	return &w, nil
 }
+
+// GitDirs records the original administrative and common directories, in that
+// order. Revalidate their association without granting access to new metadata.
+// Branch and Commit describe creation; the current branch/HEAD may have changed.
+func verifyManagedWorktree(ctx context.Context, w tasks.Workspace) error {
+	if len(w.GitDirs) != 2 || w.GitDirs[0] == w.GitDirs[1] {
+		return errors.New("original Git metadata binding unavailable")
+	}
+	for i, arg := range []string{"--git-dir", "--git-common-dir"} {
+		dir, err := gitWorkspace(ctx, w.Path, "rev-parse", "--path-format=absolute", arg)
+		if err != nil {
+			return err
+		}
+		canonical, err := filepath.EvalSymlinks(dir)
+		if err != nil || canonical != w.GitDirs[i] {
+			return errors.New("Git metadata directory association changed")
+		}
+	}
+	top, err := gitWorkspace(ctx, w.Path, "rev-parse", "--show-toplevel")
+	if err != nil || top != w.Path {
+		return errors.New("Git working directory association changed")
+	}
+	backlink, err := os.ReadFile(filepath.Join(w.GitDirs[0], "gitdir"))
+	if err != nil {
+		return errors.New("Git worktree back-reference unavailable")
+	}
+	path, err := filepath.EvalSymlinks(strings.TrimSpace(string(backlink)))
+	if err != nil || path != filepath.Join(w.Path, ".git") {
+		return errors.New("Git worktree back-reference changed")
+	}
+	return nil
+}
+
 func (s *Service) taskWorkspacePath(ctx context.Context, task string) (string, error) {
 	w, err := s.RunJournal.TaskWorkspace(ctx, task)
 	if err != nil {

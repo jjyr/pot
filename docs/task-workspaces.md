@@ -145,6 +145,21 @@ directory is missing, report its loss rather than silently recreating an empty
 workspace and resuming as if files survived. OS temporary storage is not a durable
 artifact store.
 
+Continuation verifies the canonical path and the recorded directory identity. A
+managed worktree must still resolve to its original Git administrative and common
+directories, with its administrative back-reference pointing to that worktree.
+Missing or replaced directories, redirected paths and changed Git associations
+fail preparation; Runtime does not adopt or recreate a replacement workspace or
+grant access to new Git metadata.
+
+The recorded branch and commit describe the initial feature branch and starting
+commit. They are not a mirror of the current branch or HEAD and are not updated
+on continuation. Renaming a branch in place, checking out another branch,
+advancing or rebasing HEAD, and detaching HEAD do not by themselves invalidate
+the workspace. The Agent inspects current Git state when developing, committing
+or preparing a pull request. Initial branch validation, separate branch creation
+and starting-commit selection still apply when preparing a new managed worktree.
+
 Task state, checkpoints and operation receipts remain in their owning component
 stores. Downloads must resolve through recorded original file locations or
 explicitly retained delivered files, rather than assuming `WORKSPACE/tasks/ID`.
