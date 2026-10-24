@@ -285,6 +285,12 @@ connection and removes its active directory projection; a minimal authenticated
 tombstone fences a stale peer. Messages, tasks, results and receipts remain.
 Neither action silently cancels receiver-owned execution.
 
+Each revocation propagation attempt retires its transport session, including
+failed or canceled attempts. The remote may close the connection before its
+reply arrives. A later pending attempt opens a fresh authenticated session and
+can observe the remote tombstone. Failed attempts retain the durable pending
+revocation; closing the session does not retry business requests.
+
 Persisted schemas and upgrade procedures are documented in
 [database migrations](database-migrations.md). Upgrade connected Pot and Codex
 adapters together. Admission requiring a new invitation stays fenced until the

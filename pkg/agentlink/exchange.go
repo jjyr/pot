@@ -298,6 +298,9 @@ func (s *Service) propagateRevoke(ctx context.Context, connection Connection) er
 		}
 		return err
 	}
+	// The peer may close this session while persisting its revocation, before
+	// its response or EOF reaches us. Do not reuse it for a later pending attempt.
+	defer session.Close()
 	var response struct {
 		Status string `json:"status"`
 	}
