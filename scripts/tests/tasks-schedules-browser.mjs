@@ -16,6 +16,20 @@ async function openTasks(page){
 }
 async function ready(page){await page.waitForFunction(()=>document.querySelector('.task-list')?.getAttribute('aria-busy')==='false');}
 async function photosReady(page){await page.evaluate(()=>document.fonts.ready);await page.waitForFunction(()=>[...document.querySelectorAll('.record-group-heading img')].every(i=>i.complete&&i.naturalWidth===128));}
+async function assertRecordLayout(page,selector){
+ const rows=page.locator(selector);
+ assert.ok(await rows.evaluateAll(nodes=>nodes.every(n=>n.getBoundingClientRect().height>=44&&n.scrollWidth<=n.clientWidth)),'Records retain 44px targets and fit their content');
+ assert.ok(await page.locator('.record-group').evaluateAll(groups=>groups.every(g=>{const head=g.querySelector('.record-group-heading'),row=g.querySelector('button');return g.tagName==='SECTION'&&g.getAttribute('aria-labelledby')===head.querySelector('h2').id&&Math.abs(head.getBoundingClientRect().left-row.getBoundingClientRect().left)<1;})),'Semantic sections and rows share the same alignment');
+ // Tab from the real identity disclosure into its first record, then through
+ // the list to force scrolling. Focus must remain visible at both scroll edges.
+ await page.locator('.record-owner-identity summary').first().focus();await page.keyboard.press('Tab');
+ assert.equal(await rows.first().evaluate(n=>n===document.activeElement),true);
+ for(const index of [0,await rows.count()-1]){
+  if(index) {await rows.nth(index-1).focus();await page.keyboard.press('Tab');}
+  assert.ok(await rows.nth(index).evaluate(n=>{const r=n.getBoundingClientRect(),list=n.closest('.record-group-list').getBoundingClientRect(),s=getComputedStyle(n);return n===document.activeElement&&n.matches(':focus-visible')&&parseFloat(s.outlineWidth)>=2&&r.top>=list.top-1&&r.bottom<=list.bottom+1&&r.left>=list.left&&r.right<=list.right;}),'Keyboard focus remains visible inside the scroll container');
+ }
+ await page.locator('.record-owner-identity summary').first().focus();await page.keyboard.press('Enter');assert.ok(await page.locator('.record-owner-identity').first().evaluate(n=>n.open),'Full identity remains keyboard accessible');await page.keyboard.press('Enter');
+}
 async function assertPhotos(page){
  await photosReady(page);
  const groups=await page.locator('.record-group').evaluateAll(nodes=>nodes.map(g=>({key:g.dataset.viewKey,src:g.querySelector('.record-group-heading img')?.getAttribute('src'),fallback:!!g.querySelector('.record-group-heading .avatar>svg')})));
@@ -132,7 +146,7 @@ try{
   const broken=await browser.newPage({viewport:{width:1280,height:1000},reducedMotion:'reduce'});broken.on('pageerror',e=>errors.push(e.message));await broken.goto(fixtureURL(version,'light'));await broken.waitForFunction(()=>window.tasksSchedulesFixture?.ready);
   await broken.evaluate(()=>{window.tasksSchedulesFixture.profiles.two[1].avatar='data:image/png;base64,broken';window.tasksSchedulesFixture.change(['agent-links']);});
   await broken.waitForFunction(()=>window.tasksSchedulesFixture.client.assistants.some(a=>a.origin?.assistant_id==='beta'&&a.avatar==='data:image/png;base64,broken'));await openTasks(broken);
-  if(version==='after')await broken.locator('.record-group').first().locator('.avatar>svg').waitFor();else await broken.waitForFunction(()=>{const img=document.querySelector('.record-group-heading img');return img?.complete&&img.naturalWidth===0;});
+  await broken.locator('.record-group').first().locator('.avatar>svg').waitFor();
   await broken.screenshot({path:resolve(directory,`tasks-avatar-failure-desktop-light-${version}.png`)});await broken.close();
  }
  // Narrow layouts, both catalog languages, light/dark/system and keyboard touch geometry.
@@ -141,7 +155,8 @@ try{
   assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`${width}/${theme}/${locale} horizontal overflow`);
   const geometry=await p.locator('.record-pagination button').evaluateAll(nodes=>nodes.every(n=>n.getBoundingClientRect().height>=44));assert.ok(geometry);await assertPhotos(p);assert.ok(await p.locator('.task-short-id').evaluateAll(nodes=>nodes.every(n=>/^#[a-f0-9]{4}$/.test(n.textContent))));
   const color=await p.locator('.task-identity-mark[data-task-color]').first().evaluate(el=>({index:Number(el.dataset.taskColor),bg:getComputedStyle(el).getPropertyValue('--task-bg').trim()}));assert.equal(color.bg,palette[color.index][theme==='light'?'light':'dark'].bg);
-  await p.getByRole('button',{name:locale==='en'?'Schedules':'定时任务',exact:true}).click();await p.locator('.schedule-record').first().waitFor();await assertPhotos(p);assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);assert.ok(await p.locator('.record-pagination button').evaluateAll(nodes=>nodes.every(n=>n.getBoundingClientRect().height>=44)));await p.close();
+  await assertRecordLayout(p,'.task-row');
+  await p.getByRole('button',{name:locale==='en'?'Schedules':'定时任务',exact:true}).click();await p.locator('.schedule-record').first().waitFor();await assertPhotos(p);assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);assert.ok(await p.locator('.record-pagination button').evaluateAll(nodes=>nodes.every(n=>n.getBoundingClientRect().height>=44)));await assertRecordLayout(p,'.schedule-record');await p.close();
  }
  assert.deepEqual(errors,[]);console.log('PASS: actual Tasks/Schedules pages, full-query adapter, global pagination, complete/phase/owner filters, retained DOM/disclosures, loading/empty/focus, unknown ownership, fixed four-character IDs with collisions/cross-node detail routing, loaded profile avatars/missing/decode failure/avatar-only refresh on both pages and 18 layout/locale/theme combinations.');
 }finally{await browser.close();}

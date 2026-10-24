@@ -14,6 +14,13 @@ Assistant replies use transparent natural prose with a small avatar and assistan
 User messages align right in a single warm neutral bubble without a name row. Reserve
 cards for related controls or details, rather than wrapping every row.
 
+Tasks and Schedules use transparent assistant sections with 24 px between groups.
+Headings and records share a 4 px horizontal inset inside the page padding;
+headings use 8 px vertical padding and records use 12 px. Records size to their
+content with a 44 px minimum target. Only adjacent records have a divider; the
+heading and final record do not add enclosing lines. Keep keyboard focus visible
+inside the scrollable list, and preserve full identity disclosures in headings.
+
 ### Color and surfaces
 
 [`styles.css`](../web/src/styles.css) installs the shared semantic tokens.
