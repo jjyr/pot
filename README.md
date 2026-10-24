@@ -62,10 +62,6 @@ brew tap jjyr/pot https://github.com/jjyr/pot.git
 brew install --cask jjyr/pot/pot
 ```
 
-The App uses its signed in-app updater for both cask and direct installations.
-The cask declares `auto_updates true`, so normal `brew upgrade` skips it; an
-explicit `brew upgrade --cask --greedy jjyr/pot/pot` opts into cask replacement.
-
 Install the independent headless CLI alongside the App with:
 
 ```sh
