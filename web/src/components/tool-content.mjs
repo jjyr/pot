@@ -115,7 +115,7 @@ export function createToolContent({locale=()=> 'en',downloadFile,acquireFileImag
       if(item.taskSignature!==signature){item.taskSignature=signature;const head=n('div','tool-task-heading'),name=n('strong','',title);head.append(name);
         if(phase){const key='schedule.state.'+phase,translated=translate(locale(),key);head.append(n('span','tool-task-phase',translated===key?phase:translated));}
         if(onOpenTask&&task.id){const open=n('button','tool-action',t('viewTask'));open.type='button';open.onclick=()=>onOpenTask(resolveTask(task.id)||task);head.append(open);}
-        const brand=task.agent_link?.kind||task.executor_icon,executor=task.agent_link?.name||(['pot','codex'].includes(brand)?translate(locale(),'agentLinks.source'+(brand==='pot'?'Pot':'Codex')):'');
+        const brand=task.agent_link?.kind||task.executor_icon,executor=task.agent_link?.name||(['pot','codex','antigravity'].includes(brand)?translate(locale(),'agentLinks.source'+(brand==='antigravity'?'Antigravity':brand==='pot'?'Pot':'Codex')):'');
         const details={...(executor?{target:executor}:{}),...(task.model?{model:task.model}:{}),...(typeof task.archived==='boolean'?{archived:task.archived}:{})};
         // Routing IDs, timestamps and the full Task record remain in raw details.
         item.content.replaceChildren(head,renderValue(details));

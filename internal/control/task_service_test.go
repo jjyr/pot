@@ -48,8 +48,7 @@ func TestLocalTaskUsesSharedCapacityOwnerModelAndSummary(t *testing.T) {
 		w.Write([]byte("data: " + string(data) + "\n\ndata: [DONE]\n\n"))
 	}))
 	defer server.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	ctx := t.Context()
 	root := t.TempDir()
 	manager, _ := execution.New("local", "boot", execution.Limits{MaxActive: 1, MaxQueued: 8})
 	keys, _ := secrets.NewMemoryKey(make([]byte, 32))
@@ -83,6 +82,10 @@ func TestLocalTaskUsesSharedCapacityOwnerModelAndSummary(t *testing.T) {
 	}
 	sub := s.Tasks.Subscribe()
 	defer sub.Close()
+	// Bound execution waiting independently of setup and later attribution reads.
+	// Summary completion has its own wait and must not expire usage queries.
+	taskCtx, cancelTask := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelTask()
 	for {
 		r, err := s.Tasks.Get(ctx, "main", accepted.Info.ID)
 		if err != nil {
@@ -94,7 +97,7 @@ func TestLocalTaskUsesSharedCapacityOwnerModelAndSummary(t *testing.T) {
 			}
 			break
 		}
-		if _, err = sub.Next(ctx); err != nil {
+		if _, err = sub.Next(taskCtx); err != nil {
 			t.Fatalf("Task did not finish: %+v: %v", r, err)
 		}
 	}

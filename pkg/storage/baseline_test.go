@@ -313,15 +313,15 @@ func TestInitialSchemaConstraintsAndMailboxViews(t *testing.T) {
 	defer db.Close()
 	for _, bad := range []string{
 		`INSERT INTO assistant_mail_identity VALUES(2,'wrong-singleton')`,
-		`INSERT INTO codex_link_assistants(id,name,workspace,mode) VALUES('bad','Bad','/fixture','unsafe')`,
-		`INSERT INTO codex_task_inputs VALUES('missing-job','request','text','run')`,
+		`INSERT INTO agent_adapter_assistants(id,name,workspace,mode) VALUES('bad','Bad','/fixture','unsafe')`,
+		`INSERT INTO agent_adapter_inputs VALUES('missing-job','request','text','run')`,
 	} {
 		if _, err := db.Exec(bad); err == nil {
 			t.Fatalf("constraint missing: %s", bad)
 		}
 	}
-	execMigrationSQL(t, db, `INSERT INTO codex_link_assistants(id,name,workspace,mode,is_default) VALUES('first','First','/fixture','read-only',1)`)
-	if _, err := db.Exec(`INSERT INTO codex_link_assistants(id,name,workspace,mode,is_default) VALUES('second','Second','/fixture','read-only',1)`); err == nil {
+	execMigrationSQL(t, db, `INSERT INTO agent_adapter_assistants(id,name,workspace,mode,is_default) VALUES('first','First','/fixture','read-only',1)`)
+	if _, err := db.Exec(`INSERT INTO agent_adapter_assistants(id,name,workspace,mode,is_default) VALUES('second','Second','/fixture','read-only',1)`); err == nil {
 		t.Fatal("partial unique default index missing")
 	}
 	execMigrationSQL(t, db, `INSERT INTO agent_messages(id,envelope,direction,state,conversation,recipient) VALUES('input','{"kind":"task_input","to":{"kind":"task"},"owner":"owner","request_id":"request","text":"retained"}','in','queued','run','task')`)

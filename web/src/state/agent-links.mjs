@@ -24,6 +24,7 @@ export function projectLinkedAssistants(page,space) {
 export function agentFailureKey(error) {
   const code=String(error||'');
   for(const [value,key]of Object.entries({
+    assistant_busy:'agentLinks.assistantBusy',assistant_changed:'agentLinks.assistantChanged',antigravity_model_unavailable:'agentLinks.modelUnavailable',antigravity_turn_failed:'agentLinks.antigravitySessionFailed',antigravity_invalid_execution_configuration:'agentLinks.antigravitySessionFailed',
     codex_approval_denied:'agentLinks.reviewDenied',
     codex_approval_requires_local_review:'agentLinks.codexApproval',
     codex_host_restarted_outcome_unknown:'agentLinks.codexOutcomeUnknown',
@@ -36,5 +37,5 @@ export function agentFailureKey(error) {
     original_execution_unavailable:'agentLinks.originalExecutionUnavailable',
     local_node_required:'agentLinks.localNodeRequired',
   }))if(code.includes(value))return key;
-  return null;
+  return code.includes('antigravity_')?'agentLinks.antigravitySessionFailed':null;
 }

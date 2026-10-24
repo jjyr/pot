@@ -760,6 +760,22 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       {name:'limit',label:tr('Token limit','Token 上限'),kind:'number',parse:Number,required:true},{name:'timezone',label:tr('Time zone','时区'),required:true},{name:'auto_resume',label:tr('Automatically resume','自动恢复'),kind:'checkbox'},
     ],(values,context)=>request('/api/v1/usage/policy',{...context,method:'POST',body:values}),{capturedScope:owner});
   }
+  async function linkedAssistantEditor(connectionID,space,assistantID='') {
+    const captured={space,owner:''},t=key=>translate(locale(),'agentLinks.'+key);
+    const initiatingEditor=editor,initiatingRoot=host.firstElementChild;let catalog;
+    try {catalog=await request('/api/v1/agent-links/assistants',{...captured,method:'POST',body:{connection_id:connectionID,action:'catalog'}});}
+    catch(error){notify(t('managementFailed'));return;}
+    if(disposed||editor!==initiatingEditor||host.firstElementChild!==initiatingRoot)return;
+    const existing=catalog.assistants?.find(item=>item.id===assistantID);if(assistantID&&!existing){notify(t('assistantChanged'));return;}const id=existing?.id||uid(),initial={name:existing?.name||'Antigravity',model:existing?.model||catalog.models?.[0]?.id||'',workspace:catalog.workspaces?.[0]?.id||''};
+    const definitions=[{name:'name',key:'assistantName',required:true},{name:'model',key:'assistantModel',required:true,choices:(catalog.models||[]).map(item=>[item.id,item.name])}];
+    if(!existing)definitions.push({name:'workspace',key:'assistantWorkspace',required:true,choices:(catalog.workspaces||[]).map(item=>[item.id,item.name])});
+    const form=renderEditor(t(existing?'assistantUpdate':'assistantCreate'),initial,definitions.map(({key,...item})=>({...item,label:t(key)})),async(values,context)=>{
+      const value=await request('/api/v1/agent-links/assistants',{...captured,method:'POST',body:{connection_id:connectionID,action:existing?'update':'create',request_id:context.request_id,id,name:values.name,model:values.model,effort:'',workspace:existing?'':values.workspace,revision:existing?.revision||0}}).catch(reason=>{throw Object.assign(Error(t('managementFailed')),{uiKey:'agentLinks.managementFailed',diagnostic:reason.message});});
+      return {managed_assistant:value.assistant};
+    },{capturedScope:captured,submitLabel:t(existing?'assistantUpdate':'assistantCreate')});
+    form.lifecycle.afterSave=async()=>{await changed();await openChat({space,owner:'agent-link:'+connectionID+':'+id});};
+    form.lifecycle.locale=()=>{form.lifecycle.setTitle?.(t(existing?'assistantUpdate':'assistantCreate'));for(const definition of definitions){const input=form.controls.get(definition.name),label=input?.closest('.form-row')?.querySelector('.form-label');if(label)label.textContent=t(definition.key);if(input)input.setAttribute('aria-label',t(definition.key));}const submit=form.root.querySelector('.editor-actions .primary'),cancel=form.root.querySelector('.editor-actions button:not(.primary)');if(submit)submit.textContent=t(existing?'assistantUpdate':'assistantCreate');if(cancel)cancel.textContent=translate(locale(),'integrations.cancel');};
+  }
   async function addAssistantPage(root,token) {
     assistantStartRefresh=null;
     const t=key=>translate(locale(),'assistantStart.'+key),captured={space:client.spaces.find(item=>item.kind==='local')?.id||scope().space,owner:''};
@@ -767,7 +783,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     heading(t(first?'firstTitle':'title'));root.classList.add('assistant-start');
     const intro=n('div','assistant-start-intro');intro.append(n('h1','',t(first?'firstTitle':'title')),n('p','hint',t('description')));root.append(intro);
     const options=n('div','assistant-start-options');root.append(options);
-    for(const kind of ['api','pot','codex']) {
+    for(const kind of ['api','pot','codex','antigravity']) {
       const option=n('section','page-card assistant-start-option');
       const header=n('div','assistant-start-option-header'),mark=n('span','assistant-start-icon assistant-start-icon-'+kind),content=n('div','assistant-start-option-content');
       mark.setAttribute('aria-hidden','true');mark.append(kind==='api'?icon('plug'):connectionBrand(kind));
@@ -788,11 +804,12 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
         const link=(snapshot.items||[]).find(item=>item.id===connectedID);
         if(!link)throw Error(translate(locale(),'agentLinks.failed'));
         const assistants=(link.assistants||link.directory?.targets?.filter(item=>item.address?.kind==='assistant')||[]).filter(item=>item.capabilities?.operations?.includes('chat.read')),defaultID=link.directory?.default_target?.agent_id;
-        if(!assistants.length&&link.directory?.targets?.some(item=>item.address?.kind==='node'&&item.capabilities?.operations?.includes('task.submit'))){await leave();route='add-assistant';const list=body();list.append(n('h1','',t('executorTitle')),n('p','hint',t('executorDescription')),action(t('back'),()=>show('add-assistant',{force:true})));return;}
+        if(kind==='antigravity'&&link.directory?.targets?.some(item=>item.capabilities?.operations?.includes('assistant.management'))){await linkedAssistantEditor(connectedID,captured.space);return;}
+        if(!assistants.length&&link.directory?.targets?.some(item=>item.address?.kind==='node'&&item.capabilities?.operations?.includes('task.submit'))){await leave();route='add-assistant';routeChanged('add-assistant');const list=body();list.append(n('h1','',t('executorTitle')),n('p','hint',t('executorDescription')),action(t('back'),()=>show('add-assistant',{force:true})));return;}
         const chosen=assistants.length===1?assistants[0]:assistants.find(item=>(item.address?.agent_id||item.id)===defaultID);
         const open=assistant=>openChat({space:captured.space,owner:'agent-link:'+connectedID+':'+(assistant.address?.agent_id||assistant.id)});
         if(chosen){await leave();await open(chosen);return;}
-        await leave();route='add-assistant';assistantStartRefresh=openDirectory;const list=body();
+        await leave();route='add-assistant';routeChanged('add-assistant');assistantStartRefresh=openDirectory;const list=body();
         heading(t(assistants.length?'chooseTitle':'emptyTitle'));
         list.append(n('h1','',t(assistants.length?'chooseTitle':'emptyTitle')),n('p','hint',t(assistants.length?'chooseDescription':'emptyDescription')));
         for(const assistant of assistants)list.append(action(assistant.name||assistant.address.agent_id,()=>open(assistant)));
@@ -867,6 +884,10 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
           if(remoteID===(node.link?.default_assistant_id||node.link?.directory?.default_target?.agent_id))open.append(n('span','hint',t('agentLinks.defaultAssistant')));
           if(node.link&&!assistant.capabilities?.operations?.includes('chat.read'))open.disabled=true;
           open.setAttribute('aria-label',t('agentLinks.openChat')+' · '+(assistant.name||remoteID));directory.append(open);
+        }
+        if(node.link?.directory?.targets?.some(item=>item.capabilities?.operations?.includes('assistant.management'))){
+          directory.append(action(t('agentLinks.manageAssistants'),()=>linkedAssistantEditor(node.link.id,node.space)));
+          for(const assistant of assistants)directory.append(action(t('agentLinks.editExecution')+' · '+assistant.name,()=>linkedAssistantEditor(node.link.id,node.space,assistant.address?.agent_id||assistant.id)));
         }
         view.inspector.append(directory);
         if(node.link){

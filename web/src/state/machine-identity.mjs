@@ -6,7 +6,7 @@ export function linkEndpoint(link){
   try{const url=new URL(link?.peer?.address);return url.protocol==='tcp:'&&!url.username&&!url.password&&!url.search&&!url.hash?url.host:'';}catch{return '';}
 }
 export const linkHostLabel=link=>[link?.observation?.value?.hostname,linkEndpoint(link)].filter((value,index,all)=>value&&all.indexOf(value)===index).join(' · ');
-export const linkDisplayName=link=>link?.peer?.name&&link.peer.name!==link.peer.node_id?link.peer.name:link?.peer?.kind==='codex'?'Codex':'Pot';
+export const linkDisplayName=link=>link?.peer?.name&&link.peer.name!==link.peer.node_id?link.peer.name:link?.peer?.kind==='antigravity'?'Antigravity':link?.peer?.kind==='codex'?'Codex':'Pot';
 
 const clients=new WeakMap();
 // Presentation samples are scoped to the owning Control, never used for routing.

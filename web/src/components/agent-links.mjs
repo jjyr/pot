@@ -107,7 +107,7 @@ export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({
     const alive=()=>!closed&&form.root.isConnected;
     function paint(){
       if(!alive())return;
-      heading.textContent=t('agentLinks.addHeading');description.textContent=t(guideKey||'agentLinks.addDescription');hint.textContent=t('agentLinks.addressHint');note.textContent=t('agentLinks.nodeScope');
+      heading.textContent=t('agentLinks.addHeading');description.textContent=t(guideKey||'agentLinks.addDescription');hint.textContent=t('agentLinks.addressHint');note.textContent=t(verified?.peer?.kind==='antigravity'?'agentLinks.managementScope':'agentLinks.nodeScope');
       row.querySelector('.form-label').textContent=t('agentLinks.peerAddress');input.setAttribute('aria-label',t('agentLinks.peerAddress'));input.placeholder=t('agentLinks.pasteAddress');
       paste.replaceChildren(icon('copy'),n('span','',t('agentLinks.paste')));paste.disabled=phase==='adding';
       submit.hidden=true;submit.textContent=t(phase==='adding'?'agentLinks.pending':'agentLinks.add');submit.disabled=phase==='adding'||!verified||verifiedAddress!==input.value.trim();cancel.textContent=t('integrations.cancel');
@@ -115,14 +115,14 @@ export function createAgentLinks({root,request,locale,notify=()=>{},scope=()=>({
       error.replaceChildren();error.hidden=!previewError;
       if(previewError){const retry=action(t('retry'),()=>verifyAddress());error.append(n('span','',t(previewError.uiKey||errorKey(previewError))),retry);if(previewError.diagnostic||previewError.message){const details=n('details','detail-disclosure');details.append(n('summary','',t('agentLinks.diagnostics')),n('pre','',previewError.diagnostic||previewError.message));error.append(details);}}
       preview.replaceChildren();preview.hidden=!verified;
-      if(verified){const peer=verified.peer,card=n('div','connection-identity-card'),info=n('div','connection-identity-main'),label=n('span','connection-verified',t('agentLinks.verified'));info.append(n('strong','',peer.name),n('p','hint',t(peer.kind==='codex'?'agentLinks.remoteCodex':'agentLinks.remotePot')));card.append(connectionBrand(peer.kind),info,label);const details=n('details','detail-disclosure'),values=n('dl','connection-identity-details');details.append(n('summary','',t('agentLinks.diagnostics')));for(const [key,value]of [['agentLinks.publicAddress',verified.endpoint],['agentLinks.fingerprint',verified.fingerprint]]){values.append(n('dt','',t(key)),n('dd','',value));}details.append(values);preview.append(card,details);}
+      if(verified){const peer=verified.peer,card=n('div','connection-identity-card'),info=n('div','connection-identity-main'),label=n('span','connection-verified',t('agentLinks.verified'));info.append(n('strong','',peer.name),n('p','hint',t(peer.kind==='antigravity'?'agentLinks.remoteAntigravity':peer.kind==='codex'?'agentLinks.remoteCodex':'agentLinks.remotePot')));card.append(connectionBrand(peer.kind),info,label);const details=n('details','detail-disclosure'),values=n('dl','connection-identity-details');details.append(n('summary','',t('agentLinks.diagnostics')));for(const [key,value]of [['agentLinks.publicAddress',verified.endpoint],['agentLinks.fingerprint',verified.fingerprint]]){values.append(n('dt','',t(key)),n('dd','',value));}details.append(values);preview.append(card,details);}
     }
     async function verifyAddress(){
       clearTimeout(previewTimer);previewRequest?.abort();const version=++previewVersion,value=input.value.trim();verified=null;verifiedAddress='';previewError=null;
       if(!value){phase='empty';paint();return;}
       const controller=previewRequest=new AbortController();form.form.querySelector(':scope > .inline-error')?.replaceChildren();phase='checking';paint();
       try{const result=await request(base,{...ownerScope,signal:controller.signal,method:'POST',body:{action:'preview',address:value}});if(!alive()||version!==previewVersion||controller.signal.aborted)return;
-        if(typeof result?.peer?.node_id!=='string'||!result.peer.node_id.trim()||!result.peer.name||!['pot','codex'].includes(result.peer.kind)||!result.endpoint||!result.fingerprint)throw uiError(null,'agentLinks.failed');
+        if(typeof result?.peer?.node_id!=='string'||!result.peer.node_id.trim()||!result.peer.name||!['pot','codex','antigravity'].includes(result.peer.kind)||!result.endpoint||!result.fingerprint)throw uiError(null,'agentLinks.failed');
         verified=result;verifiedAddress=value;phase='identified';paint();form.form.requestSubmit();
       }catch(reason){if(!alive()||version!==previewVersion||controller.signal.aborted)return;previewError=reason;phase='error';}paint();
     }
