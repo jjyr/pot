@@ -3,43 +3,94 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Exact reviewed fixture source SHA; never publishes
+        description: Exact published product source SHA; read-only verification
+        required: true
+        type: string
+      expected-index:
+        description: Exact qualified published OCI index digest
         required: true
         type: string
 permissions:
   contents: read
 env:
   MISE_AUTO_INSTALL: 'false'
-  POT_TEST_TIMEOUT_SCALE: '4'
 jobs:
-  native-fixtures:
-    runs-on: macos-26
+  public-verification:
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE: ${{ inputs.ref }}
+      EXPECTED_INDEX: ${{ inputs.expected-index }}
+      POT_UPDATE_PUBLIC_KEY: ${{ vars.POT_UPDATE_PUBLIC_KEY }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          ref: ${{ inputs.ref }}
           persist-credentials: false
-      - name: Require the exact reviewed source
-        env:
-          SOURCE: ${{ inputs.ref }}
-        run: test "$(git rev-parse HEAD)" = "$SOURCE"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ inputs.ref }}
+          path: source
+          persist-credentials: false
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
         with:
           version: 2026.10.10
           cache: false
-          install_args: go python node
-      - name: Prepare the pinned real sandbox SDK
+          install_args: go python
+      - name: Require the exact published source and original pinned public key
+        working-directory: source
         run: |
-          mise exec -- python - <<'PYTHON'
-          import sys
+          test "$(git rev-parse HEAD)" = "$SOURCE"
+          python3 - <<'PY'
+          import hashlib, os
           from pathlib import Path
-          sys.path.insert(0, 'scripts')
-          from pot_packaging import prepare_sandbox
-          prepare_sandbox(Path('.local/pot/sandbox-tests').resolve())
-          PYTHON
-      - name: Verify all sandbox outcomes without suppressing live session assertions
-        env:
-          POT_SANDBOX_INTEGRATION: '1'
-          POT_SANDBOX_SDK: ${{ github.workspace }}/.local/pot/sandbox-tests
-        run: mise exec -- go test -v -race -failfast -count=3 ./pkg/executor -run '^TestRealSandbox'
+          key=os.environ['POT_UPDATE_PUBLIC_KEY'].strip()
+          assert hashlib.sha256(key.encode()).hexdigest() == '667300d694bbaf3bbd038604a2b16d98603f44ffe9ce912fc35cebcd5236c260'
+          folder=Path('.pot-artifacts/release-before');folder.mkdir(parents=True)
+          (folder/'public-key.txt').write_text(key+'\n')
+          PY
+      - name: Anonymously download and verify all 15 assets, feed, VCS receipts and real ZIP cask
+        working-directory: source
+        run: mise exec -- python ../scripts/verify-public-refresh.py "$SOURCE" public
+      - name: Read anonymous OCI index and platform metadata
+        working-directory: source
+        run: python3 ../scripts/inspect-public-refresh-image.py .pot-artifacts/image-final
+      - name: Anonymously pull both platform manifests and inspect actual configurations
+        working-directory: source
+        run: |
+          python3 - <<'PY'
+          import json,os,subprocess
+          from pathlib import Path
+          folder=Path(os.environ['RUNNER_TEMP'])/'anonymous-docker';folder.mkdir()
+          index=Path('.pot-artifacts/image-final/image-digest.txt').read_text().strip()
+          assert index==os.environ['EXPECTED_INDEX']
+          platforms=json.loads(Path('.pot-artifacts/image-final/image-platforms.json').read_text())
+          receipts=[]
+          for platform in platforms:
+              arch=platform['platform']['architecture']; image='ghcr.io/jjyr/pot@'+platform['digest']
+              subprocess.run(['docker','--config',str(folder),'pull','--platform','linux/'+arch,image],check=True)
+              value=json.loads(subprocess.check_output(['docker','--config',str(folder),'image','inspect',image]))[0]
+              assert value['Architecture']==arch and value['Os']=='linux'
+              assert value['Config']['Labels']['org.opencontainers.image.revision']==os.environ['SOURCE']
+              assert value['Config']['Labels']['org.opencontainers.image.version']=='0.0.1'
+              receipts.append({'architecture':arch,'manifest':platform['digest'],'id':value['Id'],'labels':value['Config']['Labels']})
+          assert {x['architecture'] for x in receipts}=={'amd64','arm64'}
+          Path('.pot-artifacts/anonymous-image-receipts.json').write_text(json.dumps({'index':index,'images':receipts},indent=2)+'\n')
+          PY
+      - name: Retain small public verification receipts and generated cask
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: public-refresh-verification
+          include-hidden-files: true
+          path: |
+            source/.pot-artifacts/public-assets-verified.json
+            source/.pot-artifacts/anonymous-image-receipts.json
+            source/.pot-artifacts/image-final/*
+            source/public/pot.rb
+            source/public/update.json
+            source/public/feed-verified.json
+            source/public/MACOS-RELEASE.txt
+            source/public/SHA256SUMS-*
+            source/public/*.sha256
+          retention-days: 7
