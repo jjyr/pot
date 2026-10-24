@@ -276,28 +276,32 @@ The adapter retains group keys by membership and original record nodes across
 append, prepend and splits, giving the existing reading cursor and virtualizer
 stable member targets. Disclosures are scoped to the conversation and survive
 virtual recycling. `state/task-identity.mjs` is shared with Task views: complete
-`node_id / kind / agent_id` addresses identify Tasks, session labels start at four
-characters and only lengthen on collisions, and equal IDs on different nodes
-include a node suffix. The session registry covers identities discovered in
-catalogue pages and loaded history; unseen identities cannot be disambiguated in
-advance. Only a confirmed TaskInfo address mapping permits icon color. Linked
+`node_id / kind / agent_id` addresses identify Tasks. The shared `taskShortID`
+helper displays `#` followed by the first four
+characters of the real `address.agent_id` (or the entire ID when shorter).
+Equal prefixes deliberately share the same short label, including equal IDs on
+different nodes. Full addresses, catalogue scope and owner still determine
+identity and navigation; labels never route requests. Only a confirmed TaskInfo
+address mapping permits icon color. Linked
 catalogue IDs are never treated as remote address IDs. UTF-8 FNV-1a32 selects one
 of the six fixed families in `state/task-palette.json`; only the small Task mark
 uses the same family across light, dark and system themes. Missing mappings use
 neutral marks, and short labels remain visible when names are long.
 
-`components/task-identity.mjs` renders the shared 22 px folded-file line mark
-and neutral monospace short label. Communication endpoints, expanded records,
-background rows and the collapsed background summary use the same mark and
+`components/task-identity.mjs` renders the original `icon('tasks')` inside a
+22 px tinted container and a neutral monospace short label. Communication
+endpoints, expanded records and background rows use the same mark and
 authoritative address mapping. The small tinted background has no colored
 outline; task names and labels stay neutral. Runtime activity and semantic
 status remain separate from the fixed identity color. A confirmed endpoint and
 its background row open the same existing Task detail with the catalogue ID;
 unknown addresses retain a neutral mark without inventing a navigation target.
-The collapsed summary fits an ordered prefix and exposes the remainder as `+N`,
-which expands the existing list. The three-row preview, task ordering and counts
-remain independent of summary width. Keyed projections retain live controls
-through title, status, locale and short-label updates.
+Each background row keeps the icon, ellipsized title, short ID and activity/status
+on one line, including narrow layouts. Source and elapsed time remain in the
+accessible description and Task details. The original three-row preview and
+expand/collapse control retain task ordering and counts without a second summary.
+Keyed projections retain live controls through title, status, locale and
+short-label updates.
 
 ## Read state and activity
 

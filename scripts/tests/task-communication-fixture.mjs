@@ -7,9 +7,10 @@ const local={node_id:'review-local',kind:'assistant',agent_id:'pot'};
 const remote={node_id:'review-codex',kind:'assistant',agent_id:'review'};
 const text='**Review summary**\n\n- Keep the message easy to read.\n- Check the same layout at phone width.\n\n```js\nconst safe = true;\nconst description = "A long code line stays inside its own scrollable code block at phone width.";\n```\n\nThis paragraph checks natural long-message reading, with clear spacing between paragraphs, lists and code. The same synthetic text is shown in both source versions.\n\n<script>window.reviewInjected = true</script>';
 const tool=(id,name,args,result)=>({id,role:'tool',status:'complete',text:'',tool:{id,turn_id:'review',name,args,result,phase:'completed'}});
-const taskA={node_id:'review-local',kind:'task',agent_id:'8a1c1000-1111-2222-3333-444444444444'};
-const taskB={node_id:'review-local',kind:'task',agent_id:'8a1cf000-1111-2222-3333-444444444444'};
-const taskC={...taskA,node_id:'review-remote'};
+const edge=params.has('edge');
+const taskA={node_id:'review-local',kind:'task',agent_id:edge?'8a1c1000-1111-4222-8333-444444444444':'a078c820-5dca-4aba-b473-e26a060224ab'};
+const taskB={node_id:'review-local',kind:'task',agent_id:edge?'8a1cf000-1111-4222-8333-444444444444':'b16981fa-e96c-4bec-bace-f3f4e5479be8'};
+const taskC={...taskA,node_id:'review-remote',agent_id:edge?taskA.agent_id:'c25abc79-83f3-48f6-9df9-9e5481f739e9'};
 const send=(id,to,text)=>tool(id,'send_message',{to,text},{accepted:true});
 const receive=(id,from,text)=>tool(id,'receive_message',{messages:[{from,to:local,text}]});
 const messages=[
@@ -18,7 +19,7 @@ const messages=[
   receive('mail-2',taskB,'The short ID stays visible in both directions.'),
   send('mail-3',taskB,'Check narrow screens and dark mode.'),
   receive('mail-4',taskA,'The source order is preserved.'),
-  tool('mail-5','receive_message',{messages:[{from:taskC,to:local,text:'This task has the same ID on another node.'},{from:taskA,to:local,text:'One receive record contains two messages.'}]}),
+  tool('mail-5','receive_message',{messages:[{from:taskC,to:local,text:edge?'This task has the same ID on another node.':'This task runs on another node.'},{from:taskA,to:local,text:'One receive record contains two messages.'}]}),
   send('mail-6',taskA,'Thanks. Keep call details available on demand.'),
   {id:'reply',reply_to:'review',role:'assistant',status:'complete',text:'Synthetic messages only. No real Task or model was started.'},
 ].map((message,index)=>({...message,sequence:String(index+1),version:1,created_at_ms:0}));
@@ -31,11 +32,11 @@ window.addEventListener('error',event=>errors.push(event.message));
 window.addEventListener('unhandledrejection',event=>errors.push(String(event.reason)));
 localStorage.setItem('pot-system-notifications-browser-v1','false');
 const snapshot=()=>({kind:'reset',runtime_id:space.id,boot_id:'review',owner_id:JSON.stringify([space.id,scope.owner]),conversation_id:'main',cursor:String(cursor),running:false,turn_id:null,replies:[],messages,history:{before:'1',after:String(messages.length),has_more:false,has_newer:false}});
-const catalogue=[{id:taskA.agent_id,address:taskA,title:'Layout review',phase:'complete'},{id:taskB.agent_id,address:taskB,title:'Responsive checks',phase:'complete'},{id:'local-hash',address:taskC,title:'Remote review',phase:'complete'}];
+const catalogue=[{id:taskA.agent_id,address:taskA,title:'Layout review',phase:'complete'},{id:taskB.agent_id,address:taskB,title:'Responsive checks',phase:'complete'},{id:edge?'local-hash':taskC.agent_id,address:taskC,title:'Remote review',phase:'complete'}];
 if(params.has('identity')){
   catalogue[0].phase='running';catalogue[1].phase='queued';catalogue[2].phase='waiting';
   catalogue[0].title='Layout review · Long task title that truncates while keeping its identity visible';
-  catalogue.push({id:'unknown-catalogue',title:'Unconfirmed address',phase:'queued'},...Array.from({length:3},(_,index)=>({id:'extra-'+index,address:{node_id:'review-local',kind:'task',agent_id:'extra-'+index},title:'Background check '+(index+1),phase:'running'})));
+  catalogue.push({id:'unknown-catalogue',title:'Unconfirmed address',phase:'queued'},...Array.from({length:3},(_,index)=>({id:edge?'extra-'+index:['d3618b5a-6722-4f38-bdf4-cf269db87e83','e4724fa2-fdef-46f1-b36a-8eb1bd25ed13','f583a019-a3bf-43b9-80ef-f9d651f549bf'][index],address:{node_id:'review-local',kind:'task',agent_id:edge?'extra-'+index:['d3618b5a-6722-4f38-bdf4-cf269db87e83','e4724fa2-fdef-46f1-b36a-8eb1bd25ed13','f583a019-a3bf-43b9-80ef-f9d651f549bf'][index]},title:'Background check '+(index+1),phase:'running'})));
 }
 const changes=new Set(),requests=[];
 const client={production:true,runtime:{runtime_id:space.id,boot_id:'review'},spaces:[space],scope:()=>({...scope}),setScope:value=>scope={...scope,...value},changes:callback=>{changes.add(callback);return()=>changes.delete(callback);},

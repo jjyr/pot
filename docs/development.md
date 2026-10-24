@@ -271,7 +271,9 @@ for comparison. This fixture uses production Chat components and synthetic data.
 For adjacent Task communication, run `mise run test:task-communication`, serve the
 repository on loopback and open `/scripts/tests/fixtures/task-communication.html`.
 Add `?identity=1` for the matching communication/background identity fixture,
-including linked addresses, missing mappings, collisions and summary overflow.
+including linked addresses, missing mappings and normal UUID-shaped IDs.
+Add `edge=1` separately for repeated prefixes and equal IDs across nodes; both
+keep the same four-character label while full addresses retain detail routing.
 Run `scripts/tests/task-identity-browser.mjs` against the same origin to exercise
 the shared marks, authoritative detail navigation and keyed background updates.
 The fixture mounts production Chat with synthetic records and rejects writes.

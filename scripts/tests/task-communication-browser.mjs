@@ -32,7 +32,7 @@ try{
     });
     assert.equal(result.texts.length,7);assert.equal(result.texts[2],'Check narrow screens and dark mode.');
     assert.equal(result.named,true);assert.equal(result.overflow,false);assert(result.colors.every(color=>color!==undefined));
-    assert(result.short.includes('@'));assert(result.colors.includes(String(result.color)));
+    assert.equal(result.short,'#a078');assert(result.colors.includes(String(result.color)));
     await page.evaluate(()=>window.taskCommunication.update(messages=>{const f=window.taskCommunication;messages.splice(-1,0,{...f.send('append',f.taskA,'Appended message'),sequence:'8',version:1});}));
     assert.equal(await page.evaluate(()=>document.querySelector('.communication-stack')===originalStack&&document.querySelector('[data-call-id="mail-3"] .communication-text p')===originalText&&getSelection().toString()==='Check narrow screens and dark mode.'),true,'append retains group, body and selection');
     await page.evaluate(()=>window.taskCommunication.update(messages=>{const f=window.taskCommunication;messages.splice(1,0,{...f.receive('prepend',f.taskB,'Earlier message'),sequence:'1',version:1});}));
