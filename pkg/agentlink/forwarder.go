@@ -54,25 +54,25 @@ type dialResult struct {
 // connectionForwarder owns one connection's queue and transport. Its loop never
 // waits for a network response; the Session multiplexes the bounded call workers.
 type connectionForwarder struct {
-	ctx        context.Context
-	cancel     context.CancelFunc
-	done       chan struct{}
-	requests   chan *forwardRequest
-	changes    chan forwardChange
-	wake       chan struct{}
-	completed  chan *forwardRequest
-	dialled    chan dialResult
-	dial       func(context.Context) (connectionTransport, error)
-	publish    func(connectionTransport)
-	lost       func(connectionTransport)
-	wg         sync.WaitGroup
-	syncGate   chan struct{}
-	metadataMu sync.Mutex
+	ctx          context.Context
+	cancel       context.CancelFunc
+	done         chan struct{}
+	requests     chan *forwardRequest
+	changes      chan forwardChange
+	wake         chan struct{}
+	completed    chan *forwardRequest
+	dialled      chan dialResult
+	dial         func(context.Context) (connectionTransport, error)
+	publish      func(connectionTransport)
+	lost         func(connectionTransport)
+	wg           sync.WaitGroup
+	syncGate     chan struct{}
+	metadataGate chan struct{}
 }
 
 func newConnectionForwarder(ctx context.Context, dial func(context.Context) (connectionTransport, error), publish, lost func(connectionTransport)) *connectionForwarder {
 	ctx, cancel := context.WithCancel(ctx)
-	f := &connectionForwarder{ctx: ctx, cancel: cancel, done: make(chan struct{}), requests: make(chan *forwardRequest), changes: make(chan forwardChange), wake: make(chan struct{}, 1), completed: make(chan *forwardRequest, maxConcurrentBusinessRequests+1), syncGate: make(chan struct{}, 1), dialled: make(chan dialResult), dial: dial, publish: publish, lost: lost}
+	f := &connectionForwarder{ctx: ctx, cancel: cancel, done: make(chan struct{}), requests: make(chan *forwardRequest), changes: make(chan forwardChange), wake: make(chan struct{}, 1), completed: make(chan *forwardRequest, maxConcurrentBusinessRequests+1), syncGate: make(chan struct{}, 1), metadataGate: make(chan struct{}, 1), dialled: make(chan dialResult), dial: dial, publish: publish, lost: lost}
 	go f.run()
 	return f
 }

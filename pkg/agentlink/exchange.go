@@ -106,8 +106,29 @@ func (s *Service) Sync(ctx context.Context, id string) error {
 	return s.refreshMetadata(ctx, c)
 }
 func (s *Service) refreshMetadata(ctx context.Context, c Connection) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if s.options.Backend == nil {
 		return nil
+	}
+	f, err := s.forwarder(c)
+	if err != nil {
+		return err
+	}
+	select {
+	case f.metadataGate <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.ctx.Done():
+		return ErrUnavailable
+	}
+	defer func() { <-f.metadataGate }()
+	return s.sampleMetadata(ctx, c)
+}
+func (s *Service) sampleMetadata(ctx context.Context, c Connection) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -118,6 +139,7 @@ func (s *Service) refreshMetadata(ctx context.Context, c Connection) error {
 	s.sampleObservation(ctx, c, directory)
 	return nil
 }
+
 func (s *Service) syncConnection(ctx context.Context, id string) error {
 	connection, err := s.Get(ctx, id)
 	if err != nil {

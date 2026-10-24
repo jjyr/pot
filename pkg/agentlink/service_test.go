@@ -676,3 +676,62 @@ func TestPromotedPairSessionSurvivesPendingHandshakeExpiry(t *testing.T) {
 		t.Fatal("expiry replaced the promoted session")
 	}
 }
+
+type metadataBarrierBackend struct {
+	*testBackend
+	once    sync.Once
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *metadataBarrierBackend) Directory(ctx context.Context) (Directory, error) {
+	b.once.Do(func() { close(b.entered) })
+	select {
+	case <-b.release:
+		return b.testBackend.Directory(ctx)
+	case <-ctx.Done():
+		return Directory{}, ctx.Err()
+	}
+}
+func TestInitialForegroundMetadataCoalescesPeriodicSampling(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	a, b := newFixture(t, "metadata-a"), newFixture(t, "metadata-b")
+	c := connect(t, a, b) // No Backend yet: the initial saved directory is empty.
+	a.service.options.Backend = &testBackend{f: a}
+	backend := &metadataBarrierBackend{testBackend: &testBackend{f: b}, entered: make(chan struct{}, 2), release: make(chan struct{})}
+	b.service.options.Backend = backend
+	var once sync.Once
+	release := func() { once.Do(func() { close(backend.release) }) }
+	defer release()
+	first := make(chan error, 1)
+	go func() { first <- a.service.refreshMetadata(ctx, c) }()
+	select {
+	case <-backend.entered:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	var workers sync.WaitGroup
+	defer workers.Wait()
+	defer release()
+	if a.service.tryRefreshMetadata(ctx, c, &workers) {
+		t.Error("periodic metadata invalidated an unfinished first foreground directory")
+	}
+	cancelled, stop := context.WithCancel(ctx)
+	stop()
+	if err := a.service.refreshMetadata(cancelled, c); !errors.Is(err, context.Canceled) {
+		t.Error("metadata wait ignored cancellation", err)
+	}
+	release()
+	if err := <-first; err != nil {
+		t.Fatal("initial metadata failed", err)
+	}
+	current, err := a.service.Get(ctx, c.ID)
+	if err != nil || current.Directory == nil {
+		t.Fatal("initial directory missing", current.Directory, err)
+	}
+	if !a.service.tryRefreshMetadata(ctx, c, &workers) {
+		t.Fatal("periodic sampling did not resume")
+	}
+	workers.Wait()
+}

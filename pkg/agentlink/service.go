@@ -450,9 +450,8 @@ func (s *Service) Run(ctx context.Context) {
 					}(c)
 				default:
 				}
-				if c.State != "revoked" && s.options.Backend != nil && f.metadataMu.TryLock() {
-					workers.Add(1)
-					go func(c Connection) { defer workers.Done(); defer f.metadataMu.Unlock(); _ = s.refreshMetadata(ctx, c) }(c)
+				if c.State != "revoked" && s.options.Backend != nil {
+					s.tryRefreshMetadata(ctx, c, &workers)
 				}
 			}
 		}
@@ -462,4 +461,25 @@ func (s *Service) Run(ctx context.Context) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// tryRefreshMetadata coalesces periodic metadata work instead of queuing another
+// sample while the foreground or an earlier periodic pass owns it.
+func (s *Service) tryRefreshMetadata(ctx context.Context, c Connection, workers *sync.WaitGroup) bool {
+	f, err := s.forwarder(c)
+	if err != nil || ctx.Err() != nil {
+		return false
+	}
+	select {
+	case f.metadataGate <- struct{}{}:
+	default:
+		return false
+	}
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		defer func() { <-f.metadataGate }()
+		_ = s.sampleMetadata(ctx, c)
+	}()
+	return true
 }

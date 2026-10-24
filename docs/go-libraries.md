@@ -50,6 +50,9 @@ while a sent call retains the transport's possibly uncertain result. Disconnect,
 inbound attachment and dial completion are serialized by the forwarder; generation
 checks discard late dials. Close joins owned dial/call workers and admitted RPC
 handlers before returning. Session.Done alone does not join handlers.
+Foreground synchronization and periodic metadata sampling share per-connection
+admission, so a background sample cannot invalidate an unfinished initial directory
+read. Waiting foreground callers honor cancellation; mailbox exchange remains independent.
 
 ## Third-party integrations
 
