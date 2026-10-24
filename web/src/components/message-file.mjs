@@ -12,12 +12,16 @@ function register(){
     }
     retryButton(){
       if(this.retry)return;this.retry=document.createElement('button');this.retry.type='button';this.retry.className='resource-action';
-      this.retry.onclick=async()=>{this.retry.disabled=true;try{if(this.row)await this.options.retryMessageFile(this.message,this.row.id,{signal:this.abort.signal});await this.load();}catch{this.state='source_offline';this.refresh();}finally{if(this.retry)this.retry.disabled=false;}};this.append(this.retry);this.refresh();
+      this.retry.onclick=async()=>{this.retry.disabled=true;this.emptyReads=0;try{if(this.row)await this.options.retryMessageFile(this.message,this.row.id,{signal:this.abort.signal});await this.load();}catch{this.state='source_offline';this.refresh();}finally{if(this.retry)this.retry.disabled=false;}};this.append(this.retry);this.refresh();
     }
     async load(){
       try{
         const rows=await this.options.messageFiles(this.message,{signal:this.abort.signal});if(!this.isConnected)return;
-        const row=rows.find(row=>row.href===this.reference.href);this.row=row;this.state=row?.state||'unavailable';
+        const row=rows.find(row=>row.href===this.reference.href);this.row=row;
+        // Completion can reach the UI just before the separate binding commit.
+        // Poll metadata briefly; an absent binding never authorizes a path read.
+        if(!row&&(this.emptyReads=(this.emptyReads||0)+1)<5){this.state='pending';this.showStatus();this.timer=setTimeout(()=>this.load(),500);return;}
+        this.state=row?.state||'unavailable';
         if(row?.state==='ready'&&row.resource){
           this.status?.remove();this.status=null;this.retry?.remove();this.retry=null;
           const claimed=this.options.previewClaims?.get(row.resource.id),canPreview=!claimed?.isConnected||claimed===this;

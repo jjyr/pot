@@ -71,11 +71,15 @@ func TestMessageFilesSnapshotIsolationAndReplay(t *testing.T) {
 	if string(data) != "original\nline two" {
 		t.Fatal("snapshot changed")
 	}
-	foreign, err := s.MessageFiles(ctx, "other", "", "reply")
-	if err == nil && len(foreign) != 0 {
+	other, err := s.CreateAssistant(ctx, CreateAssistant{RequestID: "foreign-files", Name: "Foreign"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := s.MessageFiles(ctx, other.ID, "", "reply")
+	if err != nil || len(foreign) != 0 {
 		t.Fatal("foreign refs leaked")
 	}
-	if _, err = s.Resources.Get(ctx, "other", id); err == nil {
+	if _, err = s.Resources.Get(ctx, other.ID, id); err == nil {
 		t.Fatal("foreign resource leaked")
 	}
 }
@@ -170,5 +174,29 @@ func TestMessageFilesDirectoryReplacementAndRegularFileLimits(t *testing.T) {
 	rows := awaitFiles(t, s, a.ID, "large")
 	if rows[0].State != "too_large" || rows[1].State != "forbidden" {
 		t.Fatal(rows)
+	}
+}
+
+func TestOwnConfigurationMappingRejectsDirectoryAliases(t *testing.T) {
+	s, _ := configurationService(t)
+	ctx := context.Background()
+	a, err := s.CreateAssistant(ctx, CreateAssistant{RequestID: "config-alias", Name: "Configuration"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, _ := s.ExecutionWorkspace(a.ID)
+	directory := s.Registry.Directory(a.ID)
+	foreign := t.TempDir()
+	os.WriteFile(filepath.Join(foreign, "AGENTS.md"), []byte("foreign private configuration"), 0600)
+	if err := os.Rename(directory, directory+"-original"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(foreign, directory); err != nil {
+		t.Fatal(err)
+	}
+	s.bindMessageFiles(a.ID, "", "", "config-link", "[rules]("+filepath.Join(directory, "AGENTS.md")+")", root)
+	rows := awaitFiles(t, s, a.ID, "config-link")
+	if rows[0].State != "forbidden" || rows[0].Resource != nil {
+		t.Fatal("configuration alias escaped owner scope", rows)
 	}
 }

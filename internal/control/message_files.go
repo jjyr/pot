@@ -31,7 +31,7 @@ func (s *Service) bindMessageFiles(owner, task, run, message, text, root string)
 		source.RootID, _ = taskDirectoryIdentity(info)
 	}
 	if task == "" {
-		if info, err := os.Stat(s.Registry.Directory(owner)); err == nil {
+		if info, err := os.Lstat(s.Registry.Directory(owner)); err == nil && info.IsDir() {
 			source.ConfigID, _ = taskDirectoryIdentity(info)
 		}
 		source.Config = filepath.Join(s.Registry.Directory(owner), "AGENTS.md")
@@ -163,6 +163,13 @@ func (s *Service) snapshotMessageFile(ctx context.Context, ref resources.Message
 			path = "AGENTS.md"
 			config = true
 			rootID = src.ConfigID
+			info, err := os.Lstat(root)
+			if err != nil {
+				return nil, err
+			}
+			if src.ConfigID == "" || !info.IsDir() {
+				return nil, errFileForbidden
+			}
 		} else {
 			if !pathWithin(path, root) {
 				return nil, errFileForbidden
