@@ -65,6 +65,7 @@ func batchReply(w http.ResponseWriter, text string) {
 }
 
 func TestQueuedUserAndTaskOutcomesUseSeparateAggregatedModelTurns(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -180,6 +181,7 @@ func TestQueuedUserAndTaskOutcomesUseSeparateAggregatedModelTurns(t *testing.T) 
 }
 
 func TestAgentCommunicationBatchesBySenderInSharedAssistantHistory(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 	var calls atomic.Int32
@@ -248,6 +250,7 @@ func TestAgentCommunicationBatchesBySenderInSharedAssistantHistory(t *testing.T)
 }
 
 func TestBatchRequestCategoryPreservesOriginalInputs(t *testing.T) {
+	t.Parallel()
 	for _, texts := range [][]string{{"foreground gate"}, {"USER_ONE", "USER_TWO"}} {
 		messages := []map[string]string{{"role": "system", "content": "Main"}, {"role": "user", "content": "<pot_context key=\"environment\">data</pot_context>"}}
 		for _, text := range texts {
@@ -262,6 +265,7 @@ func TestBatchRequestCategoryPreservesOriginalInputs(t *testing.T) {
 }
 
 func TestNotificationsShareOrderedBatchAfterUserInput(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 	entered, release := make(chan struct{}), make(chan struct{})

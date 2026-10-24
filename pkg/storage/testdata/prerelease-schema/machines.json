@@ -1,0 +1,22 @@
+{
+  "Objects": [
+    {
+      "Type": "table",
+      "Name": "node_identity",
+      "Table": "node_identity",
+      "SQL": "CREATE TABLE node_identity(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "retired_membership_state",
+      "Table": "retired_membership_state",
+      "SQL": "CREATE TABLE \"retired_membership_state\"(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL)"
+    }
+  ],
+  "Rows": {
+    "node_identity": [],
+    "retired_membership_state": []
+  },
+  "UserVersion": 0,
+  "ApplicationID": 0
+}

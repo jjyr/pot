@@ -1,0 +1,35 @@
+{
+  "Objects": [
+    {
+      "Type": "index",
+      "Name": "operation_input_run",
+      "Table": "operation_inputs",
+      "SQL": "CREATE INDEX operation_input_run ON operation_inputs(owner,turn_id)"
+    },
+    {
+      "Type": "table",
+      "Name": "operation_inputs",
+      "Table": "operation_inputs",
+      "SQL": "CREATE TABLE operation_inputs(id TEXT PRIMARY KEY REFERENCES operations(id),owner TEXT NOT NULL,turn_id TEXT NOT NULL,body TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "operation_scopes",
+      "Table": "operation_scopes",
+      "SQL": "CREATE TABLE operation_scopes(id TEXT PRIMARY KEY REFERENCES operations(id),scope TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "operations",
+      "Table": "operations",
+      "SQL": "CREATE TABLE operations(id TEXT PRIMARY KEY,input_hash TEXT NOT NULL,state TEXT NOT NULL,result BLOB,error TEXT NOT NULL)"
+    }
+  ],
+  "Rows": {
+    "operation_inputs": [],
+    "operation_scopes": [],
+    "operations": []
+  },
+  "UserVersion": 0,
+  "ApplicationID": 0
+}

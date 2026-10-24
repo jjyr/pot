@@ -32,6 +32,13 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
   assert.equal(await mark.getAttribute('aria-hidden'),'true');
   assert.equal(await mark.getAttribute('alt'),'');
   assert(await mark.evaluate(e=>{const rect=e.getBoundingClientRect();return e.complete&&e.naturalWidth===98&&e.naturalHeight===96&&rect.height===16&&Math.abs(rect.width/rect.height-98/96)<0.001;}),`${locale} official Invertocat loads and keeps its proportions at ${width}`);
+  assert.equal(await mark.getAttribute('height'),'16');
+  assert(await mark.evaluate(e=>{
+   const sheets=[...document.styleSheets],disabled=sheets.map(s=>s.disabled);
+   try{for(const sheet of sheets)sheet.disabled=true;const rect=e.getBoundingClientRect();return rect.height===16&&Math.abs(rect.width/rect.height-98/96)<0.001;}
+   finally{sheets.forEach((s,i)=>{s.disabled=disabled[i];});}
+  }),`${locale} Invertocat stays compact without the stylesheet at ${width}`);
+  assert(await page.locator('.github-star').evaluate(e=>e.getBoundingClientRect().height>=44&&getComputedStyle(e).cursor==='pointer'));
   assert(await page.locator('.github-star').getAttribute('aria-label'));
   if(width===390)assert(await page.evaluate(()=>{const star=document.querySelector('.github-star').getBoundingClientRect(),start=document.querySelector('.nav-cta').getBoundingClientRect();return star.right<=start.left&&Math.abs((star.top+star.bottom-start.top-start.bottom)/2)<2;}),`${locale} header actions share a row`);
   for(const [channel,id] of [['agent','agent-prompt'],['macos','brew-command'],['linux',null],['web','docker-image'],['web','server-command']]){
@@ -77,28 +84,40 @@ for(const locale of ['en','zh-CN','zh-TW','ja','ko','es']){
  for(const selector of ['#install-linux .linux-native .primary','#install-web .web-server .primary'])
   for(const link of await page.locator(selector).all())assert.equal(await link.getAttribute('href'),'https://github.com/jjyr/pot/releases');
  if(!installOnly){
- await page.locator('#run-project').click();
- assert.equal(await page.locator('.project-task.running').count(),3);
- await page.waitForFunction(()=>document.querySelectorAll('.project-task.done').length===1);
- assert.equal(await page.locator('.project-task.running').count(),2);
- await page.locator('#finish-project').click();assert.equal(await page.locator('.project-task.done').count(),3);
- await page.waitForTimeout(2300);assert.equal(await page.locator('.project-task.running').count(),0); // stopped timers cannot overwrite terminal state
- for(const type of ['install','docs','screens']){
-  await page.locator(`.delivery-links [data-open-report="${type}"]`).click();
-  assert(await page.locator('#report-content').innerText());
-  if(type==='screens'){
-   await page.waitForFunction(()=>[...document.querySelectorAll('.report-gallery img')].every(i=>i.complete&&i.naturalWidth===1280));
-  }
-  await page.keyboard.press('Escape');assert.equal(await page.locator('#report-dialog').evaluate(e=>e.open),false);
+ // 01 is a local conversation with communication disclosures and a result preview.
+ assert.equal(await page.locator('#assistant [role=tab], #assistant [data-flow], #run-project').count(),0);
+ assert.equal(await page.locator('.a01-communication').count(),2);
+ assert.deepEqual(await page.locator('.a01-communication').evaluateAll(els=>els.map(e=>e.open)),[false,true]);
+ for(const width of [1280,390,320]){
+  await page.setViewportSize({width,height:900});
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} 01 overflow at ${width}`);
+  await page.locator('#a01-openResult').focus();await page.keyboard.press('Enter');
+  assert(await page.locator('#a01-resultDialog').evaluate(e=>e.open));
+  assert(await page.locator('#a01-resultDialog').evaluate(e=>e.scrollWidth<=e.clientWidth),`${locale} result overflow at ${width}`);
+  await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>document.activeElement.id),'a01-openResult');
  }
+ await page.locator('.a01-communication').first().locator('summary').first().focus();
+ await page.keyboard.press('Enter');assert(await page.locator('.a01-communication').first().evaluate(e=>e.open));
+ assert.equal(await page.locator('.a01-call-details[open]').count(),0);
+ await page.locator('.a01-call-details summary').first().click();assert(await page.locator('.a01-call-details').first().evaluate(e=>e.open));
+ await page.locator('#a01-openResult').focus();await page.keyboard.press('Space');
+ assert(await page.locator('#a01-resultDialog').evaluate(e=>e.open));
+ await page.locator('[data-close="a01-resultDialog"]').click();assert.equal(await page.evaluate(()=>document.activeElement.id),'a01-openResult');
+ // The separate Agent Link and complete collaboration sections still work.
+ await page.locator('[data-agent="claude"]').click();assert.equal(await page.locator('#preview-name').innerText(),'Claude');
+ await page.locator('[data-mode="delegate"]').click();assert(await page.locator('#agent-conversation').innerText());
+ await page.locator('[data-flow="2"]').click();await page.locator('.flow-artifact').click();
+ assert(await page.locator('#report-content').innerText());await page.keyboard.press('Escape');
  }
- console.log(installOnly?'installation, responsive, clipboard and keyboard:':'locale, responsive, clipboard, parallel playback and deliverables:',locale,'passed');
+ console.log(installOnly?'installation, responsive, clipboard and keyboard:':'locale, responsive, clipboard, assistant story and collaboration:',locale,'passed');
 }
 await page.locator('[data-install="web"]').click();
 await page.selectOption('#language-select','ja');await page.waitForURL('**/ja/**');
 assert.equal(await page.locator('[role=tab][aria-selected=true]').getAttribute('data-install'),'web');
 assert(await page.locator('#install-web .web-docker').isVisible());
-console.log('Static language switch preserves selected installation channel');
+if(!installOnly)assert(await page.locator('.a01-communication').first().evaluate(e=>e.open));
+if(!installOnly)assert(await page.locator('.a01-call-details').first().evaluate(e=>e.open));
+console.log('Static language switch preserves installation and communication states');
 await page.setViewportSize({width:1280,height:900});
 if(!installOnly){
 for(const mode of ['ok','missing','limited','network','invalid','zero','timeout']){
@@ -108,22 +127,21 @@ for(const mode of ['ok','missing','limited','network','invalid','zero','timeout'
  await page.goto(`${origin}/website/en/`);if(failure)await failure;await page.waitForTimeout(150);
  const label=await page.locator('.github-star').innerText();
  assert.equal(await page.locator('.github-star').getAttribute('href'),'https://github.com/jjyr/pot');
- assert.equal(label.includes('1.2K'),mode==='ok',mode);
- if(mode!=='ok')assert.equal(label.trim(),'GitHub Star');
+ assert.equal(label.includes('1,234'),mode==='ok',mode);
+ if(mode!=='ok'&&mode!=='zero')assert.equal(label.trim(),'Star');
+ if(mode==='zero')assert.match(label,/0/);
  console.log('Star',mode,'passed');
 }
 // Cached and unavailable storage must leave the UI usable.
 await page.evaluate(()=>localStorage.setItem('pot-github-stars-v1',JSON.stringify({time:Date.now(),count:987})));
 const before=starRequests;await page.reload();await page.waitForTimeout(100);assert.equal(starRequests,before);assert.match(await page.locator('.github-star').innerText(),/987/);
 await page.addInitScript(()=>{Object.defineProperty(window,'localStorage',{configurable:true,get(){throw Error('Unavailable storage')}})});
-starMode='limited';await page.reload();await page.waitForTimeout(100);assert.equal((await page.locator('.github-star').innerText()).trim(),'GitHub Star');
+starMode='limited';await page.reload();await page.waitForTimeout(100);assert.equal((await page.locator('.github-star').innerText()).trim(),'Star');
 await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw Error('Denied')}}}));
 await page.locator('[data-install="agent"]').click();await page.locator('[data-copy="agent-prompt"]').click();assert.equal(await page.evaluate(()=>getSelection().toString()),install.prompt);assert.match(await page.locator('#copy-status').innerText(),/Select and copy/);
 // Keyboard activation and modal focus restoration use native controls.
-await page.locator('#run-project').focus();await page.keyboard.press('Enter');assert.equal(await page.locator('.project-task.running').count(),3);
-await page.locator('#finish-project').focus();await page.keyboard.press('Space');
-await page.locator('.delivery-links [data-open-report="docs"]').focus();await page.keyboard.press('Enter');assert.equal(await page.locator('#report-dialog').evaluate(e=>e.open),true);
-await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>document.activeElement.dataset.openReport),'docs');
+await page.locator('#a01-openResult').focus();await page.keyboard.press('Enter');assert(await page.locator('#a01-resultDialog').evaluate(e=>e.open));
+await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>document.activeElement.id),'a01-openResult');
 await page.locator('.github-star').focus();assert.equal(await page.evaluate(()=>document.activeElement.getAttribute('href')),'https://github.com/jjyr/pot');
 assert(await page.locator('.github-star').evaluate(e=>getComputedStyle(e).outlineStyle!=='none'));
 assert.deepEqual(errors,[]);
@@ -134,18 +152,18 @@ const offline=await browser.newPage();const outgoing=[];
 offline.on('request',request=>{if(request.url().startsWith('https://'))outgoing.push(request.url())});
 await offline.goto(origin+'/website/pot-preview.html');
 if(!installOnly){
-await offline.locator('.delivery-links [data-open-report="screens"]').click();
-await offline.waitForFunction(()=>[...document.querySelectorAll('.report-gallery img')].every(i=>i.complete&&i.naturalWidth===1280));assert.deepEqual(outgoing,[]);
-await offline.locator('#report-dialog').evaluate(e=>e.close());
+await offline.locator('#a01-openResult').click();assert(await offline.locator('#a01-resultDialog').evaluate(e=>e.open));
+await offline.keyboard.press('Escape');
 }
 await offline.locator('[data-install="web"]').click();await offline.selectOption('#language-select','es');
 assert.equal(await offline.locator('[role=tab][aria-selected=true]').getAttribute('data-install'),'web');
 assert(await offline.locator('#install-web .web-server').isVisible());
 assert(await offline.locator('#install-web .web-docker').isVisible());
 assert(await offline.locator('.github-star img').evaluate(e=>e.src.startsWith('data:image/svg+xml;base64,')&&e.complete&&e.naturalWidth===98&&e.naturalHeight===96));
-const noJS=await browser.newPage({javaScriptEnabled:false});await noJS.goto(origin+'/website/en/');assert.equal(await noJS.locator('#agent-prompt').textContent(),install.prompt);assert.equal(await noJS.locator('.project-task').count(),3);assert.equal(await noJS.locator('.install-panel:visible').count(),4);
+const noJS=await browser.newPage({javaScriptEnabled:false});await noJS.goto(origin+'/website/en/');assert.equal(await noJS.locator('#agent-prompt').textContent(),install.prompt);assert.equal(await noJS.locator('.a01-communication').count(),2);assert.equal(await noJS.locator('.install-panel:visible').count(),4);
 assert.equal(await noJS.locator('#install-linux #docker-image').count(),0);
 assert(await noJS.locator('#install-web .web-docker').isVisible());
+assert.deepEqual(outgoing,[]);
 console.log('Offline preview and no-JavaScript install content passed');
 } finally {
  await browser.close();

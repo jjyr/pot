@@ -13,6 +13,7 @@ import (
 )
 
 func TestPotDiscoveredAddressInvitationsRetainListenersAcrossRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, b := agentControl(t, "discovery-a"), agentControl(t, "discovery-b")
 	h := b.service.agentLinks
@@ -71,6 +72,7 @@ func TestPotDiscoveredAddressInvitationsRetainListenersAcrossRestart(t *testing.
 }
 
 func TestPotSelectedListenerClosesOnPersistenceFailure(t *testing.T) {
+	t.Parallel()
 	b := agentControl(t, "discovery-failure")
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

@@ -71,6 +71,7 @@ func allowanceBindings(t *testing.T, s *Service) []assistant.BackgroundBinding {
 	return result
 }
 func TestProviderAllowanceDefaultsCredentialsWaitingAndOffPersistence(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var mu sync.Mutex
 	credentials := map[string]int{}
@@ -162,6 +163,7 @@ func TestProviderAllowanceDefaultsCredentialsWaitingAndOffPersistence(t *testing
 	}
 }
 func TestProviderAllowancePermissionDegradesMetadataOnly(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, server := allowanceFixture(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusForbidden) })
 	profile := saveAllowanceProfile(t, s, "forbidden", server.URL, "permission-key")
@@ -184,6 +186,7 @@ func TestProviderAllowancePermissionDegradesMetadataOnly(t *testing.T) {
 	}
 }
 func TestProviderAllowanceRetargetDuringReadFencesCheckpoint(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	entered, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
@@ -244,6 +247,7 @@ func TestProviderAllowanceRetargetDuringReadFencesCheckpoint(t *testing.T) {
 }
 
 func TestProviderAllowanceRestartKeepsEpisodesAndOwnerSettings(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, server := allowanceFixture(t, func(w http.ResponseWriter, r *http.Request) { fixtureQuota(w, 98) })
 	saveAllowanceProfile(t, s, "kept", server.URL, "restart-key")
@@ -293,6 +297,7 @@ func TestProviderAllowanceRestartKeepsEpisodesAndOwnerSettings(t *testing.T) {
 }
 
 func TestProviderAllowanceReenableProjectsPendingUntilNextPoll(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, server := allowanceFixture(t, func(w http.ResponseWriter, r *http.Request) { fixtureQuota(w, 50) })
 	profile := saveAllowanceProfile(t, s, "toggle", server.URL, "toggle-key")

@@ -1,0 +1,120 @@
+{
+  "Objects": [
+    {
+      "Type": "index",
+      "Name": "compaction_evidence_operation",
+      "Table": "compaction_evidence",
+      "SQL": "CREATE INDEX compaction_evidence_operation ON compaction_evidence(compaction_id,sequence)"
+    },
+    {
+      "Type": "index",
+      "Name": "compaction_scope",
+      "Table": "compactions",
+      "SQL": "CREATE INDEX compaction_scope ON compactions(scope,at)"
+    },
+    {
+      "Type": "index",
+      "Name": "request_compaction",
+      "Table": "requests",
+      "SQL": "CREATE INDEX request_compaction ON requests(compaction_id)"
+    },
+    {
+      "Type": "index",
+      "Name": "tools_scope",
+      "Table": "tools",
+      "SQL": "CREATE INDEX tools_scope ON tools(scope,at)"
+    },
+    {
+      "Type": "index",
+      "Name": "usage_scope",
+      "Table": "requests",
+      "SQL": "CREATE INDEX usage_scope ON requests(scope,at)"
+    },
+    {
+      "Type": "index",
+      "Name": "usage_time",
+      "Table": "requests",
+      "SQL": "CREATE INDEX usage_time ON requests(at)"
+    },
+    {
+      "Type": "index",
+      "Name": "usage_turn",
+      "Table": "requests",
+      "SQL": "CREATE INDEX usage_turn ON requests(scope,turn_id,at)"
+    },
+    {
+      "Type": "table",
+      "Name": "compaction_evidence",
+      "Table": "compaction_evidence",
+      "SQL": "CREATE TABLE compaction_evidence(sequence INTEGER PRIMARY KEY AUTOINCREMENT,compaction_id TEXT NOT NULL REFERENCES compactions(id),at INTEGER NOT NULL,body TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "compactions",
+      "Table": "compactions",
+      "SQL": "CREATE TABLE compactions(id TEXT PRIMARY KEY,scope TEXT NOT NULL,turn_id TEXT NOT NULL,at INTEGER NOT NULL,end_at INTEGER,reason TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'running',tokens_before INTEGER,tokens_after INTEGER,entry_id TEXT)"
+    },
+    {
+      "Type": "table",
+      "Name": "request_routes",
+      "Table": "request_routes",
+      "SQL": "CREATE TABLE request_routes(request_id TEXT PRIMARY KEY REFERENCES requests(id),provider TEXT NOT NULL,generation INTEGER NOT NULL,spec_hash TEXT NOT NULL,agent TEXT NOT NULL,profile_id TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "requests",
+      "Table": "requests",
+      "SQL": "CREATE TABLE requests(id TEXT PRIMARY KEY,scope TEXT NOT NULL,turn_id TEXT NOT NULL,at INTEGER NOT NULL,model TEXT NOT NULL,input INTEGER,output INTEGER,cache INTEGER NOT NULL DEFAULT 0,reserved INTEGER NOT NULL DEFAULT 0,state TEXT NOT NULL DEFAULT 'pending',compaction_id TEXT,input_estimate INTEGER NOT NULL,output_cap INTEGER NOT NULL,original TEXT NOT NULL, cache_reported INTEGER NOT NULL DEFAULT 0)"
+    },
+    {
+      "Type": "table",
+      "Name": "routing_turns",
+      "Table": "routing_turns",
+      "SQL": "CREATE TABLE routing_turns(turn_id TEXT PRIMARY KEY)"
+    },
+    {
+      "Type": "table",
+      "Name": "settings",
+      "Table": "settings",
+      "SQL": "CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "tools",
+      "Table": "tools",
+      "SQL": "CREATE TABLE tools(id TEXT PRIMARY KEY,scope TEXT NOT NULL,turn_id TEXT NOT NULL,name TEXT NOT NULL,at INTEGER NOT NULL,end_at INTEGER,bytes INTEGER,failed INTEGER NOT NULL DEFAULT 0)"
+    },
+    {
+      "Type": "table",
+      "Name": "wait_release_requests",
+      "Table": "wait_release_requests",
+      "SQL": "CREATE TABLE wait_release_requests(owner TEXT NOT NULL,request_id TEXT NOT NULL,scope TEXT NOT NULL,turn_id TEXT NOT NULL,since INTEGER NOT NULL,complete INTEGER NOT NULL,PRIMARY KEY(owner,request_id))"
+    },
+    {
+      "Type": "table",
+      "Name": "wait_sequences",
+      "Table": "wait_sequences",
+      "SQL": "CREATE TABLE wait_sequences(scope TEXT PRIMARY KEY,since INTEGER NOT NULL)"
+    },
+    {
+      "Type": "table",
+      "Name": "waits",
+      "Table": "waits",
+      "SQL": "CREATE TABLE waits(scope TEXT PRIMARY KEY,turn_id TEXT NOT NULL,at INTEGER NOT NULL,reset_at INTEGER NOT NULL,required INTEGER NOT NULL,released INTEGER NOT NULL DEFAULT 0,provider TEXT NOT NULL DEFAULT '')"
+    }
+  ],
+  "Rows": {
+    "compaction_evidence": [],
+    "compactions": [],
+    "request_routes": [],
+    "requests": [],
+    "routing_turns": [],
+    "settings": [],
+    "tools": [],
+    "wait_release_requests": [],
+    "wait_sequences": [],
+    "waits": []
+  },
+  "UserVersion": 0,
+  "ApplicationID": 0
+}

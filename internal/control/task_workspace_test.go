@@ -62,9 +62,11 @@ func fixtureGit(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 func TestTaskWorkspaceRefreshesBaseAndUnifiesProjectTools(t *testing.T) {
+	t.Parallel()
 	testTaskWorkspaceProjectTools(t, false)
 }
 func TestRealTaskWorktreePreparation(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("POT_SANDBOX_INTEGRATION") != "1" {
 		t.Skip("requires real sandbox qualification")
 	}

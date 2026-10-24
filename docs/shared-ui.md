@@ -39,10 +39,10 @@ pointer; the tray keeps its explicit compact layout.
 Default assistant avatars use the [approved kitchen characters](design/pot-brand/README.md#assistant-characters).
 `pkg/assistantavatar` composites the assigned artwork over one of eight soft pastel
 backgrounds as an opaque 128px PNG. The creation request chooses the background;
-the saved character remains stable through renames, uploads and resets. Creation
-persists the PNG in the same profile field as custom images. Control migration
-`0015_character_avatars` upgrades old generated defaults and receipts while preserving
-custom uploads, names and revisions. The settings editor requests the original
+the saved character remains stable through renames, uploads and resets. Creation persists the PNG in the assistant files alongside its profile, using the
+same file for default images and custom uploads. The initial database baseline
+does not adopt old development avatar records; see
+[Database migrations](database-migrations.md). The settings editor requests the original
 image from `/api/v1/assistants/default-avatar?assistant_id=...` for reset previews.
 Directory, chat title, settings and tray render the stored PNG through one image
 component. Unloaded identities use a neutral placeholder.

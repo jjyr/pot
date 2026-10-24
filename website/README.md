@@ -1,7 +1,7 @@
 # Pot website
 
 A standalone product website with equal emphasis on assistant tasks and Agent Link,
-including the verified Codex integration, a parallel-task example and four installation paths. It uses static HTML, CSS and JavaScript;
+including the verified Codex integration, a website-design conversation and four installation paths. It uses static HTML, CSS and JavaScript;
 Python's standard library generates all six language entries and an offline preview.
 No product runtime, Node dependencies or build framework are required.
 
@@ -33,7 +33,7 @@ navigation and refresh work on an ordinary static server without rewrites. With
 JavaScript disabled, the localized body and language links remain available.
 
 Language switching preserves the current section, agent, direct/delegated mode,
-playback stage, workflow step and open result preview. Static pages
+workflow step, communication disclosure state and open result preview. Static pages
 carry demo state in query parameters; the offline preview switches in place.
 Chinese script subtags take precedence over region subtags: `zh-Hant`, `zh-TW`,
 `zh-HK` and `zh-MO` select Traditional Chinese; `zh-Hans` selects Simplified Chinese.
@@ -62,6 +62,22 @@ server. Regenerate them whenever a source changes. The larger self-contained
 `pot-preview.html` is generated locally and ignored by Git; it embeds all six
 pages, catalogs, styles, scripts and brand images, supports offline language
 switching and requires no network subresources.
+
+## Assistant section
+
+Section 01 is a local website-design conversation with Pot and Designer Tony,
+followed by a design-result preview. It has no playback, stage navigation or
+product screenshot gallery. User messages have no identity row; assistant
+messages keep their name and avatar. Tony uses a generic avatar.
+Native `details` provide the communication disclosures and nested call details;
+one short incoming message starts expanded. A native dialog provides the local
+design-result preview, including Escape dismissal and focus restoration.
+Language switching preserves communication disclosures and the open preview,
+alongside the other section states.
+
+The Pot/Tony story and design preview are HTML layout and interaction
+illustrations. They never send messages, create tasks or invoke models. Short
+visible labels keep their example status explicit in all six catalogs.
 
 ## GitHub Pages
 
@@ -124,18 +140,28 @@ package page awaits first publication. Platform requirements follow the
 [release contract](../docs/releases.md). Keep these small availability notes in
 sync when the channels publish. The English agent prompt is
 intentionally identical in every locale. No installation or agent execution is
-performed by the website. Result previews use synthetic notes, a documentation
-change excerpt and real shared-UI screenshots with isolated synthetic records.
-See [screenshot provenance](../docs/images/README.md).
+performed by the website. The website-design preview is a local layout illustration.
 
 The header's GitHub Invertocat links to the repository. It uses the unmodified
 black SVG from the [GitHub Brand Toolkit](https://brand.github.com/foundations/logo),
-served locally with its original 98:96 proportions. Source and trademark terms
+served locally with its original 98:96 proportions. The image has an HTML height
+of 16 pixels and an automatic width, so it stays compact even before the stylesheet
+loads or when a cached stylesheet predates the image selector. Its dedicated CSS
+class preserves that size; the link provides a 44-pixel minimum touch height.
+Source and trademark terms
 are recorded in `assets/GitHub-NOTICE.txt`. On static pages a single
 unauthenticated request to `https://api.github.com/repos/jjyr/pot` can add the
 public star count, cached in localStorage for six hours. Requests omit credentials
-and referrers and time out after three seconds. Failed requests, rate limits,
-unusable storage and invalid/zero counts retain the working link without a count.
+and referrers and time out after three seconds. Failed requests, rate limits and invalid counts retain the working link without
+a count. If storage is unavailable, a successful network response can still show
+the count.
+Valid counts are nonnegative safe integers, including a genuine zero. Only known
+counts show the separate bubble; loading or failure keeps the Star entry usable.
+The warm-white 44px segments form one link and one keyboard focus target, including
+the gap and the bubble's left-pointing tip. The official icon has an HTML height
+of 16px as well as scoped CSS sizing, keeping it small before styles load. Desktop
+counts use locale grouping; at 580px and below a truncated compact value is shown
+(with k/m/b/t/q units), while the full count stays in the link label and title.
 There is no server, token or build-time network dependency; the offline preview
 makes no star-count request. Clicking the link does not perform a Star action.
 
@@ -159,15 +185,20 @@ connection targets and does not imply endorsement or additional integration supp
 
 ## Browser checks
 
-After building, serve the **checkout root** (the product screenshot fixture imports
-`web/src`), for example `python3 -m http.server 4173 --bind 127.0.0.1`.
+After building, serve the **checkout root**, for example `python3 -m http.server 4173 --bind 127.0.0.1`.
 With Playwright and Chromium available outside the website runtime, run
 `node scripts/tests/website-browser.mjs`. `POT_WEBSITE_ORIGIN` overrides the server
 origin; `POT_PLAYWRIGHT_MODULE` can point to an external Playwright module.
-These checks cover six-language copy behavior, parallel playback and its terminal
-state, deliverable previews, narrow layouts, keyboard controls and Star fallbacks.
+These checks cover six-language copy behavior, the assistant story and its nested
+disclosures, local result previews, 320/390px layouts,
+keyboard controls, collaboration and Star fallbacks.
 They use synthetic clipboard/API responses and never execute installation commands.
 
 Use `node scripts/tests/website-browser.mjs --install-only` to check only installation
 classification, links, copy behavior, keyboard navigation, responsive layouts and
-static/offline language state without running the task-demo and Star scenarios.
+static/offline language state without running the assistant-story and Star scenarios.
+
+Run `node scripts/tests/website-star-browser.mjs` for the focused Star layout,
+API fallback, cache and input checks. It uses the same browser environment
+variables as the website checks. Set `POT_WEBSITE_OLD_CSS` to a stylesheet file
+to also check new HTML against a previous stylesheet.

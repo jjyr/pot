@@ -20,6 +20,7 @@ func installDefaultToolFixture(t *testing.T, root, id string) {
 }
 
 func TestProviderDefaultsEnableInstalledToolsAndClearLegacyFilters(t *testing.T) {
+	t.Parallel()
 	s, _ := configurationService(t)
 	root := t.TempDir()
 	s.Profiles.pluginRoot = root
@@ -79,6 +80,7 @@ func TestProviderDefaultsEnableInstalledToolsAndClearLegacyFilters(t *testing.T)
 }
 
 func TestOlderProviderRevisionAdoptsToolsOnlyAtFreshTurnBoundary(t *testing.T) {
+	t.Parallel()
 	s, profile := configurationService(t)
 	selection := AssistantSelection{ProfileID: profile.ID, ProfileRevision: profile.Revision, Model: "second"}
 	original, err := s.Profiles.ResolveAssistant(selection)
@@ -106,6 +108,7 @@ func TestOlderProviderRevisionAdoptsToolsOnlyAtFreshTurnBoundary(t *testing.T) {
 }
 
 func TestDefaultProviderInitializesNewAssistantsAndPersists(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, first := configurationService(t)
 	if s.Profiles.Snapshot().DefaultProviderID != first.ID {

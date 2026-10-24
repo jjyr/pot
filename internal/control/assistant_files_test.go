@@ -14,6 +14,7 @@ import (
 )
 
 func TestAssistantFilesAreAuthoritativeAndNotifyUI(t *testing.T) {
+	t.Parallel()
 	s, _ := configurationService(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -80,6 +81,7 @@ func TestAssistantFilesAreAuthoritativeAndNotifyUI(t *testing.T) {
 }
 
 func TestAssistantFileStampDetectsAtomicReplacementWithPreservedMetadata(t *testing.T) {
+	t.Parallel()
 	s := &Service{options: Options{Root: t.TempDir()}}
 	directory := filepath.Join(s.options.Root, "assistants", "amber-otter")
 	if err := os.MkdirAll(directory, 0700); err != nil {

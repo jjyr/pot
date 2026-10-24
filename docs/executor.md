@@ -116,6 +116,20 @@ or non-directory workdir rejects the command without creating files.
 permissions determine accessible targets. Exact file grants allow in-place writes;
 directory grants also permit atomic replacement. Protected patches run in a dedicated
 Go worker under the same OS policy, so direct Go file writes do not bypass it.
+On Linux, file bind mounts reject atomic replacement with `EBUSY`. Before
+mutation, the protected worker selects in-place writing only for existing regular
+file content updates with an exact write grant and no covering directory grant.
+The executor omits redundant file binds covered by writable directories, preserving
+atomic replacement for workspace/directory writes. Host calls and other platforms
+retain the original writer and its temporary-file permission fallback.
+
+In-place writes verify parent/file identity and original contents, reject symlinks
+and multiple hard links, and take an advisory lock before writing and fsyncing.
+I/O failures attempt to restore the original contents and report restoration
+failure explicitly. These writes are not atomic for readers or crashes; locks
+only exclude cooperating writers. Linux worker errors never select another
+strategy or retry on the host. Multi-file patches remain nontransactional.
+
 Persistent plugin sessions pin bundle, observation mode, execution mode, revision
 and environment. Policy changes invalidate them rather than upgrading JS memory.
 Plugin processes start in their configured execution workspace in both host and

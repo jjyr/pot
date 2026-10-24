@@ -10,6 +10,7 @@ import (
 )
 
 func TestBootstrapWaitsForProviderAndCreatesExactlyOneRandomAssistant(t *testing.T) {
+	t.Parallel()
 	s, profile := configurationService(t)
 	ctx := context.Background()
 	s.Profiles.mu.Lock()
@@ -67,6 +68,7 @@ func TestBootstrapWaitsForProviderAndCreatesExactlyOneRandomAssistant(t *testing
 }
 
 func TestQuickCreationUsesDefaultsAndLocalizedWelcomeOnce(t *testing.T) {
+	t.Parallel()
 	s, profile := configurationService(t)
 	ctx := context.Background()
 	if _, err := s.BootstrapAssistant(ctx, "zh-CN"); err != nil {

@@ -163,14 +163,11 @@ distributed execution services.
 
 ## Business contract and recovery
 
-Each authenticated connection admits up to five simultaneous incoming business
-requests, including directory reads, observations and task operations. A sixth
-request returns `agent_link_capacity_exceeded` before invoking the backend.
-The slot remains occupied until its handler returns, including after a caller
-stops waiting. This is a request limit, not a limit on running Tasks.
-Mailbox exchange retains a separate single-request slot; both share the existing
-180 admitted requests per minute per connection. Invitation preview retains its
-single-request slot and separate per-invitation rate budget.
+Each connection admits five concurrent business handlers and one mailbox exchange,
+sharing a 180-admissions/minute budget. Excess business requests return
+`agent_link_capacity_exceeded` before backend execution. Slots remain held until
+handlers return, even if callers stop waiting. This counts handlers, not running Tasks.
+Invitation preview has its own single slot and 180-admissions/minute budget.
 
 `Backend` provides `Directory`, `Observe`, `Submit`, `Status` and `Cancel`. The same receiver
 implementation owns in-process calls and authenticated remote calls. The receiver
@@ -207,8 +204,7 @@ After 30 seconds, a disconnected owner or a sampling failure, current totals
 exclude that node and assistant activity is unknown. Cached values remain labeled
 in the inspector. Connection health and execution state stay independent.
 
-Message migration `0012_agent_message_timestamps` records local insertion time
-outside immutable envelopes. Exact retries retain that timestamp. Historical
+The message table records local insertion time outside immutable envelopes. Exact retries retain that timestamp. Historical
 messages retain zero (unknown); if an outbox contains such a message, its oldest
 timestamp remains unknown. Aggregates cover the entire node route rather than a
 bounded delivery page.

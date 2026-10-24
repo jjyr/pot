@@ -13,6 +13,7 @@ import (
 )
 
 func TestManageScheduleToolFullGoal(t *testing.T) {
+	t.Parallel()
 	s, _ := batchService(t, func(http.ResponseWriter, *http.Request) { t.Error("schedule management called a model") }, 1)
 	ctx := context.Background()
 	dispatch := s.productDispatch("main", "schedule-goal", 1, false)

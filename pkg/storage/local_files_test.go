@@ -17,8 +17,10 @@ func TestLocalExtensionExportMovesPackagesAndRetiresSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	nodeMigrationPrefix(t, db, ControlDatabase, 27)
-	execMigrationSQL(t, db, `INSERT INTO extension_settings VALUES('plugins','example',0,7,'/source'); INSERT INTO mcp_servers VALUES('example',4,'{"id":"example","name":"Example","transport":"stdio","command":"example","secret_ref":"encrypted-reference"}')`)
+	if err := Migrate(t.Context(), db, ControlDatabase); err != nil {
+		t.Fatal(err)
+	}
+	execMigrationSQL(t, db, `INSERT INTO retired_extension_settings VALUES('plugins','example',0,7,'/source'); INSERT INTO retired_mcp_servers VALUES('example',4,'{"id":"example","name":"Example","transport":"stdio","command":"example","secret_ref":"encrypted-reference"}')`)
 	for _, dir := range []string{"agent/plugins/example", "agent/skills/example", "skills"} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0700); err != nil {
 			t.Fatal(err)
@@ -114,19 +116,18 @@ func TestLocalRunsImportPreservesEvidenceAndExportsResourcesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	nodeMigrationPrefix(t, source, RunnerDatabase, 3)
+	if err := Migrate(t.Context(), source, RunnerDatabase); err != nil {
+		t.Fatal(err)
+	}
 	input := json.RawMessage(`{"request":{"id":"call"},"operation":{"kind":"shell","command":"original"}}`)
 	digest, _ := core.HashJSON(input)
 	resources, _ := json.Marshal(map[string]any{"roots": []any{map[string]any{"builtin": false, "files": map[string]string{"example/SKILL.md": base64.RawStdEncoding.EncodeToString([]byte("frozen skill"))}}}})
 	resourceDigest, _ := core.HashJSON(json.RawMessage(resources))
-	execMigrationSQL(t, source, `INSERT INTO task_runs VALUES('node','task','run','original-launch','running','old-boot','{"phase":"running","launch_digest":"original-launch"}');INSERT INTO task_events VALUES('node','task','run',1,'original-event');INSERT INTO run_workspaces VALUES('node','task','run','original-workspace')`)
-	if _, err := source.Exec(`INSERT INTO run_commands VALUES('node','task','run','call',?,'complete','{"value":{"text":"original-result"},"cleanup_unconfirmed":false}')`, digest); err != nil {
+	execMigrationSQL(t, source, `INSERT INTO task_runs VALUES('node','task','run','original-launch','recovery_required','old-boot','{"phase":"running","launch_digest":"original-launch"}');INSERT INTO task_events VALUES('node','task','run',1,'original-event');INSERT INTO run_workspaces VALUES('node','task','run','original-workspace')`)
+	if _, err := source.Exec(`INSERT INTO retired_execution_receipts VALUES('node','task','run','call',?,'complete','{"value":{"text":"original-result"},"cleanup_unconfirmed":false}',?)`, digest, string(input)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := source.Exec(`INSERT INTO run_command_inputs VALUES('node','task','run','call',?)`, string(input)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := source.Exec(`INSERT INTO run_resources VALUES('node','task','run',?,?)`, resourceDigest, string(resources)); err != nil {
+	if _, err := source.Exec(`INSERT INTO resource_file_export VALUES('node','task','run',?,?)`, resourceDigest, string(resources)); err != nil {
 		t.Fatal(err)
 	}
 	source.Close()

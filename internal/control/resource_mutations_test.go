@@ -8,6 +8,7 @@ import (
 )
 
 func TestOwnerResourceRetriesKeepOriginalReceiptAndFenceUnknownReplacement(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	calls := 0
@@ -47,6 +48,7 @@ func TestOwnerResourceRetriesKeepOriginalReceiptAndFenceUnknownReplacement(t *te
 }
 
 func TestUncertainResourceFailureFencesReplacement(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	_, err := s.OwnerResourceMutation(ctx, "unknown", "assistant:fixed", strings.Repeat("a", 64), func() (any, error) { return nil, core.ErrCleanupUnconfirmed })

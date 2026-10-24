@@ -10,6 +10,7 @@ import (
 )
 
 func TestCompletionsUseOwnerResourcesAndBoundMetadataWithoutExecution(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	if _, err := legacyMainAssistant(ctx, s, "create", "Pot"); err != nil {
@@ -81,6 +82,7 @@ func TestCompletionsUseOwnerResourcesAndBoundMetadataWithoutExecution(t *testing
 }
 
 func TestAssistantCompletionsReadPinnedPeerProfilesAndExcludeRevokedNodes(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, b := agentControl(t, "mention-a"), agentControl(t, "mention-b")
 	connection := connectAgentControls(t, a, b)
@@ -120,6 +122,7 @@ func TestAssistantCompletionsReadPinnedPeerProfilesAndExcludeRevokedNodes(t *tes
 }
 
 func TestAssistantCompletionsRetireDefinitionsWithoutUsingHistoricalContacts(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, b := agentControl(t, "retire-local"), agentControl(t, "retire-remote")
 	owner, err := a.service.Registry.Create(ctx, "observer", "Observer")

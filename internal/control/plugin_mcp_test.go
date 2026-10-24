@@ -35,6 +35,7 @@ type settingsFixture struct {
 }
 
 func TestPluginMCPSubscriptionsDiscoveryCRUDDefaultAndSharedUI(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	manager, _ := execution.New("local", "boot", execution.DefaultLimits())
 	keys, _ := secrets.NewMemoryKey(make([]byte, 32))
@@ -194,6 +195,7 @@ func TestPluginMCPSubscriptionsDiscoveryCRUDDefaultAndSharedUI(t *testing.T) {
 }
 
 func TestPluginMCPDefaultDeletionSurvivesServiceRestartAndReconnect(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dataRoot := t.TempDir()
 	packages, _ := filepath.Abs("../../plugins")
@@ -270,6 +272,7 @@ func TestPluginMCPDefaultDeletionSurvivesServiceRestartAndReconnect(t *testing.T
 }
 
 func TestPluginMCPHostScopesOpaqueInstancesToInstalledPackage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := taskResourceService(t)
 	s.pluginMu.Lock()

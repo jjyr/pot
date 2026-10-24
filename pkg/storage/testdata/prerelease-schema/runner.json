@@ -1,0 +1,49 @@
+{
+  "Objects": [
+    {
+      "Type": "index",
+      "Name": "task_events_task_sequence",
+      "Table": "task_events",
+      "SQL": "CREATE UNIQUE INDEX task_events_task_sequence ON task_events(control_id,task_id,sequence)"
+    },
+    {
+      "Type": "table",
+      "Name": "resource_file_export",
+      "Table": "resource_file_export",
+      "SQL": "CREATE TABLE \"resource_file_export\"(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,digest TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id))"
+    },
+    {
+      "Type": "table",
+      "Name": "retired_execution_receipts",
+      "Table": "retired_execution_receipts",
+      "SQL": "CREATE TABLE retired_execution_receipts(\n  control_id TEXT,\n  task_id TEXT,\n  run_id TEXT,\n  command_id TEXT,\n  digest TEXT,\n  phase TEXT,\n  reply TEXT,\n  input TEXT\n)"
+    },
+    {
+      "Type": "table",
+      "Name": "run_workspaces",
+      "Table": "run_workspaces",
+      "SQL": "CREATE TABLE run_workspaces(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id))"
+    },
+    {
+      "Type": "table",
+      "Name": "task_events",
+      "Table": "task_events",
+      "SQL": "CREATE TABLE task_events(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,sequence INTEGER NOT NULL,event TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id,sequence))"
+    },
+    {
+      "Type": "table",
+      "Name": "task_runs",
+      "Table": "task_runs",
+      "SQL": "CREATE TABLE task_runs(control_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,digest TEXT NOT NULL,phase TEXT NOT NULL,boot_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(control_id,task_id,run_id))"
+    }
+  ],
+  "Rows": {
+    "resource_file_export": [],
+    "retired_execution_receipts": [],
+    "run_workspaces": [],
+    "task_events": [],
+    "task_runs": []
+  },
+  "UserVersion": 0,
+  "ApplicationID": 0
+}

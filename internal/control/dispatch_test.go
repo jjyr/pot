@@ -36,6 +36,7 @@ func localDispatcher(t *testing.T) (*Dispatcher, core.ExecutionContext, *executo
 	return d, core.ExecutionContext{Owner: "assistant", Workspace: root, Role: core.Main}, engine
 }
 func TestAuthorizedHostCommandReceiptNoDuplicateEffect(t *testing.T) {
+	t.Parallel()
 	d, execution, engine := localDispatcher(t)
 	call := modelprotocol.ToolCall{ID: "call-1", Name: "exec_command", Arguments: json.RawMessage(`{"cmd":"printf x >> effect; printf hello","login":false}`)}
 	first, err := d.Dispatch(context.Background(), execution, call, nil)
@@ -66,6 +67,7 @@ func TestAuthorizedHostCommandReceiptNoDuplicateEffect(t *testing.T) {
 }
 
 func TestExternalPatchApprovalControlsActualWrite(t *testing.T) {
+	t.Parallel()
 	for _, decision := range []string{"allow_once", "deny"} {
 		t.Run(decision, func(t *testing.T) {
 			d, execution, _ := localDispatcher(t)
@@ -132,6 +134,7 @@ func TestBrowserUnavailableDiagnosticSurvivesDispatchAndReceiptReplay(t *testing
 }
 
 func TestStartupRejectionsReachAgentAsNotStarted(t *testing.T) {
+	t.Parallel()
 	for _, args := range []string{
 		`{"cmd":"printf changed > marker","tty":true,"login":false}`,
 		`{"cmd":"mkdir -p missing; printf changed > marker","workdir":"missing","login":false}`,
@@ -155,6 +158,7 @@ func (uncertainEngine) Execute(context.Context, executor.Request, func(executor.
 	return nil, core.ErrCleanupUnconfirmed
 }
 func TestUncertainHostCleanupFencesNewCall(t *testing.T) {
+	t.Parallel()
 	d, e, _ := localDispatcher(t)
 	d.Host = uncertainEngine{}
 	call := modelprotocol.ToolCall{ID: "uncertain", Name: "exec_command", Arguments: json.RawMessage(`{"cmd":"true","login":false}`)}
@@ -173,6 +177,7 @@ func TestUncertainHostCleanupFencesNewCall(t *testing.T) {
 }
 
 func TestToolsCannotRetargetAnotherRuntime(t *testing.T) {
+	t.Parallel()
 	d, e, _ := localDispatcher(t)
 	call := modelprotocol.ToolCall{ID: "retarget", Name: "exec_command", Arguments: json.RawMessage(`{"cmd":"true","execution_target":{"runtime_id":"other"}}`)}
 	if _, err := d.Dispatch(context.Background(), e, call, nil); err == nil {
@@ -181,6 +186,7 @@ func TestToolsCannotRetargetAnotherRuntime(t *testing.T) {
 }
 
 func TestDispatchReportsApprovalAndActualTargetBeforeExecution(t *testing.T) {
+	t.Parallel()
 	for _, decision := range []string{"allow_task", "deny"} {
 		t.Run(decision, func(t *testing.T) {
 			d, e, _ := localDispatcher(t)

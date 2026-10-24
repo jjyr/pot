@@ -13,6 +13,7 @@ import (
 )
 
 func TestUnifiedMessageToolBindsSenderAndRemovesWaitAndGuide(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	for _, worker := range []bool{false, true} {
 		names := map[string]bool{}
@@ -49,6 +50,7 @@ func TestUnifiedMessageToolBindsSenderAndRemovesWaitAndGuide(t *testing.T) {
 }
 
 func TestTaskMessageAutomaticallyBindsGuidanceAndPeerReference(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	if _, err := legacyMainAssistant(ctx, s, "main-create", "Main"); err != nil {
@@ -122,6 +124,7 @@ func TestTaskMessageAutomaticallyBindsGuidanceAndPeerReference(t *testing.T) {
 }
 
 func TestTitleOnlyTaskBriefNeverStartsGuessingWorker(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	_, err := s.productCall(context.Background(), "main", "brief", "create_task", json.RawMessage(`{"text":"Task A: execute the long operation\n"}`))
 	if err == nil || !strings.Contains(err.Error(), "complete execution instructions") {

@@ -65,15 +65,13 @@ references, never owner guidance.
 checks. `agent_messages` in the Control's `tasks.sqlite` stores Task inputs,
 assistant correspondence, task-result events and plugin notifications. Task input
 and notification views are transcript/receiver projections over this table, not separate queues.
-Task completion and its event commit in the same transaction. Task schema 10 stores node addresses; automatic migrations upgrade the prior
-unified outcome format without importing legacy queues or schedule notifications.
+Task completion and its event commit in the same transaction. The initial schema
+stores node addresses and does not adopt pre-reset development databases or import
+legacy queues; see [Database migrations](database-migrations.md).
 
-New local assistant mail checks the recipient's active identity inside the inbox
-writer transaction. Assistant retirement takes the same writer lock and rejects
-queued, processing, allowance-waiting or interrupted correspondence. Either mail
-is accepted first and blocks retirement, or retirement commits first and new mail
-is rejected. Exact retries retain their immutable receipts after retirement;
-direct-user reply projections do not require an active local assistant.
+Assistant retirement and mail admission share the inbox writer transaction.
+Pending or interrupted correspondence blocks retirement; retired recipients reject
+new mail. Exact retries retain their receipts, and direct-user replies need no local assistant.
 
 The assistant's user inbox is separate and has priority at turn boundaries.
 Accepted requests arriving during automatic result handling start their
@@ -249,22 +247,16 @@ Cancellation and turn completion retire the old sender
 binding. Parent-state validation and new mail insertion share a transaction;
 an already accepted request retains its immutable receipt after the parent ends.
 
-## Durable identity migration
+## Durable identity receipts
 
-Migrating a message address changes its field name, not its logical node ID,
-message ID, conversation, delivery receipt or processing state. Mailbox context
-keys are migrated with their full sender and recipient addresses. Task snapshots
-convert `info.address`; original task/run ownership stays intact.
-
-Existing Task input digests bind the complete original parent envelope, which
-need not be stored in the same database. These irreversible hashes cannot always
-be recomputed. `task_input_digest_formats` marks only historical receipts as
-format 1; the narrow input hash codec preserves that exact original serialization
-for retry comparisons. New inputs use format 2. Both formats compare all original
-content, including sender, text and parent. This internal hash version does not
-accept old network address fields. Ordinary tool output, plugin state, historical
-model messages and provider replay remain opaque evidence. Migrations change only
-known typed address paths and keep uncertain executions fenced.
+Message IDs, full node addresses, conversations and delivery receipts remain
+stable across retries and restarts. New Task input digests use format 2 and bind
+the complete sender, text and parent envelope. `task_input_digest_formats` is a
+separate receipt table; it is empty in a new database. The first public baseline
+does not convert old development message addresses or reconstruct their hashes.
+See [Database migrations](database-migrations.md) for the reset boundary.
+Ordinary tool output, plugin state, historical model messages and provider replay
+remain opaque evidence; restart recovery keeps uncertain executions fenced.
 
 ## Conversation presentation
 

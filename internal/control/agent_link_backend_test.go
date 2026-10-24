@@ -56,6 +56,7 @@ func linkBackendFixture(t *testing.T) (potLinkBackend, string) {
 	return potLinkBackend{s}, second.ID
 }
 func TestPotLinkBackendDeletedDefaultDoesNotRetargetOrHideHistory(t *testing.T) {
+	t.Parallel()
 	b, second := linkBackendFixture(t)
 	ctx := context.Background()
 	if _, err := b.Directory(ctx); err != nil {
@@ -105,6 +106,7 @@ func acceptedFrom() protocol.AgentRef {
 }
 
 func TestLocalBackendCannotClaimLinkedExecution(t *testing.T) {
+	t.Parallel()
 	b, _ := linkBackendFixture(t)
 	ctx := context.Background()
 	from := protocol.AgentRef{NodeID: "node", Kind: "assistant", AgentID: "main"}

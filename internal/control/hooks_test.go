@@ -10,6 +10,7 @@ import (
 )
 
 func TestApprovalHooksUpdateUIWithoutAssistantDelivery(t *testing.T) {
+	t.Parallel()
 	for _, action := range []string{"allow_task", "allow_always", "deny", "expire", "policy", "cancel"} {
 		t.Run(action, func(t *testing.T) {
 			p := permissionFixture(t)
@@ -93,6 +94,7 @@ func TestApprovalHooksUpdateUIWithoutAssistantDelivery(t *testing.T) {
 }
 
 func TestGrantResolutionHooksCoverAllMatchingPendingCommands(t *testing.T) {
+	t.Parallel()
 	p := permissionFixture(t)
 	events := make(chan hooks.Event, 8)
 	p.PublishHook = func(event hooks.Event) { events <- event }

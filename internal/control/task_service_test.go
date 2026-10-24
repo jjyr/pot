@@ -19,6 +19,7 @@ import (
 )
 
 func TestLocalTaskUsesSharedCapacityOwnerModelAndSummary(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	var summaryCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

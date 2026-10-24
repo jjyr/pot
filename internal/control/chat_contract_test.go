@@ -14,6 +14,7 @@ import (
 
 // The operation port and frame contract are identical for both execution adapters.
 func TestChatEndpointContract(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"native", "peer"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -103,6 +104,7 @@ func TestChatEndpointContract(t *testing.T) {
 }
 
 func TestChatStatusPreservesBindingAndTerminalFailureWithoutText(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, b := agentControl(t, "status-a"), agentControl(t, "status-b")
 	c := connectAgentControls(t, a, b)
@@ -148,6 +150,7 @@ func TestChatStatusPreservesBindingAndTerminalFailureWithoutText(t *testing.T) {
 }
 
 func TestChatRepliesKeepExactParentsAcrossOutOfOrderDeliveryAndRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, b := agentControl(t, "parents-a"), agentControl(t, "parents-b")
 	c := connectAgentControls(t, a, b)

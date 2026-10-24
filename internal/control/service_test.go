@@ -47,6 +47,7 @@ func awaitConversationContext(t *testing.T, ctx context.Context, c *assistant.Co
 	}
 }
 func TestLocalControlAgentApprovalCommandPersistenceAndRestart(t *testing.T) {
+	t.Parallel()
 	var modelCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-key" {

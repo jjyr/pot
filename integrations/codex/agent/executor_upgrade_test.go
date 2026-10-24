@@ -12,20 +12,15 @@ import (
 	"github.com/jjyr/pot/pkg/storage"
 )
 
-func TestExecutorUpgradeRetainsExactRetriesAndIndependentSessions(t *testing.T) {
+func TestInitialSchemaReopenRetainsExactRetriesAndIndependentSessions(t *testing.T) {
 	b := testBackend(t)
 	ctx := context.Background()
-	// The preceding schema has the same tables; restore its receipt prefix and
-	// insert historical requests without dispatching any work.
-	if _, err := b.db.Exec("DROP TABLE schedule_probes; DELETE FROM pot_migrations WHERE id >= '0025_'"); err != nil {
-		t.Fatal(err)
-	}
 	from := protocol.AgentRef{NodeID: "caller", Kind: "assistant", AgentID: "owner"}
 	for _, state := range []string{"queued", "completed", "cancelling"} {
-		old := map[string]any{"executor": "codex", "request_id": state, "from": from, "text": "任务 <tag> & \"quoted\"\n继续"}
+		old := agentlink.TaskRequest{Target: agentlink.NodeTarget(b.nodeID), RequestID: state, From: from, Text: "任务 <tag> & \"quoted\"\n继续"}
 		identity := agentlink.Identity{Address: protocol.AgentRef{NodeID: b.nodeID, Kind: "task", AgentID: state}, Name: "Codex", Adapter: "codex"}
 		thread := "thread-" + state
-		data := map[string]any{"task": map[string]any{"id": state, "request_id": state, "run_id": "run-" + state, "execution": identity, "state": state, "result": "saved"}, "request": old, "thread_id": thread, "turn_id": "turn-" + state, "cleanup_uncertain": true}
+		data := map[string]any{"task": map[string]any{"id": state, "request_id": state, "run_id": "run-" + state, "receiver": identity, "state": state, "result": "saved"}, "request": old, "thread_id": thread, "turn_id": "turn-" + state, "cleanup_uncertain": true}
 		if _, err := b.db.Exec("INSERT INTO codex_link_jobs(id,caller,request_id,payload,data) VALUES(?,?,?,?,?)", state, callerKey(from), state, encoded(old), encoded(data)); err != nil {
 			t.Fatal(err)
 		}

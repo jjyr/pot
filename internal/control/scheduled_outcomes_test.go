@@ -20,6 +20,7 @@ import (
 )
 
 func TestScheduledAndManualOutcomesShareSummaryDelivery(t *testing.T) {
+	t.Parallel()
 	for _, failSummary := range []bool{false, true} {
 		t.Run(fmt.Sprintf("summary-fails=%v", failSummary), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -216,6 +217,7 @@ func TestScheduledAndManualOutcomesShareSummaryDelivery(t *testing.T) {
 }
 
 func TestGetTaskReturnsFinalizedOutcome(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s, _ := batchService(t, func(w http.ResponseWriter, r *http.Request) { http.Error(w, "execution failed", http.StatusBadRequest) }, 1)
 	record, err := s.Tasks.AcceptLocal(ctx, "main", protocol.CreateTask{RequestID: "query", Text: "Inspect outcome\nDo the work"})

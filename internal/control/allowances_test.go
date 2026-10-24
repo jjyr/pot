@@ -7,6 +7,7 @@ import (
 )
 
 func TestConfiguredProviderAllowancesRetainCASAndEnforceOriginalRoute(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	profile, err := s.Profiles.Save(ctx, SaveProfile{RequestID: "provider", ProfileID: "profile", Name: "Fixture", Model: "model", Endpoint: "https://example.test", Protocol: "openai_chat", APIKey: "fixture", MaxOutputTokens: 20})

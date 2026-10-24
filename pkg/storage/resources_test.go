@@ -2,25 +2,17 @@ package storage
 
 import (
 	"context"
-	"io/fs"
 	"strings"
 	"testing"
-	"testing/fstest"
 
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
-func TestResourceReplyUpgradeAndUnreadWithoutMarkdown(t *testing.T) {
+func TestResourceReplyReopenAndUnreadWithoutMarkdown(t *testing.T) {
 	db := migrationDB(t)
 	ctx := context.Background()
-	old := fstest.MapFS{}
-	for _, name := range []string{"0001_baseline.sql", "0002_message_node_identity.sql"} {
-		path := "migrations/conversation/" + name
-		data, _ := fs.ReadFile(migrationFiles, path)
-		old[path] = &fstest.MapFile{Data: data}
-	}
-	if err := migrateDatabase(ctx, db, ConversationDatabase, old); err != nil {
+	if err := Migrate(ctx, db, ConversationDatabase); err != nil {
 		t.Fatal(err)
 	}
 	original := `{"id":"earlier","conversation_id":"main","role":"user","text":"keep this history","status":"complete","created_at_ms":1,"request_id":null}`
@@ -48,6 +40,6 @@ func TestResourceReplyUpgradeAndUnreadWithoutMarkdown(t *testing.T) {
 	}
 	prior, err := store.Message(ctx, "earlier")
 	if err != nil || prior.Text != "keep this history" {
-		t.Fatal("upgrade lost earlier history", err)
+		t.Fatal("reopen lost earlier history", err)
 	}
 }

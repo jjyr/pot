@@ -9,6 +9,7 @@ import (
 )
 
 func TestPotLinkDirectChatUsesExistingMailboxAndSeparateUserProjection(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, b := agentControl(t, "chat-a"), agentControl(t, "chat-b")
 	c := connectAgentControls(t, a, b)

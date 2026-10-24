@@ -13,6 +13,7 @@ import (
 )
 
 func TestRealMainSkillSandboxResources(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("POT_SANDBOX_INTEGRATION") != "1" {
 		t.Skip("requires real sandbox qualification")
 	}

@@ -27,6 +27,7 @@ import (
 )
 
 func TestAttachmentControlBytesRetryOwnershipAndRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pdf := []byte("%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\n%%EOF")
 	var calls atomic.Int64
@@ -180,6 +181,7 @@ func TestAttachmentControlBytesRetryOwnershipAndRestart(t *testing.T) {
 
 }
 func TestResolveRejectsUnsupportedAndDoesNotMutateCheckpoint(t *testing.T) {
+	t.Parallel()
 	s, err := attachments.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

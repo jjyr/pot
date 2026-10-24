@@ -10,6 +10,7 @@ import (
 )
 
 func TestMachineInterfaceAddresses(t *testing.T) {
+	t.Parallel()
 	var values []net.Addr
 	for _, text := range []string{"127.0.0.1/8", "::1/128", "169.254.1.1/16", "fe80::1/64", "224.0.0.1/4", "0.0.0.0/32", "fd00::2/64", "10.0.0.9/24", "192.168.1.2/24", "10.0.0.9/24", "::ffff:10.0.0.9/128"} {
 		ip, network, err := net.ParseCIDR(text)
@@ -29,6 +30,7 @@ func TestMachineInterfaceAddresses(t *testing.T) {
 }
 
 func TestMachineInventoryUsesHostnameWithoutChangingIdentity(t *testing.T) {
+	t.Parallel()
 	service := agentControl(t, "opaque-node-identity").service
 	items, err := service.MachineList(context.Background())
 	if err != nil {

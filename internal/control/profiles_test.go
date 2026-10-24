@@ -11,6 +11,7 @@ import (
 )
 
 func TestProfilesPinRoutesAndReconcileOriginalResponse(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	root := t.TempDir()
 	keys, _ := secrets.NewMemoryKey(make([]byte, 32))

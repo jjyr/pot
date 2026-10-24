@@ -16,6 +16,7 @@ import (
 )
 
 func TestExtensionDefaultsDisableFilteringAndRevisionFences(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	s.options.PluginRoot = t.TempDir()
@@ -61,6 +62,7 @@ func TestExtensionDefaultsDisableFilteringAndRevisionFences(t *testing.T) {
 	}
 }
 func TestUserSkillCreateEditConflictAndRecoverableRemove(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	text := "---\nname: notes\ndescription: Notes\n---\nOriginal"
@@ -91,6 +93,7 @@ func TestUserSkillCreateEditConflictAndRecoverableRemove(t *testing.T) {
 	}
 }
 func TestMCPHTTPDiscoveryCallToolSelectionAndEncryptedCredentials(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	calls := 0
@@ -204,6 +207,7 @@ func TestMCPHTTPDiscoveryCallToolSelectionAndEncryptedCredentials(t *testing.T) 
 }
 
 func TestSameProviderRevisionRefreshUsesCurrentExtensionSettings(t *testing.T) {
+	t.Parallel()
 	s, profile := configurationService(t)
 	ctx := context.Background()
 	s.options.PluginRoot = t.TempDir()
@@ -227,6 +231,7 @@ func TestSameProviderRevisionRefreshUsesCurrentExtensionSettings(t *testing.T) {
 }
 
 func TestLocalImportRejectsLinksAndPreservesUpdateIdentity(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	source := t.TempDir()
@@ -258,6 +263,7 @@ func TestLocalImportRejectsLinksAndPreservesUpdateIdentity(t *testing.T) {
 }
 
 func TestFailedMCPTestKeepsEditableConfigurationRevision(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(401) }))
@@ -281,6 +287,7 @@ func TestFailedMCPTestKeepsEditableConfigurationRevision(t *testing.T) {
 }
 
 func TestExtensionFilesAreReadWithoutRestart(t *testing.T) {
+	t.Parallel()
 	s := taskResourceService(t)
 	ctx := context.Background()
 	// Only files own catalogue settings; there are no live SQL configuration tables.

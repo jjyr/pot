@@ -31,80 +31,37 @@ func (b *admissionBackend) Directory(ctx context.Context) (Directory, error) {
 	}
 }
 
-func TestBusinessAdmissionConcurrencyAndRelease(t *testing.T) {
-	backendFailure := errors.New("backend failure")
-	for _, outcome := range []string{"success", "error", "cancel"} {
-		t.Run(outcome, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func TestBusinessAdmissionReleasesCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{{"success", nil}, {"error", errors.New("backend failure")}, {"cancel", context.Canceled}} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			backend := &admissionBackend{entered: make(chan struct{}, 6), finish: make(chan error, 6)}
+			backend := &admissionBackend{entered: make(chan struct{}, 1), finish: make(chan error, 1)}
 			s := &Service{options: Options{Backend: backend, HostIdentity: peer.Identity{NodeID: "receiver"}}, rates: map[string]rate{}}
-			request := peer.Request{Method: "directory", Params: json.RawMessage(`{}`)}
-			done := make(chan error, 6)
-			start := func(id string) {
-				go func() {
-					_, err := s.business(ctx, Connection{ID: id}, peer.Identity{}, request)
-					done <- err
-				}()
+			done := make(chan error, 1)
+			go func() {
+				_, err := s.business(ctx, Connection{ID: "connection"}, peer.Identity{}, peer.Request{Method: "directory", Params: json.RawMessage(`{}`)})
+				done <- err
+			}()
+			select {
+			case <-backend.entered:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
 			}
-			awaitEntry := func() {
-				t.Helper()
-				select {
-				case <-backend.entered:
-				case err := <-done:
-					t.Fatalf("request returned before backend entry: %v", err)
-				case <-ctx.Done():
-					t.Fatal(ctx.Err())
-				}
+			if tc.err == context.Canceled {
+				cancel()
+			} else {
+				backend.finish <- tc.err
+			}
+			if err := <-done; !errors.Is(err, tc.err) {
+				t.Fatalf("got %v, want %v", err, tc.err)
 			}
 			for range 5 {
-				start("connection-a")
-				awaitEntry()
-			}
-			if _, err := s.business(ctx, Connection{ID: "connection-a"}, peer.Identity{}, request); !errors.Is(err, ErrCapacity) {
-				t.Fatalf("sixth request: %v", err)
-			}
-			if backend.calls.Load() != 5 {
-				t.Fatal("rejected request entered backend", backend.calls.Load())
-			}
-			// A full connection must not consume another connection's budget.
-			start("connection-b")
-			awaitEntry()
-			var want error
-			switch outcome {
-			case "error":
-				want = backendFailure
-			case "cancel":
-				want = context.Canceled
-				cancel()
-			}
-			if outcome != "cancel" {
-				for range 6 {
-					backend.finish <- want
-				}
-			}
-			for range 6 {
-				select {
-				case err := <-done:
-					if !errors.Is(err, want) {
-						t.Fatalf("handler result: got %v, want %v", err, want)
-					}
-				case <-time.After(10 * time.Second):
-					t.Fatal("handler did not return")
-				}
-			}
-			for _, id := range []string{"connection-a", "connection-b"} {
-				s.mu.Lock()
-				active := s.rates[id].Active
-				s.mu.Unlock()
-				if active != [2]int{} {
-					t.Fatal("leaked admission slots", id, active)
-				}
-				// Use a fresh request context after cancellation, without resetting
-				// the Service or its rate/admission state.
-				backend.finish <- nil
-				if _, err := s.business(context.Background(), Connection{ID: id}, peer.Identity{}, request); err != nil {
-					t.Fatal("capacity did not recover", id, err)
+				if !s.admit("connection", businessAdmission) {
+					t.Fatal("handler leaked capacity")
 				}
 			}
 		})
@@ -122,9 +79,10 @@ func TestAdmissionControlSlotAndSharedRateBudget(t *testing.T) {
 			t.Fatal("control request consumed business capacity")
 		}
 	}
-	if s.admit(id, businessAdmission) {
-		t.Fatal("sixth business request admitted")
+	if s.admit(id, businessAdmission) || !s.admit("other-connection", businessAdmission) {
+		t.Fatal("business capacity must be bounded per connection")
 	}
+	s.release("other-connection", businessAdmission)
 	s.release(id, controlAdmission)
 	for range 5 {
 		s.release(id, businessAdmission)

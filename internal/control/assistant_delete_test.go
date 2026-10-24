@@ -10,6 +10,7 @@ import (
 )
 
 func TestDeleteAssistantRetiresIdentityAndPreventsResurrection(t *testing.T) {
+	t.Parallel()
 	s, _ := configurationService(t)
 	ctx := context.Background()
 	first, err := s.CreateAssistant(ctx, CreateAssistant{RequestID: "first", Name: "First"})
@@ -75,6 +76,7 @@ func TestDeleteAssistantRetiresIdentityAndPreventsResurrection(t *testing.T) {
 }
 
 func TestDeleteAssistantRejectsActiveTasks(t *testing.T) {
+	t.Parallel()
 	s, _ := configurationService(t)
 	ctx := context.Background()
 	a, err := s.CreateAssistant(ctx, CreateAssistant{RequestID: "owner", Name: "Owner"})

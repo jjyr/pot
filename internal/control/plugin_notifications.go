@@ -58,6 +58,12 @@ type backgroundStream struct {
 func (s *Service) runBackgrounds(ctx context.Context, now int64) {
 	s.pluginMu.Lock()
 	defer s.pluginMu.Unlock()
+	s.runBackgroundsLocked(ctx, now)
+}
+
+// runBackgroundsLocked requires pluginMu. A sequence of explicit ticks can keep
+// the same lock so automatic polling cannot interleave a different clock.
+func (s *Service) runBackgroundsLocked(ctx context.Context, now int64) {
 	if err := s.ensurePluginNotifications(ctx); err != nil {
 		return
 	}

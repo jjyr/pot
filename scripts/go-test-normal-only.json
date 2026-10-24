@@ -1,0 +1,160 @@
+{
+  "normal_only": [
+    {
+      "package": "./internal/control",
+      "reason": "Saved configuration and metadata contracts; lifecycle and CAS races are covered by the retained routing/provider/task suites.",
+      "tests": [
+        "TestAssistantCompletionsReadPinnedPeerProfilesAndExcludeRevokedNodes",
+        "TestAssistantCompletionsRetireDefinitionsWithoutUsingHistoricalContacts",
+        "TestAssistantSelectionDoesNotMutateProviderOrOtherAssistant",
+        "TestBundledGitHubPluginContract",
+        "TestCompletionsUseOwnerResourcesAndBoundMetadataWithoutExecution",
+        "TestConnectionRequestDecodesThroughPublicAPI",
+        "TestCreationBindsFullSelectionAndNeverReappliesOnRetry",
+        "TestCredentialCommandEnvironmentAndNonsecretReceipts",
+        "TestDiscoveredInputModalitiesSurviveSelectionAndReload",
+        "TestGitHubLoginAvailableWithoutDeploymentConfiguration",
+        "TestHostAssistantWorkspaceAndInstructionDiscoveryAreOwnerScoped",
+        "TestHostInstructionPriorityIgnoresSharedRulesAndKeepsActualSkillPaths",
+        "TestMachineInterfaceAddresses",
+        "TestMachineInventoryUsesHostnameWithoutChangingIdentity",
+        "TestManageScheduleToolControlSystemTimezone",
+        "TestManageScheduleToolFullGoal",
+        "TestModelDefaultsRefreshOnlySameProfileRevisionAndExplicitOverridesSurvive",
+        "TestModelListOptionalModalitiesCompatibility",
+        "TestProfilesPinRoutesAndReconcileOriginalResponse",
+        "TestProviderDiscoveryAndInference",
+        "TestProviderTestRejectsHTTPAndStreamFailures"
+      ]
+    },
+    {
+      "package": "./internal/control",
+      "reason": "Synchronous resource validation and large snapshot/text bounds; resource ownership still runs in the normal suite and resource/executor packages retain full race.",
+      "tests": [
+        "TestDeletedAssistantCannotReadOrRegisterResources",
+        "TestMarkdownResourceRegistrationRetainsWorkspaceAndBundleBoundaries",
+        "TestRegisterResourceNameSchemaDescribesDisplayLabel",
+        "TestResourceToolsSnapshotActualFilesAndFenceOwnership",
+        "TestTaskChunksBoundMemoryPreserveRevisionAndConfineLinks"
+      ]
+    },
+    {
+      "package": "./internal/control",
+      "reason": "Serial many-turn request-count regressions; conversation scheduling, cancellation, recovery and compaction retain race coverage.",
+      "tests": [
+        "TestAutomaticTurnsContinueBeyondFormerRequestCutoffs",
+        "TestMainConversationHasNoDefaultRequestCountCutoff"
+      ]
+    },
+    {
+      "package": "./internal/control",
+      "reason": "Synchronous configuration, validation and preview cases. Async catalog cancellation/credential rotation, extension refresh, live connections and revocation remain in race.",
+      "tests": [
+        "TestResolveRejectsUnsupportedAndDoesNotMutateCheckpoint",
+        "TestProviderDefaultsEnableInstalledToolsAndClearLegacyFilters",
+        "TestDefaultProviderInitializesNewAssistantsAndPersists",
+        "TestProviderContributionCatalogCacheAndDisableGates",
+        "TestBuiltinProvidersUseTheSameEnabledContributionRegistry",
+        "TestExactConnectionLimitsPrecedePublicSuffixFactsBeforeSaving",
+        "TestLocalExecutionRejectsAnotherNodesModelConfiguration",
+        "TestMissingAdapterDoesNotDisableUnrelatedProviderTypes",
+        "TestDeclarativeDirectoryReaderUsesLocalFactsWithoutCredentials",
+        "TestProviderEndpointPreviewOffersCorrectionWithoutPermittingMismatch",
+        "TestExtensionDefaultsDisableFilteringAndRevisionFences",
+        "TestUserSkillCreateEditConflictAndRecoverableRemove",
+        "TestLocalImportRejectsLinksAndPreservesUpdateIdentity",
+        "TestFailedMCPTestKeepsEditableConfigurationRevision",
+        "TestMissingAssistantCannotPublishIdentity",
+        "TestAgentLinkControlPreviewDoesNotClaimInvitation",
+        "TestAgentLinkControlPreviewExpiredInvitation"
+      ]
+    },
+    {
+      "package": "./pkg/core",
+      "reason": "Pure value/schema validation and tool contracts; mutable EventGate/Changes subscriptions remain in race.",
+      "tests": [
+        "FuzzDownloadFilename",
+        "TestCatalogMergeAndResolvedChecksum",
+        "TestDecodeJSONReceiptTimestamps",
+        "TestDownloadFilename",
+        "TestModelProviderContractValidationAndBundleIsolation",
+        "TestModelProviderSnapshotsPreserveUnknownAndRejectInvalidIdentity",
+        "TestProviderModelMetadataBoundsAndErrorCodes",
+        "TestProviderPublicDefaultCredentialIsBoundedHeaderSafeData",
+        "TestProviderReaderRequestCannotChooseUndeclaredTypeProtocolOrMethod",
+        "TestProviderReaderRequestRejectsUndeclaredConfiguration",
+        "TestScheduleGoalToolContract",
+        "TestStrictDefaultsNullAndCanonicalBytes",
+        "TestStrictTargetsAndAssignmentBinding"
+      ]
+    },
+    {
+      "package": "./pkg/cronexpr",
+      "reason": "Pure cron parsing and timezone calculations.",
+      "tests": [
+        "TestParserBoundaries",
+        "TestSystemTimezone"
+      ]
+    },
+    {
+      "package": "./pkg/protocol",
+      "reason": "Pure protocol value contracts.",
+      "tests": [
+        "TestChatReplyLifecycleUsesExecutionRatherThanOutputCompletion",
+        "TestFileLinks",
+        "TestMailCausalDepthContinuesWithoutWrapping",
+        "TestMessageAddressesUseNodeIdentityOnly",
+        "TestRetiredTaskSelectorsAreRejected",
+        "TestSSEChunksAndBounds",
+        "TestScheduledInputCapacityKeepsSubmissionAndMailBoundaries",
+        "TestSendMessageToolAddressSchemaMatchesDecoder",
+        "TestTaskTargetValidation",
+        "TestTaskWorkspaceIntentValidation",
+        "TestToolProjectionPreservesInputOutputAndTerminalStates",
+        "TestWireNullUnknownAndEventShape"
+      ]
+    },
+    {
+      "package": "./pkg/modelprotocol",
+      "reason": "Serial wire encoding, parsing and long-context formatting; model/session concurrency is exercised in agent and assistant packages.",
+      "tests": [
+        "TestAnthropicCacheWriteSurvivesFinalUsage",
+        "TestAnthropicThinkingSignatureAndInitialText",
+        "TestClampNativeFieldsAndPathBinding",
+        "TestCompactionRetainsPrefixAndRestoresToolPolicy",
+        "TestEndpointResolution",
+        "TestFailuresNeverProduceExecutableCalls",
+        "TestFourEncodersPreserveSchemasImagesAndReasoning",
+        "TestFragmentedChatToolsAndNativeReplay",
+        "TestInvalidSchemasAndOrphanToolResults",
+        "TestMessageReferenceEncodingAcrossProtocols",
+        "TestNativeUserAttachmentsRemainOnTheirMessage",
+        "TestProviderStreamPacketizationConsistency",
+        "TestProviderTruncationCannotReleaseToolCalls",
+        "TestResponsesExplicitlyDisablesStrictForOptionalToolFields",
+        "TestResponsesFinalTextAndGeminiReplay",
+        "TestResponsesReplayPreservesNativeItemsWithoutAnnotations",
+        "TestResponsesReturnedMetadataIsPreserved",
+        "TestResponsesTagPrefixStreamsImmediately",
+        "TestResponsesToolsKeepOmissionSemantics",
+        "TestSSEUnicodeMultilineAndTruncation",
+        "TestUnreportedCacheUsageStaysUnknown",
+        "TestUnresolvedAttachmentCannotBecomeAnEmptyModelMessage",
+        "TestUnresolvedMessageReferencesAreRejected",
+        "TestUsagePartialCumulativeAndOverflow"
+      ]
+    },
+    {
+      "package": "./pkg/storage/migrations",
+      "reason": "Serial file/JSON conversion helpers; authoritative SQLite transactions and concurrent handles retain full storage race.",
+      "tests": [
+        "TestProfileCacheTTLUpgrade",
+        "TestProfileCompactionUpgradePreservesRoutesAndReceipts",
+        "TestRetireBrowserTailnetFailsWithoutRemovingUnrecognizedData",
+        "TestRetireBrowserTailnetPreservesCredentialsAndInactiveKeys",
+        "TestRetireBrowserTailnetRejectsSymlinks",
+        "TestRetiredOwnerListenerSettingsUpgradeOnce"
+      ]
+    }
+  ]
+}

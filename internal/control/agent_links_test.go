@@ -16,7 +16,6 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
-// Background observation shares the peer's one-operation admission limit.
 // Retry only a confirmed capacity rejection, which precedes remote execution;
 // retain the exact original request and return every other outcome unchanged.
 func callAgentWhenReady(ctx context.Context, service *Service, owner string, operation agentlink.Operation, call agentlink.Call) (any, error) {
@@ -43,6 +42,7 @@ func retryAgentCapacity(ctx context.Context, call func(context.Context) (any, er
 }
 
 func TestRetryAgentCapacityPreservesOtherOutcomes(t *testing.T) {
+	t.Parallel()
 	transport := errors.New("transport outcome unknown")
 	for _, tc := range []struct {
 		name  string
@@ -161,6 +161,7 @@ func awaitAgentLinkMail(t *testing.T, s *Service, id string) protocol.MailRecord
 }
 
 func TestAgentLinkControlsExchangeWithoutAppAndDoNotGrantExecution(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, b := agentControl(t, "link-a"), agentControl(t, "link-b")
 	peer := protocol.AgentRef{NodeID: "link-b", Kind: "assistant", AgentID: "main"}
@@ -219,6 +220,7 @@ func TestAgentLinkControlsExchangeWithoutAppAndDoNotGrantExecution(t *testing.T)
 }
 
 func TestAgentLinkControlBindingRevocationAndNarrowListener(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, b := agentControl(t, "binding-a"), agentControl(t, "binding-b")
 	connection := connectAgentControls(t, a, b)
@@ -265,6 +267,7 @@ func TestAgentLinkControlBindingRevocationAndNarrowListener(t *testing.T) {
 }
 
 func TestMissingAssistantCannotPublishIdentity(t *testing.T) {
+	t.Parallel()
 	s := taskControl(t, "empty-node", "")
 	if _, err := s.agentLinkIdentity(context.Background(), "main"); err == nil {
 		t.Fatal("missing assistant published identity")
@@ -272,6 +275,7 @@ func TestMissingAssistantCannotPublishIdentity(t *testing.T) {
 }
 
 func TestAgentLinkControlPreviewDoesNotClaimInvitation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, b := agentControl(t, "preview-a"), agentControl(t, "preview-b")
 	if _, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", Mode: "address", Endpoint: b.endpoint}); err != nil {
@@ -316,6 +320,7 @@ func TestAgentLinkControlPreviewDoesNotClaimInvitation(t *testing.T) {
 }
 
 func TestAgentLinkControlPreviewExpiredInvitation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, b := agentControl(t, "expired-a"), agentControl(t, "expired-b")
 	if _, err := b.service.ManageAgentLink(ctx, AgentLinkCommand{Action: "configure", Mode: "address", Endpoint: b.endpoint}); err != nil {
