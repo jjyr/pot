@@ -18,9 +18,9 @@ type Workspace struct {
 	Source      string   `json:"source,omitempty"`
 	Remote      string   `json:"remote,omitempty"`
 	Base        string   `json:"base,omitempty"`
-	Commit      string   `json:"commit,omitempty"`
-	Branch      string   `json:"branch,omitempty"`
-	GitDirs     []string `json:"git_dirs,omitempty"`
+	Commit      string   `json:"commit,omitempty"`   // Starting commit, not current HEAD.
+	Branch      string   `json:"branch,omitempty"`   // Initial branch, not current branch.
+	GitDirs     []string `json:"git_dirs,omitempty"` // Administrative directory, then common directory.
 	Error       string   `json:"error,omitempty"`
 }
 
