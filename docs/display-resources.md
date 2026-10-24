@@ -88,6 +88,8 @@ and permissions. Ready references continue to show the saved version after sourc
 mutation or deletion. There is no implicit refresh to the current file version.
 
 Inline references open a file viewer, with optional source-line positioning.
+HTML references with a line number use inert source text rather than an interactive
+frame.
 A sole reference in a paragraph uses the existing image, bounded Markdown/text,
 PDF, audio/video or sandboxed HTML preview. Unsupported types show a download
 card. Media never autoplay and no file is automatically saved to the device.
@@ -97,9 +99,8 @@ updates preserve message identity and retain mounted media and resource leases.
 New model tool catalogs and dispatchers expose neither `register_resource` nor
 `present_resource`. Internal Store registration remains available to host services.
 Historical completed presentation results and typed presentation messages continue
-to render without rewriting their resources. The built-in main prompt still
-contains obsolete register/present delivery guidance; its text is intentionally
-unchanged pending explicit authorization to edit agent prompts.
+to render without rewriting their resources. The built-in main prompt directs
+file delivery through Markdown links using the same source and preview rules.
 
 Resource labels never choose a viewer or executable capability. Download names
 are derived separately with `core.DownloadFilename`; separators, control and

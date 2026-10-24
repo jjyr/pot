@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jjyr/pot/internal/assistant"
 	"github.com/jjyr/pot/internal/resources"
 )
 
@@ -105,6 +106,12 @@ func TestMarkdownResourceRegistrationRetainsWorkspaceAndBundleBoundaries(t *test
 func TestResourceToolsRemoved(t *testing.T) {
 	s, _ := configurationService(t)
 	for _, worker := range []bool{false, true} {
+		dispatch := s.productDispatch("main", "turn", 1, worker)
+		for _, name := range []string{"register_resource", "present_resource"} {
+			if dispatch[name] != nil || strings.Contains(assistant.MainPrompt, name) {
+				t.Fatal("obsolete resource tool remains in dispatch or built-in prompt", name)
+			}
+		}
 		for _, tool := range s.productTools(worker) {
 			if tool.Name == "register_resource" || tool.Name == "present_resource" {
 				t.Fatal("obsolete display tool", tool.Name)

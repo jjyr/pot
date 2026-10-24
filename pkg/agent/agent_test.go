@@ -604,6 +604,30 @@ func TestCompactionPersistsReducedClassifiedHistory(t *testing.T) {
 	}
 }
 
+func TestFileDeliveryInstructionsWithoutResourceTools(t *testing.T) {
+	for _, role := range []core.ExecutionRole{core.Main, core.Worker, core.Summary} {
+		t.Run(string(role), func(t *testing.T) {
+			a, _, service, thread, execution := setup(t)
+			execution.Role = role
+			service.model = func(request core.ModelRequest, _ int) (string, error) {
+				body := string(request.Body)
+				for _, obsolete := range []string{"register_resource", "present_resource"} {
+					if strings.Contains(body, obsolete) {
+						t.Error("model request requires removed resource tool", obsolete)
+					}
+				}
+				if !strings.Contains(body, "explicit Markdown file links") || !strings.Contains(body, "pot-file://TaskID/relative-path") {
+					t.Error("model request lacks supported file delivery instructions")
+				}
+				return response("done"), nil
+			}
+			if err := a.Execute(context.Background(), execution, thread, core.TurnRequest{RequestID: "file-delivery", Text: "Deliver the report"}, false, func(core.AgentEvent) error { return nil }); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestNotificationRetainsConfiguredToolsAndRefreshesContext(t *testing.T) {
 	a, _, service, thread, execution := setup(t)
 	execution.Role = core.Summary

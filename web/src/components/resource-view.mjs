@@ -21,7 +21,7 @@ function register(){
   customElements.define('pot-resource',class extends HTMLElement{
     generation=0;
     connectedCallback(){
-      const generation=++this.generation,{resource,mode,caption}=this.presentation,kind=resourcePreviewKind(resource);
+      const generation=++this.generation,{resource,mode,caption}=this.presentation,preview=resourcePreviewKind(resource),kind=this.line&&preview==='html'?'text':preview;
       const t=key=>translate(document.documentElement.lang,`resource.${key}`);
       this.dataset.kind=kind;this.dataset.mode=mode;
       const head=node('div','resource-heading'),identity=node('div','resource-identity'),badge=node('span','resource-type'),title=node('strong','resource-name',caption||resource.name),details=node('span','resource-details');
