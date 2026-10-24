@@ -68,8 +68,8 @@ local/remote placement or the Pot/Codex icon. Unsupported operations stay hidden
 or disabled; linked task results and their conversation keep their original route.
 
 Local machine permissions stay with the local node. Linked nodes own their
-models, credentials, workspaces and execution permissions. The UI provides no
-remote operator configuration or owner credential entry.
+models, credentials, workspaces and execution permissions. The UI manages receiver-advertised assistant configuration within existing owner
+scopes. It provides no owner credential entry or remote permission editing.
 Settings and native operator routes address the local installation.
 
 The native `internal/localui` adapter provides a transient local presentation
@@ -85,17 +85,25 @@ original conversation. Existing chat bubbles, composer, task detail and result
 notification components remain shared. See [Design language](design-language.md)
 and [Agent Links](agent-links.md).
 
-First-use Chat and + open the same Add assistant page in the conversation region.
-Its choices are API, another Pot, then Codex. The directory remains available on
-wide windows; narrow windows use a full-width page with Back. Returning to a
-conversation preserves its draft and reading position. API creation uses the
-local default Provider/model or opens the shared Provider editor first. Linked
-assistants come from the receiver directory; adding a node does not create a
-local assistant. A sole chat-capable assistant, or the receiver's chat-capable
-default, opens automatically; otherwise the page offers a choice. A connected
-Codex task executor returns to a connection confirmation explaining how the
-current assistant can delegate a task; it does not open a Codex chat. Empty remote
-chat directories offer refresh, and failed directory reads offer recovery.
+First-use Chat and + open the same Add assistant page. A transparent list shows
+this Pot and each connected node separately, including multiple nodes of the same
+brand. Offline and unsupported nodes retain their names, status explanations and
+connection-management actions. Only online nodes advertising node-level
+`assistant.management` open a creation form. The local API provider is selected
+inside that form. The secondary connection entry returns to creation with the new
+node selected; connecting from Link returns to Link instead.
+
+The shared form consumes a versioned, typed receiver catalog and only renders
+known supported fields. Models, reasoning effort and workspace scopes belong to
+the receiver. Loading and retry remain local to the selected runtime. A compact
+runtime summary offers Change, and one primary action creates the assistant.
+An unconfirmed mutation locks its payload for an exact retry with the same request
+ID. Successful creation opens the returned full identity even if the subsequent
+directory refresh fails. Cached absence requires a fresh source check before
+leaving the selected conversation; an offline node cannot confirm deletion.
+Other clients discover mutations through normal directory
+synchronization. The Link inspector reuses this form for creation and execution
+settings; names, avatars and deletion retain their existing profile/delete paths.
 
 Browser language and appearance use `pot-ui-locale` and `pot-ui-theme` per origin.
 The `pot-ui-v3` service worker cache replaces obsolete `pot-ui-*` asset caches.

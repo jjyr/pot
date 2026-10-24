@@ -393,7 +393,6 @@ def run(binary, base, env, cli_command, profile_only=False):
                 {
                     "request_id": "binary-artifact",
                     "text": "Prepare isolated artifact task",
-                    "machine_id": runtime["runtime_id"],
                     "workspace": {"kind": "directory", "project_dir": str(artifact_workspace)},
                 },
             )

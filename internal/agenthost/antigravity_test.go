@@ -36,7 +36,7 @@ func TestAntigravityManagementKeepsSessionsAndFencesBusyEdits(t *testing.T) {
 	b := agyBackend(t)
 	ctx := context.Background()
 	from := protocol.AgentRef{NodeID: "pot", Kind: "user", AgentID: "operator"}
-	r := agentlink.AssistantManagementRequest{From: from, Action: "create", RequestID: "one", ID: "one", Name: "One", Model: "model-one", Workspace: "antigravity"}
+	r := agentlink.AssistantManagementRequest{From: from, Action: "create", RequestID: "one", ID: "one", Name: managementValue("One"), Model: managementValue("model-one"), Workspace: scopeID(filepath.Join(b.root, "workspace"), "read-only")}
 	created, e := b.ManageAssistant(ctx, r)
 	if e != nil || created.Assistant == nil {
 		t.Fatal(created, e)
@@ -46,7 +46,7 @@ func TestAntigravityManagementKeepsSessionsAndFencesBusyEdits(t *testing.T) {
 		t.Fatal(retry, e)
 	}
 	changed := r
-	changed.Model = "model-two"
+	changed.Model = managementValue("model-two")
 	if _, e = b.ManageAssistant(ctx, changed); !errors.Is(e, agentlink.ErrConflict) {
 		t.Fatal("changed retry accepted", e)
 	}
@@ -57,7 +57,7 @@ func TestAntigravityManagementKeepsSessionsAndFencesBusyEdits(t *testing.T) {
 			t.Fatal("agent configured host", e)
 		}
 	}
-	update := agentlink.AssistantManagementRequest{From: from, Action: "update", RequestID: "update", ID: "one", Name: "One", Model: "model-two", Revision: created.Assistant.Revision}
+	update := agentlink.AssistantManagementRequest{From: from, Action: "update", RequestID: "update", ID: "one", Name: managementValue("One"), Model: managementValue("model-two"), Revision: created.Assistant.Revision}
 	b.db.Exec("UPDATE agent_adapter_assistants SET thread_id='retained-conversation' WHERE id='one'")
 	a, _ := b.resolve(ctx, "one")
 	parent := protocol.Envelope{ID: "incoming", Kind: "message", From: protocol.AgentRef{NodeID: "pot", Kind: "assistant", AgentID: "main"}, To: b.identity(a).Address, ConversationID: "123e4567-e89b-42d3-a456-426614174000", Text: "queued"}

@@ -83,3 +83,10 @@ Brand icons derive from `resources/app/PotIcon.swift`; tray atlases use the same
 artwork.
 
 SRT and its npm dependencies are pinned by `sandbox/package-lock.json`. Packaging includes their notices under `sandbox/THIRD-PARTY-NOTICES.txt`, exposed by About alongside Node and Go notices. The checked SDK extension is maintained in `sandbox/patch-sdk.mjs`.
+
+The Antigravity connection mark is the unmodified official favicon from
+`https://antigravity.google/favicon.svg`, retained in `web/src/assets/` with
+`Antigravity-NOTICE.txt`. It identifies the integration and does not imply
+endorsement. The original colors/proportions are preserved; the asset does not
+replace assistant avatars. Packaged `FrontendIconLicense.txt` includes its source
+and trademark notice alongside the other frontend icon notices.

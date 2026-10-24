@@ -42,12 +42,12 @@ async parentPage=>{
   assert(await full.getAttribute('readonly')!==null,'Manual invitation cannot be edited');
   assert(writes===writesBeforeDenied,'Preparing the invitation needs no clipboard permission');
   await page.locator('.agent-link-manual-copy').getByRole('button',{name:'Copy connection address',exact:true}).click();
-  await page.getByText('Clipboard copying is unavailable. Select the full address above and copy it manually.',{exact:true}).waitFor();
+  await page.getByText('Clipboard copying is unavailable. Select the full address above and copy it manually.',{exact:true}).first().waitFor();
   assert(await full.inputValue()===invitation&&calls.filter(call=>call.body.endpoint).length===invites,'Shortcut failure preserves the same manually copyable invitation');
   await page.evaluate(()=>{localStorage.setItem('pot-ui-locale','zh-CN');window.dispatchEvent(new Event('pot:locale'));});
   await page.getByLabel('完整连接地址',{exact:true}).waitFor();assert(await page.getByLabel('完整连接地址',{exact:true}).inputValue()===invitation,'Locale changes preserve the invitation');
   await page.getByText('快捷复制不可用，请选中上方完整地址并手动复制。',{exact:true}).waitFor();
-  await page.keyboard.press('Escape');assert(await full.inputValue()==='','Closing clears the invitation');
+  await page.keyboard.press('Escape');await page.waitForFunction(()=>document.querySelector('.agent-link-manual-copy textarea')?.value==='');assert(await full.inputValue()==='','Closing clears the invitation');
   await page.evaluate(()=>{window.fixtureClipboardDenied=false;localStorage.setItem('pot-ui-locale','en');window.dispatchEvent(new Event('pot:locale'));});
   assert(!calls.find(call=>call.method==='POST').body.assistant_id,'Invitations are not bound to a local assistant');
   assert(!await page.locator('.agent-link-recovery,.agent-link-unread').count(),'Manual message consumer recovery is removed');

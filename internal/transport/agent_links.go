@@ -12,13 +12,21 @@ func (a *Application) agentLinkCall(ctx context.Context, method, path string, r 
 	u, _ := url.ParseRequestURI(r.Path)
 	if path == "/api/v1/agent-links/assistants" && method == "POST" {
 		var input struct {
-			ConnectionID string `json:"connection_id"`
-			agentlink.AssistantManagementRequest
+			ConnectionID string            `json:"connection_id"`
+			From         protocol.AgentRef `json:"from,omitempty"`
+			Action       string            `json:"action"`
+			RequestID    string            `json:"request_id,omitempty"`
+			ID           string            `json:"id,omitempty"`
+			Name         *string           `json:"name,omitempty"`
+			Model        *string           `json:"model,omitempty"`
+			Effort       *string           `json:"effort,omitempty"`
+			Workspace    string            `json:"workspace,omitempty"`
+			Revision     uint64            `json:"revision,omitempty"`
 		}
 		if err := decode(r.Body, &input); err != nil {
 			return nil, err, true
 		}
-		value, err := a.Control.ManageLinkedAssistant(ctx, input.ConnectionID, input.AssistantManagementRequest)
+		value, err := a.Control.ManageLinkedAssistant(ctx, input.ConnectionID, agentlink.AssistantManagementRequest{Action: input.Action, RequestID: input.RequestID, ID: input.ID, Name: input.Name, Model: input.Model, Effort: input.Effort, Workspace: input.Workspace, Revision: input.Revision})
 		return value, err, true
 	}
 	if path == "/api/v1/agent-links/capabilities" && method == "GET" {

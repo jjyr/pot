@@ -173,3 +173,12 @@ node keys, owner secrets, assistant revisions, native threads, immutable request
 results and uncertain-cleanup fences remain intact. Old jobs are not rewritten or
 replayed. Antigravity uses a separate root and the same schema; opening a root with
 the wrong runtime is rejected.
+
+`tasks/0004_management_scopes` registers independent workspace scope IDs for
+existing owner paths/modes and converts saved management results to those scopes
+and the receiver's saved avatar.
+Optional effort remains a JSON string when present; omission preserves the stored
+receiver option, while an explicit empty string selects a supported default. The
+migration preserves original request payloads for exact retry recovery, assistant/native
+thread identities, revisions and task executor configuration. New owner-configured
+scopes use the same registry; deleting an assistant does not delete its scope.

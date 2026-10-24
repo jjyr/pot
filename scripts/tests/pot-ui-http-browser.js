@@ -22,8 +22,8 @@ async page=>{
   const providerBefore=await(await page.request.get(state.origin+'/api/v1/providers')).json(),assistantsBefore=await(await page.request.get(state.origin+'/api/v1/assistants')).json();
   const existingConnection=providerBefore.connections[0];
   const quickResponse=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/v1/assistants'&&response.request().method()==='POST'&&response.ok());
-  await page.getByRole('button',{name:'Add assistant',exact:true}).click();await page.getByRole('button',{name:'Create assistant',exact:true}).click();
-  const quick=await(await quickResponse).json();await page.locator('.assistant-identity-name').filter({hasText:quick.name}).waitFor();
+  await page.getByRole('button',{name:'Add assistant',exact:true}).click();await page.locator('.assistant-runtime-choice').first().click();await page.getByLabel('Assistant name',{exact:true}).fill('Quick local assistant');await page.getByRole('button',{name:'Create assistant',exact:true}).click();
+  const quick=await(await quickResponse).json();await page.locator('.window-title').filter({hasText:quick.name}).waitFor();await page.locator('.role-assistant').filter({hasText:quick.name}).waitFor();await page.waitForFunction(()=>document.querySelector('#pot-composer')&&!document.querySelector('#pot-composer').disabled);
   await page.getByRole('button',{name:'Assistant settings',exact:true}).click();
   await page.locator('.editor-fields>.avatar').waitFor();
   assert(await page.locator('.editor-fields>.avatar').count()===1,'Assistant has an avatar preview');
@@ -53,7 +53,9 @@ async page=>{
   step='first stream';
   const before=await second.locator('.role-assistant').count();await page.locator('#pot-composer').fill('First real browser stream');await page.getByRole('button',{name:'Send',exact:true}).click();await second.waitForFunction(count=>document.querySelectorAll('.role-assistant').length>count,before);await second.getByRole('link',{name:'Download binary proof',exact:true}).last().waitFor();await page.getByRole('link',{name:'Download binary proof',exact:true}).last().waitFor();
   const receipt=await page.request.get(state.origin+'/api/v1/snapshot?assistant_id='+state.assistant_id);const wireSnapshot=await receipt.json(),snapshot={...wireSnapshot.view.state,messages:wireSnapshot.view.messages.map(value=>value.message)};assert(snapshot.messages.some(value=>value.role==='user'&&value.text==='First real browser stream'),'Browser send persisted under original assistant');
-  const downloadPromise=page.waitForEvent('download');await page.getByRole('link',{name:'Download binary proof',exact:true}).last().click();const download=await downloadPromise;assert(download.suggestedFilename()==='proof.bin','Actual download filename');await download.saveAs(state.download_path);
+  await page.getByRole('link',{name:'Download binary proof',exact:true}).last().click();
+  const viewer=page.locator('dialog[open]');await viewer.locator('pot-resource').waitFor();
+  const downloadPromise=page.waitForEvent('download');await viewer.getByRole('button',{name:'Download proof.bin',exact:true}).click();const download=await downloadPromise;assert(download.suggestedFilename()==='proof.bin','Actual download filename');await download.saveAs(state.download_path);await viewer.getByRole('button',{name:'Close',exact:true}).click();
   step='reconnect';
   const reconnect=second.waitForResponse(response=>new URL(response.url()).pathname==='/api/v1/events'&&response.status()===200,{timeout:20000});assert((await page.request.post(state.coord+'/restart-web',{headers:{Authorization:'Bearer '+state.control_key}})).status()===200,'Independent browser service restarted');await reconnect;await page.waitForFunction(()=>!document.querySelector('#pot-composer')?.disabled);
   step='stream after reconnect';

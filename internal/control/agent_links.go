@@ -324,7 +324,7 @@ func agentLinkError(err error) error {
 	if err == nil {
 		return nil
 	}
-	for _, known := range []error{agentlink.ErrAssistantBusy, agentlink.ErrAssistantChanged, agentlink.ErrInvalid, agentlink.ErrNotFound, agentlink.ErrUnauthorized, agentlink.ErrExpired, agentlink.ErrUsed, agentlink.ErrConflict, agentlink.ErrRevoked, agentlink.ErrReconnectRequired, agentlink.ErrUnavailable, agentlink.ErrUnsupported, agentlink.ErrDisconnected, agentlink.ErrCapacity, agentlink.ErrFenced} {
+	for _, known := range []error{agentlink.ErrModelUnavailable, agentlink.ErrWorkspaceUnavailable, agentlink.ErrAssistantBusy, agentlink.ErrAssistantChanged, agentlink.ErrInvalid, agentlink.ErrNotFound, agentlink.ErrUnauthorized, agentlink.ErrExpired, agentlink.ErrUsed, agentlink.ErrConflict, agentlink.ErrRevoked, agentlink.ErrReconnectRequired, agentlink.ErrUnavailable, agentlink.ErrUnsupported, agentlink.ErrDisconnected, agentlink.ErrCapacity, agentlink.ErrFenced} {
 		if errors.Is(err, known) {
 			return protocol.APIError{Code: known.Error()}
 		}
@@ -544,5 +544,5 @@ func (s *Service) ManageLinkedAssistant(ctx context.Context, link string, input 
 	if err == nil {
 		s.Changes.Notify("agent-links")
 	}
-	return result, err
+	return result, agentLinkError(err)
 }

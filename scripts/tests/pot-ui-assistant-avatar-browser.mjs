@@ -28,20 +28,21 @@ export async function runAvatarRegression(probe) {
   locale('en');
   const before=(await directory()).length;
   const open=async seed=>{
+    await wait(()=>button('Add assistant')&&!button('Add assistant').disabled);
     const original=crypto.randomUUID.bind(crypto);let first=true;
     crypto.randomUUID=()=>{if(first){first=false;return seed;}return original();};
-    try{button('Add assistant').click();await wait(()=>document.querySelector('.assistant-start-option'));button('Create assistant').click();await wait(()=>probe.posts.at(-1)?.request_id===seed);}
+    try{button('Add assistant').click();await wait(()=>document.querySelector('.assistant-runtime-choice'));document.querySelector('.assistant-runtime-choice').click();await wait(()=>document.querySelector('.editor-actions .primary'));document.querySelector('.editor-actions .primary').click();await wait(()=>probe.posts.at(-1)?.request_id===seed);}
     finally{crypto.randomUUID=original;}
   };
   probe.failNext=true;await open('avatar-regression-'+view+'-1');
   await wait(()=>button('Add assistant')&&!button('Add assistant').disabled);
-  assert(!preview(),'Plus never opens a creation editor');
-  const failureNotice=document.querySelector('.assistant-creation-error');
-  assert(!failureNotice.hidden&&failureNotice.textContent.includes('Could not create'),'Directory exposes a localized creation failure');
+  assert(!!document.querySelector('.assistant-runtime-summary'),'The creation form retains the selected runtime');
+  const failureNotice=document.querySelector('.editor-form .inline-error');
+  assert(!failureNotice.hidden&&failureNotice.textContent.includes('not confirmed'),'The form exposes localized unknown-outcome recovery');
   if(document.querySelector('.pot-app').classList.contains('show-directory'))assert(failureNotice.getClientRects().length>0,'Phone directory failure is visible while Chat is hidden');
   assert((await directory()).length===before,'Failed creation leaves the directory intact');
   const failure=probe.posts.at(-1);
-  locale('zh-CN');button('创建助手').click();
+  locale('zh-CN');document.querySelector('.editor-actions .primary').click();
   await wait(()=>probe.posts.length>=2&&probe.posts.at(-1).request_id===failure.request_id);
   await wait(()=>document.querySelector('.window-title .assistant-identity-name')?.textContent&&document.querySelector('.role-assistant'));
   let saved=await directory(),firstDefinition=saved.find(item=>item.request_id===failure.request_id);
