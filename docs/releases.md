@@ -127,6 +127,16 @@ never clobbered. The initial release notes explain that availability is per chan
 and the Linux desktop is experimental. The publisher also handles identical asset
 creation races safely.
 
+An unpublished draft may be absent from GitHub's release-by-tag endpoint. The
+publisher checks the release list and reads a matching draft by ID before
+creating anything. Multiple releases with the same tag stop automatic publication.
+For a reviewed recovery, `scripts/publish-release VERSION ARTIFACTS --channel CHANNEL
+--release-id ID` binds reads, uploads and publication to that existing ID; a draft
+must name the validated source and tag. Use only the original artifacts from the
+qualified run, wait for other asset writers to finish, and retain their hashes.
+Every channel asset must be present with its expected digest and size before a
+draft becomes public. Recovery never rewrites a tag or replaces different bytes.
+
 Every archive has a standard `NAME.sha256` sidecar. Each channel owns a distinct
 manifest: `SHA256SUMS-server`, `SHA256SUMS-desktop`, `SHA256SUMS-macos` or
 `SHA256SUMS-container`. One channel cannot replace another channel's checksum

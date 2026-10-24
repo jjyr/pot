@@ -411,6 +411,144 @@ class CompleteDistribution(AssetsFixture, unittest.TestCase):
 
 
 class GitHubPublication(AssetsFixture, unittest.TestCase):
+    def test_new_draft_is_discovered_and_published_after_complete_upload(self):
+        self.exercise_draft([])
+
+    def test_existing_draft_is_reused_without_creation(self):
+        self.exercise_draft([1])
+
+    def test_ambiguous_drafts_stop_before_writes(self):
+        self.exercise_draft([1, 2], rejected="Multiple releases")
+
+    def test_reviewed_release_id_binds_uploads_and_publication(self):
+        self.exercise_draft([1, 2], selected=1)
+
+    def test_reviewed_draft_must_target_validated_source(self):
+        self.exercise_draft([1], selected=1, target=OTHER, rejected="validated source")
+
+    def test_incomplete_draft_remains_unpublished(self):
+        self.exercise_draft([1], selected=1, omit=True, rejected="incomplete")
+
+    def exercise_draft(self, ids, selected=None, target=SHA, omit=False, rejected=None):
+        publish = runpy.run_path(str(ROOT / "scripts/publish-release"))["publish"]
+        releases = [
+            {
+                "id": value,
+                "tag_name": "v1.2.3",
+                "target_commitish": target,
+                "draft": True,
+                "assets": [],
+            }
+            for value in ids
+        ]
+        writes = []
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.fixture(root)
+            prepare("1.2.3", root, channel="server")
+
+            def run(arguments, **options):
+                if arguments[:2] == ["gh", "api"]:
+                    if "--method" not in arguments:
+                        endpoint = arguments[2]
+                        if "/releases/tags/" in endpoint:
+                            published = next((r for r in releases if not r["draft"]), None)
+                            return subprocess.CompletedProcess(
+                                arguments,
+                                0 if published else 1,
+                                json.dumps(published or {"status": "404"}),
+                                "",
+                            )
+                        if endpoint.endswith("releases?per_page=100"):
+                            return subprocess.CompletedProcess(
+                                arguments, 0, json.dumps([releases]), ""
+                            )
+                        release = next(
+                            r for r in releases if r["id"] == int(endpoint.rsplit("/", 1)[1])
+                        )
+                        return subprocess.CompletedProcess(arguments, 0, json.dumps(release), "")
+                    method = arguments[arguments.index("--method") + 1]
+                    endpoint = next(a for a in arguments if "/releases/" in a)
+                    value = int(endpoint.split("/releases/", 1)[1].split("/", 1)[0])
+                    release = next(r for r in releases if r["id"] == value)
+                    self.assertEqual(value, selected)
+                    if method == "PATCH":
+                        self.assertEqual(len(release["assets"]), 5)
+                        release["draft"] = False
+                        writes.append(("publish", value))
+                        return subprocess.CompletedProcess(arguments, 0, "{}", "")
+                    self.assertEqual(method, "POST")
+                    path = Path(arguments[-1])
+                elif arguments[:3] == ["gh", "release", "create"]:
+                    self.assertFalse(releases)
+                    releases.append(
+                        {
+                            "id": 1,
+                            "tag_name": "v1.2.3",
+                            "target_commitish": SHA,
+                            "draft": True,
+                            "assets": [],
+                        }
+                    )
+                    writes.append(("create", 1))
+                    return subprocess.CompletedProcess(arguments, 0, "", "")
+                elif arguments[:3] == ["gh", "release", "edit"]:
+                    self.assertEqual(len(releases), 1)
+                    self.assertEqual(len(releases[0]["assets"]), 5)
+                    releases[0]["draft"] = False
+                    writes.append(("publish", releases[0]["id"]))
+                    return subprocess.CompletedProcess(arguments, 0, "", "")
+                else:
+                    self.assertEqual(arguments[:3], ["gh", "release", "upload"])
+                    self.assertEqual(len(releases), 1)
+                    release = releases[0]
+                    path = Path(arguments[-1])
+                writes.append(("upload", release["id"]))
+                if not omit:
+                    release["assets"].append(
+                        {
+                            "name": path.name,
+                            "digest": "sha256:" + checksum(path),
+                            "size": path.stat().st_size,
+                        }
+                    )
+                return subprocess.CompletedProcess(arguments, 0, "{}", "")
+
+            with (
+                mock.patch.dict(os.environ, GITHUB_REPOSITORY="jjyr/pot", RELEASE_SHA=SHA),
+                mock.patch("subprocess.run", side_effect=run),
+                mock.patch("subprocess.check_output", return_value=SHA),
+                mock.patch("builtins.print"),
+            ):
+                if rejected:
+                    with self.assertRaisesRegex((RuntimeError, ValueError), rejected):
+                        publish(
+                            "1.2.3",
+                            root,
+                            "server",
+                            **({"release_id": selected} if selected is not None else {}),
+                        )
+                    self.assertFalse(any(w[0] in {"publish", "create"} for w in writes))
+                else:
+                    publish(
+                        "1.2.3",
+                        root,
+                        "server",
+                        **({"release_id": selected} if selected is not None else {}),
+                    )
+                    self.assertEqual([w for w in writes if w[0] == "publish"], [("publish", 1)])
+                    count = len(writes)
+                    publish(
+                        "1.2.3",
+                        root,
+                        "server",
+                        **({"release_id": selected} if selected is not None else {}),
+                    )
+                    self.assertEqual(len(writes), count)
+                    if len(releases) > 1:
+                        self.assertEqual(releases[1]["assets"], [])
+                        self.assertTrue(releases[1]["draft"])
+
     def test_independent_channels_add_assets_without_overwriting_other_checksums(self):
         self.exercise()
 
