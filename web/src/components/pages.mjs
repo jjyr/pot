@@ -1,5 +1,8 @@
+import {taskIdentityMark,taskIdentityShort} from './task-identity.mjs';
+import {recordOwner,groupRecords,groupHeading,ownerChoices,createRecordPagination} from './record-groups.mjs';
+import {taskIdentities,taskAddress} from '../state/task-identity.mjs';
 import {machinePresentation,machineDisplayName} from '../state/machine-identity.mjs';
-import {connectionBrand,taskAgentSource} from './connection-visuals.mjs';
+import {connectionBrand} from './connection-visuals.mjs';
 import {createExtensions} from './extensions.mjs';
 import {browserTimezone,connectScheduleEditor,beforeRunDraft,hookHistory} from './schedule-editor.mjs';
 import {usageCalendar,usageDistributions} from './usage-calendar.mjs';
@@ -40,9 +43,9 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
   const gate = createRequestGate(), approvalGate = createRequestGate();
   let assistantStartRefresh=null,assistantLoad=null;
   let route = '', title = '', editor = null, disposed = false, pageVersion = 0, configurationSpace = '',taskView=null,taskOrigin=null,taskListView=null,scheduleView=null,detailParent=false,usageOwner=null;
-  let filter = {taskScope:'active', taskQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageScope:'all', usageSpace:'all',usageRange:usageRange(),usageYear:Number(usageToday().slice(0,4)),settingsTab:'general'};
+  let filter = {taskScope:'active', taskQuery:'', taskPhase:'', listOwner:'', scheduleQuery:'', taskOffset:0, scheduleOffset:0, taskTab:'tasks', usageScope:'all', usageSpace:'all',usageRange:usageRange(),usageYear:Number(usageToday().slice(0,4)),settingsTab:'general'};
   let pendingApprovals=[],notificationSettings=null;
-  const taskDetails=new Map(),resourceBoots=new Map();
+  const taskDetails=new Map(),resourceBoots=new Map(),ownerDisclosures=new Map();
   const providerAllowanceMemory=new Map(),toolMemory=new Map(),usageOffsets=new Map(),usageCache=new Map(),approvalCards=new Map(),taskNames=new Map();
   const chatApprovals=createChatApprovals({host:chatApprovalHost,locale,visible:chatVisible});
   const cached = new Map(),spaceCache = new Map(),machineDrafts=new Map(),editorParents=[],taskDrafts=new Map(),taskDraftVersions=new Map(),taskWrites=new Map(),scheduleWrites=new Map();
@@ -94,7 +97,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     const pages=results.filter(value=>value.status==='fulfilled').map(value=>value.value);
     (errorTarget||host).querySelector('.space-availability')?.remove();
     if((failed.length||pages.some(page=>page.stale))&&!(errorTarget||host).querySelector('.space-availability')) {const message=n('p','inline-error space-availability',route==='usage'?tr('Some Spaces are unavailable; totals may be incomplete and cached rows are marked stale.','部分 Space 不可用，用量可能不完整，缓存项目标记为过期。'):tr('Some Spaces are unavailable. Cached rows are marked stale.','部分 Space 不可用，缓存项目标记为过期。'));(errorTarget||host.querySelector('.page-content'))?.prepend(message);}
-    if(!pages.length&&targets.length)throw failed[0]?.reason||Error('No Space data');return pages;
+    if(!pages.length&&targets.length)throw failed[0]?.reason||Error('No Space data');pages.partial=failed.length>0||pages.some(page=>page.stale);return pages;
   }
   function heading(value) {title=value; titleChanged();}
   function errorView(reason, target = host) {
@@ -467,18 +470,33 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     };
     form.lifecycle.dispose=()=>{typeVersion++;typeController?.abort();priorDispose?.();};
   }
+  const taskListKey=()=>JSON.stringify(['tasks',[filter.taskTab,filter.taskScope,filter.taskQuery,filter.taskPhase,filter.listOwner,filter.scheduleQuery,filter.taskOffset,filter.scheduleOffset]]);
+  function paginationPair(root,label,move) {
+    const top=createRecordPagination({locale,label,move:direction=>move(direction,top)}),bottom=createRecordPagination({locale,label,move:direction=>move(direction,bottom)});
+    top.root.dataset.viewKey='pagination-top';bottom.root.dataset.viewKey='pagination-bottom';
+    return {top,bottom,update:value=>{top.update(value);bottom.update(value);}};
+  }
+  function focusPagination(pager,direction) {
+    const selected=direction<0?pager.previous:pager.next,other=direction<0?pager.next:pager.previous;
+    (selected.disabled?other:selected).focus({preventScroll:true});
+    if(selected.disabled&&other.disabled){taskListView?.rows.focus({preventScroll:true});}
+  }
   async function tasks(root,token) {
-    root.classList.add('tasks-content');
-    root.append(segments([['tasks',tr('Tasks','任务')],['schedules',tr('Schedules','定时计划')]],filter.taskTab,value=>{filter.taskTab=value;show('tasks');}));
+    const t=key=>translate(locale(),key);root.classList.add('tasks-content');
+    root.append(segments([['tasks',t('tasks.tab')],['schedules',t('tasks.schedulesTab')]],filter.taskTab,value=>{filter.taskTab=value;if(value==='tasks'&&filter.listOwner==='unknown-owner')filter.listOwner='';show('tasks');}));
     if(filter.taskTab==='schedules')return schedules(root,token);
     const controls=toolbar();controls.classList.add('task-filters');
-    const scopes=segments(['active','attention','archived'].map(value=>[value,translate(locale(),`tasks.scope.${value}`)]),filter.taskScope,value=>{filter.taskScope=value;filter.taskOffset=0;restartTaskList();});controls.append(scopes);
-    const search=field(translate(locale(),'tasks.search'),filter.taskQuery,{kind:'search'});search.row.classList.add('task-search');search.input.placeholder=translate(locale(),'tasks.search');controls.append(search.row);root.append(controls);
-    const rows=n('div','task-list');rows.dataset.scrollKey='task-list';rows.append(n('p','hint',tr('Loading…','正在加载…')));root.append(rows);
-    const summary=n('span','hint'),previous=action(tr('Previous','上一页'),()=>{filter.taskOffset=Math.max(0,filter.taskOffset-20);restartTaskList();},{disabled:!filter.taskOffset});
-    const next=action(tr('Next','下一页'),()=>{filter.taskOffset=taskListView.result.next_offset;restartTaskList();},{disabled:true});
-    const footer=toolbar(summary,previous,next);footer.classList.add('pagination');root.append(footer);
-    const view={token,rows,scopes,summary,previous,next,nodes:new Map(),result:null};taskListView=view;
+    const scopes=segments(['active','complete','archived'].map(value=>[value,t(`tasks.scope.${value}`)]),filter.taskScope,value=>{filter.taskScope=value;filter.taskPhase='';filter.taskOffset=0;restartTaskList();});controls.append(scopes);
+    const phase=field(t('tasks.phaseFilter'),filter.taskPhase|| (filter.taskScope==='unarchived'?'unarchived':''),{choices:[['',t('tasks.allStages')],['unarchived',t('tasks.unarchived')],...['running','queued','waiting','waiting_approval','complete','failed','interrupted','cancelled'].map(value=>[value,taskPhaseLabel(value)])]});phase.row.classList.add('record-filter');
+    phase.input.onchange=()=>{const value=phase.input.value;filter.taskPhase=value==='unarchived'?'':value;if(filter.taskScope!=='archived'||value==='unarchived')filter.taskScope='unarchived';filter.taskOffset=0;restartTaskList();};controls.append(phase.row);
+    const search=field(t('tasks.search'),filter.taskQuery,{kind:'search'});search.row.classList.add('task-search');search.input.placeholder=t('tasks.search');
+    const owner=field(t('tasks.assistantFilter'),filter.listOwner,{choices:ownerChoices(client,locale()).filter(([key])=>key!=='unknown-owner')});owner.row.classList.add('record-filter','record-owner-filter');owner.input.onchange=()=>{filter.listOwner=owner.input.value;filter.taskOffset=0;restartTaskList();};
+    const searchLine=toolbar(search.row,owner.row);searchLine.classList.add('record-search-line');root.append(controls,searchLine);
+    const help=n('p','record-view-help'),reminders=n('div','task-reminders');reminders.setAttribute('aria-label',t('tasks.reminders'));root.append(help,reminders);
+    const rows=n('div','task-list record-group-list');rows.dataset.scrollKey='task-list';rows.tabIndex=-1;rows.append(n('p','hint',t('loading.pending')));
+    const pager=paginationPair(root,t('tasks.pagination'),(direction,origin)=>{filter.taskOffset=direction<0?Math.max(0,filter.taskOffset-20):taskListView.result.next_offset;taskListView.pageFocus={origin,direction};restartTaskList();});
+    pager.update({loading:true});root.append(pager.top.root,rows,pager.bottom.root,n('p','record-page-note',t('tasks.pageNote')));
+    const view={token,rows,scopes,phase:phase.input,help,reminders,pager,nodes:new Map(),groups:new Map(),seen:new Map(),result:null};taskListView=view;
     view.queue=createRefreshQueue(()=>readTaskList(view),{active:()=>!disposed&&gate.current(view.token)&&taskListView===view});
     view.stopSearch=bindSearch(search.input,value=>{if(value===filter.taskQuery)return;filter.taskQuery=value;filter.taskOffset=0;restartTaskList();});
     view.clock=bindTaskClock(rows,{locale,active:()=>!disposed&&gate.current(view.token)&&taskListView===view&&!!rows.offsetParent});
@@ -488,60 +506,69 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
   function restartTaskList(){
     const view=taskListView;if(!view)return;
     view.queue.close();view.token=gate.next();view.queue=createRefreshQueue(()=>readTaskList(view),{active:()=>!disposed&&gate.current(view.token)&&taskListView===view});
-    currentViewKey=JSON.stringify(['tasks',[filter.taskTab,filter.taskScope,filter.taskQuery,filter.taskOffset,filter.scheduleOffset]]);
+    currentViewKey=taskListKey();
     return view.queue.run();
   }
   async function readTaskList(view) {
     const token=view.token,offset=filter.taskOffset,current=()=>gate.current(token)&&taskListView===view;
-    view.rows.setAttribute('aria-busy','true');view.next.disabled=true;
+    const queryKey=JSON.stringify([filter.taskScope,filter.taskQuery,filter.taskPhase,filter.listOwner,offset]);
+    if(view.queryKey!==queryKey){view.queryKey=queryKey;view.result=null;view.nodes.clear();view.groups.clear();view.rows.replaceChildren(n('p','hint',translate(locale(),'loading.pending')));}
+    for(const [index,value]of ['active','complete','archived'].entries()){const button=view.scopes.children[index];button.classList.toggle('selected',filter.taskScope===value);button.setAttribute('aria-pressed',String(filter.taskScope===value));}
+    view.rows.setAttribute('aria-busy','true');view.pager.update({offset,loading:true});
     try {
       const [,{pages,partial}]=await Promise.all([
         Promise.all((client.spaces||[]).map(space=>machineInfo.load({space:space.id,signal:token.signal}))),
-        readTaskPages({scope:filter.taskScope,q:filter.taskQuery,offset,signal:token.signal,onProgress:pages=>{if(current())updateTaskList(view,pages,true);}}),
+        readTaskPages({scope:filter.taskScope,q:filter.taskQuery,phase:filter.taskPhase,owner:filter.listOwner,offset,signal:token.signal,onProgress:pages=>{if(current()&&!view.result)updateTaskList(view,pages,true,true);}}),
       ]);
       if(!current())return;
       const total=pages.reduce((sum,page)=>sum+(page.value.total??page.value.items?.length??0),0);
-      if(!partial&&filter.taskOffset>=total&&filter.taskOffset){filter.taskOffset=Math.max(0,Math.floor((total-1)/20)*20);currentViewKey=JSON.stringify(['tasks',[filter.taskTab,filter.taskScope,filter.taskQuery,filter.taskOffset,filter.scheduleOffset]]);}
-      updateTaskList(view,pages,false);
+      if(!partial&&filter.taskOffset>=total&&filter.taskOffset){filter.taskOffset=Math.max(0,Math.floor((total-1)/20)*20);currentViewKey=taskListKey();}
+      updateTaskList(view,pages,false,partial);
       view.rows.parentElement.querySelector('.space-availability')?.remove();
-      if(partial){const notice=n('p','hint space-availability',translate(locale(),'tasks.partialSources'));notice.setAttribute('role','status');view.rows.before(notice);}
-    }catch(reason){if(current()&&reason.name!=='AbortError'){if(!view.result){view.rows.replaceChildren();errorView(reason,view.rows);}else notify(reason.message);}}
+      if(partial){const notice=n('div','hint space-availability');notice.setAttribute('role','status');notice.append(n('span','',translate(locale(),'tasks.partialSources')),action(translate(locale(),'tasks.retry'),()=>refreshTaskList(view)));view.rows.before(notice);}
+      if(view.pageFocus){focusPagination(view.pageFocus.origin,view.pageFocus.direction);view.pageFocus=null;}
+    }catch(reason){if(current()&&reason.name!=='AbortError'){if(!view.result){view.rows.replaceChildren();errorView(reason,view.rows);}else notify(reason.message);view.pager.update({offset,count:view.result?.items.length||0,partial:true});}}
     finally{if(current())view.rows.setAttribute('aria-busy','false');}
   }
-  function updateTaskList(view,pages,loading){
-      const result=combineTasks(pages,{offset:filter.taskOffset,limit:20});rememberTasks(result.items);
-      if(!view.result)view.rows.replaceChildren();view.result=result;
-      const text=(node,value)=>{if(node.textContent!==value)node.textContent=value;};
-      for(const [index,value]of ['active','attention','archived'].entries()){const button=view.scopes.children[index];text(button,`${translate(locale(),`tasks.scope.${value}`)} ${result.counts[value]}`);button.classList.toggle('selected',filter.taskScope===value);button.setAttribute('aria-pressed',String(filter.taskScope===value));}
-      const ordered=[],keys=new Set();let groupKey='';
-      const retain=(key,create)=>{keys.add(key);let entry=view.nodes.get(key);if(!entry){entry=create();view.nodes.set(key,entry);}ordered.push(entry.row);return entry;};
-      for(const task of result.items){
-        const ownerKey=JSON.stringify([task._space_id,task._assistant_id]),taskKey=JSON.stringify([task._space_id,task._assistant_id,task.id]);
-        if(ownerKey!==groupKey){groupKey=ownerKey;const assistant=(client.assistants||[]).find(item=>item.id===task._assistant_id&&item.space_id===task._space_id);text(retain('owner:'+taskKey,()=>({row:n('div','task-owner')})).row,assistant?.name||task._assistant_id);}
-        const entry=retain(taskKey,()=>{
-          const row=n('button','task-row');row.type='button';const line=n('span','task-title-line'),logo=n('span','task-brand'),title=n('span','task-title'),elapsed=n('span','task-list-elapsed'),chevron=n('span','hint task-chevron','›'),detail=n('span','task-meta'),phase=n('span'),meta=n('span','hint');
-          elapsed.setAttribute('role','timer');elapsed.setAttribute('aria-live','off');
-          line.append(logo,title);detail.append(phase,meta);row.append(line,elapsed,chevron,detail);return {row,logo,title,phase,meta,elapsed};
-        });
-        entry.row.setAttribute('aria-label',task.title);entry.row.disabled=task._stale;entry.row.title=task.title;entry.row.onclick=()=>taskDetail(task,{returnTo:{route:'tasks'}});
-        const source=taskAgentSource(task,locale());if(source)entry.logo.replaceChildren(source);else text(entry.logo,task.executor_icon==='anthropic'?'A':'◉');text(entry.title,task.title);entry.phase.className=`task-phase phase-${task.phase}`;
-        text(entry.phase,taskPhaseLabel(task.phase));
-        const time=['queued','running','waiting','waiting_approval'].includes(task.phase)?taskElapsed(task.started_at_ms,Date.now(),locale()):'';
-        entry.elapsed.hidden=!time;text(entry.elapsed,time);
-        entry.elapsed.id=`task-elapsed-${encodeURIComponent(taskKey)}`;
-        if(time)entry.row.setAttribute('aria-describedby',entry.elapsed.id);else entry.row.removeAttribute('aria-describedby');
-        if(time)entry.elapsed.dataset.startedAt=task.started_at_ms;else delete entry.elapsed.dataset.startedAt;
-        entry.elapsed.title=tr('Total time since execution first started, including waits','自首次开始执行起的总耗时，包含中间等待');
-        text(entry.meta,`${task._space_name||''}${task.machine_id?' · '+machineInfo.label(task.machine_id,{space:task._space_id},locale()):''}${task.pending?' · '+task.pending+' '+tr('pending instructions','条待处理指令'):''}${task._stale?' · '+tr('Stale','已过期'):''}`);
+  function updateTaskList(view,pages,loading,partial=false){
+    const result=combineTasks(pages,{offset:filter.taskOffset,limit:20});rememberTasks(pages.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner)));
+    if(!view.result)view.rows.replaceChildren();view.result=result;
+    const text=(node,value)=>{if(node.textContent!==value)node.textContent=value;},t=key=>translate(locale(),key);
+    for(const [index,value]of ['active','complete','archived'].entries()){const button=view.scopes.children[index];text(button,`${t(`tasks.scope.${value}`)}${partial?'':' '+result.counts[value].toLocaleString(locale())}`);button.classList.toggle('selected',filter.taskScope===value);button.setAttribute('aria-pressed',String(filter.taskScope===value));}
+    text(view.help,t(filter.taskScope==='complete'?'tasks.completeHelp':filter.taskScope==='archived'?'tasks.archivedHelp':'tasks.activeHelp'));
+    view.phase.value=filter.taskPhase||(filter.taskScope==='unarchived'?'unarchived':'');
+    const reminderProjection=n('div','task-reminders');reminderProjection.setAttribute('aria-label',t('tasks.reminders'));reminderProjection.append(n('span','',t('tasks.reminders')));
+    for(const stage of ['failed','interrupted','waiting_approval']){const button=action(t('tasks.reminder').replace('{stage}',taskPhaseLabel(stage)).replace('{count}',partial?'—':result.counts[stage].toLocaleString(locale())),()=>{filter.taskScope='unarchived';filter.taskPhase=stage;filter.taskOffset=0;restartTaskList();});button.dataset.viewKey=stage;reminderProjection.append(button);}reconcile(view.reminders,reminderProjection);
+    const signature=JSON.stringify([filter.taskScope,filter.taskQuery,filter.taskPhase,filter.listOwner]);if(view.seenSignature!==signature){view.seen.clear();view.seenSignature=signature;}
+    const groups=groupRecords(result.items,client),retainedGroups=new Set(),retainedTasks=new Set(),scroll=view.rows.scrollTop,focused=view.rows.contains(document.activeElement)?document.activeElement:null;
+    for(const [index,group]of groups.entries()){
+      retainedGroups.add(group.key);let container=view.groups.get(group.key);
+      if(!container){const row=n('section','record-group'),head=groupHeading(group,locale(),ownerDisclosures),records=n('div','record-group-records');row.dataset.viewKey=group.key;row.setAttribute('aria-labelledby',head.querySelector('h2').id);row.append(head,records);container={row,head,records};view.groups.set(group.key,container);}else reconcile(container.head,groupHeading(group,locale(),ownerDisclosures));
+      if(view.rows.children[index]!==container.row)view.rows.insertBefore(container.row,view.rows.children[index]||null);
+      const seenOffset=view.seen.get(group.key);let continuation=container.row.querySelector('.record-continuation');
+      if(seenOffset!=null&&seenOffset<filter.taskOffset){if(!continuation){continuation=n('p','record-continuation',t('tasks.continued'));container.records.before(continuation);}}else continuation?.remove();
+      if(!loading)view.seen.set(group.key,Math.min(seenOffset??filter.taskOffset,filter.taskOffset));
+      for(const [position,task]of group.items.entries()){
+        const taskKey=JSON.stringify([task._space_id,task._assistant_id,task.id]);retainedTasks.add(taskKey);let entry=view.nodes.get(taskKey);
+        if(!entry){
+          const row=n('button','task-row');row.type='button';row.dataset.viewKey=taskKey;
+          const line=n('span','task-title-line'),title=n('span','task-title'),elapsed=n('span','task-list-elapsed'),chevron=n('span','hint task-chevron','›'),detail=n('span','task-meta'),phase=n('span'),mark=taskIdentityMark(task),short=taskIdentityShort(task),meta=n('span','hint'),archived=n('span','task-archived');
+          short.classList.add('task-short-id');elapsed.setAttribute('role','timer');elapsed.setAttribute('aria-live','off');line.append(title);detail.append(phase,mark,short,archived,meta);row.append(line,elapsed,chevron,detail);entry={row,title,phase,mark,short,meta,elapsed,archived};view.nodes.set(taskKey,entry);
+        }
+        entry.row.setAttribute('aria-label',task.title);entry.row.disabled=task._stale;entry.row.title=task.title;entry.row.dataset.phase=task.phase;entry.row.onclick=()=>taskDetail(task,{returnTo:{route:'tasks'}});
+        text(entry.title,task.title);entry.phase.className=`task-phase phase-${task.phase}`;text(entry.phase,taskPhaseLabel(task.phase)+(task.paused?' · '+t('tasks.schedulePaused'):''));
+        reconcile(entry.mark,taskIdentityMark(task));text(entry.short,taskIdentities.short(task)||t('tasks.identityUnknown'));entry.short.title=taskAddress(task)?JSON.stringify(taskAddress(task)):t('tasks.identityUnknown');text(entry.archived,task.archived?t('tasks.scope.archived'):'');
+        const time=['queued','running','waiting','waiting_approval'].includes(task.phase)?taskElapsed(task.started_at_ms,Date.now(),locale()):'';entry.elapsed.hidden=!time;text(entry.elapsed,time);entry.elapsed.id=`task-elapsed-${encodeURIComponent(taskKey)}`;
+        if(time){entry.row.setAttribute('aria-describedby',entry.elapsed.id);entry.elapsed.dataset.startedAt=task.started_at_ms;}else{entry.row.removeAttribute('aria-describedby');delete entry.elapsed.dataset.startedAt;}entry.elapsed.title=t('tasks.elapsedHelp');
+        text(entry.meta,[task.machine_id?machineInfo.label(task.machine_id,{space:task._space_id},locale()):'',task.pending?t('tasks.pendingInstructions').replace('{count}',task.pending):'',task._stale?t('loading.stale'):''].filter(Boolean).join(' · '));
+        if(container.records.children[position]!==entry.row)container.records.insertBefore(entry.row,container.records.children[position]||null);
       }
-      if(!result.items.length)text(retain('empty',()=>({row:n('p','page-empty')})).row,tr('No ongoing tasks. Describe a goal in Chat to get started.','暂无进行中的任务，在聊天中描述目标即可开始。'));
-      const scroll=view.rows.scrollTop,focused=view.rows.contains(document.activeElement)?document.activeElement:null;
-      for(const [key,entry]of view.nodes)if(!keys.has(key)){entry.row.remove();view.nodes.delete(key);}
-      for(const [index,row]of ordered.entries())if(view.rows.children[index]!==row)view.rows.insertBefore(row,view.rows.children[index]||null);
-      if(focused?.isConnected&&document.activeElement!==focused)focused.focus({preventScroll:true});
-      view.rows.scrollTop=scroll;
-      text(view.summary,translate(locale(),'tasks.pageSummary').replace('{count}',result.total.toLocaleString(locale())).replace('{page}',Math.floor(filter.taskOffset/20)+1)+(loading?' · '+translate(locale(),'loading.pending'):''));view.previous.disabled=!filter.taskOffset;view.next.disabled=loading||result.next_offset==null;
-      view.clock.refresh();
+    }
+    for(const [key,entry]of view.nodes)if(!retainedTasks.has(key)){entry.row.remove();view.nodes.delete(key);}
+    for(const [key,entry]of view.groups)if(!retainedGroups.has(key)){entry.row.remove();view.groups.delete(key);}
+    let empty=view.rows.querySelector('.page-empty');if(!result.items.length){if(!empty){empty=n('div','page-empty');view.rows.append(empty);}empty.replaceChildren(n('h2','',t('tasks.emptyView')),n('p','hint',t('tasks.emptyHelp')));}else empty?.remove();
+    if(focused?.isConnected&&document.activeElement!==focused)focused.focus({preventScroll:true});view.rows.scrollTop=scroll;
+    view.pager.update({offset:filter.taskOffset,count:result.items.length,total:result.total,nextOffset:result.next_offset,loading,partial});view.clock.refresh();
   }
   function closeTaskList(){taskListView?.stopSearch?.();taskListView?.queue.close();taskListView?.clock.dispose();taskListView=null;}
   function closeTaskView(){if(taskView)rememberTaskDetail(taskView);taskView?.eventsQueue?.close();taskView?.ui?.dispose();taskView=null;host.classList.remove('task-page-host');}
@@ -595,7 +622,7 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
       })();
       const updates=await Promise.allSettled([view.initialRead?Promise.resolve(view.record):request(path,options),can('task.input')?request(`${path}/messages`,options):Promise.resolve([]),events]);view.initialRead=false;
       if(!current())return;
-      if(updates[0].status==='fulfilled')view.record=updates[0].value;if(updates[1].status==='fulfilled')view.inputs=list(updates[1].value);
+      if(updates[0].status==='fulfilled'){view.record=updates[0].value;rememberTasks([{...view.record.info,_space_id:view.scope.space,assistant_id:view.scope.owner,_assistant_id:view.scope.owner}]);}if(updates[1].status==='fulfilled')view.inputs=list(updates[1].value);
       view.connectionError=updates.filter(update=>update.status==='rejected'&&update.reason.name!=='AbortError').map(update=>update.reason.message).join('\n');
       const page=updates[2].status==='fulfilled'?updates[2].value:{};
       view.unavailable=!!page?.unavailable;render=true;
@@ -607,8 +634,8 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
   function approvalFor(tool,task=''){if(approvalOwner!==approvalContext())return;const scope=approvalScope();const approval=pendingApprovals.find(item=>item.request.owner===scope.owner&&(item.request.task||'')===task&&item.request.call_id===tool.id&&item.request.turn===tool.turn_id);return approval?{...approval,task_title:taskNames.get(taskNameKey(scope,task))}:undefined;}
   function taskNeedsApproval(id,phase){return approvalOwner===approvalContext()?pendingApprovals.some(item=>item.request.owner===scope().owner&&item.request.task===id):phase==='waiting_approval';}
   const taskNameKey=(captured,id)=>JSON.stringify([captured.space,captured.owner,id]);
-  function rememberTasks(items){for(const task of items)taskNames.set(taskNameKey({space:task._space_id,owner:task.assistant_id||task._assistant_id},task.id),task.title);}
-  function taskPhaseLabel(phase){return phase==='waiting_approval'?translate(locale(),'tool.waiting_approval'):tr({running:'Running',queued:'Queued',waiting:'Waiting',failed:'Failed',complete:'Complete',interrupted:'Interrupted',cancelled:'Cancelled'}[phase]||phase,{running:'运行中',queued:'排队中',waiting:'等待中',failed:'失败',complete:'已完成',interrupted:'已中断',cancelled:'已取消'}[phase]||phase);}
+  function rememberTasks(items){taskIdentities.register(items);for(const task of items)taskNames.set(taskNameKey({space:task._space_id,owner:task.assistant_id||task._assistant_id},task.id),task.title);}
+  function taskPhaseLabel(phase){return translate(locale(),phase==='waiting'?'tasks.stage.waiting':`schedule.state.${phase}`);}
   async function decideApproval(approval,action){
     const captured={...approvalScope()};
     if(disposed||approvalOwner!==approvalContext()||approval.request.owner!==captured.owner||(taskView&&approval.request.task!==taskView.task.id)||!pendingApprovals.some(item=>item.id===approval.id))throw Error(tr('Approval context changed.','授权上下文已改变。'));
@@ -616,28 +643,49 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
     await permissions();
   }
   async function schedules(root,token) {
-    root.classList.add('schedules-content');root.append(toolbar(action(translate(locale(),'schedule.new'),()=>scheduleEditor())));const content=n('div','schedule-projection');root.append(content);
-    return connectView(root,token,()=>across('/api/v1/schedules?limit=50',token,{paginate:true,perAssistant:true}),pages=>{
-      const projection=n('div','schedule-projection');renderSchedules(projection,pages);reconcile(content,projection);
-    },{topics:['schedules','tasks','assistants','spaces','machines']});
+    const t=key=>translate(locale(),key);root.classList.add('schedules-content');root.append(toolbar(action(t('schedule.new'),()=>scheduleEditor())));
+    const search=field(t('tasks.scheduleSearch'),filter.scheduleQuery,{kind:'search'});search.row.classList.add('task-search');search.input.placeholder=t('tasks.scheduleSearch');
+    const owner=field(t('tasks.assistantFilter'),filter.listOwner,{choices:ownerChoices(client,locale())});owner.row.classList.add('record-filter','record-owner-filter');
+    const line=toolbar(search.row,owner.row);line.classList.add('record-search-line');root.append(line,n('p','record-view-help',t('tasks.scheduleHelp')));
+    const content=n('div','schedule-projection');root.append(content);let currentPages=null;
+    const render=()=>{if(!currentPages)return;const projection=n('div','schedule-projection');renderSchedules(projection,currentPages,render);currentViewKey=taskListKey();reconcile(content,projection);};
+    owner.input.onchange=()=>{filter.listOwner=owner.input.value;filter.scheduleOffset=0;render();};
+    const stopSearch=bindSearch(search.input,value=>{filter.scheduleQuery=value;filter.scheduleOffset=0;render();});
+    const loading=paginationPair(content,t('tasks.schedulePagination'),()=>{});loading.update({loading:true});content.append(loading.top.root,n('p','hint',t('loading.pending')),loading.bottom.root);
+    const connected=await connectView(root,token,()=>across('/api/v1/schedules?limit=50',token,{paginate:true,perAssistant:true}),pages=>{currentPages=pages;render();},{topics:['schedules','tasks','assistants','spaces','machines']});
+    if(pageView&&gate.current(token)){const close=pageView.queue.close.bind(pageView.queue);pageView.queue.close=()=>{stopSearch();close();};}else stopSearch();return connected;
   }
-  function renderSchedules(root,pages) {
-
-    const items=pages.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner)).sort((a,b)=>(a.next_at_ms||0)-(b.next_at_ms||0)||a._assistant_id.localeCompare(b._assistant_id)||a.id.localeCompare(b.id));
+  function renderSchedules(root,pages,render) {
+    const t=key=>translate(locale(),key),partial=pages.partial||pages.some(page=>page.stale);
+    // across() has exhausted each source cursor before this projection; filtering
+    // applies to complete collections, never only the visible page.
+    const query=filter.scheduleQuery.trim().toLocaleLowerCase(locale());
+    const items=pages.flatMap(page=>ownedItems(page.value,page.space,page.stale,page.owner)).filter(item=>(!filter.listOwner||recordOwner(item,client).key===filter.listOwner)&&(!query||item.spec.title.toLocaleLowerCase(locale()).includes(query))).sort((a,b)=>(a.next_at_ms||0)-(b.next_at_ms||0)||a._assistant_id.localeCompare(b._assistant_id)||a.id.localeCompare(b.id));
     filter.scheduleOffset=Math.min(filter.scheduleOffset,Math.max(0,Math.floor((items.length-1)/20)*20));
-    const rows=n('div','schedule-list');rows.dataset.scrollKey='schedule-list';if(!items.length)empty(rows,tr('No schedules','暂无定时计划'));
-    for(const item of items.slice(filter.scheduleOffset,filter.scheduleOffset+20)) {
-      const row=n('div','schedule-card page-card'),button=action(item.spec.title,()=>scheduleHistory(item),{disabled:item._stale});button.classList.add('schedule-title');
-      const owner=n('span','schedule-owner'),assistant=(client.assistants||[]).find(owner=>owner.id===item._assistant_id&&owner.space_id===item._space_id),space=(client.spaces||[]).find(space=>space.id===item._space_id);
-      owner.append(n('span','',assistant?.name||item._assistant_id));owner.title=item._space_name||'';
-      owner.append(icon(space?.kind==='local'&&!space?.remote?'machines':'cloud'));
-      row.append(button,owner,...(item.spec.kind==='cron'?[n('code','schedule-rule',`${item.spec.cron} · ${item.spec.timezone}`)]:[]),n('span','hint',item._stale?tr('Stale','已过期'):item.spec.enabled?item.next_label||tr('Not scheduled','未安排'):tr('Paused','已暂停')));row.dataset.viewKey=JSON.stringify([item._space_id,item._assistant_id,item.id]);rows.append(row);
+    const visible=items.slice(filter.scheduleOffset,filter.scheduleOffset+20),rows=n('div','schedule-list record-group-list');rows.dataset.scrollKey='schedule-list';rows.tabIndex=-1;
+    if(!visible.length)rows.append(n('div','page-empty',t('tasks.scheduleEmpty')));
+    for(const group of groupRecords(visible,client)){
+      const section=n('section','record-group');section.dataset.viewKey=group.key;const head=groupHeading(group,locale(),ownerDisclosures);section.setAttribute('aria-labelledby',head.querySelector('h2').id);section.append(head);const records=n('div','record-group-records');
+      // Earlier sources are known in full here, so continuation has evidence.
+      if(items.slice(0,filter.scheduleOffset).some(item=>recordOwner(item,client).key===group.key))section.append(n('p','record-continuation',t('tasks.continued')));
+      for(const item of group.items){
+        const row=action('',()=>scheduleHistory(item),{disabled:item._stale});row.classList.add('schedule-record');row.setAttribute('aria-label',item.spec.title);row.dataset.viewKey=JSON.stringify([item._space_id,item._assistant_id,item.id]);
+        const title=n('span','schedule-record-title',item.spec.title),meta=n('span','schedule-record-meta'),state=n('span',item.spec.enabled?'schedule-enabled':'hint',t(item.spec.enabled?'tasks.scheduleEnabled':'tasks.schedulePaused'));
+        const next=item.spec.enabled?t('tasks.scheduleNext').replace('{time}',item.next_label||t('tasks.scheduleNoNext')):t('tasks.schedulePausedNext');meta.append(state,n('span','',next));
+        const rule=item.spec.kind==='cron'?item.spec.cron:item.spec.kind==='interval'?t('tasks.scheduleInterval').replace('{minutes}',item.spec.every_minutes.toLocaleString(locale())):t('tasks.scheduleOnce').replace('{time}',item.spec.at);
+        row.append(title,n('span','schedule-record-chevron','›'),meta,n('span','schedule-record-rule',`${rule} · ${t('tasks.scheduleTimezone').replace('{zone}',item.spec.timezone||'')}`));records.append(row);
+      }
+      section.append(records);rows.append(section);
     }
-    root.append(rows);
-    const footer=n('div','schedule-pagination'),buttons=toolbar(action(tr('Previous','上一页'),()=>{filter.scheduleOffset=Math.max(0,filter.scheduleOffset-20);show('tasks');},{disabled:!filter.scheduleOffset}),action(tr('Next','下一页'),()=>{filter.scheduleOffset+=20;show('tasks');},{disabled:filter.scheduleOffset+20>=items.length}));
-    footer.append(n('span','hint',`${items.length} · ${Math.floor(filter.scheduleOffset/20)+1}`),buttons);root.append(footer);
+    const pager=paginationPair(root,t('tasks.schedulePagination'),(direction,origin)=>{const position=origin===pager.top?'pagination-top':'pagination-bottom';filter.scheduleOffset=Math.max(0,filter.scheduleOffset+direction*20);render();const nav=host.querySelector(`[data-view-key="${position}"]`),target=nav?.querySelector(`[data-page-direction="${direction<0?'previous':'next'}"]`),other=nav?.querySelector(`[data-page-direction="${direction<0?'next':'previous'}"]`);if(target&&!target.disabled)target.focus({preventScroll:true});else if(other&&!other.disabled)other.focus({preventScroll:true});else host.querySelector('.schedule-list')?.focus({preventScroll:true});});
+    pager.update({offset:filter.scheduleOffset,total:items.length,count:visible.length,nextOffset:filter.scheduleOffset+20<items.length?filter.scheduleOffset+20:null,partial:!!partial});root.append(pager.top.root,rows,pager.bottom.root,n('p','record-page-note',t('tasks.pageNote')));
   }
   async function scheduleHistory(item,record=true,runsOffset=0) {
+    if(!recordOwner(item,client).address){
+      captureView();pageView?.queue.close();pageView=null;closeTaskList();detailParent=true;
+      const root=body();heading(item.spec.title);const info=card(translate(locale(),'tasks.ownerUnknown'));
+      info.append(n('p','',item.spec.goal),n('p','hint',item.spec.timezone),n('p','hint',translate(locale(),'tasks.ownerMissing')));root.append(info);return;
+    }
     if(scheduleView&&scheduleView.item.id===item.id&&scheduleView.item._space_id===item._space_id&&scheduleView.item._assistant_id===item._assistant_id&&scheduleView.runsOffset===runsOffset&&pageView)return pageView.queue.run();
     captureView();pageView?.queue.close();pageView=null;closeTaskList();taskView=null;detailParent=true;filter.taskTab='schedules';
     if(record)history.pushState({potRoute:'tasks',potSchedule:{...item},potScope:{space:item._space_id,owner:item._assistant_id}},'',location.href);
@@ -665,9 +713,9 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
         try{await request('/api/v1/schedules',{method:'POST',space:selected._space_id,owner:selected._assistant_id,body});scheduleWrites.delete(writeKey);if(scheduleView===view&&gate.current(view.token)){if(name==='delete'){scheduleView=null;await show('tasks',{force:true});}else await pageView.queue.run();}}
         catch(reason){if(scheduleView===view&&gate.current(view.token))errorView(reason,view.content);}
         finally{view.busy=false;for(const control of actions.querySelectorAll('button'))control.disabled=false;}
-      },{primary:name==='run',danger:name==='delete',disabled:selected._stale||view.busy});actions.append(button);
+      },{primary:name==='run',danger:name==='delete',disabled:selected._stale||recordOwner(selected,client).profile?.offline||!recordOwner(selected,client).address||view.busy});actions.append(button);
     }
-    if(view.confirmed){const remove=actions.lastChild;remove.textContent=tr('Confirm removal','确认移除');}info.append(actions,n('p','hint',tr('Pausing or removing only affects future runs.','暂停或移除只影响未来的执行。')));root.append(info,n('p','hint',tr('Run history','运行历史')));
+    if(view.confirmed){const remove=actions.lastChild;remove.textContent=tr('Confirm removal','确认移除');}info.append(actions,n('p','hint',translate(locale(),'tasks.scheduleStopHelp')));root.append(info,n('p','hint',tr('Run history','运行历史')));
     const rows=(value.runs||[]).map(run=>{const summary=n('span','',run.summary),hook=hookHistory(run,locale());if(hook)summary.append(hook);if(run.task_id)summary.append(action(translate(locale(),'schedule.viewTask'),()=>taskDetail({id:run.task_id,title:run.summary||selected.spec.title,assistant_id:selected._assistant_id,_assistant_id:selected._assistant_id,_space_id:selected._space_id})));return [run.scheduled_label,translate(locale(),`schedule.state.${run.state}`),summary];});
     root.append(table(['scheduled','state','summary'].map(key=>translate(locale(),`schedule.${key}`)),rows,(value.runs||[]).map(run=>run.id||JSON.stringify([run.scheduled_label,run.task_id]))));
     root.append(toolbar(action(tr('Newer entries','较新记录'),()=>scheduleHistory(selected,false,Math.max(0,runsOffset-20)),{disabled:!runsOffset}),action(tr('Older entries','较早记录'),()=>scheduleHistory(selected,false,value.runs_next_offset),{disabled:value.runs_next_offset==null})));
@@ -965,12 +1013,12 @@ export function createPages({onApprovalsChanged=()=>{},createLocalAssistant=()=>
  if(extensionUI&&next==='extensions')return extensionUI.refresh();extensionUI?.dispose();extensionUI=null;
     if(!keepUsageOwner)usageOwner=null;
     if(next==='settings'&&filter.settingsTab!=='general'&&!configurationSpace)configurationSpace=scope().space;
-    const viewKey=JSON.stringify([next,next==='tasks'?[filter.taskTab,filter.taskScope,filter.taskQuery,filter.taskOffset,filter.scheduleOffset]:next==='usage'?[filter.usageSpace,filter.usageRange,filter.usageYear,usageOwner]:next==='settings'?[filter.settingsTab,configurationSpace]:[]]);
+    const viewKey=JSON.stringify([next,next==='tasks'?[filter.taskTab,filter.taskScope,filter.taskQuery,filter.taskPhase,filter.listOwner,filter.scheduleQuery,filter.taskOffset,filter.scheduleOffset]:next==='usage'?[filter.usageSpace,filter.usageRange,filter.usageYear,usageOwner]:next==='settings'?[filter.settingsTab,configurationSpace]:[]]);
     if(!force&&route===next&&currentViewKey===viewKey){if(taskListView)return refreshTaskList();if(pageView)return pageView.queue.run();}
     captureView();viewReady=false;pageView?.queue.close();pageView=null;
 
     closeTaskView();taskOrigin=null;closeTaskList();scheduleView=null;detailParent=false;if(!keepUsageOwner)usageOwner=null;
-    route=next;heading(next==='extensions'?translate(locale(),'extensions.title'):tr({tasks:filter.taskTab==='schedules'?'Schedules':'Tasks',machines:translate(locale(),'topology.title'),usage:'Usage',settings:'Settings'}[next]||next,{tasks:filter.taskTab==='schedules'?'定时计划':'任务',machines:translate(locale(),'topology.title'),usage:'用量',settings:'设置'}[next]||next));
+    route=next;heading(next==='tasks'?translate(locale(),filter.taskTab==='schedules'?'tasks.schedulesTab':'tasks.tab'):next==='extensions'?translate(locale(),'extensions.title'):tr({tasks:filter.taskTab==='schedules'?'Schedules':'Tasks',machines:translate(locale(),'topology.title'),usage:'Usage',settings:'Settings'}[next]||next,{tasks:filter.taskTab==='schedules'?'定时计划':'任务',machines:translate(locale(),'topology.title'),usage:'用量',settings:'设置'}[next]||next));
     const version=++pageVersion,token=gate.next(),root=body();currentViewKey=viewKey;
     root.append(n('p','hint',tr('Loading…','正在加载…')));
     try {root.replaceChildren();await ({settings,tasks,machines,usage,extensions,'add-assistant':addAssistantPage}[next]||settings)(root,token);if(gate.current(token))restoreView(viewKey,token);}

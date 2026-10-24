@@ -70,3 +70,58 @@ func TestCatalogPaginatesAcrossOwnersWithoutLeakingAgentPages(t *testing.T) {
 		t.Fatalf("Unicode case folding: %+v %v", page, err)
 	}
 }
+
+func TestCatalogCompletedStagesAndOwnerFilterUseWholeCollection(t *testing.T) {
+	s, _, _ := fixture(t)
+	ctx := context.Background()
+	for i := 0; i < 138; i++ {
+		owner := "alpha"
+		if i%2 == 1 {
+			owner = "beta"
+		}
+		record, err := s.AcceptLocal(ctx, owner, protocol.CreateTask{RequestID: fmt.Sprint(i), Text: fmt.Sprintf("report %03d", i)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		phase := []string{"complete", "failed", "interrupted", "waiting_approval", "waiting", "cancelled"}[i%6]
+		_, err = s.db.Exec("UPDATE tasks SET phase=?,body=json_set(body,'$.info.phase',?,'$.info.updated_at_ms',?,'$.info.archived',json(?)) WHERE assistant_id=? AND id=?", phase, phase, i, fmt.Sprint(i >= 120), owner, record.Info.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := s.Catalog(ctx, protocol.TaskQuery{Scope: "complete", Limit: 7})
+	if err != nil || page.Total != 20 || len(page.Items) != 7 || page.NextOffset == nil || page.Counts.Complete != 20 || page.Counts.Failed != 20 || page.Counts.Interrupted != 20 || page.Counts.WaitingApproval != 20 || page.Counts.Archived != 18 {
+		t.Fatal(page, err)
+	}
+	for _, item := range page.Items {
+		if item.Phase != protocol.TaskComplete || item.Archived {
+			t.Fatal("completed view contains other outcome", item)
+		}
+	}
+	// The last result is reached by a server page, not by filtering the first page.
+	page, err = s.Catalog(ctx, protocol.TaskQuery{Scope: "complete", Limit: 7, Offset: 14})
+	if err != nil || page.Total != 20 || len(page.Items) != 6 || page.NextOffset != nil {
+		t.Fatal(page, err)
+	}
+	failed := protocol.TaskFailed
+	page, err = s.Catalog(ctx, protocol.TaskQuery{Scope: "unarchived", Phase: &failed, AssistantID: "beta", Limit: 5, Offset: 15})
+	if err != nil || page.Total != 20 || len(page.Items) != 5 || page.Counts.Complete != 0 || page.Counts.Failed != 20 || page.Counts.Archived != 9 {
+		t.Fatal(page, err)
+	}
+	for _, item := range page.Items {
+		if item.AssistantID != "beta" || item.Phase != failed || item.Archived {
+			t.Fatal(item)
+		}
+	}
+	page, err = s.Catalog(ctx, protocol.TaskQuery{Scope: "archived", Phase: &failed, AssistantID: "beta", Q: "report 12", Limit: 20})
+	if err != nil || page.Total != 2 || page.Counts.Archived != 5 {
+		t.Fatal(page, err)
+	}
+	if _, err = s.Page(ctx, "alpha", protocol.TaskQuery{AssistantID: "beta"}); err == nil {
+		t.Fatal("owner-scoped caller escaped its owner")
+	}
+	invalid := protocol.TaskPhase("completed")
+	if _, err = s.Catalog(ctx, protocol.TaskQuery{Phase: &invalid}); err == nil {
+		t.Fatal("invalid phase accepted")
+	}
+}

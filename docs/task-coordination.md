@@ -300,8 +300,45 @@ open for the owning assistant's decision. Without a model decision, it stays ope
 | Group | Selection |
 |---|---|
 | Ongoing | Non-archived `queued`, `running`, `waiting`, `waiting_approval` |
-| Needs attention | Non-archived ended Runs, including successful work kept for follow-up |
+| Completed | Non-archived `complete` records only |
 | Archived | `archived: true`, independent of the last Run's outcome |
+
+The Tasks page offers Ongoing, Completed and Archived. Stage filters and
+secondary reminders keep failed, interrupted and approval-waiting work accessible;
+`waiting` means waiting for allowance, and paused or offline state does not change
+the recorded execution phase. The agent-facing `attention` scope still includes
+all non-archived ended Runs for follow-up.
+
+`GET /api/v1/tasks/catalog` accepts `scope=complete` (unarchived success),
+`scope=unarchived`, an exact `phase`, search `q`, and the catalogue's local
+`assistant_id`. The client resolves a selected full assistant address
+`[node_id, kind, agent_id]` through each source directory, including linked
+`origin` identities, before querying that source. Control maps a linked directory
+key to its existing durable user-chat session before filtering stored ownership;
+a missing mapping returns an empty page without creating a conversation. Counts cover the whole matching
+owner/search/target collection independently of the selected scope and phase;
+rows and totals additionally apply the selected scope and phase in the same read
+transaction. No filter derives a full total from visible rows.
+
+Both Tasks and Schedules paginate globally before grouping the current page by
+full assistant address. Group counts explicitly describe this page; the same
+assistant can appear on multiple pages. Partial-source pages omit a complete total.
+Schedules retain the existing bounded collection reader, exhaust source cursors,
+then filter and paginate the complete returned collection. Unresolved schedule
+ownership stays in a neutral group and never uses the selected Chat as its owner.
+
+Task display marks use the explicit `TaskInfo.address`; a linked catalogue ID can
+be a local hash and is never substituted for the remote address. Missing mappings
+stay neutral. Short IDs display `#` and the first four characters of the real
+Task ID (or all available characters for a shorter ID). Equal prefixes, including
+the same Task ID on different nodes, keep the same short label. Full addresses
+remain authoritative for identity, color, scope and routing. The shared
+UTF-8 FNV-1a 32-bit hash of `[node_id,"task",agent_id]` selects one of six fixed
+light/dark icon palettes. Colors are decorative, may collide, and never route
+requests or change assistant avatars, body text or semantic status colors.
+Task and schedule groups load the owning assistant's saved PNG avatar from its
+scoped local or Agent Link directory profile. Missing or undecodable images use
+the neutral person icon; profile image changes refresh mounted group headings.
 
 The assistant's `set_task_dispositions({decisions})` accepts 1–8 decisions in one
 atomic batch. Each decision supplies `task_id`, current `run_id`, `archived` and

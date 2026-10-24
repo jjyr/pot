@@ -11,13 +11,13 @@ const wait=async(test)=>{for(let i=0;i<150;i++){if(test())return;await pause(20)
 let locale='en',failProviders=false,delays={},context={space:'a',owner:'alpha'};
 const profiles={profiles:[{id:'p',name:'Fixture Provider',provider:'fixture',model:'fixture-model',model_settings:{}}],connections:[],directory:[],default_provider_id:'p',configured_models:{}};
 const taskItems=Array.from({length:51},(_,i)=>({id:'t'+i,assistant_id:'alpha',title:'Fixture Task '+i,phase:'running',created_at_ms:1000-i,started_at_ms:Date.now()-10000}));
-const client={production:true,desktop:false,runtime:{runtime_id:'fixture-control',boot_id:'boot'},spaces:[{id:'a',control_id:'ca',name:'Space A',connected:true},{id:'b',control_id:'cb',name:'Space B',connected:true}],assistants:[{id:'alpha',space_id:'a',name:'Alpha'}],scope:()=>({...context}),setScope:value=>Object.assign(context,value),
+const client={production:true,desktop:false,runtime:{runtime_id:'fixture-control',boot_id:'boot'},spaces:[{id:'a',control_id:'ca',name:'Space A',connected:true},{id:'b',control_id:'cb',name:'Space B',connected:true}],assistants:[{id:'alpha',space_id:'a',control_id:'ca',name:'Alpha'}],scope:()=>({...context}),setScope:value=>Object.assign(context,value),
   async request(path,options={}){const url=new URL(path,location.origin),base=url.pathname,key=options.space+':'+path;counts.set(key,(counts.get(key)||0)+1);await pause(delays[base]??150);
     if(base==='/api/v1/providers'){if(failProviders)throw Error('Fixture offline');return structuredClone({...profiles,profiles:profiles.profiles.map(p=>({...p,name:options.space==='b'?'Space B Provider':p.name}))});}
     if(base==='/api/v1/agent/routing')return {profile_limits:{},provider_limits:{}};
     if(base==='/api/v1/usage/providers')return {providers:[{provider:'fixture',active:false,policy:{period:'none'}}]};
     if((base==='/api/v1/tasks/query'||base==='/api/v1/tasks/catalog')){if(options.space==='b')return {items:[],total:0,counts:{}};const offset=Number(url.searchParams.get('offset')||0);return {items:taskItems.slice(offset,offset+50),next_offset:offset===0?50:null,counts:{active:51,attention:0,archived:0},total:51};}
-    if(base==='/api/v1/tasks/t0')return {info:taskItems[0],run_id:'run',task:{text:'Fixture task input'}};
+    if(base==='/api/v1/tasks/t0')return {info:taskItems[0],run_id:'run',request:{text:'Fixture task input'},capabilities:{version:1,operations:['task.read','task.input','task.events']}};
     if(base==='/api/v1/tasks/t0/messages')return {items:[]};
     if(base==='/api/v1/tasks/t0/events')return {events:Number(url.searchParams.get('after'))===0?[{sequence:1,event:{update:{type:'message_started'}}},{sequence:2,event:{update:{type:'text_delta',text:'Cached task transcript'}}},{sequence:3,event:{update:{type:'message_finished'}}}]:[],has_more:false};
     if(base==='/api/v1/schedules')return {items:[],next_offset:null};
@@ -46,8 +46,8 @@ async function run(){results.textContent='Running '+(baseline?'baseline':'cached
   check(count('/api/v1/providers')===1,'AI → task configuration → AI shares one providers read');check(immediate,'Return renders provider cache before delayed IO');check(independent,'Configuration renders before slow allowances');
   click('Third-party accounts');await wait(()=>host.textContent.includes('@fixture-login'));check(count('/api/v1/integrations')===2,'Existing login progress refresh bypasses the configuration TTL');
   delays['/api/v1/permissions']=700;const machines=pages.show('machines');await pause(200);check(host.textContent.includes('Fixture Machine'),'Machine inventory renders before slow permission reads');await machines;const machineReturn=pages.show('machines',{force:true});await pause(40);check(host.textContent.includes('Fixture Machine'),'Machine return displays cached inventory during authority checks');await machineReturn;delays['/api/v1/permissions']=150;
-  await pages.show('tasks');await wait(()=>host.querySelectorAll('.task-row').length===20);const taskReads=count('/api/v1/tasks/catalog');click('Next');await wait(()=>host.textContent.includes('Page 2'));
-  check(count('/api/v1/tasks/catalog')===taskReads,'Task pagination reuses the bounded cached prefix');click('Previous');await wait(()=>host.textContent.includes('Page 1'));
+  await pages.show('tasks');await wait(()=>host.querySelectorAll('.task-row').length===20);const taskReads=count('/api/v1/tasks/catalog');click('Next →');await wait(()=>host.textContent.includes('Page 2')&&host.querySelector('.task-list').getAttribute('aria-busy')==='false');
+  check(count('/api/v1/tasks/catalog')===taskReads,'Task pagination reuses the bounded cached prefix');click('← Previous');await wait(()=>host.textContent.includes('Page 1')&&host.querySelector('.task-list').getAttribute('aria-busy')==='false');
   await pages.openTask({...taskItems[0],_space_id:'a'});await wait(()=>host.textContent.includes('Cached task transcript'));check(counts.get('a:/api/v1/tasks/t0')===1,'First task visit reads detail only once');
   await pages.show('tasks',{force:true});delays['/api/v1/tasks/t0']=800;delays['/api/v1/tasks/t0/events']=800;
   const returning=pages.openTask({...taskItems[0],_space_id:'a'});await pause(40);check(host.textContent.includes('Cached task transcript'),'Task return keeps transcript during refresh');await returning;
