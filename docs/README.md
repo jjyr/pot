@@ -28,6 +28,7 @@ Code defines actual behavior.
 | MCP protocol component and SDK assets | [MCP](mcp.md) |
 | Plugins, tools, approvals and browser execution | [Plugin packages](plugins.md), [composition](tool-composition.md), [permissions](permissions.md), [computer use](computer-use.md) |
 | Antigravity plugin, models and persistent assistants | [Antigravity Agent Link](../integrations/antigravity/README.md) |
+| Agent-assisted Codex connection | [Connect with an agent](connect-with-agent.md) |
 | Codex sessions and adapter | [Codex Agent Link](../integrations/codex/README.md) |
 | Assistant messaging and Agent Links | [Assistant messages](assistant-messages.md) |
 | Node connections and reliable message transport | [Agent Link](agent-links.md) |

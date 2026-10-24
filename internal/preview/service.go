@@ -131,7 +131,7 @@ func (s *Service) snapshotLocked() Snapshot {
 	}
 	return Snapshot{
 		Assistants: catalogue,
-		RuntimeID:  "go-ui-preview", BootID: s.boot, OwnerID: "preview-assistant",
+		RuntimeID:  "pot-ui-preview", BootID: s.boot, OwnerID: "preview-assistant",
 		ConversationID: ConversationID, Cursor: strconv.FormatUint(s.cursor, 10),
 		Messages: slices.Clone(s.messages), Running: s.active != nil, TurnID: turn,
 		Configuration: map[string]string{"name": "Fixture connection", "model": "fixture-model"}, Usage: map[string]uint64{"input": 12000, "output": 3500},

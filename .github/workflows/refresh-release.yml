@@ -1,0 +1,147 @@
+name: Refresh reviewed v0.0.1 naming
+
+# Explicit recovery only. Normal publishers continue to reject conflicting bytes.
+on:
+  workflow_dispatch:
+    inputs:
+      lease-tag-only:
+        description: Prepare only the exact v0.0.1 source tag from main; then run again from v0.0.1
+        default: false
+        type: boolean
+      run-id:
+        description: Successful nonpublishing CI run with validation-version=0.0.1
+        required: true
+        type: string
+      source:
+        description: Reviewed exact candidate commit (matches v0.0.1 and fixed merge tree)
+        required: true
+        type: string
+      merged-source:
+        description: Exact reviewed qualification PR 291 merge SHA (PR280 ancestry, candidate parent and identical tree required)
+        required: true
+        type: string
+      tag-object:
+        description: Exact original annotated v0.0.1 tag object (lease)
+        required: true
+        type: string
+      baseline:
+        description: Reviewed release snapshot JSON (id, tag_name, target_commitish, assets with id/name/size/digest)
+        required: true
+        type: string
+      image-digest:
+        description: Exact previous ghcr.io/jjyr/pot:0.0.1 index digest
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: pot-v001-refresh
+  cancel-in-progress: false
+
+jobs:
+  lease-tag:
+    if: github.ref == 'refs/heads/main' && inputs.lease-tag-only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      POT_BUILD_REVISION: ${{ inputs.source }}
+      CANDIDATE_RUN: ${{ inputs.run-id }}
+      REVIEWED_MERGE: ${{ inputs.merged-source }}
+      RELEASE_BASELINE: ${{ inputs.baseline }}
+      PREVIOUS_TAG_OBJECT: ${{ inputs.tag-object }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.source }}
+          persist-credentials: false
+      - name: Lease the reviewed tag without recursive tag-push CI
+        run: python3 scripts/refresh-release retag dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: v001-tag-recovery
+          path: recovery/*
+          if-no-files-found: error
+          retention-days: 7
+
+  refresh:
+    if: github.ref == 'refs/tags/v0.0.1' && !inputs.lease-tag-only
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      actions: read
+      packages: write
+    env:
+      POT_BUILD_REVISION: ${{ inputs.source }}
+      POT_UPDATE_PUBLIC_KEY: ${{ vars.POT_UPDATE_PUBLIC_KEY }}
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE_RUN: ${{ inputs.run-id }}
+      REVIEWED_MERGE: ${{ inputs.merged-source }}
+      RELEASE_BASELINE: ${{ inputs.baseline }}
+      PREVIOUS_TAG_OBJECT: ${{ inputs.tag-object }}
+      PREVIOUS_IMAGE_DIGEST: ${{ inputs.image-digest }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.source }}
+          persist-credentials: false
+      - name: Verify successful candidate, merged source, tag and exact release baseline
+        run: python3 scripts/refresh-release check dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run-id }}
+          pattern: package-*
+          merge-multiple: true
+          path: dist
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.10.10
+          cache: false
+          install_args: go python
+      - name: Verify all candidate channels and sign final feed
+        env:
+          POT_UPDATE_PRIVATE_KEY: ${{ secrets.POT_UPDATE_PRIVATE_KEY }}
+          POT_MACOS_RELEASE_MODE: ${{ vars.POT_MACOS_RELEASE_MODE }}
+        run: |
+          test "$POT_MACOS_RELEASE_MODE" = unsigned
+          mise exec -- python scripts/prepare-release 0.0.1 dist
+          mise exec -- python scripts/prepare-release 0.0.1 dist --channel server
+          mise exec -- python scripts/prepare-release 0.0.1 dist --channel desktop
+          mise exec -- python scripts/prepare-release 0.0.1 dist --channel container
+          mise exec -- python scripts/prepare-release 0.0.1 dist --channel macos --macos-mode unsigned --sign-feed
+      - name: Preserve exact replacement plan and original assets before changing public names
+        run: python3 scripts/refresh-release stage dist
+      - name: Retain original bytes and qualified signed replacement set
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: v001-refresh-recovery
+          path: |
+            dist/*
+            recovery/*
+          if-no-files-found: error
+          retention-days: 7
+      - run: sudo apt-get update && sudo apt-get install -y skopeo
+      - name: Replace only the reviewed image digest with the qualified OCI index
+        run: mise exec -- python scripts/publish-container 0.0.1 dist --replace-digest "$PREVIOUS_IMAGE_DIGEST"
+      - name: Activate staged packages, then sidecars, manifests and signed feed
+        run: python3 scripts/refresh-release activate dist
+      - name: Record final public inventory
+        if: always()
+        run: gh api repos/jjyr/pot/releases/422513414 > recovery/release-after.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: v001-refresh-result
+          path: recovery/*
+          retention-days: 7

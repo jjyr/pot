@@ -14,7 +14,7 @@ Upstream source: [Wails v3.0.0-beta.30](https://github.com/wailsapp/wails/blob/v
 Wails is copyright 2018–Present Lea Anthony and distributed under the MIT
 License. The original notice is included with the linked Go dependency notices.
 
-`scripts/build-go-app` verifies the pinned version, original file hash and exact
+`scripts/build-pot-app` verifies the pinned version, original file hash and exact
 patch context, copies the module into its disposable build directory, and uses a
 temporary Go module file to compile that copy. The module cache and repository
 Go module files are never changed. Packaged notices identify this modification.

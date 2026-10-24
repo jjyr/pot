@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""Prepare retained JS/Node assets for the independent Go product."""
+
+import argparse
+from pathlib import Path
+import platform
+
+from pot_packaging import BUILD, NODE_HASHES, prepare_resources
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument(
+    "--platform",
+    choices=NODE_HASHES,
+    default={
+        "Darwin": "darwin-arm64",
+        "Linux": "linux-"
+        + {"x86_64": "amd64", "aarch64": "arm64"}.get(platform.machine(), "unsupported"),
+    }.get(platform.system()),
+)
+parser.add_argument("--output", type=Path, default=BUILD / "runtime-resources")
+args = parser.parse_args()
+prepare_resources(args.output.resolve(), args.platform)
+print(args.output.resolve())

@@ -17,7 +17,6 @@
         "TestHostAssistantWorkspaceAndInstructionDiscoveryAreOwnerScoped",
         "TestHostInstructionPriorityIgnoresSharedRulesAndKeepsActualSkillPaths",
         "TestMachineInterfaceAddresses",
-        "TestMachineInventoryUsesHostnameWithoutChangingIdentity",
         "TestManageScheduleToolControlSystemTimezone",
         "TestManageScheduleToolFullGoal",
         "TestModelDefaultsRefreshOnlySameProfileRevisionAndExplicitOverridesSurvive",
@@ -33,8 +32,6 @@
       "tests": [
         "TestDeletedAssistantCannotReadOrRegisterResources",
         "TestMarkdownResourceRegistrationRetainsWorkspaceAndBundleBoundaries",
-        "TestRegisterResourceNameSchemaDescribesDisplayLabel",
-        "TestResourceToolsSnapshotActualFilesAndFenceOwnership",
         "TestTaskChunksBoundMemoryPreserveRevisionAndConfineLinks"
       ]
     },

@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/jjyr/pot/internal/testutil"
 	"io"
 	"net"
 	"strings"
@@ -44,7 +45,7 @@ func testRawTLSServer(t *testing.T, config *tls.Config, handle func(*tls.Conn) e
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 	go func() {
 		raw, err := ln.Accept()
 		if err != nil {

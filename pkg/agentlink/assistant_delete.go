@@ -25,6 +25,10 @@ type AssistantDeletionBackend interface {
 }
 
 func (s *Service) DeleteAssistant(ctx context.Context, link string, input DeleteAssistantRequest) (AssistantDeletion, error) {
+	if !s.enterRPC() {
+		return AssistantDeletion{}, ErrUnavailable
+	}
+	defer s.rpcWG.Done()
 	if input.From.Kind != "user" || !input.From.Valid() || input.From.NodeID != s.options.HostIdentity.NodeID {
 		return AssistantDeletion{}, ErrUnauthorized
 	}
@@ -32,12 +36,8 @@ func (s *Service) DeleteAssistant(ctx context.Context, link string, input Delete
 	if err != nil {
 		return AssistantDeletion{}, err
 	}
-	session, err := s.businessSession(ctx, c)
-	if err != nil {
-		return AssistantDeletion{}, err
-	}
 	var result AssistantDeletion
-	err = s.call(ctx, session, "assistant.delete", input, &result)
+	err = s.callConnection(ctx, c, "assistant.delete", input, &result)
 	if err == nil && (result.ID != input.AssistantID || !result.Deleted) {
 		err = ErrConflict
 	}

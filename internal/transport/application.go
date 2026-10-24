@@ -100,9 +100,6 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 		}
 		return s.RecoverRuntimeRun(ctx, command)
 	}
-	if result, err, handled := a.machineCall(ctx, method, u, r); handled {
-		return result, err
-	}
 	if result, err, handled := a.agentLinkCall(ctx, method, path, r); handled {
 		return result, err
 	}
@@ -173,7 +170,7 @@ func (a *Application) Call(ctx context.Context, r Request) (any, error) {
 			}
 			return c.Diagnostics(ctx)
 		case "/api/v1/runtime":
-			return map[string]any{"api_version": protocol.APIVersion, "runtime_id": a.RuntimeID, "boot_id": a.BootID, "implementation": "go", "version": buildinfo.Version, "control_id": a.RuntimeID, "name": a.Name}, nil
+			return map[string]any{"api_version": protocol.APIVersion, "runtime_id": a.RuntimeID, "boot_id": a.BootID, "implementation": "go", "version": buildinfo.Version, "control_id": a.RuntimeID, "name": a.Name, "host": s.LocalHost()}, nil
 		case "/api/v1/control":
 			return map[string]any{"id": a.RuntimeID, "name": a.Name, "runtime_id": a.RuntimeID, "connected": true, "role": s.ControlRole()}, nil
 		case "/api/v1/assistants":

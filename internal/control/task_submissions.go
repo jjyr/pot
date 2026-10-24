@@ -283,6 +283,22 @@ func (s *Service) taskExecutionNotification(ctx context.Context, id, owner strin
 	return err
 }
 func (s *Service) TaskPage(ctx context.Context, owner string, q protocol.TaskQuery) (protocol.TaskPage, error) {
+	// The operator filter uses the directory key. Linked tasks are stored under
+	// their durable user-chat session, not the remote assistant ID or UI key.
+	// Resolve only existing mappings; listing must not create a conversation.
+	if owner == "" && strings.HasPrefix(q.AssistantID, "agent-link:") {
+		if !ValidAgentKey(q.AssistantID) {
+			return protocol.TaskPage{}, agentlink.ErrInvalid
+		}
+		parts := strings.SplitN(strings.TrimPrefix(q.AssistantID, "agent-link:"), ":", 2)
+		err := s.integrationDB.QueryRowContext(ctx, "SELECT id FROM agent_link_chat_sessions WHERE link_id=? AND assistant_id=?", parts[0], parts[1]).Scan(&q.AssistantID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return protocol.TaskPage{Items: []protocol.TaskInfo{}}, nil
+		}
+		if err != nil {
+			return protocol.TaskPage{}, err
+		}
+	}
 	var page protocol.TaskPage
 	var err error
 	if owner == "" {

@@ -177,6 +177,7 @@ type TaskInput struct {
 	Text      string `json:"text" required:"true"`
 }
 type TaskQuery struct {
+	AssistantID     string     `json:"assistant_id"`
 	ExecutionTarget string     `json:"execution_target"`
 	Scope           string     `json:"scope"`
 	Phase           *TaskPhase `json:"phase"`
@@ -197,9 +198,13 @@ func (q *TaskQuery) UnmarshalJSON(data []byte) error {
 }
 
 type TaskCounts struct {
-	Active    uint64 `json:"active"`
-	Attention uint64 `json:"attention"`
-	Archived  uint64 `json:"archived"`
+	Active          uint64 `json:"active"`
+	Complete        uint64 `json:"complete"`
+	Failed          uint64 `json:"failed"`
+	Interrupted     uint64 `json:"interrupted"`
+	WaitingApproval uint64 `json:"waiting_approval"`
+	Attention       uint64 `json:"attention"`
+	Archived        uint64 `json:"archived"`
 }
 type TaskPage struct {
 	Items      []TaskInfo `json:"items"`

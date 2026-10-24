@@ -163,11 +163,19 @@ distributed execution services.
 
 ## Business contract and recovery
 
-Each connection admits five concurrent business handlers and one mailbox exchange,
-sharing a 180-admissions/minute budget. Excess business requests return
-`agent_link_capacity_exceeded` before backend execution. Slots remain held until
-handlers return, even if callers stop waiting. This counts handlers, not running Tasks.
-Invitation preview has its own single slot and 180-admissions/minute budget.
+Each connection forwards up to 32 business requests concurrently over one
+multiplexed session and holds up to 64 additional requests in FIFO dispatch order.
+A full queue returns `agent_link_capacity_exceeded` before sending. Queued callers
+can cancel without sending; sent calls retain the transport's response or uncertain
+outcome and are never automatically replayed by the forwarder. Different
+connections have independent queues and shared dials. A caller's cancellation does
+not cancel another caller's dial. Dials and dispatched calls have a 15-second bound.
+The receiver admits 32 business handlers and one independent mailbox exchange;
+slots remain held until handlers return, even if callers stop waiting. These limits
+count RPC handlers, not running Tasks. Authenticated business and exchange calls
+have no fixed per-minute rate limit. Invitation preview retains its separate
+single slot and 180-admissions/minute budget. The peer transport's 64 pending-call
+and memory limits remain in force.
 
 `Backend` provides `Directory`, `Observe`, `Submit`, `Status` and `Cancel`. The same receiver
 implementation owns in-process calls and authenticated remote calls. The receiver

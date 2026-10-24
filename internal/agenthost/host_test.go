@@ -22,6 +22,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"github.com/jjyr/pot/internal/linkhost"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/peer"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -35,7 +36,7 @@ func TestAgentHostMCPDirectoryWithoutCompetingInboxReader(t *testing.T) {
 	t.Setenv("POT_AGENT_ASSISTANT_ID", "codex")
 	h, _ := testHost(t)
 	defer h.close()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 10*time.Second))
 	defer cancel()
 	client := hostClient{token: h.token, client: &http.Client{Transport: hostRoundTripper(func(r *http.Request) (*http.Response, error) {
 		r.RemoteAddr = "127.0.0.1:12345"
@@ -165,6 +166,13 @@ func testHost(t *testing.T) (*agentHost, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		for name, db := range map[string]*sql.DB{"control": h.db, "tasks": h.tasks} {
+			if stats := db.Stats(); stats.OpenConnections != 0 {
+				t.Errorf("host close left %s database connections active: %+v", name, stats)
+			}
+		}
+	})
 	return h, root
 }
 func TestAgentHostRestartStableIdentityAndMailbox(t *testing.T) {

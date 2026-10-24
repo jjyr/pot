@@ -2,13 +2,14 @@ package terminal
 
 import (
 	"context"
+	"github.com/jjyr/pot/internal/testutil"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestShellDetachReplayResizeOwnerIsolationAndShutdown(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 10*time.Second))
 	defer cancel()
 	h := New()
 	defer h.Close(ctx)

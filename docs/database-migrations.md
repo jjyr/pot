@@ -165,7 +165,7 @@ and recovery fences. A successfully acknowledged inbox batch may already be
 
 ## Shared native adapter storage
 
-`control/0002_agent_adapter` renames Codex host and endpoint tables to shared
+`control/0003_agent_adapter` renames Codex host and endpoint tables to shared
 adapter tables and records the runtime kind. `tasks/0002_agent_adapter` renames
 assistant, job, executor, task-session and continuation tables; adds model/effort
 columns; and introduces caller-bound assistant-management receipts. Existing Codex

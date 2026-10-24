@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/plugin"
 )
@@ -42,7 +43,7 @@ func TestBackgroundProtocolCannotForgeRouteOrLeakCredential(t *testing.T) {
 			if _, err = p.ToolBundle(); err == nil {
 				t.Fatal("service became transferable tool")
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 			defer cancel()
 			worker, _ := os.Executable()
 			_, err = RunBackground(ctx, "", p, core.BackgroundRequest{Version: 1, Config: []byte(`{}`), State: []byte(`null`)}, map[string]string{"SERVICE_TOKEN": "fixture-private-token"}, []string{worker})
@@ -54,28 +55,81 @@ func TestBackgroundProtocolCannotForgeRouteOrLeakCredential(t *testing.T) {
 }
 
 func TestBackgroundCancellationUsesSupervisorForDetachedDescendants(t *testing.T) {
-	root := t.TempDir()
-	source := `import {spawn} from 'node:child_process';import {writeFileSync} from 'node:fs';export async function poll(){const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'});writeFileSync('child.pid',String(child.pid));await new Promise(()=>{});}`
-	if err := os.WriteFile(filepath.Join(root, "service.mjs"), []byte(source), 0600); err != nil {
-		t.Fatal(err)
-	}
-	p := plugin.Package{Root: root, Manifest: core.PluginManifest{SchemaVersion: 2, ID: "example", Version: "1", Contributes: core.PluginContributions{Background: &core.PluginBackground{Runtime: "node", Execution: "control", Entrypoint: "service.mjs", Files: []string{"service.mjs"}}}}}
-	worker, _ := os.Executable()
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
-	if _, err := RunBackground(ctx, "", p, core.BackgroundRequest{Version: 1}, nil, []string{worker}); err == nil || err.Error() != "background exchange timed out" {
-		t.Fatal("deadline diagnostic missing", err)
-	}
-	data, err := os.ReadFile(filepath.Join(root, "child.pid"))
-	if err != nil {
-		t.Fatal("fixture child did not start", err)
-	}
-	pid, err := strconv.Atoi(string(data))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
-		t.Fatal("supervised background descendant survived", pid, err)
+	for _, mode := range []string{"cancel", "deadline"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			source := `import {spawn} from 'node:child_process';import {writeFileSync,renameSync} from 'node:fs';export async function poll(){const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'});child.once('spawn',()=>{writeFileSync('child.pid.tmp',String(child.pid));renameSync('child.pid.tmp','child.pid');});await new Promise(()=>{});}`
+			if err := os.WriteFile(filepath.Join(root, "service.mjs"), []byte(source), 0600); err != nil {
+				t.Fatal(err)
+			}
+			p := plugin.Package{Root: root, Manifest: core.PluginManifest{SchemaVersion: 2, ID: "example", Version: "1", Contributes: core.PluginContributions{Background: &core.PluginBackground{Runtime: "node", Execution: "control", Entrypoint: "service.mjs", Files: []string{"service.mjs"}}}}}
+			worker, _ := os.Executable()
+			ctx, cancel := context.WithCancel(t.Context())
+			if mode == "deadline" {
+				cancel()
+				ctx, cancel = context.WithTimeout(t.Context(), testutil.Timeout(t, 3*time.Second))
+			}
+			done := make(chan struct{})
+			var runErr error
+			go func() {
+				_, runErr = RunBackground(ctx, "", p, core.BackgroundRequest{Version: 1}, nil, []string{worker})
+				close(done)
+			}()
+			t.Cleanup(func() {
+				cancel()
+				select {
+				case <-done:
+				case <-time.After(testutil.Timeout(t, 5*time.Second)):
+					t.Error("background fixture cleanup did not finish")
+				}
+			})
+			// A real spawn receipt, rather than an assumed 300ms startup, establishes
+			// that cancellation will exercise a detached descendant's supervisor.
+			ticker := time.NewTicker(5 * time.Millisecond)
+			defer ticker.Stop()
+			ready := time.NewTimer(testutil.Timeout(t, 5*time.Second))
+			defer ready.Stop()
+			var pid int
+			for pid == 0 {
+				data, err := os.ReadFile(filepath.Join(root, "child.pid"))
+				if err == nil {
+					pid, err = strconv.Atoi(string(data))
+					if err != nil || pid <= 0 {
+						t.Fatal("invalid child receipt", string(data), err)
+					}
+					break
+				}
+				if !os.IsNotExist(err) {
+					t.Fatal(err)
+				}
+				select {
+				case <-done:
+					t.Fatal("background ended before child readiness", runErr)
+				case <-ready.C:
+					t.Fatal("fixture child did not become ready")
+				case <-ticker.C:
+				}
+			}
+			expected := "background exchange timed out"
+			if mode == "cancel" {
+				cancel()
+				expected = "background exchange failed"
+			}
+			select {
+			case <-done:
+			case <-time.After(testutil.Timeout(t, 5*time.Second)):
+				t.Fatal("background cancellation did not finish")
+			}
+			if runErr == nil || runErr.Error() != expected {
+				t.Fatal("cancellation diagnostic missing", mode, runErr)
+			}
+			if mode == "deadline" && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				t.Fatal("deadline did not fire", ctx.Err())
+			}
+			if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+				t.Fatal("supervised background descendant survived", pid, err)
+			}
+		})
 	}
 }
 
@@ -87,7 +141,7 @@ func TestBackgroundStreamAcknowledgesOnlyCommittedFrames(t *testing.T) {
 	}
 	p := plugin.Package{Root: root, Manifest: core.PluginManifest{SchemaVersion: 2, ID: "example", Version: "1", Contributes: core.PluginContributions{Background: &core.PluginBackground{Runtime: "node", Execution: "control", Mode: "stream", Entrypoint: "service.mjs", Files: []string{"service.mjs"}}}}}
 	worker, _ := os.Executable()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 	defer cancel()
 	count := 0
 	rejected := errors.New("transaction_rejected")

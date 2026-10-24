@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/core"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/modelprotocol"
@@ -24,7 +25,7 @@ func TestAssistantMailAcceptsDuringRecipientCompaction(t *testing.T) {
 	t.Parallel()
 	for _, outcome := range []string{"complete", "failed", "restart"} {
 		t.Run(outcome, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 20*time.Second))
 			defer cancel()
 			entered, release := make(chan struct{}), make(chan struct{})
 			var once sync.Once

@@ -19,6 +19,10 @@ type ChatBackend interface {
 }
 
 func (s *Service) ChatStatus(ctx context.Context, link string, query ChatLookup) (ChatStatus, error) {
+	if !s.enterRPC() {
+		return ChatStatus{}, ErrUnavailable
+	}
+	defer s.rpcWG.Done()
 	if !query.From.Valid() || query.From.Kind != "user" || query.From.NodeID != s.options.HostIdentity.NodeID || !core.Identifier(query.AssistantID) || !core.Identifier(query.MessageID) {
 		return ChatStatus{}, ErrUnauthorized
 	}
@@ -37,12 +41,8 @@ func (s *Service) ChatStatus(ctx context.Context, link string, query ChatLookup)
 		if e != nil {
 			return result, e
 		}
-		session, e := s.businessSession(ctx, c)
-		if e != nil {
-			return result, e
-		}
 		node = c.PeerHost.NodeID
-		err = s.call(ctx, session, "chat.status", query, &result)
+		err = s.callConnection(ctx, c, "chat.status", query, &result)
 	}
 	if err != nil {
 		return result, err

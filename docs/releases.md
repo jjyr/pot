@@ -5,17 +5,19 @@ checks pass. Docker, Linux server and the experimental Linux desktop do not depe
 on macOS signing. Each channel requires its own build, smoke, checksum and
 applicable signing gates. Windows is currently unsupported.
 
-Source builds remain available until public artifacts exist. This repository is
-also the Homebrew tap: root `Casks/pot.rb` starts disabled until the first macOS
-release is published and its reviewed cask update lands. Release workflows propose
-a cask update PR after successful macOS publication; they never push the default branch or
-change repository/registry visibility.
+The first public release is 0.0.1; the root `Casks/pot.rb` installs its App.
+Release workflows propose a cask update PR after successful macOS publication;
+they never push the default branch or change repository/registry visibility.
+
+CLI builds use `pot-VERSION-PLATFORM.tar.gz`, containing `pot-PLATFORM/bin/pot`
+and the complete `Resources/` directory. App ZIP, Homebrew and image names retain
+their existing Pot branding.
 
 | Channel | Versioned distribution | Publication boundary |
 |---|---|---|
-| Linux server, amd64/arm64 | `pot-go-VERSION-linux-ARCH.tar.gz` | Both native CLI builds and extracted-package smoke; GitHub Release assets |
+| Linux server, amd64/arm64 | `pot-VERSION-linux-ARCH.tar.gz` | Both native CLI builds and extracted-package smoke; GitHub Release assets |
 | Linux desktop (Experimental), amd64 | `pot-desktop_VERSION_linux_amd64.deb` | Native GTK/WebKit build and real WebView smoke; GitHub Release assets; manual upgrades |
-| macOS 26+, Apple Silicon | `Pot-VERSION-arm64.zip`, `pot-go-VERSION-darwin-arm64.tar.gz` | Native App/CLI smoke and explicit `unsigned` (ad-hoc) or `signed` (Developer ID + notarization) mode; GitHub assets, cask and signed update feed |
+| macOS 26+, Apple Silicon | `Pot-VERSION-arm64.zip`, `pot-VERSION-darwin-arm64.tar.gz` | Native App/CLI smoke and explicit `unsigned` (ad-hoc) or `signed` (Developer ID + notarization) mode; GitHub assets, cask and signed update feed |
 | Container, Linux amd64/arm64 | `pot-container-VERSION.oci.tar`, `ghcr.io/jjyr/pot:VERSION` | Native image build/smoke on both architectures, OCI integrity and metadata verification; GHCR |
 | Homebrew | Root `Casks/pot.rb` in `jjyr/pot` | Published final App ZIP verified before a same-repository cask update PR; merge makes installation/upgrades available |
 
@@ -30,11 +32,16 @@ platform requirements, installation boundaries and source-build instructions.
 
 ## Triggers and source selection
 
-Only tag pushes start CI automatically. Every tag runs checks, including Unicode
+The release/build `CI` workflow starts automatically only on tag pushes. The
+separate `Tests` workflow runs one Linux lightweight check on PRs and pushes to
+`main`. Release/build calls and manual `Tests` runs always use the complete
+Linux/macOS normal/static and race matrix, regardless of `publish`; see
+[Development](development.md#ci-and-manual-pr-checks) for both coverage boundaries.
+Every tag runs checks, including Unicode
 names and tags outside the release pattern. Only exact `vMAJOR.MINOR.PATCH` tags
 without leading zeroes select publication. Other tags build validation artifacts
 with version `0.0.0`; they do not push images or create releases. Branch pushes,
-PR events and Release events do not start CI.
+PR events and Release events do not start the release/build workflow.
 
 Ordinary manual runs never publish, including when selecting a stable version tag.
 The optional `ref` and `pr` inputs are mutually exclusive. Leave both empty to
@@ -63,7 +70,9 @@ bypasses checks.
 ```text
 resolve one source SHA + version + publication intent
                          |
-              shared Linux/macOS product checks
+              shared Linux/macOS Tests workflow
+                         |
+               headless/cross-platform builds
                          |
        +-----------------+----------------+------------------+
        |                 |                |                  |
@@ -147,7 +156,7 @@ manifest: `SHA256SUMS-server`, `SHA256SUMS-desktop`, `SHA256SUMS-macos` or
 manifest. The unsigned aggregate validation bundle uses `SHA256SUMS`. Artifacts
 are retained for seven days. `POT_APP_VERSION` and `POT_BUILD_REVISION` set matching
 version/revision metadata across all builds. Versioned CLI filenames retain the
-internal installation directory `pot-go-PLATFORM`.
+internal installation directory `pot-PLATFORM`.
 
 Channel publication is intentionally independent, not a transaction across GitHub
 and GHCR. An environment refusal, registry error or platform failure may leave
@@ -234,6 +243,48 @@ does not install this workflow; the code must be merged before tagging a release
 Runner availability, pinned toolchains, package repositories, upstream downloads
 and standard Actions minutes/billing remain execution prerequisites. A job refused
 before startup does not establish a code failure. Paid model tests are not enabled.
+
+## Explicit 0.0.1 naming refresh
+
+The `Refresh reviewed v0.0.1 naming` workflow is a separate, manual operation for
+this same-version naming correction. Ordinary publishers keep all immutable-byte
+checks. It accepts a successful nonpublishing CI run built with
+`validation-version=0.0.1`, its exact reviewed source, the original public release
+snapshot, the exact previous image index digest and `merged-source`, the reviewed
+qualification PR 291 merge SHA. PR280 must remain merged at
+`5225cdf82c0f04fd49b5938c62c43ef3fd7a412d`, and that exact naming merge must be an
+ancestor of the candidate. Only the fixed qualification PR291 in `jjyr/pot`,
+merged into `main`, can supply the final head. The source must match the tag,
+that PR head and a parent of its normal merge, with an identical tree. This fixed merge remains the boundary
+if main later advances; later UI changes cannot enter the selected artifacts. First run it from `main` with
+`lease-tag-only=true` and the exact original annotated tag object. This job has no
+release environment or signing secrets: it validates the successful candidate,
+merged tree and original asset snapshot, then moves `v0.0.1` with an exact
+old-object lease. Its workflow token suppresses recursive tag-push CI; do not push
+the replacement tag separately with a personal token. Then dispatch the same
+workflow from `v0.0.1` with `lease-tag-only=false`. Signing and publication retain
+the existing `release` environment's `v*` tag policy. No additional tag, environment
+policy change or Actions-write permission is needed. If signing fails, the original
+public assets and signed feed are still intact; inspect the saved tag objects and
+partial effects before any recovery.
+
+The workflow checks all distributions, signs the final feed with the existing
+controlled release key, saves every original asset, uploads and verifies the new
+assets under temporary names, and retains the replacement plan and recovery bytes
+as Actions artifacts. It replaces only the specified old image digest, activates
+archives before references, and updates release metadata last. GitHub cannot switch
+multiple same-name assets atomically: existing App downloads can briefly require
+a retry while the ZIP, sidecar and feed switch. Original assets remain available
+under their preserved IDs until final verification and cask synchronization; only
+then remove the exact original IDs and temporary backups. Never delete the entire
+release, bypass immutable-release settings, relax normal publisher checks or
+regenerate the previous signed feed for rollback. Save recovery artifacts beyond
+the seven-day Actions retention if needed.
+
+The refreshed build uses only current service/configuration/browser names and
+rejects earlier root/storage discriminators. It does not convert data or migrate
+running services. Equal-version self-update remains disabled; manual installation
+requires a separate unused root. See [Updates](updates.md).
 
 ## Homebrew generation
 

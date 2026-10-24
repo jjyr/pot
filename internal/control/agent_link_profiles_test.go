@@ -18,7 +18,7 @@ func TestLinkedPotRetiresOnlySelectedAssistant(t *testing.T) {
 	connection := connectAgentControls(t, a, b)
 	owner := "agent-link:" + connection.ID + ":main"
 	callAgent := func(operation agentlink.Operation, call agentlink.Call) (any, error) {
-		return callAgentWhenReady(ctx, a.service, owner, operation, call)
+		return callAgentWhenReady(t, ctx, a.service, owner, operation, call)
 	}
 	d, err := a.service.AgentCapabilities(ctx, owner)
 	if err != nil || !d.Supports(agentlink.AssistantDelete) {
@@ -57,7 +57,7 @@ func TestLinkedPotRetiresOnlySelectedAssistant(t *testing.T) {
 	// The directory request can be rejected before dispatch while the peer is
 	// refreshing its cache. Retry that exact admission rejection only; never
 	// repeat deletion or accept a cached result in place of the receiver read.
-	value, err = retryAgentCapacity(ctx, func(ctx context.Context) (any, error) {
+	value, err = retryAgentCapacity(t, ctx, func(ctx context.Context) (any, error) {
 		return a.service.agentLinks.service.Directory(ctx, connection.ID)
 	})
 	directory, _ := value.(agentlink.Directory)

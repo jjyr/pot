@@ -78,9 +78,9 @@ constructing a download URL. The
   its checksum, then `sudo apt install ./THE_DOWNLOADED_FILE.deb` and launch
   `pot-desktop`. Use the actual downloaded filename. Do not offer arm64 until a
   corresponding qualified asset exists.
-- Web UI / Server: `pot-go-VERSION-linux-ARCH.tar.gz`, with `ARCH` matching
+- Web UI / Server: `pot-VERSION-linux-ARCH.tar.gz`, with `ARCH` matching
   `amd64` or `arm64`. Verify the checksum and extract into a new directory. From
-  the extracted `pot-go-linux-ARCH/bin`, run
+  the extracted `pot-linux-ARCH/bin`, run
   `./pot serve -root "$HOME/.pot-node" -ui 127.0.0.1:17703`. In another terminal
   use `./pot access -root "$HOME/.pot-node" token` locally. See the server section
   below for browser access, stopping, backups and first verification.
@@ -120,7 +120,7 @@ mise run build
 mise run open
 ```
 
-This creates the independent development bundle `.local/go/PotGoPreview.app`,
+This creates the independent development bundle `.local/pot/PotPreview.app`,
 not a production release. Launch that bundle again to start; use **Quit** to
 stop it (closing the macOS window leaves Pot running). Rebuild with these same
 commands after quitting and backing up before updates. For published
@@ -132,8 +132,8 @@ On native Debian/Ubuntu amd64, build the Experimental Linux desktop package:
 sudo apt install build-essential pkg-config binutils libgtk-3-dev \
   libwebkit2gtk-4.1-dev dbus-user-session bubblewrap socat xvfb xauth
 POT_APP_VERSION=0.1.0 POT_BUILD_REVISION=local \
-  mise exec -- python scripts/build-desktop --platform linux-amd64 --output .local/go/dist
-cd .local/go/dist
+  mise exec -- python scripts/build-desktop --platform linux-amd64 --output .local/pot/dist
+cd .local/pot/dist
 sha256sum -c pot-desktop_0.1.0_linux_amd64.deb.sha256
 sudo apt install ./pot-desktop_0.1.0_linux_amd64.deb
 pot-desktop
@@ -155,14 +155,14 @@ In the checkout on a glibc amd64/arm64 host:
 ```sh
 mise run prepare
 mise run build:go
-.local/go/bin/pot serve -root "$HOME/.pot-node" -ui 127.0.0.1:17703
+.local/pot/bin/pot serve -root "$HOME/.pot-node" -ui 127.0.0.1:17703
 ```
 
 Leave that terminal running. In another terminal in the same checkout:
 
 ```sh
-.local/go/bin/pot access -root "$HOME/.pot-node" token
-.local/go/bin/pot status -root "$HOME/.pot-node"
+.local/pot/bin/pot access -root "$HOME/.pot-node" token
+.local/pot/bin/pot status -root "$HOME/.pot-node"
 ```
 
 The first run initializes the chosen private root. Open

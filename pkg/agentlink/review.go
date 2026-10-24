@@ -41,6 +41,10 @@ func validReview(r ReviewRequest, node string) bool {
 }
 
 func (s *Service) Review(ctx context.Context, link string, r ReviewRequest) (ReviewState, error) {
+	if !s.enterRPC() {
+		return ReviewState{}, ErrUnavailable
+	}
+	defer s.rpcWG.Done()
 	if !validReview(r, s.options.HostIdentity.NodeID) {
 		return ReviewState{}, ErrUnauthorized
 	}
@@ -51,12 +55,8 @@ func (s *Service) Review(ctx context.Context, link string, r ReviewRequest) (Rev
 	if c.Directory == nil || !c.Directory.Capabilities(NodeTarget(c.Directory.NodeID)).Supports(Approvals) {
 		return ReviewState{}, ErrUnsupported
 	}
-	session, err := s.businessSession(ctx, c)
-	if err != nil {
-		return ReviewState{}, err
-	}
 	var result ReviewState
-	err = s.call(ctx, session, "execution.review", r, &result)
+	err = s.callConnection(ctx, c, "execution.review", r, &result)
 	if err == nil && (result.NodeID != c.PeerHost.NodeID || len(result.Pending) > 32) {
 		return ReviewState{}, ErrConflict
 	}

@@ -37,6 +37,7 @@ func (a *Application) taskCall(ctx context.Context, method string, u *url.URL, o
 	case catalog:
 		var q protocol.TaskQuery
 		q.Scope = u.Query().Get("scope")
+		q.AssistantID = u.Query().Get("assistant_id")
 		q.Q = u.Query().Get("q")
 		q.ExecutionTarget = u.Query().Get("execution_target")
 		q.Selected = u.Query().Get("selected")

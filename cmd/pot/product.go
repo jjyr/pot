@@ -27,7 +27,7 @@ import (
 func productCommand(ctx context.Context, args []string, out io.Writer) (result error) {
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	flags.SetOutput(out)
-	root := flags.String("root", "", "private Go data root (default ~/.pot)")
+	root := flags.String("root", "", "private Pot data root (default ~/.pot)")
 	workspace := flags.String("workspace", "", "Host Agent workspace")
 	ui := flags.String("ui", "", "explicit loopback browser address, for example 127.0.0.1:17703")
 	method := flags.String("method", "GET", "API method")

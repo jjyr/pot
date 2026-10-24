@@ -1,4 +1,5 @@
 import {machinePresentation} from '../state/machine-identity.mjs';
+import {storedPreference} from '../state/preferences.mjs';
 import {createCompaction} from './compaction.mjs';
 import {projectLinkedAssistants,supportsCapability} from '../state/agent-links.mjs';
 import {agentSource} from './connection-visuals.mjs';
@@ -6,7 +7,7 @@ import {createUpdates} from './updates.mjs';
 import {mergeHistoryPage} from '../state/chat-history.mjs';
 import {createChatCache} from '../state/chat-cache.mjs';
 import {createChatSync} from '../state/chat-sync.mjs';
-import {createMessageWindow} from './message-window.mjs';
+import {createCommunicationWindow} from './communication-window.mjs';
 import {createReadingCursor} from './reading-cursor.mjs';
 import {notificationOnboarding} from './notification-onboarding.mjs';
 import {createSendConfirmation} from '../state/send-confirmation.mjs';
@@ -55,7 +56,7 @@ function button(name, label, className = 'icon-button') {
   return item;
 }
 function stored(key, fallback) {
-  try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
+  return storedPreference(key, fallback);
 }
 function persist(key, value) { try { localStorage.setItem(key, value); } catch { /* restricted WebView */ } }
 
@@ -68,10 +69,10 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     viewSurface='browser:'+tabID;
   }
   const params = new URLSearchParams(location.search);
-  let locale = params.get('locale') || stored('pot-go-preview-locale', navigator.language.startsWith('zh') ? 'zh-CN' : 'en');
+  let locale = params.get('locale') || stored('pot-ui-locale', navigator.language.startsWith('zh') ? 'zh-CN' : 'en');
   if (!messages[locale]) locale = 'en';
   client.uiLocale=()=>locale;
-  let theme = params.get('theme') || stored('pot-go-preview-theme', 'system');
+  let theme = params.get('theme') || stored('pot-ui-theme', 'system');
   if (!['system', 'light', 'dark'].includes(theme)) theme = 'system';
   const state = createConversationState();
   let initialReads=[];try{initialReads=client.desktop?client.readBaselines||[]:JSON.parse(stored('pot-ui-read-v1','[]'));}catch{}
@@ -372,13 +373,12 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     const label=text=>{const value=el('span','',text);value.title=text;return value;};
     projection.classList.toggle('has-error', Boolean(error || connectionError) || visibleConnection === 'offline');
     projection.classList.toggle('is-connected',!pending&&!error&&!connectionError&&visibleConnection==='connected');
-    const replyOwnsConnection=state.snapshot?.running||state.sends.has(editorOwner);
     if(pending){
       projection.append(label(t(pending.phase==='uncertain'?'send.unknown':'send.confirming')));
       if(pending.recoverable){const retry=el('button','text-button',t('send.checkRetry'));retry.type='button';retry.disabled=visibleConnection!=='connected';retry.onclick=()=>confirmations.recover(pending);projection.append(retry);}
     }
-    if(error||!replyOwnsConnection)projection.append(label(error || connectionError || (visibleConnection === 'connected' ? t(client.production?'connected':'preview') : t(visibleConnection))));
-    if (visibleConnection === 'offline'&&!replyOwnsConnection) {
+    projection.append(label(error || connectionError || (visibleConnection === 'connected' ? t(client.production?'connected':'preview') : t(visibleConnection))));
+    if (visibleConnection === 'offline') {
       const retry = el('button', 'text-button', t('retry'));
       retry.type = 'button';
       retry.onclick = () => loadSnapshot(true);
@@ -429,8 +429,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
         select.id = `preview-${key}`;
         label.htmlFor = select.id;
         select.onchange = () => {
-          if (key === 'language') { locale = select.value; persist('pot-go-preview-locale', locale); }
-          else { theme = select.value; persist('pot-go-preview-theme', theme); }
+          if (key === 'language') { locale = select.value; persist('pot-ui-locale', locale); }
+          else { theme = select.value; persist('pot-ui-theme', theme); }
           renderShell(); renderMessages(); if(client.production) window.dispatchEvent(new Event('pot:locale'));
         };
         label.append(text, select);
@@ -698,8 +698,9 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   historyStatus.onclick=()=>{pauseFollowing();if(historyFailure==='history.missing'){historyFailure='';renderMessages();}else if(!historyLoading&&state.snapshot?.history?.has_more)readHistory({before:state.snapshot.history.before});};
   const messageNodes = new Map(),toolMemory=new Map();
   const taskCache=new Map();
+  const openChatTask=(task,scope=client.scope())=>{route='tasks';pages.openTask({...task,_space_id:task._space_id||scope.space,assistant_id:task.assistant_id||scope.owner},{returnTo:{route:'chat',scope:{...scope}}});renderShell();};
   const backgroundTaskView=createBackgroundTasks({locale:()=>locale,
-    onOpen:task=>{const returnTo={route:'chat',scope:{...client.scope()}};route='tasks';pages.openTask(task,{returnTo});renderShell();},
+    onOpen:openChatTask,
     onToggle:change=>{cancelChatPosition();reading.pause({ignoreToggle:!!change.expanded});pendingTaskToggle=change;renderMessages();},
   });
   let backgroundTasks=null,backgroundTaskKey='';
@@ -718,7 +719,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
           items.push(...(value.items||[]));offset=value.next_offset;
         }while(offset!=null);
         taskCache.set(key,items.filter(task=>['queued','running','waiting','waiting_approval'].includes(task.phase)).map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner})));
-        pages.rememberTasks(taskCache.get(key));if(route==='chat')renderMessages();
+        messageIdentities(client).rememberTasks(items.map(task=>({...task,_space_id:scope.space,assistant_id:scope.owner})));pages.rememberTasks(taskCache.get(key));if(route==='chat')renderMessages();
       },{active:()=>!disposed&&key===JSON.stringify([client.scope().space,client.scope().owner])});
     }return backgroundTasks.run();
   }
@@ -729,6 +730,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
   };
   let renderingSnapshot=null,renderingSending=null,renderingForest=null,navigationPath=new Map();
   const markdownFiles=scope=>({
+    messageFiles:client.messageFiles?(message,options)=>client.messageFiles(message,{...scope,...options}):undefined,
+    retryMessageFile:client.retryMessageFile?(message,ref,options)=>client.retryMessageFile(message,ref,{...scope,...options}):undefined,
     acquireResource:client.acquireResource?resource=>client.acquireResource(resource,scope):undefined,
     downloadResource:client.downloadResource?resource=>client.downloadResource(resource,scope):undefined,
     acquireFileImage:client.acquireFileImage?({task,path})=>client.acquireFileImage(task,path,scope):undefined,
@@ -752,14 +755,14 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
  record.compact.update(message);
  }else if(message.role==='tool'&&message.tool){
       const scope=client.scope?.()||{},key=JSON.stringify([scope.space,scope.owner,message.id]);
-      if(!record.tool){record.tool=createToolCall({messageActor:()=>messageIdentities(client).actor(scope),resolveTask:id=>(taskCache.get(JSON.stringify([scope.space,scope.owner]))||[]).find(task=>task.id===id),onOpenTask:task=>{route='tasks';pages.openTask({...task,_space_id:scope.space,assistant_id:scope.owner},{returnTo:{route:'chat',scope:{...scope}}});renderShell();},resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key,locale:()=>locale,machineLabel:id=>machinePresentation(client).label(id,scope,locale),onDecision:(approval,action)=>pages.decideApproval(approval,action),onInteract:event=>reading.engage(event),onLocate:(call,turn)=>{const target=renderingForest.byID.get(turn+':'+call)?.message;if(target)jumpToMessage(target.id,{expand:true});},...markdownFiles(scope)});bubble.append(record.tool.element);}
-      record.tool.update(message,{offline:connection==='offline'||disconnected,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
+      if(!record.tool){record.tool=createToolCall({messageActor:()=>messageIdentities(client).actor(scope),resolveTask:id=>(taskCache.get(JSON.stringify([scope.space,scope.owner]))||[]).find(task=>task.id===id),onOpenTask:task=>openChatTask(task,scope),resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key,locale:()=>locale,machineLabel:id=>machinePresentation(client).label(id,scope,locale),onDecision:(approval,action)=>pages.decideApproval(approval,action),onInteract:event=>reading.engage(event),onLocate:(call,turn)=>{const target=renderingForest.byID.get(turn+':'+call)?.message;if(target)jumpToMessage(target.id,{expand:true});},...markdownFiles(scope)});bubble.append(record.tool.element);}
+      record.tool.update(message,{stacked:message.communicationStacked,offline:connection==='offline'||disconnected,children:forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children.map(entry=>entry.message)||[]});
     }else if(message.role==='assistant'){
       record.reply ||= createReplyBubble(bubble);
       const scope=client.scope?.();
       record.reply.update(message,{t,...markdownFiles(scope),
         onSettings:async()=>{if(!await pages?.leave())return;route='settings';await pages.showProviders();renderShell();},
-        onReconnect:()=>loadSnapshot(true),onRetrySend:submit,canRetrySend:connection==='connected'&&!pendingSend()&&draft(state)===sending?.request.text});
+        onRetrySend:submit,canRetrySend:connection==='connected'&&!pendingSend()&&draft(state)===sending?.request.text});
       record.text=message.text;record.role=message.role;
     }else if (record.text !== message.text || record.role !== message.role) {
       bubble.replaceChildren();
@@ -809,13 +812,13 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       const entry=forest.byID.get(message.tool.turn_id+':'+message.tool.id),children=entry?.children.map(child=>child.message)||[];
       if(chatPosition&&navigationPath.has(message.id)||reading.destination?.expand&&reading.destination.id===message.id)record.tool.element.open=true;
       if(children.length||record.childrenWindow){
-        if(!record.childrenWindow){record.childrenWindow=createMessageWindow({scroller:history,host:record.tool.children,nested:true,render:renderMessage,dispose:disposeMessage,requestRender:requestMessageRender,reading,heights:windowHeights});record.tool.element.addEventListener('toggle',()=>renderMessages());}
+        if(!record.childrenWindow){record.childrenWindow=createCommunicationWindow({onOpenTask:openChatTask,locale:()=>locale,actor:()=>messageIdentities(client).actor(client.scope?.()),resolveIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,scope:()=>JSON.stringify(client.scope?.()),scroller:history,host:record.tool.children,nested:true,render:renderMessage,dispose:disposeMessage,requestRender:requestMessageRender,reading,heights:windowHeights});record.tool.element.addEventListener('toggle',()=>renderMessages());}
         record.childrenWindow.set(record.tool.element.open?children:[],{target:navigationPath.has(message.id)?{id:navigationPath.get(message.id)}:undefined});
       }
     }
     return record;
   };
-  const messageWindow=createMessageWindow({scroller:history,host:windowHost,render:renderMessage,dispose:disposeMessage,requestRender:requestMessageRender,reading,heights:windowHeights});
+  const messageWindow=createCommunicationWindow({onOpenTask:openChatTask,locale:()=>locale,actor:()=>messageIdentities(client).actor(client.scope?.()),resolveIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,scope:()=>JSON.stringify(client.scope?.()),scroller:history,host:windowHost,render:renderMessage,dispose:disposeMessage,requestRender:requestMessageRender,reading,heights:windowHeights});
   const viewportObserver=new ResizeObserver(()=>requestMessageRender(true));viewportObserver.observe(history);
   function renderMessages(viewportOnly=false){fullRender ||= !viewportOnly;if(disposed||renderFrame)return;renderFrame=requestAnimationFrame(()=>{renderFrame=0;const viewportOnly=!fullRender;fullRender=false;renderMessagesNow(viewportOnly);});}
   function renderMessagesNow(viewportOnly=false) {
@@ -1037,14 +1040,14 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     messageWindow.set([]);messageNodes.clear();windowHost.replaceChildren();messageColumn.replaceChildren(historyStatus,windowHost,chatApprovals);
     input.value='';directoryOpen=true;error='';
   }
-  const stopResources=client.resources?.subscribe((meta,reason)=>{if(disposed||!['/api/v1/spaces','/api/v1/assistants','/api/v1/agent-links','/api/v1/machines'].includes(meta.path))return;if(reason){error=translate(locale,'loading.stale');updateControls();return;}if(error===translate(locale,'loading.stale'))error='';loadDirectory();});
+  const stopResources=client.resources?.subscribe((meta,reason)=>{if(disposed||!['/api/v1/spaces','/api/v1/assistants','/api/v1/agent-links','/api/v1/runtime'].includes(meta.path))return;if(reason){error=translate(locale,'loading.stale');updateControls();return;}if(error===translate(locale,'loading.stale'))error='';loadDirectory();});
   const directoryQueue=createRefreshQueue(()=>readDirectory(),{active:()=>!disposed});
   function loadDirectory(){return directoryQueue.run();}
   async function readDirectory() {
     if (!client.production) return;
     const notificationEpoch=notifications?.epoch;
     const previousMachines=machinePresentation(client).revision;
-    const ticket = ++directoryEpoch,previousSpaces=JSON.stringify(spaces),previousOwners=JSON.stringify(assistants.map(item=>[item.space_id,item.id,item.name,item.offline,item.capabilities]));
+    const ticket = ++directoryEpoch,previousSpaces=JSON.stringify(spaces),previousOwners=JSON.stringify(assistants.map(item=>[item.space_id,item.id,item.name,item.profile_name,item.avatar,item.origin,item.offline,item.capabilities]));
     try {
       const catalog = await (client.read||client.request)('/api/v1/spaces', {owner:'', space:'',signal:abort.signal});
       if (ticket !== directoryEpoch || disposed) return;
@@ -1062,7 +1065,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
       if (ticket !== directoryEpoch || disposed) return;
       assistants = results.flatMap((result, index) => result.status === 'fulfilled' ? result.value : (()=>{const space=spaces[index],previous=assistants.filter(item=>item.space_id===space.id);return previous.length?previous.map(item=>({...item,offline:true})):projectAssistants(space.assistants||[],space,true);})());
       client.assistants=assistants;
-      const changed=[];if(previousMachines!==machinePresentation(client).revision)changed.push('machines');if(previousSpaces!==JSON.stringify(spaces))changed.push('spaces');if(previousOwners!==JSON.stringify(assistants.map(item=>[item.space_id,item.id,item.name,item.offline,item.capabilities])))changed.push('assistants');if(changed.length)pages.refresh(changed);
+      const changed=[];if(previousMachines!==machinePresentation(client).revision)changed.push('machines');if(previousSpaces!==JSON.stringify(spaces))changed.push('spaces');if(previousOwners!==JSON.stringify(assistants.map(item=>[item.space_id,item.id,item.name,item.profile_name,item.avatar,item.origin,item.offline,item.capabilities])))changed.push('assistants');if(changed.length)pages.refresh(changed);
       for(const item of assistants){const arrival=replies.observe(controlOf(item),item.id,item.reply_id||'',item.reply_count||0,!item.offline);if(arrival.arrived&&route==='chat'&&document.visibilityState!=='hidden'&&!reducedMotion.matches){reactions.set(replyKey(controlOf(item),item.id),performance.now());setTimeout(()=>{if(!disposed){directorySignature='';renderShell();}},650);}}saveReads();
       if (linkFailures.length||results.some(result => result.status === 'rejected')) error = t('partialOffline');else if(error===t('partialOffline'))error='';
       if(selectedAssistant&&!pages.editing&&!assistants.some(item=>item.id===selectedAssistant.id&&item.space_id===selectedAssistant.space_id)){
@@ -1087,8 +1090,8 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     } catch (reason) { if (ticket===directoryEpoch&&!disposed) {error = reason.message; connection='offline'; updateControls();if(!assistants.length){const empty=el('div','empty-chat',reason.message);const retry=el('button','control',t('retry'));retry.onclick=()=>loadDirectory();empty.append(document.createElement('br'),retry);messageColumn.replaceChildren(empty);}} }
   }
   const preferencesChanged = event => {
-    if(event.detail.key==='pot-go-preview-locale') locale=event.detail.value;
-    if(event.detail.key==='pot-go-preview-theme') theme=event.detail.value;
+    if(event.detail.key==='pot-ui-locale') locale=event.detail.value;
+    if(event.detail.key==='pot-ui-theme') theme=event.detail.value;
     renderShell();renderMessages();window.dispatchEvent(new Event('pot:locale'));
   };
   window.addEventListener('pot:preference',preferencesChanged);
@@ -1185,7 +1188,7 @@ export function mountApp(root, client, {surface = 'main'} = {}) {
     rememberChatPosition();clearTimeout(viewTimer);cancelAnimationFrame(revealFrame);historyAbort.abort();
     window.removeEventListener('pagehide',rememberChatPosition);document.removeEventListener('visibilitychange',persistChat);
     Promise.all([viewWrite,chatSync?.close()]).finally(()=>chatCache?.close());
-    disposed = true;updates?.close();confirmations.close();cancelAnimationFrame(renderFrame);viewportObserver.disconnect();reading.dispose();messageWindow.close();stopResources?.();client.resources?.clear();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
+    disposed = true;updates?.close();confirmations.close();cancelAnimationFrame(renderFrame);viewportObserver.disconnect();reading.dispose();messageWindow.close();stopResources?.();client.resources?.clear();stopResume();taskClock.dispose();onboarding?.dispose();notifications?.dispose();directoryQueue.close();backgroundTasks?.close();backgroundTaskView.close();directoryEpoch++; abort.abort(); unsubscribe(); stopChanges(); pages?.dispose(); editor.destroy();
     stopMessageSelection();completions?.dispose();attachmentUI?.destroy();client.releaseAttachments?.();
     stopRead();reducedMotion.removeEventListener('change',reducedChanged);window.removeEventListener('focus',focusRead);document.removeEventListener('visibilitychange',focusRead);window.removeEventListener('storage',readStorage);
     root.removeEventListener('pointerdown',pointerDown);root.removeEventListener('pointermove',pointerMove);root.removeEventListener('pointerup',pointerUp);root.removeEventListener('pointercancel',pointerCancel);

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/internal/linkhost"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/processscope"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -59,7 +60,7 @@ func testBackend(t *testing.T) *backend {
 }
 func awaitTask(t *testing.T, b *backend, from protocol.AgentRef, id string, want string) agentlink.Task {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(testutil.Timeout(t, 15*time.Second))
 	for time.Now().Before(deadline) {
 		task, err := b.Status(context.Background(), from, id)
 		if errors.Is(err, agentlink.ErrNotFound) {

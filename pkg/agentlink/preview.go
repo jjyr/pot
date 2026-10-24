@@ -20,6 +20,10 @@ type previewRequest struct {
 // Preview proves the endpoint possesses the invitation's host key and reads its
 // current target identity without claiming the invitation or creating a link.
 func (s *Service) Preview(ctx context.Context, raw string) (Preview, error) {
+	if !s.enterRPC() {
+		return Preview{}, ErrUnavailable
+	}
+	defer s.rpcWG.Done()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	address, err := parseAddress(ctx, raw)
@@ -97,7 +101,7 @@ func (s *Service) previewInvitation(ctx context.Context, request previewRequest)
 }
 
 func (s *Service) previewHandler(request previewRequest) peer.Handler {
-	return func(ctx context.Context, input peer.Request) (json.RawMessage, error) {
+	return s.protectHandler(func(ctx context.Context, input peer.Request) (json.RawMessage, error) {
 		if input.Method != "preview" {
 			return nil, ErrUnauthorized
 		}
@@ -107,10 +111,10 @@ func (s *Service) previewHandler(request previewRequest) peer.Handler {
 		if len(input.Params) > 128 || decodeJSON(input.Params, &params) != nil || !validToken(params.Code) {
 			return nil, ErrInvalid
 		}
-		if !s.admit("preview:"+request.Invitation, controlAdmission) {
+		if !s.admitPreview(request.Invitation) {
 			return nil, ErrUnavailable
 		}
-		defer s.release("preview:"+request.Invitation, controlAdmission)
+		defer s.releasePreview(request.Invitation)
 		value := request
 		value.Code = params.Code
 		result, err := s.previewInvitation(ctx, value)
@@ -118,5 +122,5 @@ func (s *Service) previewHandler(request previewRequest) peer.Handler {
 			return nil, err
 		}
 		return json.Marshal(result)
-	}
+	})
 }

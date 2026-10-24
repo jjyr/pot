@@ -71,7 +71,7 @@ func TestSignedReleaseTrustAndFormat(t *testing.T) {
 	if _, err := Verify(tampered, key); err == nil {
 		t.Fatal("accepted modified release")
 	}
-	for _, change := range []func(*Release){func(r *Release) { r.StorageFormat = "future" }, func(r *Release) { r.Artifacts[0].URL = "https://evil.example/pot" }, func(r *Release) { r.Artifacts[0].Size = 2 << 30 }, func(r *Release) { r.Artifacts = append(r.Artifacts, r.Artifacts[0]) }} {
+	for _, change := range []func(*Release){func(r *Release) { r.StorageFormat = "pot-go-2026-10-5" }, func(r *Release) { r.StorageFormat = "future" }, func(r *Release) { r.Artifacts[0].URL = "https://evil.example/pot" }, func(r *Release) { r.Artifacts[0].Size = 2 << 30 }, func(r *Release) { r.Artifacts = append(r.Artifacts, r.Artifacts[0]) }} {
 		candidate := r
 		candidate.Artifacts = append([]Artifact{}, r.Artifacts...)
 		change(&candidate)
@@ -157,6 +157,7 @@ func TestDownloadRejectsChecksumAndPreservesInstalledFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
 func TestConfirmationAndUnsupportedHost(t *testing.T) {
 	m := New(context.Background(), nil, nil)
 	status, _ := m.Status()
@@ -196,6 +197,23 @@ func TestConfirmationAndUnsupportedHost(t *testing.T) {
 
 // Subprocess fixture uses the real host registration, shutdown handshake and
 // exec restart. No installed product, user service or model API is touched.
+type fixtureBoot struct {
+	Nonce   string
+	Version string
+}
+
+func fixtureReady(root string) fixtureBoot {
+	var boot fixtureBoot
+	data, _ := os.ReadFile(filepath.Join(root, "fixture-ready.json"))
+	_ = json.Unmarshal(data, &boot)
+	return boot
+}
+
+func fixtureRestarted(root, previous, version string) bool {
+	boot := fixtureReady(root)
+	return boot.Nonce != "" && boot.Nonce != previous && boot.Version == version
+}
+
 func TestHostProcess(t *testing.T) {
 	root := os.Getenv("POT_UPDATE_TEST_ROOT")
 	if root == "" {
@@ -209,6 +227,10 @@ func TestHostProcess(t *testing.T) {
 	}
 	json.Unmarshal(data, &metadata)
 	buildinfo.Version = metadata.Version
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		t.Fatal(err)
+	}
 	fmt.Fprintf(os.Stderr, "FIXTURE host boot pid=%d version=%s at=%s\n", os.Getpid(), metadata.Version, time.Now().UTC().Format(time.RFC3339Nano))
 	buildinfo.UpdatePublicKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
 	h, err := OpenHost()
@@ -226,11 +248,26 @@ func TestHostProcess(t *testing.T) {
 		}
 		if !(metadata.Version == "0.2.0" && os.Getenv("POT_UPDATE_TEST_FAIL") == "1") {
 			h.Ready()
+			mustWrite(t, filepath.Join(root, "fixture-ready.json"), fixtureBoot{hex.EncodeToString(nonce[:]), metadata.Version})
 			fmt.Fprintf(os.Stderr, "FIXTURE host ready pid=%d version=%s at=%s\n", os.Getpid(), metadata.Version, time.Now().UTC().Format(time.RFC3339Nano))
 		}
 		<-ctx.Done()
 		fmt.Fprintf(os.Stderr, "FIXTURE host run stopped pid=%d version=%s cleanup=%s at=%s\n", os.Getpid(), metadata.Version, os.Getenv("POT_UPDATE_TEST_CLEANUP"), time.Now().UTC().Format(time.RFC3339Nano))
 		if os.Getenv("POT_UPDATE_TEST_CLEANUP") == "1" {
+			if address := os.Getenv("POT_UPDATE_TEST_STOP_BARRIER"); address != "" {
+				barrier, err := net.DialTimeout("tcp", address, 10*time.Second)
+				if err != nil {
+					return err
+				}
+				defer barrier.Close()
+				_ = barrier.SetDeadline(time.Now().Add(10 * time.Second))
+				if _, err = barrier.Write([]byte{1}); err != nil {
+					return err
+				}
+				if _, err = io.ReadFull(barrier, make([]byte, 1)); err != nil {
+					return err
+				}
+			}
 			return errors.New("cleanup unconfirmed")
 		}
 		return nil
@@ -337,6 +374,16 @@ func TestWorkerRestartsWholeInstallationAndRollsBack(t *testing.T) {
 			if scenario == "cleanup" {
 				process.Env = append(process.Env, "POT_UPDATE_TEST_CLEANUP=1")
 			}
+			var stopped *net.TCPListener
+			if scenario == "cleanup" {
+				var listenErr error
+				stopped, listenErr = net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+				if listenErr != nil {
+					t.Fatal(listenErr)
+				}
+				defer stopped.Close()
+				process.Env = append(process.Env, "POT_UPDATE_TEST_STOP_BARRIER="+stopped.Addr().String())
+			}
 			if scenario == "rollback" {
 				process.Env = append(process.Env, "POT_UPDATE_TEST_FAIL=1")
 			}
@@ -370,7 +417,11 @@ func TestWorkerRestartsWholeInstallationAndRollsBack(t *testing.T) {
 				t.Fatal("fixture timeout")
 			}
 			var peers []Participant
-			wait(func() bool { peers, _ = participants(directory); return len(peers) == 1 && peers[0].Ready })
+			wait(func() bool {
+				peers, _ = participants(directory)
+				return len(peers) == 1 && peers[0].Ready && fixtureReady(root).Nonce != ""
+			})
+			initialBoot := fixtureReady(root).Nonce
 			expectedPeers := 1
 			if scenario == "success" {
 				root2 := filepath.Join(base, "browser-data")
@@ -423,6 +474,39 @@ func TestWorkerRestartsWholeInstallationAndRollsBack(t *testing.T) {
 				// No frontend follows up the click. The backend must install,
 				// restart both hosts and complete the transaction by itself.
 				wait(func() bool { return manager.state().Phase == "current" })
+			} else if scenario == "cleanup" {
+				result := make(chan error, 1)
+				go func() { result <- Worker(filepath.Join(directory, "job.json")) }()
+				_ = stopped.SetDeadline(time.Now().Add(10 * time.Second))
+				barrier, acceptErr := stopped.Accept()
+				if acceptErr != nil {
+					t.Fatal(acceptErr)
+				}
+				_ = barrier.SetDeadline(time.Now().Add(10 * time.Second))
+				if _, readErr := io.ReadFull(barrier, make([]byte, 1)); readErr != nil {
+					barrier.Close()
+					t.Fatal(readErr)
+				}
+				// The old callback has stopped, but its server still reports the
+				// same version and Ready. Neither PID nor that stale status proves
+				// that the asynchronous, same-version resume has completed.
+				old, statusErr := participants(directory)
+				if statusErr != nil || len(old) != 1 || !old[0].Ready || old[0].Version != "0.1.0" {
+					t.Errorf("old stopped host status: %+v, %v", old, statusErr)
+				}
+				if fixtureRestarted(root, initialBoot, "0.1.0") {
+					t.Error("stopped original boot satisfied restart readiness")
+				}
+				_, releaseErr := barrier.Write([]byte{1})
+				barrier.Close()
+				if releaseErr != nil {
+					t.Fatal(releaseErr)
+				}
+				select {
+				case err = <-result:
+				case <-time.After(10 * time.Second):
+					t.Fatal("cleanup worker did not return after releasing the owned host")
+				}
 			} else {
 				err = Worker(filepath.Join(directory, "job.json"))
 			}
@@ -434,12 +518,15 @@ func TestWorkerRestartsWholeInstallationAndRollsBack(t *testing.T) {
 				expected = "0.1.0"
 			}
 			wait(func() bool {
+				if scenario != "confirmation" && !fixtureRestarted(root, initialBoot, expected) {
+					return false
+				}
 				peers, _ = participants(directory)
 				if len(peers) != expectedPeers {
 					return false
 				}
 				for _, peer := range peers {
-					if peer.Version != expected {
+					if peer.Version != expected || !peer.Ready {
 						return false
 					}
 				}

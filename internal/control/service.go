@@ -190,6 +190,8 @@ func Open(options Options) (*Service, error) {
 	s.pluginWG.Add(1)
 	go s.pluginLoop()
 	s.watchAssistantFiles()
+	s.fileWG.Add(1)
+	go s.messageFileLoop()
 	success = true
 	return s, nil
 }
@@ -401,7 +403,7 @@ func (s *Service) prepareFor(ctx context.Context, c *assistant.Conversation, thr
 		}
 		definitions = append(definitions, retryTools...)
 	}
-	return assistant.RunOptions{ResolveAttachments: s.resolveAttachments(principal, request.RequestID), Composer: s.options.Composer, Execution: executionContext, Services: ports, Dispatch: dispatch.Dispatch, Tools: definitions, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
+	return assistant.RunOptions{MessageCompleted: s.messageFileCompletion(principal, "", request.RequestID, executionContext.Workspace), ResolveAttachments: s.resolveAttachments(principal, request.RequestID), Composer: s.options.Composer, Execution: executionContext, Services: ports, Dispatch: dispatch.Dispatch, Tools: definitions, Cleanup: func(ctx context.Context, _ core.ExecutionContext, abort bool) error {
 		s.Integrations.Forget(credentialScope(thread.Owner, request.RequestID, thread.Generation))
 		s.Permissions.Expire(principal, request.RequestID, thread.Generation)
 		err := engine.Drain()
@@ -460,6 +462,9 @@ func (s *Service) Close() error {
 	s.mu.Unlock()
 	linkErr := s.closeAgentLinks()
 	s.pluginWG.Wait()
+	if s.agentLinks != nil {
+		s.agentLinks.service.Close()
+	}
 	s.fileWG.Wait()
 	var result error = linkErr
 	if s.Terminals != nil {

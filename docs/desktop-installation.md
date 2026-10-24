@@ -62,7 +62,7 @@ same first-launch guidance applies to cask installations.
 
 The macOS CLI archive uses the same release mode. When macOS blocks a trusted,
 verified extracted CLI installation, apply any quarantine exception only to that
-specific extracted `pot-go-darwin-arm64` directory, never to a parent containing
+specific extracted `pot-darwin-arm64` directory, never to a parent containing
 other applications. Pot's [signed update feed](updates.md) authenticates package
 origin separately from Apple signing in both modes; it does not grant Gatekeeper
 approval. Published downloads and successful native smoke are prerequisites for
@@ -137,16 +137,16 @@ sudo apt install build-essential pkg-config binutils libgtk-3-dev \
   libwebkit2gtk-4.1-dev dbus-user-session bubblewrap socat xvfb xauth
 mise install
 POT_APP_VERSION=0.0.0 POT_BUILD_REVISION=local \
-  mise exec -- python scripts/build-desktop --platform linux-amd64 --output .local/go/dist
+  mise exec -- python scripts/build-desktop --platform linux-amd64 --output .local/pot/dist
 xvfb-run -a mise exec -- python scripts/smoke-desktop \
-  --platform linux-amd64 --archive .local/go/dist/pot-desktop_0.0.0_linux_amd64.deb
+  --platform linux-amd64 --archive .local/pot/dist/pot-desktop_0.0.0_linux_amd64.deb
 ```
 
 Use `linux-arm64` on a native arm64 runner. Cross-compiling a CGO desktop requires
 a matching C library, GTK and WebKit sysroot; this script intentionally requires
 native builds. `POT_APP_VERSION` must be `major.minor.patch`; `POT_BUILD_REVISION`
 uses the same linker contract as the CLI and macOS app. The default artifact
-directory is `.local/go/dist`; `--output` accepts an explicit destination.
+directory is `.local/pot/dist`; `--output` accepts an explicit destination.
 
 `build-desktop` produces `pot-desktop_VERSION_linux_ARCH.deb` and the adjacent
 `.deb.sha256`. It uses binutils `ar` to write the standard Debian package format;

@@ -51,7 +51,6 @@ export function mutationTopics(path,body,value) {
   if(path.startsWith('/api/v1/usage'))return ['usage','settings'];
   if(path.startsWith('/api/v1/agent')||path==='/api/v1/instructions')return ['settings','assistants','conversation'];
   if(path==='/api/v1/messages'||path.startsWith('/api/v1/turn/'))return ['conversation','assistants'];
-  if(path.startsWith('/api/v1/machines'))return ['machines','permissions'];
   if(path.startsWith('/api/v1/spaces'))return ['spaces','machines'];
   return [];
 }
@@ -95,6 +94,8 @@ export async function createProductionClient({desktop = false, base = ''} = {}) 
   const attachmentURLs=new Map(),attachmentLeases=new Map();
   const attachmentKey=(attachment,options)=>{const scope={...context,...options};return JSON.stringify([scope.space,scope.owner,attachment.id]);};
   client = {production: true, desktop, runtime, request,readBaselines,
+    messageFiles(message,options={}){return request(`/api/v1/message-files/${encodeURIComponent(message)}?${new URLSearchParams({task_id:options.task||''})}`,options);},
+    retryMessageFile(message,ref,options={}){return request(`/api/v1/message-files/${encodeURIComponent(message)}/${encodeURIComponent(ref)}?${new URLSearchParams({task_id:options.task||''})}`,{...options,method:'POST'});},
     acquireResource:createDisplayResources(request,()=>context,(resource,path,scope,operation='content',token='')=>desktop?`/pot-resource-content?${new URLSearchParams({id:resource.id,path,assistant_id:scope.owner,space_id:scope.space,render:operation==='render'?'1':'0',token})}`:`${base}${scopedPath(`/api/v1/resources/${encodeURIComponent(resource.id)}/${operation}?${new URLSearchParams({path,token})}`,scope)}`),
     async downloadResource(resource,options={}){
       const scope={...context,...options};

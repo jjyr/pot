@@ -1,0 +1,18 @@
+/* Fixed six-color task marks; semantic statuses and assistant avatars stay independent. */
+.task-identity-mark{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;flex:none;border:0;border-radius:6px;background:var(--secondary);color:var(--muted);}
+.task-identity-mark svg{width:15px;height:15px;}
+.task-identity-short{flex:none;white-space:nowrap;color:var(--muted);font:11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:-.025em;}
+.task-identity-mark[data-task-color="0"]{--task-bg:#f0e9d9;--task-border:#b4a27c;--task-ink:#756035}
+.task-identity-mark[data-task-color="1"]{--task-bg:#e5ebf1;--task-border:#9aafc1;--task-ink:#46637d}
+.task-identity-mark[data-task-color="2"]{--task-bg:#ece7f1;--task-border:#af9bc0;--task-ink:#6b557f}
+.task-identity-mark[data-task-color="3"]{--task-bg:#eee6df;--task-border:#bba18e;--task-ink:#765b49}
+.task-identity-mark[data-task-color="4"]{--task-bg:#e6e9ea;--task-border:#9cabad;--task-ink:#53666c}
+.task-identity-mark[data-task-color="5"]{--task-bg:#efe6ec;--task-border:#b89daf;--task-ink:#795d70}
+.task-identity-mark[data-task-color]{background:var(--task-bg);border-color:var(--task-border);color:var(--task-ink);}
+[data-theme="dark"] .task-identity-mark[data-task-color="0"]{--task-bg:#39352b;--task-border:#70654b;--task-ink:#d8c59b}
+[data-theme="dark"] .task-identity-mark[data-task-color="1"]{--task-bg:#2a343e;--task-border:#526b80;--task-ink:#adc7dd}
+[data-theme="dark"] .task-identity-mark[data-task-color="2"]{--task-bg:#34303e;--task-border:#695980;--task-ink:#c9b7dc}
+[data-theme="dark"] .task-identity-mark[data-task-color="3"]{--task-bg:#39312c;--task-border:#78604e;--task-ink:#d8baa4}
+[data-theme="dark"] .task-identity-mark[data-task-color="4"]{--task-bg:#2f3638;--task-border:#617479;--task-ink:#b5c8cc}
+[data-theme="dark"] .task-identity-mark[data-task-color="5"]{--task-bg:#3b3039;--task-border:#7e6275;--task-ink:#d7b9cd}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]):not([data-theme="dark"]) .task-identity-mark[data-task-color="0"]{--task-bg:#39352b;--task-border:#70654b;--task-ink:#d8c59b}:root:not([data-theme="light"]):not([data-theme="dark"]) .task-identity-mark[data-task-color="1"]{--task-bg:#2a343e;--task-border:#526b80;--task-ink:#adc7dd}:root:not([data-theme="light"]):not([data-theme="dark"]) .task-identity-mark[data-task-color="2"]{--task-bg:#34303e;--task-border:#695980;--task-ink:#c9b7dc}:root:not([data-theme="light"]):not([data-theme="dark"]) .task-identity-mark[data-task-color="3"]{--task-bg:#39312c;--task-border:#78604e;--task-ink:#d8baa4}:root:not([data-theme="light"]):not([data-theme="dark"]) .task-identity-mark[data-task-color="4"]{--task-bg:#2f3638;--task-border:#617479;--task-ink:#b5c8cc}:root:not([data-theme="light"]):not([data-theme="dark"]) .task-identity-mark[data-task-color="5"]{--task-bg:#3b3039;--task-border:#7e6275;--task-ink:#d7b9cd}}

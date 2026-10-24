@@ -1,3 +1,4 @@
+@import './components/task-identity.css';
 @import url("./styles/extensions.css");
 @import url("./styles/agent-links.css");
 @import url("./styles/topology.css");
@@ -170,7 +171,7 @@ pot-mermaid[data-state='error'] .mermaid-canvas { color: var(--danger); }
 .reply-status-title { display: flex; align-items: center; gap: 8px; }
 .reply-status-title svg { width: 17px; height: 17px; flex: none; }
 .is-failed .reply-status-title { color: var(--danger); font-weight: 500; }
-.reply-error-summary,.reply-connection-detail { margin-top: 8px; color: var(--text); font-size: var(--description-size); }
+.reply-error-summary { margin-top: 8px; color: var(--text); font-size: var(--description-size); }
 .reply-error-details { margin-top: 12px; color: var(--muted); font-size: var(--description-size); }
 .reply-error-details summary { cursor: pointer; }
 .reply-error-details pre { min-width: 0; margin-top: 8px; padding: 10px; white-space: pre-wrap; border: 0; background: color-mix(in srgb,var(--danger) 5%,var(--canvas)); color: var(--text); }
@@ -494,9 +495,9 @@ html[data-theme=dark] #pot-error-toast{background:#401f24;color:#ffdddd;border-c
 .background-tasks{margin-top:12px;padding-top:12px;border-top:1px solid var(--divider);width:100%;max-width:720px;}
 .background-tasks-heading{margin:0 0 4px;padding:0 8px;font-size:12px;font-weight:400;color:var(--muted);}
 .background-task-list{display:flex;flex-direction:column;gap:2px;}
-.background-task{border:0;border-radius:var(--radius);background:transparent;padding:8px;display:grid;grid-template-columns:5px minmax(0,1fr);column-gap:8px;row-gap:4px;align-items:start;color:var(--muted);text-align:left;font-size:13px;line-height:20px;width:100%;max-width:100%;min-height:44px;}
-.background-task-title{min-width:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere;color:var(--text);}
-.background-task-meta{grid-column:2;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px;color:var(--muted);font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;}
+.background-task{border:0;border-radius:var(--radius);background:transparent;padding:8px;display:grid;grid-template-columns:22px auto minmax(0,1fr) auto;column-gap:8px;align-items:center;color:var(--muted);text-align:left;font-size:13px;line-height:20px;width:100%;max-width:100%;min-height:44px;}
+.background-task-title{min-width:0;margin-inline-start:4px;display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--text);}
+.background-task-meta{display:flex;flex-wrap:nowrap;white-space:nowrap;align-items:center;justify-self:end;gap:4px;color:var(--muted);font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;}
 .background-task-status{color:inherit;}.background-task.needs-approval .background-task-status{color:var(--attention);}.background-task-elapsed{white-space:nowrap;}
 .background-tasks-toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:44px;margin-top:4px;padding:8px;border:0;border-radius:var(--radius);background:transparent;color:var(--muted);font-size:13px;text-align:left;text-decoration:none;}
 .background-tasks-toggle svg{width:16px;height:16px;flex:none;}.background-tasks-toggle[aria-expanded='true'] svg{transform:rotate(180deg);}
@@ -891,3 +892,114 @@ pot-resource.is-expanded .resource-text{max-height:75vh}
 
 @container(max-width:430px){.tool-call .communication-text{padding-left:0;font-size:13px;}.communication-identity{gap:4px 8px;}}
 @media(max-width:719px){.communication-tool>.tool-body>.tool-raw{margin-left:0;}}
+
+pot-message-file { display: inline; overflow-wrap: anywhere; }
+pot-message-file:has(> pot-resource) { display: block; margin-block: 12px; }
+.file-reference-status { margin-inline-start: .6em; color: var(--muted); font-size: .85em; }
+.file-reference-dialog { width: min(960px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 16px; border: 1px solid var(--divider); border-radius: 12px; background: var(--surface); color: inherit; }
+.file-reference-dialog::backdrop { background: #0008; }
+.file-reference-dialog pot-resource { display: block; }
+.resource-text mark { background: #e8bc4050; color: inherit; }
+/* Tasks and schedules: group the current global page by full assistant identity. */
+.tasks-content,.schedules-content{min-height:0;}
+.tasks-content>.segments{flex:none;}
+.tasks-content>.segments .control,.task-filters .segments .control{min-height:44px;}
+.task-filters{align-items:center;margin-bottom:12px;flex:none;}
+.record-search-line{align-items:center;flex:none;gap:12px;margin-bottom:8px;}
+.record-search-line .task-search{margin:0;min-width:0;}
+.record-search-line .field-input,.record-filter .field-input{min-height:44px;max-width:100%;}
+.record-filter{display:flex;margin:0;min-width:0;max-width:100%;}
+.record-filter>.form-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);}
+.record-filter .field-body{min-width:0;max-width:100%;}
+.record-owner-filter{max-width:48%;flex:1;}
+.record-owner-filter .field-input{width:100%;text-overflow:ellipsis;}
+.record-view-help{color:var(--muted);font-size:13px;margin:0 0 8px;flex:none;}
+.task-reminders{display:flex;align-items:center;gap:4px 12px;flex-wrap:wrap;color:var(--muted);font-size:12px;flex:none;}
+.task-reminders .control{min-height:44px;padding:6px 4px;border:0;background:transparent;color:var(--muted);font-size:12px;}
+.record-group-list.task-list,.record-group-list.schedule-list{border:0;border-radius:0;background:transparent;min-height:180px;overflow:auto;flex:1;}
+.record-group{border:0;border-radius:0;background:transparent;box-shadow:none;}
+.record-group+.record-group{margin-top:24px;}
+.record-group-heading{display:flex;align-items:flex-start;gap:10px;padding:8px 4px;background:transparent;}
+.record-group-heading .avatar{display:flex;align-items:center;justify-content:center;background:var(--surface);color:var(--muted);flex:none;}
+.record-group-info{min-width:0;flex:1;}
+.record-group-info h2{font-size:15px;font-weight:600;margin:0;line-height:1.5;overflow-wrap:anywhere;}
+.record-group-source,.record-group-count{font-size:12px;color:var(--muted);overflow-wrap:anywhere;}
+.record-group-count{padding-top:2px;white-space:nowrap;}
+.record-owner-identity{font-size:12px;color:var(--muted);}
+.record-owner-identity summary{cursor:pointer;min-height:44px;display:flex;flex-direction:column;justify-content:center;width:fit-content;max-width:100%;}
+.record-owner-identity code{display:block;overflow-wrap:anywhere;white-space:normal;max-width:100%;padding:4px 0;}
+.record-group .task-row{height:auto;min-height:44px;padding:12px 4px;border:0;border-radius:0;box-shadow:none;background:transparent;gap:6px 10px;}
+.record-group .task-row+.task-row,.schedule-record+.schedule-record{border-top:1px solid var(--divider);}
+.record-group .task-row:hover,.schedule-record:hover{background:var(--navigation);}
+.record-group .task-title{font-size:15px;white-space:normal;overflow-wrap:anywhere;}
+.record-group .task-meta{align-items:center;gap:7px 10px;}
+.task-short-id{font-size:11px;color:var(--muted);white-space:normal;overflow-wrap:anywhere;}
+.task-phase.phase-waiting_approval{color:var(--attention);}
+.phase-interrupted{color:var(--attention);}
+.task-archived{color:var(--muted);}
+.record-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0;flex:none;}
+.record-page-summary{font-size:12px;color:var(--muted);margin:0;}
+.record-page-buttons{display:flex;gap:8px;flex:none;}
+.record-page-buttons .control{min-height:44px;padding:8px 12px;font-size:13px;background:var(--surface);border:1px solid var(--divider);}
+.record-page-buttons .control:disabled{opacity:.4;cursor:default;}
+.tasks-content button:focus-visible,.tasks-content select:focus-visible,.tasks-content input:focus-visible,.tasks-content summary:focus-visible,.schedules-content button:focus-visible,.schedules-content select:focus-visible,.schedules-content input:focus-visible,.schedules-content summary:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
+.record-group .task-row:focus-visible,.schedule-record:focus-visible{outline-offset:-2px;}
+.record-page-note{font-size:12px;color:var(--muted);margin:2px 0 0;flex:none;}
+.record-continuation{font-size:12px;color:var(--muted);padding:8px 4px;margin:0;}
+.schedule-projection{display:flex;flex-direction:column;min-height:0;flex:1;}
+.schedule-record{display:grid;grid-template-columns:minmax(0,1fr) auto;text-align:left;width:100%;border:0;border-radius:0;box-shadow:none;background:transparent;padding:12px 4px;gap:8px;min-height:44px;color:var(--text);}
+.schedule-record-title{font-size:15px;overflow-wrap:anywhere;}
+.schedule-record-chevron{color:var(--muted);}
+.schedule-record-meta{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 12px;grid-column:1/-1;font-size:12px;color:var(--muted);}
+.schedule-enabled{color:var(--success);}
+.schedule-record-rule{grid-column:1/-1;color:var(--muted);font-size:12px;overflow-wrap:anywhere;}
+@media(max-width:719px){
+ .task-filters{gap:8px;}.task-filters>.segments{width:100%;}.task-filters>.record-filter{width:100%;}.task-filters>.record-filter .field-body{width:100%;}.task-filters>.record-filter select{width:100%;}
+ .record-search-line{flex-wrap:wrap;gap:8px;}.record-search-line .task-search{flex:1 1 100%;}.record-owner-filter{flex:1 1 100%;max-width:100%;}
+ .record-pagination{align-items:stretch;flex-direction:column;gap:8px;}.record-page-buttons{width:100%;}.record-page-buttons .control{flex:1;min-width:0;}
+ .record-group-count{white-space:normal;max-width:70px;text-align:right;}
+ .record-group .task-meta{grid-column:1/-1;padding-right:46px;}.record-group .task-list-elapsed{grid-row:2;align-self:center;}.record-view-help{font-size:12px;}.task-reminders{gap:0 10px;}.task-reminders .control{font-size:12px;}
+}
+/* Adjacent task mail keeps the lightweight communication disclosure. */
+.message.communication-group{display:block;}
+.communication-stack{min-width:0;padding-left:6px;border-left:2px solid transparent;font:12px/1.5 var(--font-family,system-ui);}
+.communication-stack-summary{cursor:pointer;min-height:44px;list-style:none;padding-block:7px;}
+.communication-stack-summary::-webkit-details-marker{display:none;}
+.communication-stack-title{display:block;color:var(--muted);}
+.communication-stack-title:before{content:'›';display:inline-block;width:19px;font-size:18px;line-height:1;}
+.communication-stack[open]>.communication-stack-summary>.communication-stack-title:before{content:'⌄';}
+.communication-stack-summary:focus-visible{outline:2px solid var(--primary);outline-offset:3px;}
+.communication-stack-routes{margin-left:19px;max-width:560px;}
+.communication-stack-route{display:flex;align-items:center;gap:8px;min-width:0;}
+.communication-stack-route>.communication-summary{margin:0;flex:1;order:0;}
+.communication-stack-route .communication-flow{max-width:none;}
+.communication-stack-count{flex:none;font-size:11px;color:var(--muted);}
+.communication-stack-body>.message{width:100%;margin:0 0 14px;}
+.communication-stack-body>.message>.message-body{width:100%;padding:0;background:transparent;border:0;}
+.communication-stacked-record>.tool-summary{pointer-events:none;min-height:0;padding-block:4px;}
+.communication-stacked-record>.tool-summary:before{display:none;}
+.communication-stacked-record>.tool-summary>.tool-title{font-size:11px;color:var(--muted);font-weight:400;}
+.communication-stacked-record>.tool-summary>.tool-status{font-size:11px;}
+.communication-stacked-record>.tool-body{padding-left:19px;}
+.communication-identity>.communication-flow{flex:1;max-width:100%;}
+.communication-identity .communication-flow .communication-endpoint{max-width:45%;}
+.communication-endpoint .task-identity-mark{width:22px;height:22px;padding:0;border:0;border-radius:6px;}
+.communication-endpoint .task-identity-mark svg{width:15px;height:15px;}
+.communication-task-endpoint .communication-name{color:var(--text);font-weight:400;white-space:nowrap;display:block;text-overflow:ellipsis;overflow:hidden;}
+button.communication-task-endpoint{border:0;padding:0;background:transparent;text-align:left;font:inherit;cursor:pointer;}
+button.communication-task-endpoint:hover .communication-name{text-decoration:underline;text-underline-offset:3px;}
+button.communication-task-endpoint:focus-visible{outline:2px solid var(--primary);outline-offset:3px;border-radius:4px;}
+.background-task-meta .task-activity-dot{flex:none;align-self:center;margin:0 2px 0 0;}
+.background-task-meta .task-activity-dot[data-phase=running]{width:11px;height:11px;border:1.5px solid var(--primary);border-right-color:transparent;border-radius:50%;background:transparent;animation:task-spin 1s linear infinite;}
+.background-task-meta .task-activity-dot[data-phase=queued],.background-task-meta .task-activity-dot[data-phase=waiting]{width:9px;height:9px;border:1px solid var(--muted);background:transparent;animation:none;}
+.background-task-meta .task-activity-dot[data-phase=complete]{background:var(--success);animation:none;}
+.background-task-meta .task-activity-dot[data-phase=failed]{background:var(--danger);animation:none;}
+@keyframes task-spin{to{transform:rotate(360deg);}}
+@media(prefers-reduced-motion:reduce){.background-task-meta .task-activity-dot{animation:none!important;}}
+
+.communication-task-endpoint{flex-wrap:wrap;}
+.communication-task-endpoint>.communication-name{flex:1;min-width:28px;margin-inline-start:4px;}
+.communication-short{font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere;max-width:100%;color:var(--muted);}
+.communication-stack .communication-name{font-size:12px;}
+.communication-tool[data-phase=failed]>.tool-summary>.tool-status,.communication-tool[data-phase=denied]>.tool-summary>.tool-status{color:var(--danger);}
+@media(max-width:430px){.communication-stack-routes{margin-left:0;}.communication-stack-route{gap:4px;}.communication-stack-count{font-size:10px;}.communication-stacked-record>.tool-body{padding-left:0;}}

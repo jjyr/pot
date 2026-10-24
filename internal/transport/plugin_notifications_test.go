@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/integrations"
 	"os"
 	"path/filepath"
@@ -53,7 +54,7 @@ func TestPluginNotificationConfigurationOwnerRoutes(t *testing.T) {
 }
 
 func TestGitHubFilterSettingsPortReturnsEffectiveRevisionAndIdempotentRetry(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 30*time.Second))
 	defer cancel()
 	keys, _ := secrets.NewMemoryKey(make([]byte, 32))
 	manager, _ := execution.New("local", "boot", execution.Limits{MaxActive: 1, MaxQueued: 8})

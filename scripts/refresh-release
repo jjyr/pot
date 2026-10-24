@@ -1,0 +1,369 @@
+#!/usr/bin/env python3
+"""Explicit, snapshot-bound v0.0.1 naming refresh; normal publishers stay immutable."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import tarfile
+import tempfile
+import zipfile
+from urllib.parse import quote
+
+from release_contract import checksum, release_assets
+
+REPOSITORY = "jjyr/pot"
+RELEASE = 422513414
+VERSION = "0.0.1"
+TAG = "v" + VERSION
+NAMING_MERGE = "5225cdf82c0f04fd49b5938c62c43ef3fd7a412d"
+QUALIFICATION_PR = 291
+
+
+def api(endpoint, method="GET", body=None):
+    command = ["gh", "api", "--method", method, f"repos/{REPOSITORY}/{endpoint}"]
+    if body is not None:
+        command += ["--input", "-"]
+    result = subprocess.check_output(
+        command, input=json.dumps(body) if body is not None else None, text=True
+    )
+    return json.loads(result) if result else None
+
+
+def asset_record(asset):
+    return {key: asset[key] for key in ("id", "name", "size", "digest")}
+
+
+def require_asset(actual, expected):
+    if actual is None or asset_record(actual) != asset_record(expected):
+        raise ValueError(f"Release asset changed: {expected['name']}")
+
+
+def baseline():
+    value = json.loads(os.environ["RELEASE_BASELINE"])
+    if value["id"] != RELEASE or value["tag_name"] != TAG or len(value["assets"]) != 15:
+        raise ValueError("Refresh requires the reviewed 15-asset v0.0.1 release snapshot")
+    for asset in value["assets"]:
+        if not re.fullmatch(r"sha256:[a-f0-9]{64}", asset["digest"]):
+            raise ValueError("Every original asset needs its exact SHA-256 digest")
+    return value
+
+
+def selected_release():
+    release = api(f"releases/{RELEASE}")
+    if release["id"] != RELEASE or release["tag_name"] != TAG or release["draft"]:
+        raise ValueError("Reviewed public release no longer matches")
+    if release.get("immutable"):
+        raise ValueError("GitHub immutable release cannot be refreshed")
+    return release
+
+
+def check_source(require_tag=True):
+    source = os.environ["POT_BUILD_REVISION"]
+    if not re.fullmatch(r"[a-f0-9]{40}", source):
+        raise ValueError("Refresh needs an exact source SHA")
+    if require_tag and api(f"commits/refs/tags/{TAG}")["sha"] != source:
+        raise ValueError("Tag no longer matches candidate source")
+    reviewed = os.environ["REVIEWED_MERGE"]
+    if not re.fullmatch(r"[a-f0-9]{40}", reviewed):
+        raise ValueError("Refresh needs the exact reviewed PR 291 merge SHA")
+    naming = api("pulls/280")
+    if (
+        not naming["merged"]
+        or naming["base"]["ref"] != "main"
+        or naming["base"]["repo"]["full_name"] != REPOSITORY
+        or naming["merge_commit_sha"] != NAMING_MERGE
+    ):
+        raise ValueError("Original reviewed PR 280 naming merge changed")
+    ancestry = api(f"compare/{NAMING_MERGE}...{source}")
+    if ancestry["status"] != "ahead" or ancestry["merge_base_commit"]["sha"] != NAMING_MERGE:
+        raise ValueError("Qualification source does not descend from the naming merge")
+    pr = api(f"pulls/{QUALIFICATION_PR}")
+    if (
+        not pr["merged"]
+        or pr["base"]["ref"] != "main"
+        or pr["base"]["repo"]["full_name"] != REPOSITORY
+        or pr["head"]["repo"]["full_name"] != REPOSITORY
+        or pr["head"]["sha"] != source
+        or pr["merge_commit_sha"] != reviewed
+    ):
+        raise ValueError("Reviewed source does not identify the merged qualification PR 291")
+    candidate = api(f"commits/{source}")
+    merged = api(f"commits/{reviewed}")
+    if len(merged["parents"]) != 2 or source not in {parent["sha"] for parent in merged["parents"]}:
+        raise ValueError("Reviewed merge does not contain the exact candidate parent")
+    if candidate["commit"]["tree"]["sha"] != merged["commit"]["tree"]["sha"]:
+        raise ValueError("Candidate tree does not match the fixed reviewed merge")
+    run_id = os.environ["CANDIDATE_RUN"]
+    if not run_id.isdecimal():
+        raise ValueError("Invalid candidate run")
+    run = api(f"actions/runs/{run_id}")
+    if (
+        run["path"] != ".github/workflows/ci.yml"
+        or run["head_sha"] != source
+        or run["event"] != "workflow_dispatch"
+        or run["conclusion"] != "success"
+    ):
+        raise ValueError("Candidate must be a successful CI run at the exact source")
+    return source
+
+
+def retag(original):
+    # The workflow GITHUB_TOKEN suppresses recursive tag-push CI. A user's token
+    # must not run this phase locally: it would start the ordinary publisher.
+    if (
+        os.environ.get("GITHUB_ACTIONS") != "true"
+        or os.environ.get("GITHUB_REF") != "refs/heads/main"
+    ):
+        raise ValueError("Tag refresh must run in the dedicated main workflow")
+    source = check_source(require_tag=False)
+    expected = os.environ["PREVIOUS_TAG_OBJECT"]
+    if not re.fullmatch(r"[a-f0-9]{40}", expected):
+        raise ValueError("Tag refresh needs the exact original object")
+    check_baseline(selected_release(), original)
+    current = api(f"git/ref/tags/{TAG}")
+    timestamp = subprocess.check_output(
+        ["git", "show", "-s", "--format=%ct", source], text=True
+    ).strip()
+    annotation = (
+        f"object {source}\ntype commit\ntag {TAG}\n"
+        f"tagger jjy <jjyruby@gmail.com> {timestamp} +0000\n\n"
+        "Refresh Pot 0.0.1 naming from the validated candidate\n"
+    )
+    replacement = subprocess.check_output(["git", "mktag"], input=annotation, text=True).strip()
+    if current["object"]["sha"] == replacement:
+        return source
+    if current["object"]["sha"] != expected:
+        raise ValueError("Original tag object changed before refresh")
+    recovery = Path("recovery")
+    recovery.mkdir(exist_ok=True)
+    (recovery / "tag-before.json").write_text(json.dumps(current, indent=2) + "\n")
+    # Credential helper is scoped to this command and expands the token only in
+    # its child environment; no credential, token or identity is persisted.
+    helper = '!f() { printf "username=x-access-token\npassword=%s\n" "$GH_TOKEN"; }; f'
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "credential.helper=",
+            "-c",
+            "credential.helper=" + helper,
+            "push",
+            f"--force-with-lease=refs/tags/{TAG}:{expected}",
+            "origin",
+            f"{replacement}:refs/tags/{TAG}",
+        ],
+        check=True,
+    )
+    if api(f"git/ref/tags/{TAG}")["object"]["sha"] != replacement:
+        raise ValueError("Refreshed tag does not match the exact replacement object")
+    check_source()
+    return source
+
+
+def check_baseline(release, original):
+    if release["target_commitish"] != original["target_commitish"]:
+        raise ValueError("Release target changed since review")
+    if len(release["assets"]) != len(original["assets"]):
+        raise ValueError("Release asset inventory changed since review")
+    for old in original["assets"]:
+        require_asset(next((a for a in release["assets"] if a["id"] == old["id"]), None), old)
+
+
+def names():
+    return sorted(
+        set(
+            name
+            for channel in ("server", "desktop", "macos")
+            for name in release_assets(VERSION, channel)
+        )
+    )
+
+
+def download(asset, path):
+    with path.open("wb") as output:
+        subprocess.run(
+            [
+                "gh",
+                "api",
+                "-H",
+                "Accept: application/octet-stream",
+                f"repos/{REPOSITORY}/releases/assets/{asset['id']}",
+            ],
+            stdout=output,
+            check=True,
+        )
+    if path.stat().st_size != asset["size"] or "sha256:" + checksum(path) != asset["digest"]:
+        raise ValueError(f"Downloaded bytes do not match {asset['name']}")
+
+
+def verify_build(binary, source):
+    with tempfile.NamedTemporaryFile() as file:
+        file.write(binary)
+        file.flush()
+        metadata = subprocess.check_output(["go", "version", "-m", file.name], text=True)
+    # Trimpath builds omit linker flags from build info. CI's native --version
+    # gates check the product version; the VCS receipt binds these exact binaries.
+    if "\tbuild\tvcs.revision=" + source not in metadata.splitlines():
+        raise ValueError("Candidate binary has a different source revision")
+
+
+def verify_candidate_builds(output, source):
+    for platform in ("linux-amd64", "linux-arm64", "darwin-arm64"):
+        with tarfile.open(output / f"pot-{VERSION}-{platform}.tar.gz") as archive:
+            verify_build(archive.extractfile(f"pot-{platform}/bin/pot").read(), source)
+    with zipfile.ZipFile(output / f"Pot-{VERSION}-arm64.zip") as archive:
+        for binary in ("pot", "pot-app"):
+            verify_build(archive.read("Pot.app/Contents/MacOS/" + binary), source)
+    with tempfile.TemporaryDirectory() as temporary:
+        subprocess.run(
+            [
+                "dpkg-deb",
+                "--extract",
+                str(output / f"pot-desktop_{VERSION}_linux_amd64.deb"),
+                temporary,
+            ],
+            check=True,
+        )
+        for binary in Path(temporary).glob("opt/pot*/bin/pot*"):
+            verify_build(binary.read_bytes(), source)
+
+
+def stage(output, original, source):
+    release = selected_release()
+    check_baseline(release, original)
+    verify_candidate_builds(output, source)
+    feed = output / "update.json"
+    payload = json.loads(
+        subprocess.check_output(
+            ["go", "run", "./scripts/sign-release", "verify"], input=feed.read_bytes()
+        )
+    )
+    if payload["version"] != VERSION:
+        raise ValueError("Signed feed version does not match refresh")
+    from pot_packaging import storage_format
+
+    if payload["storage_format"] != storage_format():
+        raise ValueError("Signed feed storage format does not match source")
+    from release_contract import update_artifacts
+
+    expected = {(kind, platform): name for kind, platform, name in update_artifacts(VERSION)}
+    if len(payload["artifacts"]) != len(expected):
+        raise ValueError("Incomplete signed feed")
+    for artifact in payload["artifacts"]:
+        name = expected.pop((artifact["kind"], artifact["platform"]))
+        path = output / name
+        if (
+            artifact["url"] != f"https://github.com/{REPOSITORY}/releases/download/{TAG}/{name}"
+            or artifact["size"] != path.stat().st_size
+            or artifact["sha256"] != checksum(path)
+        ):
+            raise ValueError("Signed feed does not match candidate bytes")
+    recovery = Path("recovery")
+    recovery.mkdir(exist_ok=True)
+    (recovery / "release-before.json").write_text(json.dumps(release, indent=2) + "\n")
+    (recovery / "tag-active.json").write_text(
+        json.dumps(api(f"git/ref/tags/{TAG}"), indent=2) + "\n"
+    )
+    # Back up every original byte before uploading anything. Never reconstruct an old feed.
+    for asset in original["assets"]:
+        download(asset, recovery / asset["name"])
+    plan = []
+    for name in names():
+        path = output / name
+        record = {"name": name, "size": path.stat().st_size, "digest": "sha256:" + checksum(path)}
+        record["staged_name"] = f"refresh-{source[:12]}-{name}"
+        plan.append(record)
+    (recovery / "replacement-plan.json").write_text(json.dumps(plan, indent=2) + "\n")
+    # Staged names are not referenced by a feed or cask. Validate every upload before activation.
+    for record in plan:
+        path = output / record["name"]
+        result = subprocess.check_output(
+            [
+                "gh",
+                "api",
+                "--method",
+                "POST",
+                "-H",
+                "Content-Type: application/octet-stream",
+                f"https://uploads.github.com/repos/{REPOSITORY}/releases/{RELEASE}/assets?name="
+                + quote(record["staged_name"], safe=""),
+                "--input",
+                str(path),
+            ],
+            text=True,
+        )
+        staged = json.loads(result)
+        require_asset(staged, dict(record, id=staged["id"], name=record["staged_name"]))
+        record["id"] = staged["id"]
+        (recovery / "replacement-plan.json").write_text(json.dumps(plan, indent=2) + "\n")
+    print("All original bytes preserved and all replacement assets staged and verified")
+
+
+def activate(original, source):
+    plan = json.loads(Path("recovery/replacement-plan.json").read_text())
+    release = selected_release()
+    if release["target_commitish"] != original["target_commitish"]:
+        raise ValueError("Release target changed before activation")
+    for old in original["assets"]:
+        require_asset(next((a for a in release["assets"] if a["id"] == old["id"]), None), old)
+    for record in plan:
+        require_asset(
+            api(f"releases/assets/{record['id']}"), dict(record, name=record["staged_name"])
+        )
+    # Archives before references. Same-name GitHub assets cannot switch atomically;
+    # a brief verification/download retry window is unavoidable for the App ZIP.
+    order = sorted(
+        plan,
+        key=lambda r: (
+            r["name"] == "update.json",
+            r["name"].startswith("SHA256SUMS"),
+            r["name"].endswith(".sha256"),
+            any(old["name"] == r["name"] for old in original["assets"]),
+            r["name"],
+        ),
+    )
+    for record in order:
+        old = next((a for a in original["assets"] if a["name"] == record["name"]), None)
+        if old:
+            require_asset(api(f"releases/assets/{old['id']}"), old)
+            api(
+                f"releases/assets/{old['id']}",
+                "PATCH",
+                {"name": f"previous-{old['id']}-{old['name']}"},
+            )
+        require_asset(
+            api(f"releases/assets/{record['id']}"), dict(record, name=record["staged_name"])
+        )
+        updated = api(f"releases/assets/{record['id']}", "PATCH", {"name": record["name"]})
+        require_asset(updated, record)
+    # Bind the release metadata only after the final signed references are live.
+    check_source()
+    api(f"releases/{RELEASE}", "PATCH", {"target_commitish": source})
+    for record in plan:
+        require_asset(api(f"releases/assets/{record['id']}"), record)
+    print("Activated and verified all 15 new assets; old bytes retained until final cleanup")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("phase", choices=["retag", "check", "stage", "activate"])
+    parser.add_argument("output", type=Path)
+    args = parser.parse_args()
+    original = baseline()
+    if args.phase == "retag":
+        retag(original)
+        return
+    source = check_source()
+    if args.phase == "check":
+        check_baseline(selected_release(), original)
+    elif args.phase == "stage":
+        stage(args.output, original, source)
+    else:
+        activate(original, source)
+
+
+if __name__ == "__main__":
+    main()

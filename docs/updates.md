@@ -130,3 +130,10 @@ inspection before restarting services; do not delete execution uncertainty fence
 or restore older receipts merely to make startup succeed. Previous packages and
 snapshots are retained for inspection and can be removed by the operator after a
 successful update has been qualified.
+
+The 0.0.1 naming refresh uses the `pot-2026-10-5` storage-format discriminator.
+Earlier development binaries and roots use a different discriminator and are not
+eligible for automatic conversion or same-version self-update. The updater still
+rejects equal versions. Install the refreshed 0.0.1 manually with a separate unused
+root; retain any previous root with its matching binary. No database migration or
+root adoption is performed by this refresh.

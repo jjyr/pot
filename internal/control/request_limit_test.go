@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/internal/inbox"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/protocol"
 	"github.com/jjyr/pot/pkg/storage"
 )
@@ -30,7 +31,7 @@ func TestMainConversationHasNoDefaultRequestCountCutoff(t *testing.T) {
 		case <-r.Context().Done():
 		}
 	}, 1)
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 20*time.Second))
 	defer cancel()
 	c, err := s.Conversation(ctx, "main")
 	if err != nil {

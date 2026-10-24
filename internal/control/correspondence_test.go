@@ -9,12 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
 func TestCorrespondenceUsesAssistantHistoryAndCanReportToUser(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 10*time.Second))
 	defer cancel()
 	var received atomic.Bool
 	s, _ := batchService(t, func(w http.ResponseWriter, r *http.Request) {

@@ -56,7 +56,7 @@ if(params.has('phone')){
   const summary=document.createElement('summary');summary.textContent='Fixture controls';panel.append(summary,record);
   const button=(text,run)=>{const b=document.createElement('button');b.textContent=text;b.onclick=run;panel.append(b);};
   button('Dismiss fake system prompt',()=>finish());button('Deny fake system prompt',()=>reject());
-  button('Switch language',()=>{locale=locale==='en'?'zh-CN':'en';window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-go-preview-locale',value:locale}}));});
+  button('Switch language',()=>{locale=locale==='en'?'zh-CN':'en';window.dispatchEvent(new CustomEvent('pot:preference',{detail:{key:'pot-ui-locale',value:locale}}));});
   button('Reset first-run record',()=>{const request=indexedDB.deleteDatabase('pot-notification-onboarding-v1');request.onsuccess=()=>location.reload();});
   button('Run storage checks',async()=>{
     try{

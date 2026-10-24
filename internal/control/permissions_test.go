@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jjyr/pot/internal/testutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -42,7 +43,7 @@ func waitApproval(t *testing.T, p *PermissionStore) Approval {
 }
 func decideRequest(t *testing.T, p *PermissionStore, r HostRequest, action string) string {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 	defer cancel()
 	done := make(chan struct {
 		mode string

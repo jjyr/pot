@@ -11,7 +11,7 @@ import subprocess
 import tarfile
 import tempfile
 
-from go_packaging import BUILD, ROOT, call, digest, go_build, linker_flags, prepare_resources
+from pot_packaging import BUILD, ROOT, call, digest, go_build, linker_flags, prepare_resources
 
 
 def write_deb(staged, work, archive, version, arch, binary):

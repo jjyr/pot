@@ -45,6 +45,10 @@ type AssistantManagementBackend interface {
 }
 
 func (s *Service) ManageAssistant(ctx context.Context, link string, input AssistantManagementRequest) (AssistantManagementResult, error) {
+	if !s.enterRPC() {
+		return AssistantManagementResult{}, ErrUnavailable
+	}
+	defer s.rpcWG.Done()
 	if !input.From.Valid() || input.From.Kind != "user" || input.From.NodeID != s.options.HostIdentity.NodeID {
 		return AssistantManagementResult{}, ErrUnauthorized
 	}
@@ -52,12 +56,8 @@ func (s *Service) ManageAssistant(ctx context.Context, link string, input Assist
 	if err != nil {
 		return AssistantManagementResult{}, err
 	}
-	session, err := s.businessSession(ctx, c)
-	if err != nil {
-		return AssistantManagementResult{}, err
-	}
 	var result AssistantManagementResult
-	err = s.call(ctx, session, string(AssistantManagement), input, &result)
+	err = s.callConnection(ctx, c, string(AssistantManagement), input, &result)
 	if err == nil && input.Action != "catalog" {
 		_, _ = s.Directory(ctx, link)
 	}

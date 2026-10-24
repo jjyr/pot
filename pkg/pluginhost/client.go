@@ -131,7 +131,7 @@ func New(config Config) (*Client, error) {
 	if _, err := rand.Read(id); err != nil {
 		return nil, err
 	}
-	directory, err := os.MkdirTemp("", "pot-go-plugin-")
+	directory, err := os.MkdirTemp("", "pot-plugin-")
 	if err != nil {
 		return nil, err
 	}

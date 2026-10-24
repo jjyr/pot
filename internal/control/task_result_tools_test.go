@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/assistantavatar"
 	"io"
 	"net/http"
@@ -22,7 +23,7 @@ import (
 
 func TestTaskResultExecutesCommandAndImportsTaskAvatar(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 15*time.Second))
 	defer cancel()
 	var rounds atomic.Int32
 	var s *Service
@@ -44,7 +45,7 @@ func TestTaskResultExecutesCommandAndImportsTaskAvatar(t *testing.T) {
 		for _, tool := range body.Tools {
 			names[tool.Function.Name] = true
 		}
-		for _, name := range []string{"exec_command", "exec", "wait", "create_task", "send_message", "manage_schedule", "register_resource", "present_resource"} {
+		for _, name := range []string{"exec_command", "exec", "wait", "create_task", "send_message", "manage_schedule"} {
 			if !names[name] {
 				t.Error("notification lost configured assistant tool", name)
 			}
