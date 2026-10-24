@@ -20,6 +20,9 @@ func cancelOriginal(observer *nativeObserver, original *os.Process, done <-chan 
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
 	firstScan := true
+	// A parent becoming childless does not mean its exit handler has completed.
+	// Retain parent identities across scans for the entire shared grace window.
+	parents := make(map[uint64]bool)
 	for {
 		select {
 		case <-done:
@@ -35,7 +38,6 @@ func cancelOriginal(observer *nativeObserver, original *os.Process, done <-chan 
 		if err != nil {
 			return errors.Join(err, stopOriginal(original, done))
 		}
-		parents := make(map[uint64]bool, len(members))
 		hasDescendants := false
 		for _, member := range members {
 			parents[member.parent] = true

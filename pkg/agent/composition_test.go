@@ -7,13 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/composition"
 	"github.com/jjyr/pot/pkg/core"
 	m "github.com/jjyr/pot/pkg/modelprotocol"
 )
 
 func TestCompositionTextWaitsForCompletion(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 	defer cancel()
 	started, release := make(chan struct{}), make(chan struct{})
 	manager := &compositionManager{ctx: ctx, composer: composition.Runner{}, jobs: map[string]*compositionJob{}, tools: []m.ToolDefinition{{Name: "block"}}, emit: func(core.Update) error { return nil }, dispatch: func(ctx context.Context, _ core.ExecutionContext, _ m.ToolCall, _ func(core.Update) error) (json.RawMessage, error) {
@@ -63,7 +64,7 @@ func TestCompositionTextWaitsForCompletion(t *testing.T) {
 func TestCompositionExplicitYieldAndTimeoutDoNotReplayOutput(t *testing.T) {
 	for _, explicit := range []bool{false, true} {
 		t.Run(map[bool]string{false: "timeout", true: "yield_control"}[explicit], func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 			defer cancel()
 			release := make(chan struct{})
 			manager := &compositionManager{ctx: ctx, composer: composition.Runner{}, jobs: map[string]*compositionJob{}, tools: []m.ToolDefinition{{Name: "block"}}, emit: func(core.Update) error { return nil }, dispatch: func(ctx context.Context, _ core.ExecutionContext, _ m.ToolCall, _ func(core.Update) error) (json.RawMessage, error) {

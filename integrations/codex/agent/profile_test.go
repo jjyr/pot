@@ -17,6 +17,7 @@ import (
 	"github.com/jjyr/pot/internal/control"
 	"github.com/jjyr/pot/internal/linkhost"
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/internal/transport"
 	"github.com/jjyr/pot/internal/webui"
 	"github.com/jjyr/pot/pkg/agentlink"
@@ -30,7 +31,26 @@ import (
 func profileApplication(t *testing.T, configure ...func(*peer.Server)) (*agentHost, *transport.Application, string) {
 	t.Helper()
 	h, _ := testHost(t)
-	t.Cleanup(h.close)
+	t.Cleanup(func() {
+		defer h.close()
+		// Control and the listener clean up first (LIFO). Disconnect serializes
+		// with session shutdown and fences its asynchronous offline update before
+		// the fixture closes databases and removes their temporary directory.
+		ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 5*time.Second))
+		defer cancel()
+		connections, err := h.links.List(ctx)
+		if err != nil {
+			t.Errorf("host shutdown state: %v", err)
+			return
+		}
+		for _, connection := range connections {
+			if connection.State != "revoked" {
+				if err := h.links.Disconnect(ctx, connection.ID); err != nil {
+					t.Errorf("host session shutdown: %v", err)
+				}
+			}
+		}
+	})
 	ctx := context.Background()
 	server := h.peerServer()
 	for _, apply := range configure {

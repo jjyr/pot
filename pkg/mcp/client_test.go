@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -114,7 +115,7 @@ func TestSDKNegotiationMetadataErrorsAndCancellation(t *testing.T) {
 }
 
 func TestSDKStreamableHTTPKeepsTransportSessionAndErrorCode(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 	defer cancel()
 	server := NewServer(&Implementation{Name: "http-fixture", Version: "1"}, nil)
 	var calls atomic.Int32

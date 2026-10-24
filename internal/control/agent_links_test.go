@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -18,14 +19,14 @@ import (
 
 // Retry only a confirmed capacity rejection, which precedes remote execution;
 // retain the exact original request and return every other outcome unchanged.
-func callAgentWhenReady(ctx context.Context, service *Service, owner string, operation agentlink.Operation, call agentlink.Call) (any, error) {
-	return retryAgentCapacity(ctx, func(ctx context.Context) (any, error) {
+func callAgentWhenReady(t *testing.T, ctx context.Context, service *Service, owner string, operation agentlink.Operation, call agentlink.Call) (any, error) {
+	return retryAgentCapacity(t, ctx, func(ctx context.Context) (any, error) {
 		return service.CallAgent(ctx, owner, operation, call)
 	})
 }
 
-func retryAgentCapacity(ctx context.Context, call func(context.Context) (any, error)) (any, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+func retryAgentCapacity(t *testing.T, ctx context.Context, call func(context.Context) (any, error)) (any, error) {
+	ctx, cancel := context.WithTimeout(ctx, testutil.Timeout(t, 5*time.Second))
 	defer cancel()
 	for {
 		value, err := call(ctx)
@@ -59,7 +60,7 @@ func TestRetryAgentCapacityPreservesOtherOutcomes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
-			value, err := retryAgentCapacity(t.Context(), func(context.Context) (any, error) {
+			value, err := retryAgentCapacity(t, t.Context(), func(context.Context) (any, error) {
 				calls++
 				if calls == 1 {
 					return "original", tc.err
@@ -78,7 +79,7 @@ func TestRetryAgentCapacityPreservesOtherOutcomes(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	calls := 0
-	_, err := retryAgentCapacity(ctx, func(context.Context) (any, error) {
+	_, err := retryAgentCapacity(t, ctx, func(context.Context) (any, error) {
 		calls++
 		cancel()
 		return nil, agentlink.ErrCapacity
@@ -140,7 +141,7 @@ func connectAgentControls(t *testing.T, a, b *agentControlFixture) agentlink.Con
 
 func awaitAgentLinkMail(t *testing.T, s *Service, id string) protocol.MailRecord {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 10*time.Second))
 	defer cancel()
 	updates := s.Mailbox.Changes.Subscribe()
 	defer updates.Close()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/agentlink"
 	"github.com/jjyr/pot/pkg/protocol"
 	"net/http"
@@ -17,7 +18,7 @@ func TestChatEndpointContract(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []string{"native", "peer"} {
 		t.Run(mode, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 15*time.Second))
 			defer cancel()
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { batchReply(w, "hello") }))
 			defer upstream.Close()

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/internal/hooks"
+	"github.com/jjyr/pot/internal/testutil"
 )
 
 func TestApprovalHooksUpdateUIWithoutAssistantDelivery(t *testing.T) {
@@ -19,7 +20,7 @@ func TestApprovalHooksUpdateUIWithoutAssistantDelivery(t *testing.T) {
 			p.PublishHook = func(event hooks.Event) { s.publishHook(event); events <- event }
 			sub := s.Changes.Subscribe()
 			defer sub.Close()
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 			defer cancel()
 			done := make(chan error, 1)
 			r := hostRequest("original")
@@ -98,7 +99,7 @@ func TestGrantResolutionHooksCoverAllMatchingPendingCommands(t *testing.T) {
 	p := permissionFixture(t)
 	events := make(chan hooks.Event, 8)
 	p.PublishHook = func(event hooks.Event) { events <- event }
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 	defer cancel()
 	done := make(chan error, 2)
 	for _, call := range []string{"first", "second"} {

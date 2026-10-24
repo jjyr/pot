@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
@@ -18,7 +19,7 @@ func TestFailedTaskRecoveryIsSilentAndReplacementReportsOnce(t *testing.T) {
 	t.Parallel()
 	for _, failures := range []int32{1, 3} {
 		t.Run(fmt.Sprintf("transient-failures=%d", failures), func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 15*time.Second))
 			defer cancel()
 			var workers, recoveryRounds, reports atomic.Int32
 			s, _ := batchService(t, func(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +119,7 @@ func TestFailedTaskRecoveryIsSilentAndReplacementReportsOnce(t *testing.T) {
 
 func TestCreationErrorsCanBeRepairedAndMultipleTasksDispatchSilently(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 10*time.Second))
 	defer cancel()
 	var rounds atomic.Int32
 	s, _ := batchService(t, func(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,36 @@
+name: Test tools and caches
+description: Install pinned test tools and restore source-aware Go caches
+inputs:
+  tools:
+    description: Mise tools needed by this job
+    default: go python node
+  scope:
+    description: Build cache family (normal, race or builds)
+    required: true
+  cache:
+    description: Whether this source may use shared caches
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+      with:
+        version: 2026.10.10
+        cache: ${{ inputs.cache == 'true' }}
+        install_args: ${{ inputs.tools }}
+    - if: inputs.cache == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/go/pkg/mod
+        key: test-modules-v1-${{ hashFiles('go.sum', 'mise.toml') }}
+        restore-keys: test-modules-v1-
+    - if: inputs.cache == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/Library/Caches/go-build
+        key: test-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.scope }}-${{ hashFiles('go.sum', 'mise.toml') }}-${{ hashFiles('**/*.go', '**/*.sql', 'web/**', 'plugins/**', 'resources/**', 'integrations/**', 'scripts/**', 'go.mod') }}
+        restore-keys: |
+          test-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.scope }}-${{ hashFiles('go.sum', 'mise.toml') }}-
+          test-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.scope }}-

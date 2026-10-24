@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/execution"
 )
 
@@ -20,7 +21,7 @@ func TestTaskComponentsQueueOnOneOwnedPool(t *testing.T) {
 	if s.Tasks.DB() != s.tasksDB || s.tasksDB.Stats().MaxOpenConnections != 1 {
 		t.Fatal("Task database is not the shared single-connection pool")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 	defer cancel()
 	conn, err := s.tasksDB.Conn(ctx)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jjyr/pot/internal/testutil"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,7 +20,7 @@ func runOutput(ctx context.Context, runner Runner, code string, tools map[string
 }
 
 func TestParallelToolsKeepResultsPrivateAndJSONOnly(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 5*time.Second))
 	defer cancel()
 	var started atomic.Int32
 	barrier := make(chan struct{})
@@ -52,7 +53,7 @@ text(Object.getPrototypeOf(r[0]) === Object.prototype);
 }
 
 func TestStreamingOwnerAndToolCancellationOnCompletion(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 5*time.Second))
 	defer cancel()
 	started, release, cancelled := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	tools := make(map[string]Tool)
@@ -144,7 +145,7 @@ func TestToolCallsAndConcurrencyAreBounded(t *testing.T) {
 		t.Fatalf("calls=%d err=%v", calls.Load(), err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 5*time.Second))
 	defer cancel()
 	var active, maximum atomic.Int32
 	release := make(chan struct{})

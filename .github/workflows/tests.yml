@@ -1,0 +1,68 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Resolved source SHA for release/build callers
+        type: string
+        default: ''
+      use-cache:
+        description: Explicit source/PR validation may not use shared caches
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}-${{ inputs.ref }}
+  # A release caller must not be cancelled by another validation run.
+  cancel-in-progress: ${{ inputs.ref == '' }}
+
+env:
+  MISE_AUTO_INSTALL: 'false'
+  POT_TEST_TIMEOUT_SCALE: '4'
+
+jobs:
+  product:
+    name: ${{ matrix.plan.name }} (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-26]
+        plan:
+          - {name: Normal and static checks, mode: normal, shard: '1/1'}
+          - {name: Race 1/4, mode: race, shard: '1/4'}
+          - {name: Race 2/4, mode: race, shard: '2/4'}
+          - {name: Race 3/4, mode: race, shard: '3/4'}
+          - {name: Race 4/4, mode: race, shard: '4/4'}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/test-setup
+        with:
+          scope: ${{ matrix.plan.mode }}
+          tools: ${{ matrix.plan.mode == 'normal' && 'go python node ruff shfmt shellcheck swiftformat' || 'go python node' }}
+          cache: ${{ inputs.ref == '' || inputs.use-cache }}
+      - if: matrix.plan.mode == 'normal' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap ripgrep socat
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Normal tests, static checks, contracts and sandbox in parallel
+        if: matrix.plan.mode == 'normal'
+        run: mise run ci:normal
+      - name: Complete race coverage for this shard
+        if: matrix.plan.mode == 'race'
+        run: mise exec -- python scripts/test_go.py race --shard ${{ matrix.plan.shard }} --count=1
+      - if: matrix.plan.mode == 'normal' && runner.os == 'Linux'
+        run: mise exec -- go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.11

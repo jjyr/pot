@@ -172,6 +172,8 @@ On macOS, cancellation skips the reaping window when its first membership scan
 finds no descendants and force-stops the original workload immediately. Otherwise,
 it stops leaf descendants first and gives their parents a shared 250 ms window
 to reap them and handle exit notifications, even after the descendants disappear.
+Parent identities remain protected across membership scans during that window,
+including intermediate parents whose last child has just exited.
 The trusted supervisor stays alive and drains all remaining tracked members
 before issuing a cleanup receipt. The window is bounded independently of tree depth.
 Linux keeps its original workload-first termination and subreaper drain sequence.

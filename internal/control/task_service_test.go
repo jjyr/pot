@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/jjyr/pot/internal/secrets"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/internal/usage"
 	"github.com/jjyr/pot/pkg/execution"
 	"github.com/jjyr/pot/pkg/protocol"
@@ -48,7 +49,7 @@ func TestLocalTaskUsesSharedCapacityOwnerModelAndSummary(t *testing.T) {
 		w.Write([]byte("data: " + string(data) + "\n\ndata: [DONE]\n\n"))
 	}))
 	defer server.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 10*time.Second))
 	defer cancel()
 	root := t.TempDir()
 	manager, _ := execution.New("local", "boot", execution.Limits{MaxActive: 1, MaxQueued: 8})

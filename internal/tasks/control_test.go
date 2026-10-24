@@ -2,13 +2,14 @@ package tasks
 
 import (
 	"context"
+	"github.com/jjyr/pot/internal/testutil"
 	"github.com/jjyr/pot/pkg/protocol"
 	"testing"
 	"time"
 )
 
 func TestTaskPauseGateBindsOriginalRunAndCancellationWakesIt(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.Timeout(t, 3*time.Second))
 	defer cancel()
 	s, _, _ := fixture(t)
 	record, err := s.AcceptLocal(ctx, "assistant", protocol.CreateTask{RequestID: "create", Text: "work"})
