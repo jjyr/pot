@@ -129,7 +129,11 @@ creation races safely.
 
 An unpublished draft may be absent from GitHub's release-by-tag endpoint. The
 publisher checks the release list and reads a matching draft by ID before
-creating anything. Multiple releases with the same tag stop automatic publication.
+creating anything. Multiple matches in the release list stop automatic publication.
+An existing public release is reused instead of leftover drafts. All reads, uploads and
+publication stay bound to the selected ID; automatically discovered drafts must
+also name the validated source. A selected draft cannot be published if another
+release is already public for that tag.
 For a reviewed recovery, `scripts/publish-release VERSION ARTIFACTS --channel CHANNEL
 --release-id ID` binds reads, uploads and publication to that existing ID; a draft
 must name the validated source and tag. Use only the original artifacts from the
