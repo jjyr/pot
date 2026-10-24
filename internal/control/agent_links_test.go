@@ -16,7 +16,6 @@ import (
 	"github.com/jjyr/pot/pkg/protocol"
 )
 
-// Background observation shares the peer's one-operation admission limit.
 // Retry only a confirmed capacity rejection, which precedes remote execution;
 // retain the exact original request and return every other outcome unchanged.
 func callAgentWhenReady(ctx context.Context, service *Service, owner string, operation agentlink.Operation, call agentlink.Call) (any, error) {

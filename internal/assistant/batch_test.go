@@ -250,7 +250,7 @@ func TestRetiredCorrespondenceWaitsArePreservedWithoutReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.Close()
-	reopened, err := OpenMailbox(path, "local")
+	reopened, err := OpenMailbox(path, "local", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func TestResultBatchConcurrentClaimAndRestartFence(t *testing.T) {
 	}
 	m.Close()
 	var err error
-	m, err = OpenMailbox(path, "local")
+	m, err = OpenMailbox(path, "local", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

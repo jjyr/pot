@@ -19,7 +19,7 @@ func TestCompletionInboxClaimsAndReportsTheSameResultOnce(t *testing.T) {
 
 func testCompletionInboxClaimsAndReportsTheSameResultOnce(t *testing.T, origin protocol.TaskOrigin) {
 	ctx := context.Background()
-	m, err := OpenMailbox(filepath.Join(t.TempDir(), "messages.sqlite"), "control")
+	m, err := OpenMailbox(filepath.Join(t.TempDir(), "messages.sqlite"), "control", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

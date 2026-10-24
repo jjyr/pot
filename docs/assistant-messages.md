@@ -69,6 +69,10 @@ Task completion and its event commit in the same transaction. The initial schema
 stores node addresses and does not adopt pre-reset development databases or import
 legacy queues; see [Database migrations](database-migrations.md).
 
+Assistant retirement and mail admission share the inbox writer transaction.
+Pending or interrupted correspondence blocks retirement; retired recipients reject
+new mail. Exact retries retain their receipts, and direct-user replies need no local assistant.
+
 The assistant's user inbox is separate and has priority at turn boundaries.
 Accepted requests arriving during automatic result handling start their
 own Main turn afterwards; they do not inherit the summary's role. Pending user

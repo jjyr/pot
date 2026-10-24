@@ -26,7 +26,7 @@ func TestCorrespondenceReceiptSurvivesCompletionAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.Close()
-	reopened, err := OpenMailbox(path, "local")
+	reopened, err := OpenMailbox(path, "local", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestInterruptedCorrespondenceRetainsReceiptWithoutReactivation(t *testing.T
 		t.Fatal(err)
 	}
 	m.Close()
-	reopened, err := OpenMailbox(path, "local")
+	reopened, err := OpenMailbox(path, "local", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestConfirmedFailureDoesNotStarveQueuedMailAfterRestart(t *testing.T) {
 	}
 	next := sendMail(t, m, "new", old.From, old.To, nil)
 	m.Close()
-	reopened, err := OpenMailbox(path, "local")
+	reopened, err := OpenMailbox(path, "local", MailboxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
