@@ -146,7 +146,10 @@ contents. It checks installation metadata, resource paths shared with macOS smok
 App plist versions, Debian metadata, and Go VCS/OS/architecture information.
 `-trimpath` builds omit linker arguments from Go build info, so the verifier reads
 exact linked Go string globals in ELF/Mach-O load segments for version, revision,
-pinned key and schema digest. This establishes embedded metadata, not runtime
+pinned key and schema digest. For external-linked macOS binaries it decodes only
+declared dyld chained rebase slots (with page/segment bounds), including
+`DYLD_CHAINED_PTR_64_OFFSET`; imported binds are not local string evidence.
+This establishes embedded metadata, not runtime
 `--version` output or native execution. It does not infer Apple developer identity
 or notarization from the disclosure. Reports explicitly mark native CLI/service,
 App/WebView, codesign/notarization and container execution as `not_run`: those
@@ -159,13 +162,15 @@ unique layer with its declared size. This is a full registry byte pull without
 loading or running images. `--oci metadata` is a diagnostic mode; it saves checked
 metadata but returns incomplete because layers were not downloaded.
 
-The command prints a concise summary and always writes `report.json` after parsed
-arguments/preflight; `--markdown` also writes `report.md`. JSON retains successful
+The command bounds independent asset downloads to three concurrent requests and prints
+one start/completion line per asset plus a concise summary. It writes `report.json`
+atomically at each check/download completion, so interrupted downloads retain
+completed receipts and pending work. `--markdown` also writes `report.md` on completion. JSON retains successful
 download hashes, partial progress, failures, pending/blocked checks, OCI digests and
 layer receipts, retry events and native limitations. Exit codes are `0` for the
 selected public verification phase passing, `1` for a conflict/check failure, and
 `2` for incomplete publication/installation or diagnostic-only OCI verification.
-A missing resource is incomplete; signature/hash/source conflicts fail immediately.
+A missing resource is incomplete; signature/hash/source conflicts fail without retry.
 Only explicit HTTP rate limits and transient 502/503/504 responses receive at most
 three attempts, with delays capped at 30 seconds. There is no publication retry,
 rollback, asset replacement or settings mutation.

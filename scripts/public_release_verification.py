@@ -3,7 +3,7 @@
 import argparse
 import base64
 from datetime import datetime, timezone
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import io
 import json
@@ -147,6 +147,36 @@ def validate_release(release, version, source, resolved):
     )
     if expected - set(names):
         raise Incomplete(f"missing release assets: {sorted(expected - set(names))}")
+
+
+def download_assets(network, assets, output, on_result):
+    """Bound independent public downloads and retain every completed receipt."""
+
+    def fetch(asset):
+        name = asset["name"]
+        print(f"DOWNLOAD {name} ({asset['size']} bytes)", flush=True)
+        return network.download(
+            asset["browser_download_url"], output / name, asset["size"], asset.get("digest")
+        )
+
+    errors = []
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        pending = {pool.submit(fetch, asset): asset["name"] for asset in assets}
+        for future in as_completed(pending):
+            name = pending[future]
+            try:
+                result = future.result()
+            except Exception as error:
+                result = error
+                errors.append(error)
+            on_result(name, result)
+            print(
+                f"{'FAILED' if isinstance(result, Exception) else 'VERIFIED'} download {name}",
+                flush=True,
+            )
+    if errors:
+        kind = Incomplete if all(isinstance(error, Incomplete) for error in errors) else ValueError
+        raise kind("public asset downloads did not complete; see asset_failures in report")
 
 
 def verify_manifest(text, names, downloads):
@@ -503,6 +533,8 @@ def main(argv=None):
         "trusted_key_sha256": hashlib.sha256((args.public_key or "").encode()).hexdigest(),
         "phase": args.phase,
         "scope": "public_bytes_and_metadata",
+        "status": "incomplete",
+        "active_checks": [],
         "checks": [],
         "limitations": [
             "Static Go string globals and VCS inspection; package executables and --version are never run.",
@@ -513,7 +545,15 @@ def main(argv=None):
     }
     network = Network()
 
+    def checkpoint():
+        target = args.output / "report.json"
+        temporary = target.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(report, indent=2) + "\n")
+        temporary.replace(target)
+
     def check(name, operation):
+        report["active_checks"].append(name)
+        checkpoint()
         try:
             evidence = operation()
             pending = name == "homebrew" and any(item["status"] != "passed" for item in evidence)
@@ -528,6 +568,9 @@ def main(argv=None):
                 report["checks"][-1]["evidence"] = error.evidence
             print(f"{status.upper()} {name}: {error}", flush=True)
             return None
+        finally:
+            report["active_checks"].pop()
+            checkpoint()
 
     def preflight():
         require(sys.version_info >= (3, 12), "Python 3.12 or newer is required")
@@ -575,17 +618,33 @@ def main(argv=None):
                 output = Path(temporary)
                 for asset in release["assets"]:
                     name = asset["name"]
-                    report["asset_in_progress"] = name
                     url = f"https://github.com/{args.repository}/releases/download/v{args.version}/{name}"
                     require(asset["browser_download_url"] == url, "unexpected asset URL")
                     if not any(
                         name in distribution_names(args.version, channel) for channel in CHANNELS
                     ):
                         require(asset["size"] <= LIMIT, "release metadata exceeds size limit")
-                    downloads[name] = network.download(
-                        url, output / name, asset["size"], asset.get("digest")
-                    )
-                report.pop("asset_in_progress", None)
+                report["asset_downloads_pending"] = [asset["name"] for asset in release["assets"]]
+                report["asset_failures"] = []
+
+                def receipt(name, result):
+                    report["asset_downloads_pending"].remove(name)
+                    if isinstance(result, Exception):
+                        report["asset_failures"].append(
+                            {
+                                "name": name,
+                                "status": "incomplete"
+                                if isinstance(result, Incomplete)
+                                else "failed",
+                                "detail": str(result),
+                            }
+                        )
+                    else:
+                        downloads[name] = result
+                    checkpoint()
+
+                checkpoint()
+                download_assets(network, release["assets"], output, receipt)
                 for channel in CHANNELS:
                     names = distribution_names(args.version, channel)
                     for name in names:
@@ -647,7 +706,7 @@ def main(argv=None):
         "failed" if "failed" in states else "incomplete" if "incomplete" in states else "passed"
     )
     report["network_retries"] = network.retries
-    (args.output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
+    checkpoint()
     if args.markdown:
         lines = [
             f"Release v{args.version}: {report['status']}",

@@ -17,6 +17,9 @@ from unittest import mock
 import urllib.error
 import zipfile
 import plistlib
+import platform
+import struct
+import threading
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -85,6 +88,7 @@ class PublicRelease(unittest.TestCase):
     def setUpClass(cls):
         cls.temporary = tempfile.TemporaryDirectory(prefix="pot-public-fixtures-")
         root = Path(cls.temporary.name)
+        cls.source_root = root
         (root / "internal/buildinfo").mkdir(parents=True)
         (root / "go.mod").write_text("module github.com/jjyr/pot\n\ngo 1.24\n")
         (root / "internal/buildinfo/buildinfo.go").write_text(
@@ -92,6 +96,10 @@ class PublicRelease(unittest.TestCase):
         )
         (root / "main.go").write_text(
             'package main\nimport ("fmt"; "github.com/jjyr/pot/internal/buildinfo")\nfunc main(){fmt.Println(buildinfo.Version,buildinfo.Revision,buildinfo.UpdatePublicKey,buildinfo.UpdateSchemaDigest)}\n'
+        )
+        (root / "cgo_darwin.go").write_text(
+            'package main\n/* static int fixture_value = 1; */\nimport "C"\n'
+            'func init() { if C.fixture_value != 1 { panic("fixture") } }\n'
         )
         subprocess.run(["git", "init", "--quiet", "--initial-branch=fixture"], cwd=root, check=True)
         subprocess.run(["git", "add", "."], cwd=root, check=True)
@@ -128,6 +136,7 @@ class PublicRelease(unittest.TestCase):
                 "UpdateSchemaDigest": "a" * 64,
             }.items()
         )
+        cls.linker_flags = flags
         for platform in ["linux-amd64", "linux-arm64", "darwin-arm64"]:
             system, architecture = platform.split("-")
             destination = root / platform
@@ -483,11 +492,171 @@ class PublicRelease(unittest.TestCase):
                 self.binaries["linux-amd64"], VERSION, self.source, PUBLIC, STORAGE, "linux-arm64"
             )
 
+    @unittest.skipUnless(
+        sys.platform == "darwin" and platform.machine() == "arm64",
+        "native Apple Silicon CGO/external linker requires macOS",
+    )
+    def test_native_cgo_external_macho(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = Path(temporary) / "external-macho"
+            subprocess.run(
+                [
+                    "go",
+                    "build",
+                    "-trimpath",
+                    "-ldflags=" + self.linker_flags + " -linkmode=external",
+                    "-o",
+                    str(binary),
+                    ".",
+                ],
+                cwd=self.source_root,
+                check=True,
+                env=dict(os.environ, GOOS="darwin", GOARCH="arm64", CGO_ENABLED="1"),
+            )
+            data = binary.read_bytes()
+            offset, seen = 32, False
+            for _ in range(struct.unpack_from("<I", data, 16)[0]):
+                kind, size = struct.unpack_from("<II", data, offset)
+                seen |= kind == 0x80000034
+                offset += size
+            self.assertTrue(seen, "native external fixture must exercise chained fixups")
+            verify.verify_binary(data, VERSION, self.source, PUBLIC, STORAGE, "darwin-arm64")
+
+    def test_interruption_retains_incomplete_json(self):
+        class Interrupted(FakeNetwork):
+            def open(self, url, headers=None):
+                if url.startswith("https://github.com/"):
+                    raise KeyboardInterrupt()
+                return super().open(url, headers)
+
+        with (
+            mock.patch.object(verify, "Network", lambda: Interrupted(self.fixture)),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            verify.main(
+                [
+                    VERSION,
+                    self.source,
+                    "--public-key",
+                    PUBLIC,
+                    "--macos-mode",
+                    "unsigned",
+                    "--output",
+                    self.output.name,
+                ]
+            )
+        report = json.loads((Path(self.output.name) / "report.json").read_text())
+        self.assertEqual(report["status"], "incomplete")
+        self.assertTrue(report["asset_downloads_pending"])
+        self.assertEqual(report["checks"][0]["status"], "passed")
+        self.assertFalse((Path(self.output.name) / "report.json.tmp").exists())
+
     def test_wrong_expected_mode_fails(self):
         self.assertEqual(self.run_verifier("--macos-mode", "signed")[0], 1)
 
 
+def chained_macho(pointer_format=6):
+    """Minimal independent dyld layout: two Go headers on one rebase chain."""
+    data = bytearray(12288)
+    imagebase = 0x100000000
+    commands = []
+    for index, (name, protection) in enumerate(
+        [(b"__TEXT", 5), (b"__DATA", 3), (b"__LINKEDIT", 1)]
+    ):
+        commands.append(
+            struct.pack(
+                "<II16sQQQQIIII",
+                0x19,
+                72,
+                name,
+                imagebase + index * 4096,
+                4096,
+                index * 4096,
+                4096,
+                protection,
+                protection,
+                0,
+                0,
+            )
+        )
+    commands.append(struct.pack("<IIII", 0x80000034, 16, 8192, 68))
+    struct.pack_into("<8I", data, 0, 0xFEEDFACF, 0x100000C, 0, 2, 4, 232, 0, 0)
+    data[32:264] = b"".join(commands)
+    data[512:517], data[520:560] = b"1.2.3", b"a" * 40
+    target = 512 + (imagebase if pointer_format == 2 else 0)
+    struct.pack_into(
+        "<QQQQ",
+        data,
+        4096,
+        target | (4 << 51),
+        5,
+        520 + (imagebase if pointer_format == 2 else 0),
+        40,
+    )
+    struct.pack_into("<7I", data, 8192, 0, 28, 68, 68, 0, 1, 0)
+    struct.pack_into("<4I", data, 8220, 3, 0, 16, 0)
+    struct.pack_into("<IHHQIHH", data, 8236, 24, 4096, pointer_format, 4096, 0, 1, 0)
+    return data
+
+
 class HostileInputs(unittest.TestCase):
+    def test_real_format_chained_offsets_and_absolute_rebases(self):
+        for pointer_format in [2, 6]:
+            data = chained_macho(pointer_format)
+            self.assertEqual(
+                verify.embedded_go_strings(data, {"version": "1.2.3", "source": "a" * 40}),
+                ["version", "source"],
+            )
+            with self.assertRaises(ValueError):
+                verify.embedded_go_strings(data + b"9.9.9", {"version": "9.9.9"})
+
+    def test_malformed_and_bind_chains_are_not_string_evidence(self):
+        for change in [
+            lambda d: struct.pack_into("<H", d, 8242, 12),  # unsupported format
+            lambda d: struct.pack_into("<H", d, 8258, 4093),  # out of page
+            lambda d: struct.pack_into("<I", d, 8220, 4),  # invalid segment count
+            lambda d: struct.pack_into("<Q", d, 4096, 512 | (0xFFF << 51)),
+            lambda d: struct.pack_into("<Q", d, 4096, 512 | (4 << 51) | (1 << 63)),
+        ]:
+            data = chained_macho()
+            change(data)
+            with self.assertRaises(ValueError):
+                verify.embedded_go_strings(data, {"version": "1.2.3", "source": "a" * 40})
+
+    def test_asset_pool_is_bounded_and_preserves_failure_receipts(self):
+        lock, barrier = threading.Lock(), threading.Barrier(3)
+        active, peak = 0, 0
+
+        class Transfer:
+            def download(self, url, destination, size, digest):
+                nonlocal active, peak
+                with lock:
+                    active += 1
+                    peak = max(peak, active)
+                barrier.wait(timeout=10)
+                with lock:
+                    active -= 1
+                if destination.name == "asset-2":
+                    raise ValueError("fixture byte conflict")
+                return {"size": size, "sha256": "a" * 64}
+
+        assets = [
+            {"name": f"asset-{i}", "browser_download_url": "https://example.org/", "size": 1}
+            for i in range(6)
+        ]
+        receipts = {}
+        with self.assertRaises(ValueError):
+            verify.download_assets(
+                Transfer(),
+                assets,
+                Path("unused-fixture"),
+                lambda name, result: receipts.update({name: result}),
+            )
+        self.assertEqual(peak, 3)
+        self.assertEqual(len(receipts), 6)
+        self.assertIsInstance(receipts["asset-2"], ValueError)
+        self.assertEqual(receipts["asset-5"]["size"], 1)
+
     def test_homebrew_fields_are_active_and_unique(self):
         good = 'version "1.2.3"\nsha256 "' + "a" * 64 + '"\nurl "https://example.org/package"\n'
         self.assertEqual(verify.homebrew_fields(good)["version"], "1.2.3")
