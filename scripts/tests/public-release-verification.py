@@ -436,6 +436,38 @@ class PublicRelease(unittest.TestCase):
         brew = next(c for c in report["checks"] if c["name"] == "homebrew")
         self.assertTrue(all(c["status"] == "pending_update" for c in brew["evidence"]))
 
+    def test_valid_signature_cannot_rebind_artifact_bytes_or_url(self):
+        feed = json.loads(base64.b64decode(json.loads(self.assets["update.json"])["payload"]))
+        downloads = {
+            name: {"size": len(data), "sha256": digest(data)[7:]}
+            for name, data in self.assets.items()
+        }
+        for field, value in [
+            ("url", "https://example.org/untrusted.tar.gz"),
+            ("sha256", "b" * 64),
+            ("size", 1),
+        ]:
+            wrong = copy.deepcopy(feed)
+            wrong["artifacts"][0][field] = value
+            data = json.dumps(wrong).encode()
+            signature = (
+                subprocess.check_output(
+                    ["go", "run", "./scripts/sign-release", "sign"],
+                    cwd=ROOT,
+                    input=data,
+                    env=dict(
+                        os.environ, POT_UPDATE_PUBLIC_KEY=PUBLIC, POT_UPDATE_PRIVATE_KEY=PRIVATE
+                    ),
+                )
+                .strip()
+                .decode()
+            )
+            (Path(self.output.name) / "update.json").write_text(
+                json.dumps({"payload": base64.b64encode(data).decode(), "signature": signature})
+            )
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                verify.verify_feed(Path(self.output.name), VERSION, PUBLIC, downloads, "jjyr/pot")
+
     def test_embedded_metadata_is_read_without_running_binaries(self):
         for platform, binary in self.binaries.items():
             verify.verify_binary(binary, VERSION, self.source, PUBLIC, STORAGE, platform)
@@ -456,6 +488,17 @@ class PublicRelease(unittest.TestCase):
 
 
 class HostileInputs(unittest.TestCase):
+    def test_homebrew_fields_are_active_and_unique(self):
+        good = 'version "1.2.3"\nsha256 "' + "a" * 64 + '"\nurl "https://example.org/package"\n'
+        self.assertEqual(verify.homebrew_fields(good)["version"], "1.2.3")
+        for text in [
+            good.replace('version "1.2.3"', '# version "1.2.3"'),
+            good + 'version "9.9.9"\n',
+            good.replace('sha256 "', '# sha256 "'),
+        ]:
+            with self.assertRaises(ValueError):
+                verify.homebrew_fields(text)
+
     def test_manifest_traversal_duplicate_and_wrong_hash(self):
         good = "a" * 64
         for text in [

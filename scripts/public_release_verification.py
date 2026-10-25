@@ -176,6 +176,11 @@ def verify_feed(output, version, key, downloads, repository):
     require(result.returncode == 0, "Ed25519 feed signature verification failed with trusted key")
     feed = json.loads(result.stdout)
     require(feed["version"] == version, "signed feed version mismatch")
+    require(
+        isinstance(feed["storage_format"], str)
+        and re.fullmatch(r".+-[a-f0-9]{64}", feed["storage_format"]),
+        "invalid signed storage format/schema digest",
+    )
     expected = {(kind, platform): name for kind, platform, name in update_artifacts(version)}
     require(len(feed["artifacts"]) == len(expected), "signed feed artifact count mismatch")
     seen = set()
@@ -432,6 +437,16 @@ def verify_registry(network, repository, version, source, mode):
     return result
 
 
+def homebrew_fields(text):
+    fields = {}
+    for name in ["version", "sha256", "url"]:
+        values = re.findall(r"^[ \t]*" + name + r' "([^"\n]+)"[ \t]*$', text, re.MULTILINE)
+        require(len(values) == 1, f"Homebrew requires exactly one active {name} field")
+        fields[name] = values[0]
+    require(re.fullmatch(r"[a-f0-9]{64}", fields["sha256"]), "invalid Homebrew SHA256")
+    return fields
+
+
 def verify_brew(network, repository, version, output, phase):
     generate_cask(version, output)
     generate_formula(version, output)
@@ -443,29 +458,21 @@ def verify_brew(network, repository, version, output, phase):
             0
         ].decode()
         expected = (output / generated).read_text()
-        # Verify the distribution pointer fields; unrelated reviewed formula formatting may evolve.
-        for pattern in [r'version "([^"]+)"', r'sha256 "([^"]+)"', r'url "([^"]+)"']:
-            actual, wanted = re.search(pattern, text), re.search(pattern, expected)
-            require(
-                actual is not None and wanted is not None, "missing Homebrew distribution field"
-            )
-            if actual[1] != wanted[1]:
-                current = re.search(r'version "([^"]+)"', text)[1]
-                if version_number(current) != current or tuple(
-                    map(int, current.split("."))
-                ) >= tuple(map(int, version.split("."))):
-                    raise ValueError(f"conflicting/newer Homebrew pointer: {remote}")
-                statuses.append(
-                    {
-                        "path": remote,
-                        "status": "pending_update",
-                        "current_version": current,
-                        "snapshot_source": snapshot,
-                    }
-                )
-                break
-        else:
+        actual, wanted = homebrew_fields(text), homebrew_fields(expected)
+        if actual == wanted:
             statuses.append({"path": remote, "status": "passed", "snapshot_source": snapshot})
+            continue
+        current = version_number(actual["version"])
+        if tuple(map(int, current.split("."))) >= tuple(map(int, version.split("."))):
+            raise ValueError(f"conflicting/newer Homebrew pointer: {remote}")
+        statuses.append(
+            {
+                "path": remote,
+                "status": "pending_update",
+                "current_version": current,
+                "snapshot_source": snapshot,
+            }
+        )
     if phase == "installation" and any(item["status"] != "passed" for item in statuses):
         raise Incomplete("published bytes verified; Homebrew pointers still await merge", statuses)
     return statuses
