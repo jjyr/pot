@@ -3,6 +3,7 @@
 
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -57,6 +58,8 @@ def main():
             (1200, 820, "zh-CN", "dark"),
             (390, 844, "en", "light"),
             (390, 844, "zh-CN", "dark"),
+            (320, 844, "en", "light"),
+            (320, 844, "zh-CN", "dark"),
         ]:
             # Every scenario starts with independent local preference/cache state.
             cli(
@@ -76,6 +79,14 @@ def main():
                 "screenshot",
                 "--filename",
                 str(images / f"assistant-start-{width}-{locale}-after.png"),
+            )
+            cli(
+                "goto",
+                f"{origin}/scripts/tests/fixtures/assistant-start.html?locale={locale}&theme={theme}",
+            )
+            cli(
+                "run-code",
+                "async page => { await page.waitForFunction(() => !!window.assistantStartResults); const result = await page.evaluate(() => window.assistantStartResults); if (!result.passed) throw Error(JSON.stringify(result)); return result; }",
             )
             print(f"Add assistant browser: {width}x{height}, {locale}, {theme} passed", flush=True)
         for width, height, locale, theme in [
@@ -101,6 +112,28 @@ def main():
                 "async page => { await page.evaluate(() => window.nativeAssistantCaptureContinue()); await page.waitForFunction(() => !!window.assistantStartResults); const result = await page.evaluate(() => window.assistantStartResults); if (!result.passed) throw Error(JSON.stringify(result)); }",
             )
             print(f"Antigravity editor capture: {width}, {locale} passed", flush=True)
+        first_connection = (ROOT / "scripts/tests/pot-ui-first-connection-browser.js").read_text()
+        for kind in ["codex", "antigravity"]:
+            for width, locale in [
+                (1200, "en"),
+                (1200, "zh-CN"),
+                (390, "en"),
+                (390, "zh-CN"),
+                (320, "en"),
+                (320, "zh-CN"),
+            ]:
+                result = cli(
+                    "run-code",
+                    first_connection.replace(
+                        "STATE",
+                        json.dumps(
+                            {"origin": origin, "kind": kind, "locale": locale, "width": width}
+                        ),
+                    ),
+                )
+                if '"passed":true' not in result:
+                    raise RuntimeError(result[:3000])
+                print(f"First connection: {kind}, {width}, {locale} passed", flush=True)
     finally:
         cli("close")
         server.shutdown()

@@ -44,7 +44,7 @@ func (m *hostMailbox) PendingNode(ctx context.Context, local, peer string) ([]pr
 	return out, rows.Err()
 }
 func (m *hostMailbox) Deliver(ctx context.Context, e protocol.Envelope) (protocol.Receipt, error) {
-	if e.From.Kind != "assistant" && e.From.Kind != "task" && !(m.backend != nil && m.backend.runtime().Kind == "antigravity" && e.From.Kind == "user") {
+	if e.From.Kind != "assistant" && e.From.Kind != "task" && !(m.backend != nil && e.From.Kind == "user") {
 		return protocol.Receipt{}, agentlink.ErrUnsupported
 	}
 	if e.Kind != "message" || e.To.Kind != "assistant" || e.To.NodeID != m.local.NodeID {
@@ -57,6 +57,15 @@ func (m *hostMailbox) Deliver(ctx context.Context, e protocol.Envelope) (protoco
 				return err
 			}
 			if !accepted {
+				if e.From.Kind == "user" {
+					var model string
+					if err := tx.QueryRowContext(ctx, "SELECT model FROM agent_adapter_assistants WHERE id=? AND deleted=0", e.To.AgentID).Scan(&model); err != nil {
+						return err
+					}
+					if model == "" {
+						return agentlink.ErrUnsupported
+					}
+				}
 				if err := activeAssistantTx(ctx, tx, e.To.AgentID); err != nil {
 					return err
 				}

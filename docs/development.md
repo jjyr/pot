@@ -736,10 +736,24 @@ The Add assistant browser fixture is included in `test:ui-http-integration` and 
 also run independently with `mise exec -- python
 scripts/tests/pot-ui-assistant-start-browser.py`. It uses synthetic node directories
 and no model credentials. Desktop/mobile, English/Chinese and light/dark cases
-cover explicit API creation, conversation draft restoration, source-specific
-connection instructions, remote default/explicit selection, empty-directory
-refresh and directory-load failure recovery. Screenshots stay under ignored
+cover explicit API creation, conversation draft restoration, runtime selection,
+zero-connection Codex/Antigravity installation guidance, invitation verification,
+type mismatch, preview/pairing retry, cancellation, explicit creation and connection
+reuse. Screenshots stay under ignored
 `output/playwright/`.
+
+For real HTTP authentication and signed Agent Link pairing, start
+`POT_FIRST_CONNECTION_FIXTURE_URL_FILE=/tmp/pot-first-connection-urls mise exec --
+go test ./internal/agenthost -run '^TestFirstConnectionBrowserFixture$' -count=1 -v
+-timeout=30m`. The URL file contains independent zero-connection Controls for each
+Agent and create/manage/observe intent. Open a URL with
+`/scripts/tests/fixtures/first-connection-live.html?locale=en` (or `zh-CN`). The
+fixture supplies a temporary browser login and disposable clipboard invitation;
+product authentication, pairing and management remain real. Native CLIs return
+mock metadata, no worker starts, and installation commands are only displayed.
+`scripts/tests/pot-ui-first-connection-live-browser.js` checks create/manage
+intents using an injected `STATE` with `origin`, `kind` and `intent`. POST
+`/fixture/stop` to any fixture URL when finished. All databases are temporary.
 
 The composer selector browser fixture is also part of `test:ui-http-integration`:
 `mise exec -- python scripts/tests/pot-ui-composer-selectors-browser.py`.

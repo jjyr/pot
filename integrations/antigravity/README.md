@@ -7,7 +7,7 @@ and exchange assistant messages across connected nodes. The receiving machine
 owns the Antigravity login, native permissions and allowed workspace scopes.
 
 ```text
-Pot user -> assistant management -> model / effort / existing workspace scope
+Pot user -> assistant management -> model / existing workspace scope
                                       |
 Pot chat / assistant mail <-> authenticated Agent Link <-> shared adapter host
                                                             |
@@ -40,7 +40,9 @@ Stop the host before upgrading its executable.
 
 Run `pot-setup` in Antigravity. It returns a private, short-lived connection-page
 URL. Open that page and copy an invitation into Pot's **Add assistant >
-Antigravity** flow, or paste a Pot invitation into the connection page. Pairing
+＋ Connect a new Agent > Antigravity** guide, or paste a Pot invitation into the
+connection page. The guide shows installation and invitation steps; after
+connecting, configure and create the new assistant explicitly. Pairing
 allows messaging and user-only assistant management within existing local scope
 choices. It grants no arbitrary filesystem path selection or credentials.
 
@@ -102,8 +104,8 @@ Receipts mean durable acceptance, not model completion. Direct user replies ente
 Pot's existing chat projection without waking a local Pot model.
 
 The independent node executor snapshots its own workspace, mode and model for
-each task. The first explicit model selection initializes an otherwise unconfigured
-executor. Further changes are local owner operations:
+each task. Creating or updating an assistant does not configure this executor. Its model and
+permissions are separate local owner operations:
 
 ```sh
 ~/.config/pot-antigravity/plugin/bin/pot-antigravity-agent executor \

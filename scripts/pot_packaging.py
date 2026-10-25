@@ -263,7 +263,11 @@ def prepare_resources(destination, platform):
     (destination / "FrontendIconLicense.txt").write_text(
         "\n\n".join(
             (ROOT / "web/src/assets" / name).read_text().rstrip()
-            for name in ("Lucide-LICENSE.txt", "Octicons-LICENSE.txt")
+            for name in (
+                "Lucide-LICENSE.txt",
+                "Octicons-LICENSE.txt",
+                "Antigravity-NOTICE.txt",
+            )
         )
         + "\n"
     )

@@ -229,7 +229,7 @@ func runAgyTurn(ctx context.Context, s Session, prompt string, events turnEvents
 
 // Models runs metadata discovery, never inference. Labels and opaque slugs are
 // receiver facts and need no product translation. Discovery failure isn't empty.
-func (b *backend) models(ctx context.Context) ([]agentlink.ExecutionModel, error) {
+func (b *backend) agyModels(ctx context.Context) ([]agentlink.ExecutionModel, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, b.binary, "models")

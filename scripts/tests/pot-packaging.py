@@ -65,6 +65,28 @@ class GoPackaging(unittest.TestCase):
             )
             self.assertIn("MIT License", notice)
 
+    def test_antigravity_mark_ships_offline_with_source_notice(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            node = root / "node"
+            node.mkdir()
+            destination = root / "Resources"
+            with (
+                mock.patch.object(pot_packaging, "node", return_value=node),
+                mock.patch.object(pot_packaging, "prepare_sandbox"),
+                mock.patch.object(pot_packaging, "prepare_plugins"),
+                mock.patch.object(pot_packaging, "call"),
+            ):
+                pot_packaging.prepare_resources(destination, "linux-amd64")
+            self.assertEqual(
+                (destination / "web/assets/antigravity.svg").read_bytes(),
+                (ROOT / "website/assets/antigravity.svg").read_bytes(),
+            )
+            self.assertIn(
+                (ROOT / "web/src/assets/Antigravity-NOTICE.txt").read_text().rstrip(),
+                (destination / "FrontendIconLicense.txt").read_text(),
+            )
+
     def test_tool_packages_contain_only_declared_files(self):
         for platform in ("linux-amd64", "darwin-arm64"):
             with tempfile.TemporaryDirectory() as temporary:

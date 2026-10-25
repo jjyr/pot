@@ -525,6 +525,9 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 	// Preserve the receiving Codex configuration, including its automatic
 	// reviewer. Only server requests for a human decision enter Agent Link.
 	params := map[string]any{"cwd": s.Workspace, "sandbox": s.Mode}
+	if s.Model != "" {
+		params["model"] = s.Model
+	}
 	method := "thread/start"
 	if s.ThreadID != "" {
 		method = "thread/resume"
@@ -561,7 +564,11 @@ func runTurn(ctx context.Context, s Session, prompt string, events turnEvents) (
 			return
 		}
 	}
-	raw, err = a.rpc(ctx, "turn/start", map[string]any{"threadId": thread.Thread.ID, "input": []any{map[string]any{"type": "text", "text": prompt, "text_elements": []any{}}}})
+	turnParams := map[string]any{"threadId": thread.Thread.ID, "input": []any{map[string]any{"type": "text", "text": prompt, "text_elements": []any{}}}}
+	if s.Effort != "" {
+		turnParams["effort"] = s.Effort
+	}
+	raw, err = a.rpc(ctx, "turn/start", turnParams)
 	if err != nil {
 		a.finish("failed", "codex_turn_start_failed_outcome_unknown: "+err.Error())
 		return

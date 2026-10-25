@@ -13,6 +13,7 @@ type managementBackend struct {
 	*testBackend
 	enabled atomic.Bool
 	calls   atomic.Int32
+	corrupt atomic.Bool
 }
 
 func (b *managementBackend) Directory(ctx context.Context) (Directory, error) {
@@ -22,8 +23,15 @@ func (b *managementBackend) Directory(ctx context.Context) (Directory, error) {
 	}
 	return d, e
 }
-func (b *managementBackend) ManageAssistant(context.Context, AssistantManagementRequest) (AssistantManagementResult, error) {
+func (b *managementBackend) ManageAssistant(_ context.Context, input AssistantManagementRequest) (AssistantManagementResult, error) {
 	b.calls.Add(1)
+	if input.Action != "catalog" {
+		node := b.f.id
+		if b.corrupt.Load() {
+			node = "other-node"
+		}
+		return AssistantManagementResult{Assistant: &ManagedAssistant{ID: input.ID, Address: AssistantTarget(node, input.ID), Revision: 1}}, nil
+	}
 	return AssistantManagementResult{Models: []ExecutionModel{{ID: "model", Name: "Model"}}}, nil
 }
 func TestAssistantManagementRequiresAdvertisedCapabilityAndAuthenticatedUser(t *testing.T) {
@@ -56,6 +64,18 @@ func TestAssistantManagementRequiresAdvertisedCapabilityAndAuthenticatedUser(t *
 	result, e := a.service.ManageAssistant(ctx, c.ID, input)
 	if e != nil || len(result.Models) != 1 || receiver.calls.Load() != 1 {
 		t.Fatal(result, e, receiver.calls.Load())
+	}
+	receiver.corrupt.Store(true)
+	mutation := input
+	mutation.Action = "create"
+	mutation.ID = "same-name"
+	mutation.RequestID = "create"
+	if _, e = a.service.ManageAssistant(ctx, c.ID, mutation); !errors.Is(e, ErrConflict) {
+		t.Fatal("accepted another node's identity", e)
+	}
+	receiver.corrupt.Store(false)
+	if value, e := a.service.ManageAssistant(ctx, c.ID, mutation); e != nil || value.Assistant.Address != AssistantTarget(b.id, "same-name") {
+		t.Fatal(value, e)
 	}
 	if e = a.service.Disconnect(ctx, c.ID); e != nil {
 		t.Fatal(e)

@@ -32,6 +32,7 @@ func main() {
 	}
 	threadID := fmt.Sprintf("thread-%d", os.Getpid())
 	workspace := ""
+	selectedModel := ""
 	state := 0
 	prompt := ""
 	scanner := bufio.NewScanner(os.Stdin)
@@ -41,10 +42,14 @@ func main() {
 			ID     any    `json:"id"`
 			Method string `json:"method"`
 			Params struct {
-				ClientInfo   any `json:"clientInfo"`
+				ClientInfo struct {
+					Name string `json:"name"`
+				} `json:"clientInfo"`
 				Capabilities struct {
 					OptOut []string `json:"optOutNotificationMethods"`
 				} `json:"capabilities"`
+				Model        string                        `json:"model"`
+				Effort       string                        `json:"effort"`
 				Cwd          string                        `json:"cwd"`
 				Sandbox      string                        `json:"sandbox"`
 				Approval     json.RawMessage               `json:"approvalPolicy"`
@@ -61,14 +66,14 @@ func main() {
 		}
 		switch m.Method {
 		case "initialize":
-			if state != 0 || m.Params.ClientInfo == nil {
+			if state != 0 || m.Params.ClientInfo.Name == "" {
 				os.Exit(14)
 			}
 			state = 1
 			for _, method := range m.Params.Capabilities.OptOut {
 				muted[method] = true
 			}
-			if !muted["item/commandExecution/outputDelta"] || !muted["item/agentMessage/delta"] || muted["item/completed"] || muted["turn/completed"] || muted["turn/started"] || !muted["item/autoApprovalReview/started"] || !muted["item/autoApprovalReview/completed"] {
+			if m.Params.ClientInfo.Name != "pot_management" && (!muted["item/commandExecution/outputDelta"] || !muted["item/agentMessage/delta"] || muted["item/completed"] || muted["turn/completed"] || muted["turn/started"] || !muted["item/autoApprovalReview/started"] || !muted["item/autoApprovalReview/completed"]) {
 				os.Exit(22)
 			}
 			reply(m.ID, map[string]any{"userAgent": "fake-codex/0.163.0"})
@@ -77,6 +82,11 @@ func main() {
 				os.Exit(15)
 			}
 			state = 2
+		case "model/list":
+			if state != 2 {
+				os.Exit(25)
+			}
+			reply(m.ID, map[string]any{"data": []any{map[string]any{"id": "model-one", "model": "model-one", "displayName": "Model One", "supportedReasoningEfforts": []any{map[string]string{"reasoningEffort": "low"}, map[string]string{"reasoningEffort": "high"}}, "defaultReasoningEffort": "low"}, map[string]any{"id": "model-two", "model": "model-two", "displayName": "Model Two"}}, "nextCursor": nil})
 		case "thread/start", "thread/resume":
 			if state != 2 || m.Params.Cwd == "" || len(m.Params.Approval) != 0 || len(m.Params.Reviewer) != 0 || (m.Params.Sandbox != "read-only" && m.Params.Sandbox != "workspace-write") {
 				os.Exit(16)
@@ -91,6 +101,7 @@ func main() {
 			}
 			state = 3
 			workspace = m.Params.Cwd
+			selectedModel = m.Params.Model
 			if m.Method == "thread/resume" {
 				if m.Params.ThreadID == "" || !m.Params.ExcludeTurns {
 					os.Exit(21)
@@ -104,6 +115,12 @@ func main() {
 			}
 			state = 4
 			prompt = m.Params.Input[0].Text
+			if selectedModel != "" {
+				settings, _ := json.Marshal(map[string]string{"model": selectedModel, "effort": m.Params.Effort})
+				if os.WriteFile(filepath.Join(workspace, "native-settings.json"), settings, 0600) != nil {
+					os.Exit(26)
+				}
+			}
 			reply(m.ID, map[string]any{"turn": map[string]string{"id": "turn-1", "status": "inProgress"}})
 			notification("turn/started", map[string]any{"threadId": threadID, "turn": map[string]string{"id": "turn-1", "status": "inProgress"}})
 			notification("item/started", map[string]any{"threadId": threadID, "item": map[string]string{"id": "command-1", "type": "commandExecution", "command": "fixture only"}})

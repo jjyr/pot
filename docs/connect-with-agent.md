@@ -76,7 +76,9 @@ needed to finish setup.
    firewall or network changes with the user; follow the integration guide
    instead of exposing the local owner HTTP listener.
 4. Let the user copy the complete connection information from the selected,
-   read-only field and paste it into Pot's **Add Agent**. A manual copy works
+   read-only field and paste it into Pot's **Add assistant > ＋ Connect a new Agent
+   > Codex** guide, then explicitly configure and create a new assistant. For a
+   connection only, use **Link > Add Agent**. A manual copy works
    when browser clipboard access is unavailable. Treat the invitation as private
    pairing information and keep it out of shared transcripts and screenshots.
    Only one side needs a reachable address; traffic then flows both ways.
