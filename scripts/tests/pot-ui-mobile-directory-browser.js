@@ -3,7 +3,7 @@ async (page,{origin=new URL(page.url()).origin,browser=page.context().browser()}
   const assert=(ok,message)=>{if(!ok)throw Error(message);},results=[];
   for(const width of [320,390]){
     const context=await browser.newContext({viewport:{width,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:1,reducedMotion:'no-preference',serviceWorkers:'block',userAgent:'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36'});
-    const mobile=await context.newPage(),nativeCases=[];
+    const mobile=await context.newPage(),nativeCases=[];let featureDrawer;
     try{
       const cdp=await context.newCDPSession(mobile),errors=[];
       mobile.on('pageerror',error=>errors.push(error.message));
@@ -81,11 +81,33 @@ async (page,{origin=new URL(page.url()).origin,browser=page.context().browser()}
       await chat();await touch('touchStart',20);await touch('touchMove',34);await touch('touchCancel');
       await mobile.waitForFunction(()=>!document.querySelector('#app').classList.contains('is-edge-back'));
       assert(!await mobile.locator('#app').evaluate(root=>root.classList.contains('show-directory')),`${width}px native cancelled touch stays in Chat`);
+      if(width===390){
+        // Directory -> feature drawer is a separate gesture from Chat -> directory.
+        await mobile.locator('.narrow-navigation').click();
+        await touch('touchStart',20,250);await touch('touchMove',34,250);
+        await mobile.evaluate(()=>new Promise(requestAnimationFrame));
+        assert(await mobile.locator('.mobile-menu').evaluate(menu=>!menu.hidden&&menu.inert),'Native touch previews the feature drawer');
+        await touch('touchCancel');
+        await mobile.waitForFunction(()=>{const menu=document.querySelector('.mobile-menu');return menu.hidden&&menu.style.transform==='';});
+        assert(await mobile.locator('#app').evaluate(root=>root.classList.contains('show-directory')),'Cancelled feature opening stays in the directory');
+        // Larger Chromium touches may become browser navigation; the full
+        // commit uses the same explicit synthetic pointer boundary as Back.
+        await pointer('pointerdown',5);await pointer('pointermove',160);await pointer('pointerup',160);
+        await mobile.waitForFunction(()=>{const menu=document.querySelector('.mobile-menu');return !menu.hidden&&!menu.inert&&menu.style.transform==='';});
+        await mobile.emulateMedia({reducedMotion:'reduce'});
+        const reducedFrames=await mobile.evaluate(async()=>{
+          const root=document.querySelector('#app');for(const [type,x]of [['pointerdown',250],['pointermove',20],['pointerup',20]])root.dispatchEvent(new PointerEvent(type,{pointerId:9,pointerType:'touch',isPrimary:true,bubbles:true,cancelable:true,clientX:x,clientY:250}));
+          const frames=[];for(let i=0;i<2;i++){await new Promise(requestAnimationFrame);const menu=document.querySelector('.mobile-menu');frames.push({hidden:menu.hidden,transform:menu.style.transform,animations:menu.getAnimations().length,directory:root.classList.contains('show-directory')});}return frames;
+        });
+        assert(reducedFrames.every(frame=>frame.hidden&&!frame.transform&&!frame.animations&&frame.directory),'Reduced Motion closes the drawer before the first visible frame: '+JSON.stringify(reducedFrames));
+        await chat();assert(await mobile.locator('.composer-input').inputValue()==='Retained draft','Feature drawer gestures retain the conversation draft');
+        await mobile.emulateMedia({reducedMotion:'no-preference'});featureDrawer={nativeCancel:true,pointerCommit:true,reducedFrames};
+      }
       await mobile.setViewportSize({width:1200,height:844});
       const desktop=await mobile.locator('.assistant-directory').boundingBox();
       assert(desktop.x===56&&desktop.y===0&&desktop.width===236,'Wide directory keeps its grid placement');
       assert(!await mobile.locator('.narrow-navigation').isVisible(),'Wide Chat hides phone navigation');
-      await mobile.evaluate(()=>directoryFixture.dispose());assert(errors.length===0,errors.join('\n'));results.push({width,nativeCases,commitAndCancel:true,desktop:true});
+      await mobile.evaluate(()=>directoryFixture.dispose());assert(errors.length===0,errors.join('\n'));results.push({width,nativeCases,commitAndCancel:true,desktop:true,featureDrawer});
     }catch(error){throw Error(`${width}px directory: ${error.message}; `+JSON.stringify(await mobile.evaluate(()=>({frames:directoryFixture.frames.slice(-6),final:directoryFixture.measure(),refreshes:directoryFixture.refreshes})).catch(()=>({}))),{cause:error});}finally{await context.close();}
   }
   return {passed:true,mobileDirectory:results,errors:[]};

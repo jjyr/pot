@@ -4,7 +4,7 @@ export const groups = {
   nav: ['directory', 'switching'],
   history: ['task-history', 'task-history-edges'],
   domain: ['domain-repositories.html'],
-  management: ['assistant-start-phone','first-connection-codex','first-connection-antigravity','settings-phone'],
+  management: ['assistant-start-phone','first-connection-codex','first-connection-antigravity','settings-phone','machines'],
   composer: ['composer-phone','composer-enter'],
   approvals: ['linked-approvals','patch-approvals'],
   usage: ['usage-empty','usage-unknown','usage-partial','usage-trend'],

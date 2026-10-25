@@ -478,7 +478,6 @@ def run(binary, base, env, cli_command, profile_only=False):
                 "pot-ui-agent-capabilities-browser.js",
                 "pot-ui-tasks-browser.js",
                 "pot-ui-task-refresh-browser.js",
-                "pot-ui-machines-browser.js",
                 "pot-ui-github-account-browser.js",
                 "pot-ui-refresh-browser.js",
                 "pot-ui-production-browser.js",
