@@ -105,20 +105,8 @@ def run(binary, base, env, cli_command, profile_only=False):
                 + code
                 + ")(fixture); } finally { await context.close(); } }"
             )
-            if script == "pot-ui-mobile-directory-browser.js":
-                wrapper = (
-                    "async page => ("
-                    + code
-                    + ")(null,{browser:page.context().browser(),origin:"
-                    + json.dumps(origin)
-                    + "})"
-                )
             output = browser_cli("run-code", wrapper)
-            marker = (
-                '"errors":[]'
-                if script in {"pot-ui-shell-browser.js", "pot-ui-production-browser.js"}
-                else '"passed":true'
-            )
+            marker = '"errors":[]' if script == "pot-ui-production-browser.js" else '"passed":true'
             if marker not in output:
                 raise RuntimeError(script + " did not pass")
             print("Browser passed: " + script, flush=True)

@@ -52,9 +52,6 @@ async function taskChecks(){
  check(composerMentionValue(editor)==='指导 '+code+'  结束'&&document.activeElement===editor,'Task guidance replaces only the query and retains focus');
  editor.setRangeText('继续',editor.selectionStart,editor.selectionEnd,'end');editor.dispatchEvent(new Event('input',{bubbles:true}));
  check(saved==='/skill:code-review\n指导 '+code+' 继续 结束','Task draft serializes the complete inline address with unchanged Skill prefix');
- // A retained transcript is readable, but writes require a confirmed domain
- // snapshot. Explicitly advance the fixture instead of relying on the old
- // default freshness of task-conversation.update.
  check(host.querySelector('.send-button').disabled,'Retained Task guidance cannot send before fresh confirmation');
  view.update({record,state:createTaskTranscript(),inputs:[],approvals:[],fresh:true});
  host.querySelector('.send-button').click();await wait(()=>sent==='/skill:code-review\n指导 '+code+' 继续 结束');

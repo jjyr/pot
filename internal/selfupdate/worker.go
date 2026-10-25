@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"reflect"
 	"syscall"
 	"time"
 
+	"github.com/jjyr/pot/internal/buildinfo"
 	"github.com/jjyr/pot/pkg/instance"
+	"github.com/jjyr/pot/pkg/storage"
 )
 
 type Job struct {
@@ -20,6 +22,7 @@ type Job struct {
 	Version   string       `json:"version"`
 	Interrupt bool         `json:"interrupt"`
 	Package   Installation `json:"package"`
+	Retry     bool         `json:"retry"`
 }
 
 func Worker(path string) (result error) {
@@ -66,10 +69,17 @@ func Worker(path string) (result error) {
 		}
 		_ = instance.WriteJSON(filepath.Join(job.Directory, "state.json"), state)
 	}
+	if job.Retry {
+		return retryInstalled(job, save)
+	}
 	peers, err := participants(job.Directory)
 	if err != nil {
 		save("failed", err)
 		return err
+	}
+	if len(peers) == 0 {
+		save("failed", errors.New("no registered update hosts"))
+		return errors.New("no registered update hosts")
 	}
 	hosts, err := restartHosts(job.Install, peers)
 	if err != nil {
@@ -116,6 +126,25 @@ func Worker(path string) (result error) {
 	if prepared.Version != job.Version || filepath.Dir(prepared.Path) != stage {
 		return errors.New("invalid prepared installation")
 	}
+	feed, err := os.ReadFile(filepath.Join(job.Directory, "verified-feed.json"))
+	if err != nil {
+		return err
+	}
+	release, err := Verify(feed, buildinfo.UpdatePublicKey)
+	if err != nil {
+		return err
+	}
+	if release.Version != job.Version || eligibility(release) != "" {
+		return errors.New("prepared release is not eligible")
+	}
+	if err := checkTarget(prepared.Path, job.Package, release); err != nil {
+		return err
+	}
+	sourceSchemas, err := storage.Schemas()
+	if err != nil {
+		return err
+	}
+	schemaChange := !reflect.DeepEqual(sourceSchemas, release.Schemas)
 	// Ask every host to close its servers, stores and execution scopes, and wait
 	// for its full shutdown result. A timeout or uncertain cleanup aborts install.
 	for _, host := range hosts {
@@ -138,14 +167,17 @@ func Worker(path string) (result error) {
 	if !os.IsNotExist(err) {
 		return err
 	}
-	// The data format is unchanged. Preserve closed database/metadata snapshots for
-	// inspection, but do not restore them over newer durable execution receipts.
-	for index, p := range peers {
-		if p.Root != "" {
-			if err = backupState(p.Root, filepath.Join(job.Directory, "data-"+job.Version, fmt.Sprint(index))); err != nil {
-				return err
-			}
-		}
+	rootLocks, err := lockDataRoots(peers)
+	if err != nil {
+		return err
+	}
+	defer closeLocks(rootLocks)
+	journal, err := migrationPreflight(peers, release)
+	if err != nil {
+		return err
+	}
+	if err := journal.save(job.Directory, "prepared"); err != nil {
+		return err
 	}
 	if err = os.Rename(job.Install, backup); err != nil {
 		return err
@@ -157,7 +189,12 @@ func Worker(path string) (result error) {
 		}
 		return err
 	}
+	if err := journal.save(job.Directory, "restarting"); err != nil {
+		state.Phase = "blocked"
+		return err
+	}
 	save("restarting", nil)
+	closeLocks(rootLocks)
 	exclusive.Close()
 	for _, host := range hosts {
 		if err = host.resume(); err != nil {
@@ -168,6 +205,13 @@ func Worker(path string) (result error) {
 		err = healthy(hosts, job.Directory, job.Version)
 	}
 	if err == nil {
+		err = journal.complete()
+	}
+	if err == nil {
+		if err := journal.save(job.Directory, "complete"); err != nil {
+			state.Phase = "blocked"
+			return err
+		}
 		save("current", nil)
 		return nil
 	}
@@ -185,6 +229,23 @@ func Worker(path string) (result error) {
 		return errors.Join(err, lockErr)
 	}
 	defer exclusive.Close()
+	rollbackLocks, lockErr := lockDataRoots(peers)
+	if lockErr != nil {
+		state.Phase = "blocked"
+		return errors.Join(err, lockErr)
+	}
+	defer closeLocks(rollbackLocks)
+	if schemaChange {
+		if changed := journal.unchanged(); changed != nil {
+			state.Phase = "blocked"
+			_ = journal.save(job.Directory, "forward_recovery_required")
+			return errors.Join(err, errors.New("automatic rollback refused after committed or uncertain migrations; inspect migration-journal.json and worker.log; repair/restart this new version, never start the old binary"), changed)
+		}
+	}
+	if e := journal.save(job.Directory, "rolling_back"); e != nil {
+		state.Phase = "blocked"
+		return errors.Join(err, e)
+	}
 	failed := filepath.Join(job.Directory, "failed-"+job.Version)
 	if e := os.Rename(job.Install, failed); e != nil {
 		state.Phase = "blocked"
@@ -214,7 +275,7 @@ func checkInstallation(install string, expected Installation) error {
 	if err = json.Unmarshal(data, &installed); err != nil {
 		return err
 	}
-	if installed != expected || installed.StorageFormat != storageFormat() {
+	if installed != expected || installed.Protocol != UpdateProtocol || installed.StorageFormat != storageFormat() {
 		return errors.New("update job does not match installed package")
 	}
 	return nil
@@ -242,7 +303,7 @@ func healthy(hosts []*restartHost, directory, version string) error {
 				}
 			}
 			var current Participant
-			if err := localCall(ctx, host.Socket, "GET", "/status", &current); err != nil || !current.Ready || current.Version != version || current.Root != host.Root {
+			if err := localCall(ctx, host.Socket, "GET", "/status", &current); err != nil || current.BootID == "" || current.BootID == host.previousBoot || !current.Ready || current.Protocol != UpdateProtocol || current.Version != version || current.Root != host.Root {
 				ok = false
 				break
 			}
@@ -257,33 +318,31 @@ func healthy(hosts []*restartHost, directory, version string) error {
 		}
 	}
 }
-func backupState(root, destination string) error {
-	if err := privateDirectory(destination); err != nil {
-		return err
+
+func checkTarget(path string, source Installation, release Release) error {
+	found := false
+	for _, artifact := range release.Artifacts {
+		if artifact.Kind == source.Kind && artifact.Platform == source.Platform {
+			found = true
+		}
 	}
-	entries, err := os.ReadDir(root)
+	if !found {
+		return errors.New("authenticated release has no artifact for this installation")
+	}
+	metadata := filepath.Join(path, "Resources/update.json")
+	if source.Kind == "app" {
+		metadata = filepath.Join(path, "Contents/Resources/update.json")
+	}
+	body, err := os.ReadFile(metadata)
 	if err != nil {
 		return err
 	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".json") && !strings.HasSuffix(name, ".sqlite") {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if !info.Mode().IsRegular() {
-			return errors.New("data snapshot contains non-regular metadata")
-		}
-		data, err := os.ReadFile(filepath.Join(root, name))
-		if err != nil {
-			return err
-		}
-		if err = os.WriteFile(filepath.Join(destination, name), data, 0600); err != nil {
-			return err
-		}
+	var target Installation
+	if err := json.Unmarshal(body, &target); err != nil {
+		return err
+	}
+	if target.Version != release.Version || target.Protocol != UpdateProtocol || target.StorageFormat != release.StorageFormat || target.Kind != source.Kind || target.Platform != source.Platform {
+		return errors.New("prepared package does not match authenticated target")
 	}
 	return nil
 }

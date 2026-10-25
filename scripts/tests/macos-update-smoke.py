@@ -7,6 +7,8 @@ Signature, manifest and download trust are covered by the selfupdate Go tests.
 """
 
 import argparse
+import base64
+import hashlib
 from contextlib import closing
 import http.client
 import json
@@ -78,7 +80,7 @@ def hosts(directory, ready=True):
     return result
 
 
-def exercise(old, new, scenario):
+def exercise(old, new, scenario, feed):
     # macOS Unix socket paths are limited to 104 bytes. Its default per-user
     # temporary directory can exceed that once a second data root is appended.
     with tempfile.TemporaryDirectory(prefix="pot-native-update-", dir="/private/tmp") as temporary:
@@ -136,6 +138,8 @@ def exercise(old, new, scenario):
                     broken = dict(target, storage_format="fixture-invalid-format")
                     write(stage / "Contents/Resources/update.json", broken)
                     subprocess.run(["codesign", "--force", "--sign", "-", stage], check=True)
+                shutil.copyfile(feed, updates / "verified-feed.json")
+                (updates / "verified-feed.json").chmod(0o600)
                 write(updates / "prepared.json", {"Version": target["version"], "Path": str(stage)})
                 write(updates / "state.json", {"version": target["version"], "phase": "ready"})
                 result = call(
@@ -260,6 +264,9 @@ def main():
     parser.add_argument(
         "--build", action="store_true", help="Build both test versions with an ephemeral update key"
     )
+    parser.add_argument(
+        "--feed", type=Path, help="Pinned-key signed target manifest for existing Apps"
+    )
     args = parser.parse_args()
     if platform.system() != "Darwin":
         parser.error("native macOS required")
@@ -290,13 +297,54 @@ def main():
                 app = directory / (version + ".app")
                 subprocess.run(["ditto", repo / ".local/pot/Pot.app", app], check=True)
                 apps.append(app)
+            sys.path.insert(0, str(repo / "scripts"))
+            from pot_packaging import schema_catalog, ledger_digest
+
+            archive = directory / "target.zip"
+            subprocess.run(["ditto", "-c", "-k", "--keepParent", apps[1], archive], check=True)
+            metadata = json.loads((apps[1] / "Contents/Resources/update.json").read_text())
+            payload = json.dumps(
+                {
+                    "version": metadata["version"],
+                    "storage_format": metadata["storage_format"],
+                    "protocol": metadata["protocol"],
+                    "schemas": schema_catalog(),
+                    "ledger_digest": ledger_digest(),
+                    "artifacts": [
+                        {
+                            "kind": "app",
+                            "platform": metadata["platform"],
+                            "url": f"https://github.com/jjyr/pot/releases/download/v{metadata['version']}/target.zip",
+                            "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                            "size": archive.stat().st_size,
+                        }
+                    ],
+                },
+                separators=(",", ":"),
+            ).encode()
+            signature = (
+                subprocess.check_output(
+                    ["go", "run", "./scripts/sign-release", "sign"],
+                    input=payload,
+                    cwd=repo,
+                    env={
+                        **os.environ,
+                        "POT_UPDATE_PUBLIC_KEY": public,
+                        "POT_UPDATE_PRIVATE_KEY": (directory / "key.pem").read_text(),
+                    },
+                )
+                .strip()
+                .decode()
+            )
+            feed = directory / "update.json"
+            write(feed, {"payload": base64.b64encode(payload).decode(), "signature": signature})
             for scenario in ("success", "launch-failure", "startup-failure"):
-                exercise(*apps, scenario)
+                exercise(*apps, scenario, feed)
     else:
-        if not args.old_app or not args.new_app:
-            parser.error("provide old_app and new_app, or --build")
+        if not args.old_app or not args.new_app or not args.feed:
+            parser.error("provide old_app, new_app and --feed, or --build")
         for scenario in ("success", "launch-failure", "startup-failure"):
-            exercise(args.old_app.resolve(), args.new_app.resolve(), scenario)
+            exercise(args.old_app.resolve(), args.new_app.resolve(), scenario, args.feed.resolve())
 
 
 if __name__ == "__main__":

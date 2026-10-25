@@ -47,6 +47,7 @@ async (page, {base='http://127.0.0.1:18729',captureOnly=false,browser=page.conte
         path==='/api/v1/completions'?{items:[{token:'/skill:review',label:'Review',detail:'Review changes'}]}:{items:[]};
       await route.fulfill({json:data});
     });
+    let step='initial';
     try{
       await tab.goto(`${base}/?locale=en&theme=light&conversation=alpha`);
       const input=tab.locator('#pot-composer'),send=tab.locator('.composer-area > form .send-button');
@@ -99,25 +100,34 @@ async (page, {base='http://127.0.0.1:18729',captureOnly=false,browser=page.conte
         assert(await input.inputValue()===''&&await tab.locator('.composer-selector').count()===1,'Completion remains selectable by button');await tab.getByRole('button',{name:'Remove Review',exact:true}).click();
         await input.fill('First line');await input.press('End');await input.press('Enter');await shot('after');
         const payload=await input.inputValue(),before=sends.length;
+        step='native button send';
         await send.click();await tab.waitForFunction(()=>document.querySelector('#pot-composer').value==='');
         assert(sends.length===before+1&&sends.at(-1).body.text===payload,'Mobile click sends exactly once, preserving newlines');
+        step='accessible send';
         await input.fill('Accessible\nbutton');await send.focus();await send.press('Enter');
         await tab.waitForFunction(()=>document.querySelector('#pot-composer').value==='');
         assert(sends.at(-1).body.text==='Accessible\nbutton','Keyboard activation of the send button remains accessible');
+        step='rejected send';
         rejectNext=true;await input.fill('Retain\nfailed draft');await send.click();
         await tab.waitForFunction(()=>!document.querySelector('.composer-area > form .send-button').disabled);
         assert(await input.inputValue()==='Retain\nfailed draft','Network failure retains the multiline draft');
+        step='retry';
         const failed=sends.at(-1).body;await send.click();await tab.waitForFunction(()=>document.querySelector('#pot-composer').value==='');
         assert(sends.at(-1).body.request_id===failed.request_id,'Retry retains request identity');
-        await input.fill('');await tab.locator('.composer input[type=file]').setInputFiles({name:'fixture.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4\nfixture')});
+        step='attachments';
+        await input.fill('');await tab.getByRole('button',{name:'Add attachment',exact:true}).click();
+        const [chooser]=await Promise.all([tab.waitForEvent('filechooser'),tab.getByRole('menuitem',{name:'PDF',exact:true}).click()]);
+        await chooser.setFiles({name:'fixture.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4\nfixture')});
         await tab.waitForFunction(()=>!document.querySelector('.composer-area > form .send-button').disabled);
         const attachmentsBefore=sends.length;await input.focus();await input.press('Enter');
         assert(sends.length===attachmentsBefore,'Attachment-only Enter cannot send');
         await input.fill('');await send.click();await tab.waitForFunction(()=>!document.querySelector('.composer-attachments').textContent.trim());
         assert(sends.at(-1).body.text===''&&sends.at(-1).body.attachments.length===1,'Attachment-only button send remains supported');
+        step='steering';
         running=true;await tab.evaluate(value=>window.__pushEnterSnapshot(value),snapshot());
         await input.fill('Task\nguidance');const steerBefore=sends.length;await input.press('Enter');
         assert(sends.length===steerBefore,'Running assistant does not steer on mobile Enter');
+        step='native button send';
         await send.click();await tab.waitForFunction(()=>document.querySelector('#pot-composer').value==='');
         assert(sends.at(-1).path==='/api/v1/turn/steer'&&sends.at(-1).body.user_message_id==='active-turn','Button retains steering target');
         await input.fill('Blocked implicit submit');const implicitBefore=sends.length;
@@ -139,6 +149,7 @@ async (page, {base='http://127.0.0.1:18729',captureOnly=false,browser=page.conte
         await tab.waitForTimeout(100);await input.press('Enter');await tab.waitForFunction(()=>document.querySelector('#pot-composer').value==='');
         assert(sends.length===imeBefore+1,'Desktop ordinary Enter sends after IME guard expires');
       }
+      step='task integration';
       // Both composer call sites must honor the same policy.
       if(mobile)await tab.setViewportSize({width:1200,height:852});
       await tab.getByRole('button',{name:'Tasks',exact:true}).first().click();await tab.getByRole('button',{name:'Enter fixture task',exact:true}).click();
@@ -152,7 +163,7 @@ async (page, {base='http://127.0.0.1:18729',captureOnly=false,browser=page.conte
       await tab.waitForFunction(()=>document.querySelector('.task-composer-area textarea').value==='');
       assert(sends.length===taskBefore+1&&sends.at(-1).body.text===(mobile?'Task line\n':'Task line'),'Task sends once through the expected action');
       assert(errors.length===0,errors.join('\n'));results.push({mobile,sends:sends.length,errors});
-    }catch(reason){throw Error(JSON.stringify({mobile,error:reason.message,url:tab.url(),draft:await tab.locator('#pot-composer').inputValue().catch(()=>''),text:(await tab.locator('body').innerText()).slice(-1800),errors}));}finally{await context.close();}
+    }catch(reason){throw Error(JSON.stringify({mobile,step,error:reason.message,at:reason.stack?.split('\n').slice(0,4),sends:sends.slice(-3),attachment:await tab.locator('.attachment-plus').evaluate(node=>({disabled:node.disabled,title:node.title})).catch(()=>null),url:tab.url(),draft:await tab.locator('#pot-composer').inputValue().catch(()=>''),text:(await tab.locator('body').innerText()).slice(-1800),errors}));}finally{await context.close();}
   }
   return results;
 }

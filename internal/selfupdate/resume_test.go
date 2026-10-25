@@ -5,12 +5,51 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestSameVersionRetryRequiresNewBoot(t *testing.T) {
+	directory, err := os.MkdirTemp("/tmp", "pot-health-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(directory)
+	socket := filepath.Join(directory, "host.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	boot := "stopped-boot"
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		json.NewEncoder(w).Encode(Participant{Root: "root", Version: "0.2.0", Protocol: UpdateProtocol, BootID: boot, Ready: true})
+	}))
+	server.Listener = listener
+	server.Start()
+	defer server.Close()
+	host := &restartHost{Participant: Participant{Root: "root", Socket: socket}, previousBoot: boot}
+	before := healthTimeout
+	healthTimeout = 20 * time.Millisecond
+	defer func() { healthTimeout = before }()
+	if err := healthy([]*restartHost{host}, directory, "0.2.0"); err == nil {
+		t.Fatal("stopped same-version boot passed readiness")
+	}
+	mu.Lock()
+	boot = "new-boot"
+	mu.Unlock()
+	if err := healthy([]*restartHost{host}, directory, "0.2.0"); err != nil {
+		t.Fatal("restarted target did not become ready", err)
+	}
+}
 
 type heldResumeResponse struct {
 	header       http.Header

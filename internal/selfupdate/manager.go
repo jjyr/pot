@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"golang.org/x/sys/unix"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -30,8 +32,13 @@ type State struct {
 type Status struct {
 	Current string `json:"current"`
 	State
-	Work      Work `json:"work"`
-	Supported bool `json:"supported"`
+	Work        Work   `json:"work"`
+	Supported   bool   `json:"supported"`
+	CanRetry    bool   `json:"can_retry"`
+	AutoInstall bool   `json:"auto_install"`
+	ReleaseURL  string `json:"release_url"`
+	Reason      string `json:"reason,omitempty"`
+	Discovery   string `json:"discovery"`
 }
 type Command struct {
 	Action    string `json:"action"`
@@ -40,13 +47,20 @@ type Command struct {
 	Interrupt bool   `json:"interrupt"`
 }
 type Manager struct {
-	Host    *Host
-	Notify  func()
-	mu      sync.Mutex
-	release *Release
-	busy    bool
-	ctx     context.Context
-	client  *http.Client
+	Host        *Host
+	Notify      func()
+	mu          sync.Mutex
+	release     *Release
+	busy        bool
+	ctx         context.Context
+	client      *http.Client
+	discoveryMu sync.RWMutex
+	detected    string
+	reason      string
+	discovery   string
+	envelope    []byte
+	checkMu     sync.Mutex
+	checking    chan struct{}
 }
 
 func New(ctx context.Context, h *Host, notify func()) *Manager {
@@ -54,6 +68,9 @@ func New(ctx context.Context, h *Host, notify func()) *Manager {
 }
 func (m *Manager) state() State {
 	var s State
+	if m.Host == nil {
+		return s
+	}
 	data, err := os.ReadFile(filepath.Join(m.Host.Directory, "state.json"))
 	if err == nil {
 		_ = json.Unmarshal(data, &s)
@@ -68,37 +85,68 @@ func (m *Manager) save(s State) error {
 	return err
 }
 func (m *Manager) Status() (Status, error) {
-	s := Status{Current: buildinfo.Version, Supported: m.Host != nil}
+	s := Status{Current: buildinfo.Version, Supported: m.Host != nil, Discovery: "checking"}
+	m.discoveryMu.RLock()
+	s.Version, s.Reason, s.Discovery = m.detected, m.reason, m.discovery
+	if s.Discovery == "" {
+		s.Discovery = "checking"
+	}
+	m.discoveryMu.RUnlock()
 	if m.Host == nil {
+		s.Reason = "installation"
+		if buildinfo.UpdatePublicKey == "" {
+			s.Reason = "no_key"
+		}
+		s.ReleaseURL = releaseURL(s.Version)
 		return s, nil
 	}
-	s.State = m.state()
-	if s.Version != "" && !newer(s.Version, buildinfo.Version) && s.Phase != "installing" && s.Phase != "restarting" && s.Phase != "blocked" {
-		s.State = State{Version: buildinfo.Version, Phase: "current"}
+	saved := m.state()
+	if saved.Version != "" && (newer(saved.Version, buildinfo.Version) || saved.Phase == "installing" || saved.Phase == "restarting" || saved.Phase == "blocked") {
+		s.State = saved
 	}
+	if s.Version == "" && saved.Version != "" && !newer(saved.Version, buildinfo.Version) {
+		s.State = State{Phase: "current"}
+	}
+	s.ReleaseURL = releaseURL(s.Version)
+	s.AutoInstall = s.Discovery == "verified" && s.Reason == "" && s.Version != "" && newer(s.Version, buildinfo.Version)
 	peers, err := participants(m.Host.Directory)
 	if err != nil {
 		return s, err
 	}
 	for _, p := range peers {
+		if p.Protocol != UpdateProtocol {
+			s.AutoInstall = false
+			s.Reason = "protocol"
+		}
 		if p.Unsupported {
 			s.Supported = false
+			s.AutoInstall = false
+			s.Reason = "protected_state"
 		}
 		s.Work.Tasks += p.Work.Tasks
 		s.Work.Replies += p.Work.Replies
 		s.Work.Sessions += p.Work.Sessions
 	}
+	if s.Phase == "blocked" {
+		s.AutoInstall = false
+		s.Reason = "recovery"
+		s.CanRetry = s.Version == buildinfo.Version
+	}
+	if s.AutoInstall && m.Host.Install != "" {
+		if unix.Access(filepath.Dir(m.Host.Install), unix.W_OK) != nil || unix.Access(m.Host.Install, unix.W_OK) != nil {
+			s.AutoInstall = false
+			s.Reason = "permissions"
+		}
+	}
 	return s, nil
 }
 func (m *Manager) Run() {
-	if m.Host == nil {
-		return
-	}
 	go m.check()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	next := time.Now().Add(4 * time.Hour)
 	previous := m.state()
+	phaseSince := time.Now()
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -107,9 +155,13 @@ func (m *Manager) Run() {
 			s := m.state()
 			if s != previous {
 				previous = s
+				phaseSince = time.Now()
 				if m.Notify != nil {
 					m.Notify()
 				}
+			}
+			if m.Host != nil && (s.Phase == "installing" || s.Phase == "restarting") && time.Since(phaseSince) > 15*time.Second {
+				m.checkWorker(s)
 			}
 			if time.Now().After(next) {
 				next = time.Now().Add(4 * time.Hour)
@@ -118,11 +170,41 @@ func (m *Manager) Run() {
 		}
 	}
 }
+func (m *Manager) checkWorker(s State) {
+	lock, err := openLock(filepath.Join(m.Host.Directory, "update.lock"), syscall.LOCK_EX|syscall.LOCK_NB)
+	if err != nil {
+		return
+	}
+	defer lock.Close()
+	if m.state() != s {
+		return
+	}
+	s.Phase = "blocked"
+	s.Error = "installer absent; inspect migration-journal.json and worker.log before retrying the installed target"
+	_ = m.save(s)
+}
+func (m *Manager) checkFlight() <-chan struct{} {
+	m.checkMu.Lock()
+	defer m.checkMu.Unlock()
+	if m.checking != nil {
+		return m.checking
+	}
+	flight := make(chan struct{})
+	m.checking = flight
+	go func() { m.doCheck(); m.checkMu.Lock(); close(flight); m.checking = nil; m.checkMu.Unlock() }()
+	return flight
+}
 func (m *Manager) check() {
+	select {
+	case <-m.checkFlight():
+	case <-m.ctx.Done():
+	}
+}
+func (m *Manager) doCheck() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	phase := m.state().Phase
-	if !m.busy && phase == "downloading" {
+	if m.Host != nil && !m.busy && phase == "downloading" {
 		download, err := openLock(filepath.Join(m.Host.Directory, "download.lock"), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err != nil {
 			return
@@ -133,29 +215,77 @@ func (m *Manager) check() {
 		s.Error = "download interrupted by process restart"
 		_ = m.save(s)
 	}
-	if m.busy || m.Host.Maintaining() {
-		return
-	}
+	installing := m.busy || m.Host != nil && m.Host.Maintaining()
 	ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
 	defer cancel()
 	data, err := fetch(ctx, m.client, "https://github.com/jjyr/pot/releases/latest/download/update.json", 1<<20)
+	feedUnavailable := err != nil
+	var release Release
+	reason, discovery := "", "verified"
+	if err == nil {
+		release, err = Verify(data, buildinfo.UpdatePublicKey)
+	}
 	if err != nil {
-		return
+		reason, discovery = "verification", "manual"
+		if buildinfo.UpdatePublicKey == "" {
+			reason = "no_key"
+		}
+		body, fallbackErr := fetch(ctx, m.client, "https://api.github.com/repos/jjyr/pot/releases/latest", 1<<20)
+		var public struct {
+			Tag        string `json:"tag_name"`
+			Draft      bool   `json:"draft"`
+			Prerelease bool   `json:"prerelease"`
+		}
+		if fallbackErr != nil || json.Unmarshal(body, &public) != nil || public.Draft || public.Prerelease || !strings.HasPrefix(public.Tag, "v") || !versionPattern.MatchString(strings.TrimPrefix(public.Tag, "v")) {
+			m.discoveryMu.Lock()
+			if feedUnavailable {
+				m.discovery = "unreachable"
+			} else {
+				m.discovery = "invalid_signature"
+			}
+			m.discoveryMu.Unlock()
+			if m.Notify != nil {
+				m.Notify()
+			}
+			return
+		}
+		release = Release{Version: strings.TrimPrefix(public.Tag, "v")}
+	} else {
+		reason = eligibility(release)
+		if reason == "" && m.Host != nil {
+			if _, e := m.artifact(release); e != nil {
+				reason = "artifact"
+			}
+		}
 	}
-	release, err := Verify(data, buildinfo.UpdatePublicKey)
-	if err != nil || !newer(release.Version, buildinfo.Version) {
-		return
+	if !newer(release.Version, buildinfo.Version) && buildinfo.Version != "development" {
+		release.Version = ""
+		discovery = "current"
 	}
-	if _, err = m.artifact(release); err != nil {
-		return
+	m.discoveryMu.Lock()
+	m.detected, m.reason, m.discovery = release.Version, reason, discovery
+	m.discoveryMu.Unlock()
+	if !installing {
+		m.release, m.envelope = nil, nil
+		if reason == "" && release.Version != "" {
+			m.release = &release
+			m.envelope = data
+		}
 	}
-	m.release = &release
-	old := m.state()
-	if old.Version == release.Version && (old.Phase == "ready" || old.Phase == "failed") {
-		return
+	if !installing && m.Host != nil && release.Version != "" {
+		old := m.state()
+		if old.Version != release.Version || old.Phase != "ready" && old.Phase != "failed" && old.Phase != "blocked" {
+			_ = m.save(State{Version: release.Version, Phase: "available"})
+		}
 	}
-	_ = m.save(State{Version: release.Version, Phase: "available"})
+	if !installing && m.Host != nil && release.Version == "" {
+		_ = m.save(State{Version: buildinfo.Version, Phase: "current"})
+	}
+	if m.Notify != nil {
+		m.Notify()
+	}
 }
+
 func (m *Manager) artifact(r Release) (Artifact, error) {
 	for _, a := range r.Artifacts {
 		if a.Kind == m.Host.Package.Kind && a.Platform == m.Host.Package.Platform {
@@ -175,14 +305,44 @@ func (m *Manager) Call(ctx context.Context, method string, body json.RawMessage)
 	if err := protocol.DecodeStrict(body, &command); err != nil {
 		return nil, err
 	}
+	if command.Action == "check" {
+		if command.Version != "" || command.Interrupt || !protocolID(command.RequestID) {
+			return nil, protocol.APIError{Code: "invalid_update"}
+		}
+		m.check()
+		return m.Status()
+	}
 	if m.Host == nil {
 		return nil, protocol.APIError{Code: "update_unavailable"}
+	}
+	if command.Action == "retry" {
+		status, err := m.Status()
+		if err != nil {
+			return nil, err
+		}
+		if !status.CanRetry || command.Version != status.Version || !protocolID(command.RequestID) || command.Interrupt {
+			return nil, protocol.APIError{Code: "update_unavailable"}
+		}
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		operation, err := openLock(filepath.Join(m.Host.Directory, "operation.lock"), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err != nil {
+			return nil, protocol.APIError{Code: "update_busy"}
+		}
+		defer operation.Close()
+		if err := m.install(command, m.state()); err != nil {
+			return nil, err
+		}
+		return m.Status()
+	}
+	if !newer(command.Version, buildinfo.Version) {
+		return nil, protocol.APIError{Code: "update_stale"}
 	}
 	status, statusErr := m.Status()
 	if statusErr != nil {
 		return nil, statusErr
 	}
-	if !status.Supported {
+	if !status.Supported || !status.AutoInstall {
 		return nil, protocol.APIError{Code: "update_unavailable"}
 	}
 	if !versionPattern.MatchString(command.Version) || !protocolID(command.RequestID) || (command.Action != "download" && command.Action != "install") {
@@ -339,12 +499,15 @@ func (m *Manager) download(ctx context.Context, a Artifact, version string) erro
 	if err = json.Unmarshal(data, &installed); err != nil {
 		return err
 	}
-	if installed.Version != version || installed.StorageFormat != storageFormat() || installed.Kind != a.Kind || installed.Platform != a.Platform {
+	if installed.Version != version || m.release == nil || installed.StorageFormat != m.release.StorageFormat || installed.Protocol != UpdateProtocol || installed.Kind != a.Kind || installed.Platform != a.Platform {
 		return errors.New("update package metadata mismatch")
 	}
 	// Prepared paths are private installation state; package bytes were verified above.
 	if m.release == nil {
 		return errors.New("release unavailable")
+	}
+	if err := os.WriteFile(filepath.Join(m.Host.Directory, "verified-feed.json"), m.envelope, 0600); err != nil {
+		return err
 	}
 	return instance.WriteJSON(filepath.Join(m.Host.Directory, "prepared.json"), struct{ Version, Path string }{version, target})
 }
@@ -360,7 +523,7 @@ func (m *Manager) install(command Command, s State) error {
 	if err := checkInstallation(m.Host.Install, m.Host.Package); err != nil {
 		return protocol.APIError{Code: "update_unavailable"}
 	}
-	job := Job{Install: m.Host.Install, Directory: m.Host.Directory, Version: command.Version, Interrupt: command.Interrupt, Package: m.Host.Package}
+	job := Job{Install: m.Host.Install, Directory: m.Host.Directory, Version: command.Version, Interrupt: command.Interrupt, Package: m.Host.Package, Retry: command.Action == "retry"}
 	path := filepath.Join(m.Host.Directory, "job.json")
 	if err = instance.WriteJSON(path, job); err != nil {
 		return err

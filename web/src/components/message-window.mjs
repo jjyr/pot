@@ -1,17 +1,23 @@
 import {moveConversationNode} from './conversation-dom.mjs';
 import {Virtualizer, observeElementRect, observeElementOffset, defaultRangeExtractor} from '../vendor/tanstack-virtual-core.mjs';
+import {createConversationController} from './conversation-controller.mjs';
 
-// TanStack owns item offsets, end anchoring and dynamic size corrections. Pot
-// owns the rendered nodes, disclosures and the logical reading destination.
-export function createMessageWindow({scroller, host, render, dispose, requestRender, reading, heights = new Map(), nested = false}) {
+// The controller owns intent and compensation; this adapter commits its measured
+// flow ranges. Child adapters share that controller and never write the scroller.
+export function createMessageWindow({scroller, host, render, dispose, requestRender, controller:parentController, active, interact, upward, downward, scrolled, canReadEarlier, earlierBoundary, onEarlierVisible, heights = new Map(), nested = false}) {
   let rows = [], mounted = new Map(), closed = false, suspended = false, updating = false, dirty = false;
-  let width = 0, margin = 0, target = null, restore, reportRect;
+  let width = 0, margin = 0, reportRect, reportOffset, owner, controller=parentController, frame=0;
   const pending = new Set(), spacers = [];
   const indexesByKey = new Map(), indexesByID = new Map();
   const margins = new WeakMap(), sources = new WeakMap();
   function navigationIndex() {
-    return !target ? -1 : target.end ? rows.length - 1 : (indexesByID.get(target.id) ?? indexesByKey.get(target.id) ?? -1);
+    if(controller?.following)return rows.length-1;
+    const id=controller?.destination?.id||controller?.anchor?.id;
+    let index=indexesByID.get(id)??indexesByKey.get(id);
+    if(index===undefined)for(const parent of controller?.visibilityPath.keys()||[])if(indexesByID.has(parent)){index=indexesByID.get(parent);break;}
+    return index??-1;
   }
+  function invalidate(){if(!closed&&!suspended&&!frame)frame=scroller.ownerDocument.defaultView.requestAnimationFrame(()=>{frame=0;update();});}
   function pinnedIndexes(range) {
     const indexes = new Set(defaultRangeExtractor(range)), selection = getSelection();
     // A navigation target must exist before the first paint, even while the
@@ -47,23 +53,25 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     estimateSize:index=>heights.get(rows[index].viewKey)??(rows[index].role==='user'?120:rows[index].role==='tool'?70:180),
     observeElementRect(instance,callback){reportRect=callback;return observeElementRect(instance,callback);},
     observeElementOffset(instance,callback){
+      reportOffset=callback;
       return observeElementOffset(instance,(offset,scrolling)=>{
         // Capture reader movement before TanStack commits a different DOM range.
-        if(!nested)reading?.observeScroll();
+        if(!nested)owner?.nativeScroll();
         callback(offset,scrolling);
+        if(!nested&&!scrolling)owner?.idle();
       });
     },
     indexAttribute:'data-virtual-index', measureElement:sizeOf,
     useAnimationFrameWithResizeObserver:true,
     rangeExtractor:pinnedIndexes, overscan:12,
-    anchorTo:nested?'start':'end', followOnAppend:!nested, scrollEndThreshold:1,
+    anchorTo:'start', followOnAppend:false, scrollEndThreshold:1,
     initialOffset:()=>scroller.scrollTop,
     scrollToFn(offset,{adjustments=0}) {
       // The only writer for a conversation's native scroll position. Every
       // command and resize correction is arbitrated by TanStack first.
       if(nested||closed||suspended)return;
       const top=Math.max(0,Math.min(offset+adjustments,scroller.scrollHeight-scroller.clientHeight));
-      if(Math.abs(top-scroller.scrollTop)>.5){scroller.scrollTop=top;reading?.acceptScroll();}
+      if(Math.abs(top-scroller.scrollTop)>.5){scroller.scrollTop=top;owner?.wrote(scroller.scrollTop);}
     },
     onChange(_instance, sync) {
       if (closed || suspended) return;
@@ -72,26 +80,15 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
         // Native scrolling and resize corrections must commit their ranges in
         // the same frame as the offset change, retaining existing nodes.
         if (sync && rows.length && host.isConnected && host.getClientRects().length) update();
-        else requestRender();
+        else if(nested)requestRender();else invalidate();
       }
     },
   });
-  if (nested) virtualizer.shouldAdjustScrollPositionOnItemSizeChange=()=>false;
+  if(nested)virtualizer.shouldAdjustScrollPositionOnItemSizeChange=()=>false;
   const unmount = virtualizer._didMount();
-  const cancel = ()=>{virtualizer.cancelScroll();target=null;};
-  const unbindScroll = nested?undefined:reading?.bindScroll({
-    get scrolling(){return virtualizer.isTouchScrolling;},
-    get moving(){return virtualizer.isScrolling;},
-    cancel,
-    project({mode,top,explicit}){
-      if(closed||suspended||!explicit&&virtualizer.isTouchScrolling)return;
-      if(mode==='latest'){
-        if(scroller.scrollHeight-scroller.clientHeight-scroller.scrollTop>.5)virtualizer.scrollToEnd();
-      }else if(Math.abs(top-scroller.scrollTop)>.5)virtualizer.scrollToOffset(top);
-    },
-  });
-  const gestures=nested?[]:['wheel','touchstart','pointerdown','keydown'];
-  for(const name of gestures)scroller.addEventListener(name,cancel,{passive:true});
+  if(!nested){owner=createConversationController({scroller,virtualizer,requestLayout:invalidate,syncOffset:offset=>reportOffset?.(offset,true),active,interact,upward,downward,scrolled,canReadEarlier,earlierBoundary,onEarlierVisible});controller=owner.api;}
+  const geometryObserver=nested?null:new ResizeObserver(invalidate);
+  geometryObserver?.observe(scroller);if(host.parentElement)geometryObserver?.observe(host.parentElement);
 
   function draw() {
     // Moving flow rows/spacers can briefly shrink the list. Reserve its extent
@@ -112,6 +109,9 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       const record=render(message,old);
       sources.set(record,message);
       record.row.dataset.windowKey=item.key;record.row.dataset.virtualIndex=String(item.index);
+      // Stable reading identity belongs to the list contract, including callers
+      // whose renderer only supplies content and a row element.
+      record.row.dataset.messageId=message.id;record.row.dataset.scrollAnchor=`message:${item.key}`;
       layout.push({record});if(changed||!record.row.isConnected)pending.add(record);
       offset=item.end-margin;
     }
@@ -139,11 +139,8 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
       if(!record.row.isConnected)continue;
       const index=Number(record.row.dataset.virtualIndex),before=virtualizer.itemSizeCache.get(record.row.dataset.windowKey);
       virtualizer.measureElement(record.row);
-      // TanStack defers measureElement during native scrolling. A newly drawn
-      // flow row already contributes its real height, so leaving its estimate
-      // until ResizeObserver lets the reading cursor project that difference
-      // before TanStack applies it again. Commit initial sizes in this layout;
-      // resizeItem still arbitrates corrections held by an active touch.
+      // Measure new flow rows in this commit, including while scrolling. The
+      // controller alone decides compensation; late duplicate RO sizes do not.
       if(virtualizer.isScrolling)virtualizer.resizeItem(index,sizeOf(record.row));
       changed=before!==virtualizer.itemSizeCache.get(record.row.dataset.windowKey)||changed;
     }
@@ -155,17 +152,15 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
     const nextWidth=host.clientWidth;
     const rect={width:scroller.clientWidth,height:scroller.clientHeight};
     if(virtualizer.scrollRect?.width!==rect.width||virtualizer.scrollRect?.height!==rect.height)reportRect?.(rect);
-    if(width&&nextWidth&&width!==nextWidth){if(!nested)reading?.resize();marginsForMounted();virtualizer.measure();for(const record of mounted.values())pending.add(record);}
+    if(width&&nextWidth&&width!==nextWidth){marginsForMounted();virtualizer.measure();for(const record of mounted.values())pending.add(record);}
     if(nextWidth)width=nextWidth;
     if(rows!==next){
       indexesByKey.clear();indexesByID.clear();
       next.forEach((item,index)=>{indexesByKey.set(item.viewKey,index);indexesByID.set(item.id,index);for(const member of item.members||[])indexesByID.set(member.id,index);});
     }
-    const followOnAppend=!nested&&(!reading||reading.following&&!virtualizer.isTouchScrolling);
-    const anchorTo=!nested&&(!reading||reading.following)?'end':'start';
-    if(rows!==next||Math.abs(nextMargin-margin)>.5||virtualizer.options.followOnAppend!==followOnAppend||virtualizer.options.anchorTo!==anchorTo){
+    if(rows!==next||Math.abs(nextMargin-margin)>.5){
       const list=next; margin=nextMargin;
-      virtualizer.setOptions({...virtualizer.options,count:list.length,getItemKey:index=>list[index].viewKey,estimateSize:index=>heights.get(list[index].viewKey)??(list[index].role==='user'?120:list[index].role==='tool'?70:180),rangeExtractor:range=>pinnedIndexes(range),scrollMargin:margin,followOnAppend,anchorTo});
+      virtualizer.setOptions({...virtualizer.options,count:list.length,getItemKey:index=>list[index].viewKey,estimateSize:index=>heights.get(list[index].viewKey)??(list[index].role==='user'?120:list[index].role==='tool'?70:180),rangeExtractor:range=>pinnedIndexes(range),scrollMargin:margin});
       rows=next;
       const available=new Set(rows.map(item=>item.viewKey));
       for(const [key,record]of mounted)if(!available.has(key)){virtualizer.observer.unobserve(record.row);virtualizer.elementsCache.delete(key);mounted.delete(key);pending.delete(record);dispose(record);}
@@ -176,33 +171,32 @@ export function createMessageWindow({scroller, host, render, dispose, requestRen
   function update(next=rows,options={}) {
     if(closed||updating)return;
     suspended=false;updating=true;
-    if(options.restore)restore=options.restore;
     try{
+      owner?.beforeLayout();if(options.parents)owner?.setParents(options.parents);
       if(!next.length)virtualizer.cancelScroll();
       configure(next);virtualizer._willUpdate();
-      if(options.target&&!virtualizer.isTouchScrolling){
-        target=options.target;
-        virtualizer.setOptions({...virtualizer.options,rangeExtractor:range=>pinnedIndexes(range)});
-        if(target.end&&!nested&&!reading)virtualizer.scrollToEnd();
-        else if(target.id){const index=navigationIndex();if(index>=0){const item=virtualizer.getMeasurements()[index];if(nested){virtualizer.scrollOffset=item.start-(target.offset??scroller.clientHeight/3);}else if(!reading){virtualizer.setOptions({...virtualizer.options,scrollPaddingStart:target.offset??scroller.clientHeight/3});virtualizer.scrollToIndex(index,{align:'start'});}}}
-      }
+      // Intent changes can pin a different identity without changing the data.
+      virtualizer.setOptions({...virtualizer.options,rangeExtractor:range=>pinnedIndexes(range)});
       draw();
       const changed=measure();
       // One commit after the first measurements; later resizes are incremental.
       if(changed||dirty){dirty=false;draw();measure();}
       virtualizer._willUpdate();
-      restore?.();
-      if(!nested)reading?.commit();
+      if(owner){
+        for(let pass=0;pass<3&&owner.reconcile();pass++){draw();if(measure())draw();}
+        owner.publish();
+      }
     }finally{updating=false;}
   }
-  return {set:update,measure,layout:update,cancelScroll:cancel,suspend(){
+  return Object.assign(Object.create(controller||null),{setMessages:update,measure,suspend(){
+    cancelAnimationFrame(frame);frame=0;
+    owner?.suspend();
     suspended=true;virtualizer.cancelScroll();unmount();
     for(const record of mounted.values())record.childrenWindow?.suspend();
   },close(){
-    closed=true;unbindScroll?.();virtualizer.cancelScroll();unmount();
-    for(const name of gestures)scroller.removeEventListener(name,cancel);
+    closed=true;cancelAnimationFrame(frame);geometryObserver?.disconnect();owner?.close();virtualizer.cancelScroll();unmount();
     for(const record of mounted.values())dispose(record);
     mounted.clear();pending.clear();indexesByKey.clear();indexesByID.clear();
     for(const spacer of spacers)spacer.remove();
-  }};
+  }});
 }

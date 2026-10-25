@@ -1,6 +1,6 @@
 // Behavior groups shared by selection, listing and the runner contract.
 export const groups = {
-  scroll: ['continuity', 'task-continuity', 'scroll-components'],
+  scroll: ['controller', 'continuity', 'task-continuity', 'scroll-components'],
   nav: ['directory', 'switching'],
   history: ['task-history', 'task-history-edges'],
   domain: ['domain-repositories.html'],
@@ -19,7 +19,7 @@ export const fixtures = {
   'cached-loading.html': 'ALL CHECKS PASSED',
 };
 export const faults = {
-  'scroll-measure': {group:'scroll', path:'/web/src/components/message-window.mjs', from:'if(virtualizer.isScrolling)virtualizer.resizeItem(index,sizeOf(record.row));', to:''},
+  'controller-ownership': {group:'scroll', path:'/web/src/components/conversation-controller.mjs', from:'virtualizer.shouldAdjustScrollPositionOnItemSizeChange=()=>false;', to:''},
   'scroll-flow': {group:'scroll', path:'/web/src/components/message-window.mjs', from:'host.style.minHeight=`${Math.max(host.getBoundingClientRect().height,virtualizer.getTotalSize())}px`;', to:''},
   'directory-grid': {group:'nav', path:'/web/src/styles.css', from:'position:absolute;grid-area:auto;top:calc(var(--titlebar-height)', to:'position:absolute;top:calc(var(--titlebar-height)'},
   'history-cursor': {group:'history', path:'/web/src/components/task-conversation.mjs', from:'historyAttempt===key||disposed', to:'disposed'},

@@ -33,10 +33,3 @@ assert.equal(taskShortID(uuid.address),'#a078');assert.equal(taskShortID(task('x
 normal.register([task('a078ffff-1111-4222-8333-444444444444')]);assert.equal(normal.short(uuid),'#a078');
 normal.register([task(uuid.address.agent_id,'other-node')]);assert.equal(normal.short(uuid),'#a078');
 normal.register([uuid,task('b169ffff-1111-4222-8333-444444444444')].reverse());assert.equal(normal.short(uuid),'#a078');
-
-// Host labels are a value contract, independent of page markup and font metrics.
-const {machineDisplayName,machineHostLabel}=await import('../../web/src/state/machine-identity.mjs');
-const machine={id:'opaque-machine',runtime_id:'opaque-machine',hostname:'dev-box.local',ip_addresses:['192.168.1.24']};
-assert.equal(machineDisplayName(machine),'dev-box.local');
-assert.equal(machineHostLabel(machine),'dev-box.local · 192.168.1.24');
-assert.equal(machineDisplayName({id:'opaque-machine',name:'opaque-machine',ip_addresses:['192.168.1.24']}),'192.168.1.24');

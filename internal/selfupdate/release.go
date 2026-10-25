@@ -1,5 +1,5 @@
 // Package selfupdate owns signed release discovery and installation-local updates.
-// It never changes data formats, runs migrations, or coordinates remote machines.
+// It coordinates installation-local startup migrations, never remote machines.
 package selfupdate
 
 import (
@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jjyr/pot/internal/buildinfo"
+	"github.com/jjyr/pot/pkg/storage"
 	"io"
 	"net/http"
 	"net/url"
@@ -22,8 +23,10 @@ import (
 )
 
 // StorageFormat versions non-SQL persisted contracts. The build additionally pins
-// the centralized SQL migration fingerprint; automatic schema changes are rejected.
+// the centralized SQL migration fingerprint and signed migration lineage.
 const StorageFormat = "pot-2026-10-5"
+const UpdateProtocol = 2
+
 const releaseOrigin = "https://github.com/jjyr/pot/releases/download/"
 
 var versionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
@@ -36,9 +39,12 @@ type Artifact struct {
 	Size     int64  `json:"size"`
 }
 type Release struct {
-	Version       string     `json:"version"`
-	StorageFormat string     `json:"storage_format"`
-	Artifacts     []Artifact `json:"artifacts"`
+	Version       string                `json:"version"`
+	StorageFormat string                `json:"storage_format"`
+	Artifacts     []Artifact            `json:"artifacts"`
+	Protocol      int                   `json:"protocol"`
+	Schemas       storage.SchemaCatalog `json:"schemas"`
+	LedgerDigest  string                `json:"ledger_digest"`
 }
 type Envelope struct {
 	Payload   string `json:"payload"`
@@ -83,7 +89,7 @@ func Verify(data []byte, key string) (Release, error) {
 	if err = json.Unmarshal(payload, &r); err != nil {
 		return r, err
 	}
-	if !versionPattern.MatchString(r.Version) || r.StorageFormat != storageFormat() {
+	if !versionPattern.MatchString(r.Version) {
 		return r, errors.New("unsupported release version or storage format")
 	}
 	seen := map[string]bool{}
@@ -94,7 +100,7 @@ func Verify(data []byte, key string) (Release, error) {
 			return r, errors.New("invalid release artifact")
 		}
 		u, err := url.Parse(a.URL)
-		if err != nil || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		if err != nil || u.RawQuery != "" || u.Fragment != "" || u.User != nil || u.RawPath != "" || !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`).MatchString(strings.TrimPrefix(a.URL, releaseOrigin+"v"+r.Version+"/")) {
 			return r, errors.New("invalid release URL")
 		}
 		seen[id] = true
@@ -134,4 +140,29 @@ func storageFormat() string {
 		return StorageFormat
 	}
 	return StorageFormat + "-" + buildinfo.UpdateSchemaDigest
+}
+
+// eligibility is separate from authenticity: verified incompatible releases are
+// still discoverable, but only a signed complete append-only lineage can install.
+func eligibility(r Release) string {
+	if r.Protocol != UpdateProtocol {
+		return "protocol"
+	}
+	if r.StorageFormat != StorageFormat && !regexp.MustCompile("^"+regexp.QuoteMeta(StorageFormat)+"-[a-f0-9]{64}$").MatchString(r.StorageFormat) {
+		return "format"
+	}
+	if r.LedgerDigest != storage.LedgerDigest() {
+		return "migration_path"
+	}
+	current, err := storage.Schemas()
+	if err != nil || !storage.ExtendsSchemas(r.Schemas, current) {
+		return "migration_path"
+	}
+	return ""
+}
+func releaseURL(version string) string {
+	if !versionPattern.MatchString(version) {
+		return ""
+	}
+	return "https://github.com/jjyr/pot/releases/tag/v" + version
 }

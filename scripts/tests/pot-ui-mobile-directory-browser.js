@@ -3,7 +3,7 @@ async (page,{origin=new URL(page.url()).origin,browser=page.context().browser()}
   const assert=(ok,message)=>{if(!ok)throw Error(message);},results=[];
   for(const width of [320,390]){
     const context=await browser.newContext({viewport:{width,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:1,reducedMotion:'no-preference',serviceWorkers:'block',userAgent:'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36'});
-    const mobile=await context.newPage();
+    const mobile=await context.newPage(),nativeCases=[];
     try{
       const cdp=await context.newCDPSession(mobile),errors=[];
       mobile.on('pageerror',error=>errors.push(error.message));
@@ -43,6 +43,7 @@ async (page,{origin=new URL(page.url()).origin,browser=page.context().browser()}
         await mobile.locator('.narrow-navigation').click();await chat();
         await mobile.waitForFunction(()=>directoryFixture.deliveredCount===(directoryFixture.long?80:2));
         for(const dx of long?[14]:[0,12,13]){
+          nativeCases.push({drift:dx,long,focused,delay});
           await chat();await mobile.locator('.composer-input').fill('Retained draft');
           if(!focused)await mobile.locator('.composer-input').blur();
           assert(await mobile.locator('.composer-input').evaluate(input=>document.activeElement===input)===focused,'Composer focus matches the scenario');
@@ -84,7 +85,7 @@ async (page,{origin=new URL(page.url()).origin,browser=page.context().browser()}
       const desktop=await mobile.locator('.assistant-directory').boundingBox();
       assert(desktop.x===56&&desktop.y===0&&desktop.width===236,'Wide directory keeps its grid placement');
       assert(!await mobile.locator('.narrow-navigation').isVisible(),'Wide Chat hides phone navigation');
-      await mobile.evaluate(()=>directoryFixture.dispose());assert(errors.length===0,errors.join('\n'));results.push({width,touchDrifts:[0,12,13,14],shortAndLong:true,focusedAndDelayed:true,commitAndCancel:true,desktop:true});
+      await mobile.evaluate(()=>directoryFixture.dispose());assert(errors.length===0,errors.join('\n'));results.push({width,nativeCases,commitAndCancel:true,desktop:true});
     }catch(error){throw Error(`${width}px directory: ${error.message}; `+JSON.stringify(await mobile.evaluate(()=>({frames:directoryFixture.frames.slice(-6),final:directoryFixture.measure(),refreshes:directoryFixture.refreshes})).catch(()=>({}))),{cause:error});}finally{await context.close();}
   }
   return {passed:true,mobileDirectory:results,errors:[]};

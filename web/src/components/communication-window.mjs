@@ -36,7 +36,7 @@ export function createCommunicationWindow({locale=()=> 'en',actor=()=>undefined,
       details.addEventListener('toggle',()=>{memory.set(memoryKey,{open:details.open});options.requestRender();});
       summary.addEventListener('click',event=>{
         if(event.defaultPrevented)return;
-        options.reading?.engage(event);event.preventDefault();options.reading?.pause();
+        window.engage(event);event.preventDefault();window.pause();
         details.open=!details.open;memory.set(memoryKey,{open:details.open});options.requestRender();
       });
     }
@@ -44,7 +44,7 @@ export function createCommunicationWindow({locale=()=> 'en',actor=()=>undefined,
     // selection, focus and embedded resource state across the new wrapper.
     if(!group.row.isConnected&&options.host.isConnected)options.host.append(group.row);
     group.members=message.members;group.row.dataset.messageId=message.id;group.row.dataset.scrollAnchor=`message:${message.viewKey}`;
-    if(message.members.some(member=>member.id===options.reading?.destination?.id))group.details.open=true;
+    if(window.revealing&&message.members.some(member=>member.id===window.destination?.id||window.visibilityPath.has(member.id)))group.details.open=true;
     const counts=communicationCounts(message.members,actor()),format=value=>value.toLocaleString(locale());
     group.title.textContent=translate(locale(),counts.tasks===1?'tool.communicationStackOneTask':'tool.communicationStack').replace('{records}',format(counts.records)).replace('{messages}',format(counts.messages)).replace('{tasks}',format(counts.tasks));
     counts.routes.forEach(({mail,count},index)=>{
@@ -73,7 +73,7 @@ export function createCommunicationWindow({locale=()=> 'en',actor=()=>undefined,
   const window=createMessageWindow({...options,render,dispose});
   function layout(messages,settings={}){
     const nextScope=typeof scope==='function'?scope():scope;
-    if(currentScope!==undefined&&currentScope!==nextScope){owners.clear();window.layout([]);for(const {record}of records.values())options.dispose(record);records.clear();project=createCommunicationProjection();source=undefined;}
+    if(currentScope!==undefined&&currentScope!==nextScope){owners.clear();window.setMessages([]);for(const {record}of records.values())options.dispose(record);records.clear();project=createCommunicationProjection();source=undefined;}
     currentScope=nextScope;
     const currentActor=actor(),nextActorSignature=JSON.stringify(currentActor);
     if(source!==messages||actorSignature!==nextActorSignature||blocked){
@@ -81,13 +81,12 @@ export function createCommunicationWindow({locale=()=> 'en',actor=()=>undefined,
       taskIdentities.register(addresses);
       const selection=getSelection(),selected=selection&&!selection.isCollapsed?selection.anchorNode?.parentElement?.closest('article.message'):null;
       const focus=document.activeElement?.closest('article.message');
-      const anchor=(options.host.contains(focus)?focus:options.host.contains(selected)?selected:null)?.dataset.messageId||options.reading?.anchor?.id;
+      const anchor=(options.host.contains(focus)?focus:options.host.contains(selected)?selected:null)?.dataset.messageId||window.anchor?.id;
       current=project(messages,{actor:currentActor,blocked,anchor});source=messages;actorSignature=nextActorSignature;
       owners=new Map(current.flatMap(message=>(message.members||[message]).map(member=>[member.viewKey,message.viewKey])));
     }
-    if(options.reading)options.reading.layout(()=>window.layout(current,settings));
-    else window.layout(current,settings);
+    window.setMessages(current,settings);
     for(const [key,entry]of records)if(!owners.has(key)){options.dispose(entry.record);records.delete(key);}
   }
-  return {...window,layout,set:layout,close(){owners.clear();window.close();for(const {record}of records.values())options.dispose(record);records.clear();}};
+  return Object.assign(Object.create(window),{setMessages:layout,close(){owners.clear();window.close();for(const {record}of records.values())options.dispose(record);records.clear();}});
 }

@@ -38,7 +38,7 @@ export async function isolatedPage(browser,origin,run) {
   await context.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.abort());
   try {const result=await run(page);if(errors.length)throw Error('Browser exceptions: '+errors.join('; '));return result;}
   catch(error){
-    const state=await page.evaluate(()=>({result:document.querySelector('#results')?.textContent?.slice(-2200),scroll:window.continuity?.sample(),taskScroll:window.taskContinuity?.sample(),taskFrames:window.taskContinuity?.last,last:window.continuity?.logs?.slice(-2),reads:window.continuity?.reads,history:window.historyEdges&&{calls:historyEdges.calls.map(c=>({before:c.before,aborted:c.signal.aborted})),inflight:historyEdges.inflight},directory:window.directoryFixture?.measure()})).catch(()=>({}));
+    const state=await page.evaluate(()=>({result:document.querySelector('#results')?.textContent?.slice(-2200),controller:window.controllerScene&&{...controllerScene.sample(),writes:controllerScene.writes.slice(-4),heldMeasurements:window.measurementDelivery?.held.length},scroll:window.continuity?.sample(),taskScroll:window.taskContinuity?.sample(),taskFrames:window.taskContinuity?.last,last:window.continuity?.logs?.slice(-2),reads:window.continuity?.reads,history:window.historyEdges&&{calls:historyEdges.calls.map(c=>({before:c.before,aborted:c.signal.aborted})),inflight:historyEdges.inflight},directory:window.directoryFixture?.measure()})).catch(()=>({}));
     throw Error(error.message+'\n'+JSON.stringify({state,wheelFrames:await page.evaluate(()=>window.wheelFrames).catch(()=>undefined),errors,pending:[...network.keys()].map(url=>new URL(url).pathname)}),{cause:error});
   }finally{await context.close();}
 }

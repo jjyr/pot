@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jjyr/pot/pkg/assistantavatar"
 	"github.com/jjyr/pot/pkg/storage/migrations"
@@ -115,7 +116,7 @@ func OpenDatabase(path string, kind Database) (*sql.DB, error) {
 
 // Migrate upgrades a caller-owned database through the same centralized schemas.
 // Use before opening transactions or starting receivers on an existing handle.
-// Each SQL file and its history receipt commit in one SQLite transaction.
+// Every pending file and its history receipt commit in one database transaction.
 func Migrate(ctx context.Context, db *sql.DB, kind Database) error {
 	return migrateDatabase(ctx, db, kind, migrationFiles)
 }
@@ -133,29 +134,70 @@ func migrateDatabase(ctx context.Context, db *sql.DB, kind Database, files fs.FS
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	complete, err := checkMigrationHistory(ctx, db, kind, definitions)
+	// BEGIN IMMEDIATE also serializes independent handles/processes. Recheck
+	// history inside this transaction, rather than planning outside the write lock.
+	tx, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Close()
+	// Pin one physical connection and issue the lock explicitly, including for
+	// caller-owned handles that were not opened with OpenSQLite's _txlock option.
+	defer tx.ExecContext(context.Background(), "ROLLBACK")
+	if _, err := tx.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return err
+	}
+	complete, err := checkMigrationHistory(ctx, tx, kind, definitions)
 	if err != nil {
 		return err
 	}
 	if complete {
-		return nil
+		_, err := tx.ExecContext(ctx, "COMMIT")
+		return err
 	}
-	set := migrate.MigrationSet{TableName: "pot_migrations"}
-	_, err = set.ExecContext(ctx, db, "sqlite3", &migrate.MemoryMigrationSource{Migrations: definitions}, migrate.Up)
-	if err != nil {
-		return fmt.Errorf("migrate %s database: %w", kind, err)
+	if _, err := tx.ExecContext(ctx, migrationLedger); err != nil {
+		return err
 	}
-	return nil
+	var applied int
+	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM pot_migrations").Scan(&applied); err != nil {
+		return err
+	}
+	// Definitions, stable IDs and statement parsing remain owned by sql-migrate.
+	// Its ExecContext commits per file; this adapter applies its parsed Up plan
+	// inside the one transaction required by product startup.
+	for _, definition := range definitions[applied:] {
+		for _, query := range definition.Up {
+			if _, err := tx.ExecContext(ctx, query); err != nil {
+				return fmt.Errorf("migrate %s database at %s: %w", kind, definition.Id, err)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO pot_migrations(id,applied_at) VALUES(?,?)", definition.Id, time.Now()); err != nil {
+			return err
+		}
+	}
+	_, err = tx.ExecContext(ctx, "COMMIT")
+	return err
 }
 
 // checkMigrationHistory only reads. An empty receipt table can remain after a
 // failed first migration; it is safe to retry only if no product objects exist.
-func checkMigrationHistory(ctx context.Context, db *sql.DB, kind Database, definitions []*migrate.Migration) (bool, error) {
+type migrationReader interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+//go:embed migrations/ledger.sql
+var migrationLedger string
+
+func checkMigrationHistory(ctx context.Context, db migrationReader, kind Database, definitions []*migrate.Migration) (bool, error) {
 	exists, err := tableExists(ctx, db, "pot_migrations")
 	if err != nil {
 		return false, err
 	}
 	if exists {
+		if err := checkMigrationLedger(ctx, db); err != nil {
+			return false, err
+		}
 		// Require an exact prefix: disallow downgrade, edited applied files,
 		// another database kind and holes instead of sql-migrate's catch-up mode.
 		rows, err := db.QueryContext(ctx, "SELECT id FROM pot_migrations ORDER BY id")
@@ -232,6 +274,11 @@ func loadMigrations(files fs.FS, kind Database) ([]*migrate.Migration, error) {
 		if len(definition.Up) == 0 || len(definition.Down) != 0 || definition.DisableTransactionUp {
 			return nil, fmt.Errorf("%s must contain transactional Up SQL only", entry.Name())
 		}
+		for _, query := range definition.Up {
+			if err := validateMigrationSQL(query); err != nil {
+				return nil, fmt.Errorf("%s: %w", entry.Name(), err)
+			}
+		}
 		definitions = append(definitions, definition)
 	}
 	if len(definitions) == 0 {
@@ -240,7 +287,7 @@ func loadMigrations(files fs.FS, kind Database) ([]*migrate.Migration, error) {
 	return definitions, nil
 }
 
-func tableExists(ctx context.Context, db *sql.DB, table string) (bool, error) {
+func tableExists(ctx context.Context, db migrationReader, table string) (bool, error) {
 	var exists bool
 	err := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)", table).Scan(&exists)
 	return exists, err
@@ -249,7 +296,7 @@ func tableExists(ctx context.Context, db *sql.DB, table string) (bool, error) {
 // This one-time pre-release reset deliberately does not adopt any old schema,
 // even one whose final tables resemble the baseline. Future versions upgrade
 // only an exact prefix of this new migration lineage.
-func checkEmptyDatabase(ctx context.Context, db *sql.DB, kind Database) error {
+func checkEmptyDatabase(ctx context.Context, db migrationReader, kind Database) error {
 	var objects, userVersion, applicationID int
 	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name != 'pot_migrations'").Scan(&objects); err != nil {
 		return err
@@ -265,3 +312,46 @@ func checkEmptyDatabase(ctx context.Context, db *sql.DB, kind Database) error {
 	}
 	return nil
 }
+
+// The receipt table is fixed updater metadata, not an independently migratable
+// product schema. Refuse drift before trusting IDs or applying any batch.
+func checkMigrationLedger(ctx context.Context, db migrationReader) error {
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info(pot_migrations)")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type column struct {
+		name, kind        string
+		required, primary int
+	}
+	var columns []column
+	for rows.Next() {
+		var cid int
+		var c column
+		var defaultValue any
+		if err := rows.Scan(&cid, &c.name, &c.kind, &c.required, &defaultValue, &c.primary); err != nil {
+			return err
+		}
+		c.kind = strings.ToUpper(c.kind)
+		columns = append(columns, c)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+	if len(columns) != 2 || columns[0] != (column{"id", "VARCHAR(255)", 1, 1}) || columns[1] != (column{"applied_at", "DATETIME", 0, 0}) {
+		return fmt.Errorf("unsupported migration ledger layout; do not edit receipts; for unsupported pre-release data, back up the complete root and use a new root (see docs/database-migrations.md)")
+	}
+	var triggers int
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='trigger' AND tbl_name='pot_migrations'").Scan(&triggers); err != nil {
+		return err
+	}
+	if triggers != 0 {
+		return fmt.Errorf("unsupported migration ledger triggers; do not edit receipts; for unsupported pre-release data, back up the complete root and use a new root (see docs/database-migrations.md)")
+	}
+	return nil
+}
+
+// LedgerDigest binds the fixed receipt DDL independently of product lineage.
+func LedgerDigest() string { return fmt.Sprintf("%x", sha256.Sum256([]byte(migrationLedger))) }

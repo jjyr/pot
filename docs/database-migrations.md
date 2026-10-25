@@ -22,9 +22,9 @@ Service startup (exclusive data-root lock)
                     |
          exact history prefix or empty DB
                     |
-       embedded SQL -> transactional sql-migrate
+       sql-migrate parsed SQL -> one pending-batch transaction
                     |             |
-                    |       SQL + version receipt
+                    |       all pending SQL + version receipts
                     v
            business queries / recovery
 ```
@@ -86,8 +86,12 @@ contains a contiguous sequence beginning with `0001_initial_schema.sql`. Add the
 next four-digit version, for example `0002_example.sql`. Versions are independent
 per kind, application release and JSON payload `schema_version`.
 
-[`sql-migrate`](https://github.com/rubenv/sql-migrate) executes each file and its
-`pot_migrations` receipt in one transaction. Receipts contain `id` and `applied_at`;
+[`sql-migrate`](https://github.com/rubenv/sql-migrate) parses the embedded files and defines stable migration IDs. The centralized
+runner applies the entire pending batch and all `pot_migrations` receipts in one
+`BEGIN IMMEDIATE` transaction, including initial ledger creation. `migrations/ledger.sql` preserves the original
+sql-migrate receipt layout; startup rejects altered ledger columns/keys or
+triggers. The build fingerprint includes it, and the updater separately signs
+and checks its digest rather than treating it as an append-only product migration. Receipts contain `id` and `applied_at`;
 IDs bind `<version>_<name>_<kind>_<SHA-256 of the complete file>`. The new initial
 schema name and hash cannot be confused with the old `0001_baseline` receipt.
 Inspect history with:
@@ -153,16 +157,23 @@ uncertain effects. Migrations never launch work, retry tools or invoke agents.
 Ordinary restart recovery runs afterward under its existing rules.
 
 Test preceding-format and skipped-version upgrades, preserved data, reopening,
-constraints and failure/retry. A failing file rolls back its SQL and receipt;
-earlier committed files remain. Database files migrate independently. Same-process
-migration calls are serialized; product roots retain their exclusive process
-lock. External callers must provide equivalent process exclusion.
+constraints and failure/retry. A failing file or commit rolls back **every pending file in that database batch**
+and their receipts; history committed by an earlier successful startup remains.
+A process interruption leaves the same retry boundary. Database files migrate
+independently. Same-process calls are serialized, `BEGIN IMMEDIATE` rechecks
+history under the write lock, and product roots retain their exclusive process
+lock. Concurrent starts cannot apply a conversion twice. Reentry uses exact
+ledger prefixes rather than blindly adding `IF NOT EXISTS` to SQL.
 
-Before future upgrades, stop all processes using the root and take a consistent
-complete-root backup with the matching binary. The [self-update path](updates.md)
-requires an identical migration fingerprint for package-only rollback. Restore
-the complete pre-upgrade backup and binary together to roll back a schema change.
-Never force an older binary to accept newer data or erase migration history.
+The [self-update path](updates.md) coordinates local hosts, checks authenticated
+migration lineage and runs normal startup migrations automatically. It does not
+create database backups or implement Down migrations. Before any new binary sees
+data, all old hosts must have closed stores and released root locks. If a schema
+migration has committed and readiness later fails, maintenance stays blocked on
+the new package for forward recovery. Never force an older binary to accept newer
+data, erase migration history, restore older execution receipts or replay work.
+Operator-managed backups are a separate operational choice, not a prerequisite
+or automatic phase of installation.
 
 ## Conversation completion recovery
 

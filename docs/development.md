@@ -66,9 +66,11 @@ Goja compositions run in a bounded process worker. Goja supplies no independent
 per-runtime hard heap limit. See [Go libraries](go-libraries.md).
 
 Signed self-update releases require the release key configuration in [Updates](updates.md).
-Automatic updates require matching `selfupdate.StorageFormat` markers and
-centralized migration fingerprints. Schema changes automatically block package-only
-rollback; non-database persisted-format changes must also change the marker.
+Automatic updates require matching non-SQL `selfupdate.StorageFormat` markers,
+update protocol and signed append-only migration lineage. Pending migrations
+commit as one batch per database; committed schema changes require forward
+recovery if readiness fails. No automatic database backup or Down migration is
+performed. Non-SQL persisted-format changes must change the marker. See [Updates](updates.md).
 
 ## Checks and isolated previews
 
@@ -199,6 +201,19 @@ then run `scripts/tests/pot-ui-codex-profile-browser.js` or
 The latter retires the disposable remote assistant; restart the fixture before
 repeating it. The fixture login grants only its temporary browser session; product
 routes still pass through the real browser allowlist. Stop with `POST /fixture/stop`.
+
+For update discovery and Settings' version refresh icon, run
+`POT_UPDATES_FIXTURE_URL_FILE=/tmp/pot-updates-url mise exec -- go test
+./internal/transport -run '^TestUpdateAuthenticatedHTTPAndBrowserFixture$'
+-count=1 -v -timeout=27m`. Open the written origin at
+`/scripts/tests/fixtures/updates.html?http=1&locale=en`. It uses disposable Control
+stores, the real authenticated browser/HTTP update route and synthetic discovery
+results; it never installs a package or invokes a model. `POST /fixture/update`
+sets the synthetic status, `/fixture/calls` shows received check commands, and
+`POST /fixture/stop` closes it. For same-data screenshots, extract the base commit's
+`web/src/` and `pkg/storage/migrations/ui-cache/` into ignored
+`output/update-before/`; `?before=1` selects those actual baseline assets. Use
+`locale=zh-CN` and a phone viewport for the narrow titlebar/menu.
 
 For an isolated long-chat browser fixture with real local history/SSE endpoints,
 run `POT_HISTORY_FIXTURE_URL_FILE=/tmp/pot-history-url mise exec -- go test
@@ -816,7 +831,7 @@ mise run test:ui-http-integration
 
 | Group | Behavior and fixture boundary |
 |---|---|
-| `scroll` | Phone Chat: real 36px wheel, every message 221–239 readable in both directions, same-ID screen displacement, complete ordered 80-row IDB page, async image growth, nested tools, reading/new output/Latest. Desktop Task: smaller mixed-height wheel witness 1189–1199 through its actual repository/page. One shared adapter contract covers focus during virtual retirement, prepend/append/end, reorder/trim, disposal and deferred tool/raw output. |
+| `scroll` | Controller: held/reversed/repeated measurements and wheel/key/touch interleaving; phone Chat: real 36px wheel, every message 221–239 readable in both directions, same-ID screen displacement, complete ordered 80-row IDB page, async image growth, nested tools, reading/new output/Latest. Desktop Task: smaller mixed-height wheel witness 1189–1199 through its actual repository/page. One shared adapter contract covers focus during virtual retirement, prepend/append/end, reorder/trim, disposal and deferred tool/raw output. |
 | `nav` | 320/390px CDP touch taps and 12/13/14px Back drift, every visible intermediate frame, search/scroll/draft retention, delayed refresh and commit/cancel. Cached owner/page navigation separately checks first-frame anchors, multiline drafts, focus, reference identity and late IO. |
 | `history` | Visible top automatically reads 80 rows/one cursor, prepend anchor, short-window filling, Retry, single flight, same-cursor termination, new output while reading and Latest/run/dispose late-result isolation. |
 | `domain` | Fast Node contracts plus real-IDB repository fixture: progressive sources, retired queries, captured owner/run, mutation idempotency, commit-before-notify, evicted backfill and run fencing. |
@@ -858,7 +873,7 @@ case before repeating the full suite. Fault probes are development checks, not a
 default repeated matrix; they alter only the loopback response, never checkout:
 
 ```sh
-mise exec -- node scripts/tests/ui-regressions.mjs --group scroll --case continuity --fault scroll-measure
+mise exec -- node scripts/tests/ui-regressions.mjs --group scroll --case controller --fault controller-ownership
 mise exec -- node scripts/tests/ui-regressions.mjs --group scroll --case continuity --fault scroll-flow
 mise exec -- node scripts/tests/ui-regressions.mjs --group nav --case directory --fault directory-grid
 mise exec -- node scripts/tests/ui-regressions.mjs --group history --case task-history-edges --fault history-cursor

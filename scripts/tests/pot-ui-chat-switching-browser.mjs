@@ -114,7 +114,7 @@ async function run(){
       }
       check(errors.length===0,'No browser errors: '+errors.join('; '));
       passed=true;
-    }finally{if(passed)dispose();else window.chatSwitchingDispose=dispose;}
+    }finally{if(passed&&new URLSearchParams(location.search).get('contract')!=='navigation')dispose();else window.chatSwitchingDispose=dispose;}
   }
   results.textContent+='ALL CHECKS PASSED\n';
 }

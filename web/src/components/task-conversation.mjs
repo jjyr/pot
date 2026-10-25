@@ -19,7 +19,6 @@ import {toolForest} from '../state/tool-calls.mjs';
 import {projectScriptRuns} from '../state/script-runs.mjs';
 import {projectTaskMessages} from '../state/task-transcript.mjs';
 import {createCommunicationWindow} from './communication-window.mjs';
-import {createReadingCursor} from './reading-cursor.mjs';
 import {copyFeedback} from './motion.mjs';
 
 export function createTaskConversation({root,task,record:initial,locale,client,scope,draft,onDraft,downloadFile:downloadTaskFile,toolMemory,approvalFor,onDecision,onSend,onStop,onPause,onCancel,onArchive,onUsage,onRefresh,onSettings,onOpenTask,assistantName,onEarlier,onLatest}){
@@ -45,8 +44,8 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   input.value=draft;form.append(input,send);composerArea.append(latest,form,footer,error);latest.hidden=true;footer.hidden=true;error.hidden=true;error.setAttribute('role','alert');
   root.classList.add('task-conversation');root.append(stage,history,composerArea);
   const dialog=n('dialog','preferences product-actions task-actions');dialog.setAttribute('aria-label',tr('Task actions','任务操作'));root.append(dialog);
-  let fresh=false,record=initial,state,inputs=[],approvals=[],unavailable=false,connectionError='',storageError=false,busy=false,historyBusy=false,disposed=false,restored=false,frame=0,menuMode='actions',menuSignature='',fileSignature='',draftVersion=0;
-  let forest,projection,restoringPosition=false,downloadFailure,historyFailure,historyAbort,historyAttempt='',historyRun='',historyFrame=0;
+  let fresh=false,record=initial,state,inputs=[],approvals=[],unavailable=false,connectionError='',storageError=false,busy=false,historyBusy=false,disposed=false,frame=0,menuMode='actions',menuSignature='',fileSignature='',draftVersion=0;
+  let forest,projection,downloadFailure,historyFailure,historyAbort,historyAttempt='',historyRun='',historyFrame=0;
   function renderDownloadFailure(){
     downloadNotice.hidden=!downloadFailure;downloadNotice.replaceChildren();
     if(!downloadFailure)return;
@@ -59,8 +58,10 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     try{await downloadTaskFile(file);}
     catch(reason){if(!disposed){downloadFailure={file,diagnostic:reason?.message||String(reason)};renderDownloadFailure();}}
   }
-  const reading=createReadingCursor(history,{active:()=>!disposed&&root.isConnected&&!!history.clientHeight,requestRender:scheduleFollow,changed:()=>{latest.hidden=reading.following;},upward:scheduleHistory,scrolled:scheduleHistory,canReadEarlier:()=>!!state?.has_more});
-  const editor=bindComposer(input,{layout:work=>reading.layout(work),onInput:text=>{draftVersion++;onDraft(completion.value());updateComposer();},onSend:submit,onCompositionEnd:updateComposer});
+  const heights=new Map();
+  const transcriptWindow=createCommunicationWindow({onOpenTask,locale,actor:()=>record.info?.address||task.address,resolveIdentity:address=>messageIdentities(client).resolve(address),blocked:message=>!!approvalFor(message.tool),memory:toolMemory,scope:JSON.stringify([scope,task.id]),scroller:history,host:transcript,render:renderMessage,dispose:entry=>disposeMessage(entry),requestRender:scheduleFollow,heights,active:()=>!disposed&&root.isConnected&&!!history.clientHeight,upward:scheduleHistory,scrolled:scheduleHistory,earlierBoundary:boundary,onEarlierVisible:scheduleHistory,canReadEarlier:()=>!!state?.has_more});
+  const stopReading=transcriptWindow.subscribeReading(()=>{latest.hidden=transcriptWindow.following;});
+  const editor=bindComposer(input,{onInput:text=>{draftVersion++;onDraft(completion.value());updateComposer();},onSend:submit,onCompositionEnd:updateComposer});
   const completion=bindCompletions(input,{client:{scope:()=>scope,resources:client.resources,read:client.read?(path,options)=>client.read(path,options):undefined,request:(path,options)=>client.request(path,options)},host:composerArea,locale,mobile:editor.mobile,id:`pot-task-${task.id}-completions`,setText:text=>editor.setValue(text)});
   input.value='';completion.setValue(draft);
   const can=operation=>supportsCapability(record,operation);
@@ -68,20 +69,20 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   const active=()=>['queued','running','waiting','waiting_approval'].includes(record.info?.phase||task.phase);
   function scheduleFollow(){if(frame||disposed)return;frame=requestAnimationFrame(()=>{frame=0;if(!disposed)renderTranscript();});}
   let previousWidth=0,resizeFrame=0;
-  const resizeObserver=new ResizeObserver(()=>{if(root.clientWidth!==previousWidth){previousWidth=root.clientWidth;cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{if(!disposed)editor.resize();});}reading.reflow();});resizeObserver.observe(column);resizeObserver.observe(history);resizeObserver.observe(composerArea);
-  const historyObserver=new IntersectionObserver(scheduleHistory,{root:history});historyObserver.observe(boundary);
+  const resizeObserver=new ResizeObserver(()=>{if(root.clientWidth!==previousWidth){previousWidth=root.clientWidth;cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{if(!disposed)editor.resize();});}});resizeObserver.observe(column);resizeObserver.observe(history);resizeObserver.observe(composerArea);
   function scheduleHistory(){if(disposed||historyFrame)return;historyFrame=requestAnimationFrame(()=>{historyFrame=0;const box=boundary.getBoundingClientRect(),viewport=history.getBoundingClientRect();if(root.isConnected&&history.clientHeight&&box.bottom>=viewport.top&&box.top<=viewport.bottom)loadEarlier();});}
-  function showHistoryStatus(){reading.layout(()=>{boundary.replaceChildren();if(historyBusy)boundary.textContent=t('history.loading');else if(historyFailure){boundary.append(n('span','',t(historyFailure.storage?'storage.failed':'tasks.historyFailed')),action(t('retry'),()=>{historyFailure=null;historyAttempt='';loadEarlier();}));}});}
+  // Commit loading chrome through the list before the domain starts its read.
+  function showHistoryStatus(){boundary.replaceChildren();if(historyBusy)boundary.textContent=t('history.loading');else if(historyFailure){boundary.append(n('span','',t(historyFailure.storage?'storage.failed':'tasks.historyFailed')),action(t('retry'),()=>{historyFailure=null;historyAttempt='';loadEarlier();}));}renderTranscript();}
   async function loadEarlier(){
     const before=state?.messages.find(message=>!message.context_only)?.sequence,key=historyRun+':'+before;
     if(!onEarlier||!state?.has_more||!before||historyBusy||historyFailure||historyAttempt===key||disposed)return;
     historyAttempt=key;historyBusy=true;historyAbort=new AbortController();const controller=historyAbort;
-    reading.flush();if(reading.following)reading.pause();showHistoryStatus();
+    if(transcriptWindow.following)transcriptWindow.pause();showHistoryStatus();
     try{await onEarlier({before,signal:controller.signal});}
     catch(reason){if(!disposed&&!controller.signal.aborted){historyFailure=reason;}}
-    finally{if(historyAbort===controller){historyBusy=false;historyAbort=null;if(!disposed){showHistoryStatus();renderTranscript();scheduleHistory();}}}
+    finally{if(historyAbort===controller){historyBusy=false;historyAbort=null;if(!disposed){showHistoryStatus();scheduleHistory();}}}
   }
-  latest.onclick=async()=>{historyAbort?.abort();historyAbort=null;historyBusy=false;historyFailure=null;historyAttempt='';showHistoryStatus();try{await onLatest?.();if(!disposed){reading.latest();renderTranscript();}}catch(reason){if(!disposed){historyFailure=reason;showHistoryStatus();}}};
+  latest.onclick=async()=>{historyAbort?.abort();historyAbort=null;historyBusy=false;historyFailure=null;historyAttempt='';showHistoryStatus();try{await onLatest?.();if(!disposed){transcriptWindow.scrollToLatest();renderTranscript();}}catch(reason){if(!disposed){historyFailure=reason;showHistoryStatus();}}};
   async function run(work){
     if(busy||disposed)return;busy=true;error.hidden=true;updateComposer();renderMenu();
     try{await work();if(!disposed){dialog.close();error.textContent='';}}
@@ -94,7 +95,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     await run(async()=>{await onSend(text);if(disposed)return;if(completion.value()===text&&version===draftVersion){completion.setValue('');onDraft('');}completion.reset();});
   }
   form.onsubmit=event=>{event.preventDefault();if(!editor.mobile)submit();};send.onclick=()=>completion.value().trim()?submit():run(onStop);
-  function updateComposer(){return reading.layout(updateComposerLayout);}
+  function updateComposer(){return updateComposerLayout();}
   function updateComposerLayout(){
     const running=active(),hasText=!!completion.value().trim(),stop=running&&!hasText;
     form.hidden=!can('task.input')&&!can('task.interrupt');input.readOnly=!can('task.input');input.setAttribute('aria-label',t('tasks.followupLabel'));input.placeholder=t('tasks.followupPlaceholder');
@@ -114,16 +115,15 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
   function locateApproval(){
     for(const message of projectTaskMessages(state,inputs,record))if(message.tool&&approvalFor(message.tool)){
       let parent=message;while(parent?.tool){const key=JSON.stringify([scope,task.id,parent.id]);toolMemory.set(key,{...toolMemory.get(key),open:true});parent=forest?.byID.get(parent.tool.turn_id+':'+parent.tool.parent_id)?.message;}
-      reading.locate({id:message.id,expand:true});renderTranscript();
+      transcriptWindow.locate({id:message.id,expand:true});renderTranscript();
       transcript.querySelector('.tool-call[data-phase="waiting_approval"] summary')?.focus({preventScroll:true});return;
     }
-    if(approvalHost.querySelector('.approval-card')){reading.locate({key:'task-approvals'});renderTranscript();approvalHost.querySelector('button')?.focus({preventScroll:true});}
+    if(approvalHost.querySelector('.approval-card')){transcriptWindow.locate({key:'task-approvals'});renderTranscript();approvalHost.querySelector('button')?.focus({preventScroll:true});}
   }
   approvalHost.dataset.scrollAnchor='task-approvals';
   function copyButton(entry){
     if(entry.copy){label(entry.copy,t(entry.copy.dataset.copied?'copied':'copy'));return;}entry.copy=iconButton('copy',t('copy'),'copy-message');copyFeedback(entry.copy,{text:()=>entry.text||'',locale,translate,onError:reason=>{error.textContent=reason.message;error.hidden=false;}});entry.element.append(entry.copy);
   }
-  const heights=new Map();
   const disposeMessage=entry=>{entry.childrenWindow?.close();entry.element.remove();};
   function renderMessage(message,existing){
       let entry=existing;
@@ -133,14 +133,14 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
  if(!entry.compact){entry.compact=createCompaction({locale});entry.element.append(entry.compact.element);}
  entry.compact.update(message);
  }else if(message.tool){
-        if(!entry.tool){entry.tool=createToolCall({messageActor:()=>record.info?.address||task.address,onOpenTask,resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key:JSON.stringify([scope,task.id,message.id]),locale,machineLabel,onDecision,onInteract:event=>reading.engage(event),onLocate:(call,turn)=>{const target=forest.byID.get(turn+':'+call)?.message;if(target){reading.locate({id:target.id,expand:true});renderTranscript();}},downloadFile,acquireFileImage});entry.element.append(entry.tool.element);}
+        if(!entry.tool){entry.tool=createToolCall({messageActor:()=>record.info?.address||task.address,onOpenTask,resolveMessageIdentity:address=>messageIdentities(client).resolve(address),memory:toolMemory,key:JSON.stringify([scope,task.id,message.id]),locale,machineLabel,onDecision,onInteract:event=>transcriptWindow.engage(event),onLocate:(call,turn)=>{const target=forest.byID.get(turn+':'+call)?.message;if(target){transcriptWindow.locate({id:target.id,expand:true});renderTranscript();}},downloadFile,acquireFileImage});entry.element.append(entry.tool.element);}
         const children=forest.byID.get(message.tool.turn_id+':'+message.tool.id)?.children||[];
         const approvalDescendant=children.some(function pending(entry){return !!approvalFor(entry.message.tool)||entry.children.some(pending);});
         entry.tool.update(message,{stacked:message.communicationStacked,approval:approvalFor(message.tool),approvalDescendant,offline:unavailable||!!connectionError,children:children.map(child=>child.message)});
-        if((reading.destination||restoringPosition)&&destinations.has(message.id)||reading.destination?.expand&&reading.destination.id===message.id)entry.tool.element.open=true;
+        if(transcriptWindow.revealing&&transcriptWindow.visibilityPath.has(message.id)||transcriptWindow.destination?.expand&&transcriptWindow.destination.id===message.id)entry.tool.element.open=true;
         if(children.length||entry.childrenWindow){
-          if(!entry.childrenWindow){entry.childrenWindow=createCommunicationWindow({onOpenTask,locale,actor:()=>record.info?.address||task.address,resolveIdentity:address=>messageIdentities(client).resolve(address),blocked:message=>!!approvalFor(message.tool),memory:toolMemory,scope:JSON.stringify([scope,task.id]),scroller:history,host:entry.tool.children,nested:true,render:renderMessage,dispose:disposeMessage,requestRender:()=>reading.reflow(),reading,heights});entry.tool.element.addEventListener('toggle',scheduleFollow);}
-          entry.childrenWindow.set(entry.tool.element.open?children.map(child=>({...child.message,viewKey:child.message.id})):[],{target:destinations.has(message.id)?{id:destinations.get(message.id)}:undefined});
+          if(!entry.childrenWindow){entry.childrenWindow=createCommunicationWindow({onOpenTask,locale,actor:()=>record.info?.address||task.address,resolveIdentity:address=>messageIdentities(client).resolve(address),blocked:message=>!!approvalFor(message.tool),memory:toolMemory,scope:JSON.stringify([scope,task.id]),scroller:history,host:entry.tool.children,nested:true,render:renderMessage,dispose:disposeMessage,requestRender:scheduleFollow,controller:transcriptWindow,heights});entry.tool.element.addEventListener('toggle',scheduleFollow);}
+          entry.childrenWindow.setMessages(entry.tool.element.open?children.map(child=>({...child.message,viewKey:child.message.id})):[]);
         }
       }else{
         if(!entry.body){entry.body=n('div','message-body');entry.element.append(entry.body);if(message.role==='assistant')entry.reply=createReplyBubble(entry.body);}
@@ -157,22 +157,13 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
       }
       return entry;
   }
-  const transcriptWindow=createCommunicationWindow({onOpenTask,locale,actor:()=>record.info?.address||task.address,resolveIdentity:address=>messageIdentities(client).resolve(address),blocked:message=>!!approvalFor(message.tool),memory:toolMemory,scope:JSON.stringify([scope,task.id]),scroller:history,host:transcript,render:renderMessage,dispose:disposeMessage,requestRender:()=>reading.reflow(),reading,heights});
-  let destinations=new Map();
   function renderTranscript(){
     if(!state)return;
     if(!projection){const rows=projectScriptRuns(projectTaskMessages(state,inputs,record,{offline:unavailable||!!connectionError}),{activeTurn:active()?[...state.tools.values()].at(-1)?.tool.turn_id:null});projection={rows,forest:toolForest(rows)};}
     const {rows}=projection;forest=projection.forest;
-    reading.flush();
-    destinations=new Map();let destination=rows.find(message=>message.id===(reading.destination?.id||reading.anchor?.id));
-    const seen=new Set();
-    while(destination?.tool?.parent_id&&!seen.has(destination.id)){
-      seen.add(destination.id);const parent=forest.byID.get(destination.tool.turn_id+':'+destination.tool.parent_id)?.message;if(!parent)break;
-      destinations.set(parent.id,destination.id);destination=parent;
-    }
-    const target=reading.following?{end:true}:destination?{id:destination.id,offset:reading.destination?undefined:reading.anchor?.offset}:undefined;
-    transcriptWindow.layout(rows.filter(message=>!message.tool?.parent_id||!forest.byID.has(message.tool.turn_id+':'+message.tool.parent_id)).map(message=>({...message,viewKey:message.id})),{anchor:reading.anchor?.id,target,restore:()=>reading.apply()});
-    latest.hidden=reading.following;scheduleHistory();
+    const parents=new Map(rows.flatMap(message=>{const parent=message.tool?.parent_id&&forest.byID.get(message.tool.turn_id+':'+message.tool.parent_id)?.message;return parent?[[message.id,parent.id]]:[];}));
+    transcriptWindow.setMessages(rows.filter(message=>!message.tool?.parent_id||!forest.byID.has(message.tool.turn_id+':'+message.tool.parent_id)).map(message=>({...message,viewKey:message.id})),{parents});
+    latest.hidden=transcriptWindow.following;scheduleHistory();
   }
   function renderMenu(force=false){
     if(!dialog.open&&!force)return;
@@ -201,7 +192,7 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
     update(next){
       if(disposed)return;
       projection=null;
-      if(next.storageError!==undefined)storageError=next.storageError;if(next.fresh!==undefined)fresh=next.fresh;historyNotice.hidden=!(next.state?.cache_truncated||next.record?.cache_truncated||next.cacheTruncated);historyNotice.textContent=t('tasks.cachedOutputBounded');const nextRun=next.record?.run_id||task.id;if(nextRun!==historyRun){historyAbort?.abort();historyAbort=null;historyBusy=false;historyFailure=null;historyAttempt='';historyRun=nextRun;showHistoryStatus();}if(next.record)record=next.record;messageIdentities(client).rememberTasks([record.info||task]);if(next.state)state=next.state;if(next.inputs)inputs=next.inputs;if(next.approvals)approvals=next.approvals;if(next.unavailable!==undefined)unavailable=next.unavailable;if(next.connectionError!==undefined)connectionError=next.connectionError;
+      if(next.storageError!==undefined)storageError=next.storageError;if(next.fresh!==undefined)fresh=next.fresh;historyNotice.hidden=!(next.state?.cache_truncated||next.record?.cache_truncated||next.cacheTruncated);historyNotice.textContent=t('tasks.cachedOutputBounded');const nextRun=next.record?.run_id||task.id;if(nextRun!==historyRun){if(historyRun)transcriptWindow.reset();historyAbort?.abort();historyAbort=null;historyBusy=false;historyFailure=null;historyAttempt='';historyRun=nextRun;showHistoryStatus();}if(next.record)record=next.record;messageIdentities(client).rememberTasks([record.info||task]);if(next.state)state=next.state;if(next.inputs)inputs=next.inputs;if(next.approvals)approvals=next.approvals;if(next.unavailable!==undefined)unavailable=next.unavailable;if(next.connectionError!==undefined)connectionError=next.connectionError;
       updateIdentity();renderStage();renderTranscript();scheduleFollow();updateComposer();renderMenu();
       renderDownloadFailure();
       const attachments=record.outcome?.artifacts?.map(path=>({path}))||record.files||[],artifactError=record.outcome?.artifacts_error||'';
@@ -212,9 +203,9 @@ export function createTaskConversation({root,task,record:initial,locale,client,s
       }
     },
     openMenu(){menuMode='actions';menuSignature='';renderMenu(true);dialog.showModal();},
-    position(){return reading.snapshot();},
-    restore(position){restored=true;restoringPosition=true;reading.restore(position);editor.resize();renderTranscript();restoringPosition=false;},
-    start(){if(!restored)reading.latest();editor.resize();renderTranscript();},
-    dispose(){disposed=true;historyAbort?.abort();historyObserver.disconnect();cancelAnimationFrame(historyFrame);cancelAnimationFrame(frame);cancelAnimationFrame(resizeFrame);reading.dispose();transcriptWindow.close();resizeObserver.disconnect();completion.dispose();editor.destroy();goal.removeEventListener('toggle',onToggle);dialog.close();dialog.remove();},
+    position(){return transcriptWindow.snapshot();},
+    restore(position){transcriptWindow.restore(position);editor.resize();renderTranscript();},
+    start(){editor.resize();renderTranscript();},
+    dispose(){disposed=true;historyAbort?.abort();cancelAnimationFrame(historyFrame);cancelAnimationFrame(frame);cancelAnimationFrame(resizeFrame);stopReading();transcriptWindow.close();resizeObserver.disconnect();completion.dispose();editor.destroy();goal.removeEventListener('toggle',onToggle);dialog.close();dialog.remove();},
   };
 }

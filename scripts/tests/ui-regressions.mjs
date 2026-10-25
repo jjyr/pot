@@ -21,13 +21,22 @@ else {
       else if(name==='composer-enter')result=await contract('pot-ui-mobile-enter-browser.js',null,{browser,origin:server.origin,base:server.origin+'/web/src'});
       else result=await isolatedPage(browser,server.origin,async page=>{
         if(/^(assistant-start|first-connection|settings|composer|usage)-/.test(name)||name==='linked-approvals'||name==='patch-approvals')return focused(page,name,server.origin);
+        if(name==='controller')return contract('pot-ui-conversation-controller-browser.js',page,{origin:server.origin});
         if(fixtures[name])return fixture(page,server.origin,name,fixtures[name]);
         if(name==='scroll-components')return fixture(page,server.origin,'chat-scroll.html?contract=window','DONE scrolling checks');
         if(name==='task-continuity')return taskContinuity(page,{origin:server.origin});
         if(name==='task-history')return taskHistoryBrowser(page,{origin:server.origin});
         if(name==='task-history-edges')return taskHistoryEdges(page,{origin:server.origin});
         if(name==='switching'){
-          return fixture(page,server.origin,'chat-switching.html?conversation=alpha&locale=en','ALL CHECKS PASSED');
+          const state=await fixture(page,server.origin,'chat-switching.html?conversation=alpha&locale=en&contract=navigation','ALL CHECKS PASSED');
+          const trigger=page.getByRole('button',{name:'Assistant information',exact:true}),dialog=page.getByRole('dialog',{name:'Assistant information',exact:true}),composer=page.locator('#pot-composer');
+          try{const draft=await composer.inputValue();await trigger.press('Enter');await dialog.waitFor();
+          await composer.click();await dialog.waitFor({state:'hidden'});
+          await trigger.press('Enter');await dialog.waitFor();await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});
+          await page.waitForFunction(()=>document.querySelector('.assistant-profile-trigger')?.getAttribute('aria-expanded')==='false');
+          if(await trigger.getAttribute('aria-expanded')!=='false'||await composer.inputValue()!==draft)throw Error('Assistant menu dismissal lost its accessible state or draft');
+          return {...state,menuKeyboardAndOutsideDismissal:true};
+          }finally{await page.evaluate(()=>window.chatSwitchingDispose?.());}
         }
         // The CLI expression derives its origin without loading the application.
         return contract('pot-ui-chat-continuity-browser.js',page,{origin:server.origin,witness:witnessMessages});
