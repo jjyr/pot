@@ -97,15 +97,23 @@ def run(binary, base, env, cli_command, profile_only=False):
                 .replace("STATE", json.dumps({"origin": origin}))
                 .replace("docs/pr-images/", str(ROOT / "output/pr-images/regression") + "/")
             )
-            output = browser_cli(
-                "run-code",
-                "async page => { const context = await page.context().browser().newContext({serviceWorkers:'block',storageState:await page.context().storageState()}); "
+            wrapper = (
+                "async page => { const context = await page.context().browser().newContext({locale:'en-US',viewport:{width:1280,height:800},serviceWorkers:'block',storageState:await page.context().storageState()}); "
                 "try { const fixture = await context.newPage(); await fixture.goto("
                 + json.dumps(origin)
                 + "); return await ("
                 + code
-                + ")(fixture); } finally { await context.close(); } }",
+                + ")(fixture); } finally { await context.close(); } }"
             )
+            if script == "pot-ui-mobile-directory-browser.js":
+                wrapper = (
+                    "async page => ("
+                    + code
+                    + ")(null,{browser:page.context().browser(),origin:"
+                    + json.dumps(origin)
+                    + "})"
+                )
+            output = browser_cli("run-code", wrapper)
             marker = (
                 '"errors":[]'
                 if script in {"pot-ui-shell-browser.js", "pot-ui-production-browser.js"}

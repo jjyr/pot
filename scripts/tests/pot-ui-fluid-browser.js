@@ -1,8 +1,7 @@
 // Actual shared components, deterministic data, no model or product state.
 async page=>{
   const origin=new URL(page.url()).origin,assert=(ok,message)=>{if(!ok)throw Error(message);};
-  const context=await page.context().browser().newContext({serviceWorkers:'block'});page=await context.newPage();
-  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.route('**/fluid-fixture*',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css"><body><main id="app"></main></body></html>'}));
   await page.goto(origin+'/fluid-fixture');await page.setViewportSize({width:1200,height:820});
   await page.evaluate(async()=>{
@@ -82,5 +81,5 @@ async page=>{
   await page.emulateMedia({reducedMotion:'reduce'});await gesture([250,20,20]);await page.waitForTimeout(30);assert(!await page.locator('.mobile-menu').isVisible(),'Reduced Motion settles immediately');
   await page.locator('.assistant-row').first().click();assert(await page.locator('#pot-composer').inputValue()==='中文草稿','Gestures retain the conversation draft');
   await page.emulateMedia({reducedMotion:'no-preference'});await page.evaluate(()=>fluidFixture.dispose());
-  assert(errors.length===0,errors.join('\n'));await context.close();return {passed:true,markdown,incremental:true,longTaskVirtualization:true,progressiveSpaces:true,imeSearch:true,compactComposer:true,gestures:true,errors};
+  assert(errors.length===0,errors.join('\n'));return {passed:true,markdown,incremental:true,longTaskVirtualization:true,progressiveSpaces:true,imeSearch:true,compactComposer:true,gestures:true,errors};
 }

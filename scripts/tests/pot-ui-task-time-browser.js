@@ -1,6 +1,6 @@
 // Disposable production Chat and Task-list fixture; API replies and time are local.
 async page=>{
- const state=STATE,context=await page.context().browser().newContext({serviceWorkers:'block'});page=await context.newPage();
+ const state=STATE;
  const assert=(value,message)=>{if(!value)throw Error(message);},errors=[],reads=[];
  page.on('pageerror',error=>errors.push(error.message));
  const now=Date.UTC(2026,9,18,6),started=now-754000;
@@ -21,7 +21,6 @@ async page=>{
  });
  const change=async()=>{const response=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/v1/tasks/query');await page.evaluate(version=>window.__taskTimeChanges(version),++revision);await response;};
  const elapsed=()=>page.locator('.background-task').filter({hasText:'独立 worktree'}).locator('.background-task-elapsed');
- try{
   await page.emulateMedia({reducedMotion:'reduce'});await page.setViewportSize({width:1200,height:850});await page.goto(state.origin+'/?locale=zh-CN&theme=light&conversation=alpha');
   await page.locator('.background-task').first().waitFor();await page.locator('#pot-composer').fill('保留这条草稿');
   if(!state.before){
@@ -83,5 +82,4 @@ async page=>{
   tasks=[];await change();await page.locator('.background-tasks').waitFor({state:'detached'});
   assert(errors.length===0,errors.join('; '));
   return {passed:true,task_list:true,clock_without_requests:true,responsive:true,reload:true,owner_scoping:true,navigation:true,errors};
- }finally{await context.close();}
 }

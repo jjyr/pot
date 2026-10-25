@@ -1,7 +1,6 @@
 // Production views with delayed fixture reads, cross-Space changes and CAS writes.
 async page=>{
  const state=STATE,assert=(value,message)=>{if(!value)throw Error(message);},errors=[];
- const context=await page.context().browser().newContext({serviceWorkers:'block'});page=await context.newPage();
  page.on('pageerror',error=>errors.push(error.message));
  await page.route('**/refresh-fixture',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="/styles.css"><body><main style="height:700px;width:900px;max-width:100%;margin:30px auto;overflow:auto"></main><div class="approval-host"></div><div class="chat-approvals"></div><div class="message-column"></div></body></html>'}));
  const idle=()=>page.waitForFunction(()=>!document.querySelector('main [aria-busy="true"]')&&!refreshFixture.pending.length);
@@ -140,5 +139,5 @@ async page=>{
   assert(await page.locator('.chat-approvals .approval-card').count()===1&&await page.evaluate(()=>refreshFixture.earlyCard===document.querySelector('.chat-approvals .approval-card')),'A later tool snapshot retains the same shared Chat approval without duplication');
   assert(await page.evaluate(()=>refreshFixture.calls.filter(call=>call.path==='/api/v1/permissions').length===refreshFixture.permissionReads),'Snapshot reconciliation uses cached approvals without another network read');
   assert(errors.length===0,errors.join('\n'));return {passed:true,usage:true,machines:true,permission_drafts:true,revision_conflicts:true,integrations:true,schedules:true,approvals:true,navigation:true,shell:true,errors};
- }finally{await page.evaluate(()=>{window.refreshFixture?.unmount?.();window.refreshFixture?.pages.dispose();});await context.close();}
+ }finally{await page.evaluate(()=>{window.refreshFixture?.unmount?.();window.refreshFixture?.pages.dispose();});}
 }

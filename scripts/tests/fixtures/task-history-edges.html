@@ -11,6 +11,7 @@ f.reset=mode=>{
     try{if(f.mode==='error'){f.mode='success';throw Error('Synthetic page failure');}
       if(f.mode!=='success'){await new Promise(resolve=>{f.pending=true;f.release=()=>{f.pending=false;resolve();};});}
       if(signal.aborted)return;
+      if(f.mode==='same-cursor'){f.ui.update({record:f.record,state:f.state,fresh:true});return;}
       f.state={...f.state,messages:[...Array.from({length:80},(_,i)=>({id:'m'+(i+1),sequence:i+1,text:'Message '+(i+1),role:'assistant',phase:'complete'})),...f.state.messages],has_more:false};f.ui.update({record:f.record,state:f.state,fresh:true});
     }finally{f.inflight--;}
   }});f.ui.update({record:f.record,state:f.state,fresh:true});f.ui.start();

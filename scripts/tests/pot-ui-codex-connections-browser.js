@@ -1,9 +1,9 @@
 // The Codex plugin uses the same node connection widget. All peer endpoints and
 // clipboard values are synthetic; no Codex execution is launched by this test.
-async parentPage=>{
- const assert=(value,message)=>{if(!value)throw Error(message);},origin=new URL(parentPage.url()).origin;
- const context=await parentPage.context().browser().newContext({viewport:{width:1280,height:720},serviceWorkers:'block'}),page=await context.newPage(),errors=[],calls=[];
+async page=>{
+ const assert=(value,message)=>{if(!value)throw Error(message);},origin=new URL(page.url()).origin;
  let releasePreview,releaseConnect,items=[];
+ const context=page.context(),errors=[],calls=[];
  const address='tcp://cloud-pot.tailnet.ts.net:8793#synthetic-invitation';
  await context.addInitScript(()=>{localStorage.setItem('pot-ui-locale','en');window.fixtureClipboard='';window.fixtureClipboardWrites=0;window.fixtureClipboardDenied=false;Object.defineProperty(navigator,'clipboard',{value:{readText:async()=>window.fixtureClipboard,writeText:async value=>{window.fixtureClipboardWrites++;if(window.fixtureClipboardDenied)throw Error('Synthetic clipboard denied');window.fixtureClipboard=value;}}});});
  page.on('pageerror',error=>errors.push(error.message));
@@ -70,5 +70,5 @@ async parentPage=>{
   await page.locator('.agent-link-choose').click();await page.getByText('本机',{exact:true}).waitFor();await page.keyboard.press('Escape');await page.getByRole('button',{name:'添加 Agent',exact:true}).click();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Standalone editor fits a narrow viewport');
   await page.evaluate(()=>window.dispatchEvent(new Event('pagehide')));const count=calls.length;await page.waitForTimeout(3300);assert(calls.length===count,'Closing stops local background refresh');
   assert(!errors.length,'No browser exceptions: '+errors.join('; '));return {passed:true,nodeInvitation:true,automaticConnect:true,localeDuringValidation:true,lifecycle:true,narrowWidth:393};
- }finally{releasePreview?.();releaseConnect?.();await context.close();}
+ }finally{releasePreview?.();releaseConnect?.();}
 }

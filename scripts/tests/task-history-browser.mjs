@@ -1,18 +1,12 @@
 import assert from 'node:assert/strict';
 
-export async function taskHistoryBrowser(page,{origin,before=false,screenshot}={}){
+export async function taskHistoryBrowser(page,{origin}={}){
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
-  await page.goto(origin+'/scripts/tests/fixtures/db-driven-task.html'+(before?'?before=1':''));
+  await page.goto(origin+'/scripts/tests/fixtures/db-driven-task.html');
   await page.waitForFunction(()=>document.querySelector('#results')?.textContent.startsWith('Ready'),null,{timeout:120000});
   await page.waitForFunction(()=>document.querySelector('.task-transcript')?.textContent.includes('Execution update 1200.'));
   const history=page.locator('.task-history');
   async function top(){await history.hover();await page.mouse.wheel(0,-1000000);}
-  if(before){
-    await top();await page.waitForFunction(()=>document.querySelector('.task-history')?.scrollTop===0);
-    assert.equal(await page.getByRole('button',{name:'Load earlier output',exact:true}).count(),1,'Previous PR head requires the history button');
-    assert.ok((await page.locator('.task-transcript').textContent()).includes('Execution update 0561.'));
-    if(screenshot)await page.screenshot({path:screenshot});return;
-  }
   assert.equal(await page.getByRole('button',{name:'Load earlier output',exact:true}).count(),0);
   await page.evaluate(()=>{
     const f=taskFixture;f.pagesDomainPromise=import('/web/src/state/domains/index.mjs');
@@ -38,7 +32,6 @@ export async function taskHistoryBrowser(page,{origin,before=false,screenshot}={
   });
   assert.deepEqual(first.counts,{rows:80,scans:1},'Automatic local pagination reads one indexed 80-row page');
   assert.equal(first.maximum,1);assert.equal(first.calls,1);assert.ok(first.shift!==null&&Math.abs(first.shift)<=3,'Prepending preserves the visible message offset: '+JSON.stringify(first));
-  if(screenshot)await page.screenshot({path:screenshot});
   await top();await page.waitForFunction(()=>taskFixture.earlier.length===2&&taskFixture.inflight===0&&taskFixture.earlier[1].first?.includes('Execution update 0401.'));
   await page.evaluate(async()=>{
     const f=taskFixture;for(let i=0;i<3;i++)f.events.push({sequence:f.events.length+1,event:{update:i===0?{type:'message_started',id:'new-output'}:i===1?{type:'text_delta',text:'New output while reading'}:{type:'message_finished'}}});await f.pages.refresh(['tasks']);
@@ -59,20 +52,32 @@ export async function taskHistoryEdges(page,{origin}){
   await page.getByRole('button',{name:'Retry',exact:true}).click();
   await page.waitForFunction(()=>historyEdges.calls.length===2&&historyEdges.state.has_more===false);
   assert.equal(await page.evaluate(()=>historyEdges.maximum),1);
+  await page.evaluate(()=>historyEdges.reset('same-cursor'));
+  await page.waitForFunction(()=>historyEdges.pending);
+  const heldCalls=await page.evaluate(()=>historyEdges.calls.length);
+  await page.evaluate(async()=>{for(let i=0;i<8;i++){document.querySelector('.task-history').dispatchEvent(new Event('scroll'));await new Promise(requestAnimationFrame);}});
+  assert.equal(await page.evaluate(()=>historyEdges.calls.length),heldCalls,'Visible boundary cannot duplicate an in-flight cursor');
+  await page.evaluate(()=>historyEdges.release());
+  await page.waitForFunction(()=>historyEdges.inflight===0);
+  await page.evaluate(async()=>{for(let i=0;i<8;i++)await new Promise(requestAnimationFrame);});
+  assert.equal(await page.evaluate(()=>historyEdges.calls.length),heldCalls,'Unchanged history cursor terminates automatic retries');
   await page.evaluate(()=>historyEdges.reset('latest'));
   await page.waitForFunction(()=>historyEdges.pending);
   await page.locator('.latest-button').click();
   assert.equal(await page.evaluate(()=>historyEdges.calls.at(-1).signal.aborted),true,'Latest cancels an in-flight history request');
-  await page.evaluate(()=>historyEdges.release());
+  await page.evaluate(()=>historyEdges.release());await page.waitForFunction(()=>historyEdges.inflight===0);
+  assert.equal(await page.locator('[data-message-id="m1"]').count(),0,'Latest ignores late history');
   await page.evaluate(()=>historyEdges.reset('run'));
   await page.waitForFunction(()=>historyEdges.pending);
   await page.evaluate(()=>historyEdges.changeRun());
   assert.equal(await page.evaluate(()=>historyEdges.calls.at(-1).signal.aborted),true,'A new run cancels old history IO');
-  await page.evaluate(()=>historyEdges.release());
+  await page.evaluate(()=>historyEdges.release());await page.waitForFunction(()=>historyEdges.inflight===0);
+  assert.equal(await page.locator('[data-message-id="m1"]').count(),0,'New run ignores late history');
   await page.evaluate(()=>historyEdges.reset('dispose'));
   await page.waitForFunction(()=>historyEdges.pending);
   await page.evaluate(()=>historyEdges.ui.dispose());
   assert.equal(await page.evaluate(()=>historyEdges.calls.at(-1).signal.aborted),true,'Disposal cancels history IO');
-  await page.evaluate(()=>historyEdges.release());
+  await page.evaluate(()=>historyEdges.release());await page.waitForFunction(()=>historyEdges.inflight===0);
+  assert.equal(await page.locator('[data-message-id="m1"]').count(),0,'Disposed transcript ignores late history');
   console.log('Task history edges: short initial window loads automatically, failures require Retry, single flight, Latest/run/disposal cancellation passed');
 }

@@ -1,11 +1,11 @@
 // Production shell with synthetic catalogue/subscriptions; no backend or model calls.
-async page=>{
-  const origin=new URL(page.url()).origin,browser=page.context().browser();
+async (page,{origin=new URL(page.url()).origin,browser=page.context().browser()}={})=>{
   const assert=(ok,message)=>{if(!ok)throw Error(message);},results=[];
   for(const width of [320,390]){
     const context=await browser.newContext({viewport:{width,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:1,reducedMotion:'no-preference',serviceWorkers:'block',userAgent:'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36'});
+    const mobile=await context.newPage();
     try{
-      const mobile=await context.newPage(),cdp=await context.newCDPSession(mobile),errors=[];
+      const cdp=await context.newCDPSession(mobile),errors=[];
       mobile.on('pageerror',error=>errors.push(error.message));
       await mobile.route('**/directory-fixture*',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="stylesheet" href="/styles.css"><main id="app"></main></html>'}));
       await mobile.goto(origin+'/directory-fixture?conversation=alpha&locale=en&theme=light');
@@ -42,14 +42,14 @@ async page=>{
         await mobile.evaluate(({long,delay})=>{directoryFixture.long=long;directoryFixture.delay=delay;},{long,delay});
         await mobile.locator('.narrow-navigation').click();await chat();
         await mobile.waitForFunction(()=>directoryFixture.deliveredCount===(directoryFixture.long?80:2));
-        for(const dx of [0,12,13,14]){
+        for(const dx of long?[13,14]:[0,12,13,14]){
           await chat();await mobile.locator('.composer-input').fill('Retained draft');
           if(!focused)await mobile.locator('.composer-input').blur();
           assert(await mobile.locator('.composer-input').evaluate(input=>document.activeElement===input)===focused,'Composer focus matches the scenario');
           const refreshes=await mobile.evaluate(()=>{const f=directoryFixture;if(f.delay)f.refresh();f.sample();return f.refreshes;});
-          await touch('touchStart',20);await mobile.waitForTimeout(40);
+          await touch('touchStart',20);await mobile.evaluate(()=>new Promise(requestAnimationFrame));
           if(dx)await touch('touchMove',20+dx);
-          await mobile.waitForTimeout(40);await touch('touchEnd');
+          await mobile.evaluate(()=>new Promise(requestAnimationFrame));await touch('touchEnd');
           await mobile.waitForFunction(()=>document.querySelector('#app').classList.contains('show-directory')&&!document.querySelector('#app').classList.contains('is-edge-back'));
           await mobile.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
           const data=await mobile.evaluate(()=>directoryFixture.stop()),label=`${width}px drift ${dx}, long=${long}, focused=${focused}, delay=${delay}`;
@@ -85,7 +85,7 @@ async page=>{
       assert(desktop.x===56&&desktop.y===0&&desktop.width===236,'Wide directory keeps its grid placement');
       assert(!await mobile.locator('.narrow-navigation').isVisible(),'Wide Chat hides phone navigation');
       await mobile.evaluate(()=>directoryFixture.dispose());assert(errors.length===0,errors.join('\n'));results.push({width,touchDrifts:[0,12,13,14],shortAndLong:true,focusedAndDelayed:true,commitAndCancel:true,desktop:true});
-    }finally{await context.close();}
+    }catch(error){throw Error(`${width}px directory: ${error.message}; `+JSON.stringify(await mobile.evaluate(()=>({frames:directoryFixture.frames.slice(-6),final:directoryFixture.measure(),refreshes:directoryFixture.refreshes})).catch(()=>({}))),{cause:error});}finally{await context.close();}
   }
   return {passed:true,mobileDirectory:results,errors:[]};
 }

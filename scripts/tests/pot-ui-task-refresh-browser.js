@@ -1,6 +1,5 @@
 // Exercise the production page component with controlled, delayed API replies.
 async page=>{
- const context=await page.context().browser().newContext({serviceWorkers:'block'});page=await context.newPage();
  const state=STATE,assert=(value,message)=>{if(!value)throw Error(message);},errors=[];
  const onError=error=>errors.push(error.message);page.on('pageerror',onError);
  await page.route('**/task-refresh-fixture',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html lang="zh-CN"><meta charset="utf-8"><link rel="stylesheet" href="/styles.css"><body><main style="height:680px;width:900px;max-width:100%;margin:40px auto;overflow:auto"></main></body></html>'}));
@@ -80,5 +79,5 @@ async page=>{
   assert(await page.evaluate(()=>taskFixture.guidance===document.querySelector('textarea')&&taskFixture.guidance.value==='保留任务指导'),'Transcript updates retain the guidance draft');
   assert(errors.length===0,errors.join('\n'));
   return {passed:true,coalesced_refresh:true,stable_dom:true,retained_search:true,offline_recovery:true,stale_responses_ignored:true,owner_identity:true,detail_navigation:true,errors};
- }finally{await page.evaluate(()=>window.taskFixture?.pages.dispose());page.off('pageerror',onError);await context.close();}
+ }finally{await page.evaluate(()=>window.taskFixture?.pages.dispose());page.off('pageerror',onError);}
 }

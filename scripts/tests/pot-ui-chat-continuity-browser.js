@@ -2,7 +2,23 @@
 // Real wheel input must preserve the same visible content through range changes.
 async page=>{
   const origin=new URL(page.url()).origin,results=[],errors=[];
-  const assert=(value,label)=>{if(!value)throw Error(label);};
+  let diagnostic;
+  const assert=(value,label)=>{if(!value)throw Error(label+'; '+JSON.stringify(diagnostic));};
+  const settle=()=>page.evaluate(async()=>{
+    let previous,stable=0;
+    for(let frame=0;frame<90;frame++){
+      await new Promise(requestAnimationFrame);
+      const sample=continuity.sample(),key=JSON.stringify([sample.top,sample.height,sample.visible]);
+      stable=key===previous?stable+1:0;previous=key;if(stable===3)return;
+    }
+    throw Error('Continuity layout did not settle: '+JSON.stringify(continuity.sample()));
+  });
+  const wheel=async delta=>{
+    const before=await page.evaluate(()=>continuity.sample());
+    await page.mouse.wheel(0,delta);
+    await page.waitForFunction(({top,delta})=>{const h=document.querySelector('.history');return h.scrollTop!==top||(delta<0?h.scrollTop===0:h.scrollHeight-h.clientHeight-h.scrollTop<=1);},{top:before.top,delta});
+    await settle();
+  };
   page.on('pageerror',error=>errors.push(error.message));
   await page.route('**/chat-continuity-fixture',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css"><div id="app"></div></html>'}));
   for(const width of [1280,390,320]){
@@ -58,21 +74,34 @@ async page=>{
     });
     if(width<720)await page.getByRole('button',{name:'Scroll fixture',exact:true}).click();
     await page.locator('[data-message-id="m240"]').waitFor();
-    await page.waitForTimeout(250);
+    await settle();
     await page.mouse.move(width-35,400);
-    let previous=await page.evaluate(()=>continuity.sample()),worst=0,maxMounted=0;
+    let previous=await page.evaluate(()=>continuity.sample()),worst=0,worstSample=null,maxMounted=0;
     const seen={up:new Set(),down:new Set()};
-    for(let step=0;step<320;step++){
-      const delta=step<160?-36:36,direction=delta<0?'up':'down';
-      await page.mouse.wheel(0,delta);await page.waitForTimeout(55);
-      const next=await page.evaluate(({step,delta})=>{const sample=continuity.sample();continuity.logs.push({step,delta,...sample});return sample;},{step,delta});
+    let steps=0;
+    for(const direction of ['up','down'])for(let step=0;step<160;step++){
+      previous.visible.forEach(row=>{if(Math.min(row.bottom,previous.viewport)-Math.max(row.top,0)>=24)seen[direction].add(Number(row.sequence));});
+      const delta=direction==='up'?-36:36;steps++;
+      await wheel(delta);
+      const next=await page.evaluate(({step,delta})=>{const sample=continuity.sample();continuity.logs.push({step,delta,...sample});if(continuity.logs.length>4)continuity.logs.shift();return sample;},{step,delta});
+      diagnostic={width,direction,step,delta,previous,next,reads:await page.evaluate(()=>continuity.reads)};
       const common=previous.visible.find(row=>next.visible.some(item=>item.id===row.id));
       assert(common,`${width}px ${direction} step ${step} skipped the entire visible interval`);
       const movement=next.visible.find(row=>row.id===common.id).top-common.top;
       const expected=delta>0?Math.min(delta,previous.height-previous.viewport-previous.top):Math.max(delta,-previous.top);
-      const drift=Math.abs(movement+expected);worst=Math.max(worst,drift);maxMounted=Math.max(maxMounted,next.mounted);
+      // DOMRect retains fractional CSS pixels; scrollHeight/clientHeight and
+      // native wheel boundary rounding have coarser precision. 3px is an error
+      // budget, never a claimed residual jump. Report raw input and clipped
+      // expectation separately, together with the actual same-ID displacement.
+      const drift=Math.abs(movement+expected);
+      const measurement={step,direction,id:common.id,wheelDelta:delta,boundaryExpected:expected,scrollDelta:next.top-previous.top,anchorMovement:movement,drift};
+      diagnostic={...diagnostic,measurement};
+      if(!worstSample||drift>worst)worstSample=measurement;
+      worst=Math.max(worst,drift);maxMounted=Math.max(maxMounted,next.mounted);
       assert(drift<=3,`${width}px ${direction} step ${step}: visible content drifted ${drift.toFixed(1)}px for ${delta}px wheel input`);
-      next.visible.forEach(row=>seen[direction].add(Number(row.sequence)));previous=next;
+      next.visible.forEach(row=>{if(Math.min(row.bottom,next.viewport)-Math.max(row.top,0)>=24)seen[direction].add(Number(row.sequence));});previous=next;
+      const witnessed=Array.from({length:19},(_,i)=>i+221).every(id=>seen[direction].has(id));
+      if(witnessed&&(direction==='up'||next.height-next.viewport-next.top<=2))break;
     }
     for(const direction of ['up','down'])for(let sequence=221;sequence<=239;sequence++)assert(seen[direction].has(sequence),`${width}px ${direction}: message ${sequence} was never readable`);
     assert(maxMounted<80,`${width}px retains virtualization`);
@@ -80,9 +109,10 @@ async page=>{
     const persisted=await page.evaluate(()=>continuity.persisted());
     assert(persisted.length===80&&persisted.every((value,index)=>Number(value)===161+index),`${width}px stored messages stay complete and ordered`);
     // Output and page remounts preserve the paused reader, while Latest is explicit.
-    for(let i=0;i<12;i++){await page.mouse.wheel(0,-36);await page.waitForTimeout(35);}
+    for(let i=0;i<12;i++)await wheel(-36);
     const saved=await page.evaluate(()=>continuity.sample().anchor);
-    await page.evaluate(()=>continuity.append());await page.waitForTimeout(180);
+    await page.evaluate(()=>continuity.append());
+    await page.waitForFunction(async()=>(await continuity.persisted()).at(-1)==='241');await settle();
     const anchorOffset=()=>page.evaluate(id=>{const h=document.querySelector('.history'),row=h.querySelector(`[data-message-id="${id}"]`);return row?.getBoundingClientRect().top-h.getBoundingClientRect().top;},saved.id);
     assert(Math.abs(await anchorOffset()-saved.offset)<=3,`${width}px new output preserves reading`);
     if(width<720)await page.getByRole('button',{name:'Conversation actions',exact:true}).click();
@@ -90,40 +120,47 @@ async page=>{
     if(width<720)await page.locator('.titlebar .narrow-navigation').click();
     await page.getByRole('button',{name:'Chat',exact:true}).first().click();
     if(width<720)await page.getByRole('button',{name:'Scroll fixture',exact:true}).click();
-    await page.waitForTimeout(180);
+    await settle();
     assert(Math.abs(await anchorOffset()-saved.offset)<=3,`${width}px page switch preserves reading`);
-    await page.locator('.latest-button').click();await page.waitForTimeout(180);
+    await page.locator('.latest-button').click();await settle();
     let current=await page.evaluate(()=>continuity.sample());assert(current.height-current.viewport-current.top<=2,`${width}px Latest follows the end`);
     await page.evaluate(()=>continuity.image());await page.locator('pot-file-image[data-state="loading"]').waitFor();
     await page.mouse.move(width-35,400);
-    for(let i=0;i<6;i++){await page.mouse.wheel(0,-36);await page.waitForTimeout(35);}
+    for(let i=0;i<6;i++)await wheel(-36);
     const imageAnchor=await page.evaluate(()=>continuity.sample().anchor);
-    await page.evaluate(()=>continuity.imageReady());await page.locator('pot-file-image[data-state="ready"]').waitFor();await page.waitForTimeout(120);
+    await page.evaluate(()=>continuity.imageReady());await page.locator('pot-file-image[data-state="ready"]').waitFor();await settle();
     const imageOffset=await page.evaluate(id=>{const h=document.querySelector('.history');return h.querySelector(`[data-message-id="${id}"]`).getBoundingClientRect().top-h.getBoundingClientRect().top;},imageAnchor.id);
     assert(Math.abs(imageOffset-imageAnchor.offset)<=3,`${width}px asynchronous image growth preserves reading`);
-    await page.locator('.latest-button').click();await page.waitForTimeout(120);
+    await page.locator('.latest-button').click();await settle();
     current=await page.evaluate(()=>continuity.sample());assert(current.height-current.viewport-current.top<=2,`${width}px Latest reveals the loaded image`);
-    await page.evaluate(()=>continuity.nested());await page.waitForTimeout(180);
-    const parent=page.locator('[data-message-id="m242"] > .message-body > details.tool-call > summary');
-    await parent.click();await page.waitForTimeout(150);
+    await page.evaluate(()=>continuity.nested());await page.locator('[data-message-id="m242"]').waitFor();await settle();
+    const parent=page.locator('[data-message-id="m242"]').locator('details.tool-call > summary').first();
+    await parent.click();await settle();
     assert(await page.locator('.tool-children article.message').count()>0,`${width}px nested tools render their child window`);
     await page.mouse.move(width-35,400);
-    let nestedPrevious=await page.evaluate(()=>continuity.sample()),nestedWorst=0;
+    let nestedPrevious=await page.evaluate(()=>continuity.sample()),nestedWorst=0,nestedWorstSample=null;
     for(let step=0;step<40;step++){
-      const delta=step<20?36:-36;await page.mouse.wheel(0,delta);await page.waitForTimeout(55);
+      const delta=step<20?36:-36;await wheel(delta);
       const next=await page.evaluate(()=>continuity.sample());
+      diagnostic={scenario:'nested',width,step,delta,previous:nestedPrevious,next,reads:await page.evaluate(()=>continuity.reads)};
       const common=nestedPrevious.visible.find(row=>row.id!=='m242'&&next.visible.some(item=>item.id===row.id));
       if(nestedPrevious.visible.some(row=>row.id!=='m242')&&next.visible.some(row=>row.id!=='m242'))assert(common,`${width}px nested child window skipped its visible interval at step ${step}`);
-      if(common){const actual=next.visible.find(row=>row.id===common.id).top-common.top;const expected=delta>0?Math.min(delta,nestedPrevious.height-nestedPrevious.viewport-nestedPrevious.top):Math.max(delta,-nestedPrevious.top);nestedWorst=Math.max(nestedWorst,Math.abs(actual+expected));assert(Math.abs(actual+expected)<=3,`${width}px nested child window jumped at step ${step}`);}
+      if(common){
+        const actual=next.visible.find(row=>row.id===common.id).top-common.top;
+        const expected=delta>0?Math.min(delta,nestedPrevious.height-nestedPrevious.viewport-nestedPrevious.top):Math.max(delta,-nestedPrevious.top);
+        const drift=Math.abs(actual+expected),measurement={step,id:common.id,wheelDelta:delta,boundaryExpected:expected,scrollDelta:next.top-nestedPrevious.top,anchorMovement:actual,drift};
+        diagnostic={...diagnostic,measurement};if(!nestedWorstSample||drift>nestedWorst)nestedWorstSample=measurement;
+        nestedWorst=Math.max(nestedWorst,drift);assert(drift<=3,`${width}px nested child window jumped at step ${step}`);
+      }
       nestedPrevious=next;
     }
     const childID=await page.locator('.tool-children article.message').last().getAttribute('data-message-id');
-    const child=page.locator(`[data-message-id="${childID}"] > .message-body > details.tool-call`);
-    await child.locator(':scope > summary').click();await page.waitForTimeout(100);
+    const child=page.locator(`[data-message-id="${childID}"]`).locator('details.tool-call').first();
+    await child.locator(':scope > summary').click();await settle();
     assert((await child.locator('.tool-body').textContent()).includes('Nested output.'),`${width}px expanding a child reveals its long output`);
     await child.locator(':scope > summary').click();
-    await parent.click();await page.waitForTimeout(100);
-    results.push({width,worstDrift:worst,nestedWorst,maxMounted,readable:[221,239],steps:320});
+    await parent.click();await settle();
+    results.push({width,worstDrift:worst,worstSample,nestedWorst,nestedWorstSample,maxMounted,readable:[221,239],steps});
   }
   assert(errors.length===0,errors.join('; '));
   return {passed:true,results,errors};

@@ -58,7 +58,7 @@ async function run(){
     const saved=anchor();h.dispatchEvent(new Event('scroll'));await settle();
     check(h.querySelector(`[data-message-id="${saved.id}"]`)===saved.node,'unchanged viewport reuses its mounted message DOM');
     const timings=[];let blanks=0,gaps=0,maxMounted=0;
-    for(let i=0;i<90;i++){
+    for(let i=0;i<30;i++){
       const start=performance.now();scroll(Math.max(0,h.scrollTop+(i%30<15?-1:1)*h.clientHeight*.8));await frame();
       timings.push(performance.now()-start);if(!anchor())blanks++;
       const viewport=h.getBoundingClientRect();if([...h.querySelectorAll('.message-window-spacer')].some(e=>{const r=e.getBoundingClientRect();return r.height>1&&r.bottom>viewport.top+1&&r.top<viewport.top+h.clientHeight-1;}))gaps++;

@@ -798,33 +798,114 @@ adapter capability; Codex task and message adapters do not implement it.
 `TestConfiguredModelAgentLinksLive` separately covers user-only Pot-to-Pot replies
 using the machine's configured model, under its existing request/output caps.
 
-## Browser repository contracts
+## Frontend regression selection
 
-Serve the repository root on loopback to open
-`scripts/tests/fixtures/chat-cache-read-volume.html`, `projection-store.html`,
-`chat-cache.html`, `chat-cache-ui.html`, `domain-repositories.html` and
-`cached-loading.html`. These fixtures
-use synthetic data and isolated IndexedDB names. The read-volume fixture counts
-actual returned message rows and scans for 2048- and 8192-message histories,
-including a cold query; it fails if an incremental write or history page reads
-the whole conversation.
-
-The automated runner can own and clean up its loopback source server:
+Run the build and source checks before a focused browser check; focused runners
+select behavior, they do not replace build, lint, architecture or translation
+checks. PR/main CI remains lightweight. Full browser/HTTP qualification is opt-in
+for manual or release validation.
 
 ```sh
-POT_PLAYWRIGHT_MODULE=/absolute/path/to/existing/playwright/index.mjs \
-POT_CHROMIUM_EXECUTABLE=/absolute/path/to/chrome \
-mise exec -- node scripts/tests/db-repositories-browser.mjs auto
+mise run build:web-ui
+mise run lint
+mise run check:go
+mise run test:i18n
+mise run test:ui
 ```
 
-Use an existing Playwright installation and Chromium executable; the runner does
-not install dependencies. `POT_DB_FIXTURE=projection-store.html` selects one
-fixture; `POT_DB_FIXTURE=task-history` selects automatic pagination and its
-short-window/error/cancellation scenarios. Optional
-`POT_DB_SCREENSHOTS=output/pr-images/<branch>` captures the long Task history
-comparison. For its before view, extract the previous PR head's `web` and
-`pkg/storage/migrations/ui-cache` directories with `git archive` into ignored
-`output/task-history-before/`. The cached-loading fixture's optional baseline
-view separately uses `output/cached-loading/baseline/`. Both captures use the same
-synthetic 1200-message transcript and viewport. Review and commit only the images
-actually used in a PR, following [PR images](pr-images/README.md).
+`test:ui` contains the fast Node reducer, domain, command, scope, input-lifecycle
+and runner contracts. Browser groups use an existing Playwright module and Chrome;
+they start an ephemeral loopback source server, block external requests and close
+their own browser and listener. They never install dependencies or read product
+profiles. Set these variables to your existing installation:
+
+```sh
+export POT_PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs
+export POT_CHROMIUM_EXECUTABLE=/absolute/path/to/chrome
+mise run test:ui-scroll
+mise run test:ui-nav
+mise run test:ui-history
+mise run test:ui-domain
+mise run test:ui-storage
+mise run test:ui-regressions
+```
+
+| Behavior / command | Coverage and fixtures |
+|---|---|
+| `test:ui-scroll` | Real Chromium 36px wheel input at 1280/390/320; stable message identity and screen displacement <=3px; messages 221–239 readable in both directions; bounded DOM, complete 80-record IDB page, no unexpected backend reads, historical output, Latest, page returns, async image growth, nested tool windows. Component fixture separately retains prepend/append/end boundaries, focus across virtual retirement, reorder/trim target identity, disposal and deferred tool/raw output. |
+| `test:ui-nav` | Real CDP touch taps and 12/13/14px drift, visible intermediate-frame directory geometry, committed/cancelled navigation, drafts, delayed refresh; switching fixture covers keyed cached navigation, delayed references, A → B → A and Latest superseding late IO. |
+| `test:ui-history` | Visible top automatically reads one 80-row indexed page/one cursor, stable prepend anchor, historical reading during new output, explicit Latest; short-window filling, error/Retry, single flight, same-cursor termination and Latest/run/dispose cancellation and late completion. |
+| `test:ui-domain` | Fast Node domain contracts plus real-IDB domain fixture: fast Space progress while another is held, shared reads, disposed/changed queries, explicit owner scope, commit-before-notify, accepted mutation receipt retry without another HTTP effect, evicted Task backfill and late-run fencing. |
+| `test:ui-storage` | Read-volume fixture (2048/8192 records, incremental 1 row/0 scans and page 80/1 cursor); chat cache namespace, cursor/reset, boot/version fencing, atomic transaction abort; projection query/mutation storage failure and owner isolation; cache UI commit-before-display and cached-loading race fixtures. |
+| `test:ui-http-integration` | Full standard HTTP/SSE entry: builds current CLI and creates private runtime/browser/model/artifact fixtures. Keeps authentication, two independent clients, reconnect, credential rotation, wrong-owner/path boundaries, binary download integrity and provider setup/probe contracts, followed by assistant/settings/linked approvals/composer/usage fixtures. |
+
+List or isolate one scenario without implicit ordering:
+
+```sh
+mise exec -- node scripts/tests/ui-regressions.mjs --list
+mise exec -- node scripts/tests/ui-regressions.mjs --group nav --case directory
+mise exec -- node scripts/tests/ui-regressions.mjs --group storage --case projection-store.html
+```
+
+Every source scenario gets a fresh context, locale, routes and isolated IDB names.
+The directory matrix owns its actual mobile contexts directly; no unused outer
+context is created. HTTP contracts consume the runner's context and its disposable
+authentication state. Providers and connection probes require the standard HTTP
+fixture's deterministic model connection and authenticated API; do not run them
+against the static source server. The real HTTP contract deliberately retains its
+two-client and anonymous contexts.
+
+The 3px continuity threshold is a failure tolerance, not a measured residual
+jump. DOMRect positions retain fractional CSS pixels while scroll extents and
+native boundary rounding have coarser precision. Results report the actual worst
+sample, raw wheel delta, boundary-clipped expected distance, actual scroll delta
+and same-message screen displacement. For example, +36px input with only 34px
+remaining expects 34px movement; the 2px boundary remainder is not drift. Keep
+unrounded measurements and the same-ID/complete-sequence assertions when changing
+the tolerance or fixture.
+
+Wheel completion uses observed scroll movement and bounded stable animation
+frames. The witness ends only after all required messages are readable in both
+directions, with a maximum step budget. A native wheel is never replaced by a
+synthetic WheelEvent or direct scrollTop. The component fixture uses direct
+positioning for deterministic adapter contracts; that does not qualify gestures.
+Touch drift checks sample every visible frame, including the simultaneous edge
+Back/directory transition. Large swipe commit/cancel uses synthetic pointers;
+Chromium checks do not qualify physical iPhone Safari momentum or its keyboard.
+
+Failures report scenario identity, recent visible IDs/range, scroll height/offset,
+reading anchor, history cursor/cancellation, directory geometry and outstanding
+request paths where available. Logs omit query strings and authentication state.
+Use `--case` to narrow a failure before repeating the full suite. Controlled
+promises hold source completion and image loading; queue/frame drains are bounded.
+
+Regression probes can remove one known fix only from the loopback server's
+responses; the working tree stays intact. Each command must exit nonzero at the
+corresponding behavior assertion (a browser startup failure is not evidence):
+
+```sh
+mise exec -- node scripts/tests/ui-regressions.mjs --group scroll --case continuity --fault scroll-measure
+mise exec -- node scripts/tests/ui-regressions.mjs --group scroll --case continuity --fault scroll-flow
+mise exec -- node scripts/tests/ui-regressions.mjs --group nav --case directory --fault directory-grid
+mise exec -- node scripts/tests/ui-regressions.mjs --group history --case task-history-edges --fault history-cursor
+mise exec -- node scripts/tests/ui-regressions.mjs --group domain --fault domain-progress
+```
+
+The full `test:ui-http-integration` command remains unchanged. It needs cached
+`@playwright/cli` (`npm_config_cache` may select an existing cache) and an installed
+browser (`PLAYWRIGHT_MCP_CONFIG` may select an existing executable). Use a private
+`TMPDIR` for fixture files when shared temporary storage is constrained. All model
+responses are local deterministic fixtures; no paid model or production Runtime
+is used. Browser groups are complementary to this real transport qualification.
+
+Update-refresh SVG/spinning/restored state, duplicate-check prevention and
+ReleaseURL checks depend on the corresponding update UI being in the tested base.
+On branches without that product change, `test:ui` still runs the available update
+domain/state checks; source fixtures do not establish the newer update UI behavior.
+Do not copy upgrade product code into a test-only branch to make that claim.
+
+For manual repository inspection, the source fixtures remain under
+`scripts/tests/fixtures/`. `db-driven-task.html?before=1` is an optional visual
+comparison only: it requires an explicitly extracted baseline under ignored
+`output/task-history-before/`. It is excluded from regression execution because
+passing an obsolete button behavior is not evidence about the current product.

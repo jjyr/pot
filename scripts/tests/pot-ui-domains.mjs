@@ -1,3 +1,4 @@
+import {tasksDomainContract} from './tasks-domain-contract.mjs';
 import assert from 'node:assert/strict';
 import {createQueryRegistry,createCommands} from '../../web/src/state/domains/query.mjs';
 import {createProvidersDomain} from '../../web/src/state/domains/providers.mjs';
@@ -15,3 +16,5 @@ const first=commands.run(scope,'task:t:input',{text:'intent'},send,{idempotent:t
 const reads=[];const domain=createProvidersDomain({request:async()=>({})},{resources:{read:async(path,options)=>{reads.push({path,options});return {profiles:[]};},state:()=>({freshness:'fresh'})},queries:createQueryRegistry(resources),commands});
 assert.equal(domain.catalog({space:'one',owner:'a',signal:new AbortController().signal}),domain.catalog({space:'one',owner:'b',request_id:'editor'}),'Provider catalog normalizes shared scope and excludes consumer context');await domain.query({space:'one',owner:'a'});assert.deepEqual(reads[0].options,{space:'one',owner:'',authoritative:false});commands.dispose();
 console.log('Domain queries: shared first read, consumer disposal, committed publication, freshness, scope isolation; commands: shared intent and retry identity; Provider scope normalization passed');
+
+await tasksDomainContract(console.log);
